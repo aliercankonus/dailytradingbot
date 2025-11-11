@@ -1,55 +1,48 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { useMarketData } from "@/hooks/useMarketData";
+import { useEffect, useState } from "react";
+
+interface Trade {
+  pair: string;
+  type: string;
+  price: string;
+  amount: string;
+  profit: string;
+  time: string;
+  isProfit: boolean;
+}
 
 export const TradeHistory = () => {
-  const trades = [
-    {
-      pair: "BTC/USDT",
-      type: "BUY",
-      price: "$43,521.30",
-      amount: "0.0234",
-      profit: "+$125.43",
-      time: "2 min ago",
-      isProfit: true,
-    },
-    {
-      pair: "ETH/USDT",
-      type: "SELL",
-      price: "$2,284.50",
-      amount: "0.5100",
-      profit: "+$87.22",
-      time: "5 min ago",
-      isProfit: true,
-    },
-    {
-      pair: "SOL/USDT",
-      type: "BUY",
-      price: "$98.45",
-      amount: "12.400",
-      profit: "-$23.10",
-      time: "8 min ago",
-      isProfit: false,
-    },
-    {
-      pair: "BNB/USDT",
-      type: "SELL",
-      price: "$312.80",
-      amount: "3.2100",
-      profit: "+$54.60",
-      time: "12 min ago",
-      isProfit: true,
-    },
-    {
-      pair: "ADA/USDT",
-      type: "BUY",
-      price: "$0.5234",
-      amount: "1850.00",
-      profit: "+$32.15",
-      time: "15 min ago",
-      isProfit: true,
-    },
-  ];
+  const { data: marketData } = useMarketData();
+  const [trades, setTrades] = useState<Trade[]>([]);
+
+  // Generate simulated trades based on real market data
+  useEffect(() => {
+    if (marketData && marketData.length > 0) {
+      const simulatedTrades: Trade[] = marketData.slice(0, 5).map((ticker, idx) => {
+        const price = parseFloat(ticker.lastPrice);
+        const isProfit = Math.random() > 0.3; // 70% win rate
+        const type = idx % 2 === 0 ? "BUY" : "SELL";
+        
+        const profit = (price * 0.001 * (isProfit ? 1 : -1) * (Math.random() * 2 + 1)).toFixed(2);
+        const amount = (Math.random() * 5 + 0.1).toFixed(4);
+        
+        return {
+          pair: ticker.symbol.replace('USDT', '/USDT'),
+          type,
+          price: `$${price.toFixed(2)}`,
+          amount,
+          profit: `${isProfit ? '+' : '-'}$${Math.abs(parseFloat(profit)).toFixed(2)}`,
+          time: `${(idx + 1) * 3} min ago`,
+          isProfit,
+        };
+      });
+      
+      setTrades(simulatedTrades);
+    }
+  }, [marketData]);
 
   return (
     <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
@@ -71,54 +64,62 @@ export const TradeHistory = () => {
             </tr>
           </thead>
           <tbody>
-            {trades.map((trade, idx) => (
-              <tr
-                key={idx}
-                className="text-sm border-b border-border/50 hover:bg-secondary/30 transition-colors"
-              >
-                <td className="py-3 px-2">
-                  <div className="flex items-center gap-2">
-                    <div className={`h-2 w-2 rounded-full ${
-                      trade.type === "BUY" ? "bg-success" : "bg-danger"
-                    }`} />
-                    <span className="font-semibold text-foreground">{trade.pair}</span>
-                  </div>
-                </td>
-                <td className="py-3 px-2">
-                  <Badge
-                    variant={trade.type === "BUY" ? "default" : "secondary"}
-                    className={`text-xs ${
-                      trade.type === "BUY" 
-                        ? "bg-success/20 text-success" 
-                        : "bg-danger/20 text-danger"
-                    }`}
-                  >
-                    {trade.type}
-                  </Badge>
-                </td>
-                <td className="py-3 px-2 text-right font-mono text-foreground">
-                  {trade.price}
-                </td>
-                <td className="py-3 px-2 text-right font-mono text-muted-foreground">
-                  {trade.amount}
-                </td>
-                <td className="py-3 px-2 text-right">
-                  <div className={`flex items-center justify-end gap-1 font-semibold font-mono ${
-                    trade.isProfit ? "text-profit" : "text-loss"
-                  }`}>
-                    {trade.isProfit ? (
-                      <ArrowUpRight className="h-3 w-3" />
-                    ) : (
-                      <ArrowDownRight className="h-3 w-3" />
-                    )}
-                    {trade.profit}
-                  </div>
-                </td>
-                <td className="py-3 px-2 text-right text-muted-foreground text-xs">
-                  {trade.time}
+            {trades.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="text-center py-8 text-muted-foreground">
+                  Loading trade data...
                 </td>
               </tr>
-            ))}
+            ) : (
+              trades.map((trade, idx) => (
+                <tr
+                  key={idx}
+                  className="text-sm border-b border-border/50 hover:bg-secondary/30 transition-colors"
+                >
+                  <td className="py-3 px-2">
+                    <div className="flex items-center gap-2">
+                      <div className={`h-2 w-2 rounded-full ${
+                        trade.type === "BUY" ? "bg-success" : "bg-danger"
+                      }`} />
+                      <span className="font-semibold text-foreground">{trade.pair}</span>
+                    </div>
+                  </td>
+                  <td className="py-3 px-2">
+                    <Badge
+                      variant={trade.type === "BUY" ? "default" : "secondary"}
+                      className={`text-xs ${
+                        trade.type === "BUY" 
+                          ? "bg-success/20 text-success" 
+                          : "bg-danger/20 text-danger"
+                      }`}
+                    >
+                      {trade.type}
+                    </Badge>
+                  </td>
+                  <td className="py-3 px-2 text-right font-mono text-foreground">
+                    {trade.price}
+                  </td>
+                  <td className="py-3 px-2 text-right font-mono text-muted-foreground">
+                    {trade.amount}
+                  </td>
+                  <td className="py-3 px-2 text-right">
+                    <div className={`flex items-center justify-end gap-1 font-semibold font-mono ${
+                      trade.isProfit ? "text-profit" : "text-loss"
+                    }`}>
+                      {trade.isProfit ? (
+                        <ArrowUpRight className="h-3 w-3" />
+                      ) : (
+                        <ArrowDownRight className="h-3 w-3" />
+                      )}
+                      {trade.profit}
+                    </div>
+                  </td>
+                  <td className="py-3 px-2 text-right text-muted-foreground text-xs">
+                    {trade.time}
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

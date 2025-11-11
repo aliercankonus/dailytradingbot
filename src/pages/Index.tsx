@@ -4,6 +4,7 @@ import { BotStatus } from "@/components/BotStatus";
 import { StrategyOverview } from "@/components/StrategyOverview";
 import { TradeHistory } from "@/components/TradeHistory";
 import { PortfolioMetrics } from "@/components/PortfolioMetrics";
+import { LivePriceCard } from "@/components/LivePriceCard";
 
 const Index = () => {
   const [botActive, setBotActive] = useState(false);
@@ -23,8 +24,15 @@ const Index = () => {
           </div>
         </div>
 
-        {/* Strategy Overview */}
-        <StrategyOverview />
+        {/* Live Prices & Strategy Overview */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-1">
+            <LivePriceCard />
+          </div>
+          <div className="lg:col-span-2">
+            <StrategyOverview />
+          </div>
+        </div>
 
         {/* Trade History */}
         <TradeHistory />
