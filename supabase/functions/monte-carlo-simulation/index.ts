@@ -28,15 +28,56 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch strategy configuration
-    const { data: strategy, error: strategyError } = await supabase
+    // Fetch strategy configuration (custom or built-in)
+    let strategy: any = null;
+
+    const { data: customStrategy, error: strategyError } = await supabase
       .from('custom_strategies')
       .select('*')
       .eq('id', params.strategyId)
-      .single();
+      .maybeSingle();
 
-    if (strategyError || !strategy) {
-      throw new Error(`Strategy not found: ${strategyError?.message}`);
+    if (strategyError) {
+      throw new Error(`Database error: ${strategyError.message}`);
+    }
+
+    if (customStrategy) {
+      strategy = customStrategy;
+    } else {
+      // Try built-in strategies
+      const { data: builtIn, error: builtInErr } = await supabase
+        .from('strategy_performance')
+        .select('id, strategy_name')
+        .eq('id', params.strategyId)
+        .maybeSingle();
+
+      if (builtInErr) {
+        throw new Error(`Database error: ${builtInErr.message}`);
+      }
+
+      if (builtIn) {
+        const name = (builtIn.strategy_name || '').toLowerCase();
+        if (name.includes('mean reversion')) {
+          strategy = {
+            name: builtIn.strategy_name,
+            risk_settings: { stopLossPercent: 2, takeProfitPercent: 4, positionSizePercent: 1 },
+          };
+        } else if (name.includes('momentum')) {
+          strategy = {
+            name: builtIn.strategy_name,
+            risk_settings: { stopLossPercent: 3, takeProfitPercent: 6, positionSizePercent: 1 },
+          };
+        } else if (name.includes('grid')) {
+          strategy = {
+            name: builtIn.strategy_name,
+            risk_settings: { stopLossPercent: 1.5, takeProfitPercent: 1.5, positionSizePercent: 1 },
+          };
+        }
+      }
+    }
+
+    if (!strategy) {
+      throw new Error(`Strategy with ID ${params.strategyId} not found. Please ensure the strategy exists before running Monte Carlo simulation.`);
     }
 
     // Fetch historical data to calculate returns statistics
