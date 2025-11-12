@@ -258,6 +258,17 @@ serve(async (req) => {
 
     console.log('Fetching active custom strategies...');
     
+    // Check if auto-trading is enabled
+    const { data: riskParams } = await supabase
+      .from('risk_parameters')
+      .select('is_trading_enabled, max_open_trades, current_open_trades')
+      .single();
+
+    const autoExecute = riskParams?.is_trading_enabled && 
+                       (riskParams?.current_open_trades || 0) < (riskParams?.max_open_trades || 5);
+    
+    console.log(`Auto-execute enabled: ${autoExecute}`);
+
     // Fetch active custom strategies
     const { data: strategies, error: strategiesError } = await supabase
       .from('custom_strategies')
@@ -301,6 +312,7 @@ serve(async (req) => {
     
     // Analyze each market with each active strategy
     const allSignals = [];
+    const executedSignals = [];
     
     for (const strategy of strategies as CustomStrategy[]) {
       console.log(`Analyzing with strategy: ${strategy.name}`);
@@ -314,27 +326,48 @@ serve(async (req) => {
           allSignals.push(signal);
           
           // Store signal in database
-          const { error: insertError } = await supabase.from('trading_signals').insert({
-            symbol: signal.symbol,
-            signal_type: signal.signalType,
-            trend: signal.trend,
-            entry_price: signal.entryPrice,
-            stop_loss: signal.stopLoss,
-            take_profit: signal.takeProfit,
-            risk_reward_ratio: signal.riskRewardRatio,
-            confidence_score: signal.confidenceScore,
-            indicators: signal.indicators,
-            reason: signal.reason
-          });
+          const { data: insertedSignal, error: insertError } = await supabase
+            .from('trading_signals')
+            .insert({
+              symbol: signal.symbol,
+              signal_type: signal.signalType,
+              trend: signal.trend,
+              entry_price: signal.entryPrice,
+              stop_loss: signal.stopLoss,
+              take_profit: signal.takeProfit,
+              risk_reward_ratio: signal.riskRewardRatio,
+              confidence_score: signal.confidenceScore,
+              indicators: signal.indicators,
+              reason: signal.reason
+            })
+            .select()
+            .single();
           
           if (insertError) {
             console.error('Error inserting signal:', insertError);
+          } else if (autoExecute && insertedSignal) {
+            // Automatically execute the signal
+            try {
+              console.log(`Auto-executing signal ${insertedSignal.id} for ${signal.symbol}`);
+              const { error: execError } = await supabase.functions.invoke('execute-trade', {
+                body: { signalId: insertedSignal.id, action: 'execute' }
+              });
+              
+              if (execError) {
+                console.error(`Failed to auto-execute signal ${insertedSignal.id}:`, execError);
+              } else {
+                executedSignals.push(insertedSignal.id);
+                console.log(`Successfully executed signal ${insertedSignal.id}`);
+              }
+            } catch (execError) {
+              console.error(`Error executing signal ${insertedSignal.id}:`, execError);
+            }
           }
         }
       }
     }
 
-    console.log(`Generated ${allSignals.length} signals total`);
+    console.log(`Generated ${allSignals.length} signals total, executed ${executedSignals.length}`);
 
     // Clean up old signals
     const { error: deleteError } = await supabase
@@ -350,6 +383,8 @@ serve(async (req) => {
       JSON.stringify({ 
         success: true, 
         signals: allSignals,
+        executedSignals: executedSignals.length,
+        autoExecuteEnabled: autoExecute,
         strategiesAnalyzed: strategies.length,
         timestamp: new Date().toISOString()
       }),

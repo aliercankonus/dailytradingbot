@@ -16,11 +16,24 @@ export const useSignalGenerator = () => {
       if (data?.signals?.length > 0) {
         toast({
           title: "Signals Generated",
-          description: `Found ${data.signals.length} new trading signals`,
+          description: data.autoExecuteEnabled 
+            ? `Generated ${data.signals.length} signals, executed ${data.executedSignals}`
+            : `Found ${data.signals.length} new trading signals`,
+        });
+      } else {
+        toast({
+          title: "No Signals",
+          description: "No trading opportunities found at this time",
+          variant: "default"
         });
       }
     } catch (error) {
       console.error('Error generating signals:', error);
+      toast({
+        title: "Error",
+        description: "Failed to generate signals",
+        variant: "destructive"
+      });
     } finally {
       setIsGenerating(false);
     }
