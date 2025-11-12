@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Plus, Trash2, FlaskConical } from 'lucide-react';
 
 const strategySchema = z.object({
@@ -21,10 +22,13 @@ interface Condition {
   indicator: string;
   operator: string;
   value: string;
+  compareToIndicator?: boolean;
+  targetIndicator?: string;
 }
 
 interface Indicator {
   type: string;
+  name?: string;
   period?: number;
   signal?: number;
 }
@@ -94,28 +98,38 @@ export const StrategyBuilderForm = ({
   }, [initialData, form]);
 
   const addEntryCondition = () => {
-    setEntryConditions([...entryConditions, { indicator: 'RSI', operator: 'below', value: '30' }]);
+    setEntryConditions([...entryConditions, { 
+      indicator: 'RSI', 
+      operator: 'below', 
+      value: '30',
+      compareToIndicator: false 
+    }]);
   };
 
   const removeEntryCondition = (index: number) => {
     setEntryConditions(entryConditions.filter((_, i) => i !== index));
   };
 
-  const updateEntryCondition = (index: number, field: keyof Condition, value: string) => {
+  const updateEntryCondition = (index: number, field: keyof Condition, value: string | boolean) => {
     const updated = [...entryConditions];
     updated[index] = { ...updated[index], [field]: value };
     setEntryConditions(updated);
   };
 
   const addExitCondition = () => {
-    setExitConditions([...exitConditions, { indicator: 'RSI', operator: 'above', value: '70' }]);
+    setExitConditions([...exitConditions, { 
+      indicator: 'RSI', 
+      operator: 'above', 
+      value: '70',
+      compareToIndicator: false 
+    }]);
   };
 
   const removeExitCondition = (index: number) => {
     setExitConditions(exitConditions.filter((_, i) => i !== index));
   };
 
-  const updateExitCondition = (index: number, field: keyof Condition, value: string) => {
+  const updateExitCondition = (index: number, field: keyof Condition, value: string | boolean) => {
     const updated = [...exitConditions];
     updated[index] = { ...updated[index], [field]: value };
     setExitConditions(updated);
@@ -224,6 +238,11 @@ export const StrategyBuilderForm = ({
                     <SelectItem value="MACD">MACD</SelectItem>
                     <SelectItem value="EMA">EMA</SelectItem>
                     <SelectItem value="Price">Price</SelectItem>
+                    {indicators.map((ind) => (
+                      <SelectItem key={ind.type + (ind.period || '')} value={ind.name || ind.type}>
+                        {ind.name || ind.type}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Select
@@ -240,13 +259,46 @@ export const StrategyBuilderForm = ({
                     <SelectItem value="crosses_below">Crosses Below</SelectItem>
                   </SelectContent>
                 </Select>
-                <Input
-                  type="text"
-                  value={condition.value}
-                  onChange={(e) => updateEntryCondition(index, 'value', e.target.value)}
-                  placeholder="Value"
-                  className="flex-1"
-                />
+                
+                <div className="flex-1 flex gap-2 items-center">
+                  <Checkbox
+                    checked={condition.compareToIndicator || false}
+                    onCheckedChange={(checked) => {
+                      updateEntryCondition(index, 'compareToIndicator', checked);
+                      if (!checked) {
+                        updateEntryCondition(index, 'targetIndicator', '');
+                      }
+                    }}
+                  />
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">Compare to indicator</span>
+                </div>
+
+                {condition.compareToIndicator ? (
+                  <Select
+                    value={condition.targetIndicator || ''}
+                    onValueChange={(value) => updateEntryCondition(index, 'targetIndicator', value)}
+                  >
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Select indicator" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {indicators.map((ind) => (
+                        <SelectItem key={ind.type + (ind.period || '')} value={ind.name || ind.type}>
+                          {ind.name || ind.type}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    type="text"
+                    value={condition.value}
+                    onChange={(e) => updateEntryCondition(index, 'value', e.target.value)}
+                    placeholder="Value"
+                    className="flex-1"
+                  />
+                )}
+                
                 <Button
                   type="button"
                   variant="destructive"
@@ -286,6 +338,11 @@ export const StrategyBuilderForm = ({
                     <SelectItem value="MACD">MACD</SelectItem>
                     <SelectItem value="EMA">EMA</SelectItem>
                     <SelectItem value="Price">Price</SelectItem>
+                    {indicators.map((ind) => (
+                      <SelectItem key={ind.type + (ind.period || '')} value={ind.name || ind.type}>
+                        {ind.name || ind.type}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Select
@@ -302,13 +359,46 @@ export const StrategyBuilderForm = ({
                     <SelectItem value="crosses_below">Crosses Below</SelectItem>
                   </SelectContent>
                 </Select>
-                <Input
-                  type="text"
-                  value={condition.value}
-                  onChange={(e) => updateExitCondition(index, 'value', e.target.value)}
-                  placeholder="Value"
-                  className="flex-1"
-                />
+                
+                <div className="flex-1 flex gap-2 items-center">
+                  <Checkbox
+                    checked={condition.compareToIndicator || false}
+                    onCheckedChange={(checked) => {
+                      updateExitCondition(index, 'compareToIndicator', checked);
+                      if (!checked) {
+                        updateExitCondition(index, 'targetIndicator', '');
+                      }
+                    }}
+                  />
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">Compare to indicator</span>
+                </div>
+
+                {condition.compareToIndicator ? (
+                  <Select
+                    value={condition.targetIndicator || ''}
+                    onValueChange={(value) => updateExitCondition(index, 'targetIndicator', value)}
+                  >
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Select indicator" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {indicators.map((ind) => (
+                        <SelectItem key={ind.type + (ind.period || '')} value={ind.name || ind.type}>
+                          {ind.name || ind.type}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    type="text"
+                    value={condition.value}
+                    onChange={(e) => updateExitCondition(index, 'value', e.target.value)}
+                    placeholder="Value"
+                    className="flex-1"
+                  />
+                )}
+                
                 <Button
                   type="button"
                   variant="destructive"

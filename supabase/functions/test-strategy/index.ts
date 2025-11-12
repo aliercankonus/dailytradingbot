@@ -19,6 +19,8 @@ interface Condition {
   indicator: string;
   operator: string;
   value: string;
+  compareToIndicator?: boolean;
+  targetIndicator?: string;
 }
 
 interface IndicatorConfig {
@@ -136,9 +138,16 @@ function evaluateCondition(
   indicatorValues: Map<string, number>
 ): boolean {
   const indicatorValue = indicatorValues.get(condition.indicator) || 0;
-  const targetValue = parseFloat(condition.value);
   
-  switch (condition.operator) {
+  // Check if comparing to another indicator
+  let targetValue: number;
+  if (condition.compareToIndicator && condition.targetIndicator) {
+    targetValue = indicatorValues.get(condition.targetIndicator) || 0;
+  } else {
+    targetValue = parseFloat(condition.value || '0');
+  }
+  
+  switch (condition.operator.toLowerCase()) {
     case 'above':
       return indicatorValue > targetValue;
     case 'below':

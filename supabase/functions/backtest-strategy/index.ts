@@ -19,6 +19,8 @@ interface Condition {
   indicator: string;
   operator: string;
   value: number;
+  compareToIndicator?: boolean;
+  targetIndicator?: string;
 }
 
 interface IndicatorConfig {
@@ -138,23 +140,31 @@ serve(async (req) => {
       }
     };
 
-    const evaluateCondition = (condition: Condition, indicatorValue: number): boolean => {
-      const threshold = Number(condition.value);
+    const evaluateCondition = (condition: Condition, indicators: { [key: string]: number }): boolean => {
+      const indicatorValue = indicators[condition.indicator] || 0;
+      
+      // Check if comparing to another indicator
+      let targetValue: number;
+      if (condition.compareToIndicator && condition.targetIndicator) {
+        targetValue = indicators[condition.targetIndicator] || 0;
+      } else {
+        targetValue = Number(condition.value || 0);
+      }
       
       switch (condition.operator.toLowerCase()) {
         case '>':
         case 'above':
-          return indicatorValue > threshold;
+          return indicatorValue > targetValue;
         case '<':
         case 'below':
-          return indicatorValue < threshold;
+          return indicatorValue < targetValue;
         case '>=':
-          return indicatorValue >= threshold;
+          return indicatorValue >= targetValue;
         case '<=':
-          return indicatorValue <= threshold;
+          return indicatorValue <= targetValue;
         case '==':
         case 'equals':
-          return Math.abs(indicatorValue - threshold) < 0.01;
+          return Math.abs(indicatorValue - targetValue) < 0.01;
         default:
           return false;
       }
@@ -189,8 +199,7 @@ serve(async (req) => {
       if (!position) {
         const entryConditions = (strategy.entry_conditions || []) as Condition[];
         const allEntryConditionsMet = entryConditions.every((condition) => {
-          const indicatorValue = indicators[condition.indicator] || currentPrice;
-          return evaluateCondition(condition, indicatorValue);
+          return evaluateCondition(condition, indicators);
         });
 
         if (allEntryConditionsMet && entryConditions.length > 0) {
@@ -217,8 +226,7 @@ serve(async (req) => {
         // Check exit conditions from strategy
         const exitConditions = (strategy.exit_conditions || []) as Condition[];
         const anyExitConditionMet = exitConditions.some((condition) => {
-          const indicatorValue = indicators[condition.indicator] || currentPrice;
-          return evaluateCondition(condition, indicatorValue);
+          return evaluateCondition(condition, indicators);
         });
 
         if (anyExitConditionMet && exitConditions.length > 0) {

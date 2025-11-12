@@ -7,11 +7,15 @@ export interface StrategyTemplate {
     indicator: string;
     operator: string;
     value: string;
+    compareToIndicator?: boolean;
+    targetIndicator?: string;
   }>;
   exit_conditions: Array<{
     indicator: string;
     operator: string;
     value: string;
+    compareToIndicator?: boolean;
+    targetIndicator?: string;
   }>;
   indicators: Array<{
     type: string;
@@ -35,10 +39,10 @@ export const strategyTemplates: StrategyTemplate[] = [
     description: 'Buy when RSI drops below 30 (oversold), sell when RSI rises above 70 (overbought). Classic mean reversion strategy.',
     category: 'reversal',
     entry_conditions: [
-      { indicator: 'RSI', operator: 'below', value: '30' }
+      { indicator: 'RSI', operator: 'below', value: '30', compareToIndicator: false }
     ],
     exit_conditions: [
-      { indicator: 'RSI', operator: 'above', value: '70' }
+      { indicator: 'RSI', operator: 'above', value: '70', compareToIndicator: false }
     ],
     indicators: [
       { type: 'RSI', name: 'RSI', period: 14 }
@@ -52,14 +56,13 @@ export const strategyTemplates: StrategyTemplate[] = [
   {
     id: 'macd-crossover',
     name: 'MACD Crossover',
-    description: 'Enter when MACD line is positive and rising, exit when MACD turns negative. Momentum-based trend following.',
+    description: 'Enter when MACD line crosses above zero (bullish crossover), exit when MACD crosses below zero. Classic momentum strategy.',
     category: 'momentum',
     entry_conditions: [
-      { indicator: 'MACD', operator: 'above', value: '0' },
-      { indicator: 'RSI', operator: 'above', value: '50' }
+      { indicator: 'MACD', operator: 'above', value: '0', compareToIndicator: false }
     ],
     exit_conditions: [
-      { indicator: 'MACD', operator: 'below', value: '0' }
+      { indicator: 'MACD', operator: 'below', value: '0', compareToIndicator: false }
     ],
     indicators: [
       { type: 'MACD', name: 'MACD', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
@@ -74,19 +77,17 @@ export const strategyTemplates: StrategyTemplate[] = [
   {
     id: 'ema-crossover',
     name: 'EMA Golden Cross',
-    description: 'Enter when price is above both EMAs (bullish alignment), exit when price drops below fast EMA. Trend strength indicator.',
+    description: 'Enter when fast EMA crosses above slow EMA (golden cross), exit when fast EMA crosses below (death cross). Trend following.',
     category: 'trend',
     entry_conditions: [
-      { indicator: 'EMA_Fast', operator: 'below', value: '0' },
-      { indicator: 'RSI', operator: 'above', value: '50' }
+      { indicator: 'EMA_Fast', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'EMA_Slow' }
     ],
     exit_conditions: [
-      { indicator: 'EMA_Fast', operator: 'above', value: '0' }
+      { indicator: 'EMA_Fast', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'EMA_Slow' }
     ],
     indicators: [
       { type: 'EMA', name: 'EMA_Fast', period: 12 },
-      { type: 'EMA', name: 'EMA_Slow', period: 26 },
-      { type: 'RSI', name: 'RSI', period: 14 }
+      { type: 'EMA', name: 'EMA_Slow', period: 26 }
     ],
     risk_settings: {
       stopLossPercent: 2.5,
@@ -100,11 +101,11 @@ export const strategyTemplates: StrategyTemplate[] = [
     description: 'Enter when RSI is strong (>50) and MACD is positive. Ride momentum until RSI weakens.',
     category: 'momentum',
     entry_conditions: [
-      { indicator: 'RSI', operator: 'above', value: '50' },
-      { indicator: 'MACD', operator: 'above', value: '0' }
+      { indicator: 'RSI', operator: 'above', value: '50', compareToIndicator: false },
+      { indicator: 'MACD', operator: 'above', value: '0', compareToIndicator: false }
     ],
     exit_conditions: [
-      { indicator: 'RSI', operator: 'below', value: '40' }
+      { indicator: 'RSI', operator: 'below', value: '40', compareToIndicator: false }
     ],
     indicators: [
       { type: 'RSI', name: 'RSI', period: 14 },
@@ -122,10 +123,10 @@ export const strategyTemplates: StrategyTemplate[] = [
     description: 'Buy extreme dips (RSI < 25) and sell when price returns to normal levels (RSI > 50). Conservative approach.',
     category: 'reversal',
     entry_conditions: [
-      { indicator: 'RSI', operator: 'below', value: '25' }
+      { indicator: 'RSI', operator: 'below', value: '25', compareToIndicator: false }
     ],
     exit_conditions: [
-      { indicator: 'RSI', operator: 'above', value: '50' }
+      { indicator: 'RSI', operator: 'above', value: '50', compareToIndicator: false }
     ],
     indicators: [
       { type: 'RSI', name: 'RSI', period: 14 },
@@ -143,11 +144,11 @@ export const strategyTemplates: StrategyTemplate[] = [
     description: 'Enter when price is above EMA and RSI confirms strength. Exit when trend weakens.',
     category: 'trend',
     entry_conditions: [
-      { indicator: 'EMA', operator: 'below', value: '0' },
-      { indicator: 'RSI', operator: 'above', value: '55' }
+      { indicator: 'EMA', operator: 'below', value: '0', compareToIndicator: false },
+      { indicator: 'RSI', operator: 'above', value: '55', compareToIndicator: false }
     ],
     exit_conditions: [
-      { indicator: 'RSI', operator: 'below', value: '45' }
+      { indicator: 'RSI', operator: 'below', value: '45', compareToIndicator: false }
     ],
     indicators: [
       { type: 'EMA', name: 'EMA', period: 20 },
@@ -165,10 +166,10 @@ export const strategyTemplates: StrategyTemplate[] = [
     description: 'Low-risk strategy with tight stops. Enter on moderate oversold (RSI < 35), exit at neutral (RSI > 55).',
     category: 'reversal',
     entry_conditions: [
-      { indicator: 'RSI', operator: 'below', value: '35' }
+      { indicator: 'RSI', operator: 'below', value: '35', compareToIndicator: false }
     ],
     exit_conditions: [
-      { indicator: 'RSI', operator: 'above', value: '55' }
+      { indicator: 'RSI', operator: 'above', value: '55', compareToIndicator: false }
     ],
     indicators: [
       { type: 'RSI', name: 'RSI', period: 14 }
@@ -185,11 +186,11 @@ export const strategyTemplates: StrategyTemplate[] = [
     description: 'High-risk, high-reward. Enter on strong momentum signals, wider stops for volatility.',
     category: 'momentum',
     entry_conditions: [
-      { indicator: 'RSI', operator: 'above', value: '60' },
-      { indicator: 'MACD', operator: 'above', value: '0' }
+      { indicator: 'RSI', operator: 'above', value: '60', compareToIndicator: false },
+      { indicator: 'MACD', operator: 'above', value: '0', compareToIndicator: false }
     ],
     exit_conditions: [
-      { indicator: 'RSI', operator: 'below', value: '50' }
+      { indicator: 'RSI', operator: 'below', value: '50', compareToIndicator: false }
     ],
     indicators: [
       { type: 'RSI', name: 'RSI', period: 14 },
