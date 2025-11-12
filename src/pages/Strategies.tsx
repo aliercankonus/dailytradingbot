@@ -20,12 +20,14 @@ import { useCustomStrategies } from "@/hooks/useCustomStrategies";
 import { useBuiltInStrategies } from "@/hooks/useBuiltInStrategies";
 import { BacktestingModule } from "@/components/BacktestingModule";
 import { StrategyComparison } from "@/components/StrategyComparison";
+import { EditBuiltInStrategyDialog } from "@/components/EditBuiltInStrategyDialog";
 
 const Strategies = () => {
   const navigate = useNavigate();
   const { strategies: customStrategies, loading: customLoading, deleteStrategy, toggleActive } = useCustomStrategies();
-  const { strategies: builtInStrategies, loading: builtInLoading, toggleStatus } = useBuiltInStrategies();
+  const { strategies: builtInStrategies, loading: builtInLoading, toggleStatus, refetch: refetchBuiltIn } = useBuiltInStrategies();
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [editingBuiltInStrategy, setEditingBuiltInStrategy] = useState<any>(null);
 
   const handleDelete = async () => {
     if (deleteId) {
@@ -136,6 +138,13 @@ const Strategies = () => {
                         </div>
 
                         <div className="flex items-center gap-2 ml-4">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setEditingBuiltInStrategy(strategy)}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
                           <div className="flex items-center gap-2">
                             <Power className="h-4 w-4 text-muted-foreground" />
                             <Switch
@@ -390,6 +399,13 @@ const Strategies = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <EditBuiltInStrategyDialog
+        strategy={editingBuiltInStrategy}
+        open={!!editingBuiltInStrategy}
+        onOpenChange={(open) => !open && setEditingBuiltInStrategy(null)}
+        onSuccess={refetchBuiltIn}
+      />
     </div>
   );
 };
