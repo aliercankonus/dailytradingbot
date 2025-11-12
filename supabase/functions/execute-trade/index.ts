@@ -128,13 +128,13 @@ serve(async (req) => {
         signal_id: signalId,
         symbol: signal.symbol,
         side,
-        order_type: isPaperTrading ? 'PAPER' : 'MARKET',
+        order_type: 'MARKET',
         quantity,
         entry_price: executedPrice,
         stop_loss: signal.stop_loss,
         take_profit: signal.take_profit,
         status: 'open',
-        binance_order_id: orderData.orderId?.toString(),
+        binance_order_id: isPaperTrading ? null : orderData.orderId?.toString(),
       })
       .select()
       .single();
