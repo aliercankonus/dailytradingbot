@@ -5,9 +5,12 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useBacktesting } from '@/hooks/useBacktesting';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Bar, Area } from 'recharts';
-import { TrendingUp, TrendingDown, Target, Activity } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Activity, Info } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useCustomStrategies } from '@/hooks/useCustomStrategies';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 
 interface BacktestingModuleProps {
   strategies: Array<{ id: string; name: string }>;
@@ -16,6 +19,7 @@ interface BacktestingModuleProps {
 export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
   const { results, runningBacktest, runBacktest } = useBacktesting();
   const { toast } = useToast();
+  const { strategies: customStrategies } = useCustomStrategies();
 
   const [formData, setFormData] = useState({
     strategyId: strategies[0]?.id || '',
@@ -24,6 +28,77 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
     endDate: new Date().toISOString().split('T')[0],
     initialCapital: 10000,
   });
+
+  const [selectedStrategyConfig, setSelectedStrategyConfig] = useState<any>(null);
+
+  useEffect(() => {
+    if (formData.strategyId) {
+      // Find the strategy in custom strategies
+      const customStrategy = customStrategies.find(s => s.id === formData.strategyId);
+      if (customStrategy) {
+        setSelectedStrategyConfig(customStrategy);
+      } else {
+        // It's a built-in strategy
+        const builtIn = strategies.find(s => s.id === formData.strategyId);
+        if (builtIn) {
+          const name = builtIn.name.toLowerCase();
+          if (name.includes('mean reversion')) {
+            setSelectedStrategyConfig({
+              name: builtIn.name,
+              isBuiltIn: true,
+              indicators: [
+                { type: 'price', name: 'price' },
+                { type: 'bb_lower', name: 'bb_lower', period: 20 },
+                { type: 'bb_middle', name: 'bb_middle', period: 20 },
+                { type: 'rsi', name: 'rsi', period: 14 },
+              ],
+              entry_conditions: [
+                { indicator: 'price', operator: '<', targetIndicator: 'bb_lower' },
+                { indicator: 'rsi', operator: '<', value: 30 },
+              ],
+              exit_conditions: [
+                { indicator: 'price', operator: '>=', targetIndicator: 'bb_middle' },
+              ],
+              risk_settings: { stopLossPercent: 2, takeProfitPercent: 4 },
+            });
+          } else if (name.includes('momentum')) {
+            setSelectedStrategyConfig({
+              name: builtIn.name,
+              isBuiltIn: true,
+              indicators: [
+                { type: 'macd', name: 'macd', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+                { type: 'macd_signal', name: 'macd_signal', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+              ],
+              entry_conditions: [
+                { indicator: 'macd', operator: '>', targetIndicator: 'macd_signal' },
+              ],
+              exit_conditions: [
+                { indicator: 'macd', operator: '<', targetIndicator: 'macd_signal' },
+              ],
+              risk_settings: { stopLossPercent: 3, takeProfitPercent: 6 },
+            });
+          } else if (name.includes('grid')) {
+            setSelectedStrategyConfig({
+              name: builtIn.name,
+              isBuiltIn: true,
+              indicators: [
+                { type: 'price', name: 'price' },
+                { type: 'bb_lower', name: 'bb_lower', period: 20 },
+                { type: 'bb_upper', name: 'bb_upper', period: 20 },
+              ],
+              entry_conditions: [
+                { indicator: 'price', operator: '<=', targetIndicator: 'bb_lower' },
+              ],
+              exit_conditions: [
+                { indicator: 'price', operator: '>=', targetIndicator: 'bb_upper' },
+              ],
+              risk_settings: { stopLossPercent: 1.5, takeProfitPercent: 1.5 },
+            });
+          }
+        }
+      }
+    }
+  }, [formData.strategyId, customStrategies, strategies]);
 
   const handleRunBacktest = async () => {
     if (!formData.strategyId) {
@@ -137,6 +212,105 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
           Tests your strategy against past market data to see how it would have performed
         </p>
       </Card>
+
+      {selectedStrategyConfig && (
+        <Card className="p-6">
+          <div className="flex items-start gap-3 mb-4">
+            <Info className="h-5 w-5 text-primary mt-0.5" />
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold mb-1">Strategy Configuration Preview</h3>
+              <p className="text-sm text-muted-foreground">
+                {selectedStrategyConfig.isBuiltIn 
+                  ? 'Built-in strategy using default configuration' 
+                  : selectedStrategyConfig.description || 'Custom strategy configuration'}
+              </p>
+            </div>
+            {selectedStrategyConfig.isBuiltIn && (
+              <Badge variant="secondary">Built-in</Badge>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            {/* Indicators */}
+            <div>
+              <h4 className="text-sm font-semibold mb-2">Technical Indicators</h4>
+              <div className="flex flex-wrap gap-2">
+                {(selectedStrategyConfig.indicators || []).map((indicator: any, idx: number) => (
+                  <Badge key={idx} variant="outline" className="text-xs">
+                    {indicator.type.toUpperCase()}
+                    {indicator.period && ` (${indicator.period})`}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Entry Conditions */}
+            <div>
+              <h4 className="text-sm font-semibold mb-2 text-success">Entry Conditions</h4>
+              <div className="space-y-1 text-sm">
+                {(selectedStrategyConfig.entry_conditions || []).map((condition: any, idx: number) => (
+                  <div key={idx} className="flex items-center gap-2 text-muted-foreground">
+                    <span className="w-2 h-2 rounded-full bg-success" />
+                    <span className="font-mono">{condition.indicator}</span>
+                    <span>{condition.operator}</span>
+                    {condition.targetIndicator ? (
+                      <span className="font-mono">{condition.targetIndicator}</span>
+                    ) : (
+                      <span className="font-mono">{condition.value}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Exit Conditions */}
+            <div>
+              <h4 className="text-sm font-semibold mb-2 text-danger">Exit Conditions</h4>
+              <div className="space-y-1 text-sm">
+                {(selectedStrategyConfig.exit_conditions || []).map((condition: any, idx: number) => (
+                  <div key={idx} className="flex items-center gap-2 text-muted-foreground">
+                    <span className="w-2 h-2 rounded-full bg-danger" />
+                    <span className="font-mono">{condition.indicator}</span>
+                    <span>{condition.operator}</span>
+                    {condition.targetIndicator ? (
+                      <span className="font-mono">{condition.targetIndicator}</span>
+                    ) : (
+                      <span className="font-mono">{condition.value}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Risk Management */}
+            <div>
+              <h4 className="text-sm font-semibold mb-2">Risk Management</h4>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span className="text-muted-foreground">Stop Loss:</span>
+                  <span className="ml-2 font-mono font-semibold text-danger">
+                    {selectedStrategyConfig.risk_settings?.stopLossPercent || 
+                     selectedStrategyConfig.risk_management?.stopLossPercent || 2}%
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Take Profit:</span>
+                  <span className="ml-2 font-mono font-semibold text-success">
+                    {selectedStrategyConfig.risk_settings?.takeProfitPercent || 
+                     selectedStrategyConfig.risk_management?.takeProfitPercent || 4}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {latestResult && (
         <>
