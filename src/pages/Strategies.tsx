@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,6 +17,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useCustomStrategies } from "@/hooks/useCustomStrategies";
+import { BacktestingModule } from "@/components/BacktestingModule";
 
 const Strategies = () => {
   const navigate = useNavigate();
@@ -61,12 +63,19 @@ const Strategies = () => {
       </header>
 
       <main className="container mx-auto px-4 py-6">
-        {loading ? (
-          <div className="text-center py-12">
-            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
-            <p className="mt-4 text-muted-foreground">Loading strategies...</p>
-          </div>
-        ) : strategies.length === 0 ? (
+        <Tabs defaultValue="strategies" className="w-full">
+          <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
+            <TabsTrigger value="strategies">Strategies</TabsTrigger>
+            <TabsTrigger value="backtesting">Historical Backtesting</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="strategies">
+            {loading ? (
+              <div className="text-center py-12">
+                <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
+                <p className="mt-4 text-muted-foreground">Loading strategies...</p>
+              </div>
+            ) : strategies.length === 0 ? (
           <Card className="p-12 text-center">
             <div className="max-w-md mx-auto space-y-4">
               <div className="h-16 w-16 mx-auto rounded-full bg-secondary/50 flex items-center justify-center">
@@ -82,8 +91,8 @@ const Strategies = () => {
               </Button>
             </div>
           </Card>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {strategies.map((strategy) => (
               <Card key={strategy.id} className="p-6 hover:border-primary/50 transition-colors">
                 <div className="space-y-4">
@@ -151,8 +160,28 @@ const Strategies = () => {
                 </div>
               </Card>
             ))}
-          </div>
-        )}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="backtesting">
+            {strategies.length === 0 ? (
+              <Card className="p-12 text-center">
+                <p className="text-muted-foreground">
+                  Create a strategy first before running backtests
+                </p>
+                <Button onClick={() => navigate('/strategies/new')} className="mt-4 gap-2">
+                  <Plus className="h-4 w-4" />
+                  Create Strategy
+                </Button>
+              </Card>
+            ) : (
+              <BacktestingModule 
+                strategies={strategies.map(s => ({ id: s.id, name: s.name }))}
+              />
+            )}
+          </TabsContent>
+        </Tabs>
       </main>
 
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>

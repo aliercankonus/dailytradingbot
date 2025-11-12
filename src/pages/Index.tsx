@@ -9,7 +9,6 @@ import { PortfolioMetrics } from "@/components/PortfolioMetrics";
 import { LivePriceCard } from "@/components/LivePriceCard";
 import { TradingSignalsDashboard } from "@/components/TradingSignalsDashboard";
 import { RiskManagementControls } from "@/components/RiskManagementControls";
-import { BacktestingModule } from "@/components/BacktestingModule";
 import { PerformanceAnalytics } from "@/components/PerformanceAnalytics";
 import { ActivePositions } from "@/components/ActivePositions";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -44,13 +43,12 @@ const Index = () => {
       
       <main className="container mx-auto px-4 py-6">
         <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="signals">Signals</TabsTrigger>
             <TabsTrigger value="positions">Positions</TabsTrigger>
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
             <TabsTrigger value="risk">Risk</TabsTrigger>
-            <TabsTrigger value="backtest">Backtest</TabsTrigger>
           </TabsList>
 
           <TabsContent value="dashboard" className="space-y-6">
@@ -89,10 +87,6 @@ const Index = () => {
 
           <TabsContent value="risk">
             <RiskManagementControls />
-          </TabsContent>
-
-          <TabsContent value="backtest">
-            <BacktestingModule />
           </TabsContent>
         </Tabs>
       </main>

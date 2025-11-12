@@ -53,11 +53,11 @@ export const useBacktesting = () => {
   };
 
   const runBacktest = async (params: {
+    strategyId: string;
     symbol: string;
     startDate: string;
     endDate: string;
     initialCapital: number;
-    strategyName: string;
   }) => {
     try {
       setRunningBacktest(true);

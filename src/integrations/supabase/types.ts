@@ -32,6 +32,7 @@ export type Database = {
           results_data: Json | null
           sharpe_ratio: number | null
           start_date: string
+          strategy_id: string | null
           strategy_name: string
           symbol: string
           total_loss: number | null
@@ -57,6 +58,7 @@ export type Database = {
           results_data?: Json | null
           sharpe_ratio?: number | null
           start_date: string
+          strategy_id?: string | null
           strategy_name: string
           symbol: string
           total_loss?: number | null
@@ -82,6 +84,7 @@ export type Database = {
           results_data?: Json | null
           sharpe_ratio?: number | null
           start_date?: string
+          strategy_id?: string | null
           strategy_name?: string
           symbol?: string
           total_loss?: number | null
@@ -89,6 +92,53 @@ export type Database = {
           total_trades?: number | null
           win_rate?: number | null
           winning_trades?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "backtesting_results_strategy_id_fkey"
+            columns: ["strategy_id"]
+            isOneToOne: false
+            referencedRelation: "custom_strategies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      custom_strategies: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          entry_conditions: Json
+          exit_conditions: Json
+          id: string
+          indicators: Json
+          is_active: boolean | null
+          name: string
+          risk_settings: Json | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          entry_conditions?: Json
+          exit_conditions?: Json
+          id?: string
+          indicators?: Json
+          is_active?: boolean | null
+          name: string
+          risk_settings?: Json | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          entry_conditions?: Json
+          exit_conditions?: Json
+          id?: string
+          indicators?: Json
+          is_active?: boolean | null
+          name?: string
+          risk_settings?: Json | null
+          updated_at?: string | null
         }
         Relationships: []
       }

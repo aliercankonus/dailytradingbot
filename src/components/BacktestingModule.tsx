@@ -2,29 +2,43 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useBacktesting } from '@/hooks/useBacktesting';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { TrendingUp, TrendingDown, Target, Activity } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useState } from 'react';
 
-export const BacktestingModule = () => {
+interface BacktestingModuleProps {
+  strategies: Array<{ id: string; name: string }>;
+}
+
+export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
   const { results, runningBacktest, runBacktest } = useBacktesting();
   const { toast } = useToast();
 
   const [formData, setFormData] = useState({
+    strategyId: strategies[0]?.id || '',
     symbol: 'BTCUSDT',
-    startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0],
     initialCapital: 10000,
-    strategyName: 'Momentum Strategy',
   });
 
   const handleRunBacktest = async () => {
+    if (!formData.strategyId) {
+      toast({
+        title: "Strategy Required",
+        description: "Please select a strategy to backtest",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       toast({
         title: "Running Backtest",
-        description: "This may take a few moments...",
+        description: "Analyzing historical data...",
       });
 
       await runBacktest(formData);
@@ -49,9 +63,28 @@ export const BacktestingModule = () => {
       <h2 className="text-2xl font-bold">Backtesting</h2>
 
       <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-4">Run New Backtest</h3>
+        <h3 className="text-lg font-semibold mb-4">Run Historical Backtest</h3>
         
         <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="strategy">Strategy</Label>
+            <Select
+              value={formData.strategyId}
+              onValueChange={(value) => setFormData({ ...formData, strategyId: value })}
+            >
+              <SelectTrigger id="strategy">
+                <SelectValue placeholder="Select a strategy" />
+              </SelectTrigger>
+              <SelectContent>
+                {strategies.map((strategy) => (
+                  <SelectItem key={strategy.id} value={strategy.id}>
+                    {strategy.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="symbol">Symbol</Label>
             <Input
@@ -59,15 +92,6 @@ export const BacktestingModule = () => {
               value={formData.symbol}
               onChange={(e) => setFormData({ ...formData, symbol: e.target.value })}
               placeholder="BTCUSDT"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="strategy">Strategy Name</Label>
-            <Input
-              id="strategy"
-              value={formData.strategyName}
-              onChange={(e) => setFormData({ ...formData, strategyName: e.target.value })}
             />
           </div>
 
@@ -104,11 +128,14 @@ export const BacktestingModule = () => {
 
         <Button 
           onClick={handleRunBacktest} 
-          disabled={runningBacktest}
+          disabled={runningBacktest || !formData.strategyId}
           className="w-full mt-4"
         >
-          {runningBacktest ? 'Running...' : 'Run Backtest'}
+          {runningBacktest ? 'Running Backtest...' : 'Run Historical Backtest'}
         </Button>
+        <p className="text-xs text-muted-foreground mt-2 text-center">
+          Tests your strategy against past market data to see how it would have performed
+        </p>
       </Card>
 
       {latestResult && (
