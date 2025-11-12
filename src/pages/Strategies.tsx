@@ -22,6 +22,7 @@ import { BacktestingModule } from "@/components/BacktestingModule";
 import { StrategyComparison } from "@/components/StrategyComparison";
 import { StrategyOptimizer } from "@/components/StrategyOptimizer";
 import { AIStrategyRecommender } from "@/components/AIStrategyRecommender";
+import { MonteCarloSimulation } from "@/components/MonteCarloSimulation";
 import { EditBuiltInStrategyDialog } from "@/components/EditBuiltInStrategyDialog";
 
 const Strategies = () => {
@@ -75,13 +76,14 @@ const Strategies = () => {
 
       <main className="container mx-auto px-4 py-6">
         <Tabs defaultValue="all" className="w-full">
-          <TabsList className="grid w-full max-w-3xl grid-cols-6 mb-6">
-            <TabsTrigger value="all">All Strategies</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-7 mb-6">
+            <TabsTrigger value="all">All</TabsTrigger>
             <TabsTrigger value="custom">Custom</TabsTrigger>
-            <TabsTrigger value="backtesting">Backtesting</TabsTrigger>
+            <TabsTrigger value="backtesting">Backtest</TabsTrigger>
             <TabsTrigger value="optimizer">Optimizer</TabsTrigger>
-            <TabsTrigger value="ai-recommender">AI Recommender</TabsTrigger>
-            <TabsTrigger value="comparison">Comparison</TabsTrigger>
+            <TabsTrigger value="monte-carlo">Monte Carlo</TabsTrigger>
+            <TabsTrigger value="ai-recommender">AI</TabsTrigger>
+            <TabsTrigger value="comparison">Compare</TabsTrigger>
           </TabsList>
 
           <TabsContent value="all" className="space-y-6">
@@ -403,6 +405,20 @@ const Strategies = () => {
 
           <TabsContent value="ai-recommender">
             <AIStrategyRecommender />
+          </TabsContent>
+
+          <TabsContent value="monte-carlo">
+            {customStrategies.length === 0 ? (
+              <Card className="p-12 text-center">
+                <p className="text-muted-foreground">Create a custom strategy first to run Monte Carlo simulations</p>
+                <Button onClick={() => navigate('/strategies/new')} className="mt-4 gap-2">
+                  <Plus className="h-4 w-4" />
+                  Create Strategy
+                </Button>
+              </Card>
+            ) : (
+              <MonteCarloSimulation strategies={customStrategies.map(s => ({ id: s.id, name: s.name }))} />
+            )}
           </TabsContent>
         </Tabs>
       </main>

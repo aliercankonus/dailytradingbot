@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.ai-strategy-recommender]
 verify_jwt = false
+
+[functions.monte-carlo-simulation]
+verify_jwt = false

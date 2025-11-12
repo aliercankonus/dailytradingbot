@@ -36,7 +36,7 @@ serve(async (req) => {
     const { data: recentTrades, error: tradesError } = await supabase
       .from('trades')
       .select('*')
-      .order('entry_time', { ascending: false })
+      .order('executed_at', { ascending: false })
       .limit(20);
 
     if (tradesError) {
