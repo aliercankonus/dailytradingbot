@@ -52,16 +52,18 @@ export const strategyTemplates: StrategyTemplate[] = [
   {
     id: 'macd-crossover',
     name: 'MACD Crossover',
-    description: 'Enter when MACD line crosses above signal line, exit when it crosses below. Popular momentum indicator.',
+    description: 'Enter when MACD line is positive and rising, exit when MACD turns negative. Momentum-based trend following.',
     category: 'momentum',
     entry_conditions: [
-      { indicator: 'MACD', operator: 'above', value: '0' }
+      { indicator: 'MACD', operator: 'above', value: '0' },
+      { indicator: 'RSI', operator: 'above', value: '50' }
     ],
     exit_conditions: [
       { indicator: 'MACD', operator: 'below', value: '0' }
     ],
     indicators: [
-      { type: 'MACD', name: 'MACD', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }
+      { type: 'MACD', name: 'MACD', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+      { type: 'RSI', name: 'RSI', period: 14 }
     ],
     risk_settings: {
       stopLossPercent: 2,
@@ -71,18 +73,20 @@ export const strategyTemplates: StrategyTemplate[] = [
   },
   {
     id: 'ema-crossover',
-    name: 'EMA Crossover',
-    description: 'Buy when fast EMA (12) crosses above slow EMA (26), sell on reverse crossover. Trend following strategy.',
+    name: 'EMA Golden Cross',
+    description: 'Enter when price is above both EMAs (bullish alignment), exit when price drops below fast EMA. Trend strength indicator.',
     category: 'trend',
     entry_conditions: [
-      { indicator: 'EMA_Fast', operator: 'above', value: '0' }
+      { indicator: 'EMA_Fast', operator: 'below', value: '0' },
+      { indicator: 'RSI', operator: 'above', value: '50' }
     ],
     exit_conditions: [
-      { indicator: 'EMA_Fast', operator: 'below', value: '0' }
+      { indicator: 'EMA_Fast', operator: 'above', value: '0' }
     ],
     indicators: [
       { type: 'EMA', name: 'EMA_Fast', period: 12 },
-      { type: 'EMA', name: 'EMA_Slow', period: 26 }
+      { type: 'EMA', name: 'EMA_Slow', period: 26 },
+      { type: 'RSI', name: 'RSI', period: 14 }
     ],
     risk_settings: {
       stopLossPercent: 2.5,
