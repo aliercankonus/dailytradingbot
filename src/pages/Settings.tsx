@@ -10,6 +10,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { Settings as SettingsIcon, Key, Mail, Shield, ArrowLeft } from 'lucide-react';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { PerformanceSettings } from '@/components/PerformanceSettings';
+import { PerformanceMonitoringDashboard } from '@/components/PerformanceMonitoringDashboard';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -133,8 +135,15 @@ export default function Settings() {
         <h1 className="text-3xl font-bold">Settings</h1>
       </div>
 
-      {/* Trading Mode */}
-      <Card className="p-6">
+      <Tabs defaultValue="general" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="general">General Settings</TabsTrigger>
+          <TabsTrigger value="performance">Performance Monitor</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="general" className="space-y-6">
+          {/* Trading Mode */}
+          <Card className="p-6">
         <div className="flex items-center gap-3 mb-4">
           <Shield className="h-5 w-5 text-primary" />
           <h2 className="text-xl font-semibold">Trading Mode</h2>
@@ -293,8 +302,14 @@ export default function Settings() {
         </div>
       </Card>
 
-      {/* Performance Settings */}
-      <PerformanceSettings />
+          {/* Performance Settings */}
+          <PerformanceSettings />
+        </TabsContent>
+
+        <TabsContent value="performance">
+          <PerformanceMonitoringDashboard />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

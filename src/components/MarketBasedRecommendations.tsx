@@ -24,10 +24,20 @@ interface CachedRecommendations {
   marketCondition: string;
   marketData: MarketData[];
   timestamp: number;
+  btcPrice: number;
+  ethPrice: number;
+}
+
+interface PerformanceMetrics {
+  timestamp: number;
+  action: 'cache_hit' | 'cache_miss' | 'api_call' | 'cache_invalidated';
+  reason?: string;
 }
 
 const CACHE_KEY = 'ai_recommendations_cache';
+const METRICS_KEY = 'performance_metrics';
 const DEFAULT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const SIGNIFICANT_CHANGE_THRESHOLD = 2; // 2% price change
 
 export const MarketBasedRecommendations = () => {
   const [marketData, setMarketData] = useState<MarketData[]>([]);
@@ -44,15 +54,62 @@ export const MarketBasedRecommendations = () => {
     }
   }, []);
 
-  const loadFromCacheOrFetch = () => {
-    const cached = loadFromCache();
-    if (cached) {
-      setRecommendations(cached.recommendations);
-      setMarketCondition(cached.marketCondition);
-      setMarketData(cached.marketData);
-      setLastFetch(cached.timestamp);
-    } else {
+  const loadFromCacheOrFetch = async () => {
+    // First, fetch current market data to check for significant changes
+    try {
+      const { data: functionData } = await supabase.functions.invoke('market-data', {
+        body: { symbols: ['BTCUSDT', 'ETHUSDT'] }
+      });
+
+      if (functionData?.success && functionData?.data) {
+        const currentBtcPrice = parseFloat(functionData.data[0]?.lastPrice || '0');
+        const currentEthPrice = parseFloat(functionData.data[1]?.lastPrice || '0');
+        
+        const cached = loadFromCache();
+        
+        if (cached) {
+          // Check if market has moved significantly
+          const btcChange = Math.abs((currentBtcPrice - cached.btcPrice) / cached.btcPrice * 100);
+          const ethChange = Math.abs((currentEthPrice - cached.ethPrice) / cached.ethPrice * 100);
+          
+          if (btcChange >= SIGNIFICANT_CHANGE_THRESHOLD || ethChange >= SIGNIFICANT_CHANGE_THRESHOLD) {
+            // Significant market movement detected - invalidate cache
+            logMetric('cache_invalidated', `BTC: ${btcChange.toFixed(2)}%, ETH: ${ethChange.toFixed(2)}%`);
+            localStorage.removeItem(CACHE_KEY);
+            fetchMarketDataAndRecommendations();
+          } else {
+            // Use cached data
+            logMetric('cache_hit');
+            setRecommendations(cached.recommendations);
+            setMarketCondition(cached.marketCondition);
+            setMarketData(cached.marketData);
+            setLastFetch(cached.timestamp);
+          }
+        } else {
+          logMetric('cache_miss');
+          fetchMarketDataAndRecommendations();
+        }
+      }
+    } catch (error) {
+      console.error('Error checking market data:', error);
       fetchMarketDataAndRecommendations();
+    }
+  };
+
+  const logMetric = (action: PerformanceMetrics['action'], reason?: string) => {
+    try {
+      const metrics: PerformanceMetrics[] = JSON.parse(localStorage.getItem(METRICS_KEY) || '[]');
+      metrics.push({
+        timestamp: Date.now(),
+        action,
+        reason
+      });
+      
+      // Keep only last 100 entries
+      const recentMetrics = metrics.slice(-100);
+      localStorage.setItem(METRICS_KEY, JSON.stringify(recentMetrics));
+    } catch (error) {
+      console.error('Error logging metric:', error);
     }
   };
 
@@ -70,6 +127,7 @@ export const MarketBasedRecommendations = () => {
       }
       
       // Cache expired
+      logMetric('cache_invalidated', 'TTL expired');
       localStorage.removeItem(CACHE_KEY);
       return null;
     } catch (error) {
@@ -78,11 +136,13 @@ export const MarketBasedRecommendations = () => {
     }
   };
 
-  const saveToCache = (data: Omit<CachedRecommendations, 'timestamp'>) => {
+  const saveToCache = (data: Omit<CachedRecommendations, 'timestamp' | 'btcPrice' | 'ethPrice'>, btcPrice: number, ethPrice: number) => {
     try {
       const cacheData: CachedRecommendations = {
         ...data,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        btcPrice,
+        ethPrice
       };
       localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
     } catch (error) {
@@ -117,10 +177,15 @@ export const MarketBasedRecommendations = () => {
         const data = functionData.data;
         setMarketData(data);
 
+        logMetric('api_call', 'Market data fetched');
+
         // Analyze market condition
         const btcChange = parseFloat(data[0]?.priceChangePercent || '0');
         const ethChange = parseFloat(data[1]?.priceChangePercent || '0');
         const avgChange = (btcChange + ethChange) / 2;
+        
+        const btcPrice = parseFloat(data[0]?.lastPrice || '0');
+        const ethPrice = parseFloat(data[1]?.lastPrice || '0');
         
         let condition = 'neutral';
         if (avgChange > 3) condition = 'bullish';
@@ -130,6 +195,8 @@ export const MarketBasedRecommendations = () => {
         else if (Math.abs(avgChange) < 0.5) condition = 'ranging';
 
         setMarketCondition(condition);
+
+        logMetric('api_call', 'AI recommendations requested');
 
         // Call AI recommender
         const { data: aiData, error: aiError } = await supabase.functions.invoke('ai-strategy-recommender', {
@@ -159,7 +226,7 @@ export const MarketBasedRecommendations = () => {
             recommendations: topRecommendations,
             marketCondition: condition,
             marketData: data
-          });
+          }, btcPrice, ethPrice);
           
           setLastFetch(Date.now());
         }
