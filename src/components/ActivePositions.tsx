@@ -1,10 +1,40 @@
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { usePositions } from '@/hooks/usePositions';
-import { TrendingUp, TrendingDown } from 'lucide-react';
+import { TrendingUp, TrendingDown, X } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
+import { useState } from 'react';
 
 export const ActivePositions = () => {
   const { positions, loading } = usePositions();
+  const { toast } = useToast();
+  const [closingPosition, setClosingPosition] = useState<string | null>(null);
+
+  const closePosition = async (positionId: string, symbol: string) => {
+    try {
+      setClosingPosition(positionId);
+      const { error } = await supabase.functions.invoke('close-trade', {
+        body: { positionId }
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Position Closed",
+        description: `Successfully closed ${symbol} position`,
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : 'Failed to close position',
+        variant: "destructive",
+      });
+    } finally {
+      setClosingPosition(null);
+    }
+  };
 
   if (loading) {
     return <Card className="p-6"><p className="text-muted-foreground">Loading positions...</p></Card>;
@@ -34,13 +64,23 @@ export const ActivePositions = () => {
                   </Badge>
                 </div>
               </div>
-              <div className="text-right">
-                <div className={`text-xl font-bold ${(position.unrealized_pnl || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                  ${(position.unrealized_pnl || 0).toFixed(2)}
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <div className={`text-xl font-bold ${(position.unrealized_pnl || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    ${(position.unrealized_pnl || 0).toFixed(2)}
+                  </div>
+                  <div className={`text-sm ${(position.unrealized_pnl_percent || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    {(position.unrealized_pnl_percent || 0).toFixed(2)}%
+                  </div>
                 </div>
-                <div className={`text-sm ${(position.unrealized_pnl_percent || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                  {(position.unrealized_pnl_percent || 0).toFixed(2)}%
-                </div>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => closePosition(position.id, position.symbol)}
+                  disabled={closingPosition === position.id}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
               </div>
             </div>
 

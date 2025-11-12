@@ -1,16 +1,49 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, Filter } from "lucide-react";
 import { useTrades } from "@/hooks/useTrades";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useState, useMemo } from "react";
 
 export const TradeHistory = () => {
   const { trades, loading } = useTrades();
+  const [selectedStrategy, setSelectedStrategy] = useState<string>("all");
+
+  const strategies = useMemo(() => {
+    const uniqueStrategies = new Set(trades.map(t => t.strategy_name || 'Unknown'));
+    return Array.from(uniqueStrategies);
+  }, [trades]);
+
+  const filteredTrades = useMemo(() => {
+    if (selectedStrategy === "all") return trades;
+    return trades.filter(t => (t.strategy_name || 'Unknown') === selectedStrategy);
+  }, [trades, selectedStrategy]);
 
   return (
     <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-foreground">Recent Trades</h3>
-        <Badge variant="secondary" className="text-xs">Live</Badge>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            <Select value={selectedStrategy} onValueChange={setSelectedStrategy}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="All Strategies" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Strategies</SelectItem>
+                {strategies.map(strategy => (
+                  <SelectItem key={strategy} value={strategy}>
+                    {strategy}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Badge variant="secondary" className="text-xs">
+            {filteredTrades.length} Trades
+          </Badge>
+        </div>
       </div>
       
       <div className="overflow-x-auto">
@@ -34,14 +67,14 @@ export const TradeHistory = () => {
                   Loading trade data...
                 </td>
               </tr>
-            ) : trades.length === 0 ? (
+            ) : filteredTrades.length === 0 ? (
               <tr>
                 <td colSpan={8} className="text-center py-8 text-muted-foreground">
                   No trades executed yet
                 </td>
               </tr>
             ) : (
-              trades.map((trade) => (
+              filteredTrades.map((trade) => (
                 <tr
                   key={trade.id}
                   className="text-sm border-b border-border/50 hover:bg-secondary/30 transition-colors"

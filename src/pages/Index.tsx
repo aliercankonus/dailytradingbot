@@ -11,6 +11,7 @@ import { RiskManagementControls } from "@/components/RiskManagementControls";
 import { PerformanceAnalytics } from "@/components/PerformanceAnalytics";
 import { ActivePositions } from "@/components/ActivePositions";
 import { MarketBasedRecommendations } from "@/components/MarketBasedRecommendations";
+import { CloseAllTradesButton } from "@/components/CloseAllTradesButton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const Index = () => {
@@ -51,6 +52,10 @@ const Index = () => {
           </TabsList>
 
           <TabsContent value="dashboard" className="space-y-6">
+            <div className="flex justify-end mb-4">
+              <CloseAllTradesButton />
+            </div>
+            
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-1">
                 <BotStatus />
