@@ -81,10 +81,13 @@ serve(async (req) => {
             name: builtIn.strategy_name,
             indicators: [
               { type: 'price', name: 'price' },
-              { type: 'bb', name: 'bb', period: 20 },
+              { type: 'bb_lower', name: 'bb_lower', period: 20 },
+              { type: 'bb_middle', name: 'bb_middle', period: 20 },
+              { type: 'rsi', name: 'rsi', period: 14 },
             ],
             entry_conditions: [
               { indicator: 'price', operator: '<', value: 0, compareToIndicator: true, targetIndicator: 'bb_lower' },
+              { indicator: 'rsi', operator: '<', value: 30 },
             ],
             exit_conditions: [
               { indicator: 'price', operator: '>=', value: 0, compareToIndicator: true, targetIndicator: 'bb_middle' },
@@ -111,15 +114,16 @@ serve(async (req) => {
             name: builtIn.strategy_name,
             indicators: [
               { type: 'price', name: 'price' },
-              { type: 'bb', name: 'bb', period: 20, stdDev: 2 },
+              { type: 'bb_lower', name: 'bb_lower', period: 20 },
+              { type: 'bb_upper', name: 'bb_upper', period: 20 },
             ],
             entry_conditions: [
-              { indicator: 'price', operator: '<', value: 0, compareToIndicator: true, targetIndicator: 'bb_lower' },
+              { indicator: 'price', operator: '<=', value: 0, compareToIndicator: true, targetIndicator: 'bb_lower' },
             ],
             exit_conditions: [
-              { indicator: 'price', operator: '>', value: 0, compareToIndicator: true, targetIndicator: 'bb_upper' },
+              { indicator: 'price', operator: '>=', value: 0, compareToIndicator: true, targetIndicator: 'bb_upper' },
             ],
-            risk_management: { stopLossPercent: 2, takeProfitPercent: 2 },
+            risk_management: { stopLossPercent: 1.5, takeProfitPercent: 1.5 },
           };
         }
       }
