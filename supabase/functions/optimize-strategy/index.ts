@@ -33,15 +33,80 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch strategy configuration
-    const { data: strategy, error: strategyError } = await supabase
+    // Fetch strategy configuration (custom or built-in)
+    let strategy: any = null;
+
+    const { data: customStrategy, error: strategyError } = await supabase
       .from('custom_strategies')
       .select('*')
       .eq('id', params.strategyId)
-      .single();
+      .maybeSingle();
 
-    if (strategyError || !strategy) {
-      throw new Error(`Strategy not found: ${strategyError?.message}`);
+    if (strategyError) {
+      throw new Error(`Database error: ${strategyError.message}`);
+    }
+
+    if (customStrategy) {
+      strategy = customStrategy;
+    } else {
+      const { data: builtIn, error: builtInErr } = await supabase
+        .from('strategy_performance')
+        .select('id, strategy_name')
+        .eq('id', params.strategyId)
+        .maybeSingle();
+
+      if (builtInErr) {
+        throw new Error(`Database error: ${builtInErr.message}`);
+      }
+
+      if (builtIn) {
+        const name = (builtIn.strategy_name || '').toLowerCase();
+        if (name.includes('mean reversion')) {
+          strategy = {
+            name: builtIn.strategy_name,
+            indicators: [
+              { type: 'price', name: 'price' },
+              { type: 'bb_lower', name: 'bb_lower', period: 20 },
+              { type: 'bb_middle', name: 'bb_middle', period: 20 },
+              { type: 'rsi', name: 'rsi', period: 14 },
+            ],
+            entry_conditions: [
+              { indicator: 'rsi', operator: '<', value: 30 },
+            ],
+            exit_conditions: [],
+            risk_settings: { stopLossPercent: 2, takeProfitPercent: 4 },
+          };
+        } else if (name.includes('momentum')) {
+          strategy = {
+            name: builtIn.strategy_name,
+            indicators: [
+              { type: 'macd', name: 'macd', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+              { type: 'macd_signal', name: 'macd_signal', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+            ],
+            entry_conditions: [
+              { indicator: 'macd', operator: '>', value: 0 },
+            ],
+            exit_conditions: [],
+            risk_settings: { stopLossPercent: 3, takeProfitPercent: 6 },
+          };
+        } else if (name.includes('grid')) {
+          strategy = {
+            name: builtIn.strategy_name,
+            indicators: [
+              { type: 'price', name: 'price' },
+              { type: 'bb_lower', name: 'bb_lower', period: 20 },
+              { type: 'bb_upper', name: 'bb_upper', period: 20 },
+            ],
+            entry_conditions: [],
+            exit_conditions: [],
+            risk_settings: { stopLossPercent: 1.5, takeProfitPercent: 1.5 },
+          };
+        }
+      }
+    }
+
+    if (!strategy) {
+      throw new Error(`Strategy with ID ${params.strategyId} not found. Please ensure the strategy exists before running optimization.`);
     }
 
     // Generate parameter combinations to test
@@ -68,8 +133,8 @@ serve(async (req) => {
     }
 
     // If strategy has RSI conditions, test RSI ranges too
-    const hasRSI = strategy.entry_conditions?.some((c: any) => c.indicator === 'RSI') ||
-                   strategy.exit_conditions?.some((c: any) => c.indicator === 'RSI');
+    const hasRSI = strategy.entry_conditions?.some((c: any) => (c.indicator || '').toString().toLowerCase() === 'rsi') ||
+                   strategy.exit_conditions?.some((c: any) => (c.indicator || '').toString().toLowerCase() === 'rsi');
     
     if (hasRSI && params.parameterRanges.rsiLow && params.parameterRanges.rsiHigh) {
       const rsiCombinations: typeof combinations = [];
