@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -74,6 +74,24 @@ export const StrategyBuilderForm = ({
       description: initialData?.description || '',
     },
   });
+
+  // Update form when initialData changes (e.g., when template is selected)
+  useEffect(() => {
+    if (initialData) {
+      form.reset({
+        name: initialData.name || '',
+        description: initialData.description || '',
+      });
+      setEntryConditions(initialData.entry_conditions || []);
+      setExitConditions(initialData.exit_conditions || []);
+      setIndicators(initialData.indicators || []);
+      setRiskSettings(initialData.risk_settings || {
+        stopLossPercent: 2,
+        takeProfitPercent: 4,
+        positionSizePercent: 1,
+      });
+    }
+  }, [initialData, form]);
 
   const addEntryCondition = () => {
     setEntryConditions([...entryConditions, { indicator: 'RSI', operator: 'below', value: '30' }]);

@@ -80,14 +80,16 @@ const StrategyBuilder = () => {
   };
 
   const handleSelectTemplate = (template: StrategyTemplate) => {
-    setTemplateData({
+    const newTemplateData = {
       name: template.name,
       description: template.description,
       entry_conditions: template.entry_conditions,
       exit_conditions: template.exit_conditions,
       indicators: template.indicators,
       risk_settings: template.risk_settings,
-    });
+    };
+    setTemplateData(newTemplateData);
+    setInitialData(newTemplateData);
     toast({
       title: "Template Applied",
       description: `${template.name} template has been loaded. You can customize it before saving.`,
@@ -133,6 +135,7 @@ const StrategyBuilder = () => {
 
       <main className="container mx-auto px-4 py-6 max-w-5xl">
         <StrategyBuilderForm
+          key={initialData?.name || 'new'}
           onSubmit={handleSubmit}
           onCancel={handleCancel}
           onTest={handleTest}
