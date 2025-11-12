@@ -50,10 +50,14 @@ serve(async (req) => {
       .from('custom_strategies')
       .select('*')
       .eq('id', strategyId)
-      .single();
+      .maybeSingle();
 
-    if (strategyError || !strategy) {
-      throw new Error(`Strategy not found: ${strategyError?.message}`);
+    if (strategyError) {
+      throw new Error(`Database error: ${strategyError.message}`);
+    }
+
+    if (!strategy) {
+      throw new Error(`Strategy with ID ${strategyId} not found. Please ensure the strategy exists before running a backtest.`);
     }
 
     console.log('Using strategy:', strategy.name);
