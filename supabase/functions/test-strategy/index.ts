@@ -13,6 +13,7 @@ interface MarketData {
   volume: string;
   highPrice: string;
   lowPrice: string;
+  quoteVolume: string;
 }
 
 interface Condition {
@@ -25,8 +26,12 @@ interface Condition {
 
 interface IndicatorConfig {
   type: string;
+  name?: string;
   period?: number;
   signal?: number;
+  fastPeriod?: number;
+  slowPeriod?: number;
+  signalPeriod?: number;
 }
 
 interface StrategyConfig {
@@ -105,6 +110,32 @@ function calculateBollingerBands(prices: number[], period = 20, stdDev = 2): { u
   };
 }
 
+// Calculate On-Balance Volume (OBV)
+function calculateOBV(prices: number[], volumes: number[]): number {
+  if (prices.length !== volumes.length || prices.length < 2) return 0;
+  
+  let obv = 0;
+  for (let i = 1; i < prices.length; i++) {
+    if (prices[i] > prices[i - 1]) {
+      obv += volumes[i];
+    } else if (prices[i] < prices[i - 1]) {
+      obv -= volumes[i];
+    }
+  }
+  
+  return obv;
+}
+
+// Calculate Average Volume
+function calculateAverageVolume(volumes: number[], period = 20): number {
+  if (volumes.length < period) {
+    return volumes.reduce((a, b) => a + b, 0) / volumes.length;
+  }
+  
+  const recentVolumes = volumes.slice(-period);
+  return recentVolumes.reduce((a, b) => a + b, 0) / period;
+}
+
 // Detect trend
 function detectTrend(data: MarketData): 'bullish' | 'bearish' | 'ranging' {
   const changePercent = parseFloat(data.priceChangePercent);
@@ -115,27 +146,34 @@ function detectTrend(data: MarketData): 'bullish' | 'bearish' | 'ranging' {
   return 'ranging';
 }
 
-// Generate historical prices
-function generateHistoricalPrices(currentPrice: number, changePercent: number): number[] {
+// Generate historical prices and volumes
+function generateHistoricalData(currentPrice: number, currentVolume: number, changePercent: number): { prices: number[]; volumes: number[] } {
   const prices: number[] = [];
+  const volumes: number[] = [];
   const volatility = Math.abs(changePercent) / 100;
   
   for (let i = 30; i >= 0; i--) {
     const variation = (Math.random() - 0.5) * volatility * currentPrice;
     const trend = (changePercent / 100) * currentPrice * (i / 30);
     prices.push(currentPrice - trend + variation);
+    
+    // Generate volume with some variation
+    const volumeVariation = (Math.random() - 0.5) * 0.3 * currentVolume;
+    volumes.push(Math.max(currentVolume + volumeVariation, currentVolume * 0.5));
   }
   
-  return prices;
+  return { prices, volumes };
 }
 
 // Calculate indicator value
 function calculateIndicator(
   indicatorConfig: IndicatorConfig,
   marketData: MarketData,
-  historicalPrices: number[]
+  historicalPrices: number[],
+  historicalVolumes: number[]
 ): number {
   const currentPrice = parseFloat(marketData.lastPrice);
+  const currentVolume = parseFloat(marketData.volume);
   
   switch (indicatorConfig.type) {
     case 'RSI':
@@ -158,6 +196,18 @@ function calculateIndicator(
     case 'BB_Lower':
       const bbLower = calculateBollingerBands(historicalPrices, indicatorConfig.period || 20);
       return bbLower.lower;
+    case 'Volume':
+      return currentVolume;
+    case 'Volume_Avg':
+      return calculateAverageVolume(historicalVolumes, indicatorConfig.period || 20);
+    case 'OBV':
+      return calculateOBV(historicalPrices, historicalVolumes);
+    case 'OBV_Avg':
+      const obvValues: number[] = [];
+      for (let i = Math.max(0, historicalPrices.length - (indicatorConfig.period || 20)); i < historicalPrices.length; i++) {
+        obvValues.push(calculateOBV(historicalPrices.slice(0, i + 1), historicalVolumes.slice(0, i + 1)));
+      }
+      return obvValues.reduce((a, b) => a + b, 0) / obvValues.length;
     case 'Price':
       return currentPrice;
     default:
@@ -197,18 +247,20 @@ function evaluateCondition(
 // Test strategy against market data
 function testStrategy(data: MarketData, strategy: StrategyConfig) {
   const currentPrice = parseFloat(data.lastPrice);
+  const currentVolume = parseFloat(data.volume);
   const changePercent = parseFloat(data.priceChangePercent);
-  const historicalPrices = generateHistoricalPrices(currentPrice, changePercent);
+  const { prices: historicalPrices, volumes: historicalVolumes } = generateHistoricalData(currentPrice, currentVolume, changePercent);
   
   // Calculate all indicators
   const indicatorValues = new Map<string, number>();
   
   for (const indicatorConfig of strategy.indicators) {
-    const value = calculateIndicator(indicatorConfig, data, historicalPrices);
-    indicatorValues.set(indicatorConfig.type, value);
+    const value = calculateIndicator(indicatorConfig, data, historicalPrices, historicalVolumes);
+    indicatorValues.set(indicatorConfig.name || indicatorConfig.type, value);
   }
   
   indicatorValues.set('Price', currentPrice);
+  indicatorValues.set('Volume', currentVolume);
   
   // Evaluate entry conditions
   const entryResults = strategy.entry_conditions.map(condition => ({

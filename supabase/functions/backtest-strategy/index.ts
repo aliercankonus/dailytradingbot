@@ -143,7 +143,31 @@ serve(async (req) => {
       };
     };
 
-    const calculateIndicator = (type: string, prices: number[], config: IndicatorConfig): number => {
+    const calculateOBV = (prices: number[], volumes: number[]): number => {
+      if (prices.length !== volumes.length || prices.length < 2) return 0;
+      
+      let obv = 0;
+      for (let i = 1; i < prices.length; i++) {
+        if (prices[i] > prices[i - 1]) {
+          obv += volumes[i];
+        } else if (prices[i] < prices[i - 1]) {
+          obv -= volumes[i];
+        }
+      }
+      
+      return obv;
+    };
+
+    const calculateAverageVolume = (volumes: number[], period: number = 20): number => {
+      if (volumes.length < period) {
+        return volumes.reduce((a, b) => a + b, 0) / volumes.length;
+      }
+      
+      const recentVolumes = volumes.slice(-period);
+      return recentVolumes.reduce((a, b) => a + b, 0) / period;
+    };
+
+    const calculateIndicator = (type: string, prices: number[], volumes: number[], config: IndicatorConfig): number => {
       switch (type.toLowerCase()) {
         case 'rsi':
           return calculateRSI(prices, config.period || 14);
@@ -165,6 +189,18 @@ serve(async (req) => {
         case 'bb_lower':
           const bbLower = calculateBollingerBands(prices, config.period || 20);
           return bbLower.lower;
+        case 'volume':
+          return volumes[volumes.length - 1];
+        case 'volume_avg':
+          return calculateAverageVolume(volumes, config.period || 20);
+        case 'obv':
+          return calculateOBV(prices, volumes);
+        case 'obv_avg':
+          const obvValues: number[] = [];
+          for (let i = Math.max(0, prices.length - (config.period || 20)); i < prices.length; i++) {
+            obvValues.push(calculateOBV(prices.slice(0, i + 1), volumes.slice(0, i + 1)));
+          }
+          return obvValues.reduce((a, b) => a + b, 0) / (obvValues.length || 1);
         case 'price':
           return prices[prices.length - 1];
         default:
@@ -214,8 +250,10 @@ serve(async (req) => {
     for (let i = 50; i < klines.length; i++) {
       const currentCandle = klines[i];
       const currentPrice = parseFloat(currentCandle[4]); // Close price
+      const currentVolume = parseFloat(currentCandle[5]); // Volume
       const timestamp = new Date(currentCandle[0]).toISOString();
       const historicalPrices = klines.slice(Math.max(0, i - 100), i + 1).map((k: any) => parseFloat(k[4]));
+      const historicalVolumes = klines.slice(Math.max(0, i - 100), i + 1).map((k: any) => parseFloat(k[5]));
       
       // Calculate all configured indicators
       const indicators: { [key: string]: number } = {};
@@ -223,6 +261,7 @@ serve(async (req) => {
         indicators[indicatorConfig.name || indicatorConfig.type] = calculateIndicator(
           indicatorConfig.type,
           historicalPrices,
+          historicalVolumes,
           indicatorConfig
         );
       }

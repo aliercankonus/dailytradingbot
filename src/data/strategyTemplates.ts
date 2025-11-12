@@ -19,7 +19,7 @@ export interface StrategyTemplate {
   }>;
   indicators: Array<{
     type: string;
-    name: string;
+    name?: string;
     period?: number;
     fastPeriod?: number;
     slowPeriod?: number;
@@ -285,6 +285,98 @@ export const strategyTemplates: StrategyTemplate[] = [
     risk_settings: {
       stopLossPercent: 2.5,
       takeProfitPercent: 5,
+      positionSizePercent: 2
+    }
+  },
+  {
+    id: 'volume-breakout',
+    name: 'Volume Breakout',
+    description: 'Enter when volume surges above 2x average with strong price momentum. Exit when volume normalizes.',
+    category: 'breakout',
+    entry_conditions: [
+      { indicator: 'Volume', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'Volume_Avg' },
+      { indicator: 'RSI', operator: 'above', value: '55', compareToIndicator: false }
+    ],
+    exit_conditions: [
+      { indicator: 'Volume', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'Volume_Avg' }
+    ],
+    indicators: [
+      { type: 'Volume', name: 'Volume', period: 1 },
+      { type: 'Volume_Avg', name: 'Volume_Avg', period: 20 },
+      { type: 'RSI', name: 'RSI', period: 14 }
+    ],
+    risk_settings: {
+      stopLossPercent: 3,
+      takeProfitPercent: 7,
+      positionSizePercent: 2.5
+    }
+  },
+  {
+    id: 'obv-trend',
+    name: 'OBV Trend Following',
+    description: 'Enter when OBV confirms uptrend (OBV rising above its average). Exit when OBV weakens below average.',
+    category: 'trend',
+    entry_conditions: [
+      { indicator: 'OBV', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'OBV_Avg' },
+      { indicator: 'RSI', operator: 'above', value: '50', compareToIndicator: false }
+    ],
+    exit_conditions: [
+      { indicator: 'OBV', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'OBV_Avg' }
+    ],
+    indicators: [
+      { type: 'OBV', name: 'OBV', period: 1 },
+      { type: 'OBV_Avg', name: 'OBV_Avg', period: 20 },
+      { type: 'RSI', name: 'RSI', period: 14 }
+    ],
+    risk_settings: {
+      stopLossPercent: 2.5,
+      takeProfitPercent: 6,
+      positionSizePercent: 2
+    }
+  },
+  {
+    id: 'volume-surge-momentum',
+    name: 'Volume Surge Momentum',
+    description: 'High-volume momentum strategy. Enter when volume spikes 3x average with MACD confirmation.',
+    category: 'momentum',
+    entry_conditions: [
+      { indicator: 'Volume', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'Volume_Avg' },
+      { indicator: 'MACD', operator: 'above', value: '0', compareToIndicator: false }
+    ],
+    exit_conditions: [
+      { indicator: 'MACD', operator: 'below', value: '0', compareToIndicator: false }
+    ],
+    indicators: [
+      { type: 'Volume', name: 'Volume', period: 1 },
+      { type: 'Volume_Avg', name: 'Volume_Avg', period: 20 },
+      { type: 'MACD', name: 'MACD', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }
+    ],
+    risk_settings: {
+      stopLossPercent: 3.5,
+      takeProfitPercent: 8,
+      positionSizePercent: 2.5
+    }
+  },
+  {
+    id: 'obv-divergence',
+    name: 'OBV Divergence',
+    description: 'Enter when OBV shows bullish divergence (OBV rising while RSI oversold). Exit at overbought or OBV weakens.',
+    category: 'reversal',
+    entry_conditions: [
+      { indicator: 'OBV', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'OBV_Avg' },
+      { indicator: 'RSI', operator: 'below', value: '40', compareToIndicator: false }
+    ],
+    exit_conditions: [
+      { indicator: 'RSI', operator: 'above', value: '65', compareToIndicator: false }
+    ],
+    indicators: [
+      { type: 'OBV', name: 'OBV', period: 1 },
+      { type: 'OBV_Avg', name: 'OBV_Avg', period: 20 },
+      { type: 'RSI', name: 'RSI', period: 14 }
+    ],
+    risk_settings: {
+      stopLossPercent: 3,
+      takeProfitPercent: 6,
       positionSizePercent: 2
     }
   }
