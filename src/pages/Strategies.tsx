@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useCustomStrategies } from "@/hooks/useCustomStrategies";
 import { BacktestingModule } from "@/components/BacktestingModule";
+import { StrategyComparison } from "@/components/StrategyComparison";
 
 const Strategies = () => {
   const navigate = useNavigate();
@@ -64,9 +65,10 @@ const Strategies = () => {
 
       <main className="container mx-auto px-4 py-6">
         <Tabs defaultValue="strategies" className="w-full">
-          <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
+          <TabsList className="grid w-full max-w-2xl grid-cols-3 mb-6">
             <TabsTrigger value="strategies">Strategies</TabsTrigger>
-            <TabsTrigger value="backtesting">Historical Backtesting</TabsTrigger>
+            <TabsTrigger value="backtesting">Backtesting</TabsTrigger>
+            <TabsTrigger value="comparison">Comparison</TabsTrigger>
           </TabsList>
 
           <TabsContent value="strategies">
@@ -180,6 +182,10 @@ const Strategies = () => {
                 strategies={strategies.map(s => ({ id: s.id, name: s.name }))}
               />
             )}
+          </TabsContent>
+
+          <TabsContent value="comparison">
+            <StrategyComparison />
           </TabsContent>
         </Tabs>
       </main>
