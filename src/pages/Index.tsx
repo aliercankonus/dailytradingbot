@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Settings } from "lucide-react";
+import { Settings, Layers } from "lucide-react";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { BotStatus } from "@/components/BotStatus";
 import { StrategyOverview } from "@/components/StrategyOverview";
@@ -23,13 +23,22 @@ const Index = () => {
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
         <div className="flex items-center justify-between">
           <DashboardHeader />
-          <button
-            onClick={() => navigate('/settings')}
-            className="mr-6 p-2 hover:bg-accent rounded-lg transition-colors"
-            aria-label="Settings"
-          >
-            <Settings className="h-5 w-5 text-muted-foreground hover:text-foreground" />
-          </button>
+          <div className="flex items-center gap-2 mr-6">
+            <button
+              onClick={() => navigate('/strategies')}
+              className="p-2 hover:bg-accent rounded-lg transition-colors"
+              aria-label="Strategies"
+            >
+              <Layers className="h-5 w-5 text-muted-foreground hover:text-foreground" />
+            </button>
+            <button
+              onClick={() => navigate('/settings')}
+              className="p-2 hover:bg-accent rounded-lg transition-colors"
+              aria-label="Settings"
+            >
+              <Settings className="h-5 w-5 text-muted-foreground hover:text-foreground" />
+            </button>
+          </div>
         </div>
       </header>
       
