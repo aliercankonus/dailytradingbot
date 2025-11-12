@@ -4,18 +4,23 @@ import { useRealtimePrices } from "@/hooks/useRealtimePrices";
 import { useRiskParameters } from "@/hooks/useRiskParameters";
 import { useTrades } from "@/hooks/useTrades";
 import { usePositions } from "@/hooks/usePositions";
+import { useBinanceBalance } from "@/hooks/useBinanceBalance";
 
 export const PortfolioMetrics = () => {
   const { connected } = useRealtimePrices();
   const { riskParams, loading: riskLoading } = useRiskParameters();
   const { trades, loading: tradesLoading } = useTrades();
   const { positions, loading: positionsLoading } = usePositions();
+  const { balance: binanceBalance, loading: balanceLoading } = useBinanceBalance();
 
-  const loading = riskLoading || tradesLoading || positionsLoading;
+  const loading = riskLoading || tradesLoading || positionsLoading || balanceLoading;
 
   // Calculate metrics from real portfolio data
   const calculateMetrics = () => {
-    const basePortfolio = riskParams?.portfolio_value || 0;
+    // Use Binance balance for live trading, database value for paper trading
+    const basePortfolio = binanceBalance?.isPaperTrading === false 
+      ? binanceBalance.balance 
+      : (riskParams?.portfolio_value || 0);
     
     // Calculate realized P&L from closed trades
     const realizedPnL = trades
