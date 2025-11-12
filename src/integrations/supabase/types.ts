@@ -238,10 +238,12 @@ export type Database = {
           consecutive_loss_threshold: number
           consecutive_losses: number | null
           current_open_trades: number | null
+          email_notifications_enabled: boolean | null
           id: string
           is_trading_enabled: boolean | null
           max_open_trades: number
           max_risk_per_trade_percent: number
+          notification_email: string | null
           notification_phone: string | null
           paper_trading_mode: boolean | null
           portfolio_value: number
@@ -253,10 +255,12 @@ export type Database = {
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
           current_open_trades?: number | null
+          email_notifications_enabled?: boolean | null
           id?: string
           is_trading_enabled?: boolean | null
           max_open_trades?: number
           max_risk_per_trade_percent?: number
+          notification_email?: string | null
           notification_phone?: string | null
           paper_trading_mode?: boolean | null
           portfolio_value?: number
@@ -268,10 +272,12 @@ export type Database = {
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
           current_open_trades?: number | null
+          email_notifications_enabled?: boolean | null
           id?: string
           is_trading_enabled?: boolean | null
           max_open_trades?: number
           max_risk_per_trade_percent?: number
+          notification_email?: string | null
           notification_phone?: string | null
           paper_trading_mode?: boolean | null
           portfolio_value?: number
