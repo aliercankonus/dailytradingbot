@@ -2,12 +2,14 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useSignals } from '@/hooks/useSignals';
+import { useSignalGenerator } from '@/hooks/useSignalGenerator';
 import { supabase } from '@/integrations/supabase/client';
-import { TrendingUp, TrendingDown, Target, Shield, Zap } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 export const TradingSignalsDashboard = () => {
   const { signals, loading } = useSignals();
+  const { generateSignals, isGenerating } = useSignalGenerator();
   const { toast } = useToast();
 
   const executeTrade = async (signalId: string, symbol: string) => {
@@ -44,9 +46,20 @@ export const TradingSignalsDashboard = () => {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Trading Signals</h2>
-        <Badge variant="outline" className="text-sm">
-          {signals.length} Active Signals
-        </Badge>
+        <div className="flex items-center gap-3">
+          <Badge variant="outline" className="text-sm">
+            {signals.length} Active Signals
+          </Badge>
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={generateSignals}
+            disabled={isGenerating}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${isGenerating ? 'animate-spin' : ''}`} />
+            {isGenerating ? 'Analyzing...' : 'Generate Signals'}
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4">
