@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Settings, Layers } from "lucide-react";
 import { DashboardHeader } from "@/components/DashboardHeader";
@@ -15,7 +14,6 @@ import { MarketBasedRecommendations } from "@/components/MarketBasedRecommendati
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const Index = () => {
-  const [botActive, setBotActive] = useState(false);
   const navigate = useNavigate();
 
   return (
@@ -55,7 +53,7 @@ const Index = () => {
           <TabsContent value="dashboard" className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-1">
-                <BotStatus active={botActive} onToggle={() => setBotActive(!botActive)} />
+                <BotStatus />
               </div>
               <div className="lg:col-span-2">
                 <PortfolioMetrics />

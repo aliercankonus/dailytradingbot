@@ -6,14 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Play, Pause, RotateCcw, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRiskParameters } from "@/hooks/useRiskParameters";
+import { useToast } from "@/hooks/use-toast";
 
-interface BotStatusProps {
-  active: boolean;
-  onToggle: () => void;
-}
-
-export const BotStatus = ({ active, onToggle }: BotStatusProps) => {
-  const { riskParams } = useRiskParameters();
+export const BotStatus = () => {
+  const { riskParams, updateRiskParameters } = useRiskParameters();
+  const { toast } = useToast();
   const [selectedCrypto, setSelectedCrypto] = useState("BTCUSDT");
 
   const cryptoOptions = [
@@ -23,6 +20,47 @@ export const BotStatus = ({ active, onToggle }: BotStatusProps) => {
     { value: "ADAUSDT", label: "ADA/USDT" },
     { value: "SOLUSDT", label: "SOL/USDT" },
   ];
+
+  const active = riskParams?.is_trading_enabled ?? false;
+
+  const handleToggle = async () => {
+    try {
+      const newState = !active;
+      await updateRiskParameters({ is_trading_enabled: newState });
+      toast({
+        title: newState ? "Bot Started" : "Bot Stopped",
+        description: newState 
+          ? "Trading bot is now active and monitoring for signals" 
+          : "Trading bot has been stopped",
+        variant: newState ? "default" : "destructive",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update bot status",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleReset = async () => {
+    try {
+      await updateRiskParameters({ 
+        consecutive_losses: 0,
+        current_open_trades: 0 
+      });
+      toast({
+        title: "Bot Reset",
+        description: "Bot counters have been reset",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to reset bot",
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
@@ -77,7 +115,7 @@ export const BotStatus = ({ active, onToggle }: BotStatusProps) => {
 
         <div className="grid grid-cols-2 gap-2 pt-2">
           <Button 
-            onClick={onToggle}
+            onClick={handleToggle}
             className={cn(
               "w-full transition-all",
               active 
@@ -100,6 +138,7 @@ export const BotStatus = ({ active, onToggle }: BotStatusProps) => {
           <Button 
             variant="outline" 
             className="w-full border-border hover:bg-secondary"
+            onClick={handleReset}
           >
             <RotateCcw className="h-4 w-4 mr-2" />
             Reset
