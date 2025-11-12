@@ -1,34 +1,49 @@
 import { Card } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, Wallet, Target, Activity } from "lucide-react";
-import { useMarketData } from "@/hooks/useMarketData";
 import { useRealtimePrices } from "@/hooks/useRealtimePrices";
+import { useRiskParameters } from "@/hooks/useRiskParameters";
+import { useTrades } from "@/hooks/useTrades";
+import { usePositions } from "@/hooks/usePositions";
 
 export const PortfolioMetrics = () => {
-  const { data: marketData, loading } = useMarketData();
   const { connected } = useRealtimePrices();
+  const { riskParams, loading: riskLoading } = useRiskParameters();
+  const { trades, loading: tradesLoading } = useTrades();
+  const { positions, loading: positionsLoading } = usePositions();
 
-  // Calculate metrics from real market data
+  const loading = riskLoading || tradesLoading || positionsLoading;
+
+  // Calculate metrics from real portfolio data
   const calculateMetrics = () => {
-    if (!marketData || marketData.length === 0) {
-      return {
-        portfolioValue: "$12,458.32",
-        totalPnL: "$2,148.23",
-        winRate: "68.4%",
-        avgChange: "+8.4%",
-      };
-    }
-
-    const totalChange = marketData.reduce((sum, ticker) => {
-      return sum + parseFloat(ticker.priceChangePercent);
-    }, 0);
-    const avgChangeNum = totalChange / marketData.length;
-    const avgChange = avgChangeNum.toFixed(2);
+    const basePortfolio = riskParams?.portfolio_value || 0;
+    
+    // Calculate realized P&L from closed trades
+    const realizedPnL = trades
+      .filter(t => t.status === 'closed' && t.profit_loss !== null)
+      .reduce((sum, trade) => sum + (trade.profit_loss || 0), 0);
+    
+    // Calculate unrealized P&L from open positions
+    const unrealizedPnL = positions
+      .filter(p => p.status === 'active' && p.unrealized_pnl !== null)
+      .reduce((sum, pos) => sum + (pos.unrealized_pnl || 0), 0);
+    
+    const totalPnL = realizedPnL + unrealizedPnL;
+    const currentValue = basePortfolio + totalPnL;
+    const totalReturn = basePortfolio > 0 ? ((totalPnL / basePortfolio) * 100) : 0;
+    
+    // Calculate win rate from closed trades
+    const closedTrades = trades.filter(t => t.status === 'closed');
+    const winningTrades = closedTrades.filter(t => (t.profit_loss || 0) > 0).length;
+    const winRate = closedTrades.length > 0 ? ((winningTrades / closedTrades.length) * 100) : 0;
     
     return {
-      portfolioValue: "$12,458.32",
-      totalPnL: "$2,148.23",
-      winRate: "68.4%",
-      avgChange: `${avgChangeNum >= 0 ? '+' : ''}${avgChange}%`,
+      portfolioValue: `$${currentValue.toFixed(2)}`,
+      totalPnL: `${totalPnL >= 0 ? '+' : ''}$${Math.abs(totalPnL).toFixed(2)}`,
+      totalReturn: `${totalReturn >= 0 ? '+' : ''}${totalReturn.toFixed(2)}%`,
+      winRate: `${winRate.toFixed(1)}%`,
+      isPositivePnL: totalPnL >= 0,
+      isPositiveReturn: totalReturn >= 0,
+      hasData: closedTrades.length > 0 || positions.length > 0,
     };
   };
 
@@ -38,22 +53,22 @@ export const PortfolioMetrics = () => {
     {
       label: "Portfolio Value",
       value: metrics.portfolioValue,
-      change: metrics.avgChange,
-      isPositive: parseFloat(metrics.avgChange) >= 0,
+      change: metrics.totalReturn,
+      isPositive: metrics.isPositiveReturn,
       icon: Wallet,
     },
     {
       label: "Total P&L",
       value: metrics.totalPnL,
-      change: "+24.6%",
-      isPositive: true,
-      icon: TrendingUp,
+      change: metrics.hasData ? "Realized + Unrealized" : "No trades yet",
+      isPositive: metrics.isPositivePnL,
+      icon: metrics.isPositivePnL ? TrendingUp : TrendingDown,
     },
     {
       label: "Win Rate",
       value: metrics.winRate,
-      change: "+2.1%",
-      isPositive: true,
+      change: metrics.hasData ? "From closed trades" : "No trades yet",
+      isPositive: parseFloat(metrics.winRate) >= 50,
       icon: Target,
     },
   ];
