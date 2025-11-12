@@ -11,6 +11,7 @@ interface RiskParameters {
   current_open_trades: number;
   consecutive_losses: number;
   is_trading_enabled: boolean;
+  paper_trading_mode: boolean;
   updated_at: string;
 }
 

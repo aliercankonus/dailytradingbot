@@ -92,6 +92,38 @@ export type Database = {
         }
         Relationships: []
       }
+      notifications: {
+        Row: {
+          id: string
+          message: string
+          sent_at: string | null
+          trade_id: string | null
+          type: string
+        }
+        Insert: {
+          id?: string
+          message: string
+          sent_at?: string | null
+          trade_id?: string | null
+          type: string
+        }
+        Update: {
+          id?: string
+          message?: string
+          sent_at?: string | null
+          trade_id?: string | null
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_trade_id_fkey"
+            columns: ["trade_id"]
+            isOneToOne: false
+            referencedRelation: "trades"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       positions: {
         Row: {
           current_price: number | null
@@ -160,6 +192,7 @@ export type Database = {
           is_trading_enabled: boolean | null
           max_open_trades: number
           max_risk_per_trade_percent: number
+          paper_trading_mode: boolean | null
           portfolio_value: number
           position_size_reduction_percent: number
           updated_at: string | null
@@ -172,6 +205,7 @@ export type Database = {
           is_trading_enabled?: boolean | null
           max_open_trades?: number
           max_risk_per_trade_percent?: number
+          paper_trading_mode?: boolean | null
           portfolio_value?: number
           position_size_reduction_percent?: number
           updated_at?: string | null
@@ -184,6 +218,7 @@ export type Database = {
           is_trading_enabled?: boolean | null
           max_open_trades?: number
           max_risk_per_trade_percent?: number
+          paper_trading_mode?: boolean | null
           portfolio_value?: number
           position_size_reduction_percent?: number
           updated_at?: string | null

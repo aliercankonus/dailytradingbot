@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Settings } from "lucide-react";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { BotStatus } from "@/components/BotStatus";
 import { StrategyOverview } from "@/components/StrategyOverview";
@@ -8,24 +10,38 @@ import { LivePriceCard } from "@/components/LivePriceCard";
 import { TradingSignalsDashboard } from "@/components/TradingSignalsDashboard";
 import { RiskManagementControls } from "@/components/RiskManagementControls";
 import { BacktestingModule } from "@/components/BacktestingModule";
+import { PerformanceAnalytics } from "@/components/PerformanceAnalytics";
 import { ActivePositions } from "@/components/ActivePositions";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const Index = () => {
   const [botActive, setBotActive] = useState(false);
+  const navigate = useNavigate();
 
   return (
     <div className="min-h-screen bg-background">
-      <DashboardHeader />
+      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
+        <div className="flex items-center justify-between">
+          <DashboardHeader />
+          <button
+            onClick={() => navigate('/settings')}
+            className="mr-6 p-2 hover:bg-accent rounded-lg transition-colors"
+            aria-label="Settings"
+          >
+            <Settings className="h-5 w-5 text-muted-foreground hover:text-foreground" />
+          </button>
+        </div>
+      </header>
       
       <main className="container mx-auto px-4 py-6">
         <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-            <TabsTrigger value="signals">Trading Signals</TabsTrigger>
+            <TabsTrigger value="signals">Signals</TabsTrigger>
             <TabsTrigger value="positions">Positions</TabsTrigger>
-            <TabsTrigger value="risk">Risk Management</TabsTrigger>
-            <TabsTrigger value="backtest">Backtesting</TabsTrigger>
+            <TabsTrigger value="analytics">Analytics</TabsTrigger>
+            <TabsTrigger value="risk">Risk</TabsTrigger>
+            <TabsTrigger value="backtest">Backtest</TabsTrigger>
           </TabsList>
 
           <TabsContent value="dashboard" className="space-y-6">
@@ -56,6 +72,10 @@ const Index = () => {
 
           <TabsContent value="positions">
             <ActivePositions />
+          </TabsContent>
+
+          <TabsContent value="analytics">
+            <PerformanceAnalytics />
           </TabsContent>
 
           <TabsContent value="risk">

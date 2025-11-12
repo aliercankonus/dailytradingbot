@@ -9,6 +9,9 @@ verify_jwt = false
 [functions.strategy-analyzer]
 verify_jwt = false
 
+[functions.send-notification]
+verify_jwt = false
+
 [functions.execute-trade]
 verify_jwt = false
 
