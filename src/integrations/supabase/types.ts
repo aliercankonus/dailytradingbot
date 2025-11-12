@@ -409,6 +409,7 @@ export type Database = {
           signal_id: string | null
           status: string
           stop_loss: number | null
+          strategy_name: string | null
           symbol: string
           take_profit: number | null
         }
@@ -428,6 +429,7 @@ export type Database = {
           signal_id?: string | null
           status?: string
           stop_loss?: number | null
+          strategy_name?: string | null
           symbol: string
           take_profit?: number | null
         }
@@ -447,6 +449,7 @@ export type Database = {
           signal_id?: string | null
           status?: string
           stop_loss?: number | null
+          strategy_name?: string | null
           symbol?: string
           take_profit?: number | null
         }
@@ -472,6 +475,8 @@ export type Database = {
           risk_reward_ratio: number | null
           signal_type: Database["public"]["Enums"]["signal_type"]
           stop_loss: number | null
+          strategy_id: string | null
+          strategy_name: string | null
           symbol: string
           take_profit: number | null
           trend: Database["public"]["Enums"]["market_trend"]
@@ -487,6 +492,8 @@ export type Database = {
           risk_reward_ratio?: number | null
           signal_type: Database["public"]["Enums"]["signal_type"]
           stop_loss?: number | null
+          strategy_id?: string | null
+          strategy_name?: string | null
           symbol: string
           take_profit?: number | null
           trend: Database["public"]["Enums"]["market_trend"]
@@ -502,11 +509,21 @@ export type Database = {
           risk_reward_ratio?: number | null
           signal_type?: Database["public"]["Enums"]["signal_type"]
           stop_loss?: number | null
+          strategy_id?: string | null
+          strategy_name?: string | null
           symbol?: string
           take_profit?: number | null
           trend?: Database["public"]["Enums"]["market_trend"]
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "trading_signals_strategy_id_fkey"
+            columns: ["strategy_id"]
+            isOneToOne: false
+            referencedRelation: "custom_strategies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

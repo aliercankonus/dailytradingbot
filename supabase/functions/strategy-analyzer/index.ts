@@ -338,7 +338,9 @@ serve(async (req) => {
               risk_reward_ratio: signal.riskRewardRatio,
               confidence_score: signal.confidenceScore,
               indicators: signal.indicators,
-              reason: signal.reason
+              reason: signal.reason,
+              strategy_id: strategy.id,
+              strategy_name: strategy.name
             })
             .select()
             .single();

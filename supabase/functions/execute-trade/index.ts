@@ -54,6 +54,8 @@ serve(async (req) => {
       throw new Error('Signal not found');
     }
 
+    console.log(`Executing trade for signal from strategy: ${signal.strategy_name || 'Unknown'}`);
+
     // Calculate position size based on risk parameters
     const riskAmount = (riskParams.portfolio_value * riskParams.max_risk_per_trade_percent) / 100;
     const stopLossDistance = Math.abs(signal.entry_price - signal.stop_loss);
@@ -135,6 +137,7 @@ serve(async (req) => {
         take_profit: signal.take_profit,
         status: 'open',
         binance_order_id: isPaperTrading ? null : orderData.orderId?.toString(),
+        strategy_name: signal.strategy_name || 'Unknown',
       })
       .select()
       .single();

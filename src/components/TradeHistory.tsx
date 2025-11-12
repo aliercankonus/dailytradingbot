@@ -18,6 +18,7 @@ export const TradeHistory = () => {
           <thead>
             <tr className="text-sm text-muted-foreground border-b border-border">
               <th className="text-left py-2 px-2">Pair</th>
+              <th className="text-left py-2 px-2">Strategy</th>
               <th className="text-left py-2 px-2">Type</th>
               <th className="text-right py-2 px-2">Entry</th>
               <th className="text-right py-2 px-2">Exit</th>
@@ -29,13 +30,13 @@ export const TradeHistory = () => {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} className="text-center py-8 text-muted-foreground">
+                <td colSpan={8} className="text-center py-8 text-muted-foreground">
                   Loading trade data...
                 </td>
               </tr>
             ) : trades.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-center py-8 text-muted-foreground">
+                <td colSpan={8} className="text-center py-8 text-muted-foreground">
                   No trades executed yet
                 </td>
               </tr>
@@ -54,6 +55,11 @@ export const TradeHistory = () => {
                         {trade.symbol.replace('USDT', '/USDT')}
                       </span>
                     </div>
+                  </td>
+                  <td className="py-3 px-2">
+                    <Badge variant="outline" className="text-xs">
+                      {trade.strategy_name || 'Unknown'}
+                    </Badge>
                   </td>
                   <td className="py-3 px-2">
                     <Badge
