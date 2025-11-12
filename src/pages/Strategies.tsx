@@ -366,7 +366,7 @@ const Strategies = () => {
           </TabsContent>
 
           <TabsContent value="backtesting">
-            {customStrategies.length === 0 ? (
+            {customStrategies.length === 0 && builtInStrategies.length === 0 ? (
               <Card className="p-12 text-center">
                 <p className="text-muted-foreground">
                   Create a strategy first before running backtests
@@ -378,13 +378,16 @@ const Strategies = () => {
               </Card>
             ) : (
               <BacktestingModule 
-                strategies={customStrategies.map(s => ({ id: s.id, name: s.name }))}
+                strategies={[
+                  ...builtInStrategies.map(s => ({ id: s.id, name: s.strategy_name })),
+                  ...customStrategies.map(s => ({ id: s.id, name: s.name }))
+                ]}
               />
             )}
           </TabsContent>
 
           <TabsContent value="optimizer">
-            {customStrategies.length === 0 ? (
+            {customStrategies.length === 0 && builtInStrategies.length === 0 ? (
               <Card className="p-12 text-center">
                 <p className="text-muted-foreground">
                   Create a strategy first before running optimization
@@ -395,7 +398,12 @@ const Strategies = () => {
                 </Button>
               </Card>
             ) : (
-              <StrategyOptimizer strategies={customStrategies.map(s => ({ id: s.id, name: s.name }))} />
+              <StrategyOptimizer 
+                strategies={[
+                  ...builtInStrategies.map(s => ({ id: s.id, name: s.strategy_name })),
+                  ...customStrategies.map(s => ({ id: s.id, name: s.name }))
+                ]} 
+              />
             )}
           </TabsContent>
 
@@ -408,16 +416,21 @@ const Strategies = () => {
           </TabsContent>
 
           <TabsContent value="monte-carlo">
-            {customStrategies.length === 0 ? (
+            {customStrategies.length === 0 && builtInStrategies.length === 0 ? (
               <Card className="p-12 text-center">
-                <p className="text-muted-foreground">Create a custom strategy first to run Monte Carlo simulations</p>
+                <p className="text-muted-foreground">Create a strategy first to run Monte Carlo simulations</p>
                 <Button onClick={() => navigate('/strategies/new')} className="mt-4 gap-2">
                   <Plus className="h-4 w-4" />
                   Create Strategy
                 </Button>
               </Card>
             ) : (
-              <MonteCarloSimulation strategies={customStrategies.map(s => ({ id: s.id, name: s.name }))} />
+              <MonteCarloSimulation 
+                strategies={[
+                  ...builtInStrategies.map(s => ({ id: s.id, name: s.strategy_name })),
+                  ...customStrategies.map(s => ({ id: s.id, name: s.name }))
+                ]} 
+              />
             )}
           </TabsContent>
         </Tabs>

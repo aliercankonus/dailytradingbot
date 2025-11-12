@@ -37,6 +37,7 @@ export const AIStrategyRecommender = () => {
   const [recommendations, setRecommendations] = useState<AIRecommendations | null>(null);
   const [marketCondition, setMarketCondition] = useState('neutral');
   const [timeframe, setTimeframe] = useState('30d');
+  const [selectedCrypto, setSelectedCrypto] = useState('BTCUSDT');
 
   const fetchRecommendations = async () => {
     try {
@@ -44,7 +45,7 @@ export const AIStrategyRecommender = () => {
       console.log('Fetching AI recommendations...');
 
       const { data, error } = await supabase.functions.invoke('ai-strategy-recommender', {
-        body: { marketCondition, timeframe }
+        body: { marketCondition, timeframe, symbol: selectedCrypto }
       });
 
       if (error) throw error;
@@ -99,7 +100,23 @@ export const AIStrategyRecommender = () => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Cryptocurrency</label>
+              <Select value={selectedCrypto} onValueChange={setSelectedCrypto}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="BTCUSDT">BTC/USDT</SelectItem>
+                  <SelectItem value="ETHUSDT">ETH/USDT</SelectItem>
+                  <SelectItem value="BNBUSDT">BNB/USDT</SelectItem>
+                  <SelectItem value="ADAUSDT">ADA/USDT</SelectItem>
+                  <SelectItem value="SOLUSDT">SOL/USDT</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="space-y-2">
               <label className="text-sm font-medium">Market Condition</label>
               <Select value={marketCondition} onValueChange={setMarketCondition}>

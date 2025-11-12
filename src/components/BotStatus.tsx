@@ -1,7 +1,11 @@
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Play, Pause, RotateCcw } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Play, Pause, RotateCcw, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRiskParameters } from "@/hooks/useRiskParameters";
 
 interface BotStatusProps {
   active: boolean;
@@ -9,6 +13,17 @@ interface BotStatusProps {
 }
 
 export const BotStatus = ({ active, onToggle }: BotStatusProps) => {
+  const { riskParams } = useRiskParameters();
+  const [selectedCrypto, setSelectedCrypto] = useState("BTCUSDT");
+
+  const cryptoOptions = [
+    { value: "BTCUSDT", label: "BTC/USDT" },
+    { value: "ETHUSDT", label: "ETH/USDT" },
+    { value: "BNBUSDT", label: "BNB/USDT" },
+    { value: "ADAUSDT", label: "ADA/USDT" },
+    { value: "SOLUSDT", label: "SOL/USDT" },
+  ];
+
   return (
     <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
       <div className="space-y-4">
@@ -20,7 +35,35 @@ export const BotStatus = ({ active, onToggle }: BotStatusProps) => {
           )} />
         </div>
 
-        <div className="py-4 text-center">
+        <div className="space-y-3">
+          <div>
+            <label className="text-sm text-muted-foreground mb-2 block">Trading Pair</label>
+            <Select value={selectedCrypto} onValueChange={setSelectedCrypto}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {cryptoOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4" />
+                      {option.label}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+            <span className="text-sm text-muted-foreground">Trading Mode:</span>
+            <Badge variant={riskParams?.paper_trading_mode ? "secondary" : "destructive"}>
+              {riskParams?.paper_trading_mode ? "Paper Trading" : "Live Trading"}
+            </Badge>
+          </div>
+        </div>
+
+        <div className="py-4 text-center border-y border-border">
           <div className={cn(
             "text-3xl font-bold mb-2",
             active ? "text-success" : "text-muted-foreground"

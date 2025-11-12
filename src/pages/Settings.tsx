@@ -22,6 +22,9 @@ export default function Settings() {
   const [formData, setFormData] = useState({
     binanceApiKey: '',
     binanceApiSecret: '',
+    twilioAccountSid: '',
+    twilioAuthToken: '',
+    twilioPhoneNumber: '',
     notificationEmail: 'trader@example.com',
     notificationPhone: riskParams?.notification_phone || '',
   });
@@ -266,8 +269,52 @@ export default function Settings() {
         
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Receive SMS alerts for critical events like stop-loss and take-profit triggers.
+            Configure Twilio credentials and receive SMS alerts for critical trading events.
           </p>
+
+          <div className="space-y-4 p-4 bg-muted/30 rounded-lg">
+            <h3 className="font-medium">Twilio API Credentials</h3>
+            <div className="space-y-2">
+              <Label htmlFor="twilioSid">Account SID</Label>
+              <Input
+                id="twilioSid"
+                type="password"
+                value={formData.twilioAccountSid}
+                onChange={(e) => setFormData({ ...formData, twilioAccountSid: e.target.value })}
+                placeholder="Enter Twilio Account SID"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="twilioToken">Auth Token</Label>
+              <Input
+                id="twilioToken"
+                type="password"
+                value={formData.twilioAuthToken}
+                onChange={(e) => setFormData({ ...formData, twilioAuthToken: e.target.value })}
+                placeholder="Enter Twilio Auth Token"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="twilioPhone">Twilio Phone Number</Label>
+              <Input
+                id="twilioPhone"
+                type="tel"
+                value={formData.twilioPhoneNumber}
+                onChange={(e) => setFormData({ ...formData, twilioPhoneNumber: e.target.value })}
+                placeholder="+1234567890"
+              />
+            </div>
+
+            <Button onClick={handleSaveApiKeys} disabled={loading}>
+              {loading ? 'Updating...' : 'Update Twilio Credentials'}
+            </Button>
+            
+            <p className="text-xs text-muted-foreground">
+              Note: Twilio credentials are stored securely. Update them here if you need to change your Twilio account.
+            </p>
+          </div>
 
           <div className="flex items-center justify-between p-4 border rounded-lg">
             <div className="space-y-1">
@@ -283,7 +330,7 @@ export default function Settings() {
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="phone">Phone Number (with country code)</Label>
+            <Label htmlFor="phone">Your Phone Number (with country code)</Label>
             <Input
               id="phone"
               type="tel"

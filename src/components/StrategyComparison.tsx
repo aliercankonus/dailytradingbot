@@ -49,23 +49,34 @@ export const StrategyComparison = () => {
 
       if (perfError) console.error('Error fetching performance data:', perfError);
 
-      // Combine and format data
-      const combinedResults: BacktestResult[] = [
-        ...(backtestData || []),
-        ...(perfData || []).map(p => ({
-          id: p.id,
-          strategy_name: p.strategy_name,
-          symbol: 'Multiple',
-          win_rate: (p.winning_trades / (p.total_trades || 1)) * 100,
-          net_profit: p.total_profit,
-          sharpe_ratio: 0,
-          max_drawdown: p.max_drawdown,
-          total_trades: p.total_trades,
-          profit_factor: 0,
-          results_data: null,
-          initial_capital: 10000
-        }))
-      ];
+      // Use a Map to prevent duplicates by strategy name
+      const resultsMap = new Map<string, BacktestResult>();
+
+      // Add backtest results first (they have more detail)
+      (backtestData || []).forEach(result => {
+        resultsMap.set(result.strategy_name, result);
+      });
+
+      // Add performance data only if not already in map
+      (perfData || []).forEach(p => {
+        if (!resultsMap.has(p.strategy_name)) {
+          resultsMap.set(p.strategy_name, {
+            id: p.id,
+            strategy_name: p.strategy_name,
+            symbol: 'Multiple',
+            win_rate: (p.winning_trades / (p.total_trades || 1)) * 100,
+            net_profit: p.total_profit,
+            sharpe_ratio: 0,
+            max_drawdown: p.max_drawdown,
+            total_trades: p.total_trades,
+            profit_factor: 0,
+            results_data: null,
+            initial_capital: 10000
+          });
+        }
+      });
+
+      const combinedResults = Array.from(resultsMap.values());
 
       setResults(combinedResults);
       
