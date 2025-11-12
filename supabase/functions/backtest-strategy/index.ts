@@ -45,8 +45,10 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch strategy configuration
-    const { data: strategy, error: strategyError } = await supabase
+    // Fetch strategy configuration (custom or built-in)
+    let strategy: any = null;
+
+    const { data: customStrategy, error: strategyError } = await supabase
       .from('custom_strategies')
       .select('*')
       .eq('id', strategyId)
@@ -54,6 +56,71 @@ serve(async (req) => {
 
     if (strategyError) {
       throw new Error(`Database error: ${strategyError.message}`);
+    }
+
+    if (customStrategy) {
+      strategy = customStrategy;
+    } else {
+      // Try built-in strategies by id, then map to default configs
+      const { data: builtIn, error: builtInErr } = await supabase
+        .from('strategy_performance')
+        .select('id, strategy_name')
+        .eq('id', strategyId)
+        .maybeSingle();
+
+      if (builtInErr) {
+        throw new Error(`Database error: ${builtInErr.message}`);
+      }
+
+      if (builtIn) {
+        const name = (builtIn.strategy_name || '').toLowerCase();
+        if (name.includes('mean reversion')) {
+          strategy = {
+            name: builtIn.strategy_name,
+            indicators: [
+              { type: 'price', name: 'price' },
+              { type: 'bb', name: 'bb', period: 20 },
+            ],
+            entry_conditions: [
+              { indicator: 'price', operator: '<', value: 0, compareToIndicator: true, targetIndicator: 'bb_lower' },
+            ],
+            exit_conditions: [
+              { indicator: 'price', operator: '>=', value: 0, compareToIndicator: true, targetIndicator: 'bb_middle' },
+            ],
+            risk_management: { stopLossPercent: 2, takeProfitPercent: 4 },
+          };
+        } else if (name.includes('momentum')) {
+          strategy = {
+            name: builtIn.strategy_name,
+            indicators: [
+              { type: 'macd', name: 'macd', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+              { type: 'macd_signal', name: 'macd_signal', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+            ],
+            entry_conditions: [
+              { indicator: 'macd', operator: '>', value: 0, compareToIndicator: true, targetIndicator: 'macd_signal' },
+            ],
+            exit_conditions: [
+              { indicator: 'macd', operator: '<', value: 0, compareToIndicator: true, targetIndicator: 'macd_signal' },
+            ],
+            risk_management: { stopLossPercent: 3, takeProfitPercent: 6 },
+          };
+        } else if (name.includes('grid')) {
+          strategy = {
+            name: builtIn.strategy_name,
+            indicators: [
+              { type: 'price', name: 'price' },
+              { type: 'bb', name: 'bb', period: 20, stdDev: 2 },
+            ],
+            entry_conditions: [
+              { indicator: 'price', operator: '<', value: 0, compareToIndicator: true, targetIndicator: 'bb_lower' },
+            ],
+            exit_conditions: [
+              { indicator: 'price', operator: '>', value: 0, compareToIndicator: true, targetIndicator: 'bb_upper' },
+            ],
+            risk_management: { stopLossPercent: 2, takeProfitPercent: 2 },
+          };
+        }
+      }
     }
 
     if (!strategy) {
