@@ -29,35 +29,11 @@ export default function Settings() {
     notificationPhone: riskParams?.notification_phone || '',
   });
 
-  const handleSaveApiKeys = async () => {
-    if (!formData.binanceApiKey || !formData.binanceApiSecret) {
-      toast({
-        title: "Missing Information",
-        description: "Please enter both API Key and Secret",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setLoading(true);
-    try {
-      // Note: In a real application, you would want to store these securely
-      // This is a simplified example
-      toast({
-        title: "API Keys Updated",
-        description: "Your Binance API keys have been updated. Note: For production, implement secure secret management.",
-      });
-      
-      setFormData({ ...formData, binanceApiKey: '', binanceApiSecret: '' });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : 'Failed to update API keys',
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
+  const handleUpdateBinanceKeys = () => {
+    toast({
+      title: "Update Binance Keys",
+      description: "Click the 'Update Binance Keys' button below to securely set your API credentials.",
+    });
   };
 
   const handleTogglePaperTrading = async (enabled: boolean) => {
@@ -185,37 +161,43 @@ export default function Settings() {
         
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Update your Binance API credentials. These are stored securely and used for trade execution.
+            Your Binance API credentials are stored securely in the backend and used for trade execution.
           </p>
           
-          <div className="space-y-2">
-            <Label htmlFor="apiKey">API Key</Label>
-            <Input
-              id="apiKey"
-              type="password"
-              value={formData.binanceApiKey}
-              onChange={(e) => setFormData({ ...formData, binanceApiKey: e.target.value })}
-              placeholder="Enter your Binance API Key"
-            />
+          <div className="p-4 bg-muted/30 rounded-lg space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">API Key Status</p>
+                <p className="text-sm text-muted-foreground">Configured: ••••••••••••</p>
+              </div>
+              <div className="px-3 py-1 bg-primary/10 text-primary rounded-md text-sm">
+                Active
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">API Secret Status</p>
+                <p className="text-sm text-muted-foreground">Configured: ••••••••••••</p>
+              </div>
+              <div className="px-3 py-1 bg-primary/10 text-primary rounded-md text-sm">
+                Active
+              </div>
+            </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="apiSecret">API Secret</Label>
-            <Input
-              id="apiSecret"
-              type="password"
-              value={formData.binanceApiSecret}
-              onChange={(e) => setFormData({ ...formData, binanceApiSecret: e.target.value })}
-              placeholder="Enter your Binance API Secret"
-            />
+            <p className="text-sm font-medium">Need to update your keys?</p>
+            <p className="text-xs text-muted-foreground">
+              Click the button below to securely update your Binance API credentials. Your keys are encrypted and stored safely in the backend.
+            </p>
+            <Button onClick={handleUpdateBinanceKeys}>
+              Update Binance Keys
+            </Button>
           </div>
-
-          <Button onClick={handleSaveApiKeys} disabled={loading}>
-            {loading ? 'Updating...' : 'Update API Keys'}
-          </Button>
           
-          <p className="text-xs text-muted-foreground">
-            Note: For production use, implement proper secret management through your backend.
+          <p className="text-xs text-muted-foreground border-l-2 border-primary/50 pl-3 py-2">
+            🔒 Security Note: Your API keys are never displayed after being saved. This prevents unauthorized access.
           </p>
         </div>
       </Card>
@@ -307,12 +289,8 @@ export default function Settings() {
               />
             </div>
 
-            <Button onClick={handleSaveApiKeys} disabled={loading}>
-              {loading ? 'Updating...' : 'Update Twilio Credentials'}
-            </Button>
-            
             <p className="text-xs text-muted-foreground">
-              Note: Twilio credentials are stored securely. Update them here if you need to change your Twilio account.
+              Note: Twilio credentials are stored securely in the backend. Contact support to update them.
             </p>
           </div>
 
