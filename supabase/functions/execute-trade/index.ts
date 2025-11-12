@@ -122,7 +122,7 @@ serve(async (req) => {
     }
 
     // Create trade record
-    const { data: trade } = await supabase
+    const { data: trade, error: tradeError } = await supabase
       .from('trades')
       .insert({
         signal_id: signalId,
@@ -138,6 +138,11 @@ serve(async (req) => {
       })
       .select()
       .single();
+
+    if (tradeError || !trade) {
+      console.error('Failed to create trade record:', tradeError);
+      throw new Error(`Failed to create trade record: ${tradeError?.message || 'Unknown error'}`);
+    }
 
     // Create position record
     await supabase
