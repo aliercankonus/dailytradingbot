@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useCustomStrategies } from "@/hooks/useCustomStrategies";
 import { useBuiltInStrategies } from "@/hooks/useBuiltInStrategies";
+import { useStrategyPerformanceUpdater } from "@/hooks/useStrategyPerformanceUpdater";
 import { BacktestingModule } from "@/components/BacktestingModule";
 import { StrategyComparison } from "@/components/StrategyComparison";
 import { StrategyOptimizer } from "@/components/StrategyOptimizer";
@@ -30,8 +31,14 @@ const Strategies = () => {
   const navigate = useNavigate();
   const { strategies: customStrategies, loading: customLoading, deleteStrategy, toggleActive } = useCustomStrategies();
   const { strategies: builtInStrategies, loading: builtInLoading, toggleStatus, refetch: refetchBuiltIn } = useBuiltInStrategies();
+  const { updatePerformance, isUpdating } = useStrategyPerformanceUpdater();
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editingBuiltInStrategy, setEditingBuiltInStrategy] = useState<any>(null);
+
+  const handleUpdatePerformance = async () => {
+    await updatePerformance();
+    refetchBuiltIn();
+  };
 
   const handleDelete = async () => {
     if (deleteId) {
@@ -91,7 +98,19 @@ const Strategies = () => {
           <TabsContent value="all" className="space-y-6">
             {/* Built-in Strategies */}
             <div>
-              <h2 className="text-xl font-semibold mb-4">Built-in Trading Strategies</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold">Built-in Trading Strategies</h2>
+                <Button 
+                  onClick={handleUpdatePerformance} 
+                  disabled={isUpdating}
+                  size="sm" 
+                  variant="outline"
+                  className="gap-2"
+                >
+                  <Activity className="h-4 w-4" />
+                  {isUpdating ? 'Calculating...' : 'Update Metrics'}
+                </Button>
+              </div>
               {builtInLoading ? (
                 <div className="text-center py-12">
                   <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>

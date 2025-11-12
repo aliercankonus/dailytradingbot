@@ -1,5 +1,8 @@
 project_id = "ikrivrudkvvnksollslh"
 
+[functions.update-strategy-performance]
+verify_jwt = false
+
 [functions.market-data]
 verify_jwt = false
 
