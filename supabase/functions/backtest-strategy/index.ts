@@ -240,6 +240,7 @@ serve(async (req) => {
 
     // Run backtest simulation
     const trades: Trade[] = [];
+    const volumeData: Array<{ timestamp: string; price: number; volume: number }> = [];
     let currentCapital = initialCapital;
     let position: { type: 'long' | 'short', entryPrice: number, size: number, timestamp: string } | null = null;
     let maxCapital = initialCapital;
@@ -254,6 +255,15 @@ serve(async (req) => {
       const timestamp = new Date(currentCandle[0]).toISOString();
       const historicalPrices = klines.slice(Math.max(0, i - 100), i + 1).map((k: any) => parseFloat(k[4]));
       const historicalVolumes = klines.slice(Math.max(0, i - 100), i + 1).map((k: any) => parseFloat(k[5]));
+      
+      // Store volume data for charting (sample every 10th candle to reduce size)
+      if (i % 10 === 0) {
+        volumeData.push({
+          timestamp,
+          price: currentPrice,
+          volume: currentVolume
+        });
+      }
       
       // Calculate all configured indicators
       const indicators: { [key: string]: number } = {};
@@ -403,7 +413,7 @@ serve(async (req) => {
         avg_loss: avgLoss,
         largest_win: largestWin,
         largest_loss: largestLoss,
-        results_data: { trades },
+        results_data: { trades, volumeData },
       })
       .select()
       .single();

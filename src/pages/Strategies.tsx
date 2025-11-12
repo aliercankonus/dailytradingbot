@@ -20,6 +20,7 @@ import { useCustomStrategies } from "@/hooks/useCustomStrategies";
 import { useBuiltInStrategies } from "@/hooks/useBuiltInStrategies";
 import { BacktestingModule } from "@/components/BacktestingModule";
 import { StrategyComparison } from "@/components/StrategyComparison";
+import { StrategyOptimizer } from "@/components/StrategyOptimizer";
 import { EditBuiltInStrategyDialog } from "@/components/EditBuiltInStrategyDialog";
 
 const Strategies = () => {
@@ -73,10 +74,11 @@ const Strategies = () => {
 
       <main className="container mx-auto px-4 py-6">
         <Tabs defaultValue="all" className="w-full">
-          <TabsList className="grid w-full max-w-2xl grid-cols-4 mb-6">
+          <TabsList className="grid w-full max-w-3xl grid-cols-5 mb-6">
             <TabsTrigger value="all">All Strategies</TabsTrigger>
             <TabsTrigger value="custom">Custom</TabsTrigger>
             <TabsTrigger value="backtesting">Backtesting</TabsTrigger>
+            <TabsTrigger value="optimizer">Optimizer</TabsTrigger>
             <TabsTrigger value="comparison">Comparison</TabsTrigger>
           </TabsList>
 
@@ -374,6 +376,22 @@ const Strategies = () => {
               <BacktestingModule 
                 strategies={customStrategies.map(s => ({ id: s.id, name: s.name }))}
               />
+            )}
+          </TabsContent>
+
+          <TabsContent value="optimizer">
+            {customStrategies.length === 0 ? (
+              <Card className="p-12 text-center">
+                <p className="text-muted-foreground">
+                  Create a strategy first before running optimization
+                </p>
+                <Button onClick={() => navigate('/strategies/new')} className="mt-4 gap-2">
+                  <Plus className="h-4 w-4" />
+                  Create Strategy
+                </Button>
+              </Card>
+            ) : (
+              <StrategyOptimizer strategies={customStrategies.map(s => ({ id: s.id, name: s.name }))} />
             )}
           </TabsContent>
 

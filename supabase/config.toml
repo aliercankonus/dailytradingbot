@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.test-strategy]
 verify_jwt = false
+
+[functions.optimize-strategy]
+verify_jwt = false

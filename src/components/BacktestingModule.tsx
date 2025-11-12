@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useBacktesting } from '@/hooks/useBacktesting';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Bar, Area } from 'recharts';
 import { TrendingUp, TrendingDown, Target, Activity } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useState } from 'react';
@@ -218,27 +218,69 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
           </Card>
 
           {latestResult.results_data?.trades && latestResult.results_data.trades.length > 0 && (
-            <Card className="p-6">
-              <h3 className="text-lg font-semibold mb-4">Equity Curve</h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart
-                  data={latestResult.results_data.trades.map((trade: any, index: number) => ({
-                    trade: index + 1,
-                    equity: latestResult.initial_capital + 
-                      latestResult.results_data.trades
-                        .slice(0, index + 1)
-                        .reduce((sum: number, t: any) => sum + t.profit, 0),
-                  }))}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="trade" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Line type="monotone" dataKey="equity" stroke="hsl(var(--primary))" strokeWidth={2} />
-                </LineChart>
-              </ResponsiveContainer>
-            </Card>
+            <>
+              <Card className="p-6">
+                <h3 className="text-lg font-semibold mb-4">Equity Curve</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart
+                    data={latestResult.results_data.trades.map((trade: any, index: number) => ({
+                      trade: index + 1,
+                      equity: latestResult.initial_capital + 
+                        latestResult.results_data.trades
+                          .slice(0, index + 1)
+                          .reduce((sum: number, t: any) => sum + t.profit, 0),
+                    }))}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="trade" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="equity" stroke="hsl(var(--primary))" strokeWidth={2} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </Card>
+
+              {latestResult.results_data?.volumeData && latestResult.results_data.volumeData.length > 0 && (
+                <Card className="p-6">
+                  <h3 className="text-lg font-semibold mb-4">Price & Volume Analysis</h3>
+                  <ResponsiveContainer width="100%" height={400}>
+                    <ComposedChart
+                      data={latestResult.results_data.volumeData.map((data: any, index: number) => ({
+                        time: new Date(data.timestamp).toLocaleDateString(),
+                        price: data.price,
+                        volume: data.volume,
+                      }))}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="time" />
+                      <YAxis yAxisId="left" orientation="left" stroke="hsl(var(--primary))" />
+                      <YAxis yAxisId="right" orientation="right" stroke="hsl(var(--muted-foreground))" />
+                      <Tooltip />
+                      <Legend />
+                      <Area 
+                        yAxisId="right" 
+                        type="monotone" 
+                        dataKey="volume" 
+                        fill="hsl(var(--muted))" 
+                        stroke="hsl(var(--muted-foreground))" 
+                        fillOpacity={0.3}
+                        name="Volume"
+                      />
+                      <Line 
+                        yAxisId="left" 
+                        type="monotone" 
+                        dataKey="price" 
+                        stroke="hsl(var(--primary))" 
+                        strokeWidth={2}
+                        dot={false}
+                        name="Price"
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </Card>
+              )}
+            </>
           )}
         </>
       )}
