@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
-import { TrendingUp, TrendingDown, Activity, Zap } from 'lucide-react';
-import { useMarketData } from '@/hooks/useMarketData';
+import { TrendingUp, TrendingDown, Activity, Zap, RefreshCw } from 'lucide-react';
 
 interface Recommendation {
   title: string;
@@ -13,61 +13,78 @@ interface Recommendation {
   expectedImpact: string;
 }
 
+interface MarketData {
+  symbol: string;
+  priceChangePercent: string;
+  lastPrice: string;
+}
+
 export const MarketBasedRecommendations = () => {
-  const { data: marketData, loading: marketLoading } = useMarketData(['BTCUSDT', 'ETHUSDT']);
+  const [marketData, setMarketData] = useState<MarketData[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [marketCondition, setMarketCondition] = useState<string>('neutral');
   const [loading, setLoading] = useState(false);
+  const hasInitialized = useRef(false);
 
   useEffect(() => {
-    if (marketData && marketData.length > 0) {
-      analyzeMarketAndGetRecommendations();
+    if (!hasInitialized.current) {
+      hasInitialized.current = true;
+      fetchMarketDataAndRecommendations();
     }
-  }, [marketData]);
+  }, []);
 
-  const analyzeMarketAndGetRecommendations = async () => {
-    if (!marketData || marketData.length === 0) return;
-
+  const fetchMarketDataAndRecommendations = async () => {
     try {
       setLoading(true);
 
-      // Analyze market condition based on price changes
-      const btcChange = parseFloat(marketData[0]?.priceChangePercent || '0');
-      const ethChange = parseFloat(marketData[1]?.priceChangePercent || '0');
-      const avgChange = (btcChange + ethChange) / 2;
-      
-      let condition = 'neutral';
-      if (avgChange > 3) condition = 'bullish';
-      else if (avgChange > 1) condition = 'slightly bullish';
-      else if (avgChange < -3) condition = 'bearish';
-      else if (avgChange < -1) condition = 'slightly bearish';
-      else if (Math.abs(avgChange) < 0.5) condition = 'ranging';
-
-      setMarketCondition(condition);
-
-      // Call AI recommender
-      const { data, error } = await supabase.functions.invoke('ai-strategy-recommender', {
-        body: { 
-          marketCondition: condition,
-          timeframe: '24h',
-          marketData: {
-            btcChange,
-            ethChange,
-            btcPrice: marketData[0]?.lastPrice,
-            ethPrice: marketData[1]?.lastPrice
-          }
-        }
+      // Fetch market data
+      const { data: functionData, error: marketError } = await supabase.functions.invoke('market-data', {
+        body: { symbols: ['BTCUSDT', 'ETHUSDT'] }
       });
 
-      if (error) throw error;
+      if (marketError) throw marketError;
 
-      if (data?.success && data?.recommendations?.recommendations) {
-        // Get top 3 high priority recommendations
-        const topRecommendations = data.recommendations.recommendations
-          .filter((r: Recommendation) => r.priority === 'high')
-          .slice(0, 3);
+      if (functionData?.success && functionData?.data) {
+        const data = functionData.data;
+        setMarketData(data);
+
+        // Analyze market condition
+        const btcChange = parseFloat(data[0]?.priceChangePercent || '0');
+        const ethChange = parseFloat(data[1]?.priceChangePercent || '0');
+        const avgChange = (btcChange + ethChange) / 2;
         
-        setRecommendations(topRecommendations);
+        let condition = 'neutral';
+        if (avgChange > 3) condition = 'bullish';
+        else if (avgChange > 1) condition = 'slightly bullish';
+        else if (avgChange < -3) condition = 'bearish';
+        else if (avgChange < -1) condition = 'slightly bearish';
+        else if (Math.abs(avgChange) < 0.5) condition = 'ranging';
+
+        setMarketCondition(condition);
+
+        // Call AI recommender
+        const { data: aiData, error: aiError } = await supabase.functions.invoke('ai-strategy-recommender', {
+          body: { 
+            marketCondition: condition,
+            timeframe: '24h',
+            marketData: {
+              btcChange,
+              ethChange,
+              btcPrice: data[0]?.lastPrice,
+              ethPrice: data[1]?.lastPrice
+            }
+          }
+        });
+
+        if (aiError) throw aiError;
+
+        if (aiData?.success && aiData?.recommendations?.recommendations) {
+          const topRecommendations = aiData.recommendations.recommendations
+            .filter((r: Recommendation) => r.priority === 'high')
+            .slice(0, 3);
+          
+          setRecommendations(topRecommendations);
+        }
       }
     } catch (error) {
       console.error('Error getting recommendations:', error);
@@ -88,7 +105,7 @@ export const MarketBasedRecommendations = () => {
     return 'text-yellow-500';
   };
 
-  if (marketLoading || loading) {
+  if (loading && recommendations.length === 0) {
     return (
       <Card className="p-6">
         <div className="flex items-center gap-3 mb-4">
@@ -109,9 +126,19 @@ export const MarketBasedRecommendations = () => {
           <Zap className="h-5 w-5 text-primary" />
           <h3 className="text-lg font-semibold">AI Market Insights</h3>
         </div>
-        <div className={`flex items-center gap-2 ${getMarketColor()}`}>
-          {getMarketIcon()}
-          <span className="text-sm font-medium capitalize">{marketCondition}</span>
+        <div className="flex items-center gap-3">
+          <div className={`flex items-center gap-2 ${getMarketColor()}`}>
+            {getMarketIcon()}
+            <span className="text-sm font-medium capitalize">{marketCondition}</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={fetchMarketDataAndRecommendations}
+            disabled={loading}
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
         </div>
       </div>
 
