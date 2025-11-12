@@ -192,9 +192,11 @@ export type Database = {
           is_trading_enabled: boolean | null
           max_open_trades: number
           max_risk_per_trade_percent: number
+          notification_phone: string | null
           paper_trading_mode: boolean | null
           portfolio_value: number
           position_size_reduction_percent: number
+          sms_notifications_enabled: boolean | null
           updated_at: string | null
         }
         Insert: {
@@ -205,9 +207,11 @@ export type Database = {
           is_trading_enabled?: boolean | null
           max_open_trades?: number
           max_risk_per_trade_percent?: number
+          notification_phone?: string | null
           paper_trading_mode?: boolean | null
           portfolio_value?: number
           position_size_reduction_percent?: number
+          sms_notifications_enabled?: boolean | null
           updated_at?: string | null
         }
         Update: {
@@ -218,9 +222,11 @@ export type Database = {
           is_trading_enabled?: boolean | null
           max_open_trades?: number
           max_risk_per_trade_percent?: number
+          notification_phone?: string | null
           paper_trading_mode?: boolean | null
           portfolio_value?: number
           position_size_reduction_percent?: number
+          sms_notifications_enabled?: boolean | null
           updated_at?: string | null
         }
         Relationships: []

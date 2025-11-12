@@ -2,7 +2,15 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
 import { Resend } from "https://esm.sh/resend@4.0.0";
 
+interface TwilioResponse {
+  sid?: string;
+  error_message?: string;
+}
+
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
+const twilioAccountSid = Deno.env.get("TWILIO_ACCOUNT_SID");
+const twilioAuthToken = Deno.env.get("TWILIO_AUTH_TOKEN");
+const twilioPhoneNumber = Deno.env.get("TWILIO_PHONE_NUMBER");
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -33,8 +41,15 @@ const handler = async (req: Request): Promise<Response> => {
     const payload: NotificationRequest = await req.json();
     console.log('Notification request:', payload);
 
+    // Get notification preferences
+    const { data: riskParams } = await supabase
+      .from('risk_parameters')
+      .select('notification_phone, sms_notifications_enabled')
+      .single();
+
     let subject = '';
     let message = '';
+    let smsMessage = '';
 
     switch (payload.type) {
       case 'trade_executed':
@@ -47,26 +62,29 @@ const handler = async (req: Request): Promise<Response> => {
           <p><strong>Quantity:</strong> ${payload.quantity}</p>
           <p><strong>Total:</strong> $${(payload.price * payload.quantity).toFixed(2)}</p>
         `;
+        smsMessage = `Trade Executed: ${payload.side.toUpperCase()} ${payload.symbol} @ $${payload.price.toFixed(2)} x${payload.quantity}`;
         break;
       
       case 'stop_loss_hit':
-        subject = `Stop Loss Hit: ${payload.symbol}`;
+        subject = `🚨 Stop Loss Hit: ${payload.symbol}`;
         message = `
           <h2>⚠️ Stop Loss Triggered</h2>
           <p><strong>Symbol:</strong> ${payload.symbol}</p>
           <p><strong>Exit Price:</strong> $${payload.price.toFixed(2)}</p>
           <p><strong>Loss:</strong> <span style="color: #ef4444;">$${payload.profitLoss?.toFixed(2)}</span></p>
         `;
+        smsMessage = `🚨 STOP LOSS HIT: ${payload.symbol} @ $${payload.price.toFixed(2)}. Loss: $${payload.profitLoss?.toFixed(2)}`;
         break;
       
       case 'take_profit_hit':
-        subject = `Take Profit Hit: ${payload.symbol}`;
+        subject = `✅ Take Profit Hit: ${payload.symbol}`;
         message = `
           <h2>✅ Take Profit Achieved</h2>
           <p><strong>Symbol:</strong> ${payload.symbol}</p>
           <p><strong>Exit Price:</strong> $${payload.price.toFixed(2)}</p>
           <p><strong>Profit:</strong> <span style="color: #10b981;">$${payload.profitLoss?.toFixed(2)}</span></p>
         `;
+        smsMessage = `✅ TAKE PROFIT: ${payload.symbol} @ $${payload.price.toFixed(2)}. Profit: $${payload.profitLoss?.toFixed(2)}`;
         break;
     }
 
@@ -103,6 +121,47 @@ const handler = async (req: Request): Promise<Response> => {
 
     console.log('Email sent:', emailResponse);
 
+    // Send SMS notification for critical events (stop loss and take profit)
+    let smsResponse;
+    if (
+      riskParams?.sms_notifications_enabled &&
+      riskParams?.notification_phone &&
+      twilioAccountSid &&
+      twilioAuthToken &&
+      twilioPhoneNumber &&
+      (payload.type === 'stop_loss_hit' || payload.type === 'take_profit_hit')
+    ) {
+      try {
+        const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`;
+        
+        const formData = new URLSearchParams();
+        formData.append('To', riskParams.notification_phone);
+        formData.append('From', twilioPhoneNumber);
+        formData.append('Body', smsMessage);
+
+        const twilioResponse = await fetch(twilioUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Basic ' + btoa(`${twilioAccountSid}:${twilioAuthToken}`),
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: formData.toString(),
+        });
+
+        if (!twilioResponse.ok) {
+          const errorData = await twilioResponse.json();
+          console.error('Twilio error:', errorData);
+          throw new Error(`Twilio error: ${errorData.message}`);
+        }
+
+        smsResponse = await twilioResponse.json();
+        console.log('SMS sent:', smsResponse);
+      } catch (smsError) {
+        console.error('Failed to send SMS:', smsError);
+        // Don't fail the entire notification if SMS fails
+      }
+    }
+
     // Store notification in database
     const { error: dbError } = await supabase
       .from('notifications')
@@ -117,7 +176,7 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     return new Response(
-      JSON.stringify({ success: true, emailResponse }),
+      JSON.stringify({ success: true, emailResponse, smsResponse }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {

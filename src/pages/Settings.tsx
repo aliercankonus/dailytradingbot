@@ -18,6 +18,7 @@ export default function Settings() {
     binanceApiKey: '',
     binanceApiSecret: '',
     notificationEmail: 'trader@example.com',
+    notificationPhone: riskParams?.notification_phone || '',
   });
 
   const handleSaveApiKeys = async () => {
@@ -65,6 +66,49 @@ export default function Settings() {
       toast({
         title: "Error",
         description: "Failed to update trading mode",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleToggleSmsNotifications = async (enabled: boolean) => {
+    try {
+      await updateRiskParameters({ sms_notifications_enabled: enabled });
+      toast({
+        title: enabled ? "SMS Notifications Enabled" : "SMS Notifications Disabled",
+        description: enabled 
+          ? "You'll receive SMS alerts for critical events" 
+          : "SMS alerts are now disabled",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update SMS settings",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleSavePhoneNumber = async () => {
+    if (!formData.notificationPhone) {
+      toast({
+        title: "Missing Phone Number",
+        description: "Please enter a phone number",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      await updateRiskParameters({ notification_phone: formData.notificationPhone });
+      toast({
+        title: "Phone Number Updated",
+        description: "Your phone number has been saved successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update phone number",
         variant: "destructive",
       });
     }
@@ -189,6 +233,51 @@ export default function Settings() {
               <Switch defaultChecked />
             </div>
           </div>
+        </div>
+      </Card>
+
+      {/* SMS Notifications */}
+      <Card className="p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <Mail className="h-5 w-5 text-primary" />
+          <h2 className="text-xl font-semibold">SMS Notifications (Twilio)</h2>
+        </div>
+        
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Receive SMS alerts for critical events like stop-loss and take-profit triggers.
+          </p>
+
+          <div className="flex items-center justify-between p-4 border rounded-lg">
+            <div className="space-y-1">
+              <div className="font-medium">Enable SMS Alerts</div>
+              <p className="text-sm text-muted-foreground">
+                Send SMS for stop-loss and take-profit events
+              </p>
+            </div>
+            <Switch
+              checked={riskParams?.sms_notifications_enabled ?? true}
+              onCheckedChange={handleToggleSmsNotifications}
+            />
+          </div>
+          
+          <div className="space-y-2">
+            <Label htmlFor="phone">Phone Number (with country code)</Label>
+            <Input
+              id="phone"
+              type="tel"
+              value={formData.notificationPhone}
+              onChange={(e) => setFormData({ ...formData, notificationPhone: e.target.value })}
+              placeholder="+1234567890"
+            />
+            <p className="text-xs text-muted-foreground">
+              Format: +[country code][number] (e.g., +15551234567)
+            </p>
+          </div>
+
+          <Button onClick={handleSavePhoneNumber}>
+            Save Phone Number
+          </Button>
         </div>
       </Card>
     </div>

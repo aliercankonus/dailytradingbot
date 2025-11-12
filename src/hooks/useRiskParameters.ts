@@ -12,6 +12,8 @@ interface RiskParameters {
   consecutive_losses: number;
   is_trading_enabled: boolean;
   paper_trading_mode: boolean;
+  notification_phone: string | null;
+  sms_notifications_enabled: boolean;
   updated_at: string;
 }
 
