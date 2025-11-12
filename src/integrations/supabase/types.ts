@@ -314,6 +314,78 @@ export type Database = {
         }
         Relationships: []
       }
+      strategy_rotation_config: {
+        Row: {
+          created_at: string | null
+          enabled: boolean | null
+          id: string
+          market_condition_weight: number | null
+          min_trades_required: number | null
+          performance_threshold_percent: number | null
+          performance_weight: number | null
+          rotation_interval_minutes: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          enabled?: boolean | null
+          id?: string
+          market_condition_weight?: number | null
+          min_trades_required?: number | null
+          performance_threshold_percent?: number | null
+          performance_weight?: number | null
+          rotation_interval_minutes?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          enabled?: boolean | null
+          id?: string
+          market_condition_weight?: number | null
+          min_trades_required?: number | null
+          performance_threshold_percent?: number | null
+          performance_weight?: number | null
+          rotation_interval_minutes?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      strategy_rotation_history: {
+        Row: {
+          from_strategy_id: string | null
+          from_strategy_name: string
+          id: string
+          market_condition: Json | null
+          performance_metrics: Json | null
+          reason: string
+          rotated_at: string | null
+          to_strategy_id: string | null
+          to_strategy_name: string
+        }
+        Insert: {
+          from_strategy_id?: string | null
+          from_strategy_name: string
+          id?: string
+          market_condition?: Json | null
+          performance_metrics?: Json | null
+          reason: string
+          rotated_at?: string | null
+          to_strategy_id?: string | null
+          to_strategy_name: string
+        }
+        Update: {
+          from_strategy_id?: string | null
+          from_strategy_name?: string
+          id?: string
+          market_condition?: Json | null
+          performance_metrics?: Json | null
+          reason?: string
+          rotated_at?: string | null
+          to_strategy_id?: string | null
+          to_strategy_name?: string
+        }
+        Relationships: []
+      }
       trades: {
         Row: {
           binance_order_id: string | null

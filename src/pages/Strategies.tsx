@@ -24,6 +24,7 @@ import { StrategyOptimizer } from "@/components/StrategyOptimizer";
 import { AIStrategyRecommender } from "@/components/AIStrategyRecommender";
 import { MonteCarloSimulation } from "@/components/MonteCarloSimulation";
 import { EditBuiltInStrategyDialog } from "@/components/EditBuiltInStrategyDialog";
+import { StrategyRotationConfig } from "@/components/StrategyRotationConfig";
 
 const Strategies = () => {
   const navigate = useNavigate();
@@ -76,9 +77,10 @@ const Strategies = () => {
 
       <main className="container mx-auto px-4 py-6">
         <Tabs defaultValue="all" className="w-full">
-          <TabsList className="grid w-full grid-cols-7 mb-6">
+          <TabsList className="grid w-full grid-cols-8 mb-6">
             <TabsTrigger value="all">All</TabsTrigger>
             <TabsTrigger value="custom">Custom</TabsTrigger>
+            <TabsTrigger value="rotation">Rotation</TabsTrigger>
             <TabsTrigger value="backtesting">Backtest</TabsTrigger>
             <TabsTrigger value="optimizer">Optimizer</TabsTrigger>
             <TabsTrigger value="monte-carlo">Monte Carlo</TabsTrigger>
@@ -363,6 +365,10 @@ const Strategies = () => {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="rotation">
+            <StrategyRotationConfig />
           </TabsContent>
 
           <TabsContent value="backtesting">

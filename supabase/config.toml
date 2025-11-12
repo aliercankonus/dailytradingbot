@@ -36,3 +36,6 @@ verify_jwt = false
 [functions.realtime-market-data]
 verify_jwt = false
 
+[functions.strategy-rotation]
+verify_jwt = false
+
