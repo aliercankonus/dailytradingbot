@@ -47,6 +47,7 @@ serve(async (req) => {
 
     // Fetch strategy configuration (custom or built-in)
     let strategy: any = null;
+    let isCustomStrategy = false;
 
     const { data: customStrategy, error: strategyError } = await supabase
       .from('custom_strategies')
@@ -60,6 +61,7 @@ serve(async (req) => {
 
     if (customStrategy) {
       strategy = customStrategy;
+      isCustomStrategy = true;
     } else {
       // Try built-in strategies by id, then map to default configs
       const { data: builtIn, error: builtInErr } = await supabase
@@ -463,7 +465,7 @@ serve(async (req) => {
     const { data: backtestResult, error: dbError } = await supabase
       .from('backtesting_results')
       .insert({
-        strategy_id: strategyId,
+        strategy_id: isCustomStrategy ? strategyId : null, // Only set for custom strategies
         strategy_name: strategy.name,
         symbol,
         start_date: startDate,
