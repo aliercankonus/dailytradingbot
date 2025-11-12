@@ -1,41 +1,50 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Brain, Zap, Shield } from "lucide-react";
+import { useStrategyData } from "@/hooks/useStrategyData";
 
 export const StrategyOverview = () => {
-  const strategies = [
-    {
-      name: "Mean Reversion",
-      status: "active",
-      performance: "+12.4%",
-      trades: 24,
-      icon: Brain,
-      color: "text-primary",
-    },
-    {
-      name: "Momentum Trading",
-      status: "active",
-      performance: "+8.7%",
-      trades: 18,
-      icon: Zap,
-      color: "text-warning",
-    },
-    {
-      name: "Grid Trading",
-      status: "standby",
-      performance: "+5.2%",
-      trades: 12,
-      icon: Shield,
-      color: "text-muted-foreground",
-    },
-  ];
+  const { strategies: strategyData, loading } = useStrategyData();
+  
+  const getIcon = (name: string) => {
+    if (name.includes("Mean")) return Brain;
+    if (name.includes("Momentum")) return Zap;
+    return Shield;
+  };
+  
+  const getColor = (status: string) => {
+    if (status === "active") return "text-primary";
+    if (status === "standby") return "text-muted-foreground";
+    return "text-warning";
+  };
+  
+  const strategies = strategyData.map(strategy => ({
+    name: strategy.strategy_name,
+    status: strategy.status,
+    performance: `+${((strategy.total_profit / 1000) * 100).toFixed(1)}%`,
+    trades: strategy.total_trades,
+    winRate: strategy.total_trades > 0 
+      ? ((strategy.winning_trades / strategy.total_trades) * 100).toFixed(0)
+      : "0",
+    icon: getIcon(strategy.strategy_name),
+    color: getColor(strategy.status),
+  }));
 
   return (
     <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
       <h3 className="text-lg font-semibold text-foreground mb-4">Active Strategies</h3>
       
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {strategies.map((strategy, idx) => (
+        {loading ? (
+          <div className="col-span-3 text-center py-8 text-muted-foreground">
+            Loading strategies...
+          </div>
+        ) : strategies.length === 0 ? (
+          <div className="col-span-3 text-center py-8 text-muted-foreground">
+            No strategies available
+          </div>
+        ) : (
+          strategies.map((strategy, idx) => (
           <div
             key={idx}
             className="p-4 rounded-lg bg-secondary/50 border border-border hover:border-primary/50 transition-colors"
@@ -58,12 +67,17 @@ export const StrategyOverview = () => {
                 <span className="text-profit font-semibold font-mono">{strategy.performance}</span>
               </div>
               <div className="flex justify-between">
+                <span className="text-muted-foreground">Win Rate:</span>
+                <span className="text-foreground font-mono">{strategy.winRate}%</span>
+              </div>
+              <div className="flex justify-between">
                 <span className="text-muted-foreground">Trades:</span>
                 <span className="text-foreground font-mono">{strategy.trades}</span>
               </div>
             </div>
           </div>
-        ))}
+          ))
+        )}
       </div>
     </Card>
   );

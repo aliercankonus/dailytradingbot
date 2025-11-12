@@ -14,7 +14,87 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      strategy_performance: {
+        Row: {
+          id: string
+          last_updated: string | null
+          max_drawdown: number | null
+          status: string
+          strategy_name: string
+          total_profit: number | null
+          total_trades: number | null
+          winning_trades: number | null
+        }
+        Insert: {
+          id?: string
+          last_updated?: string | null
+          max_drawdown?: number | null
+          status?: string
+          strategy_name: string
+          total_profit?: number | null
+          total_trades?: number | null
+          winning_trades?: number | null
+        }
+        Update: {
+          id?: string
+          last_updated?: string | null
+          max_drawdown?: number | null
+          status?: string
+          strategy_name?: string
+          total_profit?: number | null
+          total_trades?: number | null
+          winning_trades?: number | null
+        }
+        Relationships: []
+      }
+      trading_signals: {
+        Row: {
+          confidence_score: number | null
+          created_at: string | null
+          entry_price: number | null
+          expires_at: string | null
+          id: string
+          indicators: Json | null
+          reason: string | null
+          risk_reward_ratio: number | null
+          signal_type: Database["public"]["Enums"]["signal_type"]
+          stop_loss: number | null
+          symbol: string
+          take_profit: number | null
+          trend: Database["public"]["Enums"]["market_trend"]
+        }
+        Insert: {
+          confidence_score?: number | null
+          created_at?: string | null
+          entry_price?: number | null
+          expires_at?: string | null
+          id?: string
+          indicators?: Json | null
+          reason?: string | null
+          risk_reward_ratio?: number | null
+          signal_type: Database["public"]["Enums"]["signal_type"]
+          stop_loss?: number | null
+          symbol: string
+          take_profit?: number | null
+          trend: Database["public"]["Enums"]["market_trend"]
+        }
+        Update: {
+          confidence_score?: number | null
+          created_at?: string | null
+          entry_price?: number | null
+          expires_at?: string | null
+          id?: string
+          indicators?: Json | null
+          reason?: string | null
+          risk_reward_ratio?: number | null
+          signal_type?: Database["public"]["Enums"]["signal_type"]
+          stop_loss?: number | null
+          symbol?: string
+          take_profit?: number | null
+          trend?: Database["public"]["Enums"]["market_trend"]
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +103,8 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      market_trend: "bullish" | "bearish" | "ranging"
+      signal_type: "long" | "short" | "hold" | "exit"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +231,9 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      market_trend: ["bullish", "bearish", "ranging"],
+      signal_type: ["long", "short", "hold", "exit"],
+    },
   },
 } as const
