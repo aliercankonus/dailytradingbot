@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.optimize-strategy]
 verify_jwt = false
+
+[functions.ai-strategy-recommender]
+verify_jwt = false

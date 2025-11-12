@@ -21,6 +21,7 @@ import { useBuiltInStrategies } from "@/hooks/useBuiltInStrategies";
 import { BacktestingModule } from "@/components/BacktestingModule";
 import { StrategyComparison } from "@/components/StrategyComparison";
 import { StrategyOptimizer } from "@/components/StrategyOptimizer";
+import { AIStrategyRecommender } from "@/components/AIStrategyRecommender";
 import { EditBuiltInStrategyDialog } from "@/components/EditBuiltInStrategyDialog";
 
 const Strategies = () => {
@@ -74,11 +75,12 @@ const Strategies = () => {
 
       <main className="container mx-auto px-4 py-6">
         <Tabs defaultValue="all" className="w-full">
-          <TabsList className="grid w-full max-w-3xl grid-cols-5 mb-6">
+          <TabsList className="grid w-full max-w-3xl grid-cols-6 mb-6">
             <TabsTrigger value="all">All Strategies</TabsTrigger>
             <TabsTrigger value="custom">Custom</TabsTrigger>
             <TabsTrigger value="backtesting">Backtesting</TabsTrigger>
             <TabsTrigger value="optimizer">Optimizer</TabsTrigger>
+            <TabsTrigger value="ai-recommender">AI Recommender</TabsTrigger>
             <TabsTrigger value="comparison">Comparison</TabsTrigger>
           </TabsList>
 
@@ -397,6 +399,10 @@ const Strategies = () => {
 
           <TabsContent value="comparison">
             <StrategyComparison />
+          </TabsContent>
+
+          <TabsContent value="ai-recommender">
+            <AIStrategyRecommender />
           </TabsContent>
         </Tabs>
       </main>
