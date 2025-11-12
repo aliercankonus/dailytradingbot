@@ -9,6 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Settings as SettingsIcon, Key, Mail, Shield, ArrowLeft } from 'lucide-react';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
+import { PerformanceSettings } from '@/components/PerformanceSettings';
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -291,6 +292,9 @@ export default function Settings() {
           </Button>
         </div>
       </Card>
+
+      {/* Performance Settings */}
+      <PerformanceSettings />
     </div>
   );
 }

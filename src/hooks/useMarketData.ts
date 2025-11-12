@@ -37,8 +37,14 @@ export const useMarketData = (symbols?: string[]) => {
       }
     };
 
+    // Get interval from localStorage or use default
+    const getRefreshInterval = () => {
+      const saved = localStorage.getItem('market_data_interval');
+      return saved ? parseInt(saved) : 10000; // Default 10 seconds
+    };
+
     fetchMarketData();
-    const interval = setInterval(fetchMarketData, 10000); // Refresh every 10 seconds
+    const interval = setInterval(fetchMarketData, getRefreshInterval());
 
     return () => clearInterval(interval);
   }, [symbols]);
