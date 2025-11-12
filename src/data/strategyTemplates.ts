@@ -201,5 +201,91 @@ export const strategyTemplates: StrategyTemplate[] = [
       takeProfitPercent: 10,
       positionSizePercent: 3
     }
+  },
+  {
+    id: 'ema-death-cross',
+    name: 'EMA Death Cross',
+    description: 'Short when fast EMA crosses below slow EMA (death cross), cover when fast EMA crosses back above. Bearish trend following.',
+    category: 'trend',
+    entry_conditions: [
+      { indicator: 'EMA_Fast', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'EMA_Slow' }
+    ],
+    exit_conditions: [
+      { indicator: 'EMA_Fast', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'EMA_Slow' }
+    ],
+    indicators: [
+      { type: 'EMA', name: 'EMA_Fast', period: 12 },
+      { type: 'EMA', name: 'EMA_Slow', period: 26 }
+    ],
+    risk_settings: {
+      stopLossPercent: 2.5,
+      takeProfitPercent: 5,
+      positionSizePercent: 2
+    }
+  },
+  {
+    id: 'macd-signal-cross',
+    name: 'MACD Signal Cross',
+    description: 'Enter when MACD crosses above signal line (bullish), exit when MACD crosses below signal. Momentum crossover strategy.',
+    category: 'momentum',
+    entry_conditions: [
+      { indicator: 'MACD', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'MACD_Signal' }
+    ],
+    exit_conditions: [
+      { indicator: 'MACD', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'MACD_Signal' }
+    ],
+    indicators: [
+      { type: 'MACD', name: 'MACD', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+      { type: 'MACD_Signal', name: 'MACD_Signal', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }
+    ],
+    risk_settings: {
+      stopLossPercent: 2,
+      takeProfitPercent: 4,
+      positionSizePercent: 1.5
+    }
+  },
+  {
+    id: 'bollinger-breakout',
+    name: 'Bollinger Band Breakout',
+    description: 'Enter when price breaks above upper Bollinger Band (strong momentum), exit when price crosses below middle band.',
+    category: 'breakout',
+    entry_conditions: [
+      { indicator: 'Price', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'BB_Upper' }
+    ],
+    exit_conditions: [
+      { indicator: 'Price', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'BB_Middle' }
+    ],
+    indicators: [
+      { type: 'BB', name: 'BB_Upper', period: 20 },
+      { type: 'BB', name: 'BB_Middle', period: 20 },
+      { type: 'BB', name: 'BB_Lower', period: 20 }
+    ],
+    risk_settings: {
+      stopLossPercent: 3,
+      takeProfitPercent: 6,
+      positionSizePercent: 2
+    }
+  },
+  {
+    id: 'bollinger-reversal',
+    name: 'Bollinger Band Reversal',
+    description: 'Buy when price touches lower Bollinger Band (oversold), sell when price reaches upper band. Mean reversion strategy.',
+    category: 'reversal',
+    entry_conditions: [
+      { indicator: 'Price', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'BB_Lower' }
+    ],
+    exit_conditions: [
+      { indicator: 'Price', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'BB_Upper' }
+    ],
+    indicators: [
+      { type: 'BB', name: 'BB_Upper', period: 20 },
+      { type: 'BB', name: 'BB_Middle', period: 20 },
+      { type: 'BB', name: 'BB_Lower', period: 20 }
+    ],
+    risk_settings: {
+      stopLossPercent: 2.5,
+      takeProfitPercent: 5,
+      positionSizePercent: 2
+    }
   }
 ];

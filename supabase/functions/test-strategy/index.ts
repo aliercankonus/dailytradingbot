@@ -85,6 +85,26 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
   return { macd, signal, histogram };
 }
 
+// Calculate Bollinger Bands
+function calculateBollingerBands(prices: number[], period = 20, stdDev = 2): { upper: number; middle: number; lower: number } {
+  if (prices.length < period) {
+    const currentPrice = prices[prices.length - 1] || 0;
+    return { upper: currentPrice, middle: currentPrice, lower: currentPrice };
+  }
+  
+  const recentPrices = prices.slice(-period);
+  const middle = recentPrices.reduce((a, b) => a + b, 0) / period;
+  
+  const variance = recentPrices.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / period;
+  const standardDeviation = Math.sqrt(variance);
+  
+  return {
+    upper: middle + (standardDeviation * stdDev),
+    middle: middle,
+    lower: middle - (standardDeviation * stdDev)
+  };
+}
+
 // Detect trend
 function detectTrend(data: MarketData): 'bullish' | 'bearish' | 'ranging' {
   const changePercent = parseFloat(data.priceChangePercent);
@@ -125,6 +145,19 @@ function calculateIndicator(
     case 'MACD':
       const macd = calculateMACD(historicalPrices);
       return macd.macd;
+    case 'MACD_Signal':
+      const macdData = calculateMACD(historicalPrices);
+      return macdData.signal;
+    case 'BB':
+    case 'BB_Upper':
+      const bbUpper = calculateBollingerBands(historicalPrices, indicatorConfig.period || 20);
+      return bbUpper.upper;
+    case 'BB_Middle':
+      const bbMiddle = calculateBollingerBands(historicalPrices, indicatorConfig.period || 20);
+      return bbMiddle.middle;
+    case 'BB_Lower':
+      const bbLower = calculateBollingerBands(historicalPrices, indicatorConfig.period || 20);
+      return bbLower.lower;
     case 'Price':
       return currentPrice;
     default:

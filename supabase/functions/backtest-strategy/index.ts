@@ -124,6 +124,25 @@ serve(async (req) => {
       return { macdLine, signalLine, histogram: macdLine - signalLine };
     };
 
+    const calculateBollingerBands = (prices: number[], period: number = 20, stdDev: number = 2) => {
+      if (prices.length < period) {
+        const currentPrice = prices[prices.length - 1] || 0;
+        return { upper: currentPrice, middle: currentPrice, lower: currentPrice };
+      }
+      
+      const recentPrices = prices.slice(-period);
+      const middle = recentPrices.reduce((a, b) => a + b, 0) / period;
+      
+      const variance = recentPrices.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / period;
+      const standardDeviation = Math.sqrt(variance);
+      
+      return {
+        upper: middle + (standardDeviation * stdDev),
+        middle: middle,
+        lower: middle - (standardDeviation * stdDev)
+      };
+    };
+
     const calculateIndicator = (type: string, prices: number[], config: IndicatorConfig): number => {
       switch (type.toLowerCase()) {
         case 'rsi':
@@ -133,6 +152,19 @@ serve(async (req) => {
         case 'macd':
           const macd = calculateMACD(prices, config.fastPeriod, config.slowPeriod, config.signalPeriod);
           return macd.macdLine;
+        case 'macd_signal':
+          const macdData = calculateMACD(prices, config.fastPeriod, config.slowPeriod, config.signalPeriod);
+          return macdData.signalLine;
+        case 'bb':
+        case 'bb_upper':
+          const bbUpper = calculateBollingerBands(prices, config.period || 20);
+          return bbUpper.upper;
+        case 'bb_middle':
+          const bbMiddle = calculateBollingerBands(prices, config.period || 20);
+          return bbMiddle.middle;
+        case 'bb_lower':
+          const bbLower = calculateBollingerBands(prices, config.period || 20);
+          return bbLower.lower;
         case 'price':
           return prices[prices.length - 1];
         default:
