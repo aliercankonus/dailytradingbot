@@ -27,28 +27,34 @@ serve(async (req) => {
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_DELAY = 3000;
   let reconnectTimeout: number | null = null;
-  let heartbeatInterval: number | null = null;
+
+  // Parse symbols from query params or use defaults
+  const url = new URL(req.url);
+  const symbolsParam = url.searchParams.get('symbols');
+  const symbols = symbolsParam ? JSON.parse(symbolsParam) : ['BTCUSDT', 'ETHUSDT'];
   
-  const symbols = ["btcusdt", "ethusdt", "solusdt", "bnbusdt", "adausdt"];
-  const streams = symbols.map(s => `${s}@ticker`).join('/');
+  console.log('Subscribing to symbols:', symbols);
 
   const connectToBinance = () => {
     try {
+      // Create streams parameter for multiple symbols
+      const streams = symbols.map((s: string) => `${s.toLowerCase()}@ticker`).join('/');
       const binanceUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
       
       console.log('Connecting to Binance:', binanceUrl);
       
       binanceSocket = new WebSocket(binanceUrl);
-
+      
       binanceSocket.onopen = () => {
-        console.log("Connected to Binance WebSocket");
+        console.log('Connected to Binance WebSocket');
         reconnectAttempts = 0;
         
         // Send connection success message
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify({
             type: 'connected',
-            message: 'Successfully connected to market data stream'
+            message: 'Successfully connected to market data stream',
+            symbols
           }));
         }
       };
@@ -57,34 +63,42 @@ serve(async (req) => {
         try {
           const data = JSON.parse(event.data);
           
-          if (data.stream && data.data) {
-            const ticker = data.data;
-            const formattedData = {
-              symbol: ticker.s,
-              price: ticker.c,
-              priceChange: ticker.p,
-              priceChangePercent: ticker.P,
-              high: ticker.h,
-              low: ticker.l,
-              volume: ticker.v,
-              timestamp: ticker.E
+          // Binance sends data in a specific format
+          if (data.data) {
+            const tickerData = data.data;
+            
+            // Transform to our format
+            const transformed = {
+              type: 'price_update',
+              data: {
+                symbol: tickerData.s,
+                lastPrice: tickerData.c,
+                priceChange: tickerData.p,
+                priceChangePercent: tickerData.P,
+                highPrice: tickerData.h,
+                lowPrice: tickerData.l,
+                volume: tickerData.v,
+                quoteVolume: tickerData.q,
+                timestamp: new Date(tickerData.E).toISOString()
+              }
             };
             
+            // Forward to client
             if (socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify(formattedData));
+              socket.send(JSON.stringify(transformed));
             }
           }
         } catch (error) {
-          console.error("Error processing Binance message:", error);
+          console.error('Error processing Binance message:', error);
         }
       };
 
       binanceSocket.onerror = (error) => {
-        console.error("Binance WebSocket error:", error);
+        console.error('Binance WebSocket error:', error);
       };
 
       binanceSocket.onclose = () => {
-        console.log("Binance WebSocket closed");
+        console.log('Binance WebSocket closed');
         
         // Attempt reconnection
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
@@ -112,22 +126,16 @@ serve(async (req) => {
   };
 
   socket.onopen = () => {
-    console.log("Client WebSocket connected");
+    console.log('Client WebSocket opened');
     connectToBinance();
-    
-    // Send heartbeat every 30 seconds to keep connection alive
-    heartbeatInterval = setInterval(() => {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: 'heartbeat' }));
-      }
-    }, 30000);
   };
 
   socket.onmessage = (event) => {
     try {
       const message = JSON.parse(event.data);
+      console.log('Received message from client:', message);
       
-      // Handle pong response to heartbeat
+      // Handle client messages if needed (e.g., subscribe to new symbols)
       if (message.type === 'ping') {
         socket.send(JSON.stringify({ type: 'pong' }));
       }
@@ -136,28 +144,21 @@ serve(async (req) => {
     }
   };
 
+  socket.onerror = (error) => {
+    console.error('Client WebSocket error:', error);
+  };
+
   socket.onclose = () => {
-    console.log("Client WebSocket disconnected");
+    console.log('Client WebSocket closed');
     
     // Clean up Binance connection
     if (binanceSocket && binanceSocket.readyState === WebSocket.OPEN) {
       binanceSocket.close();
     }
     
-    // Clear intervals and timeouts
-    if (heartbeatInterval !== null) {
-      clearInterval(heartbeatInterval);
-    }
+    // Clear reconnect timeout
     if (reconnectTimeout !== null) {
       clearTimeout(reconnectTimeout);
-    }
-  };
-
-  socket.onerror = (error) => {
-    console.error("Client WebSocket error:", error);
-    
-    if (binanceSocket && binanceSocket.readyState === WebSocket.OPEN) {
-      binanceSocket.close();
     }
   };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 export interface RealtimePrice {
   symbol: string;
@@ -15,48 +15,83 @@ export const useRealtimePrices = () => {
   const [prices, setPrices] = useState<Map<string, RealtimePrice>>(new Map());
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const MAX_RECONNECT_ATTEMPTS = 5;
+  const RECONNECT_DELAY = 3000;
 
   useEffect(() => {
-    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'ikrivrudkvvnksollslh';
+    const projectId = 'ikrivrudkvvnksollslh';
     const wsUrl = `wss://${projectId}.supabase.co/functions/v1/realtime-prices`;
     
-    let ws: WebSocket;
-
     const connect = () => {
       try {
-        ws = new WebSocket(wsUrl);
+        // Close existing connection if any
+        if (wsRef.current) {
+          wsRef.current.close();
+        }
+
+        console.log('Connecting to realtime prices:', wsUrl);
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
 
         ws.onopen = () => {
-          console.log('WebSocket connected');
+          console.log('WebSocket connected to realtime prices');
           setConnected(true);
           setError(null);
+          reconnectAttemptsRef.current = 0;
         };
 
         ws.onmessage = (event) => {
           try {
-            const data: RealtimePrice = JSON.parse(event.data);
-            setPrices((prev) => {
-              const newPrices = new Map(prev);
-              newPrices.set(data.symbol, data);
-              return newPrices;
-            });
+            const data = JSON.parse(event.data);
+            
+            // Handle different message types
+            if (data.type === 'connected') {
+              console.log('Successfully connected to realtime prices');
+            } else if (data.type === 'error') {
+              console.error('Error from server:', data.message);
+              setError(data.message);
+            } else if (data.type === 'heartbeat') {
+              // Respond to heartbeat
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'pong' }));
+              }
+            } else if (data.symbol) {
+              // Price update
+              setPrices((prev) => {
+                const newPrices = new Map(prev);
+                newPrices.set(data.symbol, data);
+                return newPrices;
+              });
+            }
           } catch (err) {
             console.error('Error parsing WebSocket message:', err);
           }
         };
 
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
+        ws.onerror = (event) => {
+          console.error('WebSocket error:', event);
           setError('WebSocket connection error');
           setConnected(false);
         };
 
         ws.onclose = () => {
-          console.log('WebSocket disconnected');
+          console.log('WebSocket disconnected from realtime prices');
           setConnected(false);
           
-          // Reconnect after 5 seconds
-          setTimeout(connect, 5000);
+          // Attempt reconnection
+          if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+            reconnectAttemptsRef.current++;
+            console.log(`Reconnecting... Attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS}`);
+            
+            reconnectTimeoutRef.current = window.setTimeout(() => {
+              connect();
+            }, RECONNECT_DELAY);
+          } else {
+            setError('Unable to maintain connection. Please refresh the page.');
+          }
         };
       } catch (err) {
         console.error('Error creating WebSocket:', err);
@@ -67,8 +102,11 @@ export const useRealtimePrices = () => {
     connect();
 
     return () => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close();
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.close();
+      }
+      if (reconnectTimeoutRef.current !== null) {
+        clearTimeout(reconnectTimeoutRef.current);
       }
     };
   }, []);

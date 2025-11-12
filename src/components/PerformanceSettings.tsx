@@ -8,24 +8,17 @@ import { useToast } from '@/hooks/use-toast';
 import { Settings, Gauge } from 'lucide-react';
 
 const DEFAULT_AI_TTL = 5 * 60 * 1000; // 5 minutes
-const DEFAULT_MARKET_DATA_INTERVAL = 10 * 1000; // 10 seconds
 
 export const PerformanceSettings = () => {
   const { toast } = useToast();
   const [aiCacheTTL, setAiCacheTTL] = useState(5); // in minutes
-  const [marketDataInterval, setMarketDataInterval] = useState(10); // in seconds
 
   useEffect(() => {
     // Load saved settings
     const savedTTL = localStorage.getItem('ai_recommendation_ttl');
-    const savedInterval = localStorage.getItem('market_data_interval');
     
     if (savedTTL) {
       setAiCacheTTL(parseInt(savedTTL) / 60000); // Convert ms to minutes
-    }
-    
-    if (savedInterval) {
-      setMarketDataInterval(parseInt(savedInterval) / 1000); // Convert ms to seconds
     }
   }, []);
 
@@ -33,9 +26,6 @@ export const PerformanceSettings = () => {
     try {
       // Save AI cache TTL in milliseconds
       localStorage.setItem('ai_recommendation_ttl', String(aiCacheTTL * 60 * 1000));
-      
-      // Save market data interval in milliseconds
-      localStorage.setItem('market_data_interval', String(marketDataInterval * 1000));
 
       // Clear existing AI cache to apply new TTL immediately
       localStorage.removeItem('ai_recommendations_cache');
@@ -55,9 +45,7 @@ export const PerformanceSettings = () => {
 
   const handleReset = () => {
     setAiCacheTTL(5);
-    setMarketDataInterval(10);
     localStorage.removeItem('ai_recommendation_ttl');
-    localStorage.removeItem('market_data_interval');
     localStorage.removeItem('ai_recommendations_cache');
     
     toast({
@@ -105,38 +93,6 @@ export const PerformanceSettings = () => {
               <span className="text-sm text-muted-foreground w-16">minutes</span>
             </div>
           </div>
-
-          <div>
-            <Label htmlFor="market-data-interval" className="text-base">
-              Market Data Refresh Interval
-            </Label>
-            <p className="text-sm text-muted-foreground mb-3">
-              How often to fetch live market prices. Lower values provide real-time data but increase API usage.
-            </p>
-            <div className="flex items-center gap-4">
-              <Slider
-                id="market-data-interval"
-                min={5}
-                max={60}
-                step={5}
-                value={[marketDataInterval]}
-                onValueChange={(value) => setMarketDataInterval(value[0])}
-                className="flex-1"
-              />
-              <div className="w-20">
-                <Input
-                  type="number"
-                  value={marketDataInterval}
-                  onChange={(e) => setMarketDataInterval(parseInt(e.target.value) || 10)}
-                  min={5}
-                  max={60}
-                  step={5}
-                  className="text-center"
-                />
-              </div>
-              <span className="text-sm text-muted-foreground w-16">seconds</span>
-            </div>
-          </div>
         </div>
 
         <div className="pt-4 border-t border-border">
@@ -165,13 +121,20 @@ export const PerformanceSettings = () => {
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Market Data:</span>
-              <span className="font-mono">{marketDataInterval} sec</span>
+              <span className="font-mono">Live WebSocket</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Est. AI calls/hour:</span>
               <span className="font-mono">~{Math.ceil(60 / aiCacheTTL)}</span>
             </div>
           </div>
+        </div>
+
+        <div className="p-4 bg-primary/10 rounded-lg border border-primary/20">
+          <h3 className="font-medium mb-2 text-primary">🚀 WebSocket Performance</h3>
+          <p className="text-sm text-muted-foreground">
+            Market data now uses real-time WebSocket connections instead of polling, eliminating repeated API calls and providing instant price updates with zero latency.
+          </p>
         </div>
       </div>
     </Card>
