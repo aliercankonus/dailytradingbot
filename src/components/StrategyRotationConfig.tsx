@@ -6,11 +6,35 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { useStrategyRotation } from '@/hooks/useStrategyRotation';
-import { Loader2, RefreshCw, History, TrendingUp } from 'lucide-react';
+import { Loader2, RefreshCw, History, TrendingUp, Clock, Play, Pause } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { useState, useEffect } from 'react';
 
 export const StrategyRotationConfig = () => {
   const { config, history, loading, updateConfig, triggerRotation } = useStrategyRotation();
+  const [nextRunTime, setNextRunTime] = useState<string>('');
+
+  useEffect(() => {
+    const calculateNextRun = () => {
+      // Cron runs at minute 0 of every hour
+      const now = new Date();
+      const next = new Date(now);
+      next.setMinutes(0, 0, 0);
+      
+      // If current time is past the hour mark, add an hour
+      if (now.getMinutes() > 0 || now.getSeconds() > 0) {
+        next.setHours(next.getHours() + 1);
+      }
+      
+      setNextRunTime(next.toLocaleString());
+    };
+
+    calculateNextRun();
+    // Update every minute
+    const interval = setInterval(calculateNextRun, 60000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   if (loading || !config) {
     return (
@@ -43,19 +67,48 @@ export const StrategyRotationConfig = () => {
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Enable/Disable */}
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="rotation-enabled">Enable Rotation</Label>
-              <div className="text-sm text-muted-foreground">
-                Automatically rotate strategies based on performance
+          {/* Cron Job Status */}
+          <div className="p-4 bg-muted/50 rounded-lg space-y-3 border">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Clock className="h-5 w-5 text-muted-foreground" />
+                <div>
+                  <h3 className="font-semibold">Automated Schedule</h3>
+                  <p className="text-sm text-muted-foreground">Runs every hour at :00 minutes</p>
+                </div>
               </div>
+              <Badge variant={config.enabled ? "default" : "secondary"}>
+                {config.enabled ? "Active" : "Paused"}
+              </Badge>
             </div>
-            <Switch
-              id="rotation-enabled"
-              checked={config.enabled}
-              onCheckedChange={(checked) => updateConfig({ enabled: checked })}
-            />
+            
+            {config.enabled && nextRunTime && (
+              <div className="text-sm">
+                <span className="text-muted-foreground">Next run: </span>
+                <span className="font-medium text-foreground">{nextRunTime}</span>
+              </div>
+            )}
+            
+            <div className="flex gap-2">
+              <Button
+                variant={config.enabled ? "outline" : "default"}
+                size="sm"
+                onClick={() => updateConfig({ enabled: !config.enabled })}
+                className="gap-2"
+              >
+                {config.enabled ? (
+                  <>
+                    <Pause className="h-4 w-4" />
+                    Pause
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4" />
+                    Resume
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
 
           {/* Rotation Interval */}
