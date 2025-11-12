@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.monitor-positions]
 verify_jwt = false
+
+[functions.test-strategy]
+verify_jwt = false

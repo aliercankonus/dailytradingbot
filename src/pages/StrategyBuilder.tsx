@@ -1,15 +1,24 @@
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StrategyBuilderForm } from "@/components/StrategyBuilderForm";
+import { StrategyTestResults } from "@/components/StrategyTestResults";
 import { useCustomStrategies } from "@/hooks/useCustomStrategies";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { useEffect, useState } from "react";
 
 const StrategyBuilder = () => {
   const navigate = useNavigate();
   const { id } = useParams();
   const { strategies, createStrategy, updateStrategy } = useCustomStrategies();
+  const { toast } = useToast();
   const [initialData, setInitialData] = useState<any>(null);
+  const [testResults, setTestResults] = useState<any>(null);
+  const [isTestDialogOpen, setIsTestDialogOpen] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [formData, setFormData] = useState<any>(null);
 
   useEffect(() => {
     if (id) {
@@ -31,6 +40,39 @@ const StrategyBuilder = () => {
 
   const handleCancel = () => {
     navigate('/strategies');
+  };
+
+  const handleTest = async (data: any) => {
+    setFormData(data);
+    setIsTesting(true);
+    
+    try {
+      const { data: result, error } = await supabase.functions.invoke('test-strategy', {
+        body: { strategy: data }
+      });
+
+      if (error) throw error;
+
+      if (result.success) {
+        setTestResults(result);
+        setIsTestDialogOpen(true);
+        toast({
+          title: "Test Complete",
+          description: `Generated ${result.summary.signalsGenerated} signals from ${result.summary.totalSymbolsTested} symbols`,
+        });
+      } else {
+        throw new Error(result.error || 'Test failed');
+      }
+    } catch (error) {
+      console.error('Test error:', error);
+      toast({
+        title: "Test Failed",
+        description: error instanceof Error ? error.message : "Failed to test strategy",
+        variant: "destructive",
+      });
+    } finally {
+      setIsTesting(false);
+    }
   };
 
   return (
@@ -62,9 +104,28 @@ const StrategyBuilder = () => {
         <StrategyBuilderForm
           onSubmit={handleSubmit}
           onCancel={handleCancel}
+          onTest={handleTest}
           initialData={initialData}
+          isTesting={isTesting}
         />
       </main>
+
+      {/* Test Results Dialog */}
+      <Dialog open={isTestDialogOpen} onOpenChange={setIsTestDialogOpen}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Strategy Test Results</DialogTitle>
+          </DialogHeader>
+          {testResults && (
+            <StrategyTestResults
+              strategyName={testResults.strategyName}
+              results={testResults.results}
+              summary={testResults.summary}
+              timestamp={testResults.timestamp}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

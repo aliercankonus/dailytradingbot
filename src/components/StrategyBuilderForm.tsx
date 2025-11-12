@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, FlaskConical } from 'lucide-react';
 
 const strategySchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
@@ -38,10 +38,18 @@ interface RiskSettings {
 interface StrategyBuilderFormProps {
   onSubmit: (data: any) => void;
   onCancel: () => void;
+  onTest?: (data: any) => void;
   initialData?: any;
+  isTesting?: boolean;
 }
 
-export const StrategyBuilderForm = ({ onSubmit, onCancel, initialData }: StrategyBuilderFormProps) => {
+export const StrategyBuilderForm = ({ 
+  onSubmit, 
+  onCancel, 
+  onTest, 
+  initialData,
+  isTesting = false 
+}: StrategyBuilderFormProps) => {
   const [entryConditions, setEntryConditions] = useState<Condition[]>(
     initialData?.entry_conditions || []
   );
@@ -118,6 +126,19 @@ export const StrategyBuilderForm = ({ onSubmit, onCancel, initialData }: Strateg
       risk_settings: riskSettings,
       is_active: initialData?.is_active ?? false,
     });
+  };
+
+  const handleTest = () => {
+    const data = form.getValues();
+    if (onTest) {
+      onTest({
+        ...data,
+        entry_conditions: entryConditions,
+        exit_conditions: exitConditions,
+        indicators,
+        risk_settings: riskSettings,
+      });
+    }
   };
 
   return (
@@ -389,6 +410,17 @@ export const StrategyBuilderForm = ({ onSubmit, onCancel, initialData }: Strateg
           <Button type="button" variant="outline" onClick={onCancel}>
             Cancel
           </Button>
+          {onTest && (
+            <Button 
+              type="button" 
+              variant="secondary" 
+              onClick={handleTest}
+              disabled={isTesting}
+            >
+              <FlaskConical className="h-4 w-4 mr-2" />
+              {isTesting ? 'Testing...' : 'Test Strategy'}
+            </Button>
+          )}
           <Button type="submit">
             {initialData ? 'Update Strategy' : 'Create Strategy'}
           </Button>
