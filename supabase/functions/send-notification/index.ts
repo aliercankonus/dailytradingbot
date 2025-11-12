@@ -18,14 +18,35 @@ const corsHeaders = {
 };
 
 interface NotificationRequest {
-  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit';
-  tradeId: string;
-  symbol: string;
-  side: string;
-  price: number;
-  quantity: number;
+  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation';
+  tradeId?: string;
+  symbol?: string;
+  side?: string;
+  price?: number;
+  quantity?: number;
   profitLoss?: number;
   email?: string;
+  // Strategy rotation fields
+  fromStrategy?: string;
+  toStrategy?: string;
+  reason?: string;
+  fromMetrics?: {
+    winRate: number;
+    profit: number;
+    trades: number;
+    maxDrawdown: number;
+  };
+  toMetrics?: {
+    winRate: number;
+    profit: number;
+    trades: number;
+    maxDrawdown: number;
+  };
+  marketCondition?: {
+    volatility: number;
+    trend: string;
+    volume: number;
+  };
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -53,16 +74,16 @@ const handler = async (req: Request): Promise<Response> => {
 
     switch (payload.type) {
       case 'trade_executed':
-        subject = `Trade Executed: ${payload.side.toUpperCase()} ${payload.symbol}`;
+        subject = `Trade Executed: ${payload.side!.toUpperCase()} ${payload.symbol}`;
         message = `
           <h2>Trade Executed Successfully</h2>
           <p><strong>Symbol:</strong> ${payload.symbol}</p>
-          <p><strong>Side:</strong> ${payload.side.toUpperCase()}</p>
-          <p><strong>Price:</strong> $${payload.price.toFixed(2)}</p>
+          <p><strong>Side:</strong> ${payload.side!.toUpperCase()}</p>
+          <p><strong>Price:</strong> $${payload.price!.toFixed(2)}</p>
           <p><strong>Quantity:</strong> ${payload.quantity}</p>
-          <p><strong>Total:</strong> $${(payload.price * payload.quantity).toFixed(2)}</p>
+          <p><strong>Total:</strong> $${(payload.price! * payload.quantity!).toFixed(2)}</p>
         `;
-        smsMessage = `Trade Executed: ${payload.side.toUpperCase()} ${payload.symbol} @ $${payload.price.toFixed(2)} x${payload.quantity}`;
+        smsMessage = `Trade Executed: ${payload.side!.toUpperCase()} ${payload.symbol} @ $${payload.price!.toFixed(2)} x${payload.quantity}`;
         break;
       
       case 'stop_loss_hit':
@@ -70,10 +91,10 @@ const handler = async (req: Request): Promise<Response> => {
         message = `
           <h2>⚠️ Stop Loss Triggered</h2>
           <p><strong>Symbol:</strong> ${payload.symbol}</p>
-          <p><strong>Exit Price:</strong> $${payload.price.toFixed(2)}</p>
+          <p><strong>Exit Price:</strong> $${payload.price!.toFixed(2)}</p>
           <p><strong>Loss:</strong> <span style="color: #ef4444;">$${payload.profitLoss?.toFixed(2)}</span></p>
         `;
-        smsMessage = `🚨 STOP LOSS HIT: ${payload.symbol} @ $${payload.price.toFixed(2)}. Loss: $${payload.profitLoss?.toFixed(2)}`;
+        smsMessage = `🚨 STOP LOSS HIT: ${payload.symbol} @ $${payload.price!.toFixed(2)}. Loss: $${payload.profitLoss?.toFixed(2)}`;
         break;
       
       case 'take_profit_hit':
@@ -81,10 +102,46 @@ const handler = async (req: Request): Promise<Response> => {
         message = `
           <h2>✅ Take Profit Achieved</h2>
           <p><strong>Symbol:</strong> ${payload.symbol}</p>
-          <p><strong>Exit Price:</strong> $${payload.price.toFixed(2)}</p>
+          <p><strong>Exit Price:</strong> $${payload.price!.toFixed(2)}</p>
           <p><strong>Profit:</strong> <span style="color: #10b981;">$${payload.profitLoss?.toFixed(2)}</span></p>
         `;
-        smsMessage = `✅ TAKE PROFIT: ${payload.symbol} @ $${payload.price.toFixed(2)}. Profit: $${payload.profitLoss?.toFixed(2)}`;
+        smsMessage = `✅ TAKE PROFIT: ${payload.symbol} @ $${payload.price!.toFixed(2)}. Profit: $${payload.profitLoss?.toFixed(2)}`;
+        break;
+      
+      case 'strategy_rotation':
+        subject = `🔄 Strategy Rotation: ${payload.fromStrategy} → ${payload.toStrategy}`;
+        const profitChangeNum = payload.toMetrics!.profit - payload.fromMetrics!.profit;
+        const winRateChangeNum = payload.toMetrics!.winRate - payload.fromMetrics!.winRate;
+        const profitChange = profitChangeNum.toFixed(2);
+        const winRateChange = winRateChangeNum.toFixed(1);
+        message = `
+          <h2>🔄 Strategy Rotation Completed</h2>
+          <p style="margin-bottom: 20px;">${payload.reason}</p>
+          
+          <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+            <h3 style="margin-top: 0; color: #ef4444;">Previous Strategy: ${payload.fromStrategy}</h3>
+            <p><strong>Win Rate:</strong> ${payload.fromMetrics!.winRate.toFixed(1)}%</p>
+            <p><strong>Total Profit:</strong> $${payload.fromMetrics!.profit.toFixed(2)}</p>
+            <p><strong>Total Trades:</strong> ${payload.fromMetrics!.trades}</p>
+            <p><strong>Max Drawdown:</strong> ${payload.fromMetrics!.maxDrawdown.toFixed(2)}%</p>
+          </div>
+          
+          <div style="background: #f0fdf4; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+            <h3 style="margin-top: 0; color: #10b981;">New Strategy: ${payload.toStrategy}</h3>
+            <p><strong>Win Rate:</strong> ${payload.toMetrics!.winRate.toFixed(1)}% <span style="color: ${winRateChangeNum >= 0 ? '#10b981' : '#ef4444'};">(${winRateChangeNum > 0 ? '+' : ''}${winRateChange}%)</span></p>
+            <p><strong>Total Profit:</strong> $${payload.toMetrics!.profit.toFixed(2)} <span style="color: ${profitChangeNum >= 0 ? '#10b981' : '#ef4444'};">(${profitChangeNum > 0 ? '+' : ''}$${profitChange})</span></p>
+            <p><strong>Total Trades:</strong> ${payload.toMetrics!.trades}</p>
+            <p><strong>Max Drawdown:</strong> ${payload.toMetrics!.maxDrawdown.toFixed(2)}%</p>
+          </div>
+          
+          <div style="background: #eff6ff; padding: 15px; border-radius: 8px;">
+            <h3 style="margin-top: 0; color: #2563eb;">Market Conditions</h3>
+            <p><strong>Trend:</strong> ${payload.marketCondition!.trend.toUpperCase()}</p>
+            <p><strong>Volatility:</strong> ${payload.marketCondition!.volatility.toFixed(1)}</p>
+            <p><strong>Volume:</strong> ${payload.marketCondition!.volume.toLocaleString()}</p>
+          </div>
+        `;
+        smsMessage = `🔄 STRATEGY ROTATION: ${payload.fromStrategy} → ${payload.toStrategy}. Win rate: ${payload.toMetrics!.winRate.toFixed(1)}% (${winRateChangeNum > 0 ? '+' : ''}${winRateChange}%). Market: ${payload.marketCondition!.trend}`;
         break;
     }
 
@@ -121,7 +178,7 @@ const handler = async (req: Request): Promise<Response> => {
 
     console.log('Email sent:', emailResponse);
 
-    // Send SMS notification for critical events (stop loss and take profit)
+    // Send SMS notification for critical events (stop loss, take profit, and strategy rotation)
     let smsResponse;
     if (
       riskParams?.sms_notifications_enabled &&
@@ -129,7 +186,7 @@ const handler = async (req: Request): Promise<Response> => {
       twilioAccountSid &&
       twilioAuthToken &&
       twilioPhoneNumber &&
-      (payload.type === 'stop_loss_hit' || payload.type === 'take_profit_hit')
+      (payload.type === 'stop_loss_hit' || payload.type === 'take_profit_hit' || payload.type === 'strategy_rotation')
     ) {
       try {
         const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`;
@@ -167,7 +224,7 @@ const handler = async (req: Request): Promise<Response> => {
       .from('notifications')
       .insert({
         type: payload.type,
-        trade_id: payload.tradeId,
+        trade_id: payload.tradeId || null,
         message: subject,
       });
 

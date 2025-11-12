@@ -142,9 +142,51 @@ Deno.serve(async (req) => {
             from_win_rate: currentActive?.win_rate || 0,
             to_win_rate: bestStrategy.win_rate,
             from_profit: currentActive?.total_profit || 0,
-            to_profit: bestStrategy.total_profit
+            to_profit: bestStrategy.total_profit,
+            from_total_trades: currentActive?.total_trades || 0,
+            to_total_trades: bestStrategy.total_trades,
+            from_max_drawdown: currentActive?.max_drawdown || 0,
+            to_max_drawdown: bestStrategy.max_drawdown
           }
         });
+
+      // Get notification preferences
+      const { data: riskParams } = await supabase
+        .from('risk_parameters')
+        .select('notification_email, notification_phone, email_notifications_enabled, sms_notifications_enabled')
+        .single();
+
+      // Send notification about rotation
+      if (riskParams?.email_notifications_enabled || riskParams?.sms_notifications_enabled) {
+        try {
+          await supabase.functions.invoke('send-notification', {
+            body: {
+              type: 'strategy_rotation',
+              fromStrategy: currentActive?.strategy_name || 'None',
+              toStrategy: bestStrategy.strategy_name,
+              reason: `Score improvement: ${bestStrategy.score.toFixed(2)} vs ${(currentActive?.score || 0).toFixed(2)}`,
+              fromMetrics: {
+                winRate: currentActive?.win_rate || 0,
+                profit: currentActive?.total_profit || 0,
+                trades: currentActive?.total_trades || 0,
+                maxDrawdown: currentActive?.max_drawdown || 0
+              },
+              toMetrics: {
+                winRate: bestStrategy.win_rate,
+                profit: bestStrategy.total_profit,
+                trades: bestStrategy.total_trades,
+                maxDrawdown: bestStrategy.max_drawdown
+              },
+              marketCondition: marketCondition,
+              email: riskParams.notification_email
+            }
+          });
+          console.log('Rotation notification sent');
+        } catch (notifError) {
+          console.error('Failed to send rotation notification:', notifError);
+          // Don't fail rotation if notification fails
+        }
+      }
 
       return new Response(
         JSON.stringify({

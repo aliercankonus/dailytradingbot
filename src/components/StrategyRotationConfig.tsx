@@ -9,6 +9,7 @@ import { useStrategyRotation } from '@/hooks/useStrategyRotation';
 import { Loader2, RefreshCw, History, TrendingUp, Clock, Play, Pause } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useState, useEffect } from 'react';
+import { RotationPerformanceCharts } from './RotationPerformanceCharts';
 
 export const StrategyRotationConfig = () => {
   const { config, history, loading, updateConfig, triggerRotation } = useStrategyRotation();
@@ -193,6 +194,9 @@ export const StrategyRotationConfig = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Performance Comparison Charts */}
+      {history.length > 0 && <RotationPerformanceCharts history={history} />}
 
       {/* Rotation History */}
       <Card>
