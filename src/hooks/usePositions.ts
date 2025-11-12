@@ -1,0 +1,56 @@
+import { useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+
+interface Position {
+  id: string;
+  symbol: string;
+  side: string;
+  quantity: number;
+  entry_price: number;
+  current_price: number | null;
+  stop_loss: number;
+  take_profit: number;
+  unrealized_pnl: number | null;
+  unrealized_pnl_percent: number | null;
+  status: string;
+  opened_at: string;
+}
+
+export const usePositions = () => {
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchPositions = async () => {
+      try {
+        setLoading(true);
+        const { data, error: queryError } = await supabase
+          .from('positions')
+          .select('*')
+          .eq('status', 'active')
+          .order('opened_at', { ascending: false });
+
+        if (queryError) throw queryError;
+        setPositions(data || []);
+      } catch (err) {
+        console.error('Error fetching positions:', err);
+        setError(err instanceof Error ? err.message : 'Failed to fetch positions');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPositions();
+    
+    // Monitor positions every 5 seconds
+    const monitorInterval = setInterval(async () => {
+      await supabase.functions.invoke('monitor-positions');
+      fetchPositions();
+    }, 5000);
+
+    return () => clearInterval(monitorInterval);
+  }, []);
+
+  return { positions, loading, error };
+};

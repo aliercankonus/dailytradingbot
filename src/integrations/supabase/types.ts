@@ -14,6 +14,182 @@ export type Database = {
   }
   public: {
     Tables: {
+      backtesting_results: {
+        Row: {
+          avg_loss: number | null
+          avg_win: number | null
+          created_at: string | null
+          end_date: string
+          final_capital: number | null
+          id: string
+          initial_capital: number
+          largest_loss: number | null
+          largest_win: number | null
+          losing_trades: number | null
+          max_drawdown: number | null
+          net_profit: number | null
+          profit_factor: number | null
+          results_data: Json | null
+          sharpe_ratio: number | null
+          start_date: string
+          strategy_name: string
+          symbol: string
+          total_loss: number | null
+          total_profit: number | null
+          total_trades: number | null
+          win_rate: number | null
+          winning_trades: number | null
+        }
+        Insert: {
+          avg_loss?: number | null
+          avg_win?: number | null
+          created_at?: string | null
+          end_date: string
+          final_capital?: number | null
+          id?: string
+          initial_capital?: number
+          largest_loss?: number | null
+          largest_win?: number | null
+          losing_trades?: number | null
+          max_drawdown?: number | null
+          net_profit?: number | null
+          profit_factor?: number | null
+          results_data?: Json | null
+          sharpe_ratio?: number | null
+          start_date: string
+          strategy_name: string
+          symbol: string
+          total_loss?: number | null
+          total_profit?: number | null
+          total_trades?: number | null
+          win_rate?: number | null
+          winning_trades?: number | null
+        }
+        Update: {
+          avg_loss?: number | null
+          avg_win?: number | null
+          created_at?: string | null
+          end_date?: string
+          final_capital?: number | null
+          id?: string
+          initial_capital?: number
+          largest_loss?: number | null
+          largest_win?: number | null
+          losing_trades?: number | null
+          max_drawdown?: number | null
+          net_profit?: number | null
+          profit_factor?: number | null
+          results_data?: Json | null
+          sharpe_ratio?: number | null
+          start_date?: string
+          strategy_name?: string
+          symbol?: string
+          total_loss?: number | null
+          total_profit?: number | null
+          total_trades?: number | null
+          win_rate?: number | null
+          winning_trades?: number | null
+        }
+        Relationships: []
+      }
+      positions: {
+        Row: {
+          current_price: number | null
+          entry_price: number
+          id: string
+          opened_at: string | null
+          quantity: number
+          side: string
+          status: string
+          stop_loss: number | null
+          symbol: string
+          take_profit: number | null
+          trade_id: string | null
+          unrealized_pnl: number | null
+          unrealized_pnl_percent: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          current_price?: number | null
+          entry_price: number
+          id?: string
+          opened_at?: string | null
+          quantity: number
+          side: string
+          status?: string
+          stop_loss?: number | null
+          symbol: string
+          take_profit?: number | null
+          trade_id?: string | null
+          unrealized_pnl?: number | null
+          unrealized_pnl_percent?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          current_price?: number | null
+          entry_price?: number
+          id?: string
+          opened_at?: string | null
+          quantity?: number
+          side?: string
+          status?: string
+          stop_loss?: number | null
+          symbol?: string
+          take_profit?: number | null
+          trade_id?: string | null
+          unrealized_pnl?: number | null
+          unrealized_pnl_percent?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "positions_trade_id_fkey"
+            columns: ["trade_id"]
+            isOneToOne: false
+            referencedRelation: "trades"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      risk_parameters: {
+        Row: {
+          consecutive_loss_threshold: number
+          consecutive_losses: number | null
+          current_open_trades: number | null
+          id: string
+          is_trading_enabled: boolean | null
+          max_open_trades: number
+          max_risk_per_trade_percent: number
+          portfolio_value: number
+          position_size_reduction_percent: number
+          updated_at: string | null
+        }
+        Insert: {
+          consecutive_loss_threshold?: number
+          consecutive_losses?: number | null
+          current_open_trades?: number | null
+          id?: string
+          is_trading_enabled?: boolean | null
+          max_open_trades?: number
+          max_risk_per_trade_percent?: number
+          portfolio_value?: number
+          position_size_reduction_percent?: number
+          updated_at?: string | null
+        }
+        Update: {
+          consecutive_loss_threshold?: number
+          consecutive_losses?: number | null
+          current_open_trades?: number | null
+          id?: string
+          is_trading_enabled?: boolean | null
+          max_open_trades?: number
+          max_risk_per_trade_percent?: number
+          portfolio_value?: number
+          position_size_reduction_percent?: number
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       strategy_performance: {
         Row: {
           id: string
@@ -46,6 +222,74 @@ export type Database = {
           winning_trades?: number | null
         }
         Relationships: []
+      }
+      trades: {
+        Row: {
+          binance_order_id: string | null
+          closed_at: string | null
+          created_at: string | null
+          entry_price: number
+          executed_at: string | null
+          exit_price: number | null
+          id: string
+          order_type: string
+          profit_loss: number | null
+          profit_loss_percent: number | null
+          quantity: number
+          side: string
+          signal_id: string | null
+          status: string
+          stop_loss: number | null
+          symbol: string
+          take_profit: number | null
+        }
+        Insert: {
+          binance_order_id?: string | null
+          closed_at?: string | null
+          created_at?: string | null
+          entry_price: number
+          executed_at?: string | null
+          exit_price?: number | null
+          id?: string
+          order_type: string
+          profit_loss?: number | null
+          profit_loss_percent?: number | null
+          quantity: number
+          side: string
+          signal_id?: string | null
+          status?: string
+          stop_loss?: number | null
+          symbol: string
+          take_profit?: number | null
+        }
+        Update: {
+          binance_order_id?: string | null
+          closed_at?: string | null
+          created_at?: string | null
+          entry_price?: number
+          executed_at?: string | null
+          exit_price?: number | null
+          id?: string
+          order_type?: string
+          profit_loss?: number | null
+          profit_loss_percent?: number | null
+          quantity?: number
+          side?: string
+          signal_id?: string | null
+          status?: string
+          stop_loss?: number | null
+          symbol?: string
+          take_profit?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trades_signal_id_fkey"
+            columns: ["signal_id"]
+            isOneToOne: false
+            referencedRelation: "trading_signals"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       trading_signals: {
         Row: {
