@@ -32,17 +32,46 @@ export const StrategyComparison = () => {
 
   const fetchResults = async () => {
     try {
-      const { data, error } = await supabase
+      // Fetch backtesting results
+      const { data: backtestData, error: backtestError } = await supabase
         .from('backtesting_results')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setResults(data || []);
+      if (backtestError) throw backtestError;
+
+      // Fetch strategy performance data
+      const { data: perfData, error: perfError } = await supabase
+        .from('strategy_performance')
+        .select('*')
+        .order('total_profit', { ascending: false })
+        .limit(10);
+
+      if (perfError) console.error('Error fetching performance data:', perfError);
+
+      // Combine and format data
+      const combinedResults: BacktestResult[] = [
+        ...(backtestData || []),
+        ...(perfData || []).map(p => ({
+          id: p.id,
+          strategy_name: p.strategy_name,
+          symbol: 'Multiple',
+          win_rate: (p.winning_trades / (p.total_trades || 1)) * 100,
+          net_profit: p.total_profit,
+          sharpe_ratio: 0,
+          max_drawdown: p.max_drawdown,
+          total_trades: p.total_trades,
+          profit_factor: 0,
+          results_data: null,
+          initial_capital: 10000
+        }))
+      ];
+
+      setResults(combinedResults);
       
       // Auto-select first 3 results
-      if (data && data.length > 0) {
-        setSelectedIds(data.slice(0, Math.min(3, data.length)).map(r => r.id));
+      if (combinedResults.length > 0) {
+        setSelectedIds(combinedResults.slice(0, Math.min(3, combinedResults.length)).map(r => r.id));
       }
     } catch (error) {
       console.error('Error fetching results:', error);

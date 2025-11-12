@@ -11,6 +11,7 @@ import { TradingSignalsDashboard } from "@/components/TradingSignalsDashboard";
 import { RiskManagementControls } from "@/components/RiskManagementControls";
 import { PerformanceAnalytics } from "@/components/PerformanceAnalytics";
 import { ActivePositions } from "@/components/ActivePositions";
+import { MarketBasedRecommendations } from "@/components/MarketBasedRecommendations";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const Index = () => {
@@ -69,6 +70,8 @@ const Index = () => {
                 <StrategyOverview />
               </div>
             </div>
+
+            <MarketBasedRecommendations />
 
             <TradeHistory />
           </TabsContent>

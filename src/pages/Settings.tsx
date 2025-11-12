@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,10 +7,11 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Settings as SettingsIcon, Key, Mail, Shield } from 'lucide-react';
+import { Settings as SettingsIcon, Key, Mail, Shield, ArrowLeft } from 'lucide-react';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 
 export default function Settings() {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const { riskParams, updateRiskParameters } = useRiskParameters();
   const [loading, setLoading] = useState(false);
@@ -117,6 +119,15 @@ export default function Settings() {
   return (
     <div className="container mx-auto p-6 space-y-6">
       <div className="flex items-center gap-3 mb-6">
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          onClick={() => navigate('/')}
+          className="mr-2"
+        >
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back
+        </Button>
         <SettingsIcon className="h-8 w-8 text-primary" />
         <h1 className="text-3xl font-bold">Settings</h1>
       </div>
