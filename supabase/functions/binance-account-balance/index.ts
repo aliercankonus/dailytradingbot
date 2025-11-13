@@ -33,7 +33,8 @@ Deno.serve(async (req) => {
     // Get risk parameters to check paper trading mode
     let riskQuery = supabase
       .from('risk_parameters')
-      .select('paper_trading_mode, portfolio_value');
+      .select('paper_trading_mode, portfolio_value')
+      .limit(1);
     if (userId) {
       // Prefer user-specific settings when available
       // deno-lint-ignore no-unused-vars
