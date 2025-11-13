@@ -42,11 +42,14 @@ export const useCustomStrategies = () => {
     }
   };
 
-  const createStrategy = async (strategy: Omit<CustomStrategy, 'id' | 'created_at' | 'updated_at'>) => {
+  const createStrategy = async (strategy: Omit<CustomStrategy, 'id' | 'created_at' | 'updated_at' | 'user_id'>) => {
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
       const { data, error } = await (supabase as any)
         .from('custom_strategies')
-        .insert([strategy])
+        .insert([{ ...strategy, user_id: user.id }])
         .select()
         .single();
 

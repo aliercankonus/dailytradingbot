@@ -12,20 +12,37 @@ serve(async (req) => {
   }
 
   try {
-    const { signalId, action } = await req.json();
-    console.log('Execute trade request:', { signalId, action });
+    // Get user from authorization header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      throw new Error('No authorization header');
+    }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      global: {
+        headers: { Authorization: authHeader }
+      }
+    });
+
+    // Verify user
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      throw new Error('Unauthorized');
+    }
+
+    const { signalId, action } = await req.json();
+    console.log('Execute trade request:', { signalId, action, userId: user.id });
+
     const binanceApiKey = Deno.env.get('BINANCE_API_KEY');
     const binanceApiSecret = Deno.env.get('BINANCE_API_SECRET');
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Get risk parameters
+    // Get risk parameters for the user
     const { data: riskParams } = await supabase
       .from('risk_parameters')
       .select('*')
+      .eq('user_id', user.id)
       .single();
 
     if (!riskParams?.is_trading_enabled) {
@@ -127,6 +144,7 @@ serve(async (req) => {
     const { data: trade, error: tradeError } = await supabase
       .from('trades')
       .insert({
+        user_id: user.id,
         signal_id: signalId,
         symbol: signal.symbol,
         side,
@@ -151,6 +169,7 @@ serve(async (req) => {
     await supabase
       .from('positions')
       .insert({
+        user_id: user.id,
         trade_id: trade.id,
         symbol: signal.symbol,
         side,
