@@ -21,7 +21,8 @@ export const CloseAllTradesButton = () => {
   const { toast } = useToast();
   const [isClosing, setIsClosing] = useState(false);
   const { refetch: refetchTrades } = useTrades();
-  const { refetch: refetchPositions } = usePositions();
+  const { positions, refetch: refetchPositions } = usePositions();
+  const hasOpenPositions = positions.length > 0;
 
   const closeAllTrades = async () => {
     try {
@@ -53,7 +54,11 @@ export const CloseAllTradesButton = () => {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button variant="destructive" size="sm" disabled={isClosing}>
+        <Button 
+          variant="destructive" 
+          size="sm" 
+          disabled={isClosing || !hasOpenPositions}
+        >
           {isClosing ? (
             <>
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />

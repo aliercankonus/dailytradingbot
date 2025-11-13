@@ -60,6 +60,8 @@ export const TradeHistory = () => {
               <th className="text-left py-2 px-2">Type</th>
               <th className="text-right py-2 px-2">Entry</th>
               <th className="text-right py-2 px-2">Exit</th>
+              <th className="text-right py-2 px-2">Stop Loss</th>
+              <th className="text-right py-2 px-2">Take Profit</th>
               <th className="text-right py-2 px-2">Quantity</th>
               <th className="text-right py-2 px-2">P&L</th>
               <th className="text-left py-2 px-2">Status</th>
@@ -68,13 +70,13 @@ export const TradeHistory = () => {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="text-center py-8 text-muted-foreground">
+                <td colSpan={10} className="text-center py-8 text-muted-foreground">
                   Loading trade data...
                 </td>
               </tr>
             ) : filteredTrades.length === 0 ? (
               <tr>
-                <td colSpan={8} className="text-center py-8 text-muted-foreground">
+                <td colSpan={10} className="text-center py-8 text-muted-foreground">
                   No trades executed yet
                 </td>
               </tr>
@@ -116,6 +118,12 @@ export const TradeHistory = () => {
                   </td>
                   <td className="py-3 px-2 text-right font-mono text-foreground">
                     {trade.exit_price ? `$${trade.exit_price.toFixed(2)}` : '-'}
+                  </td>
+                  <td className="py-3 px-2 text-right font-mono text-red-500">
+                    ${trade.stop_loss?.toFixed(2) || '-'}
+                  </td>
+                  <td className="py-3 px-2 text-right font-mono text-green-500">
+                    ${trade.take_profit?.toFixed(2) || '-'}
                   </td>
                   <td className="py-3 px-2 text-right font-mono text-muted-foreground">
                     {trade.quantity.toFixed(4)}
