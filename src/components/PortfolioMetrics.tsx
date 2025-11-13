@@ -86,7 +86,7 @@ export const PortfolioMetrics = () => {
   ];
 
   return (
-    <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
+    <Card className="h-full p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-foreground">Portfolio Overview</h3>
         <div className="flex items-center gap-2 text-xs">
