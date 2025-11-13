@@ -15,8 +15,7 @@ export const TradingSignalsDashboard = () => {
   const { generateSignals, isGenerating } = useSignalGenerator();
   const { toast } = useToast();
   const { riskParams, loading: riskLoading, updateRiskParameters } = useRiskParameters();
-  const autoExecEnabled = Boolean(riskParams?.is_trading_enabled) &&
-    ((riskParams?.current_open_trades ?? 0) < (riskParams?.max_open_trades ?? 0));
+  const autoExecEnabled = Boolean(riskParams?.is_trading_enabled);
 
   const toggleAutoExecution = async (enabled: boolean) => {
     try {
