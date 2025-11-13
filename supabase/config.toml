@@ -1,5 +1,8 @@
 project_id = "ikrivrudkvvnksollslh"
 
+[functions.binance-account-balance]
+verify_jwt = false
+
 [functions.update-strategy-performance]
 verify_jwt = false
 
