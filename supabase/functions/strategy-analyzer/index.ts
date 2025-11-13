@@ -506,14 +506,42 @@ serve(async (req) => {
 
     console.log(`Generated ${allSignals.length} signals total, executed ${executedSignals.length}`);
 
-    // Clean up old signals
-    const { error: deleteError } = await supabase
-      .from('trading_signals')
-      .delete()
-      .lt('expires_at', new Date().toISOString());
+    // Clean up old signals that are NOT referenced by trades
+    try {
+      // First, get IDs of signals that are referenced by trades
+      const { data: referencedSignals } = await supabase
+        .from('trades')
+        .select('signal_id')
+        .not('signal_id', 'is', null);
 
-    if (deleteError) {
-      console.error('Error cleaning up old signals:', deleteError);
+      const referencedIds = referencedSignals?.map(t => t.signal_id) || [];
+
+      // Delete only expired signals that are NOT referenced
+      const { data: expiredSignals } = await supabase
+        .from('trading_signals')
+        .select('id')
+        .lt('expires_at', new Date().toISOString());
+
+      if (expiredSignals && expiredSignals.length > 0) {
+        const idsToDelete = expiredSignals
+          .filter(s => !referencedIds.includes(s.id))
+          .map(s => s.id);
+
+        if (idsToDelete.length > 0) {
+          const { error: deleteError } = await supabase
+            .from('trading_signals')
+            .delete()
+            .in('id', idsToDelete);
+
+          if (deleteError) {
+            console.error('Error cleaning up old signals:', deleteError);
+          } else {
+            console.log(`Cleaned up ${idsToDelete.length} expired signals`);
+          }
+        }
+      }
+    } catch (cleanupError) {
+      console.error('Error during signal cleanup:', cleanupError);
     }
 
     return new Response(

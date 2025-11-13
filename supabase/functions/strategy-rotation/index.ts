@@ -33,13 +33,27 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Get user from auth header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      throw new Error('No authorization header');
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+    
+    if (userError || !user) {
+      throw new Error('Invalid user token');
+    }
+
     console.log('Starting strategy rotation evaluation...');
 
     // Get rotation configuration
     const { data: config, error: configError } = await supabase
       .from('strategy_rotation_config')
       .select('*')
-      .single();
+      .eq('user_id', user.id)
+      .maybeSingle();
 
     if (configError || !config?.enabled) {
       console.log('Strategy rotation is disabled');
@@ -59,7 +73,8 @@ Deno.serve(async (req) => {
     // Get all strategies with their performance
     const { data: strategies, error: strategiesError } = await supabase
       .from('strategy_performance')
-      .select('*');
+      .select('*')
+      .eq('user_id', user.id);
 
     if (strategiesError || !strategies) {
       throw new Error('Failed to fetch strategies');
@@ -154,7 +169,8 @@ Deno.serve(async (req) => {
       const { data: riskParams } = await supabase
         .from('risk_parameters')
         .select('notification_email, notification_phone, email_notifications_enabled, sms_notifications_enabled')
-        .single();
+        .eq('user_id', user.id)
+        .maybeSingle();
 
       // Send notification about rotation
       if (riskParams?.email_notifications_enabled || riskParams?.sms_notifications_enabled) {
