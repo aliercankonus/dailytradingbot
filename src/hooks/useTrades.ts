@@ -24,31 +24,31 @@ export const useTrades = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchTrades = async () => {
+    try {
+      setLoading(true);
+      const { data, error: queryError } = await supabase
+        .from('trades')
+        .select('*')
+        .order('executed_at', { ascending: false })
+        .limit(50);
+
+      if (queryError) throw queryError;
+      setTrades(data || []);
+    } catch (err) {
+      console.error('Error fetching trades:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch trades');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchTrades = async () => {
-      try {
-        setLoading(true);
-        const { data, error: queryError } = await supabase
-          .from('trades')
-          .select('*')
-          .order('executed_at', { ascending: false })
-          .limit(50);
-
-        if (queryError) throw queryError;
-        setTrades(data || []);
-      } catch (err) {
-        console.error('Error fetching trades:', err);
-        setError(err instanceof Error ? err.message : 'Failed to fetch trades');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchTrades();
     const interval = setInterval(fetchTrades, 10000);
 
     return () => clearInterval(interval);
   }, []);
 
-  return { trades, loading, error };
+  return { trades, loading, error, refetch: fetchTrades };
 };
