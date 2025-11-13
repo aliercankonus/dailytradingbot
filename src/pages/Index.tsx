@@ -13,6 +13,7 @@ import { ActivePositions } from "@/components/ActivePositions";
 import { MarketBasedRecommendations } from "@/components/MarketBasedRecommendations";
 import { CloseAllTradesButton } from "@/components/CloseAllTradesButton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -42,6 +43,7 @@ const Index = () => {
       </header>
       
       <main className="container mx-auto px-4 py-6">
+        <AutoSignalGenerator />
         <Tabs defaultValue="dashboard" className="space-y-6">
           <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
