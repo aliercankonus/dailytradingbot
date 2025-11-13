@@ -300,8 +300,15 @@ serve(async (req) => {
     // Authenticate user
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      return new Response(JSON.stringify({ success: false, error: 'Unauthorized' }), {
-        status: 401,
+      // Be graceful for unauthenticated calls (e.g., expired session on auto-poll)
+      return new Response(JSON.stringify({ 
+        success: true, 
+        signals: [], 
+        executedSignals: 0,
+        autoExecuteEnabled: false,
+        message: 'Not authenticated'
+      }), {
+        status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
@@ -310,8 +317,15 @@ serve(async (req) => {
     const { data: { user }, error: userError } = await supabase.auth.getUser(token);
     
     if (userError || !user) {
-      return new Response(JSON.stringify({ success: false, error: 'Invalid token' }), {
-        status: 401,
+      // Graceful fallback for invalid/expired token
+      return new Response(JSON.stringify({ 
+        success: true, 
+        signals: [], 
+        executedSignals: 0,
+        autoExecuteEnabled: false,
+        message: 'Not authenticated'
+      }), {
+        status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
