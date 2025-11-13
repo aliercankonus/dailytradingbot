@@ -1,6 +1,8 @@
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { useSignals } from '@/hooks/useSignals';
 import { useSignalGenerator } from '@/hooks/useSignalGenerator';
 import { supabase } from '@/integrations/supabase/client';
@@ -12,9 +14,27 @@ export const TradingSignalsDashboard = () => {
   const { signals, loading } = useSignals();
   const { generateSignals, isGenerating } = useSignalGenerator();
   const { toast } = useToast();
-  const { riskParams, loading: riskLoading } = useRiskParameters();
+  const { riskParams, loading: riskLoading, updateRiskParameters } = useRiskParameters();
   const autoExecEnabled = Boolean(riskParams?.is_trading_enabled) &&
     ((riskParams?.current_open_trades ?? 0) < (riskParams?.max_open_trades ?? 0));
+
+  const toggleAutoExecution = async (enabled: boolean) => {
+    try {
+      await updateRiskParameters({ is_trading_enabled: enabled });
+      toast({
+        title: enabled ? "Auto Execution Enabled" : "Auto Execution Disabled",
+        description: enabled 
+          ? "Trades will be executed automatically when signals are generated" 
+          : "Manual trade execution required",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update auto execution setting",
+        variant: "destructive",
+      });
+    }
+  };
 
   const executeTrade = async (signalId: string, symbol: string) => {
     try {
@@ -54,10 +74,17 @@ export const TradingSignalsDashboard = () => {
           <Badge variant="outline" className="text-sm">
             {signals.length} Active Signals
           </Badge>
-          <Badge variant={autoExecEnabled ? 'default' : 'secondary'} className="text-sm">
-            Auto Execution: {autoExecEnabled ? 'ON' : 'OFF'}
-          </Badge>
-          <Button 
+          <div className="flex items-center gap-2 border rounded-md px-3 py-1.5">
+            <Label htmlFor="auto-exec" className="text-sm cursor-pointer">
+              Auto Execution
+            </Label>
+            <Switch
+              id="auto-exec"
+              checked={riskParams?.is_trading_enabled ?? true}
+              onCheckedChange={toggleAutoExecution}
+            />
+          </div>
+          <Button
             variant="outline" 
             size="sm"
             onClick={generateSignals}
