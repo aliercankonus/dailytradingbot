@@ -39,27 +39,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         // Handle initial setup for new users
         if (event === 'SIGNED_IN' && session?.user) {
-          setTimeout(async () => {
-            // Check if risk parameters exist, create if not
-            const { data: riskParams } = await supabase
-              .from('risk_parameters')
-              .select('id')
-              .eq('user_id', session.user.id)
-              .maybeSingle();
-
-            if (!riskParams) {
-              await supabase.from('risk_parameters').insert({
-                user_id: session.user.id,
-                portfolio_value: 10000,
-                max_risk_per_trade_percent: 1.5,
-                max_open_trades: 5,
-                consecutive_loss_threshold: 3,
-                position_size_reduction_percent: 50,
-                paper_trading_mode: true,
-                is_trading_enabled: true,
-              });
-            }
-          }, 0);
+          // Initialization is now handled by database triggers
         }
       }
     );
