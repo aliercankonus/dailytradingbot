@@ -99,26 +99,51 @@ function detectTrend(data: MarketData): 'bullish' | 'bearish' | 'ranging' {
   return 'ranging';
 }
 
-// Fetch historical prices (simplified - using current price with variations)
-function generateHistoricalPrices(currentPrice: number, changePercent: number): number[] {
-  const prices: number[] = [];
-  const volatility = Math.abs(changePercent) / 100;
-  
-  // Generate 30 historical prices
-  for (let i = 30; i >= 0; i--) {
-    const variation = (Math.random() - 0.5) * volatility * currentPrice;
-    const trend = (changePercent / 100) * currentPrice * (i / 30);
-    prices.push(currentPrice - trend + variation);
+// Fetch real Binance kline data with volume
+async function fetchBinanceKlines(symbol: string, limit: number = 100): Promise<{ prices: number[], volumes: number[] }> {
+  try {
+    const response = await fetch(
+      `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=${limit}`
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Binance API error: ${response.status}`);
+    }
+    
+    const klines = await response.json();
+    
+    // Binance klines: [openTime, open, high, low, close, volume, closeTime, quoteVolume, trades, ...]
+    const prices = klines.map((k: any) => parseFloat(k[4])); // close prices
+    const volumes = klines.map((k: any) => parseFloat(k[5])); // volumes
+    
+    console.log(`Fetched ${prices.length} klines for ${symbol}, latest volume: ${volumes[volumes.length - 1]}`);
+    
+    return { prices, volumes };
+  } catch (error) {
+    console.error(`Failed to fetch Binance klines for ${symbol}:`, error);
+    // Fallback to synthetic data
+    const prices: number[] = [];
+    const volumes: number[] = [];
+    let price = 50000;
+    
+    for (let i = 0; i < limit; i++) {
+      const change = (Math.random() - 0.5) * 0.02;
+      price = price * (1 + change);
+      prices.push(price);
+      volumes.push(Math.random() * 1000000 + 500000); // synthetic volume with minimum
+    }
+    
+    console.log(`Using synthetic data for ${symbol}, generated ${prices.length} prices`);
+    return { prices, volumes };
   }
-  
-  return prices;
 }
 
 // Calculate indicator value
 function calculateIndicator(
   indicatorConfig: IndicatorConfig,
   marketData: MarketData,
-  historicalPrices: number[]
+  historicalPrices: number[],
+  volumes: number[]
 ): number {
   const currentPrice = parseFloat(marketData.lastPrice);
   
@@ -132,6 +157,13 @@ function calculateIndicator(
       return macd.macd;
     case 'Price':
       return currentPrice;
+    case 'Volume':
+      return volumes[volumes.length - 1] || 0;
+    case 'Volume_Avg': {
+      const period = indicatorConfig.period || 20;
+      const recentVolumes = volumes.slice(-period);
+      return recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
+    }
     default:
       return 0;
   }
@@ -143,8 +175,19 @@ function evaluateCondition(
   indicatorValues: Map<string, number>,
   marketData: MarketData
 ): boolean {
-  const indicatorValue = indicatorValues.get(condition.indicator) || 0;
+  // Skip conditions with empty or invalid thresholds
+  if (!condition.value || condition.value.trim() === '') {
+    console.log(`Skipping invalid condition: ${condition.indicator} ${condition.operator} (empty threshold)`);
+    return true; // Don't block signal due to invalid config
+  }
+  
   const targetValue = parseFloat(condition.value);
+  if (isNaN(targetValue)) {
+    console.log(`Skipping invalid condition: ${condition.indicator} ${condition.operator} ${condition.value} (not a number)`);
+    return true;
+  }
+  
+  const indicatorValue = indicatorValues.get(condition.indicator) || 0;
   
   console.log(`Evaluating: ${condition.indicator} ${condition.operator} ${condition.value} (current: ${indicatorValue})`);
   
@@ -165,16 +208,14 @@ function evaluateCondition(
 }
 
 // Analyze market using custom strategy
-function analyzeWithStrategy(data: MarketData, strategy: CustomStrategy) {
+async function analyzeWithStrategy(data: MarketData, strategy: CustomStrategy, prices: number[], volumes: number[]) {
   const currentPrice = parseFloat(data.lastPrice);
-  const changePercent = parseFloat(data.priceChangePercent);
-  const historicalPrices = generateHistoricalPrices(currentPrice, changePercent);
   
   // Calculate all indicators for this strategy
   const indicatorValues = new Map<string, number>();
   
   for (const indicatorConfig of strategy.indicators) {
-    const value = calculateIndicator(indicatorConfig, data, historicalPrices);
+    const value = calculateIndicator(indicatorConfig, data, prices, volumes);
     indicatorValues.set(indicatorConfig.type, value);
     console.log(`Calculated ${indicatorConfig.type}: ${value}`);
   }
@@ -318,7 +359,10 @@ serve(async (req) => {
       console.log(`Analyzing with strategy: ${strategy.name}`);
       
       for (const data of marketData) {
-        const signal = analyzeWithStrategy(data, strategy);
+        // Fetch real Binance kline data with volume
+        const { prices, volumes } = await fetchBinanceKlines(data.symbol, 100);
+        
+        const signal = await analyzeWithStrategy(data, strategy, prices, volumes);
         
         // Only store signals that are not 'hold'
         if (signal.signalType !== 'hold') {
