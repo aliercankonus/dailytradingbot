@@ -28,10 +28,10 @@ export const useRiskParameters = () => {
       const { data, error: queryError } = await supabase
         .from('risk_parameters')
         .select('*')
-        .single();
+        .maybeSingle();
 
       if (queryError) throw queryError;
-      setRiskParams(data);
+      setRiskParams(data || null);
     } catch (err) {
       console.error('Error fetching risk parameters:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch risk parameters');

@@ -6,11 +6,15 @@ import { useSignalGenerator } from '@/hooks/useSignalGenerator';
 import { supabase } from '@/integrations/supabase/client';
 import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useRiskParameters } from '@/hooks/useRiskParameters';
 
 export const TradingSignalsDashboard = () => {
   const { signals, loading } = useSignals();
   const { generateSignals, isGenerating } = useSignalGenerator();
   const { toast } = useToast();
+  const { riskParams, loading: riskLoading } = useRiskParameters();
+  const autoExecEnabled = Boolean(riskParams?.is_trading_enabled) &&
+    ((riskParams?.current_open_trades ?? 0) < (riskParams?.max_open_trades ?? 0));
 
   const executeTrade = async (signalId: string, symbol: string) => {
     try {
@@ -38,7 +42,7 @@ export const TradingSignalsDashboard = () => {
     }
   };
 
-  if (loading) {
+  if (loading || riskLoading) {
     return <Card className="p-6"><p className="text-muted-foreground">Loading signals...</p></Card>;
   }
 
@@ -49,6 +53,9 @@ export const TradingSignalsDashboard = () => {
         <div className="flex items-center gap-3">
           <Badge variant="outline" className="text-sm">
             {signals.length} Active Signals
+          </Badge>
+          <Badge variant={autoExecEnabled ? 'default' : 'secondary'} className="text-sm">
+            Auto Execution: {autoExecEnabled ? 'ON' : 'OFF'}
           </Badge>
           <Button 
             variant="outline" 
@@ -140,12 +147,16 @@ export const TradingSignalsDashboard = () => {
               <div className="text-xs text-muted-foreground">
                 Risk/Reward: 1:{signal.risk_reward_ratio?.toFixed(2)}
               </div>
-              <Button 
-                onClick={() => executeTrade(signal.id, signal.symbol)}
-                variant={signal.signal_type === 'long' ? 'default' : 'destructive'}
-              >
-                Execute Trade
-              </Button>
+              {autoExecEnabled ? (
+                <Badge variant="outline">Auto-execution ON</Badge>
+              ) : (
+                <Button 
+                  onClick={() => executeTrade(signal.id, signal.symbol)}
+                  variant={signal.signal_type === 'long' ? 'default' : 'destructive'}
+                >
+                  Execute Trade
+                </Button>
+              )}
             </div>
           </Card>
         ))}
