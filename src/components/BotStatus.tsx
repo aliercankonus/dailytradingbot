@@ -63,7 +63,7 @@ export const BotStatus = () => {
   };
 
   return (
-    <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
+    <Card className="h-full p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-foreground">Bot Status</h3>
