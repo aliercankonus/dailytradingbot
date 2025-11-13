@@ -10,7 +10,7 @@ import { TradingSignalsDashboard } from "@/components/TradingSignalsDashboard";
 import { RiskManagementControls } from "@/components/RiskManagementControls";
 import { PerformanceAnalytics } from "@/components/PerformanceAnalytics";
 import { ActivePositions } from "@/components/ActivePositions";
-import { MarketBasedRecommendations } from "@/components/MarketBasedRecommendations";
+
 import { CloseAllTradesButton } from "@/components/CloseAllTradesButton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
@@ -74,7 +74,7 @@ const Index = () => {
               <StrategyOverview />
             </div>
 
-            <MarketBasedRecommendations />
+            
           </TabsContent>
 
           <TabsContent value="signals">
