@@ -510,7 +510,10 @@ serve(async (req) => {
             try {
               console.log(`Auto-executing signal ${insertedSignal.id} for ${signal.symbol}`);
               const { error: execError } = await supabase.functions.invoke('execute-trade', {
-                body: { signalId: insertedSignal.id, action: 'execute' }
+                body: { signalId: insertedSignal.id, action: 'execute' },
+                headers: {
+                  Authorization: authHeader
+                }
               });
               
               if (execError) {
