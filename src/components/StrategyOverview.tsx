@@ -34,17 +34,19 @@ export const StrategyOverview = () => {
     <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
       <h3 className="text-lg font-semibold text-foreground mb-4">Active Strategies</h3>
       
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {loading ? (
-          <div className="col-span-3 text-center py-8 text-muted-foreground">
+          <div className="col-span-full text-center py-8 text-muted-foreground">
             Loading strategies...
           </div>
         ) : strategies.length === 0 ? (
-          <div className="col-span-3 text-center py-8 text-muted-foreground">
+          <div className="col-span-full text-center py-8 text-muted-foreground">
             No strategies available
           </div>
         ) : (
-          strategies.map((strategy, idx) => (
+          strategies
+            .filter(s => s.status === 'active')
+            .map((strategy, idx) => (
           <div
             key={idx}
             className="p-4 rounded-lg bg-secondary/50 border border-border hover:border-primary/50 transition-colors"
@@ -52,8 +54,8 @@ export const StrategyOverview = () => {
             <div className="flex items-start justify-between mb-3">
               <strategy.icon className={`h-5 w-5 ${strategy.color}`} />
               <Badge
-                variant={strategy.status === "active" ? "default" : "secondary"}
-                className={strategy.status === "active" ? "bg-success/20 text-success" : ""}
+                variant="default"
+                className="bg-success/20 text-success"
               >
                 {strategy.status}
               </Badge>

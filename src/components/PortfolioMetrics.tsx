@@ -76,6 +76,13 @@ export const PortfolioMetrics = () => {
       isPositive: parseFloat(metrics.winRate) >= 50,
       icon: Target,
     },
+    {
+      label: "Open Positions",
+      value: positions.length.toString(),
+      change: `${riskParams?.current_open_trades || 0}/${riskParams?.max_open_trades || 0} trades`,
+      isPositive: true,
+      icon: Activity,
+    },
   ];
 
   return (
@@ -90,7 +97,7 @@ export const PortfolioMetrics = () => {
         </div>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {metricsDisplay.map((metric, idx) => (
           <div key={idx} className="space-y-2">
             <div className="flex items-center justify-between">

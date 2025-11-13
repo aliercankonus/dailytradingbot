@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowUpRight, ArrowDownRight, Filter, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ArrowUpRight, ArrowDownRight, Filter, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTrades } from "@/hooks/useTrades";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState, useMemo } from "react";
@@ -8,6 +9,8 @@ import { useState, useMemo } from "react";
 export const TradeHistory = () => {
   const { trades, loading } = useTrades();
   const [selectedStrategy, setSelectedStrategy] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const tradesPerPage = 10;
 
   const strategies = useMemo(() => {
     const uniqueStrategies = new Set(trades.map(t => t.strategy_name || 'Unknown'));
@@ -18,6 +21,17 @@ export const TradeHistory = () => {
     if (selectedStrategy === "all") return trades;
     return trades.filter(t => (t.strategy_name || 'Unknown') === selectedStrategy);
   }, [trades, selectedStrategy]);
+
+  // Pagination logic
+  const totalPages = Math.ceil(filteredTrades.length / tradesPerPage);
+  const startIndex = (currentPage - 1) * tradesPerPage;
+  const endIndex = startIndex + tradesPerPage;
+  const paginatedTrades = filteredTrades.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filter changes
+  useMemo(() => {
+    setCurrentPage(1);
+  }, [selectedStrategy]);
 
   return (
     <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
@@ -74,14 +88,14 @@ export const TradeHistory = () => {
                   Loading trade data...
                 </td>
               </tr>
-            ) : filteredTrades.length === 0 ? (
+            ) : paginatedTrades.length === 0 ? (
               <tr>
                 <td colSpan={10} className="text-center py-8 text-muted-foreground">
-                  No trades executed yet
+                  No trades found
                 </td>
               </tr>
             ) : (
-              filteredTrades.map((trade) => (
+              paginatedTrades.map((trade) => (
                 <tr
                   key={trade.id}
                   className="text-sm border-b border-border/50 hover:bg-secondary/30 transition-colors"
@@ -158,6 +172,36 @@ export const TradeHistory = () => {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
+          <div className="text-sm text-muted-foreground">
+            Showing {startIndex + 1}-{Math.min(endIndex, filteredTrades.length)} of {filteredTrades.length} trades
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div className="text-sm text-muted-foreground">
+              Page {currentPage} of {totalPages}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
     </Card>
   );
 };
