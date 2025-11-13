@@ -37,29 +37,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(session?.user ?? null);
         setLoading(false);
 
-        // Handle profile creation for new users
+        // Handle initial setup for new users
         if (event === 'SIGNED_IN' && session?.user) {
           setTimeout(async () => {
-            // Check if profile exists, create if not
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('id')
-              .eq('id', session.user.id)
-              .single();
-
-            if (!profile) {
-              await supabase.from('profiles').insert({
-                id: session.user.id,
-                email: session.user.email,
-              });
-            }
-
             // Check if risk parameters exist, create if not
             const { data: riskParams } = await supabase
               .from('risk_parameters')
               .select('id')
               .eq('user_id', session.user.id)
-              .single();
+              .maybeSingle();
 
             if (!riskParams) {
               await supabase.from('risk_parameters').insert({
