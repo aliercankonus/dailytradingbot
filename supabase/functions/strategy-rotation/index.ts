@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
         .update({ status: 'active' })
         .eq('id', bestStrategy.id);
 
-      // Record rotation history
+      // Record rotation history with user_id
       await supabase
         .from('strategy_rotation_history')
         .insert({
@@ -162,7 +162,8 @@ Deno.serve(async (req) => {
             to_total_trades: bestStrategy.total_trades,
             from_max_drawdown: currentActive?.max_drawdown || 0,
             to_max_drawdown: bestStrategy.max_drawdown
-          }
+          },
+          user_id: user.id
         });
 
       // Get notification preferences
@@ -178,6 +179,7 @@ Deno.serve(async (req) => {
           await supabase.functions.invoke('send-notification', {
             body: {
               type: 'strategy_rotation',
+              userId: user.id,
               fromStrategy: currentActive?.strategy_name || 'None',
               toStrategy: bestStrategy.strategy_name,
               reason: `Score improvement: ${bestStrategy.score.toFixed(2)} vs ${(currentActive?.score || 0).toFixed(2)}`,

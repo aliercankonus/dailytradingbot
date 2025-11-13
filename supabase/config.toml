@@ -1,53 +1,10 @@
 project_id = "ikrivrudkvvnksollslh"
 
-[functions.binance-account-balance]
-verify_jwt = false
-
-[functions.strategy-rotation]
-verify_jwt = false
-
-[functions.update-strategy-performance]
-verify_jwt = false
-
-[functions.close-trade]
-verify_jwt = false
-
 [functions.market-data]
 verify_jwt = false
 
 [functions.realtime-prices]
 verify_jwt = false
 
-[functions.strategy-analyzer]
-verify_jwt = false
-
-[functions.send-notification]
-verify_jwt = false
-
-[functions.execute-trade]
-verify_jwt = false
-
-[functions.backtest-strategy]
-verify_jwt = false
-
-[functions.monitor-positions]
-verify_jwt = false
-
-[functions.test-strategy]
-verify_jwt = false
-
-[functions.optimize-strategy]
-verify_jwt = false
-
-[functions.ai-strategy-recommender]
-verify_jwt = false
-
-[functions.monte-carlo-simulation]
-verify_jwt = false
-
 [functions.realtime-market-data]
 verify_jwt = false
-
-[functions.strategy-rotation]
-verify_jwt = false
-

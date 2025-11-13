@@ -12,21 +12,41 @@ serve(async (req) => {
   }
 
   try {
-    const { positionId, closeAll, manualClose = false } = await req.json();
-    console.log('Close trade request:', { positionId, closeAll, manualClose });
-
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Authenticate user
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(JSON.stringify({ success: false, error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+    
+    if (userError || !user) {
+      return new Response(JSON.stringify({ success: false, error: 'Invalid token' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const { positionId, closeAll, manualClose = false } = await req.json();
+    console.log(`Close trade request by user ${user.id}:`, { positionId, closeAll, manualClose });
+
     let closedCount = 0;
 
     if (closeAll) {
-      // Close all active positions
+      // Close all active positions for this user
       const { data: positions, error: fetchError } = await supabase
         .from('positions')
         .select('*')
-        .eq('status', 'active');
+        .eq('status', 'active')
+        .eq('user_id', user.id);
 
       if (fetchError) throw fetchError;
 
@@ -44,12 +64,13 @@ serve(async (req) => {
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     } else {
-      // Close single position
+      // Close single position for this user
       const { data: position, error: fetchError } = await supabase
         .from('positions')
         .select('*')
         .eq('id', positionId)
         .eq('status', 'active')
+        .eq('user_id', user.id)
         .single();
 
       if (fetchError) throw fetchError;
@@ -107,10 +128,11 @@ async function closePosition(supabase: any, position: any, manualClose: boolean 
     })
     .eq('id', position.trade_id);
 
-  // Update risk parameters - decrement open trades count
+  // Update risk parameters for this user - decrement open trades count
   const { data: riskParams } = await supabase
     .from('risk_parameters')
     .select('*')
+    .eq('user_id', position.user_id)
     .single();
 
   if (riskParams) {

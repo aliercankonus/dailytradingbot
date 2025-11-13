@@ -19,6 +19,7 @@ const corsHeaders = {
 
 interface NotificationRequest {
   type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation';
+  userId?: string;
   tradeId?: string;
   symbol?: string;
   side?: string;
@@ -219,13 +220,14 @@ const handler = async (req: Request): Promise<Response> => {
       }
     }
 
-    // Store notification in database
+    // Store notification in database with user_id
     const { error: dbError } = await supabase
       .from('notifications')
       .insert({
         type: payload.type,
         trade_id: payload.tradeId || null,
         message: subject,
+        user_id: payload.userId || null,
       });
 
     if (dbError) {
