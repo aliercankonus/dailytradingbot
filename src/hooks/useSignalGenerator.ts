@@ -9,9 +9,24 @@ export const useSignalGenerator = () => {
   const generateSignals = async () => {
     try {
       setIsGenerating(true);
+      
+      // Check if user is authenticated before making the call
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        console.log('No active session, skipping signal generation');
+        return;
+      }
+
       const { data, error } = await supabase.functions.invoke('strategy-analyzer');
 
-      if (error) throw error;
+      if (error) {
+        // Don't show toast for auth errors during auto-polling
+        if (error.message?.includes('token') || error.message?.includes('401')) {
+          console.log('Authentication error during auto signal generation, session may have expired');
+          return;
+        }
+        throw error;
+      }
 
       if (data?.signals?.length > 0) {
         toast({
