@@ -28,7 +28,7 @@ export const CloseAllTradesButton = () => {
     try {
       setIsClosing(true);
       const { data, error } = await supabase.functions.invoke('close-trade', {
-        body: { closeAll: true }
+        body: { closeAll: true, manualClose: true }
       });
 
       if (error) throw error;
