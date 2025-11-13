@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { X } from 'lucide-react';
+import { X, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useState } from 'react';
@@ -53,9 +53,18 @@ export const CloseAllTradesButton = () => {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button variant="destructive" size="sm">
-          <X className="h-4 w-4 mr-2" />
-          Close All Trades
+        <Button variant="destructive" size="sm" disabled={isClosing}>
+          {isClosing ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Closing...
+            </>
+          ) : (
+            <>
+              <X className="h-4 w-4 mr-2" />
+              Close All Trades
+            </>
+          )}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
@@ -67,13 +76,20 @@ export const CloseAllTradesButton = () => {
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={isClosing}>Cancel</AlertDialogCancel>
           <AlertDialogAction 
             onClick={closeAllTrades}
             disabled={isClosing}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            {isClosing ? 'Closing...' : 'Close All'}
+            {isClosing ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Closing Positions...
+              </>
+            ) : (
+              'Close All'
+            )}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
