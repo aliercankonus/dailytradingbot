@@ -297,12 +297,32 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    console.log('Fetching active strategies...');
+    // Authenticate user
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(JSON.stringify({ success: false, error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
     
-    // Check if auto-trading is enabled
+    if (userError || !user) {
+      return new Response(JSON.stringify({ success: false, error: 'Invalid token' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    console.log(`Strategy analyzer called by user: ${user.id}`);
+    
+    // Check if auto-trading is enabled for this user
     const { data: riskParams } = await supabase
       .from('risk_parameters')
       .select('is_trading_enabled, max_open_trades, current_open_trades')
+      .eq('user_id', user.id)
       .single();
 
     const autoExecute = riskParams?.is_trading_enabled && 
@@ -310,21 +330,23 @@ serve(async (req) => {
     
     console.log(`Auto-execute enabled: ${autoExecute}`);
 
-    // Fetch active custom strategies
+    // Fetch active custom strategies for this user
     const { data: customStrategies, error: customError } = await supabase
       .from('custom_strategies')
       .select('*')
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .eq('user_id', user.id);
 
     if (customError) {
       console.error('Error fetching custom strategies:', customError);
     }
 
-    // Fetch active built-in strategies
+    // Fetch active built-in strategies for this user
     const { data: builtInStrategies, error: builtInError } = await supabase
       .from('strategy_performance')
       .select('*')
-      .eq('status', 'active');
+      .eq('status', 'active')
+      .eq('user_id', user.id);
 
     if (builtInError) {
       console.error('Error fetching built-in strategies:', builtInError);
@@ -460,7 +482,7 @@ serve(async (req) => {
           console.log(`Generated ${signal.signalType} signal for ${signal.symbol} using ${strategy.name}`);
           allSignals.push(signal);
           
-          // Store signal in database
+          // Store signal in database with user_id
           const { data: insertedSignal, error: insertError } = await supabase
             .from('trading_signals')
             .insert({
@@ -475,7 +497,8 @@ serve(async (req) => {
               indicators: signal.indicators,
               reason: signal.reason,
               strategy_id: strategy.id,
-              strategy_name: strategy.name
+              strategy_name: strategy.name,
+              user_id: user.id
             })
             .select()
             .single();

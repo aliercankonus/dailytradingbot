@@ -236,11 +236,12 @@ serve(async (req) => {
       })
       .eq('id', riskParams.id);
 
-    // Send notification
+    // Send notification with user_id
     try {
       await supabase.functions.invoke('send-notification', {
         body: {
           type: 'trade_executed',
+          userId: user.id,
           tradeId: trade.id,
           symbol: signal.symbol,
           side,
