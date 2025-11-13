@@ -15,20 +15,34 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // Get user from auth header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      throw new Error('No authorization header');
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+    
+    if (userError || !user) {
+      throw new Error('Invalid user token');
+    }
+
     // Get risk parameters to check paper trading mode
     const { data: riskParams, error: riskError } = await supabase
       .from('risk_parameters')
       .select('paper_trading_mode, portfolio_value')
-      .single();
+      .eq('user_id', user.id)
+      .maybeSingle();
 
     if (riskError) throw riskError;
 
-    // If in paper trading mode, return the database portfolio value
-    if (riskParams.paper_trading_mode) {
+    // If no risk params found or in paper trading mode, return default/database value
+    if (!riskParams || riskParams.paper_trading_mode) {
       return new Response(
         JSON.stringify({
           success: true,
-          balance: riskParams.portfolio_value,
+          balance: riskParams?.portfolio_value || 10000,
           currency: 'USDT',
           isPaperTrading: true,
         }),
