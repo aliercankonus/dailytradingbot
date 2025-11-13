@@ -54,10 +54,30 @@ export const useStrategyRotation = () => {
       const { data, error } = await supabase
         .from('strategy_rotation_config')
         .select('*')
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
-      setConfig(data);
+      
+      // If no config exists, create one
+      if (!data) {
+        const { data: newConfig, error: createError } = await supabase
+          .from('strategy_rotation_config')
+          .insert({
+            enabled: false,
+            rotation_interval_minutes: 60,
+            performance_threshold_percent: 5.0,
+            min_trades_required: 10,
+            market_condition_weight: 0.5,
+            performance_weight: 0.5
+          })
+          .select()
+          .single();
+        
+        if (createError) throw createError;
+        setConfig(newConfig);
+      } else {
+        setConfig(data);
+      }
     } catch (error) {
       console.error('Error fetching rotation config:', error);
       toast({
