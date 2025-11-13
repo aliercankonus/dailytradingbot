@@ -51,16 +51,30 @@ export const useStrategyRotation = () => {
 
   const fetchConfig = async () => {
     try {
-      const { data, error } = await supabase
+      // Ensure user is authenticated
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setLoading(false);
+        toast({
+          title: 'Sign in required',
+          description: 'Please sign in to manage strategy rotation.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const res = await (supabase as any)
         .from('strategy_rotation_config')
         .select('*')
+        .eq('user_id', user.id)
         .maybeSingle();
+      const { data, error } = res as any;
 
       if (error) throw error;
       
-      // If no config exists, create one
+      // If no config exists, create one for this user
       if (!data) {
-        const { data: newConfig, error: createError } = await supabase
+        const insertRes = await supabase
           .from('strategy_rotation_config')
           .insert({
             enabled: false,
@@ -68,10 +82,12 @@ export const useStrategyRotation = () => {
             performance_threshold_percent: 5.0,
             min_trades_required: 10,
             market_condition_weight: 0.5,
-            performance_weight: 0.5
+            performance_weight: 0.5,
+            user_id: user.id,
           })
           .select()
           .single();
+        const { data: newConfig, error: createError } = insertRes as any;
         
         if (createError) throw createError;
         setConfig(newConfig);
@@ -92,12 +108,17 @@ export const useStrategyRotation = () => {
 
   const fetchHistory = async () => {
     try {
-      const { data, error } = await supabase
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const res = await (supabase as any)
         .from('strategy_rotation_history')
         .select('*')
+        .eq('user_id', user.id)
         .order('rotated_at', { ascending: false })
         .limit(10);
 
+      const { data, error } = res as any;
       if (error) throw error;
       setHistory(data || []);
     } catch (error) {
@@ -134,13 +155,23 @@ export const useStrategyRotation = () => {
 
   const triggerRotation = async () => {
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({
+          title: 'Sign in required',
+          description: 'Please sign in before triggering rotation.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       const { data, error } = await supabase.functions.invoke('strategy-rotation');
 
       if (error) throw error;
 
       toast({
         title: 'Rotation Check Complete',
-        description: data.rotated 
+        description: data?.rotated 
           ? `Rotated to ${data.to}` 
           : 'No rotation needed',
       });
