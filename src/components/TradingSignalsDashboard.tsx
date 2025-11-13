@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { useSignals } from '@/hooks/useSignals';
 import { useSignalGenerator } from '@/hooks/useSignalGenerator';
 import { supabase } from '@/integrations/supabase/client';
-import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 export const TradingSignalsDashboard = () => {
@@ -116,6 +116,25 @@ export const TradingSignalsDashboard = () => {
               <div className="text-sm font-medium mb-1">Analysis</div>
               <p className="text-sm text-muted-foreground">{signal.reason}</p>
             </div>
+
+            {signal.indicators && Object.keys(signal.indicators).length > 0 && (
+              <div className="mb-4 p-3 bg-accent/30 rounded-lg border border-border">
+                <div className="flex items-center gap-2 text-sm font-medium mb-3">
+                  <Activity className="h-4 w-4" />
+                  Indicator Values
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {Object.entries(signal.indicators).map(([key, value]) => (
+                    <div key={key} className="p-2 bg-background/60 rounded border border-border/50">
+                      <div className="text-xs text-muted-foreground font-medium">{key}</div>
+                      <div className="text-sm font-bold mt-1">
+                        {typeof value === 'number' ? value.toFixed(2) : String(value)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-between">
               <div className="text-xs text-muted-foreground">
