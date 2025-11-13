@@ -3,6 +3,8 @@ import { X } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useState } from 'react';
+import { useTrades } from '@/hooks/useTrades';
+import { usePositions } from '@/hooks/usePositions';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +20,8 @@ import {
 export const CloseAllTradesButton = () => {
   const { toast } = useToast();
   const [isClosing, setIsClosing] = useState(false);
+  const { refetch: refetchTrades } = useTrades();
+  const { refetch: refetchPositions } = usePositions();
 
   const closeAllTrades = async () => {
     try {
@@ -27,6 +31,9 @@ export const CloseAllTradesButton = () => {
       });
 
       if (error) throw error;
+
+      // Immediately refresh trades and positions
+      await Promise.all([refetchTrades(), refetchPositions()]);
 
       toast({
         title: "All Positions Closed",

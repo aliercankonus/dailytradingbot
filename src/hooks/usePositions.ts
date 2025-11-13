@@ -21,26 +21,26 @@ export const usePositions = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchPositions = async () => {
+    try {
+      setLoading(true);
+      const { data, error: queryError } = await supabase
+        .from('positions')
+        .select('*')
+        .eq('status', 'active')
+        .order('opened_at', { ascending: false });
+
+      if (queryError) throw queryError;
+      setPositions(data || []);
+    } catch (err) {
+      console.error('Error fetching positions:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch positions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchPositions = async () => {
-      try {
-        setLoading(true);
-        const { data, error: queryError } = await supabase
-          .from('positions')
-          .select('*')
-          .eq('status', 'active')
-          .order('opened_at', { ascending: false });
-
-        if (queryError) throw queryError;
-        setPositions(data || []);
-      } catch (err) {
-        console.error('Error fetching positions:', err);
-        setError(err instanceof Error ? err.message : 'Failed to fetch positions');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchPositions();
     
     // Monitor positions every 5 seconds
@@ -52,5 +52,5 @@ export const usePositions = () => {
     return () => clearInterval(monitorInterval);
   }, []);
 
-  return { positions, loading, error };
+  return { positions, loading, error, refetch: fetchPositions };
 };
