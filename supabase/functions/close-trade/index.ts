@@ -12,8 +12,8 @@ serve(async (req) => {
   }
 
   try {
-    const { positionId, closeAll } = await req.json();
-    console.log('Close trade request:', { positionId, closeAll });
+    const { positionId, closeAll, manualClose = false } = await req.json();
+    console.log('Close trade request:', { positionId, closeAll, manualClose });
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -31,7 +31,7 @@ serve(async (req) => {
       if (fetchError) throw fetchError;
 
       for (const position of positions || []) {
-        await closePosition(supabase, position);
+        await closePosition(supabase, position, manualClose);
         closedCount++;
       }
 
@@ -55,7 +55,7 @@ serve(async (req) => {
       if (fetchError) throw fetchError;
       if (!position) throw new Error('Position not found or already closed');
 
-      await closePosition(supabase, position);
+      await closePosition(supabase, position, manualClose);
 
       return new Response(
         JSON.stringify({
@@ -81,10 +81,13 @@ serve(async (req) => {
   }
 });
 
-async function closePosition(supabase: any, position: any) {
+async function closePosition(supabase: any, position: any, manualClose: boolean = false) {
   const currentPrice = position.current_price || position.entry_price;
   const pnl = position.unrealized_pnl || 0;
   const pnlPercent = position.unrealized_pnl_percent || 0;
+
+  // Determine status based on whether it's manual or system close
+  const tradeStatus = manualClose ? 'closed' : 'complete';
 
   // Update position to closed
   await supabase
@@ -99,7 +102,7 @@ async function closePosition(supabase: any, position: any) {
       exit_price: currentPrice,
       profit_loss: pnl,
       profit_loss_percent: pnlPercent,
-      status: 'closed',
+      status: tradeStatus,
       closed_at: new Date().toISOString()
     })
     .eq('id', position.trade_id);

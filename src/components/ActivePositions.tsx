@@ -16,7 +16,7 @@ export const ActivePositions = () => {
     try {
       setClosingPosition(positionId);
       const { error } = await supabase.functions.invoke('close-trade', {
-        body: { positionId }
+        body: { positionId, manualClose: true }
       });
 
       if (error) throw error;
