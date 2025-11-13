@@ -45,6 +45,7 @@ export const MarketBasedRecommendations = () => {
   const [marketCondition, setMarketCondition] = useState<string>('neutral');
   const [loading, setLoading] = useState(false);
   const [lastFetch, setLastFetch] = useState<number>(0);
+  const [creditsExhausted, setCreditsExhausted] = useState(false);
   const hasInitialized = useRef(false);
 
   useEffect(() => {
@@ -212,9 +213,23 @@ export const MarketBasedRecommendations = () => {
           }
         });
 
-        if (aiError) throw aiError;
+        // Handle 402 AI credits exhausted - fail silently on page load
+        if (aiData?.status === 402 || aiData?.error === 'AI credits exhausted') {
+          console.log('AI credits exhausted - skipping recommendations');
+          setCreditsExhausted(true);
+          setRecommendations([]);
+          setLastFetch(Date.now());
+          return;
+        }
+
+        if (aiError) {
+          console.error('AI recommender error:', aiError);
+          setRecommendations([]);
+          return;
+        }
 
         if (aiData?.success && aiData?.recommendations?.recommendations) {
+          setCreditsExhausted(false);
           const topRecommendations = aiData.recommendations.recommendations
             .filter((r: Recommendation) => r.priority === 'high')
             .slice(0, 3);
@@ -314,7 +329,9 @@ export const MarketBasedRecommendations = () => {
         </div>
       ) : (
         <p className="text-sm text-muted-foreground text-center py-4">
-          No specific recommendations at this time. Market conditions are stable.
+          {creditsExhausted 
+            ? '💳 AI recommendations require Lovable AI credits. Add credits in Settings → Workspace → Usage.'
+            : 'No specific recommendations at this time. Market conditions are stable.'}
         </p>
       )}
 
