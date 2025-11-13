@@ -58,24 +58,16 @@ const Index = () => {
               <CloseAllTradesButton />
             </div>
             
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-1">
-                <BotStatus />
-              </div>
-              <div className="lg:col-span-2">
-                <PortfolioMetrics />
-              </div>
+            <div className="grid grid-cols-1 gap-6">
+              <BotStatus />
+              <PortfolioMetrics />
             </div>
 
             <TradeHistory />
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-1">
-                <LivePriceCard />
-              </div>
-              <div className="lg:col-span-2">
-                <StrategyOverview />
-              </div>
+            <div className="grid grid-cols-1 gap-6">
+              <LivePriceCard />
+              <StrategyOverview />
             </div>
 
             <MarketBasedRecommendations />
