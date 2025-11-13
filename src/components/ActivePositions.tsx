@@ -2,13 +2,13 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { usePositions } from '@/hooks/usePositions';
-import { TrendingUp, TrendingDown, X } from 'lucide-react';
+import { TrendingUp, TrendingDown, X, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useState } from 'react';
 
 export const ActivePositions = () => {
-  const { positions, loading } = usePositions();
+  const { positions, loading, refetch } = usePositions();
   const { toast } = useToast();
   const [closingPosition, setClosingPosition] = useState<string | null>(null);
 
@@ -20,6 +20,9 @@ export const ActivePositions = () => {
       });
 
       if (error) throw error;
+
+      // Immediately refresh positions
+      await refetch();
 
       toast({
         title: "Position Closed",
@@ -43,7 +46,12 @@ export const ActivePositions = () => {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Active Positions</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-2xl font-bold">Active Positions</h2>
+          {loading && (
+            <Loader2 className="h-4 w-4 text-primary animate-spin" />
+          )}
+        </div>
         <Badge variant="outline">{positions.length} Open</Badge>
       </div>
 
@@ -79,7 +87,11 @@ export const ActivePositions = () => {
                   onClick={() => closePosition(position.id, position.symbol)}
                   disabled={closingPosition === position.id}
                 >
-                  <X className="h-4 w-4" />
+                  {closingPosition === position.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <X className="h-4 w-4" />
+                  )}
                 </Button>
               </div>
             </div>

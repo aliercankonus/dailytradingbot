@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowUpRight, ArrowDownRight, Filter } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, Filter, Loader2 } from "lucide-react";
 import { useTrades } from "@/hooks/useTrades";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState, useMemo } from "react";
@@ -22,7 +22,12 @@ export const TradeHistory = () => {
   return (
     <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-foreground">Recent Trades</h3>
+        <div className="flex items-center gap-3">
+          <h3 className="text-lg font-semibold text-foreground">Recent Trades</h3>
+          {loading && (
+            <Loader2 className="h-4 w-4 text-primary animate-spin" />
+          )}
+        </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-muted-foreground" />
