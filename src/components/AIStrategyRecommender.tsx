@@ -48,7 +48,21 @@ export const AIStrategyRecommender = () => {
         body: { marketCondition, timeframe, symbol: selectedCrypto }
       });
 
+      // Check for 402 AI credits exhausted error
+      if (data?.status === 402 || data?.error === 'AI credits exhausted') {
+        toast({
+          title: 'AI Credits Exhausted',
+          description: 'Your Lovable AI credits have run out. Please add credits in Settings → Workspace → Usage to continue using AI recommendations.',
+          variant: 'destructive',
+          duration: 10000, // Show for 10 seconds
+        });
+        return;
+      }
+
       if (error) throw error;
+      if (!data?.success) {
+        throw new Error(data?.error || 'Failed to generate recommendations');
+      }
 
       console.log('AI recommendations received:', data);
       setRecommendations(data.recommendations);

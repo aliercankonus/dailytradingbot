@@ -146,6 +146,23 @@ Format your response as a JSON object with this structure:
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
       console.error('AI API error:', aiResponse.status, errorText);
+      
+      // Handle 402 Payment Required specifically (AI credits exhausted)
+      if (aiResponse.status === 402) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'AI credits exhausted',
+            message: 'Your Lovable AI credits have run out. Please add credits in Settings → Workspace → Usage.',
+            status: 402
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 402,
+          }
+        );
+      }
+      
       throw new Error(`AI API error: ${aiResponse.status}`);
     }
 
