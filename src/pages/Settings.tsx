@@ -26,32 +26,32 @@ export default function Settings() {
     notificationPhone: riskParams?.notification_phone || '',
   });
 
+  const fetchApiKeys = async () => {
+    try {
+      setApiKeysLoading(true);
+      const { data, error } = await supabase
+        .from('user_api_keys' as any)
+        .select('*')
+        .maybeSingle();
+
+      if (error) throw error;
+      
+      if (data) {
+        setFormData(prev => ({
+          ...prev,
+          binanceApiKey: (data as any).binance_api_key || '',
+          binanceApiSecret: (data as any).binance_api_secret || '',
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching API keys:', error);
+    } finally {
+      setApiKeysLoading(false);
+    }
+  };
+
   // Fetch user's API keys on load
   useEffect(() => {
-    const fetchApiKeys = async () => {
-      try {
-        setApiKeysLoading(true);
-        const { data, error } = await supabase
-          .from('user_api_keys')
-          .select('*')
-          .maybeSingle();
-
-        if (error) throw error;
-        
-        if (data) {
-          setFormData(prev => ({
-            ...prev,
-            binanceApiKey: data.binance_api_key || '',
-            binanceApiSecret: data.binance_api_secret || '',
-          }));
-        }
-      } catch (error) {
-        console.error('Error fetching API keys:', error);
-      } finally {
-        setApiKeysLoading(false);
-      }
-    };
-
     fetchApiKeys();
   }, []);
 
@@ -72,7 +72,7 @@ export default function Settings() {
 
       // Check if record exists
       const { data: existing } = await supabase
-        .from('user_api_keys')
+        .from('user_api_keys' as any)
         .select('id')
         .eq('user_id', user.id)
         .maybeSingle();
@@ -80,7 +80,7 @@ export default function Settings() {
       if (existing) {
         // Update existing record
         const { error } = await supabase
-          .from('user_api_keys')
+          .from('user_api_keys' as any)
           .update({
             binance_api_key: formData.binanceApiKey,
             binance_api_secret: formData.binanceApiSecret,
@@ -92,7 +92,7 @@ export default function Settings() {
       } else {
         // Insert new record
         const { error } = await supabase
-          .from('user_api_keys')
+          .from('user_api_keys' as any)
           .insert({
             user_id: user.id,
             binance_api_key: formData.binanceApiKey,
@@ -107,12 +107,8 @@ export default function Settings() {
         description: "Your Binance API credentials have been saved securely",
       });
 
-      // Clear form for security
-      setFormData(prev => ({
-        ...prev,
-        binanceApiKey: '',
-        binanceApiSecret: '',
-      }));
+      // Refetch to show updated keys
+      fetchApiKeys();
     } catch (error) {
       toast({
         title: "Error",
