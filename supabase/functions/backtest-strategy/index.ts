@@ -45,6 +45,21 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Get authenticated user
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      throw new Error('No authorization header');
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    if (authError || !user) {
+      throw new Error('Unauthorized');
+    }
+
+    const userId = user.id;
+
     // Fetch strategy configuration (custom or built-in)
     let strategy: any = null;
     let isCustomStrategy = false;
@@ -469,6 +484,7 @@ serve(async (req) => {
     const { data: backtestResult, error: dbError } = await supabase
       .from('backtesting_results')
       .insert({
+        user_id: userId,
         strategy_id: isCustomStrategy ? strategyId : null, // Only set for custom strategies
         strategy_name: strategy.name,
         symbol,
