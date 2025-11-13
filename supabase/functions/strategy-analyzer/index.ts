@@ -297,7 +297,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    console.log('Fetching active custom strategies...');
+    console.log('Fetching active strategies...');
     
     // Check if auto-trading is enabled
     const { data: riskParams } = await supabase
@@ -311,19 +311,110 @@ serve(async (req) => {
     console.log(`Auto-execute enabled: ${autoExecute}`);
 
     // Fetch active custom strategies
-    const { data: strategies, error: strategiesError } = await supabase
+    const { data: customStrategies, error: customError } = await supabase
       .from('custom_strategies')
       .select('*')
       .eq('is_active', true);
 
-    if (strategiesError) {
-      console.error('Error fetching strategies:', strategiesError);
-      throw strategiesError;
+    if (customError) {
+      console.error('Error fetching custom strategies:', customError);
     }
 
-    console.log(`Found ${strategies?.length || 0} active strategies`);
+    // Fetch active built-in strategies
+    const { data: builtInStrategies, error: builtInError } = await supabase
+      .from('strategy_performance')
+      .select('*')
+      .eq('status', 'active');
 
-    if (!strategies || strategies.length === 0) {
+    if (builtInError) {
+      console.error('Error fetching built-in strategies:', builtInError);
+    }
+
+    // Define predefined logic for built-in strategies
+    const builtInStrategyConfigs: Record<string, any> = {
+      'Grid Trading': {
+        id: 'grid-trading-builtin',
+        name: 'Grid Trading',
+        description: 'Buy at support levels, sell at resistance with multiple grid orders',
+        indicators: [
+          { type: 'RSI', name: 'RSI', period: 14 },
+          { type: 'EMA', name: 'EMA_20', period: 20 }
+        ],
+        entry_conditions: [
+          { indicator: 'RSI', operator: 'below', value: '45', compareToIndicator: false },
+          { indicator: 'Price', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'EMA_20' }
+        ],
+        exit_conditions: [
+          { indicator: 'RSI', operator: 'above', value: '60', compareToIndicator: false }
+        ],
+        risk_settings: {
+          stopLossPercent: 2,
+          takeProfitPercent: 3,
+          positionSizePercent: 1.5
+        },
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      'Momentum Trading': {
+        id: 'momentum-trading-builtin',
+        name: 'Momentum Trading',
+        description: 'Ride strong momentum with RSI and MACD confirmation',
+        indicators: [
+          { type: 'RSI', name: 'RSI', period: 14 },
+          { type: 'MACD', name: 'MACD', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }
+        ],
+        entry_conditions: [
+          { indicator: 'RSI', operator: 'above', value: '55', compareToIndicator: false },
+          { indicator: 'MACD', operator: 'above', value: '0', compareToIndicator: false }
+        ],
+        exit_conditions: [
+          { indicator: 'RSI', operator: 'below', value: '45', compareToIndicator: false }
+        ],
+        risk_settings: {
+          stopLossPercent: 2.5,
+          takeProfitPercent: 5,
+          positionSizePercent: 2
+        },
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      'Mean Reversion': {
+        id: 'mean-reversion-builtin',
+        name: 'Mean Reversion',
+        description: 'Buy oversold conditions, sell overbought',
+        indicators: [
+          { type: 'RSI', name: 'RSI', period: 14 }
+        ],
+        entry_conditions: [
+          { indicator: 'RSI', operator: 'below', value: '30', compareToIndicator: false }
+        ],
+        exit_conditions: [
+          { indicator: 'RSI', operator: 'above', value: '70', compareToIndicator: false }
+        ],
+        risk_settings: {
+          stopLossPercent: 3,
+          takeProfitPercent: 6,
+          positionSizePercent: 2
+        },
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    };
+
+    // Convert built-in strategies to custom strategy format
+    const builtInAsCustom = (builtInStrategies || [])
+      .filter(s => builtInStrategyConfigs[s.strategy_name])
+      .map(s => builtInStrategyConfigs[s.strategy_name]);
+
+    // Combine all strategies
+    const strategies = [...(customStrategies || []), ...builtInAsCustom];
+
+    console.log(`Found ${customStrategies?.length || 0} custom strategies and ${builtInAsCustom.length} built-in strategies (${strategies.length} total)`);
+
+    if (strategies.length === 0) {
       console.log('No active strategies found, skipping signal generation');
       return new Response(
         JSON.stringify({ 
