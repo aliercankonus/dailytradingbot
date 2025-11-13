@@ -49,6 +49,13 @@ export const StrategyComparison = () => {
 
       if (perfError) console.error('Error fetching performance data:', perfError);
 
+      // Fetch custom strategies
+      const { data: customData, error: customError } = await supabase
+        .from('custom_strategies')
+        .select('*');
+
+      if (customError) console.error('Error fetching custom strategies:', customError);
+
       // Use a Map to prevent duplicates by strategy name
       const resultsMap = new Map<string, BacktestResult>();
 
@@ -69,6 +76,25 @@ export const StrategyComparison = () => {
             sharpe_ratio: 0,
             max_drawdown: p.max_drawdown,
             total_trades: p.total_trades,
+            profit_factor: 0,
+            results_data: null,
+            initial_capital: 10000
+          });
+        }
+      });
+
+      // Add custom strategies only if not already in map
+      (customData || []).forEach(cs => {
+        if (!resultsMap.has(cs.name)) {
+          resultsMap.set(cs.name, {
+            id: cs.id,
+            strategy_name: cs.name,
+            symbol: 'Custom',
+            win_rate: 0,
+            net_profit: 0,
+            sharpe_ratio: 0,
+            max_drawdown: 0,
+            total_trades: 0,
             profit_factor: 0,
             results_data: null,
             initial_capital: 10000
