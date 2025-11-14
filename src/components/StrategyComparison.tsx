@@ -104,6 +104,7 @@ export const StrategyComparison = () => {
 
       const combinedResults = Array.from(resultsMap.values());
 
+      console.log('StrategyComparison - Combined Results:', combinedResults);
       setResults(combinedResults);
       
       // Auto-select first 3 results
@@ -126,6 +127,7 @@ export const StrategyComparison = () => {
   };
 
   const selectedResults = results.filter(r => selectedIds.includes(r.id));
+  console.log('StrategyComparison - Selected Results:', selectedResults);
 
   // Prepare comparison data
   const metricsComparison = selectedResults.map(result => ({
@@ -136,6 +138,7 @@ export const StrategyComparison = () => {
     'Sharpe Ratio': result.sharpe_ratio || 0,
     'Profit Factor': result.profit_factor || 0,
   }));
+  console.log('StrategyComparison - Metrics Comparison:', metricsComparison);
 
   const colors = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))'];
 
