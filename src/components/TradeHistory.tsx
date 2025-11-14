@@ -1,15 +1,20 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ArrowUpRight, ArrowDownRight, Filter, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, Filter, Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { useTrades } from "@/hooks/useTrades";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState, useMemo } from "react";
+
+type SortColumn = 'symbol' | 'strategy_name' | 'profit_loss' | 'status' | 'side' | 'executed_at';
+type SortDirection = 'asc' | 'desc';
 
 export const TradeHistory = () => {
   const { trades, loading } = useTrades();
   const [selectedStrategy, setSelectedStrategy] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const [sortColumn, setSortColumn] = useState<SortColumn>('executed_at');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const tradesPerPage = 10;
 
   const strategies = useMemo(() => {
@@ -17,10 +22,77 @@ export const TradeHistory = () => {
     return Array.from(uniqueStrategies);
   }, [trades]);
 
+  const handleSort = (column: SortColumn) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('desc');
+    }
+    setCurrentPage(1);
+  };
+
+  const SortIcon = ({ column }: { column: SortColumn }) => {
+    if (sortColumn !== column) {
+      return <ArrowUpDown className="h-3 w-3 text-muted-foreground/50" />;
+    }
+    return sortDirection === 'asc' 
+      ? <ArrowUp className="h-3 w-3 text-primary" />
+      : <ArrowDown className="h-3 w-3 text-primary" />;
+  };
+
   const filteredTrades = useMemo(() => {
-    if (selectedStrategy === "all") return trades;
-    return trades.filter(t => (t.strategy_name || 'Unknown') === selectedStrategy);
-  }, [trades, selectedStrategy]);
+    let result = selectedStrategy === "all" 
+      ? [...trades] 
+      : trades.filter(t => (t.strategy_name || 'Unknown') === selectedStrategy);
+    
+    // Sort the trades
+    result.sort((a, b) => {
+      let aVal: any;
+      let bVal: any;
+
+      switch (sortColumn) {
+        case 'symbol':
+          aVal = a.symbol;
+          bVal = b.symbol;
+          break;
+        case 'strategy_name':
+          aVal = a.strategy_name || 'Unknown';
+          bVal = b.strategy_name || 'Unknown';
+          break;
+        case 'profit_loss':
+          aVal = a.profit_loss ?? -Infinity;
+          bVal = b.profit_loss ?? -Infinity;
+          break;
+        case 'status':
+          aVal = a.status;
+          bVal = b.status;
+          break;
+        case 'side':
+          aVal = a.side;
+          bVal = b.side;
+          break;
+        case 'executed_at':
+          aVal = new Date(a.executed_at).getTime();
+          bVal = new Date(b.executed_at).getTime();
+          break;
+        default:
+          return 0;
+      }
+
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        return sortDirection === 'asc' 
+          ? aVal.localeCompare(bVal)
+          : bVal.localeCompare(aVal);
+      }
+
+      return sortDirection === 'asc' 
+        ? aVal - bVal
+        : bVal - aVal;
+    });
+
+    return result;
+  }, [trades, selectedStrategy, sortColumn, sortDirection]);
 
   // Pagination logic
   const totalPages = Math.ceil(filteredTrades.length / tradesPerPage);
@@ -69,16 +141,56 @@ export const TradeHistory = () => {
         <table className="w-full">
           <thead>
             <tr className="text-sm text-muted-foreground border-b border-border">
-              <th className="text-left py-2 px-2">Pair</th>
-              <th className="text-left py-2 px-2">Strategy</th>
-              <th className="text-left py-2 px-2">Type</th>
+              <th className="text-left py-2 px-2">
+                <button 
+                  onClick={() => handleSort('symbol')}
+                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                >
+                  Pair
+                  <SortIcon column="symbol" />
+                </button>
+              </th>
+              <th className="text-left py-2 px-2">
+                <button 
+                  onClick={() => handleSort('strategy_name')}
+                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                >
+                  Strategy
+                  <SortIcon column="strategy_name" />
+                </button>
+              </th>
+              <th className="text-left py-2 px-2">
+                <button 
+                  onClick={() => handleSort('side')}
+                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                >
+                  Type
+                  <SortIcon column="side" />
+                </button>
+              </th>
               <th className="text-right py-2 px-2">Entry</th>
               <th className="text-right py-2 px-2">Exit</th>
               <th className="text-right py-2 px-2">Stop Loss</th>
               <th className="text-right py-2 px-2">Take Profit</th>
               <th className="text-right py-2 px-2">Quantity</th>
-              <th className="text-right py-2 px-2">P&L</th>
-              <th className="text-left py-2 px-2">Status</th>
+              <th className="text-right py-2 px-2">
+                <button 
+                  onClick={() => handleSort('profit_loss')}
+                  className="flex items-center gap-1 hover:text-foreground transition-colors ml-auto"
+                >
+                  P&L
+                  <SortIcon column="profit_loss" />
+                </button>
+              </th>
+              <th className="text-left py-2 px-2">
+                <button 
+                  onClick={() => handleSort('status')}
+                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                >
+                  Status
+                  <SortIcon column="status" />
+                </button>
+              </th>
             </tr>
           </thead>
           <tbody>
