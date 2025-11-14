@@ -15,6 +15,28 @@ export const StrategyRotationConfig = () => {
   const { config, history, loading, updateConfig, triggerRotation } = useStrategyRotation();
   const [nextRunTime, setNextRunTime] = useState<string>(''); // next hourly check
   const [earliestRotationTime, setEarliestRotationTime] = useState<string>(''); // earliest hour when rotation can occur
+  const [localValues, setLocalValues] = useState({
+    rotation_interval_minutes: 0,
+    performance_threshold_percent: 0,
+    min_trades_required: 0,
+    market_condition_weight: 0,
+    performance_weight: 0,
+  });
+  const [hasChanges, setHasChanges] = useState(false);
+
+  // Initialize local values when config loads
+  useEffect(() => {
+    if (config) {
+      setLocalValues({
+        rotation_interval_minutes: config.rotation_interval_minutes,
+        performance_threshold_percent: config.performance_threshold_percent,
+        min_trades_required: config.min_trades_required,
+        market_condition_weight: config.market_condition_weight * 100,
+        performance_weight: config.performance_weight * 100,
+      });
+      setHasChanges(false);
+    }
+  }, [config]);
 
   useEffect(() => {
     const roundUpToNext5Min = (date: Date) => {
@@ -58,6 +80,33 @@ export const StrategyRotationConfig = () => {
 
     return () => clearInterval(interval);
   }, [config, history]);
+
+  const handleLocalChange = (field: keyof typeof localValues, value: number) => {
+    setLocalValues(prev => ({ ...prev, [field]: value }));
+    setHasChanges(true);
+  };
+
+  const handleSave = async () => {
+    await updateConfig({
+      ...localValues,
+      market_condition_weight: localValues.market_condition_weight / 100,
+      performance_weight: localValues.performance_weight / 100,
+    });
+    setHasChanges(false);
+  };
+
+  const handleReset = () => {
+    if (config) {
+      setLocalValues({
+        rotation_interval_minutes: config.rotation_interval_minutes,
+        performance_threshold_percent: config.performance_threshold_percent,
+        min_trades_required: config.min_trades_required,
+        market_condition_weight: config.market_condition_weight * 100,
+        performance_weight: config.performance_weight * 100,
+      });
+      setHasChanges(false);
+    }
+  };
 
   if (loading || !config) {
     return (
@@ -147,15 +196,15 @@ export const StrategyRotationConfig = () => {
           {/* Rotation Interval */}
           <div className="space-y-2">
             <Label htmlFor="rotation-interval">
-              Minimum Rotation Interval (minutes): {config.rotation_interval_minutes}
+              Minimum Rotation Interval (minutes): {localValues.rotation_interval_minutes}
             </Label>
             <Input
               id="rotation-interval"
               type="number"
               min="1"
               max="1440"
-              value={config.rotation_interval_minutes}
-              onChange={(e) => updateConfig({ rotation_interval_minutes: parseInt(e.target.value) || 1 })}
+              value={localValues.rotation_interval_minutes}
+              onChange={(e) => handleLocalChange('rotation_interval_minutes', parseInt(e.target.value) || 1)}
             />
             <div className="text-sm text-muted-foreground">
               Minimum time between strategy rotations
@@ -165,7 +214,7 @@ export const StrategyRotationConfig = () => {
           {/* Performance Threshold */}
           <div className="space-y-2">
             <Label htmlFor="performance-threshold">
-              Performance Threshold (%): {config.performance_threshold_percent}
+              Performance Threshold (%): {localValues.performance_threshold_percent}
             </Label>
             <Input
               id="performance-threshold"
@@ -173,8 +222,8 @@ export const StrategyRotationConfig = () => {
               min="0.5"
               max="50"
               step="0.5"
-              value={config.performance_threshold_percent}
-              onChange={(e) => updateConfig({ performance_threshold_percent: parseFloat(e.target.value) || 0.5 })}
+              value={localValues.performance_threshold_percent}
+              onChange={(e) => handleLocalChange('performance_threshold_percent', parseFloat(e.target.value) || 0.5)}
             />
             <div className="text-sm text-muted-foreground">
               Minimum score improvement required to trigger rotation
@@ -184,15 +233,15 @@ export const StrategyRotationConfig = () => {
           {/* Min Trades Required */}
           <div className="space-y-2">
             <Label htmlFor="min-trades">
-              Minimum Trades Required: {config.min_trades_required}
+              Minimum Trades Required: {localValues.min_trades_required}
             </Label>
             <Input
               id="min-trades"
               type="number"
               min="1"
               max="100"
-              value={config.min_trades_required}
-              onChange={(e) => updateConfig({ min_trades_required: parseInt(e.target.value) || 1 })}
+              value={localValues.min_trades_required}
+              onChange={(e) => handleLocalChange('min_trades_required', parseInt(e.target.value) || 1)}
             />
             <div className="text-sm text-muted-foreground">
               Strategies need this many trades before being eligible
@@ -203,30 +252,42 @@ export const StrategyRotationConfig = () => {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>
-                Market Condition Weight: {(config.market_condition_weight * 100).toFixed(0)}%
+                Market Condition Weight: {localValues.market_condition_weight.toFixed(0)}%
               </Label>
               <Slider
-                value={[config.market_condition_weight * 100]}
+                value={[localValues.market_condition_weight]}
                 min={0}
                 max={100}
                 step={5}
-                onValueChange={([value]) => updateConfig({ market_condition_weight: value / 100 })}
+                onValueChange={([value]) => handleLocalChange('market_condition_weight', value)}
               />
             </div>
 
             <div className="space-y-2">
               <Label>
-                Performance Weight: {(config.performance_weight * 100).toFixed(0)}%
+                Performance Weight: {localValues.performance_weight.toFixed(0)}%
               </Label>
               <Slider
-                value={[config.performance_weight * 100]}
+                value={[localValues.performance_weight]}
                 min={0}
                 max={100}
                 step={5}
-                onValueChange={([value]) => updateConfig({ performance_weight: value / 100 })}
+                onValueChange={([value]) => handleLocalChange('performance_weight', value)}
               />
             </div>
           </div>
+
+          {/* Save/Reset Buttons */}
+          {hasChanges && (
+            <div className="flex gap-2 pt-4 border-t">
+              <Button onClick={handleSave} className="flex-1">
+                Save Changes
+              </Button>
+              <Button onClick={handleReset} variant="outline">
+                Reset
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
