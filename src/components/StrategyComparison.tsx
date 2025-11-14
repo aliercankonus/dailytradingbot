@@ -49,6 +49,40 @@ export const StrategyComparison = () => {
 
       if (perfError) console.error('Error fetching performance data:', perfError);
 
+      // Fetch real trade performance grouped by strategy
+      const { data: tradeData, error: tradeError } = await supabase
+        .from('trades')
+        .select('*')
+        .eq('status', 'closed');
+
+      if (tradeError) console.error('Error fetching trade data:', tradeError);
+
+      // Calculate performance from actual trades
+      const tradePerformance = new Map<string, any>();
+      if (tradeData) {
+        tradeData.forEach(trade => {
+          const strategyName = trade.strategy_name || 'Unknown';
+          if (!tradePerformance.has(strategyName)) {
+            tradePerformance.set(strategyName, {
+              total_trades: 0,
+              winning_trades: 0,
+              total_profit: 0,
+              total_loss: 0,
+              trades_data: []
+            });
+          }
+          const perf = tradePerformance.get(strategyName);
+          perf.total_trades++;
+          if ((trade.profit_loss || 0) > 0) {
+            perf.winning_trades++;
+            perf.total_profit += trade.profit_loss || 0;
+          } else {
+            perf.total_loss += Math.abs(trade.profit_loss || 0);
+          }
+          perf.trades_data.push(trade);
+        });
+      }
+
       // Fetch custom strategies
       const { data: customData, error: customError } = await supabase
         .from('custom_strategies')
@@ -77,6 +111,27 @@ export const StrategyComparison = () => {
             max_drawdown: p.max_drawdown,
             total_trades: p.total_trades,
             profit_factor: 0,
+            results_data: null,
+            initial_capital: 10000
+          });
+        }
+      });
+
+      // Add real trade performance data
+      tradePerformance.forEach((perf, strategyName) => {
+        if (!resultsMap.has(strategyName)) {
+          const netProfit = perf.total_profit - perf.total_loss;
+          const profitFactor = perf.total_loss > 0 ? perf.total_profit / perf.total_loss : 0;
+          resultsMap.set(strategyName, {
+            id: `trade-${strategyName}`,
+            strategy_name: strategyName,
+            symbol: 'Live Trading',
+            win_rate: (perf.winning_trades / (perf.total_trades || 1)) * 100,
+            net_profit: netProfit,
+            sharpe_ratio: 0,
+            max_drawdown: 0,
+            total_trades: perf.total_trades,
+            profit_factor: profitFactor,
             results_data: null,
             initial_capital: 10000
           });
