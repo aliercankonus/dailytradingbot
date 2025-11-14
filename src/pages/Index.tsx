@@ -10,7 +10,7 @@ import { TradingSignalsDashboard } from "@/components/TradingSignalsDashboard";
 import { RiskManagementControls } from "@/components/RiskManagementControls";
 import { PerformanceAnalytics } from "@/components/PerformanceAnalytics";
 import { ActivePositions } from "@/components/ActivePositions";
-
+import { ClosedPositionsDashboard } from "@/components/ClosedPositionsDashboard";
 import { CloseAllTradesButton } from "@/components/CloseAllTradesButton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
@@ -45,10 +45,11 @@ const Index = () => {
       <main className="container mx-auto px-4 py-6">
         <AutoSignalGenerator />
         <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="signals">Signals</TabsTrigger>
             <TabsTrigger value="positions">Positions</TabsTrigger>
+            <TabsTrigger value="history">History</TabsTrigger>
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
             <TabsTrigger value="risk">Risk</TabsTrigger>
           </TabsList>
@@ -83,6 +84,10 @@ const Index = () => {
 
           <TabsContent value="positions">
             <ActivePositions />
+          </TabsContent>
+
+          <TabsContent value="history">
+            <ClosedPositionsDashboard />
           </TabsContent>
 
           <TabsContent value="analytics">
