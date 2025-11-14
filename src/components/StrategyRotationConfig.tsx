@@ -17,25 +17,51 @@ export const StrategyRotationConfig = () => {
 
   useEffect(() => {
     const calculateNextRun = () => {
-      // Cron runs at minute 0 of every hour
-      const now = new Date();
-      const next = new Date(now);
-      next.setMinutes(0, 0, 0);
+      if (!config || !config.enabled || history.length === 0) {
+        // If no rotation history, next check is at the next hour
+        const now = new Date();
+        const next = new Date(now);
+        next.setMinutes(0, 0, 0);
+        if (now.getMinutes() > 0 || now.getSeconds() > 0) {
+          next.setHours(next.getHours() + 1);
+        }
+        setNextRunTime(next.toLocaleString());
+        return;
+      }
+
+      // Calculate based on last rotation + interval
+      const lastRotation = new Date(history[0].rotated_at);
+      const intervalMs = config.rotation_interval_minutes * 60 * 1000;
+      const nextRotation = new Date(lastRotation.getTime() + intervalMs);
       
-      // If current time is past the hour mark, add an hour
+      // But cron checks every hour, so find the next hourly check after the rotation time
+      const now = new Date();
+      let nextCheck = new Date(now);
+      nextCheck.setMinutes(0, 0, 0);
+      
+      // Move to next hour boundary if needed
       if (now.getMinutes() > 0 || now.getSeconds() > 0) {
-        next.setHours(next.getHours() + 1);
+        nextCheck.setHours(nextCheck.getHours() + 1);
       }
       
-      setNextRunTime(next.toLocaleString());
+      // If next rotation is after next check, find the hour check after rotation
+      if (nextRotation > nextCheck) {
+        nextCheck = new Date(nextRotation);
+        nextCheck.setMinutes(0, 0, 0);
+        // Round up to next hour
+        if (nextRotation.getMinutes() > 0 || nextRotation.getSeconds() > 0) {
+          nextCheck.setHours(nextCheck.getHours() + 1);
+        }
+      }
+      
+      setNextRunTime(nextCheck.toLocaleString());
     };
 
     calculateNextRun();
-    // Update every minute
     const interval = setInterval(calculateNextRun, 60000);
     
     return () => clearInterval(interval);
-  }, []);
+  }, [config, history]);
 
   if (loading || !config) {
     return (
@@ -75,7 +101,9 @@ export const StrategyRotationConfig = () => {
                 <Clock className="h-5 w-5 text-muted-foreground" />
                 <div>
                   <h3 className="font-semibold">Automated Schedule</h3>
-                  <p className="text-sm text-muted-foreground">Runs every hour at :00 minutes</p>
+                  <p className="text-sm text-muted-foreground">
+                    Checks every hour, rotates after {config.rotation_interval_minutes} min interval
+                  </p>
                 </div>
               </div>
               <Badge variant={config.enabled ? "default" : "secondary"}>
