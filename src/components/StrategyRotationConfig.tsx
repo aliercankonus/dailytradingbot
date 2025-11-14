@@ -278,16 +278,14 @@ export const StrategyRotationConfig = () => {
           </div>
 
           {/* Save/Reset Buttons */}
-          {hasChanges && (
-            <div className="flex gap-2 pt-4 border-t">
-              <Button onClick={handleSave} className="flex-1">
-                Save Changes
-              </Button>
-              <Button onClick={handleReset} variant="outline">
-                Reset
-              </Button>
-            </div>
-          )}
+          <div className="flex gap-2 pt-4 border-t">
+            <Button onClick={handleSave} className="flex-1" disabled={!hasChanges}>
+              Save Changes
+            </Button>
+            <Button onClick={handleReset} variant="outline" disabled={!hasChanges}>
+              Reset
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
