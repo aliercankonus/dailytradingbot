@@ -29,11 +29,14 @@ export const useSignalGenerator = () => {
       }
 
       if (data?.signals?.length > 0) {
+        const deduplicationInfo = data.totalSignalsGenerated > data.signalsAfterDeduplication 
+          ? ` (${data.totalSignalsGenerated} before deduplication)` 
+          : '';
         toast({
           title: "Signals Generated",
           description: data.autoExecuteEnabled 
-            ? `Generated ${data.signals.length} signals, executed ${data.executedSignals}`
-            : `Found ${data.signals.length} new trading signals`,
+            ? `Generated ${data.signals.length} signals${deduplicationInfo}, executed ${data.executedSignals}`
+            : `Found ${data.signals.length} new trading signals${deduplicationInfo}`,
         });
       } else {
         toast({
