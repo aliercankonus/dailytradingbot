@@ -42,9 +42,13 @@ export const TradeHistory = () => {
   };
 
   const filteredTrades = useMemo(() => {
-    let result = selectedStrategy === "all" 
-      ? [...trades] 
-      : trades.filter(t => (t.strategy_name || 'Unknown') === selectedStrategy);
+    // First filter to only show open trades
+    let result = trades.filter(t => t.status === 'open');
+    
+    // Then filter by strategy if needed
+    if (selectedStrategy !== "all") {
+      result = result.filter(t => (t.strategy_name || 'Unknown') === selectedStrategy);
+    }
     
     // Sort the trades
     result.sort((a, b) => {
