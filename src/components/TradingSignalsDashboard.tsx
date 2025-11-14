@@ -79,9 +79,12 @@ export const TradingSignalsDashboard = () => {
             </Label>
             <Switch
               id="auto-exec"
-              checked={riskParams?.is_trading_enabled ?? true}
+              checked={autoExecEnabled}
               onCheckedChange={toggleAutoExecution}
             />
+            {!autoExecEnabled && (
+              <Badge variant="destructive" className="ml-2">OFF</Badge>
+            )}
           </div>
           <Button
             variant="outline" 
@@ -94,6 +97,15 @@ export const TradingSignalsDashboard = () => {
           </Button>
         </div>
       </div>
+
+      {!autoExecEnabled && signals.length > 0 && (
+        <Card className="p-4 bg-yellow-50 dark:bg-yellow-950 border-yellow-200 dark:border-yellow-800">
+          <p className="text-sm text-yellow-800 dark:text-yellow-200">
+            <strong>Auto Execution is OFF</strong> - Signals are generated but trades won't execute automatically. 
+            Enable auto execution or manually execute each signal.
+          </p>
+        </Card>
+      )}
 
       <div className="grid gap-4">
         {signals.map((signal) => (

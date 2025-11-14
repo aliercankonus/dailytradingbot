@@ -16,6 +16,7 @@ interface BacktestResult {
   sharpe_ratio: number;
   max_drawdown: number;
   total_trades: number;
+  winning_trades?: number;
   profit_factor: number;
   results_data: any;
   initial_capital: number;
@@ -49,15 +50,14 @@ export const StrategyComparison = () => {
 
       if (perfError) console.error('Error fetching performance data:', perfError);
 
-      // Fetch real trade performance grouped by strategy
+      // Fetch ALL trades (both open and closed) for comprehensive performance
       const { data: tradeData, error: tradeError } = await supabase
         .from('trades')
-        .select('*')
-        .eq('status', 'closed');
+        .select('*');
 
       if (tradeError) console.error('Error fetching trade data:', tradeError);
 
-      // Calculate performance from actual trades
+      // Calculate performance from actual trades, grouped by strategy name only (not symbol)
       const tradePerformance = new Map<string, any>();
       if (tradeData) {
         tradeData.forEach(trade => {
@@ -68,18 +68,22 @@ export const StrategyComparison = () => {
               winning_trades: 0,
               total_profit: 0,
               total_loss: 0,
-              trades_data: []
+              symbols: new Set<string>()
             });
           }
           const perf = tradePerformance.get(strategyName);
           perf.total_trades++;
-          if ((trade.profit_loss || 0) > 0) {
-            perf.winning_trades++;
-            perf.total_profit += trade.profit_loss || 0;
-          } else {
-            perf.total_loss += Math.abs(trade.profit_loss || 0);
+          perf.symbols.add(trade.symbol);
+          
+          // Only count P/L for closed trades
+          if (trade.status === 'closed' && trade.profit_loss !== null) {
+            if (trade.profit_loss > 0) {
+              perf.winning_trades++;
+              perf.total_profit += trade.profit_loss;
+            } else {
+              perf.total_loss += Math.abs(trade.profit_loss);
+            }
           }
-          perf.trades_data.push(trade);
         });
       }
 
@@ -90,15 +94,82 @@ export const StrategyComparison = () => {
 
       if (customError) console.error('Error fetching custom strategies:', customError);
 
-      // Use a Map to prevent duplicates by strategy name
+      // Use a Map to group by strategy name, aggregating across all symbols
       const resultsMap = new Map<string, BacktestResult>();
 
-      // Add backtest results first (they have more detail)
+      // First, aggregate backtesting results by strategy name across all symbols
+      const backtestByStrategy = new Map<string, any>();
       (backtestData || []).forEach(result => {
-        resultsMap.set(result.strategy_name, result);
+        const key = result.strategy_name;
+        if (!backtestByStrategy.has(key)) {
+          backtestByStrategy.set(key, {
+            ...result,
+            symbols: new Set([result.symbol]),
+            total_trades: result.total_trades || 0,
+            winning_trades: result.winning_trades || 0,
+            net_profit: result.net_profit || 0,
+            max_drawdown: result.max_drawdown || 0
+          });
+        } else {
+          const existing = backtestByStrategy.get(key);
+          existing.symbols.add(result.symbol);
+          existing.total_trades += result.total_trades || 0;
+          existing.winning_trades += result.winning_trades || 0;
+          existing.net_profit += result.net_profit || 0;
+          existing.max_drawdown = Math.min(existing.max_drawdown, result.max_drawdown || 0);
+        }
       });
 
-      // Add performance data only if not already in map
+      // Add aggregated backtest results
+      backtestByStrategy.forEach((result, strategyName) => {
+        const symbolText: string = result.symbols.size > 1 
+          ? `${result.symbols.size} symbols` 
+          : String(Array.from(result.symbols)[0]);
+        
+        resultsMap.set(strategyName, {
+          ...result,
+          symbol: symbolText,
+          win_rate: (result.winning_trades / (result.total_trades || 1)) * 100
+        });
+      });
+
+      // Merge or add trade performance data
+      tradePerformance.forEach((perf, strategyName) => {
+        const closedTrades = perf.winning_trades + Math.floor(perf.total_loss / (perf.total_profit / (perf.winning_trades || 1)));
+        const netProfit = perf.total_profit - perf.total_loss;
+        const profitFactor = perf.total_loss > 0 ? perf.total_profit / perf.total_loss : 0;
+        const symbolText: string = perf.symbols.size > 1 
+          ? `${perf.symbols.size} symbols` 
+          : String(Array.from(perf.symbols)[0]);
+
+        if (resultsMap.has(strategyName)) {
+          // Merge with existing data
+          const existing = resultsMap.get(strategyName)!;
+          existing.total_trades += perf.total_trades;
+          existing.winning_trades = (existing.winning_trades || 0) + perf.winning_trades;
+          existing.net_profit = (existing.net_profit || 0) + netProfit;
+          existing.win_rate = ((existing.winning_trades || 0) / (existing.total_trades || 1)) * 100;
+          existing.profit_factor = profitFactor;
+          existing.symbol = symbolText;
+        } else {
+          // Add as new entry
+          resultsMap.set(strategyName, {
+            id: `trade-${strategyName}`,
+            strategy_name: strategyName,
+            symbol: symbolText,
+            win_rate: closedTrades > 0 ? (perf.winning_trades / closedTrades) * 100 : 0,
+            net_profit: netProfit,
+            sharpe_ratio: 0,
+            max_drawdown: 0,
+            total_trades: perf.total_trades,
+            profit_factor: profitFactor,
+            results_data: null,
+            initial_capital: 10000
+          });
+        }
+      });
+
+      // Add performance data for strategies without backtest or trade data
       (perfData || []).forEach(p => {
         if (!resultsMap.has(p.strategy_name)) {
           resultsMap.set(p.strategy_name, {
@@ -106,32 +177,11 @@ export const StrategyComparison = () => {
             strategy_name: p.strategy_name,
             symbol: 'Multiple',
             win_rate: (p.winning_trades / (p.total_trades || 1)) * 100,
-            net_profit: p.total_profit,
+            net_profit: p.total_profit || 0,
             sharpe_ratio: 0,
-            max_drawdown: p.max_drawdown,
-            total_trades: p.total_trades,
+            max_drawdown: p.max_drawdown || 0,
+            total_trades: p.total_trades || 0,
             profit_factor: 0,
-            results_data: null,
-            initial_capital: 10000
-          });
-        }
-      });
-
-      // Add real trade performance data
-      tradePerformance.forEach((perf, strategyName) => {
-        if (!resultsMap.has(strategyName)) {
-          const netProfit = perf.total_profit - perf.total_loss;
-          const profitFactor = perf.total_loss > 0 ? perf.total_profit / perf.total_loss : 0;
-          resultsMap.set(strategyName, {
-            id: `trade-${strategyName}`,
-            strategy_name: strategyName,
-            symbol: 'Live Trading',
-            win_rate: (perf.winning_trades / (perf.total_trades || 1)) * 100,
-            net_profit: netProfit,
-            sharpe_ratio: 0,
-            max_drawdown: 0,
-            total_trades: perf.total_trades,
-            profit_factor: profitFactor,
             results_data: null,
             initial_capital: 10000
           });

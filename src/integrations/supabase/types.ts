@@ -38,6 +38,7 @@ export type Database = {
           total_loss: number | null
           total_profit: number | null
           total_trades: number | null
+          user_id: string | null
           win_rate: number | null
           winning_trades: number | null
         }
@@ -64,6 +65,7 @@ export type Database = {
           total_loss?: number | null
           total_profit?: number | null
           total_trades?: number | null
+          user_id?: string | null
           win_rate?: number | null
           winning_trades?: number | null
         }
@@ -90,6 +92,7 @@ export type Database = {
           total_loss?: number | null
           total_profit?: number | null
           total_trades?: number | null
+          user_id?: string | null
           win_rate?: number | null
           winning_trades?: number | null
         }
@@ -115,6 +118,7 @@ export type Database = {
           name: string
           risk_settings: Json | null
           updated_at: string | null
+          user_id: string | null
         }
         Insert: {
           created_at?: string | null
@@ -127,6 +131,7 @@ export type Database = {
           name: string
           risk_settings?: Json | null
           updated_at?: string | null
+          user_id?: string | null
         }
         Update: {
           created_at?: string | null
@@ -139,6 +144,7 @@ export type Database = {
           name?: string
           risk_settings?: Json | null
           updated_at?: string | null
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -149,6 +155,7 @@ export type Database = {
           sent_at: string | null
           trade_id: string | null
           type: string
+          user_id: string | null
         }
         Insert: {
           id?: string
@@ -156,6 +163,7 @@ export type Database = {
           sent_at?: string | null
           trade_id?: string | null
           type: string
+          user_id?: string | null
         }
         Update: {
           id?: string
@@ -163,6 +171,7 @@ export type Database = {
           sent_at?: string | null
           trade_id?: string | null
           type?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -190,6 +199,7 @@ export type Database = {
           unrealized_pnl: number | null
           unrealized_pnl_percent: number | null
           updated_at: string | null
+          user_id: string | null
         }
         Insert: {
           current_price?: number | null
@@ -206,6 +216,7 @@ export type Database = {
           unrealized_pnl?: number | null
           unrealized_pnl_percent?: number | null
           updated_at?: string | null
+          user_id?: string | null
         }
         Update: {
           current_price?: number | null
@@ -222,6 +233,7 @@ export type Database = {
           unrealized_pnl?: number | null
           unrealized_pnl_percent?: number | null
           updated_at?: string | null
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -232,6 +244,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string | null
+          email: string | null
+          full_name: string | null
+          id: string
+          updated_at: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string | null
+          email?: string | null
+          full_name?: string | null
+          id: string
+          updated_at?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string | null
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          updated_at?: string | null
+        }
+        Relationships: []
       }
       risk_parameters: {
         Row: {
@@ -250,6 +289,7 @@ export type Database = {
           position_size_reduction_percent: number
           sms_notifications_enabled: boolean | null
           updated_at: string | null
+          user_id: string
         }
         Insert: {
           consecutive_loss_threshold?: number
@@ -267,6 +307,7 @@ export type Database = {
           position_size_reduction_percent?: number
           sms_notifications_enabled?: boolean | null
           updated_at?: string | null
+          user_id: string
         }
         Update: {
           consecutive_loss_threshold?: number
@@ -284,6 +325,7 @@ export type Database = {
           position_size_reduction_percent?: number
           sms_notifications_enabled?: boolean | null
           updated_at?: string | null
+          user_id?: string
         }
         Relationships: []
       }
@@ -296,6 +338,7 @@ export type Database = {
           strategy_name: string
           total_profit: number | null
           total_trades: number | null
+          user_id: string | null
           winning_trades: number | null
         }
         Insert: {
@@ -306,6 +349,7 @@ export type Database = {
           strategy_name: string
           total_profit?: number | null
           total_trades?: number | null
+          user_id?: string | null
           winning_trades?: number | null
         }
         Update: {
@@ -316,6 +360,7 @@ export type Database = {
           strategy_name?: string
           total_profit?: number | null
           total_trades?: number | null
+          user_id?: string | null
           winning_trades?: number | null
         }
         Relationships: []
@@ -331,6 +376,7 @@ export type Database = {
           performance_weight: number | null
           rotation_interval_minutes: number | null
           updated_at: string | null
+          user_id: string
         }
         Insert: {
           created_at?: string | null
@@ -342,6 +388,7 @@ export type Database = {
           performance_weight?: number | null
           rotation_interval_minutes?: number | null
           updated_at?: string | null
+          user_id: string
         }
         Update: {
           created_at?: string | null
@@ -353,6 +400,7 @@ export type Database = {
           performance_weight?: number | null
           rotation_interval_minutes?: number | null
           updated_at?: string | null
+          user_id?: string
         }
         Relationships: []
       }
@@ -367,6 +415,7 @@ export type Database = {
           rotated_at: string | null
           to_strategy_id: string | null
           to_strategy_name: string
+          user_id: string | null
         }
         Insert: {
           from_strategy_id?: string | null
@@ -378,6 +427,7 @@ export type Database = {
           rotated_at?: string | null
           to_strategy_id?: string | null
           to_strategy_name: string
+          user_id?: string | null
         }
         Update: {
           from_strategy_id?: string | null
@@ -389,6 +439,7 @@ export type Database = {
           rotated_at?: string | null
           to_strategy_id?: string | null
           to_strategy_name?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -412,6 +463,7 @@ export type Database = {
           strategy_name: string | null
           symbol: string
           take_profit: number | null
+          user_id: string | null
         }
         Insert: {
           binance_order_id?: string | null
@@ -432,6 +484,7 @@ export type Database = {
           strategy_name?: string | null
           symbol: string
           take_profit?: number | null
+          user_id?: string | null
         }
         Update: {
           binance_order_id?: string | null
@@ -452,6 +505,7 @@ export type Database = {
           strategy_name?: string | null
           symbol?: string
           take_profit?: number | null
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -480,6 +534,7 @@ export type Database = {
           symbol: string
           take_profit: number | null
           trend: Database["public"]["Enums"]["market_trend"]
+          user_id: string | null
         }
         Insert: {
           confidence_score?: number | null
@@ -497,6 +552,7 @@ export type Database = {
           symbol: string
           take_profit?: number | null
           trend: Database["public"]["Enums"]["market_trend"]
+          user_id?: string | null
         }
         Update: {
           confidence_score?: number | null
@@ -514,6 +570,7 @@ export type Database = {
           symbol?: string
           take_profit?: number | null
           trend?: Database["public"]["Enums"]["market_trend"]
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -524,6 +581,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      user_api_keys: {
+        Row: {
+          binance_api_key: string | null
+          binance_api_secret: string | null
+          created_at: string | null
+          id: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          binance_api_key?: string | null
+          binance_api_secret?: string | null
+          created_at?: string | null
+          id?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          binance_api_key?: string | null
+          binance_api_secret?: string | null
+          created_at?: string | null
+          id?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
       }
     }
     Views: {
