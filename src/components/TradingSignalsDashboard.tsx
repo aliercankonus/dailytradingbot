@@ -121,9 +121,18 @@ export const TradingSignalsDashboard = () => {
                   Confidence: {signal.confidence_score}%
                 </div>
                 <div className="flex items-center gap-2 justify-end">
-                  <Badge variant="outline">{signal.trend}</Badge>
+                  <Badge 
+                    variant={
+                      signal.trend.toLowerCase() === 'bullish' ? 'default' : 
+                      signal.trend.toLowerCase() === 'bearish' ? 'destructive' : 
+                      'secondary'
+                    }
+                    className="font-medium"
+                  >
+                    📈 {signal.trend}
+                  </Badge>
                   {signal.strategy_name && (
-                    <Badge variant="secondary" className="font-medium">
+                    <Badge variant="outline" className="font-medium">
                       {signal.strategy_name}
                     </Badge>
                   )}
