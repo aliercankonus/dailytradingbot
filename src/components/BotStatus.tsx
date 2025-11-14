@@ -1,35 +1,20 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Play, Pause, RotateCcw, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Play, Pause, RotateCcw, TrendingUp, TrendingDown, Minus, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRiskParameters } from "@/hooks/useRiskParameters";
 import { useToast } from "@/hooks/use-toast";
-import { useSignals } from "@/hooks/useSignals";
+import { useLiveTrend } from "@/hooks/useLiveTrend";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export const BotStatus = () => {
   const { riskParams, updateRiskParameters } = useRiskParameters();
   const { toast } = useToast();
-  const { signals } = useSignals();
   const [selectedCrypto, setSelectedCrypto] = useState("BTCUSDT");
-
-  const currentTrend = useMemo(() => {
-    // Filter signals for the selected trading pair
-    const pairSignals = signals.filter(signal => signal.symbol === selectedCrypto);
-    
-    if (pairSignals.length === 0) return { trend: 'neutral', count: 0 };
-    
-    const trendCounts = pairSignals.reduce((acc, signal) => {
-      const trend = signal.trend.toLowerCase();
-      acc[trend] = (acc[trend] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const dominantTrend = Object.entries(trendCounts).sort((a, b) => b[1] - a[1])[0];
-    return { trend: dominantTrend[0], count: dominantTrend[1] };
-  }, [signals, selectedCrypto]);
+  const { trendData, loading: trendLoading } = useLiveTrend(selectedCrypto, 60000);
 
   const cryptoOptions = [
     { value: "BTCUSDT", label: "BTC/USDT" },
@@ -118,23 +103,57 @@ export const BotStatus = () => {
             </Badge>
           </div>
 
-          <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-            <span className="text-sm text-muted-foreground">Market Trend:</span>
-            <Badge 
-              variant={
-                currentTrend.trend === 'bullish' ? 'default' : 
-                currentTrend.trend === 'bearish' ? 'destructive' : 
-                'secondary'
-              }
-              className="font-medium"
-            >
-              {currentTrend.trend === 'bullish' && <TrendingUp className="h-3 w-3 mr-1" />}
-              {currentTrend.trend === 'bearish' && <TrendingDown className="h-3 w-3 mr-1" />}
-              {currentTrend.trend === 'neutral' && <Minus className="h-3 w-3 mr-1" />}
-              {currentTrend.trend.charAt(0).toUpperCase() + currentTrend.trend.slice(1)}
-              {currentTrend.count > 0 && ` (${currentTrend.count})`}
-            </Badge>
-          </div>
+          <TooltipProvider>
+            <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Market Trend:</span>
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Activity className="h-3 w-3 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <div className="space-y-2 text-xs">
+                      <p className="font-semibold">Technical Indicators (1m candles):</p>
+                      {trendData && (
+                        <>
+                          <div>
+                            <span className="font-medium">EMA:</span> 12={trendData.indicators.ema12}, 26={trendData.indicators.ema26} ({trendData.indicators.emaSignal})
+                          </div>
+                          <div>
+                            <span className="font-medium">RSI:</span> {trendData.indicators.rsi} ({trendData.indicators.rsiSignal})
+                          </div>
+                          <div>
+                            <span className="font-medium">MACD:</span> {trendData.indicators.macd.toFixed(2)} / Signal: {trendData.indicators.macdSignal.toFixed(2)} ({trendData.indicators.macdTrend})
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              {trendLoading ? (
+                <Badge variant="secondary" className="animate-pulse">
+                  Loading...
+                </Badge>
+              ) : trendData ? (
+                <Badge 
+                  variant={
+                    trendData.trend === 'bullish' ? 'default' : 
+                    trendData.trend === 'bearish' ? 'destructive' : 
+                    'secondary'
+                  }
+                  className="font-medium"
+                >
+                  {trendData.trend === 'bullish' && <TrendingUp className="h-3 w-3 mr-1" />}
+                  {trendData.trend === 'bearish' && <TrendingDown className="h-3 w-3 mr-1" />}
+                  {trendData.trend === 'neutral' && <Minus className="h-3 w-3 mr-1" />}
+                  {trendData.trend.charAt(0).toUpperCase() + trendData.trend.slice(1)} ({trendData.confidence}%)
+                </Badge>
+              ) : (
+                <Badge variant="secondary">No Data</Badge>
+              )}
+            </div>
+          </TooltipProvider>
         </div>
 
         <div className="py-4 text-center border-y border-border">
