@@ -44,9 +44,13 @@ export const PortfolioMetrics = () => {
     return {
       portfolioValue: `$${currentValue.toFixed(2)}`,
       totalPnL: `${totalPnL >= 0 ? '+' : ''}$${Math.abs(totalPnL).toFixed(2)}`,
+      realizedPnL: `${realizedPnL >= 0 ? '+' : ''}$${Math.abs(realizedPnL).toFixed(2)}`,
+      unrealizedPnL: `${unrealizedPnL >= 0 ? '+' : ''}$${Math.abs(unrealizedPnL).toFixed(2)}`,
       totalReturn: `${totalReturn >= 0 ? '+' : ''}${totalReturn.toFixed(2)}%`,
       winRate: `${winRate.toFixed(1)}%`,
       isPositivePnL: totalPnL >= 0,
+      isPositiveRealizedPnL: realizedPnL >= 0,
+      isPositiveUnrealizedPnL: unrealizedPnL >= 0,
       isPositiveReturn: totalReturn >= 0,
       hasData: closedTrades.length > 0 || positions.length > 0,
     };
@@ -68,6 +72,20 @@ export const PortfolioMetrics = () => {
       change: metrics.hasData ? "Realized + Unrealized" : "No trades yet",
       isPositive: metrics.isPositivePnL,
       icon: metrics.isPositivePnL ? TrendingUp : TrendingDown,
+    },
+    {
+      label: "Realized P&L",
+      value: metrics.realizedPnL,
+      change: "From closed trades",
+      isPositive: metrics.isPositiveRealizedPnL,
+      icon: metrics.isPositiveRealizedPnL ? TrendingUp : TrendingDown,
+    },
+    {
+      label: "Unrealized P&L",
+      value: metrics.unrealizedPnL,
+      change: "From active positions",
+      isPositive: metrics.isPositiveUnrealizedPnL,
+      icon: metrics.isPositiveUnrealizedPnL ? TrendingUp : TrendingDown,
     },
     {
       label: "Win Rate",
@@ -97,7 +115,7 @@ export const PortfolioMetrics = () => {
         </div>
       </div>
       
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {metricsDisplay.map((metric, idx) => (
           <div key={idx} className="space-y-2">
             <div className="flex items-center justify-between">
