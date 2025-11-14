@@ -152,11 +152,14 @@ export const StrategyRotationConfig = () => {
             <Input
               id="rotation-interval"
               type="number"
-              min="15"
+              min="1"
               max="1440"
               value={config.rotation_interval_minutes}
-              onChange={(e) => { const v = parseInt(e.target.value, 10); if (Number.isFinite(v)) { updateConfig({ rotation_interval_minutes: Math.max(1, v) }); } }}
+              onChange={(e) => updateConfig({ rotation_interval_minutes: parseInt(e.target.value) || 1 })}
             />
+            <div className="text-sm text-muted-foreground">
+              Minimum time between strategy rotations
+            </div>
           </div>
 
           {/* Performance Threshold */}
@@ -167,14 +170,14 @@ export const StrategyRotationConfig = () => {
             <Input
               id="performance-threshold"
               type="number"
-              min="1"
+              min="0.5"
               max="50"
               step="0.5"
               value={config.performance_threshold_percent}
-              onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) { updateConfig({ performance_threshold_percent: v }); } }}
+              onChange={(e) => updateConfig({ performance_threshold_percent: parseFloat(e.target.value) || 0.5 })}
             />
             <div className="text-sm text-muted-foreground">
-              Minimum time between strategy rotations
+              Minimum score improvement required to trigger rotation
             </div>
           </div>
 
@@ -186,10 +189,10 @@ export const StrategyRotationConfig = () => {
             <Input
               id="min-trades"
               type="number"
-              min="5"
+              min="1"
               max="100"
               value={config.min_trades_required}
-              onChange={(e) => { const v = parseInt(e.target.value, 10); if (Number.isFinite(v)) { updateConfig({ min_trades_required: Math.max(1, v) }); } }}
+              onChange={(e) => updateConfig({ min_trades_required: parseInt(e.target.value) || 1 })}
             />
             <div className="text-sm text-muted-foreground">
               Strategies need this many trades before being eligible
