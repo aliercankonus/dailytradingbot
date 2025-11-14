@@ -491,60 +491,81 @@ serve(async (req) => {
         
         const signal = await analyzeWithStrategy(data, strategy, prices, volumes);
         
-        // Only store signals that are not 'hold'
+        // Only collect signals that are not 'hold'
         if (signal.signalType !== 'hold') {
           console.log(`Generated ${signal.signalType} signal for ${signal.symbol} using ${strategy.name}`);
-          allSignals.push(signal);
-          
-          // Store signal in database with user_id
-          const { data: insertedSignal, error: insertError } = await supabase
-            .from('trading_signals')
-            .insert({
-              symbol: signal.symbol,
-              signal_type: signal.signalType,
-              trend: signal.trend,
-              entry_price: signal.entryPrice,
-              stop_loss: signal.stopLoss,
-              take_profit: signal.takeProfit,
-              risk_reward_ratio: signal.riskRewardRatio,
-              confidence_score: signal.confidenceScore,
-              indicators: signal.indicators,
-              reason: signal.reason,
-              strategy_id: strategy.id,
-              strategy_name: strategy.name,
-              user_id: user.id
-            })
-            .select()
-            .single();
-          
-          if (insertError) {
-            console.error('Error inserting signal:', insertError);
-          } else if (autoExecute && insertedSignal) {
-            // Automatically execute the signal
-            try {
-              console.log(`Auto-executing signal ${insertedSignal.id} for ${signal.symbol}`);
-              const { error: execError } = await supabase.functions.invoke('execute-trade', {
-                body: { signalId: insertedSignal.id, action: 'execute' },
-                headers: {
-                  Authorization: authHeader
-                }
-              });
-              
-              if (execError) {
-                console.error(`Failed to auto-execute signal ${insertedSignal.id}:`, execError);
-              } else {
-                executedSignals.push(insertedSignal.id);
-                console.log(`Successfully executed signal ${insertedSignal.id}`);
-              }
-            } catch (execError) {
-              console.error(`Error executing signal ${insertedSignal.id}:`, execError);
-            }
-          }
+          allSignals.push({
+            ...signal,
+            strategyId: strategy.id,
+            strategyName: strategy.name
+          });
         }
       }
     }
 
-    console.log(`Generated ${allSignals.length} signals total, executed ${executedSignals.length}`);
+    // Deduplicate signals: for same symbol+signalType, keep highest confidence
+    const deduplicatedSignals = new Map();
+    
+    for (const signal of allSignals) {
+      const key = `${signal.symbol}_${signal.signalType}`;
+      const existing = deduplicatedSignals.get(key);
+      
+      if (!existing || signal.confidenceScore > existing.confidenceScore) {
+        deduplicatedSignals.set(key, signal);
+      }
+    }
+    
+    const finalSignals = Array.from(deduplicatedSignals.values());
+    console.log(`Deduplicated ${allSignals.length} signals to ${finalSignals.length} unique signals`);
+    
+    // Insert deduplicated signals and execute if auto-execute is enabled
+    for (const signal of finalSignals) {
+      const { data: insertedSignal, error: insertError } = await supabase
+        .from('trading_signals')
+        .insert({
+          symbol: signal.symbol,
+          signal_type: signal.signalType,
+          trend: signal.trend,
+          entry_price: signal.entryPrice,
+          stop_loss: signal.stopLoss,
+          take_profit: signal.takeProfit,
+          risk_reward_ratio: signal.riskRewardRatio,
+          confidence_score: signal.confidenceScore,
+          indicators: signal.indicators,
+          reason: signal.reason,
+          strategy_id: signal.strategyId,
+          strategy_name: signal.strategyName,
+          user_id: user.id
+        })
+        .select()
+        .single();
+      
+      if (insertError) {
+        console.error('Error inserting signal:', insertError);
+      } else if (autoExecute && insertedSignal) {
+        // Automatically execute the signal
+        try {
+          console.log(`Auto-executing signal ${insertedSignal.id} for ${signal.symbol}`);
+          const { error: execError } = await supabase.functions.invoke('execute-trade', {
+            body: { signalId: insertedSignal.id, action: 'execute' },
+            headers: {
+              Authorization: authHeader
+            }
+          });
+          
+          if (execError) {
+            console.error(`Failed to auto-execute signal ${insertedSignal.id}:`, execError);
+          } else {
+            executedSignals.push(insertedSignal.id);
+            console.log(`Successfully executed signal ${insertedSignal.id}`);
+          }
+        } catch (execError) {
+          console.error(`Error executing signal ${insertedSignal.id}:`, execError);
+        }
+      }
+    }
+
+    console.log(`Generated ${finalSignals.length} signals total (${allSignals.length} before deduplication), executed ${executedSignals.length}`);
 
     // Clean up old signals that are NOT referenced by trades
     try {
@@ -587,7 +608,9 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        signals: allSignals,
+        signals: finalSignals,
+        totalSignalsGenerated: allSignals.length,
+        signalsAfterDeduplication: finalSignals.length,
         executedSignals: executedSignals.length,
         autoExecuteEnabled: autoExecute,
         strategiesAnalyzed: strategies.length,
