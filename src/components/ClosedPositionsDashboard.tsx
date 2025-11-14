@@ -10,8 +10,30 @@ import { useMemo } from 'react';
 export const ClosedPositionsDashboard = () => {
   const { data: positions, isLoading } = useClosedPositions();
 
+  const getCloseReason = (position: any): string => {
+    const exitPrice = position.current_price;
+    
+    if (position.side === 'BUY') {
+      if (position.take_profit && exitPrice >= position.take_profit) {
+        return 'Take Profit';
+      } else if (position.stop_loss && exitPrice <= position.stop_loss) {
+        return 'Stop Loss';
+      }
+    } else {
+      if (position.take_profit && exitPrice <= position.take_profit) {
+        return 'Take Profit';
+      } else if (position.stop_loss && exitPrice >= position.stop_loss) {
+        return 'Stop Loss';
+      }
+    }
+    
+    return 'Manual Close';
+  };
+
   const stats = useMemo(() => {
-    if (!positions) return { total: 0, profitable: 0, losses: 0, totalPnL: 0, avgPnL: 0, takeProfitCount: 0, stopLossCount: 0 };
+    if (!positions || positions.length === 0) {
+      return { total: 0, profitable: 0, losses: 0, totalPnL: 0, avgPnL: 0, takeProfitCount: 0, stopLossCount: 0 };
+    }
     
     const profitable = positions.filter(p => (p.unrealized_pnl || 0) > 0).length;
     const losses = positions.filter(p => (p.unrealized_pnl || 0) < 0).length;
@@ -37,26 +59,6 @@ export const ClosedPositionsDashboard = () => {
       stopLossCount,
     };
   }, [positions]);
-
-  const getCloseReason = (position: any): string => {
-    const exitPrice = position.current_price;
-    
-    if (position.side === 'BUY') {
-      if (position.take_profit && exitPrice >= position.take_profit) {
-        return 'Take Profit';
-      } else if (position.stop_loss && exitPrice <= position.stop_loss) {
-        return 'Stop Loss';
-      }
-    } else {
-      if (position.take_profit && exitPrice <= position.take_profit) {
-        return 'Take Profit';
-      } else if (position.stop_loss && exitPrice >= position.stop_loss) {
-        return 'Stop Loss';
-      }
-    }
-    
-    return 'Manual Close';
-  };
 
   const getCloseReasonBadge = (position: any) => {
     const reason = getCloseReason(position);
