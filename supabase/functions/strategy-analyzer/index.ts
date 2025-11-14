@@ -335,14 +335,32 @@ serve(async (req) => {
     // Check if auto-trading is enabled for this user
     const { data: riskParams } = await supabase
       .from('risk_parameters')
-      .select('is_trading_enabled, max_open_trades, current_open_trades')
+      .select('is_trading_enabled, max_open_trades, current_open_trades, paper_trading_mode')
       .eq('user_id', user.id)
       .single();
 
-    const autoExecute = riskParams?.is_trading_enabled && 
-                       (riskParams?.current_open_trades || 0) < (riskParams?.max_open_trades || 5);
+    // Sync current_open_trades with actual active positions count
+    const { count: activePositionsCount } = await supabase
+      .from('positions')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('status', 'active');
+
+    const actualOpenTrades = activePositionsCount || 0;
     
-    console.log(`Auto-execute enabled: ${autoExecute}`);
+    // Update if mismatch
+    if (riskParams && riskParams.current_open_trades !== actualOpenTrades) {
+      console.log(`Syncing current_open_trades from ${riskParams.current_open_trades} to ${actualOpenTrades}`);
+      await supabase
+        .from('risk_parameters')
+        .update({ current_open_trades: actualOpenTrades })
+        .eq('user_id', user.id);
+    }
+
+    const autoExecute = riskParams?.is_trading_enabled && 
+                       actualOpenTrades < (riskParams?.max_open_trades || 5);
+    
+    console.log(`Auto-execute enabled: ${autoExecute} (is_trading_enabled: ${riskParams?.is_trading_enabled}, open: ${actualOpenTrades}/${riskParams?.max_open_trades})`);
 
     // Fetch active custom strategies for this user
     const { data: customStrategies, error: customError } = await supabase
