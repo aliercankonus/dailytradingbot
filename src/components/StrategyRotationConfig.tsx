@@ -17,8 +17,8 @@ export const StrategyRotationConfig = () => {
 
   useEffect(() => {
     const calculateNextRun = () => {
-      if (!config || !config.enabled || history.length === 0) {
-        // If no rotation history, next check is at the next hour
+      if (!config || !config.enabled) {
+        // If disabled, show next hour
         const now = new Date();
         const next = new Date(now);
         next.setMinutes(0, 0, 0);
@@ -29,32 +29,44 @@ export const StrategyRotationConfig = () => {
         return;
       }
 
-      // Calculate based on last rotation + interval
+      if (history.length === 0) {
+        // If no history, next check is at the next hour
+        const now = new Date();
+        const next = new Date(now);
+        next.setMinutes(0, 0, 0);
+        if (now.getMinutes() > 0 || now.getSeconds() > 0) {
+          next.setHours(next.getHours() + 1);
+        }
+        setNextRunTime(next.toLocaleString());
+        return;
+      }
+
+      // Calculate when the next rotation should happen
       const lastRotation = new Date(history[0].rotated_at);
       const intervalMs = config.rotation_interval_minutes * 60 * 1000;
-      const nextRotation = new Date(lastRotation.getTime() + intervalMs);
+      const nextRotationTime = new Date(lastRotation.getTime() + intervalMs);
       
-      // But cron checks every hour, so find the next hourly check after the rotation time
-      const now = new Date();
-      let nextCheck = new Date(now);
+      // Find the next hourly check (:00) at or after nextRotationTime
+      const nextCheck = new Date(nextRotationTime);
       nextCheck.setMinutes(0, 0, 0);
       
-      // Move to next hour boundary if needed
-      if (now.getMinutes() > 0 || now.getSeconds() > 0) {
+      // If nextRotationTime is past the hour mark, move to next hour
+      if (nextRotationTime.getMinutes() > 0 || nextRotationTime.getSeconds() > 0 || nextRotationTime.getMilliseconds() > 0) {
         nextCheck.setHours(nextCheck.getHours() + 1);
       }
       
-      // If next rotation is after next check, find the hour check after rotation
-      if (nextRotation > nextCheck) {
-        nextCheck = new Date(nextRotation);
-        nextCheck.setMinutes(0, 0, 0);
-        // Round up to next hour
-        if (nextRotation.getMinutes() > 0 || nextRotation.getSeconds() > 0) {
-          nextCheck.setHours(nextCheck.getHours() + 1);
+      // Make sure it's not in the past
+      const now = new Date();
+      if (nextCheck <= now) {
+        const futureCheck = new Date(now);
+        futureCheck.setMinutes(0, 0, 0);
+        if (now.getMinutes() > 0 || now.getSeconds() > 0) {
+          futureCheck.setHours(futureCheck.getHours() + 1);
         }
+        setNextRunTime(futureCheck.toLocaleString());
+      } else {
+        setNextRunTime(nextCheck.toLocaleString());
       }
-      
-      setNextRunTime(nextCheck.toLocaleString());
     };
 
     calculateNextRun();
