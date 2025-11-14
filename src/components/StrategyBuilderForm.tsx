@@ -437,6 +437,11 @@ export const StrategyBuilderForm = ({
                     <SelectItem value="RSI">RSI</SelectItem>
                     <SelectItem value="MACD">MACD</SelectItem>
                     <SelectItem value="EMA">EMA</SelectItem>
+                    <SelectItem value="Volume">Volume</SelectItem>
+                    <SelectItem value="Volume_Avg">Volume Average</SelectItem>
+                    <SelectItem value="OBV">OBV</SelectItem>
+                    <SelectItem value="BB">Bollinger Bands</SelectItem>
+                    <SelectItem value="MACD_Signal">MACD Signal</SelectItem>
                   </SelectContent>
                 </Select>
                 <Input
