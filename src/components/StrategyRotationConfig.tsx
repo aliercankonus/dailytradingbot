@@ -17,20 +17,17 @@ export const StrategyRotationConfig = () => {
   const [earliestRotationTime, setEarliestRotationTime] = useState<string>(''); // earliest hour when rotation can occur
 
   useEffect(() => {
-    const roundUpToNextHour = (date: Date) => {
+    const roundUpToNext5Min = (date: Date) => {
       const d = new Date(date);
-      d.setMinutes(0, 0, 0);
-      if (date.getMinutes() > 0 || date.getSeconds() > 0 || date.getMilliseconds() > 0) {
-        d.setHours(d.getHours() + 1);
-      }
+      const minutes = d.getMinutes();
+      const roundedMinutes = Math.ceil((minutes + 1) / 5) * 5;
+      d.setMinutes(roundedMinutes, 0, 0);
       return d;
     };
 
     const calculateNextRun = () => {
       const now = new Date();
-
-      // Always compute next check (cron runs hourly at :00)
-      const nextCheck = roundUpToNextHour(now);
+      const nextCheck = roundUpToNext5Min(now);
 
       if (!config || !config.enabled) {
         setNextRunTime(nextCheck.toLocaleString());
@@ -38,25 +35,26 @@ export const StrategyRotationConfig = () => {
         return;
       }
 
-      // If no history, rotation is eligible immediately; first check is next top-of-hour
+      // If no history, rotation can happen at next check
       if (history.length === 0) {
         setNextRunTime(nextCheck.toLocaleString());
         setEarliestRotationTime(nextCheck.toLocaleString());
         return;
       }
 
+      // Calculate when rotation becomes eligible based on interval
       const lastRotation = new Date(history[0].rotated_at);
       const intervalMs = config.rotation_interval_minutes * 60 * 1000;
       const eligibleAt = new Date(lastRotation.getTime() + intervalMs);
 
-      const firstCheckWhenEligible = roundUpToNextHour(eligibleAt > now ? eligibleAt : now);
+      const firstCheckWhenEligible = roundUpToNext5Min(eligibleAt > now ? eligibleAt : now);
 
       setNextRunTime(nextCheck.toLocaleString());
       setEarliestRotationTime(firstCheckWhenEligible.toLocaleString());
     };
 
     calculateNextRun();
-    const interval = setInterval(calculateNextRun, 60000);
+    const interval = setInterval(calculateNextRun, 30000); // Update every 30s
 
     return () => clearInterval(interval);
   }, [config, history]);
@@ -100,7 +98,7 @@ export const StrategyRotationConfig = () => {
                 <div>
                   <h3 className="font-semibold">Automated Schedule</h3>
                   <p className="text-sm text-muted-foreground">
-                    Checks every hour, rotates after {config.rotation_interval_minutes} min interval
+                    Checks every 5 minutes • Rotates when criteria met
                   </p>
                 </div>
               </div>
@@ -149,7 +147,7 @@ export const StrategyRotationConfig = () => {
           {/* Rotation Interval */}
           <div className="space-y-2">
             <Label htmlFor="rotation-interval">
-              Check Interval (minutes): {config.rotation_interval_minutes}
+              Minimum Rotation Interval (minutes): {config.rotation_interval_minutes}
             </Label>
             <Input
               id="rotation-interval"
@@ -176,7 +174,7 @@ export const StrategyRotationConfig = () => {
               onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) { updateConfig({ performance_threshold_percent: v }); } }}
             />
             <div className="text-sm text-muted-foreground">
-              Minimum score improvement required to trigger rotation
+              Minimum time between strategy rotations
             </div>
           </div>
 
