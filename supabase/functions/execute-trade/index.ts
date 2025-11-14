@@ -225,11 +225,17 @@ serve(async (req) => {
       );
     }
 
-    // Update risk parameters
+    // Update risk parameters - sync with actual active positions count
+    const { count: activeCount } = await supabase
+      .from('positions')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('status', 'active');
+
     await supabase
       .from('risk_parameters')
       .update({
-        current_open_trades: riskParams.current_open_trades + 1,
+        current_open_trades: activeCount || 0,
       })
       .eq('id', riskParams.id);
 
