@@ -43,6 +43,7 @@ serve(async (req) => {
     const priceMap = new Map(prices.map(p => [p.symbol, p.price]));
 
     const updates = [];
+    const closedPositions = [];
 
     for (const position of positions) {
       const currentPrice = priceMap.get(position.symbol);
@@ -56,15 +57,75 @@ serve(async (req) => {
         ? ((currentPrice - position.entry_price) / position.entry_price) * 100
         : ((position.entry_price - currentPrice) / position.entry_price) * 100;
 
-      // Update position with current price and PnL
-      await supabase
-        .from('positions')
-        .update({
-          current_price: currentPrice,
-          unrealized_pnl: pnl,
-          unrealized_pnl_percent: pnlPercent,
-        })
-        .eq('id', position.id);
+      // Check if take profit or stop loss is hit
+      let shouldClose = false;
+      let closeReason = '';
+
+      if (position.side === 'BUY') {
+        // For LONG positions: TP when price goes UP, SL when price goes DOWN
+        if (position.take_profit && currentPrice >= position.take_profit) {
+          shouldClose = true;
+          closeReason = 'take_profit';
+        } else if (position.stop_loss && currentPrice <= position.stop_loss) {
+          shouldClose = true;
+          closeReason = 'stop_loss';
+        }
+      } else {
+        // For SHORT positions: TP when price goes DOWN, SL when price goes UP
+        if (position.take_profit && currentPrice <= position.take_profit) {
+          shouldClose = true;
+          closeReason = 'take_profit';
+        } else if (position.stop_loss && currentPrice >= position.stop_loss) {
+          shouldClose = true;
+          closeReason = 'stop_loss';
+        }
+      }
+
+      if (shouldClose) {
+        // Close the position
+        await supabase
+          .from('positions')
+          .update({
+            status: 'closed',
+            current_price: currentPrice,
+            unrealized_pnl: pnl,
+            unrealized_pnl_percent: pnlPercent,
+          })
+          .eq('id', position.id);
+
+        // Close the associated trade
+        await supabase
+          .from('trades')
+          .update({
+            status: 'closed',
+            exit_price: currentPrice,
+            profit_loss: pnl,
+            profit_loss_percent: pnlPercent,
+            closed_at: new Date().toISOString(),
+          })
+          .eq('id', position.trade_id);
+
+        closedPositions.push({
+          symbol: position.symbol,
+          side: position.side,
+          reason: closeReason,
+          exitPrice: currentPrice,
+          pnl,
+          pnlPercent,
+        });
+
+        console.log(`Closed position ${position.id} - ${position.symbol} ${position.side} - ${closeReason} at ${currentPrice}`);
+      } else {
+        // Update position with current price and PnL
+        await supabase
+          .from('positions')
+          .update({
+            current_price: currentPrice,
+            unrealized_pnl: pnl,
+            unrealized_pnl_percent: pnlPercent,
+          })
+          .eq('id', position.id);
+      }
 
       updates.push({
         symbol: position.symbol,
@@ -78,7 +139,8 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         updates,
-        message: `Updated ${updates.length} positions`,
+        closedPositions,
+        message: `Updated ${updates.length} positions, closed ${closedPositions.length} positions`,
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
