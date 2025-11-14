@@ -5,10 +5,15 @@ import { useClosedPositions } from '@/hooks/useClosedPositions';
 import { Loader2, TrendingUp, TrendingDown, Target, ShieldAlert } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 export const ClosedPositionsDashboard = () => {
   const { data: positions, isLoading } = useClosedPositions();
+  const [currentPage, setCurrentPage] = useState(1);
+  const [activeTab, setActiveTab] = useState<'all' | 'profitable' | 'losses'>('all');
+  const positionsPerPage = 10;
 
   const getCloseReason = (position: any): string => {
     const exitPrice = position.current_price;
@@ -59,6 +64,31 @@ export const ClosedPositionsDashboard = () => {
       stopLossCount,
     };
   }, [positions]);
+
+  // Filter positions based on active tab
+  const filteredPositions = useMemo(() => {
+    if (!positions) return [];
+    
+    switch (activeTab) {
+      case 'profitable':
+        return positions.filter(p => (p.unrealized_pnl || 0) > 0);
+      case 'losses':
+        return positions.filter(p => (p.unrealized_pnl || 0) < 0);
+      default:
+        return positions;
+    }
+  }, [positions, activeTab]);
+
+  // Pagination logic
+  const totalPages = Math.ceil(filteredPositions.length / positionsPerPage);
+  const startIndex = (currentPage - 1) * positionsPerPage;
+  const endIndex = startIndex + positionsPerPage;
+  const paginatedPositions = filteredPositions.slice(startIndex, endIndex);
+
+  // Reset to page 1 when tab changes
+  useMemo(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
 
   const getCloseReasonBadge = (position: any) => {
     const reason = getCloseReason(position);
@@ -163,29 +193,47 @@ export const ClosedPositionsDashboard = () => {
           <CardDescription>All closed trading positions with outcomes</CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="all">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'all' | 'profitable' | 'losses')}>
             <TabsList className="mb-4">
               <TabsTrigger value="all">All ({stats.total})</TabsTrigger>
               <TabsTrigger value="profitable">Profitable ({stats.profitable})</TabsTrigger>
               <TabsTrigger value="losses">Losses ({stats.losses})</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="all" className="space-y-4">
-              <PositionsTable positions={positions || []} getCloseReasonBadge={getCloseReasonBadge} />
-            </TabsContent>
-
-            <TabsContent value="profitable" className="space-y-4">
-              <PositionsTable 
-                positions={(positions || []).filter(p => (p.unrealized_pnl || 0) > 0)} 
-                getCloseReasonBadge={getCloseReasonBadge} 
-              />
-            </TabsContent>
-
-            <TabsContent value="losses" className="space-y-4">
-              <PositionsTable 
-                positions={(positions || []).filter(p => (p.unrealized_pnl || 0) < 0)} 
-                getCloseReasonBadge={getCloseReasonBadge} 
-              />
+            <TabsContent value={activeTab} className="space-y-4">
+              <PositionsTable positions={paginatedPositions} getCloseReasonBadge={getCloseReasonBadge} />
+              
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-2 py-4">
+                  <div className="text-sm text-muted-foreground">
+                    Showing {startIndex + 1} to {Math.min(endIndex, filteredPositions.length)} of {filteredPositions.length} positions
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous
+                    </Button>
+                    <div className="text-sm">
+                      Page {currentPage} of {totalPages}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
             </TabsContent>
           </Tabs>
         </CardContent>
