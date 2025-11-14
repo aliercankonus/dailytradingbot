@@ -31,6 +31,28 @@ export const useRiskParameters = () => {
         .maybeSingle();
 
       if (queryError) throw queryError;
+
+      if (!data) {
+        // Create defaults for this user if missing
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { error: insertError } = await supabase
+            .from('risk_parameters')
+            .insert({ user_id: user.id });
+          if (insertError) {
+            console.error('Error inserting default risk parameters:', insertError);
+          } else {
+            // Re-fetch after creating
+            const { data: created } = await supabase
+              .from('risk_parameters')
+              .select('*')
+              .maybeSingle();
+            setRiskParams(created || null);
+            return;
+          }
+        }
+      }
+
       setRiskParams(data || null);
     } catch (err) {
       console.error('Error fetching risk parameters:', err);
@@ -42,12 +64,24 @@ export const useRiskParameters = () => {
 
   const updateRiskParameters = async (updates: Partial<RiskParameters>) => {
     try {
-      if (!riskParams) return;
-      
+      // Ensure a row exists before updating
+      if (!riskParams) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated');
+        const { error: insertError } = await supabase
+          .from('risk_parameters')
+          .insert({ user_id: user.id });
+        if (insertError) throw insertError;
+        await fetchRiskParameters();
+      }
+
+      const id = riskParams?.id;
+      if (!id) throw new Error('Risk parameters not initialized');
+
       const { error: updateError } = await supabase
         .from('risk_parameters')
         .update(updates)
-        .eq('id', riskParams.id);
+        .eq('id', id);
 
       if (updateError) throw updateError;
       await fetchRiskParameters();
