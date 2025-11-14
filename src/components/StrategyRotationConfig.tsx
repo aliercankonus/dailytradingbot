@@ -13,65 +13,51 @@ import { RotationPerformanceCharts } from './RotationPerformanceCharts';
 
 export const StrategyRotationConfig = () => {
   const { config, history, loading, updateConfig, triggerRotation } = useStrategyRotation();
-  const [nextRunTime, setNextRunTime] = useState<string>('');
+  const [nextRunTime, setNextRunTime] = useState<string>(''); // next hourly check
+  const [earliestRotationTime, setEarliestRotationTime] = useState<string>(''); // earliest hour when rotation can occur
 
   useEffect(() => {
+    const roundUpToNextHour = (date: Date) => {
+      const d = new Date(date);
+      d.setMinutes(0, 0, 0);
+      if (date.getMinutes() > 0 || date.getSeconds() > 0 || date.getMilliseconds() > 0) {
+        d.setHours(d.getHours() + 1);
+      }
+      return d;
+    };
+
     const calculateNextRun = () => {
+      const now = new Date();
+
+      // Always compute next check (cron runs hourly at :00)
+      const nextCheck = roundUpToNextHour(now);
+
       if (!config || !config.enabled) {
-        // If disabled, show next hour
-        const now = new Date();
-        const next = new Date(now);
-        next.setMinutes(0, 0, 0);
-        if (now.getMinutes() > 0 || now.getSeconds() > 0) {
-          next.setHours(next.getHours() + 1);
-        }
-        setNextRunTime(next.toLocaleString());
+        setNextRunTime(nextCheck.toLocaleString());
+        setEarliestRotationTime('');
         return;
       }
 
+      // If no history, rotation is eligible immediately; first check is next top-of-hour
       if (history.length === 0) {
-        // If no history, next check is at the next hour
-        const now = new Date();
-        const next = new Date(now);
-        next.setMinutes(0, 0, 0);
-        if (now.getMinutes() > 0 || now.getSeconds() > 0) {
-          next.setHours(next.getHours() + 1);
-        }
-        setNextRunTime(next.toLocaleString());
+        setNextRunTime(nextCheck.toLocaleString());
+        setEarliestRotationTime(nextCheck.toLocaleString());
         return;
       }
 
-      // Calculate when the next rotation should happen
       const lastRotation = new Date(history[0].rotated_at);
       const intervalMs = config.rotation_interval_minutes * 60 * 1000;
-      const nextRotationTime = new Date(lastRotation.getTime() + intervalMs);
-      
-      // Find the next hourly check (:00) at or after nextRotationTime
-      const nextCheck = new Date(nextRotationTime);
-      nextCheck.setMinutes(0, 0, 0);
-      
-      // If nextRotationTime is past the hour mark, move to next hour
-      if (nextRotationTime.getMinutes() > 0 || nextRotationTime.getSeconds() > 0 || nextRotationTime.getMilliseconds() > 0) {
-        nextCheck.setHours(nextCheck.getHours() + 1);
-      }
-      
-      // Make sure it's not in the past
-      const now = new Date();
-      if (nextCheck <= now) {
-        const futureCheck = new Date(now);
-        futureCheck.setMinutes(0, 0, 0);
-        if (now.getMinutes() > 0 || now.getSeconds() > 0) {
-          futureCheck.setHours(futureCheck.getHours() + 1);
-        }
-        setNextRunTime(futureCheck.toLocaleString());
-      } else {
-        setNextRunTime(nextCheck.toLocaleString());
-      }
+      const eligibleAt = new Date(lastRotation.getTime() + intervalMs);
+
+      const firstCheckWhenEligible = roundUpToNextHour(eligibleAt > now ? eligibleAt : now);
+
+      setNextRunTime(nextCheck.toLocaleString());
+      setEarliestRotationTime(firstCheckWhenEligible.toLocaleString());
     };
 
     calculateNextRun();
     const interval = setInterval(calculateNextRun, 60000);
-    
+
     return () => clearInterval(interval);
   }, [config, history]);
 
@@ -123,10 +109,18 @@ export const StrategyRotationConfig = () => {
               </Badge>
             </div>
             
-            {config.enabled && nextRunTime && (
-              <div className="text-sm">
-                <span className="text-muted-foreground">Next run: </span>
-                <span className="font-medium text-foreground">{nextRunTime}</span>
+            {config.enabled && (
+              <div className="text-sm space-y-1">
+                <div>
+                  <span className="text-muted-foreground">Next check: </span>
+                  <span className="font-medium text-foreground">{nextRunTime}</span>
+                </div>
+                {earliestRotationTime && (
+                  <div>
+                    <span className="text-muted-foreground">Earliest rotation window: </span>
+                    <span className="font-medium text-foreground">{earliestRotationTime}</span>
+                  </div>
+                )}
               </div>
             )}
             
@@ -163,7 +157,7 @@ export const StrategyRotationConfig = () => {
               min="15"
               max="1440"
               value={config.rotation_interval_minutes}
-              onChange={(e) => updateConfig({ rotation_interval_minutes: parseInt(e.target.value) })}
+              onChange={(e) => { const v = parseInt(e.target.value, 10); if (Number.isFinite(v)) { updateConfig({ rotation_interval_minutes: Math.max(1, v) }); } }}
             />
           </div>
 
@@ -179,7 +173,7 @@ export const StrategyRotationConfig = () => {
               max="50"
               step="0.5"
               value={config.performance_threshold_percent}
-              onChange={(e) => updateConfig({ performance_threshold_percent: parseFloat(e.target.value) })}
+              onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) { updateConfig({ performance_threshold_percent: v }); } }}
             />
             <div className="text-sm text-muted-foreground">
               Minimum score improvement required to trigger rotation
@@ -197,7 +191,7 @@ export const StrategyRotationConfig = () => {
               min="5"
               max="100"
               value={config.min_trades_required}
-              onChange={(e) => updateConfig({ min_trades_required: parseInt(e.target.value) })}
+              onChange={(e) => { const v = parseInt(e.target.value, 10); if (Number.isFinite(v)) { updateConfig({ min_trades_required: Math.max(1, v) }); } }}
             />
             <div className="text-sm text-muted-foreground">
               Strategies need this many trades before being eligible
