@@ -27,7 +27,7 @@ export const DashboardHeader = () => {
               <Activity className="h-6 w-6 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-foreground">CryptoBot</h1>
+              <h1 className="text-xl font-bold text-foreground">Daily Trading Bot</h1>
               <p className="text-xs text-muted-foreground">Algorithmic Trading System</p>
             </div>
           </div>
