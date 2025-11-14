@@ -63,6 +63,33 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Check if enough time has passed since last rotation
+    const { data: lastRotation } = await supabase
+      .from('strategy_rotation_history')
+      .select('rotated_at')
+      .eq('user_id', user.id)
+      .order('rotated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (lastRotation) {
+      const timeSinceLastRotation = Date.now() - new Date(lastRotation.rotated_at).getTime();
+      const intervalMs = config.rotation_interval_minutes * 60 * 1000;
+      
+      if (timeSinceLastRotation < intervalMs) {
+        const remainingMinutes = Math.ceil((intervalMs - timeSinceLastRotation) / 60000);
+        console.log(`Rotation interval not reached. ${remainingMinutes} minutes remaining.`);
+        return new Response(
+          JSON.stringify({ 
+            message: 'Rotation interval not reached',
+            remainingMinutes,
+            nextRotationTime: new Date(new Date(lastRotation.rotated_at).getTime() + intervalMs).toISOString()
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
     // Get market data for market condition analysis
     const { data: marketData } = await supabase.functions.invoke('market-data', {
       body: { symbols: ['BTCUSDT'] }
