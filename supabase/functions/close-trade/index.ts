@@ -128,21 +128,19 @@ async function closePosition(supabase: any, position: any, manualClose: boolean 
     })
     .eq('id', position.trade_id);
 
-  // Update risk parameters for this user - decrement open trades count
-  const { data: riskParams } = await supabase
-    .from('risk_parameters')
-    .select('*')
+  // Update risk parameters for this user - sync with actual active positions
+  const { count: activeCount } = await supabase
+    .from('positions')
+    .select('*', { count: 'exact', head: true })
     .eq('user_id', position.user_id)
-    .single();
+    .eq('status', 'active');
 
-  if (riskParams) {
-    await supabase
-      .from('risk_parameters')
-      .update({
-        current_open_trades: Math.max(0, (riskParams.current_open_trades || 0) - 1)
-      })
-      .eq('id', riskParams.id);
-  }
+  await supabase
+    .from('risk_parameters')
+    .update({
+      current_open_trades: activeCount || 0
+    })
+    .eq('user_id', position.user_id);
 
   console.log(`Closed position ${position.id} for ${position.symbol} with P&L: $${pnl.toFixed(2)}`);
 }

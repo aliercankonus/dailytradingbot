@@ -14,6 +14,7 @@ import { ClosedPositionsDashboard } from "@/components/ClosedPositionsDashboard"
 import { CloseAllTradesButton } from "@/components/CloseAllTradesButton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
+import { TradeCounterSync } from "@/components/TradeCounterSync";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -44,6 +45,7 @@ const Index = () => {
       
       <main className="container mx-auto px-4 py-6">
         <AutoSignalGenerator />
+        <TradeCounterSync />
         <Tabs defaultValue="dashboard" className="space-y-6">
           <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
