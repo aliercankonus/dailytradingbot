@@ -130,11 +130,11 @@ export const StrategyComparison = () => {
   // Prepare comparison data
   const metricsComparison = selectedResults.map(result => ({
     name: result.strategy_name,
-    'Win Rate': result.win_rate,
-    'Net Profit': result.net_profit,
-    'Max Drawdown': Math.abs(result.max_drawdown),
-    'Sharpe Ratio': result.sharpe_ratio,
-    'Profit Factor': result.profit_factor,
+    'Win Rate': result.win_rate || 0,
+    'Net Profit': result.net_profit || 0,
+    'Max Drawdown': Math.abs(result.max_drawdown || 0),
+    'Sharpe Ratio': result.sharpe_ratio || 0,
+    'Profit Factor': result.profit_factor || 0,
   }));
 
   const colors = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))'];
@@ -176,8 +176,8 @@ export const StrategyComparison = () => {
                 <div className="flex-1">
                   <div className="font-semibold">{result.strategy_name}</div>
                   <div className="text-sm text-muted-foreground">{result.symbol}</div>
-                  <div className={`text-sm font-medium mt-1 ${result.net_profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    {result.net_profit >= 0 ? '+' : ''}{result.net_profit.toFixed(2)} ({result.win_rate.toFixed(1)}% win)
+                  <div className={`text-sm font-medium mt-1 ${(result.net_profit || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    {(result.net_profit || 0) >= 0 ? '+' : ''}{(result.net_profit || 0).toFixed(2)} ({(result.win_rate || 0).toFixed(1)}% win)
                   </div>
                 </div>
               </div>
@@ -209,8 +209,8 @@ export const StrategyComparison = () => {
                   <tr className="border-b border-border/50">
                     <td className="py-3 px-4 font-medium">Net Profit</td>
                     {selectedResults.map(r => (
-                      <td key={r.id} className={`py-3 px-4 text-right font-mono ${r.net_profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                        ${r.net_profit.toFixed(2)}
+                      <td key={r.id} className={`py-3 px-4 text-right font-mono ${(r.net_profit || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                        ${(r.net_profit || 0).toFixed(2)}
                       </td>
                     ))}
                   </tr>
@@ -218,7 +218,7 @@ export const StrategyComparison = () => {
                     <td className="py-3 px-4 font-medium">Win Rate</td>
                     {selectedResults.map(r => (
                       <td key={r.id} className="py-3 px-4 text-right font-mono">
-                        {r.win_rate.toFixed(1)}%
+                        {(r.win_rate || 0).toFixed(1)}%
                       </td>
                     ))}
                   </tr>
@@ -226,7 +226,7 @@ export const StrategyComparison = () => {
                     <td className="py-3 px-4 font-medium">Total Trades</td>
                     {selectedResults.map(r => (
                       <td key={r.id} className="py-3 px-4 text-right font-mono">
-                        {r.total_trades}
+                        {r.total_trades || 0}
                       </td>
                     ))}
                   </tr>
@@ -250,7 +250,7 @@ export const StrategyComparison = () => {
                     <td className="py-3 px-4 font-medium">Max Drawdown</td>
                     {selectedResults.map(r => (
                       <td key={r.id} className="py-3 px-4 text-right font-mono text-red-500">
-                        {r.max_drawdown?.toFixed(2)}%
+                        {(r.max_drawdown || 0).toFixed(2)}%
                       </td>
                     ))}
                   </tr>
