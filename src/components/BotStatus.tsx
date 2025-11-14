@@ -16,9 +16,12 @@ export const BotStatus = () => {
   const [selectedCrypto, setSelectedCrypto] = useState("BTCUSDT");
 
   const currentTrend = useMemo(() => {
-    if (signals.length === 0) return { trend: 'neutral', count: 0 };
+    // Filter signals for the selected trading pair
+    const pairSignals = signals.filter(signal => signal.symbol === selectedCrypto);
     
-    const trendCounts = signals.reduce((acc, signal) => {
+    if (pairSignals.length === 0) return { trend: 'neutral', count: 0 };
+    
+    const trendCounts = pairSignals.reduce((acc, signal) => {
       const trend = signal.trend.toLowerCase();
       acc[trend] = (acc[trend] || 0) + 1;
       return acc;
@@ -26,7 +29,7 @@ export const BotStatus = () => {
 
     const dominantTrend = Object.entries(trendCounts).sort((a, b) => b[1] - a[1])[0];
     return { trend: dominantTrend[0], count: dominantTrend[1] };
-  }, [signals]);
+  }, [signals, selectedCrypto]);
 
   const cryptoOptions = [
     { value: "BTCUSDT", label: "BTC/USDT" },
