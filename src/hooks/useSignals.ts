@@ -15,6 +15,7 @@ interface Signal {
   created_at: string;
   expires_at: string;
   indicators: any;
+  strategy_name?: string;
 }
 
 export const useSignals = () => {

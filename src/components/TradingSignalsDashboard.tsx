@@ -120,7 +120,14 @@ export const TradingSignalsDashboard = () => {
                   <Zap className="h-4 w-4" />
                   Confidence: {signal.confidence_score}%
                 </div>
-                <Badge variant="outline">{signal.trend}</Badge>
+                <div className="flex items-center gap-2 justify-end">
+                  <Badge variant="outline">{signal.trend}</Badge>
+                  {signal.strategy_name && (
+                    <Badge variant="secondary" className="font-medium">
+                      {signal.strategy_name}
+                    </Badge>
+                  )}
+                </div>
               </div>
             </div>
 
