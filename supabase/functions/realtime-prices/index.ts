@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -22,6 +23,21 @@ serve(async (req) => {
 
   const { socket, response } = Deno.upgradeWebSocket(req);
 
+  // Initialize Supabase client
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  // Get user ID from authorization header
+  const authHeader = headers.get("authorization");
+  let userId: string | null = null;
+  
+  if (authHeader) {
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user } } = await supabase.auth.getUser(token);
+    userId = user?.id || null;
+  }
+
   let binanceSocket: WebSocket | null = null;
   let reconnectAttempts = 0;
   const MAX_RECONNECT_ATTEMPTS = 5;
@@ -29,7 +45,28 @@ serve(async (req) => {
   let reconnectTimeout: number | null = null;
   let heartbeatInterval: number | null = null;
 
-  const symbols = ["btcusdt", "ethusdt", "solusdt", "bnbusdt"];
+  // Fetch active symbols from database
+  let symbols = ["btcusdt", "ethusdt"]; // Default fallback
+  
+  if (userId) {
+    try {
+      const { data: symbolsData } = await supabase
+        .from("trading_symbols_config")
+        .select("symbol")
+        .eq("user_id", userId)
+        .eq("is_active", true);
+      
+      if (symbolsData && symbolsData.length > 0) {
+        symbols = symbolsData.map(s => s.symbol.toLowerCase());
+        console.log("Fetched active symbols:", symbols);
+      } else {
+        console.log("No active symbols found, using defaults");
+      }
+    } catch (error) {
+      console.error("Error fetching symbols:", error);
+    }
+  }
+  
   const streams = symbols.map((s) => `${s}@ticker`).join("/");
 
   const connectToBinance = () => {
