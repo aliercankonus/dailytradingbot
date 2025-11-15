@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useSymbols } from "@/hooks/useSymbols";
 import {
   BarChart,
   Bar,
@@ -56,11 +57,12 @@ interface MonteCarloSimulationProps {
 
 export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) => {
   const { toast } = useToast();
+  const { activeSymbols, symbols } = useSymbols();
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<SimulationResults | null>(null);
 
   const [strategyId, setStrategyId] = useState("");
-  const [symbol, setSymbol] = useState("BTCUSDT");
+  const [symbol, setSymbol] = useState("");
   const [simulations, setSimulations] = useState(10000);
   const [timeHorizon, setTimeHorizon] = useState(30);
   const [initialCapital, setInitialCapital] = useState(10000);
@@ -149,9 +151,9 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="BTCUSDT">BTC/USDT</SelectItem>
-                  <SelectItem value="ETHUSDT">ETH/USDT</SelectItem>
-                  <SelectItem value="BNBUSDT">BNB/USDT</SelectItem>
+                  {symbols.filter(s => s.is_active).map(s => (
+                    <SelectItem key={s.id} value={s.symbol}>{s.display_name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
