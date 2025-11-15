@@ -1,8 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
 interface MarketData {
@@ -49,33 +49,33 @@ interface StrategyConfig {
 // Calculate RSI
 function calculateRSI(prices: number[], period = 14): number {
   if (prices.length < period + 1) return 50;
-  
+
   let gains = 0;
   let losses = 0;
-  
+
   for (let i = 1; i <= period; i++) {
     const change = prices[i] - prices[i - 1];
     if (change > 0) gains += change;
     else losses += Math.abs(change);
   }
-  
+
   const avgGain = gains / period;
   const avgLoss = losses / period;
   const rs = avgGain / (avgLoss || 1);
-  return 100 - (100 / (1 + rs));
+  return 100 - 100 / (1 + rs);
 }
 
 // Calculate EMA
 function calculateEMA(prices: number[], period: number): number {
   if (prices.length < period) return prices[prices.length - 1] || 0;
-  
+
   const multiplier = 2 / (period + 1);
   let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  
+
   for (let i = period; i < prices.length; i++) {
     ema = (prices[i] - ema) * multiplier + ema;
   }
-  
+
   return ema;
 }
 
@@ -86,34 +86,38 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
   const macd = ema12 - ema26;
   const signal = macd * 0.9;
   const histogram = macd - signal;
-  
+
   return { macd, signal, histogram };
 }
 
 // Calculate Bollinger Bands
-function calculateBollingerBands(prices: number[], period = 20, stdDev = 2): { upper: number; middle: number; lower: number } {
+function calculateBollingerBands(
+  prices: number[],
+  period = 20,
+  stdDev = 2,
+): { upper: number; middle: number; lower: number } {
   if (prices.length < period) {
     const currentPrice = prices[prices.length - 1] || 0;
     return { upper: currentPrice, middle: currentPrice, lower: currentPrice };
   }
-  
+
   const recentPrices = prices.slice(-period);
   const middle = recentPrices.reduce((a, b) => a + b, 0) / period;
-  
+
   const variance = recentPrices.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / period;
   const standardDeviation = Math.sqrt(variance);
-  
+
   return {
-    upper: middle + (standardDeviation * stdDev),
+    upper: middle + standardDeviation * stdDev,
     middle: middle,
-    lower: middle - (standardDeviation * stdDev)
+    lower: middle - standardDeviation * stdDev,
   };
 }
 
 // Calculate On-Balance Volume (OBV)
 function calculateOBV(prices: number[], volumes: number[]): number {
   if (prices.length !== volumes.length || prices.length < 2) return 0;
-  
+
   let obv = 0;
   for (let i = 1; i < prices.length; i++) {
     if (prices[i] > prices[i - 1]) {
@@ -122,7 +126,7 @@ function calculateOBV(prices: number[], volumes: number[]): number {
       obv -= volumes[i];
     }
   }
-  
+
   return obv;
 }
 
@@ -131,37 +135,41 @@ function calculateAverageVolume(volumes: number[], period = 20): number {
   if (volumes.length < period) {
     return volumes.reduce((a, b) => a + b, 0) / volumes.length;
   }
-  
+
   const recentVolumes = volumes.slice(-period);
   return recentVolumes.reduce((a, b) => a + b, 0) / period;
 }
 
 // Detect trend
-function detectTrend(data: MarketData): 'bullish' | 'bearish' | 'ranging' {
+function detectTrend(data: MarketData): "bullish" | "bearish" | "ranging" {
   const changePercent = parseFloat(data.priceChangePercent);
   const volumeRatio = parseFloat(data.volume) / 1000000;
-  
-  if (changePercent > 2 && volumeRatio > 50) return 'bullish';
-  if (changePercent < -2 && volumeRatio > 50) return 'bearish';
-  return 'ranging';
+
+  if (changePercent > 2 && volumeRatio > 50) return "bullish";
+  if (changePercent < -2 && volumeRatio > 50) return "bearish";
+  return "ranging";
 }
 
 // Generate historical prices and volumes
-function generateHistoricalData(currentPrice: number, currentVolume: number, changePercent: number): { prices: number[]; volumes: number[] } {
+function generateHistoricalData(
+  currentPrice: number,
+  currentVolume: number,
+  changePercent: number,
+): { prices: number[]; volumes: number[] } {
   const prices: number[] = [];
   const volumes: number[] = [];
   const volatility = Math.abs(changePercent) / 100;
-  
+
   for (let i = 30; i >= 0; i--) {
     const variation = (Math.random() - 0.5) * volatility * currentPrice;
     const trend = (changePercent / 100) * currentPrice * (i / 30);
     prices.push(currentPrice - trend + variation);
-    
+
     // Generate volume with some variation
     const volumeVariation = (Math.random() - 0.5) * 0.3 * currentVolume;
     volumes.push(Math.max(currentVolume + volumeVariation, currentVolume * 0.5));
   }
-  
+
   return { prices, volumes };
 }
 
@@ -170,45 +178,49 @@ function calculateIndicator(
   indicatorConfig: IndicatorConfig,
   marketData: MarketData,
   historicalPrices: number[],
-  historicalVolumes: number[]
+  historicalVolumes: number[],
 ): number {
   const currentPrice = parseFloat(marketData.lastPrice);
   const currentVolume = parseFloat(marketData.volume);
-  
+
   switch (indicatorConfig.type) {
-    case 'RSI':
+    case "RSI":
       return calculateRSI(historicalPrices, indicatorConfig.period || 14);
-    case 'EMA':
+    case "EMA":
       return calculateEMA(historicalPrices, indicatorConfig.period || 20);
-    case 'MACD':
+    case "MACD":
       const macd = calculateMACD(historicalPrices);
       return macd.macd;
-    case 'MACD_Signal':
+    case "MACD_Signal":
       const macdData = calculateMACD(historicalPrices);
       return macdData.signal;
-    case 'BB':
-    case 'BB_Upper':
+    case "BB":
+    case "BB_Upper":
       const bbUpper = calculateBollingerBands(historicalPrices, indicatorConfig.period || 20);
       return bbUpper.upper;
-    case 'BB_Middle':
+    case "BB_Middle":
       const bbMiddle = calculateBollingerBands(historicalPrices, indicatorConfig.period || 20);
       return bbMiddle.middle;
-    case 'BB_Lower':
+    case "BB_Lower":
       const bbLower = calculateBollingerBands(historicalPrices, indicatorConfig.period || 20);
       return bbLower.lower;
-    case 'Volume':
+    case "Volume":
       return currentVolume;
-    case 'Volume_Avg':
+    case "Volume_Avg":
       return calculateAverageVolume(historicalVolumes, indicatorConfig.period || 20);
-    case 'OBV':
+    case "OBV":
       return calculateOBV(historicalPrices, historicalVolumes);
-    case 'OBV_Avg':
+    case "OBV_Avg":
       const obvValues: number[] = [];
-      for (let i = Math.max(0, historicalPrices.length - (indicatorConfig.period || 20)); i < historicalPrices.length; i++) {
+      for (
+        let i = Math.max(0, historicalPrices.length - (indicatorConfig.period || 20));
+        i < historicalPrices.length;
+        i++
+      ) {
         obvValues.push(calculateOBV(historicalPrices.slice(0, i + 1), historicalVolumes.slice(0, i + 1)));
       }
       return obvValues.reduce((a, b) => a + b, 0) / obvValues.length;
-    case 'Price':
+    case "Price":
       return currentPrice;
     default:
       return 0;
@@ -216,28 +228,25 @@ function calculateIndicator(
 }
 
 // Evaluate a condition
-function evaluateCondition(
-  condition: Condition,
-  indicatorValues: Map<string, number>
-): boolean {
+function evaluateCondition(condition: Condition, indicatorValues: Map<string, number>): boolean {
   const indicatorValue = indicatorValues.get(condition.indicator) || 0;
-  
+
   // Check if comparing to another indicator
   let targetValue: number;
   if (condition.compareToIndicator && condition.targetIndicator) {
     targetValue = indicatorValues.get(condition.targetIndicator) || 0;
   } else {
-    targetValue = parseFloat(condition.value || '0');
+    targetValue = parseFloat(condition.value || "0");
   }
-  
+
   switch (condition.operator.toLowerCase()) {
-    case 'above':
+    case "above":
       return indicatorValue > targetValue;
-    case 'below':
+    case "below":
       return indicatorValue < targetValue;
-    case 'crosses_above':
+    case "crosses_above":
       return indicatorValue > targetValue;
-    case 'crosses_below':
+    case "crosses_below":
       return indicatorValue < targetValue;
     default:
       return false;
@@ -249,71 +258,72 @@ function testStrategy(data: MarketData, strategy: StrategyConfig) {
   const currentPrice = parseFloat(data.lastPrice);
   const currentVolume = parseFloat(data.volume);
   const changePercent = parseFloat(data.priceChangePercent);
-  const { prices: historicalPrices, volumes: historicalVolumes } = generateHistoricalData(currentPrice, currentVolume, changePercent);
-  
+  const { prices: historicalPrices, volumes: historicalVolumes } = generateHistoricalData(
+    currentPrice,
+    currentVolume,
+    changePercent,
+  );
+
   // Calculate all indicators
   const indicatorValues = new Map<string, number>();
-  
+
   for (const indicatorConfig of strategy.indicators) {
     const value = calculateIndicator(indicatorConfig, data, historicalPrices, historicalVolumes);
     indicatorValues.set(indicatorConfig.name || indicatorConfig.type, value);
   }
-  
-  indicatorValues.set('Price', currentPrice);
-  indicatorValues.set('Volume', currentVolume);
-  
+
+  indicatorValues.set("Price", currentPrice);
+  indicatorValues.set("Volume", currentVolume);
+
   // Evaluate entry conditions
-  const entryResults = strategy.entry_conditions.map(condition => ({
+  const entryResults = strategy.entry_conditions.map((condition) => ({
     condition: `${condition.indicator} ${condition.operator} ${condition.value}`,
-    currentValue: indicatorValues.get(condition.indicator)?.toFixed(2) || 'N/A',
-    met: evaluateCondition(condition, indicatorValues)
+    currentValue: indicatorValues.get(condition.indicator)?.toFixed(2) || "N/A",
+    met: evaluateCondition(condition, indicatorValues),
   }));
-  
-  const entryConditionsMet = entryResults.every(r => r.met);
-  
+
+  const entryConditionsMet = entryResults.every((r) => r.met);
+
   // Evaluate exit conditions
-  const exitResults = strategy.exit_conditions.map(condition => ({
+  const exitResults = strategy.exit_conditions.map((condition) => ({
     condition: `${condition.indicator} ${condition.operator} ${condition.value}`,
-    currentValue: indicatorValues.get(condition.indicator)?.toFixed(2) || 'N/A',
-    met: evaluateCondition(condition, indicatorValues)
+    currentValue: indicatorValues.get(condition.indicator)?.toFixed(2) || "N/A",
+    met: evaluateCondition(condition, indicatorValues),
   }));
-  
+
   // Determine signal
-  let signalType: 'long' | 'short' | 'hold' = 'hold';
-  let reason = 'Entry conditions not met';
-  
+  let signalType: "long" | "short" | "hold" = "hold";
+  let reason = "Entry conditions not met";
+
   if (entryConditionsMet) {
     const trend = detectTrend(data);
-    
-    if (trend === 'bullish') {
-      signalType = 'long';
-      reason = 'Entry conditions met with bullish trend';
-    } else if (trend === 'bearish') {
-      signalType = 'short';
-      reason = 'Entry conditions met with bearish trend';
+
+    if (trend === "bullish") {
+      signalType = "long";
+      reason = "Entry conditions met with bullish trend";
+    } else if (trend === "bearish") {
+      signalType = "short";
+      reason = "Entry conditions met with bearish trend";
     } else {
-      signalType = 'long';
-      reason = 'Entry conditions met (ranging market)';
+      signalType = "long";
+      reason = "Entry conditions met (ranging market)";
     }
   }
-  
+
   // Calculate stop loss and take profit
   const stopLossPercent = strategy.risk_settings.stopLossPercent;
   const takeProfitPercent = strategy.risk_settings.takeProfitPercent;
-  
-  const stopLoss = signalType === 'long' 
-    ? currentPrice * (1 - stopLossPercent / 100)
-    : currentPrice * (1 + stopLossPercent / 100);
-    
-  const takeProfit = signalType === 'long'
-    ? currentPrice * (1 + takeProfitPercent / 100)
-    : currentPrice * (1 - takeProfitPercent / 100);
-  
-  const conditionsMet = entryResults.filter(r => r.met).length;
-  const confidenceScore = strategy.entry_conditions.length > 0
-    ? Math.round((conditionsMet / strategy.entry_conditions.length) * 100)
-    : 0;
-  
+
+  const stopLoss =
+    signalType === "long" ? currentPrice * (1 - stopLossPercent / 100) : currentPrice * (1 + stopLossPercent / 100);
+
+  const takeProfit =
+    signalType === "long" ? currentPrice * (1 + takeProfitPercent / 100) : currentPrice * (1 - takeProfitPercent / 100);
+
+  const conditionsMet = entryResults.filter((r) => r.met).length;
+  const confidenceScore =
+    strategy.entry_conditions.length > 0 ? Math.round((conditionsMet / strategy.entry_conditions.length) * 100) : 0;
+
   return {
     symbol: data.symbol,
     signalType,
@@ -325,53 +335,51 @@ function testStrategy(data: MarketData, strategy: StrategyConfig) {
     reason,
     entryConditions: entryResults,
     exitConditions: exitResults,
-    indicatorValues: Object.fromEntries(
-      Array.from(indicatorValues.entries()).map(([k, v]) => [k, v.toFixed(2)])
-    ),
+    indicatorValues: Object.fromEntries(Array.from(indicatorValues.entries()).map(([k, v]) => [k, v.toFixed(2)])),
     marketData: {
       price: currentPrice.toFixed(2),
-      change: changePercent.toFixed(2) + '%',
+      change: changePercent.toFixed(2) + "%",
       volume: parseFloat(data.volume).toLocaleString(),
-    }
+    },
   };
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
+  if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
     const { strategy } = await req.json();
-    
+
     if (!strategy) {
-      throw new Error('Strategy configuration is required');
+      throw new Error("Strategy configuration is required");
     }
 
     console.log(`Testing strategy: ${strategy.name}`);
 
     // Fetch current market data
-    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'ADAUSDT'];
-    
+    const symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"];
+
     const marketDataPromises = symbols.map(async (symbol) => {
       const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
       return response.json();
     });
 
     const marketData = await Promise.all(marketDataPromises);
-    console.log('Market data fetched successfully');
-    
+    console.log("Market data fetched successfully");
+
     // Test strategy against all symbols
-    const results = marketData.map(data => testStrategy(data, strategy));
-    
+    const results = marketData.map((data) => testStrategy(data, strategy));
+
     // Summary statistics
-    const signalsGenerated = results.filter(r => r.signalType !== 'hold').length;
-    const longSignals = results.filter(r => r.signalType === 'long').length;
-    const shortSignals = results.filter(r => r.signalType === 'short').length;
+    const signalsGenerated = results.filter((r) => r.signalType !== "hold").length;
+    const longSignals = results.filter((r) => r.signalType === "long").length;
+    const shortSignals = results.filter((r) => r.signalType === "short").length;
     const avgConfidence = results.reduce((sum, r) => sum + r.confidenceScore, 0) / results.length;
 
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         success: true,
         strategyName: strategy.name,
         results,
@@ -381,26 +389,26 @@ serve(async (req) => {
           longSignals,
           shortSignals,
           holdSignals: results.length - signalsGenerated,
-          averageConfidence: avgConfidence.toFixed(1)
+          averageConfidence: avgConfidence.toFixed(1),
         },
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       }),
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200 
-      }
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      },
     );
   } catch (error) {
-    console.error('Error in test-strategy:', error);
+    console.error("Error in test-strategy:", error);
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
       }),
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500 
-      }
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500,
+      },
     );
   }
 });

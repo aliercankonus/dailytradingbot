@@ -1,11 +1,22 @@
-import { useState, useEffect } from 'react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Badge } from '@/components/ui/badge';
-import { supabase } from '@/integrations/supabase/client';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { TrendingUp, TrendingDown, Target, Activity } from 'lucide-react';
+import { useState, useEffect } from "react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
+import { TrendingUp, TrendingDown, Target, Activity } from "lucide-react";
 
 interface BacktestResult {
   id: string;
@@ -35,49 +46,49 @@ export const StrategyComparison = () => {
     try {
       // Fetch backtesting results
       const { data: backtestData, error: backtestError } = await supabase
-        .from('backtesting_results')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .from("backtesting_results")
+        .select("*")
+        .order("created_at", { ascending: false });
 
       if (backtestError) throw backtestError;
 
       // Fetch strategy performance data
       const { data: perfData, error: perfError } = await supabase
-        .from('strategy_performance')
-        .select('*')
-        .order('total_profit', { ascending: false })
+        .from("strategy_performance")
+        .select("*")
+        .order("total_profit", { ascending: false })
         .limit(10);
 
-      if (perfError) console.error('Error fetching performance data:', perfError);
+      if (perfError) console.error("Error fetching performance data:", perfError);
 
       // Fetch ALL trades (both open and closed) for comprehensive performance
-      const { data: tradeData, error: tradeError } = await supabase
-        .from('trades')
-        .select('*');
+      const { data: tradeData, error: tradeError } = await supabase.from("trades").select("*");
 
-      if (tradeError) console.error('Error fetching trade data:', tradeError);
+      if (tradeError) console.error("Error fetching trade data:", tradeError);
 
       // Calculate performance from actual trades, grouped by strategy name only (not symbol)
       const tradePerformance = new Map<string, any>();
       if (tradeData) {
-        tradeData.forEach(trade => {
+        tradeData.forEach((trade) => {
           // Strip symbol suffix from strategy name
-          const cleanStrategyName = (trade.strategy_name || 'Unknown').replace(/\s*(BTCUSDT|ETHUSDT|BNBUSDT|SOLUSDT|ADAUSDT)$/i, '').trim();
+          const cleanStrategyName = (trade.strategy_name || "Unknown")
+            .replace(/\s*(BTCUSDT|ETHUSDT|BNBUSDT|SOLUSDT)$/i, "")
+            .trim();
           if (!tradePerformance.has(cleanStrategyName)) {
             tradePerformance.set(cleanStrategyName, {
               total_trades: 0,
               winning_trades: 0,
               total_profit: 0,
               total_loss: 0,
-              symbols: new Set<string>()
+              symbols: new Set<string>(),
             });
           }
           const perf = tradePerformance.get(cleanStrategyName);
           perf.total_trades++;
           perf.symbols.add(trade.symbol);
-          
+
           // Only count P/L for closed trades
-          if (trade.status === 'closed' && trade.profit_loss !== null) {
+          if (trade.status === "closed" && trade.profit_loss !== null) {
             if (trade.profit_loss > 0) {
               perf.winning_trades++;
               perf.total_profit += trade.profit_loss;
@@ -89,20 +100,18 @@ export const StrategyComparison = () => {
       }
 
       // Fetch custom strategies
-      const { data: customData, error: customError } = await supabase
-        .from('custom_strategies')
-        .select('*');
+      const { data: customData, error: customError } = await supabase.from("custom_strategies").select("*");
 
-      if (customError) console.error('Error fetching custom strategies:', customError);
+      if (customError) console.error("Error fetching custom strategies:", customError);
 
       // Use a Map to group by strategy name, aggregating across all symbols
       const resultsMap = new Map<string, BacktestResult>();
 
       // First, aggregate backtesting results by strategy name across all symbols
       const backtestByStrategy = new Map<string, any>();
-      (backtestData || []).forEach(result => {
+      (backtestData || []).forEach((result) => {
         // Strip symbol suffix from strategy name (e.g., "Strategy BTCUSDT" -> "Strategy")
-        const cleanStrategyName = result.strategy_name.replace(/\s*(BTCUSDT|ETHUSDT|BNBUSDT|SOLUSDT|ADAUSDT)$/i, '').trim();
+        const cleanStrategyName = result.strategy_name.replace(/\s*(BTCUSDT|ETHUSDT|BNBUSDT|SOLUSDT)$/i, "").trim();
         const key = cleanStrategyName;
         if (!backtestByStrategy.has(key)) {
           backtestByStrategy.set(key, {
@@ -112,7 +121,7 @@ export const StrategyComparison = () => {
             total_trades: result.total_trades || 0,
             winning_trades: result.winning_trades || 0,
             net_profit: result.net_profit || 0,
-            max_drawdown: result.max_drawdown || 0
+            max_drawdown: result.max_drawdown || 0,
           });
         } else {
           const existing = backtestByStrategy.get(key);
@@ -126,25 +135,24 @@ export const StrategyComparison = () => {
 
       // Add aggregated backtest results
       backtestByStrategy.forEach((result, strategyName) => {
-        const symbolText: string = result.symbols.size > 1 
-          ? `${result.symbols.size} symbols` 
-          : String(Array.from(result.symbols)[0]);
-        
+        const symbolText: string =
+          result.symbols.size > 1 ? `${result.symbols.size} symbols` : String(Array.from(result.symbols)[0]);
+
         resultsMap.set(strategyName, {
           ...result,
           symbol: symbolText,
-          win_rate: (result.winning_trades / (result.total_trades || 1)) * 100
+          win_rate: (result.winning_trades / (result.total_trades || 1)) * 100,
         });
       });
 
       // Merge or add trade performance data
       tradePerformance.forEach((perf, strategyName) => {
-        const closedTrades = perf.winning_trades + Math.floor(perf.total_loss / (perf.total_profit / (perf.winning_trades || 1)));
+        const closedTrades =
+          perf.winning_trades + Math.floor(perf.total_loss / (perf.total_profit / (perf.winning_trades || 1)));
         const netProfit = perf.total_profit - perf.total_loss;
         const profitFactor = perf.total_loss > 0 ? perf.total_profit / perf.total_loss : 0;
-        const symbolText: string = perf.symbols.size > 1 
-          ? `${perf.symbols.size} symbols` 
-          : String(Array.from(perf.symbols)[0]);
+        const symbolText: string =
+          perf.symbols.size > 1 ? `${perf.symbols.size} symbols` : String(Array.from(perf.symbols)[0]);
 
         if (resultsMap.has(strategyName)) {
           // Merge with existing data
@@ -168,20 +176,20 @@ export const StrategyComparison = () => {
             total_trades: perf.total_trades,
             profit_factor: profitFactor,
             results_data: null,
-            initial_capital: 10000
+            initial_capital: 10000,
           });
         }
       });
 
       // Add performance data for strategies without backtest or trade data
-      (perfData || []).forEach(p => {
+      (perfData || []).forEach((p) => {
         // Strip symbol suffix from strategy name
-        const cleanStrategyName = p.strategy_name.replace(/\s*(BTCUSDT|ETHUSDT|BNBUSDT|SOLUSDT|ADAUSDT)$/i, '').trim();
+        const cleanStrategyName = p.strategy_name.replace(/\s*(BTCUSDT|ETHUSDT|BNBUSDT|SOLUSDT)$/i, "").trim();
         if (!resultsMap.has(cleanStrategyName)) {
           resultsMap.set(cleanStrategyName, {
             id: p.id,
             strategy_name: cleanStrategyName,
-            symbol: 'Multiple',
+            symbol: "Multiple",
             win_rate: (p.winning_trades / (p.total_trades || 1)) * 100,
             net_profit: p.total_profit || 0,
             sharpe_ratio: 0,
@@ -189,18 +197,18 @@ export const StrategyComparison = () => {
             total_trades: p.total_trades || 0,
             profit_factor: 0,
             results_data: null,
-            initial_capital: 10000
+            initial_capital: 10000,
           });
         }
       });
 
       // Add custom strategies only if not already in map
-      (customData || []).forEach(cs => {
+      (customData || []).forEach((cs) => {
         if (!resultsMap.has(cs.name)) {
           resultsMap.set(cs.name, {
             id: cs.id,
             strategy_name: cs.name,
-            symbol: 'Custom',
+            symbol: "Custom",
             win_rate: 0,
             net_profit: 0,
             sharpe_ratio: 0,
@@ -208,50 +216,46 @@ export const StrategyComparison = () => {
             total_trades: 0,
             profit_factor: 0,
             results_data: null,
-            initial_capital: 10000
+            initial_capital: 10000,
           });
         }
       });
 
       const combinedResults = Array.from(resultsMap.values());
 
-      console.log('StrategyComparison - Combined Results:', combinedResults);
+      console.log("StrategyComparison - Combined Results:", combinedResults);
       setResults(combinedResults);
-      
+
       // Auto-select first 3 results
       if (combinedResults.length > 0) {
-        setSelectedIds(combinedResults.slice(0, Math.min(3, combinedResults.length)).map(r => r.id));
+        setSelectedIds(combinedResults.slice(0, Math.min(3, combinedResults.length)).map((r) => r.id));
       }
     } catch (error) {
-      console.error('Error fetching results:', error);
+      console.error("Error fetching results:", error);
     } finally {
       setLoading(false);
     }
   };
 
   const toggleSelection = (id: string) => {
-    setSelectedIds(prev => 
-      prev.includes(id) 
-        ? prev.filter(x => x !== id)
-        : [...prev, id]
-    );
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
-  const selectedResults = results.filter(r => selectedIds.includes(r.id));
-  console.log('StrategyComparison - Selected Results:', selectedResults);
+  const selectedResults = results.filter((r) => selectedIds.includes(r.id));
+  console.log("StrategyComparison - Selected Results:", selectedResults);
 
   // Prepare comparison data
-  const metricsComparison = selectedResults.map(result => ({
+  const metricsComparison = selectedResults.map((result) => ({
     name: result.strategy_name,
-    'Win Rate': result.win_rate || 0,
-    'Net Profit': result.net_profit || 0,
-    'Max Drawdown': Math.abs(result.max_drawdown || 0),
-    'Sharpe Ratio': result.sharpe_ratio || 0,
-    'Profit Factor': result.profit_factor || 0,
+    "Win Rate": result.win_rate || 0,
+    "Net Profit": result.net_profit || 0,
+    "Max Drawdown": Math.abs(result.max_drawdown || 0),
+    "Sharpe Ratio": result.sharpe_ratio || 0,
+    "Profit Factor": result.profit_factor || 0,
   }));
-  console.log('StrategyComparison - Metrics Comparison:', metricsComparison);
+  console.log("StrategyComparison - Metrics Comparison:", metricsComparison);
 
-  const colors = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))'];
+  const colors = ["hsl(var(--primary))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))"];
 
   if (loading) {
     return (
@@ -274,24 +278,27 @@ export const StrategyComparison = () => {
       <div>
         <h3 className="text-lg font-semibold mb-4">Select Strategies to Compare</h3>
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {results.map(result => (
-            <Card 
+          {results.map((result) => (
+            <Card
               key={result.id}
               className={`p-4 cursor-pointer transition-colors ${
-                selectedIds.includes(result.id) ? 'border-primary bg-primary/5' : ''
+                selectedIds.includes(result.id) ? "border-primary bg-primary/5" : ""
               }`}
               onClick={() => toggleSelection(result.id)}
             >
               <div className="flex items-start gap-3">
-                <Checkbox 
+                <Checkbox
                   checked={selectedIds.includes(result.id)}
                   onCheckedChange={() => toggleSelection(result.id)}
                 />
                 <div className="flex-1">
                   <div className="font-semibold">{result.strategy_name}</div>
                   <div className="text-sm text-muted-foreground">{result.symbol}</div>
-                  <div className={`text-sm font-medium mt-1 ${(result.net_profit || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    {(result.net_profit || 0) >= 0 ? '+' : ''}{(result.net_profit || 0).toFixed(2)} ({(result.win_rate || 0).toFixed(1)}% win)
+                  <div
+                    className={`text-sm font-medium mt-1 ${(result.net_profit || 0) >= 0 ? "text-green-500" : "text-red-500"}`}
+                  >
+                    {(result.net_profit || 0) >= 0 ? "+" : ""}
+                    {(result.net_profit || 0).toFixed(2)} ({(result.win_rate || 0).toFixed(1)}% win)
                   </div>
                 </div>
               </div>
@@ -322,15 +329,18 @@ export const StrategyComparison = () => {
                 <tbody>
                   <tr className="border-b border-border/50">
                     <td className="py-3 px-4 font-medium">Net Profit</td>
-                    {selectedResults.map(r => (
-                      <td key={r.id} className={`py-3 px-4 text-right font-mono ${(r.net_profit || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    {selectedResults.map((r) => (
+                      <td
+                        key={r.id}
+                        className={`py-3 px-4 text-right font-mono ${(r.net_profit || 0) >= 0 ? "text-green-500" : "text-red-500"}`}
+                      >
                         ${(r.net_profit || 0).toFixed(2)}
                       </td>
                     ))}
                   </tr>
                   <tr className="border-b border-border/50">
                     <td className="py-3 px-4 font-medium">Win Rate</td>
-                    {selectedResults.map(r => (
+                    {selectedResults.map((r) => (
                       <td key={r.id} className="py-3 px-4 text-right font-mono">
                         {(r.win_rate || 0).toFixed(1)}%
                       </td>
@@ -338,7 +348,7 @@ export const StrategyComparison = () => {
                   </tr>
                   <tr className="border-b border-border/50">
                     <td className="py-3 px-4 font-medium">Total Trades</td>
-                    {selectedResults.map(r => (
+                    {selectedResults.map((r) => (
                       <td key={r.id} className="py-3 px-4 text-right font-mono">
                         {r.total_trades || 0}
                       </td>
@@ -346,23 +356,23 @@ export const StrategyComparison = () => {
                   </tr>
                   <tr className="border-b border-border/50">
                     <td className="py-3 px-4 font-medium">Profit Factor</td>
-                    {selectedResults.map(r => (
+                    {selectedResults.map((r) => (
                       <td key={r.id} className="py-3 px-4 text-right font-mono">
-                        {r.profit_factor?.toFixed(2) || 'N/A'}
+                        {r.profit_factor?.toFixed(2) || "N/A"}
                       </td>
                     ))}
                   </tr>
                   <tr className="border-b border-border/50">
                     <td className="py-3 px-4 font-medium">Sharpe Ratio</td>
-                    {selectedResults.map(r => (
+                    {selectedResults.map((r) => (
                       <td key={r.id} className="py-3 px-4 text-right font-mono">
-                        {r.sharpe_ratio?.toFixed(2) || 'N/A'}
+                        {r.sharpe_ratio?.toFixed(2) || "N/A"}
                       </td>
                     ))}
                   </tr>
                   <tr>
                     <td className="py-3 px-4 font-medium">Max Drawdown</td>
-                    {selectedResults.map(r => (
+                    {selectedResults.map((r) => (
                       <td key={r.id} className="py-3 px-4 text-right font-mono text-red-500">
                         {(r.max_drawdown || 0).toFixed(2)}%
                       </td>
@@ -403,41 +413,39 @@ export const StrategyComparison = () => {
             </Card>
           </div>
 
-          {selectedResults.every(r => r.results_data?.trades?.length > 0) && (
+          {selectedResults.every((r) => r.results_data?.trades?.length > 0) && (
             <Card className="p-6">
               <h3 className="text-lg font-semibold mb-4">Equity Curves Comparison</h3>
               <ResponsiveContainer width="100%" height={350}>
                 <LineChart
                   data={(() => {
                     // Find the max number of trades across all strategies
-                    const maxTrades = Math.max(...selectedResults.map(r => r.results_data.trades.length));
-                    
+                    const maxTrades = Math.max(...selectedResults.map((r) => r.results_data.trades.length));
+
                     // Create data points for each trade number
                     const data = [];
                     for (let i = 0; i < maxTrades; i++) {
                       const point: any = { trade: i + 1 };
-                      
-                      selectedResults.forEach(result => {
+
+                      selectedResults.forEach((result) => {
                         if (i < result.results_data.trades.length) {
-                          point[result.strategy_name] = result.initial_capital + 
+                          point[result.strategy_name] =
+                            result.initial_capital +
                             result.results_data.trades
                               .slice(0, i + 1)
                               .reduce((sum: number, t: any) => sum + t.profit, 0);
                         }
                       });
-                      
+
                       data.push(point);
                     }
-                    
+
                     return data;
                   })()}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis 
-                    dataKey="trade"
-                    label={{ value: 'Trade Number', position: 'insideBottom', offset: -5 }}
-                  />
-                  <YAxis label={{ value: 'Equity ($)', angle: -90, position: 'insideLeft' }} />
+                  <XAxis dataKey="trade" label={{ value: "Trade Number", position: "insideBottom", offset: -5 }} />
+                  <YAxis label={{ value: "Equity ($)", angle: -90, position: "insideLeft" }} />
                   <Tooltip />
                   <Legend />
                   {selectedResults.map((result, idx) => (

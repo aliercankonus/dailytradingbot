@@ -1,14 +1,25 @@
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { supabase } from '@/integrations/supabase/client';
-import { useToast } from '@/hooks/use-toast';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LineChart, Line } from 'recharts';
-import { Loader2, TrendingUp, TrendingDown, AlertTriangle, Target } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { useState } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+  LineChart,
+  Line,
+} from "recharts";
+import { Loader2, TrendingUp, TrendingDown, AlertTriangle, Target } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 interface SimulationResults {
   statistics: {
@@ -47,9 +58,9 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<SimulationResults | null>(null);
-  
-  const [strategyId, setStrategyId] = useState('');
-  const [symbol, setSymbol] = useState('BTCUSDT');
+
+  const [strategyId, setStrategyId] = useState("");
+  const [symbol, setSymbol] = useState("BTCUSDT");
   const [simulations, setSimulations] = useState(10000);
   const [timeHorizon, setTimeHorizon] = useState(30);
   const [initialCapital, setInitialCapital] = useState(10000);
@@ -58,43 +69,43 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
   const runSimulation = async () => {
     if (!strategyId) {
       toast({
-        title: 'Error',
-        description: 'Please select a strategy',
-        variant: 'destructive',
+        title: "Error",
+        description: "Please select a strategy",
+        variant: "destructive",
       });
       return;
     }
 
     try {
       setLoading(true);
-      console.log('Starting Monte Carlo simulation...');
+      console.log("Starting Monte Carlo simulation...");
 
-      const { data, error } = await supabase.functions.invoke('monte-carlo-simulation', {
+      const { data, error } = await supabase.functions.invoke("monte-carlo-simulation", {
         body: {
           strategyId,
           symbol,
           simulations,
           timeHorizonDays: timeHorizon,
           initialCapital,
-          confidenceLevel
-        }
+          confidenceLevel,
+        },
       });
 
       if (error) throw error;
 
-      console.log('Simulation complete:', data);
+      console.log("Simulation complete:", data);
       setResults(data);
-      
+
       toast({
-        title: 'Simulation Complete',
+        title: "Simulation Complete",
         description: `Ran ${simulations.toLocaleString()} simulations successfully`,
       });
     } catch (error) {
-      console.error('Error running simulation:', error);
+      console.error("Error running simulation:", error);
       toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to run simulation',
-        variant: 'destructive',
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to run simulation",
+        variant: "destructive",
       });
     } finally {
       setLoading(false);
@@ -102,7 +113,7 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
   };
 
   const formatPercent = (value: number) => {
-    const sign = value >= 0 ? '+' : '';
+    const sign = value >= 0 ? "+" : "";
     return `${sign}${value.toFixed(2)}%`;
   };
 
@@ -111,9 +122,7 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
       <Card>
         <CardHeader>
           <CardTitle>Monte Carlo Simulation</CardTitle>
-          <CardDescription>
-            Test strategy robustness across thousands of randomized market scenarios
-          </CardDescription>
+          <CardDescription>Test strategy robustness across thousands of randomized market scenarios</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -124,8 +133,10 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
                   <SelectValue placeholder="Select strategy" />
                 </SelectTrigger>
                 <SelectContent>
-                  {strategies.map(s => (
-                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                  {strategies.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -141,7 +152,6 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
                   <SelectItem value="BTCUSDT">BTC/USDT</SelectItem>
                   <SelectItem value="ETHUSDT">ETH/USDT</SelectItem>
                   <SelectItem value="BNBUSDT">BNB/USDT</SelectItem>
-                  <SelectItem value="ADAUSDT">ADA/USDT</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -202,7 +212,7 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
                 Running {simulations.toLocaleString()} Simulations...
               </>
             ) : (
-              'Run Monte Carlo Simulation'
+              "Run Monte Carlo Simulation"
             )}
           </Button>
         </CardContent>
@@ -217,7 +227,9 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Expected Return</p>
-                    <p className={`text-2xl font-bold ${results.statistics.meanReturn >= 0 ? 'text-profit' : 'text-loss'}`}>
+                    <p
+                      className={`text-2xl font-bold ${results.statistics.meanReturn >= 0 ? "text-profit" : "text-loss"}`}
+                    >
                       {formatPercent(results.statistics.meanReturn)}
                     </p>
                   </div>
@@ -259,8 +271,12 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
                 <div>
                   <p className="text-sm text-muted-foreground">Sharpe Ratio</p>
                   <p className="text-2xl font-bold">{results.statistics.averageSharpeRatio.toFixed(2)}</p>
-                  <Badge variant={results.statistics.averageSharpeRatio > 1 ? 'default' : 'secondary'} className="mt-1">
-                    {results.statistics.averageSharpeRatio > 2 ? 'Excellent' : results.statistics.averageSharpeRatio > 1 ? 'Good' : 'Poor'}
+                  <Badge variant={results.statistics.averageSharpeRatio > 1 ? "default" : "secondary"} className="mt-1">
+                    {results.statistics.averageSharpeRatio > 2
+                      ? "Excellent"
+                      : results.statistics.averageSharpeRatio > 1
+                        ? "Good"
+                        : "Poor"}
                   </Badge>
                 </div>
               </CardContent>
@@ -282,9 +298,7 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Expected Return</span>
-                  <span className="font-mono font-bold">
-                    {formatPercent(results.statistics.meanReturn)}
-                  </span>
+                  <span className="font-mono font-bold">{formatPercent(results.statistics.meanReturn)}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Upper Bound</span>
@@ -317,7 +331,9 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Conditional VaR</span>
-                  <span className="font-mono text-loss">{formatPercent(results.statistics.conditionalValueAtRisk)}</span>
+                  <span className="font-mono text-loss">
+                    {formatPercent(results.statistics.conditionalValueAtRisk)}
+                  </span>
                 </div>
               </div>
             </CardContent>
@@ -333,7 +349,7 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
                 <BarChart data={results.distribution.filter((_, i) => i % 2 === 0)}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="range" angle={-45} textAnchor="end" height={100} tick={{ fontSize: 10 }} />
-                  <YAxis label={{ value: 'Frequency (%)', angle: -90, position: 'insideLeft' }} />
+                  <YAxis label={{ value: "Frequency (%)", angle: -90, position: "insideLeft" }} />
                   <Tooltip />
                   <Bar dataKey="percentage" fill="hsl(var(--primary))" />
                 </BarChart>
@@ -351,7 +367,7 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
                 {Object.entries(results.percentiles).map(([key, value]) => (
                   <div key={key}>
                     <p className="text-sm text-muted-foreground">{key.toUpperCase()}</p>
-                    <p className={`font-mono font-bold ${value >= 0 ? 'text-profit' : 'text-loss'}`}>
+                    <p className={`font-mono font-bold ${value >= 0 ? "text-profit" : "text-loss"}`}>
                       {formatPercent(value)}
                     </p>
                   </div>

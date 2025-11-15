@@ -20,7 +20,6 @@ export const BotStatus = () => {
     { value: "BTCUSDT", label: "BTC/USDT" },
     { value: "ETHUSDT", label: "ETH/USDT" },
     { value: "BNBUSDT", label: "BNB/USDT" },
-    { value: "ADAUSDT", label: "ADA/USDT" },
     { value: "SOLUSDT", label: "SOL/USDT" },
   ];
 
@@ -32,9 +31,7 @@ export const BotStatus = () => {
       await updateRiskParameters({ is_trading_enabled: newState });
       toast({
         title: newState ? "Bot Started" : "Bot Stopped",
-        description: newState 
-          ? "Trading bot is now active and monitoring for signals" 
-          : "Trading bot has been stopped",
+        description: newState ? "Trading bot is now active and monitoring for signals" : "Trading bot has been stopped",
         variant: newState ? "default" : "destructive",
       });
     } catch (error) {
@@ -48,9 +45,9 @@ export const BotStatus = () => {
 
   const handleReset = async () => {
     try {
-      await updateRiskParameters({ 
+      await updateRiskParameters({
         consecutive_losses: 0,
-        current_open_trades: 0 
+        current_open_trades: 0,
       });
       toast({
         title: "Bot Reset",
@@ -70,10 +67,7 @@ export const BotStatus = () => {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-foreground">Bot Status</h3>
-          <div className={cn(
-            "h-3 w-3 rounded-full",
-            active ? "bg-success animate-pulse" : "bg-muted"
-          )} />
+          <div className={cn("h-3 w-3 rounded-full", active ? "bg-success animate-pulse" : "bg-muted")} />
         </div>
 
         <div className="space-y-3">
@@ -117,13 +111,16 @@ export const BotStatus = () => {
                       {trendData && (
                         <>
                           <div>
-                            <span className="font-medium">EMA:</span> 12={trendData.indicators.ema12}, 26={trendData.indicators.ema26} ({trendData.indicators.emaSignal})
+                            <span className="font-medium">EMA:</span> 12={trendData.indicators.ema12}, 26=
+                            {trendData.indicators.ema26} ({trendData.indicators.emaSignal})
                           </div>
                           <div>
-                            <span className="font-medium">RSI:</span> {trendData.indicators.rsi} ({trendData.indicators.rsiSignal})
+                            <span className="font-medium">RSI:</span> {trendData.indicators.rsi} (
+                            {trendData.indicators.rsiSignal})
                           </div>
                           <div>
-                            <span className="font-medium">MACD:</span> {trendData.indicators.macd.toFixed(2)} / Signal: {trendData.indicators.macdSignal.toFixed(2)} ({trendData.indicators.macdTrend})
+                            <span className="font-medium">MACD:</span> {trendData.indicators.macd.toFixed(2)} / Signal:{" "}
+                            {trendData.indicators.macdSignal.toFixed(2)} ({trendData.indicators.macdTrend})
                           </div>
                         </>
                       )}
@@ -136,17 +133,19 @@ export const BotStatus = () => {
                   Loading...
                 </Badge>
               ) : trendData ? (
-                <Badge 
+                <Badge
                   variant={
-                    trendData.trend === 'bullish' ? 'default' : 
-                    trendData.trend === 'bearish' ? 'destructive' : 
-                    'secondary'
+                    trendData.trend === "bullish"
+                      ? "default"
+                      : trendData.trend === "bearish"
+                        ? "destructive"
+                        : "secondary"
                   }
                   className="font-medium"
                 >
-                  {trendData.trend === 'bullish' && <TrendingUp className="h-3 w-3 mr-1" />}
-                  {trendData.trend === 'bearish' && <TrendingDown className="h-3 w-3 mr-1" />}
-                  {trendData.trend === 'neutral' && <Minus className="h-3 w-3 mr-1" />}
+                  {trendData.trend === "bullish" && <TrendingUp className="h-3 w-3 mr-1" />}
+                  {trendData.trend === "bearish" && <TrendingDown className="h-3 w-3 mr-1" />}
+                  {trendData.trend === "neutral" && <Minus className="h-3 w-3 mr-1" />}
                   {trendData.trend.charAt(0).toUpperCase() + trendData.trend.slice(1)} ({trendData.confidence}%)
                 </Badge>
               ) : (
@@ -157,25 +156,18 @@ export const BotStatus = () => {
         </div>
 
         <div className="py-4 text-center border-y border-border">
-          <div className={cn(
-            "text-3xl font-bold mb-2",
-            active ? "text-success" : "text-muted-foreground"
-          )}>
+          <div className={cn("text-3xl font-bold mb-2", active ? "text-success" : "text-muted-foreground")}>
             {active ? "ACTIVE" : "STOPPED"}
           </div>
-          <p className="text-sm text-muted-foreground">
-            {active ? "Bot is trading" : "Bot is paused"}
-          </p>
+          <p className="text-sm text-muted-foreground">{active ? "Bot is trading" : "Bot is paused"}</p>
         </div>
 
         <div className="grid grid-cols-2 gap-2 pt-2">
-          <Button 
+          <Button
             onClick={handleToggle}
             className={cn(
               "w-full transition-all",
-              active 
-                ? "bg-danger hover:bg-danger/90" 
-                : "bg-success hover:bg-success/90"
+              active ? "bg-danger hover:bg-danger/90" : "bg-success hover:bg-success/90",
             )}
           >
             {active ? (
@@ -190,11 +182,7 @@ export const BotStatus = () => {
               </>
             )}
           </Button>
-          <Button 
-            variant="outline" 
-            className="w-full border-border hover:bg-secondary"
-            onClick={handleReset}
-          >
+          <Button variant="outline" className="w-full border-border hover:bg-secondary" onClick={handleReset}>
             <RotateCcw className="h-4 w-4 mr-2" />
             Reset
           </Button>
