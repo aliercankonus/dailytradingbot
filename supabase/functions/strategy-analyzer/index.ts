@@ -372,6 +372,25 @@ serve(async (req) => {
       `Auto-execute enabled: ${autoExecute} (is_trading_enabled: ${riskParams?.is_trading_enabled}, open: ${actualOpenTrades}/${maxOpenTrades}, available slots: ${availableSlots})`,
     );
 
+    // If trading is disabled, don't generate signals at all
+    if (!riskParams?.is_trading_enabled) {
+      console.log("Trading is disabled, skipping signal generation");
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: "Trading is currently disabled",
+          signals: [],
+          executedSignals: 0,
+          autoExecuteEnabled: false,
+          timestamp: new Date().toISOString(),
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
     // If no available slots, don't generate any signals
     if (availableSlots <= 0) {
       console.log("No available trade slots, skipping signal generation");
