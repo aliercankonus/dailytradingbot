@@ -242,16 +242,16 @@ export const TradeHistory = () => {
                     </Badge>
                   </td>
                   <td className="py-3 px-2 text-right font-mono text-foreground">
-                    ${trade.entry_price.toFixed(2)}
+                    ${trade.entry_price.toFixed(4)}
                   </td>
                   <td className="py-3 px-2 text-right font-mono text-foreground">
-                    {trade.exit_price ? `$${trade.exit_price.toFixed(2)}` : '-'}
+                    {trade.exit_price ? `$${trade.exit_price.toFixed(4)}` : '-'}
                   </td>
                   <td className="py-3 px-2 text-right font-mono text-red-500">
-                    ${trade.stop_loss?.toFixed(2) || '-'}
+                    ${trade.stop_loss?.toFixed(4) || '-'}
                   </td>
                   <td className="py-3 px-2 text-right font-mono text-green-500">
-                    ${trade.take_profit?.toFixed(2) || '-'}
+                    ${trade.take_profit?.toFixed(4) || '-'}
                   </td>
                   <td className="py-3 px-2 text-right font-mono text-muted-foreground">
                     {trade.quantity.toFixed(4)}

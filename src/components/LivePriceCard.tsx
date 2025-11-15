@@ -41,7 +41,7 @@ export const LivePriceCard = () => {
 
                 <div className="text-right">
                   <div className="font-mono font-semibold text-foreground">
-                    ${parseFloat(price.price).toFixed(2)}
+                    ${parseFloat(price.price).toFixed(4)}
                   </div>
                   <div className={`text-sm flex items-center justify-end gap-1 ${
                     isPositive ? 'text-profit' : 'text-loss'

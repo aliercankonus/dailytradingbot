@@ -163,21 +163,21 @@ export const TradingSignalsDashboard = () => {
             <div className="grid grid-cols-3 gap-4 mb-4">
               <div className="p-3 bg-muted rounded-lg">
                 <div className="text-xs text-muted-foreground mb-1">Entry Price</div>
-                <div className="text-lg font-bold">${signal.entry_price.toFixed(2)}</div>
+                <div className="text-lg font-bold">${signal.entry_price.toFixed(4)}</div>
               </div>
               <div className="p-3 bg-muted rounded-lg">
                 <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
                   <Shield className="h-3 w-3" />
                   Stop Loss
                 </div>
-                <div className="text-lg font-bold text-red-500">${signal.stop_loss.toFixed(2)}</div>
+                <div className="text-lg font-bold text-red-500">${signal.stop_loss.toFixed(4)}</div>
               </div>
               <div className="p-3 bg-muted rounded-lg">
                 <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
                   <Target className="h-3 w-3" />
                   Take Profit
                 </div>
-                <div className="text-lg font-bold text-green-500">${signal.take_profit.toFixed(2)}</div>
+                <div className="text-lg font-bold text-green-500">${signal.take_profit.toFixed(4)}</div>
               </div>
             </div>
 

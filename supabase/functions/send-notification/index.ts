@@ -80,11 +80,11 @@ const handler = async (req: Request): Promise<Response> => {
           <h2>Trade Executed Successfully</h2>
           <p><strong>Symbol:</strong> ${payload.symbol}</p>
           <p><strong>Side:</strong> ${payload.side!.toUpperCase()}</p>
-          <p><strong>Price:</strong> $${payload.price!.toFixed(2)}</p>
+          <p><strong>Price:</strong> $${payload.price!.toFixed(4)}</p>
           <p><strong>Quantity:</strong> ${payload.quantity}</p>
-          <p><strong>Total:</strong> $${(payload.price! * payload.quantity!).toFixed(2)}</p>
+          <p><strong>Total:</strong> $${(payload.price! * payload.quantity!).toFixed(4)}</p>
         `;
-        smsMessage = `Trade Executed: ${payload.side!.toUpperCase()} ${payload.symbol} @ $${payload.price!.toFixed(2)} x${payload.quantity}`;
+        smsMessage = `Trade Executed: ${payload.side!.toUpperCase()} ${payload.symbol} @ $${payload.price!.toFixed(4)} x${payload.quantity}`;
         break;
       
       case 'stop_loss_hit':
@@ -92,10 +92,10 @@ const handler = async (req: Request): Promise<Response> => {
         message = `
           <h2>⚠️ Stop Loss Triggered</h2>
           <p><strong>Symbol:</strong> ${payload.symbol}</p>
-          <p><strong>Exit Price:</strong> $${payload.price!.toFixed(2)}</p>
+          <p><strong>Exit Price:</strong> $${payload.price!.toFixed(4)}</p>
           <p><strong>Loss:</strong> <span style="color: #ef4444;">$${payload.profitLoss?.toFixed(2)}</span></p>
         `;
-        smsMessage = `🚨 STOP LOSS HIT: ${payload.symbol} @ $${payload.price!.toFixed(2)}. Loss: $${payload.profitLoss?.toFixed(2)}`;
+        smsMessage = `🚨 STOP LOSS HIT: ${payload.symbol} @ $${payload.price!.toFixed(4)}. Loss: $${payload.profitLoss?.toFixed(2)}`;
         break;
       
       case 'take_profit_hit':
@@ -103,10 +103,10 @@ const handler = async (req: Request): Promise<Response> => {
         message = `
           <h2>✅ Take Profit Achieved</h2>
           <p><strong>Symbol:</strong> ${payload.symbol}</p>
-          <p><strong>Exit Price:</strong> $${payload.price!.toFixed(2)}</p>
+          <p><strong>Exit Price:</strong> $${payload.price!.toFixed(4)}</p>
           <p><strong>Profit:</strong> <span style="color: #10b981;">$${payload.profitLoss?.toFixed(2)}</span></p>
         `;
-        smsMessage = `✅ TAKE PROFIT: ${payload.symbol} @ $${payload.price!.toFixed(2)}. Profit: $${payload.profitLoss?.toFixed(2)}`;
+        smsMessage = `✅ TAKE PROFIT: ${payload.symbol} @ $${payload.price!.toFixed(4)}. Profit: $${payload.profitLoss?.toFixed(2)}`;
         break;
       
       case 'strategy_rotation':
