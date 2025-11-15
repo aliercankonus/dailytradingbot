@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -14,9 +15,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useSymbols } from '@/hooks/useSymbols';
-import { Plus, Trash2, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { Plus, Trash2, Loader2, CheckCircle2, XCircle, ArrowLeft } from 'lucide-react';
 
 const Symbols = () => {
+  const navigate = useNavigate();
   const { symbols, activeSymbols, loading, toggleSymbol, addSymbol, deleteSymbol } = useSymbols();
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newSymbol, setNewSymbol] = useState('');
@@ -47,11 +49,21 @@ const Symbols = () => {
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold">Trading Symbols</h1>
-              <p className="text-muted-foreground mt-1">
-                Manage which trading pairs are active in your system
-              </p>
+            <div className="flex items-center gap-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => navigate('/')}
+                className="hover:bg-accent"
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+              <div>
+                <h1 className="text-3xl font-bold">Trading Symbols</h1>
+                <p className="text-muted-foreground mt-1">
+                  Manage which trading pairs are active in your system
+                </p>
+              </div>
             </div>
             <Button onClick={() => setShowAddDialog(true)}>
               <Plus className="h-4 w-4 mr-2" />
