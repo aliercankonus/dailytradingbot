@@ -92,10 +92,15 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
 // Detect trend based on price action
 function detectTrend(data: MarketData): "bullish" | "bearish" | "ranging" {
   const changePercent = parseFloat(data.priceChangePercent);
-  const volumeRatio = parseFloat(data.volume) / 1000000;
-
-  if (changePercent > 2 && volumeRatio > 50) return "bullish";
-  if (changePercent < -2 && volumeRatio > 50) return "bearish";
+  
+  // More realistic thresholds for trend detection
+  // Bullish: Price up by more than 1%
+  if (changePercent > 1) return "bullish";
+  
+  // Bearish: Price down by more than 1%
+  if (changePercent < -1) return "bearish";
+  
+  // Ranging: Price moving between -1% and +1%
   return "ranging";
 }
 
