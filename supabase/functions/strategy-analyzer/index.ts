@@ -578,11 +578,11 @@ serve(async (req) => {
       }
     }
 
-    // Deduplicate signals: for same symbol+signalType, keep highest confidence
+    // Deduplicate signals: for same symbol+signalType+strategy, keep highest confidence
     const deduplicatedSignals = new Map();
 
     for (const signal of allSignals) {
-      const key = `${signal.symbol}_${signal.signalType}`;
+      const key = `${signal.symbol}_${signal.signalType}_${signal.strategyName}`;
       const existing = deduplicatedSignals.get(key);
 
       if (!existing || signal.confidenceScore > existing.confidenceScore) {
@@ -605,6 +605,21 @@ serve(async (req) => {
 
     // Insert limited signals and execute if auto-execute is enabled
     for (const signal of limitedSignals) {
+      // Check if a similar signal already exists (within last 60 seconds)
+      const { data: existingSignals } = await supabase
+        .from("trading_signals")
+        .select("id")
+        .eq("symbol", signal.symbol)
+        .eq("signal_type", signal.signalType)
+        .eq("strategy_name", signal.strategyName)
+        .eq("user_id", user.id)
+        .gte("created_at", new Date(Date.now() - 60000).toISOString());
+
+      if (existingSignals && existingSignals.length > 0) {
+        console.log(`Skipping duplicate signal for ${signal.symbol} (${signal.strategyName})`);
+        continue;
+      }
+
       const { data: insertedSignal, error: insertError } = await supabase
         .from("trading_signals")
         .insert({

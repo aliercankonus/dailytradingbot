@@ -137,6 +137,27 @@ serve(async (req) => {
       executedPrice = parseFloat(orderData.fills?.[0]?.price || signal.entry_price);
     }
 
+    // Check if this signal has already been executed
+    const { data: existingTrade } = await supabase
+      .from('trades')
+      .select('id')
+      .eq('signal_id', signalId)
+      .maybeSingle();
+
+    if (existingTrade) {
+      console.log(`Signal ${signalId} already executed as trade ${existingTrade.id}`);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'This signal has already been executed',
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 400,
+        }
+      );
+    }
+
     // Create trade record
     const { data: trade, error: tradeError } = await supabase
       .from('trades')
