@@ -132,10 +132,23 @@ export const ActivePositions = () => {
                     </Badge>
                   </div>
                 )}
-                {position.confidence_score && (
+                {position.confidence_score !== undefined && (
                   <div>
                     <div className="text-xs text-muted-foreground">Confidence</div>
-                    <div className="font-medium">{position.confidence_score}%</div>
+                    <Badge 
+                      variant={
+                        position.confidence_score > 70 ? 'default' : 
+                        position.confidence_score >= 40 ? 'outline' : 
+                        'destructive'
+                      }
+                      className={`text-xs mt-1 ${
+                        position.confidence_score > 70 ? 'bg-green-500 hover:bg-green-600' :
+                        position.confidence_score >= 40 ? 'bg-yellow-500 hover:bg-yellow-600 text-black' :
+                        'bg-red-500 hover:bg-red-600'
+                      }`}
+                    >
+                      {position.confidence_score}%
+                    </Badge>
                   </div>
                 )}
               </div>
