@@ -2,16 +2,41 @@ import { Card } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, Wallet, Target, Activity } from "lucide-react";
 import { useRealtimePrices } from "@/hooks/useRealtimePrices";
 import { useRiskParameters } from "@/hooks/useRiskParameters";
-import { useTrades } from "@/hooks/useTrades";
 import { usePositions } from "@/hooks/usePositions";
 import { useBinanceBalance } from "@/hooks/useBinanceBalance";
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 export const PortfolioMetrics = () => {
   const { connected } = useRealtimePrices();
   const { riskParams, loading: riskLoading } = useRiskParameters();
-  const { trades, loading: tradesLoading } = useTrades();
   const { positions, loading: positionsLoading } = usePositions();
   const { balance: binanceBalance, loading: balanceLoading } = useBinanceBalance();
+  const [allTrades, setAllTrades] = useState<any[]>([]);
+  const [tradesLoading, setTradesLoading] = useState(true);
+
+  // Fetch ALL trades for accurate P&L calculation
+  useEffect(() => {
+    const fetchAllTrades = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('trades')
+          .select('*')
+          .order('executed_at', { ascending: false });
+        
+        if (error) throw error;
+        setAllTrades(data || []);
+      } catch (err) {
+        console.error('Error fetching all trades:', err);
+      } finally {
+        setTradesLoading(false);
+      }
+    };
+
+    fetchAllTrades();
+    const interval = setInterval(fetchAllTrades, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   const loading = riskLoading || tradesLoading || positionsLoading || balanceLoading;
 
@@ -22,8 +47,8 @@ export const PortfolioMetrics = () => {
       ? binanceBalance.balance 
       : (riskParams?.portfolio_value || 0);
     
-    // Calculate realized P&L from closed trades
-    const realizedPnL = trades
+    // Calculate realized P&L from ALL closed trades (not limited to 50)
+    const realizedPnL = allTrades
       .filter(t => t.status === 'closed' && t.profit_loss !== null)
       .reduce((sum, trade) => sum + (trade.profit_loss || 0), 0);
     
@@ -36,8 +61,8 @@ export const PortfolioMetrics = () => {
     const currentValue = basePortfolio + totalPnL;
     const totalReturn = basePortfolio > 0 ? ((totalPnL / basePortfolio) * 100) : 0;
     
-    // Calculate win rate from closed trades
-    const closedTrades = trades.filter(t => t.status === 'closed');
+    // Calculate win rate from ALL closed trades
+    const closedTrades = allTrades.filter(t => t.status === 'closed');
     const winningTrades = closedTrades.filter(t => (t.profit_loss || 0) > 0).length;
     const winRate = closedTrades.length > 0 ? ((winningTrades / closedTrades.length) * 100) : 0;
     
