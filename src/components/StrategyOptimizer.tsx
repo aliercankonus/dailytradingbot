@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useSymbols } from '@/hooks/useSymbols';
 import { Settings, TrendingUp, Target, Activity, Zap } from 'lucide-react';
@@ -22,11 +22,18 @@ export const StrategyOptimizer = ({ strategies }: StrategyOptimizerProps) => {
 
   const [formData, setFormData] = useState({
     strategyId: strategies[0]?.id || '',
-    symbol: activeSymbols[0] || '',
+    symbol: '',
     startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0],
     initialCapital: 10000,
   });
+
+  // Set default symbol when activeSymbols loads
+  useEffect(() => {
+    if (activeSymbols.length > 0 && !formData.symbol) {
+      setFormData(prev => ({ ...prev, symbol: activeSymbols[0] }));
+    }
+  }, [activeSymbols]);
 
   const [paramRanges, setParamRanges] = useState({
     stopLoss: { min: 1, max: 5, step: 0.5 },

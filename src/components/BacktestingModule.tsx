@@ -25,11 +25,18 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
 
   const [formData, setFormData] = useState({
     strategyId: strategies[0]?.id || '',
-    symbol: activeSymbols[0] || '',
+    symbol: '',
     startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0],
     initialCapital: 10000,
   });
+
+  // Set default symbol when activeSymbols loads
+  useEffect(() => {
+    if (activeSymbols.length > 0 && !formData.symbol) {
+      setFormData(prev => ({ ...prev, symbol: activeSymbols[0] }));
+    }
+  }, [activeSymbols]);
 
   const [selectedStrategyConfig, setSelectedStrategyConfig] = useState<any>(null);
 
