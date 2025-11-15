@@ -287,8 +287,8 @@ const PositionsTable = ({ positions, getCloseReasonBadge }: PositionsTableProps)
                   {position.trades?.strategy_name || 'N/A'}
                 </span>
               </TableCell>
-              <TableCell className="text-right">${position.entry_price?.toFixed(2)}</TableCell>
-              <TableCell className="text-right">${position.current_price?.toFixed(2)}</TableCell>
+              <TableCell className="text-right">${position.entry_price?.toFixed(4)}</TableCell>
+              <TableCell className="text-right">${position.current_price?.toFixed(4)}</TableCell>
               <TableCell className="text-right">{position.quantity?.toFixed(4)}</TableCell>
               <TableCell className="text-right">
                 <span className={position.unrealized_pnl >= 0 ? 'text-success' : 'text-destructive'}>

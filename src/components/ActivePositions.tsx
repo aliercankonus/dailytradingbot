@@ -99,19 +99,19 @@ export const ActivePositions = () => {
             <div className="grid grid-cols-4 gap-2 text-sm">
               <div>
                 <div className="text-xs text-muted-foreground">Entry</div>
-                <div className="font-medium">${position.entry_price.toFixed(2)}</div>
+                <div className="font-medium">${position.entry_price.toFixed(4)}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Current</div>
-                <div className="font-medium">${(position.current_price || position.entry_price).toFixed(2)}</div>
+                <div className="font-medium">${(position.current_price || position.entry_price).toFixed(4)}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Stop Loss</div>
-                <div className="font-medium text-red-500">${position.stop_loss.toFixed(2)}</div>
+                <div className="font-medium text-red-500">${position.stop_loss.toFixed(4)}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Take Profit</div>
-                <div className="font-medium text-green-500">${position.take_profit.toFixed(2)}</div>
+                <div className="font-medium text-green-500">${position.take_profit.toFixed(4)}</div>
               </div>
             </div>
           </Card>
