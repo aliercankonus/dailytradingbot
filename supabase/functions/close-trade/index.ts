@@ -104,16 +104,28 @@ serve(async (req) => {
 
 async function closePosition(supabase: any, position: any, manualClose: boolean = false) {
   const currentPrice = position.current_price || position.entry_price;
-  const pnl = position.unrealized_pnl || 0;
-  const pnlPercent = position.unrealized_pnl_percent || 0;
+  
+  // Recalculate P&L from current price to ensure accuracy
+  const pnl = position.side === 'BUY'
+    ? (currentPrice - position.entry_price) * position.quantity
+    : (position.entry_price - currentPrice) * position.quantity;
+  
+  const pnlPercent = position.side === 'BUY'
+    ? ((currentPrice - position.entry_price) / position.entry_price) * 100
+    : ((position.entry_price - currentPrice) / position.entry_price) * 100;
 
-  // Determine status based on whether it's manual or system close
-  const tradeStatus = manualClose ? 'closed' : 'complete';
+  // Always use 'closed' status for consistency
+  const tradeStatus = 'closed';
 
   // Update position to closed
   await supabase
     .from('positions')
-    .update({ status: 'closed' })
+    .update({ 
+      status: 'closed',
+      current_price: currentPrice,
+      unrealized_pnl: pnl,
+      unrealized_pnl_percent: pnlPercent
+    })
     .eq('id', position.id);
 
   // Update trade record
