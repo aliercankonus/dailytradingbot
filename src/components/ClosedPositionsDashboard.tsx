@@ -40,9 +40,10 @@ export const ClosedPositionsDashboard = () => {
       return { total: 0, profitable: 0, losses: 0, totalPnL: 0, avgPnL: 0, takeProfitCount: 0, stopLossCount: 0 };
     }
     
-    const profitable = positions.filter(p => (p.unrealized_pnl || 0) > 0).length;
-    const losses = positions.filter(p => (p.unrealized_pnl || 0) < 0).length;
-    const totalPnL = positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
+    // Use actual profit_loss from trades table, not unrealized_pnl
+    const profitable = positions.filter(p => (p.trades?.profit_loss || 0) > 0).length;
+    const losses = positions.filter(p => (p.trades?.profit_loss || 0) <= 0).length;
+    const totalPnL = positions.reduce((sum, p) => sum + (p.trades?.profit_loss || 0), 0);
     
     // Estimate closure reason based on price and TP/SL
     let takeProfitCount = 0;
@@ -71,9 +72,9 @@ export const ClosedPositionsDashboard = () => {
     
     switch (activeTab) {
       case 'profitable':
-        return positions.filter(p => (p.unrealized_pnl || 0) > 0);
+        return positions.filter(p => (p.trades?.profit_loss || 0) > 0);
       case 'losses':
-        return positions.filter(p => (p.unrealized_pnl || 0) < 0);
+        return positions.filter(p => (p.trades?.profit_loss || 0) <= 0);
       default:
         return positions;
     }
@@ -291,18 +292,18 @@ const PositionsTable = ({ positions, getCloseReasonBadge }: PositionsTableProps)
               <TableCell className="text-right">${position.current_price?.toFixed(4)}</TableCell>
               <TableCell className="text-right">{position.quantity?.toFixed(4)}</TableCell>
               <TableCell className="text-right">
-                <span className={position.unrealized_pnl >= 0 ? 'text-success' : 'text-destructive'}>
-                  {position.unrealized_pnl >= 0 ? (
+                <span className={(position.trades?.profit_loss || 0) >= 0 ? 'text-success' : 'text-destructive'}>
+                  {(position.trades?.profit_loss || 0) >= 0 ? (
                     <TrendingUp className="h-4 w-4 inline mr-1" />
                   ) : (
                     <TrendingDown className="h-4 w-4 inline mr-1" />
                   )}
-                  ${Math.abs(position.unrealized_pnl).toFixed(2)}
+                  ${Math.abs(position.trades?.profit_loss || 0).toFixed(2)}
                 </span>
               </TableCell>
               <TableCell className="text-right">
-                <span className={position.unrealized_pnl_percent >= 0 ? 'text-success' : 'text-destructive'}>
-                  {position.unrealized_pnl_percent?.toFixed(2)}%
+                <span className={(position.trades?.profit_loss_percent || 0) >= 0 ? 'text-success' : 'text-destructive'}>
+                  {position.trades?.profit_loss_percent?.toFixed(2) || '0.00'}%
                 </span>
               </TableCell>
               <TableCell>{getCloseReasonBadge(position)}</TableCell>
