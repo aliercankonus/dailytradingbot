@@ -2,7 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowUpRight, ArrowDownRight, Filter, Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
-import { useTrades } from "@/hooks/useTrades";
+import { useOpenTrades } from "@/hooks/useOpenTrades";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState, useMemo } from "react";
 
@@ -10,15 +10,15 @@ type SortColumn = 'symbol' | 'strategy_name' | 'profit_loss' | 'status' | 'side'
 type SortDirection = 'asc' | 'desc';
 
 export const TradeHistory = () => {
-  const { trades, loading } = useTrades();
+  const { trades, loading } = useOpenTrades();
   const [selectedStrategy, setSelectedStrategy] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [sortColumn, setSortColumn] = useState<SortColumn>('executed_at');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const tradesPerPage = 10;
 
-  const strategies = useMemo(() => {
-    const uniqueStrategies = new Set(trades.map(t => t.strategy_name || 'Unknown'));
+  const strategies = useMemo<string[]>(() => {
+    const uniqueStrategies = new Set<string>(trades.map(t => t.strategy_name || 'Unknown'));
     return Array.from(uniqueStrategies);
   }, [trades]);
 
@@ -42,10 +42,8 @@ export const TradeHistory = () => {
   };
 
   const filteredTrades = useMemo(() => {
-    // First filter to only show open trades
-    let result = trades.filter(t => t.status === 'open');
-    
-    // Then filter by strategy if needed
+    // Start from open trades (already filtered in hook)
+    let result = trades;
     if (selectedStrategy !== "all") {
       result = result.filter(t => (t.strategy_name || 'Unknown') === selectedStrategy);
     }
