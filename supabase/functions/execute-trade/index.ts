@@ -225,6 +225,12 @@ serve(async (req) => {
       );
     }
 
+    // Delete the signal after trade execution
+    await supabase
+      .from('trading_signals')
+      .delete()
+      .eq('id', signalId);
+
     // Update risk parameters - sync with actual active positions count
     const { count: activeCount } = await supabase
       .from('positions')

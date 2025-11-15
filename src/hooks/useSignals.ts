@@ -27,6 +27,15 @@ export const useSignals = () => {
     const fetchSignals = async () => {
       try {
         setLoading(true);
+        
+        // Get all active trades to filter out used signals
+        const { data: activeTrades } = await supabase
+          .from('trades')
+          .select('signal_id')
+          .eq('status', 'open');
+        
+        const usedSignalIds = new Set(activeTrades?.map(t => t.signal_id).filter(Boolean));
+        
         const { data, error: queryError } = await supabase
           .from('trading_signals')
           .select('*')
@@ -34,7 +43,10 @@ export const useSignals = () => {
           .order('created_at', { ascending: false });
 
         if (queryError) throw queryError;
-        setSignals(data || []);
+        
+        // Filter out signals that already have open trades
+        const availableSignals = (data || []).filter(signal => !usedSignalIds.has(signal.id));
+        setSignals(availableSignals);
       } catch (err) {
         console.error('Error fetching signals:', err);
         setError(err instanceof Error ? err.message : 'Failed to fetch signals');
