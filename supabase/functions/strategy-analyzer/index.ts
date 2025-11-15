@@ -364,11 +364,32 @@ serve(async (req) => {
       await supabase.from("risk_parameters").update({ current_open_trades: actualOpenTrades }).eq("user_id", user.id);
     }
 
-    const autoExecute = riskParams?.is_trading_enabled && actualOpenTrades < (riskParams?.max_open_trades || 5);
+    const maxOpenTrades = riskParams?.max_open_trades || 5;
+    const availableSlots = maxOpenTrades - actualOpenTrades;
+    const autoExecute = riskParams?.is_trading_enabled && availableSlots > 0;
 
     console.log(
-      `Auto-execute enabled: ${autoExecute} (is_trading_enabled: ${riskParams?.is_trading_enabled}, open: ${actualOpenTrades}/${riskParams?.max_open_trades})`,
+      `Auto-execute enabled: ${autoExecute} (is_trading_enabled: ${riskParams?.is_trading_enabled}, open: ${actualOpenTrades}/${maxOpenTrades}, available slots: ${availableSlots})`,
     );
+
+    // If no available slots, don't generate any signals
+    if (availableSlots <= 0) {
+      console.log("No available trade slots, skipping signal generation");
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: `Maximum open trades reached (${actualOpenTrades}/${maxOpenTrades})`,
+          signals: [],
+          executedSignals: 0,
+          autoExecuteEnabled: false,
+          timestamp: new Date().toISOString(),
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
 
     // Fetch active custom strategies for this user
     const { data: customStrategies, error: customError } = await supabase
@@ -536,11 +557,18 @@ serve(async (req) => {
     const finalSignals = Array.from(deduplicatedSignals.values());
     console.log(`Deduplicated ${allSignals.length} signals to ${finalSignals.length} unique signals`);
 
-    // Sort signals by creation order to ensure FIFO execution
-    finalSignals.sort((a, b) => a.symbol.localeCompare(b.symbol));
+    // Sort signals by confidence score (highest first) for priority execution
+    finalSignals.sort((a, b) => b.confidenceScore - a.confidenceScore);
 
-    // Insert deduplicated signals and execute if auto-execute is enabled
-    for (const signal of finalSignals) {
+    // Limit signals to available slots
+    const limitedSignals = finalSignals.slice(0, availableSlots);
+    
+    if (limitedSignals.length < finalSignals.length) {
+      console.log(`Limited signals from ${finalSignals.length} to ${limitedSignals.length} based on available slots (${availableSlots})`);
+    }
+
+    // Insert limited signals and execute if auto-execute is enabled
+    for (const signal of limitedSignals) {
       const { data: insertedSignal, error: insertError } = await supabase
         .from("trading_signals")
         .insert({
@@ -596,7 +624,7 @@ serve(async (req) => {
     }
 
     console.log(
-      `Generated ${finalSignals.length} signals total (${allSignals.length} before deduplication), executed ${executedSignals.length}`,
+      `Generated ${limitedSignals.length} signals total (${allSignals.length} before deduplication, ${finalSignals.length} after deduplication, limited to ${availableSlots} slots), executed ${executedSignals.length}`,
     );
 
     // Clean up expired signals (>60 seconds old) that are NOT referenced by trades
@@ -636,9 +664,11 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        signals: finalSignals,
+        signals: limitedSignals,
         totalSignalsGenerated: allSignals.length,
         signalsAfterDeduplication: finalSignals.length,
+        signalsAfterLimiting: limitedSignals.length,
+        availableSlots: availableSlots,
         executedSignals: executedSignals.length,
         autoExecuteEnabled: autoExecute,
         strategiesAnalyzed: strategies.length,
