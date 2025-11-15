@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useRiskParameters } from './useRiskParameters';
 
 export const useSignalGenerator = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const { toast } = useToast();
+  const { riskParams } = useRiskParameters();
 
   const generateSignals = async () => {
     try {
@@ -58,6 +60,12 @@ export const useSignalGenerator = () => {
   };
 
   useEffect(() => {
+    // Only generate signals if bot is enabled
+    if (!riskParams?.is_trading_enabled) {
+      console.log('Bot is disabled, skipping signal generation');
+      return;
+    }
+
     // Generate signals immediately on mount
     generateSignals();
 
@@ -65,7 +73,7 @@ export const useSignalGenerator = () => {
     const interval = setInterval(generateSignals, 5 * 60 * 1000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [riskParams?.is_trading_enabled]);
 
   return { generateSignals, isGenerating };
 };
