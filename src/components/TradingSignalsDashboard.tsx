@@ -129,9 +129,22 @@ export const TradingSignalsDashboard = () => {
                 </div>
               </div>
               <div className="text-right">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                <div className="flex items-center gap-2 text-sm mb-1">
                   <Zap className="h-4 w-4" />
-                  Confidence: {signal.confidence_score}%
+                  <Badge 
+                    variant={
+                      signal.confidence_score > 70 ? 'default' : 
+                      signal.confidence_score >= 40 ? 'outline' : 
+                      'destructive'
+                    }
+                    className={`text-xs ${
+                      signal.confidence_score > 70 ? 'bg-green-500 hover:bg-green-600' :
+                      signal.confidence_score >= 40 ? 'bg-yellow-500 hover:bg-yellow-600 text-black' :
+                      'bg-red-500 hover:bg-red-600'
+                    }`}
+                  >
+                    {signal.confidence_score}% Confidence
+                  </Badge>
                 </div>
                 <div className="flex items-center gap-2 justify-end flex-wrap">
                   <Badge 
