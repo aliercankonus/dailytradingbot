@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useSymbols } from '@/hooks/useSymbols';
 import { Settings, TrendingUp, Target, Activity, Zap } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -15,12 +16,13 @@ interface StrategyOptimizerProps {
 
 export const StrategyOptimizer = ({ strategies }: StrategyOptimizerProps) => {
   const { toast } = useToast();
+  const { activeSymbols, symbols } = useSymbols();
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [results, setResults] = useState<any>(null);
 
   const [formData, setFormData] = useState({
     strategyId: strategies[0]?.id || '',
-    symbol: 'BTCUSDT',
+    symbol: activeSymbols[0] || '',
     startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0],
     initialCapital: 10000,
@@ -115,12 +117,19 @@ export const StrategyOptimizer = ({ strategies }: StrategyOptimizerProps) => {
 
               <div className="space-y-2">
                 <Label htmlFor="opt-symbol">Symbol</Label>
-                <Input
-                  id="opt-symbol"
+                <Select
                   value={formData.symbol}
-                  onChange={(e) => setFormData({ ...formData, symbol: e.target.value })}
-                  placeholder="BTCUSDT"
-                />
+                  onValueChange={(value) => setFormData({ ...formData, symbol: value })}
+                >
+                  <SelectTrigger id="opt-symbol">
+                    <SelectValue placeholder="Select symbol" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {symbols.filter(s => s.is_active).map(s => (
+                      <SelectItem key={s.id} value={s.symbol}>{s.display_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">

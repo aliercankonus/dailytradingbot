@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -8,20 +8,30 @@ import { cn } from "@/lib/utils";
 import { useRiskParameters } from "@/hooks/useRiskParameters";
 import { useToast } from "@/hooks/use-toast";
 import { useLiveTrend } from "@/hooks/useLiveTrend";
+import { useSymbols } from "@/hooks/useSymbols";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export const BotStatus = () => {
   const { riskParams, updateRiskParameters } = useRiskParameters();
   const { toast } = useToast();
-  const [selectedCrypto, setSelectedCrypto] = useState("BTCUSDT");
-  const { trendData, loading: trendLoading } = useLiveTrend(selectedCrypto, 60000);
+  const { activeSymbols, symbols } = useSymbols();
+  const [selectedCrypto, setSelectedCrypto] = useState("");
+  
+  // Set default to first active symbol when available
+  useEffect(() => {
+    if (activeSymbols.length > 0 && !selectedCrypto) {
+      setSelectedCrypto(activeSymbols[0]);
+    }
+  }, [activeSymbols]);
+  
+  const { trendData, loading: trendLoading } = useLiveTrend(selectedCrypto || activeSymbols[0] || "", 60000);
 
-  const cryptoOptions = [
-    { value: "BTCUSDT", label: "BTC/USDT" },
-    { value: "ETHUSDT", label: "ETH/USDT" },
-    { value: "BNBUSDT", label: "BNB/USDT" },
-    { value: "SOLUSDT", label: "SOL/USDT" },
-  ];
+  const cryptoOptions = symbols
+    .filter(s => s.is_active)
+    .map(s => ({
+      value: s.symbol,
+      label: s.display_name
+    }));
 
   const active = riskParams?.is_trading_enabled ?? false;
 

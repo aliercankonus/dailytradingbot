@@ -23,7 +23,7 @@ export const useMarketData = (symbols?: string[]) => {
   const RECONNECT_DELAY = 3000;
 
   useEffect(() => {
-    const symbolsList = symbols || ['BTCUSDT', 'ETHUSDT'];
+    const symbolsList = symbols && symbols.length > 0 ? symbols : [];
     
     const connectWebSocket = () => {
       try {

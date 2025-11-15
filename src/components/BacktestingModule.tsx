@@ -9,6 +9,7 @@ import { TrendingUp, TrendingDown, Target, Activity, Info } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useEffect } from 'react';
 import { useCustomStrategies } from '@/hooks/useCustomStrategies';
+import { useSymbols } from '@/hooks/useSymbols';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 
@@ -20,10 +21,11 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
   const { results, runningBacktest, runBacktest } = useBacktesting();
   const { toast } = useToast();
   const { strategies: customStrategies } = useCustomStrategies();
+  const { activeSymbols, symbols } = useSymbols();
 
   const [formData, setFormData] = useState({
     strategyId: strategies[0]?.id || '',
-    symbol: 'BTCUSDT',
+    symbol: activeSymbols[0] || '',
     startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0],
     initialCapital: 10000,
@@ -162,12 +164,19 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
 
           <div className="space-y-2">
             <Label htmlFor="symbol">Symbol</Label>
-            <Input
-              id="symbol"
+            <Select
               value={formData.symbol}
-              onChange={(e) => setFormData({ ...formData, symbol: e.target.value })}
-              placeholder="BTCUSDT"
-            />
+              onValueChange={(value) => setFormData({ ...formData, symbol: value })}
+            >
+              <SelectTrigger id="symbol">
+                <SelectValue placeholder="Select symbol" />
+              </SelectTrigger>
+              <SelectContent>
+                {symbols.filter(s => s.is_active).map(s => (
+                  <SelectItem key={s.id} value={s.symbol}>{s.display_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-2">
