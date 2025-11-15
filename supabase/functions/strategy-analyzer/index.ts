@@ -413,6 +413,24 @@ serve(async (req) => {
       console.error("Error fetching built-in strategies:", builtInError);
     }
 
+    // Fetch active trading symbols for this user
+    const { data: userSymbols, error: symbolsError } = await supabase
+      .from("trading_symbols_config")
+      .select("symbol")
+      .eq("user_id", user.id)
+      .eq("is_active", true);
+
+    if (symbolsError) {
+      console.error("Error fetching symbols:", symbolsError);
+    }
+
+    // Use user's active symbols, fallback to defaults if none
+    const symbols = userSymbols && userSymbols.length > 0
+      ? userSymbols.map(s => s.symbol)
+      : ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"];
+
+    console.log(`Using ${symbols.length} active symbols:`, symbols);
+
     // Define predefined logic for built-in strategies
     const builtInStrategyConfigs: Record<string, any> = {
       "Grid Trading": {
@@ -505,8 +523,7 @@ serve(async (req) => {
       );
     }
 
-    // Fetch current market data for common symbols
-    const symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"];
+    // Fetch current market data for active symbols
     console.log(`Fetching market data for ${symbols.length} symbols...`);
 
     const marketDataPromises = symbols.map(async (symbol) => {

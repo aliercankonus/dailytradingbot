@@ -582,6 +582,36 @@ export type Database = {
           },
         ]
       }
+      trading_symbols_config: {
+        Row: {
+          created_at: string
+          display_name: string
+          id: string
+          is_active: boolean
+          symbol: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name: string
+          id?: string
+          is_active?: boolean
+          symbol: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string
+          id?: string
+          is_active?: boolean
+          symbol?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_api_keys: {
         Row: {
           binance_api_key: string | null

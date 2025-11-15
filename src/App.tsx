@@ -9,6 +9,7 @@ import Index from "./pages/Index";
 import Settings from "./pages/Settings";
 import Strategies from "./pages/Strategies";
 import StrategyBuilder from "./pages/StrategyBuilder";
+import Symbols from "./pages/Symbols";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -25,6 +26,7 @@ const App = () => (
             <Route path="/auth" element={<Auth />} />
             <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+            <Route path="/symbols" element={<ProtectedRoute><Symbols /></ProtectedRoute>} />
             <Route path="/strategies" element={<ProtectedRoute><Strategies /></ProtectedRoute>} />
             <Route path="/strategies/new" element={<ProtectedRoute><StrategyBuilder /></ProtectedRoute>} />
             <Route path="/strategies/edit/:id" element={<ProtectedRoute><StrategyBuilder /></ProtectedRoute>} />
