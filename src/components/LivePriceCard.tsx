@@ -5,8 +5,8 @@ import { useSymbols } from "@/hooks/useSymbols";
 import { useEffect, useState } from "react";
 
 export const LivePriceCard = () => {
-  const { prices, connected } = useRealtimePrices();
   const { activeSymbols, loading: symbolsLoading } = useSymbols();
+  const { prices, connected } = useRealtimePrices(activeSymbols);
   const [displayPrices, setDisplayPrices] = useState<any[]>([]);
 
   useEffect(() => {

@@ -45,26 +45,34 @@ serve(async (req) => {
   let reconnectTimeout: number | null = null;
   let heartbeatInterval: number | null = null;
 
-  // Fetch active symbols from database
+  // Determine symbols to stream
   let symbols = ["btcusdt", "ethusdt"]; // Default fallback
-  
-  if (userId) {
-    try {
+
+  try {
+    const url = new URL(req.url);
+    const symbolsParam = url.searchParams.get("symbols");
+
+    if (symbolsParam) {
+      const parsed = JSON.parse(decodeURIComponent(symbolsParam));
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        symbols = parsed.map((s: string) => s.toLowerCase());
+        console.log("Using symbols from client:", symbols);
+      }
+    } else if (userId) {
       const { data: symbolsData } = await supabase
         .from("trading_symbols_config")
         .select("symbol")
         .eq("user_id", userId)
         .eq("is_active", true);
-      
       if (symbolsData && symbolsData.length > 0) {
-        symbols = symbolsData.map(s => s.symbol.toLowerCase());
+        symbols = symbolsData.map((s) => s.symbol.toLowerCase());
         console.log("Fetched active symbols:", symbols);
       } else {
-        console.log("No active symbols found, using defaults");
+        console.log("No active symbols found for user, using defaults");
       }
-    } catch (error) {
-      console.error("Error fetching symbols:", error);
     }
+  } catch (e) {
+    console.error("Error determining symbols:", e);
   }
   
   const streams = symbols.map((s) => `${s}@ticker`).join("/");
