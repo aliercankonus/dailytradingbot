@@ -114,6 +114,32 @@ export const ActivePositions = () => {
                 <div className="font-medium text-green-500">${position.take_profit.toFixed(4)}</div>
               </div>
             </div>
+
+            {(position.trend || position.confidence_score) && (
+              <div className="grid grid-cols-2 gap-2 text-sm mt-3 pt-3 border-t">
+                {position.trend && (
+                  <div>
+                    <div className="text-xs text-muted-foreground">Trend</div>
+                    <Badge 
+                      variant={
+                        position.trend === 'bullish' ? 'default' : 
+                        position.trend === 'bearish' ? 'destructive' : 
+                        'outline'
+                      } 
+                      className="text-xs mt-1"
+                    >
+                      {position.trend}
+                    </Badge>
+                  </div>
+                )}
+                {position.confidence_score && (
+                  <div>
+                    <div className="text-xs text-muted-foreground">Confidence</div>
+                    <div className="font-medium">{position.confidence_score}%</div>
+                  </div>
+                )}
+              </div>
+            )}
           </Card>
         ))}
 

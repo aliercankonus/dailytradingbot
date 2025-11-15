@@ -199,6 +199,8 @@ serve(async (req) => {
         unrealized_pnl: 0,
         unrealized_pnl_percent: 0,
         status: 'active',
+        trend: signal.trend,
+        confidence_score: signal.confidence_score,
       });
 
     if (!isPaperTrading) {
