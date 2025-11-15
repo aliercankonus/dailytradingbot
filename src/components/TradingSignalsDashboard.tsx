@@ -6,9 +6,10 @@ import { Label } from '@/components/ui/label';
 import { useSignals } from '@/hooks/useSignals';
 import { useSignalGenerator } from '@/hooks/useSignalGenerator';
 import { supabase } from '@/integrations/supabase/client';
-import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
+import { getSignalPriorityTier, getSignalPriorityVariant } from '@/lib/utils';
 
 export const TradingSignalsDashboard = () => {
   const { signals, loading } = useSignals();
@@ -132,7 +133,14 @@ export const TradingSignalsDashboard = () => {
                   <Zap className="h-4 w-4" />
                   Confidence: {signal.confidence_score}%
                 </div>
-                <div className="flex items-center gap-2 justify-end">
+                <div className="flex items-center gap-2 justify-end flex-wrap">
+                  <Badge 
+                    variant={getSignalPriorityVariant(getSignalPriorityTier(signal.confidence_score))}
+                    className="font-medium"
+                  >
+                    <AlertCircle className="h-3 w-3 mr-1" />
+                    {getSignalPriorityTier(signal.confidence_score)} Priority
+                  </Badge>
                   <Badge 
                     variant={
                       signal.trend.toLowerCase() === 'bullish' ? 'default' : 
