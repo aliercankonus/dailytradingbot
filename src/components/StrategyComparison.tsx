@@ -61,9 +61,10 @@ export const StrategyComparison = () => {
       const tradePerformance = new Map<string, any>();
       if (tradeData) {
         tradeData.forEach(trade => {
-          const strategyName = trade.strategy_name || 'Unknown';
-          if (!tradePerformance.has(strategyName)) {
-            tradePerformance.set(strategyName, {
+          // Strip symbol suffix from strategy name
+          const cleanStrategyName = (trade.strategy_name || 'Unknown').replace(/\s*(BTCUSDT|ETHUSDT|BNBUSDT|SOLUSDT|ADAUSDT)$/i, '').trim();
+          if (!tradePerformance.has(cleanStrategyName)) {
+            tradePerformance.set(cleanStrategyName, {
               total_trades: 0,
               winning_trades: 0,
               total_profit: 0,
@@ -71,7 +72,7 @@ export const StrategyComparison = () => {
               symbols: new Set<string>()
             });
           }
-          const perf = tradePerformance.get(strategyName);
+          const perf = tradePerformance.get(cleanStrategyName);
           perf.total_trades++;
           perf.symbols.add(trade.symbol);
           
@@ -100,10 +101,13 @@ export const StrategyComparison = () => {
       // First, aggregate backtesting results by strategy name across all symbols
       const backtestByStrategy = new Map<string, any>();
       (backtestData || []).forEach(result => {
-        const key = result.strategy_name;
+        // Strip symbol suffix from strategy name (e.g., "Strategy BTCUSDT" -> "Strategy")
+        const cleanStrategyName = result.strategy_name.replace(/\s*(BTCUSDT|ETHUSDT|BNBUSDT|SOLUSDT|ADAUSDT)$/i, '').trim();
+        const key = cleanStrategyName;
         if (!backtestByStrategy.has(key)) {
           backtestByStrategy.set(key, {
             ...result,
+            strategy_name: cleanStrategyName,
             symbols: new Set([result.symbol]),
             total_trades: result.total_trades || 0,
             winning_trades: result.winning_trades || 0,
@@ -171,10 +175,12 @@ export const StrategyComparison = () => {
 
       // Add performance data for strategies without backtest or trade data
       (perfData || []).forEach(p => {
-        if (!resultsMap.has(p.strategy_name)) {
-          resultsMap.set(p.strategy_name, {
+        // Strip symbol suffix from strategy name
+        const cleanStrategyName = p.strategy_name.replace(/\s*(BTCUSDT|ETHUSDT|BNBUSDT|SOLUSDT|ADAUSDT)$/i, '').trim();
+        if (!resultsMap.has(cleanStrategyName)) {
+          resultsMap.set(cleanStrategyName, {
             id: p.id,
-            strategy_name: p.strategy_name,
+            strategy_name: cleanStrategyName,
             symbol: 'Multiple',
             win_rate: (p.winning_trades / (p.total_trades || 1)) * 100,
             net_profit: p.total_profit || 0,
