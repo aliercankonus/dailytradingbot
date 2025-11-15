@@ -12,6 +12,12 @@ export const useSignalGenerator = () => {
     try {
       setIsGenerating(true);
       
+      // Check if bot is enabled before generating signals
+      if (!riskParams?.is_trading_enabled) {
+        console.log('Bot is disabled, skipping signal generation');
+        return;
+      }
+      
       // Check if user is authenticated before making the call
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
