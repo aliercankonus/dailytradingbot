@@ -1,16 +1,21 @@
 import { Card } from "@/components/ui/card";
 import { TrendingUp, TrendingDown } from "lucide-react";
 import { useRealtimePrices } from "@/hooks/useRealtimePrices";
+import { useSymbols } from "@/hooks/useSymbols";
 import { useEffect, useState } from "react";
 
 export const LivePriceCard = () => {
   const { prices, connected } = useRealtimePrices();
+  const { activeSymbols, loading: symbolsLoading } = useSymbols();
   const [displayPrices, setDisplayPrices] = useState<any[]>([]);
 
   useEffect(() => {
-    const priceArray = Array.from(prices.values()).slice(0, 5);
+    // Filter prices to only show active symbols
+    const priceArray = Array.from(prices.values())
+      .filter(price => activeSymbols.includes(price.symbol))
+      .slice(0, 10);
     setDisplayPrices(priceArray);
-  }, [prices]);
+  }, [prices, activeSymbols]);
 
   return (
     <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
@@ -20,7 +25,15 @@ export const LivePriceCard = () => {
       </div>
 
       <div className="space-y-3">
-        {displayPrices.length === 0 ? (
+        {symbolsLoading ? (
+          <div className="text-center py-8 text-muted-foreground">
+            Loading symbols...
+          </div>
+        ) : activeSymbols.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            No active trading symbols. Go to Symbols page to activate trading pairs.
+          </div>
+        ) : displayPrices.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             {connected ? 'Waiting for price updates...' : 'Connecting to market...'}
           </div>
