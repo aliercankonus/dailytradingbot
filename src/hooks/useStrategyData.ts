@@ -20,34 +20,98 @@ export const useStrategyData = () => {
       try {
         setLoading(true);
         
-        // Fetch built-in strategy performance data
-        const { data: builtInData, error: builtInError } = await supabase
-          .from('strategy_performance')
-          .select('*')
-          .order('total_profit', { ascending: false });
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          setStrategies([]);
+          setLoading(false);
+          return;
+        }
 
-        if (builtInError) throw builtInError;
+        // Fetch actual trade performance data
+        const { data: tradesData, error: tradesError } = await supabase
+          .from('trades')
+          .select('strategy_name, profit_loss, status')
+          .eq('user_id', user.id)
+          .eq('status', 'closed');
+
+        if (tradesError) throw tradesError;
+
+        // Calculate performance by strategy
+        const performanceMap = new Map<string, { total_trades: number; winning_trades: number; total_profit: number }>();
+        
+        (tradesData || []).forEach(trade => {
+          const strategyName = trade.strategy_name || 'Unknown';
+          const current = performanceMap.get(strategyName) || { total_trades: 0, winning_trades: 0, total_profit: 0 };
+          
+          current.total_trades++;
+          if (trade.profit_loss > 0) {
+            current.winning_trades++;
+          }
+          current.total_profit += trade.profit_loss || 0;
+          
+          performanceMap.set(strategyName, current);
+        });
 
         // Fetch custom strategies
         const { data: customData, error: customError } = await supabase
           .from('custom_strategies')
           .select('*')
+          .eq('user_id', user.id)
           .eq('is_active', true);
 
         if (customError) throw customError;
 
-        // Transform custom strategies to match Strategy interface
-        const customStrategies: Strategy[] = (customData || []).map(cs => ({
-          id: cs.id,
-          strategy_name: cs.name,
-          status: 'active',
-          total_trades: 0,
-          winning_trades: 0,
-          total_profit: 0
-        }));
+        // Fetch built-in strategies (from strategy_performance or fallback)
+        const { data: builtInData, error: builtInError } = await supabase
+          .from('strategy_performance')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('total_profit', { ascending: false });
+
+        if (builtInError) throw builtInError;
+
+        // Merge built-in strategies with actual performance data
+        const builtInStrategies: Strategy[] = (builtInData || []).map(s => {
+          const performance = performanceMap.get(s.strategy_name);
+          return {
+            id: s.id,
+            strategy_name: s.strategy_name,
+            status: s.status,
+            total_trades: performance?.total_trades || 0,
+            winning_trades: performance?.winning_trades || 0,
+            total_profit: performance?.total_profit || 0
+          };
+        });
+
+        // Add strategies that have trades but aren't in strategy_performance
+        performanceMap.forEach((perf, strategyName) => {
+          if (!builtInStrategies.find(s => s.strategy_name === strategyName)) {
+            builtInStrategies.push({
+              id: `generated-${strategyName}`,
+              strategy_name: strategyName,
+              status: 'active',
+              total_trades: perf.total_trades,
+              winning_trades: perf.winning_trades,
+              total_profit: perf.total_profit
+            });
+          }
+        });
+
+        // Transform custom strategies and add performance data
+        const customStrategies: Strategy[] = (customData || []).map(cs => {
+          const performance = performanceMap.get(cs.name);
+          return {
+            id: cs.id,
+            strategy_name: cs.name,
+            status: 'active',
+            total_trades: performance?.total_trades || 0,
+            winning_trades: performance?.winning_trades || 0,
+            total_profit: performance?.total_profit || 0
+          };
+        });
 
         // Combine both arrays
-        const combinedStrategies = [...(builtInData || []), ...customStrategies];
+        const combinedStrategies = [...builtInStrategies, ...customStrategies];
         setStrategies(combinedStrategies);
       } catch (err) {
         console.error('Error fetching strategies:', err);
