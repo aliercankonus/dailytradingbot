@@ -83,20 +83,6 @@ export const useStrategyData = () => {
           };
         });
 
-        // Add strategies that have trades but aren't in strategy_performance
-        performanceMap.forEach((perf, strategyName) => {
-          if (!builtInStrategies.find(s => s.strategy_name === strategyName)) {
-            builtInStrategies.push({
-              id: `generated-${strategyName}`,
-              strategy_name: strategyName,
-              status: 'active',
-              total_trades: perf.total_trades,
-              winning_trades: perf.winning_trades,
-              total_profit: perf.total_profit
-            });
-          }
-        });
-
         // Transform custom strategies and add performance data
         const customStrategies: Strategy[] = (customData || []).map(cs => {
           const performance = performanceMap.get(cs.name);
@@ -108,6 +94,25 @@ export const useStrategyData = () => {
             winning_trades: performance?.winning_trades || 0,
             total_profit: performance?.total_profit || 0
           };
+        });
+
+        // Add strategies that have trades but aren't in builtInStrategies OR customStrategies
+        const allStrategyNames = new Set([
+          ...builtInStrategies.map(s => s.strategy_name),
+          ...customStrategies.map(s => s.strategy_name)
+        ]);
+        
+        performanceMap.forEach((perf, strategyName) => {
+          if (!allStrategyNames.has(strategyName)) {
+            builtInStrategies.push({
+              id: `generated-${strategyName}`,
+              strategy_name: strategyName,
+              status: 'active',
+              total_trades: perf.total_trades,
+              winning_trades: perf.winning_trades,
+              total_profit: perf.total_profit
+            });
+          }
         });
 
         // Combine both arrays
