@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,6 +67,13 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
   const [timeHorizon, setTimeHorizon] = useState(30);
   const [initialCapital, setInitialCapital] = useState(10000);
   const [confidenceLevel, setConfidenceLevel] = useState(0.95);
+
+  // Set default symbol when activeSymbols loads
+  useEffect(() => {
+    if (activeSymbols.length > 0 && !symbol) {
+      setSymbol(activeSymbols[0]);
+    }
+  }, [activeSymbols]);
 
   const runSimulation = async () => {
     if (!strategyId) {
@@ -148,7 +155,7 @@ export const MonteCarloSimulation = ({ strategies }: MonteCarloSimulationProps) 
               <Label>Symbol</Label>
               <Select value={symbol} onValueChange={setSymbol}>
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue placeholder="Select symbol" />
                 </SelectTrigger>
                 <SelectContent>
                   {symbols.filter(s => s.is_active).map(s => (
