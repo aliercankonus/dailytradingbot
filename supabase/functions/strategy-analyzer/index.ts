@@ -536,6 +536,9 @@ serve(async (req) => {
     const finalSignals = Array.from(deduplicatedSignals.values());
     console.log(`Deduplicated ${allSignals.length} signals to ${finalSignals.length} unique signals`);
 
+    // Sort signals by creation order to ensure FIFO execution
+    finalSignals.sort((a, b) => a.symbol.localeCompare(b.symbol));
+
     // Insert deduplicated signals and execute if auto-execute is enabled
     for (const signal of finalSignals) {
       const { data: insertedSignal, error: insertError } = await supabase
@@ -561,24 +564,33 @@ serve(async (req) => {
       if (insertError) {
         console.error("Error inserting signal:", insertError);
       } else if (autoExecute && insertedSignal) {
-        // Automatically execute the signal
-        try {
-          console.log(`Auto-executing signal ${insertedSignal.id} for ${signal.symbol}`);
-          const { error: execError } = await supabase.functions.invoke("execute-trade", {
-            body: { signalId: insertedSignal.id, action: "execute" },
-            headers: {
-              Authorization: authHeader,
-            },
-          });
+        // Check if signal is already expired (older than 60 seconds)
+        const signalAge = new Date().getTime() - new Date(insertedSignal.created_at).getTime();
+        const isExpired = signalAge > 60000; // 60 seconds in milliseconds
 
-          if (execError) {
-            console.error(`Failed to auto-execute signal ${insertedSignal.id}:`, execError);
-          } else {
-            executedSignals.push(insertedSignal.id);
-            console.log(`Successfully executed signal ${insertedSignal.id}`);
+        if (isExpired) {
+          console.log(`Signal ${insertedSignal.id} expired (age: ${signalAge}ms), deleting without execution`);
+          await supabase.from("trading_signals").delete().eq("id", insertedSignal.id);
+        } else {
+          // Automatically execute the signal
+          try {
+            console.log(`Auto-executing signal ${insertedSignal.id} for ${signal.symbol} (age: ${signalAge}ms)`);
+            const { error: execError } = await supabase.functions.invoke("execute-trade", {
+              body: { signalId: insertedSignal.id, action: "execute" },
+              headers: {
+                Authorization: authHeader,
+              },
+            });
+
+            if (execError) {
+              console.error(`Failed to auto-execute signal ${insertedSignal.id}:`, execError);
+            } else {
+              executedSignals.push(insertedSignal.id);
+              console.log(`Successfully executed signal ${insertedSignal.id}`);
+            }
+          } catch (execError) {
+            console.error(`Error executing signal ${insertedSignal.id}:`, execError);
           }
-        } catch (execError) {
-          console.error(`Error executing signal ${insertedSignal.id}:`, execError);
         }
       }
     }
@@ -587,7 +599,7 @@ serve(async (req) => {
       `Generated ${finalSignals.length} signals total (${allSignals.length} before deduplication), executed ${executedSignals.length}`,
     );
 
-    // Clean up old signals that are NOT referenced by trades
+    // Clean up expired signals (>60 seconds old) that are NOT referenced by trades
     try {
       // First, get IDs of signals that are referenced by trades
       const { data: referencedSignals } = await supabase
@@ -597,11 +609,12 @@ serve(async (req) => {
 
       const referencedIds = referencedSignals?.map((t) => t.signal_id) || [];
 
-      // Delete only expired signals that are NOT referenced
+      // Delete only expired signals (>60 seconds) that are NOT referenced
+      const sixtySecondsAgo = new Date(Date.now() - 60000).toISOString();
       const { data: expiredSignals } = await supabase
         .from("trading_signals")
-        .select("id")
-        .lt("expires_at", new Date().toISOString());
+        .select("id, created_at")
+        .lt("created_at", sixtySecondsAgo);
 
       if (expiredSignals && expiredSignals.length > 0) {
         const idsToDelete = expiredSignals.filter((s) => !referencedIds.includes(s.id)).map((s) => s.id);
@@ -610,9 +623,9 @@ serve(async (req) => {
           const { error: deleteError } = await supabase.from("trading_signals").delete().in("id", idsToDelete);
 
           if (deleteError) {
-            console.error("Error cleaning up old signals:", deleteError);
+            console.error("Error cleaning up expired signals:", deleteError);
           } else {
-            console.log(`Cleaned up ${idsToDelete.length} expired signals`);
+            console.log(`Cleaned up ${idsToDelete.length} expired signals (>60s old)`);
           }
         }
       }
