@@ -14,6 +14,8 @@ interface Position {
   unrealized_pnl_percent: number | null;
   status: string;
   opened_at: string;
+  trend?: string;
+  confidence_score?: number;
 }
 
 export const usePositions = () => {

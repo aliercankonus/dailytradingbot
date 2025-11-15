@@ -185,6 +185,7 @@ export type Database = {
       }
       positions: {
         Row: {
+          confidence_score: number | null
           current_price: number | null
           entry_price: number
           id: string
@@ -196,12 +197,14 @@ export type Database = {
           symbol: string
           take_profit: number | null
           trade_id: string | null
+          trend: string | null
           unrealized_pnl: number | null
           unrealized_pnl_percent: number | null
           updated_at: string | null
           user_id: string | null
         }
         Insert: {
+          confidence_score?: number | null
           current_price?: number | null
           entry_price: number
           id?: string
@@ -213,12 +216,14 @@ export type Database = {
           symbol: string
           take_profit?: number | null
           trade_id?: string | null
+          trend?: string | null
           unrealized_pnl?: number | null
           unrealized_pnl_percent?: number | null
           updated_at?: string | null
           user_id?: string | null
         }
         Update: {
+          confidence_score?: number | null
           current_price?: number | null
           entry_price?: number
           id?: string
@@ -230,6 +235,7 @@ export type Database = {
           symbol?: string
           take_profit?: number | null
           trade_id?: string | null
+          trend?: string | null
           unrealized_pnl?: number | null
           unrealized_pnl_percent?: number | null
           updated_at?: string | null
