@@ -31,7 +31,7 @@ export const useTrades = () => {
         .from('trades')
         .select('*')
         .order('executed_at', { ascending: false })
-        .limit(50);
+        .limit(200);
 
       if (queryError) throw queryError;
       setTrades(data || []);
