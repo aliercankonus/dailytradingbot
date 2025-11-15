@@ -18,17 +18,25 @@ export const StrategyOverview = () => {
     return "text-warning";
   };
   
-  const strategies = strategyData.map(strategy => ({
-    name: strategy.strategy_name,
-    status: strategy.status,
-    performance: `+${((strategy.total_profit / 1000) * 100).toFixed(1)}%`,
-    trades: strategy.total_trades,
-    winRate: strategy.total_trades > 0 
-      ? ((strategy.winning_trades / strategy.total_trades) * 100).toFixed(0)
-      : "0",
-    icon: getIcon(strategy.strategy_name),
-    color: getColor(strategy.status),
-  }));
+  const strategies = strategyData.map(strategy => {
+    // Calculate performance as percentage gain/loss
+    const performance = strategy.total_profit;
+    const performanceDisplay = performance >= 0 
+      ? `+$${performance.toFixed(2)}`
+      : `-$${Math.abs(performance).toFixed(2)}`;
+    
+    return {
+      name: strategy.strategy_name,
+      status: strategy.status,
+      performance: performanceDisplay,
+      trades: strategy.total_trades || 0,
+      winRate: strategy.total_trades > 0 
+        ? ((strategy.winning_trades / strategy.total_trades) * 100).toFixed(0)
+        : "0",
+      icon: getIcon(strategy.strategy_name),
+      color: getColor(strategy.status),
+    };
+  });
 
   return (
     <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
@@ -66,7 +74,12 @@ export const StrategyOverview = () => {
             <div className="space-y-1 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Performance:</span>
-                <span className="text-profit font-semibold font-mono">{strategy.performance}</span>
+                <span className={`font-semibold font-mono ${
+                  strategy.performance.startsWith('+') ? 'text-profit' : 
+                  strategy.performance.startsWith('-') ? 'text-loss' : 'text-foreground'
+                }`}>
+                  {strategy.performance}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Win Rate:</span>
