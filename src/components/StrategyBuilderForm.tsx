@@ -238,7 +238,7 @@ export const StrategyBuilderForm = ({
                     <SelectItem value="MACD">MACD</SelectItem>
                     <SelectItem value="EMA">EMA</SelectItem>
                     <SelectItem value="Price">Price</SelectItem>
-                    {indicators.filter(ind => ind.name && ind.name !== ind.type).map((ind) => (
+                    {indicators.filter(ind => ind.name).map((ind) => (
                       <SelectItem key={ind.name || ind.type} value={ind.name || ind.type}>
                         {ind.name || ind.type}
                       </SelectItem>
@@ -338,7 +338,7 @@ export const StrategyBuilderForm = ({
                     <SelectItem value="MACD">MACD</SelectItem>
                     <SelectItem value="EMA">EMA</SelectItem>
                     <SelectItem value="Price">Price</SelectItem>
-                    {indicators.filter(ind => ind.name && ind.name !== ind.type).map((ind) => (
+                    {indicators.filter(ind => ind.name).map((ind) => (
                       <SelectItem key={ind.name || ind.type} value={ind.name || ind.type}>
                         {ind.name || ind.type}
                       </SelectItem>
