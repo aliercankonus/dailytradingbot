@@ -78,6 +78,14 @@ export const ActivePositions = () => {
                   <Badge variant={position.side === 'BUY' ? 'default' : 'destructive'} className="text-xs">
                     {position.side}
                   </Badge>
+                  {position.strategy_name && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Strategy: {position.strategy_name}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Opened: {new Date(position.opened_at).toLocaleString()}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
