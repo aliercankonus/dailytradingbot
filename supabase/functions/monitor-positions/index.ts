@@ -140,6 +140,48 @@ serve(async (req) => {
             currentPrice,
             pnlPercent,
           });
+
+          // Send notification about trailing stop activation
+          try {
+            // Get user's notification preferences
+            const { data: riskParams } = await supabase
+              .from('risk_parameters')
+              .select('notification_email, email_notifications_enabled')
+              .eq('user_id', position.user_id)
+              .single();
+
+            // Create notification record in database
+            await supabase
+              .from('notifications')
+              .insert({
+                user_id: position.user_id,
+                trade_id: position.trade_id,
+                type: 'trailing_stop_activated',
+                message: `Trailing stop activated for ${position.symbol} ${position.side}. Stop loss moved from $${position.stop_loss.toFixed(2)} to $${newStopLoss.toFixed(2)} (P&L: +${pnlPercent.toFixed(2)}%)`,
+              });
+
+            // Send email/SMS notification if enabled
+            if (riskParams?.email_notifications_enabled) {
+              await supabase.functions.invoke('send-notification', {
+                body: {
+                  type: 'trailing_stop_activated',
+                  userId: position.user_id,
+                  tradeId: position.trade_id,
+                  symbol: position.symbol,
+                  side: position.side,
+                  price: currentPrice,
+                  oldStopLoss: position.stop_loss,
+                  newStopLoss,
+                  pnlPercent,
+                  email: riskParams.notification_email,
+                },
+              });
+              console.log(`Notification sent for trailing stop: ${position.symbol}`);
+            }
+          } catch (notifError) {
+            console.error('Error sending trailing stop notification:', notifError);
+            // Don't fail the monitoring if notification fails
+          }
         }
       }
 
