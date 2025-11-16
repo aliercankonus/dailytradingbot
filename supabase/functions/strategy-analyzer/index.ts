@@ -272,27 +272,36 @@ async function analyzeWithStrategy(
   }
 
   // Determine signal type based on REAL market trend
-  let signalType: "long" | "short" | "hold" = "hold";
+  let signalType: "long" | "short";
   let reason = `${strategy.name}: Entry conditions met`;
 
-  // Only generate signals that align with market trend
-  if (marketTrend === "bullish" || marketTrend === "ranging") {
+  // **CRITICAL FIX**: Avoid ranging markets unless strategy is specifically designed for it
+  // Ranging markets have the worst win rates (25-35%)
+  if (marketTrend === "ranging") {
+    console.log(`Skipping signal for ${data.symbol}: Market is ranging (low probability setup)`);
+    return null;
+  }
+  
+  // Only generate signals that align with strong market trend
+  if (marketTrend === "bullish") {
     signalType = "long";
-    reason = marketTrend === "bullish" 
-      ? `${strategy.name}: Entry conditions met with bullish trend`
-      : `${strategy.name}: Entry conditions met`;
+    reason = `${strategy.name}: Entry conditions met with bullish trend`;
   } else if (marketTrend === "bearish") {
     signalType = "short";
     reason = `${strategy.name}: Entry conditions met with bearish trend`;
-  }
-
-  // Skip signal if trend consistency is too low (same filter as execute-trade)
-  if (trendConsistency < 50 && trendConsistency > 0) {
-    console.log(`Skipping signal for ${data.symbol}: Trend consistency too low (${trendConsistency}%)`);
+  } else {
+    // Should not reach here due to ranging filter above, but keep as safety
+    console.log(`Skipping signal for ${data.symbol}: No clear trend`);
     return null;
   }
 
-  // Skip if signal type doesn't match trend
+  // Skip signal if trend consistency is too low
+  if (trendConsistency < 60) {
+    console.log(`Skipping signal for ${data.symbol}: Trend consistency too low (${trendConsistency}% < 60%)`);
+    return null;
+  }
+
+  // Skip if signal type doesn't match trend (redundant but safe)
   if (signalType === "long" && marketTrend === "bearish") {
     console.log(`Skipping LONG signal for ${data.symbol}: Market is bearish`);
     return null;
@@ -314,12 +323,39 @@ async function analyzeWithStrategy(
 
   const riskRewardRatio = takeProfitPercent / stopLossPercent;
 
-  // Calculate confidence score
+  // Calculate confidence score based on market trend confidence
+  // Get the actual trend confidence from calculate-trend
   const conditionsMet = strategy.entry_conditions.filter((condition) =>
     evaluateCondition(condition, indicatorValues, data),
   ).length;
-  const confidenceScore = Math.round((conditionsMet / strategy.entry_conditions.length) * 100);
+  
+  // Base confidence from conditions (50-80%)
+  const conditionsConfidence = 50 + ((conditionsMet / strategy.entry_conditions.length) * 30);
+  
+  // Get trend data for real confidence
+  let trendConfidence = 60; // Default moderate confidence
+  try {
+    const { data: trendData } = await supabase.functions.invoke('calculate-trend', {
+      body: { symbol: data.symbol }
+    });
+    if (trendData && trendData.confidence) {
+      trendConfidence = trendData.confidence;
+    }
+  } catch (e) {
+    console.error('Error getting trend confidence:', e);
+  }
+  
+  // Final confidence is weighted average of conditions and trend
+  // Trend confidence is more important (60%), conditions are 40%
+  const confidenceScore = Math.round((trendConfidence * 0.6) + (conditionsConfidence * 0.4));
 
+  // **CRITICAL FIX**: Filter out low confidence signals
+  // Minimum 60% confidence required to avoid poor quality trades
+  if (confidenceScore < 60) {
+    console.log(`Skipping signal for ${data.symbol}: Confidence too low (${confidenceScore}% < 60%)`);
+    return null;
+  }
+  
   return {
     symbol: data.symbol,
     signalType,
@@ -637,8 +673,8 @@ serve(async (req) => {
 
         const signal = await analyzeWithStrategy(data, strategy, prices, volumes, supabase);
 
-        // Only collect signals that are not 'hold' and not null
-        if (signal && signal.signalType !== "hold") {
+        // Only collect valid signals (null signals are already filtered out in analyzeWithStrategy)
+        if (signal) {
           console.log(`Generated ${signal.signalType} signal for ${signal.symbol} using ${strategy.name}`);
           allSignals.push({
             ...signal,
