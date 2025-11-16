@@ -15,6 +15,7 @@ import { CloseAllTradesButton } from "@/components/CloseAllTradesButton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
 import { TradeCounterSync } from "@/components/TradeCounterSync";
+import { TrailingStopMonitor } from "@/components/TrailingStopMonitor";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -91,7 +92,8 @@ const Index = () => {
             <TradingSignalsDashboard />
           </TabsContent>
 
-          <TabsContent value="positions">
+          <TabsContent value="positions" className="space-y-6">
+            <TrailingStopMonitor />
             <ActivePositions />
           </TabsContent>
 
