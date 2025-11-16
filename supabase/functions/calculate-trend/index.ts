@@ -150,12 +150,22 @@ function calculateTrend(prices: number[]): {
   
   // Calculate confidence and determine trend
   const netSignal = bullishSignals - bearishSignals;
-  const confidence = Math.min((Math.abs(netSignal) / totalWeight) * 100, 100);
+  
+  // More realistic confidence calculation
+  // Max score is 8 (all indicators aligned), confidence scales from 40-90%
+  const rawConfidence = (Math.abs(netSignal) / totalWeight) * 100;
+  
+  // Apply non-linear scaling to avoid extreme values
+  // This ensures confidence stays in 40-90% range for normal conditions
+  let confidence = 40 + (rawConfidence * 0.5); // Scale to 40-90% range
+  confidence = Math.min(Math.max(confidence, 40), 90); // Clamp between 40-90%
   
   let trend: 'bullish' | 'bearish' | 'neutral';
-  if (netSignal > 1) {
+  
+  // Require stronger signals for trend classification
+  if (netSignal > 2) {
     trend = 'bullish';
-  } else if (netSignal < -1) {
+  } else if (netSignal < -2) {
     trend = 'bearish';
   } else {
     trend = 'neutral';
