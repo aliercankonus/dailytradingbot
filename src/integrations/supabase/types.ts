@@ -291,6 +291,7 @@ export type Database = {
           consecutive_losses: number | null
           current_open_trades: number | null
           email_notifications_enabled: boolean | null
+          entry_stagger_minutes: number
           id: string
           is_trading_enabled: boolean | null
           max_open_trades: number
@@ -316,6 +317,7 @@ export type Database = {
           consecutive_losses?: number | null
           current_open_trades?: number | null
           email_notifications_enabled?: boolean | null
+          entry_stagger_minutes?: number
           id?: string
           is_trading_enabled?: boolean | null
           max_open_trades?: number
@@ -341,6 +343,7 @@ export type Database = {
           consecutive_losses?: number | null
           current_open_trades?: number | null
           email_notifications_enabled?: boolean | null
+          entry_stagger_minutes?: number
           id?: string
           is_trading_enabled?: boolean | null
           max_open_trades?: number
@@ -612,6 +615,7 @@ export type Database = {
           indicators: Json | null
           reason: string | null
           risk_reward_ratio: number | null
+          scheduled_for: string | null
           signal_type: Database["public"]["Enums"]["signal_type"]
           stop_loss: number | null
           strategy_id: string | null
@@ -631,6 +635,7 @@ export type Database = {
           indicators?: Json | null
           reason?: string | null
           risk_reward_ratio?: number | null
+          scheduled_for?: string | null
           signal_type: Database["public"]["Enums"]["signal_type"]
           stop_loss?: number | null
           strategy_id?: string | null
@@ -650,6 +655,7 @@ export type Database = {
           indicators?: Json | null
           reason?: string | null
           risk_reward_ratio?: number | null
+          scheduled_for?: string | null
           signal_type?: Database["public"]["Enums"]["signal_type"]
           stop_loss?: number | null
           strategy_id?: string | null
