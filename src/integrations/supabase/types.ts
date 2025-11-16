@@ -294,6 +294,9 @@ export type Database = {
           portfolio_value: number
           position_size_reduction_percent: number
           sms_notifications_enabled: boolean | null
+          trailing_stop_activation_percent: number | null
+          trailing_stop_distance_multiplier: number | null
+          trailing_stop_enabled: boolean | null
           updated_at: string | null
           user_id: string
         }
@@ -312,6 +315,9 @@ export type Database = {
           portfolio_value?: number
           position_size_reduction_percent?: number
           sms_notifications_enabled?: boolean | null
+          trailing_stop_activation_percent?: number | null
+          trailing_stop_distance_multiplier?: number | null
+          trailing_stop_enabled?: boolean | null
           updated_at?: string | null
           user_id: string
         }
@@ -330,6 +336,9 @@ export type Database = {
           portfolio_value?: number
           position_size_reduction_percent?: number
           sms_notifications_enabled?: boolean | null
+          trailing_stop_activation_percent?: number | null
+          trailing_stop_distance_multiplier?: number | null
+          trailing_stop_enabled?: boolean | null
           updated_at?: string | null
           user_id?: string
         }

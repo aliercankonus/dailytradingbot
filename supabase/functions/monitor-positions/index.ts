@@ -31,6 +31,27 @@ serve(async (req) => {
       );
     }
 
+    // Get unique user IDs and fetch their trailing stop settings
+    const userIds = [...new Set(positions.map(p => p.user_id))];
+    const { data: riskParamsList } = await supabase
+      .from('risk_parameters')
+      .select('user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier')
+      .in('user_id', userIds);
+
+    // Create a map of user settings
+    const userSettingsMap = new Map(
+      riskParamsList?.map(rp => [
+        rp.user_id,
+        {
+          enabled: rp.trailing_stop_enabled ?? true,
+          activationPercent: rp.trailing_stop_activation_percent ?? 1.0,
+          distanceMultiplier: rp.trailing_stop_distance_multiplier ?? 1.5,
+        }
+      ]) || []
+    );
+
+    console.log(`Loaded trailing stop settings for ${userSettingsMap.size} users`);
+
     // Fetch current prices and ATR for all symbols
     const symbols = [...new Set(positions.map(p => p.symbol))];
     
@@ -88,14 +109,21 @@ serve(async (req) => {
         ? ((currentPrice - position.entry_price) / position.entry_price) * 100
         : ((position.entry_price - currentPrice) / position.entry_price) * 100;
 
+      // Get user's trailing stop settings
+      const userSettings = userSettingsMap.get(position.user_id) || {
+        enabled: true,
+        activationPercent: 1.0,
+        distanceMultiplier: 1.5,
+      };
+
       // TRAILING STOP LOSS LOGIC
       let newStopLoss = position.stop_loss;
       let trailingActivated = false;
       
-      // Activate trailing stop when position is profitable (>1%)
-      if (pnlPercent > 1) {
-        // Calculate trailing stop loss at 1.5x ATR from current price
-        const trailingDistance = Math.max(atrPercent * 1.5, 1.5); // Min 1.5%
+      // Check if trailing stop is enabled and position is profitable enough
+      if (userSettings.enabled && pnlPercent > userSettings.activationPercent) {
+        // Calculate trailing stop loss using user's multiplier setting
+        const trailingDistance = Math.max(atrPercent * userSettings.distanceMultiplier, 1.5); // Min 1.5%
         
         if (position.side === 'BUY') {
           // For LONG: Trail stop loss UP as price rises
