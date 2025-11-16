@@ -80,20 +80,62 @@ serve(async (req) => {
     }
 
     const currentTrend = trendData?.trend || signal.trend;
-    console.log(`Current market trend: ${currentTrend}, Signal trend: ${signal.trend}, Signal type: ${signal.signal_type}`);
+    const trendConsistency = trendData?.trendConsistency || 0;
+    const atrPercent = trendData?.atrPercent || 1.5;
+    
+    console.log(`Current market trend: ${currentTrend}, Consistency: ${trendConsistency}, ATR: ${atrPercent}%, Signal: ${signal.signal_type}`);
 
-    // Validate trend matches signal direction
+    // FILTER 1: Validate trend matches signal direction
     const signalDirection = signal.signal_type === 'long' ? 'BUY' : 'SELL';
     if (currentTrend === 'bullish' && signalDirection === 'SELL') {
-      throw new Error('Market trend is bullish but signal is SHORT - trade cancelled for safety');
+      throw new Error('Market trend is bullish but signal is SHORT - trade cancelled');
     }
     if (currentTrend === 'bearish' && signalDirection === 'BUY') {
-      throw new Error('Market trend is bearish but signal is LONG - trade cancelled for safety');
+      throw new Error('Market trend is bearish but signal is LONG - trade cancelled');
     }
 
-    // Calculate position size based on risk parameters
+    // FILTER 2: Require trend consistency (at least 66% of last 3 periods match)
+    if (trendConsistency < 0.66) {
+      throw new Error(`Trend not consistent enough (${(trendConsistency * 100).toFixed(0)}%) - trade cancelled to avoid reversals`);
+    }
+
+    // FILTER 3: Skip ranging markets for BUY/SELL signals
+    if (currentTrend === 'ranging') {
+      throw new Error('Market is ranging - trade cancelled to avoid choppy conditions');
+    }
+
+    // FILTER 4: Avoid high volatility (ATR > 3%)
+    if (atrPercent > 3) {
+      throw new Error(`Market volatility too high (ATR: ${atrPercent.toFixed(2)}%) - trade cancelled`);
+    }
+
+    // FILTER 5: Require confidence > 80
+    if ((signal.confidence_score || 0) < 80) {
+      throw new Error(`Signal confidence too low (${signal.confidence_score}) - trade cancelled`);
+    }
+
+    // Get current price for ATR-based stop loss calculation
+    const priceResponse = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${signal.symbol}`);
+    const priceData = await priceResponse.json();
+    const currentPrice = parseFloat(priceData.price);
+
+    // Calculate ATR-based stop loss (use 2x ATR for breathing room)
+    const atrStopLossPercent = Math.max(atrPercent * 2, 1.5); // Minimum 1.5%, typically 2x ATR
+    const atrTakeProfitPercent = atrStopLossPercent * 2.5; // 2.5:1 reward-risk ratio
+
+    const atrStopLoss = signalDirection === 'BUY' 
+      ? currentPrice * (1 - atrStopLossPercent / 100)
+      : currentPrice * (1 + atrStopLossPercent / 100);
+    
+    const atrTakeProfit = signalDirection === 'BUY'
+      ? currentPrice * (1 + atrTakeProfitPercent / 100)
+      : currentPrice * (1 - atrTakeProfitPercent / 100);
+
+    console.log(`ATR-based SL: ${atrStopLoss.toFixed(2)} (${atrStopLossPercent.toFixed(2)}%), TP: ${atrTakeProfit.toFixed(2)} (${atrTakeProfitPercent.toFixed(2)}%)`);
+
+    // Calculate position size based on ATR stop loss
     const riskAmount = (riskParams.portfolio_value * riskParams.max_risk_per_trade_percent) / 100;
-    const stopLossDistance = Math.abs(signal.entry_price - signal.stop_loss);
+    const stopLossDistance = Math.abs(currentPrice - atrStopLoss);
     let quantity = riskAmount / stopLossDistance;
 
     // Apply position size reduction if consecutive losses
@@ -107,7 +149,7 @@ serve(async (req) => {
 
     const side = signal.signal_type === 'long' ? 'BUY' : 'SELL';
     let orderData: any;
-    let executedPrice = signal.entry_price;
+    let executedPrice = currentPrice; // Use current price instead of signal entry price
 
     if (isPaperTrading) {
       // Simulate paper trading
@@ -115,7 +157,7 @@ serve(async (req) => {
       orderData = {
         orderId: `PAPER_${Date.now()}`,
         status: 'FILLED',
-        fills: [{ price: signal.entry_price.toString() }],
+        fills: [{ price: currentPrice.toString() }],
       };
     } else {
       // Execute real trade on Binance
@@ -155,7 +197,7 @@ serve(async (req) => {
 
       orderData = await orderResponse.json();
       console.log('Order executed:', orderData);
-      executedPrice = parseFloat(orderData.fills?.[0]?.price || signal.entry_price);
+      executedPrice = parseFloat(orderData.fills?.[0]?.price || currentPrice);
     }
 
     // Check if this signal has already been executed
@@ -190,8 +232,8 @@ serve(async (req) => {
         order_type: 'MARKET',
         quantity,
         entry_price: executedPrice,
-        stop_loss: signal.stop_loss,
-        take_profit: signal.take_profit,
+        stop_loss: atrStopLoss,
+        take_profit: atrTakeProfit,
         status: 'open',
         binance_order_id: isPaperTrading ? null : orderData.orderId?.toString(),
         strategy_name: signal.strategy_name || 'Unknown',
@@ -215,8 +257,8 @@ serve(async (req) => {
         quantity,
         entry_price: executedPrice,
         current_price: executedPrice,
-        stop_loss: signal.stop_loss,
-        take_profit: signal.take_profit,
+        stop_loss: atrStopLoss,
+        take_profit: atrTakeProfit,
         unrealized_pnl: 0,
         unrealized_pnl_percent: 0,
         status: 'active',
@@ -237,7 +279,7 @@ serve(async (req) => {
       );
 
       // Place stop-loss order
-      const slQueryString = `symbol=${signal.symbol}&side=${side === 'BUY' ? 'SELL' : 'BUY'}&type=STOP_LOSS_LIMIT&quantity=${quantity}&price=${signal.stop_loss}&stopPrice=${signal.stop_loss}&timeInForce=GTC&timestamp=${Date.now()}`;
+      const slQueryString = `symbol=${signal.symbol}&side=${side === 'BUY' ? 'SELL' : 'BUY'}&type=STOP_LOSS_LIMIT&quantity=${quantity}&price=${atrStopLoss}&stopPrice=${atrStopLoss}&timeInForce=GTC&timestamp=${Date.now()}`;
       const slData = encoder.encode(slQueryString);
       const slSignature = await crypto.subtle.sign('HMAC', cryptoKey, slData);
       const slSignatureHex = Array.from(new Uint8Array(slSignature))
@@ -253,7 +295,7 @@ serve(async (req) => {
       );
 
       // Place take-profit order
-      const tpQueryString = `symbol=${signal.symbol}&side=${side === 'BUY' ? 'SELL' : 'BUY'}&type=TAKE_PROFIT_LIMIT&quantity=${quantity}&price=${signal.take_profit}&stopPrice=${signal.take_profit}&timeInForce=GTC&timestamp=${Date.now()}`;
+      const tpQueryString = `symbol=${signal.symbol}&side=${side === 'BUY' ? 'SELL' : 'BUY'}&type=TAKE_PROFIT_LIMIT&quantity=${quantity}&price=${atrTakeProfit}&stopPrice=${atrTakeProfit}&timeInForce=GTC&timestamp=${Date.now()}`;
       const tpData = encoder.encode(tpQueryString);
       const tpSignature = await crypto.subtle.sign('HMAC', cryptoKey, tpData);
       const tpSignatureHex = Array.from(new Uint8Array(tpSignature))
