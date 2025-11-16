@@ -242,7 +242,7 @@ serve(async (req) => {
         ...trendData,
         atr: Math.round(atr * 100) / 100,
         atrPercent: Math.round(atrPercent * 100) / 100,
-        trendConsistency: Math.round(trendConsistency * 100) / 100,
+        trendConsistency: Math.round(trendConsistency * 100), // Return as percentage (67 instead of 0.67)
         trendHistory,
         timestamp: new Date().toISOString(),
       }),
