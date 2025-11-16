@@ -296,6 +296,7 @@ export type Database = {
           max_open_trades: number
           max_positions_to_close_per_cycle: number | null
           max_risk_per_trade_percent: number
+          min_confidence_threshold: number
           notification_email: string | null
           notification_phone: string | null
           paper_trading_mode: boolean | null
@@ -320,6 +321,7 @@ export type Database = {
           max_open_trades?: number
           max_positions_to_close_per_cycle?: number | null
           max_risk_per_trade_percent?: number
+          min_confidence_threshold?: number
           notification_email?: string | null
           notification_phone?: string | null
           paper_trading_mode?: boolean | null
@@ -344,6 +346,7 @@ export type Database = {
           max_open_trades?: number
           max_positions_to_close_per_cycle?: number | null
           max_risk_per_trade_percent?: number
+          min_confidence_threshold?: number
           notification_email?: string | null
           notification_phone?: string | null
           paper_trading_mode?: boolean | null

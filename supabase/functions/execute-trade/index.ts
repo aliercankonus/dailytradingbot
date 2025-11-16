@@ -136,9 +136,10 @@ serve(async (req) => {
       throw new Error(`Market volatility too high (ATR: ${atrPercent.toFixed(2)}%) - trade cancelled`);
     }
 
-    // FILTER 5: Require confidence > 60
-    if ((signal.confidence_score || 0) < 60) {
-      throw new Error(`Signal confidence too low (${signal.confidence_score}) - trade cancelled`);
+    // FILTER 5: Require confidence > configurable threshold
+    const minConfidence = riskParams.min_confidence_threshold || 60;
+    if ((signal.confidence_score || 0) < minConfidence) {
+      throw new Error(`Signal confidence too low (${signal.confidence_score}%) - minimum required: ${minConfidence}%`);
     }
 
     // Get current price for ATR-based stop loss calculation
