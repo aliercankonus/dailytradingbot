@@ -6,10 +6,11 @@ import { Label } from '@/components/ui/label';
 import { useSignals } from '@/hooks/useSignals';
 import { useSignalGenerator } from '@/hooks/useSignalGenerator';
 import { supabase } from '@/integrations/supabase/client';
-import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity, AlertCircle } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity, AlertCircle, Clock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { getSignalPriorityTier, getSignalPriorityVariant } from '@/lib/utils';
+import { formatDistanceToNow } from 'date-fns';
 
 export const TradingSignalsDashboard = () => {
   const { signals, loading } = useSignals();
@@ -219,8 +220,14 @@ export const TradingSignalsDashboard = () => {
             )}
 
             <div className="flex items-center justify-between">
-              <div className="text-xs text-muted-foreground">
-                Risk/Reward: 1:{signal.risk_reward_ratio?.toFixed(2)}
+              <div className="flex flex-col gap-1">
+                <div className="text-xs text-muted-foreground">
+                  Risk/Reward: 1:{signal.risk_reward_ratio?.toFixed(2)}
+                </div>
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Clock className="h-3 w-3" />
+                  Created {formatDistanceToNow(new Date(signal.created_at), { addSuffix: true })}
+                </div>
               </div>
               {autoExecEnabled ? (
                 <Badge variant="outline">Auto-execution ON</Badge>
