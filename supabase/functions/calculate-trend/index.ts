@@ -58,11 +58,11 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
   return { macd, signal, histogram };
 }
 
-// Fetch Binance klines - return full kline data for ATR calculation
-async function fetchBinanceKlines(symbol: string, limit: number = 100): Promise<any[]> {
+// Fetch Binance klines with configurable interval
+async function fetchBinanceKlines(symbol: string, interval: string = '1h', limit: number = 100): Promise<any[]> {
   try {
     const response = await fetch(
-      `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=${limit}`
+      `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
     );
     
     if (!response.ok) {
@@ -72,9 +72,51 @@ async function fetchBinanceKlines(symbol: string, limit: number = 100): Promise<
     const klines = await response.json();
     return klines;
   } catch (error) {
-    console.error(`Failed to fetch Binance klines for ${symbol}:`, error);
+    console.error(`Failed to fetch Binance klines for ${symbol} on ${interval}:`, error);
     throw error;
   }
+}
+
+// Validate market structure (higher highs/higher lows for bullish, etc.)
+function validateMarketStructure(klines: any[], trend: 'bullish' | 'bearish' | 'neutral'): { valid: boolean; confidence: number } {
+  if (klines.length < 10) return { valid: false, confidence: 0 };
+  
+  const highs = klines.slice(-10).map((k: any) => parseFloat(k[2])); // high prices
+  const lows = klines.slice(-10).map((k: any) => parseFloat(k[3])); // low prices
+  
+  if (trend === 'bullish') {
+    // Check for higher highs and higher lows
+    let higherHighs = 0;
+    let higherLows = 0;
+    
+    for (let i = 1; i < highs.length; i++) {
+      if (highs[i] > highs[i - 1]) higherHighs++;
+      if (lows[i] > lows[i - 1]) higherLows++;
+    }
+    
+    const hhPercent = (higherHighs / (highs.length - 1)) * 100;
+    const hlPercent = (higherLows / (lows.length - 1)) * 100;
+    const structureScore = (hhPercent + hlPercent) / 2;
+    
+    return { valid: structureScore > 50, confidence: structureScore };
+  } else if (trend === 'bearish') {
+    // Check for lower highs and lower lows
+    let lowerHighs = 0;
+    let lowerLows = 0;
+    
+    for (let i = 1; i < highs.length; i++) {
+      if (highs[i] < highs[i - 1]) lowerHighs++;
+      if (lows[i] < lows[i - 1]) lowerLows++;
+    }
+    
+    const lhPercent = (lowerHighs / (highs.length - 1)) * 100;
+    const llPercent = (lowerLows / (lows.length - 1)) * 100;
+    const structureScore = (lhPercent + llPercent) / 2;
+    
+    return { valid: structureScore > 50, confidence: structureScore };
+  }
+  
+  return { valid: false, confidence: 0 };
 }
 
 // Calculate comprehensive trend using multiple indicators
@@ -195,83 +237,85 @@ serve(async (req) => {
 
   try {
     const { symbol } = await req.json();
-    
-    if (!symbol) {
-      return new Response(
-        JSON.stringify({ error: 'Symbol is required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    if (!symbol) throw new Error('Symbol is required');
 
-    console.log(`Calculating trend for ${symbol}`);
+    console.log(`Multi-timeframe analysis for ${symbol}`);
+
+    // Fetch multiple timeframes in parallel
+    const [klines5m, klines15m, klines1h, klines4h] = await Promise.all([
+      fetchBinanceKlines(symbol, '5m', 100),
+      fetchBinanceKlines(symbol, '15m', 100),
+      fetchBinanceKlines(symbol, '1h', 100),
+      fetchBinanceKlines(symbol, '4h', 50),
+    ]);
+
+    // Extract close prices for each timeframe
+    const prices5m = klines5m.map((k: any) => parseFloat(k[4]));
+    const prices15m = klines15m.map((k: any) => parseFloat(k[4]));
+    const prices1h = klines1h.map((k: any) => parseFloat(k[4]));
+    const prices4h = klines4h.map((k: any) => parseFloat(k[4]));
+    const currentPrice = prices1h[prices1h.length - 1];
+
+    // Calculate trend for each timeframe
+    const trend5m = calculateTrend(prices5m);
+    const trend15m = calculateTrend(prices15m);
+    const trend1h = calculateTrend(prices1h);
+    const trend4h = calculateTrend(prices4h);
+
+    // Check multi-timeframe agreement
+    const timeframes = [trend5m, trend15m, trend1h, trend4h];
+    const bullishCount = timeframes.filter(t => t.trend === 'bullish').length;
+    const bearishCount = timeframes.filter(t => t.trend === 'bearish').length;
     
-    // Fetch last 100 1-minute candles
-    const klines = await fetchBinanceKlines(symbol, 100);
-    const prices = klines.map((k: any) => parseFloat(k[4])); // close prices
-    
-    // Calculate trend using technical indicators
-    const trendData = calculateTrend(prices);
-    
-    // Calculate ATR (Average True Range) for volatility-based stop loss
+    let multiTimeframeAgree = false;
+    let primaryTrend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+    if (bullishCount >= 3) { multiTimeframeAgree = true; primaryTrend = 'bullish'; }
+    else if (bearishCount >= 3) { multiTimeframeAgree = true; primaryTrend = 'bearish'; }
+
+    // Validate market structure on 1h timeframe
+    const marketStructure = validateMarketStructure(klines1h, trend1h.trend);
+
+    // Calculate ATR for volatility
     const atrPeriod = 14;
+    const atrKlines = klines1h.slice(-atrPeriod - 1);
     let atrSum = 0;
-    for (let i = klines.length - atrPeriod; i < klines.length - 1; i++) {
-      const high = parseFloat(klines[i][2]);
-      const low = parseFloat(klines[i][3]);
-      const prevClose = parseFloat(klines[i - 1][4]);
-      const tr = Math.max(
-        high - low,
-        Math.abs(high - prevClose),
-        Math.abs(low - prevClose)
-      );
+    for (let i = 1; i < atrKlines.length; i++) {
+      const high = parseFloat(atrKlines[i][2]);
+      const low = parseFloat(atrKlines[i][3]);
+      const prevClose = parseFloat(atrKlines[i - 1][4]);
+      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
       atrSum += tr;
     }
     const atr = atrSum / atrPeriod;
-    const currentPrice = prices[prices.length - 1];
     const atrPercent = (atr / currentPrice) * 100;
+    const volatilityNormal = atrPercent > 0.5 && atrPercent < 5.0;
 
-    // Check if recent price movements align with current trend
-    // Look at last 10 periods (10 minutes) for consistency
-    let consistentPeriods = 0;
-    const periodsToCheck = Math.min(10, prices.length - 1);
-    
-    for (let i = prices.length - periodsToCheck; i < prices.length; i++) {
-      const periodChange = ((prices[i] - prices[i - 1]) / prices[i - 1]) * 100;
-      
-      // Check if price movement aligns with current trend
-      if (trendData.trend === 'bullish' && periodChange > 0) {
-        consistentPeriods++;
-      } else if (trendData.trend === 'bearish' && periodChange < 0) {
-        consistentPeriods++;
-      } else if (trendData.trend === 'neutral' && Math.abs(periodChange) < 0.3) {
-        consistentPeriods++;
-      }
-    }
+    // Check momentum confirmation
+    const momentumConfirms = Math.abs(trend1h.indicators.macdHistogram) > 0.01;
 
-    // Calculate trend consistency as percentage
-    const trendConsistency = Math.round((consistentPeriods / periodsToCheck) * 100);
-    
-    console.log(`Trend for ${symbol}: ${trendData.trend} (confidence: ${trendData.confidence}%, consistency: ${trendConsistency}%, ATR: ${atrPercent.toFixed(2)}%)`);
-    
-    return new Response(
-      JSON.stringify({
-        symbol,
-        currentPrice,
-        ...trendData,
-        atr: Math.round(atr * 100) / 100,
-        atrPercent: Math.round(atrPercent * 100) / 100,
-        trendConsistency,
-        timestamp: new Date().toISOString(),
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    // Calculate overall trend consistency
+    const trendScores = timeframes.map(t => t.trend === primaryTrend ? t.confidence : 0);
+    const avgTrendConsistency = trendScores.reduce((a, b) => a + b, 0) / 4;
+
+    console.log(`${symbol}: trend=${primaryTrend} agree=${multiTimeframeAgree} struct=${marketStructure.valid} vol=${volatilityNormal} momentum=${momentumConfirms}`);
+
+    return new Response(JSON.stringify({
+      symbol, currentPrice, trend: primaryTrend, confidence: Math.round(avgTrendConsistency),
+      multiTimeframe: {
+        agree: multiTimeframeAgree, trend5m: trend5m.trend, trend15m: trend15m.trend,
+        trend1h: trend1h.trend, trend4h: trend4h.trend, confidence5m: trend5m.confidence,
+        confidence15m: trend15m.confidence, confidence1h: trend1h.confidence, confidence4h: trend4h.confidence,
+      },
+      marketStructure: { valid: marketStructure.valid, confidence: Math.round(marketStructure.confidence) },
+      volatility: { atr, atrPercent: Math.round(atrPercent * 100) / 100, normal: volatilityNormal },
+      momentum: { confirms: momentumConfirms, macdHistogram: Math.round(trend1h.indicators.macdHistogram * 1000) / 1000 },
+      indicators: trend1h.indicators, trendConsistency: Math.round(avgTrendConsistency),
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error) {
-    console.error('Error calculating trend:', error);
+    console.error('Error in calculate-trend:', error);
     return new Response(
-      JSON.stringify({ 
-        error: error instanceof Error ? error.message : 'Failed to calculate trend' 
-      }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });
