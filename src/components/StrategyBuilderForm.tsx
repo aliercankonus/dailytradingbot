@@ -233,16 +233,23 @@ export const StrategyBuilderForm = ({
                   <SelectTrigger className="w-[140px]">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-background z-50">
                     <SelectItem value="RSI">RSI</SelectItem>
                     <SelectItem value="MACD">MACD</SelectItem>
                     <SelectItem value="EMA">EMA</SelectItem>
                     <SelectItem value="Price">Price</SelectItem>
-                    {indicators.filter(ind => ind.name).map((ind) => (
-                      <SelectItem key={ind.name || ind.type} value={ind.name || ind.type}>
-                        {ind.name || ind.type}
-                      </SelectItem>
-                    ))}
+                    {indicators
+                      .filter(ind => {
+                        const name = ind.name || ind.type;
+                        // Exclude base indicators that are already shown above
+                        return name && !['RSI', 'MACD', 'EMA', 'Price'].includes(name);
+                      })
+                      .map((ind) => (
+                        <SelectItem key={ind.name || ind.type} value={ind.name || ind.type}>
+                          {ind.name || ind.type}
+                        </SelectItem>
+                      ))
+                    }
                   </SelectContent>
                 </Select>
                 <Select
@@ -252,7 +259,7 @@ export const StrategyBuilderForm = ({
                   <SelectTrigger className="w-[140px]">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-background z-50">
                     <SelectItem value="above">Above</SelectItem>
                     <SelectItem value="below">Below</SelectItem>
                     <SelectItem value="crosses_above">Crosses Above</SelectItem>
@@ -281,7 +288,7 @@ export const StrategyBuilderForm = ({
                     <SelectTrigger className="flex-1">
                       <SelectValue placeholder="Select indicator" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="bg-background z-50">
                       {indicators.map((ind) => (
                         <SelectItem key={ind.type + (ind.period || '')} value={ind.name || ind.type}>
                           {ind.name || ind.type}
@@ -333,16 +340,23 @@ export const StrategyBuilderForm = ({
                   <SelectTrigger className="w-[140px]">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-background z-50">
                     <SelectItem value="RSI">RSI</SelectItem>
                     <SelectItem value="MACD">MACD</SelectItem>
                     <SelectItem value="EMA">EMA</SelectItem>
                     <SelectItem value="Price">Price</SelectItem>
-                    {indicators.filter(ind => ind.name).map((ind) => (
-                      <SelectItem key={ind.name || ind.type} value={ind.name || ind.type}>
-                        {ind.name || ind.type}
-                      </SelectItem>
-                    ))}
+                    {indicators
+                      .filter(ind => {
+                        const name = ind.name || ind.type;
+                        // Exclude base indicators that are already shown above
+                        return name && !['RSI', 'MACD', 'EMA', 'Price'].includes(name);
+                      })
+                      .map((ind) => (
+                        <SelectItem key={ind.name || ind.type} value={ind.name || ind.type}>
+                          {ind.name || ind.type}
+                        </SelectItem>
+                      ))
+                    }
                   </SelectContent>
                 </Select>
                 <Select
@@ -352,7 +366,7 @@ export const StrategyBuilderForm = ({
                   <SelectTrigger className="w-[140px]">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-background z-50">
                     <SelectItem value="above">Above</SelectItem>
                     <SelectItem value="below">Below</SelectItem>
                     <SelectItem value="crosses_above">Crosses Above</SelectItem>
@@ -381,7 +395,7 @@ export const StrategyBuilderForm = ({
                     <SelectTrigger className="flex-1">
                       <SelectValue placeholder="Select indicator" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="bg-background z-50">
                       {indicators.map((ind) => (
                         <SelectItem key={ind.type + (ind.period || '')} value={ind.name || ind.type}>
                           {ind.name || ind.type}
@@ -433,7 +447,7 @@ export const StrategyBuilderForm = ({
                   <SelectTrigger className="w-[140px]">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-background z-50">
                     <SelectItem value="RSI">RSI</SelectItem>
                     <SelectItem value="MACD">MACD</SelectItem>
                     <SelectItem value="EMA">EMA</SelectItem>
