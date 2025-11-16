@@ -12,21 +12,48 @@ serve(async (req) => {
   }
 
   try {
-    // Get user from authorization header
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      throw new Error('No authorization header');
-    }
-
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Verify user using bearer token (do not attach user auth to admin client)
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-    if (userError || !user) {
-      throw new Error('Unauthorized');
+    // Check for service-level user ID (from auto-trader)
+    const serviceUserId = req.headers.get("x-user-id");
+    let user;
+
+    if (serviceUserId) {
+      // Service-level call from auto-trader
+      const { data: userData, error: userError } = await supabase.auth.admin.getUserById(serviceUserId);
+      
+      if (userError || !userData.user) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Invalid service user ID",
+          }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+      
+      user = userData.user;
+      console.log(`Execute trade called by auto-trader for user: ${user.id}`);
+    } else {
+      // Regular authenticated call from frontend
+      const authHeader = req.headers.get('Authorization');
+      if (!authHeader) {
+        throw new Error('No authorization header');
+      }
+
+      const token = authHeader.replace('Bearer ', '');
+      const { data: { user: authenticatedUser }, error: userError } = await supabase.auth.getUser(token);
+      if (userError || !authenticatedUser) {
+        throw new Error('Unauthorized');
+      }
+      
+      user = authenticatedUser;
+      console.log(`Execute trade called by user: ${user.id}`);
     }
 
     const { signalId, action } = await req.json();

@@ -345,10 +345,59 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Authenticate user
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      // Be graceful for unauthenticated calls (e.g., expired session on auto-poll)
+    // Check for service-level user ID (from auto-trader)
+    const serviceUserId = req.headers.get("x-user-id");
+    
+    let user;
+    let authHeader = req.headers.get("Authorization");
+
+    if (serviceUserId) {
+      // Service-level call from auto-trader
+      const { data: userData, error: userError } = await supabase.auth.admin.getUserById(serviceUserId);
+      
+      if (userError || !userData.user) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            message: "Invalid service user ID",
+          }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+      
+      user = userData.user;
+      console.log(`Strategy analyzer called by auto-trader for user: ${user.id}`);
+    } else if (authHeader) {
+      // Regular authenticated call from frontend
+      const token = authHeader.replace("Bearer ", "");
+      const {
+        data: { user: authenticatedUser },
+        error: userError,
+      } = await supabase.auth.getUser(token);
+
+      if (userError || !authenticatedUser) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            signals: [],
+            executedSignals: 0,
+            autoExecuteEnabled: false,
+            message: "Not authenticated",
+          }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+      
+      user = authenticatedUser;
+      console.log(`Strategy analyzer called by user: ${user.id}`);
+    } else {
+      // No authentication provided
       return new Response(
         JSON.stringify({
           success: true,
@@ -363,31 +412,6 @@ serve(async (req) => {
         },
       );
     }
-
-    const token = authHeader.replace("Bearer ", "");
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser(token);
-
-    if (userError || !user) {
-      // Graceful fallback for invalid/expired token
-      return new Response(
-        JSON.stringify({
-          success: true,
-          signals: [],
-          executedSignals: 0,
-          autoExecuteEnabled: false,
-          message: "Not authenticated",
-        }),
-        {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
-
-    console.log(`Strategy analyzer called by user: ${user.id}`);
 
     // Check if auto-trading is enabled for this user
     const { data: riskParams } = await supabase
@@ -701,11 +725,19 @@ serve(async (req) => {
           // Automatically execute the signal
           try {
             console.log(`Auto-executing signal ${insertedSignal.id} for ${signal.symbol} (age: ${signalAge}ms)`);
+            
+            // Prepare headers for execute-trade
+            const executeHeaders: Record<string, string> = {};
+            if (authHeader) {
+              executeHeaders.Authorization = authHeader;
+            }
+            if (serviceUserId) {
+              executeHeaders["x-user-id"] = serviceUserId;
+            }
+            
             const { error: execError } = await supabase.functions.invoke("execute-trade", {
               body: { signalId: insertedSignal.id, action: "execute" },
-              headers: {
-                Authorization: authHeader,
-              },
+              headers: executeHeaders,
             });
 
             if (execError) {
