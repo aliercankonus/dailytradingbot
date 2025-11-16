@@ -218,7 +218,13 @@ function evaluateCondition(
 }
 
 // Analyze market using custom strategy
-async function analyzeWithStrategy(data: MarketData, strategy: CustomStrategy, prices: number[], volumes: number[]) {
+async function analyzeWithStrategy(
+  data: MarketData, 
+  strategy: CustomStrategy, 
+  prices: number[], 
+  volumes: number[],
+  supabase: any
+) {
   const currentPrice = parseFloat(data.lastPrice);
 
   // Calculate all indicators for this strategy
@@ -240,24 +246,60 @@ async function analyzeWithStrategy(data: MarketData, strategy: CustomStrategy, p
 
   console.log(`Strategy ${strategy.name} - Entry conditions met: ${entryConditionsMet}`);
 
-  // Determine signal type
-  let signalType: "long" | "short" | "hold" = "hold";
-  let reason = `Waiting for entry conditions (${strategy.name})`;
+  // Return null if entry conditions not met
+  if (!entryConditionsMet) {
+    return null;
+  }
 
-  if (entryConditionsMet) {
-    // Determine if bullish or bearish based on trend
-    const trend = detectTrend(data);
-
-    if (trend === "bullish") {
-      signalType = "long";
-      reason = `${strategy.name}: Entry conditions met with bullish trend`;
-    } else if (trend === "bearish") {
-      signalType = "short";
-      reason = `${strategy.name}: Entry conditions met with bearish trend`;
-    } else {
-      signalType = "long"; // Default to long if ranging
-      reason = `${strategy.name}: Entry conditions met`;
+  // Get real-time market trend using the same function as execute-trade
+  let marketTrend: "bullish" | "bearish" | "ranging" = "ranging";
+  let trendConsistency = 0;
+  
+  try {
+    const { data: trendData, error: trendError } = await supabase.functions.invoke('calculate-trend', {
+      body: { symbol: data.symbol }
+    });
+    
+    if (trendError) {
+      console.error(`Error fetching trend for ${data.symbol}:`, trendError);
+    } else if (trendData) {
+      marketTrend = trendData.trend;
+      trendConsistency = trendData.trendConsistency || 0;
+      console.log(`Real-time trend for ${data.symbol}: ${marketTrend} (consistency: ${trendConsistency}%)`);
     }
+  } catch (error) {
+    console.error(`Failed to fetch trend for ${data.symbol}:`, error);
+  }
+
+  // Determine signal type based on REAL market trend
+  let signalType: "long" | "short" | "hold" = "hold";
+  let reason = `${strategy.name}: Entry conditions met`;
+
+  // Only generate signals that align with market trend
+  if (marketTrend === "bullish" || marketTrend === "ranging") {
+    signalType = "long";
+    reason = marketTrend === "bullish" 
+      ? `${strategy.name}: Entry conditions met with bullish trend`
+      : `${strategy.name}: Entry conditions met`;
+  } else if (marketTrend === "bearish") {
+    signalType = "short";
+    reason = `${strategy.name}: Entry conditions met with bearish trend`;
+  }
+
+  // Skip signal if trend consistency is too low (same filter as execute-trade)
+  if (trendConsistency < 50 && trendConsistency > 0) {
+    console.log(`Skipping signal for ${data.symbol}: Trend consistency too low (${trendConsistency}%)`);
+    return null;
+  }
+
+  // Skip if signal type doesn't match trend
+  if (signalType === "long" && marketTrend === "bearish") {
+    console.log(`Skipping LONG signal for ${data.symbol}: Market is bearish`);
+    return null;
+  }
+  if (signalType === "short" && marketTrend === "bullish") {
+    console.log(`Skipping SHORT signal for ${data.symbol}: Market is bullish`);
+    return null;
   }
 
   // Calculate stop loss and take profit based on strategy settings
@@ -281,7 +323,7 @@ async function analyzeWithStrategy(data: MarketData, strategy: CustomStrategy, p
   return {
     symbol: data.symbol,
     signalType,
-    trend: detectTrend(data),
+    trend: marketTrend,
     entryPrice: currentPrice,
     stopLoss,
     takeProfit,
@@ -569,10 +611,10 @@ serve(async (req) => {
         // Fetch real Binance kline data with volume
         const { prices, volumes } = await fetchBinanceKlines(data.symbol, 100);
 
-        const signal = await analyzeWithStrategy(data, strategy, prices, volumes);
+        const signal = await analyzeWithStrategy(data, strategy, prices, volumes, supabase);
 
-        // Only collect signals that are not 'hold'
-        if (signal.signalType !== "hold") {
+        // Only collect signals that are not 'hold' and not null
+        if (signal && signal.signalType !== "hold") {
           console.log(`Generated ${signal.signalType} signal for ${signal.symbol} using ${strategy.name}`);
           allSignals.push({
             ...signal,
