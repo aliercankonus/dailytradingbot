@@ -18,9 +18,31 @@ interface TrailingStopEvent {
 export const TrailingStopMonitor = () => {
   const [trailingEvents, setTrailingEvents] = useState<TrailingStopEvent[]>([]);
   const [activeTrails, setActiveTrails] = useState<number>(0);
+  const [settings, setSettings] = useState({ enabled: true, activationPercent: 1.0, distanceMultiplier: 1.5 });
   const { toast } = useToast();
 
   useEffect(() => {
+    // Fetch user's trailing stop settings
+    const fetchSettings = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data } = await supabase
+        .from('risk_parameters')
+        .select('trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier')
+        .eq('user_id', user.id)
+        .single();
+
+      if (data) {
+        setSettings({
+          enabled: data.trailing_stop_enabled ?? true,
+          activationPercent: data.trailing_stop_activation_percent ?? 1.0,
+          distanceMultiplier: data.trailing_stop_distance_multiplier ?? 1.5,
+        });
+      }
+    };
+
+    fetchSettings();
     // Monitor for positions with positive P&L (potential trailing stops)
     const checkTrailingStops = async () => {
       const { data: positions } = await supabase
@@ -120,8 +142,13 @@ export const TrailingStopMonitor = () => {
               <Shield className="h-12 w-12 mx-auto mb-2 opacity-50" />
               <p className="text-sm">No trailing stop adjustments yet</p>
               <p className="text-xs mt-1">
-                Trailing stops activate when positions are +1% profitable
+                Trailing stops activate when positions are +{settings.activationPercent}% profitable
               </p>
+              {!settings.enabled && (
+                <p className="text-xs mt-2 text-destructive">
+                  ⚠️ Trailing stops are currently disabled in Settings
+                </p>
+              )}
             </div>
           ) : (
             trailingEvents.map((event, index) => (
@@ -175,13 +202,14 @@ export const TrailingStopMonitor = () => {
 
         <div className="mt-4 p-3 bg-muted/50 rounded-lg">
           <h4 className="text-sm font-medium mb-2 text-foreground">
-            How Trailing Stop Loss Works:
+            Current Settings:
           </h4>
           <ul className="text-xs text-muted-foreground space-y-1">
-            <li>• Activates when position is +1% profitable</li>
-            <li>• Follows price at 1.5x ATR distance (typically 2-4%)</li>
-            <li>• Only moves in favorable direction (locks in profits)</li>
-            <li>• Automatically protects gains as price moves up</li>
+            <li>• Status: {settings.enabled ? '✅ Enabled' : '❌ Disabled'}</li>
+            <li>• Activates at: +{settings.activationPercent}% profit</li>
+            <li>• Trailing distance: {settings.distanceMultiplier}x ATR (typically {(settings.distanceMultiplier * 2).toFixed(1)}-{(settings.distanceMultiplier * 3).toFixed(1)}%)</li>
+            <li>• Only moves in favorable direction</li>
+            <li>• Automatically protects gains</li>
           </ul>
         </div>
       </CardContent>
