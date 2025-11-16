@@ -6,7 +6,7 @@ import { useRiskParameters } from './useRiskParameters';
 export const useSignalGenerator = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const { toast } = useToast();
-  const { riskParams } = useRiskParameters();
+  const { riskParams, loading } = useRiskParameters();
 
   const generateSignals = async () => {
     try {
@@ -66,12 +66,19 @@ export const useSignalGenerator = () => {
   };
 
   useEffect(() => {
+    // Wait for risk parameters to load
+    if (loading) {
+      console.log('Waiting for risk parameters to load...');
+      return;
+    }
+
     // Only generate signals if bot is enabled
     if (!riskParams?.is_trading_enabled) {
       console.log('Bot is disabled, skipping signal generation');
       return;
     }
 
+    console.log('Bot is enabled, starting signal generation');
     // Generate signals immediately on mount
     generateSignals();
 
@@ -79,7 +86,7 @@ export const useSignalGenerator = () => {
     const interval = setInterval(generateSignals, 5 * 60 * 1000);
 
     return () => clearInterval(interval);
-  }, [riskParams?.is_trading_enabled]);
+  }, [riskParams?.is_trading_enabled, loading]);
 
   return { generateSignals, isGenerating };
 };
