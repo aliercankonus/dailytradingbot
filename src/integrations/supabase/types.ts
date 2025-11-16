@@ -359,6 +359,57 @@ export type Database = {
         }
         Relationships: []
       }
+      setup_performance: {
+        Row: {
+          avg_loss: number | null
+          avg_profit: number | null
+          created_at: string | null
+          id: string
+          losing_trades: number | null
+          profit_factor: number | null
+          setup_pattern: string
+          strategy_name: string
+          symbol: string
+          total_trades: number | null
+          updated_at: string | null
+          user_id: string
+          win_rate: number | null
+          winning_trades: number | null
+        }
+        Insert: {
+          avg_loss?: number | null
+          avg_profit?: number | null
+          created_at?: string | null
+          id?: string
+          losing_trades?: number | null
+          profit_factor?: number | null
+          setup_pattern: string
+          strategy_name: string
+          symbol: string
+          total_trades?: number | null
+          updated_at?: string | null
+          user_id: string
+          win_rate?: number | null
+          winning_trades?: number | null
+        }
+        Update: {
+          avg_loss?: number | null
+          avg_profit?: number | null
+          created_at?: string | null
+          id?: string
+          losing_trades?: number | null
+          profit_factor?: number | null
+          setup_pattern?: string
+          strategy_name?: string
+          symbol?: string
+          total_trades?: number | null
+          updated_at?: string | null
+          user_id?: string
+          win_rate?: number | null
+          winning_trades?: number | null
+        }
+        Relationships: []
+      }
       strategy_performance: {
         Row: {
           id: string

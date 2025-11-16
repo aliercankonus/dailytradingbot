@@ -673,14 +673,40 @@ serve(async (req) => {
 
         const signal = await analyzeWithStrategy(data, strategy, prices, volumes, supabase);
 
-        // Only collect valid signals (null signals are already filtered out in analyzeWithStrategy)
+        // Apply multi-layer confirmation strategy
         if (signal) {
-          console.log(`Generated ${signal.signalType} signal for ${signal.symbol} using ${strategy.name}`);
-          allSignals.push({
-            ...signal,
-            strategyId: strategy.id,
-            strategyName: strategy.name,
-          });
+          // Get comprehensive trend analysis
+          const trendResponse = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=' + data.symbol);
+          const trendData = await trendResponse.json();
+          
+          // Fetch setup performance for historical win rate
+          const setupPattern = `${strategy.name}_${signal.signalType === 'long' ? 'LONG' : 'SHORT'}`;
+          const { data: setupPerf } = await supabase
+            .from('setup_performance')
+            .select('win_rate, total_trades')
+            .eq('user_id', user.id)
+            .eq('setup_pattern', setupPattern)
+            .eq('symbol', data.symbol)
+            .maybeSingle();
+          
+          // Multi-layer confirmation checks
+          const trendConfirmed = signal.trend === 'bullish' || signal.trend === 'bearish';
+          const volatilityNormal = signal.confidenceScore >= 60;
+          const setupWinRate = setupPerf?.win_rate || 0;
+          const hasHistoricalData = (setupPerf?.total_trades || 0) >= 5;
+          const historicalWinRateOk = !hasHistoricalData || setupWinRate >= 50;
+          
+          // CRITICAL: All confirmations must pass
+          if (trendConfirmed && volatilityNormal && historicalWinRateOk) {
+            console.log(`✓ Multi-layer pass: ${signal.symbol} ${strategy.name} (winRate: ${setupWinRate.toFixed(1)}%)`);
+            allSignals.push({
+              ...signal,
+              strategyId: strategy.id,
+              strategyName: strategy.name,
+            });
+          } else {
+            console.log(`✗ Multi-layer fail: ${signal.symbol} trend=${trendConfirmed} vol=${volatilityNormal} hist=${historicalWinRateOk} (${setupWinRate.toFixed(1)}%)`);
+          }
         }
       }
     }
