@@ -12,6 +12,7 @@ import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { PerformanceSettings } from '@/components/PerformanceSettings';
 import { PerformanceMonitoringDashboard } from '@/components/PerformanceMonitoringDashboard';
 import { TrailingStopSettings } from '@/components/TrailingStopSettings';
+import { PositionRebalancingSettings } from '@/components/PositionRebalancingSettings';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function Settings() {
@@ -335,6 +336,9 @@ export default function Settings() {
 
           {/* Trailing Stop Loss Settings */}
           <TrailingStopSettings />
+
+          {/* Position Rebalancing */}
+          <PositionRebalancingSettings />
 
           {/* Risk Management */}
           <PerformanceSettings />

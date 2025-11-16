@@ -14,6 +14,9 @@ interface RiskParameters {
   paper_trading_mode: boolean;
   notification_phone: string | null;
   sms_notifications_enabled: boolean;
+  auto_rebalance_enabled: boolean;
+  rebalance_loss_threshold_percent: number;
+  max_positions_to_close_per_cycle: number;
   updated_at: string;
 }
 
