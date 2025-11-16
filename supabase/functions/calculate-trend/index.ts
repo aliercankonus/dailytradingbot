@@ -220,18 +220,26 @@ serve(async (req) => {
     const currentPrice = prices[prices.length - 1];
     const atrPercent = (atr / currentPrice) * 100;
 
-    // Get last 3 periods trend for consistency check
-    const trendHistory = [];
-    for (let i = prices.length - 72; i < prices.length; i += 24) { // Every 24 minutes = 3 periods
-      const periodStart = Math.max(0, i - 24);
-      const periodChange = ((prices[i] - prices[periodStart]) / prices[periodStart]) * 100;
-      if (periodChange > 0.5) trendHistory.push('bullish');
-      else if (periodChange < -0.5) trendHistory.push('bearish');
-      else trendHistory.push('ranging');
+    // Check if recent price movements align with current trend
+    // Look at last 10 periods (10 minutes) for consistency
+    let consistentPeriods = 0;
+    const periodsToCheck = Math.min(10, prices.length - 1);
+    
+    for (let i = prices.length - periodsToCheck; i < prices.length; i++) {
+      const periodChange = ((prices[i] - prices[i - 1]) / prices[i - 1]) * 100;
+      
+      // Check if price movement aligns with current trend
+      if (trendData.trend === 'bullish' && periodChange > 0) {
+        consistentPeriods++;
+      } else if (trendData.trend === 'bearish' && periodChange < 0) {
+        consistentPeriods++;
+      } else if (trendData.trend === 'neutral' && Math.abs(periodChange) < 0.3) {
+        consistentPeriods++;
+      }
     }
 
-    // Calculate trend consistency
-    const trendConsistency = trendHistory.filter(t => t === trendData.trend).length / trendHistory.length;
+    // Calculate trend consistency as percentage
+    const trendConsistency = Math.round((consistentPeriods / periodsToCheck) * 100);
     
     console.log(`Trend for ${symbol}: ${trendData.trend} (confidence: ${trendData.confidence}%, consistency: ${(trendConsistency * 100).toFixed(0)}%, ATR: ${atrPercent.toFixed(2)}%)`);
     
@@ -242,8 +250,7 @@ serve(async (req) => {
         ...trendData,
         atr: Math.round(atr * 100) / 100,
         atrPercent: Math.round(atrPercent * 100) / 100,
-        trendConsistency: Math.round(trendConsistency * 100), // Return as percentage (67 instead of 0.67)
-        trendHistory,
+        trendConsistency,
         timestamp: new Date().toISOString(),
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
