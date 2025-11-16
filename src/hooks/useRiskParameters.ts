@@ -96,8 +96,31 @@ export const useRiskParameters = () => {
 
   useEffect(() => {
     fetchRiskParameters();
-    const interval = setInterval(fetchRiskParameters, 10000);
-    return () => clearInterval(interval);
+
+    // Set up realtime subscription for immediate updates
+    const channel = supabase
+      .channel('risk_parameters_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'risk_parameters'
+        },
+        (payload) => {
+          console.log('Risk parameters changed:', payload);
+          fetchRiskParameters();
+        }
+      )
+      .subscribe();
+
+    // Keep polling as backup
+    const interval = setInterval(fetchRiskParameters, 30000);
+
+    return () => {
+      channel.unsubscribe();
+      clearInterval(interval);
+    };
   }, []);
 
   return { riskParams, loading, error, updateRiskParameters };
