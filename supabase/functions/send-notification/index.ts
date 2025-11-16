@@ -257,20 +257,6 @@ const handler = async (req: Request): Promise<Response> => {
       }
     }
 
-    // Store notification in database with user_id
-    const { error: dbError } = await supabase
-      .from('notifications')
-      .insert({
-        type: payload.type,
-        trade_id: payload.tradeId || null,
-        message: subject,
-        user_id: payload.userId || null,
-      });
-
-    if (dbError) {
-      console.error('Error storing notification:', dbError);
-    }
-
     return new Response(
       JSON.stringify({ success: true, emailResponse, smsResponse }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
