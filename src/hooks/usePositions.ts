@@ -17,6 +17,8 @@ interface Position {
   trend?: string;
   confidence_score?: number;
   strategy_name?: string;
+  opened_by_rebalancer?: boolean;
+  closed_by_rebalancer?: boolean;
 }
 
 export const usePositions = () => {

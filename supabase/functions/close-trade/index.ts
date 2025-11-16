@@ -35,8 +35,8 @@ serve(async (req) => {
       });
     }
 
-    const { positionId, closeAll, manualClose = false } = await req.json();
-    console.log(`Close trade request by user ${user.id}:`, { positionId, closeAll, manualClose });
+    const { positionId, closeAll, manualClose = false, closedByRebalancer = false } = await req.json();
+    console.log(`Close trade request by user ${user.id}:`, { positionId, closeAll, manualClose, closedByRebalancer });
 
     let closedCount = 0;
 
@@ -51,7 +51,7 @@ serve(async (req) => {
       if (fetchError) throw fetchError;
 
       for (const position of positions || []) {
-        await closePosition(supabase, position, manualClose);
+        await closePosition(supabase, position, manualClose, closedByRebalancer);
         closedCount++;
       }
 
@@ -76,7 +76,7 @@ serve(async (req) => {
       if (fetchError) throw fetchError;
       if (!position) throw new Error('Position not found or already closed');
 
-      await closePosition(supabase, position, manualClose);
+      await closePosition(supabase, position, manualClose, closedByRebalancer);
 
       return new Response(
         JSON.stringify({
@@ -102,7 +102,7 @@ serve(async (req) => {
   }
 });
 
-async function closePosition(supabase: any, position: any, manualClose: boolean = false) {
+async function closePosition(supabase: any, position: any, manualClose: boolean = false, closedByRebalancer: boolean = false) {
   const currentPrice = position.current_price || position.entry_price;
   
   // Recalculate P&L from current price to ensure accuracy
@@ -117,14 +117,15 @@ async function closePosition(supabase: any, position: any, manualClose: boolean 
   // Always use 'closed' status for consistency
   const tradeStatus = 'closed';
 
-  // Update position to closed
-  await supabase
+  // Update position status to closed with final P&L and rebalancer flag
+  const { error: updateError } = await supabase
     .from('positions')
-    .update({ 
+    .update({
       status: 'closed',
       current_price: currentPrice,
       unrealized_pnl: pnl,
-      unrealized_pnl_percent: pnlPercent
+      unrealized_pnl_percent: pnlPercent,
+      closed_by_rebalancer: closedByRebalancer,
     })
     .eq('id', position.id);
 

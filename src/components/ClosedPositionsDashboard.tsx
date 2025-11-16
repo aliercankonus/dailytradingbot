@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useClosedPositions } from '@/hooks/useClosedPositions';
-import { Loader2, TrendingUp, TrendingDown, Target, ShieldAlert } from 'lucide-react';
+import { Loader2, TrendingUp, TrendingDown, Target, ShieldAlert, RotateCw } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMemo, useState } from 'react';
@@ -93,6 +93,16 @@ export const ClosedPositionsDashboard = () => {
 
   const getCloseReasonBadge = (position: any) => {
     const reason = getCloseReason(position);
+    
+    // Check if closed by rebalancer
+    if (position.closed_by_rebalancer) {
+      return (
+        <Badge variant="outline" className="gap-1 bg-blue-500/10 text-blue-500 border-blue-500/20">
+          <RotateCw className="h-3 w-3" />
+          Auto-Rebalanced
+        </Badge>
+      );
+    }
     
     if (reason === 'Take Profit') {
       return (

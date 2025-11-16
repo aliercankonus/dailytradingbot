@@ -195,11 +195,12 @@ async function rebalanceUserPositions(
 
   for (const position of positionsToCloseNow) {
     try {
-      // Close the position
+      // Close the position and mark as closed by rebalancer
       const { error: closeError } = await supabase.functions.invoke('close-trade', {
         body: { 
           positionId: position.id,
-          manualClose: false // Auto-rebalance close
+          manualClose: false,
+          closedByRebalancer: true
         }
       });
 
@@ -216,7 +217,7 @@ async function rebalanceUserPositions(
       if (trend && trend.confidence >= 60 && trend.trendConsistency >= 60) {
         const newSignalType = trend.trend === 'bullish' ? 'long' : 'short';
         
-        // Create new trading signal
+        // Create new trading signal marked as created by rebalancer
         const { error: signalError } = await supabase
           .from('trading_signals')
           .insert({
@@ -226,6 +227,7 @@ async function rebalanceUserPositions(
             trend: trend.trend,
             confidence_score: trend.confidence,
             entry_price: trend.currentPrice,
+            created_by_rebalancer: true,
             stop_loss: newSignalType === 'long' 
               ? trend.currentPrice * (1 - 0.015)
               : trend.currentPrice * (1 + 0.015),
