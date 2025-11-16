@@ -280,6 +280,7 @@ export type Database = {
       }
       risk_parameters: {
         Row: {
+          auto_rebalance_enabled: boolean | null
           consecutive_loss_threshold: number
           consecutive_losses: number | null
           current_open_trades: number | null
@@ -287,12 +288,14 @@ export type Database = {
           id: string
           is_trading_enabled: boolean | null
           max_open_trades: number
+          max_positions_to_close_per_cycle: number | null
           max_risk_per_trade_percent: number
           notification_email: string | null
           notification_phone: string | null
           paper_trading_mode: boolean | null
           portfolio_value: number
           position_size_reduction_percent: number
+          rebalance_loss_threshold_percent: number | null
           sms_notifications_enabled: boolean | null
           trailing_stop_activation_percent: number | null
           trailing_stop_distance_multiplier: number | null
@@ -301,6 +304,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          auto_rebalance_enabled?: boolean | null
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
           current_open_trades?: number | null
@@ -308,12 +312,14 @@ export type Database = {
           id?: string
           is_trading_enabled?: boolean | null
           max_open_trades?: number
+          max_positions_to_close_per_cycle?: number | null
           max_risk_per_trade_percent?: number
           notification_email?: string | null
           notification_phone?: string | null
           paper_trading_mode?: boolean | null
           portfolio_value?: number
           position_size_reduction_percent?: number
+          rebalance_loss_threshold_percent?: number | null
           sms_notifications_enabled?: boolean | null
           trailing_stop_activation_percent?: number | null
           trailing_stop_distance_multiplier?: number | null
@@ -322,6 +328,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          auto_rebalance_enabled?: boolean | null
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
           current_open_trades?: number | null
@@ -329,12 +336,14 @@ export type Database = {
           id?: string
           is_trading_enabled?: boolean | null
           max_open_trades?: number
+          max_positions_to_close_per_cycle?: number | null
           max_risk_per_trade_percent?: number
           notification_email?: string | null
           notification_phone?: string | null
           paper_trading_mode?: boolean | null
           portfolio_value?: number
           position_size_reduction_percent?: number
+          rebalance_loss_threshold_percent?: number | null
           sms_notifications_enabled?: boolean | null
           trailing_stop_activation_percent?: number | null
           trailing_stop_distance_multiplier?: number | null
