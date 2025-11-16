@@ -323,31 +323,46 @@ async function analyzeWithStrategy(
 
   const riskRewardRatio = takeProfitPercent / stopLossPercent;
 
-  // Calculate confidence score based on market trend confidence
-  // Get the actual trend confidence from calculate-trend
-  const conditionsMet = strategy.entry_conditions.filter((condition) =>
-    evaluateCondition(condition, indicatorValues, data),
-  ).length;
+  // Calculate confidence score based on multiple factors
+  // 1. Trend consistency (already fetched above) - 40%
+  const trendWeight = trendConsistency * 0.4;
   
-  // Base confidence from conditions (50-80%)
-  const conditionsConfidence = 50 + ((conditionsMet / strategy.entry_conditions.length) * 30);
+  // 2. Volume confirmation - 20%
+  const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+  const currentVolume = volumes[volumes.length - 1];
+  const volumeRatio = currentVolume / avgVolume;
+  const volumeWeight = Math.min(volumeRatio / 2, 1) * 20; // Cap at 20%
   
-  // Get trend data for real confidence
-  let trendConfidence = 60; // Default moderate confidence
-  try {
-    const { data: trendData } = await supabase.functions.invoke('calculate-trend', {
-      body: { symbol: data.symbol }
-    });
-    if (trendData && trendData.confidence) {
-      trendConfidence = trendData.confidence;
-    }
-  } catch (e) {
-    console.error('Error getting trend confidence:', e);
+  // 3. RSI strength - 15%
+  const rsi = indicatorValues.get("RSI") || 50;
+  let rsiStrength = 0;
+  if (signalType === "long" && rsi < 50) {
+    rsiStrength = (50 - rsi) / 20; // Oversold is good for longs
+  } else if (signalType === "short" && rsi > 50) {
+    rsiStrength = (rsi - 50) / 20; // Overbought is good for shorts
   }
+  const rsiWeight = Math.min(rsiStrength, 1) * 15;
   
-  // Final confidence is weighted average of conditions and trend
-  // Trend confidence is more important (60%), conditions are 40%
-  const confidenceScore = Math.round((trendConfidence * 0.6) + (conditionsConfidence * 0.4));
+  // 4. Price momentum - 15%
+  const ema12 = calculateEMA(prices, 12);
+  const ema26 = calculateEMA(prices, 26);
+  const emaDiff = Math.abs((ema12 - ema26) / ema26) * 100;
+  const momentumWeight = Math.min(emaDiff / 2, 1) * 15; // Cap at 15%
+  
+  // 5. Risk/Reward ratio bonus - 10%
+  const rrBonus = Math.min(riskRewardRatio / 3, 1) * 10;
+  
+  // Final confidence score
+  const confidenceScore = Math.round(trendWeight + volumeWeight + rsiWeight + momentumWeight + rrBonus);
+  
+  console.log(`Confidence breakdown for ${data.symbol}:`, {
+    trend: `${trendWeight.toFixed(1)}% (consistency: ${trendConsistency}%)`,
+    volume: `${volumeWeight.toFixed(1)}% (ratio: ${volumeRatio.toFixed(2)}x)`,
+    rsi: `${rsiWeight.toFixed(1)}% (value: ${rsi.toFixed(1)})`,
+    momentum: `${momentumWeight.toFixed(1)}% (EMA diff: ${emaDiff.toFixed(2)}%)`,
+    riskReward: `${rrBonus.toFixed(1)}% (R:R ${riskRewardRatio.toFixed(2)})`,
+    total: `${confidenceScore}%`
+  });
 
   // **CRITICAL FIX**: Filter out low confidence signals
   // Minimum 60% confidence required to avoid poor quality trades
