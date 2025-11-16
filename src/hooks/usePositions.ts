@@ -16,6 +16,7 @@ interface Position {
   opened_at: string;
   trend?: string;
   confidence_score?: number;
+  strategy_name?: string;
 }
 
 export const usePositions = () => {
@@ -28,12 +29,22 @@ export const usePositions = () => {
       setLoading(true);
       const { data, error: queryError } = await supabase
         .from('positions')
-        .select('*')
+        .select(`
+          *,
+          trades!inner(strategy_name)
+        `)
         .eq('status', 'active')
         .order('opened_at', { ascending: false });
 
       if (queryError) throw queryError;
-      setPositions(data || []);
+      
+      // Flatten the joined data
+      const formattedData = (data || []).map(pos => ({
+        ...pos,
+        strategy_name: pos.trades?.strategy_name
+      }));
+      
+      setPositions(formattedData);
     } catch (err) {
       console.error('Error fetching positions:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch positions');
