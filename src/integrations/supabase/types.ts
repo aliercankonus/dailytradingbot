@@ -185,11 +185,13 @@ export type Database = {
       }
       positions: {
         Row: {
+          closed_by_rebalancer: boolean | null
           confidence_score: number | null
           current_price: number | null
           entry_price: number
           id: string
           opened_at: string | null
+          opened_by_rebalancer: boolean | null
           quantity: number
           side: string
           status: string
@@ -204,11 +206,13 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
           entry_price: number
           id?: string
           opened_at?: string | null
+          opened_by_rebalancer?: boolean | null
           quantity: number
           side: string
           status?: string
@@ -223,11 +227,13 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
           entry_price?: number
           id?: string
           opened_at?: string | null
+          opened_by_rebalancer?: boolean | null
           quantity?: number
           side?: string
           status?: string
@@ -545,6 +551,7 @@ export type Database = {
         Row: {
           confidence_score: number | null
           created_at: string | null
+          created_by_rebalancer: boolean | null
           entry_price: number | null
           expires_at: string | null
           id: string
@@ -563,6 +570,7 @@ export type Database = {
         Insert: {
           confidence_score?: number | null
           created_at?: string | null
+          created_by_rebalancer?: boolean | null
           entry_price?: number | null
           expires_at?: string | null
           id?: string
@@ -581,6 +589,7 @@ export type Database = {
         Update: {
           confidence_score?: number | null
           created_at?: string | null
+          created_by_rebalancer?: boolean | null
           entry_price?: number | null
           expires_at?: string | null
           id?: string

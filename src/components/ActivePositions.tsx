@@ -2,7 +2,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { usePositions } from '@/hooks/usePositions';
-import { TrendingUp, TrendingDown, X, Loader2, Shield } from 'lucide-react';
+import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useState } from 'react';
@@ -68,6 +68,12 @@ export const ActivePositions = () => {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="font-bold text-lg">{position.symbol}</h3>
+                    {position.opened_by_rebalancer && (
+                      <Badge variant="outline" className="text-xs flex items-center gap-1 bg-blue-500/10 text-blue-500 border-blue-500/20">
+                        <RotateCw className="h-3 w-3" />
+                        Auto-Rebalanced
+                      </Badge>
+                    )}
                     {(position.unrealized_pnl_percent || 0) > 1 && (
                       <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
                         <Shield className="h-3 w-3" />

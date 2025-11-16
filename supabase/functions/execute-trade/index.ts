@@ -273,7 +273,7 @@ serve(async (req) => {
       throw new Error(`Failed to create trade record: ${tradeError?.message || 'Unknown error'}`);
     }
 
-    // Create position record with real-time trend
+    // Create position record with real-time trend and rebalancer flag
     await supabase
       .from('positions')
       .insert({
@@ -291,6 +291,7 @@ serve(async (req) => {
         status: 'active',
         trend: currentTrend,
         confidence_score: signal.confidence_score,
+        opened_by_rebalancer: signal.created_by_rebalancer || false,
       });
 
     if (!isPaperTrading) {
