@@ -31,23 +31,54 @@ serve(async (req) => {
       );
     }
 
-    // Fetch current prices for all symbols
+    // Fetch current prices and ATR for all symbols
     const symbols = [...new Set(positions.map(p => p.symbol))];
-    const pricePromises = symbols.map(async (symbol) => {
-      const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
-      const data = await response.json();
-      return { symbol, price: parseFloat(data.price) };
+    
+    // Fetch prices and calculate ATR for trailing stop loss
+    const symbolDataPromises = symbols.map(async (symbol) => {
+      // Get current price
+      const priceResponse = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+      const priceData = await priceResponse.json();
+      const price = parseFloat(priceData.price);
+      
+      // Get last 30 klines to calculate ATR
+      const klinesResponse = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=30`);
+      const klines = await klinesResponse.json();
+      
+      // Calculate ATR (Average True Range)
+      const atrPeriod = 14;
+      let atrSum = 0;
+      for (let i = klines.length - atrPeriod; i < klines.length - 1; i++) {
+        const high = parseFloat(klines[i][2]);
+        const low = parseFloat(klines[i][3]);
+        const prevClose = parseFloat(klines[i - 1][4]);
+        const tr = Math.max(
+          high - low,
+          Math.abs(high - prevClose),
+          Math.abs(low - prevClose)
+        );
+        atrSum += tr;
+      }
+      const atr = atrSum / atrPeriod;
+      const atrPercent = (atr / price) * 100;
+      
+      return { symbol, price, atr, atrPercent };
     });
 
-    const prices = await Promise.all(pricePromises);
-    const priceMap = new Map(prices.map(p => [p.symbol, p.price]));
+    const symbolData = await Promise.all(symbolDataPromises);
+    const priceMap = new Map(symbolData.map(d => [d.symbol, d.price]));
+    const atrMap = new Map(symbolData.map(d => [d.symbol, { atr: d.atr, atrPercent: d.atrPercent }]));
 
     const updates = [];
     const closedPositions = [];
+    const trailingStopUpdates = [];
 
     for (const position of positions) {
       const currentPrice = priceMap.get(position.symbol);
       if (!currentPrice) continue;
+
+      const atrData = atrMap.get(position.symbol);
+      const atrPercent = atrData?.atrPercent || 1.5;
 
       const pnl = position.side === 'BUY'
         ? (currentPrice - position.entry_price) * position.quantity
@@ -57,7 +88,62 @@ serve(async (req) => {
         ? ((currentPrice - position.entry_price) / position.entry_price) * 100
         : ((position.entry_price - currentPrice) / position.entry_price) * 100;
 
-      // Check if take profit or stop loss is hit
+      // TRAILING STOP LOSS LOGIC
+      let newStopLoss = position.stop_loss;
+      let trailingActivated = false;
+      
+      // Activate trailing stop when position is profitable (>1%)
+      if (pnlPercent > 1) {
+        // Calculate trailing stop loss at 1.5x ATR from current price
+        const trailingDistance = Math.max(atrPercent * 1.5, 1.5); // Min 1.5%
+        
+        if (position.side === 'BUY') {
+          // For LONG: Trail stop loss UP as price rises
+          const calculatedStopLoss = currentPrice * (1 - trailingDistance / 100);
+          
+          // Only update if new stop loss is HIGHER than current (never move down)
+          if (calculatedStopLoss > position.stop_loss) {
+            newStopLoss = calculatedStopLoss;
+            trailingActivated = true;
+            console.log(`Trailing SL activated for ${position.symbol}: ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (P&L: ${pnlPercent.toFixed(2)}%)`);
+          }
+        } else {
+          // For SHORT: Trail stop loss DOWN as price falls
+          const calculatedStopLoss = currentPrice * (1 + trailingDistance / 100);
+          
+          // Only update if new stop loss is LOWER than current (never move up)
+          if (calculatedStopLoss < position.stop_loss) {
+            newStopLoss = calculatedStopLoss;
+            trailingActivated = true;
+            console.log(`Trailing SL activated for ${position.symbol}: ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (P&L: ${pnlPercent.toFixed(2)}%)`);
+          }
+        }
+
+        // Update stop loss in database if trailing was activated
+        if (trailingActivated) {
+          await supabase
+            .from('positions')
+            .update({ stop_loss: newStopLoss })
+            .eq('id', position.id);
+
+          // Also update the trade record
+          await supabase
+            .from('trades')
+            .update({ stop_loss: newStopLoss })
+            .eq('id', position.trade_id);
+
+          trailingStopUpdates.push({
+            symbol: position.symbol,
+            side: position.side,
+            oldStopLoss: position.stop_loss,
+            newStopLoss,
+            currentPrice,
+            pnlPercent,
+          });
+        }
+      }
+
+      // Check if take profit or stop loss is hit (use updated stop loss)
       let shouldClose = false;
       let closeReason = '';
 
@@ -66,18 +152,18 @@ serve(async (req) => {
         if (position.take_profit && currentPrice >= position.take_profit) {
           shouldClose = true;
           closeReason = 'take_profit';
-        } else if (position.stop_loss && currentPrice <= position.stop_loss) {
+        } else if (newStopLoss && currentPrice <= newStopLoss) {
           shouldClose = true;
-          closeReason = 'stop_loss';
+          closeReason = trailingActivated ? 'trailing_stop_loss' : 'stop_loss';
         }
       } else {
         // For SHORT positions: TP when price goes DOWN, SL when price goes UP
         if (position.take_profit && currentPrice <= position.take_profit) {
           shouldClose = true;
           closeReason = 'take_profit';
-        } else if (position.stop_loss && currentPrice >= position.stop_loss) {
+        } else if (newStopLoss && currentPrice >= newStopLoss) {
           shouldClose = true;
-          closeReason = 'stop_loss';
+          closeReason = trailingActivated ? 'trailing_stop_loss' : 'stop_loss';
         }
       }
 
@@ -140,7 +226,8 @@ serve(async (req) => {
         success: true,
         updates,
         closedPositions,
-        message: `Updated ${updates.length} positions, closed ${closedPositions.length} positions`,
+        trailingStopUpdates,
+        message: `Updated ${updates.length} positions, ${trailingStopUpdates.length} trailing stops adjusted, closed ${closedPositions.length} positions`,
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
