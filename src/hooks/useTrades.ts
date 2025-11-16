@@ -30,8 +30,7 @@ export const useTrades = () => {
       const { data, error: queryError } = await supabase
         .from('trades')
         .select('*')
-        .order('executed_at', { ascending: false })
-        .limit(200);
+        .order('executed_at', { ascending: false });
 
       if (queryError) throw queryError;
       setTrades(data || []);
