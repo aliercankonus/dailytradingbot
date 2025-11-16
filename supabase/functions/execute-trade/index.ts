@@ -70,6 +70,27 @@ serve(async (req) => {
 
     console.log(`Executing trade for signal from strategy: ${signal.strategy_name || 'Unknown'}`);
 
+    // Get real-time trend analysis before executing trade
+    const { data: trendData, error: trendError } = await supabase.functions.invoke('calculate-trend', {
+      body: { symbol: signal.symbol }
+    });
+
+    if (trendError) {
+      console.warn('Failed to get current trend, using signal trend:', trendError);
+    }
+
+    const currentTrend = trendData?.trend || signal.trend;
+    console.log(`Current market trend: ${currentTrend}, Signal trend: ${signal.trend}, Signal type: ${signal.signal_type}`);
+
+    // Validate trend matches signal direction
+    const signalDirection = signal.signal_type === 'long' ? 'BUY' : 'SELL';
+    if (currentTrend === 'bullish' && signalDirection === 'SELL') {
+      throw new Error('Market trend is bullish but signal is SHORT - trade cancelled for safety');
+    }
+    if (currentTrend === 'bearish' && signalDirection === 'BUY') {
+      throw new Error('Market trend is bearish but signal is LONG - trade cancelled for safety');
+    }
+
     // Calculate position size based on risk parameters
     const riskAmount = (riskParams.portfolio_value * riskParams.max_risk_per_trade_percent) / 100;
     const stopLossDistance = Math.abs(signal.entry_price - signal.stop_loss);
@@ -183,7 +204,7 @@ serve(async (req) => {
       throw new Error(`Failed to create trade record: ${tradeError?.message || 'Unknown error'}`);
     }
 
-    // Create position record
+    // Create position record with real-time trend
     await supabase
       .from('positions')
       .insert({
@@ -199,7 +220,7 @@ serve(async (req) => {
         unrealized_pnl: 0,
         unrealized_pnl_percent: 0,
         status: 'active',
-        trend: signal.trend,
+        trend: currentTrend,
         confidence_score: signal.confidence_score,
       });
 
