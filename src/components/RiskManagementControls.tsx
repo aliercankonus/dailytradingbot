@@ -20,7 +20,6 @@ export const RiskManagementControls = () => {
     consecutive_loss_threshold: 3,
     position_size_reduction_percent: 50,
     portfolio_value: 10000,
-    is_trading_enabled: true,
   });
 
   useEffect(() => {
@@ -31,7 +30,6 @@ export const RiskManagementControls = () => {
         consecutive_loss_threshold: riskParams.consecutive_loss_threshold,
         position_size_reduction_percent: riskParams.position_size_reduction_percent,
         portfolio_value: riskParams.portfolio_value,
-        is_trading_enabled: riskParams.is_trading_enabled,
       });
     }
   }, [riskParams]);
@@ -108,22 +106,6 @@ export const RiskManagementControls = () => {
         <h3 className="text-lg font-semibold mb-4">Risk Parameters</h3>
         
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="trading-enabled">Enable Automated Trading</Label>
-              <div className="text-sm text-muted-foreground">
-                Allow the bot to execute trades automatically
-              </div>
-            </div>
-            <Switch
-              id="trading-enabled"
-              checked={formData.is_trading_enabled}
-              onCheckedChange={(checked) => 
-                setFormData({ ...formData, is_trading_enabled: checked })
-              }
-            />
-          </div>
-
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="portfolio-value">Portfolio Value ($)</Label>
