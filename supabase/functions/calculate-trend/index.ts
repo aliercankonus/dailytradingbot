@@ -58,8 +58,8 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
   return { macd, signal, histogram };
 }
 
-// Fetch Binance klines
-async function fetchBinanceKlines(symbol: string, limit: number = 100): Promise<number[]> {
+// Fetch Binance klines - return full kline data for ATR calculation
+async function fetchBinanceKlines(symbol: string, limit: number = 100): Promise<any[]> {
   try {
     const response = await fetch(
       `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=${limit}`
@@ -70,9 +70,7 @@ async function fetchBinanceKlines(symbol: string, limit: number = 100): Promise<
     }
     
     const klines = await response.json();
-    const prices = klines.map((k: any) => parseFloat(k[4])); // close prices
-    
-    return prices;
+    return klines;
   } catch (error) {
     console.error(`Failed to fetch Binance klines for ${symbol}:`, error);
     throw error;
@@ -198,18 +196,54 @@ serve(async (req) => {
     console.log(`Calculating trend for ${symbol}`);
     
     // Fetch last 100 1-minute candles
-    const prices = await fetchBinanceKlines(symbol, 100);
+    const klines = await fetchBinanceKlines(symbol, 100);
+    const prices = klines.map((k: any) => parseFloat(k[4])); // close prices
     
     // Calculate trend using technical indicators
     const trendData = calculateTrend(prices);
     
-    console.log(`Trend for ${symbol}: ${trendData.trend} (confidence: ${trendData.confidence}%)`);
+    // Calculate ATR (Average True Range) for volatility-based stop loss
+    const atrPeriod = 14;
+    let atrSum = 0;
+    for (let i = klines.length - atrPeriod; i < klines.length - 1; i++) {
+      const high = parseFloat(klines[i][2]);
+      const low = parseFloat(klines[i][3]);
+      const prevClose = parseFloat(klines[i - 1][4]);
+      const tr = Math.max(
+        high - low,
+        Math.abs(high - prevClose),
+        Math.abs(low - prevClose)
+      );
+      atrSum += tr;
+    }
+    const atr = atrSum / atrPeriod;
+    const currentPrice = prices[prices.length - 1];
+    const atrPercent = (atr / currentPrice) * 100;
+
+    // Get last 3 periods trend for consistency check
+    const trendHistory = [];
+    for (let i = prices.length - 72; i < prices.length; i += 24) { // Every 24 minutes = 3 periods
+      const periodStart = Math.max(0, i - 24);
+      const periodChange = ((prices[i] - prices[periodStart]) / prices[periodStart]) * 100;
+      if (periodChange > 0.5) trendHistory.push('bullish');
+      else if (periodChange < -0.5) trendHistory.push('bearish');
+      else trendHistory.push('ranging');
+    }
+
+    // Calculate trend consistency
+    const trendConsistency = trendHistory.filter(t => t === trendData.trend).length / trendHistory.length;
+    
+    console.log(`Trend for ${symbol}: ${trendData.trend} (confidence: ${trendData.confidence}%, consistency: ${(trendConsistency * 100).toFixed(0)}%, ATR: ${atrPercent.toFixed(2)}%)`);
     
     return new Response(
       JSON.stringify({
         symbol,
-        currentPrice: prices[prices.length - 1],
+        currentPrice,
         ...trendData,
+        atr: Math.round(atr * 100) / 100,
+        atrPercent: Math.round(atrPercent * 100) / 100,
+        trendConsistency: Math.round(trendConsistency * 100) / 100,
+        trendHistory,
         timestamp: new Date().toISOString(),
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
