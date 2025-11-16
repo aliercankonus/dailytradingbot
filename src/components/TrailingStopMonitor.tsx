@@ -78,6 +78,9 @@ export const TrailingStopMonitor = () => {
           
           // Detect if stop loss was updated (trailing stop triggered)
           if (oldPos.stop_loss !== newPos.stop_loss && (newPos.unrealized_pnl_percent || 0) > 0) {
+            // Skip if old stop loss is missing
+            if (!oldPos.stop_loss || !newPos.stop_loss) return;
+            
             const event: TrailingStopEvent = {
               symbol: newPos.symbol,
               side: newPos.side,
@@ -175,7 +178,7 @@ export const TrailingStopMonitor = () => {
                     
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <span className="line-through">
-                        ${event.oldStopLoss.toFixed(2)}
+                        ${event.oldStopLoss?.toFixed(2) ?? 'N/A'}
                       </span>
                       {event.side === 'BUY' ? (
                         <ArrowUpRight className="h-3 w-3 text-primary" />
@@ -183,10 +186,10 @@ export const TrailingStopMonitor = () => {
                         <ArrowDownRight className="h-3 w-3 text-primary" />
                       )}
                       <span className="text-primary font-medium">
-                        ${event.newStopLoss.toFixed(2)}
+                        ${event.newStopLoss?.toFixed(2) ?? 'N/A'}
                       </span>
                       <span className="text-xs">
-                        (${event.currentPrice.toFixed(2)})
+                        (${event.currentPrice?.toFixed(2) ?? 'N/A'})
                       </span>
                     </div>
                   </div>
