@@ -2,7 +2,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { usePositions } from '@/hooks/usePositions';
-import { TrendingUp, TrendingDown, X, Loader2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, X, Loader2, Shield } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useState } from 'react';
@@ -66,7 +66,15 @@ export const ActivePositions = () => {
                   <TrendingDown className="h-6 w-6 text-red-500" />
                 )}
                 <div>
-                  <h3 className="font-bold text-lg">{position.symbol}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-lg">{position.symbol}</h3>
+                    {(position.unrealized_pnl_percent || 0) > 1 && (
+                      <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
+                        <Shield className="h-3 w-3" />
+                        Trailing
+                      </Badge>
+                    )}
+                  </div>
                   <Badge variant={position.side === 'BUY' ? 'default' : 'destructive'} className="text-xs">
                     {position.side}
                   </Badge>

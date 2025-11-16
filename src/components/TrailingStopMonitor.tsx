@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { TrendingUp, Shield, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 interface TrailingStopEvent {
   symbol: string;
@@ -17,6 +18,7 @@ interface TrailingStopEvent {
 export const TrailingStopMonitor = () => {
   const [trailingEvents, setTrailingEvents] = useState<TrailingStopEvent[]>([]);
   const [activeTrails, setActiveTrails] = useState<number>(0);
+  const { toast } = useToast();
 
   useEffect(() => {
     // Monitor for positions with positive P&L (potential trailing stops)
@@ -65,6 +67,17 @@ export const TrailingStopMonitor = () => {
             };
             
             setTrailingEvents(prev => [event, ...prev].slice(0, 10)); // Keep last 10 events
+
+            // Show toast notification
+            const stopImprovement = newPos.side === 'BUY'
+              ? ((newPos.stop_loss - oldPos.stop_loss) / oldPos.stop_loss * 100).toFixed(2)
+              : ((oldPos.stop_loss - newPos.stop_loss) / oldPos.stop_loss * 100).toFixed(2);
+
+            toast({
+              title: "🛡️ Trailing Stop Activated",
+              description: `${newPos.symbol} ${newPos.side}: Stop loss improved by ${stopImprovement}% to $${newPos.stop_loss.toFixed(2)} (P&L: +${newPos.unrealized_pnl_percent.toFixed(2)}%)`,
+              duration: 5000,
+            });
           }
         }
       )

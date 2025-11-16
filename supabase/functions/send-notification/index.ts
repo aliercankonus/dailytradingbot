@@ -18,7 +18,7 @@ const corsHeaders = {
 };
 
 interface NotificationRequest {
-  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation';
+  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated';
   userId?: string;
   tradeId?: string;
   symbol?: string;
@@ -48,6 +48,10 @@ interface NotificationRequest {
     trend: string;
     volume: number;
   };
+  // Trailing stop fields
+  oldStopLoss?: number;
+  newStopLoss?: number;
+  pnlPercent?: number;
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -143,6 +147,39 @@ const handler = async (req: Request): Promise<Response> => {
           </div>
         `;
         smsMessage = `🔄 STRATEGY ROTATION: ${payload.fromStrategy} → ${payload.toStrategy}. Win rate: ${payload.toMetrics!.winRate.toFixed(1)}% (${winRateChangeNum > 0 ? '+' : ''}${winRateChange}%). Market: ${payload.marketCondition!.trend}`;
+        break;
+
+      case 'trailing_stop_activated':
+        subject = `🛡️ Trailing Stop Activated: ${payload.symbol}`;
+        const stopLossDiff = payload.side === 'BUY' 
+          ? payload.newStopLoss! - payload.oldStopLoss!
+          : payload.oldStopLoss! - payload.newStopLoss!;
+        const stopLossImprovement = ((stopLossDiff / payload.oldStopLoss!) * 100).toFixed(2);
+        
+        message = `
+          <h2>🛡️ Trailing Stop Loss Activated</h2>
+          <p>Your profits are now being protected!</p>
+          
+          <div style="background: #f0fdf4; padding: 15px; border-radius: 8px; margin: 20px 0;">
+            <p><strong>Symbol:</strong> ${payload.symbol}</p>
+            <p><strong>Side:</strong> ${payload.side}</p>
+            <p><strong>Current P&L:</strong> <span style="color: #10b981;">+${payload.pnlPercent!.toFixed(2)}%</span></p>
+            <p><strong>Current Price:</strong> $${payload.price!.toFixed(2)}</p>
+          </div>
+          
+          <div style="background: #eff6ff; padding: 15px; border-radius: 8px;">
+            <h3 style="margin-top: 0;">Stop Loss Updated</h3>
+            <p><strong>Previous Stop Loss:</strong> <span style="text-decoration: line-through;">$${payload.oldStopLoss!.toFixed(2)}</span></p>
+            <p><strong>New Stop Loss:</strong> <span style="color: #2563eb; font-size: 1.2em;">$${payload.newStopLoss!.toFixed(2)}</span></p>
+            <p><strong>Improvement:</strong> <span style="color: #10b981;">+${stopLossImprovement}%</span></p>
+          </div>
+          
+          <p style="margin-top: 20px;">
+            The trailing stop will continue to adjust automatically as the price moves in your favor, 
+            locking in more profits while giving the position room to breathe.
+          </p>
+        `;
+        smsMessage = `🛡️ TRAILING STOP: ${payload.symbol} ${payload.side} stop moved to $${payload.newStopLoss!.toFixed(2)} (was $${payload.oldStopLoss!.toFixed(2)}). P&L: +${payload.pnlPercent!.toFixed(2)}%`;
         break;
     }
 
