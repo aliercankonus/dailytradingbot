@@ -241,7 +241,7 @@ serve(async (req) => {
     // Calculate trend consistency as percentage
     const trendConsistency = Math.round((consistentPeriods / periodsToCheck) * 100);
     
-    console.log(`Trend for ${symbol}: ${trendData.trend} (confidence: ${trendData.confidence}%, consistency: ${(trendConsistency * 100).toFixed(0)}%, ATR: ${atrPercent.toFixed(2)}%)`);
+    console.log(`Trend for ${symbol}: ${trendData.trend} (confidence: ${trendData.confidence}%, consistency: ${trendConsistency}%, ATR: ${atrPercent.toFixed(2)}%)`);
     
     return new Response(
       JSON.stringify({
