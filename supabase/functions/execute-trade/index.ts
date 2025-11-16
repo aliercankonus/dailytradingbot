@@ -136,8 +136,8 @@ serve(async (req) => {
       throw new Error(`Market volatility too high (ATR: ${atrPercent.toFixed(2)}%) - trade cancelled`);
     }
 
-    // FILTER 5: Require confidence > 80
-    if ((signal.confidence_score || 0) < 80) {
+    // FILTER 5: Require confidence > 60
+    if ((signal.confidence_score || 0) < 60) {
       throw new Error(`Signal confidence too low (${signal.confidence_score}) - trade cancelled`);
     }
 
