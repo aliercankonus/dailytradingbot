@@ -16,7 +16,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
 import { TradeCounterSync } from "@/components/TradeCounterSync";
 import { TrailingStopMonitor } from "@/components/TrailingStopMonitor";
-import { BotStatusBanner } from "@/components/BotStatusBanner";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -66,8 +65,6 @@ const Index = () => {
           </TabsList>
 
           <TabsContent value="dashboard" className="space-y-6">
-            <BotStatusBanner />
-            
             <div className="flex justify-end mb-4">
               <CloseAllTradesButton />
             </div>
