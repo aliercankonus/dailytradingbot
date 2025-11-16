@@ -452,7 +452,7 @@ serve(async (req) => {
     // Check if auto-trading is enabled for this user
     const { data: riskParams } = await supabase
       .from("risk_parameters")
-      .select("is_trading_enabled, max_open_trades, current_open_trades, paper_trading_mode")
+      .select("is_trading_enabled, max_open_trades, current_open_trades, paper_trading_mode, entry_stagger_minutes")
       .eq("user_id", user.id)
       .single();
 
@@ -736,8 +736,22 @@ serve(async (req) => {
       console.log(`Limited signals from ${finalSignals.length} to ${limitedSignals.length} based on available slots (${availableSlots})`);
     }
 
+    // Calculate staggered entry times for signals
+    const staggerMinutes = riskParams.entry_stagger_minutes || 0;
+    const now = new Date();
+    
+    // Spread signals evenly across the stagger window
+    const timeIncrementMs = staggerMinutes > 0 && limitedSignals.length > 1
+      ? (staggerMinutes * 60 * 1000) / (limitedSignals.length - 1)
+      : 0;
+    
+    if (staggerMinutes > 0) {
+      console.log(`Staggering ${limitedSignals.length} signals over ${staggerMinutes} minutes (${(timeIncrementMs / 1000).toFixed(0)}s between each)`);
+    }
+
     // Insert limited signals and execute if auto-execute is enabled
-    for (const signal of limitedSignals) {
+    for (let i = 0; i < limitedSignals.length; i++) {
+      const signal = limitedSignals[i];
       // Check if a similar signal already exists (within last 60 seconds)
       const { data: existingSignals } = await supabase
         .from("trading_signals")
@@ -752,6 +766,12 @@ serve(async (req) => {
         console.log(`Skipping duplicate signal for ${signal.symbol} (${signal.strategyName})`);
         continue;
       }
+
+      // Calculate scheduled execution time for this signal
+      const scheduledFor = new Date(now.getTime() + (i * timeIncrementMs));
+      const delaySeconds = Math.round((scheduledFor.getTime() - now.getTime()) / 1000);
+      
+      console.log(`Signal ${i + 1}/${limitedSignals.length}: ${signal.symbol} scheduled for ${scheduledFor.toISOString()} (in ${delaySeconds}s)`);
 
       const { data: insertedSignal, error: insertError } = await supabase
         .from("trading_signals")
@@ -769,6 +789,7 @@ serve(async (req) => {
           strategy_id: signal.strategyId,
           strategy_name: signal.strategyName,
           user_id: user.id,
+          scheduled_for: scheduledFor.toISOString(),
         })
         .select()
         .single();

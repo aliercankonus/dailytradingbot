@@ -21,6 +21,7 @@ export const RiskManagementControls = () => {
     position_size_reduction_percent: 50,
     portfolio_value: 10000,
     min_confidence_threshold: 60,
+    entry_stagger_minutes: 10,
   });
 
   useEffect(() => {
@@ -32,6 +33,7 @@ export const RiskManagementControls = () => {
         position_size_reduction_percent: riskParams.position_size_reduction_percent,
         portfolio_value: riskParams.portfolio_value,
         min_confidence_threshold: riskParams.min_confidence_threshold,
+        entry_stagger_minutes: riskParams.entry_stagger_minutes,
       });
     }
   }, [riskParams]);
@@ -187,6 +189,23 @@ export const RiskManagementControls = () => {
               />
               <p className="text-xs text-muted-foreground">
                 Minimum confidence score (0-100) required for trade execution
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="entry-stagger">Entry Stagger Window (minutes)</Label>
+              <Input
+                id="entry-stagger"
+                type="number"
+                min="0"
+                max="60"
+                value={formData.entry_stagger_minutes}
+                onChange={(e) => 
+                  setFormData({ ...formData, entry_stagger_minutes: parseInt(e.target.value) })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Time window to spread trade entries (0 = all at once, 10 = spread over 10 min)
               </p>
             </div>
           </div>
