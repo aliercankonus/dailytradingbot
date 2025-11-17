@@ -267,24 +267,24 @@ serve(async (req) => {
 
     // ============================================================
     // HIGHER TIMEFRAME DOMINANT WEIGHTING SYSTEM
-    // 4h = 80% weight, 1h = 15%, 15m = 3%, 5m = 2%
+    // 4h = 60% weight, 1h = 25%, 15m = 10%, 5m = 5%
     // ============================================================
 
-    // CRITICAL: 4h timeframe determines primary direction (80% weight)
+    // CRITICAL: 4h timeframe determines primary direction (60% weight)
     const dominantTrend = trend4h.trend;
     const dominantConfidence = trend4h.confidence;
 
-    // 1h must confirm 4h for high-quality signals (15% weight)
+    // 1h must confirm 4h for high-quality signals (25% weight)
     const confirmation1h = trend1h.trend === dominantTrend;
     const confirmation15m = trend15m.trend === dominantTrend;
     const confirmation5m = trend5m.trend === dominantTrend;
 
     // Calculate weighted trend consistency
     const weightedConsistency =
-      dominantConfidence * 0.8 + // 4h: 80%
-      (confirmation1h ? trend1h.confidence * 0.15 : 0) + // 1h: 15%
-      (confirmation15m ? trend15m.confidence * 0.03 : 0) + // 15m: 3%
-      (confirmation5m ? trend5m.confidence * 0.02 : 0); // 5m: 2%
+      dominantConfidence * 0.6 + // 4h: 60%
+      (confirmation1h ? trend1h.confidence * 0.25 : 0) + // 1h: 25%
+      (confirmation15m ? trend15m.confidence * 0.10 : 0) + // 15m: 10%
+      (confirmation5m ? trend5m.confidence * 0.05 : 0); // 5m: 5%
 
     // High timeframe alignment: 4h + 1h must agree for valid signals
     const highTimeframeAligned = dominantTrend !== "neutral" && confirmation1h;
