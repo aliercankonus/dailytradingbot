@@ -295,11 +295,8 @@ async function analyzeWithStrategy(
     return null;
   }
 
-  // Skip signal if trend consistency is too low
-  if (trendConsistency < 60) {
-    console.log(`Skipping signal for ${data.symbol}: Trend consistency too low (${trendConsistency}% < 60%)`);
-    return null;
-  }
+  // Proceed even with lower trend consistency; confidence scoring accounts for it
+
 
   // Skip if signal type doesn't match trend (redundant but safe)
   if (signalType === "long" && marketTrend === "bearish") {
