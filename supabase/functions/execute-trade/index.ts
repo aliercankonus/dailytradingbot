@@ -97,19 +97,7 @@ serve(async (req) => {
 
     console.log(`Executing trade for signal from strategy: ${signal.strategy_name || 'Unknown'}`);
 
-    // TIMING CHECK: Verify scheduled time has arrived (for staggered entry)
-    const now = new Date();
-    const scheduledFor = new Date(signal.scheduled_for);
-    const timeUntilScheduled = scheduledFor.getTime() - now.getTime();
-    
-    if (timeUntilScheduled > 5000) { // More than 5 seconds early
-      const waitSeconds = Math.round(timeUntilScheduled / 1000);
-      throw new Error(`Signal not ready yet - scheduled for ${scheduledFor.toISOString()} (in ${waitSeconds}s)`);
-    }
-    
-    if (timeUntilScheduled > 0) {
-      console.log(`Signal ready in ${Math.round(timeUntilScheduled / 1000)}s, proceeding with execution`);
-    }
+    console.log(`Executing trade for signal from strategy: ${signal.strategy_name || 'Unknown'}`);
 
     // Get real-time trend analysis before executing trade
     const { data: trendData, error: trendError } = await supabase.functions.invoke('calculate-trend', {

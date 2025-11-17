@@ -18,7 +18,6 @@ interface RiskParameters {
   rebalance_loss_threshold_percent: number;
   max_positions_to_close_per_cycle: number;
   min_confidence_threshold: number;
-  entry_stagger_minutes: number;
   updated_at: string;
 }
 
