@@ -262,20 +262,35 @@ serve(async (req) => {
     const trend1h = calculateTrend(prices1h);
     const trend4h = calculateTrend(prices4h);
 
-    // Check multi-timeframe agreement
-    const timeframes = [trend5m, trend15m, trend1h, trend4h];
-    const bullishCount = timeframes.filter(t => t.trend === 'bullish').length;
-    const bearishCount = timeframes.filter(t => t.trend === 'bearish').length;
+    // ============================================================
+    // HIGHER TIMEFRAME DOMINANT WEIGHTING SYSTEM
+    // 4h = 80% weight, 1h = 15%, 15m = 3%, 5m = 2%
+    // ============================================================
     
-    let multiTimeframeAgree = false;
-    let primaryTrend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
-    if (bullishCount >= 3) { multiTimeframeAgree = true; primaryTrend = 'bullish'; }
-    else if (bearishCount >= 3) { multiTimeframeAgree = true; primaryTrend = 'bearish'; }
-
-    // Validate market structure on 1h timeframe
-    const marketStructure = validateMarketStructure(klines1h, trend1h.trend);
-
-    // Calculate ATR for volatility
+    // CRITICAL: 4h timeframe determines primary direction (80% weight)
+    const dominantTrend = trend4h.trend;
+    const dominantConfidence = trend4h.confidence;
+    
+    // 1h must confirm 4h for high-quality signals (15% weight)
+    const confirmation1h = trend1h.trend === dominantTrend;
+    const confirmation15m = trend15m.trend === dominantTrend;
+    const confirmation5m = trend5m.trend === dominantTrend;
+    
+    // Calculate weighted trend consistency
+    const weightedConsistency = 
+      (dominantConfidence * 0.80) +  // 4h: 80%
+      (confirmation1h ? trend1h.confidence * 0.15 : 0) +  // 1h: 15%
+      (confirmation15m ? trend15m.confidence * 0.03 : 0) +  // 15m: 3%
+      (confirmation5m ? trend5m.confidence * 0.02 : 0);    // 5m: 2%
+    
+    // High timeframe alignment: 4h + 1h must agree for valid signals
+    const highTimeframeAligned = dominantTrend !== 'neutral' && confirmation1h;
+    
+    let primaryTrend: 'bullish' | 'bearish' | 'neutral' | 'ranging' = dominantTrend;
+    
+    // ============================================================
+    // RANGING MARKET DETECTION
+    // ============================================================
     const atrPeriod = 14;
     const atrKlines = klines1h.slice(-atrPeriod - 1);
     let atrSum = 0;
@@ -288,28 +303,141 @@ serve(async (req) => {
     }
     const atr = atrSum / atrPeriod;
     const atrPercent = (atr / currentPrice) * 100;
-    const volatilityNormal = atrPercent > 0.5 && atrPercent < 5.0;
+    
+    // Market is ranging if ATR < 2% (too tight for reliable directional trading)
+    const isRanging = atrPercent < 2.0;
+    const volatilityNormal = atrPercent >= 2.0 && atrPercent < 5.0;
+    
+    if (isRanging) {
+      primaryTrend = 'ranging';
+      console.log(`${symbol}: RANGING MARKET DETECTED (ATR: ${atrPercent.toFixed(2)}%) - skipping signals`);
+    }
 
-    // Check momentum confirmation
-    const momentumConfirms = Math.abs(trend1h.indicators.macdHistogram) > 0.01;
+    // ============================================================
+    // PULLBACK DETECTION
+    // ============================================================
+    let inPullback = false;
+    let pullbackPercent = 0;
+    
+    if (dominantTrend === 'bullish' || dominantTrend === 'bearish') {
+      // Find recent swing high/low over last 24 candles (24 hours on 1h chart)
+      const recentKlines = klines1h.slice(-24);
+      const recentHighs = recentKlines.map((k: any) => parseFloat(k[2]));
+      const recentLows = recentKlines.map((k: any) => parseFloat(k[3]));
+      
+      if (dominantTrend === 'bullish') {
+        // For bullish trend, check if we're pulling back from recent high
+        const swingHigh = Math.max(...recentHighs);
+        const swingLow = Math.min(...recentLows.slice(-12)); // Low from last 12 hours
+        const range = swingHigh - swingLow;
+        const pullback = swingHigh - currentPrice;
+        pullbackPercent = (pullback / range) * 100;
+        
+        // Ideal entry: 30-50% retracement
+        inPullback = pullbackPercent >= 30 && pullbackPercent <= 60;
+      } else if (dominantTrend === 'bearish') {
+        // For bearish trend, check if we're pulling back from recent low
+        const swingLow = Math.min(...recentLows);
+        const swingHigh = Math.max(...recentHighs.slice(-12)); // High from last 12 hours
+        const range = swingHigh - swingLow;
+        const pullback = currentPrice - swingLow;
+        pullbackPercent = (pullback / range) * 100;
+        
+        // Ideal entry: 30-50% retracement
+        inPullback = pullbackPercent >= 30 && pullbackPercent <= 60;
+      }
+    }
 
-    // Calculate overall trend consistency
-    const trendScores = timeframes.map(t => t.trend === primaryTrend ? t.confidence : 0);
-    const avgTrendConsistency = trendScores.reduce((a, b) => a + b, 0) / 4;
+    // ============================================================
+    // MOMENTUM CONFIRMATION (2-3 consecutive candles)
+    // ============================================================
+    const recentKlines = klines1h.slice(-3);
+    let consecutiveBullish = 0;
+    let consecutiveBearish = 0;
+    
+    for (let i = 0; i < recentKlines.length; i++) {
+      const open = parseFloat(recentKlines[i][1]);
+      const close = parseFloat(recentKlines[i][4]);
+      if (close > open) consecutiveBullish++;
+      if (close < open) consecutiveBearish++;
+    }
+    
+    const momentumBuilding = 
+      (dominantTrend === 'bullish' && consecutiveBullish >= 2) ||
+      (dominantTrend === 'bearish' && consecutiveBearish >= 2);
+    
+    // MACD histogram must be expanding
+    const macdHistogram = trend1h.indicators.macdHistogram;
+    const momentumConfirms = Math.abs(macdHistogram) > 0.01 && momentumBuilding;
 
-    console.log(`${symbol}: trend=${primaryTrend} agree=${multiTimeframeAgree} struct=${marketStructure.valid} vol=${volatilityNormal} momentum=${momentumConfirms}`);
+    // Validate market structure on 1h timeframe
+    const marketStructure = validateMarketStructure(klines1h, trend1h.trend);
+
+    console.log(`${symbol}: 4h=${trend4h.trend} 1h=${trend1h.trend} aligned=${highTimeframeAligned} pullback=${inPullback}(${pullbackPercent.toFixed(1)}%) momentum=${momentumConfirms} ranging=${isRanging}`);
 
     return new Response(JSON.stringify({
-      symbol, currentPrice, trend: primaryTrend, confidence: Math.round(avgTrendConsistency),
-      multiTimeframe: {
-        agree: multiTimeframeAgree, trend5m: trend5m.trend, trend15m: trend15m.trend,
-        trend1h: trend1h.trend, trend4h: trend4h.trend, confidence5m: trend5m.confidence,
-        confidence15m: trend15m.confidence, confidence1h: trend1h.confidence, confidence4h: trend4h.confidence,
+      symbol, 
+      currentPrice, 
+      trend: primaryTrend, 
+      confidence: Math.round(weightedConsistency),
+      
+      // Higher timeframe dominance
+      higherTimeframeFilter: {
+        trend4h: trend4h.trend,
+        trend1h: trend1h.trend,
+        aligned: highTimeframeAligned,
+        dominantConfidence: dominantConfidence,
+        weightedConsistency: Math.round(weightedConsistency),
       },
-      marketStructure: { valid: marketStructure.valid, confidence: Math.round(marketStructure.confidence) },
-      volatility: { atr, atrPercent: Math.round(atrPercent * 100) / 100, normal: volatilityNormal },
-      momentum: { confirms: momentumConfirms, macdHistogram: Math.round(trend1h.indicators.macdHistogram * 1000) / 1000 },
-      indicators: trend1h.indicators, trendConsistency: Math.round(avgTrendConsistency),
+      
+      // Pullback detection
+      pullback: {
+        inPullback,
+        pullbackPercent: Math.round(pullbackPercent * 10) / 10,
+        ideal: inPullback && pullbackPercent >= 30 && pullbackPercent <= 50,
+      },
+      
+      // Ranging detection
+      ranging: {
+        isRanging,
+        atrPercent: Math.round(atrPercent * 100) / 100,
+        safe: atrPercent >= 2.0 && atrPercent <= 5.0,
+      },
+      
+      // Momentum confirmation
+      momentum: { 
+        confirms: momentumConfirms,
+        building: momentumBuilding,
+        consecutiveBullish,
+        consecutiveBearish,
+        macdHistogram: Math.round(macdHistogram * 1000) / 1000,
+      },
+      
+      // Multi-timeframe details
+      multiTimeframe: {
+        trend5m: trend5m.trend, 
+        trend15m: trend15m.trend,
+        trend1h: trend1h.trend, 
+        trend4h: trend4h.trend, 
+        confidence5m: trend5m.confidence,
+        confidence15m: trend15m.confidence, 
+        confidence1h: trend1h.confidence, 
+        confidence4h: trend4h.confidence,
+      },
+      
+      marketStructure: { 
+        valid: marketStructure.valid, 
+        confidence: Math.round(marketStructure.confidence) 
+      },
+      
+      volatility: { 
+        atr, 
+        atrPercent: Math.round(atrPercent * 100) / 100, 
+        normal: volatilityNormal 
+      },
+      
+      indicators: trend1h.indicators, 
+      trendConsistency: Math.round(weightedConsistency),
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error) {
     console.error('Error in calculate-trend:', error);
