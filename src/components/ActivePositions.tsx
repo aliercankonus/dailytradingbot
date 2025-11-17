@@ -160,7 +160,7 @@ export const ActivePositions = () => {
                     <div className="font-medium">{position.confidence_score}%</div>
                   </div>
                 )}
-                {position.trend_consistency !== undefined && (
+                {position.trend_consistency !== undefined && position.trend_consistency !== null && (
                   <div>
                     <div className="text-xs text-muted-foreground">Trend Consistency</div>
                     <div className="font-medium">{position.trend_consistency.toFixed(0)}%</div>
