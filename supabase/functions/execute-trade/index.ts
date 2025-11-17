@@ -123,9 +123,10 @@ serve(async (req) => {
       throw new Error('Market trend is bearish but signal is LONG - trade cancelled');
     }
 
-    // FILTER 2: Require trend consistency (at least 50% of recent periods match)
-    if (trendConsistency < 50) {
-      throw new Error(`Trend not consistent enough (${trendConsistency.toFixed(0)}%) - trade cancelled to avoid reversals`);
+    // FILTER 2: Require trend consistency (configurable threshold)
+    const minTrendConsistency = riskParams.min_trend_consistency || 50;
+    if (trendConsistency < minTrendConsistency) {
+      throw new Error(`Trend not consistent enough (${trendConsistency.toFixed(0)}%) - minimum required: ${minTrendConsistency}%`);
     }
 
     // FILTER 3: Skip ranging markets for BUY/SELL signals
