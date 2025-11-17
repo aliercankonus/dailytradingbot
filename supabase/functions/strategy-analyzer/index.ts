@@ -223,7 +223,8 @@ async function analyzeWithStrategy(
   strategy: CustomStrategy, 
   prices: number[], 
   volumes: number[],
-  supabase: any
+  supabase: any,
+  minConfidenceThreshold: number
 ) {
   const currentPrice = parseFloat(data.lastPrice);
 
@@ -361,10 +362,9 @@ async function analyzeWithStrategy(
     total: `${confidenceScore}%`
   });
 
-  // **CRITICAL FIX**: Filter out low confidence signals
-  // Minimum 60% confidence required to avoid poor quality trades
-  if (confidenceScore < 60) {
-    console.log(`Skipping signal for ${data.symbol}: Confidence too low (${confidenceScore}% < 60%)`);
+  // Filter out low confidence signals using user's configured threshold
+  if (confidenceScore < minConfidenceThreshold) {
+    console.log(`Skipping signal for ${data.symbol}: Confidence too low (${confidenceScore}% < ${minConfidenceThreshold}%)`);
     return null;
   }
   
@@ -464,7 +464,7 @@ serve(async (req) => {
     // Check if auto-trading is enabled for this user
     const { data: riskParams } = await supabase
       .from("risk_parameters")
-      .select("is_trading_enabled, max_open_trades, current_open_trades, paper_trading_mode, entry_stagger_minutes")
+      .select("is_trading_enabled, max_open_trades, current_open_trades, paper_trading_mode, entry_stagger_minutes, min_confidence_threshold")
       .eq("user_id", user.id)
       .single();
 
@@ -683,7 +683,7 @@ serve(async (req) => {
         // Fetch real Binance kline data with volume
         const { prices, volumes } = await fetchBinanceKlines(data.symbol, 100);
 
-        const signal = await analyzeWithStrategy(data, strategy, prices, volumes, supabase);
+        const signal = await analyzeWithStrategy(data, strategy, prices, volumes, supabase, riskParams?.min_confidence_threshold || 60);
 
         // Apply multi-layer confirmation strategy
         if (signal) {
@@ -703,7 +703,7 @@ serve(async (req) => {
           
           // Multi-layer confirmation checks
           const trendConfirmed = signal.trend === 'bullish' || signal.trend === 'bearish';
-          const volatilityNormal = signal.confidenceScore >= 60;
+          const volatilityNormal = signal.confidenceScore >= (riskParams?.min_confidence_threshold || 60);
           const setupWinRate = setupPerf?.win_rate || 0;
           const hasHistoricalData = (setupPerf?.total_trades || 0) >= 5;
           const historicalWinRateOk = !hasHistoricalData || setupWinRate >= 50;
