@@ -21,6 +21,7 @@ export const RiskManagementControls = () => {
     position_size_reduction_percent: 50,
     portfolio_value: 10000,
     min_confidence_threshold: 60,
+    min_trend_consistency: 50,
   });
 
   useEffect(() => {
@@ -32,6 +33,7 @@ export const RiskManagementControls = () => {
         position_size_reduction_percent: riskParams.position_size_reduction_percent,
         portfolio_value: riskParams.portfolio_value,
         min_confidence_threshold: riskParams.min_confidence_threshold,
+        min_trend_consistency: riskParams.min_trend_consistency,
       });
     }
   }, [riskParams]);
@@ -187,6 +189,23 @@ export const RiskManagementControls = () => {
               />
               <p className="text-xs text-muted-foreground">
                 Minimum confidence score (0-100) required for trade execution
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="min-trend-consistency">Minimum Trend Consistency (%)</Label>
+              <Input
+                id="min-trend-consistency"
+                type="number"
+                min="0"
+                max="100"
+                value={formData.min_trend_consistency}
+                onChange={(e) => 
+                  setFormData({ ...formData, min_trend_consistency: parseFloat(e.target.value) })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Minimum trend consistency (0-100) required for trade execution
               </p>
             </div>
 

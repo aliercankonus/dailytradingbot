@@ -18,6 +18,7 @@ interface RiskParameters {
   rebalance_loss_threshold_percent: number;
   max_positions_to_close_per_cycle: number;
   min_confidence_threshold: number;
+  min_trend_consistency: number;
   updated_at: string;
 }
 
