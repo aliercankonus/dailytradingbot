@@ -334,9 +334,16 @@ async function analyzeWithStrategy(
     return null;
   }
 
-  // Get real-time market trend using the same function as execute-trade
+  // ============================================================
+  // HIGHER TIMEFRAME TREND FILTER + PULLBACK ENTRY SYSTEM
+  // ============================================================
   let marketTrend: "bullish" | "bearish" | "ranging" = "ranging";
   let trendConsistency = 0;
+  let higherTimeframeAligned = false;
+  let inPullback = false;
+  let pullbackIdeal = false;
+  let momentumConfirms = false;
+  let isRanging = false;
   
   try {
     const { data: trendData, error: trendError } = await supabase.functions.invoke('calculate-trend', {
@@ -345,50 +352,85 @@ async function analyzeWithStrategy(
     
     if (trendError) {
       console.error(`Error fetching trend for ${data.symbol}:`, trendError);
-    } else if (trendData) {
+      return null; // Don't trade without trend data
+    } 
+    
+    if (trendData) {
       marketTrend = trendData.trend;
       trendConsistency = trendData.trendConsistency || 0;
-      console.log(`Real-time trend for ${data.symbol}: ${marketTrend} (consistency: ${trendConsistency}%)`);
+      
+      // Extract new filter data
+      higherTimeframeAligned = trendData.higherTimeframeFilter?.aligned || false;
+      inPullback = trendData.pullback?.inPullback || false;
+      pullbackIdeal = trendData.pullback?.ideal || false;
+      momentumConfirms = trendData.momentum?.confirms || false;
+      isRanging = trendData.ranging?.isRanging || false;
+      
+      console.log(`${data.symbol} FILTERS: 4h+1h=${higherTimeframeAligned} pullback=${inPullback}(${trendData.pullback?.pullbackPercent}%) momentum=${momentumConfirms} ranging=${isRanging}`);
     }
   } catch (error) {
     console.error(`Failed to fetch trend for ${data.symbol}:`, error);
+    return null; // Don't trade without trend data
   }
 
-  // Determine signal type based on REAL market trend
+  // ============================================================
+  // FILTER 1: RANGING MARKET DETECTION
+  // ============================================================
+  if (isRanging || marketTrend === "ranging") {
+    console.log(`❌ ${data.symbol}: RANGING MARKET - ATR too low for directional trading`);
+    return null;
+  }
+
+  // ============================================================
+  // FILTER 2: HIGHER TIMEFRAME ALIGNMENT (MOST IMPORTANT)
+  // ============================================================
+  // CRITICAL: Only trade when 4h + 1h agree on direction
+  if (!higherTimeframeAligned) {
+    console.log(`❌ ${data.symbol}: Higher timeframes NOT aligned (4h and 1h must agree)`);
+    return null;
+  }
+
+  // ============================================================
+  // DETERMINE SIGNAL TYPE BASED ON HIGHER TIMEFRAME TREND
+  // ============================================================
   let signalType: "long" | "short";
   let reason = `${strategy.name}: Entry conditions met`;
 
-  // **CRITICAL FIX**: Avoid ranging markets unless strategy is specifically designed for it
-  // Ranging markets have the worst win rates (25-35%)
-  if (marketTrend === "ranging") {
-    console.log(`Skipping signal for ${data.symbol}: Market is ranging (low probability setup)`);
-    return null;
-  }
-  
-  // Only generate signals that align with strong market trend
+  // Only LONG when 4h + 1h are bullish
   if (marketTrend === "bullish") {
     signalType = "long";
-    reason = `${strategy.name}: Entry conditions met with bullish trend`;
-  } else if (marketTrend === "bearish") {
+    reason = `${strategy.name}: 4h+1h bullish alignment`;
+  } 
+  // Only SHORT when 4h + 1h are bearish
+  else if (marketTrend === "bearish") {
     signalType = "short";
-    reason = `${strategy.name}: Entry conditions met with bearish trend`;
-  } else {
-    // Should not reach here due to ranging filter above, but keep as safety
-    console.log(`Skipping signal for ${data.symbol}: No clear trend`);
+    reason = `${strategy.name}: 4h+1h bearish alignment`;
+  } 
+  else {
+    console.log(`❌ ${data.symbol}: No clear higher timeframe trend`);
     return null;
   }
 
-  // Proceed even with lower trend consistency; confidence scoring accounts for it
-
-
-  // Skip if signal type doesn't match trend (redundant but safe)
-  if (signalType === "long" && marketTrend === "bearish") {
-    console.log(`Skipping LONG signal for ${data.symbol}: Market is bearish`);
+  // ============================================================
+  // FILTER 3: MOMENTUM CONFIRMATION
+  // ============================================================
+  // Require 2-3 consecutive candles + MACD histogram expanding
+  if (!momentumConfirms) {
+    console.log(`❌ ${data.symbol}: Momentum NOT building (need 2+ consecutive candles)`);
     return null;
   }
-  if (signalType === "short" && marketTrend === "bullish") {
-    console.log(`Skipping SHORT signal for ${data.symbol}: Market is bullish`);
-    return null;
+
+  // ============================================================
+  // FILTER 4: PULLBACK DETECTION (IDEAL ENTRY TIMING)
+  // ============================================================
+  // Strongly prefer entries in pullback zone (30-60% retracement)
+  // But allow entries with momentum if pullback just completed
+  if (!inPullback) {
+    console.log(`⚠️  ${data.symbol}: Not in pullback zone (entry timing not ideal, but momentum building)`);
+    // Continue - momentum confirmation allows entries outside pullback
+  } else if (pullbackIdeal) {
+    reason += ` + ideal pullback entry`;
+    console.log(`✓ ${data.symbol}: IDEAL PULLBACK ENTRY (30-50% retracement)`);
   }
 
   // Calculate stop loss and take profit based on strategy settings
@@ -463,10 +505,23 @@ async function analyzeWithStrategy(
   else volNorm = 0.5; // Still penalize extreme volatility but less harsh
   const volWeight = volNorm * 10;
   
-  // Final confidence score
-  const confidenceScore = Math.round(
-    trendWeight + structureWeight + momentumWeight + volumeWeight + rrWeight + volWeight
-  );
+  // 7. ENTRY TIMING BONUS (10%): Pullback quality + Momentum confirmation
+  // NEW: Reward ideal pullback entries (30-50% retracement)
+  let entryTimingBonus = 0;
+  if (pullbackIdeal) {
+    entryTimingBonus = 10; // Full bonus for ideal pullback
+  } else if (inPullback) {
+    entryTimingBonus = 7; // Good bonus for being in pullback zone
+  } else if (momentumConfirms) {
+    entryTimingBonus = 5; // Partial credit if momentum is strong but no pullback
+  }
+  
+  // Final confidence score (now out of 110%, scaled back to 100%)
+  const rawConfidence = 
+    trendWeight + structureWeight + momentumWeight + volumeWeight + rrWeight + volWeight + entryTimingBonus;
+  
+  // Scale to ensure max is 100%
+  const confidenceScore = Math.round(Math.min(rawConfidence * (100 / 110), 100));
   
   console.log(`Confidence breakdown for ${data.symbol}:`, {
     trend: `${trendWeight.toFixed(1)}% (struct: ${structureStrength.toFixed(2)}, ema: ${emaSlope.toFixed(2)}, mtf: ${mtfAgreement.toFixed(2)})`,
@@ -475,7 +530,9 @@ async function analyzeWithStrategy(
     volume: `${volumeWeight.toFixed(1)}% (ratio: ${volumeRatio.toFixed(2)}x)`,
     riskReward: `${rrWeight.toFixed(1)}% (R:R ${riskRewardRatio.toFixed(2)})`,
     volatility: `${volWeight.toFixed(1)}% (atr ratio: ${volRatio.toFixed(2)})`,
-    total: `${confidenceScore}%`
+    entryTiming: `${entryTimingBonus.toFixed(1)}% (pullbackIdeal: ${pullbackIdeal}, inPullback: ${inPullback}, momentum: ${momentumConfirms})`,
+    raw: `${rawConfidence.toFixed(1)}%`,
+    final: `${confidenceScore}%`
   });
 
   // Filter out low confidence signals using user's configured threshold
