@@ -304,9 +304,9 @@ serve(async (req) => {
     const atr = atrSum / atrPeriod;
     const atrPercent = (atr / currentPrice) * 100;
     
-    // Market is ranging if ATR < 2% (too tight for reliable directional trading)
-    const isRanging = atrPercent < 2.0;
-    const volatilityNormal = atrPercent >= 2.0 && atrPercent < 5.0;
+    // Market is ranging if ATR < 1.2% (too tight for reliable directional trading)
+    const isRanging = atrPercent < 1.2;
+    const volatilityNormal = atrPercent >= 1.2 && atrPercent < 5.0;
     
     if (isRanging) {
       primaryTrend = 'ranging';
