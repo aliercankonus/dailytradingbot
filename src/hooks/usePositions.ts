@@ -16,6 +16,7 @@ interface Position {
   opened_at: string;
   trend?: string;
   confidence_score?: number;
+  trend_consistency?: number;
   strategy_name?: string;
   opened_by_rebalancer?: boolean;
   closed_by_rebalancer?: boolean;
