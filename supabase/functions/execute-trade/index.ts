@@ -295,6 +295,7 @@ serve(async (req) => {
         status: 'active',
         trend: currentTrend,
         confidence_score: signal.confidence_score,
+        trend_consistency: trendConsistency,
         opened_by_rebalancer: signal.created_by_rebalancer || false,
       });
 

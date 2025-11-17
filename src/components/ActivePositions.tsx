@@ -137,8 +137,8 @@ export const ActivePositions = () => {
               </div>
             </div>
 
-            {(position.trend || position.confidence_score) && (
-              <div className="grid grid-cols-2 gap-2 text-sm mt-3 pt-3 border-t">
+            {(position.trend || position.confidence_score || position.trend_consistency) && (
+              <div className="grid grid-cols-3 gap-2 text-sm mt-3 pt-3 border-t">
                 {position.trend && (
                   <div>
                     <div className="text-xs text-muted-foreground">Trend</div>
@@ -148,29 +148,22 @@ export const ActivePositions = () => {
                         position.trend === 'bearish' ? 'destructive' : 
                         'outline'
                       } 
-                      className="text-xs mt-1"
+                      className="text-xs"
                     >
                       {position.trend}
                     </Badge>
                   </div>
                 )}
-                {position.confidence_score !== undefined && (
+                {position.confidence_score && (
                   <div>
                     <div className="text-xs text-muted-foreground">Confidence</div>
-                    <Badge 
-                      variant={
-                        position.confidence_score > 70 ? 'default' : 
-                        position.confidence_score >= 40 ? 'outline' : 
-                        'destructive'
-                      }
-                      className={`text-xs mt-1 ${
-                        position.confidence_score > 70 ? 'bg-green-500 hover:bg-green-600' :
-                        position.confidence_score >= 40 ? 'bg-yellow-500 hover:bg-yellow-600 text-black' :
-                        'bg-red-500 hover:bg-red-600'
-                      }`}
-                    >
-                      {position.confidence_score}%
-                    </Badge>
+                    <div className="font-medium">{position.confidence_score}%</div>
+                  </div>
+                )}
+                {position.trend_consistency !== undefined && (
+                  <div>
+                    <div className="text-xs text-muted-foreground">Trend Consistency</div>
+                    <div className="font-medium">{position.trend_consistency.toFixed(0)}%</div>
                   </div>
                 )}
               </div>
