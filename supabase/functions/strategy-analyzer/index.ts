@@ -43,37 +43,119 @@ interface CustomStrategy {
   };
 }
 
-// Calculate RSI
-function calculateRSI(prices: number[], period = 14): number {
-  if (prices.length < period + 1) return 50;
-
-  let gains = 0;
-  let losses = 0;
-
-  for (let i = 1; i <= period; i++) {
-    const change = prices[i] - prices[i - 1];
-    if (change > 0) gains += change;
-    else losses += Math.abs(change);
-  }
-
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-  const rs = avgGain / (avgLoss || 1);
-  return 100 - 100 / (1 + rs);
-}
-
 // Calculate EMA
 function calculateEMA(prices: number[], period: number): number {
-  if (prices.length < period) return prices[prices.length - 1] || 0;
-
+  if (prices.length < period) return prices[prices.length - 1];
+  
   const multiplier = 2 / (period + 1);
   let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
-
+  
   for (let i = period; i < prices.length; i++) {
     ema = (prices[i] - ema) * multiplier + ema;
   }
-
+  
   return ema;
+}
+
+// Calculate RSI
+function calculateRSI(prices: number[], period = 14): number {
+  if (prices.length < period + 1) return 50;
+  
+  let gains = 0;
+  let losses = 0;
+  
+  for (let i = prices.length - period; i < prices.length; i++) {
+    const change = prices[i] - prices[i - 1];
+    if (change > 0) gains += change;
+    else losses -= change;
+  }
+  
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+  
+  if (avgLoss === 0) return 100;
+  return 100 - 100 / (1 + avgGain / avgLoss);
+}
+
+// Calculate ATR (Average True Range)
+function calculateATR(prices: number[], period = 14): number {
+  if (prices.length < period + 1) return 0;
+  
+  const trueRanges: number[] = [];
+  for (let i = prices.length - period; i < prices.length; i++) {
+    const high = prices[i];
+    const low = prices[i] * 0.99; // Approximate low
+    const prevClose = prices[i - 1];
+    const tr = Math.max(
+      high - low,
+      Math.abs(high - prevClose),
+      Math.abs(low - prevClose)
+    );
+    trueRanges.push(tr);
+  }
+  
+  return trueRanges.reduce((a, b) => a + b, 0) / trueRanges.length;
+}
+
+// Calculate support/resistance structure strength
+function analyzeStructure(
+  prices: number[], 
+  currentPrice: number, 
+  direction: "long" | "short"
+): number {
+  if (prices.length < 50) return 0.5;
+  
+  const recentPrices = prices.slice(-50);
+  const high = Math.max(...recentPrices);
+  const low = Math.min(...recentPrices);
+  const range = high - low;
+  
+  // Check for support/resistance levels
+  let structureScore = 0;
+  
+  // 1. Support behind stop (for longs) or resistance behind stop (for shorts)
+  const stopDistance = direction === "long" ? 0.02 : -0.02; // 2% stop
+  const stopLevel = currentPrice * (1 + stopDistance);
+  const nearbyLevels = recentPrices.filter(p => 
+    Math.abs(p - stopLevel) < range * 0.01
+  ).length;
+  structureScore += nearbyLevels > 2 ? 0.33 : 0;
+  
+  // 2. No immediate resistance (for longs) or support (for shorts)
+  const targetDistance = direction === "long" ? 0.01 : -0.01; // 1% target
+  const targetLevel = currentPrice * (1 + targetDistance);
+  const resistanceLevels = recentPrices.filter(p => 
+    direction === "long" ? (p > currentPrice && p < targetLevel) : (p < currentPrice && p > targetLevel)
+  ).length;
+  structureScore += resistanceLevels < 3 ? 0.33 : 0;
+  
+  // 3. Price position in range (prefer lows for longs, highs for shorts)
+  const pricePosition = (currentPrice - low) / range;
+  if (direction === "long") {
+    structureScore += pricePosition < 0.5 ? 0.34 : 0;
+  } else {
+    structureScore += pricePosition > 0.5 ? 0.34 : 0;
+  }
+  
+  return Math.min(structureScore, 1);
+}
+
+// Calculate EMA slope strength
+function calculateEMASlope(prices: number[]): number {
+  if (prices.length < 200) return 0.5;
+  
+  const ema20 = calculateEMA(prices, 20);
+  const ema50 = calculateEMA(prices, 50);
+  const ema200 = calculateEMA(prices, 200);
+  
+  // Check EMA alignment: 20 > 50 > 200 for uptrend, reverse for downtrend
+  const bullishAlignment = ema20 > ema50 && ema50 > ema200 ? 1 : 0;
+  const bearishAlignment = ema20 < ema50 && ema50 < ema200 ? 1 : 0;
+  const neutralAlignment = 0.5;
+  
+  if (bullishAlignment) return 1;
+  if (bearishAlignment) return 1;
+  return neutralAlignment;
 }
 
 // Calculate MACD
@@ -321,44 +403,74 @@ async function analyzeWithStrategy(
 
   const riskRewardRatio = takeProfitPercent / stopLossPercent;
 
-  // Calculate confidence score based on multiple factors
-  // 1. Trend consistency (already fetched above) - 40%
-  const trendWeight = trendConsistency * 0.4;
+  // Calculate confidence score based on multiple factors (0-100)
   
-  // 2. Volume confirmation - 20%
+  // 1. TREND (30%): Structure + EMA Slope + Multi-TF Agreement
+  const structureStrength = analyzeStructure(prices, currentPrice, signalType);
+  const emaSlope = calculateEMASlope(prices);
+  const mtfAgreement = trendConsistency / 100; // Convert to 0-1
+  const trendNorm = Math.min(Math.max(
+    0.55 * structureStrength + 0.35 * emaSlope + 0.10 * mtfAgreement,
+    0
+  ), 1);
+  const trendWeight = trendNorm * 30;
+  
+  // 2. STRUCTURE (15%): Support/resistance and clean path
+  const structureScore = analyzeStructure(prices, currentPrice, signalType);
+  const structureWeight = structureScore * 15;
+  
+  // 3. MOMENTUM (15%): EMA gap + MACD direction + RSI slope
+  const ema12 = calculateEMA(prices, 12);
+  const ema26 = calculateEMA(prices, 26);
+  const emaGap = Math.abs((ema12 - ema26) / currentPrice) * 100;
+  const emaGapNorm = Math.min(emaGap / 0.5, 1);
+  
+  const macd = indicatorValues.get("MACD") || 0;
+  const macdDirection = (macd > 0 && signalType === "long") || (macd < 0 && signalType === "short") ? 1 : 0;
+  
+  const rsi = indicatorValues.get("RSI") || 50;
+  const rsiSlope = signalType === "long" ? Math.max(0, (50 - rsi) / 30) : Math.max(0, (rsi - 50) / 30);
+  
+  const momentumNorm = Math.min(Math.max(
+    0.6 * emaGapNorm + 0.25 * macdDirection + 0.15 * rsiSlope,
+    0
+  ), 1);
+  const momentumWeight = momentumNorm * 15;
+  
+  // 4. VOLUME (15%): Current volume vs average
   const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
   const currentVolume = volumes[volumes.length - 1];
   const volumeRatio = currentVolume / avgVolume;
-  const volumeWeight = Math.min(volumeRatio / 2, 1) * 20; // Cap at 20%
+  const volumeNorm = Math.min(Math.max((volumeRatio - 0.5) / (1.5 - 0.5), 0), 1);
+  const volumeWeight = volumeNorm * 15;
   
-  // 3. RSI strength - 15%
-  const rsi = indicatorValues.get("RSI") || 50;
-  let rsiStrength = 0;
-  if (signalType === "long" && rsi < 50) {
-    rsiStrength = (50 - rsi) / 20; // Oversold is good for longs
-  } else if (signalType === "short" && rsi > 50) {
-    rsiStrength = (rsi - 50) / 20; // Overbought is good for shorts
-  }
-  const rsiWeight = Math.min(rsiStrength, 1) * 15;
+  // 5. RISK/REWARD (15%): R:R ratio quality
+  const rrNorm = Math.min(Math.max((riskRewardRatio - 1.0) / (2.5 - 1.0), 0), 1);
+  const rrWeight = rrNorm * 15;
   
-  // 4. Price momentum - 15%
-  const ema12 = calculateEMA(prices, 12);
-  const ema26 = calculateEMA(prices, 26);
-  const emaDiff = Math.abs((ema12 - ema26) / ema26) * 100;
-  const momentumWeight = Math.min(emaDiff / 2, 1) * 15; // Cap at 15%
-  
-  // 5. Risk/Reward ratio bonus - 10%
-  const rrBonus = Math.min(riskRewardRatio / 3, 1) * 10;
+  // 6. VOLATILITY (10%): ATR-based volatility check
+  const atr14 = calculateATR(prices, 14);
+  const atr50 = calculateATR(prices, 50);
+  const volRatio = atr50 > 0 ? atr14 / atr50 : 1;
+  let volNorm = 0.5; // Default neutral
+  if (volRatio < 0.8) volNorm = 0.3; // Too low volatility
+  else if (volRatio >= 0.8 && volRatio <= 1.2) volNorm = 1; // Ideal
+  else if (volRatio > 1.2 && volRatio <= 1.5) volNorm = 0.7; // High but acceptable
+  else volNorm = 0.4; // Too high volatility
+  const volWeight = volNorm * 10;
   
   // Final confidence score
-  const confidenceScore = Math.round(trendWeight + volumeWeight + rsiWeight + momentumWeight + rrBonus);
+  const confidenceScore = Math.round(
+    trendWeight + structureWeight + momentumWeight + volumeWeight + rrWeight + volWeight
+  );
   
   console.log(`Confidence breakdown for ${data.symbol}:`, {
-    trend: `${trendWeight.toFixed(1)}% (consistency: ${trendConsistency}%)`,
+    trend: `${trendWeight.toFixed(1)}% (struct: ${structureStrength.toFixed(2)}, ema: ${emaSlope.toFixed(2)}, mtf: ${mtfAgreement.toFixed(2)})`,
+    structure: `${structureWeight.toFixed(1)}% (score: ${structureScore.toFixed(2)})`,
+    momentum: `${momentumWeight.toFixed(1)}% (ema: ${emaGapNorm.toFixed(2)}, macd: ${macdDirection}, rsi: ${rsiSlope.toFixed(2)})`,
     volume: `${volumeWeight.toFixed(1)}% (ratio: ${volumeRatio.toFixed(2)}x)`,
-    rsi: `${rsiWeight.toFixed(1)}% (value: ${rsi.toFixed(1)})`,
-    momentum: `${momentumWeight.toFixed(1)}% (EMA diff: ${emaDiff.toFixed(2)}%)`,
-    riskReward: `${rrBonus.toFixed(1)}% (R:R ${riskRewardRatio.toFixed(2)})`,
+    riskReward: `${rrWeight.toFixed(1)}% (R:R ${riskRewardRatio.toFixed(2)})`,
+    volatility: `${volWeight.toFixed(1)}% (atr ratio: ${volRatio.toFixed(2)})`,
     total: `${confidenceScore}%`
   });
 
