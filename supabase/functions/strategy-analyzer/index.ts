@@ -421,16 +421,20 @@ async function analyzeWithStrategy(
   }
 
   // ============================================================
-  // FILTER 4: PULLBACK DETECTION (IDEAL ENTRY TIMING)
+  // FILTER 4: PULLBACK DETECTION (STRICT REQUIREMENT)
   // ============================================================
-  // Strongly prefer entries in pullback zone (30-60% retracement)
-  // But allow entries with momentum if pullback just completed
+  // MANDATORY: Only enter trades in pullback zone (30-60% retracement)
+  // This prevents entering at extended prices that immediately reverse
   if (!inPullback) {
-    console.log(`⚠️  ${data.symbol}: Not in pullback zone (entry timing not ideal, but momentum building)`);
-    // Continue - momentum confirmation allows entries outside pullback
-  } else if (pullbackIdeal) {
+    console.log(`❌ ${data.symbol}: NOT IN PULLBACK ZONE - trade rejected (must be 30-60% retracement)`);
+    return null; // STRICT REJECTION - no trades outside pullback
+  }
+  
+  if (pullbackIdeal) {
     reason += ` + ideal pullback entry`;
     console.log(`✓ ${data.symbol}: IDEAL PULLBACK ENTRY (30-50% retracement)`);
+  } else {
+    reason += ` + pullback zone entry`;
   }
 
   // Calculate stop loss and take profit based on strategy settings
@@ -505,16 +509,15 @@ async function analyzeWithStrategy(
   else volNorm = 0.5; // Still penalize extreme volatility but less harsh
   const volWeight = volNorm * 10;
   
-  // 7. ENTRY TIMING BONUS (10%): Pullback quality + Momentum confirmation
-  // NEW: Reward ideal pullback entries (30-50% retracement)
+  // 7. ENTRY TIMING BONUS (10%): Pullback quality
+  // Since pullback is now MANDATORY, reward ideal pullback entries (30-50% retracement)
   let entryTimingBonus = 0;
   if (pullbackIdeal) {
-    entryTimingBonus = 10; // Full bonus for ideal pullback
+    entryTimingBonus = 10; // Full bonus for ideal pullback (30-50%)
   } else if (inPullback) {
-    entryTimingBonus = 7; // Good bonus for being in pullback zone
-  } else if (momentumConfirms) {
-    entryTimingBonus = 5; // Partial credit if momentum is strong but no pullback
+    entryTimingBonus = 7; // Good bonus for being in pullback zone (30-60%)
   }
+  // Note: momentumConfirms is already checked earlier as a hard requirement
   
   // Final confidence score (now out of 110%, scaled back to 100%)
   const rawConfidence = 
