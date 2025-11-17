@@ -150,23 +150,15 @@ serve(async (req) => {
     const priceData = await priceResponse.json();
     const currentPrice = parseFloat(priceData.price);
 
-    // Calculate ATR-based stop loss (use 2x ATR for breathing room)
-    const atrStopLossPercent = Math.max(atrPercent * 2, 1.5); // Minimum 1.5%, typically 2x ATR
-    const atrTakeProfitPercent = atrStopLossPercent * 2.5; // 2.5:1 reward-risk ratio
+    // Use strategy's configured stop loss and take profit from signal
+    const stopLoss = signal.stop_loss;
+    const takeProfit = signal.take_profit;
 
-    const atrStopLoss = signalDirection === 'BUY' 
-      ? currentPrice * (1 - atrStopLossPercent / 100)
-      : currentPrice * (1 + atrStopLossPercent / 100);
-    
-    const atrTakeProfit = signalDirection === 'BUY'
-      ? currentPrice * (1 + atrTakeProfitPercent / 100)
-      : currentPrice * (1 - atrTakeProfitPercent / 100);
+    console.log(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)} (from strategy configuration)`);
 
-    console.log(`ATR-based SL: ${atrStopLoss.toFixed(2)} (${atrStopLossPercent.toFixed(2)}%), TP: ${atrTakeProfit.toFixed(2)} (${atrTakeProfitPercent.toFixed(2)}%)`);
-
-    // Calculate position size based on ATR stop loss
+    // Calculate position size based on strategy's stop loss
     const riskAmount = (riskParams.portfolio_value * riskParams.max_risk_per_trade_percent) / 100;
-    const stopLossDistance = Math.abs(currentPrice - atrStopLoss);
+    const stopLossDistance = Math.abs(currentPrice - stopLoss);
     let quantity = riskAmount / stopLossDistance;
 
     // Apply position size reduction if consecutive losses
@@ -263,8 +255,8 @@ serve(async (req) => {
         order_type: 'MARKET',
         quantity,
         entry_price: executedPrice,
-        stop_loss: atrStopLoss,
-        take_profit: atrTakeProfit,
+        stop_loss: stopLoss,
+        take_profit: takeProfit,
         status: 'open',
         binance_order_id: isPaperTrading ? null : orderData.orderId?.toString(),
         strategy_name: signal.strategy_name || 'Unknown',
@@ -288,8 +280,8 @@ serve(async (req) => {
         quantity,
         entry_price: executedPrice,
         current_price: executedPrice,
-        stop_loss: atrStopLoss,
-        take_profit: atrTakeProfit,
+        stop_loss: stopLoss,
+        take_profit: takeProfit,
         unrealized_pnl: 0,
         unrealized_pnl_percent: 0,
         status: 'active',
@@ -312,7 +304,7 @@ serve(async (req) => {
       );
 
       // Place stop-loss order
-      const slQueryString = `symbol=${signal.symbol}&side=${side === 'BUY' ? 'SELL' : 'BUY'}&type=STOP_LOSS_LIMIT&quantity=${quantity}&price=${atrStopLoss}&stopPrice=${atrStopLoss}&timeInForce=GTC&timestamp=${Date.now()}`;
+      const slQueryString = `symbol=${signal.symbol}&side=${side === 'BUY' ? 'SELL' : 'BUY'}&type=STOP_LOSS_LIMIT&quantity=${quantity}&price=${stopLoss}&stopPrice=${stopLoss}&timeInForce=GTC&timestamp=${Date.now()}`;
       const slData = encoder.encode(slQueryString);
       const slSignature = await crypto.subtle.sign('HMAC', cryptoKey, slData);
       const slSignatureHex = Array.from(new Uint8Array(slSignature))
@@ -328,7 +320,7 @@ serve(async (req) => {
       );
 
       // Place take-profit order
-      const tpQueryString = `symbol=${signal.symbol}&side=${side === 'BUY' ? 'SELL' : 'BUY'}&type=TAKE_PROFIT_LIMIT&quantity=${quantity}&price=${atrTakeProfit}&stopPrice=${atrTakeProfit}&timeInForce=GTC&timestamp=${Date.now()}`;
+      const tpQueryString = `symbol=${signal.symbol}&side=${side === 'BUY' ? 'SELL' : 'BUY'}&type=TAKE_PROFIT_LIMIT&quantity=${quantity}&price=${takeProfit}&stopPrice=${takeProfit}&timeInForce=GTC&timestamp=${Date.now()}`;
       const tpData = encoder.encode(tpQueryString);
       const tpSignature = await crypto.subtle.sign('HMAC', cryptoKey, tpData);
       const tpSignatureHex = Array.from(new Uint8Array(tpSignature))
