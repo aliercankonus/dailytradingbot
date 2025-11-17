@@ -420,43 +420,47 @@ async function analyzeWithStrategy(
   const structureWeight = structureScore * 15;
   
   // 3. MOMENTUM (15%): EMA gap + MACD direction + RSI slope
+  // RECALIBRATED for tight stops (0.5-2% range): Lower EMA gap threshold
   const ema12 = calculateEMA(prices, 12);
   const ema26 = calculateEMA(prices, 26);
   const emaGap = Math.abs((ema12 - ema26) / currentPrice) * 100;
-  const emaGapNorm = Math.min(emaGap / 0.5, 1);
+  const emaGapNorm = Math.min(emaGap / 0.2, 1); // Changed from 0.5% to 0.2% for tighter stops
   
   const macd = indicatorValues.get("MACD") || 0;
-  const macdDirection = (macd > 0 && signalType === "long") || (macd < 0 && signalType === "short") ? 1 : 0;
+  const macdDirection = (macd > 0 && signalType === "long") || (macd < 0 && signalType === "short") ? 1 : 0.5; // Partial credit instead of 0
   
   const rsi = indicatorValues.get("RSI") || 50;
   const rsiSlope = signalType === "long" ? Math.max(0, (50 - rsi) / 30) : Math.max(0, (rsi - 50) / 30);
   
   const momentumNorm = Math.min(Math.max(
-    0.6 * emaGapNorm + 0.25 * macdDirection + 0.15 * rsiSlope,
+    0.5 * emaGapNorm + 0.3 * macdDirection + 0.2 * rsiSlope, // Rebalanced weights
     0
   ), 1);
   const momentumWeight = momentumNorm * 15;
   
   // 4. VOLUME (15%): Current volume vs average
+  // RECALIBRATED: More forgiving volume requirements
   const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
   const currentVolume = volumes[volumes.length - 1];
   const volumeRatio = currentVolume / avgVolume;
-  const volumeNorm = Math.min(Math.max((volumeRatio - 0.5) / (1.5 - 0.5), 0), 1);
+  const volumeNorm = Math.min(Math.max((volumeRatio - 0.3) / (1.2 - 0.3), 0), 1); // Lowered from 0.5-1.5 to 0.3-1.2
   const volumeWeight = volumeNorm * 15;
   
   // 5. RISK/REWARD (15%): R:R ratio quality
-  const rrNorm = Math.min(Math.max((riskRewardRatio - 1.0) / (2.5 - 1.0), 0), 1);
+  // RECALIBRATED for tight stops: Accept 0.8:1 to 2.0:1 range instead of 1.0:1 to 2.5:1
+  const rrNorm = Math.min(Math.max((riskRewardRatio - 0.8) / (2.0 - 0.8), 0), 1);
   const rrWeight = rrNorm * 15;
   
   // 6. VOLATILITY (10%): ATR-based volatility check
+  // RECALIBRATED for tight stops: More forgiving volatility ranges
   const atr14 = calculateATR(prices, 14);
   const atr50 = calculateATR(prices, 50);
   const volRatio = atr50 > 0 ? atr14 / atr50 : 1;
   let volNorm = 0.5; // Default neutral
-  if (volRatio < 0.8) volNorm = 0.3; // Too low volatility
-  else if (volRatio >= 0.8 && volRatio <= 1.2) volNorm = 1; // Ideal
-  else if (volRatio > 1.2 && volRatio <= 1.5) volNorm = 0.7; // High but acceptable
-  else volNorm = 0.4; // Too high volatility
+  if (volRatio < 0.7) volNorm = 0.4; // Low volatility is more acceptable now
+  else if (volRatio >= 0.7 && volRatio <= 1.3) volNorm = 1; // Wider ideal range
+  else if (volRatio > 1.3 && volRatio <= 1.6) volNorm = 0.7; // More forgiving high volatility
+  else volNorm = 0.5; // Still penalize extreme volatility but less harsh
   const volWeight = volNorm * 10;
   
   // Final confidence score
