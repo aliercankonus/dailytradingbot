@@ -148,10 +148,30 @@ async function closePosition(supabase: any, position: any, manualClose: boolean 
     .eq('user_id', position.user_id)
     .eq('status', 'active');
 
+  // Get current risk parameters to update consecutive losses
+  const { data: currentRiskParams } = await supabase
+    .from('risk_parameters')
+    .select('consecutive_losses')
+    .eq('user_id', position.user_id)
+    .single();
+
+  // Update consecutive losses based on trade outcome
+  let newConsecutiveLosses = 0;
+  if (pnl < 0) {
+    // Trade was a loss - increment consecutive losses
+    newConsecutiveLosses = (currentRiskParams?.consecutive_losses || 0) + 1;
+    console.log(`Trade loss - consecutive losses: ${newConsecutiveLosses}`);
+  } else {
+    // Trade was a win or breakeven - reset consecutive losses to 0
+    newConsecutiveLosses = 0;
+    console.log(`Trade win/breakeven - resetting consecutive losses to 0`);
+  }
+
   await supabase
     .from('risk_parameters')
     .update({
-      current_open_trades: activeCount || 0
+      current_open_trades: activeCount || 0,
+      consecutive_losses: newConsecutiveLosses
     })
     .eq('user_id', position.user_id);
 
