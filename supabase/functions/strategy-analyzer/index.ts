@@ -77,15 +77,15 @@ function calculateRSI(prices: number[], period = 14): number {
   return 100 - 100 / (1 + avgGain / avgLoss);
 }
 
-// Calculate ATR (Average True Range)
-function calculateATR(prices: number[], period = 14): number {
-  if (prices.length < period + 1) return 0;
+// Calculate ATR (Average True Range) - FIXED to use real high/low data
+function calculateATR(highs: number[], lows: number[], closes: number[], period = 14): number {
+  if (closes.length < period + 1) return 0;
   
   const trueRanges: number[] = [];
-  for (let i = prices.length - period; i < prices.length; i++) {
-    const high = prices[i];
-    const low = prices[i] * 0.99; // Approximate low
-    const prevClose = prices[i - 1];
+  for (let i = closes.length - period; i < closes.length; i++) {
+    const high = highs[i];
+    const low = lows[i];
+    const prevClose = closes[i - 1];
     const tr = Math.max(
       high - low,
       Math.abs(high - prevClose),
@@ -189,7 +189,7 @@ function detectTrend(data: MarketData): "bullish" | "bearish" | "ranging" {
 async function fetchBinanceKlines(
   symbol: string,
   limit: number = 100,
-): Promise<{ prices: number[]; volumes: number[] }> {
+): Promise<{ prices: number[]; highs: number[]; lows: number[]; volumes: number[] }> {
   try {
     const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=${limit}`);
 
@@ -201,15 +201,19 @@ async function fetchBinanceKlines(
 
     // Binance klines: [openTime, open, high, low, close, volume, closeTime, quoteVolume, trades, ...]
     const prices = klines.map((k: any) => parseFloat(k[4])); // close prices
+    const highs = klines.map((k: any) => parseFloat(k[2])); // high prices
+    const lows = klines.map((k: any) => parseFloat(k[3])); // low prices
     const volumes = klines.map((k: any) => parseFloat(k[5])); // volumes
 
     console.log(`Fetched ${prices.length} klines for ${symbol}, latest volume: ${volumes[volumes.length - 1]}`);
 
-    return { prices, volumes };
+    return { prices, highs, lows, volumes };
   } catch (error) {
     console.error(`Failed to fetch Binance klines for ${symbol}:`, error);
     // Fallback to synthetic data
     const prices: number[] = [];
+    const highs: number[] = [];
+    const lows: number[] = [];
     const volumes: number[] = [];
     let price = 50000;
 
@@ -217,11 +221,13 @@ async function fetchBinanceKlines(
       const change = (Math.random() - 0.5) * 0.02;
       price = price * (1 + change);
       prices.push(price);
+      highs.push(price * 1.005); // synthetic high 0.5% above close
+      lows.push(price * 0.995); // synthetic low 0.5% below close
       volumes.push(Math.random() * 1000000 + 500000); // synthetic volume with minimum
     }
 
     console.log(`Using synthetic data for ${symbol}, generated ${prices.length} prices`);
-    return { prices, volumes };
+    return { prices, highs, lows, volumes };
   }
 }
 
@@ -302,7 +308,9 @@ function evaluateCondition(
 async function analyzeWithStrategy(
   data: MarketData, 
   strategy: CustomStrategy, 
-  prices: number[], 
+  prices: number[],
+  highs: number[],
+  lows: number[],
   volumes: number[],
   supabase: any,
   minConfidenceThreshold: number,
@@ -552,8 +560,8 @@ async function analyzeWithStrategy(
   
   // 6. VOLATILITY (10%): ATR-based volatility check
   // RECALIBRATED for tight stops: More forgiving volatility ranges
-  const atr14 = calculateATR(prices, 14);
-  const atr50 = calculateATR(prices, 50);
+  const atr14 = calculateATR(highs, lows, prices, 14);
+  const atr50 = calculateATR(highs, lows, prices, 50);
   const volRatio = atr50 > 0 ? atr14 / atr50 : 1;
   let volNorm = 0.5; // Default neutral
   if (volRatio < 0.7) volNorm = 0.4; // Low volatility is more acceptable now
@@ -910,9 +918,9 @@ serve(async (req) => {
 
       for (const data of marketData) {
         // Fetch real Binance kline data with volume
-        const { prices, volumes } = await fetchBinanceKlines(data.symbol, 100);
+        const { prices, highs, lows, volumes } = await fetchBinanceKlines(data.symbol, 100);
 
-        const signal = await analyzeWithStrategy(data, strategy, prices, volumes, supabase, riskParams?.min_confidence_threshold || 60, user.id);
+        const signal = await analyzeWithStrategy(data, strategy, prices, highs, lows, volumes, supabase, riskParams?.min_confidence_threshold || 60, user.id);
 
         // Apply multi-layer confirmation strategy
         if (signal) {
