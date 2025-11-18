@@ -352,26 +352,82 @@ serve(async (req) => {
     }
 
     // ============================================================
-    // MOMENTUM CONFIRMATION (2-3 consecutive candles)
+    // MOMENTUM CONFIRMATION (STRICT: 2-3 consecutive candles on 15m/5m)
     // ============================================================
-    const recentKlines = klines1h.slice(-3);
-    let consecutiveBullish = 0;
-    let consecutiveBearish = 0;
-
-    for (let i = 0; i < recentKlines.length; i++) {
-      const open = parseFloat(recentKlines[i][1]);
-      const close = parseFloat(recentKlines[i][4]);
-      if (close > open) consecutiveBullish++;
-      if (close < open) consecutiveBearish++;
+    // CRITICAL: Use 15m candles for momentum - more sensitive to near-term direction
+    // Check last 3 candles: ALL must be moving in trade direction (no mixed signals)
+    const recentKlines15m = klines15m.slice(-3);
+    const recentKlines5m = klines5m.slice(-3);
+    
+    // Count CONSECUTIVE candles in same direction (must be unbroken streak)
+    let consecutive15mBullish = 0;
+    let consecutive15mBearish = 0;
+    let consecutive5mBullish = 0;
+    let consecutive5mBearish = 0;
+    let lastDirection15m = "";
+    let lastDirection5m = "";
+    
+    // Check 15m candles for consecutive movement
+    for (let i = 0; i < recentKlines15m.length; i++) {
+      const open = parseFloat(recentKlines15m[i][1]);
+      const close = parseFloat(recentKlines15m[i][4]);
+      const currentDirection = close > open ? "bullish" : "bearish";
+      
+      // Reset streak if direction changes
+      if (i === 0) {
+        lastDirection15m = currentDirection;
+        if (currentDirection === "bullish") consecutive15mBullish = 1;
+        else consecutive15mBearish = 1;
+      } else if (currentDirection === lastDirection15m) {
+        // Continue the streak
+        if (currentDirection === "bullish") consecutive15mBullish++;
+        else consecutive15mBearish++;
+      } else {
+        // Direction changed - streak broken
+        if (currentDirection === "bullish") consecutive15mBullish = 1;
+        else consecutive15mBearish = 1;
+        lastDirection15m = currentDirection;
+      }
     }
-
-    const momentumBuilding =
-      (dominantTrend === "bullish" && consecutiveBullish >= 2) ||
-      (dominantTrend === "bearish" && consecutiveBearish >= 2);
-
-    // MACD histogram must be expanding
-    const macdHistogram = trend1h.indicators.macdHistogram;
-    const momentumConfirms = Math.abs(macdHistogram) > 0.01 && momentumBuilding;
+    
+    // Check 5m candles for confirmation (optional but strengthens signal)
+    for (let i = 0; i < recentKlines5m.length; i++) {
+      const open = parseFloat(recentKlines5m[i][1]);
+      const close = parseFloat(recentKlines5m[i][4]);
+      const currentDirection = close > open ? "bullish" : "bearish";
+      
+      if (i === 0) {
+        lastDirection5m = currentDirection;
+        if (currentDirection === "bullish") consecutive5mBullish = 1;
+        else consecutive5mBearish = 1;
+      } else if (currentDirection === lastDirection5m) {
+        if (currentDirection === "bullish") consecutive5mBullish++;
+        else consecutive5mBearish++;
+      } else {
+        if (currentDirection === "bullish") consecutive5mBullish = 1;
+        else consecutive5mBearish = 1;
+        lastDirection5m = currentDirection;
+      }
+    }
+    
+    // STRICT REQUIREMENT: Need 2-3 consecutive candles on 15m in trade direction
+    // 5m must also confirm (at least 2 consecutive in same direction)
+    const momentum15mConfirms =
+      (dominantTrend === "bullish" && consecutive15mBullish >= 2) ||
+      (dominantTrend === "bearish" && consecutive15mBearish >= 2);
+    
+    const momentum5mConfirms =
+      (dominantTrend === "bullish" && consecutive5mBullish >= 2) ||
+      (dominantTrend === "bearish" && consecutive5mBearish >= 2);
+    
+    // MACD histogram must be expanding (shows strength building)
+    const macdHistogram = trend15m.indicators.macdHistogram; // Use 15m MACD
+    const macdExpanding = Math.abs(macdHistogram) > 0.01;
+    
+    // FINAL GATE: All three must confirm
+    const momentumConfirms = momentum15mConfirms && momentum5mConfirms && macdExpanding;
+    
+    console.log(`${symbol} MOMENTUM: 15m=${consecutive15mBullish}bull/${consecutive15mBearish}bear 5m=${consecutive5mBullish}bull/${consecutive5mBearish}bear macd=${macdHistogram.toFixed(3)} confirms=${momentumConfirms}`);
 
     // Validate market structure on 1h timeframe
     const marketStructure = validateMarketStructure(klines1h, trend1h.trend);
@@ -413,9 +469,11 @@ serve(async (req) => {
         // Momentum confirmation
         momentum: {
           confirms: momentumConfirms,
-          building: momentumBuilding,
-          consecutiveBullish,
-          consecutiveBearish,
+          building: momentum15mConfirms && momentum5mConfirms,
+          consecutive15mBullish,
+          consecutive15mBearish,
+          consecutive5mBullish,
+          consecutive5mBearish,
           macdHistogram: Math.round(macdHistogram * 1000) / 1000,
         },
 
