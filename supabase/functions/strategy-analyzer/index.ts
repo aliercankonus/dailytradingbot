@@ -500,16 +500,16 @@ async function analyzeWithStrategy(
   // ============================================================
   // FILTER 4: PULLBACK DETECTION (STRICT REQUIREMENT)
   // ============================================================
-  // MANDATORY: Only enter trades in pullback zone (20-60% retracement)
+  // MANDATORY: Only enter trades in pullback zone (10-65% retracement)
   // This prevents entering at extended prices that immediately reverse
   if (!inPullback) {
-    console.log(`❌ ${data.symbol}: NOT IN PULLBACK ZONE - trade rejected (must be 20-60% retracement)`);
+    console.log(`❌ ${data.symbol}: NOT IN PULLBACK ZONE - trade rejected (must be 10-65% retracement)`);
     await logRejection('Not in pullback zone', {
       higherTimeframeAligned: true,
       momentumConfirms: true,
       isRanging: false,
       inPullback: false,
-      required: '20-60% retracement'
+      required: '10-65% retracement'
     });
     return null; // STRICT REJECTION - no trades outside pullback
   }
@@ -594,12 +594,12 @@ async function analyzeWithStrategy(
   const volWeight = volNorm * 10;
   
   // 7. ENTRY TIMING BONUS (10%): Pullback quality
-  // Since pullback is now MANDATORY, reward ideal pullback entries (20-50% retracement)
+  // Since pullback is now MANDATORY, reward ideal pullback entries (10-55% retracement)
   let entryTimingBonus = 0;
   if (pullbackIdeal) {
-    entryTimingBonus = 10; // Full bonus for ideal pullback (20-50%)
+    entryTimingBonus = 10; // Full bonus for ideal pullback (10-55%)
   } else if (inPullback) {
-    entryTimingBonus = 7; // Good bonus for being in pullback zone (20-60%)
+    entryTimingBonus = 7; // Good bonus for being in pullback zone (10-65%)
   }
   // Note: momentumConfirms is already checked earlier as a hard requirement
   
