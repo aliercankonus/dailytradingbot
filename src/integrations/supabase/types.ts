@@ -419,6 +419,39 @@ export type Database = {
         }
         Relationships: []
       }
+      signal_rejection_log: {
+        Row: {
+          checked_at: string
+          created_at: string | null
+          filters_status: Json | null
+          id: string
+          rejection_reason: string
+          symbol: string
+          trend_data: Json | null
+          user_id: string
+        }
+        Insert: {
+          checked_at?: string
+          created_at?: string | null
+          filters_status?: Json | null
+          id?: string
+          rejection_reason: string
+          symbol: string
+          trend_data?: Json | null
+          user_id: string
+        }
+        Update: {
+          checked_at?: string
+          created_at?: string | null
+          filters_status?: Json | null
+          id?: string
+          rejection_reason?: string
+          symbol?: string
+          trend_data?: Json | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       strategy_performance: {
         Row: {
           id: string

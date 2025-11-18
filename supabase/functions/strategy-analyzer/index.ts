@@ -306,7 +306,8 @@ async function analyzeWithStrategy(
   prices: number[], 
   volumes: number[],
   supabase: any,
-  minConfidenceThreshold: number
+  minConfidenceThreshold: number,
+  userId: string
 ) {
   const currentPrice = parseFloat(data.lastPrice);
 
@@ -373,11 +374,41 @@ async function analyzeWithStrategy(
     return null; // Don't trade without trend data
   }
 
+  // Helper function to log rejection reason
+  const logRejection = async (reason: string, filtersStatus: any) => {
+    try {
+      await supabase
+        .from('signal_rejection_log')
+        .insert({
+          user_id: userId,
+          symbol: data.symbol,
+          rejection_reason: reason,
+          filters_status: filtersStatus,
+          trend_data: {
+            marketTrend: marketTrend,
+            trendConsistency: trendConsistency,
+            higherTimeframeAligned: higherTimeframeAligned,
+            inPullback: inPullback,
+            pullbackIdeal: pullbackIdeal,
+            momentumConfirms: momentumConfirms,
+            isRanging: isRanging
+          }
+        });
+    } catch (error) {
+      console.error('Failed to log rejection:', error);
+    }
+  };
+
   // ============================================================
   // FILTER 1: RANGING MARKET DETECTION
   // ============================================================
   if (isRanging || marketTrend === "ranging") {
     console.log(`❌ ${data.symbol}: RANGING MARKET - ATR too low for directional trading`);
+    await logRejection('Ranging market detected', {
+      isRanging: true,
+      marketTrend: marketTrend,
+      required: 'Clear trend direction needed'
+    });
     return null;
   }
 
@@ -387,6 +418,11 @@ async function analyzeWithStrategy(
   // CRITICAL: Only trade when 4h + 1h agree on direction
   if (!higherTimeframeAligned) {
     console.log(`❌ ${data.symbol}: Higher timeframes NOT aligned (4h and 1h must agree)`);
+    await logRejection('Higher timeframes not aligned', {
+      higherTimeframeAligned: false,
+      marketTrend: marketTrend,
+      required: '4h and 1h must agree on direction'
+    });
     return null;
   }
 
@@ -408,6 +444,10 @@ async function analyzeWithStrategy(
   } 
   else {
     console.log(`❌ ${data.symbol}: No clear higher timeframe trend`);
+    await logRejection('No clear higher timeframe trend', {
+      marketTrend: marketTrend,
+      required: 'Clear bullish or bearish trend'
+    });
     return null;
   }
 
@@ -417,6 +457,11 @@ async function analyzeWithStrategy(
   // Require 2-3 consecutive candles + MACD histogram expanding
   if (!momentumConfirms) {
     console.log(`❌ ${data.symbol}: Momentum NOT building (need 2+ consecutive candles)`);
+    await logRejection('Momentum not confirmed', {
+      higherTimeframeAligned: true,
+      momentumConfirms: false,
+      required: '2-3 consecutive candles on 15m and 5m + MACD expanding'
+    });
     return null;
   }
 
@@ -427,6 +472,13 @@ async function analyzeWithStrategy(
   // This prevents entering at extended prices that immediately reverse
   if (!inPullback) {
     console.log(`❌ ${data.symbol}: NOT IN PULLBACK ZONE - trade rejected (must be 20-60% retracement)`);
+    await logRejection('Not in pullback zone', {
+      higherTimeframeAligned: true,
+      momentumConfirms: true,
+      isRanging: false,
+      inPullback: false,
+      required: '20-60% retracement'
+    });
     return null; // STRICT REJECTION - no trades outside pullback
   }
   
@@ -859,7 +911,7 @@ serve(async (req) => {
         // Fetch real Binance kline data with volume
         const { prices, volumes } = await fetchBinanceKlines(data.symbol, 100);
 
-        const signal = await analyzeWithStrategy(data, strategy, prices, volumes, supabase, riskParams?.min_confidence_threshold || 60);
+        const signal = await analyzeWithStrategy(data, strategy, prices, volumes, supabase, riskParams?.min_confidence_threshold || 60, user.id);
 
         // Apply multi-layer confirmation strategy
         if (signal) {
