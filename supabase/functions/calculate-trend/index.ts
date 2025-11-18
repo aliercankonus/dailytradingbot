@@ -246,46 +246,46 @@ serve(async (req) => {
     console.log(`Multi-timeframe analysis for ${symbol}`);
 
     // Fetch multiple timeframes in parallel
-    const [klines5m, klines15m, klines1h, klines4h] = await Promise.all([
-      fetchBinanceKlines(symbol, "5m", 100),
+    const [klines15m, klines30m, klines1h, klines4h] = await Promise.all([
       fetchBinanceKlines(symbol, "15m", 100),
+      fetchBinanceKlines(symbol, "30m", 100),
       fetchBinanceKlines(symbol, "1h", 100),
       fetchBinanceKlines(symbol, "4h", 50),
     ]);
 
     // Extract close prices for each timeframe
-    const prices5m = klines5m.map((k: any) => parseFloat(k[4]));
     const prices15m = klines15m.map((k: any) => parseFloat(k[4]));
+    const prices30m = klines30m.map((k: any) => parseFloat(k[4]));
     const prices1h = klines1h.map((k: any) => parseFloat(k[4]));
     const prices4h = klines4h.map((k: any) => parseFloat(k[4]));
     const currentPrice = prices1h[prices1h.length - 1];
 
     // Calculate trend for each timeframe
-    const trend5m = calculateTrend(prices5m);
     const trend15m = calculateTrend(prices15m);
+    const trend30m = calculateTrend(prices30m);
     const trend1h = calculateTrend(prices1h);
     const trend4h = calculateTrend(prices4h);
 
     // ============================================================
     // HIGHER TIMEFRAME DOMINANT WEIGHTING SYSTEM
-    // 4h = 60% weight, 1h = 25%, 15m = 10%, 5m = 5%
+    // 4h = 45% weight, 1h = 30%, 30m = 15%, 15m = 10%
     // ============================================================
 
-    // CRITICAL: 4h timeframe determines primary direction (60% weight)
+    // CRITICAL: 4h timeframe determines primary direction (45% weight)
     const dominantTrend = trend4h.trend;
     const dominantConfidence = trend4h.confidence;
 
-    // 1h must confirm 4h for high-quality signals (25% weight)
+    // 1h must confirm 4h for high-quality signals (30% weight)
     const confirmation1h = trend1h.trend === dominantTrend;
+    const confirmation30m = trend30m.trend === dominantTrend;
     const confirmation15m = trend15m.trend === dominantTrend;
-    const confirmation5m = trend5m.trend === dominantTrend;
 
     // Calculate weighted trend consistency
     const weightedConsistency =
-      dominantConfidence * 0.6 + // 4h: 60%
-      (confirmation1h ? trend1h.confidence * 0.25 : 0) + // 1h: 25%
-      (confirmation15m ? trend15m.confidence * 0.10 : 0) + // 15m: 10%
-      (confirmation5m ? trend5m.confidence * 0.05 : 0); // 5m: 5%
+      dominantConfidence * 0.45 + // 4h: 45%
+      (confirmation1h ? trend1h.confidence * 0.30 : 0) + // 1h: 30%
+      (confirmation30m ? trend30m.confidence * 0.15 : 0) + // 30m: 15%
+      (confirmation15m ? trend15m.confidence * 0.10 : 0); // 15m: 10%
 
     // High timeframe alignment: 4h + 1h must agree for valid signals
     const highTimeframeAligned = dominantTrend !== "neutral" && confirmation1h;
@@ -353,20 +353,20 @@ serve(async (req) => {
     }
 
     // ============================================================
-    // MOMENTUM CONFIRMATION (STRICT: 2-3 consecutive candles on 15m/5m)
+    // MOMENTUM CONFIRMATION (STRICT: 2-3 consecutive candles on 15m/30m)
     // ============================================================
-    // CRITICAL: Use 15m candles for momentum - more sensitive to near-term direction
+    // CRITICAL: Use 15m and 30m candles for momentum - more sensitive to near-term direction
     // Check last 3 candles: ALL must be moving in trade direction (no mixed signals)
     const recentKlines15m = klines15m.slice(-3);
-    const recentKlines5m = klines5m.slice(-3);
+    const recentKlines30m = klines30m.slice(-3);
     
     // Count CONSECUTIVE candles in same direction (must be unbroken streak)
     let consecutive15mBullish = 0;
     let consecutive15mBearish = 0;
-    let consecutive5mBullish = 0;
-    let consecutive5mBearish = 0;
+    let consecutive30mBullish = 0;
+    let consecutive30mBearish = 0;
     let lastDirection15m = "";
-    let lastDirection5m = "";
+    let lastDirection30m = "";
     
     // Check 15m candles for consecutive movement
     for (let i = 0; i < recentKlines15m.length; i++) {
@@ -391,50 +391,50 @@ serve(async (req) => {
       }
     }
     
-    // Check 5m candles for confirmation (optional but strengthens signal)
-    for (let i = 0; i < recentKlines5m.length; i++) {
-      const open = parseFloat(recentKlines5m[i][1]);
-      const close = parseFloat(recentKlines5m[i][4]);
+    // Check 30m candles for confirmation
+    for (let i = 0; i < recentKlines30m.length; i++) {
+      const open = parseFloat(recentKlines30m[i][1]);
+      const close = parseFloat(recentKlines30m[i][4]);
       const currentDirection = close > open ? "bullish" : "bearish";
       
       if (i === 0) {
-        lastDirection5m = currentDirection;
-        if (currentDirection === "bullish") consecutive5mBullish = 1;
-        else consecutive5mBearish = 1;
-      } else if (currentDirection === lastDirection5m) {
-        if (currentDirection === "bullish") consecutive5mBullish++;
-        else consecutive5mBearish++;
+        lastDirection30m = currentDirection;
+        if (currentDirection === "bullish") consecutive30mBullish = 1;
+        else consecutive30mBearish = 1;
+      } else if (currentDirection === lastDirection30m) {
+        if (currentDirection === "bullish") consecutive30mBullish++;
+        else consecutive30mBearish++;
       } else {
-        if (currentDirection === "bullish") consecutive5mBullish = 1;
-        else consecutive5mBearish = 1;
-        lastDirection5m = currentDirection;
+        if (currentDirection === "bullish") consecutive30mBullish = 1;
+        else consecutive30mBearish = 1;
+        lastDirection30m = currentDirection;
       }
     }
     
     // STRICT REQUIREMENT: Need 2-3 consecutive candles on 15m in trade direction
-    // 5m must also confirm (at least 2 consecutive in same direction)
+    // 30m must also confirm (at least 2 consecutive in same direction)
     const momentum15mConfirms =
       (dominantTrend === "bullish" && consecutive15mBullish >= 2) ||
       (dominantTrend === "bearish" && consecutive15mBearish >= 2);
     
-    const momentum5mConfirms =
-      (dominantTrend === "bullish" && consecutive5mBullish >= 2) ||
-      (dominantTrend === "bearish" && consecutive5mBearish >= 2);
+    const momentum30mConfirms =
+      (dominantTrend === "bullish" && consecutive30mBullish >= 2) ||
+      (dominantTrend === "bearish" && consecutive30mBearish >= 2);
     
     // MACD histogram must be expanding (shows strength building)
     const macdHistogram = trend15m.indicators.macdHistogram; // Use 15m MACD
     const macdExpanding = Math.abs(macdHistogram) > 0.01;
     
     // FINAL GATE: All three must confirm
-    const momentumConfirms = momentum15mConfirms && momentum5mConfirms && macdExpanding;
+    const momentumConfirms = momentum15mConfirms && momentum30mConfirms && macdExpanding;
     
-    console.log(`${symbol} MOMENTUM: 15m=${consecutive15mBullish}bull/${consecutive15mBearish}bear 5m=${consecutive5mBullish}bull/${consecutive5mBearish}bear macd=${macdHistogram.toFixed(3)} confirms=${momentumConfirms}`);
+    console.log(`${symbol} MOMENTUM: 15m=${consecutive15mBullish}bull/${consecutive15mBearish}bear 30m=${consecutive30mBullish}bull/${consecutive30mBearish}bear macd=${macdHistogram.toFixed(3)} confirms=${momentumConfirms}`);
 
     // Validate market structure on 1h timeframe
     const marketStructure = validateMarketStructure(klines1h, trend1h.trend);
 
     console.log(
-      `${symbol}: 4h=${trend4h.trend} 1h=${trend1h.trend} aligned=${highTimeframeAligned} pullback=${inPullback}(${pullbackPercent.toFixed(1)}%) momentum=${momentumConfirms} ranging=${isRanging}`,
+      `${symbol}: 4h=${trend4h.trend} 1h=${trend1h.trend} 30m=${trend30m.trend} aligned=${highTimeframeAligned} pullback=${inPullback}(${pullbackPercent.toFixed(1)}%) momentum=${momentumConfirms} ranging=${isRanging}`,
     );
 
     return new Response(
@@ -470,22 +470,22 @@ serve(async (req) => {
         // Momentum confirmation
         momentum: {
           confirms: momentumConfirms,
-          building: momentum15mConfirms && momentum5mConfirms,
+          building: momentum15mConfirms && momentum30mConfirms,
           consecutive15mBullish,
           consecutive15mBearish,
-          consecutive5mBullish,
-          consecutive5mBearish,
+          consecutive30mBullish,
+          consecutive30mBearish,
           macdHistogram: Math.round(macdHistogram * 1000) / 1000,
         },
 
         // Multi-timeframe details
         multiTimeframe: {
-          trend5m: trend5m.trend,
           trend15m: trend15m.trend,
+          trend30m: trend30m.trend,
           trend1h: trend1h.trend,
           trend4h: trend4h.trend,
-          confidence5m: trend5m.confidence,
           confidence15m: trend15m.confidence,
+          confidence30m: trend30m.confidence,
           confidence1h: trend1h.confidence,
           confidence4h: trend4h.confidence,
         },
