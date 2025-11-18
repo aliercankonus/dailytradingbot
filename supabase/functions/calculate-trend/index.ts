@@ -337,8 +337,8 @@ serve(async (req) => {
         const pullback = swingHigh - currentPrice;
         pullbackPercent = (pullback / range) * 100;
 
-        // Ideal entry: 20-50% retracement
-        inPullback = pullbackPercent >= 20 && pullbackPercent <= 60;
+        // Ideal entry: 10-55% retracement (more natural range)
+        inPullback = pullbackPercent >= 10 && pullbackPercent <= 65;
       } else if (dominantTrend === "bearish") {
         // For bearish trend, check if we're pulling back from recent low
         const swingLow = Math.min(...recentLows);
@@ -347,8 +347,8 @@ serve(async (req) => {
         const pullback = currentPrice - swingLow;
         pullbackPercent = (pullback / range) * 100;
 
-        // Ideal entry: 20-50% retracement
-        inPullback = pullbackPercent >= 20 && pullbackPercent <= 60;
+        // Ideal entry: 10-55% retracement (more natural range)
+        inPullback = pullbackPercent >= 10 && pullbackPercent <= 65;
       }
     }
 
@@ -457,7 +457,7 @@ serve(async (req) => {
         pullback: {
           inPullback,
           pullbackPercent: Math.round(pullbackPercent * 10) / 10,
-          ideal: inPullback && pullbackPercent >= 20 && pullbackPercent <= 50,
+          ideal: inPullback && pullbackPercent >= 10 && pullbackPercent <= 55,
         },
 
         // Ranging detection
