@@ -149,13 +149,12 @@ function calculateEMASlope(prices: number[]): number {
   const ema200 = calculateEMA(prices, 200);
   
   // Check EMA alignment: 20 > 50 > 200 for uptrend, reverse for downtrend
-  const bullishAlignment = ema20 > ema50 && ema50 > ema200 ? 1 : 0;
-  const bearishAlignment = ema20 < ema50 && ema50 < ema200 ? 1 : 0;
-  const neutralAlignment = 0.5;
+  const bullishAlignment = ema20 > ema50 && ema50 > ema200;
+  const bearishAlignment = ema20 < ema50 && ema50 < ema200;
   
   if (bullishAlignment) return 1;
-  if (bearishAlignment) return 1;
-  return neutralAlignment;
+  if (bearishAlignment) return -1;
+  return 0;
 }
 
 // Calculate MACD
