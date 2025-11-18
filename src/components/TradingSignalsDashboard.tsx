@@ -11,6 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { getSignalPriorityTier, getSignalPriorityVariant } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
+import { SignalRejectionReasons } from './SignalRejectionReasons';
 
 export const TradingSignalsDashboard = () => {
   const { signals, loading } = useSignals();
@@ -249,6 +250,8 @@ export const TradingSignalsDashboard = () => {
           </Card>
         )}
       </div>
+
+      <SignalRejectionReasons />
     </div>
   );
 };
