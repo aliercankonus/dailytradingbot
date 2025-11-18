@@ -430,10 +430,26 @@ async function analyzeWithStrategy(
   };
 
   // ============================================================
-  // FILTER 1: RANGING MARKET DETECTION
+  // FILTER 1: HIGHER TIMEFRAME ALIGNMENT (MOST IMPORTANT)
   // ============================================================
-  if (isRanging || marketTrend === "ranging") {
-    console.log(`❌ ${data.symbol}: RANGING MARKET - ATR too low for directional trading`);
+  // Check 4h and 1h agreement FIRST - this is the primary filter
+  if (!higherTimeframeAligned) {
+    console.log(`❌ ${data.symbol}: Higher timeframes NOT aligned (4h and 1h must agree)`);
+    await logRejection('Higher timeframes not aligned', {
+      higherTimeframeAligned: false,
+      marketTrend: marketTrend,
+      required: '4h and 1h must agree on direction'
+    });
+    return null;
+  }
+
+  // ============================================================
+  // FILTER 2: RANGING MARKET DETECTION (Only if timeframes not aligned)
+  // ============================================================
+  // If higher timeframes are aligned, allow low ATR (early trend formation)
+  // Only reject on ranging if we also don't have clear timeframe alignment
+  if (marketTrend === "ranging") {
+    console.log(`❌ ${data.symbol}: RANGING MARKET - no clear trend direction`);
     await logRejection('Ranging market detected', {
       isRanging: true,
       marketTrend: marketTrend,
@@ -441,10 +457,7 @@ async function analyzeWithStrategy(
     });
     return null;
   }
-
-  // ============================================================
-  // FILTER 2: HIGHER TIMEFRAME ALIGNMENT (MOST IMPORTANT)
-  // ============================================================
+  // Note: isRanging (low ATR) is allowed if higher timeframes agree - early trend formation
   // CRITICAL: Only trade when 4h + 1h agree on direction
   if (!higherTimeframeAligned) {
     console.log(`❌ ${data.symbol}: Higher timeframes NOT aligned (4h and 1h must agree)`);
