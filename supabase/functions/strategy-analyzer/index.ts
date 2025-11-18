@@ -164,14 +164,30 @@ function calculateEMASlope(prices: number[]): number {
   return 0;
 }
 
-// Calculate MACD
+// Calculate MACD - FIXED to properly calculate signal line as 9-period EMA
 function calculateMACD(prices: number[]): { macd: number; signal: number; histogram: number } {
+  if (prices.length < 35) {
+    return { macd: 0, signal: 0, histogram: 0 };
+  }
+
+  // Calculate MACD line for all available prices
+  const macdLine: number[] = [];
+  for (let i = 26; i < prices.length; i++) {
+    const priceSlice = prices.slice(0, i + 1);
+    const ema12 = calculateEMA(priceSlice, 12);
+    const ema26 = calculateEMA(priceSlice, 26);
+    macdLine.push(ema12 - ema26);
+  }
+
+  // Calculate signal line as 9-period EMA of MACD line
+  const signal = calculateEMA(macdLine, 9);
+  
+  // Current MACD value
   const ema12 = calculateEMA(prices, 12);
   const ema26 = calculateEMA(prices, 26);
   const macd = ema12 - ema26;
-
-  // For signal line, we'd need more historical data, so we'll approximate
-  const signal = macd * 0.9; // Simplified signal line
+  
+  // Histogram is difference between MACD and signal
   const histogram = macd - signal;
 
   return { macd, signal, histogram };
