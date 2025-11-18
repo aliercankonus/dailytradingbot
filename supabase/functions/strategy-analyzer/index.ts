@@ -426,26 +426,28 @@ async function analyzeWithStrategy(
   }
 
   // ============================================================
-  // DETERMINE SIGNAL TYPE BASED ON HIGHER TIMEFRAME TREND
+  // DETERMINE SIGNAL TYPE BASED ON ALIGNED HIGHER TIMEFRAME TREND
   // ============================================================
+  // NOTE: We've already verified higherTimeframeAligned (4h + 1h agree)
+  // marketTrend here is the 4h trend, which now matches 1h due to alignment check
   let signalType: "long" | "short";
   let reason = `${strategy.name}: Entry conditions met`;
 
-  // Only LONG when 4h + 1h are bullish
-  if (marketTrend === "bullish") {
+  if (marketTrend === "bullish" && higherTimeframeAligned) {
     signalType = "long";
-    reason = `${strategy.name}: 4h+1h bullish alignment`;
+    reason = `${strategy.name}: 4h+1h confirmed bullish`;
   } 
-  // Only SHORT when 4h + 1h are bearish
-  else if (marketTrend === "bearish") {
+  else if (marketTrend === "bearish" && higherTimeframeAligned) {
     signalType = "short";
-    reason = `${strategy.name}: 4h+1h bearish alignment`;
+    reason = `${strategy.name}: 4h+1h confirmed bearish`;
   } 
   else {
-    console.log(`❌ ${data.symbol}: No clear higher timeframe trend`);
-    await logRejection('No clear higher timeframe trend', {
+    // Should never reach here due to earlier alignment check, but defensive
+    console.log(`❌ ${data.symbol}: Invalid trend state after alignment check`);
+    await logRejection('Invalid trend state', {
       marketTrend: marketTrend,
-      required: 'Clear bullish or bearish trend'
+      higherTimeframeAligned: higherTimeframeAligned,
+      required: 'Aligned bullish or bearish trend'
     });
     return null;
   }
