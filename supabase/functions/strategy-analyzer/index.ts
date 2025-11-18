@@ -540,7 +540,7 @@ async function analyzeWithStrategy(
   const emaSlope = calculateEMASlope(prices);
   const mtfAgreement = trendConsistency / 100; // Convert to 0-1
   const trendNorm = Math.min(Math.max(
-    0.55 * structureStrength + 0.35 * emaSlope + 0.10 * mtfAgreement,
+    0.40 * structureStrength + 0.30 * emaSlope + 0.30 * mtfAgreement,
     0
   ), 1);
   const trendWeight = trendNorm * 30;
