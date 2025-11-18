@@ -97,9 +97,11 @@ function calculateATR(highs: number[], lows: number[], closes: number[], period 
   return trueRanges.reduce((a, b) => a + b, 0) / trueRanges.length;
 }
 
-// Calculate support/resistance structure strength
+// Calculate support/resistance structure strength - ATR-BASED (volatility adaptive)
 function analyzeStructure(
-  prices: number[], 
+  prices: number[],
+  highs: number[],
+  lows: number[],
   currentPrice: number, 
   direction: "long" | "short"
 ): number {
@@ -110,20 +112,25 @@ function analyzeStructure(
   const low = Math.min(...recentPrices);
   const range = high - low;
   
+  // Calculate ATR for dynamic stop/target levels
+  const atr = calculateATR(highs.slice(-50), lows.slice(-50), prices.slice(-50), 14);
+  
   // Check for support/resistance levels
   let structureScore = 0;
   
   // 1. Support behind stop (for longs) or resistance behind stop (for shorts)
-  const stopDistance = direction === "long" ? 0.02 : -0.02; // 2% stop
-  const stopLevel = currentPrice * (1 + stopDistance);
+  // Use 2x ATR for stop distance instead of fixed 2%
+  const stopDistance = direction === "long" ? -2 * atr : 2 * atr;
+  const stopLevel = currentPrice + stopDistance;
   const nearbyLevels = recentPrices.filter(p => 
-    Math.abs(p - stopLevel) < range * 0.01
+    Math.abs(p - stopLevel) < atr * 0.5 // Look within 0.5 ATR of stop level
   ).length;
   structureScore += nearbyLevels > 2 ? 0.33 : 0;
   
   // 2. No immediate resistance (for longs) or support (for shorts)
-  const targetDistance = direction === "long" ? 0.01 : -0.01; // 1% target
-  const targetLevel = currentPrice * (1 + targetDistance);
+  // Use 1.5x ATR for target distance instead of fixed 1%
+  const targetDistance = direction === "long" ? 1.5 * atr : -1.5 * atr;
+  const targetLevel = currentPrice + targetDistance;
   const resistanceLevels = recentPrices.filter(p => 
     direction === "long" ? (p > currentPrice && p < targetLevel) : (p < currentPrice && p > targetLevel)
   ).length;
@@ -513,7 +520,7 @@ async function analyzeWithStrategy(
   // Calculate confidence score based on multiple factors (0-100)
   
   // 1. TREND (30%): Structure + EMA Slope + Multi-TF Agreement
-  const structureStrength = analyzeStructure(prices, currentPrice, signalType);
+  const structureStrength = analyzeStructure(prices, highs, lows, currentPrice, signalType);
   const emaSlope = calculateEMASlope(prices);
   const mtfAgreement = trendConsistency / 100; // Convert to 0-1
   const trendNorm = Math.min(Math.max(
@@ -523,7 +530,7 @@ async function analyzeWithStrategy(
   const trendWeight = trendNorm * 30;
   
   // 2. STRUCTURE (15%): Support/resistance and clean path
-  const structureScore = analyzeStructure(prices, currentPrice, signalType);
+  const structureScore = analyzeStructure(prices, highs, lows, currentPrice, signalType);
   const structureWeight = structureScore * 15;
   
   // 3. MOMENTUM (15%): EMA gap + MACD direction + RSI slope
