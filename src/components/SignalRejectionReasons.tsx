@@ -26,7 +26,7 @@ export const SignalRejectionReasons = () => {
     if (filtersStatus.momentumConfirms === false) {
       details.push(
         `15m: ${filtersStatus.consecutive15mBullish || 0}bull/${filtersStatus.consecutive15mBearish || 0}bear`,
-        `5m: ${filtersStatus.consecutive5mBullish || 0}bull/${filtersStatus.consecutive5mBearish || 0}bear`
+        `30m: ${filtersStatus.consecutive30mBullish || 0}bull/${filtersStatus.consecutive30mBearish || 0}bear`
       );
     }
     
