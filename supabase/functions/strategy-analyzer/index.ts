@@ -46,33 +46,33 @@ interface CustomStrategy {
 // Calculate EMA
 function calculateEMA(prices: number[], period: number): number {
   if (prices.length < period) return prices[prices.length - 1];
-  
+
   const multiplier = 2 / (period + 1);
   let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  
+
   for (let i = period; i < prices.length; i++) {
     ema = (prices[i] - ema) * multiplier + ema;
   }
-  
+
   return ema;
 }
 
 // Calculate RSI
 function calculateRSI(prices: number[], period = 14): number {
   if (prices.length < period + 1) return 50;
-  
+
   let gains = 0;
   let losses = 0;
-  
+
   for (let i = prices.length - period; i < prices.length; i++) {
     const change = prices[i] - prices[i - 1];
     if (change > 0) gains += change;
     else losses -= change;
   }
-  
+
   const avgGain = gains / period;
   const avgLoss = losses / period;
-  
+
   if (avgLoss === 0) return 100;
   return 100 - 100 / (1 + avgGain / avgLoss);
 }
@@ -80,20 +80,16 @@ function calculateRSI(prices: number[], period = 14): number {
 // Calculate ATR (Average True Range) - FIXED to use real high/low data
 function calculateATR(highs: number[], lows: number[], closes: number[], period = 14): number {
   if (closes.length < period + 1) return 0;
-  
+
   const trueRanges: number[] = [];
   for (let i = closes.length - period; i < closes.length; i++) {
     const high = highs[i];
     const low = lows[i];
     const prevClose = closes[i - 1];
-    const tr = Math.max(
-      high - low,
-      Math.abs(high - prevClose),
-      Math.abs(low - prevClose)
-    );
+    const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
     trueRanges.push(tr);
   }
-  
+
   return trueRanges.reduce((a, b) => a + b, 0) / trueRanges.length;
 }
 
@@ -102,40 +98,40 @@ function analyzeStructure(
   prices: number[],
   highs: number[],
   lows: number[],
-  currentPrice: number, 
-  direction: "long" | "short"
+  currentPrice: number,
+  direction: "long" | "short",
 ): number {
   if (prices.length < 50) return 0.5;
-  
+
   const recentPrices = prices.slice(-50);
   const high = Math.max(...recentPrices);
   const low = Math.min(...recentPrices);
   const range = high - low;
-  
+
   // Calculate ATR for dynamic stop/target levels
   const atr = calculateATR(highs.slice(-50), lows.slice(-50), prices.slice(-50), 14);
-  
+
   // Check for support/resistance levels
   let structureScore = 0;
-  
+
   // 1. Support behind stop (for longs) or resistance behind stop (for shorts)
   // Use 2x ATR for stop distance instead of fixed 2%
   const stopDistance = direction === "long" ? -2 * atr : 2 * atr;
   const stopLevel = currentPrice + stopDistance;
-  const nearbyLevels = recentPrices.filter(p => 
-    Math.abs(p - stopLevel) < atr * 0.5 // Look within 0.5 ATR of stop level
+  const nearbyLevels = recentPrices.filter(
+    (p) => Math.abs(p - stopLevel) < atr * 0.5, // Look within 0.5 ATR of stop level
   ).length;
   structureScore += nearbyLevels > 2 ? 0.33 : 0;
-  
+
   // 2. No immediate resistance (for longs) or support (for shorts)
   // Use 1.5x ATR for target distance instead of fixed 1%
   const targetDistance = direction === "long" ? 1.5 * atr : -1.5 * atr;
   const targetLevel = currentPrice + targetDistance;
-  const resistanceLevels = recentPrices.filter(p => 
-    direction === "long" ? (p > currentPrice && p < targetLevel) : (p < currentPrice && p > targetLevel)
+  const resistanceLevels = recentPrices.filter((p) =>
+    direction === "long" ? p > currentPrice && p < targetLevel : p < currentPrice && p > targetLevel,
   ).length;
   structureScore += resistanceLevels < 3 ? 0.33 : 0;
-  
+
   // 3. Price position in range (prefer lows for longs, highs for shorts)
   const pricePosition = (currentPrice - low) / range;
   if (direction === "long") {
@@ -143,22 +139,22 @@ function analyzeStructure(
   } else {
     structureScore += pricePosition > 0.5 ? 0.34 : 0;
   }
-  
+
   return Math.min(structureScore, 1);
 }
 
 // Calculate EMA slope strength
 function calculateEMASlope(prices: number[]): number {
   if (prices.length < 200) return 0.5;
-  
+
   const ema20 = calculateEMA(prices, 20);
   const ema50 = calculateEMA(prices, 50);
   const ema200 = calculateEMA(prices, 200);
-  
+
   // Check EMA alignment: 20 > 50 > 200 for uptrend, reverse for downtrend
   const bullishAlignment = ema20 > ema50 && ema50 > ema200;
   const bearishAlignment = ema20 < ema50 && ema50 < ema200;
-  
+
   if (bullishAlignment) return 1;
   if (bearishAlignment) return -1;
   return 0;
@@ -181,12 +177,12 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
 
   // Calculate signal line as 9-period EMA of MACD line
   const signal = calculateEMA(macdLine, 9);
-  
+
   // Current MACD value
   const ema12 = calculateEMA(prices, 12);
   const ema26 = calculateEMA(prices, 26);
   const macd = ema12 - ema26;
-  
+
   // Histogram is difference between MACD and signal
   const histogram = macd - signal;
 
@@ -196,14 +192,14 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
 // Detect trend based on price action
 function detectTrend(data: MarketData): "bullish" | "bearish" | "ranging" {
   const changePercent = parseFloat(data.priceChangePercent);
-  
+
   // More realistic thresholds for trend detection
   // Bullish: Price up by more than 1%
   if (changePercent > 1) return "bullish";
-  
+
   // Bearish: Price down by more than 1%
   if (changePercent < -1) return "bearish";
-  
+
   // Ranging: Price moving between -1% and +1%
   return "ranging";
 }
@@ -329,15 +325,15 @@ function evaluateCondition(
 
 // Analyze market using custom strategy
 async function analyzeWithStrategy(
-  data: MarketData, 
-  strategy: CustomStrategy, 
+  data: MarketData,
+  strategy: CustomStrategy,
   prices: number[],
   highs: number[],
   lows: number[],
   volumes: number[],
   supabase: any,
   minConfidenceThreshold: number,
-  userId: string
+  userId: string,
 ) {
   const currentPrice = parseFloat(data.lastPrice);
 
@@ -375,29 +371,31 @@ async function analyzeWithStrategy(
   let pullbackIdeal = false;
   let momentumConfirms = false;
   let isRanging = false;
-  
+
   try {
-    const { data: trendData, error: trendError } = await supabase.functions.invoke('calculate-trend', {
-      body: { symbol: data.symbol }
+    const { data: trendData, error: trendError } = await supabase.functions.invoke("calculate-trend", {
+      body: { symbol: data.symbol },
     });
-    
+
     if (trendError) {
       console.error(`Error fetching trend for ${data.symbol}:`, trendError);
       return null; // Don't trade without trend data
-    } 
-    
+    }
+
     if (trendData) {
       marketTrend = trendData.trend;
       trendConsistency = trendData.trendConsistency || 0;
-      
+
       // Extract new filter data
       higherTimeframeAligned = trendData.higherTimeframeFilter?.aligned || false;
       inPullback = trendData.pullback?.inPullback || false;
       pullbackIdeal = trendData.pullback?.ideal || false;
       momentumConfirms = trendData.momentum?.confirms || false;
       isRanging = trendData.ranging?.isRanging || false;
-      
-      console.log(`${data.symbol} FILTERS: 4h+1h=${higherTimeframeAligned} pullback=${inPullback}(${trendData.pullback?.pullbackPercent}%) momentum=${momentumConfirms} ranging=${isRanging}`);
+
+      console.log(
+        `${data.symbol} FILTERS: 4h+1h=${higherTimeframeAligned} pullback=${inPullback}(${trendData.pullback?.pullbackPercent}%) momentum=${momentumConfirms} ranging=${isRanging}`,
+      );
     }
   } catch (error) {
     console.error(`Failed to fetch trend for ${data.symbol}:`, error);
@@ -409,25 +407,23 @@ async function analyzeWithStrategy(
   // to prevent table bloat. See cleanup logic at the end of this function.
   const logRejection = async (reason: string, filtersStatus: any) => {
     try {
-      await supabase
-        .from('signal_rejection_log')
-        .insert({
-          user_id: userId,
-          symbol: data.symbol,
-          rejection_reason: reason,
-          filters_status: filtersStatus,
-          trend_data: {
-            marketTrend: marketTrend,
-            trendConsistency: trendConsistency,
-            higherTimeframeAligned: higherTimeframeAligned,
-            inPullback: inPullback,
-            pullbackIdeal: pullbackIdeal,
-            momentumConfirms: momentumConfirms,
-            isRanging: isRanging
-          }
-        });
+      await supabase.from("signal_rejection_log").insert({
+        user_id: userId,
+        symbol: data.symbol,
+        rejection_reason: reason,
+        filters_status: filtersStatus,
+        trend_data: {
+          marketTrend: marketTrend,
+          trendConsistency: trendConsistency,
+          higherTimeframeAligned: higherTimeframeAligned,
+          inPullback: inPullback,
+          pullbackIdeal: pullbackIdeal,
+          momentumConfirms: momentumConfirms,
+          isRanging: isRanging,
+        },
+      });
     } catch (error) {
-      console.error('Failed to log rejection:', error);
+      console.error("Failed to log rejection:", error);
     }
   };
 
@@ -437,10 +433,10 @@ async function analyzeWithStrategy(
   // Check 4h and 1h agreement FIRST - this is the primary filter
   if (!higherTimeframeAligned) {
     console.log(`❌ ${data.symbol}: Higher timeframes NOT aligned (4h and 1h must agree)`);
-    await logRejection('Higher timeframes not aligned', {
+    await logRejection("Higher timeframes not aligned", {
       higherTimeframeAligned: false,
       marketTrend: marketTrend,
-      required: '4h and 1h must agree on direction'
+      required: "4h and 1h must agree on direction",
     });
     return null;
   }
@@ -452,10 +448,10 @@ async function analyzeWithStrategy(
   // Only reject on ranging if we also don't have clear timeframe alignment
   if (marketTrend === "ranging") {
     console.log(`❌ ${data.symbol}: RANGING MARKET - no clear trend direction`);
-    await logRejection('Ranging market detected', {
+    await logRejection("Ranging market detected", {
       isRanging: true,
       marketTrend: marketTrend,
-      required: 'Clear trend direction needed'
+      required: "Clear trend direction needed",
     });
     return null;
   }
@@ -463,10 +459,10 @@ async function analyzeWithStrategy(
   // CRITICAL: Only trade when 4h + 1h agree on direction
   if (!higherTimeframeAligned) {
     console.log(`❌ ${data.symbol}: Higher timeframes NOT aligned (4h and 1h must agree)`);
-    await logRejection('Higher timeframes not aligned', {
+    await logRejection("Higher timeframes not aligned", {
       higherTimeframeAligned: false,
       marketTrend: marketTrend,
-      required: '4h and 1h must agree on direction'
+      required: "4h and 1h must agree on direction",
     });
     return null;
   }
@@ -482,18 +478,16 @@ async function analyzeWithStrategy(
   if (marketTrend === "bullish" && higherTimeframeAligned) {
     signalType = "long";
     reason = `${strategy.name}: 4h+1h confirmed bullish`;
-  } 
-  else if (marketTrend === "bearish" && higherTimeframeAligned) {
+  } else if (marketTrend === "bearish" && higherTimeframeAligned) {
     signalType = "short";
     reason = `${strategy.name}: 4h+1h confirmed bearish`;
-  } 
-  else {
+  } else {
     // Should never reach here due to earlier alignment check, but defensive
     console.log(`❌ ${data.symbol}: Invalid trend state after alignment check`);
-    await logRejection('Invalid trend state', {
+    await logRejection("Invalid trend state", {
       marketTrend: marketTrend,
       higherTimeframeAligned: higherTimeframeAligned,
-      required: 'Aligned bullish or bearish trend'
+      required: "Aligned bullish or bearish trend",
     });
     return null;
   }
@@ -504,10 +498,10 @@ async function analyzeWithStrategy(
   // Require 2-3 consecutive candles + MACD histogram expanding
   if (!momentumConfirms) {
     console.log(`❌ ${data.symbol}: Momentum NOT building (need 2+ consecutive candles)`);
-    await logRejection('Momentum not confirmed', {
+    await logRejection("Momentum not confirmed", {
       higherTimeframeAligned: true,
       momentumConfirms: false,
-      required: '2-3 consecutive candles on 15m and 5m + MACD expanding'
+      required: "2-3 consecutive candles on 15m and 5m + MACD expanding",
     });
     return null;
   }
@@ -519,16 +513,16 @@ async function analyzeWithStrategy(
   // This prevents entering at extended prices that immediately reverse
   if (!inPullback) {
     console.log(`❌ ${data.symbol}: NOT IN PULLBACK ZONE - trade rejected (must be 10-65% retracement)`);
-    await logRejection('Not in pullback zone', {
+    await logRejection("Not in pullback zone", {
       higherTimeframeAligned: true,
       momentumConfirms: true,
       isRanging: false,
       inPullback: false,
-      required: '10-65% retracement'
+      required: "10-65% retracement",
     });
     return null; // STRICT REJECTION - no trades outside pullback
   }
-  
+
   if (pullbackIdeal) {
     reason += ` + ideal pullback entry`;
     console.log(`✓ ${data.symbol}: IDEAL PULLBACK ENTRY (20-50% retracement)`);
@@ -549,40 +543,40 @@ async function analyzeWithStrategy(
   const riskRewardRatio = takeProfitPercent / stopLossPercent;
 
   // Calculate confidence score based on multiple factors (0-100)
-  
+
   // 1. TREND (30%): Structure + EMA Slope + Multi-TF Agreement
   const structureStrength = analyzeStructure(prices, highs, lows, currentPrice, signalType);
   const emaSlope = calculateEMASlope(prices);
   const mtfAgreement = trendConsistency / 100; // Convert to 0-1
-  const trendNorm = Math.min(Math.max(
-    0.40 * structureStrength + 0.30 * emaSlope + 0.30 * mtfAgreement,
-    0
-  ), 1);
+  const trendNorm = Math.min(Math.max(0.4 * structureStrength + 0.3 * emaSlope + 0.3 * mtfAgreement, 0), 1);
   const trendWeight = trendNorm * 30;
-  
+
   // 2. STRUCTURE (15%): Support/resistance and clean path
   const structureScore = analyzeStructure(prices, highs, lows, currentPrice, signalType);
   const structureWeight = structureScore * 15;
-  
+
   // 3. MOMENTUM (15%): EMA gap + MACD direction + RSI slope
   // RECALIBRATED for tight stops (0.5-2% range): Lower EMA gap threshold
   const ema12 = calculateEMA(prices, 12);
   const ema26 = calculateEMA(prices, 26);
   const emaGap = Math.abs((ema12 - ema26) / currentPrice) * 100;
   const emaGapNorm = Math.min(emaGap / 0.2, 1); // Changed from 0.5% to 0.2% for tighter stops
-  
+
   const macd = indicatorValues.get("MACD") || 0;
   const macdDirection = (macd > 0 && signalType === "long") || (macd < 0 && signalType === "short") ? 1 : 0.5; // Partial credit instead of 0
-  
+
   const rsi = indicatorValues.get("RSI") || 50;
   const rsiSlope = signalType === "long" ? Math.max(0, (50 - rsi) / 30) : Math.max(0, (rsi - 50) / 30);
-  
-  const momentumNorm = Math.min(Math.max(
-    0.5 * emaGapNorm + 0.3 * macdDirection + 0.2 * rsiSlope, // Rebalanced weights
-    0
-  ), 1);
+
+  const momentumNorm = Math.min(
+    Math.max(
+      0.5 * emaGapNorm + 0.3 * macdDirection + 0.2 * rsiSlope, // Rebalanced weights
+      0,
+    ),
+    1,
+  );
   const momentumWeight = momentumNorm * 15;
-  
+
   // 4. VOLUME (15%): Current volume vs average
   // RECALIBRATED: More forgiving volume requirements
   const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
@@ -590,24 +584,27 @@ async function analyzeWithStrategy(
   const volumeRatio = currentVolume / avgVolume;
   const volumeNorm = Math.min(Math.max((volumeRatio - 0.3) / (1.2 - 0.3), 0), 1); // Lowered from 0.5-1.5 to 0.3-1.2
   const volumeWeight = volumeNorm * 15;
-  
+
   // 5. RISK/REWARD (15%): R:R ratio quality
   // RECALIBRATED for tight stops: Accept 0.8:1 to 2.0:1 range instead of 1.0:1 to 2.5:1
   const rrNorm = Math.min(Math.max((riskRewardRatio - 0.8) / (2.0 - 0.8), 0), 1);
   const rrWeight = rrNorm * 15;
-  
+
   // 6. VOLATILITY (10%): ATR-based volatility check
   // RECALIBRATED for tight stops: More forgiving volatility ranges
   const atr14 = calculateATR(highs, lows, prices, 14);
   const atr50 = calculateATR(highs, lows, prices, 50);
   const volRatio = atr50 > 0 ? atr14 / atr50 : 1;
   let volNorm = 0.5; // Default neutral
-  if (volRatio < 0.7) volNorm = 0.4; // Low volatility is more acceptable now
-  else if (volRatio >= 0.7 && volRatio <= 1.3) volNorm = 1; // Wider ideal range
-  else if (volRatio > 1.3 && volRatio <= 1.6) volNorm = 0.7; // More forgiving high volatility
+  if (volRatio < 0.7)
+    volNorm = 0.4; // Low volatility is more acceptable now
+  else if (volRatio >= 0.7 && volRatio <= 1.3)
+    volNorm = 1; // Wider ideal range
+  else if (volRatio > 1.3 && volRatio <= 1.6)
+    volNorm = 0.7; // More forgiving high volatility
   else volNorm = 0.5; // Still penalize extreme volatility but less harsh
   const volWeight = volNorm * 10;
-  
+
   // 7. ENTRY TIMING BONUS (10%): Pullback quality
   // Since pullback is now MANDATORY, reward ideal pullback entries (10-55% retracement)
   let entryTimingBonus = 0;
@@ -617,14 +614,14 @@ async function analyzeWithStrategy(
     entryTimingBonus = 7; // Good bonus for being in pullback zone (10-65%)
   }
   // Note: momentumConfirms is already checked earlier as a hard requirement
-  
+
   // Final confidence score (now out of 110%, scaled back to 100%)
-  const rawConfidence = 
+  const rawConfidence =
     trendWeight + structureWeight + momentumWeight + volumeWeight + rrWeight + volWeight + entryTimingBonus;
-  
+
   // Scale to ensure max is 100%
   const confidenceScore = Math.round(Math.min(rawConfidence * (100 / 110), 100));
-  
+
   console.log(`Confidence breakdown for ${data.symbol}:`, {
     trend: `${trendWeight.toFixed(1)}% (struct: ${structureStrength.toFixed(2)}, ema: ${emaSlope.toFixed(2)}, mtf: ${mtfAgreement.toFixed(2)})`,
     structure: `${structureWeight.toFixed(1)}% (score: ${structureScore.toFixed(2)})`,
@@ -634,15 +631,17 @@ async function analyzeWithStrategy(
     volatility: `${volWeight.toFixed(1)}% (atr ratio: ${volRatio.toFixed(2)})`,
     entryTiming: `${entryTimingBonus.toFixed(1)}% (pullbackIdeal: ${pullbackIdeal}, inPullback: ${inPullback}, momentum: ${momentumConfirms})`,
     raw: `${rawConfidence.toFixed(1)}%`,
-    final: `${confidenceScore}%`
+    final: `${confidenceScore}%`,
   });
 
   // Filter out low confidence signals using user's configured threshold
   if (confidenceScore < minConfidenceThreshold) {
-    console.log(`Skipping signal for ${data.symbol}: Confidence too low (${confidenceScore}% < ${minConfidenceThreshold}%)`);
+    console.log(
+      `Skipping signal for ${data.symbol}: Confidence too low (${confidenceScore}% < ${minConfidenceThreshold}%)`,
+    );
     return null;
   }
-  
+
   return {
     symbol: data.symbol,
     signalType,
@@ -670,14 +669,14 @@ serve(async (req) => {
 
     // Check for service-level user ID (from auto-trader)
     const serviceUserId = req.headers.get("x-user-id");
-    
+
     let user;
     let authHeader = req.headers.get("Authorization");
 
     if (serviceUserId) {
       // Service-level call from auto-trader
       const { data: userData, error: userError } = await supabase.auth.admin.getUserById(serviceUserId);
-      
+
       if (userError || !userData.user) {
         return new Response(
           JSON.stringify({
@@ -690,7 +689,7 @@ serve(async (req) => {
           },
         );
       }
-      
+
       user = userData.user;
       console.log(`Strategy analyzer called by auto-trader for user: ${user.id}`);
     } else if (authHeader) {
@@ -716,7 +715,7 @@ serve(async (req) => {
           },
         );
       }
-      
+
       user = authenticatedUser;
       console.log(`Strategy analyzer called by user: ${user.id}`);
     } else {
@@ -838,9 +837,10 @@ serve(async (req) => {
     }
 
     // Use user's active symbols, fallback to defaults if none
-    const symbols = userSymbols && userSymbols.length > 0
-      ? userSymbols.map(s => s.symbol)
-      : ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"];
+    const symbols =
+      userSymbols && userSymbols.length > 0
+        ? userSymbols.map((s) => s.symbol)
+        : ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"];
 
     console.log(`Using ${symbols.length} active symbols:`, symbols);
 
@@ -958,31 +958,41 @@ serve(async (req) => {
         // Fetch real Binance kline data with volume
         const { prices, highs, lows, volumes } = await fetchBinanceKlines(data.symbol, 100);
 
-        const signal = await analyzeWithStrategy(data, strategy, prices, highs, lows, volumes, supabase, riskParams?.min_confidence_threshold || 60, user.id);
+        const signal = await analyzeWithStrategy(
+          data,
+          strategy,
+          prices,
+          highs,
+          lows,
+          volumes,
+          supabase,
+          riskParams?.min_confidence_threshold || 60,
+          user.id,
+        );
 
         // Apply multi-layer confirmation strategy
         if (signal) {
           // Get comprehensive trend analysis
-          const trendResponse = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=' + data.symbol);
+          const trendResponse = await fetch("https://api.binance.com/api/v3/ticker/24hr?symbol=" + data.symbol);
           const trendData = await trendResponse.json();
-          
+
           // Fetch setup performance for historical win rate
-          const setupPattern = `${strategy.name}_${signal.signalType === 'long' ? 'LONG' : 'SHORT'}`;
+          const setupPattern = `${strategy.name}_${signal.signalType === "long" ? "LONG" : "SHORT"}`;
           const { data: setupPerf } = await supabase
-            .from('setup_performance')
-            .select('win_rate, total_trades')
-            .eq('user_id', user.id)
-            .eq('setup_pattern', setupPattern)
-            .eq('symbol', data.symbol)
+            .from("setup_performance")
+            .select("win_rate, total_trades")
+            .eq("user_id", user.id)
+            .eq("setup_pattern", setupPattern)
+            .eq("symbol", data.symbol)
             .maybeSingle();
-          
+
           // Multi-layer confirmation checks
-          const trendConfirmed = signal.trend === 'bullish' || signal.trend === 'bearish';
+          const trendConfirmed = signal.trend === "bullish" || signal.trend === "bearish";
           const volatilityNormal = signal.confidenceScore >= (riskParams?.min_confidence_threshold || 60);
           const setupWinRate = setupPerf?.win_rate || 0;
           const hasHistoricalData = (setupPerf?.total_trades || 0) >= 5;
           const historicalWinRateOk = !hasHistoricalData || setupWinRate >= 50;
-          
+
           // CRITICAL: All confirmations must pass
           if (trendConfirmed && volatilityNormal && historicalWinRateOk) {
             console.log(`✓ Multi-layer pass: ${signal.symbol} ${strategy.name} (winRate: ${setupWinRate.toFixed(1)}%)`);
@@ -992,7 +1002,9 @@ serve(async (req) => {
               strategyName: strategy.name,
             });
           } else {
-            console.log(`✗ Multi-layer fail: ${signal.symbol} trend=${trendConfirmed} vol=${volatilityNormal} hist=${historicalWinRateOk} (${setupWinRate.toFixed(1)}%)`);
+            console.log(
+              `✗ Multi-layer fail: ${signal.symbol} trend=${trendConfirmed} vol=${volatilityNormal} hist=${historicalWinRateOk} (${setupWinRate.toFixed(1)}%)`,
+            );
           }
         }
       }
@@ -1018,9 +1030,11 @@ serve(async (req) => {
 
     // Limit signals to available slots
     const limitedSignals = finalSignals.slice(0, availableSlots);
-    
+
     if (limitedSignals.length < finalSignals.length) {
-      console.log(`Limited signals from ${finalSignals.length} to ${limitedSignals.length} based on available slots (${availableSlots})`);
+      console.log(
+        `Limited signals from ${finalSignals.length} to ${limitedSignals.length} based on available slots (${availableSlots})`,
+      );
     }
 
     // Insert limited signals and execute if auto-execute is enabled
@@ -1075,7 +1089,7 @@ serve(async (req) => {
           // Automatically execute the signal
           try {
             console.log(`Auto-executing signal ${insertedSignal.id} for ${signal.symbol} (age: ${signalAge}ms)`);
-            
+
             // Prepare headers for execute-trade
             const executeHeaders: Record<string, string> = {};
             if (authHeader) {
@@ -1084,7 +1098,7 @@ serve(async (req) => {
             if (serviceUserId) {
               executeHeaders["x-user-id"] = serviceUserId;
             }
-            
+
             const { error: execError } = await supabase.functions.invoke("execute-trade", {
               body: { signalId: insertedSignal.id, action: "execute" },
               headers: executeHeaders,
@@ -1144,12 +1158,12 @@ serve(async (req) => {
     // Clean up old signal rejection logs in background (keep only last 24 hours)
     const cleanupRejectionLogs = async () => {
       try {
-        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        
+        const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+
         const { error: deleteError, count } = await supabase
           .from("signal_rejection_log")
           .delete()
-          .lt("checked_at", twentyFourHoursAgo);
+          .lt("checked_at", fourHoursAgo);
 
         if (deleteError) {
           console.error("Error cleaning up old rejection logs:", deleteError);
@@ -1164,7 +1178,7 @@ serve(async (req) => {
     // Run cleanup in background without blocking response
     try {
       // @ts-ignore - EdgeRuntime is available in Deno Deploy
-      if (typeof EdgeRuntime !== 'undefined') {
+      if (typeof EdgeRuntime !== "undefined") {
         // @ts-ignore
         EdgeRuntime.waitUntil(cleanupRejectionLogs());
       } else {
