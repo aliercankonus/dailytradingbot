@@ -84,6 +84,33 @@ serve(async (req) => {
       throw new Error(`Maximum open trades limit reached (${riskParams.max_open_trades})`);
     }
 
+    // ============================================================
+    // NEW: DAILY LOSS CIRCUIT BREAKER
+    // ============================================================
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const lastResetDate = riskParams.last_loss_reset_date;
+    let currentDailyLoss = riskParams.daily_realized_loss || 0;
+
+    // Reset daily loss counter if it's a new day
+    if (!lastResetDate || lastResetDate !== today) {
+      console.log(`Resetting daily loss counter (last reset: ${lastResetDate}, today: ${today})`);
+      await supabase
+        .from('risk_parameters')
+        .update({
+          daily_realized_loss: 0,
+          last_loss_reset_date: today
+        })
+        .eq('user_id', user.id);
+      currentDailyLoss = 0;
+    }
+
+    // Check circuit breaker: Stop trading if daily loss limit exceeded
+    const dailyLossPercent = (currentDailyLoss / riskParams.portfolio_value) * 100;
+    if (dailyLossPercent >= riskParams.daily_loss_limit_percent) {
+      console.error(`❌ CIRCUIT BREAKER TRIGGERED: Daily loss ${dailyLossPercent.toFixed(2)}% >= limit ${riskParams.daily_loss_limit_percent}%`);
+      throw new Error(`Daily loss limit reached (${dailyLossPercent.toFixed(2)}% of ${riskParams.daily_loss_limit_percent}%). Trading halted for today.`);
+    }
+
     // Get signal details
     const { data: signal } = await supabase
       .from('trading_signals')
@@ -97,7 +124,30 @@ serve(async (req) => {
 
     console.log(`Executing trade for signal from strategy: ${signal.strategy_name || 'Unknown'}`);
 
-    console.log(`Executing trade for signal from strategy: ${signal.strategy_name || 'Unknown'}`);
+    // ============================================================
+    // NEW: PER-SYMBOL POSITION LIMIT CHECK
+    // ============================================================
+    const { data: existingPositions, error: positionsError } = await supabase
+      .from('positions')
+      .select('id, symbol, side')
+      .eq('user_id', user.id)
+      .eq('symbol', signal.symbol)
+      .eq('status', 'active');
+
+    if (positionsError) {
+      console.error('Error checking existing positions:', positionsError);
+      throw new Error('Failed to check existing positions');
+    }
+
+    const openPositionsForSymbol = existingPositions?.length || 0;
+    const maxPerSymbol = riskParams.max_trades_per_symbol || 1;
+
+    if (openPositionsForSymbol >= maxPerSymbol) {
+      console.error(`❌ SYMBOL LIMIT: ${signal.symbol} already has ${openPositionsForSymbol} open position(s), max is ${maxPerSymbol}`);
+      throw new Error(`Maximum ${maxPerSymbol} position(s) per symbol. ${signal.symbol} already has ${openPositionsForSymbol} open.`);
+    }
+
+    console.log(`✓ Symbol check passed: ${signal.symbol} has ${openPositionsForSymbol}/${maxPerSymbol} positions`);
 
     // Get real-time trend analysis before executing trade
     const { data: trendData, error: trendError } = await supabase.functions.invoke('calculate-trend', {

@@ -293,12 +293,16 @@ export type Database = {
           consecutive_loss_threshold: number
           consecutive_losses: number | null
           current_open_trades: number | null
+          daily_loss_limit_percent: number
+          daily_realized_loss: number | null
           email_notifications_enabled: boolean | null
           id: string
           is_trading_enabled: boolean | null
+          last_loss_reset_date: string | null
           max_open_trades: number
           max_positions_to_close_per_cycle: number | null
           max_risk_per_trade_percent: number
+          max_trades_per_symbol: number
           min_confidence_threshold: number
           min_trend_consistency: number
           notification_email: string | null
@@ -319,12 +323,16 @@ export type Database = {
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
           current_open_trades?: number | null
+          daily_loss_limit_percent?: number
+          daily_realized_loss?: number | null
           email_notifications_enabled?: boolean | null
           id?: string
           is_trading_enabled?: boolean | null
+          last_loss_reset_date?: string | null
           max_open_trades?: number
           max_positions_to_close_per_cycle?: number | null
           max_risk_per_trade_percent?: number
+          max_trades_per_symbol?: number
           min_confidence_threshold?: number
           min_trend_consistency?: number
           notification_email?: string | null
@@ -345,12 +353,16 @@ export type Database = {
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
           current_open_trades?: number | null
+          daily_loss_limit_percent?: number
+          daily_realized_loss?: number | null
           email_notifications_enabled?: boolean | null
           id?: string
           is_trading_enabled?: boolean | null
+          last_loss_reset_date?: string | null
           max_open_trades?: number
           max_positions_to_close_per_cycle?: number | null
           max_risk_per_trade_percent?: number
+          max_trades_per_symbol?: number
           min_confidence_threshold?: number
           min_trend_consistency?: number
           notification_email?: string | null

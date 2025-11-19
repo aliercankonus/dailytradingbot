@@ -19,6 +19,10 @@ interface RiskParameters {
   max_positions_to_close_per_cycle: number;
   min_confidence_threshold: number;
   min_trend_consistency: number;
+  max_trades_per_symbol: number;
+  daily_loss_limit_percent: number;
+  daily_realized_loss: number;
+  last_loss_reset_date: string | null;
   updated_at: string;
 }
 
