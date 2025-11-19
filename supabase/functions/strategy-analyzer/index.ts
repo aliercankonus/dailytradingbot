@@ -1155,15 +1155,15 @@ serve(async (req) => {
       console.error("Error during signal cleanup:", cleanupError);
     }
 
-    // Clean up old signal rejection logs in background (keep only last 24 hours)
+    // Clean up old signal rejection logs in background (keep only last 1 hour)
     const cleanupRejectionLogs = async () => {
       try {
-        const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+        const oneHourAgo = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
 
         const { error: deleteError, count } = await supabase
           .from("signal_rejection_log")
           .delete()
-          .lt("checked_at", fourHoursAgo);
+          .lt("checked_at", oneHourAgo);
 
         if (deleteError) {
           console.error("Error cleaning up old rejection logs:", deleteError);
