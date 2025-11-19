@@ -22,6 +22,8 @@ export const RiskManagementControls = () => {
     portfolio_value: 10000,
     min_confidence_threshold: 60,
     min_trend_consistency: 50,
+    max_trades_per_symbol: 1,
+    daily_loss_limit_percent: 5.0,
   });
 
   useEffect(() => {
@@ -34,6 +36,8 @@ export const RiskManagementControls = () => {
         portfolio_value: riskParams.portfolio_value,
         min_confidence_threshold: riskParams.min_confidence_threshold,
         min_trend_consistency: riskParams.min_trend_consistency,
+        max_trades_per_symbol: riskParams.max_trades_per_symbol || 1,
+        daily_loss_limit_percent: riskParams.daily_loss_limit_percent || 5.0,
       });
     }
   }, [riskParams]);
@@ -64,7 +68,7 @@ export const RiskManagementControls = () => {
     <div className="space-y-4">
       <h2 className="text-2xl font-bold">Risk Management</h2>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <Card className="p-4">
           <div className="flex items-center gap-2 mb-2">
             <Shield className="h-5 w-5 text-primary" />
@@ -103,6 +107,19 @@ export const RiskManagementControls = () => {
             ${totalPnL.toFixed(2)}
           </div>
           <div className="text-xs text-muted-foreground">From open positions</div>
+        </Card>
+
+        <Card className="p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle className="h-5 w-5 text-destructive" />
+            <span className="text-sm font-medium">Daily Loss</span>
+          </div>
+          <div className="text-2xl font-bold text-destructive">
+            ${(riskParams.daily_realized_loss || 0).toFixed(2)}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Limit: {riskParams.daily_loss_limit_percent}% (${((riskParams.portfolio_value * riskParams.daily_loss_limit_percent) / 100).toFixed(2)})
+          </div>
         </Card>
       </div>
 
@@ -206,6 +223,41 @@ export const RiskManagementControls = () => {
               />
               <p className="text-xs text-muted-foreground">
                 Minimum trend consistency (0-100) required for trade execution
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="max-trades-per-symbol">Max Trades Per Symbol</Label>
+              <Input
+                id="max-trades-per-symbol"
+                type="number"
+                min="1"
+                max="5"
+                value={formData.max_trades_per_symbol}
+                onChange={(e) => 
+                  setFormData({ ...formData, max_trades_per_symbol: parseInt(e.target.value) })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Prevents over-concentration on single assets (recommended: 1)
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="daily-loss-limit">Daily Loss Circuit Breaker (%)</Label>
+              <Input
+                id="daily-loss-limit"
+                type="number"
+                min="1"
+                max="20"
+                step="0.5"
+                value={formData.daily_loss_limit_percent}
+                onChange={(e) => 
+                  setFormData({ ...formData, daily_loss_limit_percent: parseFloat(e.target.value) })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Stops all trading if daily losses exceed this % of portfolio (recommended: 5%)
               </p>
             </div>
 
