@@ -19,13 +19,10 @@ export const useSignalRejections = () => {
       try {
         setLoading(true);
         
-        // Get rejections from last 30 minutes, grouped by symbol (latest per symbol)
-        const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-        
+        // Get all rejections (limited to 200 by cleanup), grouped by symbol (latest per symbol)
         const { data, error } = await supabase
           .from('signal_rejection_log')
           .select('*')
-          .gte('checked_at', thirtyMinutesAgo)
           .order('checked_at', { ascending: false });
 
         if (error) throw error;
