@@ -501,7 +501,7 @@ async function analyzeWithStrategy(
     await logRejection("Momentum not confirmed", {
       higherTimeframeAligned: true,
       momentumConfirms: false,
-      required: "2-3 consecutive candles on 15m and 5m + MACD expanding",
+      required: "2-3 consecutive candles on 15m and 30m + MACD expanding",
     });
     return null;
   }
