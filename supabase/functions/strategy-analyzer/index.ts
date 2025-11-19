@@ -405,6 +405,8 @@ async function analyzeWithStrategy(
   }
 
   // Helper function to log rejection reason
+  // NOTE: Old rejection logs (>24 hours) are automatically cleaned up in the background
+  // to prevent table bloat. See cleanup logic at the end of this function.
   const logRejection = async (reason: string, filtersStatus: any) => {
     try {
       await supabase
@@ -1137,6 +1139,40 @@ serve(async (req) => {
       }
     } catch (cleanupError) {
       console.error("Error during signal cleanup:", cleanupError);
+    }
+
+    // Clean up old signal rejection logs in background (keep only last 24 hours)
+    const cleanupRejectionLogs = async () => {
+      try {
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        
+        const { error: deleteError, count } = await supabase
+          .from("signal_rejection_log")
+          .delete()
+          .lt("checked_at", twentyFourHoursAgo);
+
+        if (deleteError) {
+          console.error("Error cleaning up old rejection logs:", deleteError);
+        } else {
+          console.log(`Cleaned up ${count || 0} old rejection logs (>24h)`);
+        }
+      } catch (error) {
+        console.error("Error during rejection log cleanup:", error);
+      }
+    };
+
+    // Run cleanup in background without blocking response
+    try {
+      // @ts-ignore - EdgeRuntime is available in Deno Deploy
+      if (typeof EdgeRuntime !== 'undefined') {
+        // @ts-ignore
+        EdgeRuntime.waitUntil(cleanupRejectionLogs());
+      } else {
+        // Fallback for local development - just run it without waiting
+        cleanupRejectionLogs().catch(console.error);
+      }
+    } catch (bgError) {
+      console.error("Error starting background cleanup:", bgError);
     }
 
     return new Response(
