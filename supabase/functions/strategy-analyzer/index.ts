@@ -1155,20 +1155,38 @@ serve(async (req) => {
       console.error("Error during signal cleanup:", cleanupError);
     }
 
-    // Clean up old signal rejection logs in background (keep only last 1 hour)
+    // Clean up old signal rejection logs in background (keep only last 200)
     const cleanupRejectionLogs = async () => {
       try {
-        const oneHourAgo = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
-
-        const { error: deleteError, count } = await supabase
+        // Get total count of rejection logs
+        const { count: totalCount } = await supabase
           .from("signal_rejection_log")
-          .delete()
-          .lt("checked_at", oneHourAgo);
+          .select("*", { count: "exact", head: true });
 
-        if (deleteError) {
-          console.error("Error cleaning up old rejection logs:", deleteError);
-        } else {
-          console.log(`Cleaned up ${count || 0} old rejection logs (>24h)`);
+        if (totalCount && totalCount > 200) {
+          // Get the IDs of rows to delete (all except the last 200)
+          const rowsToDelete = totalCount - 200;
+
+          const { data: oldestLogs, error: fetchOldestError } = await supabase
+            .from("signal_rejection_log")
+            .select("id")
+            .order("checked_at", { ascending: true })
+            .limit(rowsToDelete);
+
+          if (fetchOldestError) {
+            console.error("Error fetching oldest rejection logs:", fetchOldestError);
+          } else if (oldestLogs && oldestLogs.length > 0) {
+            const { error: deleteLogsError } = await supabase
+              .from("signal_rejection_log")
+              .delete()
+              .in("id", oldestLogs.map((log) => log.id));
+
+            if (deleteLogsError) {
+              console.error("Error deleting old rejection logs:", deleteLogsError);
+            } else {
+              console.log(`Deleted ${oldestLogs.length} old rejection logs, keeping last 200`);
+            }
+          }
         }
       } catch (error) {
         console.error("Error during rejection log cleanup:", error);
