@@ -5,6 +5,15 @@ import { AlertCircle, TrendingDown, TrendingUp, Activity, Minimize2 } from "luci
 import { useSignalRejections } from "@/hooks/useSignalRejections";
 import { formatDistanceToNow } from "date-fns";
 
+interface SignalRejection {
+  id: string;
+  symbol: string;
+  checked_at: string;
+  rejection_reason: string;
+  filters_status: any;
+  trend_data: any;
+}
+
 export const SignalRejectionReasons = () => {
   const { rejections, loading } = useSignalRejections();
 
@@ -16,25 +25,34 @@ export const SignalRejectionReasons = () => {
     return <AlertCircle className="h-4 w-4" />;
   };
 
-  const getFilterDetails = (filtersStatus: any) => {
+  const getRejectionDetails = (rejection: SignalRejection) => {
     const details = [];
+    const fs = rejection.filters_status;
     
-    if (filtersStatus.aligned === false) {
-      details.push(`4h: ${filtersStatus.trend4h}, 1h: ${filtersStatus.trend1h}`);
+    // Higher timeframes not aligned
+    if (rejection.rejection_reason.includes('timeframes NOT aligned') || rejection.rejection_reason.includes('timeframe')) {
+      details.push(`4H: ${fs.trend4h || 'N/A'} | 1H: ${fs.trend1h || 'N/A'}`);
     }
     
-    if (filtersStatus.momentumConfirms === false) {
+    // Pullback issues
+    if (rejection.rejection_reason.includes('pullback') || fs.inPullback === false) {
+      details.push(`Retracement: ${fs.pullbackPercent !== undefined ? fs.pullbackPercent.toFixed(1) + '%' : 'N/A'}`);
+    }
+    
+    // Momentum issues
+    if (rejection.rejection_reason.includes('momentum') || fs.momentumConfirms === false) {
       details.push(
-        `15m: ${filtersStatus.consecutive15mBullish || 0}bull/${filtersStatus.consecutive15mBearish || 0}bear`,
-        `30m: ${filtersStatus.consecutive30mBullish || 0}bull/${filtersStatus.consecutive30mBearish || 0}bear`
+        `15m: ${fs.consecutive15mBullish || 0}🟢/${fs.consecutive15mBearish || 0}🔴`,
+        `30m: ${fs.consecutive30mBullish || 0}🟢/${fs.consecutive30mBearish || 0}🔴`
       );
     }
     
-    if (filtersStatus.inPullback === false && filtersStatus.pullbackPercent !== undefined) {
-      details.push(`Pullback: ${filtersStatus.pullbackPercent.toFixed(1)}%`);
+    // Ranging market
+    if (rejection.rejection_reason.includes('ranging') || fs.isRanging === true) {
+      details.push(`Market: Ranging`);
     }
     
-    return details.length > 0 ? details.join(' | ') : filtersStatus.required || 'Check filters';
+    return details.length > 0 ? details.join(' | ') : 'No specific data';
   };
 
   if (loading) {
@@ -81,7 +99,7 @@ export const SignalRejectionReasons = () => {
             <TableRow>
               <TableHead>Symbol</TableHead>
               <TableHead>Rejection Reason</TableHead>
-              <TableHead>Filter Details</TableHead>
+              <TableHead>Rejection Values</TableHead>
               <TableHead>Last Checked</TableHead>
             </TableRow>
           </TableHeader>
@@ -96,8 +114,8 @@ export const SignalRejectionReasons = () => {
                   </div>
                 </TableCell>
                 <TableCell>
-                  <div className="text-xs text-muted-foreground">
-                    {getFilterDetails(rejection.filters_status)}
+                  <div className="text-xs font-medium">
+                    {getRejectionDetails(rejection)}
                   </div>
                 </TableCell>
                 <TableCell>
