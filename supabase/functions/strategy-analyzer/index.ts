@@ -371,6 +371,7 @@ async function analyzeWithStrategy(
   let pullbackIdeal = false;
   let momentumConfirms = false;
   let isRanging = false;
+  let fullTrendData: any = null;
 
   try {
     const { data: trendData, error: trendError } = await supabase.functions.invoke("calculate-trend", {
@@ -383,6 +384,7 @@ async function analyzeWithStrategy(
     }
 
     if (trendData) {
+      fullTrendData = trendData;
       marketTrend = trendData.trend;
       trendConsistency = trendData.trendConsistency || 0;
 
@@ -436,6 +438,8 @@ async function analyzeWithStrategy(
     await logRejection("Higher timeframes not aligned", {
       higherTimeframeAligned: false,
       marketTrend: marketTrend,
+      trend4h: fullTrendData?.higherTimeframeFilter?.trend4h || 'unknown',
+      trend1h: fullTrendData?.higherTimeframeFilter?.trend1h || 'unknown',
       required: "4h and 1h must agree on direction",
     });
     return null;
@@ -462,6 +466,8 @@ async function analyzeWithStrategy(
     await logRejection("Higher timeframes not aligned", {
       higherTimeframeAligned: false,
       marketTrend: marketTrend,
+      trend4h: fullTrendData?.higherTimeframeFilter?.trend4h || 'unknown',
+      trend1h: fullTrendData?.higherTimeframeFilter?.trend1h || 'unknown',
       required: "4h and 1h must agree on direction",
     });
     return null;
@@ -501,6 +507,10 @@ async function analyzeWithStrategy(
     await logRejection("Momentum not confirmed", {
       higherTimeframeAligned: true,
       momentumConfirms: false,
+      consecutive15mBullish: fullTrendData?.momentum?.consecutive15mBullish || 0,
+      consecutive15mBearish: fullTrendData?.momentum?.consecutive15mBearish || 0,
+      consecutive30mBullish: fullTrendData?.momentum?.consecutive30mBullish || 0,
+      consecutive30mBearish: fullTrendData?.momentum?.consecutive30mBearish || 0,
       required: "2-3 consecutive candles on 15m and 30m + MACD expanding",
     });
     return null;
@@ -518,6 +528,7 @@ async function analyzeWithStrategy(
       momentumConfirms: true,
       isRanging: false,
       inPullback: false,
+      pullbackPercent: fullTrendData?.pullback?.pullbackPercent || 0,
       required: "10-65% retracement",
     });
     return null; // STRICT REJECTION - no trades outside pullback
