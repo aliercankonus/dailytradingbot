@@ -54,8 +54,8 @@ export const SignalRejectionReasons = () => {
     
     // Higher timeframes not aligned
     if (rejection.rejection_reason.includes('timeframes NOT aligned') || rejection.rejection_reason.includes('timeframe')) {
-      if (fs.trend4h && fs.trend1h) {
-        details.push(`4H: ${fs.trend4h} | 1H: ${fs.trend1h}`);
+      if (fs.trend4h || fs.trend1h) {
+        details.push(`4H: ${fs.trend4h || 'unknown'} | 1H: ${fs.trend1h || 'unknown'}`);
       }
     }
     
@@ -73,9 +73,7 @@ export const SignalRejectionReasons = () => {
       const m30Bullish = fs.consecutive30mBullish || 0;
       const m30Bearish = fs.consecutive30mBearish || 0;
       
-      if (m15Bullish > 0 || m15Bearish > 0 || m30Bullish > 0 || m30Bearish > 0) {
-        details.push(`15m: ${m15Bullish}🟢/${m15Bearish}🔴 | 30m: ${m30Bullish}🟢/${m30Bearish}🔴`);
-      }
+      details.push(`15m: ${m15Bullish}🟢/${m15Bearish}🔴 | 30m: ${m30Bullish}🟢/${m30Bearish}🔴`);
     }
     
     // Ranging market
