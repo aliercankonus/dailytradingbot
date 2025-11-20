@@ -25,34 +25,65 @@ export const SignalRejectionReasons = () => {
     return <AlertCircle className="h-4 w-4" />;
   };
 
+  const getFilterDetails = (filtersStatus: any) => {
+    const details = [];
+    
+    if (filtersStatus?.aligned === false) {
+      details.push(`4h: ${filtersStatus.trend4h}, 1h: ${filtersStatus.trend1h}`);
+    }
+    
+    if (filtersStatus?.momentumConfirms === false) {
+      details.push(
+        `15m: ${filtersStatus.consecutive15mBullish || 0}bull/${filtersStatus.consecutive15mBearish || 0}bear`,
+        `30m: ${filtersStatus.consecutive30mBullish || 0}bull/${filtersStatus.consecutive30mBearish || 0}bear`
+      );
+    }
+    
+    if (filtersStatus?.inPullback === false && filtersStatus.pullbackPercent !== undefined) {
+      details.push(`Pullback: ${filtersStatus.pullbackPercent.toFixed(1)}%`);
+    }
+    
+    return details.length > 0 ? details.join(' | ') : filtersStatus?.required || 'Check filters';
+  };
+
   const getRejectionDetails = (rejection: SignalRejection) => {
     const details = [];
     const fs = rejection.filters_status;
     
+    if (!fs) return 'No data';
+    
     // Higher timeframes not aligned
     if (rejection.rejection_reason.includes('timeframes NOT aligned') || rejection.rejection_reason.includes('timeframe')) {
-      details.push(`4H: ${fs.trend4h || 'N/A'} | 1H: ${fs.trend1h || 'N/A'}`);
+      if (fs.trend4h && fs.trend1h) {
+        details.push(`4H: ${fs.trend4h} | 1H: ${fs.trend1h}`);
+      }
     }
     
     // Pullback issues
-    if (rejection.rejection_reason.includes('pullback') || fs.inPullback === false) {
-      details.push(`Retracement: ${fs.pullbackPercent !== undefined ? fs.pullbackPercent.toFixed(1) + '%' : 'N/A'}`);
+    if (rejection.rejection_reason.includes('pullback')) {
+      if (fs.pullbackPercent !== undefined && fs.pullbackPercent !== null) {
+        details.push(`Retracement: ${fs.pullbackPercent.toFixed(1)}%`);
+      }
     }
     
     // Momentum issues
-    if (rejection.rejection_reason.includes('momentum') || fs.momentumConfirms === false) {
-      details.push(
-        `15m: ${fs.consecutive15mBullish || 0}🟢/${fs.consecutive15mBearish || 0}🔴`,
-        `30m: ${fs.consecutive30mBullish || 0}🟢/${fs.consecutive30mBearish || 0}🔴`
-      );
+    if (rejection.rejection_reason.includes('momentum')) {
+      const m15Bullish = fs.consecutive15mBullish || 0;
+      const m15Bearish = fs.consecutive15mBearish || 0;
+      const m30Bullish = fs.consecutive30mBullish || 0;
+      const m30Bearish = fs.consecutive30mBearish || 0;
+      
+      if (m15Bullish > 0 || m15Bearish > 0 || m30Bullish > 0 || m30Bearish > 0) {
+        details.push(`15m: ${m15Bullish}🟢/${m15Bearish}🔴 | 30m: ${m30Bullish}🟢/${m30Bearish}🔴`);
+      }
     }
     
     // Ranging market
-    if (rejection.rejection_reason.includes('ranging') || fs.isRanging === true) {
+    if (rejection.rejection_reason.includes('ranging') && fs.isRanging === true) {
       details.push(`Market: Ranging`);
     }
     
-    return details.length > 0 ? details.join(' | ') : 'No specific data';
+    return details.length > 0 ? details.join(' | ') : 'No specific values';
   };
 
   if (loading) {
@@ -99,6 +130,7 @@ export const SignalRejectionReasons = () => {
             <TableRow>
               <TableHead>Symbol</TableHead>
               <TableHead>Rejection Reason</TableHead>
+              <TableHead>Filter Details</TableHead>
               <TableHead>Rejection Values</TableHead>
               <TableHead>Last Checked</TableHead>
             </TableRow>
@@ -114,7 +146,12 @@ export const SignalRejectionReasons = () => {
                   </div>
                 </TableCell>
                 <TableCell>
-                  <div className="text-xs font-medium">
+                  <div className="text-xs text-muted-foreground">
+                    {getFilterDetails(rejection.filters_status)}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="text-xs font-medium text-destructive">
                     {getRejectionDetails(rejection)}
                   </div>
                 </TableCell>
