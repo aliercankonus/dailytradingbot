@@ -23,6 +23,7 @@ interface RiskParameters {
   daily_loss_limit_percent: number;
   daily_realized_loss: number;
   last_loss_reset_date: string | null;
+  auto_execute_signals: boolean;
   updated_at: string;
 }
 
