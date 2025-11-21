@@ -289,6 +289,7 @@ export type Database = {
       }
       risk_parameters: {
         Row: {
+          auto_execute_signals: boolean | null
           auto_rebalance_enabled: boolean | null
           consecutive_loss_threshold: number
           consecutive_losses: number | null
@@ -319,6 +320,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          auto_execute_signals?: boolean | null
           auto_rebalance_enabled?: boolean | null
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
@@ -349,6 +351,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          auto_execute_signals?: boolean | null
           auto_rebalance_enabled?: boolean | null
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null

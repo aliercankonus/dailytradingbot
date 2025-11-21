@@ -18,16 +18,16 @@ export const TradingSignalsDashboard = () => {
   const { generateSignals, isGenerating } = useSignalGenerator();
   const { toast } = useToast();
   const { riskParams, loading: riskLoading, updateRiskParameters } = useRiskParameters();
-  const autoExecEnabled = Boolean(riskParams?.is_trading_enabled);
+  const autoExecEnabled = Boolean(riskParams?.auto_execute_signals);
 
   const toggleAutoExecution = async (enabled: boolean) => {
     try {
-      await updateRiskParameters({ is_trading_enabled: enabled });
+      await updateRiskParameters({ auto_execute_signals: enabled });
       toast({
         title: enabled ? "Auto Execution Enabled" : "Auto Execution Disabled",
         description: enabled 
           ? "Trades will be executed automatically when signals are generated" 
-          : "Manual trade execution required",
+          : "Signals will be generated but require manual execution",
       });
     } catch (error) {
       toast({
@@ -46,7 +46,10 @@ export const TradingSignalsDashboard = () => {
       });
 
       const { data, error } = await supabase.functions.invoke('execute-trade', {
-        body: { signalId, action: 'execute' }
+        body: { signalId, action: 'execute' },
+        headers: {
+          'x-manual-execution': 'true'
+        }
       });
 
       if (error) throw error;

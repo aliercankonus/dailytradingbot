@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-manual-execution',
 };
 
 serve(async (req) => {
@@ -58,6 +58,10 @@ serve(async (req) => {
 
     const { signalId, action } = await req.json();
     console.log('Execute trade request:', { signalId, action, userId: user.id });
+    
+    // Check if this is a manual execution (from UI button click)
+    const isManualExecution = req.headers.get('x-manual-execution') === 'true';
+    console.log('Is manual execution:', isManualExecution);
 
     const binanceApiKey = Deno.env.get('BINANCE_API_KEY');
     const binanceApiSecret = Deno.env.get('BINANCE_API_SECRET');
@@ -69,8 +73,10 @@ serve(async (req) => {
       .eq('user_id', user.id)
       .single();
 
-    if (!riskParams?.is_trading_enabled) {
-      throw new Error('Trading is currently disabled');
+    // Allow manual execution even if is_trading_enabled is false (bot is off)
+    // But still require is_trading_enabled=true for automatic execution
+    if (!riskParams?.is_trading_enabled && !isManualExecution) {
+      throw new Error('Trading is currently disabled. Please enable the bot to execute trades automatically.');
     }
 
     const isPaperTrading = riskParams.paper_trading_mode ?? true;
