@@ -85,6 +85,23 @@ serve(async (req) => {
     const updates = [];
     const closedPositions = [];
     const trailingStopUpdates = [];
+    const trendExits = [];
+
+    // Fetch trend data for all symbols to check for trend reversals
+    const trendDataMap = new Map();
+    for (const symbol of symbols) {
+      try {
+        const trendResponse = await supabase.functions.invoke('calculate-trend', {
+          body: { symbol }
+        });
+        if (trendResponse.data) {
+          trendDataMap.set(symbol, trendResponse.data);
+          console.log(`Trend for ${symbol}: ${trendResponse.data.trend} (confidence: ${trendResponse.data.confidence}%)`);
+        }
+      } catch (error) {
+        console.error(`Failed to fetch trend for ${symbol}:`, error);
+      }
+    }
 
     for (const position of positions) {
       const currentPrice = priceMap.get(position.symbol);
@@ -92,6 +109,9 @@ serve(async (req) => {
 
       const atrData = atrMap.get(position.symbol);
       const atrPercent = atrData?.atrPercent || 1.5;
+      
+      // Get current trend for this position's symbol
+      const trendData = trendDataMap.get(position.symbol);
 
       const pnl =
         position.side === "BUY"
@@ -205,12 +225,51 @@ serve(async (req) => {
         }
       }
 
-      // Check if take profit or stop loss is hit (use updated stop loss)
+      // TREND-AWARE EXIT CHECK - Close position if trend has flipped against us
       let shouldClose = false;
       let closeReason = "";
+      
+      if (trendData) {
+        const currentTrend = trendData.trend; // 'bullish', 'bearish', or 'neutral'
+        const trendConfidence = trendData.confidence || 0;
+        const trend1h = trendData.higherTimeframeFilter?.trend1h;
+        
+        // For SHORT positions: Exit if trend turns bullish with confidence > 60
+        if (position.side === "SELL" && currentTrend === "bullish" && trendConfidence >= 60) {
+          shouldClose = true;
+          closeReason = "trend_reversal_bullish";
+          console.log(`🔄 TREND EXIT: Closing SHORT ${position.symbol} - Trend flipped to BULLISH (confidence: ${trendConfidence}%, 1h: ${trend1h})`);
+          
+          trendExits.push({
+            symbol: position.symbol,
+            side: position.side,
+            reason: "Trend reversed to bullish",
+            trend: currentTrend,
+            confidence: trendConfidence,
+            pnlPercent,
+          });
+        }
+        
+        // For LONG positions: Exit if trend turns bearish with confidence > 60
+        if (position.side === "BUY" && currentTrend === "bearish" && trendConfidence >= 60) {
+          shouldClose = true;
+          closeReason = "trend_reversal_bearish";
+          console.log(`🔄 TREND EXIT: Closing LONG ${position.symbol} - Trend flipped to BEARISH (confidence: ${trendConfidence}%, 1h: ${trend1h})`);
+          
+          trendExits.push({
+            symbol: position.symbol,
+            side: position.side,
+            reason: "Trend reversed to bearish",
+            trend: currentTrend,
+            confidence: trendConfidence,
+            pnlPercent,
+          });
+        }
+      }
 
-      if (position.side === "BUY") {
-        // For LONG positions: TP when price goes UP, SL when price goes DOWN
+      // Check if take profit or stop loss is hit (use updated stop loss)
+      if (!shouldClose && position.side === "BUY") {
+        // LONG: TP when price goes UP, SL when price goes DOWN
         if (position.take_profit && currentPrice >= position.take_profit) {
           shouldClose = true;
           closeReason = "take_profit";
@@ -218,8 +277,8 @@ serve(async (req) => {
           shouldClose = true;
           closeReason = trailingActivated ? "trailing_stop_loss" : "stop_loss";
         }
-      } else {
-        // For SHORT positions: TP when price goes DOWN, SL when price goes UP
+      } else if (!shouldClose && position.side === "SELL") {
+        // SHORT: TP when price goes DOWN, SL when price goes UP
         if (position.take_profit && currentPrice <= position.take_profit) {
           shouldClose = true;
           closeReason = "take_profit";
@@ -291,7 +350,8 @@ serve(async (req) => {
         updates,
         closedPositions,
         trailingStopUpdates,
-        message: `Updated ${updates.length} positions, ${trailingStopUpdates.length} trailing stops adjusted, closed ${closedPositions.length} positions`,
+        trendExits,
+        message: `Updated ${updates.length} positions, ${trailingStopUpdates.length} trailing stops adjusted, closed ${closedPositions.length} positions (${trendExits.length} trend exits)`,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
