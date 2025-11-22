@@ -17,6 +17,7 @@ export interface ClosedPosition {
   trade_id: string;
   opened_by_rebalancer?: boolean;
   closed_by_rebalancer?: boolean;
+  close_reason?: string | null;
   trades?: {
     strategy_name: string;
     profit_loss: number;

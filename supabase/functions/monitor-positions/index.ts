@@ -297,6 +297,7 @@ serve(async (req) => {
             current_price: currentPrice,
             unrealized_pnl: pnl,
             unrealized_pnl_percent: pnlPercent,
+            close_reason: closeReason,
           })
           .eq("id", position.id);
 
