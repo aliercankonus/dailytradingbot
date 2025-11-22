@@ -16,20 +16,27 @@ export const ClosedPositionsDashboard = () => {
   const positionsPerPage = 10;
 
   const getCloseReason = (position: any): string => {
-    const exitPrice = position.current_price;
+    // Use stored close_reason if available
+    if (position.close_reason) {
+      switch (position.close_reason) {
+        case 'take_profit': return 'Take Profit';
+        case 'stop_loss': return 'Stop Loss';
+        case 'trailing_stop_loss': return 'Trailing Stop';
+        case 'trend_reversal_bullish': return 'Trend Exit (Bullish)';
+        case 'trend_reversal_bearish': return 'Trend Exit (Bearish)';
+        case 'manual': return 'Manual Close';
+        default: return position.close_reason;
+      }
+    }
     
+    // Fallback: infer from price data for old positions
+    const exitPrice = position.current_price;
     if (position.side === 'BUY') {
-      if (position.take_profit && exitPrice >= position.take_profit) {
-        return 'Take Profit';
-      } else if (position.stop_loss && exitPrice <= position.stop_loss) {
-        return 'Stop Loss';
-      }
+      if (position.take_profit && exitPrice >= position.take_profit) return 'Take Profit';
+      else if (position.stop_loss && exitPrice <= position.stop_loss) return 'Stop Loss';
     } else {
-      if (position.take_profit && exitPrice <= position.take_profit) {
-        return 'Take Profit';
-      } else if (position.stop_loss && exitPrice >= position.stop_loss) {
-        return 'Stop Loss';
-      }
+      if (position.take_profit && exitPrice <= position.take_profit) return 'Take Profit';
+      else if (position.stop_loss && exitPrice >= position.stop_loss) return 'Stop Loss';
     }
     
     return 'Manual Close';
@@ -37,7 +44,10 @@ export const ClosedPositionsDashboard = () => {
 
   const stats = useMemo(() => {
     if (!positions || positions.length === 0) {
-      return { total: 0, profitable: 0, losses: 0, totalPnL: 0, avgPnL: 0, takeProfitCount: 0, stopLossCount: 0 };
+      return { 
+        total: 0, profitable: 0, losses: 0, totalPnL: 0, avgPnL: 0, 
+        takeProfitCount: 0, stopLossCount: 0, trailingStopCount: 0, trendExitCount: 0, manualCount: 0 
+      };
     }
     
     // Use actual profit_loss from trades table, not unrealized_pnl
@@ -45,14 +55,20 @@ export const ClosedPositionsDashboard = () => {
     const losses = positions.filter(p => (p.trades?.profit_loss || 0) <= 0).length;
     const totalPnL = positions.reduce((sum, p) => sum + (p.trades?.profit_loss || 0), 0);
     
-    // Estimate closure reason based on price and TP/SL
+    // Count closure reasons
     let takeProfitCount = 0;
     let stopLossCount = 0;
+    let trailingStopCount = 0;
+    let trendExitCount = 0;
+    let manualCount = 0;
     
     positions.forEach(p => {
       const closeReason = getCloseReason(p);
       if (closeReason === 'Take Profit') takeProfitCount++;
-      if (closeReason === 'Stop Loss') stopLossCount++;
+      else if (closeReason === 'Stop Loss') stopLossCount++;
+      else if (closeReason === 'Trailing Stop') trailingStopCount++;
+      else if (closeReason.includes('Trend Exit')) trendExitCount++;
+      else manualCount++;
     });
     
     return {
@@ -63,6 +79,9 @@ export const ClosedPositionsDashboard = () => {
       avgPnL: positions.length > 0 ? totalPnL / positions.length : 0,
       takeProfitCount,
       stopLossCount,
+      trailingStopCount,
+      trendExitCount,
+      manualCount,
     };
   }, [positions]);
 
@@ -106,9 +125,23 @@ export const ClosedPositionsDashboard = () => {
     
     if (reason === 'Take Profit') {
       return (
-        <Badge variant="default" className="gap-1">
+        <Badge variant="default" className="gap-1 bg-success/10 text-success border-success/20">
           <Target className="h-3 w-3" />
           Take Profit
+        </Badge>
+      );
+    } else if (reason === 'Trailing Stop') {
+      return (
+        <Badge variant="outline" className="gap-1 bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
+          <TrendingUp className="h-3 w-3" />
+          Trailing Stop
+        </Badge>
+      );
+    } else if (reason.includes('Trend Exit')) {
+      return (
+        <Badge variant="outline" className="gap-1 bg-purple-500/10 text-purple-500 border-purple-500/20">
+          <TrendingDown className="h-3 w-3" />
+          {reason}
         </Badge>
       );
     } else if (reason === 'Stop Loss') {
@@ -178,20 +211,26 @@ export const ClosedPositionsDashboard = () => {
           <CardDescription>How positions were closed</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="text-center p-4 border rounded-lg">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="text-center p-4 border rounded-lg bg-success/5">
               <div className="text-2xl font-bold text-success">{stats.takeProfitCount}</div>
               <div className="text-sm text-muted-foreground">Take Profit</div>
             </div>
-            <div className="text-center p-4 border rounded-lg">
+            <div className="text-center p-4 border rounded-lg bg-yellow-500/5">
+              <div className="text-2xl font-bold text-yellow-600">{stats.trailingStopCount}</div>
+              <div className="text-sm text-muted-foreground">Trailing Stop</div>
+            </div>
+            <div className="text-center p-4 border rounded-lg bg-purple-500/5">
+              <div className="text-2xl font-bold text-purple-500">{stats.trendExitCount}</div>
+              <div className="text-sm text-muted-foreground">Trend Exit</div>
+            </div>
+            <div className="text-center p-4 border rounded-lg bg-destructive/5">
               <div className="text-2xl font-bold text-destructive">{stats.stopLossCount}</div>
               <div className="text-sm text-muted-foreground">Stop Loss</div>
             </div>
             <div className="text-center p-4 border rounded-lg">
-              <div className="text-2xl font-bold text-muted-foreground">
-                {stats.total - stats.takeProfitCount - stats.stopLossCount}
-              </div>
-              <div className="text-sm text-muted-foreground">Manual Close</div>
+              <div className="text-2xl font-bold text-muted-foreground">{stats.manualCount}</div>
+              <div className="text-sm text-muted-foreground">Manual</div>
             </div>
           </div>
         </CardContent>

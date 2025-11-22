@@ -185,6 +185,7 @@ export type Database = {
       }
       positions: {
         Row: {
+          close_reason: string | null
           closed_by_rebalancer: boolean | null
           confidence_score: number | null
           current_price: number | null
@@ -207,6 +208,7 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          close_reason?: string | null
           closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
@@ -229,6 +231,7 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          close_reason?: string | null
           closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
