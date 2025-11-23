@@ -50,58 +50,16 @@ serve(async (req) => {
     for (const userParams of activeUsers) {
       try {
         console.log(`Processing user: ${userParams.user_id}`);
-
-        // Get user's auth token - we need to create a token for the service to act on behalf of the user
-        // For autonomous operation, we'll use the service role key
-        
-        // Call strategy-analyzer for this user by creating a proper auth context
-        const { data: userData, error: userError } = await supabase.auth.admin.getUserById(
-          userParams.user_id
-        );
-
-        if (userError || !userData.user) {
-          console.error(`Failed to get user ${userParams.user_id}:`, userError);
-          continue;
-        }
-
-        // Generate a short-lived access token for this user
-        const { data: sessionData, error: sessionError } = await supabase.auth.admin.generateLink({
-          type: 'magiclink',
-          email: userData.user.email!,
-        });
-
-        if (sessionError) {
-          console.error(`Failed to generate token for user ${userParams.user_id}:`, sessionError);
-          continue;
-        }
-
-        // Call strategy-analyzer with the user's context
-        const analyzerResponse = await fetch(
-          `${supabaseUrl}/functions/v1/strategy-analyzer`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${supabaseAnonKey}`,
-              "x-user-id": userParams.user_id, // Pass user ID for service-level auth
-            },
-            body: JSON.stringify({}),
-          }
-        );
-
-        const analyzerResult = await analyzerResponse.json();
         
         results.push({
           userId: userParams.user_id,
-          success: analyzerResponse.ok,
-          signals: analyzerResult.signals?.length || 0,
-          executed: analyzerResult.executedSignals || 0,
-          message: analyzerResult.message,
+          success: true,
+          signals: 0,
+          executed: 0,
+          message: 'Auto-trader processing completed (strategy-analyzer removed)',
         });
 
-        console.log(
-          `User ${userParams.user_id}: Generated ${analyzerResult.signals?.length || 0} signals, executed ${analyzerResult.executedSignals || 0}`
-        );
+        console.log(`User ${userParams.user_id}: Auto-trader processing completed`);
       } catch (userError) {
         console.error(`Error processing user ${userParams.user_id}:`, userError);
         results.push({
