@@ -217,6 +217,18 @@ serve(async (req) => {
     const stopLossDistance = Math.abs(currentPrice - stopLoss);
     let quantity = riskAmount / stopLossDistance;
 
+    // Apply confidence-based position size scaling
+    const confidence = signal.confidence_score || 0;
+    if (confidence < 50) {
+      quantity *= 0.5; // Reduce by 50%
+      console.log(`Position size reduced by 50% due to low confidence (${confidence}%)`);
+    } else if (confidence > 75) {
+      quantity *= 1.25; // Increase by 25%
+      console.log(`Position size increased by 25% due to high confidence (${confidence}%)`);
+    } else {
+      console.log(`Position size normal for confidence ${confidence}%`);
+    }
+
     // Apply position size reduction if consecutive losses
     if (riskParams.consecutive_losses >= riskParams.consecutive_loss_threshold) {
       quantity *= (1 - riskParams.position_size_reduction_percent / 100);
