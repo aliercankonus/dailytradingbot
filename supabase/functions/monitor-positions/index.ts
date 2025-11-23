@@ -230,40 +230,71 @@ serve(async (req) => {
       let closeReason = "";
       
       if (trendData) {
-        const currentTrend = trendData.trend; // 'bullish', 'bearish', or 'neutral'
+        const currentTrend = trendData.trend; // 'bullish', 'bearish', or 'ranging'
         const trendConfidence = trendData.confidence || 0;
         const trend1h = trendData.higherTimeframeFilter?.trend1h;
+        const trend4h = trendData.higherTimeframeFilter?.trend4h;
         
-        // For SHORT positions: Exit if trend turns bullish with confidence > 60
-        if (position.side === "SELL" && currentTrend === "bullish" && trendConfidence >= 60) {
-          shouldClose = true;
-          closeReason = "trend_reversal_bullish";
-          console.log(`🔄 TREND EXIT: Closing SHORT ${position.symbol} - Trend flipped to BULLISH (confidence: ${trendConfidence}%, 1h: ${trend1h})`);
+        // For SHORT positions: Exit if trend turns bullish OR ranging (market indecision) with lower threshold
+        // Also exit if there's higher timeframe conflict (4h bearish vs 1h bullish = dangerous for shorts)
+        if (position.side === "SELL") {
+          const htfConflict = trend4h === "bearish" && trend1h === "bullish"; // Higher timeframe conflict
           
-          trendExits.push({
-            symbol: position.symbol,
-            side: position.side,
-            reason: "Trend reversed to bullish",
-            trend: currentTrend,
-            confidence: trendConfidence,
-            pnlPercent,
-          });
+          if (currentTrend === "bullish" && trendConfidence >= 45) {
+            shouldClose = true;
+            closeReason = "trend_reversal_bullish";
+            console.log(`🔄 TREND EXIT: Closing SHORT ${position.symbol} - Trend BULLISH (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`);
+          } else if (currentTrend === "ranging" && htfConflict && trendConfidence >= 30) {
+            shouldClose = true;
+            closeReason = "trend_reversal_ranging";
+            console.log(`🔄 TREND EXIT: Closing SHORT ${position.symbol} - RANGING + HTF conflict (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`);
+          } else if (currentTrend === "ranging" && trendConfidence >= 40) {
+            shouldClose = true;
+            closeReason = "trend_reversal_ranging";
+            console.log(`🔄 TREND EXIT: Closing SHORT ${position.symbol} - Trend RANGING (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`);
+          }
+          
+          if (shouldClose) {
+            trendExits.push({
+              symbol: position.symbol,
+              side: position.side,
+              reason: `Trend: ${currentTrend} (${trendConfidence}%), 4h: ${trend4h}, 1h: ${trend1h}`,
+              trend: currentTrend,
+              confidence: trendConfidence,
+              pnlPercent,
+            });
+          }
         }
         
-        // For LONG positions: Exit if trend turns bearish with confidence > 60
-        if (position.side === "BUY" && currentTrend === "bearish" && trendConfidence >= 60) {
-          shouldClose = true;
-          closeReason = "trend_reversal_bearish";
-          console.log(`🔄 TREND EXIT: Closing LONG ${position.symbol} - Trend flipped to BEARISH (confidence: ${trendConfidence}%, 1h: ${trend1h})`);
+        // For LONG positions: Exit if trend turns bearish OR ranging with lower threshold
+        // Also exit if there's higher timeframe conflict (4h bullish vs 1h bearish)
+        if (position.side === "BUY") {
+          const htfConflict = trend4h === "bullish" && trend1h === "bearish";
           
-          trendExits.push({
-            symbol: position.symbol,
-            side: position.side,
-            reason: "Trend reversed to bearish",
-            trend: currentTrend,
-            confidence: trendConfidence,
-            pnlPercent,
-          });
+          if (currentTrend === "bearish" && trendConfidence >= 45) {
+            shouldClose = true;
+            closeReason = "trend_reversal_bearish";
+            console.log(`🔄 TREND EXIT: Closing LONG ${position.symbol} - Trend BEARISH (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`);
+          } else if (currentTrend === "ranging" && htfConflict && trendConfidence >= 30) {
+            shouldClose = true;
+            closeReason = "trend_reversal_ranging";
+            console.log(`🔄 TREND EXIT: Closing LONG ${position.symbol} - RANGING + HTF conflict (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`);
+          } else if (currentTrend === "ranging" && trendConfidence >= 40) {
+            shouldClose = true;
+            closeReason = "trend_reversal_ranging";
+            console.log(`🔄 TREND EXIT: Closing LONG ${position.symbol} - Trend RANGING (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`);
+          }
+          
+          if (shouldClose) {
+            trendExits.push({
+              symbol: position.symbol,
+              side: position.side,
+              reason: `Trend: ${currentTrend} (${trendConfidence}%), 4h: ${trend4h}, 1h: ${trend1h}`,
+              trend: currentTrend,
+              confidence: trendConfidence,
+              pnlPercent,
+            });
+          }
         }
       }
 

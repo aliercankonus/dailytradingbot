@@ -24,6 +24,7 @@ export const ClosedPositionsDashboard = () => {
         case 'trailing_stop_loss': return 'Trailing Stop';
         case 'trend_reversal_bullish': return 'Trend Exit (Bullish)';
         case 'trend_reversal_bearish': return 'Trend Exit (Bearish)';
+        case 'trend_reversal_ranging': return 'Trend Exit (Ranging)';
         case 'manual': return 'Manual Close';
         default: return position.close_reason;
       }
