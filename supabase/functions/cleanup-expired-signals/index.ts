@@ -42,11 +42,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Get signals that have open trades (shouldn't be deleted)
+    // Get signals that have ANY trades (open or closed) - can't delete if referenced by ANY trade
     const { data: activeTrades } = await supabase
       .from('trades')
       .select('signal_id')
-      .eq('status', 'open')
       .in('signal_id', expiredSignals.map(s => s.id));
 
     const referencedIds = new Set(activeTrades?.map(t => t.signal_id).filter(Boolean));
@@ -55,13 +54,13 @@ Deno.serve(async (req) => {
     const signalsToDelete = expiredSignals.filter(s => !referencedIds.has(s.id));
 
     if (signalsToDelete.length === 0) {
-      console.log(`Found ${expiredSignals.length} expired signals but all have active trades`);
+      console.log(`Found ${expiredSignals.length} expired signals but all are referenced by trades`);
       return new Response(
         JSON.stringify({ 
           success: true, 
           deleted: 0,
           skipped: expiredSignals.length,
-          message: 'All expired signals have active trades'
+          message: 'All expired signals are referenced by trades (cannot delete due to foreign key constraint)'
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
