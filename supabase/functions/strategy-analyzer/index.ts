@@ -67,12 +67,15 @@ serve(async (req) => {
 
     console.log(`Analyzing ${symbols.length} symbols`);
 
-    // Fetch existing signals and open trades to avoid duplicates
+    // Calculate timestamp for 1 minute ago to match UI filter
+    const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
+
+    // Fetch recent signals (last 1 minute) and open trades to avoid duplicates
     const { data: existingSignals } = await supabase
       .from('trading_signals')
       .select('symbol')
       .eq('user_id', user.id)
-      .gte('expires_at', new Date().toISOString());
+      .gte('created_at', oneMinuteAgo);
 
     const { data: openTrades } = await supabase
       .from('trades')
