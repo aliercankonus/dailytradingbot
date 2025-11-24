@@ -52,8 +52,23 @@ export const SignalRejectionReasons = () => {
     
     if (!fs) return 'No data';
     
-    // Higher timeframes not aligned
-    if (rejection.rejection_reason.includes('timeframes NOT aligned') || rejection.rejection_reason.includes('timeframe')) {
+    // Timeframes not aligned with no divergence opportunity
+    if (rejection.rejection_reason.includes('timeframes not aligned, no divergence opportunity')) {
+      if (fs.trend4h || fs.trend1h) {
+        details.push(`4h: ${fs.trend4h || 'unknown'}, 1h: ${fs.trend1h || 'unknown'}`);
+      }
+      
+      // Add divergence result
+      const divergenceStatus = fs.divergenceAllowed === false ? 'no divergence' : 'divergence allowed';
+      details.push(divergenceStatus);
+      
+      // Add ranging market status if present
+      if (fs.isRanging === true) {
+        details.push('ranging market');
+      }
+    }
+    // Other timeframe alignment issues
+    else if (rejection.rejection_reason.includes('timeframes NOT aligned') || rejection.rejection_reason.includes('timeframe')) {
       if (fs.trend4h || fs.trend1h) {
         details.push(`4H: ${fs.trend4h || 'unknown'} | 1H: ${fs.trend1h || 'unknown'}`);
       }
