@@ -196,7 +196,7 @@ serve(async (req) => {
         // Adjust stop loss and take profit for divergence signals (shorter timeframes)
         const isDivergenceSignal = higherTimeframeFilter.divergenceType;
         const stopLossPercent = isDivergenceSignal 
-          ? riskParams.max_risk_per_trade_percent * 0.67  // Tighter SL: 1% instead of 1.5%
+          ? riskParams.max_risk_per_trade_percent * (riskParams.divergence_sl_multiplier || 0.67)  // Use configured divergence SL multiplier
           : riskParams.max_risk_per_trade_percent;
         const takeProfitMultiplier = isDivergenceSignal 
           ? (riskParams.divergence_tp_multiplier || 2.0)  // Use configured divergence TP multiplier
