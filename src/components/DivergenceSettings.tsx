@@ -112,8 +112,9 @@ export function DivergenceSettings() {
         <Alert>
           <Info className="h-4 w-4" />
           <AlertDescription>
-            Divergence signals allow trading during trend transitions with reduced position sizing.
-            Aligned signals (4h + 1h agree) always trade at 100% position size.
+            Divergence signals allow trading during trend transitions with reduced position sizing and tighter targets.
+            Aligned signals (4h + 1h agree) use standard sizing (100%) and targets (1.5% SL / 3.75% TP).
+            Divergence signals use reduced sizing and faster exits (1% SL / 2% TP) for shorter-term opportunities.
           </AlertDescription>
         </Alert>
 
