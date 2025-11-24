@@ -214,35 +214,74 @@ async function rebalanceUserPositions(
 
       // Generate a new signal aligned with current trend
       const trend = trendData[position.symbol];
-      if (trend && trend.confidence >= 60 && trend.trendConsistency >= 60) {
-        const newSignalType = trend.trend === 'bullish' ? 'long' : 'short';
-        
-        // Create new trading signal marked as created by rebalancer
-        const { error: signalError } = await supabase
-          .from('trading_signals')
-          .insert({
-            user_id,
-            symbol: position.symbol,
-            signal_type: newSignalType,
-            trend: trend.trend,
-            confidence_score: trend.confidence,
-            entry_price: trend.currentPrice,
-            created_by_rebalancer: true,
-            stop_loss: newSignalType === 'long' 
-              ? trend.currentPrice * (1 - 0.015)
-              : trend.currentPrice * (1 + 0.015),
-            take_profit: newSignalType === 'long'
-              ? trend.currentPrice * (1 + 0.0375)
-              : trend.currentPrice * (1 - 0.0375),
-            strategy_name: 'Auto Rebalance',
-            reason: `Rebalancing: Closed ${position.side} position and opening ${newSignalType.toUpperCase()} to align with ${trend.trend} market`,
-            indicators: trend.indicators,
-            expires_at: new Date(Date.now() + 60000).toISOString() // 1 minute expiry
-          });
+      if (trend) {
+        // Fetch user's divergence settings
+        const { data: riskParams } = await supabase
+          .from('risk_parameters')
+          .select('enable_pullback_signals, enable_early_reversal_signals, pullback_position_size_percent, early_reversal_position_size_percent')
+          .eq('user_id', user_id)
+          .single();
 
-        if (!signalError) {
-          signalsGenerated++;
-          console.log(`  ✓ Generated ${newSignalType.toUpperCase()} signal for ${position.symbol}`);
+        let shouldCreateSignal = false;
+        let positionSizePercent = 100;
+        let confidenceCap = 100;
+        let signalReason = '';
+
+        // Check signal eligibility based on divergence settings
+        if (trend.higherTimeframeFilter?.aligned) {
+          shouldCreateSignal = trend.confidence >= 60 && trend.trendConsistency >= 60;
+          signalReason = `Rebalancing: Closed ${position.side} position and opening to align with ${trend.trend} market`;
+        } else if (trend.higherTimeframeFilter?.allowDivergenceSignal && riskParams) {
+          const { divergenceType } = trend.higherTimeframeFilter;
+          
+          if (divergenceType === 'pullback' && riskParams.enable_pullback_signals) {
+            shouldCreateSignal = true;
+            positionSizePercent = riskParams.pullback_position_size_percent || 50;
+            confidenceCap = 70;
+            signalReason = `Rebalancing: Pullback opportunity after closing ${position.side} position`;
+          } else if (divergenceType === 'early_reversal' && riskParams.enable_early_reversal_signals) {
+            shouldCreateSignal = true;
+            positionSizePercent = riskParams.early_reversal_position_size_percent || 40;
+            confidenceCap = 65;
+            signalReason = `Rebalancing: Early reversal opportunity after closing ${position.side} position`;
+          }
+        }
+
+        if (shouldCreateSignal) {
+          const newSignalType = trend.trend === 'bullish' ? 'long' : 'short';
+          const finalConfidence = Math.min(trend.confidence, confidenceCap);
+          
+          // Create new trading signal marked as created by rebalancer
+          const { error: signalError } = await supabase
+            .from('trading_signals')
+            .insert({
+              user_id,
+              symbol: position.symbol,
+              signal_type: newSignalType,
+              trend: trend.trend,
+              confidence_score: finalConfidence,
+              entry_price: trend.currentPrice,
+              created_by_rebalancer: true,
+              stop_loss: newSignalType === 'long' 
+                ? trend.currentPrice * (1 - 0.015)
+                : trend.currentPrice * (1 + 0.015),
+              take_profit: newSignalType === 'long'
+                ? trend.currentPrice * (1 + 0.0375)
+                : trend.currentPrice * (1 - 0.0375),
+              strategy_name: 'Auto Rebalance',
+              reason: signalReason,
+              indicators: {
+                ...trend.indicators,
+                divergenceType: trend.higherTimeframeFilter?.divergenceType,
+                positionSizePercent
+              },
+              expires_at: new Date(Date.now() + 60000).toISOString() // 1 minute expiry
+            });
+
+          if (!signalError) {
+            signalsGenerated++;
+            console.log(`  ✓ Generated ${newSignalType.toUpperCase()} signal for ${position.symbol} (${trend.higherTimeframeFilter?.divergenceType || 'aligned'})`);
+          }
         }
       }
     } catch (error) {
