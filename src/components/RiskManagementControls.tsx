@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { usePositions } from '@/hooks/usePositions';
+import { useRealtimePrices } from '@/hooks/useRealtimePrices';
 import { Shield, AlertTriangle, DollarSign, TrendingDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useEffect } from 'react';
@@ -21,6 +22,11 @@ import {
 export const RiskManagementControls = () => {
   const { riskParams, updateRiskParameters } = useRiskParameters();
   const { positions } = usePositions();
+  
+  // Get live prices for all active position symbols
+  const symbols = positions.map(p => p.symbol);
+  const { getPrice } = useRealtimePrices(symbols);
+  
   const { toast } = useToast();
 
   const [formData, setFormData] = useState({
@@ -77,7 +83,20 @@ export const RiskManagementControls = () => {
     return <Card className="p-6"><p className="text-muted-foreground">Loading...</p></Card>;
   }
 
-  const totalPnL = positions.reduce((sum, pos) => sum + (pos.unrealized_pnl || 0), 0);
+  // Calculate unrealized P&L from open positions using LIVE prices
+  const totalPnL = positions
+    .filter(p => p.status === 'active')
+    .reduce((sum, pos) => {
+      const livePrice = getPrice(pos.symbol);
+      const currentPrice = livePrice ? parseFloat(livePrice.price) : pos.current_price || pos.entry_price;
+      
+      // Calculate live P&L
+      const pnl = pos.side === 'BUY'
+        ? (currentPrice - pos.entry_price) * pos.quantity
+        : (pos.entry_price - currentPrice) * pos.quantity;
+      
+      return sum + pnl;
+    }, 0);
 
   return (
     <div className="space-y-4">
