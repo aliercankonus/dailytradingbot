@@ -356,15 +356,8 @@ serve(async (req) => {
         console.log(
           `Closed position ${position.id} - ${position.symbol} ${position.side} - ${closeReason} at ${currentPrice}`,
         );
-      } else {
-        // Update position with current price only (UI calculates P&L from live WebSocket prices)
-        await supabase
-          .from("positions")
-          .update({
-            current_price: currentPrice,
-          })
-          .eq("id", position.id);
       }
+      // Note: No database updates for active positions - UI uses live WebSocket prices
 
       updates.push({
         symbol: position.symbol,
