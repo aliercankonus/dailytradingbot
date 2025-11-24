@@ -62,12 +62,12 @@ export const usePositions = () => {
     // Monitor positions every 30 seconds (balanced compromise between cost and responsiveness)
     const monitorInterval = setInterval(async () => {
       // Only call monitor-positions if we have active positions
-      const { data } = await supabase
+      const { count } = await supabase
         .from('positions')
-        .select('id', { count: 'exact', head: true })
+        .select('*', { count: 'exact', head: true })
         .eq('status', 'active');
       
-      if (data && data.length > 0) {
+      if (count && count > 0) {
         await supabase.functions.invoke('monitor-positions');
       }
       fetchPositions();
