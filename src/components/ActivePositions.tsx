@@ -2,15 +2,44 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { usePositions } from '@/hooks/usePositions';
+import { useRealtimePrices } from '@/hooks/useRealtimePrices';
 import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 
 export const ActivePositions = () => {
   const { positions, loading, refetch } = usePositions();
   const { toast } = useToast();
   const [closingPosition, setClosingPosition] = useState<string | null>(null);
+  
+  // Get live prices for all active position symbols
+  const symbols = useMemo(() => positions.map(p => p.symbol), [positions]);
+  const { getPrice } = useRealtimePrices(symbols);
+
+  // Calculate live P&L for each position
+  const positionsWithLivePnL = useMemo(() => {
+    return positions.map(position => {
+      const livePrice = getPrice(position.symbol);
+      const currentPrice = livePrice ? parseFloat(livePrice.price) : position.current_price || position.entry_price;
+      
+      // Calculate live P&L
+      const pnl = position.side === 'BUY'
+        ? (currentPrice - position.entry_price) * position.quantity
+        : (position.entry_price - currentPrice) * position.quantity;
+      
+      const pnlPercent = position.side === 'BUY'
+        ? ((currentPrice - position.entry_price) / position.entry_price) * 100
+        : ((position.entry_price - currentPrice) / position.entry_price) * 100;
+
+      return {
+        ...position,
+        live_current_price: currentPrice,
+        live_unrealized_pnl: pnl,
+        live_unrealized_pnl_percent: pnlPercent
+      };
+    });
+  }, [positions, getPrice]);
 
   const closePosition = async (positionId: string, symbol: string) => {
     try {
@@ -52,11 +81,11 @@ export const ActivePositions = () => {
             <Loader2 className="h-4 w-4 text-primary animate-spin" />
           )}
         </div>
-        <Badge variant="outline">{positions.length} Open</Badge>
+        <Badge variant="outline">{positionsWithLivePnL.length} Open</Badge>
       </div>
 
       <div className="grid gap-4">
-        {positions.map((position) => (
+        {positionsWithLivePnL.map((position) => (
           <Card key={position.id} className="p-4">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-3">
@@ -71,10 +100,10 @@ export const ActivePositions = () => {
                     {position.opened_by_rebalancer && (
                       <Badge variant="outline" className="text-xs flex items-center gap-1 bg-blue-500/10 text-blue-500 border-blue-500/20">
                         <RotateCw className="h-3 w-3" />
-                        Auto-Rebalanced
+                     Auto-Rebalanced
                       </Badge>
                     )}
-                    {(position.unrealized_pnl_percent || 0) > 1 && (
+                    {(position.live_unrealized_pnl_percent || 0) > 1 && (
                       <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
                         <Shield className="h-3 w-3" />
                         Trailing
@@ -96,11 +125,11 @@ export const ActivePositions = () => {
               </div>
               <div className="flex items-center gap-3">
                 <div className="text-right">
-                  <div className={`text-xl font-bold ${(position.unrealized_pnl || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    ${(position.unrealized_pnl || 0).toFixed(2)}
+                  <div className={`text-xl font-bold ${position.live_unrealized_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    ${position.live_unrealized_pnl.toFixed(2)}
                   </div>
-                  <div className={`text-sm ${(position.unrealized_pnl_percent || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    {(position.unrealized_pnl_percent || 0).toFixed(2)}%
+                  <div className={`text-sm ${position.live_unrealized_pnl_percent >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    {position.live_unrealized_pnl_percent.toFixed(2)}%
                   </div>
                 </div>
                 <Button
@@ -125,7 +154,7 @@ export const ActivePositions = () => {
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Current</div>
-                <div className="font-medium">${(position.current_price || position.entry_price).toFixed(4)}</div>
+                <div className="font-medium">${position.live_current_price.toFixed(4)}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Stop Loss</div>
@@ -171,7 +200,7 @@ export const ActivePositions = () => {
           </Card>
         ))}
 
-        {positions.length === 0 && (
+        {positionsWithLivePnL.length === 0 && (
           <Card className="p-12 text-center">
             <p className="text-muted-foreground">No active positions</p>
           </Card>
