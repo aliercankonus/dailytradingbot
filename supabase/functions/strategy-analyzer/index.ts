@@ -86,6 +86,31 @@ serve(async (req) => {
 
     console.log(`Analyzing ${symbols.length} symbols`);
 
+    // Fetch active custom strategies (REQUIRED for signal generation)
+    const { data: customStrategies, error: strategiesError } = await supabase
+      .from('custom_strategies')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('is_active', true);
+
+    if (strategiesError) {
+      console.error('Failed to fetch custom strategies:', strategiesError);
+    }
+
+    if (!customStrategies || customStrategies.length === 0) {
+      return new Response(
+        JSON.stringify({ 
+          message: 'No active custom strategies configured. Multi-Timeframe Analysis is used as a prerequisite only - signals are generated for custom strategies.',
+          signals: [],
+          totalSignalsGenerated: 0,
+          rejectedByMultiTimeframeAnalysis: 0
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`Found ${customStrategies.length} active custom strategies`);
+
     // Calculate timestamp for 1 minute ago to match UI filter
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
 
@@ -109,15 +134,140 @@ serve(async (req) => {
 
     const signals: SignalData[] = [];
     let totalSignalsGenerated = 0;
-    let rejectedByDivergenceSettings = 0;
+    let rejectedByMultiTimeframeAnalysis = 0;
+
+    // Helper functions for custom strategy evaluation
+    const calculateRSI = (prices: number[], period = 14): number => {
+      if (prices.length < period + 1) return 50;
+      let gains = 0, losses = 0;
+      for (let i = 1; i <= period; i++) {
+        const change = prices[i] - prices[i - 1];
+        if (change > 0) gains += change;
+        else losses += Math.abs(change);
+      }
+      const avgGain = gains / period;
+      const avgLoss = losses / period;
+      const rs = avgGain / (avgLoss || 1);
+      return 100 - 100 / (1 + rs);
+    };
+
+    const calculateEMA = (prices: number[], period: number): number => {
+      if (prices.length < period) return prices[prices.length - 1] || 0;
+      const multiplier = 2 / (period + 1);
+      let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+      for (let i = period; i < prices.length; i++) {
+        ema = (prices[i] - ema) * multiplier + ema;
+      }
+      return ema;
+    };
+
+    const calculateMACD = (prices: number[]): { macd: number; signal: number; histogram: number } => {
+      const ema12 = calculateEMA(prices, 12);
+      const ema26 = calculateEMA(prices, 26);
+      const macd = ema12 - ema26;
+      const signal = macd * 0.9;
+      return { macd, signal, histogram: macd - signal };
+    };
+
+    const calculateBollingerBands = (prices: number[], period = 20, stdDev = 2) => {
+      if (prices.length < period) {
+        const currentPrice = prices[prices.length - 1] || 0;
+        return { upper: currentPrice, middle: currentPrice, lower: currentPrice };
+      }
+      const recentPrices = prices.slice(-period);
+      const middle = recentPrices.reduce((a, b) => a + b, 0) / period;
+      const variance = recentPrices.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / period;
+      const standardDeviation = Math.sqrt(variance);
+      return {
+        upper: middle + standardDeviation * stdDev,
+        middle,
+        lower: middle - standardDeviation * stdDev,
+      };
+    };
+
+    const calculateIndicator = (indicatorConfig: any, currentPrice: number, currentVolume: number, historicalPrices: number[], historicalVolumes: number[]): number => {
+      switch (indicatorConfig.type) {
+        case "RSI":
+          return calculateRSI(historicalPrices, indicatorConfig.period || 14);
+        case "EMA":
+          return calculateEMA(historicalPrices, indicatorConfig.period || 20);
+        case "MACD":
+          return calculateMACD(historicalPrices).macd;
+        case "MACD_Signal":
+          return calculateMACD(historicalPrices).signal;
+        case "BB_Upper":
+          return calculateBollingerBands(historicalPrices, indicatorConfig.period || 20).upper;
+        case "BB_Middle":
+          return calculateBollingerBands(historicalPrices, indicatorConfig.period || 20).middle;
+        case "BB_Lower":
+          return calculateBollingerBands(historicalPrices, indicatorConfig.period || 20).lower;
+        case "Volume":
+          return currentVolume;
+        case "Price":
+          return currentPrice;
+        default:
+          return 0;
+      }
+    };
+
+    const evaluateCondition = (condition: any, indicatorValues: Map<string, number>): boolean => {
+      const indicatorValue = indicatorValues.get(condition.indicator) || 0;
+      const targetValue = condition.compareToIndicator && condition.targetIndicator 
+        ? indicatorValues.get(condition.targetIndicator) || 0
+        : parseFloat(condition.value || "0");
+
+      switch (condition.operator.toLowerCase()) {
+        case "above":
+        case "crosses_above":
+          return indicatorValue > targetValue;
+        case "below":
+        case "crosses_below":
+          return indicatorValue < targetValue;
+        default:
+          return false;
+      }
+    };
+
+    const generateHistoricalData = (currentPrice: number, currentVolume: number, changePercent: number) => {
+      const prices: number[] = [];
+      const volumes: number[] = [];
+      const volatility = Math.abs(changePercent) / 100;
+
+      for (let i = 30; i >= 0; i--) {
+        const variation = (Math.random() - 0.5) * volatility * currentPrice;
+        const trend = (changePercent / 100) * currentPrice * (i / 30);
+        prices.push(currentPrice - trend + variation);
+        const volumeVariation = (Math.random() - 0.5) * 0.3 * currentVolume;
+        volumes.push(Math.max(currentVolume + volumeVariation, currentVolume * 0.5));
+      }
+
+      return { prices, volumes };
+    };
+
+    // Fetch market data for all active symbols
+    const symbolsList = symbols.map(s => s.symbol);
+    const marketDataPromises = symbolsList.map(async (symbol) => {
+      try {
+        const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
+        return await response.json();
+      } catch (error) {
+        console.error(`Failed to fetch market data for ${symbol}:`, error);
+        return null;
+      }
+    });
+
+    const marketDataResults = await Promise.all(marketDataPromises);
+    const marketDataMap = new Map(
+      marketDataResults
+        .filter(data => data !== null)
+        .map(data => [data.symbol, data])
+    );
 
     // Analyze each symbol
     for (const { symbol } of symbols) {
       // Skip if already has signal or open trade
       if (existingSymbols.has(symbol)) {
         console.log(`Skipping ${symbol} - already has signal or open trade`);
-        
-        // Log rejection reason
         await supabase
           .from('signal_rejection_log')
           .insert({
@@ -132,7 +282,10 @@ serve(async (req) => {
       }
 
       try {
-        // Get trend analysis
+        // ============= STEP 1: Multi-Timeframe Analysis Validation =============
+        // First, validate market conditions using Multi-Timeframe Analysis
+        // This acts as a PREREQUISITE for all custom strategies
+        
         const { data: trendData, error: trendError } = await supabase.functions.invoke('calculate-trend', {
           body: { symbol }
         });
@@ -144,221 +297,218 @@ serve(async (req) => {
 
         const { trend, confidence, trendConsistency, higherTimeframeFilter } = trendData;
 
-        // Check if signal should be created based on divergence settings
-        let shouldCreateSignal = false;
-        let positionSizePercent = 100;
+        // Validate Multi-Timeframe conditions
+        let multiTimeframePass = false;
+        let positionSizeMultiplier = 1.0;
         let confidenceCap = 100;
-        let signalReason = '';
-        let rejectionReason = '';
+        let multiTimeframeReason = '';
 
         if (higherTimeframeFilter.aligned) {
-          // Standard aligned signal - REQUIRE momentum confirmation for ALL signals
           const meetsThreshold = confidence >= riskParams.min_confidence_threshold &&
                                 trendConsistency >= riskParams.min_trend_consistency;
-          
-          // Check momentum confirmation (CRITICAL: prevents weak entries)
           const hasMomentumConfirmation = trendData.momentumConfirmed || false;
           
           if (meetsThreshold && hasMomentumConfirmation) {
-            shouldCreateSignal = true;
-            signalReason = `Aligned ${trend} trend with confirmed momentum (MACD expansion + consecutive candles)`;
-          } else if (meetsThreshold && !hasMomentumConfirmation) {
-            // Threshold met but momentum not confirmed - REJECT
-            rejectionReason = `Standard aligned signal - momentum not confirmed (consecutive candles or MACD expansion missing)`;
-            console.log(`Rejected ${trend} signal for ${symbol} - momentum not confirmed despite alignment`);
+            multiTimeframePass = true;
+            multiTimeframeReason = 'Standard aligned timeframes with momentum confirmation';
           } else {
-            // Threshold not met
-            rejectionReason = confidence < riskParams.min_confidence_threshold 
-              ? `Low confidence: ${confidence.toFixed(1)}% < ${riskParams.min_confidence_threshold}%`
-              : `Low trend consistency: ${trendConsistency.toFixed(1)}% < ${riskParams.min_trend_consistency}%`;
+            rejectedByMultiTimeframeAnalysis++;
+            await supabase
+              .from('signal_rejection_log')
+              .insert({
+                user_id: user.id,
+                symbol,
+                rejection_reason: !hasMomentumConfirmation 
+                  ? 'Multi-Timeframe prerequisite failed: momentum not confirmed'
+                  : 'Multi-Timeframe prerequisite failed: confidence or trend consistency below threshold',
+                filters_status: { confidence, trendConsistency },
+                trend_data: trendData,
+                checked_at: new Date().toISOString()
+              });
+            continue;
           }
         } else if (higherTimeframeFilter.allowDivergenceSignal) {
-          // Divergence opportunity signal
           const { divergenceType } = higherTimeframeFilter;
           
-          if (divergenceType === 'pullback') {
-            // Check if pullback signals are enabled
-            if (riskParams.enable_pullback_signals) {
-              // Multi-layer confirmation: require 30m and 15m to align with 4h
-              const tf30m = trendData.timeframes?.['30m'];
-              const tf15m = trendData.timeframes?.['15m'];
-              const tf4h = trendData.timeframes?.['4h'];
-              
-              // Check trend alignment
-              const trendAligned = tf30m && tf15m && tf4h && 
-                  tf30m.trend === tf4h.trend && 
-                  tf15m.trend === tf4h.trend;
-              
-              // Check momentum confirmation (require at least one timeframe with good momentum)
-              const hasMomentumConfirmation = trendData.momentumConfirmed || false;
-              
-              if (trendAligned && hasMomentumConfirmation) {
-                shouldCreateSignal = true;
-                positionSizePercent = riskParams.pullback_position_size_percent || 50;
-                confidenceCap = 70;
-                signalReason = `Pullback opportunity with momentum: ${higherTimeframeFilter.divergenceDetails}`;
-                totalSignalsGenerated++;
-              } else if (trendAligned && !hasMomentumConfirmation) {
-                rejectedByDivergenceSettings++;
-                rejectionReason = `Pullback signal - momentum not confirmed (consecutive candles or MACD expansion missing)`;
-                console.log(`Rejected pullback signal for ${symbol} - momentum not confirmed`);
-              } else {
-                rejectedByDivergenceSettings++;
-                rejectionReason = `Pullback signal - 30m/15m confirmation failed (30m: ${tf30m?.trend}, 15m: ${tf15m?.trend}, need ${tf4h?.trend})`;
-                console.log(`Rejected pullback signal for ${symbol} - 30m/15m confirmation failed`);
-              }
-            } else {
-              rejectedByDivergenceSettings++;
-              rejectionReason = 'Pullback signals disabled in risk settings';
-              console.log(`Rejected pullback signal for ${symbol} - pullback signals disabled`);
+          if (divergenceType === 'pullback' && riskParams.enable_pullback_signals) {
+            const tf30m = trendData.timeframes?.['30m'];
+            const tf15m = trendData.timeframes?.['15m'];
+            const tf4h = trendData.timeframes?.['4h'];
+            const trendAligned = tf30m && tf15m && tf4h && 
+                tf30m.trend === tf4h.trend && tf15m.trend === tf4h.trend;
+            const hasMomentumConfirmation = trendData.momentumConfirmed || false;
+            
+            if (trendAligned && hasMomentumConfirmation) {
+              multiTimeframePass = true;
+              positionSizeMultiplier = (riskParams.pullback_position_size_percent || 50) / 100;
+              confidenceCap = 70;
+              multiTimeframeReason = 'Pullback opportunity with momentum';
             }
-          } else if (divergenceType === 'early_reversal') {
-            // Check if early reversal signals are enabled
-            if (riskParams.enable_early_reversal_signals) {
-              // Multi-layer confirmation: require 30m and 15m to align with 1h
-              const tf30m = trendData.timeframes?.['30m'];
-              const tf15m = trendData.timeframes?.['15m'];
-              const tf1h = trendData.timeframes?.['1h'];
-              
-              // Check trend alignment
-              const trendAligned = tf30m && tf15m && tf1h && 
-                  tf30m.trend === tf1h.trend && 
-                  tf15m.trend === tf1h.trend;
-              
-              // Check momentum confirmation (stricter for early reversals)
-              const hasMomentumConfirmation = trendData.momentumConfirmed || false;
-              
-              if (trendAligned && hasMomentumConfirmation) {
-                shouldCreateSignal = true;
-                positionSizePercent = riskParams.early_reversal_position_size_percent || 40;
-                confidenceCap = 65;
-                signalReason = `Early reversal with strong momentum: ${higherTimeframeFilter.divergenceDetails}`;
-                totalSignalsGenerated++;
-              } else if (trendAligned && !hasMomentumConfirmation) {
-                rejectedByDivergenceSettings++;
-                rejectionReason = `Early reversal - momentum not confirmed (consecutive candles or MACD expansion missing)`;
-                console.log(`Rejected early reversal signal for ${symbol} - momentum not confirmed`);
-              } else {
-                rejectedByDivergenceSettings++;
-                rejectionReason = `Early reversal - 30m/15m confirmation failed (30m: ${tf30m?.trend}, 15m: ${tf15m?.trend}, need ${tf1h?.trend})`;
-                console.log(`Rejected early reversal signal for ${symbol} - 30m/15m confirmation failed`);
-              }
-            } else {
-              rejectedByDivergenceSettings++;
-              rejectionReason = 'Early reversal signals disabled in risk settings';
-              console.log(`Rejected early reversal signal for ${symbol} - early reversal signals disabled`);
+          } else if (divergenceType === 'early_reversal' && riskParams.enable_early_reversal_signals) {
+            const tf30m = trendData.timeframes?.['30m'];
+            const tf15m = trendData.timeframes?.['15m'];
+            const tf1h = trendData.timeframes?.['1h'];
+            const trendAligned = tf30m && tf15m && tf1h && 
+                tf30m.trend === tf1h.trend && tf15m.trend === tf1h.trend;
+            const hasMomentumConfirmation = trendData.momentumConfirmed || false;
+            
+            if (trendAligned && hasMomentumConfirmation) {
+              multiTimeframePass = true;
+              positionSizeMultiplier = (riskParams.early_reversal_position_size_percent || 40) / 100;
+              confidenceCap = 65;
+              multiTimeframeReason = 'Early reversal with strong momentum';
             }
           }
-        } else if (!higherTimeframeFilter.aligned && !higherTimeframeFilter.allowDivergenceSignal) {
-          // Timeframes not aligned and no divergence opportunity
-          rejectionReason = higherTimeframeFilter.divergenceDetails || 'Timeframes not aligned, no divergence opportunity';
-        }
-
-        // Log rejection if signal wasn't created
-        if (!shouldCreateSignal && rejectionReason) {
-          await supabase
-            .from('signal_rejection_log')
-            .insert({
-              user_id: user.id,
-              symbol,
-              rejection_reason: rejectionReason,
-              filters_status: {
-                confidence,
-                trendConsistency,
-                minConfidence: riskParams.min_confidence_threshold,
-                minTrendConsistency: riskParams.min_trend_consistency,
-                pullbackEnabled: riskParams.enable_pullback_signals,
-                earlyReversalEnabled: riskParams.enable_early_reversal_signals
-              },
-              trend_data: {
-                trend,
-                aligned: higherTimeframeFilter.aligned,
-                divergenceType: higherTimeframeFilter.divergenceType,
-                divergenceDetails: higherTimeframeFilter.divergenceDetails,
-                timeframes: trendData.timeframes
-              },
-              checked_at: new Date().toISOString()
-            });
-          continue;
-        }
-
-        totalSignalsGenerated++;
-
-        // Cap confidence based on signal type
-        const finalConfidence = Math.min(confidence, confidenceCap);
-
-        // Determine signal type based on trend
-        const signalType = trend === 'bullish' ? 'long' : trend === 'bearish' ? 'short' : null;
-        
-        if (!signalType) {
-          console.log(`Skipping ${symbol} - ranging market`);
           
-          // Log rejection for ranging market
+          if (!multiTimeframePass) {
+            rejectedByMultiTimeframeAnalysis++;
+            await supabase
+              .from('signal_rejection_log')
+              .insert({
+                user_id: user.id,
+                symbol,
+                rejection_reason: 'Multi-Timeframe prerequisite failed: divergence conditions not met or momentum missing',
+                filters_status: { divergenceType },
+                trend_data: trendData,
+                checked_at: new Date().toISOString()
+              });
+            continue;
+          }
+        } else {
+          rejectedByMultiTimeframeAnalysis++;
           await supabase
             .from('signal_rejection_log')
             .insert({
               user_id: user.id,
               symbol,
-              rejection_reason: 'Ranging market - no clear directional trend',
-              filters_status: { confidence, trendConsistency },
-              trend_data: {
-                trend,
-                aligned: higherTimeframeFilter.aligned,
-                timeframes: trendData.timeframes
-              },
+              rejection_reason: 'Multi-Timeframe prerequisite failed: timeframes not aligned, no divergence opportunity',
+              filters_status: null,
+              trend_data: trendData,
               checked_at: new Date().toISOString()
             });
           continue;
         }
 
-        // Adjust stop loss and take profit for divergence signals (shorter timeframes)
-        const isDivergenceSignal = higherTimeframeFilter.divergenceType;
-        const stopLossPercent = isDivergenceSignal 
-          ? riskParams.max_risk_per_trade_percent * (riskParams.divergence_sl_multiplier || 0.67)  // Use configured divergence SL multiplier
-          : riskParams.max_risk_per_trade_percent;
-        const takeProfitMultiplier = isDivergenceSignal 
-          ? (riskParams.divergence_tp_multiplier || 2.0)  // Use configured divergence TP multiplier
-          : (riskParams.standard_tp_multiplier || 2.5); // Use configured standard TP multiplier
+        // Determine signal type
+        const signalType = trend === 'bullish' ? 'long' : trend === 'bearish' ? 'short' : null;
+        if (!signalType) {
+          await supabase
+            .from('signal_rejection_log')
+            .insert({
+              user_id: user.id,
+              symbol,
+              rejection_reason: 'Multi-Timeframe prerequisite failed: ranging market',
+              filters_status: { trend },
+              trend_data: trendData,
+              checked_at: new Date().toISOString()
+            });
+          continue;
+        }
 
-        // Create signal
-        const signal = {
-          user_id: user.id,
-          symbol,
-          signal_type: signalType,
-          trend,
-          confidence_score: finalConfidence,
-          entry_price: trendData.currentPrice,
-          stop_loss: signalType === 'long'
-            ? trendData.currentPrice * (1 - (stopLossPercent / 100))
-            : trendData.currentPrice * (1 + (stopLossPercent / 100)),
-          take_profit: signalType === 'long'
-            ? trendData.currentPrice * (1 + (stopLossPercent * takeProfitMultiplier / 100))
-            : trendData.currentPrice * (1 - (stopLossPercent * takeProfitMultiplier / 100)),
-          strategy_name: 'Multi-Timeframe Analysis',
-          reason: signalReason,
-          indicators: {
-            ...trendData.indicators,
-            divergenceType: higherTimeframeFilter.divergenceType,
-            positionSizePercent,
-            trendConsistency,
-            stopLossPercent,
-            takeProfitMultiplier
-          },
-          expires_at: new Date(Date.now() + 60000).toISOString(), // 1 minute expiry
-          created_by_rebalancer: false
-        };
+        // ============= STEP 2: Custom Strategy Evaluation =============
+        // Now evaluate custom strategies since Multi-Timeframe prerequisite passed
+        
+        const marketData = marketDataMap.get(symbol);
+        if (!marketData) continue;
 
-        const { data: insertedSignal, error: insertError } = await supabase
-          .from('trading_signals')
-          .insert(signal)
-          .select('id')
-          .single();
+        const currentPrice = parseFloat(marketData.lastPrice);
+        const currentVolume = parseFloat(marketData.volume);
+        const changePercent = parseFloat(marketData.priceChangePercent);
 
-        if (insertError) {
-          console.error(`Failed to insert signal for ${symbol}:`, insertError);
-        } else if (insertedSignal) {
-          signals.push({ ...signal, id: insertedSignal.id, positionSizePercent } as SignalData);
-          console.log(`✓ Created ${signalType.toUpperCase()} signal for ${symbol} (${higherTimeframeFilter.divergenceType || 'aligned'})`);
+        const { prices: historicalPrices, volumes: historicalVolumes } = generateHistoricalData(
+          currentPrice,
+          currentVolume,
+          changePercent
+        );
+
+        // Evaluate each custom strategy
+        for (const strategy of customStrategies) {
+          // Skip if this strategy already has a signal for this symbol
+          if (signals.some(s => s.symbol === symbol && s.strategy_id === strategy.id)) {
+            continue;
+          }
+
+          // Calculate all indicators for this strategy
+          const indicatorValues = new Map<string, number>();
+          for (const indicatorConfig of strategy.indicators) {
+            const value = calculateIndicator(
+              indicatorConfig,
+              currentPrice,
+              currentVolume,
+              historicalPrices,
+              historicalVolumes
+            );
+            indicatorValues.set(indicatorConfig.name || indicatorConfig.type, value);
+          }
+          indicatorValues.set("Price", currentPrice);
+          indicatorValues.set("Volume", currentVolume);
+
+          // Evaluate entry conditions
+          const entryConditionsMet = strategy.entry_conditions.every((condition: any) => 
+            evaluateCondition(condition, indicatorValues)
+          );
+
+          if (!entryConditionsMet) {
+            continue; // Skip this strategy if entry conditions not met
+          }
+
+          // Calculate confidence (capped by Multi-Timeframe analysis)
+          const strategyConfidence = Math.min(confidence, confidenceCap);
+
+          // Apply risk settings from custom strategy
+          const stopLossPercent = strategy.risk_settings?.stopLossPercent || riskParams.max_risk_per_trade_percent;
+          const takeProfitPercent = strategy.risk_settings?.takeProfitPercent || stopLossPercent * 2.5;
+          const strategyPositionSize = (strategy.risk_settings?.positionSizePercent || 100) * positionSizeMultiplier;
+
+          // Create signal for custom strategy
+          const customSignal = {
+            user_id: user.id,
+            symbol,
+            signal_type: signalType,
+            trend,
+            confidence_score: strategyConfidence,
+            entry_price: currentPrice,
+            stop_loss: signalType === 'long'
+              ? currentPrice * (1 - (stopLossPercent / 100))
+              : currentPrice * (1 + (stopLossPercent / 100)),
+            take_profit: signalType === 'long'
+              ? currentPrice * (1 + (takeProfitPercent / 100))
+              : currentPrice * (1 - (takeProfitPercent / 100)),
+            strategy_id: strategy.id,
+            strategy_name: strategy.name,
+            reason: `${strategy.name} conditions met (Multi-Timeframe: ${multiTimeframeReason})`,
+            indicators: {
+              ...Object.fromEntries(indicatorValues.entries()),
+              multiTimeframeReason,
+              stopLossPercent,
+              takeProfitPercent,
+              positionSizePercent: strategyPositionSize
+            },
+            expires_at: new Date(Date.now() + 60000).toISOString(),
+            created_by_rebalancer: false
+          };
+
+          const { data: insertedSignal, error: insertError } = await supabase
+            .from('trading_signals')
+            .insert(customSignal)
+            .select('id')
+            .single();
+
+          if (insertError) {
+            console.error(`Failed to insert custom strategy signal for ${symbol}:`, insertError);
+          } else if (insertedSignal) {
+            signals.push({ 
+              ...customSignal, 
+              id: insertedSignal.id, 
+              positionSizePercent: strategyPositionSize 
+            } as SignalData);
+            totalSignalsGenerated++;
+            console.log(`✓ Created ${signalType.toUpperCase()} signal for ${symbol} using "${strategy.name}"`);
+            
+            // Mark symbol as having a signal to avoid duplicates
+            existingSymbols.add(symbol);
+            break; // Only one signal per symbol (first matching strategy)
+          }
         }
       } catch (error) {
         console.error(`Error analyzing ${symbol}:`, error);
@@ -366,302 +516,6 @@ serve(async (req) => {
     }
 
     const signalsAfterDeduplication = signals.length;
-
-    // ============= CUSTOM STRATEGIES EVALUATION =============
-    // Fetch active custom strategies for the user
-    const { data: customStrategies, error: strategiesError } = await supabase
-      .from('custom_strategies')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('is_active', true);
-
-    if (strategiesError) {
-      console.error('Failed to fetch custom strategies:', strategiesError);
-    } else if (customStrategies && customStrategies.length > 0) {
-      console.log(`Evaluating ${customStrategies.length} active custom strategies`);
-
-      // Helper functions for custom strategy evaluation
-      const calculateRSI = (prices: number[], period = 14): number => {
-        if (prices.length < period + 1) return 50;
-        let gains = 0, losses = 0;
-        for (let i = 1; i <= period; i++) {
-          const change = prices[i] - prices[i - 1];
-          if (change > 0) gains += change;
-          else losses += Math.abs(change);
-        }
-        const avgGain = gains / period;
-        const avgLoss = losses / period;
-        const rs = avgGain / (avgLoss || 1);
-        return 100 - 100 / (1 + rs);
-      };
-
-      const calculateEMA = (prices: number[], period: number): number => {
-        if (prices.length < period) return prices[prices.length - 1] || 0;
-        const multiplier = 2 / (period + 1);
-        let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
-        for (let i = period; i < prices.length; i++) {
-          ema = (prices[i] - ema) * multiplier + ema;
-        }
-        return ema;
-      };
-
-      const calculateMACD = (prices: number[]): { macd: number; signal: number; histogram: number } => {
-        const ema12 = calculateEMA(prices, 12);
-        const ema26 = calculateEMA(prices, 26);
-        const macd = ema12 - ema26;
-        const signal = macd * 0.9;
-        return { macd, signal, histogram: macd - signal };
-      };
-
-      const calculateBollingerBands = (prices: number[], period = 20, stdDev = 2) => {
-        if (prices.length < period) {
-          const currentPrice = prices[prices.length - 1] || 0;
-          return { upper: currentPrice, middle: currentPrice, lower: currentPrice };
-        }
-        const recentPrices = prices.slice(-period);
-        const middle = recentPrices.reduce((a, b) => a + b, 0) / period;
-        const variance = recentPrices.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / period;
-        const standardDeviation = Math.sqrt(variance);
-        return {
-          upper: middle + standardDeviation * stdDev,
-          middle,
-          lower: middle - standardDeviation * stdDev,
-        };
-      };
-
-      const calculateIndicator = (indicatorConfig: any, currentPrice: number, currentVolume: number, historicalPrices: number[], historicalVolumes: number[]): number => {
-        switch (indicatorConfig.type) {
-          case "RSI":
-            return calculateRSI(historicalPrices, indicatorConfig.period || 14);
-          case "EMA":
-            return calculateEMA(historicalPrices, indicatorConfig.period || 20);
-          case "MACD":
-            return calculateMACD(historicalPrices).macd;
-          case "MACD_Signal":
-            return calculateMACD(historicalPrices).signal;
-          case "BB_Upper":
-            return calculateBollingerBands(historicalPrices, indicatorConfig.period || 20).upper;
-          case "BB_Middle":
-            return calculateBollingerBands(historicalPrices, indicatorConfig.period || 20).middle;
-          case "BB_Lower":
-            return calculateBollingerBands(historicalPrices, indicatorConfig.period || 20).lower;
-          case "Volume":
-            return currentVolume;
-          case "Price":
-            return currentPrice;
-          default:
-            return 0;
-        }
-      };
-
-      const evaluateCondition = (condition: any, indicatorValues: Map<string, number>): boolean => {
-        const indicatorValue = indicatorValues.get(condition.indicator) || 0;
-        const targetValue = condition.compareToIndicator && condition.targetIndicator 
-          ? indicatorValues.get(condition.targetIndicator) || 0
-          : parseFloat(condition.value || "0");
-
-        switch (condition.operator.toLowerCase()) {
-          case "above":
-          case "crosses_above":
-            return indicatorValue > targetValue;
-          case "below":
-          case "crosses_below":
-            return indicatorValue < targetValue;
-          default:
-            return false;
-        }
-      };
-
-      const generateHistoricalData = (currentPrice: number, currentVolume: number, changePercent: number) => {
-        const prices: number[] = [];
-        const volumes: number[] = [];
-        const volatility = Math.abs(changePercent) / 100;
-
-        for (let i = 30; i >= 0; i--) {
-          const variation = (Math.random() - 0.5) * volatility * currentPrice;
-          const trend = (changePercent / 100) * currentPrice * (i / 30);
-          prices.push(currentPrice - trend + variation);
-          const volumeVariation = (Math.random() - 0.5) * 0.3 * currentVolume;
-          volumes.push(Math.max(currentVolume + volumeVariation, currentVolume * 0.5));
-        }
-
-        return { prices, volumes };
-      };
-
-      // Fetch market data for all active symbols
-      const symbolsList = symbols.map(s => s.symbol);
-      const marketDataPromises = symbolsList.map(async (symbol) => {
-        try {
-          const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
-          return await response.json();
-        } catch (error) {
-          console.error(`Failed to fetch market data for ${symbol}:`, error);
-          return null;
-        }
-      });
-
-      const marketDataResults = await Promise.all(marketDataPromises);
-      const marketDataMap = new Map(
-        marketDataResults
-          .filter(data => data !== null)
-          .map(data => [data.symbol, data])
-      );
-
-      // Evaluate each custom strategy
-      for (const strategy of customStrategies) {
-        console.log(`Evaluating custom strategy: ${strategy.name}`);
-
-        // Evaluate strategy against each symbol
-        for (const { symbol } of symbols) {
-          // Skip if symbol already has signal or open trade (including from Multi-Timeframe Analysis)
-          if (existingSymbols.has(symbol) || signals.some(s => s.symbol === symbol)) {
-            continue;
-          }
-
-          const marketData = marketDataMap.get(symbol);
-          if (!marketData) continue;
-
-          try {
-            const currentPrice = parseFloat(marketData.lastPrice);
-            const currentVolume = parseFloat(marketData.volume);
-            const changePercent = parseFloat(marketData.priceChangePercent);
-
-            // Generate historical data
-            const { prices: historicalPrices, volumes: historicalVolumes } = generateHistoricalData(
-              currentPrice,
-              currentVolume,
-              changePercent
-            );
-
-            // Calculate all indicators
-            const indicatorValues = new Map<string, number>();
-            for (const indicatorConfig of strategy.indicators) {
-              const value = calculateIndicator(
-                indicatorConfig,
-                currentPrice,
-                currentVolume,
-                historicalPrices,
-                historicalVolumes
-              );
-              indicatorValues.set(indicatorConfig.name || indicatorConfig.type, value);
-            }
-            indicatorValues.set("Price", currentPrice);
-            indicatorValues.set("Volume", currentVolume);
-
-            // Evaluate entry conditions
-            const entryConditionsMet = strategy.entry_conditions.every((condition: any) => 
-              evaluateCondition(condition, indicatorValues)
-            );
-
-            if (!entryConditionsMet) {
-              continue; // Skip this symbol if entry conditions not met
-            }
-
-            // Get trend analysis for momentum confirmation
-            const { data: trendData, error: trendError } = await supabase.functions.invoke('calculate-trend', {
-              body: { symbol }
-            });
-
-            if (trendError || !trendData) {
-              console.warn(`Failed to get trend for ${symbol}:`, trendError);
-              continue;
-            }
-
-            // REQUIRE momentum confirmation for custom strategies too
-            const hasMomentumConfirmation = trendData.momentumConfirmed || false;
-            if (!hasMomentumConfirmation) {
-              await supabase
-                .from('signal_rejection_log')
-                .insert({
-                  user_id: user.id,
-                  symbol,
-                  rejection_reason: `Custom strategy "${strategy.name}" - momentum not confirmed`,
-                  filters_status: { strategy: strategy.name },
-                  trend_data: trendData,
-                  checked_at: new Date().toISOString()
-                });
-              continue;
-            }
-
-            // Determine signal type based on trend
-            const trend = trendData.trend;
-            const signalType = trend === 'bullish' ? 'long' : trend === 'bearish' ? 'short' : null;
-            
-            if (!signalType) {
-              await supabase
-                .from('signal_rejection_log')
-                .insert({
-                  user_id: user.id,
-                  symbol,
-                  rejection_reason: `Custom strategy "${strategy.name}" - ranging market`,
-                  filters_status: { strategy: strategy.name },
-                  trend_data: trendData,
-                  checked_at: new Date().toISOString()
-                });
-              continue;
-            }
-
-            // Calculate confidence based on conditions met
-            const confidenceScore = Math.min(trendData.confidence, 85); // Cap custom strategy confidence at 85%
-
-            // Apply risk settings from custom strategy
-            const stopLossPercent = strategy.risk_settings?.stopLossPercent || riskParams.max_risk_per_trade_percent;
-            const takeProfitPercent = strategy.risk_settings?.takeProfitPercent || stopLossPercent * 2.5;
-
-            // Create signal for custom strategy
-            const customSignal = {
-              user_id: user.id,
-              symbol,
-              signal_type: signalType,
-              trend,
-              confidence_score: confidenceScore,
-              entry_price: currentPrice,
-              stop_loss: signalType === 'long'
-                ? currentPrice * (1 - (stopLossPercent / 100))
-                : currentPrice * (1 + (stopLossPercent / 100)),
-              take_profit: signalType === 'long'
-                ? currentPrice * (1 + (takeProfitPercent / 100))
-                : currentPrice * (1 - (takeProfitPercent / 100)),
-              strategy_id: strategy.id,
-              strategy_name: strategy.name,
-              reason: `Custom strategy conditions met with momentum confirmation`,
-              indicators: {
-                ...Object.fromEntries(indicatorValues.entries()),
-                stopLossPercent,
-                takeProfitPercent,
-                positionSizePercent: strategy.risk_settings?.positionSizePercent || 100
-              },
-              expires_at: new Date(Date.now() + 60000).toISOString(),
-              created_by_rebalancer: false
-            };
-
-            const { data: insertedSignal, error: insertError } = await supabase
-              .from('trading_signals')
-              .insert(customSignal)
-              .select('id')
-              .single();
-
-            if (insertError) {
-              console.error(`Failed to insert custom strategy signal for ${symbol}:`, insertError);
-            } else if (insertedSignal) {
-              signals.push({ 
-                ...customSignal, 
-                id: insertedSignal.id, 
-                positionSizePercent: strategy.risk_settings?.positionSizePercent || 100 
-              } as SignalData);
-              totalSignalsGenerated++;
-              console.log(`✓ Created ${signalType.toUpperCase()} signal for ${symbol} using "${strategy.name}"`);
-              
-              // Mark symbol as having a signal to avoid duplicates
-              existingSymbols.add(symbol);
-            }
-          } catch (error) {
-            console.error(`Error evaluating custom strategy "${strategy.name}" for ${symbol}:`, error);
-          }
-        }
-      }
-    }
-    // ============= END CUSTOM STRATEGIES EVALUATION =============
 
     // Auto-execute if enabled
     let executedSignals = 0;
@@ -673,7 +527,7 @@ serve(async (req) => {
               Authorization: authHeader,
             },
             body: {
-              signalId: signal.id, // Use the captured signal ID
+              signalId: signal.id,
               action: 'execute'
             }
           });
@@ -695,9 +549,10 @@ serve(async (req) => {
         signals,
         totalSignalsGenerated,
         signalsAfterDeduplication,
-        rejectedByDivergenceSettings,
+        rejectedByMultiTimeframeAnalysis,
         executedSignals,
-        autoExecuteEnabled: riskParams.auto_execute_signals
+        autoExecuteEnabled: riskParams.auto_execute_signals,
+        message: `Multi-Timeframe Analysis used as prerequisite - ${customStrategies.length} custom strategies evaluated`
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
