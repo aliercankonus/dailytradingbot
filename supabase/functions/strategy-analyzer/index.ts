@@ -114,23 +114,28 @@ serve(async (req) => {
     // Calculate timestamp for 1 minute ago to match UI filter
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
 
-    // Fetch recent signals (last 1 minute) and open trades to avoid duplicates
+    // Fetch recent signals (last 1 minute) to avoid generating duplicate signals
     const { data: existingSignals } = await supabase
       .from('trading_signals')
       .select('symbol')
       .eq('user_id', user.id)
       .gte('created_at', oneMinuteAgo);
 
+    const existingSignalsSet = new Set(existingSignals?.map(s => s.symbol) || []);
+
+    // Fetch open trades and count per symbol to respect max_trades_per_symbol
     const { data: openTrades } = await supabase
       .from('trades')
       .select('symbol')
       .eq('user_id', user.id)
       .eq('status', 'open');
 
-    const existingSymbols = new Set([
-      ...(existingSignals?.map(s => s.symbol) || []),
-      ...(openTrades?.map(t => t.symbol) || [])
-    ]);
+    // Count open trades per symbol
+    const openTradesPerSymbol = new Map<string, number>();
+    openTrades?.forEach(trade => {
+      const count = openTradesPerSymbol.get(trade.symbol) || 0;
+      openTradesPerSymbol.set(trade.symbol, count + 1);
+    });
 
     const signals: SignalData[] = [];
     let totalSignalsGenerated = 0;
@@ -265,15 +270,32 @@ serve(async (req) => {
 
     // Analyze each symbol
     for (const { symbol } of symbols) {
-      // Skip if already has signal or open trade
-      if (existingSymbols.has(symbol)) {
-        console.log(`Skipping ${symbol} - already has signal or open trade`);
+      // Skip if already has a recent signal (prevents duplicate signals)
+      if (existingSignalsSet.has(symbol)) {
+        console.log(`Skipping ${symbol} - already has active signal from last minute`);
         await supabase
           .from('signal_rejection_log')
           .insert({
             user_id: user.id,
             symbol,
-            rejection_reason: 'Already has active signal or open trade',
+            rejection_reason: 'Already has active signal from last minute',
+            filters_status: null,
+            trend_data: null,
+            checked_at: new Date().toISOString()
+          });
+        continue;
+      }
+
+      // Check if symbol has reached max trades per symbol limit
+      const currentTradeCount = openTradesPerSymbol.get(symbol) || 0;
+      if (currentTradeCount >= riskParams.max_trades_per_symbol) {
+        console.log(`Skipping ${symbol} - reached max trades per symbol limit (${currentTradeCount}/${riskParams.max_trades_per_symbol})`);
+        await supabase
+          .from('signal_rejection_log')
+          .insert({
+            user_id: user.id,
+            symbol,
+            rejection_reason: `Max trades per symbol reached (${currentTradeCount}/${riskParams.max_trades_per_symbol})`,
             filters_status: null,
             trend_data: null,
             checked_at: new Date().toISOString()
@@ -505,8 +527,8 @@ serve(async (req) => {
             totalSignalsGenerated++;
             console.log(`✓ Created ${signalType.toUpperCase()} signal for ${symbol} using "${strategy.name}"`);
             
-            // Mark symbol as having a signal to avoid duplicates
-            existingSymbols.add(symbol);
+            // Mark symbol as having a signal to avoid duplicates within this cycle
+            existingSignalsSet.add(symbol);
             break; // Only one signal per symbol (first matching strategy)
           }
         }
