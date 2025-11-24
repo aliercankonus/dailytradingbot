@@ -345,24 +345,22 @@ serve(async (req) => {
           } else {
             rejectedByMultiTimeframeAnalysis++;
             
-            // Detailed rejection data
+            // Detailed rejection data - use correct momentum structure
             const rejectionData = {
               confidence,
               trendConsistency,
               meetsThreshold,
-              momentum: {
-                confirmed: hasMomentumConfirmation,
-                tf15m_consecutive: trendData.timeframes?.['15m']?.consecutiveBullish || trendData.timeframes?.['15m']?.consecutiveBearish || 0,
-                tf30m_consecutive: trendData.timeframes?.['30m']?.consecutiveBullish || trendData.timeframes?.['30m']?.consecutiveBearish || 0,
-                macd_histogram: trendData.macdHistogram,
-                macd_expanding: trendData.macdExpanding
-              },
-              timeframes: {
-                '4h': trendData.timeframes?.['4h']?.trend,
-                '1h': trendData.timeframes?.['1h']?.trend,
-                '30m': trendData.timeframes?.['30m']?.trend,
-                '15m': trendData.timeframes?.['15m']?.trend
-              }
+              momentum: trendData.momentum,
+              consecutive15mBullish: trendData.momentum?.consecutive15mBullish || 0,
+              consecutive15mBearish: trendData.momentum?.consecutive15mBearish || 0,
+              consecutive30mBullish: trendData.momentum?.consecutive30mBullish || 0,
+              consecutive30mBearish: trendData.momentum?.consecutive30mBearish || 0,
+              trend4h: trendData.higherTimeframeFilter?.trend4h,
+              trend1h: trendData.higherTimeframeFilter?.trend1h,
+              aligned: higherTimeframeFilter.aligned,
+              required: !hasMomentumConfirmation 
+                ? 'momentum confirmation (2-3 consecutive candles on 15m and 30m)'
+                : 'confidence/consistency threshold'
             };
             
             await supabase
@@ -415,40 +413,22 @@ serve(async (req) => {
           if (!multiTimeframePass) {
             rejectedByMultiTimeframeAnalysis++;
             
-            // Detailed divergence rejection data
+            // Detailed divergence rejection data - use correct structure
             const rejectionData = {
               divergenceType,
               aligned: false,
               divergenceAllowed: true,
               pullbackEnabled: riskParams.enable_pullback_signals,
               earlyReversalEnabled: riskParams.enable_early_reversal_signals,
-              timeframes: {
-                '4h': {
-                  trend: trendData.timeframes?.['4h']?.trend,
-                  confidence: trendData.timeframes?.['4h']?.confidence
-                },
-                '1h': {
-                  trend: trendData.timeframes?.['1h']?.trend,
-                  confidence: trendData.timeframes?.['1h']?.confidence
-                },
-                '30m': {
-                  trend: trendData.timeframes?.['30m']?.trend,
-                  confidence: trendData.timeframes?.['30m']?.confidence,
-                  consecutiveBullish: trendData.timeframes?.['30m']?.consecutiveBullish || 0,
-                  consecutiveBearish: trendData.timeframes?.['30m']?.consecutiveBearish || 0
-                },
-                '15m': {
-                  trend: trendData.timeframes?.['15m']?.trend,
-                  confidence: trendData.timeframes?.['15m']?.confidence,
-                  consecutiveBullish: trendData.timeframes?.['15m']?.consecutiveBullish || 0,
-                  consecutiveBearish: trendData.timeframes?.['15m']?.consecutiveBearish || 0
-                }
-              },
-              momentum: {
-                confirmed: trendData.momentumConfirmed || false,
-                macd_histogram: trendData.macdHistogram,
-                macd_expanding: trendData.macdExpanding
-              }
+              momentum: trendData.momentum,
+              consecutive15mBullish: trendData.momentum?.consecutive15mBullish || 0,
+              consecutive15mBearish: trendData.momentum?.consecutive15mBearish || 0,
+              consecutive30mBullish: trendData.momentum?.consecutive30mBullish || 0,
+              consecutive30mBearish: trendData.momentum?.consecutive30mBearish || 0,
+              trend4h: trendData.multiTimeframe?.trend4h,
+              trend1h: trendData.multiTimeframe?.trend1h,
+              trend30m: trendData.multiTimeframe?.trend30m,
+              trend15m: trendData.multiTimeframe?.trend15m
             };
             
             await supabase
@@ -472,31 +452,17 @@ serve(async (req) => {
             divergenceAllowed: false,
             confidence,
             trendConsistency,
-            timeframes: {
-              '4h': {
-                trend: trendData.timeframes?.['4h']?.trend,
-                confidence: trendData.timeframes?.['4h']?.confidence
-              },
-              '1h': {
-                trend: trendData.timeframes?.['1h']?.trend,
-                confidence: trendData.timeframes?.['1h']?.confidence
-              },
-              '30m': {
-                trend: trendData.timeframes?.['30m']?.trend,
-                confidence: trendData.timeframes?.['30m']?.confidence
-              },
-              '15m': {
-                trend: trendData.timeframes?.['15m']?.trend,
-                confidence: trendData.timeframes?.['15m']?.confidence
-              }
-            },
-            momentum: {
-              confirmed: trendData.momentumConfirmed || false,
-              tf15m_consecutive: trendData.timeframes?.['15m']?.consecutiveBullish || trendData.timeframes?.['15m']?.consecutiveBearish || 0,
-              tf30m_consecutive: trendData.timeframes?.['30m']?.consecutiveBullish || trendData.timeframes?.['30m']?.consecutiveBearish || 0,
-              macd_histogram: trendData.macdHistogram,
-              macd_expanding: trendData.macdExpanding
-            }
+            momentum: trendData.momentum,
+            consecutive15mBullish: trendData.momentum?.consecutive15mBullish || 0,
+            consecutive15mBearish: trendData.momentum?.consecutive15mBearish || 0,
+            consecutive30mBullish: trendData.momentum?.consecutive30mBullish || 0,
+            consecutive30mBearish: trendData.momentum?.consecutive30mBearish || 0,
+            trend4h: trendData.multiTimeframe?.trend4h,
+            trend1h: trendData.multiTimeframe?.trend1h,
+            trend30m: trendData.multiTimeframe?.trend30m,
+            trend15m: trendData.multiTimeframe?.trend15m,
+            isRanging: trendData.ranging?.isRanging || false,
+            required: 'higher timeframes NOT aligned or ranging market detected'
           };
           
           await supabase
