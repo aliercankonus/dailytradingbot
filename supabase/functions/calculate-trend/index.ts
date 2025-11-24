@@ -290,6 +290,39 @@ serve(async (req) => {
     // High timeframe alignment: 4h + 1h must agree for valid signals
     const highTimeframeAligned = dominantTrend !== "neutral" && confirmation1h;
 
+    // ============================================================
+    // DIVERGENCE CLASSIFICATION FOR OPPORTUNITY CAPTURE
+    // ============================================================
+    let divergenceType: "aligned" | "pullback" | "early_reversal" | "ranging_conflict" = "aligned";
+    let divergenceConfidence = 100; // Base confidence, will be adjusted
+    let allowDivergenceSignal = false;
+
+    if (!highTimeframeAligned && dominantTrend !== "neutral") {
+      // Case 1: PULLBACK - 4h strong, 1h temporarily opposes (trade WITH 4h direction)
+      if (dominantConfidence >= 60 && trend1h.confidence >= 50) {
+        // Strong 4h trend, moderate 1h counter-move = pullback opportunity
+        divergenceType = "pullback";
+        divergenceConfidence = Math.min(dominantConfidence * 0.75, 70); // Max 70% confidence
+        allowDivergenceSignal = true;
+        console.log(`${dominantTrend.toUpperCase()} PULLBACK detected: 4h=${dominantConfidence}% vs 1h=${trend1h.trend}`);
+      }
+      // Case 2: EARLY REVERSAL - 1h strongly reversing, 4h hasn't confirmed yet
+      else if (trend1h.confidence >= 70 && dominantConfidence < 60) {
+        // Strong 1h reversal, weak 4h = early trend change (trade WITH 1h direction)
+        divergenceType = "early_reversal";
+        divergenceConfidence = Math.min(trend1h.confidence * 0.70, 65); // Max 65% confidence
+        allowDivergenceSignal = true;
+        console.log(`EARLY REVERSAL detected: 1h=${trend1h.trend}(${trend1h.confidence}%) vs weak 4h=${dominantTrend}(${dominantConfidence}%)`);
+      }
+      // Case 3: RANGING CONFLICT - Contradictory signals, skip
+      else {
+        divergenceType = "ranging_conflict";
+        divergenceConfidence = 0;
+        allowDivergenceSignal = false;
+        console.log(`RANGING CONFLICT: Skipping - unclear divergence pattern`);
+      }
+    }
+
     let primaryTrend: "bullish" | "bearish" | "neutral" | "ranging" = dominantTrend;
 
     // ============================================================
@@ -451,6 +484,17 @@ serve(async (req) => {
           aligned: highTimeframeAligned,
           dominantConfidence: dominantConfidence,
           weightedConsistency: Math.round(weightedConsistency),
+          // NEW: Divergence opportunity detection
+          divergenceType: divergenceType,
+          divergenceConfidence: Math.round(divergenceConfidence),
+          allowDivergenceSignal: allowDivergenceSignal,
+          // Guidance for signal generators
+          recommendedPositionSize: divergenceType === "aligned" ? 100 : 
+                                   divergenceType === "pullback" ? 50 :
+                                   divergenceType === "early_reversal" ? 40 : 0,
+          tradeDirection: divergenceType === "pullback" ? dominantTrend : 
+                         divergenceType === "early_reversal" ? trend1h.trend : 
+                         primaryTrend,
         },
 
         // Pullback detection
