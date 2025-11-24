@@ -11,6 +11,12 @@ import { useState, useEffect } from 'react';
 import { TrailingStopSettings } from '@/components/TrailingStopSettings';
 import { PositionRebalancingSettings } from '@/components/PositionRebalancingSettings';
 import { DivergenceSettings } from '@/components/DivergenceSettings';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
 
 export const RiskManagementControls = () => {
   const { riskParams, updateRiskParameters } = useRiskParameters();
@@ -132,11 +138,22 @@ export const RiskManagementControls = () => {
         </Card>
       </div>
 
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-4">Risk Parameters</h3>
-        
-        <div className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2">
+      <Accordion type="multiple" defaultValue={["basic", "advanced", "position"]} className="space-y-4">
+        {/* Basic Risk Parameters */}
+        <AccordionItem value="basic">
+          <Card>
+            <AccordionTrigger className="px-6 py-4 hover:no-underline">
+              <div className="flex items-center gap-3">
+                <Shield className="h-5 w-5 text-primary" />
+                <div className="text-left">
+                  <h3 className="text-lg font-semibold">Basic Risk Parameters</h3>
+                  <p className="text-sm text-muted-foreground">Portfolio value, position sizing, and loss limits</p>
+                </div>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="px-6 pb-6">
+              <div className="space-y-6 pt-4">
+                <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="portfolio-value">Portfolio Value ($)</Label>
               <Input
@@ -270,6 +287,32 @@ export const RiskManagementControls = () => {
               </p>
             </div>
 
+                </div>
+
+                <Button onClick={handleUpdate} className="w-full">
+                  Update Basic Risk Parameters
+                </Button>
+              </div>
+            </AccordionContent>
+          </Card>
+        </AccordionItem>
+
+        {/* Advanced Strategies */}
+        <AccordionItem value="advanced">
+          <Card>
+            <AccordionTrigger className="px-6 py-4 hover:no-underline">
+              <div className="flex items-center gap-3">
+                <TrendingDown className="h-5 w-5 text-primary" />
+                <div className="text-left">
+                  <h3 className="text-lg font-semibold">Advanced Strategies</h3>
+                  <p className="text-sm text-muted-foreground">Signal filtering, confidence thresholds, and TP/SL multipliers</p>
+                </div>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="px-6 pb-6">
+              <div className="space-y-6 pt-4">
+                <div className="grid gap-4 md:grid-cols-2">
+
             <div className="space-y-2">
               <Label htmlFor="standard-tp-multiplier">Standard Take Profit Multiplier</Label>
               <Input
@@ -324,22 +367,42 @@ export const RiskManagementControls = () => {
               </p>
             </div>
 
-          </div>
+                </div>
 
-          <Button onClick={handleUpdate} className="w-full">
-            Update Risk Parameters
-          </Button>
-        </div>
-      </Card>
+                <Button onClick={handleUpdate} className="w-full">
+                  Update Advanced Strategy Parameters
+                </Button>
+              </div>
+            </AccordionContent>
+          </Card>
+        </AccordionItem>
 
-      {/* Trailing Stop Loss Settings */}
-      <TrailingStopSettings />
+        {/* Position Management */}
+        <AccordionItem value="position">
+          <Card>
+            <AccordionTrigger className="px-6 py-4 hover:no-underline">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="h-5 w-5 text-primary" />
+                <div className="text-left">
+                  <h3 className="text-lg font-semibold">Position Management</h3>
+                  <p className="text-sm text-muted-foreground">Trailing stops, rebalancing, and divergence strategies</p>
+                </div>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="px-6 pb-6 space-y-6 pt-4">
 
-      {/* Automated Position Rebalancing */}
-      <PositionRebalancingSettings />
+              {/* Trailing Stop Loss Settings */}
+              <TrailingStopSettings />
 
-      {/* Divergence Opportunity Strategy */}
-      <DivergenceSettings />
+              {/* Automated Position Rebalancing */}
+              <PositionRebalancingSettings />
+
+              {/* Divergence Opportunity Strategy */}
+              <DivergenceSettings />
+            </AccordionContent>
+          </Card>
+        </AccordionItem>
+      </Accordion>
     </div>
   );
 };
