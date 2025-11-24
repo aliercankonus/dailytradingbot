@@ -344,6 +344,27 @@ serve(async (req) => {
             multiTimeframeReason = 'Standard aligned timeframes with momentum confirmation';
           } else {
             rejectedByMultiTimeframeAnalysis++;
+            
+            // Detailed rejection data
+            const rejectionData = {
+              confidence,
+              trendConsistency,
+              meetsThreshold,
+              momentum: {
+                confirmed: hasMomentumConfirmation,
+                tf15m_consecutive: trendData.timeframes?.['15m']?.consecutiveBullish || trendData.timeframes?.['15m']?.consecutiveBearish || 0,
+                tf30m_consecutive: trendData.timeframes?.['30m']?.consecutiveBullish || trendData.timeframes?.['30m']?.consecutiveBearish || 0,
+                macd_histogram: trendData.macdHistogram,
+                macd_expanding: trendData.macdExpanding
+              },
+              timeframes: {
+                '4h': trendData.timeframes?.['4h']?.trend,
+                '1h': trendData.timeframes?.['1h']?.trend,
+                '30m': trendData.timeframes?.['30m']?.trend,
+                '15m': trendData.timeframes?.['15m']?.trend
+              }
+            };
+            
             await supabase
               .from('signal_rejection_log')
               .insert({
@@ -352,7 +373,7 @@ serve(async (req) => {
                 rejection_reason: !hasMomentumConfirmation 
                   ? 'Multi-Timeframe prerequisite failed: momentum not confirmed'
                   : 'Multi-Timeframe prerequisite failed: confidence or trend consistency below threshold',
-                filters_status: { confidence, trendConsistency },
+                filters_status: rejectionData,
                 trend_data: trendData,
                 checked_at: new Date().toISOString()
               });
@@ -393,13 +414,50 @@ serve(async (req) => {
           
           if (!multiTimeframePass) {
             rejectedByMultiTimeframeAnalysis++;
+            
+            // Detailed divergence rejection data
+            const rejectionData = {
+              divergenceType,
+              aligned: false,
+              divergenceAllowed: true,
+              pullbackEnabled: riskParams.enable_pullback_signals,
+              earlyReversalEnabled: riskParams.enable_early_reversal_signals,
+              timeframes: {
+                '4h': {
+                  trend: trendData.timeframes?.['4h']?.trend,
+                  confidence: trendData.timeframes?.['4h']?.confidence
+                },
+                '1h': {
+                  trend: trendData.timeframes?.['1h']?.trend,
+                  confidence: trendData.timeframes?.['1h']?.confidence
+                },
+                '30m': {
+                  trend: trendData.timeframes?.['30m']?.trend,
+                  confidence: trendData.timeframes?.['30m']?.confidence,
+                  consecutiveBullish: trendData.timeframes?.['30m']?.consecutiveBullish || 0,
+                  consecutiveBearish: trendData.timeframes?.['30m']?.consecutiveBearish || 0
+                },
+                '15m': {
+                  trend: trendData.timeframes?.['15m']?.trend,
+                  confidence: trendData.timeframes?.['15m']?.confidence,
+                  consecutiveBullish: trendData.timeframes?.['15m']?.consecutiveBullish || 0,
+                  consecutiveBearish: trendData.timeframes?.['15m']?.consecutiveBearish || 0
+                }
+              },
+              momentum: {
+                confirmed: trendData.momentumConfirmed || false,
+                macd_histogram: trendData.macdHistogram,
+                macd_expanding: trendData.macdExpanding
+              }
+            };
+            
             await supabase
               .from('signal_rejection_log')
               .insert({
                 user_id: user.id,
                 symbol,
                 rejection_reason: 'Multi-Timeframe prerequisite failed: divergence conditions not met or momentum missing',
-                filters_status: { divergenceType },
+                filters_status: rejectionData,
                 trend_data: trendData,
                 checked_at: new Date().toISOString()
               });
@@ -407,13 +465,47 @@ serve(async (req) => {
           }
         } else {
           rejectedByMultiTimeframeAnalysis++;
+          
+          // Detailed rejection data showing why timeframes aren't aligned and no divergence
+          const rejectionData = {
+            aligned: false,
+            divergenceAllowed: false,
+            confidence,
+            trendConsistency,
+            timeframes: {
+              '4h': {
+                trend: trendData.timeframes?.['4h']?.trend,
+                confidence: trendData.timeframes?.['4h']?.confidence
+              },
+              '1h': {
+                trend: trendData.timeframes?.['1h']?.trend,
+                confidence: trendData.timeframes?.['1h']?.confidence
+              },
+              '30m': {
+                trend: trendData.timeframes?.['30m']?.trend,
+                confidence: trendData.timeframes?.['30m']?.confidence
+              },
+              '15m': {
+                trend: trendData.timeframes?.['15m']?.trend,
+                confidence: trendData.timeframes?.['15m']?.confidence
+              }
+            },
+            momentum: {
+              confirmed: trendData.momentumConfirmed || false,
+              tf15m_consecutive: trendData.timeframes?.['15m']?.consecutiveBullish || trendData.timeframes?.['15m']?.consecutiveBearish || 0,
+              tf30m_consecutive: trendData.timeframes?.['30m']?.consecutiveBullish || trendData.timeframes?.['30m']?.consecutiveBearish || 0,
+              macd_histogram: trendData.macdHistogram,
+              macd_expanding: trendData.macdExpanding
+            }
+          };
+          
           await supabase
             .from('signal_rejection_log')
             .insert({
               user_id: user.id,
               symbol,
               rejection_reason: 'Multi-Timeframe prerequisite failed: timeframes not aligned, no divergence opportunity',
-              filters_status: null,
+              filters_status: rejectionData,
               trend_data: trendData,
               checked_at: new Date().toISOString()
             });
