@@ -299,7 +299,10 @@ export type Database = {
           current_open_trades: number | null
           daily_loss_limit_percent: number
           daily_realized_loss: number | null
+          early_reversal_position_size_percent: number | null
           email_notifications_enabled: boolean | null
+          enable_early_reversal_signals: boolean | null
+          enable_pullback_signals: boolean | null
           id: string
           is_trading_enabled: boolean | null
           last_loss_reset_date: string | null
@@ -314,6 +317,7 @@ export type Database = {
           paper_trading_mode: boolean | null
           portfolio_value: number
           position_size_reduction_percent: number
+          pullback_position_size_percent: number | null
           rebalance_loss_threshold_percent: number | null
           sms_notifications_enabled: boolean | null
           trailing_stop_activation_percent: number | null
@@ -330,7 +334,10 @@ export type Database = {
           current_open_trades?: number | null
           daily_loss_limit_percent?: number
           daily_realized_loss?: number | null
+          early_reversal_position_size_percent?: number | null
           email_notifications_enabled?: boolean | null
+          enable_early_reversal_signals?: boolean | null
+          enable_pullback_signals?: boolean | null
           id?: string
           is_trading_enabled?: boolean | null
           last_loss_reset_date?: string | null
@@ -345,6 +352,7 @@ export type Database = {
           paper_trading_mode?: boolean | null
           portfolio_value?: number
           position_size_reduction_percent?: number
+          pullback_position_size_percent?: number | null
           rebalance_loss_threshold_percent?: number | null
           sms_notifications_enabled?: boolean | null
           trailing_stop_activation_percent?: number | null
@@ -361,7 +369,10 @@ export type Database = {
           current_open_trades?: number | null
           daily_loss_limit_percent?: number
           daily_realized_loss?: number | null
+          early_reversal_position_size_percent?: number | null
           email_notifications_enabled?: boolean | null
+          enable_early_reversal_signals?: boolean | null
+          enable_pullback_signals?: boolean | null
           id?: string
           is_trading_enabled?: boolean | null
           last_loss_reset_date?: string | null
@@ -376,6 +387,7 @@ export type Database = {
           paper_trading_mode?: boolean | null
           portfolio_value?: number
           position_size_reduction_percent?: number
+          pullback_position_size_percent?: number | null
           rebalance_loss_threshold_percent?: number | null
           sms_notifications_enabled?: boolean | null
           trailing_stop_activation_percent?: number | null
