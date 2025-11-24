@@ -128,11 +128,23 @@ serve(async (req) => {
           if (divergenceType === 'pullback') {
             // Check if pullback signals are enabled
             if (riskParams.enable_pullback_signals) {
-              shouldCreateSignal = true;
-              positionSizePercent = riskParams.pullback_position_size_percent || 50;
-              confidenceCap = 70;
-              signalReason = `Pullback opportunity: ${higherTimeframeFilter.divergenceDetails}`;
-              totalSignalsGenerated++;
+              // Multi-layer confirmation: require 30m and 15m to align with 4h
+              const tf30m = trendData.timeframes?.['30m'];
+              const tf15m = trendData.timeframes?.['15m'];
+              const tf4h = trendData.timeframes?.['4h'];
+              
+              if (tf30m && tf15m && tf4h && 
+                  tf30m.trend === tf4h.trend && 
+                  tf15m.trend === tf4h.trend) {
+                shouldCreateSignal = true;
+                positionSizePercent = riskParams.pullback_position_size_percent || 50;
+                confidenceCap = 70;
+                signalReason = `Pullback opportunity confirmed by 30m/15m: ${higherTimeframeFilter.divergenceDetails}`;
+                totalSignalsGenerated++;
+              } else {
+                rejectedByDivergenceSettings++;
+                console.log(`Rejected pullback signal for ${symbol} - 30m/15m confirmation failed`);
+              }
             } else {
               rejectedByDivergenceSettings++;
               console.log(`Rejected pullback signal for ${symbol} - pullback signals disabled`);
@@ -140,11 +152,23 @@ serve(async (req) => {
           } else if (divergenceType === 'early_reversal') {
             // Check if early reversal signals are enabled
             if (riskParams.enable_early_reversal_signals) {
-              shouldCreateSignal = true;
-              positionSizePercent = riskParams.early_reversal_position_size_percent || 40;
-              confidenceCap = 65;
-              signalReason = `Early reversal opportunity: ${higherTimeframeFilter.divergenceDetails}`;
-              totalSignalsGenerated++;
+              // Multi-layer confirmation: require 30m and 15m to align with 1h
+              const tf30m = trendData.timeframes?.['30m'];
+              const tf15m = trendData.timeframes?.['15m'];
+              const tf1h = trendData.timeframes?.['1h'];
+              
+              if (tf30m && tf15m && tf1h && 
+                  tf30m.trend === tf1h.trend && 
+                  tf15m.trend === tf1h.trend) {
+                shouldCreateSignal = true;
+                positionSizePercent = riskParams.early_reversal_position_size_percent || 40;
+                confidenceCap = 65;
+                signalReason = `Early reversal confirmed by 30m/15m: ${higherTimeframeFilter.divergenceDetails}`;
+                totalSignalsGenerated++;
+              } else {
+                rejectedByDivergenceSettings++;
+                console.log(`Rejected early reversal signal for ${symbol} - 30m/15m confirmation failed`);
+              }
             } else {
               rejectedByDivergenceSettings++;
               console.log(`Rejected early reversal signal for ${symbol} - early reversal signals disabled`);
