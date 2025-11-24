@@ -58,9 +58,16 @@ export const SignalRejectionReasons = () => {
         details.push(`4h: ${fs.trend4h || 'unknown'}, 1h: ${fs.trend1h || 'unknown'}`);
       }
       
-      // Add divergence result
-      const divergenceStatus = fs.divergenceAllowed === false ? 'no divergence' : 'divergence allowed';
-      details.push(divergenceStatus);
+      // Add divergence result with values
+      if (fs.divergenceType) {
+        details.push(`${fs.divergenceType}: ${fs.divergenceConfidence?.toFixed(1)}%`);
+      } else if (fs.pullbackValid !== undefined || fs.earlyReversalValid !== undefined) {
+        const pullbackStatus = fs.pullbackValid ? 'pullback valid' : 'pullback invalid';
+        const reversalStatus = fs.earlyReversalValid ? 'reversal valid' : 'reversal invalid';
+        details.push(`${pullbackStatus}, ${reversalStatus}`);
+      } else {
+        details.push('no divergence opportunity');
+      }
       
       // Add ranging market status if present
       if (fs.isRanging === true) {
