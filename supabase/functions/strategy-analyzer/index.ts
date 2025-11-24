@@ -133,13 +133,22 @@ serve(async (req) => {
         let rejectionReason = '';
 
         if (higherTimeframeFilter.aligned) {
-          // Standard aligned signal
+          // Standard aligned signal - REQUIRE momentum confirmation for ALL signals
           const meetsThreshold = confidence >= riskParams.min_confidence_threshold &&
                                 trendConsistency >= riskParams.min_trend_consistency;
-          shouldCreateSignal = meetsThreshold;
-          signalReason = `Aligned ${trend} trend across timeframes`;
           
-          if (!meetsThreshold) {
+          // Check momentum confirmation (CRITICAL: prevents weak entries)
+          const hasMomentumConfirmation = trendData.momentumConfirmed || false;
+          
+          if (meetsThreshold && hasMomentumConfirmation) {
+            shouldCreateSignal = true;
+            signalReason = `Aligned ${trend} trend with confirmed momentum (MACD expansion + consecutive candles)`;
+          } else if (meetsThreshold && !hasMomentumConfirmation) {
+            // Threshold met but momentum not confirmed - REJECT
+            rejectionReason = `Standard aligned signal - momentum not confirmed (consecutive candles or MACD expansion missing)`;
+            console.log(`Rejected ${trend} signal for ${symbol} - momentum not confirmed despite alignment`);
+          } else {
+            // Threshold not met
             rejectionReason = confidence < riskParams.min_confidence_threshold 
               ? `Low confidence: ${confidence.toFixed(1)}% < ${riskParams.min_confidence_threshold}%`
               : `Low trend consistency: ${trendConsistency.toFixed(1)}% < ${riskParams.min_trend_consistency}%`;
