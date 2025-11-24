@@ -38,34 +38,41 @@ export const useRiskParameters = () => {
   const fetchRiskParameters = async () => {
     try {
       setLoading(true);
+      
+      // Get current user first
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.error('No authenticated user');
+        setError('Not authenticated');
+        setLoading(false);
+        return;
+      }
+
+      // Query with proper user filter
       const { data, error: queryError } = await supabase
         .from('risk_parameters')
         .select('*')
+        .eq('user_id', user.id)
         .maybeSingle();
 
       if (queryError) throw queryError;
 
       if (!data) {
         // Create defaults for this user if missing
-        const { data: { user } } = await supabase.auth.getUser();
-        console.log('No risk parameters found. Current user:', user?.id);
-        if (user) {
-          console.log('Attempting to insert default risk parameters for user:', user.id);
-          const { data: inserted, error: insertError } = await supabase
-            .from('risk_parameters')
-            .insert({ user_id: user.id })
-            .select()
-            .single();
-          if (insertError) {
-            console.error('Error inserting default risk parameters:', insertError);
-            console.error('Insert error details:', JSON.stringify(insertError, null, 2));
-          } else {
-            console.log('Successfully created risk parameters:', inserted);
-            setRiskParams(inserted);
-            return;
-          }
+        console.log('No risk parameters found. Creating defaults for user:', user.id);
+        const { data: inserted, error: insertError } = await supabase
+          .from('risk_parameters')
+          .insert({ user_id: user.id })
+          .select()
+          .single();
+          
+        if (insertError) {
+          console.error('Error inserting default risk parameters:', insertError);
+          console.error('Insert error details:', JSON.stringify(insertError, null, 2));
         } else {
-          console.error('No authenticated user found');
+          console.log('Successfully created risk parameters:', inserted);
+          setRiskParams(inserted);
+          return;
         }
       }
 
