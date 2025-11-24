@@ -59,7 +59,7 @@ export const usePositions = () => {
   useEffect(() => {
     fetchPositions();
     
-    // Monitor positions every 60 seconds (reduced from 5s to save resources)
+    // Monitor positions every 30 seconds (balanced compromise between cost and responsiveness)
     const monitorInterval = setInterval(async () => {
       // Only call monitor-positions if we have active positions
       const { data } = await supabase
@@ -71,7 +71,7 @@ export const usePositions = () => {
         await supabase.functions.invoke('monitor-positions');
       }
       fetchPositions();
-    }, 60000); // Changed from 5000 (5s) to 60000 (60s)
+    }, 30000); // 30s interval for volatile markets
 
     return () => clearInterval(monitorInterval);
   }, []);
