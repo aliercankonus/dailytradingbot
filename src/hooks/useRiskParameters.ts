@@ -48,21 +48,24 @@ export const useRiskParameters = () => {
       if (!data) {
         // Create defaults for this user if missing
         const { data: { user } } = await supabase.auth.getUser();
+        console.log('No risk parameters found. Current user:', user?.id);
         if (user) {
-          const { error: insertError } = await supabase
+          console.log('Attempting to insert default risk parameters for user:', user.id);
+          const { data: inserted, error: insertError } = await supabase
             .from('risk_parameters')
-            .insert({ user_id: user.id });
+            .insert({ user_id: user.id })
+            .select()
+            .single();
           if (insertError) {
             console.error('Error inserting default risk parameters:', insertError);
+            console.error('Insert error details:', JSON.stringify(insertError, null, 2));
           } else {
-            // Re-fetch after creating
-            const { data: created } = await supabase
-              .from('risk_parameters')
-              .select('*')
-              .maybeSingle();
-            setRiskParams(created || null);
+            console.log('Successfully created risk parameters:', inserted);
+            setRiskParams(inserted);
             return;
           }
+        } else {
+          console.error('No authenticated user found');
         }
       }
 
