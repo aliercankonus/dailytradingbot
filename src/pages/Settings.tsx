@@ -13,6 +13,7 @@ import { PerformanceSettings } from '@/components/PerformanceSettings';
 import { PerformanceMonitoringDashboard } from '@/components/PerformanceMonitoringDashboard';
 import { TrailingStopSettings } from '@/components/TrailingStopSettings';
 import { PositionRebalancingSettings } from '@/components/PositionRebalancingSettings';
+import { DivergenceSettings } from '@/components/DivergenceSettings';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function Settings() {
@@ -339,6 +340,9 @@ export default function Settings() {
 
           {/* Position Rebalancing */}
           <PositionRebalancingSettings />
+
+          {/* Divergence Opportunity Strategy */}
+          <DivergenceSettings />
 
           {/* Risk Management */}
           <PerformanceSettings />
