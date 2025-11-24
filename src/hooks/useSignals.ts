@@ -28,6 +28,9 @@ export const useSignals = () => {
       try {
         setLoading(true);
         
+        // Calculate timestamp for 1 minute ago
+        const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
+        
         // Get all active trades to filter out used signals
         const { data: activeTrades } = await supabase
           .from('trades')
@@ -39,7 +42,7 @@ export const useSignals = () => {
         const { data, error: queryError } = await supabase
           .from('trading_signals')
           .select('*')
-          .gte('expires_at', new Date().toISOString())
+          .gte('created_at', oneMinuteAgo)
           .order('created_at', { ascending: false });
 
         if (queryError) throw queryError;
