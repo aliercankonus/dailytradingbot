@@ -26,6 +26,7 @@ interface RiskParameters {
   auto_execute_signals: boolean;
   standard_tp_multiplier: number;
   divergence_tp_multiplier: number;
+  divergence_sl_multiplier: number;
   updated_at: string;
 }
 

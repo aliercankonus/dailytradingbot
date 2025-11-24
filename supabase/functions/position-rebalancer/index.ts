@@ -218,7 +218,7 @@ async function rebalanceUserPositions(
         // Fetch user's divergence settings
         const { data: riskParams } = await supabase
           .from('risk_parameters')
-          .select('enable_pullback_signals, enable_early_reversal_signals, pullback_position_size_percent, early_reversal_position_size_percent')
+          .select('enable_pullback_signals, enable_early_reversal_signals, pullback_position_size_percent, early_reversal_position_size_percent, divergence_sl_multiplier, divergence_tp_multiplier, standard_tp_multiplier, max_risk_per_trade_percent')
           .eq('user_id', user_id)
           .single();
 
@@ -275,7 +275,11 @@ async function rebalanceUserPositions(
           
           // Adjust stop loss and take profit for divergence signals (shorter timeframes)
           const isDivergenceSignal = trend.higherTimeframeFilter?.divergenceType;
-          const stopLossPercent = isDivergenceSignal ? 0.01 : 0.015; // 1% vs 1.5%
+          const maxRiskPercent = (riskParams.max_risk_per_trade_percent || 1.5) / 100;
+          const divergenceSlMultiplier = riskParams.divergence_sl_multiplier || 0.67;
+          const stopLossPercent = isDivergenceSignal 
+            ? maxRiskPercent * divergenceSlMultiplier  // Use configured divergence SL multiplier
+            : maxRiskPercent;
           const divergenceTpMultiplier = riskParams.divergence_tp_multiplier || 2.0;
           const standardTpMultiplier = riskParams.standard_tp_multiplier || 2.5;
           const takeProfitPercent = isDivergenceSignal 

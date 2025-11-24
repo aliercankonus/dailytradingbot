@@ -26,6 +26,7 @@ export const RiskManagementControls = () => {
     daily_loss_limit_percent: 5.0,
     standard_tp_multiplier: 2.5,
     divergence_tp_multiplier: 2.0,
+    divergence_sl_multiplier: 0.67,
   });
 
   useEffect(() => {
@@ -42,6 +43,7 @@ export const RiskManagementControls = () => {
         daily_loss_limit_percent: riskParams.daily_loss_limit_percent || 5.0,
         standard_tp_multiplier: riskParams.standard_tp_multiplier || 2.5,
         divergence_tp_multiplier: riskParams.divergence_tp_multiplier || 2.0,
+        divergence_sl_multiplier: riskParams.divergence_sl_multiplier || 0.67,
       });
     }
   }, [riskParams]);
@@ -298,6 +300,24 @@ export const RiskManagementControls = () => {
               />
               <p className="text-xs text-muted-foreground">
                 Tighter TP for shorter-term divergence signals (e.g., 2.0 = 1:2.0 risk/reward)
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="divergence-sl-multiplier">Divergence Stop Loss Multiplier</Label>
+              <Input
+                id="divergence-sl-multiplier"
+                type="number"
+                min="0.3"
+                max="1.5"
+                step="0.05"
+                value={formData.divergence_sl_multiplier}
+                onChange={(e) => 
+                  setFormData({ ...formData, divergence_sl_multiplier: parseFloat(e.target.value) })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Tighter SL for divergence signals (e.g., 0.67 = 1% SL when max risk is 1.5%)
               </p>
             </div>
 

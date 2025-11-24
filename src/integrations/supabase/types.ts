@@ -299,6 +299,7 @@ export type Database = {
           current_open_trades: number | null
           daily_loss_limit_percent: number
           daily_realized_loss: number | null
+          divergence_sl_multiplier: number | null
           divergence_tp_multiplier: number | null
           early_reversal_position_size_percent: number | null
           email_notifications_enabled: boolean | null
@@ -336,6 +337,7 @@ export type Database = {
           current_open_trades?: number | null
           daily_loss_limit_percent?: number
           daily_realized_loss?: number | null
+          divergence_sl_multiplier?: number | null
           divergence_tp_multiplier?: number | null
           early_reversal_position_size_percent?: number | null
           email_notifications_enabled?: boolean | null
@@ -373,6 +375,7 @@ export type Database = {
           current_open_trades?: number | null
           daily_loss_limit_percent?: number
           daily_realized_loss?: number | null
+          divergence_sl_multiplier?: number | null
           divergence_tp_multiplier?: number | null
           early_reversal_position_size_percent?: number | null
           email_notifications_enabled?: boolean | null
