@@ -49,14 +49,14 @@ const Performance = () => {
     {
       label: "Total P&L",
       value: latestSnapshot ? `${latestSnapshot.total_pnl >= 0 ? "+" : ""}$${Math.abs(parseFloat(latestSnapshot.total_pnl.toString())).toFixed(2)}` : "$0.00",
-      change: `${latestSnapshot?.total_return_percent.toFixed(2)}% return`,
+      change: latestSnapshot ? `${latestSnapshot.total_return_percent.toFixed(2)}% return` : "No data yet",
       changePositive: latestSnapshot ? latestSnapshot.total_pnl >= 0 : false,
       icon: latestSnapshot && latestSnapshot.total_pnl >= 0 ? TrendingUp : TrendingDown,
     },
     {
       label: "Win Rate",
       value: latestSnapshot ? `${latestSnapshot.win_rate.toFixed(1)}%` : "0%",
-      change: `${latestSnapshot?.winning_trades || 0}W / ${latestSnapshot?.losing_trades || 0}L`,
+      change: latestSnapshot ? `${latestSnapshot.winning_trades || 0}W / ${latestSnapshot.losing_trades || 0}L` : "No trades yet",
       changePositive: latestSnapshot ? latestSnapshot.win_rate >= 50 : false,
       icon: Target,
     },
