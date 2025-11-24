@@ -128,7 +128,7 @@ export function DivergenceSettings() {
                 </Label>
               </div>
               <p className="text-sm text-muted-foreground">
-                Trade when 4h trend is strong (60%+) but 1h temporarily opposes
+                Trade with 4h trend when it's strong (≥60%) but 1h opposes, confirmed by 30m/15m alignment
               </p>
             </div>
             <Switch
@@ -153,7 +153,7 @@ export function DivergenceSettings() {
                 className="w-full"
               />
               <p className="text-xs text-muted-foreground">
-                Recommended: 50% (trades with 4h direction during pullbacks)
+                Recommended: 50% (requires 30m or 15m to confirm 4h trend direction)
               </p>
             </div>
           )}
@@ -170,7 +170,7 @@ export function DivergenceSettings() {
                 </Label>
               </div>
               <p className="text-sm text-muted-foreground">
-                Trade when 1h strongly reverses (70%+) before 4h confirms
+                Trade with 1h reversal when it's strong (≥70%) and 4h is weak, confirmed by 30m/15m alignment
               </p>
             </div>
             <Switch
@@ -195,7 +195,7 @@ export function DivergenceSettings() {
                 className="w-full"
               />
               <p className="text-xs text-muted-foreground">
-                Recommended: 40% (trades with 1h direction during early reversals)
+                Recommended: 40% (requires both 30m and 15m to confirm 1h reversal)
               </p>
             </div>
           )}
