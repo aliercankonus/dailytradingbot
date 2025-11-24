@@ -270,16 +270,22 @@ serve(async (req) => {
 
     // Analyze each symbol
     for (const { symbol } of symbols) {
+      const currentTradeCount = openTradesPerSymbol.get(symbol) || 0;
+      const hasRecentSignal = existingSignalsSet.has(symbol);
+      
       // Skip if already has a recent signal (prevents duplicate signals)
-      if (existingSignalsSet.has(symbol)) {
-        console.log(`Skipping ${symbol} - already has active signal from last minute`);
+      if (hasRecentSignal) {
+        const statusMsg = currentTradeCount > 0 
+          ? `${currentTradeCount}/${riskParams.max_trades_per_symbol} trades active, but has recent signal`
+          : 'has recent signal (no open trades)';
+        console.log(`⏭️ Skipping ${symbol} - ${statusMsg}`);
         await supabase
           .from('signal_rejection_log')
           .insert({
             user_id: user.id,
             symbol,
-            rejection_reason: 'Already has active signal from last minute',
-            filters_status: null,
+            rejection_reason: `Already has active signal from last minute (${statusMsg})`,
+            filters_status: { currentTradeCount, maxTradesPerSymbol: riskParams.max_trades_per_symbol },
             trend_data: null,
             checked_at: new Date().toISOString()
           });
@@ -287,21 +293,24 @@ serve(async (req) => {
       }
 
       // Check if symbol has reached max trades per symbol limit
-      const currentTradeCount = openTradesPerSymbol.get(symbol) || 0;
       if (currentTradeCount >= riskParams.max_trades_per_symbol) {
-        console.log(`Skipping ${symbol} - reached max trades per symbol limit (${currentTradeCount}/${riskParams.max_trades_per_symbol})`);
+        console.log(`⏭️ Skipping ${symbol} - max trades limit reached (${currentTradeCount}/${riskParams.max_trades_per_symbol} trades active)`);
         await supabase
           .from('signal_rejection_log')
           .insert({
             user_id: user.id,
             symbol,
-            rejection_reason: `Max trades per symbol reached (${currentTradeCount}/${riskParams.max_trades_per_symbol})`,
-            filters_status: null,
+            rejection_reason: `Max trades per symbol reached: ${currentTradeCount}/${riskParams.max_trades_per_symbol} trades active`,
+            filters_status: { currentTradeCount, maxTradesPerSymbol: riskParams.max_trades_per_symbol },
             trend_data: null,
             checked_at: new Date().toISOString()
           });
         continue;
       }
+      
+      // Log symbol evaluation start with current state
+      console.log(`🔍 Evaluating ${symbol} (${currentTradeCount}/${riskParams.max_trades_per_symbol} trades active, no recent signals)`);
+    
 
       try {
         // ============= STEP 1: Multi-Timeframe Analysis Validation =============
@@ -525,7 +534,7 @@ serve(async (req) => {
               positionSizePercent: strategyPositionSize 
             } as SignalData);
             totalSignalsGenerated++;
-            console.log(`✓ Created ${signalType.toUpperCase()} signal for ${symbol} using "${strategy.name}"`);
+            console.log(`✅ Created ${signalType.toUpperCase()} signal for ${symbol} using "${strategy.name}" (now ${currentTradeCount}/${riskParams.max_trades_per_symbol} trades, 1 active signal)`);
             
             // Mark symbol as having a signal to avoid duplicates within this cycle
             existingSignalsSet.add(symbol);
