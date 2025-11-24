@@ -8,9 +8,13 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 export const PortfolioMetrics = () => {
-  const { connected } = useRealtimePrices();
-  const { riskParams, loading: riskLoading } = useRiskParameters();
   const { positions, loading: positionsLoading } = usePositions();
+  
+  // Get live prices for all active position symbols
+  const symbols = positions.map(p => p.symbol);
+  const { connected, getPrice } = useRealtimePrices(symbols);
+  
+  const { riskParams, loading: riskLoading } = useRiskParameters();
   const { balance: binanceBalance, loading: balanceLoading } = useBinanceBalance();
   const [allTrades, setAllTrades] = useState<any[]>([]);
   const [tradesLoading, setTradesLoading] = useState(true);
@@ -52,10 +56,20 @@ export const PortfolioMetrics = () => {
       .filter(t => t.status === 'closed' && t.profit_loss !== null)
       .reduce((sum, trade) => sum + (trade.profit_loss || 0), 0);
     
-    // Calculate unrealized P&L from open positions
+    // Calculate unrealized P&L from open positions using LIVE prices
     const unrealizedPnL = positions
-      .filter(p => p.status === 'active' && p.unrealized_pnl !== null)
-      .reduce((sum, pos) => sum + (pos.unrealized_pnl || 0), 0);
+      .filter(p => p.status === 'active')
+      .reduce((sum, pos) => {
+        const livePrice = getPrice(pos.symbol);
+        const currentPrice = livePrice ? parseFloat(livePrice.price) : pos.current_price || pos.entry_price;
+        
+        // Calculate live P&L
+        const pnl = pos.side === 'BUY'
+          ? (currentPrice - pos.entry_price) * pos.quantity
+          : (pos.entry_price - currentPrice) * pos.quantity;
+        
+        return sum + pnl;
+      }, 0);
     
     const totalPnL = realizedPnL + unrealizedPnL;
     const currentValue = basePortfolio + totalPnL;
