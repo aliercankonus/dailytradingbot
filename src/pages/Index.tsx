@@ -22,38 +22,40 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="flex items-center justify-between">
-          <DashboardHeader />
-          <div className="flex items-center gap-2 mr-6">
-            <button
-              onClick={() => navigate('/performance')}
-              className="p-2 hover:bg-accent rounded-lg transition-colors"
-              aria-label="Performance"
-            >
-              <BarChart3 className="h-5 w-5 text-muted-foreground hover:text-foreground" />
-            </button>
-            <button
-              onClick={() => navigate('/symbols')}
-              className="p-2 hover:bg-accent rounded-lg transition-colors"
-              aria-label="Trading Symbols"
-            >
-              <Coins className="h-5 w-5 text-muted-foreground hover:text-foreground" />
-            </button>
-            <button
-              onClick={() => navigate('/strategies')}
-              className="p-2 hover:bg-accent rounded-lg transition-colors"
-              aria-label="Strategies"
-            >
-              <Layers className="h-5 w-5 text-muted-foreground hover:text-foreground" />
-            </button>
-            <button
-              onClick={() => navigate('/settings')}
-              className="p-2 hover:bg-accent rounded-lg transition-colors"
-              aria-label="Settings"
-            >
-              <Settings className="h-5 w-5 text-muted-foreground hover:text-foreground" />
-            </button>
+      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <DashboardHeader />
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => navigate('/performance')}
+                className="p-2 hover:bg-accent rounded-lg transition-colors"
+                aria-label="Performance"
+              >
+                <BarChart3 className="h-5 w-5 text-muted-foreground hover:text-foreground" />
+              </button>
+              <button
+                onClick={() => navigate('/symbols')}
+                className="p-2 hover:bg-accent rounded-lg transition-colors"
+                aria-label="Trading Symbols"
+              >
+                <Coins className="h-5 w-5 text-muted-foreground hover:text-foreground" />
+              </button>
+              <button
+                onClick={() => navigate('/strategies')}
+                className="p-2 hover:bg-accent rounded-lg transition-colors"
+                aria-label="Strategies"
+              >
+                <Layers className="h-5 w-5 text-muted-foreground hover:text-foreground" />
+              </button>
+              <button
+                onClick={() => navigate('/settings')}
+                className="p-2 hover:bg-accent rounded-lg transition-colors"
+                aria-label="Settings"
+              >
+                <Settings className="h-5 w-5 text-muted-foreground hover:text-foreground" />
+              </button>
+            </div>
           </div>
         </div>
       </header>
