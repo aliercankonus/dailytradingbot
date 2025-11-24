@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Settings, Layers, Coins } from "lucide-react";
+import { Settings, Layers, Coins, BarChart3 } from "lucide-react";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { BotStatus } from "@/components/BotStatus";
 import { StrategyOverview } from "@/components/StrategyOverview";
@@ -26,6 +26,13 @@ const Index = () => {
         <div className="flex items-center justify-between">
           <DashboardHeader />
           <div className="flex items-center gap-2 mr-6">
+            <button
+              onClick={() => navigate('/performance')}
+              className="p-2 hover:bg-accent rounded-lg transition-colors"
+              aria-label="Performance"
+            >
+              <BarChart3 className="h-5 w-5 text-muted-foreground hover:text-foreground" />
+            </button>
             <button
               onClick={() => navigate('/symbols')}
               className="p-2 hover:bg-accent rounded-lg transition-colors"

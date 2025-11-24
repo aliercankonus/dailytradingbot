@@ -10,6 +10,7 @@ import Settings from "./pages/Settings";
 import Strategies from "./pages/Strategies";
 import StrategyBuilder from "./pages/StrategyBuilder";
 import Symbols from "./pages/Symbols";
+import Performance from "./pages/Performance";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -30,6 +31,7 @@ const App = () => (
             <Route path="/strategies" element={<ProtectedRoute><Strategies /></ProtectedRoute>} />
             <Route path="/strategies/new" element={<ProtectedRoute><StrategyBuilder /></ProtectedRoute>} />
             <Route path="/strategies/edit/:id" element={<ProtectedRoute><StrategyBuilder /></ProtectedRoute>} />
+            <Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
