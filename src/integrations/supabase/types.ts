@@ -183,6 +183,93 @@ export type Database = {
           },
         ]
       }
+      portfolio_performance_history: {
+        Row: {
+          avg_loss: number | null
+          avg_win: number | null
+          consecutive_losses: number | null
+          created_at: string
+          daily_loss: number | null
+          id: string
+          initial_portfolio_value: number
+          largest_loss: number | null
+          largest_win: number | null
+          losing_trades: number
+          max_drawdown: number | null
+          max_open_positions: number
+          open_positions: number
+          paper_trading_mode: boolean
+          portfolio_value: number
+          profit_factor: number | null
+          realized_pnl: number
+          snapshot_date: string
+          snapshot_time: string
+          total_pnl: number
+          total_return_percent: number
+          total_trades: number
+          unrealized_pnl: number
+          user_id: string
+          win_rate: number
+          winning_trades: number
+        }
+        Insert: {
+          avg_loss?: number | null
+          avg_win?: number | null
+          consecutive_losses?: number | null
+          created_at?: string
+          daily_loss?: number | null
+          id?: string
+          initial_portfolio_value: number
+          largest_loss?: number | null
+          largest_win?: number | null
+          losing_trades?: number
+          max_drawdown?: number | null
+          max_open_positions?: number
+          open_positions?: number
+          paper_trading_mode?: boolean
+          portfolio_value: number
+          profit_factor?: number | null
+          realized_pnl?: number
+          snapshot_date: string
+          snapshot_time?: string
+          total_pnl?: number
+          total_return_percent?: number
+          total_trades?: number
+          unrealized_pnl?: number
+          user_id: string
+          win_rate?: number
+          winning_trades?: number
+        }
+        Update: {
+          avg_loss?: number | null
+          avg_win?: number | null
+          consecutive_losses?: number | null
+          created_at?: string
+          daily_loss?: number | null
+          id?: string
+          initial_portfolio_value?: number
+          largest_loss?: number | null
+          largest_win?: number | null
+          losing_trades?: number
+          max_drawdown?: number | null
+          max_open_positions?: number
+          open_positions?: number
+          paper_trading_mode?: boolean
+          portfolio_value?: number
+          profit_factor?: number | null
+          realized_pnl?: number
+          snapshot_date?: string
+          snapshot_time?: string
+          total_pnl?: number
+          total_return_percent?: number
+          total_trades?: number
+          unrealized_pnl?: number
+          user_id?: string
+          win_rate?: number
+          winning_trades?: number
+        }
+        Relationships: []
+      }
       positions: {
         Row: {
           close_reason: string | null
