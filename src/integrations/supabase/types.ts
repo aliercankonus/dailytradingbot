@@ -299,6 +299,7 @@ export type Database = {
           current_open_trades: number | null
           daily_loss_limit_percent: number
           daily_realized_loss: number | null
+          divergence_tp_multiplier: number | null
           early_reversal_position_size_percent: number | null
           email_notifications_enabled: boolean | null
           enable_early_reversal_signals: boolean | null
@@ -320,6 +321,7 @@ export type Database = {
           pullback_position_size_percent: number | null
           rebalance_loss_threshold_percent: number | null
           sms_notifications_enabled: boolean | null
+          standard_tp_multiplier: number | null
           trailing_stop_activation_percent: number | null
           trailing_stop_distance_multiplier: number | null
           trailing_stop_enabled: boolean | null
@@ -334,6 +336,7 @@ export type Database = {
           current_open_trades?: number | null
           daily_loss_limit_percent?: number
           daily_realized_loss?: number | null
+          divergence_tp_multiplier?: number | null
           early_reversal_position_size_percent?: number | null
           email_notifications_enabled?: boolean | null
           enable_early_reversal_signals?: boolean | null
@@ -355,6 +358,7 @@ export type Database = {
           pullback_position_size_percent?: number | null
           rebalance_loss_threshold_percent?: number | null
           sms_notifications_enabled?: boolean | null
+          standard_tp_multiplier?: number | null
           trailing_stop_activation_percent?: number | null
           trailing_stop_distance_multiplier?: number | null
           trailing_stop_enabled?: boolean | null
@@ -369,6 +373,7 @@ export type Database = {
           current_open_trades?: number | null
           daily_loss_limit_percent?: number
           daily_realized_loss?: number | null
+          divergence_tp_multiplier?: number | null
           early_reversal_position_size_percent?: number | null
           email_notifications_enabled?: boolean | null
           enable_early_reversal_signals?: boolean | null
@@ -390,6 +395,7 @@ export type Database = {
           pullback_position_size_percent?: number | null
           rebalance_loss_threshold_percent?: number | null
           sms_notifications_enabled?: boolean | null
+          standard_tp_multiplier?: number | null
           trailing_stop_activation_percent?: number | null
           trailing_stop_distance_multiplier?: number | null
           trailing_stop_enabled?: boolean | null

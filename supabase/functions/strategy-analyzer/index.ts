@@ -199,8 +199,8 @@ serve(async (req) => {
           ? riskParams.max_risk_per_trade_percent * 0.67  // Tighter SL: 1% instead of 1.5%
           : riskParams.max_risk_per_trade_percent;
         const takeProfitMultiplier = isDivergenceSignal 
-          ? 2.0  // Tighter TP: 1:2 risk/reward for quick exits
-          : 2.5; // Standard TP: 1:2.5 risk/reward
+          ? (riskParams.divergence_tp_multiplier || 2.0)  // Use configured divergence TP multiplier
+          : (riskParams.standard_tp_multiplier || 2.5); // Use configured standard TP multiplier
 
         // Create signal
         const signal = {
