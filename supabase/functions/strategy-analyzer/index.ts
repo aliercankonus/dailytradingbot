@@ -156,14 +156,24 @@ serve(async (req) => {
               const tf15m = trendData.timeframes?.['15m'];
               const tf4h = trendData.timeframes?.['4h'];
               
-              if (tf30m && tf15m && tf4h && 
+              // Check trend alignment
+              const trendAligned = tf30m && tf15m && tf4h && 
                   tf30m.trend === tf4h.trend && 
-                  tf15m.trend === tf4h.trend) {
+                  tf15m.trend === tf4h.trend;
+              
+              // Check momentum confirmation (require at least one timeframe with good momentum)
+              const hasMomentumConfirmation = trendData.momentumConfirmed || false;
+              
+              if (trendAligned && hasMomentumConfirmation) {
                 shouldCreateSignal = true;
                 positionSizePercent = riskParams.pullback_position_size_percent || 50;
                 confidenceCap = 70;
-                signalReason = `Pullback opportunity confirmed by 30m/15m: ${higherTimeframeFilter.divergenceDetails}`;
+                signalReason = `Pullback opportunity with momentum: ${higherTimeframeFilter.divergenceDetails}`;
                 totalSignalsGenerated++;
+              } else if (trendAligned && !hasMomentumConfirmation) {
+                rejectedByDivergenceSettings++;
+                rejectionReason = `Pullback signal - momentum not confirmed (consecutive candles or MACD expansion missing)`;
+                console.log(`Rejected pullback signal for ${symbol} - momentum not confirmed`);
               } else {
                 rejectedByDivergenceSettings++;
                 rejectionReason = `Pullback signal - 30m/15m confirmation failed (30m: ${tf30m?.trend}, 15m: ${tf15m?.trend}, need ${tf4h?.trend})`;
@@ -182,14 +192,24 @@ serve(async (req) => {
               const tf15m = trendData.timeframes?.['15m'];
               const tf1h = trendData.timeframes?.['1h'];
               
-              if (tf30m && tf15m && tf1h && 
+              // Check trend alignment
+              const trendAligned = tf30m && tf15m && tf1h && 
                   tf30m.trend === tf1h.trend && 
-                  tf15m.trend === tf1h.trend) {
+                  tf15m.trend === tf1h.trend;
+              
+              // Check momentum confirmation (stricter for early reversals)
+              const hasMomentumConfirmation = trendData.momentumConfirmed || false;
+              
+              if (trendAligned && hasMomentumConfirmation) {
                 shouldCreateSignal = true;
                 positionSizePercent = riskParams.early_reversal_position_size_percent || 40;
                 confidenceCap = 65;
-                signalReason = `Early reversal confirmed by 30m/15m: ${higherTimeframeFilter.divergenceDetails}`;
+                signalReason = `Early reversal with strong momentum: ${higherTimeframeFilter.divergenceDetails}`;
                 totalSignalsGenerated++;
+              } else if (trendAligned && !hasMomentumConfirmation) {
+                rejectedByDivergenceSettings++;
+                rejectionReason = `Early reversal - momentum not confirmed (consecutive candles or MACD expansion missing)`;
+                console.log(`Rejected early reversal signal for ${symbol} - momentum not confirmed`);
               } else {
                 rejectedByDivergenceSettings++;
                 rejectionReason = `Early reversal - 30m/15m confirmation failed (30m: ${tf30m?.trend}, 15m: ${tf15m?.trend}, need ${tf1h?.trend})`;
