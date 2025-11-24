@@ -6,6 +6,25 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+interface SignalData {
+  id?: string;
+  user_id: string;
+  symbol: string;
+  signal_type: 'long' | 'short';
+  trend: string;
+  confidence_score: number;
+  entry_price: number;
+  stop_loss: number;
+  take_profit: number;
+  strategy_id?: string;
+  strategy_name: string;
+  reason: string;
+  indicators: any;
+  expires_at: string;
+  created_by_rebalancer: boolean;
+  positionSizePercent?: number;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -88,7 +107,7 @@ serve(async (req) => {
       ...(openTrades?.map(t => t.symbol) || [])
     ]);
 
-    const signals = [];
+    const signals: SignalData[] = [];
     let totalSignalsGenerated = 0;
     let rejectedByDivergenceSettings = 0;
 
@@ -338,7 +357,7 @@ serve(async (req) => {
         if (insertError) {
           console.error(`Failed to insert signal for ${symbol}:`, insertError);
         } else if (insertedSignal) {
-          signals.push({ ...signal, id: insertedSignal.id, positionSizePercent });
+          signals.push({ ...signal, id: insertedSignal.id, positionSizePercent } as SignalData);
           console.log(`✓ Created ${signalType.toUpperCase()} signal for ${symbol} (${higherTimeframeFilter.divergenceType || 'aligned'})`);
         }
       } catch (error) {
@@ -347,6 +366,302 @@ serve(async (req) => {
     }
 
     const signalsAfterDeduplication = signals.length;
+
+    // ============= CUSTOM STRATEGIES EVALUATION =============
+    // Fetch active custom strategies for the user
+    const { data: customStrategies, error: strategiesError } = await supabase
+      .from('custom_strategies')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('is_active', true);
+
+    if (strategiesError) {
+      console.error('Failed to fetch custom strategies:', strategiesError);
+    } else if (customStrategies && customStrategies.length > 0) {
+      console.log(`Evaluating ${customStrategies.length} active custom strategies`);
+
+      // Helper functions for custom strategy evaluation
+      const calculateRSI = (prices: number[], period = 14): number => {
+        if (prices.length < period + 1) return 50;
+        let gains = 0, losses = 0;
+        for (let i = 1; i <= period; i++) {
+          const change = prices[i] - prices[i - 1];
+          if (change > 0) gains += change;
+          else losses += Math.abs(change);
+        }
+        const avgGain = gains / period;
+        const avgLoss = losses / period;
+        const rs = avgGain / (avgLoss || 1);
+        return 100 - 100 / (1 + rs);
+      };
+
+      const calculateEMA = (prices: number[], period: number): number => {
+        if (prices.length < period) return prices[prices.length - 1] || 0;
+        const multiplier = 2 / (period + 1);
+        let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+        for (let i = period; i < prices.length; i++) {
+          ema = (prices[i] - ema) * multiplier + ema;
+        }
+        return ema;
+      };
+
+      const calculateMACD = (prices: number[]): { macd: number; signal: number; histogram: number } => {
+        const ema12 = calculateEMA(prices, 12);
+        const ema26 = calculateEMA(prices, 26);
+        const macd = ema12 - ema26;
+        const signal = macd * 0.9;
+        return { macd, signal, histogram: macd - signal };
+      };
+
+      const calculateBollingerBands = (prices: number[], period = 20, stdDev = 2) => {
+        if (prices.length < period) {
+          const currentPrice = prices[prices.length - 1] || 0;
+          return { upper: currentPrice, middle: currentPrice, lower: currentPrice };
+        }
+        const recentPrices = prices.slice(-period);
+        const middle = recentPrices.reduce((a, b) => a + b, 0) / period;
+        const variance = recentPrices.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / period;
+        const standardDeviation = Math.sqrt(variance);
+        return {
+          upper: middle + standardDeviation * stdDev,
+          middle,
+          lower: middle - standardDeviation * stdDev,
+        };
+      };
+
+      const calculateIndicator = (indicatorConfig: any, currentPrice: number, currentVolume: number, historicalPrices: number[], historicalVolumes: number[]): number => {
+        switch (indicatorConfig.type) {
+          case "RSI":
+            return calculateRSI(historicalPrices, indicatorConfig.period || 14);
+          case "EMA":
+            return calculateEMA(historicalPrices, indicatorConfig.period || 20);
+          case "MACD":
+            return calculateMACD(historicalPrices).macd;
+          case "MACD_Signal":
+            return calculateMACD(historicalPrices).signal;
+          case "BB_Upper":
+            return calculateBollingerBands(historicalPrices, indicatorConfig.period || 20).upper;
+          case "BB_Middle":
+            return calculateBollingerBands(historicalPrices, indicatorConfig.period || 20).middle;
+          case "BB_Lower":
+            return calculateBollingerBands(historicalPrices, indicatorConfig.period || 20).lower;
+          case "Volume":
+            return currentVolume;
+          case "Price":
+            return currentPrice;
+          default:
+            return 0;
+        }
+      };
+
+      const evaluateCondition = (condition: any, indicatorValues: Map<string, number>): boolean => {
+        const indicatorValue = indicatorValues.get(condition.indicator) || 0;
+        const targetValue = condition.compareToIndicator && condition.targetIndicator 
+          ? indicatorValues.get(condition.targetIndicator) || 0
+          : parseFloat(condition.value || "0");
+
+        switch (condition.operator.toLowerCase()) {
+          case "above":
+          case "crosses_above":
+            return indicatorValue > targetValue;
+          case "below":
+          case "crosses_below":
+            return indicatorValue < targetValue;
+          default:
+            return false;
+        }
+      };
+
+      const generateHistoricalData = (currentPrice: number, currentVolume: number, changePercent: number) => {
+        const prices: number[] = [];
+        const volumes: number[] = [];
+        const volatility = Math.abs(changePercent) / 100;
+
+        for (let i = 30; i >= 0; i--) {
+          const variation = (Math.random() - 0.5) * volatility * currentPrice;
+          const trend = (changePercent / 100) * currentPrice * (i / 30);
+          prices.push(currentPrice - trend + variation);
+          const volumeVariation = (Math.random() - 0.5) * 0.3 * currentVolume;
+          volumes.push(Math.max(currentVolume + volumeVariation, currentVolume * 0.5));
+        }
+
+        return { prices, volumes };
+      };
+
+      // Fetch market data for all active symbols
+      const symbolsList = symbols.map(s => s.symbol);
+      const marketDataPromises = symbolsList.map(async (symbol) => {
+        try {
+          const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
+          return await response.json();
+        } catch (error) {
+          console.error(`Failed to fetch market data for ${symbol}:`, error);
+          return null;
+        }
+      });
+
+      const marketDataResults = await Promise.all(marketDataPromises);
+      const marketDataMap = new Map(
+        marketDataResults
+          .filter(data => data !== null)
+          .map(data => [data.symbol, data])
+      );
+
+      // Evaluate each custom strategy
+      for (const strategy of customStrategies) {
+        console.log(`Evaluating custom strategy: ${strategy.name}`);
+
+        // Evaluate strategy against each symbol
+        for (const { symbol } of symbols) {
+          // Skip if symbol already has signal or open trade (including from Multi-Timeframe Analysis)
+          if (existingSymbols.has(symbol) || signals.some(s => s.symbol === symbol)) {
+            continue;
+          }
+
+          const marketData = marketDataMap.get(symbol);
+          if (!marketData) continue;
+
+          try {
+            const currentPrice = parseFloat(marketData.lastPrice);
+            const currentVolume = parseFloat(marketData.volume);
+            const changePercent = parseFloat(marketData.priceChangePercent);
+
+            // Generate historical data
+            const { prices: historicalPrices, volumes: historicalVolumes } = generateHistoricalData(
+              currentPrice,
+              currentVolume,
+              changePercent
+            );
+
+            // Calculate all indicators
+            const indicatorValues = new Map<string, number>();
+            for (const indicatorConfig of strategy.indicators) {
+              const value = calculateIndicator(
+                indicatorConfig,
+                currentPrice,
+                currentVolume,
+                historicalPrices,
+                historicalVolumes
+              );
+              indicatorValues.set(indicatorConfig.name || indicatorConfig.type, value);
+            }
+            indicatorValues.set("Price", currentPrice);
+            indicatorValues.set("Volume", currentVolume);
+
+            // Evaluate entry conditions
+            const entryConditionsMet = strategy.entry_conditions.every((condition: any) => 
+              evaluateCondition(condition, indicatorValues)
+            );
+
+            if (!entryConditionsMet) {
+              continue; // Skip this symbol if entry conditions not met
+            }
+
+            // Get trend analysis for momentum confirmation
+            const { data: trendData, error: trendError } = await supabase.functions.invoke('calculate-trend', {
+              body: { symbol }
+            });
+
+            if (trendError || !trendData) {
+              console.warn(`Failed to get trend for ${symbol}:`, trendError);
+              continue;
+            }
+
+            // REQUIRE momentum confirmation for custom strategies too
+            const hasMomentumConfirmation = trendData.momentumConfirmed || false;
+            if (!hasMomentumConfirmation) {
+              await supabase
+                .from('signal_rejection_log')
+                .insert({
+                  user_id: user.id,
+                  symbol,
+                  rejection_reason: `Custom strategy "${strategy.name}" - momentum not confirmed`,
+                  filters_status: { strategy: strategy.name },
+                  trend_data: trendData,
+                  checked_at: new Date().toISOString()
+                });
+              continue;
+            }
+
+            // Determine signal type based on trend
+            const trend = trendData.trend;
+            const signalType = trend === 'bullish' ? 'long' : trend === 'bearish' ? 'short' : null;
+            
+            if (!signalType) {
+              await supabase
+                .from('signal_rejection_log')
+                .insert({
+                  user_id: user.id,
+                  symbol,
+                  rejection_reason: `Custom strategy "${strategy.name}" - ranging market`,
+                  filters_status: { strategy: strategy.name },
+                  trend_data: trendData,
+                  checked_at: new Date().toISOString()
+                });
+              continue;
+            }
+
+            // Calculate confidence based on conditions met
+            const confidenceScore = Math.min(trendData.confidence, 85); // Cap custom strategy confidence at 85%
+
+            // Apply risk settings from custom strategy
+            const stopLossPercent = strategy.risk_settings?.stopLossPercent || riskParams.max_risk_per_trade_percent;
+            const takeProfitPercent = strategy.risk_settings?.takeProfitPercent || stopLossPercent * 2.5;
+
+            // Create signal for custom strategy
+            const customSignal = {
+              user_id: user.id,
+              symbol,
+              signal_type: signalType,
+              trend,
+              confidence_score: confidenceScore,
+              entry_price: currentPrice,
+              stop_loss: signalType === 'long'
+                ? currentPrice * (1 - (stopLossPercent / 100))
+                : currentPrice * (1 + (stopLossPercent / 100)),
+              take_profit: signalType === 'long'
+                ? currentPrice * (1 + (takeProfitPercent / 100))
+                : currentPrice * (1 - (takeProfitPercent / 100)),
+              strategy_id: strategy.id,
+              strategy_name: strategy.name,
+              reason: `Custom strategy conditions met with momentum confirmation`,
+              indicators: {
+                ...Object.fromEntries(indicatorValues.entries()),
+                stopLossPercent,
+                takeProfitPercent,
+                positionSizePercent: strategy.risk_settings?.positionSizePercent || 100
+              },
+              expires_at: new Date(Date.now() + 60000).toISOString(),
+              created_by_rebalancer: false
+            };
+
+            const { data: insertedSignal, error: insertError } = await supabase
+              .from('trading_signals')
+              .insert(customSignal)
+              .select('id')
+              .single();
+
+            if (insertError) {
+              console.error(`Failed to insert custom strategy signal for ${symbol}:`, insertError);
+            } else if (insertedSignal) {
+              signals.push({ 
+                ...customSignal, 
+                id: insertedSignal.id, 
+                positionSizePercent: strategy.risk_settings?.positionSizePercent || 100 
+              } as SignalData);
+              totalSignalsGenerated++;
+              console.log(`✓ Created ${signalType.toUpperCase()} signal for ${symbol} using "${strategy.name}"`);
+              
+              // Mark symbol as having a signal to avoid duplicates
+              existingSymbols.add(symbol);
+            }
+          } catch (error) {
+            console.error(`Error evaluating custom strategy "${strategy.name}" for ${symbol}:`, error);
+          }
+        }
+      }
+    }
+    // ============= END CUSTOM STRATEGIES EVALUATION =============
 
     // Auto-execute if enabled
     let executedSignals = 0;
