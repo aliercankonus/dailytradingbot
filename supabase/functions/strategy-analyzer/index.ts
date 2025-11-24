@@ -296,7 +296,7 @@ serve(async (req) => {
             stopLossPercent,
             takeProfitMultiplier
           },
-          expires_at: new Date(Date.now() + 3600000).toISOString(), // 1 hour expiry
+          expires_at: new Date(Date.now() + 60000).toISOString(), // 1 minute expiry
           created_by_rebalancer: false
         };
 
