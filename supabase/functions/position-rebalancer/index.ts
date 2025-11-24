@@ -235,15 +235,37 @@ async function rebalanceUserPositions(
           const { divergenceType } = trend.higherTimeframeFilter;
           
           if (divergenceType === 'pullback' && riskParams.enable_pullback_signals) {
-            shouldCreateSignal = true;
-            positionSizePercent = riskParams.pullback_position_size_percent || 50;
-            confidenceCap = 70;
-            signalReason = `Rebalancing: Pullback opportunity after closing ${position.side} position`;
+            // Multi-layer confirmation: require 30m and 15m to align with 4h
+            const tf30m = trend.timeframes?.['30m'];
+            const tf15m = trend.timeframes?.['15m'];
+            const tf4h = trend.timeframes?.['4h'];
+            
+            if (tf30m && tf15m && tf4h && 
+                tf30m.trend === tf4h.trend && 
+                tf15m.trend === tf4h.trend) {
+              shouldCreateSignal = true;
+              positionSizePercent = riskParams.pullback_position_size_percent || 50;
+              confidenceCap = 70;
+              signalReason = `Rebalancing: Pullback opportunity confirmed by 30m/15m after closing ${position.side} position`;
+            } else {
+              console.log(`  Skipped pullback signal for ${position.symbol} - 30m/15m confirmation failed`);
+            }
           } else if (divergenceType === 'early_reversal' && riskParams.enable_early_reversal_signals) {
-            shouldCreateSignal = true;
-            positionSizePercent = riskParams.early_reversal_position_size_percent || 40;
-            confidenceCap = 65;
-            signalReason = `Rebalancing: Early reversal opportunity after closing ${position.side} position`;
+            // Multi-layer confirmation: require 30m and 15m to align with 1h
+            const tf30m = trend.timeframes?.['30m'];
+            const tf15m = trend.timeframes?.['15m'];
+            const tf1h = trend.timeframes?.['1h'];
+            
+            if (tf30m && tf15m && tf1h && 
+                tf30m.trend === tf1h.trend && 
+                tf15m.trend === tf1h.trend) {
+              shouldCreateSignal = true;
+              positionSizePercent = riskParams.early_reversal_position_size_percent || 40;
+              confidenceCap = 65;
+              signalReason = `Rebalancing: Early reversal confirmed by 30m/15m after closing ${position.side} position`;
+            } else {
+              console.log(`  Skipped early reversal signal for ${position.symbol} - 30m/15m confirmation failed`);
+            }
           }
         }
 
