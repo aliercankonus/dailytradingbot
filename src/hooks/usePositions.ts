@@ -59,11 +59,19 @@ export const usePositions = () => {
   useEffect(() => {
     fetchPositions();
     
-    // Monitor positions every 5 seconds
+    // Monitor positions every 60 seconds (reduced from 5s to save resources)
     const monitorInterval = setInterval(async () => {
-      await supabase.functions.invoke('monitor-positions');
+      // Only call monitor-positions if we have active positions
+      const { data } = await supabase
+        .from('positions')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'active');
+      
+      if (data && data.length > 0) {
+        await supabase.functions.invoke('monitor-positions');
+      }
       fetchPositions();
-    }, 5000);
+    }, 60000); // Changed from 5000 (5s) to 60000 (60s)
 
     return () => clearInterval(monitorInterval);
   }, []);
