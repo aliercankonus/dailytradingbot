@@ -24,6 +24,8 @@ interface RiskParameters {
   daily_realized_loss: number;
   last_loss_reset_date: string | null;
   auto_execute_signals: boolean;
+  standard_tp_multiplier: number;
+  divergence_tp_multiplier: number;
   updated_at: string;
 }
 

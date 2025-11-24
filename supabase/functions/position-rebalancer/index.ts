@@ -276,7 +276,11 @@ async function rebalanceUserPositions(
           // Adjust stop loss and take profit for divergence signals (shorter timeframes)
           const isDivergenceSignal = trend.higherTimeframeFilter?.divergenceType;
           const stopLossPercent = isDivergenceSignal ? 0.01 : 0.015; // 1% vs 1.5%
-          const takeProfitPercent = isDivergenceSignal ? 0.02 : 0.0375; // 2% vs 3.75%
+          const divergenceTpMultiplier = riskParams.divergence_tp_multiplier || 2.0;
+          const standardTpMultiplier = riskParams.standard_tp_multiplier || 2.5;
+          const takeProfitPercent = isDivergenceSignal 
+            ? stopLossPercent * divergenceTpMultiplier
+            : stopLossPercent * standardTpMultiplier;
           
           // Create new trading signal marked as created by rebalancer
           const { error: signalError } = await supabase

@@ -24,6 +24,8 @@ export const RiskManagementControls = () => {
     min_trend_consistency: 50,
     max_trades_per_symbol: 1,
     daily_loss_limit_percent: 5.0,
+    standard_tp_multiplier: 2.5,
+    divergence_tp_multiplier: 2.0,
   });
 
   useEffect(() => {
@@ -38,6 +40,8 @@ export const RiskManagementControls = () => {
         min_trend_consistency: riskParams.min_trend_consistency,
         max_trades_per_symbol: riskParams.max_trades_per_symbol || 1,
         daily_loss_limit_percent: riskParams.daily_loss_limit_percent || 5.0,
+        standard_tp_multiplier: riskParams.standard_tp_multiplier || 2.5,
+        divergence_tp_multiplier: riskParams.divergence_tp_multiplier || 2.0,
       });
     }
   }, [riskParams]);
@@ -258,6 +262,42 @@ export const RiskManagementControls = () => {
               />
               <p className="text-xs text-muted-foreground">
                 Stops all trading if daily losses exceed this % of portfolio (recommended: 5%)
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="standard-tp-multiplier">Standard Take Profit Multiplier</Label>
+              <Input
+                id="standard-tp-multiplier"
+                type="number"
+                min="1"
+                max="5"
+                step="0.1"
+                value={formData.standard_tp_multiplier}
+                onChange={(e) => 
+                  setFormData({ ...formData, standard_tp_multiplier: parseFloat(e.target.value) })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Take profit = SL distance × this multiplier (e.g., 2.5 = 1:2.5 risk/reward for aligned signals)
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="divergence-tp-multiplier">Divergence Take Profit Multiplier</Label>
+              <Input
+                id="divergence-tp-multiplier"
+                type="number"
+                min="1"
+                max="5"
+                step="0.1"
+                value={formData.divergence_tp_multiplier}
+                onChange={(e) => 
+                  setFormData({ ...formData, divergence_tp_multiplier: parseFloat(e.target.value) })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Tighter TP for shorter-term divergence signals (e.g., 2.0 = 1:2.0 risk/reward)
               </p>
             </div>
 
