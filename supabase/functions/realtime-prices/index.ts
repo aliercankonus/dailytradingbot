@@ -130,8 +130,14 @@ serve(async (req) => {
         console.error("Binance WebSocket error:", error);
       };
 
-      binanceSocket.onclose = () => {
-        console.log("Binance WebSocket closed");
+      binanceSocket.onclose = (event) => {
+        console.log(`Binance WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
+
+        // Only attempt reconnection if client is still connected
+        if (socket.readyState !== WebSocket.OPEN) {
+          console.log("Client disconnected, skipping Binance reconnection");
+          return;
+        }
 
         // Attempt reconnection
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
@@ -186,19 +192,24 @@ serve(async (req) => {
   };
 
   socket.onclose = () => {
-    console.log("Client WebSocket disconnected");
+    console.log("Client WebSocket disconnected - cleaning up resources");
 
     // Clean up Binance connection
-    if (binanceSocket && binanceSocket.readyState === WebSocket.OPEN) {
-      binanceSocket.close();
+    if (binanceSocket) {
+      if (binanceSocket.readyState === WebSocket.OPEN || binanceSocket.readyState === WebSocket.CONNECTING) {
+        binanceSocket.close();
+      }
+      binanceSocket = null;
     }
 
     // Clear intervals and timeouts
     if (heartbeatInterval !== null) {
       clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
     }
     if (reconnectTimeout !== null) {
       clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
     }
   };
 
