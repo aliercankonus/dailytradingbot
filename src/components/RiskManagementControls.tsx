@@ -8,6 +8,9 @@ import { usePositions } from '@/hooks/usePositions';
 import { Shield, AlertTriangle, DollarSign, TrendingDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useEffect } from 'react';
+import { TrailingStopSettings } from '@/components/TrailingStopSettings';
+import { PositionRebalancingSettings } from '@/components/PositionRebalancingSettings';
+import { DivergenceSettings } from '@/components/DivergenceSettings';
 
 export const RiskManagementControls = () => {
   const { riskParams, updateRiskParameters } = useRiskParameters();
@@ -328,6 +331,15 @@ export const RiskManagementControls = () => {
           </Button>
         </div>
       </Card>
+
+      {/* Trailing Stop Loss Settings */}
+      <TrailingStopSettings />
+
+      {/* Automated Position Rebalancing */}
+      <PositionRebalancingSettings />
+
+      {/* Divergence Opportunity Strategy */}
+      <DivergenceSettings />
     </div>
   );
 };

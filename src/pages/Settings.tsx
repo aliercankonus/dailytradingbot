@@ -11,9 +11,6 @@ import { Settings as SettingsIcon, Key, Mail, Shield, ArrowLeft } from 'lucide-r
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { PerformanceSettings } from '@/components/PerformanceSettings';
 import { PerformanceMonitoringDashboard } from '@/components/PerformanceMonitoringDashboard';
-import { TrailingStopSettings } from '@/components/TrailingStopSettings';
-import { PositionRebalancingSettings } from '@/components/PositionRebalancingSettings';
-import { DivergenceSettings } from '@/components/DivergenceSettings';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function Settings() {
@@ -334,15 +331,6 @@ export default function Settings() {
               </div>
             </div>
           </Card>
-
-          {/* Trailing Stop Loss Settings */}
-          <TrailingStopSettings />
-
-          {/* Position Rebalancing */}
-          <PositionRebalancingSettings />
-
-          {/* Divergence Opportunity Strategy */}
-          <DivergenceSettings />
 
           {/* Risk Management */}
           <PerformanceSettings />
