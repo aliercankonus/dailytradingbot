@@ -357,13 +357,11 @@ serve(async (req) => {
           `Closed position ${position.id} - ${position.symbol} ${position.side} - ${closeReason} at ${currentPrice}`,
         );
       } else {
-        // Update position with current price and PnL
+        // Update position with current price only (UI calculates P&L from live WebSocket prices)
         await supabase
           .from("positions")
           .update({
             current_price: currentPrice,
-            unrealized_pnl: pnl,
-            unrealized_pnl_percent: pnlPercent,
           })
           .eq("id", position.id);
       }
