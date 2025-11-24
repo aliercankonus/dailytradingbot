@@ -94,6 +94,18 @@ serve(async (req) => {
       // Skip if already has signal or open trade
       if (existingSymbols.has(symbol)) {
         console.log(`Skipping ${symbol} - already has signal or open trade`);
+        
+        // Log rejection reason
+        await supabase
+          .from('signal_rejection_log')
+          .insert({
+            user_id: user.id,
+            symbol,
+            rejection_reason: 'Already has active signal or open trade',
+            filters_status: null,
+            trend_data: null,
+            checked_at: new Date().toISOString()
+          });
         continue;
       }
 
@@ -115,12 +127,20 @@ serve(async (req) => {
         let positionSizePercent = 100;
         let confidenceCap = 100;
         let signalReason = '';
+        let rejectionReason = '';
 
         if (higherTimeframeFilter.aligned) {
           // Standard aligned signal
-          shouldCreateSignal = confidence >= riskParams.min_confidence_threshold &&
-                              trendConsistency >= riskParams.min_trend_consistency;
+          const meetsThreshold = confidence >= riskParams.min_confidence_threshold &&
+                                trendConsistency >= riskParams.min_trend_consistency;
+          shouldCreateSignal = meetsThreshold;
           signalReason = `Aligned ${trend} trend across timeframes`;
+          
+          if (!meetsThreshold) {
+            rejectionReason = confidence < riskParams.min_confidence_threshold 
+              ? `Low confidence: ${confidence.toFixed(1)}% < ${riskParams.min_confidence_threshold}%`
+              : `Low trend consistency: ${trendConsistency.toFixed(1)}% < ${riskParams.min_trend_consistency}%`;
+          }
         } else if (higherTimeframeFilter.allowDivergenceSignal) {
           // Divergence opportunity signal
           const { divergenceType } = higherTimeframeFilter;
@@ -143,10 +163,12 @@ serve(async (req) => {
                 totalSignalsGenerated++;
               } else {
                 rejectedByDivergenceSettings++;
+                rejectionReason = `Pullback signal - 30m/15m confirmation failed (30m: ${tf30m?.trend}, 15m: ${tf15m?.trend}, need ${tf4h?.trend})`;
                 console.log(`Rejected pullback signal for ${symbol} - 30m/15m confirmation failed`);
               }
             } else {
               rejectedByDivergenceSettings++;
+              rejectionReason = 'Pullback signals disabled in risk settings';
               console.log(`Rejected pullback signal for ${symbol} - pullback signals disabled`);
             }
           } else if (divergenceType === 'early_reversal') {
@@ -167,16 +189,45 @@ serve(async (req) => {
                 totalSignalsGenerated++;
               } else {
                 rejectedByDivergenceSettings++;
+                rejectionReason = `Early reversal - 30m/15m confirmation failed (30m: ${tf30m?.trend}, 15m: ${tf15m?.trend}, need ${tf1h?.trend})`;
                 console.log(`Rejected early reversal signal for ${symbol} - 30m/15m confirmation failed`);
               }
             } else {
               rejectedByDivergenceSettings++;
+              rejectionReason = 'Early reversal signals disabled in risk settings';
               console.log(`Rejected early reversal signal for ${symbol} - early reversal signals disabled`);
             }
           }
+        } else if (!higherTimeframeFilter.aligned && !higherTimeframeFilter.allowDivergenceSignal) {
+          // Timeframes not aligned and no divergence opportunity
+          rejectionReason = higherTimeframeFilter.divergenceDetails || 'Timeframes not aligned, no divergence opportunity';
         }
 
-        if (!shouldCreateSignal) {
+        // Log rejection if signal wasn't created
+        if (!shouldCreateSignal && rejectionReason) {
+          await supabase
+            .from('signal_rejection_log')
+            .insert({
+              user_id: user.id,
+              symbol,
+              rejection_reason: rejectionReason,
+              filters_status: {
+                confidence,
+                trendConsistency,
+                minConfidence: riskParams.min_confidence_threshold,
+                minTrendConsistency: riskParams.min_trend_consistency,
+                pullbackEnabled: riskParams.enable_pullback_signals,
+                earlyReversalEnabled: riskParams.enable_early_reversal_signals
+              },
+              trend_data: {
+                trend,
+                aligned: higherTimeframeFilter.aligned,
+                divergenceType: higherTimeframeFilter.divergenceType,
+                divergenceDetails: higherTimeframeFilter.divergenceDetails,
+                timeframes: trendData.timeframes
+              },
+              checked_at: new Date().toISOString()
+            });
           continue;
         }
 
@@ -190,6 +241,22 @@ serve(async (req) => {
         
         if (!signalType) {
           console.log(`Skipping ${symbol} - ranging market`);
+          
+          // Log rejection for ranging market
+          await supabase
+            .from('signal_rejection_log')
+            .insert({
+              user_id: user.id,
+              symbol,
+              rejection_reason: 'Ranging market - no clear directional trend',
+              filters_status: { confidence, trendConsistency },
+              trend_data: {
+                trend,
+                aligned: higherTimeframeFilter.aligned,
+                timeframes: trendData.timeframes
+              },
+              checked_at: new Date().toISOString()
+            });
           continue;
         }
 
