@@ -193,6 +193,15 @@ serve(async (req) => {
           continue;
         }
 
+        // Adjust stop loss and take profit for divergence signals (shorter timeframes)
+        const isDivergenceSignal = higherTimeframeFilter.divergenceType;
+        const stopLossPercent = isDivergenceSignal 
+          ? riskParams.max_risk_per_trade_percent * 0.67  // Tighter SL: 1% instead of 1.5%
+          : riskParams.max_risk_per_trade_percent;
+        const takeProfitMultiplier = isDivergenceSignal 
+          ? 2.0  // Tighter TP: 1:2 risk/reward for quick exits
+          : 2.5; // Standard TP: 1:2.5 risk/reward
+
         // Create signal
         const signal = {
           user_id: user.id,
@@ -202,18 +211,20 @@ serve(async (req) => {
           confidence_score: finalConfidence,
           entry_price: trendData.currentPrice,
           stop_loss: signalType === 'long'
-            ? trendData.currentPrice * (1 - (riskParams.max_risk_per_trade_percent / 100))
-            : trendData.currentPrice * (1 + (riskParams.max_risk_per_trade_percent / 100)),
+            ? trendData.currentPrice * (1 - (stopLossPercent / 100))
+            : trendData.currentPrice * (1 + (stopLossPercent / 100)),
           take_profit: signalType === 'long'
-            ? trendData.currentPrice * (1 + (riskParams.max_risk_per_trade_percent * 2.5 / 100))
-            : trendData.currentPrice * (1 - (riskParams.max_risk_per_trade_percent * 2.5 / 100)),
+            ? trendData.currentPrice * (1 + (stopLossPercent * takeProfitMultiplier / 100))
+            : trendData.currentPrice * (1 - (stopLossPercent * takeProfitMultiplier / 100)),
           strategy_name: 'Multi-Timeframe Analysis',
           reason: signalReason,
           indicators: {
             ...trendData.indicators,
             divergenceType: higherTimeframeFilter.divergenceType,
             positionSizePercent,
-            trendConsistency
+            trendConsistency,
+            stopLossPercent,
+            takeProfitMultiplier
           },
           expires_at: new Date(Date.now() + 3600000).toISOString(), // 1 hour expiry
           created_by_rebalancer: false

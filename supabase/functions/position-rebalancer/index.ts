@@ -273,6 +273,11 @@ async function rebalanceUserPositions(
           const newSignalType = trend.trend === 'bullish' ? 'long' : 'short';
           const finalConfidence = Math.min(trend.confidence, confidenceCap);
           
+          // Adjust stop loss and take profit for divergence signals (shorter timeframes)
+          const isDivergenceSignal = trend.higherTimeframeFilter?.divergenceType;
+          const stopLossPercent = isDivergenceSignal ? 0.01 : 0.015; // 1% vs 1.5%
+          const takeProfitPercent = isDivergenceSignal ? 0.02 : 0.0375; // 2% vs 3.75%
+          
           // Create new trading signal marked as created by rebalancer
           const { error: signalError } = await supabase
             .from('trading_signals')
@@ -285,17 +290,19 @@ async function rebalanceUserPositions(
               entry_price: trend.currentPrice,
               created_by_rebalancer: true,
               stop_loss: newSignalType === 'long' 
-                ? trend.currentPrice * (1 - 0.015)
-                : trend.currentPrice * (1 + 0.015),
+                ? trend.currentPrice * (1 - stopLossPercent)
+                : trend.currentPrice * (1 + stopLossPercent),
               take_profit: newSignalType === 'long'
-                ? trend.currentPrice * (1 + 0.0375)
-                : trend.currentPrice * (1 - 0.0375),
+                ? trend.currentPrice * (1 + takeProfitPercent)
+                : trend.currentPrice * (1 - takeProfitPercent),
               strategy_name: 'Auto Rebalance',
               reason: signalReason,
               indicators: {
                 ...trend.indicators,
                 divergenceType: trend.higherTimeframeFilter?.divergenceType,
-                positionSizePercent
+                positionSizePercent,
+                stopLossPercent: stopLossPercent * 100,
+                takeProfitPercent: takeProfitPercent * 100
               },
               expires_at: new Date(Date.now() + 60000).toISOString() // 1 minute expiry
             });
