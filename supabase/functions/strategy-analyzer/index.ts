@@ -300,14 +300,16 @@ serve(async (req) => {
           created_by_rebalancer: false
         };
 
-        const { error: insertError } = await supabase
+        const { data: insertedSignal, error: insertError } = await supabase
           .from('trading_signals')
-          .insert(signal);
+          .insert(signal)
+          .select('id')
+          .single();
 
         if (insertError) {
           console.error(`Failed to insert signal for ${symbol}:`, insertError);
-        } else {
-          signals.push({ ...signal, positionSizePercent });
+        } else if (insertedSignal) {
+          signals.push({ ...signal, id: insertedSignal.id, positionSizePercent });
           console.log(`✓ Created ${signalType.toUpperCase()} signal for ${symbol} (${higherTimeframeFilter.divergenceType || 'aligned'})`);
         }
       } catch (error) {
@@ -324,15 +326,10 @@ serve(async (req) => {
         try {
           const { error: executeError } = await supabase.functions.invoke('execute-trade', {
             headers: {
-              Authorization: authHeader, // Pass the user's auth token
+              Authorization: authHeader,
             },
             body: {
-              signalId: (await supabase
-                .from('trading_signals')
-                .select('id')
-                .eq('user_id', user.id)
-                .eq('symbol', signal.symbol)
-                .single()).data?.id,
+              signalId: signal.id, // Use the captured signal ID
               action: 'execute'
             }
           });
