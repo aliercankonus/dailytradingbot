@@ -323,6 +323,9 @@ serve(async (req) => {
       for (const signal of signals) {
         try {
           const { error: executeError } = await supabase.functions.invoke('execute-trade', {
+            headers: {
+              Authorization: authHeader, // Pass the user's auth token
+            },
             body: {
               signalId: (await supabase
                 .from('trading_signals')
@@ -336,6 +339,9 @@ serve(async (req) => {
 
           if (!executeError) {
             executedSignals++;
+            console.log(`✓ Executed trade for ${signal.symbol}`);
+          } else {
+            console.error(`Failed to execute trade for ${signal.symbol}:`, executeError);
           }
         } catch (error) {
           console.error('Error executing signal:', error);
