@@ -677,7 +677,21 @@ serve(async (req) => {
       }
     }
     
-    // CRITICAL FIX: Only count candles that align with BOTH dominant trend AND timeframe trend
+    // CRITICAL FIX: Zero out candles that contradict the timeframe's calculated trend
+    // If 15m trend is bearish, ignore bullish candles (and vice versa)
+    if (trend15m.trend === "bearish") {
+      consecutive15mBullish = 0; // 15m is bearish, so bullish candles don't count
+    } else if (trend15m.trend === "bullish") {
+      consecutive15mBearish = 0; // 15m is bullish, so bearish candles don't count
+    }
+    
+    if (trend30m.trend === "bearish") {
+      consecutive30mBullish = 0; // 30m is bearish, so bullish candles don't count
+    } else if (trend30m.trend === "bullish") {
+      consecutive30mBearish = 0; // 30m is bullish, so bearish candles don't count
+    }
+    
+    // ORIGINAL FIX: Only count candles that align with BOTH dominant trend AND timeframe trend
     // This prevents counting counter-trend candles that create false momentum signals
     const momentum15mConfirms =
       (dominantTrend === "bullish" && trend15m.trend === "bullish" && consecutive15mBullish >= 2) ||
