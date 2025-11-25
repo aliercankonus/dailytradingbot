@@ -61,10 +61,27 @@ export const SignalRejectionReasons = () => {
       const confidence = fs.confidence ?? td?.confidence;
       const trendConsistency = fs.trendConsistency ?? td?.trendConsistency;
       
-      if (confidence !== undefined && confidence < 60) {
-        details.push(`Confidence: ${confidence}% < 60% (threshold)`);
-        
-        // Show why confidence is low - timeframe conflicts
+      // Always show the values and whether they meet the threshold
+      if (confidence !== undefined) {
+        const meetsConfidence = fs.meetsThreshold === true || confidence >= 60;
+        details.push(`Confidence: ${confidence}%${!meetsConfidence ? ' ❌' : ' ✓'}`);
+      }
+      
+      if (trendConsistency !== undefined) {
+        const meetsConsistency = fs.meetsThreshold === true || trendConsistency >= 50;
+        details.push(`Consistency: ${trendConsistency}%${!meetsConsistency ? ' ❌' : ' ✓'}`);
+      }
+      
+      // If meetsThreshold is explicitly false but values seem to pass defaults,
+      // it means user has custom thresholds - indicate this
+      if (fs.meetsThreshold === false && 
+          confidence !== undefined && trendConsistency !== undefined &&
+          confidence >= 60 && trendConsistency >= 50) {
+        details.push('(Custom thresholds set higher than defaults)');
+      }
+      
+      // Show timeframe conflicts if confidence is the issue
+      if (confidence !== undefined && !fs.meetsThreshold) {
         if (td?.multiTimeframe) {
           const mt = td.multiTimeframe;
           const conflicts = [];
@@ -94,10 +111,6 @@ export const SignalRejectionReasons = () => {
             details.push(`TF confidence: ${tfConfidences.join(", ")}`);
           }
         }
-      }
-      
-      if (trendConsistency !== undefined && trendConsistency < 50) {
-        details.push(`Trend consistency: ${trendConsistency}% < 50% (threshold)`);
       }
     }
     
