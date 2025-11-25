@@ -357,10 +357,21 @@ serve(async (req) => {
     const dominantTrend = trend4h.trend;
     const dominantConfidence = trend4h.confidence;
 
-    // IMPROVED: When 4h is neutral, consider lower timeframe alignment
+    // NEW ALIGNMENT LOGIC: Neutral = not opposing (allows signal but reduces weight)
+    // Only reject if timeframe ACTIVELY OPPOSES the dominant trend
+    const isOpposing = (tfTrend: string, dominantTrend: string) => {
+      if (dominantTrend === "neutral") return false; // No opposing when 4h is neutral
+      if (tfTrend === "neutral") return false; // Neutral does NOT oppose
+      return tfTrend !== dominantTrend; // Only opposite direction opposes
+    };
+    
     const confirmation1h = trend1h.trend === dominantTrend;
     const confirmation30m = trend30m.trend === dominantTrend;
     const confirmation15m = trend15m.trend === dominantTrend;
+    
+    const opposing1h = isOpposing(trend1h.trend, dominantTrend);
+    const opposing30m = isOpposing(trend30m.trend, dominantTrend);
+    const opposing15m = isOpposing(trend15m.trend, dominantTrend);
 
     // Calculate weighted trend consistency
     let weightedConsistency: number;
@@ -431,24 +442,31 @@ serve(async (req) => {
       const baseWeights = {
         tf4h: 0.45,
         tf1h_aligned: 0.30,
-        tf1h_neutral: 0.15,
-        tf30m: 0.15,
-        tf15m: 0.10
+        tf1h_neutral: 0.15,  // 0.5x multiplier for neutral 1h
+        tf30m_aligned: 0.15,
+        tf30m_neutral: 0.075, // 0.5x multiplier for neutral 30m
+        tf15m_aligned: 0.10,
+        tf15m_neutral: 0.05   // 0.5x multiplier for neutral 15m
       };
       
-      // Determine 1h contribution
+      // Determine timeframe contributions
+      // Aligned = full weight, Neutral = 0.5x weight, Opposing = excluded
       const use1h_aligned = confirmation1h;
-      const use1h_neutral = !confirmation1h && trend1h.trend === "neutral";
-      const use30m = confirmation30m;
-      const use15m = confirmation15m;
+      const use1h_neutral = !confirmation1h && trend1h.trend === "neutral" && !opposing1h;
+      const use30m_aligned = confirmation30m;
+      const use30m_neutral = !confirmation30m && trend30m.trend === "neutral" && !opposing30m;
+      const use15m_aligned = confirmation15m;
+      const use15m_neutral = !confirmation15m && trend15m.trend === "neutral" && !opposing15m;
       
       // Calculate sum of included weights
       const includedWeightSum = 
         baseWeights.tf4h + // 4h always included
         (use1h_aligned ? baseWeights.tf1h_aligned : 0) +
         (use1h_neutral ? baseWeights.tf1h_neutral : 0) +
-        (use30m ? baseWeights.tf30m : 0) +
-        (use15m ? baseWeights.tf15m : 0);
+        (use30m_aligned ? baseWeights.tf30m_aligned : 0) +
+        (use30m_neutral ? baseWeights.tf30m_neutral : 0) +
+        (use15m_aligned ? baseWeights.tf15m_aligned : 0) +
+        (use15m_neutral ? baseWeights.tf15m_neutral : 0);
       
       // Normalize: scale weights so they sum to 1.0
       const scaleFactor = 1.0 / includedWeightSum;
@@ -457,22 +475,28 @@ serve(async (req) => {
       const normalized4h = baseWeights.tf4h * scaleFactor;
       const normalized1h_aligned = use1h_aligned ? baseWeights.tf1h_aligned * scaleFactor : 0;
       const normalized1h_neutral = use1h_neutral ? baseWeights.tf1h_neutral * scaleFactor : 0;
-      const normalized30m = use30m ? baseWeights.tf30m * scaleFactor : 0;
-      const normalized15m = use15m ? baseWeights.tf15m * scaleFactor : 0;
+      const normalized30m_aligned = use30m_aligned ? baseWeights.tf30m_aligned * scaleFactor : 0;
+      const normalized30m_neutral = use30m_neutral ? baseWeights.tf30m_neutral * scaleFactor : 0;
+      const normalized15m_aligned = use15m_aligned ? baseWeights.tf15m_aligned * scaleFactor : 0;
+      const normalized15m_neutral = use15m_neutral ? baseWeights.tf15m_neutral * scaleFactor : 0;
       
       weightedConsistency =
         dominantConfidence * normalized4h +
         (use1h_aligned ? trend1h.confidence * normalized1h_aligned : 0) +
         (use1h_neutral ? trend1h.confidence * normalized1h_neutral : 0) +
-        (use30m ? trend30m.confidence * normalized30m : 0) +
-        (use15m ? trend15m.confidence * normalized15m : 0);
+        (use30m_aligned ? trend30m.confidence * normalized30m_aligned : 0) +
+        (use30m_neutral ? trend30m.confidence * normalized30m_neutral : 0) +
+        (use15m_aligned ? trend15m.confidence * normalized15m_aligned : 0) +
+        (use15m_neutral ? trend15m.confidence * normalized15m_neutral : 0);
     }
 
     // ============================================================
     // ENHANCED ALIGNMENT: Allow 1h=neutral with strong 4h trend
     // ============================================================
-    // Standard alignment: 4h and 1h must match exactly
-    const standardAlignment = dominantTrend !== "neutral" && confirmation1h;
+    // Standard alignment: 4h directional and 1h does NOT oppose (neutral is OK)
+    const standardAlignment = dominantTrend !== "neutral" && !opposing1h;
+    
+    console.log(`${symbol} ALIGNMENT: 4h=${dominantTrend} 1h=${trend1h.trend} 30m=${trend30m.trend} 15m=${trend15m.trend} | opposing: 1h=${opposing1h} 30m=${opposing30m} 15m=${opposing15m} | standardAlignment=${standardAlignment}`);
     
     // Enhanced alignment: Allow 1h=neutral when 4h is strong and conditions are met
     let neutralAllowedWithStrongHigherTimeframe = false;
