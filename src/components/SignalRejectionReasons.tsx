@@ -1,12 +1,20 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, TrendingDown, TrendingUp, Activity, Minimize2, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
+import {
+  AlertCircle,
+  TrendingDown,
+  TrendingUp,
+  Activity,
+  Minimize2,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+} from "lucide-react";
 import { useSignalRejections } from "@/hooks/useSignalRejections";
 import { useMomentumStatus } from "@/hooks/useMomentumStatus";
 import { formatDistanceToNow } from "date-fns";
 import { Separator } from "@/components/ui/separator";
-
 interface SignalRejection {
   id: string;
   symbol: string;
@@ -15,77 +23,77 @@ interface SignalRejection {
   filters_status: any;
   trend_data: any;
 }
-
 export const SignalRejectionReasons = () => {
   const { rejections, loading } = useSignalRejections();
   const { momentumData, loading: momentumLoading } = useMomentumStatus();
-
   const getReasonIcon = (reason: string) => {
-    if (reason.includes('timeframe')) return <TrendingDown className="h-4 w-4" />;
-    if (reason.includes('momentum')) return <Activity className="h-4 w-4" />;
-    if (reason.includes('ranging')) return <Minimize2 className="h-4 w-4" />;
-    if (reason.includes('pullback')) return <TrendingUp className="h-4 w-4" />;
+    if (reason.includes("timeframe")) return <TrendingDown className="h-4 w-4" />;
+    if (reason.includes("momentum")) return <Activity className="h-4 w-4" />;
+    if (reason.includes("ranging")) return <Minimize2 className="h-4 w-4" />;
+    if (reason.includes("pullback")) return <TrendingUp className="h-4 w-4" />;
     return <AlertCircle className="h-4 w-4" />;
   };
-
   const getFilterDetails = (filtersStatus: any) => {
     const details = [];
-    
+
     if (filtersStatus?.aligned === false) {
       details.push(`4h: ${filtersStatus.trend4h}, 1h: ${filtersStatus.trend1h}`);
     }
-    
+
     if (filtersStatus?.momentumConfirms === false) {
       details.push(
         `15m: ${filtersStatus.consecutive15mBullish || 0}bull/${filtersStatus.consecutive15mBearish || 0}bear`,
-        `30m: ${filtersStatus.consecutive30mBullish || 0}bull/${filtersStatus.consecutive30mBearish || 0}bear`
+        `30m: ${filtersStatus.consecutive30mBullish || 0}bull/${filtersStatus.consecutive30mBearish || 0}bear`,
       );
     }
-    
+
     if (filtersStatus?.inPullback === false && filtersStatus.pullbackPercent !== undefined) {
       details.push(`Pullback: ${filtersStatus.pullbackPercent.toFixed(1)}%`);
     }
-    
-    return details.length > 0 ? details.join(' | ') : filtersStatus?.required || 'Check filters';
-  };
 
+    return details.length > 0 ? details.join(" | ") : filtersStatus?.required || "Check filters";
+  };
   const getRejectionDetails = (rejection: SignalRejection) => {
     const details = [];
     const fs = rejection.filters_status;
     const td = rejection.trend_data;
-    
-    if (!fs) return 'No data';
-    
+
+    if (!fs) return "No data";
+
     // Confidence or trend consistency below threshold
-    if (rejection.rejection_reason.includes('confidence or trend consistency below threshold')) {
+    if (rejection.rejection_reason?.includes("confidence or trend consistency below threshold")) {
       const confidence = fs.confidence ?? td?.confidence;
       const trendConsistency = fs.trendConsistency ?? td?.trendConsistency;
-      
+
       // Always show the values and whether they meet the threshold
       if (confidence !== undefined) {
-        const meetsConfidence = fs.meetsThreshold === true || confidence >= 60;
-        details.push(`Confidence: ${confidence}%${!meetsConfidence ? ' ❌' : ' ✓'}`);
+        const meetsConfidence = fs.meetsThreshold === true;
+        details.push(`Confidence: ${confidence}%${!meetsConfidence ? " ❌" : " ✓"}`);
       }
-      
+
       if (trendConsistency !== undefined) {
-        const meetsConsistency = fs.meetsThreshold === true || trendConsistency >= 50;
-        details.push(`Consistency: ${trendConsistency}%${!meetsConsistency ? ' ❌' : ' ✓'}`);
+        const meetsConsistency = fs.meetsThreshold === true;
+        details.push(`Consistency: ${trendConsistency}%${!meetsConsistency ? " ❌" : " ✓"}`);
       }
-      
+
       // If meetsThreshold is explicitly false but values seem to pass defaults,
       // it means user has custom thresholds - indicate this
-      if (fs.meetsThreshold === false && 
-          confidence !== undefined && trendConsistency !== undefined &&
-          confidence >= 60 && trendConsistency >= 50) {
-        details.push('(Custom thresholds set higher than defaults)');
+      if (
+        fs.meetsThreshold === false &&
+        confidence !== undefined &&
+        trendConsistency !== undefined &&
+        confidence >= 60 &&
+        trendConsistency >= 50
+      ) {
+        details.push("(Custom thresholds set higher than defaults)");
       }
-      
+
       // Show timeframe conflicts if confidence is the issue
       if (confidence !== undefined && !fs.meetsThreshold) {
         if (td?.multiTimeframe) {
           const mt = td.multiTimeframe;
           const conflicts = [];
-          
+
           if (mt.trend4h && mt.trend1h && mt.trend4h !== mt.trend1h) {
             conflicts.push(`4h ${mt.trend4h} vs 1h ${mt.trend1h}`);
           }
@@ -95,27 +103,27 @@ export const SignalRejectionReasons = () => {
           if (mt.trend30m && mt.trend15m && mt.trend30m !== mt.trend15m) {
             conflicts.push(`30m ${mt.trend30m} vs 15m ${mt.trend15m}`);
           }
-          
+
           if (conflicts.length > 0) {
             details.push(`Conflicts: ${conflicts.join(", ")}`);
           }
-          
+
           // Show individual timeframe confidences
           const tfConfidences = [];
           if (mt.confidence4h) tfConfidences.push(`4h: ${mt.confidence4h}%`);
           if (mt.confidence1h) tfConfidences.push(`1h: ${mt.confidence1h}%`);
           if (mt.confidence30m) tfConfidences.push(`30m: ${mt.confidence30m}%`);
           if (mt.confidence15m) tfConfidences.push(`15m: ${mt.confidence15m}%`);
-          
+
           if (tfConfidences.length > 0) {
             details.push(`TF confidence: ${tfConfidences.join(", ")}`);
           }
         }
       }
     }
-    
+
     // Timeframes not aligned with no divergence opportunity
-    if (rejection.rejection_reason.includes('timeframes not aligned, no divergence opportunity')) {
+    if (rejection.rejection_reason?.includes("timeframes not aligned, no divergence opportunity")) {
       // Show all timeframe trends
       if (td?.multiTimeframe) {
         const mt = td.multiTimeframe;
@@ -127,7 +135,7 @@ export const SignalRejectionReasons = () => {
         if (trends.length > 0) {
           details.push(trends.join(", "));
         }
-        
+
         // Show confidence levels for each timeframe
         const confidences = [];
         if (mt.confidence4h) confidences.push(`4h: ${mt.confidence4h}%`);
@@ -138,94 +146,94 @@ export const SignalRejectionReasons = () => {
           details.push(`Confidence: ${confidences.join(", ")}`);
         }
       } else if (fs.trend4h || fs.trend1h) {
-        details.push(`4h: ${fs.trend4h || 'unknown'}, 1h: ${fs.trend1h || 'unknown'}`);
+        details.push(`4h: ${fs.trend4h || "unknown"}, 1h: ${fs.trend1h || "unknown"}`);
       }
-      
+
       // Show overall confidence and consistency if available
       const overallConfidence = td?.confidence ?? fs.confidence;
       const trendConsistency = td?.trendConsistency ?? fs.trendConsistency;
-      
+
       if (overallConfidence !== undefined || trendConsistency !== undefined) {
         const thresholdDetails = [];
         if (overallConfidence !== undefined) {
           const meetsConfidence = overallConfidence >= 60;
-          thresholdDetails.push(`Overall: ${overallConfidence}%${!meetsConfidence ? ' < 60% ❌' : ' ✓'}`);
+          thresholdDetails.push(`Overall: ${overallConfidence}%${!meetsConfidence ? " < 60% ❌" : " ✓"}`);
         }
         if (trendConsistency !== undefined) {
           const meetsConsistency = trendConsistency >= 50;
-          thresholdDetails.push(`Consistency: ${trendConsistency}%${!meetsConsistency ? ' < 50% ❌' : ' ✓'}`);
+          thresholdDetails.push(`Consistency: ${trendConsistency}%${!meetsConsistency ? " < 50% ❌" : " ✓"}`);
         }
         if (thresholdDetails.length > 0) {
           details.push(thresholdDetails.join(", "));
         }
       }
-      
+
       // Show momentum status
       if (td?.momentum) {
         const m = td.momentum;
         const momentumDetails = [];
-        
+
         momentumDetails.push(`15m: ${m.consecutive15mBullish || 0}🟢/${m.consecutive15mBearish || 0}🔴`);
         momentumDetails.push(`30m: ${m.consecutive30mBullish || 0}🟢/${m.consecutive30mBearish || 0}🔴`);
-        
+
         if (m.macdHistogram !== undefined) {
           const macdOK = Math.abs(m.macdHistogram) > 0.01;
-          momentumDetails.push(`MACD: ${m.macdHistogram.toFixed(3)}${!macdOK ? ' < 0.01 ❌' : ' ✓'}`);
+          momentumDetails.push(`MACD: ${m.macdHistogram.toFixed(3)}${!macdOK ? " < 0.01 ❌" : " ✓"}`);
         }
-        
+
         const momentumConfirmed = m.confirms || false;
-        momentumDetails.push(momentumConfirmed ? 'Momentum ✓' : 'No momentum ❌');
-        
+        momentumDetails.push(momentumConfirmed ? "Momentum ✓" : "No momentum ❌");
+
         details.push(momentumDetails.join(" | "));
       }
-      
+
       // Show why no divergence
       if (td?.higherTimeframeFilter) {
         const htf = td.higherTimeframeFilter;
-        
+
         if (htf.aligned) {
-          details.push('Aligned (standard signal requires confidence/momentum)');
+          details.push("Aligned (standard signal requires confidence/momentum)");
         } else {
           // Check if divergence signals are enabled
           const pullbackEnabled = fs.pullbackEnabled ?? true;
           const earlyReversalEnabled = fs.earlyReversalEnabled ?? true;
-          
+
           if (!pullbackEnabled && !earlyReversalEnabled) {
-            details.push('Divergence signals disabled');
+            details.push("Divergence signals disabled");
           } else {
             // Show specific divergence conditions
             const divergenceChecks = [];
-            
+
             // Pullback conditions
             if (pullbackEnabled && td.multiTimeframe) {
               const mt = td.multiTimeframe;
               const confidence4h = mt.confidence4h || 0;
               const strongHigherTF = confidence4h >= 60;
-              
+
               if (!strongHigherTF) {
                 divergenceChecks.push(`Pullback: 4h ${confidence4h}% < 60%`);
               }
             }
-            
+
             // Early reversal conditions
             if (earlyReversalEnabled && td.multiTimeframe) {
               const mt = td.multiTimeframe;
               const confidence1h = mt.confidence1h || 0;
               const confidence4h = mt.confidence4h || 0;
               const strongReversal = confidence1h >= 70 && confidence4h < 60;
-              
+
               if (!strongReversal) {
                 divergenceChecks.push(`Reversal: 1h ${confidence1h}% (needs ≥70%) & 4h ${confidence4h}% (needs <60%)`);
               }
             }
-            
+
             if (divergenceChecks.length > 0) {
               details.push(divergenceChecks.join(" | "));
             }
           }
         }
       }
-      
+
       // Show ranging market if applicable
       if (td?.ranging?.isRanging === true) {
         const atrPercent = td.ranging.atrPercent || 0;
@@ -234,39 +242,42 @@ export const SignalRejectionReasons = () => {
       }
     }
     // Other timeframe alignment issues
-    else if (rejection.rejection_reason.includes('timeframes NOT aligned') || rejection.rejection_reason.includes('timeframe')) {
+    else if (
+      rejection.rejection_reason?.includes("timeframes NOT aligned") ||
+      rejection.rejection_reason?.includes("timeframe")
+    ) {
       if (fs.trend4h || fs.trend1h) {
-        details.push(`4H: ${fs.trend4h || 'unknown'} | 1H: ${fs.trend1h || 'unknown'}`);
+        details.push(`4H: ${fs.trend4h || "unknown"} | 1H: ${fs.trend1h || "unknown"}`);
       }
     }
-    
+
     // Pullback issues
-    if (rejection.rejection_reason.includes('pullback')) {
+    if (rejection.rejection_reason?.includes("pullback")) {
       if (fs.pullbackPercent !== undefined && fs.pullbackPercent !== null) {
         details.push(`Retracement: ${fs.pullbackPercent.toFixed(1)}%`);
       }
     }
-    
+
     // Momentum issues - show specific failure point
-    if (rejection.rejection_reason.includes('momentum')) {
+    if (rejection.rejection_reason?.includes("momentum")) {
       const m15Bullish = fs.consecutive15mBullish || 0;
       const m15Bearish = fs.consecutive15mBearish || 0;
       const m30Bullish = fs.consecutive30mBullish || 0;
       const m30Bearish = fs.consecutive30mBearish || 0;
-      
+
       // Determine the expected trend direction
       const expectedTrend = fs.trend4h || fs.trend1h || td?.trend;
-      const isBullish = expectedTrend === 'bullish';
-      
+      const isBullish = expectedTrend === "bullish";
+
       // Check if consecutive candles requirement is met (either 15m OR 30m)
       const candles15mOK = isBullish ? m15Bullish >= 2 : m15Bearish >= 2;
       const candles30mOK = isBullish ? m30Bullish >= 2 : m30Bearish >= 2;
       const consecutiveCandlesPass = candles15mOK || candles30mOK;
-      
+
       // Check MACD histogram
       const macdHistogram = td?.momentum?.macdHistogram ?? fs.momentum?.macdHistogram;
       const macdOK = macdHistogram !== undefined && Math.abs(macdHistogram) > 0.01;
-      
+
       if (!consecutiveCandlesPass) {
         // Consecutive candles failed - show candle counts
         details.push(`15m: ${m15Bullish}🟢/${m15Bearish}🔴, 30m: ${m30Bullish}🟢/${m30Bearish}🔴 (need ≥2 on either)`);
@@ -285,15 +296,14 @@ export const SignalRejectionReasons = () => {
         }
       }
     }
-    
+
     // Ranging market
-    if (rejection.rejection_reason.includes('ranging') && fs.isRanging === true) {
+    if (rejection.rejection_reason?.includes("ranging") && fs.isRanging === true) {
       details.push(`Market: Ranging`);
     }
-    
-    return details.length > 0 ? details.join(' | ') : 'No specific values';
-  };
 
+    return details.length > 0 ? details.join(" | ") : "No specific values";
+  };
   if (loading) {
     return (
       <Card>
@@ -304,7 +314,6 @@ export const SignalRejectionReasons = () => {
       </Card>
     );
   }
-
   if (rejections.length === 0) {
     return (
       <Card>
@@ -320,7 +329,6 @@ export const SignalRejectionReasons = () => {
       </Card>
     );
   }
-
   return (
     <Card>
       <CardHeader>
@@ -328,9 +336,7 @@ export const SignalRejectionReasons = () => {
           <AlertCircle className="h-5 w-5 text-muted-foreground" />
           Signal Rejection Reasons (Last 30 Minutes)
         </CardTitle>
-        <CardDescription>
-          Why signals are not being generated for each symbol
-        </CardDescription>
+        <CardDescription>Why signals are not being generated for each symbol</CardDescription>
       </CardHeader>
       <CardContent>
         <Table>
@@ -349,19 +355,15 @@ export const SignalRejectionReasons = () => {
                 <TableCell className="font-medium">{rejection.symbol}</TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
-                    {getReasonIcon(rejection.rejection_reason)}
+                    {getReasonIcon(rejection.rejection_reason ?? "")}
                     <span className="text-sm">{rejection.rejection_reason}</span>
                   </div>
                 </TableCell>
                 <TableCell>
-                  <div className="text-xs text-muted-foreground">
-                    {getFilterDetails(rejection.filters_status)}
-                  </div>
+                  <div className="text-xs text-muted-foreground">{getFilterDetails(rejection.filters_status)}</div>
                 </TableCell>
                 <TableCell>
-                  <div className="text-xs font-medium text-destructive">
-                    {getRejectionDetails(rejection)}
-                  </div>
+                  <div className="text-xs font-medium text-destructive">{getRejectionDetails(rejection)}</div>
                 </TableCell>
                 <TableCell>
                   <Badge variant="outline" className="text-xs">
@@ -372,24 +374,17 @@ export const SignalRejectionReasons = () => {
             ))}
           </TableBody>
         </Table>
-
         <Separator className="my-6" />
-
         <div className="space-y-4">
           <div>
             <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
               <Activity className="h-5 w-5" />
               Momentum Status Details
             </h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Current momentum confirmation status for each symbol
-            </p>
+            <p className="text-sm text-muted-foreground mb-4">Current momentum confirmation status for each symbol</p>
           </div>
-
           {momentumLoading ? (
             <p className="text-muted-foreground text-sm">Loading momentum data...</p>
-          ) : momentumData.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No active symbols configured</p>
           ) : (
             <div className="space-y-4">
               {momentumData.map((data) => {
@@ -404,32 +399,32 @@ export const SignalRejectionReasons = () => {
                     </div>
                   );
                 }
+                const { momentum, higherTimeframeFilter, timeframes, trend } = data;
+                const confirms = momentum?.confirms ?? false;
 
-                const { momentum, higherTimeframeFilter, multiTimeframe, trend } = data;
-                const confirms = momentum.confirms;
-                
-                const candles15mOK = 
-                  (trend === 'bullish' && momentum.consecutive15mBullish >= 2) ||
-                  (trend === 'bearish' && momentum.consecutive15mBearish >= 2);
-                
-                const candles30mOK = 
-                  (trend === 'bullish' && momentum.consecutive30mBullish >= 2) ||
-                  (trend === 'bearish' && momentum.consecutive30mBearish >= 2);
-                
-                const macdOK = Math.abs(momentum.macdHistogram) > 0.01;
+                const candles15mOK =
+                  (trend === "bullish" && momentum?.consecutive15mBullish >= 2) ||
+                  (trend === "bearish" && momentum?.consecutive15mBearish >= 2);
 
+                const candles30mOK =
+                  (trend === "bullish" && momentum?.consecutive30mBullish >= 2) ||
+                  (trend === "bearish" && momentum?.consecutive30mBearish >= 2);
+
+                const macdOK = Math.abs(momentum?.macdHistogram ?? 0) > 0.01;
                 return (
-                  <div 
-                    key={data.symbol} 
+                  <div
+                    key={data.symbol}
                     className={`p-4 rounded-lg border ${
-                      confirms 
-                        ? 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800' 
-                        : 'bg-muted border-border'
+                      confirms
+                        ? "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800"
+                        : "bg-muted border-border"
                     }`}
                   >
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
-                        <span className={`font-semibold text-lg ${confirms ? 'text-gray-900 dark:text-gray-100' : ''}`}>{data.symbol}</span>
+                        <span className={`font-semibold text-lg ${confirms ? "text-gray-900 dark:text-gray-100" : ""}`}>
+                          {data.symbol}
+                        </span>
                         {confirms ? (
                           <Badge className="bg-green-500 hover:bg-green-600">
                             <CheckCircle className="h-3 w-3 mr-1" />
@@ -442,70 +437,100 @@ export const SignalRejectionReasons = () => {
                           </Badge>
                         )}
                       </div>
-                      <Badge variant={trend === 'bullish' ? 'default' : trend === 'bearish' ? 'destructive' : 'outline'}>
-                        {trend === 'bullish' ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
+                      <Badge
+                        variant={trend === "bullish" ? "default" : trend === "bearish" ? "destructive" : "outline"}
+                      >
+                        {trend === "bullish" ? (
+                          <TrendingUp className="h-3 w-3 mr-1" />
+                        ) : (
+                          <TrendingDown className="h-3 w-3 mr-1" />
+                        )}
                         {trend}
                       </Badge>
                     </div>
-
                     <div className="grid grid-cols-2 gap-3 mb-3">
                       <div className="text-xs">
-                        <span className={confirms ? 'text-gray-700 dark:text-gray-300' : 'text-muted-foreground'}>4h/1h:</span>
-                        <span className={`ml-2 font-medium ${confirms ? 'text-gray-900 dark:text-gray-100' : ''}`}>
-                          {higherTimeframeFilter.trend4h} / {higherTimeframeFilter.trend1h}
+                        <span className={confirms ? "text-gray-700 dark:text-gray-300" : "text-muted-foreground"}>
+                          4h/1h:
                         </span>
-                        {higherTimeframeFilter.aligned ? (
+                        <span className={`ml-2 font-medium ${confirms ? "text-gray-900 dark:text-gray-100" : ""}`}>
+                          {higherTimeframeFilter?.trend4h ?? "N/A"} / {higherTimeframeFilter?.trend1h ?? "N/A"}
+                        </span>
+                        {higherTimeframeFilter?.aligned ? (
                           <CheckCircle className="inline h-3 w-3 ml-1 text-green-600 dark:text-green-400" />
                         ) : (
                           <AlertTriangle className="inline h-3 w-3 ml-1 text-yellow-600 dark:text-yellow-400" />
                         )}
                       </div>
                       <div className="text-xs">
-                        <span className={confirms ? 'text-gray-700 dark:text-gray-300' : 'text-muted-foreground'}>30m/15m:</span>
-                        <span className={`ml-2 font-medium ${confirms ? 'text-gray-900 dark:text-gray-100' : ''}`}>
-                          {multiTimeframe.trend30m} / {multiTimeframe.trend15m}
+                        <span className={confirms ? "text-gray-700 dark:text-gray-300" : "text-muted-foreground"}>
+                          30m/15m:
+                        </span>
+                        <span className={`ml-2 font-medium ${confirms ? "text-gray-900 dark:text-gray-100" : ""}`}>
+                          {timeframes?.["30m"]?.trend ?? "N/A"} / {timeframes?.["15m"]?.trend ?? "N/A"}
                         </span>
                       </div>
                     </div>
-
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-sm">
-                        <span className={confirms ? 'text-gray-700 dark:text-gray-300' : 'text-muted-foreground'}>15m OR 30m Candles:</span>
+                        <span className={confirms ? "text-gray-700 dark:text-gray-300" : "text-muted-foreground"}>
+                          15m OR 30m Candles:
+                        </span>
                         <div className="flex items-center gap-2">
-                          <span className={(candles15mOK || candles30mOK) ? 'text-green-700 dark:text-green-300 font-medium' : confirms ? 'text-gray-900 dark:text-gray-100' : 'text-muted-foreground'}>
-                            15m: {momentum.consecutive15mBullish}🟢/{momentum.consecutive15mBearish}🔴, 
-                            30m: {momentum.consecutive30mBullish}🟢/{momentum.consecutive30mBearish}🔴
+                          <span
+                            className={
+                              candles15mOK || candles30mOK
+                                ? "text-green-700 dark:text-green-300 font-medium"
+                                : confirms
+                                  ? "text-gray-900 dark:text-gray-100"
+                                  : "text-muted-foreground"
+                            }
+                          >
+                            15m: {momentum?.consecutive15mBullish ?? 0}🟢/{momentum?.consecutive15mBearish ?? 0}🔴, 30m:{" "}
+                            {momentum?.consecutive30mBullish ?? 0}🟢/{momentum?.consecutive30mBearish ?? 0}🔴
                           </span>
-                          {(candles15mOK || candles30mOK) ? (
+                          {candles15mOK || candles30mOK ? (
                             <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
                           ) : (
-                            <XCircle className={`h-4 w-4 ${confirms ? 'text-gray-600 dark:text-gray-400' : 'text-muted-foreground'}`} />
+                            <XCircle
+                              className={`h-4 w-4 ${confirms ? "text-gray-600 dark:text-gray-400" : "text-muted-foreground"}`}
+                            />
                           )}
                         </div>
                       </div>
-
                       <div className="flex items-center justify-between text-sm">
-                        <span className={confirms ? 'text-gray-700 dark:text-gray-300' : 'text-muted-foreground'}>MACD Histogram:</span>
+                        <span className={confirms ? "text-gray-700 dark:text-gray-300" : "text-muted-foreground"}>
+                          MACD Histogram:
+                        </span>
                         <div className="flex items-center gap-2">
-                          <span className={macdOK ? 'text-green-700 dark:text-green-300 font-medium' : confirms ? 'text-gray-900 dark:text-gray-100' : 'text-muted-foreground'}>
-                            {momentum.macdHistogram.toFixed(3)}
+                          <span
+                            className={
+                              macdOK
+                                ? "text-green-700 dark:text-green-300 font-medium"
+                                : confirms
+                                  ? "text-gray-900 dark:text-gray-100"
+                                  : "text-muted-foreground"
+                            }
+                          >
+                            {momentum?.macdHistogram?.toFixed(3) ?? "N/A"}
                           </span>
                           {macdOK ? (
                             <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
                           ) : (
-                            <XCircle className={`h-4 w-4 ${confirms ? 'text-gray-600 dark:text-gray-400' : 'text-muted-foreground'}`} />
+                            <XCircle
+                              className={`h-4 w-4 ${confirms ? "text-gray-600 dark:text-gray-400" : "text-muted-foreground"}`}
+                            />
                           )}
                         </div>
                       </div>
                     </div>
-
                     {!confirms && (
                       <div className="mt-3 pt-3 border-t border-border">
                         <p className="text-xs text-muted-foreground">
-                          <strong>Missing:</strong>{' '}
-                          {!candles15mOK && !candles30mOK && 'Either 15m OR 30m needs ≥2 consecutive candles'}
-                          {!candles15mOK && !candles30mOK && !macdOK && ', '}
-                          {!macdOK && 'MACD histogram needs >0.01'}
+                          <strong>Missing:</strong>{" "}
+                          {!candles15mOK && !candles30mOK && "Either 15m OR 30m needs ≥2 consecutive candles"}
+                          {!candles15mOK && !candles30mOK && !macdOK && ", "}
+                          {!macdOK && "MACD histogram needs >0.01"}
                         </p>
                       </div>
                     )}
