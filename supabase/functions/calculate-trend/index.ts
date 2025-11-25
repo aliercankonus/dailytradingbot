@@ -512,70 +512,76 @@ serve(async (req) => {
     }
 
     // ============================================================
-    // WEIGHTED ALIGNMENT THRESHOLD SYSTEM
+    // ENHANCED ALIGNMENT: Allow 1h=neutral with strong 4h trend
     // ============================================================
-    // Instead of binary alignment, use weighted scoring:
-    // 4H = 60%, 1H = 25%, 30m = 10%, 15m = 5%
-    // ≥70% = aligned, 50-70% = mixed, <50% = unaligned
+    // Standard alignment: 4h directional and 1h does NOT oppose (neutral is OK)
+    const standardAlignment = dominantTrend !== "neutral" && !opposing1h;
     
-    const alignmentWeights = {
-      tf4h: 60,
-      tf1h: 25,
-      tf30m: 10,
-      tf15m: 5
-    };
+    console.log(`${symbol} ALIGNMENT: 4h=${dominantTrend} 1h=${trend1h.trend} 30m=${trend30m.trend} 15m=${trend15m.trend} | opposing: 1h=${opposing1h} 30m=${opposing30m} 15m=${opposing15m} | standardAlignment=${standardAlignment}`);
     
-    let weightedAlignmentScore = 0;
+    // Enhanced alignment: Allow 1h=neutral when 4h is strong and conditions are met
     let neutralAllowedWithStrongHigherTimeframe = false;
     
-    // Skip alignment calculation if 4h is neutral (no dominant trend to align with)
-    if (dominantTrend === "neutral") {
-      weightedAlignmentScore = 0;
-      console.log(`${symbol} ALIGNMENT: 4h=neutral - no dominant trend, alignment score = 0`);
-    } else {
-      // Score each timeframe based on alignment with dominant trend
-      // Full points if aligned, half points if neutral, zero if opposed
+    if (!standardAlignment && dominantTrend !== "neutral" && trend1h.trend === "neutral") {
+      // Check if 4h trend is strong enough (≥60% confidence)
+      const strong4h = dominantConfidence >= 60;
       
-      // 4H always contributes full weight (it IS the dominant trend)
-      const score4h = alignmentWeights.tf4h;
-      weightedAlignmentScore += score4h;
+      // Check if 1h MACD histogram aligns with 4h direction
+      const macd1h = trend1h.indicators.macdHistogram;
+      const macdAligned = dominantTrend === "bullish" ? macd1h >= 0 : macd1h <= 0;
       
-      // 1H scoring
-      let score1h = 0;
-      if (trend1h.trend === dominantTrend) {
-        score1h = alignmentWeights.tf1h; // Full points for alignment
-      } else if (trend1h.trend === "neutral") {
-        score1h = alignmentWeights.tf1h * 0.5; // Half points for neutral
+      // Check if 1h has sufficient activity (not dead/ranging)
+      const adx1h = calculateADX(klines1h, 14);
+      const hasActivity = adx1h >= 15;
+      
+      // Check relative ATR on 1h (not extremely compressed)
+      const atr1hPeriod = 14;
+      const atr1hLookback = 30;
+      
+      const atr1hKlines = klines1h.slice(-atr1hPeriod - 1);
+      let atr1hSum = 0;
+      for (let i = 1; i < atr1hKlines.length; i++) {
+        const high = parseFloat(atr1hKlines[i][2]);
+        const low = parseFloat(atr1hKlines[i][3]);
+        const prevClose = parseFloat(atr1hKlines[i - 1][4]);
+        const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+        atr1hSum += tr;
       }
-      // else 0 points for opposition
-      weightedAlignmentScore += score1h;
+      const currentATR1h = atr1hSum / atr1hPeriod;
       
-      // 30m scoring
-      let score30m = 0;
-      if (trend30m.trend === dominantTrend) {
-        score30m = alignmentWeights.tf30m;
-      } else if (trend30m.trend === "neutral") {
-        score30m = alignmentWeights.tf30m * 0.5;
+      const historical1hKlines = klines1h.slice(-atr1hLookback - atr1hPeriod);
+      let historical1hATRSum = 0;
+      let historical1hATRCount = 0;
+      
+      for (let j = atr1hPeriod; j < historical1hKlines.length; j++) {
+        let periodATRSum = 0;
+        for (let i = 1; i <= atr1hPeriod; i++) {
+          const idx = j - atr1hPeriod + i;
+          const high = parseFloat(historical1hKlines[idx][2]);
+          const low = parseFloat(historical1hKlines[idx][3]);
+          const prevClose = parseFloat(historical1hKlines[idx - 1][4]);
+          const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+          periodATRSum += tr;
+        }
+        historical1hATRSum += periodATRSum / atr1hPeriod;
+        historical1hATRCount++;
       }
-      weightedAlignmentScore += score30m;
       
-      // 15m scoring
-      let score15m = 0;
-      if (trend15m.trend === dominantTrend) {
-        score15m = alignmentWeights.tf15m;
-      } else if (trend15m.trend === "neutral") {
-        score15m = alignmentWeights.tf15m * 0.5;
+      const historical1hATRAvg = historical1hATRCount > 0 ? historical1hATRSum / historical1hATRCount : currentATR1h;
+      const relative1hATR = currentATR1h / historical1hATRAvg;
+      const atrNotExtremelyCompressed = relative1hATR >= 0.5; // Less strict than ranging detection (0.6)
+      
+      // Allow if all conditions are met
+      if (strong4h && macdAligned && (hasActivity || atrNotExtremelyCompressed)) {
+        neutralAllowedWithStrongHigherTimeframe = true;
+        console.log(`${symbol}: 1h=neutral ALLOWED with strong 4h=${dominantTrend}(${dominantConfidence}%) - MACD=${macd1h.toFixed(3)} ADX=${adx1h.toFixed(1)} relATR=${relative1hATR.toFixed(2)}`);
+      } else {
+        console.log(`${symbol}: 1h=neutral BLOCKED - strong4h=${strong4h} macdAligned=${macdAligned} hasActivity=${hasActivity} atrOK=${atrNotExtremelyCompressed}`);
       }
-      weightedAlignmentScore += score15m;
-      
-      console.log(`${symbol} ALIGNMENT SCORE: ${weightedAlignmentScore.toFixed(1)}% | 4h=${dominantTrend}(${score4h}) 1h=${trend1h.trend}(${score1h}) 30m=${trend30m.trend}(${score30m}) 15m=${trend15m.trend}(${score15m})`);
     }
     
-    // Determine alignment status based on weighted score
-    const highTimeframeAligned = weightedAlignmentScore >= 70;
-    const mixedAlignment = weightedAlignmentScore >= 50 && weightedAlignmentScore < 70;
-    
-    console.log(`${symbol} ALIGNMENT: score=${weightedAlignmentScore.toFixed(1)}% | aligned=${highTimeframeAligned} mixed=${mixedAlignment}`);
+    // High timeframe alignment: standard OR enhanced neutral allowance
+    const highTimeframeAligned = standardAlignment || neutralAllowedWithStrongHigherTimeframe;
 
     // ============================================================
     // DIVERGENCE CLASSIFICATION FOR OPPORTUNITY CAPTURE
@@ -868,8 +874,6 @@ serve(async (req) => {
           trend1h: trend1h.trend,
           aligned: highTimeframeAligned,
           neutralAllowedWithStrongHigherTimeframe: neutralAllowedWithStrongHigherTimeframe,
-          weightedAlignmentScore: Math.round(weightedAlignmentScore),
-          mixedAlignment: mixedAlignment,
           dominantConfidence: dominantConfidence,
           weightedConsistency: Math.round(weightedConsistency),
           // NEW: Divergence opportunity detection
