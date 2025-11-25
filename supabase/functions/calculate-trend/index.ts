@@ -383,9 +383,15 @@ serve(async (req) => {
       }
     } else {
       // Standard calculation when 4h has a directional trend
+      // Special case: When 1h is neutral (not opposing), include it with reduced weight
+      const effective1hConfirmation = confirmation1h || trend1h.trend === "neutral";
+      const effective1hContribution = confirmation1h 
+        ? trend1h.confidence * 0.30  // Full weight if aligned
+        : (trend1h.trend === "neutral" ? trend1h.confidence * 0.15 : 0); // Half weight if neutral, zero if opposing
+      
       weightedConsistency =
         dominantConfidence * 0.45 + // 4h: 45%
-        (confirmation1h ? trend1h.confidence * 0.30 : 0) + // 1h: 30%
+        effective1hContribution + // 1h: 30% if aligned, 15% if neutral, 0% if opposing
         (confirmation30m ? trend30m.confidence * 0.15 : 0) + // 30m: 15%
         (confirmation15m ? trend15m.confidence * 0.10 : 0); // 15m: 10%
     }
