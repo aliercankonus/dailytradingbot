@@ -114,27 +114,75 @@ export const SignalRejectionReasons = () => {
         if (trends.length > 0) {
           details.push(trends.join(", "));
         }
+        
+        // Show confidence levels for each timeframe
+        const confidences = [];
+        if (mt.confidence4h) confidences.push(`4h: ${mt.confidence4h}%`);
+        if (mt.confidence1h) confidences.push(`1h: ${mt.confidence1h}%`);
+        if (mt.confidence30m) confidences.push(`30m: ${mt.confidence30m}%`);
+        if (mt.confidence15m) confidences.push(`15m: ${mt.confidence15m}%`);
+        if (confidences.length > 0) {
+          details.push(`Confidence: ${confidences.join(", ")}`);
+        }
       } else if (fs.trend4h || fs.trend1h) {
         details.push(`4h: ${fs.trend4h || 'unknown'}, 1h: ${fs.trend1h || 'unknown'}`);
+      }
+      
+      // Show overall confidence and consistency if available
+      const overallConfidence = td?.confidence ?? fs.confidence;
+      const trendConsistency = td?.trendConsistency ?? fs.trendConsistency;
+      
+      if (overallConfidence !== undefined || trendConsistency !== undefined) {
+        const thresholdDetails = [];
+        if (overallConfidence !== undefined) {
+          const meetsConfidence = overallConfidence >= 60;
+          thresholdDetails.push(`Overall: ${overallConfidence}%${!meetsConfidence ? ' < 60% ❌' : ' ✓'}`);
+        }
+        if (trendConsistency !== undefined) {
+          const meetsConsistency = trendConsistency >= 50;
+          thresholdDetails.push(`Consistency: ${trendConsistency}%${!meetsConsistency ? ' < 50% ❌' : ' ✓'}`);
+        }
+        if (thresholdDetails.length > 0) {
+          details.push(thresholdDetails.join(", "));
+        }
+      }
+      
+      // Show momentum status
+      if (td?.momentum) {
+        const m = td.momentum;
+        const momentumDetails = [];
+        
+        momentumDetails.push(`15m: ${m.consecutive15mBullish || 0}🟢/${m.consecutive15mBearish || 0}🔴`);
+        momentumDetails.push(`30m: ${m.consecutive30mBullish || 0}🟢/${m.consecutive30mBearish || 0}🔴`);
+        
+        if (m.macdHistogram !== undefined) {
+          const macdOK = Math.abs(m.macdHistogram) > 0.01;
+          momentumDetails.push(`MACD: ${m.macdHistogram.toFixed(3)}${!macdOK ? ' < 0.01 ❌' : ' ✓'}`);
+        }
+        
+        const momentumConfirmed = m.confirms || false;
+        momentumDetails.push(momentumConfirmed ? 'Momentum ✓' : 'No momentum ❌');
+        
+        details.push(momentumDetails.join(" | "));
       }
       
       // Show why no divergence
       if (td?.higherTimeframeFilter) {
         const htf = td.higherTimeframeFilter;
         
-        // Check if divergence signals are enabled
-        const pullbackEnabled = fs.pullbackEnabled ?? true;
-        const earlyReversalEnabled = fs.earlyReversalEnabled ?? true;
-        
-        if (!pullbackEnabled && !earlyReversalEnabled) {
-          details.push('Divergence signals disabled');
+        if (htf.aligned) {
+          details.push('Aligned (standard signal requires confidence/momentum)');
         } else {
-          // Show specific divergence conditions
-          const divergenceChecks = [];
+          // Check if divergence signals are enabled
+          const pullbackEnabled = fs.pullbackEnabled ?? true;
+          const earlyReversalEnabled = fs.earlyReversalEnabled ?? true;
           
-          if (htf.divergenceType === 'aligned') {
-            divergenceChecks.push('Timeframes aligned - no divergence');
+          if (!pullbackEnabled && !earlyReversalEnabled) {
+            details.push('Divergence signals disabled');
           } else {
+            // Show specific divergence conditions
+            const divergenceChecks = [];
+            
             // Pullback conditions
             if (pullbackEnabled && td.multiTimeframe) {
               const mt = td.multiTimeframe;
@@ -142,7 +190,7 @@ export const SignalRejectionReasons = () => {
               const strongHigherTF = confidence4h >= 60;
               
               if (!strongHigherTF) {
-                divergenceChecks.push(`Pullback: 4h confidence ${confidence4h}% < 60%`);
+                divergenceChecks.push(`Pullback: 4h ${confidence4h}% < 60%`);
               }
             }
             
@@ -154,15 +202,13 @@ export const SignalRejectionReasons = () => {
               const strongReversal = confidence1h >= 70 && confidence4h < 60;
               
               if (!strongReversal) {
-                divergenceChecks.push(`Reversal: needs 1h ≥70% (${confidence1h}%) & 4h <60% (${confidence4h}%)`);
+                divergenceChecks.push(`Reversal: 1h ${confidence1h}% (needs ≥70%) & 4h ${confidence4h}% (needs <60%)`);
               }
             }
-          }
-          
-          if (divergenceChecks.length > 0) {
-            details.push(divergenceChecks.join(" | "));
-          } else {
-            details.push('No divergence opportunity');
+            
+            if (divergenceChecks.length > 0) {
+              details.push(divergenceChecks.join(" | "));
+            }
           }
         }
       }
