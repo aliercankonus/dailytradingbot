@@ -365,21 +365,40 @@ serve(async (req) => {
     let weightedConsistency: number;
     
     if (dominantTrend === "neutral") {
-      // When 4h is neutral, use lower timeframe alignment instead of zeroing them out
-      // Check if 1h/30m/15m are aligned with each other
+      // When 4h is neutral, derive direction from lower timeframes
+      // 1) If ALL lower timeframes agree, we already use full weighting
       const lowerTimeframesAligned = 
-        (trend1h.trend === trend30m.trend && trend30m.trend === trend15m.trend);
+        (trend1h.trend === trend30m.trend && trend30m.trend === trend15m.trend && trend1h.trend !== "neutral");
       
       if (lowerTimeframesAligned) {
-        // Lower timeframes are aligned - weight them normally plus 4h contribution
+        // All lower timeframes aligned - weight them normally plus 4h contribution
         weightedConsistency =
-          dominantConfidence * 0.45 + // 4h: 45%
-          trend1h.confidence * 0.30 + // 1h: 30%
-          trend30m.confidence * 0.15 + // 30m: 15%
-          trend15m.confidence * 0.10; // 15m: 10%
+          dominantConfidence * 0.30 + // 4h contributes but with reduced weight when neutral
+          trend1h.confidence * 0.35 + // 1h: 35%
+          trend30m.confidence * 0.20 + // 30m: 20%
+          trend15m.confidence * 0.15; // 15m: 15%
       } else {
-        // Lower timeframes are mixed - only count 4h
-        weightedConsistency = dominantConfidence * 0.45;
+        // 2) PARTIAL ALIGNMENT: use majority vote among 1h/30m/15m
+        const trends = [trend1h.trend, trend30m.trend, trend15m.trend].filter(t => t !== "neutral");
+        const bullishCount = trends.filter(t => t === "bullish").length;
+        const bearishCount = trends.filter(t => t === "bearish").length;
+        const majorityTrend = bullishCount > bearishCount ? "bullish" : bearishCount > bullishCount ? "bearish" : "neutral";
+        
+        if (majorityTrend === "neutral") {
+          // No clear majority - fall back to 4h only
+          weightedConsistency = dominantConfidence * 0.30;
+        } else {
+          // Use only timeframes that match the majority direction
+          const use1h = trend1h.trend === majorityTrend;
+          const use30m = trend30m.trend === majorityTrend;
+          const use15m = trend15m.trend === majorityTrend;
+          
+          weightedConsistency =
+            dominantConfidence * 0.25 + // 4h small stabilizing contribution
+            (use1h ? trend1h.confidence * 0.45 : 0) + // 1h: 45% if aligned with majority
+            (use30m ? trend30m.confidence * 0.20 : 0) + // 30m: 20%
+            (use15m ? trend15m.confidence * 0.10 : 0);  // 15m: 10%
+        }
       }
     } else {
       // Standard calculation when 4h has a directional trend
