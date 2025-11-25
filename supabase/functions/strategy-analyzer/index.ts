@@ -170,8 +170,19 @@ serve(async (req) => {
       const ema12 = calculateEMA(prices, 12);
       const ema26 = calculateEMA(prices, 26);
       const macd = ema12 - ema26;
-      const signal = macd * 0.9;
-      return { macd, signal, histogram: macd - signal };
+      
+      // Calculate signal line (9-period EMA of MACD)
+      const macdValues: number[] = [];
+      for (let i = 26; i < prices.length; i++) {
+        const shortEma = calculateEMA(prices.slice(0, i + 1), 12);
+        const longEma = calculateEMA(prices.slice(0, i + 1), 26);
+        macdValues.push(shortEma - longEma);
+      }
+      
+      const signal = macdValues.length >= 9 ? calculateEMA(macdValues, 9) : macd * 0.9;
+      const histogram = macd - signal;
+      
+      return { macd, signal, histogram };
     };
 
     const calculateBollingerBands = (prices: number[], period = 20, stdDev = 2) => {
