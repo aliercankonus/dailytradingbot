@@ -247,16 +247,23 @@ function calculateTrend(prices: number[]): {
   totalWeight += emaWeight;
 
   // RSI Analysis (Weight: 2)
+  // Updated thresholds: 55-65 = trend zone, >65 = strong momentum, <35 = strong bearish
   const rsiWeight = 2;
   let rsiSignal = "neutral";
-  if (rsi > 60) {
-    bullishSignals += rsiWeight * ((rsi - 60) / 40);
-    rsiSignal = rsi > 70 ? "overbought" : "bullish";
-  } else if (rsi < 40) {
-    bearishSignals += rsiWeight * ((40 - rsi) / 40);
+  if (rsi > 55) {
+    bullishSignals += rsiWeight * ((rsi - 55) / 45); // Scale from 55 to 100
+    if (rsi > 70) {
+      rsiSignal = "overbought";
+    } else if (rsi > 65) {
+      rsiSignal = "strong_bullish";
+    } else {
+      rsiSignal = "bullish"; // 55-65 = trend zone
+    }
+  } else if (rsi < 35) {
+    bearishSignals += rsiWeight * ((35 - rsi) / 35); // Scale from 35 to 0
     rsiSignal = rsi < 30 ? "oversold" : "bearish";
   } else {
-    rsiSignal = "neutral";
+    rsiSignal = "neutral"; // 35-55 = neutral zone
   }
   totalWeight += rsiWeight;
 
