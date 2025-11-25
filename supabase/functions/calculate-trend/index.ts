@@ -650,14 +650,15 @@ serve(async (req) => {
       }
     }
     
-    // RELAXED REQUIREMENT: Need ≥2 consecutive candles on EITHER 15m OR 30m in trade direction
+    // CRITICAL FIX: Only count candles that align with BOTH dominant trend AND timeframe trend
+    // This prevents counting counter-trend candles that create false momentum signals
     const momentum15mConfirms =
-      (dominantTrend === "bullish" && consecutive15mBullish >= 2) ||
-      (dominantTrend === "bearish" && consecutive15mBearish >= 2);
+      (dominantTrend === "bullish" && trend15m.trend === "bullish" && consecutive15mBullish >= 2) ||
+      (dominantTrend === "bearish" && trend15m.trend === "bearish" && consecutive15mBearish >= 2);
     
     const momentum30mConfirms =
-      (dominantTrend === "bullish" && consecutive30mBullish >= 2) ||
-      (dominantTrend === "bearish" && consecutive30mBearish >= 2);
+      (dominantTrend === "bullish" && trend30m.trend === "bullish" && consecutive30mBullish >= 2) ||
+      (dominantTrend === "bearish" && trend30m.trend === "bearish" && consecutive30mBearish >= 2);
     
     // MACD histogram must be expanding (shows strength building)
     const macdHistogram = trend15m.indicators.macdHistogram; // Use 15m MACD
