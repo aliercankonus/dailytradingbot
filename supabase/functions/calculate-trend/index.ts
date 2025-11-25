@@ -356,17 +356,39 @@ serve(async (req) => {
     const dominantTrend = trend4h.trend;
     const dominantConfidence = trend4h.confidence;
 
-    // 1h must confirm 4h for high-quality signals (30% weight)
+    // IMPROVED: When 4h is neutral, consider lower timeframe alignment
     const confirmation1h = trend1h.trend === dominantTrend;
     const confirmation30m = trend30m.trend === dominantTrend;
     const confirmation15m = trend15m.trend === dominantTrend;
 
     // Calculate weighted trend consistency
-    const weightedConsistency =
-      dominantConfidence * 0.45 + // 4h: 45%
-      (confirmation1h ? trend1h.confidence * 0.30 : 0) + // 1h: 30%
-      (confirmation30m ? trend30m.confidence * 0.15 : 0) + // 30m: 15%
-      (confirmation15m ? trend15m.confidence * 0.10 : 0); // 15m: 10%
+    let weightedConsistency: number;
+    
+    if (dominantTrend === "neutral") {
+      // When 4h is neutral, use lower timeframe alignment instead of zeroing them out
+      // Check if 1h/30m/15m are aligned with each other
+      const lowerTimeframesAligned = 
+        (trend1h.trend === trend30m.trend && trend30m.trend === trend15m.trend);
+      
+      if (lowerTimeframesAligned) {
+        // Lower timeframes are aligned - weight them normally plus 4h contribution
+        weightedConsistency =
+          dominantConfidence * 0.45 + // 4h: 45%
+          trend1h.confidence * 0.30 + // 1h: 30%
+          trend30m.confidence * 0.15 + // 30m: 15%
+          trend15m.confidence * 0.10; // 15m: 10%
+      } else {
+        // Lower timeframes are mixed - only count 4h
+        weightedConsistency = dominantConfidence * 0.45;
+      }
+    } else {
+      // Standard calculation when 4h has a directional trend
+      weightedConsistency =
+        dominantConfidence * 0.45 + // 4h: 45%
+        (confirmation1h ? trend1h.confidence * 0.30 : 0) + // 1h: 30%
+        (confirmation30m ? trend30m.confidence * 0.15 : 0) + // 30m: 15%
+        (confirmation15m ? trend15m.confidence * 0.10 : 0); // 15m: 10%
+    }
 
     // ============================================================
     // ENHANCED ALIGNMENT: Allow 1h=neutral with strong 4h trend
