@@ -503,10 +503,10 @@ serve(async (req) => {
     }
 
     // ============================================================
-    // MOMENTUM CONFIRMATION (STRICT: 2-3 consecutive candles on 15m/30m)
+    // MOMENTUM CONFIRMATION (RELAXED: 2+ consecutive candles on 15m OR 30m)
     // ============================================================
-    // CRITICAL: Use 15m and 30m candles for momentum - more sensitive to near-term direction
-    // Check last 3 candles: ALL must be moving in trade direction (no mixed signals)
+    // Use 15m and 30m candles for momentum - more sensitive to near-term direction
+    // Check last 3 candles: need ≥2 consecutive in same direction on EITHER timeframe
     const recentKlines15m = klines15m.slice(-3);
     const recentKlines30m = klines30m.slice(-3);
     
@@ -561,8 +561,7 @@ serve(async (req) => {
       }
     }
     
-    // STRICT REQUIREMENT: Need 2-3 consecutive candles on 15m in trade direction
-    // 30m must also confirm (at least 2 consecutive in same direction)
+    // RELAXED REQUIREMENT: Need ≥2 consecutive candles on EITHER 15m OR 30m in trade direction
     const momentum15mConfirms =
       (dominantTrend === "bullish" && consecutive15mBullish >= 2) ||
       (dominantTrend === "bearish" && consecutive15mBearish >= 2);
