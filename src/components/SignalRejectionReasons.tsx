@@ -52,8 +52,54 @@ export const SignalRejectionReasons = () => {
   const getRejectionDetails = (rejection: SignalRejection) => {
     const details = [];
     const fs = rejection.filters_status;
+    const td = rejection.trend_data;
     
     if (!fs) return 'No data';
+    
+    // Confidence or trend consistency below threshold
+    if (rejection.rejection_reason.includes('confidence or trend consistency below threshold')) {
+      const confidence = fs.confidence ?? td?.confidence;
+      const trendConsistency = fs.trendConsistency ?? td?.trendConsistency;
+      
+      if (confidence !== undefined && confidence < 60) {
+        details.push(`Confidence: ${confidence}% < 60% (threshold)`);
+        
+        // Show why confidence is low - timeframe conflicts
+        if (td?.multiTimeframe) {
+          const mt = td.multiTimeframe;
+          const conflicts = [];
+          
+          if (mt.trend4h && mt.trend1h && mt.trend4h !== mt.trend1h) {
+            conflicts.push(`4h ${mt.trend4h} vs 1h ${mt.trend1h}`);
+          }
+          if (mt.trend1h && mt.trend30m && mt.trend1h !== mt.trend30m) {
+            conflicts.push(`1h ${mt.trend1h} vs 30m ${mt.trend30m}`);
+          }
+          if (mt.trend30m && mt.trend15m && mt.trend30m !== mt.trend15m) {
+            conflicts.push(`30m ${mt.trend30m} vs 15m ${mt.trend15m}`);
+          }
+          
+          if (conflicts.length > 0) {
+            details.push(`Conflicts: ${conflicts.join(", ")}`);
+          }
+          
+          // Show individual timeframe confidences
+          const tfConfidences = [];
+          if (mt.confidence4h) tfConfidences.push(`4h: ${mt.confidence4h}%`);
+          if (mt.confidence1h) tfConfidences.push(`1h: ${mt.confidence1h}%`);
+          if (mt.confidence30m) tfConfidences.push(`30m: ${mt.confidence30m}%`);
+          if (mt.confidence15m) tfConfidences.push(`15m: ${mt.confidence15m}%`);
+          
+          if (tfConfidences.length > 0) {
+            details.push(`TF confidence: ${tfConfidences.join(", ")}`);
+          }
+        }
+      }
+      
+      if (trendConsistency !== undefined && trendConsistency < 50) {
+        details.push(`Trend consistency: ${trendConsistency}% < 50% (threshold)`);
+      }
+    }
     
     // Timeframes not aligned with no divergence opportunity
     if (rejection.rejection_reason.includes('timeframes not aligned, no divergence opportunity')) {
