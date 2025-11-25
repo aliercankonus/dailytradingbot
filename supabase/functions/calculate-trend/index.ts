@@ -394,10 +394,10 @@ serve(async (req) => {
           const use15m = trend15m.trend === majorityTrend;
           
           weightedConsistency =
-            dominantConfidence * 0.25 + // 4h small stabilizing contribution
-            (use1h ? trend1h.confidence * 0.45 : 0) + // 1h: 45% if aligned with majority
-            (use30m ? trend30m.confidence * 0.20 : 0) + // 30m: 20%
-            (use15m ? trend15m.confidence * 0.10 : 0);  // 15m: 10%
+            dominantConfidence * 0.25 + // 4h: 25% stabilizing contribution
+            (use1h ? trend1h.confidence * 0.30 : 0) + // 1h: 30% if aligned with majority
+            (use30m ? trend30m.confidence * 0.25 : 0) + // 30m: 25%
+            (use15m ? trend15m.confidence * 0.20 : 0);  // 15m: 20%
         }
       }
     } else {
