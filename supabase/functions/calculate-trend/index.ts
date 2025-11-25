@@ -19,6 +19,29 @@ function calculateEMA(prices: number[], period: number): number {
   return ema;
 }
 
+// Calculate EMA array (optimized for MACD calculation)
+function calculateEMAArray(prices: number[], period: number): number[] {
+  const emaArray: number[] = [];
+  if (prices.length < period) return emaArray;
+
+  const multiplier = 2 / (period + 1);
+  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+
+  // Fill initial values
+  for (let i = 0; i < period - 1; i++) {
+    emaArray.push(0); // Placeholder for insufficient data points
+  }
+  emaArray.push(ema);
+
+  // Calculate remaining EMAs iteratively
+  for (let i = period; i < prices.length; i++) {
+    ema = (prices[i] - ema) * multiplier + ema;
+    emaArray.push(ema);
+  }
+
+  return emaArray;
+}
+
 // Calculate RSI
 function calculateRSI(prices: number[], period = 14): number {
   if (prices.length < period + 1) return 50;
@@ -40,16 +63,18 @@ function calculateRSI(prices: number[], period = 14): number {
 
 // Calculate MACD
 function calculateMACD(prices: number[]): { macd: number; signal: number; histogram: number } {
-  const ema12 = calculateEMA(prices, 12);
-  const ema26 = calculateEMA(prices, 26);
+  // Pre-calculate EMA arrays once (O(n) instead of O(n²))
+  const ema12Array = calculateEMAArray(prices, 12);
+  const ema26Array = calculateEMAArray(prices, 26);
+  
+  const ema12 = ema12Array[ema12Array.length - 1] || 0;
+  const ema26 = ema26Array[ema26Array.length - 1] || 0;
   const macd = ema12 - ema26;
 
-  // Calculate signal line (9-period EMA of MACD)
+  // Calculate signal line (9-period EMA of MACD) - reuse pre-calculated arrays
   const macdValues: number[] = [];
   for (let i = 26; i < prices.length; i++) {
-    const shortEma = calculateEMA(prices.slice(0, i + 1), 12);
-    const longEma = calculateEMA(prices.slice(0, i + 1), 26);
-    macdValues.push(shortEma - longEma);
+    macdValues.push(ema12Array[i] - ema26Array[i]);
   }
 
   const signal = macdValues.length >= 9 ? calculateEMA(macdValues, 9) : macd * 0.9;
