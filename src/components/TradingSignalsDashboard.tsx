@@ -12,7 +12,6 @@ import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { getSignalPriorityTier, getSignalPriorityVariant } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { SignalRejectionReasons } from './SignalRejectionReasons';
-import { MomentumStatusWidget } from './MomentumStatusWidget';
 
 export const TradingSignalsDashboard = () => {
   const { signals, loading } = useSignals();
@@ -255,7 +254,6 @@ export const TradingSignalsDashboard = () => {
         )}
       </div>
 
-      <MomentumStatusWidget />
       <SignalRejectionReasons />
     </div>
   );
