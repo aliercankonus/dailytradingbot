@@ -458,8 +458,8 @@ serve(async (req) => {
     const macdHistogram = trend15m.indicators.macdHistogram; // Use 15m MACD
     const macdExpanding = Math.abs(macdHistogram) > 0.01;
     
-    // FINAL GATE: All three must confirm
-    const momentumConfirms = momentum15mConfirms && momentum30mConfirms && macdExpanding;
+    // RELAXED GATE: Either 15m OR 30m consecutive candles + MACD expansion
+    const momentumConfirms = (momentum15mConfirms || momentum30mConfirms) && macdExpanding;
     
     console.log(`${symbol} MOMENTUM: 15m=${consecutive15mBullish}bull/${consecutive15mBearish}bear 30m=${consecutive30mBullish}bull/${consecutive30mBearish}bear macd=${macdHistogram.toFixed(3)} confirms=${momentumConfirms}`);
 
