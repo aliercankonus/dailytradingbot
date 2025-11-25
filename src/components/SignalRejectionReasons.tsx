@@ -103,24 +103,75 @@ export const SignalRejectionReasons = () => {
     
     // Timeframes not aligned with no divergence opportunity
     if (rejection.rejection_reason.includes('timeframes not aligned, no divergence opportunity')) {
-      if (fs.trend4h || fs.trend1h) {
+      // Show all timeframe trends
+      if (td?.multiTimeframe) {
+        const mt = td.multiTimeframe;
+        const trends = [];
+        if (mt.trend4h) trends.push(`4h: ${mt.trend4h}`);
+        if (mt.trend1h) trends.push(`1h: ${mt.trend1h}`);
+        if (mt.trend30m) trends.push(`30m: ${mt.trend30m}`);
+        if (mt.trend15m) trends.push(`15m: ${mt.trend15m}`);
+        if (trends.length > 0) {
+          details.push(trends.join(", "));
+        }
+      } else if (fs.trend4h || fs.trend1h) {
         details.push(`4h: ${fs.trend4h || 'unknown'}, 1h: ${fs.trend1h || 'unknown'}`);
       }
       
-      // Add divergence result with values
-      if (fs.divergenceType) {
-        details.push(`${fs.divergenceType}: ${fs.divergenceConfidence?.toFixed(1)}%`);
-      } else if (fs.pullbackValid !== undefined || fs.earlyReversalValid !== undefined) {
-        const pullbackStatus = fs.pullbackValid ? 'pullback valid' : 'pullback invalid';
-        const reversalStatus = fs.earlyReversalValid ? 'reversal valid' : 'reversal invalid';
-        details.push(`${pullbackStatus}, ${reversalStatus}`);
-      } else {
-        details.push('no divergence opportunity');
+      // Show why no divergence
+      if (td?.higherTimeframeFilter) {
+        const htf = td.higherTimeframeFilter;
+        
+        // Check if divergence signals are enabled
+        const pullbackEnabled = fs.pullbackEnabled ?? true;
+        const earlyReversalEnabled = fs.earlyReversalEnabled ?? true;
+        
+        if (!pullbackEnabled && !earlyReversalEnabled) {
+          details.push('Divergence signals disabled');
+        } else {
+          // Show specific divergence conditions
+          const divergenceChecks = [];
+          
+          if (htf.divergenceType === 'aligned') {
+            divergenceChecks.push('Timeframes aligned - no divergence');
+          } else {
+            // Pullback conditions
+            if (pullbackEnabled && td.multiTimeframe) {
+              const mt = td.multiTimeframe;
+              const confidence4h = mt.confidence4h || 0;
+              const strongHigherTF = confidence4h >= 60;
+              
+              if (!strongHigherTF) {
+                divergenceChecks.push(`Pullback: 4h confidence ${confidence4h}% < 60%`);
+              }
+            }
+            
+            // Early reversal conditions
+            if (earlyReversalEnabled && td.multiTimeframe) {
+              const mt = td.multiTimeframe;
+              const confidence1h = mt.confidence1h || 0;
+              const confidence4h = mt.confidence4h || 0;
+              const strongReversal = confidence1h >= 70 && confidence4h < 60;
+              
+              if (!strongReversal) {
+                divergenceChecks.push(`Reversal: needs 1h ≥70% (${confidence1h}%) & 4h <60% (${confidence4h}%)`);
+              }
+            }
+          }
+          
+          if (divergenceChecks.length > 0) {
+            details.push(divergenceChecks.join(" | "));
+          } else {
+            details.push('No divergence opportunity');
+          }
+        }
       }
       
-      // Add ranging market status if present
-      if (fs.isRanging === true) {
-        details.push('ranging market');
+      // Show ranging market if applicable
+      if (td?.ranging?.isRanging === true) {
+        const atrPercent = td.ranging.atrPercent || 0;
+        const adx = td.volatility?.adx || 0;
+        details.push(`Ranging: ATR ${atrPercent.toFixed(2)}%, ADX ${adx.toFixed(1)}`);
       }
     }
     // Other timeframe alignment issues
