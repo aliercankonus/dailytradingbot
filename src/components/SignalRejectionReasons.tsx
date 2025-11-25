@@ -331,10 +331,8 @@ export const SignalRejectionReasons = () => {
                       <div className="mt-3 pt-3 border-t border-border">
                         <p className="text-xs text-muted-foreground">
                           <strong>Missing:</strong>{' '}
-                          {!candles15mOK && '15m needs ≥2 consecutive candles'}
-                          {!candles15mOK && !candles30mOK && ', '}
-                          {!candles30mOK && '30m needs ≥2 consecutive candles'}
-                          {(!candles15mOK || !candles30mOK) && !macdOK && ', '}
+                          {!candles15mOK && !candles30mOK && 'Either 15m OR 30m needs ≥2 consecutive candles'}
+                          {!candles15mOK && !candles30mOK && !macdOK && ', '}
                           {!macdOK && 'MACD histogram needs >0.01'}
                         </p>
                       </div>
