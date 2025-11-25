@@ -60,13 +60,14 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
 
 // Calculate ADX (Average Directional Index) - measures trend strength
 function calculateADX(klines: any[], period = 14): number {
-  if (klines.length < period + 1) return 0;
+  // Need at least 2*period + 1 candles for proper ADX calculation
+  if (klines.length < (period * 2) + 1) return 0;
 
   const trueRanges: number[] = [];
   const plusDMs: number[] = [];
   const minusDMs: number[] = [];
 
-  // Calculate True Range, +DM, -DM
+  // Calculate True Range, +DM, -DM for all candles
   for (let i = 1; i < klines.length; i++) {
     const high = parseFloat(klines[i][2]);
     const low = parseFloat(klines[i][3]);
@@ -93,31 +94,49 @@ function calculateADX(klines: any[], period = 14): number {
     minusDMs.push(minusDM);
   }
 
-  if (trueRanges.length < period) return 0;
+  if (trueRanges.length < period * 2) return 0;
 
-  // Smooth TR, +DM, -DM using Wilder's smoothing
-  let smoothedTR = trueRanges.slice(0, period).reduce((a, b) => a + b, 0);
-  let smoothedPlusDM = plusDMs.slice(0, period).reduce((a, b) => a + b, 0);
-  let smoothedMinusDM = minusDMs.slice(0, period).reduce((a, b) => a + b, 0);
+  // Array to store DX values for smoothing into ADX
+  const dxValues: number[] = [];
 
-  for (let i = period; i < trueRanges.length; i++) {
-    smoothedTR = smoothedTR - smoothedTR / period + trueRanges[i];
-    smoothedPlusDM = smoothedPlusDM - smoothedPlusDM / period + plusDMs[i];
-    smoothedMinusDM = smoothedMinusDM - smoothedMinusDM / period + minusDMs[i];
+  // Calculate smoothed indicators and DX for each period
+  for (let start = 0; start <= trueRanges.length - period; start++) {
+    // Initial smoothed values for this window
+    let smoothedTR = trueRanges.slice(start, start + period).reduce((a, b) => a + b, 0);
+    let smoothedPlusDM = plusDMs.slice(start, start + period).reduce((a, b) => a + b, 0);
+    let smoothedMinusDM = minusDMs.slice(start, start + period).reduce((a, b) => a + b, 0);
+
+    // Apply Wilder's smoothing for subsequent values in this window
+    for (let i = start + period; i < Math.min(start + period * 2, trueRanges.length); i++) {
+      smoothedTR = smoothedTR - smoothedTR / period + trueRanges[i];
+      smoothedPlusDM = smoothedPlusDM - smoothedPlusDM / period + plusDMs[i];
+      smoothedMinusDM = smoothedMinusDM - smoothedMinusDM / period + minusDMs[i];
+    }
+
+    // Calculate +DI and -DI
+    const plusDI = smoothedTR > 0 ? (smoothedPlusDM / smoothedTR) * 100 : 0;
+    const minusDI = smoothedTR > 0 ? (smoothedMinusDM / smoothedTR) * 100 : 0;
+
+    // Calculate DX
+    const diDiff = Math.abs(plusDI - minusDI);
+    const diSum = plusDI + minusDI;
+    const dx = diSum === 0 ? 0 : (diDiff / diSum) * 100;
+
+    dxValues.push(dx);
   }
 
-  // Calculate +DI and -DI
-  const plusDI = (smoothedPlusDM / smoothedTR) * 100;
-  const minusDI = (smoothedMinusDM / smoothedTR) * 100;
+  // Need at least 14 DX values to calculate ADX
+  if (dxValues.length < period) return 0;
 
-  // Calculate DX
-  const diDiff = Math.abs(plusDI - minusDI);
-  const diSum = plusDI + minusDI;
-  const dx = diSum === 0 ? 0 : (diDiff / diSum) * 100;
+  // Smooth DX values into ADX using Wilder's smoothing
+  let adx = dxValues.slice(0, period).reduce((a, b) => a + b, 0) / period;
 
-  // For simplicity, return DX as ADX approximation
-  // (true ADX needs smoothing over 14 periods of DX values)
-  return dx;
+  // Apply Wilder's smoothing for remaining DX values
+  for (let i = period; i < dxValues.length; i++) {
+    adx = ((adx * (period - 1)) + dxValues[i]) / period;
+  }
+
+  return adx;
 }
 
 // Fetch Binance klines with configurable interval
