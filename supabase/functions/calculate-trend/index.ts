@@ -42,10 +42,11 @@ function calculateEMAArray(prices: number[], period: number): number[] {
   return emaArray;
 }
 
-// Calculate RSI
+// Calculate RSI with Wilder smoothing
 function calculateRSI(prices: number[], period = 14): number {
   if (prices.length < period + 1) return 50;
 
+  // Calculate initial gains and losses for first period
   let gains = 0;
   let losses = 0;
 
@@ -55,9 +56,23 @@ function calculateRSI(prices: number[], period = 14): number {
     else losses += Math.abs(change);
   }
 
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-  const rs = avgGain / (avgLoss || 1);
+  // Initial average gain and loss
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+
+  // Apply Wilder's smoothing for remaining periods
+  for (let i = period + 1; i < prices.length; i++) {
+    const change = prices[i] - prices[i - 1];
+    const currentGain = change > 0 ? change : 0;
+    const currentLoss = change < 0 ? Math.abs(change) : 0;
+
+    // Wilder's smoothing: ((prevAvg * (period-1)) + current) / period
+    avgGain = ((avgGain * (period - 1)) + currentGain) / period;
+    avgLoss = ((avgLoss * (period - 1)) + currentLoss) / period;
+  }
+
+  // Calculate final RSI from smoothed averages
+  const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
   return 100 - 100 / (1 + rs);
 }
 
