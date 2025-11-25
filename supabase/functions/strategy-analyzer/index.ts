@@ -337,7 +337,7 @@ serve(async (req) => {
         if (higherTimeframeFilter.aligned) {
           const meetsThreshold = confidence >= riskParams.min_confidence_threshold &&
                                 trendConsistency >= riskParams.min_trend_consistency;
-          const hasMomentumConfirmation = trendData.momentumConfirmed || false;
+          const hasMomentumConfirmation = trendData.momentum?.confirms || false;
           
           if (meetsThreshold && hasMomentumConfirmation) {
             multiTimeframePass = true;
@@ -386,7 +386,7 @@ serve(async (req) => {
             const tf4h = trendData.timeframes?.['4h'];
             const trendAligned = tf30m && tf15m && tf4h && 
                 tf30m.trend === tf4h.trend && tf15m.trend === tf4h.trend;
-            const hasMomentumConfirmation = trendData.momentumConfirmed || false;
+            const hasMomentumConfirmation = trendData.momentum?.confirms || false;
             
             if (trendAligned && hasMomentumConfirmation) {
               multiTimeframePass = true;
@@ -400,7 +400,7 @@ serve(async (req) => {
             const tf1h = trendData.timeframes?.['1h'];
             const trendAligned = tf30m && tf15m && tf1h && 
                 tf30m.trend === tf1h.trend && tf15m.trend === tf1h.trend;
-            const hasMomentumConfirmation = trendData.momentumConfirmed || false;
+            const hasMomentumConfirmation = trendData.momentum?.confirms || false;
             
             if (trendAligned && hasMomentumConfirmation) {
               multiTimeframePass = true;
