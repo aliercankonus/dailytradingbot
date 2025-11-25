@@ -234,14 +234,43 @@ export const SignalRejectionReasons = () => {
       }
     }
     
-    // Momentum issues
+    // Momentum issues - show specific failure point
     if (rejection.rejection_reason.includes('momentum')) {
       const m15Bullish = fs.consecutive15mBullish || 0;
       const m15Bearish = fs.consecutive15mBearish || 0;
       const m30Bullish = fs.consecutive30mBullish || 0;
       const m30Bearish = fs.consecutive30mBearish || 0;
       
-      details.push(`15m: ${m15Bullish}🟢/${m15Bearish}🔴 | 30m: ${m30Bullish}🟢/${m30Bearish}🔴`);
+      // Determine the expected trend direction
+      const expectedTrend = fs.trend4h || fs.trend1h || td?.trend;
+      const isBullish = expectedTrend === 'bullish';
+      
+      // Check if consecutive candles requirement is met (either 15m OR 30m)
+      const candles15mOK = isBullish ? m15Bullish >= 2 : m15Bearish >= 2;
+      const candles30mOK = isBullish ? m30Bullish >= 2 : m30Bearish >= 2;
+      const consecutiveCandlesPass = candles15mOK || candles30mOK;
+      
+      // Check MACD histogram
+      const macdHistogram = td?.momentum?.macdHistogram ?? fs.momentum?.macdHistogram;
+      const macdOK = macdHistogram !== undefined && Math.abs(macdHistogram) > 0.01;
+      
+      if (!consecutiveCandlesPass) {
+        // Consecutive candles failed - show candle counts
+        details.push(`15m: ${m15Bullish}🟢/${m15Bearish}🔴, 30m: ${m30Bullish}🟢/${m30Bearish}🔴 (need ≥2 on either)`);
+      } else if (!macdOK) {
+        // Candles passed but MACD failed - show MACD value
+        if (macdHistogram !== undefined) {
+          details.push(`MACD histogram: ${macdHistogram.toFixed(4)} (need >0.01)`);
+        } else {
+          details.push(`MACD histogram: unavailable`);
+        }
+      } else {
+        // Both checks somehow failed (shouldn't happen but handle it)
+        details.push(`15m: ${m15Bullish}🟢/${m15Bearish}🔴 | 30m: ${m30Bullish}🟢/${m30Bearish}🔴`);
+        if (macdHistogram !== undefined) {
+          details.push(`MACD: ${macdHistogram.toFixed(4)}`);
+        }
+      }
     }
     
     // Ranging market
