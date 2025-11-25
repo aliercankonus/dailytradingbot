@@ -426,17 +426,45 @@ serve(async (req) => {
       }
     } else {
       // Standard calculation when 4h has a directional trend
-      // Special case: When 1h is neutral (not opposing), include it with reduced weight
-      const effective1hConfirmation = confirmation1h || trend1h.trend === "neutral";
-      const effective1hContribution = confirmation1h 
-        ? trend1h.confidence * 0.30  // Full weight if aligned
-        : (trend1h.trend === "neutral" ? trend1h.confidence * 0.15 : 0); // Half weight if neutral, zero if opposing
+      // Base weights for standard case
+      const baseWeights = {
+        tf4h: 0.45,
+        tf1h_aligned: 0.30,
+        tf1h_neutral: 0.15,
+        tf30m: 0.15,
+        tf15m: 0.10
+      };
+      
+      // Determine 1h contribution
+      const use1h_aligned = confirmation1h;
+      const use1h_neutral = !confirmation1h && trend1h.trend === "neutral";
+      const use30m = confirmation30m;
+      const use15m = confirmation15m;
+      
+      // Calculate sum of included weights
+      const includedWeightSum = 
+        baseWeights.tf4h + // 4h always included
+        (use1h_aligned ? baseWeights.tf1h_aligned : 0) +
+        (use1h_neutral ? baseWeights.tf1h_neutral : 0) +
+        (use30m ? baseWeights.tf30m : 0) +
+        (use15m ? baseWeights.tf15m : 0);
+      
+      // Normalize: scale weights so they sum to 1.0
+      const scaleFactor = 1.0 / includedWeightSum;
+      
+      // Apply normalized weights
+      const normalized4h = baseWeights.tf4h * scaleFactor;
+      const normalized1h_aligned = use1h_aligned ? baseWeights.tf1h_aligned * scaleFactor : 0;
+      const normalized1h_neutral = use1h_neutral ? baseWeights.tf1h_neutral * scaleFactor : 0;
+      const normalized30m = use30m ? baseWeights.tf30m * scaleFactor : 0;
+      const normalized15m = use15m ? baseWeights.tf15m * scaleFactor : 0;
       
       weightedConsistency =
-        dominantConfidence * 0.45 + // 4h: 45%
-        effective1hContribution + // 1h: 30% if aligned, 15% if neutral, 0% if opposing
-        (confirmation30m ? trend30m.confidence * 0.15 : 0) + // 30m: 15%
-        (confirmation15m ? trend15m.confidence * 0.10 : 0); // 15m: 10%
+        dominantConfidence * normalized4h +
+        (use1h_aligned ? trend1h.confidence * normalized1h_aligned : 0) +
+        (use1h_neutral ? trend1h.confidence * normalized1h_neutral : 0) +
+        (use30m ? trend30m.confidence * normalized30m : 0) +
+        (use15m ? trend15m.confidence * normalized15m : 0);
     }
 
     // ============================================================
