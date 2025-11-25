@@ -762,15 +762,29 @@ serve(async (req) => {
       consecutive30mBearish = 0; // 30m is bullish, so bearish candles don't count
     }
     
-    // ORIGINAL FIX: Only count candles that align with BOTH dominant trend AND timeframe trend
-    // This prevents counting counter-trend candles that create false momentum signals
+    // CRITICAL: When 4h is neutral, derive momentum direction from lower timeframe consensus
+    let effectiveTrendForMomentum = dominantTrend;
+    if (dominantTrend === "neutral") {
+      // Count votes from lower timeframes
+      const bullishVotes = [trend1h.trend, trend30m.trend, trend15m.trend].filter(t => t === "bullish").length;
+      const bearishVotes = [trend1h.trend, trend30m.trend, trend15m.trend].filter(t => t === "bearish").length;
+      
+      if (bullishVotes > bearishVotes) {
+        effectiveTrendForMomentum = "bullish";
+      } else if (bearishVotes > bullishVotes) {
+        effectiveTrendForMomentum = "bearish";
+      }
+      // If tied or all neutral, keep as neutral (no momentum confirmation possible)
+    }
+    
+    // Only count candles that align with effective trend AND timeframe trend
     const momentum15mConfirms =
-      (dominantTrend === "bullish" && trend15m.trend === "bullish" && consecutive15mBullish >= 2) ||
-      (dominantTrend === "bearish" && trend15m.trend === "bearish" && consecutive15mBearish >= 2);
+      (effectiveTrendForMomentum === "bullish" && trend15m.trend === "bullish" && consecutive15mBullish >= 2) ||
+      (effectiveTrendForMomentum === "bearish" && trend15m.trend === "bearish" && consecutive15mBearish >= 2);
     
     const momentum30mConfirms =
-      (dominantTrend === "bullish" && trend30m.trend === "bullish" && consecutive30mBullish >= 2) ||
-      (dominantTrend === "bearish" && trend30m.trend === "bearish" && consecutive30mBearish >= 2);
+      (effectiveTrendForMomentum === "bullish" && trend30m.trend === "bullish" && consecutive30mBullish >= 2) ||
+      (effectiveTrendForMomentum === "bearish" && trend30m.trend === "bearish" && consecutive30mBearish >= 2);
     
     // MACD histogram must be expanding (shows strength building)
     const macdHistogram = trend15m.indicators.macdHistogram; // Use 15m MACD
