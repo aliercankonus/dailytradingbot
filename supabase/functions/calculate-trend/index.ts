@@ -58,6 +58,68 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
   return { macd, signal, histogram };
 }
 
+// Calculate ADX (Average Directional Index) - measures trend strength
+function calculateADX(klines: any[], period = 14): number {
+  if (klines.length < period + 1) return 0;
+
+  const trueRanges: number[] = [];
+  const plusDMs: number[] = [];
+  const minusDMs: number[] = [];
+
+  // Calculate True Range, +DM, -DM
+  for (let i = 1; i < klines.length; i++) {
+    const high = parseFloat(klines[i][2]);
+    const low = parseFloat(klines[i][3]);
+    const prevHigh = parseFloat(klines[i - 1][2]);
+    const prevLow = parseFloat(klines[i - 1][3]);
+    const prevClose = parseFloat(klines[i - 1][4]);
+
+    // True Range
+    const tr = Math.max(
+      high - low,
+      Math.abs(high - prevClose),
+      Math.abs(low - prevClose)
+    );
+    trueRanges.push(tr);
+
+    // Directional Movement
+    const upMove = high - prevHigh;
+    const downMove = prevLow - low;
+
+    const plusDM = upMove > downMove && upMove > 0 ? upMove : 0;
+    const minusDM = downMove > upMove && downMove > 0 ? downMove : 0;
+
+    plusDMs.push(plusDM);
+    minusDMs.push(minusDM);
+  }
+
+  if (trueRanges.length < period) return 0;
+
+  // Smooth TR, +DM, -DM using Wilder's smoothing
+  let smoothedTR = trueRanges.slice(0, period).reduce((a, b) => a + b, 0);
+  let smoothedPlusDM = plusDMs.slice(0, period).reduce((a, b) => a + b, 0);
+  let smoothedMinusDM = minusDMs.slice(0, period).reduce((a, b) => a + b, 0);
+
+  for (let i = period; i < trueRanges.length; i++) {
+    smoothedTR = smoothedTR - smoothedTR / period + trueRanges[i];
+    smoothedPlusDM = smoothedPlusDM - smoothedPlusDM / period + plusDMs[i];
+    smoothedMinusDM = smoothedMinusDM - smoothedMinusDM / period + minusDMs[i];
+  }
+
+  // Calculate +DI and -DI
+  const plusDI = (smoothedPlusDM / smoothedTR) * 100;
+  const minusDI = (smoothedMinusDM / smoothedTR) * 100;
+
+  // Calculate DX
+  const diDiff = Math.abs(plusDI - minusDI);
+  const diSum = plusDI + minusDI;
+  const dx = diSum === 0 ? 0 : (diDiff / diSum) * 100;
+
+  // For simplicity, return DX as ADX approximation
+  // (true ADX needs smoothing over 14 periods of DX values)
+  return dx;
+}
+
 // Fetch Binance klines with configurable interval
 async function fetchBinanceKlines(symbol: string, interval: string = "1h", limit: number = 100): Promise<any[]> {
   try {
@@ -326,9 +388,12 @@ serve(async (req) => {
     let primaryTrend: "bullish" | "bearish" | "neutral" | "ranging" = dominantTrend;
 
     // ============================================================
-    // RANGING MARKET DETECTION
+    // ADAPTIVE RANGING MARKET DETECTION (Relative ATR + ADX)
     // ============================================================
     const atrPeriod = 14;
+    const atrLookback = 30; // For historical ATR average
+    
+    // Calculate current ATR
     const atrKlines = klines1h.slice(-atrPeriod - 1);
     let atrSum = 0;
     for (let i = 1; i < atrKlines.length; i++) {
@@ -338,16 +403,49 @@ serve(async (req) => {
       const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
       atrSum += tr;
     }
-    const atr = atrSum / atrPeriod;
-    const atrPercent = (atr / currentPrice) * 100;
+    const currentATR = atrSum / atrPeriod;
+    const atrPercent = (currentATR / currentPrice) * 100;
 
-    // Market is ranging if ATR < 0.8% (too tight for reliable directional trading)
-    const isRanging = atrPercent < 0.8;
-    const volatilityNormal = atrPercent >= 0.8 && atrPercent < 5.0;
+    // Calculate historical ATR average (30-period lookback)
+    const historicalKlines = klines1h.slice(-atrLookback - atrPeriod);
+    let historicalATRSum = 0;
+    let historicalATRCount = 0;
+    
+    for (let j = atrPeriod; j < historicalKlines.length; j++) {
+      let periodATRSum = 0;
+      for (let i = 1; i <= atrPeriod; i++) {
+        const idx = j - atrPeriod + i;
+        const high = parseFloat(historicalKlines[idx][2]);
+        const low = parseFloat(historicalKlines[idx][3]);
+        const prevClose = parseFloat(historicalKlines[idx - 1][4]);
+        const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+        periodATRSum += tr;
+      }
+      historicalATRSum += periodATRSum / atrPeriod;
+      historicalATRCount++;
+    }
+    
+    const historicalATRAvg = historicalATRCount > 0 ? historicalATRSum / historicalATRCount : currentATR;
+    const relativeATR = currentATR / historicalATRAvg;
+    
+    // Calculate ADX for trend strength
+    const adx = calculateADX(klines1h, 14);
+    
+    // COMBINED RANGING DETECTION:
+    // Market is ranging if BOTH conditions are true:
+    // 1. Relative ATR < 0.6 (current volatility 40% below historical average)
+    // 2. ADX < 25 (weak trend strength)
+    const atrCompressed = relativeATR < 0.6;
+    const adxWeak = adx < 25;
+    const isRanging = atrCompressed && adxWeak;
+    
+    const volatilityNormal = !isRanging && atrPercent < 5.0;
 
     if (isRanging) {
       primaryTrend = "ranging";
-      console.log(`${symbol}: RANGING MARKET DETECTED (ATR: ${atrPercent.toFixed(2)}%) - skipping signals`);
+      console.log(`${symbol}: RANGING MARKET DETECTED - ATR: ${atrPercent.toFixed(2)}% (relative: ${relativeATR.toFixed(2)}x), ADX: ${adx.toFixed(1)} - skipping signals`);
+    } else {
+      console.log(`${symbol}: TRENDING MARKET - ATR: ${atrPercent.toFixed(2)}% (relative: ${relativeATR.toFixed(2)}x), ADX: ${adx.toFixed(1)}`);
     }
 
     // ============================================================
@@ -540,9 +638,13 @@ serve(async (req) => {
         },
 
         volatility: {
-          atr,
+          atr: currentATR,
           atrPercent: Math.round(atrPercent * 100) / 100,
+          relativeATR: Math.round(relativeATR * 100) / 100,
+          adx: Math.round(adx * 10) / 10,
           normal: volatilityNormal,
+          atrCompressed,
+          adxWeak,
         },
 
         indicators: trend1h.indicators,
