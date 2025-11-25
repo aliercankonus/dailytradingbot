@@ -368,8 +368,75 @@ serve(async (req) => {
       (confirmation30m ? trend30m.confidence * 0.15 : 0) + // 30m: 15%
       (confirmation15m ? trend15m.confidence * 0.10 : 0); // 15m: 10%
 
-    // High timeframe alignment: 4h + 1h must agree for valid signals
-    const highTimeframeAligned = dominantTrend !== "neutral" && confirmation1h;
+    // ============================================================
+    // ENHANCED ALIGNMENT: Allow 1h=neutral with strong 4h trend
+    // ============================================================
+    // Standard alignment: 4h and 1h must match exactly
+    const standardAlignment = dominantTrend !== "neutral" && confirmation1h;
+    
+    // Enhanced alignment: Allow 1h=neutral when 4h is strong and conditions are met
+    let neutralAllowedWithStrongHigherTimeframe = false;
+    
+    if (!standardAlignment && dominantTrend !== "neutral" && trend1h.trend === "neutral") {
+      // Check if 4h trend is strong enough (≥60% confidence)
+      const strong4h = dominantConfidence >= 60;
+      
+      // Check if 1h MACD histogram aligns with 4h direction
+      const macd1h = trend1h.indicators.macdHistogram;
+      const macdAligned = dominantTrend === "bullish" ? macd1h >= 0 : macd1h <= 0;
+      
+      // Check if 1h has sufficient activity (not dead/ranging)
+      const adx1h = calculateADX(klines1h, 14);
+      const hasActivity = adx1h >= 15;
+      
+      // Check relative ATR on 1h (not extremely compressed)
+      const atr1hPeriod = 14;
+      const atr1hLookback = 30;
+      
+      const atr1hKlines = klines1h.slice(-atr1hPeriod - 1);
+      let atr1hSum = 0;
+      for (let i = 1; i < atr1hKlines.length; i++) {
+        const high = parseFloat(atr1hKlines[i][2]);
+        const low = parseFloat(atr1hKlines[i][3]);
+        const prevClose = parseFloat(atr1hKlines[i - 1][4]);
+        const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+        atr1hSum += tr;
+      }
+      const currentATR1h = atr1hSum / atr1hPeriod;
+      
+      const historical1hKlines = klines1h.slice(-atr1hLookback - atr1hPeriod);
+      let historical1hATRSum = 0;
+      let historical1hATRCount = 0;
+      
+      for (let j = atr1hPeriod; j < historical1hKlines.length; j++) {
+        let periodATRSum = 0;
+        for (let i = 1; i <= atr1hPeriod; i++) {
+          const idx = j - atr1hPeriod + i;
+          const high = parseFloat(historical1hKlines[idx][2]);
+          const low = parseFloat(historical1hKlines[idx][3]);
+          const prevClose = parseFloat(historical1hKlines[idx - 1][4]);
+          const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+          periodATRSum += tr;
+        }
+        historical1hATRSum += periodATRSum / atr1hPeriod;
+        historical1hATRCount++;
+      }
+      
+      const historical1hATRAvg = historical1hATRCount > 0 ? historical1hATRSum / historical1hATRCount : currentATR1h;
+      const relative1hATR = currentATR1h / historical1hATRAvg;
+      const atrNotExtremelyCompressed = relative1hATR >= 0.5; // Less strict than ranging detection (0.6)
+      
+      // Allow if all conditions are met
+      if (strong4h && macdAligned && (hasActivity || atrNotExtremelyCompressed)) {
+        neutralAllowedWithStrongHigherTimeframe = true;
+        console.log(`${symbol}: 1h=neutral ALLOWED with strong 4h=${dominantTrend}(${dominantConfidence}%) - MACD=${macd1h.toFixed(3)} ADX=${adx1h.toFixed(1)} relATR=${relative1hATR.toFixed(2)}`);
+      } else {
+        console.log(`${symbol}: 1h=neutral BLOCKED - strong4h=${strong4h} macdAligned=${macdAligned} hasActivity=${hasActivity} atrOK=${atrNotExtremelyCompressed}`);
+      }
+    }
+    
+    // High timeframe alignment: standard OR enhanced neutral allowance
+    const highTimeframeAligned = standardAlignment || neutralAllowedWithStrongHigherTimeframe;
 
     // ============================================================
     // DIVERGENCE CLASSIFICATION FOR OPPORTUNITY CAPTURE
@@ -598,6 +665,7 @@ serve(async (req) => {
           trend4h: trend4h.trend,
           trend1h: trend1h.trend,
           aligned: highTimeframeAligned,
+          neutralAllowedWithStrongHigherTimeframe: neutralAllowedWithStrongHigherTimeframe,
           dominantConfidence: dominantConfidence,
           weightedConsistency: Math.round(weightedConsistency),
           // NEW: Divergence opportunity detection

@@ -341,7 +341,11 @@ serve(async (req) => {
           
           if (meetsThreshold && hasMomentumConfirmation) {
             multiTimeframePass = true;
-            multiTimeframeReason = 'Standard aligned timeframes with momentum confirmation';
+            // Check if this was neutral allowance or standard alignment
+            const neutralAllowed = higherTimeframeFilter.neutralAllowedWithStrongHigherTimeframe || false;
+            multiTimeframeReason = neutralAllowed 
+              ? 'Enhanced alignment: 1h=neutral with strong 4h trend and momentum confirmation'
+              : 'Standard aligned timeframes with momentum confirmation';
           } else {
             rejectedByMultiTimeframeAnalysis++;
             
@@ -358,6 +362,7 @@ serve(async (req) => {
               trend4h: trendData.higherTimeframeFilter?.trend4h,
               trend1h: trendData.higherTimeframeFilter?.trend1h,
               aligned: higherTimeframeFilter.aligned,
+              neutralAllowedWithStrongHigherTimeframe: higherTimeframeFilter.neutralAllowedWithStrongHigherTimeframe || false,
               required: !hasMomentumConfirmation 
                 ? 'momentum confirmation (≥2 consecutive candles on 15m OR 30m + MACD expansion)'
                 : 'confidence/consistency threshold'
