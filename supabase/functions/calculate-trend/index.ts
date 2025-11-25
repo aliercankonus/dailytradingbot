@@ -616,16 +616,26 @@ serve(async (req) => {
       // Reset streak if direction changes
       if (i === 0) {
         lastDirection15m = currentDirection;
-        if (currentDirection === "bullish") consecutive15mBullish = 1;
-        else consecutive15mBearish = 1;
+        if (currentDirection === "bullish") {
+          consecutive15mBullish = 1;
+          consecutive15mBearish = 0; // Zero out opposite
+        } else {
+          consecutive15mBearish = 1;
+          consecutive15mBullish = 0; // Zero out opposite
+        }
       } else if (currentDirection === lastDirection15m) {
         // Continue the streak
         if (currentDirection === "bullish") consecutive15mBullish++;
         else consecutive15mBearish++;
       } else {
-        // Direction changed - streak broken
-        if (currentDirection === "bullish") consecutive15mBullish = 1;
-        else consecutive15mBearish = 1;
+        // Direction changed - streak broken, zero out opposite counter
+        if (currentDirection === "bullish") {
+          consecutive15mBullish = 1;
+          consecutive15mBearish = 0; // CRITICAL: Zero out opposite
+        } else {
+          consecutive15mBearish = 1;
+          consecutive15mBullish = 0; // CRITICAL: Zero out opposite
+        }
         lastDirection15m = currentDirection;
       }
     }
@@ -638,14 +648,25 @@ serve(async (req) => {
       
       if (i === 0) {
         lastDirection30m = currentDirection;
-        if (currentDirection === "bullish") consecutive30mBullish = 1;
-        else consecutive30mBearish = 1;
+        if (currentDirection === "bullish") {
+          consecutive30mBullish = 1;
+          consecutive30mBearish = 0; // Zero out opposite
+        } else {
+          consecutive30mBearish = 1;
+          consecutive30mBullish = 0; // Zero out opposite
+        }
       } else if (currentDirection === lastDirection30m) {
         if (currentDirection === "bullish") consecutive30mBullish++;
         else consecutive30mBearish++;
       } else {
-        if (currentDirection === "bullish") consecutive30mBullish = 1;
-        else consecutive30mBearish = 1;
+        // Direction changed - zero out opposite counter
+        if (currentDirection === "bullish") {
+          consecutive30mBullish = 1;
+          consecutive30mBearish = 0; // CRITICAL: Zero out opposite
+        } else {
+          consecutive30mBearish = 1;
+          consecutive30mBullish = 0; // CRITICAL: Zero out opposite
+        }
         lastDirection30m = currentDirection;
       }
     }
