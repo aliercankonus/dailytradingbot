@@ -212,10 +212,36 @@ serve(async (req) => {
 
     console.log(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)} (from strategy configuration)`);
 
-    // Calculate position size based on strategy's stop loss
-    const riskAmount = (riskParams.portfolio_value * riskParams.max_risk_per_trade_percent) / 100;
-    const stopLossDistance = Math.abs(currentPrice - stopLoss);
-    let quantity = riskAmount / stopLossDistance;
+    // Fetch strategy's risk settings to get positionSizePercent
+    let positionSizePercent = 1.0; // Default fallback if strategy not found
+    
+    // First check if signal has positionSizePercent in indicators (for rebalancer signals)
+    if (signal.indicators && typeof signal.indicators === 'object' && 'positionSizePercent' in signal.indicators) {
+      positionSizePercent = signal.indicators.positionSizePercent as number;
+      console.log(`Using signal's positionSizePercent from indicators: ${positionSizePercent}%`);
+    } else if (signal.strategy_id) {
+      // Fetch from strategy for regular strategy signals
+      const { data: strategy } = await supabase
+        .from('custom_strategies')
+        .select('risk_settings')
+        .eq('id', signal.strategy_id)
+        .maybeSingle();
+      
+      if (strategy?.risk_settings && typeof strategy.risk_settings === 'object' && 'positionSizePercent' in strategy.risk_settings) {
+        positionSizePercent = strategy.risk_settings.positionSizePercent as number;
+        console.log(`Using strategy's positionSizePercent: ${positionSizePercent}%`);
+      } else {
+        console.warn('Strategy risk_settings missing positionSizePercent, using default 1%');
+      }
+    } else {
+      console.warn('Signal has no strategy_id or indicators.positionSizePercent, using default 1%');
+    }
+
+    // Calculate position size based on strategy's positionSizePercent
+    const positionValue = (riskParams.portfolio_value * positionSizePercent) / 100;
+    let quantity = positionValue / currentPrice;
+    
+    console.log(`Position sizing: ${positionSizePercent}% of $${riskParams.portfolio_value} = $${positionValue.toFixed(2)} / $${currentPrice.toFixed(2)} = ${quantity.toFixed(4)} ${signal.symbol.replace('USDT', '')}`);
 
     // Apply confidence-based position size scaling
     const confidence = signal.confidence_score || 0;
