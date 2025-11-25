@@ -85,14 +85,14 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
 
 // Calculate ADX (Average Directional Index) - measures trend strength
 function calculateADX(klines: any[], period = 14): number {
-  // Need at least 2*period + 1 candles for proper ADX calculation
-  if (klines.length < (period * 2) + 1) return 0;
+  // Need at least period + 1 candles for proper ADX calculation
+  if (klines.length < period + 1) return 0;
 
   const trueRanges: number[] = [];
   const plusDMs: number[] = [];
   const minusDMs: number[] = [];
 
-  // Calculate True Range, +DM, -DM for all candles
+  // Calculate True Range, +DM, -DM for all candles (O(n))
   for (let i = 1; i < klines.length; i++) {
     const high = parseFloat(klines[i][2]);
     const low = parseFloat(klines[i][3]);
@@ -119,30 +119,39 @@ function calculateADX(klines: any[], period = 14): number {
     minusDMs.push(minusDM);
   }
 
-  if (trueRanges.length < period * 2) return 0;
+  if (trueRanges.length < period) return 0;
 
-  // Array to store DX values for smoothing into ADX
+  // Apply Wilder's smoothing to TR, +DM, -DM arrays (O(n))
+  const smoothedTRs: number[] = [];
+  const smoothedPlusDMs: number[] = [];
+  const smoothedMinusDMs: number[] = [];
+
+  // Initial smoothed values (sum of first period values)
+  let smoothedTR = trueRanges.slice(0, period).reduce((a, b) => a + b, 0);
+  let smoothedPlusDM = plusDMs.slice(0, period).reduce((a, b) => a + b, 0);
+  let smoothedMinusDM = minusDMs.slice(0, period).reduce((a, b) => a + b, 0);
+
+  smoothedTRs.push(smoothedTR);
+  smoothedPlusDMs.push(smoothedPlusDM);
+  smoothedMinusDMs.push(smoothedMinusDM);
+
+  // Apply Wilder's smoothing for subsequent values
+  for (let i = period; i < trueRanges.length; i++) {
+    smoothedTR = smoothedTR - smoothedTR / period + trueRanges[i];
+    smoothedPlusDM = smoothedPlusDM - smoothedPlusDM / period + plusDMs[i];
+    smoothedMinusDM = smoothedMinusDM - smoothedMinusDM / period + minusDMs[i];
+
+    smoothedTRs.push(smoothedTR);
+    smoothedPlusDMs.push(smoothedPlusDM);
+    smoothedMinusDMs.push(smoothedMinusDM);
+  }
+
+  // Calculate DX values from smoothed arrays (O(n))
   const dxValues: number[] = [];
+  for (let i = 0; i < smoothedTRs.length; i++) {
+    const plusDI = smoothedTRs[i] > 0 ? (smoothedPlusDMs[i] / smoothedTRs[i]) * 100 : 0;
+    const minusDI = smoothedTRs[i] > 0 ? (smoothedMinusDMs[i] / smoothedTRs[i]) * 100 : 0;
 
-  // Calculate smoothed indicators and DX for each period
-  for (let start = 0; start <= trueRanges.length - period; start++) {
-    // Initial smoothed values for this window
-    let smoothedTR = trueRanges.slice(start, start + period).reduce((a, b) => a + b, 0);
-    let smoothedPlusDM = plusDMs.slice(start, start + period).reduce((a, b) => a + b, 0);
-    let smoothedMinusDM = minusDMs.slice(start, start + period).reduce((a, b) => a + b, 0);
-
-    // Apply Wilder's smoothing for subsequent values in this window
-    for (let i = start + period; i < Math.min(start + period * 2, trueRanges.length); i++) {
-      smoothedTR = smoothedTR - smoothedTR / period + trueRanges[i];
-      smoothedPlusDM = smoothedPlusDM - smoothedPlusDM / period + plusDMs[i];
-      smoothedMinusDM = smoothedMinusDM - smoothedMinusDM / period + minusDMs[i];
-    }
-
-    // Calculate +DI and -DI
-    const plusDI = smoothedTR > 0 ? (smoothedPlusDM / smoothedTR) * 100 : 0;
-    const minusDI = smoothedTR > 0 ? (smoothedMinusDM / smoothedTR) * 100 : 0;
-
-    // Calculate DX
     const diDiff = Math.abs(plusDI - minusDI);
     const diSum = plusDI + minusDI;
     const dx = diSum === 0 ? 0 : (diDiff / diSum) * 100;
@@ -150,10 +159,10 @@ function calculateADX(klines: any[], period = 14): number {
     dxValues.push(dx);
   }
 
-  // Need at least 14 DX values to calculate ADX
+  // Need at least period DX values to calculate ADX
   if (dxValues.length < period) return 0;
 
-  // Smooth DX values into ADX using Wilder's smoothing
+  // Smooth DX values into ADX using Wilder's smoothing (O(n))
   let adx = dxValues.slice(0, period).reduce((a, b) => a + b, 0) / period;
 
   // Apply Wilder's smoothing for remaining DX values
