@@ -290,7 +290,7 @@ export const SignalRejectionReasons = () => {
                   >
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
-                        <span className="font-semibold text-lg">{data.symbol}</span>
+                        <span className={`font-semibold text-lg ${confirms ? 'text-foreground' : ''}`}>{data.symbol}</span>
                         {confirms ? (
                           <Badge className="bg-green-500 hover:bg-green-600">
                             <CheckCircle className="h-3 w-3 mr-1" />
@@ -311,8 +311,8 @@ export const SignalRejectionReasons = () => {
 
                     <div className="grid grid-cols-2 gap-3 mb-3">
                       <div className="text-xs">
-                        <span className="text-muted-foreground">4h/1h:</span>
-                        <span className="ml-2 font-medium">
+                        <span className={confirms ? 'text-foreground/70' : 'text-muted-foreground'}>4h/1h:</span>
+                        <span className={`ml-2 font-medium ${confirms ? 'text-foreground' : ''}`}>
                           {higherTimeframeFilter.trend4h} / {higherTimeframeFilter.trend1h}
                         </span>
                         {higherTimeframeFilter.aligned ? (
@@ -322,8 +322,8 @@ export const SignalRejectionReasons = () => {
                         )}
                       </div>
                       <div className="text-xs">
-                        <span className="text-muted-foreground">30m/15m:</span>
-                        <span className="ml-2 font-medium">
+                        <span className={confirms ? 'text-foreground/70' : 'text-muted-foreground'}>30m/15m:</span>
+                        <span className={`ml-2 font-medium ${confirms ? 'text-foreground' : ''}`}>
                           {multiTimeframe.trend30m} / {multiTimeframe.trend15m}
                         </span>
                       </div>
@@ -331,30 +331,30 @@ export const SignalRejectionReasons = () => {
 
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">15m OR 30m Candles:</span>
+                        <span className={confirms ? 'text-foreground/70' : 'text-muted-foreground'}>15m OR 30m Candles:</span>
                         <div className="flex items-center gap-2">
-                          <span className={(candles15mOK || candles30mOK) ? 'text-green-600 dark:text-green-400 font-medium' : 'text-muted-foreground'}>
+                          <span className={(candles15mOK || candles30mOK) ? 'text-green-600 dark:text-green-400 font-medium' : confirms ? 'text-foreground/70' : 'text-muted-foreground'}>
                             15m: {momentum.consecutive15mBullish}🟢/{momentum.consecutive15mBearish}🔴, 
                             30m: {momentum.consecutive30mBullish}🟢/{momentum.consecutive30mBearish}🔴
                           </span>
                           {(candles15mOK || candles30mOK) ? (
                             <CheckCircle className="h-4 w-4 text-green-500" />
                           ) : (
-                            <XCircle className="h-4 w-4 text-muted-foreground" />
+                            <XCircle className={`h-4 w-4 ${confirms ? 'text-foreground/40' : 'text-muted-foreground'}`} />
                           )}
                         </div>
                       </div>
 
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">MACD Histogram:</span>
+                        <span className={confirms ? 'text-foreground/70' : 'text-muted-foreground'}>MACD Histogram:</span>
                         <div className="flex items-center gap-2">
-                          <span className={macdOK ? 'text-green-600 dark:text-green-400 font-medium' : 'text-muted-foreground'}>
+                          <span className={macdOK ? 'text-green-600 dark:text-green-400 font-medium' : confirms ? 'text-foreground/70' : 'text-muted-foreground'}>
                             {momentum.macdHistogram.toFixed(3)}
                           </span>
                           {macdOK ? (
                             <CheckCircle className="h-4 w-4 text-green-500" />
                           ) : (
-                            <XCircle className="h-4 w-4 text-muted-foreground" />
+                            <XCircle className={`h-4 w-4 ${confirms ? 'text-foreground/40' : 'text-muted-foreground'}`} />
                           )}
                         </div>
                       </div>
