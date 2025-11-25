@@ -706,7 +706,7 @@ serve(async (req) => {
           macdHistogram: Math.round(macdHistogram * 1000) / 1000,
         },
 
-        // Multi-timeframe details
+        // Multi-timeframe details (legacy format for compatibility)
         multiTimeframe: {
           trend15m: trend15m.trend,
           trend30m: trend30m.trend,
@@ -716,6 +716,14 @@ serve(async (req) => {
           confidence30m: trend30m.confidence,
           confidence1h: trend1h.confidence,
           confidence4h: trend4h.confidence,
+        },
+
+        // Structured timeframes for divergence validation
+        timeframes: {
+          '15m': trend15m,
+          '30m': trend30m,
+          '1h': trend1h,
+          '4h': trend4h,
         },
 
         marketStructure: {
