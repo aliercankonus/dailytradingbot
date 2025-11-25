@@ -393,11 +393,35 @@ serve(async (req) => {
           const use30m = trend30m.trend === majorityTrend;
           const use15m = trend15m.trend === majorityTrend;
           
+          // Base weights (must sum to 1.0)
+          const baseWeights = {
+            tf4h: 0.25,
+            tf1h: 0.30,
+            tf30m: 0.25,
+            tf15m: 0.20
+          };
+          
+          // Calculate sum of included weights
+          const includedWeightSum = 
+            baseWeights.tf4h + // 4h always included as stabilizer
+            (use1h ? baseWeights.tf1h : 0) +
+            (use30m ? baseWeights.tf30m : 0) +
+            (use15m ? baseWeights.tf15m : 0);
+          
+          // Normalize: scale weights so they sum to 1.0
+          const scaleFactor = 1.0 / includedWeightSum;
+          
+          // Apply normalized weights
+          const normalized4h = baseWeights.tf4h * scaleFactor;
+          const normalized1h = use1h ? baseWeights.tf1h * scaleFactor : 0;
+          const normalized30m = use30m ? baseWeights.tf30m * scaleFactor : 0;
+          const normalized15m = use15m ? baseWeights.tf15m * scaleFactor : 0;
+          
           weightedConsistency =
-            dominantConfidence * 0.25 + // 4h: 25% stabilizing contribution
-            (use1h ? trend1h.confidence * 0.30 : 0) + // 1h: 30% if aligned with majority
-            (use30m ? trend30m.confidence * 0.25 : 0) + // 30m: 25%
-            (use15m ? trend15m.confidence * 0.20 : 0);  // 15m: 20%
+            dominantConfidence * normalized4h +
+            (use1h ? trend1h.confidence * normalized1h : 0) +
+            (use30m ? trend30m.confidence * normalized30m : 0) +
+            (use15m ? trend15m.confidence * normalized15m : 0);
         }
       }
     } else {
