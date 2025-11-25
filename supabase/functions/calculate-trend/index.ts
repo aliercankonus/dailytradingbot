@@ -268,16 +268,30 @@ function calculateTrend(prices: number[]): {
   totalWeight += rsiWeight;
 
   // MACD Analysis (Weight: 3)
+  // Improved: Require histogram direction (expanding) not just sign
   const macdWeight = 3;
   let macdTrend = "neutral";
-  if (histogram > 0) {
+  
+  // Calculate previous period MACD to check histogram direction
+  const prevPrices = prices.slice(0, -1); // Remove last element
+  const { histogram: prevHistogram } = calculateMACD(prevPrices);
+  
+  // Histogram must be expanding (increasing for bullish, decreasing for bearish)
+  const histogramExpanding = histogram - prevHistogram;
+  
+  if (histogram > 0 && histogramExpanding > 0) {
+    // Bullish: positive histogram AND expanding upward
     const macdStrength = Math.min(Math.abs(histogram) / Math.abs(macd || 1), 1);
     bullishSignals += macdWeight * macdStrength;
     macdTrend = "bullish";
-  } else if (histogram < 0) {
+  } else if (histogram < 0 && histogramExpanding < 0) {
+    // Bearish: negative histogram AND expanding downward (more negative)
     const macdStrength = Math.min(Math.abs(histogram) / Math.abs(macd || 1), 1);
     bearishSignals += macdWeight * macdStrength;
     macdTrend = "bearish";
+  } else {
+    // Histogram is weak, flattening, or contracting - neutral
+    macdTrend = "neutral";
   }
   totalWeight += macdWeight;
 
