@@ -1,56 +1,54 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
+import { serve } from "jsr:@std/http@0.224.0/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-Deno.serve(async (req) => {
-  // Handle CORS preflight
+serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   const { headers } = req;
   const upgradeHeader = headers.get("upgrade") || "";
-
   if (upgradeHeader.toLowerCase() !== "websocket") {
     return new Response("Expected WebSocket connection", { status: 400 });
   }
 
   console.log("WebSocket upgrade request received");
-
   const { socket, response } = Deno.upgradeWebSocket(req);
 
-  // Initialize Supabase client
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error("Missing required environment variables");
+  }
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // Get user ID from authorization header
   const authHeader = headers.get("authorization");
   let userId: string | null = null;
-  
   if (authHeader) {
     const token = authHeader.replace("Bearer ", "");
-    const { data: { user } } = await supabase.auth.getUser(token);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser(token);
     userId = user?.id || null;
   }
 
   let binanceSocket: WebSocket | null = null;
   let reconnectAttempts = 0;
-  const MAX_RECONNECT_ATTEMPTS = 5;
-  const RECONNECT_DELAY = 3000;
+  const MAX_RECONNECT_ATTEMPTS = 10; // increased because of backoff
+  const BASE_RECONNECT_DELAY = 1000; // start with 1 second
   let reconnectTimeout: number | null = null;
   let heartbeatInterval: number | null = null;
 
   // Determine symbols to stream
-  let symbols = ["btcusdt", "ethusdt"]; // Default fallback
-
+  let symbols = ["btcusdt", "ethusdt"];
   try {
     const url = new URL(req.url);
     const symbolsParam = url.searchParams.get("symbols");
-
     if (symbolsParam) {
       const parsed = JSON.parse(decodeURIComponent(symbolsParam));
       if (Array.isArray(parsed) && parsed.length > 0) {
@@ -73,24 +71,18 @@ Deno.serve(async (req) => {
   } catch (e) {
     console.error("Error determining symbols:", e);
   }
-  
-  // Use combined streams endpoint (single connection for multiple symbols)
+
   const streams = symbols.map((s) => `${s}@ticker`).join("/");
 
   const connectToBinance = () => {
     try {
-      // Try the standard endpoint without :9443 port (use default 443)
       const binanceUrl = `wss://stream.binance.com/stream?streams=${streams}`;
-
       console.log("Connecting to Binance:", binanceUrl);
-
       binanceSocket = new WebSocket(binanceUrl);
 
       binanceSocket.onopen = () => {
         console.log("Connected to Binance WebSocket");
-        reconnectAttempts = 0;
-
-        // Send connection success message
+        reconnectAttempts = 0; // reset on successful connection
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(
             JSON.stringify({
@@ -104,7 +96,6 @@ Deno.serve(async (req) => {
       binanceSocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-
           if (data.stream && data.data) {
             const ticker = data.data;
             const formattedData = {
@@ -117,7 +108,6 @@ Deno.serve(async (req) => {
               volume: ticker.v,
               timestamp: ticker.E,
             };
-
             if (socket.readyState === WebSocket.OPEN) {
               socket.send(JSON.stringify(formattedData));
             }
@@ -132,31 +122,31 @@ Deno.serve(async (req) => {
       };
 
       binanceSocket.onclose = (event) => {
-        console.log(`Binance WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
+        console.log(`Binance WebSocket closed (code: ${event.code}, reason: ${event.reason || "none"})`);
 
-        // Only attempt reconnection if client is still connected
         if (socket.readyState !== WebSocket.OPEN) {
           console.log("Client disconnected, skipping Binance reconnection");
           return;
         }
 
-        // Attempt reconnection
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttempts++;
-          console.log(`Reconnection attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
+          // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 512s
+          const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1), 60000);
+          console.log(`Reconnection attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${delay / 1000}s`);
 
           reconnectTimeout = setTimeout(() => {
             if (socket.readyState === WebSocket.OPEN) {
               connectToBinance();
             }
-          }, RECONNECT_DELAY);
+          }, delay);
         } else {
           console.error("Max reconnection attempts reached");
           if (socket.readyState === WebSocket.OPEN) {
             socket.send(
               JSON.stringify({
                 type: "error",
-                message: "Connection to market data lost. Please refresh.",
+                message: "Connection to market data lost after multiple attempts. Please refresh.",
               }),
             );
           }
@@ -171,7 +161,6 @@ Deno.serve(async (req) => {
     console.log("Client WebSocket connected");
     connectToBinance();
 
-    // Send heartbeat every 30 seconds to keep connection alive
     heartbeatInterval = setInterval(() => {
       if (socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: "heartbeat" }));
@@ -182,8 +171,6 @@ Deno.serve(async (req) => {
   socket.onmessage = (event) => {
     try {
       const message = JSON.parse(event.data);
-
-      // Handle pong response to heartbeat
       if (message.type === "ping") {
         socket.send(JSON.stringify({ type: "pong" }));
       }
@@ -194,16 +181,12 @@ Deno.serve(async (req) => {
 
   socket.onclose = () => {
     console.log("Client WebSocket disconnected - cleaning up resources");
-
-    // Clean up Binance connection
     if (binanceSocket) {
       if (binanceSocket.readyState === WebSocket.OPEN || binanceSocket.readyState === WebSocket.CONNECTING) {
         binanceSocket.close();
       }
       binanceSocket = null;
     }
-
-    // Clear intervals and timeouts
     if (heartbeatInterval !== null) {
       clearInterval(heartbeatInterval);
       heartbeatInterval = null;
@@ -216,7 +199,6 @@ Deno.serve(async (req) => {
 
   socket.onerror = (error) => {
     console.error("Client WebSocket error:", error);
-
     if (binanceSocket && binanceSocket.readyState === WebSocket.OPEN) {
       binanceSocket.close();
     }
