@@ -285,26 +285,13 @@ export const SignalRejectionReasons = () => {
 
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">15m Candles:</span>
+                        <span className="text-muted-foreground">15m OR 30m Candles:</span>
                         <div className="flex items-center gap-2">
-                          <span className={candles15mOK ? 'text-green-600 dark:text-green-400 font-medium' : 'text-muted-foreground'}>
-                            {momentum.consecutive15mBullish}🟢 / {momentum.consecutive15mBearish}🔴
+                          <span className={(candles15mOK || candles30mOK) ? 'text-green-600 dark:text-green-400 font-medium' : 'text-muted-foreground'}>
+                            15m: {momentum.consecutive15mBullish}🟢/{momentum.consecutive15mBearish}🔴, 
+                            30m: {momentum.consecutive30mBullish}🟢/{momentum.consecutive30mBearish}🔴
                           </span>
-                          {candles15mOK ? (
-                            <CheckCircle className="h-4 w-4 text-green-500" />
-                          ) : (
-                            <XCircle className="h-4 w-4 text-muted-foreground" />
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">30m Candles:</span>
-                        <div className="flex items-center gap-2">
-                          <span className={candles30mOK ? 'text-green-600 dark:text-green-400 font-medium' : 'text-muted-foreground'}>
-                            {momentum.consecutive30mBullish}🟢 / {momentum.consecutive30mBearish}🔴
-                          </span>
-                          {candles30mOK ? (
+                          {(candles15mOK || candles30mOK) ? (
                             <CheckCircle className="h-4 w-4 text-green-500" />
                           ) : (
                             <XCircle className="h-4 w-4 text-muted-foreground" />
