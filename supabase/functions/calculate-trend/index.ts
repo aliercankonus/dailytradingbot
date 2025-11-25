@@ -288,11 +288,12 @@ function calculateTrend(prices: number[]): {
 
   let trend: "bullish" | "bearish" | "neutral";
 
-  // More sensitive trend classification - requires net signal > 0.8
-  // This prevents false "not aligned" rejections when trends are weak but in same direction
-  if (netSignal > 0.8) {
+  // Trend classification thresholds proportional to max score (±8)
+  // Requires at least 50% indicator agreement for directional trend
+  // Strong trend: ±4.0 (half of indicators must agree strongly)
+  if (netSignal >= 4.0) {
     trend = "bullish";
-  } else if (netSignal < -0.8) {
+  } else if (netSignal <= -4.0) {
     trend = "bearish";
   } else {
     trend = "neutral";
