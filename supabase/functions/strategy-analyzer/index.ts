@@ -233,20 +233,29 @@ serve(async (req) => {
       }
     };
 
-    const generateHistoricalData = (currentPrice: number, currentVolume: number, changePercent: number) => {
-      const prices: number[] = [];
-      const volumes: number[] = [];
-      const volatility = Math.abs(changePercent) / 100;
-
-      for (let i = 30; i >= 0; i--) {
-        const variation = (Math.random() - 0.5) * volatility * currentPrice;
-        const trend = (changePercent / 100) * currentPrice * (i / 30);
-        prices.push(currentPrice - trend + variation);
-        const volumeVariation = (Math.random() - 0.5) * 0.3 * currentVolume;
-        volumes.push(Math.max(currentVolume + volumeVariation, currentVolume * 0.5));
+    const fetchHistoricalKlines = async (symbol: string): Promise<{ prices: number[]; volumes: number[] }> => {
+      try {
+        // Fetch 50 candles of 15m data for indicator calculations (MACD needs ~26+ periods)
+        const response = await fetch(
+          `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=15m&limit=50`
+        );
+        
+        if (!response.ok) {
+          throw new Error(`Binance API error: ${response.status}`);
+        }
+        
+        const klines = await response.json();
+        
+        // Binance kline format: [openTime, open, high, low, close, volume, closeTime, ...]
+        const prices = klines.map((k: any) => parseFloat(k[4])); // close price
+        const volumes = klines.map((k: any) => parseFloat(k[5])); // volume
+        
+        return { prices, volumes };
+      } catch (error) {
+        console.error(`Failed to fetch klines for ${symbol}:`, error);
+        // Return empty arrays as fallback - strategy evaluation will skip if insufficient data
+        return { prices: [], volumes: [] };
       }
-
-      return { prices, volumes };
     };
 
     // Fetch market data for all active symbols
@@ -507,13 +516,14 @@ serve(async (req) => {
 
         const currentPrice = parseFloat(marketData.lastPrice);
         const currentVolume = parseFloat(marketData.volume);
-        const changePercent = parseFloat(marketData.priceChangePercent);
 
-        const { prices: historicalPrices, volumes: historicalVolumes } = generateHistoricalData(
-          currentPrice,
-          currentVolume,
-          changePercent
-        );
+        const { prices: historicalPrices, volumes: historicalVolumes } = await fetchHistoricalKlines(symbol);
+        
+        // Skip if insufficient historical data
+        if (historicalPrices.length < 26) {
+          console.warn(`Insufficient historical data for ${symbol} (${historicalPrices.length} candles)`);
+          continue;
+        }
 
         // Evaluate each custom strategy
         for (const strategy of customStrategies) {
