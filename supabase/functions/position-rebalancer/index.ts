@@ -223,13 +223,14 @@ async function rebalanceUserPositions(
           .single();
 
         let shouldCreateSignal = false;
-        let positionSizePercent = 100;
+        let positionSizePercent = 1.0; // Default 1% of portfolio
         let confidenceCap = 100;
         let signalReason = '';
 
         // Check signal eligibility based on divergence settings
         if (trend.higherTimeframeFilter?.aligned) {
           shouldCreateSignal = trend.confidence >= 60 && trend.trendConsistency >= 60;
+          positionSizePercent = 1.0; // Standard 1% position size for aligned trends
           signalReason = `Rebalancing: Closed ${position.side} position and opening to align with ${trend.trend} market`;
         } else if (trend.higherTimeframeFilter?.allowDivergenceSignal && riskParams) {
           const { divergenceType } = trend.higherTimeframeFilter;
@@ -244,7 +245,9 @@ async function rebalanceUserPositions(
                 tf30m.trend === tf4h.trend && 
                 tf15m.trend === tf4h.trend) {
               shouldCreateSignal = true;
-              positionSizePercent = riskParams.pullback_position_size_percent || 50;
+              // pullback_position_size_percent is percentage of normal (e.g., 50 = 50% of normal 1% = 0.5%)
+              const sizeReduction = (riskParams.pullback_position_size_percent || 50) / 100;
+              positionSizePercent = 1.0 * sizeReduction; // e.g., 1% * 0.5 = 0.5%
               confidenceCap = 70;
               signalReason = `Rebalancing: Pullback opportunity confirmed by 30m/15m after closing ${position.side} position`;
             } else {
@@ -260,7 +263,9 @@ async function rebalanceUserPositions(
                 tf30m.trend === tf1h.trend && 
                 tf15m.trend === tf1h.trend) {
               shouldCreateSignal = true;
-              positionSizePercent = riskParams.early_reversal_position_size_percent || 40;
+              // early_reversal_position_size_percent is percentage of normal (e.g., 40 = 40% of normal 1% = 0.4%)
+              const sizeReduction = (riskParams.early_reversal_position_size_percent || 40) / 100;
+              positionSizePercent = 1.0 * sizeReduction; // e.g., 1% * 0.4 = 0.4%
               confidenceCap = 65;
               signalReason = `Rebalancing: Early reversal confirmed by 30m/15m after closing ${position.side} position`;
             } else {
