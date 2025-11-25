@@ -359,7 +359,7 @@ serve(async (req) => {
               trend1h: trendData.higherTimeframeFilter?.trend1h,
               aligned: higherTimeframeFilter.aligned,
               required: !hasMomentumConfirmation 
-                ? 'momentum confirmation (2-3 consecutive candles on 15m and 30m)'
+                ? 'momentum confirmation (≥2 consecutive candles on 15m OR 30m + MACD expansion)'
                 : 'confidence/consistency threshold'
             };
             
