@@ -704,11 +704,24 @@ serve(async (req) => {
     // MACD histogram must be expanding (shows strength building)
     const macdHistogram = trend15m.indicators.macdHistogram; // Use 15m MACD
     const macdExpanding = Math.abs(macdHistogram) > 0.01;
+    const macdStrong = Math.abs(macdHistogram) > 0.5; // Strong directional momentum
     
     // RELAXED GATE: Either 15m OR 30m consecutive candles + MACD expansion
     const momentumConfirms = (momentum15mConfirms || momentum30mConfirms) && macdExpanding;
+
+    // NEW: momentumState captures "none" vs "mixed" vs "confirmed"
+    // - confirmed: candle + trend alignment AND MACD expansion
+    // - mixed: MACD strong but candles/trend filter block confirmation
+    // - none: no clear MACD or candle support
+    let momentumState: "none" | "mixed" | "confirmed" = "none";
+    if (momentumConfirms) {
+      momentumState = "confirmed";
+    } else if (macdStrong) {
+      // MACD is strong but candles/trends failed strict filter ⇒ treat as MIXED, not zero momentum
+      momentumState = "mixed";
+    }
     
-    console.log(`${symbol} MOMENTUM: 15m=${consecutive15mBullish}bull/${consecutive15mBearish}bear 30m=${consecutive30mBullish}bull/${consecutive30mBearish}bear macd=${macdHistogram.toFixed(3)} confirms=${momentumConfirms}`);
+    console.log(`${symbol} MOMENTUM: 15m=${consecutive15mBullish}bull/${consecutive15mBearish}bear 30m=${consecutive30mBullish}bull/${consecutive30mBearish}bear macd=${macdHistogram.toFixed(3)} confirms=${momentumConfirms} state=${momentumState}`);
 
     // Validate market structure on 1h timeframe
     const marketStructure = validateMarketStructure(klines1h, trend1h.trend);
@@ -762,6 +775,7 @@ serve(async (req) => {
         // Momentum confirmation
         momentum: {
           confirms: momentumConfirms,
+          state: momentumState,
           building: momentum15mConfirms && momentum30mConfirms,
           consecutive15mBullish,
           consecutive15mBearish,
