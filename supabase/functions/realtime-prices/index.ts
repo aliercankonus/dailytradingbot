@@ -74,11 +74,13 @@ Deno.serve(async (req) => {
     console.error("Error determining symbols:", e);
   }
   
+  // Use combined streams endpoint (single connection for multiple symbols)
   const streams = symbols.map((s) => `${s}@ticker`).join("/");
 
   const connectToBinance = () => {
     try {
-      const binanceUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
+      // Try the standard endpoint without :9443 port (use default 443)
+      const binanceUrl = `wss://stream.binance.com/stream?streams=${streams}`;
 
       console.log("Connecting to Binance:", binanceUrl);
 
