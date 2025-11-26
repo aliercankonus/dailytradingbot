@@ -28,22 +28,12 @@ export const PortfolioMetrics = () => {
 
   const loading = riskLoading || metricsLoading || positionsLoading || balanceLoading;
 
-  // Pre-compute price map for better memoization - use priceVersion to trigger updates
-  const priceMap = useMemo(() => {
-    console.log('[PortfolioMetrics] Creating priceMap, priceVersion:', priceVersion, 'positions:', positions.length);
-    const map = new Map<string, number>();
-    positions.forEach(pos => {
-      const livePrice = getPrice(pos.symbol);
-      const price = livePrice ? parseFloat(livePrice.price) : pos.current_price || pos.entry_price;
-      console.log('[PortfolioMetrics] Price for', pos.symbol, ':', price, 'from:', livePrice ? 'live' : 'fallback');
-      map.set(pos.symbol, price);
-    });
-    return map;
-  }, [positions, getPrice, priceVersion]);
+  // Compute live prices directly in metrics using priceVersion to trigger updates
+
 
   // Memoize expensive calculations - only recalculate when dependencies change
   const metrics = useMemo(() => {
-    console.log('[PortfolioMetrics] Recalculating metrics, positions:', positions.length, 'priceMap size:', priceMap.size);
+    console.log('[PortfolioMetrics] Recalculating metrics, positions:', positions.length);
     
     if (!portfolioMetrics) {
       return {
@@ -69,13 +59,13 @@ export const PortfolioMetrics = () => {
     // Get realized P&L from database view (pre-aggregated)
     const realizedPnL = portfolioMetrics.realized_pnl;
     
-    // Calculate unrealized P&L from active positions using LIVE prices from priceMap
+    // Calculate unrealized P&L from active positions using LIVE prices (same as RiskManagementControls)
     const unrealizedPnL = positions
       .filter(p => p.status === 'active')
       .reduce((sum, pos) => {
-        const currentPrice = priceMap.get(pos.symbol) || pos.entry_price;
+        const livePrice = getPrice(pos.symbol);
+        const currentPrice = livePrice ? parseFloat(livePrice.price) : pos.current_price || pos.entry_price;
         
-        // Calculate live P&L
         const pnl = pos.side === 'BUY'
           ? (currentPrice - pos.entry_price) * pos.quantity
           : (pos.entry_price - currentPrice) * pos.quantity;
@@ -102,7 +92,7 @@ export const PortfolioMetrics = () => {
       isPositiveReturn: totalReturn >= 0,
       hasData: portfolioMetrics.total_closed_trades > 0 || positions.length > 0,
     };
-  }, [portfolioMetrics, positions, priceMap, binanceBalance, riskParams]);
+  }, [portfolioMetrics, positions, priceVersion, binanceBalance, riskParams, getPrice]);
 
   const metricsDisplay = [
     {
