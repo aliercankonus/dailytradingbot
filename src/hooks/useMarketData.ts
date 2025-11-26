@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useWebSocketMonitor } from '@/contexts/WebSocketMonitorContext';
 
 export interface MarketData {
@@ -21,38 +21,51 @@ export const useMarketData = (symbols?: string[]) => {
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const connectionTimeoutRef = useRef<number | null>(null);
+  const isConnectingRef = useRef(false);
   const MAX_RECONNECT_ATTEMPTS = 5;
-  const BASE_RECONNECT_DELAY = 1000;
-  const CONNECTION_TIMEOUT = 10000;
+  const BASE_RECONNECT_DELAY = 2000;
+  const CONNECTION_TIMEOUT = 15000;
   
   const monitor = useWebSocketMonitor();
   const connectionId = useRef(`market-data-${Date.now()}`);
 
-  // Register connection on mount
+  // Stabilize symbols array
+  const symbolsKey = useMemo(() => JSON.stringify(symbols?.sort()), [symbols]);
+
+  // Register connection on mount only
   useEffect(() => {
     monitor.registerConnection(connectionId.current, 'Market Data');
     return () => monitor.unregisterConnection(connectionId.current);
-  }, [monitor]);
+  }, []);
 
   useEffect(() => {
     const symbolsList = symbols && symbols.length > 0 ? symbols : [];
+    let cancelled = false;
     
     const connectWebSocket = () => {
+      if (cancelled || isConnectingRef.current) return;
+      
       try {
+          isConnectingRef.current = true;
+          
           // Clear any existing timeouts
           if (connectionTimeoutRef.current) {
             clearTimeout(connectionTimeoutRef.current);
           }
 
-        // Close existing connection if any
+        // Close existing connection properly
         if (wsRef.current) {
-          wsRef.current.close();
+          const oldWs = wsRef.current;
+          wsRef.current = null;
+          if (oldWs.readyState === WebSocket.OPEN || oldWs.readyState === WebSocket.CONNECTING) {
+            oldWs.close();
+          }
         }
 
         const symbolsParam = encodeURIComponent(JSON.stringify(symbolsList));
         const wsUrl = `wss://ikrivrudkvvnksollslh.supabase.co/functions/v1/realtime-market-data?symbols=${symbolsParam}`;
         
-        console.log(`[MarketData] Connecting (attempt ${reconnectAttemptsRef.current + 1}/${MAX_RECONNECT_ATTEMPTS}):`, wsUrl);
+        console.log(`[MarketData] Connecting (attempt ${reconnectAttemptsRef.current + 1}/${MAX_RECONNECT_ATTEMPTS})`);
         
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
@@ -72,6 +85,7 @@ export const useMarketData = (symbols?: string[]) => {
           if (connectionTimeoutRef.current) {
             clearTimeout(connectionTimeoutRef.current);
           }
+          isConnectingRef.current = false;
           monitor.updateConnectionStatus(connectionId.current, 'connected');
           setConnected(true);
           setError(null);
@@ -112,10 +126,10 @@ export const useMarketData = (symbols?: string[]) => {
 
         ws.onerror = (event) => {
           console.error('[MarketData] WebSocket error:', event);
+          isConnectingRef.current = false;
           const errorMessage = reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS 
             ? 'Unable to connect to market data. Please check your connection.'
             : 'Connection error - reconnecting...';
-          monitor.updateConnectionStatus(connectionId.current, 'disconnected');
           monitor.recordError(connectionId.current, errorMessage);
           setError(errorMessage);
           setConnected(false);
@@ -123,6 +137,7 @@ export const useMarketData = (symbols?: string[]) => {
 
         ws.onclose = (event) => {
           console.log(`[MarketData] WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
+          isConnectingRef.current = false;
           monitor.updateConnectionStatus(connectionId.current, 'disconnected');
           setConnected(false);
           
@@ -131,8 +146,10 @@ export const useMarketData = (symbols?: string[]) => {
             clearTimeout(connectionTimeoutRef.current);
           }
           
-          // Attempt reconnection with exponential backoff
-          if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+          if (cancelled) return;
+          
+          // Only reconnect if not normal closure
+          if (event.code !== 1000 && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttemptsRef.current++;
             const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current - 1);
             console.log(`[MarketData] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
@@ -142,7 +159,7 @@ export const useMarketData = (symbols?: string[]) => {
             reconnectTimeoutRef.current = window.setTimeout(() => {
               connectWebSocket();
             }, delay);
-          } else {
+          } else if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
             setError('Connection lost. Please refresh the page to reconnect.');
             setLoading(false);
           }
@@ -150,6 +167,7 @@ export const useMarketData = (symbols?: string[]) => {
 
       } catch (err) {
         console.error('[MarketData] Error setting up WebSocket:', err);
+        isConnectingRef.current = false;
         setError('Failed to initialize market data connection');
         setLoading(false);
         setConnected(false);
@@ -160,18 +178,27 @@ export const useMarketData = (symbols?: string[]) => {
 
     // Cleanup on unmount
     return () => {
+      cancelled = true;
+      isConnectingRef.current = false;
       console.log('[MarketData] Cleaning up WebSocket connection');
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
+      
       if (reconnectTimeoutRef.current !== null) {
         clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
       if (connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
+      }
+      if (wsRef.current) {
+        const ws = wsRef.current;
+        wsRef.current = null;
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close(1000, 'Component unmounted');
+        }
       }
     };
-  }, [symbols, monitor]);
+  }, [symbolsKey]);
 
   return { data, loading, error, connected };
 };

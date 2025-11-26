@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWebSocketMonitor } from '@/contexts/WebSocketMonitorContext';
 
@@ -21,18 +21,22 @@ export const useRealtimePrices = (symbols?: string[]) => {
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const connectionTimeoutRef = useRef<number | null>(null);
+  const isConnectingRef = useRef(false);
   const MAX_RECONNECT_ATTEMPTS = 5;
-  const BASE_RECONNECT_DELAY = 1000;
-  const CONNECTION_TIMEOUT = 10000;
+  const BASE_RECONNECT_DELAY = 2000;
+  const CONNECTION_TIMEOUT = 15000;
   
   const monitor = useWebSocketMonitor();
   const connectionId = useRef(`realtime-prices-${Date.now()}`);
 
-  // Register connection on mount
+  // Stabilize symbols array to prevent unnecessary reconnections
+  const symbolsKey = useMemo(() => JSON.stringify(symbols?.sort()), [symbols]);
+
+  // Register connection on mount only
   useEffect(() => {
     monitor.registerConnection(connectionId.current, 'Realtime Prices');
     return () => monitor.unregisterConnection(connectionId.current);
-  }, [monitor]);
+  }, []);
 
   useEffect(() => {
     const projectId = 'ikrivrudkvvnksollslh';
@@ -40,7 +44,13 @@ export const useRealtimePrices = (symbols?: string[]) => {
     let cancelled = false;
 
     const setupAndConnect = async () => {
+      if (isConnectingRef.current) {
+        console.log('[RealtimePrices] Connection already in progress, skipping');
+        return;
+      }
+
       try {
+        isConnectingRef.current = true;
         const { data: sessionData } = await supabase.auth.getSession();
         const token = sessionData.session?.access_token;
 
@@ -55,17 +65,24 @@ export const useRealtimePrices = (symbols?: string[]) => {
         const wsUrl = `wss://${projectId}.supabase.co/functions/v1/realtime-prices${qs}`;
 
         const connect = () => {
+          if (cancelled) return;
+          
           try {
             // Clear any existing timeouts
             if (connectionTimeoutRef.current) {
               clearTimeout(connectionTimeoutRef.current);
             }
 
+            // Close existing connection properly
             if (wsRef.current) {
-              wsRef.current.close();
+              const oldWs = wsRef.current;
+              wsRef.current = null;
+              if (oldWs.readyState === WebSocket.OPEN || oldWs.readyState === WebSocket.CONNECTING) {
+                oldWs.close();
+              }
             }
 
-            console.log(`[RealtimePrices] Connecting (attempt ${reconnectAttemptsRef.current + 1}/${MAX_RECONNECT_ATTEMPTS}):`, wsUrl);
+            console.log(`[RealtimePrices] Connecting (attempt ${reconnectAttemptsRef.current + 1}/${MAX_RECONNECT_ATTEMPTS})`);
             const ws = new WebSocket(wsUrl);
             wsRef.current = ws;
 
@@ -84,6 +101,7 @@ export const useRealtimePrices = (symbols?: string[]) => {
                 if (connectionTimeoutRef.current) {
                     clearTimeout(connectionTimeoutRef.current);
                 }
+                isConnectingRef.current = false;
                 monitor.updateConnectionStatus(connectionId.current, 'connected');
                 setConnected(true);
                 setError(null);
@@ -100,10 +118,9 @@ export const useRealtimePrices = (symbols?: string[]) => {
                   console.error('Error from server:', data.message);
                   setError(data.message);
                 } else if (data.type === 'heartbeat') {
-                  if (ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'pong' }));
-                  }
+                  // Heartbeat received, no response needed
                 } else if (data.symbol) {
+                  // Batch price updates to reduce re-renders
                   setPrices((prev) => {
                     const newPrices = new Map(prev);
                     newPrices.set(data.symbol, data);
@@ -117,10 +134,10 @@ export const useRealtimePrices = (symbols?: string[]) => {
 
             ws.onerror = (event) => {
                 console.error('[RealtimePrices] WebSocket error:', event);
+                isConnectingRef.current = false;
                 const errorMessage = reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS 
                     ? 'Unable to connect to price feed. Please check your connection.'
                     : 'Connection error - reconnecting...';
-                monitor.updateConnectionStatus(connectionId.current, 'disconnected');
                 monitor.recordError(connectionId.current, errorMessage);
                 setError(errorMessage);
                 setConnected(false);
@@ -128,6 +145,7 @@ export const useRealtimePrices = (symbols?: string[]) => {
 
             ws.onclose = (event) => {
               console.log(`[RealtimePrices] WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
+              isConnectingRef.current = false;
               monitor.updateConnectionStatus(connectionId.current, 'disconnected');
               setConnected(false);
               
@@ -138,8 +156,8 @@ export const useRealtimePrices = (symbols?: string[]) => {
               
               if (cancelled) return;
               
-              // Attempt reconnection with exponential backoff
-              if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+              // Only reconnect if not a normal closure
+              if (event.code !== 1000 && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
                 reconnectAttemptsRef.current++;
                 const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current - 1);
                 console.log(`[RealtimePrices] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
@@ -149,12 +167,13 @@ export const useRealtimePrices = (symbols?: string[]) => {
                 reconnectTimeoutRef.current = window.setTimeout(() => {
                   connect();
                 }, delay);
-              } else {
+              } else if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
                 setError('Connection lost. Please refresh the page to reconnect.');
               }
             };
           } catch (err) {
             console.error('Error creating WebSocket:', err);
+            isConnectingRef.current = false;
             setError('Failed to create WebSocket connection');
           }
         };
@@ -162,6 +181,7 @@ export const useRealtimePrices = (symbols?: string[]) => {
         connect();
       } catch (e) {
         console.error('Error preparing realtime prices connection', e);
+        isConnectingRef.current = false;
         setError('Failed to prepare realtime prices connection');
       }
     };
@@ -170,18 +190,26 @@ export const useRealtimePrices = (symbols?: string[]) => {
 
     return () => {
       cancelled = true;
+      isConnectingRef.current = false;
       console.log('[RealtimePrices] Cleaning up WebSocket connection');
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.close();
-      }
+      
       if (reconnectTimeoutRef.current !== null) {
         clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
       if (connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
+      }
+      if (wsRef.current) {
+        const ws = wsRef.current;
+        wsRef.current = null;
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close(1000, 'Component unmounted');
+        }
       }
     };
-  }, [JSON.stringify(symbols), monitor]);
+  }, [symbolsKey]);
 
   const getPrice = useCallback((symbol: string) => {
     return prices.get(symbol);
