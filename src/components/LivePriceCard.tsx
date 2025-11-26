@@ -12,11 +12,13 @@ export const LivePriceCard = () => {
   const [displayPrices, setDisplayPrices] = useState<any[]>([]);
   const { toast } = useToast();
 
+  // Convert Map to array whenever prices change - this ensures reactivity
   useEffect(() => {
     // Filter prices to only show active symbols
     const priceArray = Array.from(prices.values())
       .filter(price => activeSymbols.includes(price.symbol))
       .slice(0, 10);
+    console.log('[LivePriceCard] Updating display prices, count:', priceArray.length, 'prices Map size:', prices.size);
     setDisplayPrices(priceArray);
   }, [prices, activeSymbols]);
 
