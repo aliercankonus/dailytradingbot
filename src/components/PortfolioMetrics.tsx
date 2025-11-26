@@ -4,8 +4,8 @@ import { useRealtimePrices } from "@/hooks/useRealtimePrices";
 import { useRiskParameters } from "@/hooks/useRiskParameters";
 import { usePositions } from "@/hooks/usePositions";
 import { useBinanceBalance } from "@/hooks/useBinanceBalance";
-import { useState, useEffect, useMemo } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { usePortfolioMetrics } from "@/hooks/usePortfolioMetrics";
+import { useMemo } from "react";
 
 export const PortfolioMetrics = () => {
   const { positions, loading: positionsLoading } = usePositions();
@@ -16,50 +16,9 @@ export const PortfolioMetrics = () => {
   
   const { riskParams, loading: riskLoading } = useRiskParameters();
   const { balance: binanceBalance, loading: balanceLoading } = useBinanceBalance();
-  const [portfolioMetrics, setPortfolioMetrics] = useState<any>(null);
-  const [metricsLoading, setMetricsLoading] = useState(true);
-
-  // Fetch pre-aggregated portfolio metrics from database view (much faster)
-  useEffect(() => {
-    const fetchMetrics = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('portfolio_metrics_view')
-          .select('*')
-          .single();
-        
-        if (error) {
-          // If no data exists yet (no closed trades), use defaults
-          if (error.code === 'PGRST116') {
-            setPortfolioMetrics({
-              realized_pnl: 0,
-              total_closed_trades: 0,
-              winning_trades: 0,
-              losing_trades: 0,
-              win_rate: 0,
-              largest_win: 0,
-              largest_loss: 0,
-              avg_win: 0,
-              avg_loss: 0
-            });
-          } else {
-            throw error;
-          }
-        } else {
-          setPortfolioMetrics(data);
-        }
-      } catch (err) {
-        console.error('Error fetching portfolio metrics:', err);
-      } finally {
-        setMetricsLoading(false);
-      }
-    };
-
-    fetchMetrics();
-    // Refresh every 30s - only changes when trades close
-    const interval = setInterval(fetchMetrics, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  
+  // Use cached portfolio metrics with React Query
+  const { data: portfolioMetrics, isLoading: metricsLoading } = usePortfolioMetrics();
 
   const loading = riskLoading || metricsLoading || positionsLoading || balanceLoading;
 
