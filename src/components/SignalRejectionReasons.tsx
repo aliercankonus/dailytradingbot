@@ -10,6 +10,9 @@ import {
   CheckCircle,
   XCircle,
   AlertTriangle,
+  ArrowUp,
+  ArrowDown,
+  Minus,
 } from "lucide-react";
 import { useSignalRejections } from "@/hooks/useSignalRejections";
 import { useMomentumStatus } from "@/hooks/useMomentumStatus";
@@ -537,6 +540,32 @@ export const SignalRejectionReasons = () => {
                           MACD Histogram:
                         </span>
                         <div className="flex items-center gap-2">
+                          {/* MACD Direction Arrow Indicator */}
+                          {momentum?.macdHistogram !== undefined && (
+                            <>
+                              {trend === "bullish" && momentum.macdHistogram > 0 && macdDirectionOK ? (
+                                <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-green-100 dark:bg-green-950">
+                                  <ArrowUp className="h-3 w-3 text-green-600 dark:text-green-400" />
+                                  <span className="text-xs text-green-700 dark:text-green-300 font-medium">Bullish</span>
+                                </div>
+                              ) : trend === "bearish" && momentum.macdHistogram < 0 && macdDirectionOK ? (
+                                <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-100 dark:bg-red-950">
+                                  <ArrowDown className="h-3 w-3 text-red-600 dark:text-red-400" />
+                                  <span className="text-xs text-red-700 dark:text-red-300 font-medium">Bearish</span>
+                                </div>
+                              ) : !macdDirectionOK ? (
+                                <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-100 dark:bg-yellow-950">
+                                  <Minus className="h-3 w-3 text-yellow-600 dark:text-yellow-400" />
+                                  <span className="text-xs text-yellow-700 dark:text-yellow-300 font-medium">Misaligned</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800">
+                                  <Minus className="h-3 w-3 text-gray-600 dark:text-gray-400" />
+                                  <span className="text-xs text-gray-700 dark:text-gray-300 font-medium">Neutral</span>
+                                </div>
+                              )}
+                            </>
+                          )}
                           <span
                             className={
                               macdOK
@@ -545,11 +574,6 @@ export const SignalRejectionReasons = () => {
                             }
                           >
                             {momentum?.macdHistogram?.toFixed(3) ?? "N/A"}
-                            {!macdDirectionOK && momentum?.macdHistogram !== undefined && (
-                              <span className="text-xs ml-1">
-                                (wrong direction)
-                              </span>
-                            )}
                           </span>
                           {macdOK ? (
                             <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
