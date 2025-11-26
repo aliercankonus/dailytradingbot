@@ -30,16 +30,21 @@ export const PortfolioMetrics = () => {
 
   // Pre-compute price map for better memoization - use priceVersion to trigger updates
   const priceMap = useMemo(() => {
+    console.log('[PortfolioMetrics] Creating priceMap, priceVersion:', priceVersion, 'positions:', positions.length);
     const map = new Map<string, number>();
     positions.forEach(pos => {
       const livePrice = getPrice(pos.symbol);
-      map.set(pos.symbol, livePrice ? parseFloat(livePrice.price) : pos.current_price || pos.entry_price);
+      const price = livePrice ? parseFloat(livePrice.price) : pos.current_price || pos.entry_price;
+      console.log('[PortfolioMetrics] Price for', pos.symbol, ':', price, 'from:', livePrice ? 'live' : 'fallback');
+      map.set(pos.symbol, price);
     });
     return map;
   }, [positions, getPrice, priceVersion]);
 
   // Memoize expensive calculations - only recalculate when dependencies change
   const metrics = useMemo(() => {
+    console.log('[PortfolioMetrics] Recalculating metrics, positions:', positions.length, 'priceMap size:', priceMap.size);
+    
     if (!portfolioMetrics) {
       return {
         portfolioValue: '$0.00',
@@ -77,6 +82,8 @@ export const PortfolioMetrics = () => {
         
         return sum + pnl;
       }, 0);
+    
+    console.log('[PortfolioMetrics] Unrealized P&L:', unrealizedPnL, 'Realized P&L:', realizedPnL);
     
     const totalPnL = realizedPnL + unrealizedPnL;
     const currentValue = basePortfolio + totalPnL;
