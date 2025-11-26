@@ -203,7 +203,7 @@ export const ActivePositions = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-2 text-sm">
+            <div className="grid grid-cols-5 gap-2 text-sm">
               <div>
                 <div className="text-xs text-muted-foreground">Entry</div>
                 <div className="font-medium">${position.entry_price.toFixed(4)}</div>
@@ -211,6 +211,10 @@ export const ActivePositions = () => {
               <div>
                 <div className="text-xs text-muted-foreground">Current</div>
                 <div className="font-medium">${position.live_current_price.toFixed(4)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Quantity</div>
+                <div className="font-medium">{position.quantity.toFixed(6)}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Stop Loss</div>
@@ -324,7 +328,7 @@ export const ActivePositions = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-4 gap-2 text-sm">
+              <div className="grid grid-cols-5 gap-2 text-sm">
                 <div>
                   <div className="text-xs text-muted-foreground">Entry</div>
                   <div className="font-medium">${position.entry_price.toFixed(4)}</div>
@@ -332,6 +336,10 @@ export const ActivePositions = () => {
                 <div>
                   <div className="text-xs text-muted-foreground">Current</div>
                   <div className="font-medium">${position.live_current_price.toFixed(4)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Quantity</div>
+                  <div className="font-medium">{position.quantity.toFixed(6)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Stop Loss</div>
