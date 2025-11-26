@@ -399,7 +399,7 @@ export const SignalRejectionReasons = () => {
                     </div>
                   );
                 }
-                const { momentum, higherTimeframeFilter, trend } = data;
+                const { momentum, higherTimeframeFilter, multiTimeframe, trend } = data;
                 const confirms = momentum?.confirms ?? false;
 
                 const candles15mOK =
@@ -411,6 +411,7 @@ export const SignalRejectionReasons = () => {
                   (trend === "bearish" && momentum?.consecutive30mBearish >= 2);
 
                 const macdOK = Math.abs(momentum?.macdHistogram ?? 0) > 0.01;
+                const adxOK = (momentum?.adx ?? 0) >= 20;
                 return (
                   <div
                     key={data.symbol}
@@ -467,7 +468,7 @@ export const SignalRejectionReasons = () => {
                           30m/15m:
                         </span>
                         <span className={`ml-2 font-medium ${confirms ? "text-gray-900 dark:text-gray-100" : ""}`}>
-                          N/A / N/A
+                          {multiTimeframe?.trend30m ?? "N/A"} / {multiTimeframe?.trend15m ?? "N/A"}
                         </span>
                       </div>
                     </div>
@@ -523,14 +524,41 @@ export const SignalRejectionReasons = () => {
                           )}
                         </div>
                       </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className={confirms ? "text-gray-700 dark:text-gray-300" : "text-muted-foreground"}>
+                          ADX (Trend Strength):
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={
+                              adxOK
+                                ? "text-green-700 dark:text-green-300 font-medium"
+                                : confirms
+                                  ? "text-gray-900 dark:text-gray-100"
+                                  : "text-muted-foreground"
+                            }
+                          >
+                            {momentum?.adx?.toFixed(1) ?? "N/A"}
+                          </span>
+                          {adxOK ? (
+                            <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                          ) : (
+                            <XCircle
+                              className={`h-4 w-4 ${confirms ? "text-gray-600 dark:text-gray-400" : "text-muted-foreground"}`}
+                            />
+                          )}
+                        </div>
+                      </div>
                     </div>
                     {!confirms && (
                       <div className="mt-3 pt-3 border-t border-border">
                         <p className="text-xs text-muted-foreground">
                           <strong>Missing:</strong>{" "}
                           {!candles15mOK && !candles30mOK && "Either 15m OR 30m needs ≥2 consecutive candles"}
-                          {!candles15mOK && !candles30mOK && !macdOK && ", "}
+                          {!candles15mOK && !candles30mOK && (!macdOK || !adxOK) && ", "}
                           {!macdOK && "MACD histogram needs >0.01"}
+                          {!macdOK && !adxOK && ", "}
+                          {!adxOK && "ADX needs ≥20"}
                         </p>
                       </div>
                     )}
