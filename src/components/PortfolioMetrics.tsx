@@ -16,48 +16,80 @@ export const PortfolioMetrics = () => {
   
   const { riskParams, loading: riskLoading } = useRiskParameters();
   const { balance: binanceBalance, loading: balanceLoading } = useBinanceBalance();
-  const [allTrades, setAllTrades] = useState<any[]>([]);
-  const [tradesLoading, setTradesLoading] = useState(true);
+  const [portfolioMetrics, setPortfolioMetrics] = useState<any>(null);
+  const [metricsLoading, setMetricsLoading] = useState(true);
 
-  // Fetch ALL trades for accurate P&L calculation (cached with longer interval)
+  // Fetch pre-aggregated portfolio metrics from database view (much faster)
   useEffect(() => {
-    const fetchAllTrades = async () => {
+    const fetchMetrics = async () => {
       try {
         const { data, error } = await supabase
-          .from('trades')
-          .select('status, profit_loss')
-          .order('executed_at', { ascending: false });
+          .from('portfolio_metrics_view')
+          .select('*')
+          .single();
         
-        if (error) throw error;
-        setAllTrades(data || []);
+        if (error) {
+          // If no data exists yet (no closed trades), use defaults
+          if (error.code === 'PGRST116') {
+            setPortfolioMetrics({
+              realized_pnl: 0,
+              total_closed_trades: 0,
+              winning_trades: 0,
+              losing_trades: 0,
+              win_rate: 0,
+              largest_win: 0,
+              largest_loss: 0,
+              avg_win: 0,
+              avg_loss: 0
+            });
+          } else {
+            throw error;
+          }
+        } else {
+          setPortfolioMetrics(data);
+        }
       } catch (err) {
-        console.error('Error fetching all trades:', err);
+        console.error('Error fetching portfolio metrics:', err);
       } finally {
-        setTradesLoading(false);
+        setMetricsLoading(false);
       }
     };
 
-    fetchAllTrades();
-    // Reduced interval to 30s - trades don't change that frequently
-    const interval = setInterval(fetchAllTrades, 30000);
+    fetchMetrics();
+    // Refresh every 30s - only changes when trades close
+    const interval = setInterval(fetchMetrics, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  const loading = riskLoading || tradesLoading || positionsLoading || balanceLoading;
+  const loading = riskLoading || metricsLoading || positionsLoading || balanceLoading;
 
   // Memoize expensive calculations - only recalculate when dependencies change
   const metrics = useMemo(() => {
+    if (!portfolioMetrics) {
+      return {
+        portfolioValue: '$0.00',
+        totalPnL: '+$0.00',
+        realizedPnL: '+$0.00',
+        unrealizedPnL: '+$0.00',
+        totalReturn: '+0.00%',
+        winRate: '0.0%',
+        isPositivePnL: true,
+        isPositiveRealizedPnL: true,
+        isPositiveUnrealizedPnL: true,
+        isPositiveReturn: true,
+        hasData: false,
+      };
+    }
+
     // Use Binance balance for live trading, database value for paper trading
     const basePortfolio = binanceBalance?.isPaperTrading === false 
       ? binanceBalance.balance 
       : (riskParams?.portfolio_value || 0);
     
-    // Calculate realized P&L from ALL closed trades
-    const realizedPnL = allTrades
-      .filter(t => t.status === 'closed' && t.profit_loss !== null)
-      .reduce((sum, trade) => sum + (trade.profit_loss || 0), 0);
+    // Get realized P&L from database view (pre-aggregated)
+    const realizedPnL = portfolioMetrics.realized_pnl;
     
-    // Calculate unrealized P&L from open positions using LIVE prices
+    // Calculate unrealized P&L from active positions using LIVE prices
     const unrealizedPnL = positions
       .filter(p => p.status === 'active')
       .reduce((sum, pos) => {
@@ -76,25 +108,20 @@ export const PortfolioMetrics = () => {
     const currentValue = basePortfolio + totalPnL;
     const totalReturn = basePortfolio > 0 ? ((totalPnL / basePortfolio) * 100) : 0;
     
-    // Calculate win rate from ALL closed trades
-    const closedTrades = allTrades.filter(t => t.status === 'closed');
-    const winningTrades = closedTrades.filter(t => (t.profit_loss || 0) > 0).length;
-    const winRate = closedTrades.length > 0 ? ((winningTrades / closedTrades.length) * 100) : 0;
-    
     return {
       portfolioValue: `$${currentValue.toFixed(2)}`,
       totalPnL: `${totalPnL >= 0 ? '+' : ''}$${Math.abs(totalPnL).toFixed(2)}`,
       realizedPnL: `${realizedPnL >= 0 ? '+' : ''}$${Math.abs(realizedPnL).toFixed(2)}`,
       unrealizedPnL: `${unrealizedPnL >= 0 ? '+' : ''}$${Math.abs(unrealizedPnL).toFixed(2)}`,
       totalReturn: `${totalReturn >= 0 ? '+' : ''}${totalReturn.toFixed(2)}%`,
-      winRate: `${winRate.toFixed(1)}%`,
+      winRate: `${portfolioMetrics.win_rate.toFixed(1)}%`,
       isPositivePnL: totalPnL >= 0,
       isPositiveRealizedPnL: realizedPnL >= 0,
       isPositiveUnrealizedPnL: unrealizedPnL >= 0,
       isPositiveReturn: totalReturn >= 0,
-      hasData: closedTrades.length > 0 || positions.length > 0,
+      hasData: portfolioMetrics.total_closed_trades > 0 || positions.length > 0,
     };
-  }, [allTrades, positions, getPrice, binanceBalance, riskParams]);
+  }, [portfolioMetrics, positions, getPrice, binanceBalance, riskParams]);
 
   const metricsDisplay = [
     {

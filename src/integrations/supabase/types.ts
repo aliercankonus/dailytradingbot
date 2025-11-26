@@ -893,7 +893,21 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      portfolio_metrics_view: {
+        Row: {
+          avg_loss: number | null
+          avg_win: number | null
+          largest_loss: number | null
+          largest_win: number | null
+          losing_trades: number | null
+          realized_pnl: number | null
+          total_closed_trades: number | null
+          user_id: string | null
+          win_rate: number | null
+          winning_trades: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never
