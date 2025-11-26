@@ -25,7 +25,7 @@ const DEFAULT_METRICS: PortfolioMetrics = {
   avg_loss: 0
 };
 
-const fetchPortfolioMetrics = async (): Promise<PortfolioMetrics> => {
+export const fetchPortfolioMetrics = async (): Promise<PortfolioMetrics> => {
   const { data, error } = await supabase
     .from('portfolio_metrics_view')
     .select('*')
@@ -42,9 +42,11 @@ const fetchPortfolioMetrics = async (): Promise<PortfolioMetrics> => {
   return data as PortfolioMetrics;
 };
 
+export const PORTFOLIO_METRICS_QUERY_KEY = ['portfolio-metrics'];
+
 export const usePortfolioMetrics = () => {
   return useQuery({
-    queryKey: ['portfolio-metrics'],
+    queryKey: PORTFOLIO_METRICS_QUERY_KEY,
     queryFn: fetchPortfolioMetrics,
     staleTime: 30000, // Data stays fresh for 30 seconds
     gcTime: 300000, // Cache kept for 5 minutes
