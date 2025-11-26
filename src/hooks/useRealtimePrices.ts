@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useWebSocketMonitor } from '@/contexts/WebSocketMonitorContext';
 
 export interface RealtimePrice {
   symbol: string;
@@ -21,13 +22,20 @@ export const useRealtimePrices = (symbols?: string[]) => {
   const reconnectAttemptsRef = useRef(0);
   const connectionTimeoutRef = useRef<number | null>(null);
   const pingIntervalRef = useRef<number | null>(null);
+  const pingTimestampRef = useRef<number | null>(null);
   const MAX_RECONNECT_ATTEMPTS = 5;
   const BASE_RECONNECT_DELAY = 1000;
   const CONNECTION_TIMEOUT = 10000;
   const PING_INTERVAL = 30000;
+  
+  const monitor = useWebSocketMonitor();
+  const connectionId = 'realtime-prices';
 
   useEffect(() => {
     const projectId = 'ikrivrudkvvnksollslh';
+
+    // Register connection with monitor
+    monitor.registerConnection(connectionId, 'Realtime Prices');
 
     let cancelled = false;
 
@@ -82,10 +90,12 @@ export const useRealtimePrices = (symbols?: string[]) => {
                 setConnected(true);
                 setError(null);
                 reconnectAttemptsRef.current = 0;
+                monitor.updateConnectionStatus(connectionId, 'connected');
 
-                // Start ping interval to keep connection alive
+                // Start ping interval to keep connection alive and measure latency
                 pingIntervalRef.current = window.setInterval(() => {
                     if (ws.readyState === WebSocket.OPEN) {
+                        pingTimestampRef.current = Date.now();
                         ws.send(JSON.stringify({ type: 'ping' }));
                     }
                 }, PING_INTERVAL);
@@ -94,10 +104,22 @@ export const useRealtimePrices = (symbols?: string[]) => {
             ws.onmessage = (event) => {
               try {
                 const data = JSON.parse(event.data);
+                
+                // Record message for monitoring
+                monitor.recordMessage(connectionId);
+                
+                // Measure latency from ping
+                if (data.type === 'pong' && pingTimestampRef.current) {
+                  const latency = Date.now() - pingTimestampRef.current;
+                  monitor.recordLatency(connectionId, latency);
+                  pingTimestampRef.current = null;
+                }
+                
                 if (data.type === 'connected') {
                   console.log('Successfully connected to realtime prices');
                 } else if (data.type === 'error') {
                   console.error('Error from server:', data.message);
+                  monitor.recordError(connectionId, data.message);
                   setError(data.message);
                 } else if (data.type === 'heartbeat') {
                   if (ws.readyState === WebSocket.OPEN) {
@@ -122,11 +144,14 @@ export const useRealtimePrices = (symbols?: string[]) => {
                     : 'Connection error - reconnecting...';
                 setError(errorMessage);
                 setConnected(false);
+                monitor.recordError(connectionId, errorMessage);
+                monitor.updateConnectionStatus(connectionId, 'disconnected');
             };
 
             ws.onclose = (event) => {
               console.log(`[RealtimePrices] WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
               setConnected(false);
+              monitor.updateConnectionStatus(connectionId, 'disconnected');
               
               // Clean up intervals
               if (pingIntervalRef.current) {
@@ -141,6 +166,8 @@ export const useRealtimePrices = (symbols?: string[]) => {
               // Attempt reconnection with exponential backoff
               if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
                 reconnectAttemptsRef.current++;
+                monitor.recordReconnectAttempt(connectionId);
+                monitor.updateConnectionStatus(connectionId, 'reconnecting');
                 const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current - 1);
                 console.log(`[RealtimePrices] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
                 
@@ -148,7 +175,9 @@ export const useRealtimePrices = (symbols?: string[]) => {
                   connect();
                 }, delay);
               } else {
-                setError('Connection lost. Please refresh the page to reconnect.');
+                const errorMsg = 'Connection lost. Please refresh the page to reconnect.';
+                setError(errorMsg);
+                monitor.recordError(connectionId, errorMsg);
               }
             };
           } catch (err) {
@@ -181,8 +210,9 @@ export const useRealtimePrices = (symbols?: string[]) => {
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current);
       }
+      monitor.unregisterConnection(connectionId);
     };
-  }, [JSON.stringify(symbols)]);
+  }, [JSON.stringify(symbols), monitor]);
 
   const getPrice = useCallback((symbol: string) => {
     return prices.get(symbol);
