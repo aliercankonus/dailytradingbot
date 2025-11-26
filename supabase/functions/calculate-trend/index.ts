@@ -711,8 +711,9 @@ serve(async (req) => {
     const lastClose = parseFloat(recentKlines15m[recentKlines15m.length - 1][4]);
     const prevClose = parseFloat(recentKlines15m[recentKlines15m.length - 2][4]);
     
-    // Get MACD histogram values for divergence check
-    const macdHistogram = trend15m.indicators.macdHistogram;
+    // Get MACD histogram from 1h timeframe (primary momentum timeframe)
+    // Using 1h instead of 15m provides more stable momentum signals
+    const macdHistogram = trend1h.indicators.macdHistogram;
     const macdValues: number[] = [];
     
     // Calculate MACD for recent candles to check for divergence
