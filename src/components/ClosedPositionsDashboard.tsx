@@ -2,15 +2,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useClosedPositions } from '@/hooks/useClosedPositions';
-import { Loader2, TrendingUp, TrendingDown, Target, ShieldAlert, RotateCw } from 'lucide-react';
+import { Loader2, TrendingUp, TrendingDown, Target, ShieldAlert, RotateCw, Archive } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 export const ClosedPositionsDashboard = () => {
-  const { data: positions, isLoading } = useClosedPositions();
+  const [includeArchived, setIncludeArchived] = useState(false);
+  const { data: positions, isLoading } = useClosedPositions(includeArchived);
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState<'all' | 'profitable' | 'losses'>('all');
   const positionsPerPage = 10;
@@ -240,8 +243,23 @@ export const ClosedPositionsDashboard = () => {
       {/* Positions Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Closed Positions History</CardTitle>
-          <CardDescription>All closed trading positions with outcomes</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Closed Positions History</CardTitle>
+              <CardDescription>All closed trading positions with outcomes</CardDescription>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Archive className="h-4 w-4 text-muted-foreground" />
+              <Switch
+                id="include-archived"
+                checked={includeArchived}
+                onCheckedChange={setIncludeArchived}
+              />
+              <Label htmlFor="include-archived" className="text-sm cursor-pointer">
+                Show Archived
+              </Label>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'all' | 'profitable' | 'losses')}>
