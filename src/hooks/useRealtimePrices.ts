@@ -31,6 +31,7 @@ export const useRealtimePrices = (symbols?: string[]) => {
     return new Map();
   });
   
+  const [priceVersion, setPriceVersion] = useState(0); // Force re-renders
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -78,6 +79,7 @@ export const useRealtimePrices = (symbols?: string[]) => {
         console.log('[RealtimePrices] Updated prices map, now has', newPrices.size, 'symbols');
         return newPrices;
       });
+      setPriceVersion(v => v + 1); // Force re-render
       pendingUpdatesRef.current.clear();
     }
     updateTimerRef.current = null;
@@ -272,5 +274,5 @@ export const useRealtimePrices = (symbols?: string[]) => {
     return prices.get(symbol);
   }, [prices]);
 
-  return { prices, connected, error, getPrice };
+  return { prices, priceVersion, connected, error, getPrice };
 };

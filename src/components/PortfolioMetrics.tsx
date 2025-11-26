@@ -14,7 +14,7 @@ export const PortfolioMetrics = () => {
   
   // Get live prices for all active position symbols
   const symbols = positions.map(p => p.symbol);
-  const { prices, connected, getPrice } = useRealtimePrices(symbols);
+  const { prices, priceVersion, connected, getPrice } = useRealtimePrices(symbols);
   
   const { riskParams, loading: riskLoading } = useRiskParameters();
   const { balance: binanceBalance, loading: balanceLoading } = useBinanceBalance();
@@ -28,7 +28,7 @@ export const PortfolioMetrics = () => {
 
   const loading = riskLoading || metricsLoading || positionsLoading || balanceLoading;
 
-  // Pre-compute price map for better memoization - depend on prices Map directly
+  // Pre-compute price map for better memoization - use priceVersion to trigger updates
   const priceMap = useMemo(() => {
     const map = new Map<string, number>();
     positions.forEach(pos => {
@@ -36,7 +36,7 @@ export const PortfolioMetrics = () => {
       map.set(pos.symbol, livePrice ? parseFloat(livePrice.price) : pos.current_price || pos.entry_price);
     });
     return map;
-  }, [positions, getPrice, prices]);
+  }, [positions, getPrice, priceVersion]);
 
   // Memoize expensive calculations - only recalculate when dependencies change
   const metrics = useMemo(() => {
