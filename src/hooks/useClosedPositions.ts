@@ -20,18 +20,31 @@ export interface ClosedPosition {
   close_reason?: string | null;
 }
 
-export const useClosedPositions = () => {
+export const useClosedPositions = (includeArchived: boolean = false) => {
   return useQuery({
-    queryKey: ["closed-positions"],
+    queryKey: ["closed-positions", includeArchived],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("positions")
-        .select('*')
-        .eq("status", "closed")
-        .order("closed_at", { ascending: false });
+      if (includeArchived) {
+        // Query the combined view that includes both active and archived
+        const { data, error } = await supabase
+          .from("positions_with_archive")
+          .select('*')
+          .eq("status", "closed")
+          .order("closed_at", { ascending: false });
 
-      if (error) throw error;
-      return data as ClosedPosition[];
+        if (error) throw error;
+        return data as ClosedPosition[];
+      } else {
+        // Query only the main positions table
+        const { data, error } = await supabase
+          .from("positions")
+          .select('*')
+          .eq("status", "closed")
+          .order("closed_at", { ascending: false });
+
+        if (error) throw error;
+        return data as ClosedPosition[];
+      }
     },
   });
 };
