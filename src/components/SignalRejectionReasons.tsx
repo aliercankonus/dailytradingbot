@@ -399,7 +399,7 @@ export const SignalRejectionReasons = () => {
                     </div>
                   );
                 }
-                const { momentum, higherTimeframeFilter, timeframes, trend } = data;
+                const { momentum, higherTimeframeFilter, trend } = data;
                 const confirms = momentum?.confirms ?? false;
 
                 const candles15mOK =
@@ -467,7 +467,7 @@ export const SignalRejectionReasons = () => {
                           30m/15m:
                         </span>
                         <span className={`ml-2 font-medium ${confirms ? "text-gray-900 dark:text-gray-100" : ""}`}>
-                          {timeframes?.["30m"]?.trend ?? "N/A"} / {timeframes?.["15m"]?.trend ?? "N/A"}
+                          N/A / N/A
                         </span>
                       </div>
                     </div>
