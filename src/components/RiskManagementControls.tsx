@@ -83,14 +83,14 @@ export const RiskManagementControls = () => {
     return <Card className="p-6"><p className="text-muted-foreground">Loading...</p></Card>;
   }
 
-  // Calculate unrealized P&L from open positions using LIVE prices
   const totalPnL = positions
     .filter(p => p.status === 'active')
     .reduce((sum, pos) => {
       const livePrice = getPrice(pos.symbol);
-      const currentPrice = livePrice ? parseFloat(livePrice.price) : pos.current_price || pos.entry_price;
+      const currentPrice = livePrice
+        ? parseFloat(livePrice.price)
+        : pos.current_price || pos.entry_price;
       
-      // Calculate live P&L
       const pnl = pos.side === 'BUY'
         ? (currentPrice - pos.entry_price) * pos.quantity
         : (pos.entry_price - currentPrice) * pos.quantity;
