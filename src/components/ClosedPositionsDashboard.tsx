@@ -51,10 +51,10 @@ export const ClosedPositionsDashboard = () => {
       };
     }
     
-    // Use actual profit_loss from trades table, not unrealized_pnl
-    const profitable = positions.filter(p => (p.trades?.profit_loss || 0) > 0).length;
-    const losses = positions.filter(p => (p.trades?.profit_loss || 0) <= 0).length;
-    const totalPnL = positions.reduce((sum, p) => sum + (p.trades?.profit_loss || 0), 0);
+    // Use actual realized_pnl from positions table
+    const profitable = positions.filter(p => (p.realized_pnl || 0) > 0).length;
+    const losses = positions.filter(p => (p.realized_pnl || 0) <= 0).length;
+    const totalPnL = positions.reduce((sum, p) => sum + (p.realized_pnl || 0), 0);
     
     // Count closure reasons
     let takeProfitCount = 0;
@@ -92,9 +92,9 @@ export const ClosedPositionsDashboard = () => {
     
     switch (activeTab) {
       case 'profitable':
-        return positions.filter(p => (p.trades?.profit_loss || 0) > 0);
+        return positions.filter(p => (p.realized_pnl || 0) > 0);
       case 'losses':
-        return positions.filter(p => (p.trades?.profit_loss || 0) <= 0);
+        return positions.filter(p => (p.realized_pnl || 0) <= 0);
       default:
         return positions;
     }

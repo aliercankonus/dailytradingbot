@@ -26,22 +26,12 @@ interface Position {
 const fetchPositions = async (): Promise<Position[]> => {
   const { data, error: queryError } = await supabase
     .from('positions')
-    .select(`
-      *,
-      trades!inner(strategy_name)
-    `)
+    .select('*')
     .eq('status', 'active')
     .order('opened_at', { ascending: false });
 
   if (queryError) throw queryError;
-  
-  // Flatten the joined data
-  const formattedData = (data || []).map(pos => ({
-    ...pos,
-    strategy_name: pos.trades?.strategy_name
-  }));
-  
-  return formattedData;
+  return data || [];
 };
 
 export const POSITIONS_QUERY_KEY = ['positions'];

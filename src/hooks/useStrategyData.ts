@@ -27,27 +27,27 @@ export const useStrategyData = () => {
           return;
         }
 
-        // Fetch actual trade performance data
-        const { data: tradesData, error: tradesError } = await supabase
-          .from('trades')
-          .select('strategy_name, profit_loss, status')
+        // Fetch actual position performance data
+        const { data: positionsData, error: positionsError } = await supabase
+          .from('positions')
+          .select('strategy_name, realized_pnl, status')
           .eq('user_id', user.id)
           .eq('status', 'closed');
 
-        if (tradesError) throw tradesError;
+        if (positionsError) throw positionsError;
 
         // Calculate performance by strategy
         const performanceMap = new Map<string, { total_trades: number; winning_trades: number; total_profit: number }>();
         
-        (tradesData || []).forEach(trade => {
-          const strategyName = trade.strategy_name || 'Unknown';
+        (positionsData || []).forEach(position => {
+          const strategyName = position.strategy_name || 'Unknown';
           const current = performanceMap.get(strategyName) || { total_trades: 0, winning_trades: 0, total_profit: 0 };
           
           current.total_trades++;
-          if (trade.profit_loss > 0) {
+          if (position.realized_pnl > 0) {
             current.winning_trades++;
           }
-          current.total_profit += trade.profit_loss || 0;
+          current.total_profit += position.realized_pnl || 0;
           
           performanceMap.set(strategyName, current);
         });

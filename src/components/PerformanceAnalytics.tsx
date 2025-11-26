@@ -14,7 +14,7 @@ export const PerformanceAnalytics = () => {
       const prevEquity = index > 0 ? acc[index - 1].equity : 10000;
       acc.push({
         trade: index + 1,
-        equity: prevEquity + (trade.profit_loss || 0),
+        equity: prevEquity + (trade.realized_pnl || 0),
         date: new Date(trade.closed_at!).toLocaleDateString(),
       });
       return acc;
@@ -28,7 +28,7 @@ export const PerformanceAnalytics = () => {
       const existing = acc.find(d => d.month === month);
       
       if (existing) {
-        if ((trade.profit_loss || 0) > 0) {
+        if ((trade.realized_pnl || 0) > 0) {
           existing.wins += 1;
         } else {
           existing.losses += 1;
@@ -36,8 +36,8 @@ export const PerformanceAnalytics = () => {
       } else {
         acc.push({
           month,
-          wins: (trade.profit_loss || 0) > 0 ? 1 : 0,
-          losses: (trade.profit_loss || 0) <= 0 ? 1 : 0,
+          wins: (trade.realized_pnl || 0) > 0 ? 1 : 0,
+          losses: (trade.realized_pnl || 0) <= 0 ? 1 : 0,
         });
       }
       return acc;
@@ -51,15 +51,15 @@ export const PerformanceAnalytics = () => {
       const existing = acc.find(d => d.strategy === strategy);
       
       if (existing) {
-        existing.totalPnL += trade.profit_loss || 0;
+        existing.totalPnL += trade.realized_pnl || 0;
         existing.trades += 1;
-        if ((trade.profit_loss || 0) > 0) existing.wins += 1;
+        if ((trade.realized_pnl || 0) > 0) existing.wins += 1;
       } else {
         acc.push({
           strategy,
-          totalPnL: trade.profit_loss || 0,
+          totalPnL: trade.realized_pnl || 0,
           trades: 1,
-          wins: (trade.profit_loss || 0) > 0 ? 1 : 0,
+          wins: (trade.realized_pnl || 0) > 0 ? 1 : 0,
         });
       }
       return acc;
@@ -71,10 +71,10 @@ export const PerformanceAnalytics = () => {
 
   const totalPnL = trades
     .filter(t => t.closed_at)
-    .reduce((sum, t) => sum + (t.profit_loss || 0), 0);
+    .reduce((sum, t) => sum + (t.realized_pnl || 0), 0);
   
-  const winningTrades = trades.filter(t => t.closed_at && (t.profit_loss || 0) > 0).length;
-  const losingTrades = trades.filter(t => t.closed_at && (t.profit_loss || 0) <= 0).length;
+  const winningTrades = trades.filter(t => t.closed_at && (t.realized_pnl || 0) > 0).length;
+  const losingTrades = trades.filter(t => t.closed_at && (t.realized_pnl || 0) <= 0).length;
   const totalClosedTrades = winningTrades + losingTrades;
   const winRate = totalClosedTrades > 0 ? (winningTrades / totalClosedTrades) * 100 : 0;
 
@@ -124,7 +124,7 @@ export const PerformanceAnalytics = () => {
             <span className="text-sm font-medium">Avg Win/Loss</span>
           </div>
           <div className="text-2xl font-bold">
-            ${winningTrades > 0 ? (trades.filter(t => (t.profit_loss || 0) > 0).reduce((s, t) => s + (t.profit_loss || 0), 0) / winningTrades).toFixed(2) : '0.00'}
+            ${winningTrades > 0 ? (trades.filter(t => (t.realized_pnl || 0) > 0).reduce((s, t) => s + (t.realized_pnl || 0), 0) / winningTrades).toFixed(2) : '0.00'}
           </div>
         </Card>
       </div>
