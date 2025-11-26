@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { useEffect } from 'react';
 
 interface Trade {
   id: string;
@@ -19,35 +20,58 @@ interface Trade {
   strategy_name: string | null;
 }
 
+const fetchTrades = async (): Promise<Trade[]> => {
+  const { data, error: queryError } = await supabase
+    .from('trades')
+    .select('*')
+    .order('executed_at', { ascending: false })
+    .limit(100); // Limit to recent 100 trades for performance
+
+  if (queryError) throw queryError;
+  return data || [];
+};
+
+export const TRADES_QUERY_KEY = ['trades'];
+
 export const useTrades = () => {
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: TRADES_QUERY_KEY,
+    queryFn: fetchTrades,
+    staleTime: 30000, // 30 seconds
+    gcTime: 300000, // 5 minutes
+    refetchInterval: 60000, // Background refetch every 60 seconds
+    refetchOnWindowFocus: false,
+  });
 
-  const fetchTrades = async () => {
-    try {
-      setLoading(true);
-      const { data, error: queryError } = await supabase
-        .from('trades')
-        .select('*')
-        .order('executed_at', { ascending: false });
-
-      if (queryError) throw queryError;
-      setTrades(data || []);
-    } catch (err) {
-      console.error('Error fetching trades:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch trades');
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Set up real-time subscription for trades
   useEffect(() => {
-    fetchTrades();
-    const interval = setInterval(fetchTrades, 10000);
+    const channel = supabase
+      .channel('trades-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'trades'
+        },
+        () => {
+          // Invalidate trades cache on any change
+          queryClient.invalidateQueries({ queryKey: TRADES_QUERY_KEY });
+        }
+      )
+      .subscribe();
 
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
 
-  return { trades, loading, error, refetch: fetchTrades };
+  return { 
+    trades: data || [], 
+    loading: isLoading, 
+    error: error?.message || null, 
+    refetch 
+  };
 };
