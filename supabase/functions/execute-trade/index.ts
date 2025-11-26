@@ -352,8 +352,6 @@ serve(async (req) => {
         current_price: executedPrice,
         stop_loss: stopLoss,
         take_profit: takeProfit,
-        unrealized_pnl: 0,
-        unrealized_pnl_percent: 0,
         status: 'active',
         trend: currentTrend,
         confidence_score: signal.confidence_score,

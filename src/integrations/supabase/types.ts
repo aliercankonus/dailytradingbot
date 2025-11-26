@@ -297,8 +297,6 @@ export type Database = {
           take_profit: number | null
           trend: string | null
           trend_consistency: number | null
-          unrealized_pnl: number | null
-          unrealized_pnl_percent: number | null
           updated_at: string | null
           user_id: string | null
         }
@@ -328,8 +326,6 @@ export type Database = {
           take_profit?: number | null
           trend?: string | null
           trend_consistency?: number | null
-          unrealized_pnl?: number | null
-          unrealized_pnl_percent?: number | null
           updated_at?: string | null
           user_id?: string | null
         }
@@ -359,8 +355,6 @@ export type Database = {
           take_profit?: number | null
           trend?: string | null
           trend_consistency?: number | null
-          unrealized_pnl?: number | null
-          unrealized_pnl_percent?: number | null
           updated_at?: string | null
           user_id?: string | null
         }
@@ -402,8 +396,6 @@ export type Database = {
           take_profit: number | null
           trend: string | null
           trend_consistency: number | null
-          unrealized_pnl: number | null
-          unrealized_pnl_percent: number | null
           updated_at: string | null
           user_id: string
         }
@@ -434,8 +426,6 @@ export type Database = {
           take_profit?: number | null
           trend?: string | null
           trend_consistency?: number | null
-          unrealized_pnl?: number | null
-          unrealized_pnl_percent?: number | null
           updated_at?: string | null
           user_id: string
         }
@@ -466,8 +456,6 @@ export type Database = {
           take_profit?: number | null
           trend?: string | null
           trend_consistency?: number | null
-          unrealized_pnl?: number | null
-          unrealized_pnl_percent?: number | null
           updated_at?: string | null
           user_id?: string
         }
@@ -993,8 +981,6 @@ export type Database = {
           take_profit: number | null
           trend: string | null
           trend_consistency: number | null
-          unrealized_pnl: number | null
-          unrealized_pnl_percent: number | null
           updated_at: string | null
           user_id: string | null
         }

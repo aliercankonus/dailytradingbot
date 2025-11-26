@@ -14,8 +14,6 @@ interface Position {
   quantity: number;
   entry_price: number;
   current_price: number;
-  unrealized_pnl: number;
-  unrealized_pnl_percent: number;
   trend: string;
   confidence_score: number;
   opened_at: string;
@@ -114,8 +112,7 @@ async function rebalanceUserPositions(
     .from('positions')
     .select('*')
     .eq('user_id', user_id)
-    .eq('status', 'active')
-    .order('unrealized_pnl_percent', { ascending: true }); // Most losing first
+    .eq('status', 'active');
 
   if (positionsError) {
     throw positionsError;
@@ -126,13 +123,25 @@ async function rebalanceUserPositions(
     return { success: true, positions_closed: 0, signals_generated: 0 };
   }
 
-  console.log(`User ${user_id}: Found ${positions.length} active positions`);
+  // Calculate unrealized P&L for each position dynamically
+  const positionsWithPnL = positions.map((pos: any) => {
+    const currentPrice = pos.current_price || pos.entry_price;
+    const unrealized_pnl_percent = pos.side === 'BUY'
+      ? ((currentPrice - pos.entry_price) / pos.entry_price) * 100
+      : ((pos.entry_price - currentPrice) / pos.entry_price) * 100;
+    return { ...pos, unrealized_pnl_percent };
+  });
+
+  // Sort by P&L percent (most losing first)
+  positionsWithPnL.sort((a: any, b: any) => a.unrealized_pnl_percent - b.unrealized_pnl_percent);
+
+  console.log(`User ${user_id}: Found ${positionsWithPnL.length} active positions`);
 
   // Identify underwater positions that conflict with market trend
-  const positionsToRebalance: Position[] = [];
+  const positionsToRebalance: (Position & { unrealized_pnl_percent: number })[] = [];
   const symbolsToAnalyze = new Set<string>();
 
-  for (const position of positions) {
+  for (const position of positionsWithPnL) {
     // Only consider positions losing more than threshold
     if (position.unrealized_pnl_percent < -rebalance_loss_threshold_percent) {
       positionsToRebalance.push(position);
@@ -165,7 +174,7 @@ async function rebalanceUserPositions(
   }
 
   // Identify positions that conflict with current market trend
-  const positionsToClose: Position[] = [];
+  const positionsToClose: (Position & { unrealized_pnl_percent: number })[] = [];
   
   for (const position of positionsToRebalance) {
     const trend = trendData[position.symbol];

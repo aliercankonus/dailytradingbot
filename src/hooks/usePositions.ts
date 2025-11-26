@@ -11,8 +11,6 @@ interface Position {
   current_price: number | null;
   stop_loss: number;
   take_profit: number;
-  unrealized_pnl: number | null;
-  unrealized_pnl_percent: number | null;
   status: string;
   opened_at: string;
   trend?: string;
