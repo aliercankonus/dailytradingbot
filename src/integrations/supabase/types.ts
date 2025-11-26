@@ -374,6 +374,113 @@ export type Database = {
           },
         ]
       }
+      positions_archive: {
+        Row: {
+          archived_at: string | null
+          binance_order_id: string | null
+          close_reason: string | null
+          closed_at: string | null
+          closed_by_rebalancer: boolean | null
+          confidence_score: number | null
+          current_price: number | null
+          entry_price: number
+          executed_at: string | null
+          exit_price: number | null
+          id: string
+          opened_at: string | null
+          opened_by_rebalancer: boolean | null
+          order_type: string | null
+          quantity: number
+          realized_pnl: number | null
+          realized_pnl_percent: number | null
+          side: string
+          signal_id: string | null
+          status: string
+          stop_loss: number | null
+          strategy_name: string | null
+          symbol: string
+          take_profit: number | null
+          trend: string | null
+          trend_consistency: number | null
+          unrealized_pnl: number | null
+          unrealized_pnl_percent: number | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          archived_at?: string | null
+          binance_order_id?: string | null
+          close_reason?: string | null
+          closed_at?: string | null
+          closed_by_rebalancer?: boolean | null
+          confidence_score?: number | null
+          current_price?: number | null
+          entry_price: number
+          executed_at?: string | null
+          exit_price?: number | null
+          id: string
+          opened_at?: string | null
+          opened_by_rebalancer?: boolean | null
+          order_type?: string | null
+          quantity: number
+          realized_pnl?: number | null
+          realized_pnl_percent?: number | null
+          side: string
+          signal_id?: string | null
+          status: string
+          stop_loss?: number | null
+          strategy_name?: string | null
+          symbol: string
+          take_profit?: number | null
+          trend?: string | null
+          trend_consistency?: number | null
+          unrealized_pnl?: number | null
+          unrealized_pnl_percent?: number | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          archived_at?: string | null
+          binance_order_id?: string | null
+          close_reason?: string | null
+          closed_at?: string | null
+          closed_by_rebalancer?: boolean | null
+          confidence_score?: number | null
+          current_price?: number | null
+          entry_price?: number
+          executed_at?: string | null
+          exit_price?: number | null
+          id?: string
+          opened_at?: string | null
+          opened_by_rebalancer?: boolean | null
+          order_type?: string | null
+          quantity?: number
+          realized_pnl?: number | null
+          realized_pnl_percent?: number | null
+          side?: string
+          signal_id?: string | null
+          status?: string
+          stop_loss?: number | null
+          strategy_name?: string | null
+          symbol?: string
+          take_profit?: number | null
+          trend?: string | null
+          trend_consistency?: number | null
+          unrealized_pnl?: number | null
+          unrealized_pnl_percent?: number | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "positions_archive_signal_id_fkey"
+            columns: ["signal_id"]
+            isOneToOne: false
+            referencedRelation: "trading_signals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -858,9 +965,49 @@ export type Database = {
         }
         Relationships: []
       }
+      positions_with_archive: {
+        Row: {
+          binance_order_id: string | null
+          close_reason: string | null
+          closed_at: string | null
+          closed_by_rebalancer: boolean | null
+          confidence_score: number | null
+          current_price: number | null
+          entry_price: number | null
+          executed_at: string | null
+          exit_price: number | null
+          id: string | null
+          is_archived: boolean | null
+          opened_at: string | null
+          opened_by_rebalancer: boolean | null
+          order_type: string | null
+          quantity: number | null
+          realized_pnl: number | null
+          realized_pnl_percent: number | null
+          side: string | null
+          signal_id: string | null
+          status: string | null
+          stop_loss: number | null
+          strategy_name: string | null
+          symbol: string | null
+          take_profit: number | null
+          trend: string | null
+          trend_consistency: number | null
+          unrealized_pnl: number | null
+          unrealized_pnl_percent: number | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
-      [_ in never]: never
+      archive_old_positions: {
+        Args: never
+        Returns: {
+          archived_count: number
+        }[]
+      }
     }
     Enums: {
       market_trend: "bullish" | "bearish" | "ranging"
