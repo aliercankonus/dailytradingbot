@@ -272,6 +272,7 @@ export const SignalRejectionReasons = () => {
 
       // Check MACD histogram
       const macdHistogram = td?.momentum?.macdHistogram ?? fs.momentum?.macdHistogram;
+      const macdDirectionAligned = td?.momentum?.macdDirectionAligned ?? fs.momentum?.macdDirectionAligned ?? false;
       const macdExpanding = td?.momentum?.macdExpanding ?? fs.momentum?.macdExpanding ?? false;
       
       // Check ADX
@@ -286,7 +287,13 @@ export const SignalRejectionReasons = () => {
         details.push(`Price/MACD divergence detected`);
       }
       
-      if (!macdExpanding) {
+      if (!macdDirectionAligned) {
+        if (macdHistogram !== undefined) {
+          details.push(`MACD histogram: ${macdHistogram.toFixed(4)} (wrong direction for trend)`);
+        } else {
+          details.push(`MACD histogram: unavailable`);
+        }
+      } else if (!macdExpanding) {
         if (macdHistogram !== undefined) {
           details.push(`MACD histogram: ${macdHistogram.toFixed(4)} (need >0.01 expansion)`);
         } else {
@@ -410,7 +417,9 @@ export const SignalRejectionReasons = () => {
 
                 const lastCloseAligns = momentum?.lastCloseAlignsWithTrend ?? false;
                 const noDivergence = !momentum?.hasDivergence;
-                const macdOK = momentum?.macdExpanding ?? false;
+                const macdDirectionOK = momentum?.macdDirectionAligned ?? false;
+                const macdExpandingOK = momentum?.macdExpanding ?? false;
+                const macdOK = macdDirectionOK && macdExpandingOK;
                 const adxOK = (momentum?.adx ?? 0) >= 20;
                 return (
                   <div
@@ -532,19 +541,20 @@ export const SignalRejectionReasons = () => {
                             className={
                               macdOK
                                 ? "text-green-700 dark:text-green-300 font-medium"
-                                : confirms
-                                  ? "text-gray-900 dark:text-gray-100"
-                                  : "text-muted-foreground"
+                                : "text-red-700 dark:text-red-300 font-medium"
                             }
                           >
                             {momentum?.macdHistogram?.toFixed(3) ?? "N/A"}
+                            {!macdDirectionOK && momentum?.macdHistogram !== undefined && (
+                              <span className="text-xs ml-1">
+                                (wrong direction)
+                              </span>
+                            )}
                           </span>
                           {macdOK ? (
                             <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
                           ) : (
-                            <XCircle
-                              className={`h-4 w-4 ${confirms ? "text-gray-600 dark:text-gray-400" : "text-muted-foreground"}`}
-                            />
+                            <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
                           )}
                         </div>
                       </div>
@@ -582,7 +592,8 @@ export const SignalRejectionReasons = () => {
                           {!lastCloseAligns && (!noDivergence || !macdOK || !adxOK) && ", "}
                           {!noDivergence && "No divergence between price and MACD"}
                           {!noDivergence && (!macdOK || !adxOK) && ", "}
-                          {!macdOK && "MACD histogram needs >0.01"}
+                          {!macdOK && !macdDirectionOK && "MACD histogram direction must align with trend"}
+                          {!macdOK && macdDirectionOK && !macdExpandingOK && "MACD histogram needs >0.01 expansion"}
                           {!macdOK && !adxOK && ", "}
                           {!adxOK && "ADX ≥20 required"}
                         </p>

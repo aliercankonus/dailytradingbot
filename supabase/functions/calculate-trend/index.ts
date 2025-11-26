@@ -757,12 +757,19 @@ serve(async (req) => {
         (priceMovement < 0 && macdMovement > 0);
     }
     
-    // MACD histogram must be expanding (shows strength building)
-    const macdExpanding = Math.abs(macdHistogram) > 0.01;
-    const macdStrong = Math.abs(macdHistogram) > 0.5;
+    // MACD histogram must be expanding AND aligned with trend direction
+    // For bullish: histogram > 0 AND expanding
+    // For bearish: histogram < 0 AND expanding (more negative)
+    const macdDirectionAligned =
+      (effectiveTrendForMomentum === "bullish" && macdHistogram > 0) ||
+      (effectiveTrendForMomentum === "bearish" && macdHistogram < 0) ||
+      effectiveTrendForMomentum === "neutral";
+    
+    const macdExpanding = Math.abs(macdHistogram) > 0.01 && macdDirectionAligned;
+    const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned;
     
     // NEW SIMPLIFIED MOMENTUM GATE:
-    // 1. MACD histogram expanding
+    // 1. MACD histogram expanding in correct direction
     // 2. Last close aligns with trend direction
     // 3. No divergence detected
     // 4. ADX >= 20 for sufficient trend strength (calculated earlier for ranging detection)
@@ -838,6 +845,7 @@ serve(async (req) => {
           hasDivergence,
           macdHistogram: Math.round(macdHistogram * 1000) / 1000,
           macdExpanding,
+          macdDirectionAligned,
           adx: Math.round(adx * 10) / 10,
         },
         // Multi-timeframe details (legacy format for compatibility)

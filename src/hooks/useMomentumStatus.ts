@@ -10,6 +10,7 @@ interface MomentumData {
     hasDivergence: boolean;
     macdHistogram: number;
     macdExpanding: boolean;
+    macdDirectionAligned: boolean;
     adx: number;
   };
   higherTimeframeFilter: {
