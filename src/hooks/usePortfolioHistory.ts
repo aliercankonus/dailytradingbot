@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
 interface PortfolioSnapshot {
@@ -28,41 +28,34 @@ interface PortfolioSnapshot {
   paper_trading_mode: boolean;
 }
 
+const fetchPortfolioHistory = async (days: number): Promise<PortfolioSnapshot[]> => {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  
+  const { data, error } = await supabase
+    .from('portfolio_performance_history')
+    .select('*')
+    .gte('snapshot_date', startDate.toISOString().split('T')[0])
+    .order('snapshot_date', { ascending: true });
+
+  if (error) throw error;
+  return data || [];
+};
+
 export const usePortfolioHistory = (days: number = 30) => {
-  const [history, setHistory] = useState<PortfolioSnapshot[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['portfolio-history', days],
+    queryFn: () => fetchPortfolioHistory(days),
+    staleTime: 300000, // Data stays fresh for 5 minutes
+    gcTime: 600000, // Cache kept for 10 minutes
+    refetchInterval: 300000, // Background refetch every 5 minutes
+    refetchOnWindowFocus: false, // Don't refetch on window focus
+  });
 
-  const fetchHistory = async () => {
-    try {
-      setLoading(true);
-      
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - days);
-      
-      const { data, error: queryError } = await supabase
-        .from('portfolio_performance_history')
-        .select('*')
-        .gte('snapshot_date', startDate.toISOString().split('T')[0])
-        .order('snapshot_date', { ascending: true });
-
-      if (queryError) throw queryError;
-      setHistory(data || []);
-    } catch (err) {
-      console.error('Error fetching portfolio history:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch history');
-    } finally {
-      setLoading(false);
-    }
+  return {
+    history: data || [],
+    loading: isLoading,
+    error: error?.message || null,
+    refetch
   };
-
-  useEffect(() => {
-    fetchHistory();
-
-    // Refresh every 5 minutes
-    const interval = setInterval(fetchHistory, 300000);
-    return () => clearInterval(interval);
-  }, [days]);
-
-  return { history, loading, error, refetch: fetchHistory };
 };
