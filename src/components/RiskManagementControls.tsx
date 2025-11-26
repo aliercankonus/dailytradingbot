@@ -25,7 +25,7 @@ export const RiskManagementControls = () => {
   
   // Get live prices for all active position symbols
   const symbols = positions.map(p => p.symbol);
-  const { getPrice } = useRealtimePrices(symbols);
+  const { prices, getPrice } = useRealtimePrices(symbols);
   
   const { toast } = useToast();
 
