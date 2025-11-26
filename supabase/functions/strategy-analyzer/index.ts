@@ -352,17 +352,13 @@ serve(async (req) => {
               trendConsistency,
               meetsThreshold,
               momentum: trendData.momentum,
-              consecutive15mBullish: trendData.momentum?.consecutive15mBullish || 0,
-              consecutive15mBearish: trendData.momentum?.consecutive15mBearish || 0,
-              consecutive30mBullish: trendData.momentum?.consecutive30mBullish || 0,
-              consecutive30mBearish: trendData.momentum?.consecutive30mBearish || 0,
               trend4h: trendData.higherTimeframeFilter?.trend4h,
               trend1h: trendData.higherTimeframeFilter?.trend1h,
               aligned: higherTimeframeFilter.aligned,
               neutralAllowedWithStrongHigherTimeframe:
                 higherTimeframeFilter.neutralAllowedWithStrongHigherTimeframe || false,
               required: !hasMomentumConfirmation
-                ? "momentum confirmation (≥2 consecutive candles on 15m OR 30m + MACD expansion)"
+                ? "momentum confirmation (MACD histogram expanding + last close aligns with trend + no divergence)"
                 : "confidence/consistency threshold",
             };
 
