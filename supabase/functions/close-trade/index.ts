@@ -123,8 +123,6 @@ async function closePosition(supabase: any, position: any, manualClose: boolean 
     .update({
       status: 'closed',
       current_price: currentPrice,
-      unrealized_pnl: 0, // Clear unrealized PnL as it's now realized
-      unrealized_pnl_percent: 0,
       realized_pnl: pnl,
       realized_pnl_percent: pnlPercent,
       exit_price: currentPrice,

@@ -51,9 +51,14 @@ export const TrailingStopMonitor = () => {
         .eq('status', 'active');
 
       if (positions) {
-        const profitablePositions = positions.filter(p => 
-          (p.unrealized_pnl_percent || 0) > 1
-        );
+        // Calculate P&L dynamically
+        const profitablePositions = positions.filter(p => {
+          const currentPrice = p.current_price || p.entry_price;
+          const pnlPercent = p.side === 'BUY'
+            ? ((currentPrice - p.entry_price) / p.entry_price) * 100
+            : ((p.entry_price - currentPrice) / p.entry_price) * 100;
+          return pnlPercent > 1;
+        });
         setActiveTrails(profitablePositions.length);
       }
     };
@@ -76,8 +81,14 @@ export const TrailingStopMonitor = () => {
           const oldPos = payload.old as any;
           const newPos = payload.new as any;
           
+          // Calculate P&L dynamically
+          const currentPrice = newPos.current_price || newPos.entry_price;
+          const pnlPercent = newPos.side === 'BUY'
+            ? ((currentPrice - newPos.entry_price) / newPos.entry_price) * 100
+            : ((newPos.entry_price - currentPrice) / newPos.entry_price) * 100;
+          
           // Detect if stop loss was updated (trailing stop triggered)
-          if (oldPos.stop_loss !== newPos.stop_loss && (newPos.unrealized_pnl_percent || 0) > 0) {
+          if (oldPos.stop_loss !== newPos.stop_loss && pnlPercent > 0) {
             // Skip if old stop loss is missing
             if (!oldPos.stop_loss || !newPos.stop_loss) return;
             
@@ -86,8 +97,8 @@ export const TrailingStopMonitor = () => {
               side: newPos.side,
               oldStopLoss: oldPos.stop_loss,
               newStopLoss: newPos.stop_loss,
-              currentPrice: newPos.current_price,
-              pnlPercent: newPos.unrealized_pnl_percent,
+              currentPrice: currentPrice,
+              pnlPercent: pnlPercent,
               timestamp: new Date().toISOString(),
             };
             
@@ -100,7 +111,7 @@ export const TrailingStopMonitor = () => {
 
             toast({
               title: "🛡️ Trailing Stop Activated",
-              description: `${newPos.symbol} ${newPos.side}: Stop loss improved by ${stopImprovement}% to $${newPos.stop_loss.toFixed(2)} (P&L: +${newPos.unrealized_pnl_percent.toFixed(2)}%)`,
+              description: `${newPos.symbol} ${newPos.side}: Stop loss improved by ${stopImprovement}% to $${newPos.stop_loss.toFixed(2)} (P&L: +${pnlPercent.toFixed(2)}%)`,
               duration: 5000,
             });
           }

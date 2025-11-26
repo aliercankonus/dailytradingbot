@@ -64,11 +64,14 @@ serve(async (req) => {
           0
         );
 
-        // Calculate unrealized P&L from active positions
-        const unrealizedPnL = (positions || []).reduce(
-          (sum, pos) => sum + (pos.unrealized_pnl || 0),
-          0
-        );
+        // Calculate unrealized P&L from active positions (dynamically calculated)
+        const unrealizedPnL = (positions || []).reduce((sum, pos) => {
+          const currentPrice = pos.current_price || pos.entry_price;
+          const pnl = pos.side === 'BUY'
+            ? (currentPrice - pos.entry_price) * pos.quantity
+            : (pos.entry_price - currentPrice) * pos.quantity;
+          return sum + pnl;
+        }, 0);
 
         const totalPnL = realizedPnL + unrealizedPnL;
         const currentPortfolioValue = user.portfolio_value + totalPnL;
