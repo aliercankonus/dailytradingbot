@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWebSocketMonitor } from '@/contexts/WebSocketMonitorContext';
 
+// Cache key for localStorage
+const PRICE_CACHE_KEY = 'realtime_prices_cache';
+
 export interface RealtimePrice {
   symbol: string;
   price: string;
@@ -14,7 +17,20 @@ export interface RealtimePrice {
 }
 
 export const useRealtimePrices = (symbols?: string[]) => {
-  const [prices, setPrices] = useState<Map<string, RealtimePrice>>(new Map());
+  // Load cached prices immediately on mount for instant display
+  const [prices, setPrices] = useState<Map<string, RealtimePrice>>(() => {
+    try {
+      const cached = localStorage.getItem(PRICE_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        return new Map(Object.entries(parsed));
+      }
+    } catch (e) {
+      console.error('Failed to load cached prices:', e);
+    }
+    return new Map();
+  });
+  
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -22,9 +38,12 @@ export const useRealtimePrices = (symbols?: string[]) => {
   const reconnectAttemptsRef = useRef(0);
   const connectionTimeoutRef = useRef<number | null>(null);
   const isConnectingRef = useRef(false);
+  const pendingUpdatesRef = useRef<Map<string, RealtimePrice>>(new Map());
+  const updateTimerRef = useRef<number | null>(null);
   const MAX_RECONNECT_ATTEMPTS = 5;
   const BASE_RECONNECT_DELAY = 2000;
   const CONNECTION_TIMEOUT = 15000;
+  const UPDATE_BATCH_DELAY = 100; // Batch updates every 100ms
   
   const monitor = useWebSocketMonitor();
   const connectionId = useRef(`realtime-prices-${Date.now()}`);
@@ -37,6 +56,38 @@ export const useRealtimePrices = (symbols?: string[]) => {
     monitor.registerConnection(connectionId.current, 'Realtime Prices');
     return () => monitor.unregisterConnection(connectionId.current);
   }, []);
+
+  // Batch price updates for performance
+  const flushPendingUpdates = useCallback(() => {
+    if (pendingUpdatesRef.current.size > 0) {
+      setPrices((prev) => {
+        const newPrices = new Map(prev);
+        pendingUpdatesRef.current.forEach((price, symbol) => {
+          newPrices.set(symbol, price);
+        });
+        
+        // Save to localStorage for instant load next time
+        try {
+          const cacheObj = Object.fromEntries(newPrices);
+          localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(cacheObj));
+        } catch (e) {
+          console.error('Failed to cache prices:', e);
+        }
+        
+        return newPrices;
+      });
+      pendingUpdatesRef.current.clear();
+    }
+    updateTimerRef.current = null;
+  }, []);
+
+  const schedulePriceUpdate = useCallback((symbol: string, data: RealtimePrice) => {
+    pendingUpdatesRef.current.set(symbol, data);
+    
+    if (updateTimerRef.current === null) {
+      updateTimerRef.current = window.setTimeout(flushPendingUpdates, UPDATE_BATCH_DELAY);
+    }
+  }, [flushPendingUpdates]);
 
   useEffect(() => {
     const projectId = 'ikrivrudkvvnksollslh';
@@ -120,12 +171,8 @@ export const useRealtimePrices = (symbols?: string[]) => {
                 } else if (data.type === 'heartbeat') {
                   // Heartbeat received, no response needed
                 } else if (data.symbol) {
-                  // Batch price updates to reduce re-renders
-                  setPrices((prev) => {
-                    const newPrices = new Map(prev);
-                    newPrices.set(data.symbol, data);
-                    return newPrices;
-                  });
+                  // Use batched updates for better performance
+                  schedulePriceUpdate(data.symbol, data);
                 }
               } catch (err) {
                 console.error('Error parsing WebSocket message:', err);
@@ -193,6 +240,12 @@ export const useRealtimePrices = (symbols?: string[]) => {
       isConnectingRef.current = false;
       console.log('[RealtimePrices] Cleaning up WebSocket connection');
       
+      // Flush any pending updates before cleanup
+      if (updateTimerRef.current !== null) {
+        clearTimeout(updateTimerRef.current);
+        flushPendingUpdates();
+      }
+      
       if (reconnectTimeoutRef.current !== null) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
@@ -209,7 +262,7 @@ export const useRealtimePrices = (symbols?: string[]) => {
         }
       }
     };
-  }, [symbolsKey]);
+  }, [symbolsKey, flushPendingUpdates]);
 
   const getPrice = useCallback((symbol: string) => {
     return prices.get(symbol);

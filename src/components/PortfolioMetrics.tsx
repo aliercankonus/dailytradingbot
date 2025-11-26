@@ -28,6 +28,16 @@ export const PortfolioMetrics = () => {
 
   const loading = riskLoading || metricsLoading || positionsLoading || balanceLoading;
 
+  // Pre-compute price map for better memoization
+  const priceMap = useMemo(() => {
+    const map = new Map<string, number>();
+    positions.forEach(pos => {
+      const livePrice = getPrice(pos.symbol);
+      map.set(pos.symbol, livePrice ? parseFloat(livePrice.price) : pos.current_price || pos.entry_price);
+    });
+    return map;
+  }, [positions, getPrice]);
+
   // Memoize expensive calculations - only recalculate when dependencies change
   const metrics = useMemo(() => {
     if (!portfolioMetrics) {
@@ -54,12 +64,11 @@ export const PortfolioMetrics = () => {
     // Get realized P&L from database view (pre-aggregated)
     const realizedPnL = portfolioMetrics.realized_pnl;
     
-    // Calculate unrealized P&L from active positions using LIVE prices
+    // Calculate unrealized P&L from active positions using LIVE prices from priceMap
     const unrealizedPnL = positions
       .filter(p => p.status === 'active')
       .reduce((sum, pos) => {
-        const livePrice = getPrice(pos.symbol);
-        const currentPrice = livePrice ? parseFloat(livePrice.price) : pos.current_price || pos.entry_price;
+        const currentPrice = priceMap.get(pos.symbol) || pos.entry_price;
         
         // Calculate live P&L
         const pnl = pos.side === 'BUY'
@@ -86,7 +95,7 @@ export const PortfolioMetrics = () => {
       isPositiveReturn: totalReturn >= 0,
       hasData: portfolioMetrics.total_closed_trades > 0 || positions.length > 0,
     };
-  }, [portfolioMetrics, positions, getPrice, binanceBalance, riskParams]);
+  }, [portfolioMetrics, positions, priceMap, binanceBalance, riskParams]);
 
   const metricsDisplay = [
     {
