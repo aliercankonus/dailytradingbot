@@ -6,6 +6,7 @@ import { usePositions } from "@/hooks/usePositions";
 import { useBinanceBalance } from "@/hooks/useBinanceBalance";
 import { usePortfolioMetrics } from "@/hooks/usePortfolioMetrics";
 import { useRealtimePortfolioSync } from "@/hooks/useRealtimePortfolioSync";
+import { useRealtimePositionSync } from "@/hooks/useRealtimePositionSync";
 import { useMemo } from "react";
 
 export const PortfolioMetrics = () => {
@@ -21,8 +22,9 @@ export const PortfolioMetrics = () => {
   // Use cached portfolio metrics with React Query
   const { data: portfolioMetrics, isLoading: metricsLoading } = usePortfolioMetrics();
   
-  // Enable real-time cache invalidation when trades close
+  // Enable real-time cache invalidation
   useRealtimePortfolioSync();
+  useRealtimePositionSync();
 
   const loading = riskLoading || metricsLoading || positionsLoading || balanceLoading;
 
