@@ -4,7 +4,7 @@ import { useRealtimePrices } from "@/hooks/useRealtimePrices";
 import { useRiskParameters } from "@/hooks/useRiskParameters";
 import { usePositions } from "@/hooks/usePositions";
 import { useBinanceBalance } from "@/hooks/useBinanceBalance";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 export const PortfolioMetrics = () => {
@@ -19,13 +19,13 @@ export const PortfolioMetrics = () => {
   const [allTrades, setAllTrades] = useState<any[]>([]);
   const [tradesLoading, setTradesLoading] = useState(true);
 
-  // Fetch ALL trades for accurate P&L calculation
+  // Fetch ALL trades for accurate P&L calculation (cached with longer interval)
   useEffect(() => {
     const fetchAllTrades = async () => {
       try {
         const { data, error } = await supabase
           .from('trades')
-          .select('*')
+          .select('status, profit_loss')
           .order('executed_at', { ascending: false });
         
         if (error) throw error;
@@ -38,20 +38,21 @@ export const PortfolioMetrics = () => {
     };
 
     fetchAllTrades();
-    const interval = setInterval(fetchAllTrades, 10000);
+    // Reduced interval to 30s - trades don't change that frequently
+    const interval = setInterval(fetchAllTrades, 30000);
     return () => clearInterval(interval);
   }, []);
 
   const loading = riskLoading || tradesLoading || positionsLoading || balanceLoading;
 
-  // Calculate metrics from real portfolio data
-  const calculateMetrics = () => {
+  // Memoize expensive calculations - only recalculate when dependencies change
+  const metrics = useMemo(() => {
     // Use Binance balance for live trading, database value for paper trading
     const basePortfolio = binanceBalance?.isPaperTrading === false 
       ? binanceBalance.balance 
       : (riskParams?.portfolio_value || 0);
     
-    // Calculate realized P&L from ALL closed trades (not limited to 50)
+    // Calculate realized P&L from ALL closed trades
     const realizedPnL = allTrades
       .filter(t => t.status === 'closed' && t.profit_loss !== null)
       .reduce((sum, trade) => sum + (trade.profit_loss || 0), 0);
@@ -93,9 +94,7 @@ export const PortfolioMetrics = () => {
       isPositiveReturn: totalReturn >= 0,
       hasData: closedTrades.length > 0 || positions.length > 0,
     };
-  };
-
-  const metrics = calculateMetrics();
+  }, [allTrades, positions, getPrice, binanceBalance, riskParams]);
 
   const metricsDisplay = [
     {
