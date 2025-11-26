@@ -8,41 +8,38 @@ import { usePortfolioMetrics } from "@/hooks/usePortfolioMetrics";
 import { useRealtimePortfolioSync } from "@/hooks/useRealtimePortfolioSync";
 import { useRealtimePositionSync } from "@/hooks/useRealtimePositionSync";
 import { useMemo } from "react";
-
 export const PortfolioMetrics = () => {
   const { positions, loading: positionsLoading } = usePositions();
-  
+
   // Get live prices for all active position symbols
-  const symbols = positions.map(p => p.symbol);
+  const symbols = positions.map((p) => p.symbol);
   const { prices, priceVersion, connected, getPrice } = useRealtimePrices(symbols);
-  
+
   const { riskParams, loading: riskLoading } = useRiskParameters();
   const { balance: binanceBalance, loading: balanceLoading } = useBinanceBalance();
-  
+
   // Use cached portfolio metrics with React Query
   const { data: portfolioMetrics, isLoading: metricsLoading } = usePortfolioMetrics();
-  
+
   // Enable real-time cache invalidation
   useRealtimePortfolioSync();
   useRealtimePositionSync();
-
   const loading = riskLoading || metricsLoading || positionsLoading || balanceLoading;
-
   // Compute live prices directly in metrics using priceVersion to trigger updates
+  // Memoize expensive calculations - only recalculate when dependencies change
+  const metrics = useMemo(() => {
+    if (process.env.NODE_ENV === "development") {
+      console.log("[PortfolioMetrics] Recalculating metrics, positions:", positions.length);
+    }
 
-
-  // Calculate metrics on every render to avoid stale values
-  const metrics = (() => {
-    console.log('[PortfolioMetrics] Calculating metrics, positions:', positions.length);
-    
     if (!portfolioMetrics) {
       return {
-        portfolioValue: '$0.00',
-        totalPnL: '+$0.00',
-        realizedPnL: '+$0.00',
-        unrealizedPnL: '+$0.00',
-        totalReturn: '+0.00%',
-        winRate: '0.0%',
+        portfolioValue: "$0.00",
+        totalPnL: "+$0.00",
+        realizedPnL: "+$0.00",
+        unrealizedPnL: "+$0.00",
+        totalReturn: "+0.00%",
+        winRate: "0.0%",
         isPositivePnL: true,
         isPositiveRealizedPnL: true,
         isPositiveUnrealizedPnL: true,
@@ -50,50 +47,52 @@ export const PortfolioMetrics = () => {
         hasData: false,
       };
     }
-
     // Use Binance balance for live trading, database value for paper trading
-    const basePortfolio = binanceBalance?.isPaperTrading === false 
-      ? binanceBalance.balance 
-      : (riskParams?.portfolio_value || 0);
-    
+    const basePortfolio =
+      binanceBalance?.isPaperTrading === false ? (binanceBalance?.balance ?? 0) : riskParams?.portfolio_value || 0;
+
     // Get realized P&L from database view (pre-aggregated)
-    const realizedPnL = portfolioMetrics.realized_pnl;
-    
+    const realizedPnL = portfolioMetrics?.realized_pnl ?? 0;
+
     // Calculate unrealized P&L from active positions using LIVE prices (same as RiskManagementControls)
     const unrealizedPnL = positions
-      .filter(p => p.status === 'active')
+      .filter((p) => p.status === "active")
       .reduce((sum, pos) => {
-        const livePrice = getPrice(pos.symbol);
-        const currentPrice = livePrice ? parseFloat(livePrice.price) : pos.current_price || pos.entry_price;
-        
-        const pnl = pos.side === 'BUY'
-          ? (currentPrice - pos.entry_price) * pos.quantity
-          : (pos.entry_price - currentPrice) * pos.quantity;
-        
+        const livePrice = prices[pos.symbol];
+        const priceStr = livePrice?.price;
+        const currentPrice =
+          priceStr && !isNaN(parseFloat(priceStr)) ? parseFloat(priceStr) : (pos.current_price ?? pos.entry_price ?? 0);
+
+        const pnl =
+          pos.side === "BUY"
+            ? (currentPrice - (pos.entry_price ?? 0)) * (pos.quantity ?? 0)
+            : ((pos.entry_price ?? 0) - currentPrice) * (pos.quantity ?? 0);
+
         return sum + pnl;
       }, 0);
-    
-    console.log('[PortfolioMetrics] Unrealized P&L:', unrealizedPnL, 'Realized P&L:', realizedPnL);
-    
+
+    if (process.env.NODE_ENV === "development") {
+      console.log("[PortfolioMetrics] Unrealized P&L:", unrealizedPnL, "Realized P&L:", realizedPnL);
+    }
+
     const totalPnL = realizedPnL + unrealizedPnL;
     const currentValue = basePortfolio + totalPnL;
-    const totalReturn = basePortfolio > 0 ? ((totalPnL / basePortfolio) * 100) : 0;
-    
+    const totalReturn = basePortfolio > 0 ? (totalPnL / basePortfolio) * 100 : 0;
+
     return {
       portfolioValue: `$${currentValue.toFixed(2)}`,
-      totalPnL: `${totalPnL >= 0 ? '+' : ''}$${Math.abs(totalPnL).toFixed(2)}`,
-      realizedPnL: `${realizedPnL >= 0 ? '+' : ''}$${Math.abs(realizedPnL).toFixed(2)}`,
-      unrealizedPnL: `${unrealizedPnL >= 0 ? '+' : ''}$${Math.abs(unrealizedPnL).toFixed(2)}`,
-      totalReturn: `${totalReturn >= 0 ? '+' : ''}${totalReturn.toFixed(2)}%`,
-      winRate: `${portfolioMetrics.win_rate.toFixed(1)}%`,
+      totalPnL: `${totalPnL >= 0 ? "+" : ""}$${Math.abs(totalPnL).toFixed(2)}`,
+      realizedPnL: `${realizedPnL >= 0 ? "+" : ""}$${Math.abs(realizedPnL).toFixed(2)}`,
+      unrealizedPnL: `${unrealizedPnL >= 0 ? "+" : ""}$${Math.abs(unrealizedPnL).toFixed(2)}`,
+      totalReturn: `${totalReturn >= 0 ? "+" : ""}${totalReturn.toFixed(2)}%`,
+      winRate: `${(portfolioMetrics?.win_rate ?? 0).toFixed(1)}%`,
       isPositivePnL: totalPnL >= 0,
       isPositiveRealizedPnL: realizedPnL >= 0,
       isPositiveUnrealizedPnL: unrealizedPnL >= 0,
       isPositiveReturn: totalReturn >= 0,
-      hasData: portfolioMetrics.total_closed_trades > 0 || positions.length > 0,
+      hasData: (portfolioMetrics?.total_closed_trades ?? 0) > 0 || positions.length > 0,
     };
-  })();
-
+  }, [portfolioMetrics, positions, priceVersion, binanceBalance, riskParams, prices]);
   const metricsDisplay = [
     {
       label: "Portfolio Value",
@@ -138,37 +137,33 @@ export const PortfolioMetrics = () => {
       icon: Activity,
     },
   ];
-
   return (
     <Card className="h-full p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-foreground">Portfolio Overview</h3>
         <div className="flex items-center gap-2 text-xs">
-          <Activity className={`h-3 w-3 ${connected ? 'text-success animate-pulse' : 'text-muted-foreground'}`} />
-          <span className="text-muted-foreground">
-            {loading ? 'Loading...' : connected ? 'Live' : 'Connecting...'}
-          </span>
+          <Activity
+            className={`h-3 w-3 ${connected ? "text-success animate-pulse" : "text-muted-foreground"}`}
+            aria-hidden="true"
+          />
+          <span className="text-muted-foreground">{loading ? "Loading..." : connected ? "Live" : "Connecting..."}</span>
         </div>
       </div>
-      
+
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {metricsDisplay.map((metric, idx) => (
           <div key={idx} className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">{metric.label}</span>
-              <metric.icon className="h-4 w-4 text-primary" />
+              <metric.icon className="h-4 w-4 text-primary" aria-hidden="true" />
             </div>
             <div className="space-y-1">
-              <div className="text-2xl font-bold text-foreground font-mono">
-                {metric.value}
-              </div>
-              <div className={`text-sm flex items-center gap-1 ${
-                metric.isPositive ? "text-profit" : "text-loss"
-              }`}>
+              <div className="text-2xl font-bold text-foreground font-mono">{metric.value}</div>
+              <div className={`text-sm flex items-center gap-1 ${metric.isPositive ? "text-profit" : "text-loss"}`}>
                 {metric.isPositive ? (
-                  <TrendingUp className="h-3 w-3" />
+                  <TrendingUp className="h-3 w-3" aria-hidden="true" />
                 ) : (
-                  <TrendingDown className="h-3 w-3" />
+                  <TrendingDown className="h-3 w-3" aria-hidden="true" />
                 )}
                 {metric.change}
               </div>
