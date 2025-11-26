@@ -104,17 +104,17 @@ serve(async (req) => {
       .eq("user_id", user.id)
       .gte("created_at", oneMinuteAgo);
     const existingSignalsSet = new Set(existingSignals?.map((s) => s.symbol) || []);
-    // Fetch open trades and count per symbol to respect max_trades_per_symbol
-    const { data: openTrades } = await supabase
-      .from("trades")
+    // Fetch active positions and count per symbol to respect max_trades_per_symbol
+    const { data: activePositions } = await supabase
+      .from("positions")
       .select("symbol")
       .eq("user_id", user.id)
-      .eq("status", "open");
-    // Count open trades per symbol
+      .eq("status", "active");
+    // Count active positions per symbol
     const openTradesPerSymbol = new Map<string, number>();
-    openTrades?.forEach((trade) => {
-      const count = openTradesPerSymbol.get(trade.symbol) || 0;
-      openTradesPerSymbol.set(trade.symbol, count + 1);
+    activePositions?.forEach((position) => {
+      const count = openTradesPerSymbol.get(position.symbol) || 0;
+      openTradesPerSymbol.set(position.symbol, count + 1);
     });
     const signals: SignalData[] = [];
     let totalSignalsGenerated = 0;
