@@ -2,9 +2,6 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWebSocketMonitor } from '@/contexts/WebSocketMonitorContext';
 
-// Cache key for localStorage
-const PRICE_CACHE_KEY = 'realtime_prices_cache';
-
 export interface RealtimePrice {
   symbol: string;
   price: string;
@@ -17,24 +14,7 @@ export interface RealtimePrice {
 }
 
 export const useRealtimePrices = (symbols?: string[]) => {
-  // Load cached prices immediately on mount for instant display
-  const [prices, setPrices] = useState<Map<string, RealtimePrice>>(() => {
-    try {
-      const cached = localStorage.getItem(PRICE_CACHE_KEY);
-      if (cached) {
-        const parsed = JSON.parse(cached) as Record<string, RealtimePrice>;
-        const map = new Map<string, RealtimePrice>();
-        Object.entries(parsed).forEach(([symbol, price]) => {
-          map.set(symbol, price);
-          (map as any)[symbol] = price; // also expose as object-style lookup
-        });
-        return map;
-      }
-    } catch (e) {
-      console.error('Failed to load cached prices:', e);
-    }
-    return new Map();
-  });
+  const [prices, setPrices] = useState<Map<string, RealtimePrice>>(() => new Map());
   
   const [priceVersion, setPriceVersion] = useState(0); // Force re-renders
   const [connected, setConnected] = useState(false);
@@ -73,15 +53,6 @@ export const useRealtimePrices = (symbols?: string[]) => {
           newPrices.set(symbol, price);
           (newPrices as any)[symbol] = price; // allow prices[symbol] access
         });
-        
-        // Save to localStorage for instant load next time
-        try {
-          const cacheObj = Object.fromEntries(newPrices);
-          localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(cacheObj));
-        } catch (e) {
-          console.error('Failed to cache prices:', e);
-        }
-        
         console.log('[RealtimePrices] Updated prices map, now has', newPrices.size, 'symbols');
         return newPrices;
       });
