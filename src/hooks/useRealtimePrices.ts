@@ -19,8 +19,12 @@ export const useRealtimePrices = (symbols?: string[]) => {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const connectionTimeoutRef = useRef<number | null>(null);
+  const pingIntervalRef = useRef<number | null>(null);
   const MAX_RECONNECT_ATTEMPTS = 5;
-  const RECONNECT_DELAY = 3000;
+  const BASE_RECONNECT_DELAY = 1000;
+  const CONNECTION_TIMEOUT = 10000;
+  const PING_INTERVAL = 30000;
 
   useEffect(() => {
     const projectId = 'ikrivrudkvvnksollslh';
@@ -44,19 +48,47 @@ export const useRealtimePrices = (symbols?: string[]) => {
 
         const connect = () => {
           try {
+            // Clear any existing timeouts
+            if (connectionTimeoutRef.current) {
+              clearTimeout(connectionTimeoutRef.current);
+            }
+            if (pingIntervalRef.current) {
+              clearInterval(pingIntervalRef.current);
+            }
+
             if (wsRef.current) {
               wsRef.current.close();
             }
 
-            console.log('Connecting to realtime prices:', wsUrl);
+            console.log(`[RealtimePrices] Connecting (attempt ${reconnectAttemptsRef.current + 1}/${MAX_RECONNECT_ATTEMPTS}):`, wsUrl);
             const ws = new WebSocket(wsUrl);
             wsRef.current = ws;
 
+            // Set connection timeout
+            connectionTimeoutRef.current = window.setTimeout(() => {
+              if (ws.readyState !== WebSocket.OPEN) {
+                console.error('[RealtimePrices] Connection timeout');
+                ws.close();
+                setError('Connection timeout - retrying...');
+                setConnected(false);
+              }
+            }, CONNECTION_TIMEOUT);
+
             ws.onopen = () => {
-              console.log('WebSocket connected to realtime prices');
-              setConnected(true);
-              setError(null);
-              reconnectAttemptsRef.current = 0;
+                console.log('[RealtimePrices] WebSocket connected successfully');
+                if (connectionTimeoutRef.current) {
+                    clearTimeout(connectionTimeoutRef.current);
+                }
+                setConnected(true);
+                setError(null);
+                reconnectAttemptsRef.current = 0;
+
+                // Start ping interval to keep connection alive
+                pingIntervalRef.current = window.setInterval(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'ping' }));
+                    }
+                }, PING_INTERVAL);
             };
 
             ws.onmessage = (event) => {
@@ -84,23 +116,39 @@ export const useRealtimePrices = (symbols?: string[]) => {
             };
 
             ws.onerror = (event) => {
-              console.error('WebSocket error:', event);
-              setError('WebSocket connection error');
-              setConnected(false);
+                console.error('[RealtimePrices] WebSocket error:', event);
+                const errorMessage = reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS 
+                    ? 'Unable to connect to price feed. Please check your connection.'
+                    : 'Connection error - reconnecting...';
+                setError(errorMessage);
+                setConnected(false);
             };
 
-            ws.onclose = () => {
-              console.log('WebSocket disconnected from realtime prices');
+            ws.onclose = (event) => {
+              console.log(`[RealtimePrices] WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
               setConnected(false);
+              
+              // Clean up intervals
+              if (pingIntervalRef.current) {
+                clearInterval(pingIntervalRef.current);
+              }
+              if (connectionTimeoutRef.current) {
+                clearTimeout(connectionTimeoutRef.current);
+              }
+              
               if (cancelled) return;
+              
+              // Attempt reconnection with exponential backoff
               if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
                 reconnectAttemptsRef.current++;
-                console.log(`Reconnecting... Attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS}`);
+                const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current - 1);
+                console.log(`[RealtimePrices] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
+                
                 reconnectTimeoutRef.current = window.setTimeout(() => {
                   connect();
-                }, RECONNECT_DELAY);
+                }, delay);
               } else {
-                setError('Unable to maintain connection. Please refresh the page.');
+                setError('Connection lost. Please refresh the page to reconnect.');
               }
             };
           } catch (err) {
@@ -120,11 +168,18 @@ export const useRealtimePrices = (symbols?: string[]) => {
 
     return () => {
       cancelled = true;
+      console.log('[RealtimePrices] Cleaning up WebSocket connection');
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.close();
       }
       if (reconnectTimeoutRef.current !== null) {
         clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+      }
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
       }
     };
   }, [JSON.stringify(symbols)]);

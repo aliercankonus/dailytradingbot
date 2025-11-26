@@ -24,9 +24,10 @@ serve(async (req) => {
   
   let binanceSocket: WebSocket | null = null;
   let reconnectAttempts = 0;
-  const MAX_RECONNECT_ATTEMPTS = 5;
-  const RECONNECT_DELAY = 3000;
+  const MAX_RECONNECT_ATTEMPTS = 10;
+  const BASE_RECONNECT_DELAY = 1000;
   let reconnectTimeout: number | null = null;
+  let heartbeatInterval: number | null = null;
 
   // Parse symbols from query params or use defaults
   const url = new URL(req.url);
@@ -46,7 +47,7 @@ serve(async (req) => {
       binanceSocket = new WebSocket(binanceUrl);
       
       binanceSocket.onopen = () => {
-        console.log('Connected to Binance WebSocket');
+        console.log('[MarketData-Edge] Connected to Binance WebSocket');
         reconnectAttempts = 0;
         
         // Send connection success message
@@ -94,71 +95,108 @@ serve(async (req) => {
       };
 
       binanceSocket.onerror = (error) => {
-        console.error('Binance WebSocket error:', error);
+        console.error('[MarketData-Edge] Binance WebSocket error:', error);
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({
+            type: 'error',
+            message: 'Temporary connection issue - reconnecting...'
+          }));
+        }
       };
 
-      binanceSocket.onclose = () => {
-        console.log('Binance WebSocket closed');
+      binanceSocket.onclose = (event) => {
+        console.log(`[MarketData-Edge] Binance WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
         
-        // Attempt reconnection
+        // Don't reconnect if client has disconnected
+        if (socket.readyState !== WebSocket.OPEN) {
+          console.log('[MarketData-Edge] Client disconnected, skipping Binance reconnection');
+          return;
+        }
+        
+        // Attempt reconnection with exponential backoff
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttempts++;
-          console.log(`Reconnection attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
+          const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1), 60000);
+          console.log(`[MarketData-Edge] Reconnection attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${delay / 1000}s`);
           
           reconnectTimeout = setTimeout(() => {
             if (socket.readyState === WebSocket.OPEN) {
               connectToBinance();
             }
-          }, RECONNECT_DELAY);
+          }, delay);
         } else {
-          console.error('Max reconnection attempts reached');
+          console.error('[MarketData-Edge] Max reconnection attempts reached');
           if (socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({
               type: 'error',
-              message: 'Connection to market data lost. Please refresh.'
+              message: 'Connection to market data lost after multiple attempts. Please refresh.'
             }));
           }
         }
       };
     } catch (error) {
-      console.error('Error connecting to Binance:', error);
+      console.error('[MarketData-Edge] Error connecting to Binance:', error);
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: 'error',
+          message: 'Failed to establish connection to market data provider.'
+        }));
+      }
     }
   };
 
   socket.onopen = () => {
-    console.log('Client WebSocket opened');
+    console.log('[MarketData-Edge] Client WebSocket opened');
     connectToBinance();
+    
+    // Start heartbeat to keep connection alive
+    heartbeatInterval = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'heartbeat' }));
+      }
+    }, 30000);
   };
 
   socket.onmessage = (event) => {
     try {
       const message = JSON.parse(event.data);
-      console.log('Received message from client:', message);
       
       // Handle client messages if needed (e.g., subscribe to new symbols)
       if (message.type === 'ping') {
         socket.send(JSON.stringify({ type: 'pong' }));
       }
     } catch (error) {
-      console.error('Error processing client message:', error);
+      console.error('[MarketData-Edge] Error processing client message:', error);
     }
   };
 
   socket.onerror = (error) => {
-    console.error('Client WebSocket error:', error);
-  };
-
-  socket.onclose = () => {
-    console.log('Client WebSocket closed');
-    
-    // Clean up Binance connection
+    console.error('[MarketData-Edge] Client WebSocket error:', error);
+    // Close Binance connection on client error
     if (binanceSocket && binanceSocket.readyState === WebSocket.OPEN) {
       binanceSocket.close();
     }
+  };
+
+  socket.onclose = () => {
+    console.log('[MarketData-Edge] Client WebSocket closed - cleaning up resources');
     
-    // Clear reconnect timeout
+    // Clean up Binance connection
+    if (binanceSocket) {
+      if (binanceSocket.readyState === WebSocket.OPEN || binanceSocket.readyState === WebSocket.CONNECTING) {
+        binanceSocket.close();
+      }
+      binanceSocket = null;
+    }
+    
+    // Clear intervals and timeouts
+    if (heartbeatInterval !== null) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
     if (reconnectTimeout !== null) {
       clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
     }
   };
 
