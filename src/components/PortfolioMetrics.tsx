@@ -31,9 +31,9 @@ export const PortfolioMetrics = () => {
   // Compute live prices directly in metrics using priceVersion to trigger updates
 
 
-  // Memoize expensive calculations - only recalculate when dependencies change
-  const metrics = useMemo(() => {
-    console.log('[PortfolioMetrics] Recalculating metrics, positions:', positions.length);
+  // Calculate metrics on every render to avoid stale values
+  const metrics = (() => {
+    console.log('[PortfolioMetrics] Calculating metrics, positions:', positions.length);
     
     if (!portfolioMetrics) {
       return {
@@ -92,7 +92,7 @@ export const PortfolioMetrics = () => {
       isPositiveReturn: totalReturn >= 0,
       hasData: portfolioMetrics.total_closed_trades > 0 || positions.length > 0,
     };
-  }, [portfolioMetrics, positions, priceVersion, binanceBalance, riskParams, getPrice]);
+  })();
 
   const metricsDisplay = [
     {
