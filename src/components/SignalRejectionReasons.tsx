@@ -382,7 +382,7 @@ export const SignalRejectionReasons = () => {
                 const { momentum, higherTimeframeFilter, multiTimeframe, trend } = data;
                 const confirms = momentum?.confirms ?? false;
                 const lastCloseAligns = momentum?.lastCloseAlignsWithTrend ?? false;
-                const noDivergence = !momentum?.hasDivergence ?? true;
+                const noDivergence = !(momentum?.hasDivergence ?? false);
                 const macdDirectionOK = momentum?.macdDirectionAligned ?? false;
                 const macdExpandingOK = momentum?.macdExpanding ?? false;
                 const macdOK = macdDirectionOK && macdExpandingOK;
