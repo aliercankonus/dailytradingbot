@@ -26,13 +26,16 @@ export const useMarketData = (symbols?: string[]) => {
   const CONNECTION_TIMEOUT = 10000;
   
   const monitor = useWebSocketMonitor();
-  const connectionId = 'market-data';
+  const connectionId = useRef(`market-data-${Date.now()}`);
+
+  // Register connection on mount
+  useEffect(() => {
+    monitor.registerConnection(connectionId.current, 'Market Data');
+    return () => monitor.unregisterConnection(connectionId.current);
+  }, [monitor]);
 
   useEffect(() => {
     const symbolsList = symbols && symbols.length > 0 ? symbols : [];
-    
-    // Register connection with monitor
-    monitor.registerConnection(connectionId, 'Market Data');
     
     const connectWebSocket = () => {
       try {
@@ -69,6 +72,7 @@ export const useMarketData = (symbols?: string[]) => {
           if (connectionTimeoutRef.current) {
             clearTimeout(connectionTimeoutRef.current);
           }
+          monitor.updateConnectionStatus(connectionId.current, 'connected');
           setConnected(true);
           setError(null);
           reconnectAttemptsRef.current = 0;
@@ -111,12 +115,15 @@ export const useMarketData = (symbols?: string[]) => {
           const errorMessage = reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS 
             ? 'Unable to connect to market data. Please check your connection.'
             : 'Connection error - reconnecting...';
+          monitor.updateConnectionStatus(connectionId.current, 'disconnected');
+          monitor.recordError(connectionId.current, errorMessage);
           setError(errorMessage);
           setConnected(false);
         };
 
         ws.onclose = (event) => {
           console.log(`[MarketData] WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
+          monitor.updateConnectionStatus(connectionId.current, 'disconnected');
           setConnected(false);
           
           // Clean up intervals
@@ -129,6 +136,8 @@ export const useMarketData = (symbols?: string[]) => {
             reconnectAttemptsRef.current++;
             const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current - 1);
             console.log(`[MarketData] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
+            monitor.recordReconnectAttempt(connectionId.current);
+            monitor.updateConnectionStatus(connectionId.current, 'reconnecting');
             
             reconnectTimeoutRef.current = window.setTimeout(() => {
               connectWebSocket();
@@ -161,9 +170,8 @@ export const useMarketData = (symbols?: string[]) => {
       if (connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
       }
-      monitor.unregisterConnection(connectionId);
     };
-  }, [symbols]);
+  }, [symbols, monitor]);
 
   return { data, loading, error, connected };
 };
