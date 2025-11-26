@@ -31,10 +31,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  // Prefetch helper function
+  const prefetchPortfolioData = async () => {
+    try {
+      await queryClient.prefetchQuery({
+        queryKey: PORTFOLIO_METRICS_QUERY_KEY,
+        queryFn: fetchPortfolioMetrics,
+        staleTime: 30000,
+      });
+      console.log('Portfolio metrics prefetched successfully');
+    } catch (error) {
+      console.error('Error prefetching portfolio metrics:', error);
+    }
+  };
+
   useEffect(() => {
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         console.log('Auth state changed:', event);
         setSession(session);
         setUser(session?.user ?? null);
@@ -43,18 +57,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         // Prefetch portfolio metrics on login for instant dashboard display
         if (event === 'SIGNED_IN' && session?.user) {
           console.log('Prefetching portfolio metrics...');
-          await queryClient.prefetchQuery({
-            queryKey: PORTFOLIO_METRICS_QUERY_KEY,
-            queryFn: fetchPortfolioMetrics,
-            staleTime: 30000,
-          });
-          console.log('Portfolio metrics prefetched successfully');
+          prefetchPortfolioData();
         }
       }
     );
 
     // THEN check for existing session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
@@ -62,17 +71,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // Prefetch portfolio metrics if user is already logged in
       if (session?.user) {
         console.log('Prefetching portfolio metrics for existing session...');
-        await queryClient.prefetchQuery({
-          queryKey: PORTFOLIO_METRICS_QUERY_KEY,
-          queryFn: fetchPortfolioMetrics,
-          staleTime: 30000,
-        });
-        console.log('Portfolio metrics prefetched successfully');
+        prefetchPortfolioData();
       }
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [queryClient]);
 
   const signUp = async (email: string, password: string, fullName?: string) => {
     const redirectUrl = `${window.location.origin}/`;

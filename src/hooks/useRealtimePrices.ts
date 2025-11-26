@@ -26,13 +26,16 @@ export const useRealtimePrices = (symbols?: string[]) => {
   const CONNECTION_TIMEOUT = 10000;
   
   const monitor = useWebSocketMonitor();
-  const connectionId = 'realtime-prices';
+  const connectionId = useRef(`realtime-prices-${Date.now()}`);
+
+  // Register connection on mount
+  useEffect(() => {
+    monitor.registerConnection(connectionId.current, 'Realtime Prices');
+    return () => monitor.unregisterConnection(connectionId.current);
+  }, [monitor]);
 
   useEffect(() => {
     const projectId = 'ikrivrudkvvnksollslh';
-
-    // Register connection with monitor
-    monitor.registerConnection(connectionId, 'Realtime Prices');
 
     let cancelled = false;
 
@@ -81,6 +84,7 @@ export const useRealtimePrices = (symbols?: string[]) => {
                 if (connectionTimeoutRef.current) {
                     clearTimeout(connectionTimeoutRef.current);
                 }
+                monitor.updateConnectionStatus(connectionId.current, 'connected');
                 setConnected(true);
                 setError(null);
                 reconnectAttemptsRef.current = 0;
@@ -116,12 +120,15 @@ export const useRealtimePrices = (symbols?: string[]) => {
                 const errorMessage = reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS 
                     ? 'Unable to connect to price feed. Please check your connection.'
                     : 'Connection error - reconnecting...';
+                monitor.updateConnectionStatus(connectionId.current, 'disconnected');
+                monitor.recordError(connectionId.current, errorMessage);
                 setError(errorMessage);
                 setConnected(false);
             };
 
             ws.onclose = (event) => {
               console.log(`[RealtimePrices] WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
+              monitor.updateConnectionStatus(connectionId.current, 'disconnected');
               setConnected(false);
               
               // Clean up intervals
@@ -136,6 +143,8 @@ export const useRealtimePrices = (symbols?: string[]) => {
                 reconnectAttemptsRef.current++;
                 const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current - 1);
                 console.log(`[RealtimePrices] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
+                monitor.recordReconnectAttempt(connectionId.current);
+                monitor.updateConnectionStatus(connectionId.current, 'reconnecting');
                 
                 reconnectTimeoutRef.current = window.setTimeout(() => {
                   connect();
@@ -171,9 +180,8 @@ export const useRealtimePrices = (symbols?: string[]) => {
       if (connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
       }
-      monitor.unregisterConnection(connectionId);
     };
-  }, [JSON.stringify(symbols)]);
+  }, [JSON.stringify(symbols), monitor]);
 
   const getPrice = useCallback((symbol: string) => {
     return prices.get(symbol);
