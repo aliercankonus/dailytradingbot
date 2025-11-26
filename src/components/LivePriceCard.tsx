@@ -1,13 +1,16 @@
 import { Card } from "@/components/ui/card";
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
 import { useRealtimePrices } from "@/hooks/useRealtimePrices";
 import { useSymbols } from "@/hooks/useSymbols";
 import { useEffect, useState } from "react";
+import { WebSocketStatus } from "@/components/WebSocketStatus";
+import { useToast } from "@/hooks/use-toast";
 
 export const LivePriceCard = () => {
   const { activeSymbols, loading: symbolsLoading } = useSymbols();
-  const { prices, connected } = useRealtimePrices(activeSymbols);
+  const { prices, connected, error } = useRealtimePrices(activeSymbols);
   const [displayPrices, setDisplayPrices] = useState<any[]>([]);
+  const { toast } = useToast();
 
   useEffect(() => {
     // Filter prices to only show active symbols
@@ -17,12 +20,30 @@ export const LivePriceCard = () => {
     setDisplayPrices(priceArray);
   }, [prices, activeSymbols]);
 
+  // Show toast when connection error occurs
+  useEffect(() => {
+    if (error && error.includes('Unable to connect')) {
+      toast({
+        title: "Connection Issue",
+        description: error,
+        variant: "destructive",
+      });
+    }
+  }, [error, toast]);
+
   return (
     <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-foreground">Live Market Prices</h3>
-        <div className={`h-2 w-2 rounded-full ${connected ? 'bg-success animate-pulse' : 'bg-muted'}`} />
+        <WebSocketStatus connected={connected} error={error} showText={true} />
       </div>
+
+      {error && (
+        <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-2 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
 
       <div className="space-y-3">
         {symbolsLoading ? (

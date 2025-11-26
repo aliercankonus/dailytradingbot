@@ -19,14 +19,26 @@ export const useMarketData = (symbols?: string[]) => {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const connectionTimeoutRef = useRef<number | null>(null);
+  const pingIntervalRef = useRef<number | null>(null);
   const MAX_RECONNECT_ATTEMPTS = 5;
-  const RECONNECT_DELAY = 3000;
+  const BASE_RECONNECT_DELAY = 1000;
+  const CONNECTION_TIMEOUT = 10000;
+  const PING_INTERVAL = 30000;
 
   useEffect(() => {
     const symbolsList = symbols && symbols.length > 0 ? symbols : [];
     
     const connectWebSocket = () => {
       try {
+        // Clear any existing timeouts
+        if (connectionTimeoutRef.current) {
+          clearTimeout(connectionTimeoutRef.current);
+        }
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current);
+        }
+
         // Close existing connection if any
         if (wsRef.current) {
           wsRef.current.close();
@@ -35,16 +47,36 @@ export const useMarketData = (symbols?: string[]) => {
         const symbolsParam = encodeURIComponent(JSON.stringify(symbolsList));
         const wsUrl = `wss://ikrivrudkvvnksollslh.supabase.co/functions/v1/realtime-market-data?symbols=${symbolsParam}`;
         
-        console.log('Connecting to market data WebSocket:', wsUrl);
+        console.log(`[MarketData] Connecting (attempt ${reconnectAttemptsRef.current + 1}/${MAX_RECONNECT_ATTEMPTS}):`, wsUrl);
         
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
+        // Set connection timeout
+        connectionTimeoutRef.current = window.setTimeout(() => {
+          if (ws.readyState !== WebSocket.OPEN) {
+            console.error('[MarketData] Connection timeout');
+            ws.close();
+            setError('Connection timeout - retrying...');
+            setConnected(false);
+          }
+        }, CONNECTION_TIMEOUT);
+
         ws.onopen = () => {
-          console.log('Market data WebSocket connected');
+          console.log('[MarketData] WebSocket connected successfully');
+          if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+          }
           setConnected(true);
           setError(null);
           reconnectAttemptsRef.current = 0;
+
+          // Start ping interval to keep connection alive
+          pingIntervalRef.current = window.setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'ping' }));
+            }
+          }, PING_INTERVAL);
         };
 
         ws.onmessage = (event) => {
@@ -80,42 +112,46 @@ export const useMarketData = (symbols?: string[]) => {
         };
 
         ws.onerror = (event) => {
-          console.error('WebSocket error:', event);
-          setError('Failed to connect to market data');
+          console.error('[MarketData] WebSocket error:', event);
+          const errorMessage = reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS 
+            ? 'Unable to connect to market data. Please check your connection.'
+            : 'Connection error - reconnecting...';
+          setError(errorMessage);
           setConnected(false);
         };
 
-        ws.onclose = () => {
-          console.log('Market data WebSocket closed');
+        ws.onclose = (event) => {
+          console.log(`[MarketData] WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
           setConnected(false);
           
-          // Attempt reconnection
+          // Clean up intervals
+          if (pingIntervalRef.current) {
+            clearInterval(pingIntervalRef.current);
+          }
+          if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+          }
+          
+          // Attempt reconnection with exponential backoff
           if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttemptsRef.current++;
-            console.log(`Reconnecting... Attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS}`);
+            const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current - 1);
+            console.log(`[MarketData] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
             
             reconnectTimeoutRef.current = window.setTimeout(() => {
               connectWebSocket();
-            }, RECONNECT_DELAY);
+            }, delay);
           } else {
-            setError('Unable to maintain connection to market data. Please refresh the page.');
+            setError('Connection lost. Please refresh the page to reconnect.');
+            setLoading(false);
           }
         };
 
-        // Send periodic ping to keep connection alive
-        const pingInterval = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'ping' }));
-          }
-        }, 30000); // Ping every 30 seconds
-
-        return () => {
-          clearInterval(pingInterval);
-        };
       } catch (err) {
-        console.error('Error setting up WebSocket:', err);
+        console.error('[MarketData] Error setting up WebSocket:', err);
         setError('Failed to initialize market data connection');
         setLoading(false);
+        setConnected(false);
       }
     };
 
@@ -123,11 +159,18 @@ export const useMarketData = (symbols?: string[]) => {
 
     // Cleanup on unmount
     return () => {
+      console.log('[MarketData] Cleaning up WebSocket connection');
       if (wsRef.current) {
         wsRef.current.close();
       }
       if (reconnectTimeoutRef.current !== null) {
         clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+      }
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
       }
     };
   }, [symbols]);
