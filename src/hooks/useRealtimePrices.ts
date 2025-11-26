@@ -22,8 +22,13 @@ export const useRealtimePrices = (symbols?: string[]) => {
     try {
       const cached = localStorage.getItem(PRICE_CACHE_KEY);
       if (cached) {
-        const parsed = JSON.parse(cached);
-        return new Map(Object.entries(parsed));
+        const parsed = JSON.parse(cached) as Record<string, RealtimePrice>;
+        const map = new Map<string, RealtimePrice>();
+        Object.entries(parsed).forEach(([symbol, price]) => {
+          map.set(symbol, price);
+          (map as any)[symbol] = price; // also expose as object-style lookup
+        });
+        return map;
       }
     } catch (e) {
       console.error('Failed to load cached prices:', e);
@@ -66,6 +71,7 @@ export const useRealtimePrices = (symbols?: string[]) => {
         const newPrices = new Map(prev);
         pendingUpdatesRef.current.forEach((price, symbol) => {
           newPrices.set(symbol, price);
+          (newPrices as any)[symbol] = price; // allow prices[symbol] access
         });
         
         // Save to localStorage for instant load next time
