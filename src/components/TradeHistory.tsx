@@ -63,8 +63,8 @@ export const TradeHistory = () => {
           bVal = b.strategy_name || 'Unknown';
           break;
         case 'profit_loss':
-          aVal = a.profit_loss ?? -Infinity;
-          bVal = b.profit_loss ?? -Infinity;
+          aVal = a.realized_pnl ?? -Infinity;
+          bVal = b.realized_pnl ?? -Infinity;
           break;
         case 'status':
           aVal = a.status;
@@ -257,16 +257,16 @@ export const TradeHistory = () => {
                     {trade.quantity.toFixed(4)}
                   </td>
                   <td className="py-3 px-2 text-right">
-                    {trade.profit_loss !== null ? (
+                    {trade.realized_pnl !== null ? (
                       <div className={`flex items-center justify-end gap-1 font-semibold font-mono ${
-                        trade.profit_loss >= 0 ? "text-profit" : "text-loss"
+                        trade.realized_pnl >= 0 ? "text-profit" : "text-loss"
                       }`}>
-                        {trade.profit_loss >= 0 ? (
+                        {trade.realized_pnl >= 0 ? (
                           <ArrowUpRight className="h-3 w-3" />
                         ) : (
                           <ArrowDownRight className="h-3 w-3" />
                         )}
-                        {trade.profit_loss >= 0 ? '+' : ''}${trade.profit_loss.toFixed(2)}
+                        {trade.realized_pnl >= 0 ? '+' : ''}${trade.realized_pnl.toFixed(2)}
                       </div>
                     ) : (
                       <span className="text-muted-foreground">-</span>

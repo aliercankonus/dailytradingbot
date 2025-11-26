@@ -12,8 +12,8 @@ interface Trade {
   exit_price: number | null;
   stop_loss: number;
   take_profit: number;
-  profit_loss: number | null;
-  profit_loss_percent: number | null;
+  realized_pnl: number | null;
+  realized_pnl_percent: number | null;
   status: string;
   executed_at: string;
   closed_at: string | null;
@@ -22,7 +22,7 @@ interface Trade {
 
 const fetchTrades = async (): Promise<Trade[]> => {
   const { data, error: queryError } = await supabase
-    .from('trades')
+    .from('positions')
     .select('*')
     .order('executed_at', { ascending: false })
     .limit(100); // Limit to recent 100 trades for performance
@@ -45,16 +45,16 @@ export const useTrades = () => {
     refetchOnWindowFocus: false,
   });
 
-  // Set up real-time subscription for trades
+  // Set up real-time subscription for positions
   useEffect(() => {
     const channel = supabase
-      .channel('trades-changes')
+      .channel('positions-changes')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'trades'
+          table: 'positions'
         },
         () => {
           // Invalidate trades cache on any change

@@ -152,33 +152,33 @@ export type Database = {
         Row: {
           id: string
           message: string
+          position_id: string | null
           sent_at: string | null
-          trade_id: string | null
           type: string
           user_id: string | null
         }
         Insert: {
           id?: string
           message: string
+          position_id?: string | null
           sent_at?: string | null
-          trade_id?: string | null
           type: string
           user_id?: string | null
         }
         Update: {
           id?: string
           message?: string
+          position_id?: string | null
           sent_at?: string | null
-          trade_id?: string | null
           type?: string
           user_id?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "notifications_trade_id_fkey"
-            columns: ["trade_id"]
+            foreignKeyName: "notifications_position_id_fkey"
+            columns: ["position_id"]
             isOneToOne: false
-            referencedRelation: "trades"
+            referencedRelation: "positions"
             referencedColumns: ["id"]
           },
         ]
@@ -272,21 +272,29 @@ export type Database = {
       }
       positions: {
         Row: {
+          binance_order_id: string | null
           close_reason: string | null
+          closed_at: string | null
           closed_by_rebalancer: boolean | null
           confidence_score: number | null
           current_price: number | null
           entry_price: number
+          executed_at: string | null
+          exit_price: number | null
           id: string
           opened_at: string | null
           opened_by_rebalancer: boolean | null
+          order_type: string | null
           quantity: number
+          realized_pnl: number | null
+          realized_pnl_percent: number | null
           side: string
+          signal_id: string | null
           status: string
           stop_loss: number | null
+          strategy_name: string | null
           symbol: string
           take_profit: number | null
-          trade_id: string | null
           trend: string | null
           trend_consistency: number | null
           unrealized_pnl: number | null
@@ -295,21 +303,29 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          binance_order_id?: string | null
           close_reason?: string | null
+          closed_at?: string | null
           closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
           entry_price: number
+          executed_at?: string | null
+          exit_price?: number | null
           id?: string
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
+          order_type?: string | null
           quantity: number
+          realized_pnl?: number | null
+          realized_pnl_percent?: number | null
           side: string
+          signal_id?: string | null
           status?: string
           stop_loss?: number | null
+          strategy_name?: string | null
           symbol: string
           take_profit?: number | null
-          trade_id?: string | null
           trend?: string | null
           trend_consistency?: number | null
           unrealized_pnl?: number | null
@@ -318,21 +334,29 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          binance_order_id?: string | null
           close_reason?: string | null
+          closed_at?: string | null
           closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
           entry_price?: number
+          executed_at?: string | null
+          exit_price?: number | null
           id?: string
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
+          order_type?: string | null
           quantity?: number
+          realized_pnl?: number | null
+          realized_pnl_percent?: number | null
           side?: string
+          signal_id?: string | null
           status?: string
           stop_loss?: number | null
+          strategy_name?: string | null
           symbol?: string
           take_profit?: number | null
-          trade_id?: string | null
           trend?: string | null
           trend_consistency?: number | null
           unrealized_pnl?: number | null
@@ -342,10 +366,10 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "positions_trade_id_fkey"
-            columns: ["trade_id"]
+            foreignKeyName: "positions_signal_id_fkey"
+            columns: ["signal_id"]
             isOneToOne: false
-            referencedRelation: "trades"
+            referencedRelation: "trading_signals"
             referencedColumns: ["id"]
           },
         ]
@@ -691,80 +715,6 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: []
-      }
-      trades: {
-        Row: {
-          binance_order_id: string | null
-          closed_at: string | null
-          created_at: string | null
-          entry_price: number
-          executed_at: string | null
-          exit_price: number | null
-          id: string
-          order_type: string
-          profit_loss: number | null
-          profit_loss_percent: number | null
-          quantity: number
-          side: string
-          signal_id: string | null
-          status: string
-          stop_loss: number | null
-          strategy_name: string | null
-          symbol: string
-          take_profit: number | null
-          user_id: string | null
-        }
-        Insert: {
-          binance_order_id?: string | null
-          closed_at?: string | null
-          created_at?: string | null
-          entry_price: number
-          executed_at?: string | null
-          exit_price?: number | null
-          id?: string
-          order_type: string
-          profit_loss?: number | null
-          profit_loss_percent?: number | null
-          quantity: number
-          side: string
-          signal_id?: string | null
-          status?: string
-          stop_loss?: number | null
-          strategy_name?: string | null
-          symbol: string
-          take_profit?: number | null
-          user_id?: string | null
-        }
-        Update: {
-          binance_order_id?: string | null
-          closed_at?: string | null
-          created_at?: string | null
-          entry_price?: number
-          executed_at?: string | null
-          exit_price?: number | null
-          id?: string
-          order_type?: string
-          profit_loss?: number | null
-          profit_loss_percent?: number | null
-          quantity?: number
-          side?: string
-          signal_id?: string | null
-          status?: string
-          stop_loss?: number | null
-          strategy_name?: string | null
-          symbol?: string
-          take_profit?: number | null
-          user_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "trades_signal_id_fkey"
-            columns: ["signal_id"]
-            isOneToOne: false
-            referencedRelation: "trading_signals"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       trading_signals: {
         Row: {

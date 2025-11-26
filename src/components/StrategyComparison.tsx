@@ -61,21 +61,21 @@ export const StrategyComparison = () => {
 
       if (perfError) console.error("Error fetching performance data:", perfError);
 
-      // Fetch ALL trades (both open and closed) for comprehensive performance
-      const { data: tradeData, error: tradeError } = await supabase.from("trades").select("*");
+      // Fetch ALL positions (both active and closed) for comprehensive performance
+      const { data: positionData, error: positionError } = await supabase.from("positions").select("*");
 
-      if (tradeError) console.error("Error fetching trade data:", tradeError);
+      if (positionError) console.error("Error fetching position data:", positionError);
 
-      // Calculate performance from actual trades, grouped by strategy name only (not symbol)
-      const tradePerformance = new Map<string, any>();
-      if (tradeData) {
-        tradeData.forEach((trade) => {
+      // Calculate performance from actual positions, grouped by strategy name only (not symbol)
+      const positionPerformance = new Map<string, any>();
+      if (positionData) {
+        positionData.forEach((position) => {
           // Strip symbol suffix from strategy name
-          const cleanStrategyName = (trade.strategy_name || "Unknown")
+          const cleanStrategyName = (position.strategy_name || "Unknown")
             .replace(/\s*(BTCUSDT|ETHUSDT|BNBUSDT|SOLUSDT)$/i, "")
             .trim();
-          if (!tradePerformance.has(cleanStrategyName)) {
-            tradePerformance.set(cleanStrategyName, {
+          if (!positionPerformance.has(cleanStrategyName)) {
+            positionPerformance.set(cleanStrategyName, {
               total_trades: 0,
               winning_trades: 0,
               total_profit: 0,
@@ -83,17 +83,17 @@ export const StrategyComparison = () => {
               symbols: new Set<string>(),
             });
           }
-          const perf = tradePerformance.get(cleanStrategyName);
+          const perf = positionPerformance.get(cleanStrategyName);
           perf.total_trades++;
-          perf.symbols.add(trade.symbol);
+          perf.symbols.add(position.symbol);
 
-          // Only count P/L for closed trades
-          if (trade.status === "closed" && trade.profit_loss !== null) {
-            if (trade.profit_loss > 0) {
+          // Only count P/L for closed positions
+          if (position.status === "closed" && position.realized_pnl !== null) {
+            if (position.realized_pnl > 0) {
               perf.winning_trades++;
-              perf.total_profit += trade.profit_loss;
+              perf.total_profit += position.realized_pnl;
             } else {
-              perf.total_loss += Math.abs(trade.profit_loss);
+              perf.total_loss += Math.abs(position.realized_pnl);
             }
           }
         });
@@ -145,8 +145,8 @@ export const StrategyComparison = () => {
         });
       });
 
-      // Merge or add trade performance data
-      tradePerformance.forEach((perf, strategyName) => {
+      // Merge or add position performance data
+      positionPerformance.forEach((perf, strategyName) => {
         const closedTrades =
           perf.winning_trades + Math.floor(perf.total_loss / (perf.total_profit / (perf.winning_trades || 1)));
         const netProfit = perf.total_profit - perf.total_loss;

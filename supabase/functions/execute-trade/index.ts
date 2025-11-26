@@ -318,14 +318,14 @@ serve(async (req) => {
     }
 
     // Check if this signal has already been executed
-    const { data: existingTrade } = await supabase
-      .from('trades')
+    const { data: existingPosition } = await supabase
+      .from('positions')
       .select('id')
       .eq('signal_id', signalId)
       .maybeSingle();
 
-    if (existingTrade) {
-      console.log(`Signal ${signalId} already executed as trade ${existingTrade.id}`);
+    if (existingPosition) {
+      console.log(`Signal ${signalId} already executed as position ${existingPosition.id}`);
       return new Response(
         JSON.stringify({
           success: false,
@@ -338,39 +338,15 @@ serve(async (req) => {
       );
     }
 
-    // Create trade record
-    const { data: trade, error: tradeError } = await supabase
-      .from('trades')
+    // Create position record with all trade data
+    const { data: position, error: positionError } = await supabase
+      .from('positions')
       .insert({
         user_id: user.id,
         signal_id: signalId,
         symbol: signal.symbol,
         side,
         order_type: 'MARKET',
-        quantity,
-        entry_price: executedPrice,
-        stop_loss: stopLoss,
-        take_profit: takeProfit,
-        status: 'open',
-        binance_order_id: isPaperTrading ? null : orderData.orderId?.toString(),
-        strategy_name: signal.strategy_name || 'Unknown',
-      })
-      .select()
-      .single();
-
-    if (tradeError || !trade) {
-      console.error('Failed to create trade record:', tradeError);
-      throw new Error(`Failed to create trade record: ${tradeError?.message || 'Unknown error'}`);
-    }
-
-    // Create position record with real-time trend and rebalancer flag
-    await supabase
-      .from('positions')
-      .insert({
-        user_id: user.id,
-        trade_id: trade.id,
-        symbol: signal.symbol,
-        side,
         quantity,
         entry_price: executedPrice,
         current_price: executedPrice,
@@ -383,7 +359,17 @@ serve(async (req) => {
         confidence_score: signal.confidence_score,
         trend_consistency: trendConsistency,
         opened_by_rebalancer: signal.created_by_rebalancer || false,
-      });
+        binance_order_id: isPaperTrading ? null : orderData.orderId?.toString(),
+        strategy_name: signal.strategy_name || 'Unknown',
+        executed_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (positionError || !position) {
+      console.error('Failed to create position record:', positionError);
+      throw new Error(`Failed to create position record: ${positionError?.message || 'Unknown error'}`);
+    }
 
     if (!isPaperTrading) {
       // Place stop-loss and take-profit orders only for live trading
@@ -456,7 +442,7 @@ serve(async (req) => {
         body: {
           type: 'trade_executed',
           userId: user.id,
-          tradeId: trade.id,
+          tradeId: position.id,
           symbol: signal.symbol,
           side,
           price: executedPrice,
@@ -470,7 +456,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        trade,
+        position,
         message: `${side} order executed successfully${isPaperTrading ? ' (Paper Trading)' : ''}`,
       }),
       {

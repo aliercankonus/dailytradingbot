@@ -11,8 +11,8 @@ interface Trade {
   exit_price: number | null;
   stop_loss: number;
   take_profit: number;
-  profit_loss: number | null;
-  profit_loss_percent: number | null;
+  realized_pnl: number | null;
+  realized_pnl_percent: number | null;
   status: string;
   executed_at: string;
   closed_at: string | null;
@@ -28,9 +28,9 @@ export const useOpenTrades = () => {
     try {
       setLoading(true);
       const { data, error: queryError } = await supabase
-        .from('trades')
+        .from('positions')
         .select('*')
-        .eq('status', 'open')
+        .eq('status', 'active')
         .order('executed_at', { ascending: false });
 
       if (queryError) throw queryError;

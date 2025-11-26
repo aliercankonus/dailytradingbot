@@ -31,13 +31,13 @@ export const useSignals = () => {
         // Calculate timestamp for 1 minute ago
         const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
         
-        // Get all active trades to filter out used signals
-        const { data: activeTrades } = await supabase
-          .from('trades')
+        // Get all active positions to filter out used signals
+        const { data: activePositions } = await supabase
+          .from('positions')
           .select('signal_id')
-          .eq('status', 'open');
+          .eq('status', 'active');
         
-        const usedSignalIds = new Set(activeTrades?.map(t => t.signal_id).filter(Boolean));
+        const usedSignalIds = new Set(activePositions?.map(p => p.signal_id).filter(Boolean));
         
         const { data, error: queryError } = await supabase
           .from('trading_signals')

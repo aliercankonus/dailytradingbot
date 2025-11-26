@@ -114,8 +114,8 @@ async function closePosition(supabase: any, position: any, manualClose: boolean 
     ? ((currentPrice - position.entry_price) / position.entry_price) * 100
     : ((position.entry_price - currentPrice) / position.entry_price) * 100;
 
-  // Always use 'closed' status for consistency
-  const tradeStatus = 'closed';
+  // Determine close reason
+  const closeReason = manualClose ? 'manual_close' : (closedByRebalancer ? 'rebalancer' : 'system');
 
   // Update position status to closed with final P&L and rebalancer flag
   const { error: updateError } = await supabase
@@ -123,23 +123,21 @@ async function closePosition(supabase: any, position: any, manualClose: boolean 
     .update({
       status: 'closed',
       current_price: currentPrice,
-      unrealized_pnl: pnl,
-      unrealized_pnl_percent: pnlPercent,
+      unrealized_pnl: 0, // Clear unrealized PnL as it's now realized
+      unrealized_pnl_percent: 0,
+      realized_pnl: pnl,
+      realized_pnl_percent: pnlPercent,
+      exit_price: currentPrice,
+      closed_at: new Date().toISOString(),
       closed_by_rebalancer: closedByRebalancer,
+      close_reason: closeReason,
     })
     .eq('id', position.id);
 
-  // Update trade record
-  await supabase
-    .from('trades')
-    .update({
-      exit_price: currentPrice,
-      profit_loss: pnl,
-      profit_loss_percent: pnlPercent,
-      status: tradeStatus,
-      closed_at: new Date().toISOString()
-    })
-    .eq('id', position.trade_id);
+  if (updateError) {
+    console.error('Failed to update position:', updateError);
+    throw updateError;
+  }
 
   // Update risk parameters for this user - sync with actual active positions
   const { count: activeCount } = await supabase
