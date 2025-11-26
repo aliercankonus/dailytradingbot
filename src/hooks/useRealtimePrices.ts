@@ -60,6 +60,7 @@ export const useRealtimePrices = (symbols?: string[]) => {
   // Batch price updates for performance
   const flushPendingUpdates = useCallback(() => {
     if (pendingUpdatesRef.current.size > 0) {
+      console.log('[RealtimePrices] Flushing', pendingUpdatesRef.current.size, 'pending price updates');
       setPrices((prev) => {
         const newPrices = new Map(prev);
         pendingUpdatesRef.current.forEach((price, symbol) => {
@@ -74,6 +75,7 @@ export const useRealtimePrices = (symbols?: string[]) => {
           console.error('Failed to cache prices:', e);
         }
         
+        console.log('[RealtimePrices] Updated prices map, now has', newPrices.size, 'symbols');
         return newPrices;
       });
       pendingUpdatesRef.current.clear();
@@ -162,20 +164,22 @@ export const useRealtimePrices = (symbols?: string[]) => {
             ws.onmessage = (event) => {
               try {
                 const data = JSON.parse(event.data);
+                console.log('[RealtimePrices] Received message:', data.type || 'price_update', data.symbol);
                 
                 if (data.type === 'connected') {
-                  console.log('Successfully connected to realtime prices');
+                  console.log('[RealtimePrices] Successfully connected to realtime prices');
                 } else if (data.type === 'error') {
-                  console.error('Error from server:', data.message);
+                  console.error('[RealtimePrices] Error from server:', data.message);
                   setError(data.message);
                 } else if (data.type === 'heartbeat') {
                   // Heartbeat received, no response needed
                 } else if (data.symbol) {
                   // Use batched updates for better performance
+                  console.log('[RealtimePrices] Scheduling price update for', data.symbol, 'price:', data.price);
                   schedulePriceUpdate(data.symbol, data);
                 }
               } catch (err) {
-                console.error('Error parsing WebSocket message:', err);
+                console.error('[RealtimePrices] Error parsing WebSocket message:', err);
               }
             };
 
