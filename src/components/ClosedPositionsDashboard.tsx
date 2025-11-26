@@ -353,25 +353,25 @@ const PositionsTable = ({ positions, getCloseReasonBadge }: PositionsTableProps)
               </TableCell>
               <TableCell>
                 <span className="text-sm text-muted-foreground">
-                  {position.trades?.strategy_name || 'N/A'}
+                  {position.strategy_name || 'N/A'}
                 </span>
               </TableCell>
               <TableCell className="text-right">${position.entry_price?.toFixed(4)}</TableCell>
-              <TableCell className="text-right">${position.current_price?.toFixed(4)}</TableCell>
+              <TableCell className="text-right">${position.exit_price?.toFixed(4)}</TableCell>
               <TableCell className="text-right">{position.quantity?.toFixed(4)}</TableCell>
               <TableCell className="text-right">
-                <span className={(position.trades?.profit_loss || 0) >= 0 ? 'text-success' : 'text-destructive'}>
-                  {(position.trades?.profit_loss || 0) >= 0 ? (
+                <span className={(position.realized_pnl || 0) >= 0 ? 'text-success' : 'text-destructive'}>
+                  {(position.realized_pnl || 0) >= 0 ? (
                     <TrendingUp className="h-4 w-4 inline mr-1" />
                   ) : (
                     <TrendingDown className="h-4 w-4 inline mr-1" />
                   )}
-                  ${Math.abs(position.trades?.profit_loss || 0).toFixed(2)}
+                  ${Math.abs(position.realized_pnl || 0).toFixed(2)}
                 </span>
               </TableCell>
               <TableCell className="text-right">
-                <span className={(position.trades?.profit_loss_percent || 0) >= 0 ? 'text-success' : 'text-destructive'}>
-                  {position.trades?.profit_loss_percent?.toFixed(2) || '0.00'}%
+                <span className={(position.realized_pnl_percent || 0) >= 0 ? 'text-success' : 'text-destructive'}>
+                  {position.realized_pnl_percent?.toFixed(2) || '0.00'}%
                 </span>
               </TableCell>
               <TableCell>{getCloseReasonBadge(position)}</TableCell>
