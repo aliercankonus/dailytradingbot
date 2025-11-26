@@ -11,6 +11,7 @@ interface MomentumData {
     consecutive30mBullish: number;
     consecutive30mBearish: number;
     macdHistogram: number;
+    adx: number;
   };
   higherTimeframeFilter: {
     trend4h: string;
