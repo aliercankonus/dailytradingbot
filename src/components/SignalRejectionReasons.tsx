@@ -387,7 +387,7 @@ export const SignalRejectionReasons = () => {
               <Activity className="h-5 w-5" />
               Momentum Status Details
             </h3>
-            <p className="text-sm text-muted-foreground mb-4">Momentum confirmation (≥2 consecutive candles on 15m OR 30m + MACD expansion)</p>
+            <p className="text-sm text-muted-foreground mb-4">Momentum confirmation (MACD histogram expanding + last close aligns with trend + no divergence)</p>
           </div>
           {momentumLoading ? (
             <p className="text-muted-foreground text-sm">Loading momentum data...</p>
