@@ -59,17 +59,10 @@ export const usePositions = () => {
   useEffect(() => {
     fetchPositions();
     
-    // Monitor positions every 30 seconds (balanced compromise between cost and responsiveness)
+    // Monitor positions every 30 seconds - no need for extra query, monitor-positions handles empty check
     const monitorInterval = setInterval(async () => {
-      // Only call monitor-positions if we have active positions
-      const { count } = await supabase
-        .from('positions')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'active');
-      
-      if (count && count > 0) {
-        await supabase.functions.invoke('monitor-positions');
-      }
+      // Monitor-positions internally checks for active positions, no need for duplicate query
+      await supabase.functions.invoke('monitor-positions');
       fetchPositions();
     }, 30000); // 30s interval for volatile markets
 
