@@ -34,7 +34,7 @@ serve(async (req) => {
     // Get all active positions
     const { data: positions, error: posError } = await supabase
       .from("positions")
-      .select("*, trades(*)")
+      .select("*")
       .eq("status", "active");
     if (posError) throw posError;
     if (!positions || positions.length === 0) {
@@ -184,12 +184,6 @@ serve(async (req) => {
             .update({ stop_loss: newStopLoss })
             .eq("id", position.id);
           if (posUpdateError) throw posUpdateError;
-          // Also update the trade record
-          const { error: tradeUpdateError } = await supabase
-            .from("trades")
-            .update({ stop_loss: newStopLoss })
-            .eq("id", position.trade_id);
-          if (tradeUpdateError) throw tradeUpdateError;
           trailingStopUpdates.push({
             symbol: position.symbol,
             side: position.side,
@@ -222,7 +216,7 @@ serve(async (req) => {
                 body: {
                   type: "trailing_stop_activated",
                   userId: position.user_id,
-                  tradeId: position.trade_id,
+                  positionId: position.id,
                   symbol: position.symbol,
                   side: position.side,
                   price: currentPrice,
@@ -352,24 +346,14 @@ serve(async (req) => {
           .update({
             status: "closed",
             current_price: currentPrice,
-            unrealized_pnl: pnl,
-            unrealized_pnl_percent: pnlPercent,
+            exit_price: currentPrice,
+            realized_pnl: pnl,
+            realized_pnl_percent: pnlPercent,
+            closed_at: new Date().toISOString(),
             close_reason: closeReason,
           })
           .eq("id", position.id);
         if (closePosError) throw closePosError;
-        // Close the associated trade
-        const { error: closeTradeError } = await supabase
-          .from("trades")
-          .update({
-            status: "closed",
-            exit_price: currentPrice,
-            profit_loss: pnl,
-            profit_loss_percent: pnlPercent,
-            closed_at: new Date().toISOString(),
-          })
-          .eq("id", position.trade_id);
-        if (closeTradeError) throw closeTradeError;
         closedPositions.push({
           symbol: position.symbol,
           side: position.side,
