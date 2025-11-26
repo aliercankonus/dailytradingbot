@@ -1,6 +1,5 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useEffect } from 'react';
 
 interface Position {
   id: string;
@@ -35,27 +34,13 @@ const fetchPositions = async (): Promise<Position[]> => {
 export const POSITIONS_QUERY_KEY = ['positions'];
 
 export const usePositions = () => {
-  const queryClient = useQueryClient();
-  
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: POSITIONS_QUERY_KEY,
     queryFn: fetchPositions,
-    staleTime: 10000, // Data stays fresh for 10 seconds (positions change frequently)
+    staleTime: Infinity, // Data stays fresh until invalidated by real-time subscription
     gcTime: 60000, // Cache kept for 1 minute
-    refetchInterval: 30000, // Background refetch every 30 seconds
     refetchOnWindowFocus: false,
   });
-
-  // Monitor positions every 30 seconds
-  useEffect(() => {
-    const monitorInterval = setInterval(async () => {
-      await supabase.functions.invoke('monitor-positions');
-      // Invalidate cache after monitoring to fetch updated positions
-      queryClient.invalidateQueries({ queryKey: POSITIONS_QUERY_KEY });
-    }, 30000);
-
-    return () => clearInterval(monitorInterval);
-  }, [queryClient]);
 
   return { 
     positions: data || [], 
