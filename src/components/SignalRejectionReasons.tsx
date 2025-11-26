@@ -38,47 +38,38 @@ export const SignalRejectionReasons = () => {
   };
   const getFilterDetails = (filtersStatus: any) => {
     const details = [];
-
     if (filtersStatus?.aligned === false) {
       details.push(`4h: ${filtersStatus.trend4h}, 1h: ${filtersStatus.trend1h}`);
     }
-
     if (filtersStatus?.momentumConfirms === false) {
       details.push(
         `Last close alignment: ${filtersStatus.lastCloseAlignsWithTrend ? "Yes" : "No"}`,
         `Divergence: ${filtersStatus.hasDivergence ? "Detected" : "None"}`,
       );
     }
-
     if (filtersStatus?.inPullback === false && filtersStatus.pullbackPercent !== undefined) {
       details.push(`Pullback: ${filtersStatus.pullbackPercent.toFixed(1)}%`);
     }
-
     return details.length > 0 ? details.join(" | ") : filtersStatus?.required || "Check filters";
   };
   const getRejectionDetails = (rejection: SignalRejection) => {
     const details = [];
     const fs = rejection.filters_status;
     const td = rejection.trend_data;
-
     if (!fs) return "No data";
-
     // Confidence or trend consistency below threshold
     if (rejection.rejection_reason?.includes("confidence or trend consistency below threshold")) {
       const confidence = fs.confidence ?? td?.confidence;
       const trendConsistency = fs.trendConsistency ?? td?.trendConsistency;
-
       // Always show the values and whether they meet the threshold
       if (confidence !== undefined) {
-        const meetsConfidence = fs.meetsThreshold === true;
+        const meetsConfidence = confidence >= 60;
         details.push(`Confidence: ${confidence}%${!meetsConfidence ? " ❌" : " ✓"}`);
       }
-
       if (trendConsistency !== undefined) {
-        const meetsConsistency = fs.meetsThreshold === true;
+        const meetsConsistency = trendConsistency >= 50;
         details.push(`Consistency: ${trendConsistency}%${!meetsConsistency ? " ❌" : " ✓"}`);
       }
-
       // If meetsThreshold is explicitly false but values seem to pass defaults,
       // it means user has custom thresholds - indicate this
       if (
@@ -90,13 +81,11 @@ export const SignalRejectionReasons = () => {
       ) {
         details.push("(Custom thresholds set higher than defaults)");
       }
-
       // Show timeframe conflicts if confidence is the issue
-      if (confidence !== undefined && !fs.meetsThreshold) {
+      if (confidence !== undefined && confidence < 60) {
         if (td?.multiTimeframe) {
           const mt = td.multiTimeframe;
           const conflicts = [];
-
           if (mt.trend4h && mt.trend1h && mt.trend4h !== mt.trend1h) {
             conflicts.push(`4h ${mt.trend4h} vs 1h ${mt.trend1h}`);
           }
@@ -106,56 +95,49 @@ export const SignalRejectionReasons = () => {
           if (mt.trend30m && mt.trend15m && mt.trend30m !== mt.trend15m) {
             conflicts.push(`30m ${mt.trend30m} vs 15m ${mt.trend15m}`);
           }
-
           if (conflicts.length > 0) {
             details.push(`Conflicts: ${conflicts.join(", ")}`);
           }
-
           // Show individual timeframe confidences
           const tfConfidences = [];
-          if (mt.confidence4h) tfConfidences.push(`4h: ${mt.confidence4h}%`);
-          if (mt.confidence1h) tfConfidences.push(`1h: ${mt.confidence1h}%`);
-          if (mt.confidence30m) tfConfidences.push(`30m: ${mt.confidence30m}%`);
-          if (mt.confidence15m) tfConfidences.push(`15m: ${mt.confidence15m}%`);
-
+          if (mt.confidence4h !== undefined) tfConfidences.push(`4h: ${mt.confidence4h}%`);
+          if (mt.confidence1h !== undefined) tfConfidences.push(`1h: ${mt.confidence1h}%`);
+          if (mt.confidence30m !== undefined) tfConfidences.push(`30m: ${mt.confidence30m}%`);
+          if (mt.confidence15m !== undefined) tfConfidences.push(`15m: ${mt.confidence15m}%`);
           if (tfConfidences.length > 0) {
             details.push(`TF confidence: ${tfConfidences.join(", ")}`);
           }
         }
       }
     }
-
     // Timeframes not aligned with no divergence opportunity
     if (rejection.rejection_reason?.includes("timeframes not aligned, no divergence opportunity")) {
       // Show all timeframe trends
       if (td?.multiTimeframe) {
         const mt = td.multiTimeframe;
         const trends = [];
-        if (mt.trend4h) trends.push(`4h: ${mt.trend4h}`);
-        if (mt.trend1h) trends.push(`1h: ${mt.trend1h}`);
-        if (mt.trend30m) trends.push(`30m: ${mt.trend30m}`);
-        if (mt.trend15m) trends.push(`15m: ${mt.trend15m}`);
+        if (mt.trend4h !== undefined) trends.push(`4h: ${mt.trend4h}`);
+        if (mt.trend1h !== undefined) trends.push(`1h: ${mt.trend1h}`);
+        if (mt.trend30m !== undefined) trends.push(`30m: ${mt.trend30m}`);
+        if (mt.trend15m !== undefined) trends.push(`15m: ${mt.trend15m}`);
         if (trends.length > 0) {
           details.push(trends.join(", "));
         }
-
         // Show confidence levels for each timeframe
         const confidences = [];
-        if (mt.confidence4h) confidences.push(`4h: ${mt.confidence4h}%`);
-        if (mt.confidence1h) confidences.push(`1h: ${mt.confidence1h}%`);
-        if (mt.confidence30m) confidences.push(`30m: ${mt.confidence30m}%`);
-        if (mt.confidence15m) confidences.push(`15m: ${mt.confidence15m}%`);
+        if (mt.confidence4h !== undefined) confidences.push(`4h: ${mt.confidence4h}%`);
+        if (mt.confidence1h !== undefined) confidences.push(`1h: ${mt.confidence1h}%`);
+        if (mt.confidence30m !== undefined) confidences.push(`30m: ${mt.confidence30m}%`);
+        if (mt.confidence15m !== undefined) confidences.push(`15m: ${mt.confidence15m}%`);
         if (confidences.length > 0) {
           details.push(`Confidence: ${confidences.join(", ")}`);
         }
-      } else if (fs.trend4h || fs.trend1h) {
-        details.push(`4h: ${fs.trend4h || "unknown"}, 1h: ${fs.trend1h || "unknown"}`);
+      } else if (fs.trend4h !== undefined || fs.trend1h !== undefined) {
+        details.push(`4h: ${fs.trend4h ?? "unknown"}, 1h: ${fs.trend1h ?? "unknown"}`);
       }
-
       // Show overall confidence and consistency if available
       const overallConfidence = td?.confidence ?? fs.confidence;
       const trendConsistency = td?.trendConsistency ?? fs.trendConsistency;
-
       if (overallConfidence !== undefined || trendConsistency !== undefined) {
         const thresholdDetails = [];
         if (overallConfidence !== undefined) {
@@ -170,81 +152,67 @@ export const SignalRejectionReasons = () => {
           details.push(thresholdDetails.join(", "));
         }
       }
-
       if (td?.momentum) {
         const m = td.momentum;
         const momentumDetails = [];
-
         if (m.lastCloseAlignsWithTrend !== undefined) {
           momentumDetails.push(`Price align: ${m.lastCloseAlignsWithTrend ? "✓" : "❌"}`);
         }
-        
+
         if (m.hasDivergence !== undefined) {
           momentumDetails.push(`Divergence: ${m.hasDivergence ? "Yes ❌" : "None ✓"}`);
         }
-
         if (m.macdHistogram !== undefined) {
           const macdOK = Math.abs(m.macdHistogram) > 0.01;
           momentumDetails.push(`MACD: ${m.macdHistogram.toFixed(3)}${!macdOK ? " < 0.01 ❌" : " ✓"}`);
         }
-
-        const momentumConfirmed = m.confirms || false;
+        const momentumConfirmed = m.confirms ?? false;
         momentumDetails.push(momentumConfirmed ? "Momentum ✓" : "No momentum ❌");
-
         details.push(momentumDetails.join(" | "));
       }
-
       // Show why no divergence
       if (td?.higherTimeframeFilter) {
         const htf = td.higherTimeframeFilter;
-
         if (htf.aligned) {
           details.push("Aligned (standard signal requires confidence/momentum)");
         } else {
           // Check if divergence signals are enabled
           const pullbackEnabled = fs.pullbackEnabled ?? true;
           const earlyReversalEnabled = fs.earlyReversalEnabled ?? true;
-
           if (!pullbackEnabled && !earlyReversalEnabled) {
             details.push("Divergence signals disabled");
           } else {
             // Show specific divergence conditions
             const divergenceChecks = [];
-
             // Pullback conditions
             if (pullbackEnabled && td.multiTimeframe) {
               const mt = td.multiTimeframe;
-              const confidence4h = mt.confidence4h || 0;
+              const confidence4h = mt.confidence4h ?? 0;
               const strongHigherTF = confidence4h >= 60;
-
               if (!strongHigherTF) {
                 divergenceChecks.push(`Pullback: 4h ${confidence4h}% < 60%`);
               }
             }
-
             // Early reversal conditions
             if (earlyReversalEnabled && td.multiTimeframe) {
               const mt = td.multiTimeframe;
-              const confidence1h = mt.confidence1h || 0;
-              const confidence4h = mt.confidence4h || 0;
+              const confidence1h = mt.confidence1h ?? 0;
+              const confidence4h = mt.confidence4h ?? 0;
               const strongReversal = confidence1h >= 70 && confidence4h < 60;
-
               if (!strongReversal) {
                 divergenceChecks.push(`Reversal: 1h ${confidence1h}% (needs ≥70%) & 4h ${confidence4h}% (needs <60%)`);
               }
             }
-
             if (divergenceChecks.length > 0) {
               details.push(divergenceChecks.join(" | "));
             }
           }
         }
       }
-
       // Show ranging market if applicable
       if (td?.ranging?.isRanging === true) {
-        const atrPercent = td.ranging.atrPercent || 0;
-        const adx = td.volatility?.adx || 0;
+        const atrPercent = td.ranging.atrPercent ?? 0;
+        const adx = td.volatility?.adx ?? 0;
         details.push(`Ranging: ATR ${atrPercent.toFixed(2)}%, ADX ${adx.toFixed(1)}`);
       }
     }
@@ -253,43 +221,39 @@ export const SignalRejectionReasons = () => {
       rejection.rejection_reason?.includes("timeframes NOT aligned") ||
       rejection.rejection_reason?.includes("timeframe")
     ) {
-      if (fs.trend4h || fs.trend1h) {
-        details.push(`4H: ${fs.trend4h || "unknown"} | 1H: ${fs.trend1h || "unknown"}`);
+      if (fs.trend4h !== undefined || fs.trend1h !== undefined) {
+        details.push(`4H: ${fs.trend4h ?? "unknown"} | 1H: ${fs.trend1h ?? "unknown"}`);
       }
     }
-
     // Pullback issues
     if (rejection.rejection_reason?.includes("pullback")) {
       if (fs.pullbackPercent !== undefined && fs.pullbackPercent !== null) {
         details.push(`Retracement: ${fs.pullbackPercent.toFixed(1)}%`);
       }
     }
-
     // Momentum issues - show specific failure point
     if (rejection.rejection_reason?.includes("momentum")) {
       // Check if last close aligns with trend
-      const lastCloseAligns = td?.momentum?.lastCloseAlignsWithTrend ?? fs.momentum?.lastCloseAlignsWithTrend;
-      
+      const lastCloseAligns = td?.momentum?.lastCloseAlignsWithTrend ?? fs.momentum?.lastCloseAlignsWithTrend ?? false;
+
       // Check for divergence
       const hasDivergence = td?.momentum?.hasDivergence ?? fs.momentum?.hasDivergence ?? false;
-
       // Check MACD histogram
       const macdHistogram = td?.momentum?.macdHistogram ?? fs.momentum?.macdHistogram;
       const macdDirectionAligned = td?.momentum?.macdDirectionAligned ?? fs.momentum?.macdDirectionAligned ?? false;
       const macdExpanding = td?.momentum?.macdExpanding ?? fs.momentum?.macdExpanding ?? false;
-      
+
       // Check ADX
       const adx = td?.momentum?.adx ?? fs.momentum?.adx;
       const adxOK = adx !== undefined && adx >= 20;
-
       if (!lastCloseAligns) {
         details.push(`Last close does not align with trend direction`);
       }
-      
+
       if (hasDivergence) {
         details.push(`Price/MACD divergence detected`);
       }
-      
+
       if (!macdDirectionAligned) {
         if (macdHistogram !== undefined) {
           details.push(`MACD histogram: ${macdHistogram.toFixed(4)} (wrong direction for trend)`);
@@ -303,7 +267,7 @@ export const SignalRejectionReasons = () => {
           details.push(`MACD histogram: unavailable`);
         }
       }
-      
+
       if (!adxOK) {
         if (adx !== undefined) {
           details.push(`ADX: ${adx.toFixed(1)} (need ≥20)`);
@@ -312,12 +276,10 @@ export const SignalRejectionReasons = () => {
         }
       }
     }
-
     // Ranging market
     if (rejection.rejection_reason?.includes("ranging") && fs.isRanging === true) {
       details.push(`Market: Ranging`);
     }
-
     return details.length > 0 ? details.join(" | ") : "No specific values";
   };
   if (loading) {
@@ -397,7 +359,9 @@ export const SignalRejectionReasons = () => {
               <Activity className="h-5 w-5" />
               Momentum Status Details
             </h3>
-            <p className="text-sm text-muted-foreground mb-4">Momentum confirmation (MACD histogram expanding + last close aligns with trend + no divergence)</p>
+            <p className="text-sm text-muted-foreground mb-4">
+              Momentum confirmation (MACD histogram expanding + last close aligns with trend + no divergence)
+            </p>
           </div>
           {momentumLoading ? (
             <p className="text-muted-foreground text-sm">Loading momentum data...</p>
@@ -417,9 +381,8 @@ export const SignalRejectionReasons = () => {
                 }
                 const { momentum, higherTimeframeFilter, multiTimeframe, trend } = data;
                 const confirms = momentum?.confirms ?? false;
-
                 const lastCloseAligns = momentum?.lastCloseAlignsWithTrend ?? false;
-                const noDivergence = !momentum?.hasDivergence;
+                const noDivergence = !momentum?.hasDivergence ?? true;
                 const macdDirectionOK = momentum?.macdDirectionAligned ?? false;
                 const macdExpandingOK = momentum?.macdExpanding ?? false;
                 const macdOK = macdDirectionOK && macdExpandingOK;
@@ -455,10 +418,10 @@ export const SignalRejectionReasons = () => {
                       >
                         {trend === "bullish" ? (
                           <TrendingUp className="h-3 w-3 mr-1" />
-                        ) : (
+                        ) : trend === "bearish" ? (
                           <TrendingDown className="h-3 w-3 mr-1" />
-                        )}
-                        {trend}
+                        ) : null}
+                        {trend ?? "unknown"}
                       </Badge>
                     </div>
                     <div className="grid grid-cols-2 gap-3 mb-3">
@@ -546,7 +509,9 @@ export const SignalRejectionReasons = () => {
                               {trend === "bullish" && momentum.macdHistogram > 0 && macdDirectionOK ? (
                                 <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-green-100 dark:bg-green-950">
                                   <ArrowUp className="h-3 w-3 text-green-600 dark:text-green-400" />
-                                  <span className="text-xs text-green-700 dark:text-green-300 font-medium">Bullish</span>
+                                  <span className="text-xs text-green-700 dark:text-green-300 font-medium">
+                                    Bullish
+                                  </span>
                                 </div>
                               ) : trend === "bearish" && momentum.macdHistogram < 0 && macdDirectionOK ? (
                                 <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-100 dark:bg-red-950">
@@ -556,7 +521,9 @@ export const SignalRejectionReasons = () => {
                               ) : !macdDirectionOK ? (
                                 <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-100 dark:bg-yellow-950">
                                   <Minus className="h-3 w-3 text-yellow-600 dark:text-yellow-400" />
-                                  <span className="text-xs text-yellow-700 dark:text-yellow-300 font-medium">Misaligned</span>
+                                  <span className="text-xs text-yellow-700 dark:text-yellow-300 font-medium">
+                                    Misaligned
+                                  </span>
                                 </div>
                               ) : (
                                 <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800">
@@ -611,8 +578,7 @@ export const SignalRejectionReasons = () => {
                     {!confirms && (
                       <div className="mt-3 pt-3 border-t border-border">
                         <p className="text-xs text-muted-foreground">
-                          <strong>Missing:</strong>{" "}
-                          {!lastCloseAligns && "Last close must align with trend"}
+                          <strong>Missing:</strong> {!lastCloseAligns && "Last close must align with trend"}
                           {!lastCloseAligns && (!noDivergence || !macdOK || !adxOK) && ", "}
                           {!noDivergence && "No divergence between price and MACD"}
                           {!noDivergence && (!macdOK || !adxOK) && ", "}
