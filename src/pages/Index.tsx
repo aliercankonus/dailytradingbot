@@ -12,6 +12,7 @@ import { PerformanceAnalytics } from "@/components/PerformanceAnalytics";
 import { ActivePositions } from "@/components/ActivePositions";
 import { ClosedPositionsDashboard } from "@/components/ClosedPositionsDashboard";
 import { CloseAllTradesButton } from "@/components/CloseAllTradesButton";
+import { WebSocketHealthDashboard } from "@/components/WebSocketHealthDashboard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
 import { TradeCounterSync } from "@/components/TradeCounterSync";
@@ -64,13 +65,14 @@ const Index = () => {
         <AutoSignalGenerator />
         <TradeCounterSync />
         <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-7">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="signals">Signals</TabsTrigger>
             <TabsTrigger value="positions">Positions</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
             <TabsTrigger value="risk">Risk</TabsTrigger>
+            <TabsTrigger value="monitor">Monitor</TabsTrigger>
           </TabsList>
 
           <TabsContent value="dashboard" className="space-y-6">
@@ -116,6 +118,10 @@ const Index = () => {
 
           <TabsContent value="risk">
             <RiskManagementControls />
+          </TabsContent>
+
+          <TabsContent value="monitor">
+            <WebSocketHealthDashboard />
           </TabsContent>
         </Tabs>
       </main>

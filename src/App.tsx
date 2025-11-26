@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { WebSocketMonitorProvider } from "@/contexts/WebSocketMonitorContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Index from "./pages/Index";
 import Settings from "./pages/Settings";
@@ -23,18 +24,20 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
-          <Routes>
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
-            <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-            <Route path="/symbols" element={<ProtectedRoute><Symbols /></ProtectedRoute>} />
-            <Route path="/strategies" element={<ProtectedRoute><Strategies /></ProtectedRoute>} />
-            <Route path="/strategies/new" element={<ProtectedRoute><StrategyBuilder /></ProtectedRoute>} />
-            <Route path="/strategies/edit/:id" element={<ProtectedRoute><StrategyBuilder /></ProtectedRoute>} />
-            <Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} />
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <WebSocketMonitorProvider>
+            <Routes>
+              <Route path="/auth" element={<Auth />} />
+              <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
+              <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+              <Route path="/symbols" element={<ProtectedRoute><Symbols /></ProtectedRoute>} />
+              <Route path="/strategies" element={<ProtectedRoute><Strategies /></ProtectedRoute>} />
+              <Route path="/strategies/new" element={<ProtectedRoute><StrategyBuilder /></ProtectedRoute>} />
+              <Route path="/strategies/edit/:id" element={<ProtectedRoute><StrategyBuilder /></ProtectedRoute>} />
+              <Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} />
+              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </WebSocketMonitorProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
