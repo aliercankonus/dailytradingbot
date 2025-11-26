@@ -8,19 +8,18 @@ import { useToast } from "@/hooks/use-toast";
 
 export const LivePriceCard = () => {
   const { activeSymbols, loading: symbolsLoading } = useSymbols();
-  const { prices, connected, error } = useRealtimePrices(activeSymbols);
+  const { prices, priceVersion, connected, error } = useRealtimePrices(activeSymbols);
   const [displayPrices, setDisplayPrices] = useState<any[]>([]);
   const { toast } = useToast();
 
-  // Convert Map to array whenever prices change - this ensures reactivity
+  // Convert Map to array whenever prices change - use priceVersion to force updates
   useEffect(() => {
-    // Filter prices to only show active symbols
     const priceArray = Array.from(prices.values())
       .filter(price => activeSymbols.includes(price.symbol))
       .slice(0, 10);
-    console.log('[LivePriceCard] Updating display prices, count:', priceArray.length, 'prices Map size:', prices.size);
+    console.log('[LivePriceCard] Updating display prices, version:', priceVersion, 'count:', priceArray.length);
     setDisplayPrices(priceArray);
-  }, [prices, activeSymbols]);
+  }, [prices, priceVersion, activeSymbols]);
 
   // Show toast when connection error occurs
   useEffect(() => {

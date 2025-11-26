@@ -21,7 +21,7 @@ export const ActivePositions = () => {
   
   // Get live prices for all active position symbols
   const symbols = useMemo(() => positions.map(p => p.symbol), [positions]);
-  const { prices, getPrice } = useRealtimePrices(symbols);
+  const { prices, priceVersion, getPrice } = useRealtimePrices(symbols);
 
   // Extract unique strategies from positions
   const availableStrategies = useMemo(() => {
@@ -43,7 +43,7 @@ export const ActivePositions = () => {
       map.set(pos.symbol, livePrice ? parseFloat(livePrice.price) : pos.current_price || pos.entry_price);
     });
     return map;
-  }, [filteredPositions, getPrice, prices]);
+  }, [filteredPositions, getPrice, priceVersion]);
 
   const positionsWithLivePnL = useMemo(() => {
     return filteredPositions.map(position => {
