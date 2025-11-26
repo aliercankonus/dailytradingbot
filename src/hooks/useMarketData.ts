@@ -21,12 +21,9 @@ export const useMarketData = (symbols?: string[]) => {
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const connectionTimeoutRef = useRef<number | null>(null);
-  const pingIntervalRef = useRef<number | null>(null);
-  const pingTimestampRef = useRef<number | null>(null);
   const MAX_RECONNECT_ATTEMPTS = 5;
   const BASE_RECONNECT_DELAY = 1000;
   const CONNECTION_TIMEOUT = 10000;
-  const PING_INTERVAL = 30000;
   
   const monitor = useWebSocketMonitor();
   const connectionId = 'market-data';
@@ -39,13 +36,10 @@ export const useMarketData = (symbols?: string[]) => {
     
     const connectWebSocket = () => {
       try {
-        // Clear any existing timeouts
-        if (connectionTimeoutRef.current) {
-          clearTimeout(connectionTimeoutRef.current);
-        }
-        if (pingIntervalRef.current) {
-          clearInterval(pingIntervalRef.current);
-        }
+          // Clear any existing timeouts
+          if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+          }
 
         // Close existing connection if any
         if (wsRef.current) {
@@ -78,30 +72,11 @@ export const useMarketData = (symbols?: string[]) => {
           setConnected(true);
           setError(null);
           reconnectAttemptsRef.current = 0;
-          monitor.updateConnectionStatus(connectionId, 'connected');
-
-          // Start ping interval to keep connection alive and measure latency
-          pingIntervalRef.current = window.setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) {
-              pingTimestampRef.current = Date.now();
-              ws.send(JSON.stringify({ type: 'ping' }));
-            }
-          }, PING_INTERVAL);
         };
 
         ws.onmessage = (event) => {
           try {
             const message = JSON.parse(event.data);
-            
-            // Record message for monitoring
-            monitor.recordMessage(connectionId);
-            
-            // Measure latency from ping
-            if (message.type === 'pong' && pingTimestampRef.current) {
-              const latency = Date.now() - pingTimestampRef.current;
-              monitor.recordLatency(connectionId, latency);
-              pingTimestampRef.current = null;
-            }
             
             if (message.type === 'connected') {
               console.log('Successfully connected to market data stream');
@@ -125,7 +100,6 @@ export const useMarketData = (symbols?: string[]) => {
             } else if (message.type === 'error') {
               console.error('Market data error:', message.message);
               setError(message.message);
-              monitor.recordError(connectionId, message.message);
             }
           } catch (err) {
             console.error('Error parsing WebSocket message:', err);
@@ -139,19 +113,13 @@ export const useMarketData = (symbols?: string[]) => {
             : 'Connection error - reconnecting...';
           setError(errorMessage);
           setConnected(false);
-          monitor.recordError(connectionId, errorMessage);
-          monitor.updateConnectionStatus(connectionId, 'disconnected');
         };
 
         ws.onclose = (event) => {
           console.log(`[MarketData] WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
           setConnected(false);
-          monitor.updateConnectionStatus(connectionId, 'disconnected');
           
           // Clean up intervals
-          if (pingIntervalRef.current) {
-            clearInterval(pingIntervalRef.current);
-          }
           if (connectionTimeoutRef.current) {
             clearTimeout(connectionTimeoutRef.current);
           }
@@ -159,8 +127,6 @@ export const useMarketData = (symbols?: string[]) => {
           // Attempt reconnection with exponential backoff
           if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttemptsRef.current++;
-            monitor.recordReconnectAttempt(connectionId);
-            monitor.updateConnectionStatus(connectionId, 'reconnecting');
             const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current - 1);
             console.log(`[MarketData] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
             
@@ -168,9 +134,7 @@ export const useMarketData = (symbols?: string[]) => {
               connectWebSocket();
             }, delay);
           } else {
-            const errorMsg = 'Connection lost. Please refresh the page to reconnect.';
-            setError(errorMsg);
-            monitor.recordError(connectionId, errorMsg);
+            setError('Connection lost. Please refresh the page to reconnect.');
             setLoading(false);
           }
         };
@@ -197,12 +161,9 @@ export const useMarketData = (symbols?: string[]) => {
       if (connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
       }
-      if (pingIntervalRef.current) {
-        clearInterval(pingIntervalRef.current);
-      }
       monitor.unregisterConnection(connectionId);
     };
-  }, [symbols, monitor]);
+  }, [symbols]);
 
   return { data, loading, error, connected };
 };
