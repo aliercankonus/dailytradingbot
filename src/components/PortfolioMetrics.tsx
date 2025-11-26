@@ -58,10 +58,10 @@ export const PortfolioMetrics = () => {
     const unrealizedPnL = positions
       .filter((p) => p.status === "active")
       .reduce((sum, pos) => {
-        const livePrice = prices[pos.symbol];
-        const priceStr = livePrice?.price;
-        const currentPrice =
-          priceStr && !isNaN(parseFloat(priceStr)) ? parseFloat(priceStr) : (pos.current_price ?? pos.entry_price ?? 0);
+        const livePrice = getPrice(pos.symbol);
+        const currentPrice = livePrice
+          ? parseFloat(livePrice.price)
+          : pos.current_price ?? pos.entry_price ?? 0;
 
         const pnl =
           pos.side === "BUY"
