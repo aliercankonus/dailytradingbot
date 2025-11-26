@@ -35,11 +35,19 @@ export const ActivePositions = () => {
     return positions.filter(p => p.strategy_name === selectedStrategy);
   }, [positions, selectedStrategy]);
 
-  // Calculate live P&L for filtered positions
+  // Calculate live P&L for filtered positions - memoize price map separately
+  const priceMap = useMemo(() => {
+    const map = new Map<string, number>();
+    filteredPositions.forEach(pos => {
+      const livePrice = getPrice(pos.symbol);
+      map.set(pos.symbol, livePrice ? parseFloat(livePrice.price) : pos.current_price || pos.entry_price);
+    });
+    return map;
+  }, [filteredPositions, getPrice]);
+
   const positionsWithLivePnL = useMemo(() => {
     return filteredPositions.map(position => {
-      const livePrice = getPrice(position.symbol);
-      const currentPrice = livePrice ? parseFloat(livePrice.price) : position.current_price || position.entry_price;
+      const currentPrice = priceMap.get(position.symbol) || position.entry_price;
       
       // Calculate live P&L
       const pnl = position.side === 'BUY'
@@ -57,7 +65,7 @@ export const ActivePositions = () => {
         live_unrealized_pnl_percent: pnlPercent
       };
     });
-  }, [filteredPositions, getPrice]);
+  }, [filteredPositions, priceMap]);
 
   // Group positions by strategy for display
   const positionsByStrategy = useMemo(() => {
