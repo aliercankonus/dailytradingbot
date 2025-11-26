@@ -43,9 +43,9 @@ serve(async (req) => {
 
     for (const user of users) {
       try {
-        // Get all closed trades for this user
+        // Get all closed positions for this user
         const { data: allTrades } = await supabase
-          .from("trades")
+          .from("positions")
           .select("*")
           .eq("user_id", user.user_id)
           .eq("status", "closed")
@@ -58,9 +58,9 @@ serve(async (req) => {
           .eq("user_id", user.user_id)
           .eq("status", "active");
 
-        // Calculate realized P&L from all closed trades
+        // Calculate realized P&L from all closed positions
         const realizedPnL = (allTrades || []).reduce(
-          (sum, trade) => sum + (trade.profit_loss || 0),
+          (sum, trade) => sum + (trade.realized_pnl || 0),
           0
         );
 
@@ -80,8 +80,8 @@ serve(async (req) => {
 
         // Calculate trade statistics
         const closedTrades = allTrades || [];
-        const winningTrades = closedTrades.filter((t) => (t.profit_loss || 0) > 0);
-        const losingTrades = closedTrades.filter((t) => (t.profit_loss || 0) <= 0);
+        const winningTrades = closedTrades.filter((t) => (t.realized_pnl || 0) > 0);
+        const losingTrades = closedTrades.filter((t) => (t.realized_pnl || 0) <= 0);
         const winRate =
           closedTrades.length > 0
             ? (winningTrades.length / closedTrades.length) * 100
@@ -90,33 +90,33 @@ serve(async (req) => {
         // Calculate performance metrics
         const avgWin =
           winningTrades.length > 0
-            ? winningTrades.reduce((sum, t) => sum + (t.profit_loss || 0), 0) /
+            ? winningTrades.reduce((sum, t) => sum + (t.realized_pnl || 0), 0) /
               winningTrades.length
             : 0;
 
         const avgLoss =
           losingTrades.length > 0
             ? Math.abs(
-                losingTrades.reduce((sum, t) => sum + (t.profit_loss || 0), 0) /
+                losingTrades.reduce((sum, t) => sum + (t.realized_pnl || 0), 0) /
                   losingTrades.length
               )
             : 0;
 
         const totalWins = winningTrades.reduce(
-          (sum, t) => sum + (t.profit_loss || 0),
+          (sum, t) => sum + (t.realized_pnl || 0),
           0
         );
         const totalLosses = Math.abs(
-          losingTrades.reduce((sum, t) => sum + (t.profit_loss || 0), 0)
+          losingTrades.reduce((sum, t) => sum + (t.realized_pnl || 0), 0)
         );
         const profitFactor = totalLosses > 0 ? totalWins / totalLosses : 0;
 
         const largestWin = winningTrades.length > 0
-          ? Math.max(...winningTrades.map((t) => t.profit_loss || 0))
+          ? Math.max(...winningTrades.map((t) => t.realized_pnl || 0))
           : 0;
 
         const largestLoss = losingTrades.length > 0
-          ? Math.abs(Math.min(...losingTrades.map((t) => t.profit_loss || 0)))
+          ? Math.abs(Math.min(...losingTrades.map((t) => t.realized_pnl || 0)))
           : 0;
 
         // Calculate max drawdown (simplified - from peak portfolio value)
@@ -125,7 +125,7 @@ serve(async (req) => {
         let runningValue = user.portfolio_value;
 
         closedTrades.forEach((trade) => {
-          runningValue += trade.profit_loss || 0;
+          runningValue += trade.realized_pnl || 0;
           if (runningValue > peakValue) {
             peakValue = runningValue;
           }
