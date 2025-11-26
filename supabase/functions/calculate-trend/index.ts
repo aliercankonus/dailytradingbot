@@ -702,103 +702,32 @@ serve(async (req) => {
       }
     }
     // ============================================================
-    // MOMENTUM CONFIRMATION (RELAXED: 2+ consecutive candles on 15m OR 30m)
+    // SIMPLIFIED MOMENTUM CONFIRMATION
     // ============================================================
-    // Use 15m and 30m candles for momentum - more sensitive to near-term direction
-    // Check last 3 candles: need ≥2 consecutive in same direction on EITHER timeframe
+    // Check last 3 candles from 15m for price movement direction
     const recentKlines15m = klines15m.slice(-3);
-    const recentKlines30m = klines30m.slice(-3);
-
-    // Count CONSECUTIVE candles in same direction (must be unbroken streak)
-    let consecutive15mBullish = 0;
-    let consecutive15mBearish = 0;
-    let consecutive30mBullish = 0;
-    let consecutive30mBearish = 0;
-    let lastDirection15m = "";
-    let lastDirection30m = "";
-
-    // Check 15m candles for consecutive movement
-    for (let i = 0; i < recentKlines15m.length; i++) {
-      const open = parseFloat(recentKlines15m[i][1]);
-      const close = parseFloat(recentKlines15m[i][4]);
-      const currentDirection = close > open ? "bullish" : "bearish";
-
-      // Reset streak if direction changes
-      if (i === 0) {
-        lastDirection15m = currentDirection;
-        if (currentDirection === "bullish") {
-          consecutive15mBullish = 1;
-          consecutive15mBearish = 0; // Zero out opposite
-        } else {
-          consecutive15mBearish = 1;
-          consecutive15mBullish = 0; // Zero out opposite
-        }
-      } else if (currentDirection === lastDirection15m) {
-        // Continue the streak
-        if (currentDirection === "bullish") consecutive15mBullish++;
-        else consecutive15mBearish++;
-      } else {
-        // Direction changed - streak broken, zero out opposite counter
-        if (currentDirection === "bullish") {
-          consecutive15mBullish = 1;
-          consecutive15mBearish = 0; // CRITICAL: Zero out opposite
-        } else {
-          consecutive15mBearish = 1;
-          consecutive15mBullish = 0; // CRITICAL: Zero out opposite
-        }
-        lastDirection15m = currentDirection;
+    
+    // Get last and previous close prices
+    const lastClose = parseFloat(recentKlines15m[recentKlines15m.length - 1][4]);
+    const prevClose = parseFloat(recentKlines15m[recentKlines15m.length - 2][4]);
+    
+    // Get MACD histogram values for divergence check
+    const macdHistogram = trend15m.indicators.macdHistogram;
+    const macdValues: number[] = [];
+    
+    // Calculate MACD for recent candles to check for divergence
+    for (let i = Math.max(0, recentKlines15m.length - 3); i < recentKlines15m.length; i++) {
+      const closes = recentKlines15m.slice(0, i + 1).map((k: any) => parseFloat(k[4]));
+      if (closes.length >= 26) {
+        const ema12 = calculateEMA(closes, 12);
+        const ema26 = calculateEMA(closes, 26);
+        macdValues.push(ema12 - ema26);
       }
     }
-
-    // Check 30m candles for confirmation
-    for (let i = 0; i < recentKlines30m.length; i++) {
-      const open = parseFloat(recentKlines30m[i][1]);
-      const close = parseFloat(recentKlines30m[i][4]);
-      const currentDirection = close > open ? "bullish" : "bearish";
-
-      if (i === 0) {
-        lastDirection30m = currentDirection;
-        if (currentDirection === "bullish") {
-          consecutive30mBullish = 1;
-          consecutive30mBearish = 0; // Zero out opposite
-        } else {
-          consecutive30mBearish = 1;
-          consecutive30mBullish = 0; // Zero out opposite
-        }
-      } else if (currentDirection === lastDirection30m) {
-        if (currentDirection === "bullish") consecutive30mBullish++;
-        else consecutive30mBearish++;
-      } else {
-        // Direction changed - zero out opposite counter
-        if (currentDirection === "bullish") {
-          consecutive30mBullish = 1;
-          consecutive30mBearish = 0; // CRITICAL: Zero out opposite
-        } else {
-          consecutive30mBearish = 1;
-          consecutive30mBullish = 0; // CRITICAL: Zero out opposite
-        }
-        lastDirection30m = currentDirection;
-      }
-    }
-
-    // CRITICAL FIX: Zero out candles that contradict the timeframe's calculated trend
-    // If 15m trend is bearish, ignore bullish candles (and vice versa)
-    if (trend15m.trend === "bearish") {
-      consecutive15mBullish = 0; // 15m is bearish, so bullish candles don't count
-    } else if (trend15m.trend === "bullish") {
-      consecutive15mBearish = 0; // 15m is bullish, so bearish candles don't count
-    }
-
-    if (trend30m.trend === "bearish") {
-      consecutive30mBullish = 0; // 30m is bearish, so bullish candles don't count
-    } else if (trend30m.trend === "bullish") {
-      consecutive30mBearish = 0; // 30m is bullish, so bearish candles don't count
-    }
-
-    // CRITICAL: When 4h is neutral, derive momentum direction from lower timeframe consensus
+    
+    // Determine effective trend for momentum direction
     let effectiveTrendForMomentum = dominantTrend;
     if (dominantTrend === "neutral") {
-      // Count votes from lower timeframes
       const bullishVotes = [trend1h.trend, trend30m.trend, trend15m.trend].filter((t) => t === "bullish").length;
       const bearishVotes = [trend1h.trend, trend30m.trend, trend15m.trend].filter((t) => t === "bearish").length;
 
@@ -807,40 +736,47 @@ serve(async (req) => {
       } else if (bearishVotes > bullishVotes) {
         effectiveTrendForMomentum = "bearish";
       }
-      // If tied or all neutral, keep as neutral (no momentum confirmation possible)
     }
-
-    // Only count candles that align with effective trend AND timeframe trend
-    const momentum15mConfirms =
-      (effectiveTrendForMomentum === "bullish" && trend15m.trend === "bullish" && consecutive15mBullish >= 2) ||
-      (effectiveTrendForMomentum === "bearish" && trend15m.trend === "bearish" && consecutive15mBearish >= 2);
-
-    const momentum30mConfirms =
-      (effectiveTrendForMomentum === "bullish" && trend30m.trend === "bullish" && consecutive30mBullish >= 2) ||
-      (effectiveTrendForMomentum === "bearish" && trend30m.trend === "bearish" && consecutive30mBearish >= 2);
-
+    
+    // Check if last close aligns with trend direction
+    const lastCloseAlignsWithTrend =
+      (effectiveTrendForMomentum === "bullish" && lastClose > prevClose) ||
+      (effectiveTrendForMomentum === "bearish" && lastClose < prevClose) ||
+      effectiveTrendForMomentum === "neutral";
+    
+    // Check for divergence (price vs MACD)
+    let hasDivergence = false;
+    if (macdValues.length >= 2) {
+      const priceMovement = lastClose - prevClose;
+      const macdMovement = macdValues[macdValues.length - 1] - macdValues[macdValues.length - 2];
+      
+      // Bearish divergence: price up but MACD down
+      // Bullish divergence: price down but MACD up
+      hasDivergence =
+        (priceMovement > 0 && macdMovement < 0) ||
+        (priceMovement < 0 && macdMovement > 0);
+    }
+    
     // MACD histogram must be expanding (shows strength building)
-    const macdHistogram = trend15m.indicators.macdHistogram; // Use 15m MACD
     const macdExpanding = Math.abs(macdHistogram) > 0.01;
-    const macdStrong = Math.abs(macdHistogram) > 0.5; // Strong directional momentum
-
-    // STRENGTHENED GATE: Either 15m OR 30m consecutive candles + MACD expansion + ADX >= 20
-    // ADX >= 20 ensures the trend has sufficient directional strength
-    const momentumConfirms = (momentum15mConfirms || momentum30mConfirms) && macdExpanding && adx >= 20;
-    // NEW: momentumState captures "none" vs "mixed" vs "confirmed"
-    // - confirmed: candle + trend alignment AND MACD expansion
-    // - mixed: MACD strong but candles/trend filter block confirmation
-    // - none: no clear MACD or candle support
+    const macdStrong = Math.abs(macdHistogram) > 0.5;
+    
+    // NEW SIMPLIFIED MOMENTUM GATE:
+    // 1. MACD histogram expanding
+    // 2. Last close aligns with trend direction
+    // 3. No divergence detected
+    // 4. ADX >= 20 for sufficient trend strength (calculated earlier for ranging detection)
+    const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= 20;
+    // Momentum state classification
     let momentumState: "none" | "mixed" | "confirmed" = "none";
     if (momentumConfirms) {
       momentumState = "confirmed";
     } else if (macdStrong) {
-      // MACD is strong but candles/trends failed strict filter ⇒ treat as MIXED, not zero momentum
       momentumState = "mixed";
     }
 
     console.log(
-      `${symbol} MOMENTUM: 15m=${consecutive15mBullish}bull/${consecutive15mBearish}bear 30m=${consecutive30mBullish}bull/${consecutive30mBearish}bear macd=${macdHistogram.toFixed(3)} adx=${adx.toFixed(1)} confirms=${momentumConfirms} state=${momentumState}`,
+      `${symbol} MOMENTUM: lastClose=${lastClose.toFixed(2)} prevClose=${prevClose.toFixed(2)} alignsWithTrend=${lastCloseAlignsWithTrend} divergence=${hasDivergence} macd=${macdHistogram.toFixed(3)} expanding=${macdExpanding} adx=${adx.toFixed(1)} confirms=${momentumConfirms} state=${momentumState}`,
     );
     // Validate market structure on 1h timeframe
     const marketStructure = validateMarketStructure(klines1h, trend1h.trend);
@@ -897,13 +833,12 @@ serve(async (req) => {
         momentum: {
           confirms: momentumConfirms,
           state: momentumState,
-          building: momentum15mConfirms && momentum30mConfirms,
-          consecutive15mBullish,
-          consecutive15mBearish,
-          consecutive30mBullish,
-          consecutive30mBearish,
+          building: macdExpanding && !hasDivergence,
+          lastCloseAlignsWithTrend,
+          hasDivergence,
           macdHistogram: Math.round(macdHistogram * 1000) / 1000,
-          adx: Math.round(adx * 10) / 10, // Include ADX in momentum data
+          macdExpanding,
+          adx: Math.round(adx * 10) / 10,
         },
         // Multi-timeframe details (legacy format for compatibility)
         multiTimeframe: {

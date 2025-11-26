@@ -6,11 +6,10 @@ interface MomentumData {
   momentum: {
     confirms: boolean;
     building: boolean;
-    consecutive15mBullish: number;
-    consecutive15mBearish: number;
-    consecutive30mBullish: number;
-    consecutive30mBearish: number;
+    lastCloseAlignsWithTrend: boolean;
+    hasDivergence: boolean;
     macdHistogram: number;
+    macdExpanding: boolean;
     adx: number;
   };
   higherTimeframeFilter: {
