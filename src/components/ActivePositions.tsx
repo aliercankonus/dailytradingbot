@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { usePositions } from '@/hooks/usePositions';
 import { useRealtimePrices } from '@/hooks/useRealtimePrices';
+import { useRealtimePositionSync } from '@/hooks/useRealtimePositionSync';
 import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw, Filter } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -14,6 +15,9 @@ export const ActivePositions = () => {
   const { toast } = useToast();
   const [closingPosition, setClosingPosition] = useState<string | null>(null);
   const [selectedStrategy, setSelectedStrategy] = useState<string>('all');
+  
+  // Enable real-time position updates
+  useRealtimePositionSync();
   
   // Get live prices for all active position symbols
   const symbols = useMemo(() => positions.map(p => p.symbol), [positions]);
