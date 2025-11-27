@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
-import { useRealtimePrices } from "@/hooks/useRealtimePrices";
+import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
 import { useSymbols } from "@/hooks/useSymbols";
 import { useEffect, useState } from "react";
 import { WebSocketStatus } from "@/components/WebSocketStatus";
@@ -8,8 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 
 export const LivePriceCard = () => {
   const { activeSymbols, loading: symbolsLoading } = useSymbols();
-  // Subscribe to global realtime price stream and filter locally by active symbols
-  const { prices, priceVersion, connected, error } = useRealtimePrices();
+  const { prices, priceVersion, connected, error } = useRealtimePricesContext();
   const [displayPrices, setDisplayPrices] = useState<any[]>([]);
   const { toast } = useToast();
 

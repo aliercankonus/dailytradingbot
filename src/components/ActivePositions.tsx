@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { usePositions } from '@/hooks/usePositions';
-import { useRealtimePrices } from '@/hooks/useRealtimePrices';
+import { useRealtimePricesContext } from '@/contexts/RealtimePricesContext';
 import { useRealtimePositionSync } from '@/hooks/useRealtimePositionSync';
 import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw, Filter } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
@@ -19,9 +19,8 @@ export const ActivePositions = () => {
   // Enable real-time position updates
   useRealtimePositionSync();
   
-  // Get live prices for all active position symbols
-  const symbols = useMemo(() => positions.map(p => p.symbol), [positions]);
-  const { prices, priceVersion, getPrice } = useRealtimePrices(symbols);
+  // Get live prices from shared context
+  const { prices, priceVersion, getPrice } = useRealtimePricesContext();
 
   // Extract unique strategies from positions
   const availableStrategies = useMemo(() => {

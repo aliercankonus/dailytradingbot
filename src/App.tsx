@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { WebSocketMonitorProvider } from "@/contexts/WebSocketMonitorContext";
+import { RealtimePricesProvider } from "@/contexts/RealtimePricesContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Index from "./pages/Index";
 import Settings from "./pages/Settings";
@@ -24,8 +25,9 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
-          <WebSocketMonitorProvider>
-            <Routes>
+          <RealtimePricesProvider>
+            <WebSocketMonitorProvider>
+              <Routes>
               <Route path="/auth" element={<Auth />} />
               <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
@@ -36,8 +38,9 @@ const App = () => (
               <Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
-            </Routes>
-          </WebSocketMonitorProvider>
+              </Routes>
+            </WebSocketMonitorProvider>
+          </RealtimePricesProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
