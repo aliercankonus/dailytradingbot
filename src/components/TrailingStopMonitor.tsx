@@ -83,15 +83,12 @@ export const TrailingStopMonitor = () => {
 
     return positions
       .filter((p) => {
-        const realtime = getPrice ? getPrice(p.symbol) : prices.get(p.symbol);
-        const currentPrice =
-          typeof realtime === "number" 
-            ? realtime 
-            : typeof realtime?.price === "number"
-            ? realtime.price
-            : typeof p.entry_price === "number"
-            ? p.entry_price
-            : 0;
+        const live = getPrice ? getPrice(p.symbol) : undefined;
+        const currentPrice = live && typeof live.price === "string"
+          ? parseFloat(live.price)
+          : typeof p.current_price === "number"
+          ? p.current_price
+          : p.entry_price;
 
         const pnlPercent =
           p.side === "BUY"
@@ -101,28 +98,25 @@ export const TrailingStopMonitor = () => {
         return pnlPercent > TRAILING_THRESHOLD;
       })
       .map((p) => {
-        const realtime = getPrice ? getPrice(p.symbol) : prices.get(p.symbol);
-        const currentPrice =
-          typeof realtime === "number" 
-            ? realtime 
-            : typeof realtime?.price === "number"
-            ? realtime.price
-            : typeof p.entry_price === "number"
-            ? p.entry_price
-            : 0;
+        const live = getPrice ? getPrice(p.symbol) : undefined;
+        const currentPrice = live && typeof live.price === "string"
+          ? parseFloat(live.price)
+          : typeof p.current_price === "number"
+          ? p.current_price
+          : p.entry_price;
 
         const pnlPercent =
           p.side === "BUY"
             ? ((currentPrice - p.entry_price) / p.entry_price) * 100
             : ((p.entry_price - currentPrice) / p.entry_price) * 100;
 
-        return { 
-          ...p, 
-          currentPrice: Number(currentPrice), 
-          pnlPercent: Number(pnlPercent) 
+        return {
+          ...p,
+          currentPrice: Number(currentPrice),
+          pnlPercent: Number(pnlPercent),
         };
       });
-  }, [positions, prices, priceVersion, getPrice]);
+  }, [positions, getPrice, priceVersion]);
 
   return (
     <Card>
