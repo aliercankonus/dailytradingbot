@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
 interface MomentumData {
@@ -27,65 +27,59 @@ interface MomentumData {
   error?: string;
 }
 
-export const useMomentumStatus = (refreshInterval: number = 60000) => {
-  const [momentumData, setMomentumData] = useState<MomentumData[]>([]);
-  const [loading, setLoading] = useState(true);
+const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
+  // Get active trading symbols
+  const { data: symbols, error: symbolsError } = await supabase
+    .from('trading_symbols_config')
+    .select('symbol')
+    .eq('is_active', true);
 
-  const fetchMomentumForSymbols = async () => {
+  if (symbolsError) throw symbolsError;
+  if (!symbols || symbols.length === 0) return [];
+
+  // Fetch trend data for each symbol in parallel
+  const momentumPromises = symbols.map(async ({ symbol }) => {
     try {
-      setLoading(true);
-
-      // Get active trading symbols
-      const { data: symbols, error: symbolsError } = await supabase
-        .from('trading_symbols_config')
-        .select('symbol')
-        .eq('is_active', true);
-
-      if (symbolsError) throw symbolsError;
-      if (!symbols || symbols.length === 0) {
-        setMomentumData([]);
-        return;
-      }
-
-      // Fetch trend data for each symbol in parallel
-      const momentumPromises = symbols.map(async ({ symbol }) => {
-        try {
-          const { data, error } = await supabase.functions.invoke('calculate-trend', {
-            body: { symbol }
-          });
-
-          if (error) throw error;
-
-          return {
-            symbol,
-            momentum: data.momentum,
-            higherTimeframeFilter: data.higherTimeframeFilter,
-            multiTimeframe: data.multiTimeframe,
-            trend: data.trend,
-          } as MomentumData;
-        } catch (err) {
-          return {
-            symbol,
-            loading: false,
-            error: err instanceof Error ? err.message : 'Failed to fetch',
-          } as MomentumData;
-        }
+      const { data, error } = await supabase.functions.invoke('calculate-trend', {
+        body: { symbol }
       });
 
-      const results = await Promise.all(momentumPromises);
-      setMomentumData(results);
+      if (error) throw error;
+
+      return {
+        symbol,
+        momentum: data.momentum,
+        higherTimeframeFilter: data.higherTimeframeFilter,
+        multiTimeframe: data.multiTimeframe,
+        trend: data.trend,
+      } as MomentumData;
     } catch (err) {
-      console.error('Error fetching momentum status:', err);
-    } finally {
-      setLoading(false);
+      return {
+        symbol,
+        loading: false,
+        error: err instanceof Error ? err.message : 'Failed to fetch',
+      } as MomentumData;
     }
+  });
+
+  return await Promise.all(momentumPromises);
+};
+
+export const MOMENTUM_STATUS_QUERY_KEY = ['momentum-status'];
+
+export const useMomentumStatus = () => {
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: MOMENTUM_STATUS_QUERY_KEY,
+    queryFn: fetchMomentumForSymbols,
+    staleTime: 60000, // Cache data for 60 seconds
+    gcTime: 300000, // Keep in cache for 5 minutes
+    refetchOnWindowFocus: false,
+  });
+
+  return { 
+    momentumData: data || [], 
+    loading: isLoading, 
+    error: error?.message || null, 
+    refetch 
   };
-
-  useEffect(() => {
-    fetchMomentumForSymbols();
-    const interval = setInterval(fetchMomentumForSymbols, refreshInterval);
-    return () => clearInterval(interval);
-  }, [refreshInterval]);
-
-  return { momentumData, loading, refetch: fetchMomentumForSymbols };
 };

@@ -1,6 +1,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Button } from "@/components/ui/button";
 import {
   AlertCircle,
   TrendingDown,
@@ -13,11 +15,14 @@ import {
   ArrowUp,
   ArrowDown,
   Minus,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { useSignalRejections } from "@/hooks/useSignalRejections";
 import { useMomentumStatus } from "@/hooks/useMomentumStatus";
 import { formatDistanceToNow } from "date-fns";
 import { Separator } from "@/components/ui/separator";
+import { useState } from "react";
 interface SignalRejection {
   id: string;
   symbol: string;
@@ -28,6 +33,9 @@ interface SignalRejection {
 }
 export const SignalRejectionReasons = () => {
   const { rejections, loading } = useSignalRejections();
+  const [isMomentumOpen, setIsMomentumOpen] = useState(false);
+  
+  // Only fetch momentum data when section is expanded
   const { momentumData, loading: momentumLoading } = useMomentumStatus();
   const getReasonIcon = (reason: string) => {
     if (reason.includes("timeframe")) return <TrendingDown className="h-4 w-4" />;
@@ -353,21 +361,33 @@ export const SignalRejectionReasons = () => {
           </TableBody>
         </Table>
         <Separator className="my-6" />
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
-              <Activity className="h-5 w-5" />
-              Momentum Status Details
-            </h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Momentum confirmation (MACD histogram expanding + last close aligns with trend + no divergence)
-            </p>
-          </div>
-          {momentumLoading ? (
-            <p className="text-muted-foreground text-sm">Loading momentum data...</p>
-          ) : (
-            <div className="space-y-4">
-              {momentumData.map((data) => {
+        <Collapsible open={isMomentumOpen} onOpenChange={setIsMomentumOpen}>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" className="w-full justify-between p-4 h-auto hover:bg-accent">
+              <div className="flex items-center gap-2">
+                <Activity className="h-5 w-5" />
+                <div className="text-left">
+                  <h3 className="text-lg font-semibold">Momentum Status Details</h3>
+                  <p className="text-sm text-muted-foreground">
+                    MACD histogram expanding + last close aligns with trend + no divergence
+                  </p>
+                </div>
+              </div>
+              {isMomentumOpen ? (
+                <ChevronUp className="h-5 w-5 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-5 w-5 text-muted-foreground" />
+              )}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-4">
+            {isMomentumOpen && (
+              <>
+                {momentumLoading ? (
+                  <p className="text-muted-foreground text-sm">Loading momentum data...</p>
+                ) : (
+                  <div className="space-y-4">
+                    {momentumData.map((data) => {
                 if (data.error) {
                   return (
                     <div key={data.symbol} className="p-4 bg-destructive/10 rounded-lg border border-destructive/20">
@@ -591,10 +611,13 @@ export const SignalRejectionReasons = () => {
                     )}
                   </div>
                 );
-              })}
-            </div>
-          )}
-        </div>
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </CollapsibleContent>
+        </Collapsible>
       </CardContent>
     </Card>
   );
