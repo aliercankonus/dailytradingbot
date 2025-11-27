@@ -327,7 +327,10 @@ serve(async (req) => {
           closeReason = "take_profit";
         } else if (newStopLoss && currentPrice <= newStopLoss) {
           shouldClose = true;
-          closeReason = trailingActivated ? "trailing_stop_loss" : "stop_loss";
+          // If position was profitable (above activation threshold) when it hit stop loss,
+          // it must be a trailing stop loss, not a regular stop loss
+          const wasTrailing = userSettings.enabled && pnlPercent > userSettings.activationPercent;
+          closeReason = wasTrailing ? "trailing_stop_loss" : "stop_loss";
         }
       } else if (!shouldClose && position.side === "SELL") {
         // SHORT: TP when price goes DOWN, SL when price goes UP
@@ -336,7 +339,10 @@ serve(async (req) => {
           closeReason = "take_profit";
         } else if (newStopLoss && currentPrice >= newStopLoss) {
           shouldClose = true;
-          closeReason = trailingActivated ? "trailing_stop_loss" : "stop_loss";
+          // If position was profitable (above activation threshold) when it hit stop loss,
+          // it must be a trailing stop loss, not a regular stop loss
+          const wasTrailing = userSettings.enabled && pnlPercent > userSettings.activationPercent;
+          closeReason = wasTrailing ? "trailing_stop_loss" : "stop_loss";
         }
       }
       if (shouldClose) {
