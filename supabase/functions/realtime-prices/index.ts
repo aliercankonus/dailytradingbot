@@ -61,9 +61,26 @@ serve(async (req) => {
         .select("symbol")
         .eq("user_id", userId)
         .eq("is_active", true);
+
+      // Always include symbols from any currently open positions for this user
+      const { data: openPositions } = await supabase
+        .from("positions")
+        .select("symbol")
+        .eq("user_id", userId)
+        .eq("status", "active");
+
+      const allSymbols: string[] = [];
       if (symbolsData && symbolsData.length > 0) {
-        symbols = symbolsData.map((s) => s.symbol.toLowerCase());
-        console.log("Fetched active symbols:", symbols);
+        allSymbols.push(...symbolsData.map((s) => s.symbol));
+      }
+      if (openPositions && openPositions.length > 0) {
+        allSymbols.push(...openPositions.map((p) => p.symbol));
+      }
+
+      if (allSymbols.length > 0) {
+        // Normalize to lowercase and de-duplicate
+        symbols = Array.from(new Set(allSymbols.map((s) => s.toLowerCase())));
+        console.log("Fetched symbols for stream (config + open positions):", symbols);
       } else {
         console.log("No active symbols found for user, using defaults");
       }
