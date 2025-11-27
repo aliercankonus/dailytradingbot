@@ -326,6 +326,22 @@ serve(async (req) => {
           continue;
         }
         const { trend, confidence, trendConsistency, higherTimeframeFilter } = trendData;
+        
+        // CRITICAL: Check ADX ≥20 for trend strength BEFORE any other validation
+        const adx = trendData.volatility?.adx || 0;
+        if (adx < 20) {
+          rejectedByMultiTimeframeAnalysis++;
+          await supabase.from("signal_rejection_log").insert({
+            user_id: user.id,
+            symbol,
+            rejection_reason: "Multi-Timeframe prerequisite failed: ADX below 20 (weak trend strength)",
+            filters_status: { adx, required: "ADX ≥ 20", confidence, trendConsistency },
+            trend_data: trendData,
+            checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
         // Validate Multi-Timeframe conditions
         let multiTimeframePass = false;
         let positionSizeMultiplier = 1.0;
@@ -335,14 +351,18 @@ serve(async (req) => {
           const meetsThreshold =
             confidence >= riskParams.min_confidence_threshold && trendConsistency >= riskParams.min_trend_consistency;
           const hasMomentumConfirmation = trendData.momentum?.confirms || false;
+          const momentumState = trendData.momentum?.state || "none";
+          
+          // CRITICAL: Require momentum state to be "confirmed", not just "mixed"
+          const strongMomentum = hasMomentumConfirmation && momentumState === "confirmed";
 
-          if (meetsThreshold && hasMomentumConfirmation) {
+          if (meetsThreshold && strongMomentum) {
             multiTimeframePass = true;
             // Check if this was neutral allowance or standard alignment
             const neutralAllowed = higherTimeframeFilter.neutralAllowedWithStrongHigherTimeframe || false;
             multiTimeframeReason = neutralAllowed
-              ? "Enhanced alignment: 1h=neutral with strong 4h trend and momentum confirmation"
-              : "Standard aligned timeframes with momentum confirmation";
+              ? "Enhanced alignment: 1h=neutral with strong 4h trend and confirmed momentum"
+              : "Standard aligned timeframes with confirmed momentum";
           } else {
             rejectedByMultiTimeframeAnalysis++;
 
@@ -352,21 +372,23 @@ serve(async (req) => {
               trendConsistency,
               meetsThreshold,
               momentum: trendData.momentum,
+              momentumState,
+              adx,
               trend4h: trendData.higherTimeframeFilter?.trend4h,
               trend1h: trendData.higherTimeframeFilter?.trend1h,
               aligned: higherTimeframeFilter.aligned,
               neutralAllowedWithStrongHigherTimeframe:
                 higherTimeframeFilter.neutralAllowedWithStrongHigherTimeframe || false,
-              required: !hasMomentumConfirmation
-                ? "momentum confirmation (MACD histogram expanding + last close aligns with trend + no divergence)"
+              required: !strongMomentum
+                ? `momentum state must be 'confirmed' (current: ${momentumState})`
                 : "confidence/consistency threshold",
             };
 
             await supabase.from("signal_rejection_log").insert({
               user_id: user.id,
               symbol,
-              rejection_reason: !hasMomentumConfirmation
-                ? "Multi-Timeframe prerequisite failed: momentum not confirmed"
+              rejection_reason: !strongMomentum
+                ? `Multi-Timeframe prerequisite failed: momentum state is '${momentumState}' (requires 'confirmed')`
                 : "Multi-Timeframe prerequisite failed: confidence or trend consistency below threshold",
               filters_status: rejectionData,
               trend_data: trendData,
