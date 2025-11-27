@@ -147,33 +147,38 @@ serve(async (req) => {
         activationPercent: 1.0,
         distanceMultiplier: 1.5,
       };
-      // TRAILING STOP LOSS LOGIC
+      // TRAILING STOP LOSS LOGIC - Position-specific calculation
       let newStopLoss = position.stop_loss;
       let trailingActivated = false;
       // Check if trailing stop is enabled and position is profitable enough
       if (userSettings.enabled && pnlPercent > userSettings.activationPercent) {
-        // Calculate trailing stop loss using user's multiplier setting
-        const trailingDistance = Math.max(atrPercent * userSettings.distanceMultiplier, 1.5); // Min 1.5%
+        // Calculate trailing distance in absolute terms based on ATR
+        const atrAbsolute = (currentPrice * atrPercent) / 100;
+        const trailingDistanceAbsolute = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * 0.015); // Min 1.5% of current price
+        
         if (position.side === "BUY") {
-          // For LONG: Trail stop loss UP as price rises
-          const calculatedStopLoss = currentPrice * (1 - trailingDistance / 100);
+          // For LONG: Calculate stop based on entry + profit - trailing distance
+          // This makes each position's stop loss independent based on its own entry price
+          const profitAbsolute = currentPrice - position.entry_price;
+          const calculatedStopLoss = position.entry_price + profitAbsolute - trailingDistanceAbsolute;
           // Only update if new stop loss is HIGHER than current (never move down)
           if (calculatedStopLoss > position.stop_loss) {
             newStopLoss = calculatedStopLoss;
             trailingActivated = true;
             console.log(
-              `Trailing SL activated for ${position.symbol}: ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (P&L: ${pnlPercent.toFixed(2)}%)`,
+              `Trailing SL activated for ${position.symbol} (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (P&L: ${pnlPercent.toFixed(2)}%)`,
             );
           }
         } else {
-          // For SHORT: Trail stop loss DOWN as price falls
-          const calculatedStopLoss = currentPrice * (1 + trailingDistance / 100);
+          // For SHORT: Calculate stop based on entry - profit + trailing distance
+          const profitAbsolute = position.entry_price - currentPrice;
+          const calculatedStopLoss = position.entry_price - profitAbsolute + trailingDistanceAbsolute;
           // Only update if new stop loss is LOWER than current (never move up)
           if (calculatedStopLoss < position.stop_loss) {
             newStopLoss = calculatedStopLoss;
             trailingActivated = true;
             console.log(
-              `Trailing SL activated for ${position.symbol}: ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (P&L: ${pnlPercent.toFixed(2)}%)`,
+              `Trailing SL activated for ${position.symbol} (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (P&L: ${pnlPercent.toFixed(2)}%)`,
             );
           }
         }
