@@ -103,7 +103,31 @@ serve(async (req) => {
 });
 
 async function closePosition(supabase: any, position: any, manualClose: boolean = false, closedByRebalancer: boolean = false) {
-  const currentPrice = position.current_price || position.entry_price;
+  // Fetch latest price from Binance for accurate P&L calculation
+  let currentPrice = position.current_price;
+  
+  try {
+    const binanceResponse = await fetch(
+      `https://api.binance.com/api/v3/ticker/price?symbol=${position.symbol}`
+    );
+    const binanceData = await binanceResponse.json();
+    
+    if (binanceData.price) {
+      currentPrice = parseFloat(binanceData.price);
+      console.log(`[ClosePosition] Fetched fresh price for ${position.symbol}: ${currentPrice}`);
+    } else {
+      console.warn(`[ClosePosition] No price from Binance for ${position.symbol}, using stored current_price`);
+    }
+  } catch (error) {
+    console.error(`[ClosePosition] Failed to fetch Binance price for ${position.symbol}:`, error);
+    console.log(`[ClosePosition] Falling back to stored current_price: ${currentPrice}`);
+  }
+  
+  // Final fallback to entry price if no current price available
+  if (!currentPrice || currentPrice === 0) {
+    currentPrice = position.entry_price;
+    console.warn(`[ClosePosition] Using entry_price as fallback: ${currentPrice}`);
+  }
   
   // Recalculate P&L from current price to ensure accuracy
   const pnl = position.side === 'BUY'
@@ -113,6 +137,8 @@ async function closePosition(supabase: any, position: any, manualClose: boolean 
   const pnlPercent = position.side === 'BUY'
     ? ((currentPrice - position.entry_price) / position.entry_price) * 100
     : ((position.entry_price - currentPrice) / position.entry_price) * 100;
+  
+  console.log(`[ClosePosition] ${position.symbol} P&L calculation: entry=${position.entry_price}, exit=${currentPrice}, quantity=${position.quantity}, pnl=$${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)`)
 
   // Determine close reason
   const closeReason = manualClose ? 'manual_close' : (closedByRebalancer ? 'rebalancer' : 'system');
