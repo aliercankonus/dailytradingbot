@@ -25,8 +25,8 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
-          <RealtimePricesProvider>
-            <WebSocketMonitorProvider>
+          <WebSocketMonitorProvider>
+            <RealtimePricesProvider>
               <Routes>
               <Route path="/auth" element={<Auth />} />
               <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
@@ -39,8 +39,8 @@ const App = () => (
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
               </Routes>
-            </WebSocketMonitorProvider>
-          </RealtimePricesProvider>
+            </RealtimePricesProvider>
+          </WebSocketMonitorProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
