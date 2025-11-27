@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, Wallet, Target, Activity } from "lucide-react";
-import { useRealtimePrices } from "@/hooks/useRealtimePrices";
+import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
 import { useRiskParameters } from "@/hooks/useRiskParameters";
 import { usePositions } from "@/hooks/usePositions";
 import { useBinanceBalance } from "@/hooks/useBinanceBalance";
@@ -11,9 +11,8 @@ import { useMemo } from "react";
 export const PortfolioMetrics = () => {
   const { positions, loading: positionsLoading } = usePositions();
 
-  // Get live prices for all active position symbols
-  const symbols = positions.map((p) => p.symbol);
-  const { prices, priceVersion, connected, getPrice } = useRealtimePrices(symbols);
+  // Get live prices from shared context
+  const { prices, priceVersion, connected, getPrice } = useRealtimePricesContext();
 
   const { riskParams, loading: riskLoading } = useRiskParameters();
   const { balance: binanceBalance, loading: balanceLoading } = useBinanceBalance();

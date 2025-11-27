@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { usePositions } from '@/hooks/usePositions';
-import { useRealtimePrices } from '@/hooks/useRealtimePrices';
+import { useRealtimePricesContext } from '@/contexts/RealtimePricesContext';
 import { Shield, AlertTriangle, DollarSign, TrendingDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useEffect } from 'react';
@@ -23,9 +23,8 @@ export const RiskManagementControls = () => {
   const { riskParams, updateRiskParameters } = useRiskParameters();
   const { positions } = usePositions();
   
-  // Get live prices for all active position symbols
-  const symbols = positions.map(p => p.symbol);
-  const { priceVersion, getPrice } = useRealtimePrices(symbols);
+  // Get live prices from shared context
+  const { priceVersion, getPrice } = useRealtimePricesContext();
   
   const { toast } = useToast();
 
