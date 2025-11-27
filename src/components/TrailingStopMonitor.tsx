@@ -1,9 +1,10 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, Shield, ArrowUpRight, ArrowDownRight } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
 
 interface TrailingStopEvent {
   symbol: string;
@@ -17,9 +18,10 @@ interface TrailingStopEvent {
 
 export const TrailingStopMonitor = () => {
   const [trailingEvents, setTrailingEvents] = useState<TrailingStopEvent[]>([]);
-  const [activeTrails, setActiveTrails] = useState<number>(0);
+  const [positions, setPositions] = useState<any[]>([]);
   const [settings, setSettings] = useState({ enabled: true, activationPercent: 1.0, distanceMultiplier: 1.5 });
   const { toast } = useToast();
+  const { prices, priceVersion } = useRealtimePricesContext();
 
   useEffect(() => {
     // Fetch user's trailing stop settings
@@ -43,28 +45,20 @@ export const TrailingStopMonitor = () => {
     };
 
     fetchSettings();
-    // Monitor for positions with positive P&L (potential trailing stops)
-    const checkTrailingStops = async () => {
-      const { data: positions } = await supabase
+    
+    // Fetch active positions
+    const fetchPositions = async () => {
+      const { data } = await supabase
         .from('positions')
         .select('*')
         .eq('status', 'active');
 
-      if (positions) {
-        // Calculate P&L dynamically
-        const profitablePositions = positions.filter(p => {
-          const currentPrice = p.current_price || p.entry_price;
-          const pnlPercent = p.side === 'BUY'
-            ? ((currentPrice - p.entry_price) / p.entry_price) * 100
-            : ((p.entry_price - currentPrice) / p.entry_price) * 100;
-          return pnlPercent > 1;
-        });
-        setActiveTrails(profitablePositions.length);
+      if (data) {
+        setPositions(data);
       }
     };
 
-    checkTrailingStops();
-    const interval = setInterval(checkTrailingStops, 5000);
+    fetchPositions();
 
     // Subscribe to position updates to detect trailing stop changes
     const channel = supabase
@@ -81,8 +75,8 @@ export const TrailingStopMonitor = () => {
           const oldPos = payload.old as any;
           const newPos = payload.new as any;
           
-          // Calculate P&L dynamically
-          const currentPrice = newPos.current_price || newPos.entry_price;
+          // Get real-time price
+          const currentPrice = prices.get(newPos.symbol) || newPos.entry_price;
           const pnlPercent = newPos.side === 'BUY'
             ? ((currentPrice - newPos.entry_price) / newPos.entry_price) * 100
             : ((newPos.entry_price - currentPrice) / newPos.entry_price) * 100;
@@ -120,10 +114,22 @@ export const TrailingStopMonitor = () => {
       .subscribe();
 
     return () => {
-      clearInterval(interval);
       supabase.removeChannel(channel);
     };
   }, []);
+
+  // Calculate active trails using real-time prices
+  const activeTrails = useMemo(() => {
+    if (!settings.enabled) return 0;
+    
+    return positions.filter(p => {
+      const currentPrice = prices.get(p.symbol) || p.entry_price;
+      const pnlPercent = p.side === 'BUY'
+        ? ((currentPrice - p.entry_price) / p.entry_price) * 100
+        : ((p.entry_price - currentPrice) / p.entry_price) * 100;
+      return pnlPercent > settings.activationPercent;
+    }).length;
+  }, [positions, prices, priceVersion, settings.enabled, settings.activationPercent]);
 
   return (
     <Card>
