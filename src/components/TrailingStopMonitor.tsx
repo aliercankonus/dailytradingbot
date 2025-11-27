@@ -110,10 +110,25 @@ export const TrailingStopMonitor = () => {
             ? ((currentPrice - p.entry_price) / p.entry_price) * 100
             : ((p.entry_price - currentPrice) / p.entry_price) * 100;
 
+        // Calculate position-specific trailing stop based on entry + profit - distance
+        // This makes each position's stop independent even for the same symbol
+        const profitAbsolute = p.side === "BUY" 
+          ? currentPrice - p.entry_price 
+          : p.entry_price - currentPrice;
+        
+        // Use trailing distance from settings or default 1.5% of current price
+        const trailingDistancePercent = (settings.distanceMultiplier || 1.5) * 1.5; // Default 2.25%
+        const trailingDistanceAbsolute = currentPrice * (trailingDistancePercent / 100);
+        
+        const calculatedStopLoss = p.side === "BUY"
+          ? p.entry_price + profitAbsolute - trailingDistanceAbsolute
+          : p.entry_price - profitAbsolute + trailingDistanceAbsolute;
+
         return {
           ...p,
           currentPrice: Number(currentPrice),
           pnlPercent: Number(pnlPercent),
+          stop_loss: Number(calculatedStopLoss), // Override with calculated position-specific stop
         };
       });
   }, [positions, getPrice, priceVersion]);
