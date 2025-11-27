@@ -123,9 +123,27 @@ async function rebalanceUserPositions(
     return { success: true, positions_closed: 0, signals_generated: 0 };
   }
 
-  // Calculate unrealized P&L for each position dynamically
+  // Fetch live prices from Binance for accurate P&L calculation
+  const symbolSet = new Set<string>();
+  positions.forEach((p: any) => symbolSet.add(String(p.symbol)));
+  const priceMap = new Map<string, number>();
+  
+  for (const symbol of symbolSet) {
+    try {
+      const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+      const data = await response.json() as { price?: string };
+      if (data.price) {
+        priceMap.set(symbol, parseFloat(data.price));
+        console.log(`Fetched live price for ${symbol}: ${data.price}`);
+      }
+    } catch (error) {
+      console.error(`Failed to fetch price for ${symbol}:`, error);
+    }
+  }
+
+  // Calculate unrealized P&L for each position using live prices
   const positionsWithPnL = positions.map((pos: any) => {
-    const currentPrice = pos.current_price || pos.entry_price;
+    const currentPrice = priceMap.get(pos.symbol) || pos.entry_price;
     const unrealized_pnl_percent = pos.side === 'BUY'
       ? ((currentPrice - pos.entry_price) / pos.entry_price) * 100
       : ((pos.entry_price - currentPrice) / pos.entry_price) * 100;
