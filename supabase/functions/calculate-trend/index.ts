@@ -576,9 +576,9 @@ serve(async (req) => {
     let divergenceType: "aligned" | "pullback" | "early_reversal" | "ranging_conflict" = "aligned";
     let divergenceConfidence = 100; // Base confidence, will be adjusted
     let allowDivergenceSignal = false;
-    if (!highTimeframeAligned && dominantTrend !== "neutral") {
+    if (!highTimeframeAligned) {
       // Case 1: PULLBACK - 4h strong, 1h temporarily opposes (trade WITH 4h direction)
-      if (dominantConfidence >= 60 && trend1h.confidence >= 50) {
+      if (dominantTrend !== "neutral" && dominantConfidence >= 60 && trend1h.confidence >= 50) {
         // Strong 4h trend, moderate 1h counter-move = pullback opportunity
         divergenceType = "pullback";
         divergenceConfidence = Math.min(dominantConfidence * 0.75, 70); // Max 70% confidence
@@ -587,14 +587,14 @@ serve(async (req) => {
           `${dominantTrend.toUpperCase()} PULLBACK detected: 4h=${dominantConfidence}% vs 1h=${trend1h.trend}`,
         );
       }
-      // Case 2: EARLY REVERSAL - 1h strongly reversing, 4h hasn't confirmed yet
-      else if (trend1h.confidence >= 70 && dominantConfidence < 60) {
+      // Case 2: EARLY REVERSAL - 1h strongly reversing, 4h weak/neutral
+      else if (trend1h.confidence >= 70 && (dominantTrend === "neutral" || dominantConfidence < 60)) {
         // Strong 1h reversal, weak 4h = early trend change (trade WITH 1h direction)
         divergenceType = "early_reversal";
         divergenceConfidence = Math.min(trend1h.confidence * 0.7, 65); // Max 65% confidence
         allowDivergenceSignal = true;
         console.log(
-          `EARLY REVERSAL detected: 1h=${trend1h.trend}(${trend1h.confidence}%) vs weak 4h=${dominantTrend}(${dominantConfidence}%)`,
+          `EARLY REVERSAL detected: 1h=${trend1h.trend}(${trend1h.confidence}%) vs weak/neutral 4h=${dominantTrend}(${dominantConfidence}%)`,
         );
       }
       // Case 3: RANGING CONFLICT - Contradictory signals, skip
