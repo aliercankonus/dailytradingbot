@@ -48,6 +48,24 @@ export const SignalRejectionReasons = () => {
     const fs = rejection.filters_status;
     const td = rejection.trend_data;
     if (!fs) return "No data";
+    
+    // ADX below 20 rejection
+    if (rejection.rejection_reason?.includes("ADX below 20")) {
+      const adx = fs.adx ?? td?.volatility?.adx;
+      if (adx !== undefined) {
+        details.push(`ADX: ${adx.toFixed(1)} (needs ≥20 for trend strength)`);
+      }
+      const confidence = fs.confidence ?? td?.confidence;
+      const trendConsistency = fs.trendConsistency ?? td?.trendConsistency;
+      if (confidence !== undefined) {
+        details.push(`Confidence: ${confidence.toFixed(1)}%`);
+      }
+      if (trendConsistency !== undefined) {
+        details.push(`Consistency: ${trendConsistency.toFixed(1)}%`);
+      }
+      return details.join(" | ");
+    }
+    
     // Confidence or trend consistency below threshold
     if (rejection.rejection_reason?.includes("confidence or trend consistency below threshold")) {
       const confidence = fs.confidence ?? td?.confidence;
