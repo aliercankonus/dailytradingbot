@@ -225,7 +225,7 @@ serve(async (req) => {
           return 0;
       }
     };
-    const evaluateCondition = (condition: any, indicatorValues: Map<string, number>): boolean => {
+    const evaluateCondition = (condition: any, indicatorValues: Map<string, number>, previousIndicatorValues: Map<string, number>): boolean => {
       const indicatorValue = indicatorValues.get(condition.indicator) || 0;
       const previousIndicatorValue = previousIndicatorValues.get(condition.indicator) || 0;
       const targetValue =
@@ -599,7 +599,7 @@ serve(async (req) => {
           previousIndicatorValues.set("Volume", previousVolume);
           // Evaluate entry conditions
           const entryConditionsMet = strategy.entry_conditions.every((condition: any) =>
-            evaluateCondition(condition, indicatorValues),
+            evaluateCondition(condition, indicatorValues, previousIndicatorValues),
           );
           if (!entryConditionsMet) {
             continue; // Skip this strategy if entry conditions not met
