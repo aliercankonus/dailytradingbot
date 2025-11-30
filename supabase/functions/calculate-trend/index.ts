@@ -63,7 +63,6 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
   // Pre-calculate EMA arrays once (O(n) instead of O(n²))
   const ema12Array = calculateEMAArray(prices, 12);
   const ema26Array = calculateEMAArray(prices, 26);
-
   const ema12 = ema12Array[ema12Array.length - 1] || 0;
   const ema26 = ema26Array[ema26Array.length - 1] || 0;
   const macd = ema12 - ema26;
@@ -266,14 +265,11 @@ function calculateTrend(prices: number[]): {
   // Improved: Require histogram direction (expanding) not just sign
   const macdWeight = 3;
   let macdTrend = "neutral";
-
   // Calculate previous period MACD to check histogram direction
   const prevPrices = prices.slice(0, -1); // Remove last element
   const { histogram: prevHistogram } = calculateMACD(prevPrices);
-
   // Histogram must be expanding (increasing for bullish, decreasing for bearish)
   const histogramExpanding = histogram - prevHistogram;
-
   if (histogram > 0 && histogramExpanding > 0) {
     // Bullish: positive histogram AND expanding upward
     const macdStrength = Math.min(Math.abs(histogram) / Math.abs(macd || 1), 1);
@@ -365,23 +361,19 @@ serve(async (req) => {
       if (tfTrend === "neutral") return false; // Neutral does NOT oppose
       return tfTrend !== dominantTrend; // Only opposite direction opposes
     };
-
     const confirmation1h = trend1h.trend === dominantTrend;
     const confirmation30m = trend30m.trend === dominantTrend;
     const confirmation15m = trend15m.trend === dominantTrend;
-
     const opposing1h = isOpposing(trend1h.trend, dominantTrend);
     const opposing30m = isOpposing(trend30m.trend, dominantTrend);
     const opposing15m = isOpposing(trend15m.trend, dominantTrend);
     // Calculate weighted trend consistency
     let weightedConsistency: number;
-
     if (dominantTrend === "neutral") {
       // When 4h is neutral, derive direction from lower timeframes
       // 1) If ALL lower timeframes agree, we already use full weighting
       const lowerTimeframesAligned =
         trend1h.trend === trend30m.trend && trend30m.trend === trend15m.trend && trend1h.trend !== "neutral";
-
       if (lowerTimeframesAligned) {
         // All lower timeframes aligned - weight them normally plus 4h contribution
         weightedConsistency =
@@ -396,7 +388,6 @@ serve(async (req) => {
         const bearishCount = trends.filter((t) => t === "bearish").length;
         const majorityTrend =
           bullishCount > bearishCount ? "bullish" : bearishCount > bullishCount ? "bearish" : "neutral";
-
         if (majorityTrend === "neutral") {
           // No clear majority - fall back to 4h only
           weightedConsistency = dominantConfidence * 0.3;
@@ -405,7 +396,6 @@ serve(async (req) => {
           const use1h = trend1h.trend === majorityTrend;
           const use30m = trend30m.trend === majorityTrend;
           const use15m = trend15m.trend === majorityTrend;
-
           // Base weights (must sum to 1.0)
           const baseWeights = {
             tf4h: 0.25,
@@ -413,23 +403,19 @@ serve(async (req) => {
             tf30m: 0.25,
             tf15m: 0.2,
           };
-
           // Calculate sum of included weights
           const includedWeightSum =
             baseWeights.tf4h + // 4h always included as stabilizer
             (use1h ? baseWeights.tf1h : 0) +
             (use30m ? baseWeights.tf30m : 0) +
             (use15m ? baseWeights.tf15m : 0);
-
           // Normalize: scale weights so they sum to 1.0
           const scaleFactor = includedWeightSum > 0 ? 1.0 / includedWeightSum : 0;
-
           // Apply normalized weights
           const normalized4h = baseWeights.tf4h * scaleFactor;
           const normalized1h = use1h ? baseWeights.tf1h * scaleFactor : 0;
           const normalized30m = use30m ? baseWeights.tf30m * scaleFactor : 0;
           const normalized15m = use15m ? baseWeights.tf15m * scaleFactor : 0;
-
           weightedConsistency =
             dominantConfidence * normalized4h +
             (use1h ? trend1h.confidence * normalized1h : 0) +
@@ -449,7 +435,6 @@ serve(async (req) => {
         tf15m_aligned: 0.1,
         tf15m_neutral: 0.05, // 0.5x multiplier for neutral 15m
       };
-
       // Determine timeframe contributions
       // Aligned = full weight, Neutral = 0.5x weight, Opposing = excluded
       const use1h_aligned = confirmation1h;
@@ -458,7 +443,6 @@ serve(async (req) => {
       const use30m_neutral = !confirmation30m && trend30m.trend === "neutral" && !opposing30m;
       const use15m_aligned = confirmation15m;
       const use15m_neutral = !confirmation15m && trend15m.trend === "neutral" && !opposing15m;
-
       // Calculate sum of included weights
       const includedWeightSum =
         baseWeights.tf4h + // 4h always included
@@ -468,10 +452,8 @@ serve(async (req) => {
         (use30m_neutral ? baseWeights.tf30m_neutral : 0) +
         (use15m_aligned ? baseWeights.tf15m_aligned : 0) +
         (use15m_neutral ? baseWeights.tf15m_neutral : 0);
-
       // Normalize: scale weights so they sum to 1.0
       const scaleFactor = includedWeightSum > 0 ? 1.0 / includedWeightSum : 0;
-
       // Apply normalized weights
       const normalized4h = baseWeights.tf4h * scaleFactor;
       const normalized1h_aligned = use1h_aligned ? baseWeights.tf1h_aligned * scaleFactor : 0;
@@ -480,7 +462,6 @@ serve(async (req) => {
       const normalized30m_neutral = use30m_neutral ? baseWeights.tf30m_neutral * scaleFactor : 0;
       const normalized15m_aligned = use15m_aligned ? baseWeights.tf15m_aligned * scaleFactor : 0;
       const normalized15m_neutral = use15m_neutral ? baseWeights.tf15m_neutral * scaleFactor : 0;
-
       weightedConsistency =
         dominantConfidence * normalized4h +
         (use1h_aligned ? trend1h.confidence * normalized1h_aligned : 0) +
@@ -495,30 +476,23 @@ serve(async (req) => {
     // ============================================================
     // Standard alignment: 4h directional and 1h does NOT oppose (neutral is OK)
     const standardAlignment = dominantTrend !== "neutral" && !opposing1h;
-
     console.log(
       `${symbol} ALIGNMENT: 4h=${dominantTrend} 1h=${trend1h.trend} 30m=${trend30m.trend} 15m=${trend15m.trend} | opposing: 1h=${opposing1h} 30m=${opposing30m} 15m=${opposing15m} | standardAlignment=${standardAlignment}`,
     );
-
     // Enhanced alignment: Allow 1h=neutral when 4h is strong and conditions are met
     let neutralAllowedWithStrongHigherTimeframe = false;
-
     if (!standardAlignment && dominantTrend !== "neutral" && trend1h.trend === "neutral") {
       // Check if 4h trend is strong enough (≥60% confidence)
       const strong4h = dominantConfidence >= 60;
-
       // Check if 1h MACD histogram aligns with 4h direction
       const macd1h = trend1h.indicators.macdHistogram;
       const macdAligned = dominantTrend === "bullish" ? macd1h >= 0 : macd1h <= 0;
-
       // Check if 1h has sufficient activity (not dead/ranging)
       const adx1h = calculateADX(klines1h, 14);
       const hasActivity = adx1h >= 15;
-
       // Check relative ATR on 1h (not extremely compressed)
       const atr1hPeriod = 14;
       const atr1hLookback = 30;
-
       const atr1hKlines = klines1h.slice(-atr1hPeriod - 1);
       let atr1hSum = 0;
       for (let i = 1; i < atr1hKlines.length; i++) {
@@ -529,11 +503,9 @@ serve(async (req) => {
         atr1hSum += tr;
       }
       const currentATR1h = atr1hKlines.length > 1 ? atr1hSum / (atr1hKlines.length - 1) : 0;
-
       const historical1hKlines = klines1h.slice(-atr1hLookback - atr1hPeriod);
       let historical1hATRSum = 0;
       let historical1hATRCount = 0;
-
       if (historical1hKlines.length >= atr1hPeriod + 1) {
         for (let j = atr1hPeriod; j < historical1hKlines.length; j++) {
           let periodATRSum = 0;
@@ -550,11 +522,9 @@ serve(async (req) => {
           historical1hATRCount++;
         }
       }
-
       const historical1hATRAvg = historical1hATRCount > 0 ? historical1hATRSum / historical1hATRCount : currentATR1h;
       const relative1hATR = historical1hATRAvg !== 0 ? currentATR1h / historical1hATRAvg : 0;
       const atrNotExtremelyCompressed = relative1hATR >= 0.5; // Less strict than ranging detection (0.6)
-
       // Allow if all conditions are met
       if (strong4h && macdAligned && (hasActivity || atrNotExtremelyCompressed)) {
         neutralAllowedWithStrongHigherTimeframe = true;
@@ -567,7 +537,6 @@ serve(async (req) => {
         );
       }
     }
-
     // High timeframe alignment: standard OR enhanced neutral allowance
     const highTimeframeAligned = standardAlignment || neutralAllowedWithStrongHigherTimeframe;
     // ============================================================
@@ -611,7 +580,6 @@ serve(async (req) => {
     // ============================================================
     const atrPeriod = 14;
     const atrLookback = 30; // For historical ATR average
-
     // Calculate current ATR
     const atrKlines = klines1h.slice(-atrPeriod - 1);
     let atrSum = 0;
@@ -628,7 +596,6 @@ serve(async (req) => {
     const historicalKlines = klines1h.slice(-atrLookback - atrPeriod);
     let historicalATRSum = 0;
     let historicalATRCount = 0;
-
     if (historicalKlines.length >= atrPeriod + 1) {
       for (let j = atrPeriod; j < historicalKlines.length; j++) {
         let periodATRSum = 0;
@@ -645,13 +612,10 @@ serve(async (req) => {
         historicalATRCount++;
       }
     }
-
     const historicalATRAvg = historicalATRCount > 0 ? historicalATRSum / historicalATRCount : currentATR;
     const relativeATR = historicalATRAvg !== 0 ? currentATR / historicalATRAvg : 0;
-
     // Calculate ADX for trend strength
     const adx = calculateADX(klines1h, 14);
-
     // COMBINED RANGING DETECTION:
     // Market is ranging if BOTH conditions are true:
     // 1. Relative ATR < 0.6 (current volatility 40% below historical average)
@@ -659,7 +623,6 @@ serve(async (req) => {
     const atrCompressed = relativeATR < 0.6;
     const adxWeak = adx < 25;
     const isRanging = atrCompressed && adxWeak;
-
     const volatilityNormal = !isRanging && atrPercent < 5.0;
     if (isRanging) {
       primaryTrend = "ranging";
@@ -706,58 +669,55 @@ serve(async (req) => {
     // ============================================================
     // Check last 3 candles from 15m for price movement direction
     const recentKlines15m = klines15m.slice(-3);
-    
+
     // Get last and previous close prices
-    const lastClose = parseFloat(recentKlines15m[recentKlines15m.length - 1][4]);
-    const prevClose = parseFloat(recentKlines15m[recentKlines15m.length - 2][4]);
-    
+    const lastClose = prices15m[prices15m.length - 1];
+    const prevClose = prices15m[prices15m.length - 2];
+
     // Get MACD histogram from 1h timeframe (primary momentum timeframe)
     // Using 1h instead of 15m provides more stable momentum signals
     const macdHistogram = trend1h.indicators.macdHistogram;
     const macdValues: number[] = [];
-    
+
     // Calculate MACD for recent candles to check for divergence
-    for (let i = Math.max(0, recentKlines15m.length - 3); i < recentKlines15m.length; i++) {
-      const closes = recentKlines15m.slice(0, i + 1).map((k: any) => parseFloat(k[4]));
+    for (let i = Math.max(0, prices15m.length - 3); i < prices15m.length; i++) {
+      const closes = prices15m.slice(0, i + 1);
       if (closes.length >= 26) {
         const ema12 = calculateEMA(closes, 12);
         const ema26 = calculateEMA(closes, 26);
         macdValues.push(ema12 - ema26);
       }
     }
-    
+
     // Determine effective trend for momentum direction
     let effectiveTrendForMomentum = dominantTrend;
     if (dominantTrend === "neutral") {
       const bullishVotes = [trend1h.trend, trend30m.trend, trend15m.trend].filter((t) => t === "bullish").length;
       const bearishVotes = [trend1h.trend, trend30m.trend, trend15m.trend].filter((t) => t === "bearish").length;
-
       if (bullishVotes > bearishVotes) {
         effectiveTrendForMomentum = "bullish";
       } else if (bearishVotes > bullishVotes) {
         effectiveTrendForMomentum = "bearish";
       }
     }
-    
+
     // Check if last close aligns with trend direction
     const lastCloseAlignsWithTrend =
       (effectiveTrendForMomentum === "bullish" && lastClose > prevClose) ||
       (effectiveTrendForMomentum === "bearish" && lastClose < prevClose) ||
       effectiveTrendForMomentum === "neutral";
-    
+
     // Check for divergence (price vs MACD)
     let hasDivergence = false;
     if (macdValues.length >= 2) {
       const priceMovement = lastClose - prevClose;
       const macdMovement = macdValues[macdValues.length - 1] - macdValues[macdValues.length - 2];
-      
+
       // Bearish divergence: price up but MACD down
       // Bullish divergence: price down but MACD up
-      hasDivergence =
-        (priceMovement > 0 && macdMovement < 0) ||
-        (priceMovement < 0 && macdMovement > 0);
+      hasDivergence = (priceMovement > 0 && macdMovement < 0) || (priceMovement < 0 && macdMovement > 0);
     }
-    
+
     // MACD histogram must be expanding AND aligned with trend direction
     // For bullish: histogram > 0 AND expanding
     // For bearish: histogram < 0 AND expanding (more negative)
@@ -765,10 +725,10 @@ serve(async (req) => {
       (effectiveTrendForMomentum === "bullish" && macdHistogram > 0) ||
       (effectiveTrendForMomentum === "bearish" && macdHistogram < 0) ||
       effectiveTrendForMomentum === "neutral";
-    
+
     const macdExpanding = Math.abs(macdHistogram) > 0.01 && macdDirectionAligned;
     const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned;
-    
+
     // NEW SIMPLIFIED MOMENTUM GATE:
     // 1. MACD histogram expanding in correct direction
     // 2. Last close aligns with trend direction
@@ -782,7 +742,6 @@ serve(async (req) => {
     } else if (macdStrong) {
       momentumState = "mixed";
     }
-
     console.log(
       `${symbol} MOMENTUM: lastClose=${lastClose.toFixed(2)} prevClose=${prevClose.toFixed(2)} alignsWithTrend=${lastCloseAlignsWithTrend} divergence=${hasDivergence} macd=${macdHistogram.toFixed(3)} expanding=${macdExpanding} adx=${adx.toFixed(1)} confirms=${momentumConfirms} state=${momentumState}`,
     );
