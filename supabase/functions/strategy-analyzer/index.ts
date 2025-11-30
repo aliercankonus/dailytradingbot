@@ -129,8 +129,15 @@ serve(async (req) => {
         if (change > 0) gains += change;
         else losses += Math.abs(change);
       }
-      const avgGain = gains / period;
-      const avgLoss = losses / period;
+      let avgGain = gains / period;
+      let avgLoss = losses / period;
+      for (let i = period + 1; i < prices.length; i++) {
+        const change = prices[i] - prices[i - 1];
+        const gain = change > 0 ? change : 0;
+        const loss = Math.abs(change < 0 ? change : 0);
+        avgGain = (avgGain * (period - 1) + gain) / period;
+        avgLoss = (avgLoss * (period - 1) + loss) / period;
+      }
       const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
       return 100 - 100 / (1 + rs);
     };
@@ -220,17 +227,24 @@ serve(async (req) => {
     };
     const evaluateCondition = (condition: any, indicatorValues: Map<string, number>): boolean => {
       const indicatorValue = indicatorValues.get(condition.indicator) || 0;
+      const previousIndicatorValue = previousIndicatorValues.get(condition.indicator) || 0;
       const targetValue =
         condition.compareToIndicator && condition.targetIndicator
           ? indicatorValues.get(condition.targetIndicator) || 0
           : parseFloat(condition.value || "0");
+      const previousTargetValue =
+        condition.compareToIndicator && condition.targetIndicator
+          ? previousIndicatorValues.get(condition.targetIndicator) || 0
+          : parseFloat(condition.value || "0");
       switch (condition.operator.toLowerCase()) {
         case "above":
-        case "crosses_above":
           return indicatorValue > targetValue;
+        case "crosses_above":
+          return previousIndicatorValue <= previousTargetValue && indicatorValue > targetValue;
         case "below":
-        case "crosses_below":
           return indicatorValue < targetValue;
+        case "crosses_below":
+          return previousIndicatorValue >= previousTargetValue && indicatorValue < targetValue;
         default:
           return false;
       }
@@ -566,6 +580,23 @@ serve(async (req) => {
           }
           indicatorValues.set("Price", currentPrice);
           indicatorValues.set("Volume", currentVolume);
+          const previousPrice = historicalPrices[historicalPrices.length - 2] || 0;
+          const previousVolume = historicalVolumes[historicalVolumes.length - 2] || 0;
+          const previousHistoricalPrices = historicalPrices.slice(0, -1);
+          const previousHistoricalVolumes = historicalVolumes.slice(0, -1);
+          const previousIndicatorValues = new Map<string, number>();
+          for (const indicatorConfig of strategy.indicators) {
+            const previousValue = calculateIndicator(
+              indicatorConfig,
+              previousPrice,
+              previousVolume,
+              previousHistoricalPrices,
+              previousHistoricalVolumes,
+            );
+            previousIndicatorValues.set(indicatorConfig.name || indicatorConfig.type, previousValue);
+          }
+          previousIndicatorValues.set("Price", previousPrice);
+          previousIndicatorValues.set("Volume", previousVolume);
           // Evaluate entry conditions
           const entryConditionsMet = strategy.entry_conditions.every((condition: any) =>
             evaluateCondition(condition, indicatorValues),
