@@ -327,46 +327,82 @@ serve(async (req) => {
         }
         const { trend, confidence, trendConsistency, higherTimeframeFilter } = trendData;
         
-        // CRITICAL: Check ADX ≥20 for trend strength BEFORE any other validation
+        // TIERED ADX FILTERING: Adapt to signal quality instead of hard rejection
         const adx = trendData.volatility?.adx || 0;
-        if (adx < 20) {
+        let adxTier: "strong" | "moderate" | "weak" | "reject" = "reject";
+        let adxPositionMultiplier = 1.0;
+        
+        if (adx >= 20) {
+          adxTier = "strong"; // Full confidence in trend strength
+          adxPositionMultiplier = 1.0;
+        } else if (adx >= 15) {
+          adxTier = "moderate"; // Building trend, reduce position size
+          adxPositionMultiplier = 0.75;
+        } else if (adx >= 12 && confidence >= 70) {
+          adxTier = "weak"; // Early trend, strong confidence - minimal size
+          adxPositionMultiplier = 0.5;
+        } else {
+          // Only reject if ADX < 12 OR (ADX < 15 AND confidence < 70)
           rejectedByMultiTimeframeAnalysis++;
           await supabase.from("signal_rejection_log").insert({
             user_id: user.id,
             symbol,
-            rejection_reason: "Multi-Timeframe prerequisite failed: ADX below 20 (weak trend strength)",
-            filters_status: { adx, required: "ADX ≥ 20", confidence, trendConsistency },
+            rejection_reason: `Multi-Timeframe prerequisite failed: ADX too weak (${adx.toFixed(1)}) for confidence level (${confidence}%)`,
+            filters_status: { adx, confidence, required: "ADX ≥ 12 with confidence ≥70%, or ADX ≥ 15", trendConsistency },
             trend_data: trendData,
             checked_at: new Date().toISOString(),
           });
           continue;
         }
         
-        // Validate Multi-Timeframe conditions
+        // Validate Multi-Timeframe conditions with TIERED FILTERING
         let multiTimeframePass = false;
         let positionSizeMultiplier = 1.0;
         let confidenceCap = 100;
         let multiTimeframeReason = "";
+        
         if (higherTimeframeFilter.aligned) {
           const meetsThreshold =
             confidence >= riskParams.min_confidence_threshold && trendConsistency >= riskParams.min_trend_consistency;
           const hasMomentumConfirmation = trendData.momentum?.confirms || false;
           const momentumState = trendData.momentum?.state || "none";
           
-          // CRITICAL: Require momentum state to be "confirmed", not just "mixed"
-          const strongMomentum = hasMomentumConfirmation && momentumState === "confirmed";
-
-          if (meetsThreshold && strongMomentum) {
+          // TIERED MOMENTUM FILTERING: Accept confirmed OR building momentum based on other conditions
+          const confirmedMomentum = hasMomentumConfirmation && momentumState === "confirmed";
+          const buildingMomentum = momentumState === "building";
+          const mixedMomentum = momentumState === "mixed";
+          
+          // Tier 1: Perfect conditions - full position size
+          if (meetsThreshold && confirmedMomentum) {
             multiTimeframePass = true;
-            // Check if this was neutral allowance or standard alignment
+            positionSizeMultiplier = 1.0 * adxPositionMultiplier; // Apply ADX tier multiplier
             const neutralAllowed = higherTimeframeFilter.neutralAllowedWithStrongHigherTimeframe || false;
             multiTimeframeReason = neutralAllowed
-              ? "Enhanced alignment: 1h=neutral with strong 4h trend and confirmed momentum"
-              : "Standard aligned timeframes with confirmed momentum";
-          } else {
+              ? `Tier 1 (${(positionSizeMultiplier * 100).toFixed(0)}%): Enhanced alignment with confirmed momentum`
+              : `Tier 1 (${(positionSizeMultiplier * 100).toFixed(0)}%): Standard aligned with confirmed momentum`;
+          }
+          // Tier 2: Building momentum with strong alignment - reduced position size
+          else if (meetsThreshold && buildingMomentum && confidence >= 65) {
+            multiTimeframePass = true;
+            positionSizeMultiplier = 0.7 * adxPositionMultiplier; // 70% size, adjusted by ADX tier
+            multiTimeframeReason = `Tier 2 (${(positionSizeMultiplier * 100).toFixed(0)}%): Building momentum with strong alignment`;
+          }
+          // Tier 3: Mixed momentum but very strong confidence - minimal position size
+          else if (meetsThreshold && mixedMomentum && confidence >= 70 && adx >= 18) {
+            multiTimeframePass = true;
+            positionSizeMultiplier = 0.5 * adxPositionMultiplier; // 50% size, adjusted by ADX tier
+            multiTimeframeReason = `Tier 3 (${(positionSizeMultiplier * 100).toFixed(0)}%): Mixed momentum with very strong confidence`;
+          }
+          // Tier 4: No momentum but exceptional alignment - very minimal size
+          else if (meetsThreshold && confidence >= 75 && trendConsistency >= 70 && adx >= 20) {
+            multiTimeframePass = true;
+            positionSizeMultiplier = 0.4; // 40% size, no ADX adjustment (already high)
+            multiTimeframeReason = `Tier 4 (${(positionSizeMultiplier * 100).toFixed(0)}%): Exceptional alignment, weak momentum`;
+          }
+          // Reject only if none of the tiers pass
+          else {
             rejectedByMultiTimeframeAnalysis++;
 
-            // Detailed rejection data - use correct momentum structure
             const rejectionData = {
               confidence,
               trendConsistency,
@@ -374,22 +410,21 @@ serve(async (req) => {
               momentum: trendData.momentum,
               momentumState,
               adx,
+              adxTier,
               trend4h: trendData.higherTimeframeFilter?.trend4h,
               trend1h: trendData.higherTimeframeFilter?.trend1h,
               aligned: higherTimeframeFilter.aligned,
-              neutralAllowedWithStrongHigherTimeframe:
-                higherTimeframeFilter.neutralAllowedWithStrongHigherTimeframe || false,
-              required: !strongMomentum
-                ? `momentum state must be 'confirmed' (current: ${momentumState})`
-                : "confidence/consistency threshold",
+              required: !meetsThreshold
+                ? "confidence/consistency threshold"
+                : `stronger conditions needed (momentum: ${momentumState}, confidence: ${confidence}%, ADX: ${adx.toFixed(1)})`,
             };
 
             await supabase.from("signal_rejection_log").insert({
               user_id: user.id,
               symbol,
-              rejection_reason: !strongMomentum
-                ? `Multi-Timeframe prerequisite failed: momentum state is '${momentumState}' (requires 'confirmed')`
-                : "Multi-Timeframe prerequisite failed: confidence or trend consistency below threshold",
+              rejection_reason: !meetsThreshold
+                ? "Multi-Timeframe prerequisite failed: confidence or trend consistency below threshold"
+                : `Multi-Timeframe prerequisite failed: insufficient signal quality (momentum: ${momentumState}, confidence: ${confidence}%, ADX: ${adx.toFixed(1)})`,
               filters_status: rejectionData,
               trend_data: trendData,
               checked_at: new Date().toISOString(),
@@ -398,32 +433,40 @@ serve(async (req) => {
           }
         } else if (higherTimeframeFilter.allowDivergenceSignal) {
           const { divergenceType } = higherTimeframeFilter;
+          const momentumState = trendData.momentum?.state || "none";
+          const hasMomentumConfirmation = trendData.momentum?.confirms || false;
 
           if (divergenceType === "pullback" && riskParams.enable_pullback_signals) {
             const tf30m = trendData.timeframes?.["30m"];
             const tf15m = trendData.timeframes?.["15m"];
             const tf4h = trendData.timeframes?.["4h"];
             const trendAligned = tf30m && tf15m && tf4h && tf30m.trend === tf4h.trend && tf15m.trend === tf4h.trend;
-            const hasMomentumConfirmation = trendData.momentum?.confirms || false;
 
-            if (trendAligned && hasMomentumConfirmation) {
+            // RELAXED: Accept pullback with confirmed OR building momentum
+            if (trendAligned && (hasMomentumConfirmation || momentumState === "building")) {
               multiTimeframePass = true;
-              positionSizeMultiplier = (riskParams.pullback_position_size_percent || 50) / 100;
+              const baseSize = (riskParams.pullback_position_size_percent || 50) / 100;
+              positionSizeMultiplier = hasMomentumConfirmation ? baseSize : baseSize * 0.8; // Reduce by 20% if only building
               confidenceCap = 70;
-              multiTimeframeReason = "Pullback opportunity with momentum";
+              multiTimeframeReason = hasMomentumConfirmation
+                ? "Pullback opportunity with confirmed momentum"
+                : "Pullback opportunity with building momentum (reduced size)";
             }
           } else if (divergenceType === "early_reversal" && riskParams.enable_early_reversal_signals) {
             const tf30m = trendData.timeframes?.["30m"];
             const tf15m = trendData.timeframes?.["15m"];
             const tf1h = trendData.timeframes?.["1h"];
             const trendAligned = tf30m && tf15m && tf1h && tf30m.trend === tf1h.trend && tf15m.trend === tf1h.trend;
-            const hasMomentumConfirmation = trendData.momentum?.confirms || false;
 
-            if (trendAligned && hasMomentumConfirmation) {
+            // RELAXED: Accept early reversal with confirmed OR building momentum
+            if (trendAligned && (hasMomentumConfirmation || momentumState === "building")) {
               multiTimeframePass = true;
-              positionSizeMultiplier = (riskParams.early_reversal_position_size_percent || 40) / 100;
+              const baseSize = (riskParams.early_reversal_position_size_percent || 40) / 100;
+              positionSizeMultiplier = hasMomentumConfirmation ? baseSize : baseSize * 0.8; // Reduce by 20% if only building
               confidenceCap = 65;
-              multiTimeframeReason = "Early reversal with strong momentum";
+              multiTimeframeReason = hasMomentumConfirmation
+                ? "Early reversal with confirmed momentum"
+                : "Early reversal with building momentum (reduced size)";
             }
           }
 
