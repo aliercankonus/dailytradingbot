@@ -239,17 +239,13 @@ serve(async (req) => {
       try {
         // Fetch 50 candles of 15m data for indicator calculations (MACD needs ~26+ periods)
         const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=15m&limit=50`);
-
         if (!response.ok) {
           throw new Error(`Binance API error: ${response.status}`);
         }
-
         const klines = await response.json();
-
         // Binance kline format: [openTime, open, high, low, close, volume, closeTime, ...]
         const prices = klines.map((k: any) => parseFloat(k[4])).filter(Number.isFinite); // close price
         const volumes = klines.map((k: any) => parseFloat(k[5])).filter(Number.isFinite); // volume
-
         return { prices, volumes };
       } catch (error) {
         console.error(`Failed to fetch klines for ${symbol}:`, error);
@@ -274,7 +270,6 @@ serve(async (req) => {
     for (const { symbol } of symbols) {
       const currentTradeCount = openTradesPerSymbol.get(symbol) || 0;
       const hasRecentSignal = existingSignalsSet.has(symbol);
-
       // Skip if already has a recent signal (prevents duplicate signals)
       if (hasRecentSignal) {
         const statusMsg =
@@ -307,17 +302,14 @@ serve(async (req) => {
         });
         continue;
       }
-
       // Log symbol evaluation start with current state
       console.log(
         `🔍 Evaluating ${symbol} (${currentTradeCount}/${riskParams.max_trades_per_symbol} trades active, no recent signals)`,
       );
-
       try {
         // ============= STEP 1: Multi-Timeframe Analysis Validation =============
         // First, validate market conditions using Multi-Timeframe Analysis
         // This acts as a PREREQUISITE for all custom strategies
-
         const { data: trendData, error: trendError } = await supabase.functions.invoke("calculate-trend", {
           body: { symbol },
         });
@@ -326,12 +318,12 @@ serve(async (req) => {
           continue;
         }
         const { trend, confidence, trendConsistency, higherTimeframeFilter } = trendData;
-        
+
         // TIERED ADX FILTERING: Adapt to signal quality instead of hard rejection
         const adx = trendData.volatility?.adx || 0;
         let adxTier: "strong" | "moderate" | "weak" | "reject" = "reject";
         let adxPositionMultiplier = 1.0;
-        
+
         if (adx >= 20) {
           adxTier = "strong"; // Full confidence in trend strength
           adxPositionMultiplier = 1.0;
@@ -348,30 +340,35 @@ serve(async (req) => {
             user_id: user.id,
             symbol,
             rejection_reason: `Multi-Timeframe prerequisite failed: ADX too weak (${adx.toFixed(1)}) for confidence level (${confidence}%)`,
-            filters_status: { adx, confidence, required: "ADX ≥ 12 with confidence ≥70%, or ADX ≥ 15", trendConsistency },
+            filters_status: {
+              adx,
+              confidence,
+              required: "ADX ≥ 12 with confidence ≥70%, or ADX ≥ 15",
+              trendConsistency,
+            },
             trend_data: trendData,
             checked_at: new Date().toISOString(),
           });
           continue;
         }
-        
+
         // Validate Multi-Timeframe conditions with TIERED FILTERING
         let multiTimeframePass = false;
         let positionSizeMultiplier = 1.0;
         let confidenceCap = 100;
         let multiTimeframeReason = "";
-        
+
         if (higherTimeframeFilter.aligned) {
           const meetsThreshold =
             confidence >= riskParams.min_confidence_threshold && trendConsistency >= riskParams.min_trend_consistency;
           const hasMomentumConfirmation = trendData.momentum?.confirms || false;
           const momentumState = trendData.momentum?.state || "none";
-          
+
           // TIERED MOMENTUM FILTERING: Accept confirmed OR building momentum based on other conditions
           const confirmedMomentum = hasMomentumConfirmation && momentumState === "confirmed";
           const buildingMomentum = momentumState === "building";
           const mixedMomentum = momentumState === "mixed";
-          
+
           // Tier 1: Perfect conditions - full position size
           if (meetsThreshold && confirmedMomentum) {
             multiTimeframePass = true;
@@ -402,7 +399,6 @@ serve(async (req) => {
           // Reject only if none of the tiers pass
           else {
             rejectedByMultiTimeframeAnalysis++;
-
             const rejectionData = {
               confidence,
               trendConsistency,
@@ -411,14 +407,13 @@ serve(async (req) => {
               momentumState,
               adx,
               adxTier,
-              trend4h: trendData.higherTimeframeFilter?.trend4h,
-              trend1h: trendData.higherTimeframeFilter?.trend1h,
+              trend4h: trendData.timeframes?.["4h"]?.trend,
+              trend1h: trendData.timeframes?.["1h"]?.trend,
               aligned: higherTimeframeFilter.aligned,
               required: !meetsThreshold
                 ? "confidence/consistency threshold"
                 : `stronger conditions needed (momentum: ${momentumState}, confidence: ${confidence}%, ADX: ${adx.toFixed(1)})`,
             };
-
             await supabase.from("signal_rejection_log").insert({
               user_id: user.id,
               symbol,
@@ -435,13 +430,11 @@ serve(async (req) => {
           const { divergenceType } = higherTimeframeFilter;
           const momentumState = trendData.momentum?.state || "none";
           const hasMomentumConfirmation = trendData.momentum?.confirms || false;
-
           if (divergenceType === "pullback" && riskParams.enable_pullback_signals) {
             const tf30m = trendData.timeframes?.["30m"];
             const tf15m = trendData.timeframes?.["15m"];
             const tf4h = trendData.timeframes?.["4h"];
             const trendAligned = tf30m && tf15m && tf4h && tf30m.trend === tf4h.trend && tf15m.trend === tf4h.trend;
-
             // RELAXED: Accept pullback with confirmed OR building momentum
             if (trendAligned && (hasMomentumConfirmation || momentumState === "building")) {
               multiTimeframePass = true;
@@ -457,7 +450,6 @@ serve(async (req) => {
             const tf15m = trendData.timeframes?.["15m"];
             const tf1h = trendData.timeframes?.["1h"];
             const trendAligned = tf30m && tf15m && tf1h && tf30m.trend === tf1h.trend && tf15m.trend === tf1h.trend;
-
             // RELAXED: Accept early reversal with confirmed OR building momentum
             if (trendAligned && (hasMomentumConfirmation || momentumState === "building")) {
               multiTimeframePass = true;
@@ -469,10 +461,8 @@ serve(async (req) => {
                 : "Early reversal with building momentum (reduced size)";
             }
           }
-
           if (!multiTimeframePass) {
             rejectedByMultiTimeframeAnalysis++;
-
             // Detailed divergence rejection data - use correct structure
             const rejectionData = {
               divergenceType,
@@ -485,12 +475,11 @@ serve(async (req) => {
               consecutive15mBearish: trendData.momentum?.consecutive15mBearish || 0,
               consecutive30mBullish: trendData.momentum?.consecutive30mBullish || 0,
               consecutive30mBearish: trendData.momentum?.consecutive30mBearish || 0,
-              trend4h: trendData.multiTimeframe?.trend4h,
-              trend1h: trendData.multiTimeframe?.trend1h,
-              trend30m: trendData.multiTimeframe?.trend30m,
-              trend15m: trendData.multiTimeframe?.trend15m,
+              trend4h: trendData.timeframes?.["4h"]?.trend,
+              trend1h: trendData.timeframes?.["1h"]?.trend,
+              trend30m: trendData.timeframes?.["30m"]?.trend,
+              trend15m: trendData.timeframes?.["15m"]?.trend,
             };
-
             await supabase.from("signal_rejection_log").insert({
               user_id: user.id,
               symbol,
@@ -504,7 +493,6 @@ serve(async (req) => {
           }
         } else {
           rejectedByMultiTimeframeAnalysis++;
-
           // Detailed rejection data showing why timeframes aren't aligned and no divergence
           const rejectionData = {
             aligned: false,
@@ -516,14 +504,13 @@ serve(async (req) => {
             consecutive15mBearish: trendData.momentum?.consecutive15mBearish || 0,
             consecutive30mBullish: trendData.momentum?.consecutive30mBullish || 0,
             consecutive30mBearish: trendData.momentum?.consecutive30mBearish || 0,
-            trend4h: trendData.multiTimeframe?.trend4h,
-            trend1h: trendData.multiTimeframe?.trend1h,
-            trend30m: trendData.multiTimeframe?.trend30m,
-            trend15m: trendData.multiTimeframe?.trend15m,
+            trend4h: trendData.timeframes?.["4h"]?.trend,
+            trend1h: trendData.timeframes?.["1h"]?.trend,
+            trend30m: trendData.timeframes?.["30m"]?.trend,
+            trend15m: trendData.timeframes?.["15m"]?.trend,
             isRanging: trendData.ranging?.isRanging || false,
             required: "higher timeframes NOT aligned or ranging market detected",
           };
-
           await supabase.from("signal_rejection_log").insert({
             user_id: user.id,
             symbol,
@@ -549,13 +536,11 @@ serve(async (req) => {
         }
         // ============= STEP 2: Custom Strategy Evaluation =============
         // Now evaluate custom strategies since Multi-Timeframe prerequisite passed
-
         const marketData = marketDataMap.get(symbol);
         if (!marketData) continue;
         const currentPrice = parseFloat(marketData.lastPrice) || 0;
         const currentVolume = parseFloat(marketData.volume) || 0;
         const { prices: historicalPrices, volumes: historicalVolumes } = await fetchHistoricalKlines(symbol);
-
         // Skip if insufficient historical data
         if (historicalPrices.length < 26) {
           console.warn(`Insufficient historical data for ${symbol} (${historicalPrices.length} candles)`);
@@ -640,7 +625,6 @@ serve(async (req) => {
             console.log(
               `✅ Created ${signalType.toUpperCase()} signal for ${symbol} using "${strategy.name}" (now ${currentTradeCount}/${riskParams.max_trades_per_symbol} trades, 1 active signal)`,
             );
-
             // Mark symbol as having a signal to avoid duplicates within this cycle
             existingSignalsSet.add(symbol);
             break; // Only one signal per symbol (first matching strategy)
