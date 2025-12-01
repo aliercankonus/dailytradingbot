@@ -12,6 +12,8 @@ interface MomentumData {
     macdExpanding: boolean;
     macdDirectionAligned: boolean;
     adx: number;
+    volumeConfirms?: boolean;
+    volumeBoost?: number;
   };
   higherTimeframeFilter: {
     trend4h: string;

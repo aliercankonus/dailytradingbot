@@ -30,7 +30,7 @@ export const MomentumStatusDetails = () => {
           Momentum Status Details
         </CardTitle>
         <CardDescription>
-          MACD histogram expanding + last close aligns with trend + no divergence
+          MACD histogram expanding + last close aligns with trend + no divergence + volume confirmation
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -267,6 +267,32 @@ export const MomentumStatusDetails = () => {
                                 )}
                               </div>
                             </div>
+
+                            <div className="flex items-center justify-between text-sm">
+                              <span className={confirms ? "text-gray-700 dark:text-gray-300" : "text-muted-foreground"}>
+                                Volume Confirmation:
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={
+                                    momentum?.volumeConfirms
+                                      ? "text-green-700 dark:text-green-300 font-medium"
+                                      : confirms
+                                        ? "text-gray-900 dark:text-gray-100"
+                                        : "text-muted-foreground"
+                                  }
+                                >
+                                  {momentum?.volumeConfirms ? "Confirmed" : "Not Confirmed"}
+                                </span>
+                                {momentum?.volumeConfirms ? (
+                                  <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                                ) : (
+                                  <XCircle
+                                    className={`h-4 w-4 ${confirms ? "text-gray-600 dark:text-gray-400" : "text-muted-foreground"}`}
+                                  />
+                                )}
+                              </div>
+                            </div>
                           </div>
 
                           {!confirms && (
@@ -280,6 +306,8 @@ export const MomentumStatusDetails = () => {
                                 {!macdOK && macdDirectionOK && !macdExpandingOK && "MACD histogram needs >0.01 expansion"}
                                 {!macdOK && !adxOK && ", "}
                                 {!adxOK && "ADX ≥20 required"}
+                                {!adxOK && !momentum?.volumeConfirms && ", "}
+                                {!momentum?.volumeConfirms && "Volume should increase with trend"}
                               </p>
                             </div>
                           )}

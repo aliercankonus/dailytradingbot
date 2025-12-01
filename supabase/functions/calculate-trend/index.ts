@@ -75,6 +75,62 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
   const histogram = macd - signal;
   return { macd, signal, histogram };
 }
+// Calculate volume analysis (spike detection and trend confirmation)
+function calculateVolumeAnalysis(klines: any[]): {
+  volumeSpike: boolean;
+  volumeRatio: number;
+  volumeTrend: "increasing" | "decreasing" | "neutral";
+  currentVolume: number;
+  avgVolume: number;
+} {
+  if (klines.length < 21) {
+    return {
+      volumeSpike: false,
+      volumeRatio: 1.0,
+      volumeTrend: "neutral",
+      currentVolume: 0,
+      avgVolume: 0,
+    };
+  }
+
+  // Extract volumes (index 5 in kline array)
+  const volumes = klines.map((k: any) => parseFloat(k[5])).filter(Number.isFinite);
+  
+  // Calculate 20-period average volume (excluding current candle)
+  const historicalVolumes = volumes.slice(-21, -1);
+  const avgVolume = historicalVolumes.reduce((sum, v) => sum + v, 0) / historicalVolumes.length;
+  
+  // Current volume
+  const currentVolume = volumes[volumes.length - 1];
+  
+  // Volume ratio (current vs average)
+  const volumeRatio = avgVolume !== 0 ? currentVolume / avgVolume : 1.0;
+  
+  // Volume spike detected if current volume > 1.5x average
+  const volumeSpike = volumeRatio > 1.5;
+  
+  // Volume trend: compare last 3 candles to previous 3 candles
+  const recentVolumes = volumes.slice(-3);
+  const previousVolumes = volumes.slice(-6, -3);
+  const recentAvg = recentVolumes.reduce((sum, v) => sum + v, 0) / recentVolumes.length;
+  const previousAvg = previousVolumes.reduce((sum, v) => sum + v, 0) / previousVolumes.length;
+  
+  let volumeTrend: "increasing" | "decreasing" | "neutral" = "neutral";
+  if (recentAvg > previousAvg * 1.2) {
+    volumeTrend = "increasing";
+  } else if (recentAvg < previousAvg * 0.8) {
+    volumeTrend = "decreasing";
+  }
+
+  return {
+    volumeSpike,
+    volumeRatio: Math.round(volumeRatio * 100) / 100,
+    volumeTrend,
+    currentVolume: Math.round(currentVolume),
+    avgVolume: Math.round(avgVolume),
+  };
+}
+
 // Calculate ADX (Average Directional Index) - measures trend strength
 function calculateADX(klines: any[], period = 14): number {
   // Need at least period + 1 candles for proper ADX calculation
@@ -616,6 +672,12 @@ serve(async (req) => {
     const relativeATR = historicalATRAvg !== 0 ? currentATR / historicalATRAvg : 0;
     // Calculate ADX for trend strength
     const adx = calculateADX(klines1h, 14);
+
+    // Calculate volume analysis for all timeframes
+    const volume15m = calculateVolumeAnalysis(klines15m);
+    const volume30m = calculateVolumeAnalysis(klines30m);
+    const volume1h = calculateVolumeAnalysis(klines1h);
+    const volume4h = calculateVolumeAnalysis(klines4h);
     // COMBINED RANGING DETECTION:
     // Market is ranging if BOTH conditions are true:
     // 1. Relative ATR < 0.6 (current volatility 40% below historical average)
@@ -665,7 +727,7 @@ serve(async (req) => {
       }
     }
     // ============================================================
-    // SIMPLIFIED MOMENTUM CONFIRMATION
+    // SIMPLIFIED MOMENTUM CONFIRMATION WITH VOLUME
     // ============================================================
     // Check last 3 candles from 15m for price movement direction
     const recentKlines15m = klines15m.slice(-3);
@@ -701,6 +763,15 @@ serve(async (req) => {
       }
     }
 
+    // Volume confirmation: check if volume supports the momentum
+    // For high-conviction signals, volume should increase with trend
+    const volumeConfirmsDirection = 
+      (effectiveTrendForMomentum === "bullish" && volume1h.volumeTrend === "increasing") ||
+      (effectiveTrendForMomentum === "bearish" && volume1h.volumeTrend === "increasing") ||
+      volume1h.volumeSpike; // Volume spike is always confirmatory
+    
+    const volumeBoost = volumeConfirmsDirection ? 1.15 : 1.0; // 15% confidence boost with volume confirmation
+
     // Check if last close aligns with trend direction
     const lastCloseAlignsWithTrend =
       (effectiveTrendForMomentum === "bullish" && lastClose > prevClose) ||
@@ -729,12 +800,13 @@ serve(async (req) => {
     const macdExpanding = Math.abs(macdHistogram) > 0.01 && macdDirectionAligned;
     const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned;
 
-    // NEW SIMPLIFIED MOMENTUM GATE:
+    // NEW SIMPLIFIED MOMENTUM GATE WITH VOLUME CONFIRMATION:
     // 1. MACD histogram expanding in correct direction
     // 2. Last close aligns with trend direction
     // 3. No divergence detected
     // 4. ADX >= 20 for sufficient trend strength (calculated earlier for ranging detection)
-    const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= 20;
+    // 5. Volume confirms direction (15% confidence boost)
+    const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= 20 && volumeConfirmsDirection;
     // Momentum state classification
     let momentumState: "none" | "mixed" | "confirmed" = "none";
     if (momentumConfirms) {
@@ -743,7 +815,7 @@ serve(async (req) => {
       momentumState = "mixed";
     }
     console.log(
-      `${symbol} MOMENTUM: lastClose=${lastClose.toFixed(2)} prevClose=${prevClose.toFixed(2)} alignsWithTrend=${lastCloseAlignsWithTrend} divergence=${hasDivergence} macd=${macdHistogram.toFixed(3)} expanding=${macdExpanding} adx=${adx.toFixed(1)} confirms=${momentumConfirms} state=${momentumState}`,
+      `${symbol} MOMENTUM: lastClose=${lastClose.toFixed(2)} prevClose=${prevClose.toFixed(2)} alignsWithTrend=${lastCloseAlignsWithTrend} divergence=${hasDivergence} macd=${macdHistogram.toFixed(3)} expanding=${macdExpanding} adx=${adx.toFixed(1)} volumeConfirms=${volumeConfirmsDirection} confirms=${momentumConfirms} state=${momentumState}`,
     );
     // Validate market structure on 1h timeframe
     const marketStructure = validateMarketStructure(klines1h, trend1h.trend);
@@ -807,6 +879,8 @@ serve(async (req) => {
           macdExpanding,
           macdDirectionAligned,
           adx: Math.round(adx * 10) / 10,
+          volumeConfirms: volumeConfirmsDirection,
+          volumeBoost: volumeBoost,
         },
         // Multi-timeframe details (legacy format for compatibility)
         multiTimeframe: {
@@ -838,6 +912,13 @@ serve(async (req) => {
           normal: volatilityNormal,
           atrCompressed,
           adxWeak,
+        },
+        // Volume analysis across timeframes
+        volume: {
+          "15m": volume15m,
+          "30m": volume30m,
+          "1h": volume1h,
+          "4h": volume4h,
         },
         indicators: trend1h.indicators,
         trendConsistency: Math.round(weightedConsistency),
