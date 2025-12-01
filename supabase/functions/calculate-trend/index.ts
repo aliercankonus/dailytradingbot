@@ -800,13 +800,13 @@ serve(async (req) => {
     const macdExpanding = Math.abs(macdHistogram) > 0.01 && macdDirectionAligned;
     const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned;
 
-    // NEW SIMPLIFIED MOMENTUM GATE WITH VOLUME CONFIRMATION:
+    // NEW SIMPLIFIED MOMENTUM GATE (volume is optional boost, not required):
     // 1. MACD histogram expanding in correct direction
     // 2. Last close aligns with trend direction
     // 3. No divergence detected
     // 4. ADX >= 20 for sufficient trend strength (calculated earlier for ranging detection)
-    // 5. Volume confirms direction (15% confidence boost)
-    const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= 20 && volumeConfirmsDirection;
+    // Volume confirmation is NOT required but provides 10% position size boost when present
+    const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= 20;
     // Momentum state classification
     let momentumState: "none" | "mixed" | "confirmed" = "none";
     if (momentumConfirms) {
