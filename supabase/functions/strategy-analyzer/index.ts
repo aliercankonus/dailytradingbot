@@ -418,12 +418,19 @@ serve(async (req) => {
             const volumeNote = volumeConfirms ? " + volume confirmation" : "";
             multiTimeframeReason = `Tier 3 (${(positionSizeMultiplier * 100).toFixed(0)}%): Mixed momentum with very strong confidence${volumeNote}`;
           }
-          // Tier 4: No momentum but exceptional alignment - very minimal size
+          // Tier 4: Exceptional ADX - very strong trend strength compensates for no momentum
+          else if (meetsThreshold && adx >= 40 && confidence >= 65) {
+            multiTimeframePass = true;
+            positionSizeMultiplier = 0.5 * volumeBoostMultiplier; // 50% size when ADX exceptionally high
+            const volumeNote = volumeConfirms ? " + volume confirmation" : "";
+            multiTimeframeReason = `Tier 4 (${(positionSizeMultiplier * 100).toFixed(0)}%): Exceptional trend strength (ADX ${adx.toFixed(1)}), no momentum${volumeNote}`;
+          }
+          // Tier 5: No momentum but exceptional alignment - very minimal size
           else if (meetsThreshold && confidence >= 75 && trendConsistency >= 70 && adx >= 20) {
             multiTimeframePass = true;
-            positionSizeMultiplier = 0.4 * volumeBoostMultiplier; // 40% size, no ADX adjustment (already high)
+            positionSizeMultiplier = 0.4 * volumeBoostMultiplier; // 40% size
             const volumeNote = volumeConfirms ? " + volume confirmation" : "";
-            multiTimeframeReason = `Tier 4 (${(positionSizeMultiplier * 100).toFixed(0)}%): Exceptional alignment, weak momentum${volumeNote}`;
+            multiTimeframeReason = `Tier 5 (${(positionSizeMultiplier * 100).toFixed(0)}%): Exceptional alignment, weak momentum${volumeNote}`;
           }
           // Reject only if none of the tiers pass
           else {
