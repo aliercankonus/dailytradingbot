@@ -207,8 +207,8 @@ function validateMarketStructure(
 ): { valid: boolean; confidence: number } {
   if (klines.length < 10) return { valid: false, confidence: 0 };
 
-  const highs = klines.slice(-10).map((k: any) => parseFloat(k[ 2)).filter(Number.isFinite);
-  const lows = klines.slice(-10).map((k: any) => parseFloat(k 3)).filter(Number.isFinite);
+  const highs = klines.slice(-10).map((k: any) => parseFloat(k[2])).filter(Number.isFinite);
+  const lows = klines.slice(-10).map((k: any) => parseFloat(k[3])).filter(Number.isFinite);
 
   if (trend === "bullish") {
     let higherHighs = 0;
