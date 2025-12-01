@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
 import { TradeCounterSync } from "@/components/TradeCounterSync";
 import { TrailingStopMonitor } from "@/components/TrailingStopMonitor";
+import { SignalTimingMonitor } from "@/components/SignalTimingMonitor";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -99,7 +100,8 @@ const Index = () => {
             
           </TabsContent>
 
-          <TabsContent value="signals">
+          <TabsContent value="signals" className="space-y-6">
+            <SignalTimingMonitor />
             <TradingSignalsDashboard />
           </TabsContent>
 
