@@ -392,11 +392,17 @@ serve(async (req) => {
               ? `Tier 1 (${(positionSizeMultiplier * 100).toFixed(0)}%): Enhanced alignment with confirmed momentum`
               : `Tier 1 (${(positionSizeMultiplier * 100).toFixed(0)}%): Standard aligned with confirmed momentum`;
           }
-          // Tier 2: Building momentum with strong alignment - reduced position size
+          // Tier 2a: Building momentum with strong ADX (≥25) - early entry opportunity
+          else if (meetsThreshold && buildingMomentum && adx >= 25 && confidence >= 55) {
+            multiTimeframePass = true;
+            positionSizeMultiplier = 0.75 * adxPositionMultiplier; // 75% size for strong ADX with building momentum
+            multiTimeframeReason = `Tier 2a (${(positionSizeMultiplier * 100).toFixed(0)}%): Building momentum with strong trend (ADX ${adx.toFixed(1)})`;
+          }
+          // Tier 2b: Building momentum with strong alignment - reduced position size
           else if (meetsThreshold && buildingMomentum && confidence >= 65) {
             multiTimeframePass = true;
             positionSizeMultiplier = 0.7 * adxPositionMultiplier; // 70% size, adjusted by ADX tier
-            multiTimeframeReason = `Tier 2 (${(positionSizeMultiplier * 100).toFixed(0)}%): Building momentum with strong alignment`;
+            multiTimeframeReason = `Tier 2b (${(positionSizeMultiplier * 100).toFixed(0)}%): Building momentum with strong alignment`;
           }
           // Tier 3: Mixed momentum but very strong confidence - minimal position size
           else if (meetsThreshold && mixedMomentum && confidence >= 70 && adx >= 18) {
