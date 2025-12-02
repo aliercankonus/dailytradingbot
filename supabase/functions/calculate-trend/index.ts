@@ -614,6 +614,11 @@ serve(async (req) => {
     const prices1h = klines1h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
     const prices4h = klines4h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
 
+    // Safety check for empty price arrays
+    if (prices1h.length === 0) {
+      throw new Error(`No valid 1h price data for ${symbol}`);
+    }
+
     const currentPrice = prices1h[prices1h.length - 1];
 
     const trend15m = calculateTrend(prices15m);
@@ -891,7 +896,8 @@ serve(async (req) => {
       if (dominantTrend === "bullish") {
         // For bullish trend, check if we're pulling back from recent high
         const swingHigh = recentHighs.length > 0 ? Math.max(...recentHighs) : 0;
-        const swingLow = recentLows.slice(-12).length > 0 ? Math.min(...recentLows.slice(-12)) : 0; // Low from last 12 hours
+        const recentLows12 = recentLows.slice(-12); // Cache slice to avoid duplicate computation
+        const swingLow = recentLows12.length > 0 ? Math.min(...recentLows12) : 0; // Low from last 12 hours
         const range = swingHigh - swingLow;
         const pullback = swingHigh - currentPrice;
         pullbackPercent = range !== 0 ? (pullback / range) * 100 : 0;
@@ -900,7 +906,8 @@ serve(async (req) => {
       } else if (dominantTrend === "bearish") {
         // For bearish trend, check if we're pulling back from recent low
         const swingLow = recentLows.length > 0 ? Math.min(...recentLows) : 0;
-        const swingHigh = recentHighs.slice(-12).length > 0 ? Math.max(...recentHighs.slice(-12)) : 0; // High from last 12 hours
+        const recentHighs12 = recentHighs.slice(-12); // Cache slice to avoid duplicate computation
+        const swingHigh = recentHighs12.length > 0 ? Math.max(...recentHighs12) : 0; // High from last 12 hours
         const range = swingHigh - swingLow;
         const pullback = currentPrice - swingLow;
         pullbackPercent = range !== 0 ? (pullback / range) * 100 : 0;
