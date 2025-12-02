@@ -751,27 +751,16 @@ serve(async (req) => {
     // ============================================================
     // SIMPLIFIED MOMENTUM CONFIRMATION WITH VOLUME
     // ============================================================
-    // Check last 3 candles from 15m for price movement direction
-    const recentKlines15m = klines15m.slice(-3);
-
-    // Get last and previous close prices
-    const lastClose = prices15m[prices15m.length - 1];
-    const prevClose = prices15m[prices15m.length - 2];
+    // Get last and previous close prices from 1h timeframe (consistent with MACD)
+    const lastClose = prices1h[prices1h.length - 1];
+    const prevClose = prices1h[prices1h.length - 2];
 
     // Get MACD histogram from 1h timeframe (primary momentum timeframe)
-    // Using 1h instead of 15m provides more stable momentum signals
     const macdHistogram = trend1h.indicators.macdHistogram;
-    const macdValues: number[] = [];
-
-    // Calculate MACD for recent candles to check for divergence
-    for (let i = Math.max(0, prices15m.length - 3); i < prices15m.length; i++) {
-      const closes = prices15m.slice(0, i + 1);
-      if (closes.length >= 26) {
-        const ema12 = calculateEMA(closes, 12);
-        const ema26 = calculateEMA(closes, 26);
-        macdValues.push(ema12 - ema26);
-      }
-    }
+    
+    // Get previous MACD histogram for divergence detection using 1h data
+    const prevMacdHistogram = prices1h.length >= 27 ? 
+      calculateMACD(prices1h.slice(0, -1)).histogram : 0;
 
     // Determine effective trend for momentum direction
     let effectiveTrendForMomentum = dominantTrend;
@@ -800,14 +789,14 @@ serve(async (req) => {
       (effectiveTrendForMomentum === "bearish" && lastClose < prevClose) ||
       effectiveTrendForMomentum === "neutral";
 
-    // Check for divergence (price vs MACD)
+    // Check for divergence (price vs MACD) using 1h timeframe data
     let hasDivergence = false;
-    if (macdValues.length >= 2) {
-      const priceMovement = lastClose - prevClose;
-      const macdMovement = macdValues[macdValues.length - 1] - macdValues[macdValues.length - 2];
+    const priceMovement = lastClose - prevClose;
+    const macdMovement = macdHistogram - prevMacdHistogram;
 
-      // Bearish divergence: price up but MACD down
-      // Bullish divergence: price down but MACD up
+    // Bearish divergence: price up but MACD down
+    // Bullish divergence: price down but MACD up
+    if (Math.abs(priceMovement) > 0.0001 && Math.abs(macdMovement) > 0.0001) {
       hasDivergence = (priceMovement > 0 && macdMovement < 0) || (priceMovement < 0 && macdMovement > 0);
     }
 
@@ -828,7 +817,7 @@ serve(async (req) => {
     // 2. Last close aligns with trend direction
     // 3. No divergence detected
     // 4. ADX >= 20 for sufficient trend strength (calculated earlier for ranging detection)
-    // Volume confirmation is NOT required but provides 10% position size boost when present
+    // Volume confirmation is NOT required but provides 15% position size boost when present
     const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= 20;
     // Momentum state classification
     let momentumState: "none" | "mixed" | "confirmed" = "none";
