@@ -22,6 +22,90 @@ interface SignalData {
   created_by_rebalancer: boolean;
   positionSizePercent?: number;
 }
+
+// Calculate adaptive thresholds based on market volatility
+const calculateAdaptiveThresholds = (atrPercent: number, adx: number) => {
+  // Higher volatility = more forgiving thresholds (trends are stronger)
+  // Lower volatility = stricter thresholds (need more confirmation)
+  const volatilityFactor = Math.min(1.5, Math.max(0.7, atrPercent / 1.5)); // Normalize around 1.5% ATR
+  
+  return {
+    minConfidence: Math.max(40, Math.round(50 / volatilityFactor)), // Lower in high volatility
+    minConsistency: Math.max(35, Math.round(45 / volatilityFactor)),
+    adxThresholdStrong: Math.round(20 / volatilityFactor),
+    adxThresholdModerate: Math.round(15 / volatilityFactor),
+    adxThresholdWeak: Math.round(12 / volatilityFactor),
+  };
+};
+
+// Evaluate StochRSI signals for entry timing
+const evaluateStochRSI = (stochRsi: any, trend: string): { boost: number; signal: string } => {
+  if (!stochRsi) return { boost: 0, signal: "none" };
+  
+  const { aggregated } = stochRsi;
+  if (!aggregated) return { boost: 0, signal: "none" };
+  
+  // For bullish trend, look for oversold conditions or bullish crosses
+  if (trend === "bullish") {
+    if (aggregated.oversoldCount >= 2) {
+      return { boost: 0.15, signal: "strong_oversold" }; // Great entry
+    }
+    if (aggregated.bullishCrossCount >= 1) {
+      return { boost: 0.1, signal: "bullish_cross" }; // Good entry timing
+    }
+    if (aggregated.overboughtCount >= 2) {
+      return { boost: -0.1, signal: "overbought_warning" }; // Potential top
+    }
+  }
+  
+  // For bearish trend, look for overbought conditions or bearish crosses
+  if (trend === "bearish") {
+    if (aggregated.overboughtCount >= 2) {
+      return { boost: 0.15, signal: "strong_overbought" }; // Great short entry
+    }
+    if (aggregated.bearishCrossCount >= 1) {
+      return { boost: 0.1, signal: "bearish_cross" }; // Good entry timing
+    }
+    if (aggregated.oversoldCount >= 2) {
+      return { boost: -0.1, signal: "oversold_warning" }; // Potential bottom
+    }
+  }
+  
+  return { boost: 0, signal: "neutral" };
+};
+
+// Evaluate Bollinger Bands for entry opportunities
+const evaluateBollingerBands = (bollingerBands: any, trend: string): { boost: number; signal: string } => {
+  if (!bollingerBands) return { boost: 0, signal: "none" };
+  
+  const { squeezed, breakoutPotential } = bollingerBands;
+  
+  // Squeeze with breakout potential = high opportunity
+  if (squeezed && breakoutPotential) {
+    return { boost: 0.2, signal: "squeeze_breakout" };
+  }
+  
+  // Just squeeze = building energy
+  if (squeezed) {
+    return { boost: 0.1, signal: "squeeze" };
+  }
+  
+  // Check price position relative to bands for each timeframe
+  const tf1h = bollingerBands["1h"];
+  if (tf1h) {
+    // For bullish, price near lower band is good entry
+    if (trend === "bullish" && tf1h.pricePosition === "lower_zone") {
+      return { boost: 0.1, signal: "near_lower_band" };
+    }
+    // For bearish, price near upper band is good short entry
+    if (trend === "bearish" && tf1h.pricePosition === "upper_zone") {
+      return { boost: 0.1, signal: "near_upper_band" };
+    }
+  }
+  
+  return { boost: 0, signal: "neutral" };
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -330,7 +414,43 @@ serve(async (req) => {
     });
     console.log(`Pre-fetched historical data for ${historicalDataMap.size} symbols`);
     
-    // Analyze each symbol
+    // =====================================================================
+    // IMPROVEMENT #1: PARALLEL calculate-trend calls for ALL symbols
+    // =====================================================================
+    const trendDataMap = new Map<string, any>();
+    const eligibleSymbols = symbolsList.filter((symbol) => {
+      const currentTradeCount = openTradesPerSymbol.get(symbol) || 0;
+      const hasRecentSignal = existingSignalsSet.has(symbol);
+      return !hasRecentSignal && currentTradeCount < riskParams.max_trades_per_symbol;
+    });
+    
+    console.log(`🚀 Fetching trend data for ${eligibleSymbols.length} eligible symbols in PARALLEL`);
+    
+    const trendPromises = eligibleSymbols.map(async (symbol) => {
+      try {
+        const { data: trendData, error: trendError } = await supabase.functions.invoke("calculate-trend", {
+          body: { symbol },
+        });
+        if (trendError || !trendData) {
+          console.warn(`Failed to analyze ${symbol}:`, trendError);
+          return { symbol, trendData: null };
+        }
+        return { symbol, trendData };
+      } catch (error) {
+        console.error(`Error fetching trend for ${symbol}:`, error);
+        return { symbol, trendData: null };
+      }
+    });
+    
+    const trendResults = await Promise.all(trendPromises);
+    trendResults.forEach(({ symbol, trendData }) => {
+      if (trendData) {
+        trendDataMap.set(symbol, trendData);
+      }
+    });
+    console.log(`✅ Fetched trend data for ${trendDataMap.size} symbols`);
+    
+    // Analyze each symbol (now using pre-fetched trend data)
     for (const { symbol } of symbols) {
       const currentTradeCount = openTradesPerSymbol.get(symbol) || 0;
       const hasRecentSignal = existingSignalsSet.has(symbol);
@@ -372,42 +492,79 @@ serve(async (req) => {
       );
       try {
         // ============= STEP 1: Multi-Timeframe Analysis Validation =============
-        // First, validate market conditions using Multi-Timeframe Analysis
-        // This acts as a PREREQUISITE for all custom strategies
-        const { data: trendData, error: trendError } = await supabase.functions.invoke("calculate-trend", {
-          body: { symbol },
-        });
-        if (trendError || !trendData) {
-          console.warn(`Failed to analyze ${symbol}:`, trendError);
+        // Use pre-fetched trend data (PARALLEL optimization)
+        const trendData = trendDataMap.get(symbol);
+        if (!trendData) {
+          console.warn(`No trend data available for ${symbol}`);
           continue;
         }
         const { trend, confidence, trendConsistency, higherTimeframeFilter } = trendData;
 
-        // TIERED ADX FILTERING: Adapt to signal quality instead of hard rejection
+        // =====================================================================
+        // IMPROVEMENT #2: ADAPTIVE THRESHOLDS based on market volatility
+        // =====================================================================
+        const atrPercent = trendData.volatility?.atrPercent || 1.5;
         const adx = trendData.volatility?.adx || 0;
+        const adaptiveThresholds = calculateAdaptiveThresholds(atrPercent, adx);
+        
+        // Use adaptive or configured thresholds (whichever is more permissive)
+        const effectiveMinConfidence = Math.min(
+          riskParams.min_confidence_threshold,
+          adaptiveThresholds.minConfidence
+        );
+        const effectiveMinConsistency = Math.min(
+          riskParams.min_trend_consistency,
+          adaptiveThresholds.minConsistency
+        );
+
+        // =====================================================================
+        // IMPROVEMENT #3: StochRSI + Bollinger Bands evaluation
+        // =====================================================================
+        const stochRsiEval = evaluateStochRSI(trendData.stochasticRsi, trend);
+        const bollingerEval = evaluateBollingerBands(trendData.bollingerBands, trend);
+        const technicalBoost = stochRsiEval.boost + bollingerEval.boost;
+        
+        // Log technical indicator signals
+        if (stochRsiEval.signal !== "neutral" && stochRsiEval.signal !== "none") {
+          console.log(`📊 ${symbol} StochRSI: ${stochRsiEval.signal} (boost: ${(stochRsiEval.boost * 100).toFixed(0)}%)`);
+        }
+        if (bollingerEval.signal !== "neutral" && bollingerEval.signal !== "none") {
+          console.log(`📊 ${symbol} Bollinger: ${bollingerEval.signal} (boost: ${(bollingerEval.boost * 100).toFixed(0)}%)`);
+        }
+
+        // TIERED ADX FILTERING with ADAPTIVE thresholds
         let adxTier: "strong" | "moderate" | "weak" | "reject" = "reject";
         let adxPositionMultiplier = 1.0;
 
-        if (adx >= 20) {
+        if (adx >= adaptiveThresholds.adxThresholdStrong) {
           adxTier = "strong"; // Full confidence in trend strength
           adxPositionMultiplier = 1.0;
-        } else if (adx >= 15) {
+        } else if (adx >= adaptiveThresholds.adxThresholdModerate) {
           adxTier = "moderate"; // Building trend, reduce position size
           adxPositionMultiplier = 0.75;
-        } else if (adx >= 12 && confidence >= 70) {
-          adxTier = "weak"; // Early trend, strong confidence - minimal size
+        } else if (adx >= adaptiveThresholds.adxThresholdWeak && confidence >= 65) {
+          adxTier = "weak"; // Early trend, good confidence - minimal size
           adxPositionMultiplier = 0.5;
+        } else if (adx >= 10 && technicalBoost >= 0.2) {
+          // NEW: Allow weak ADX if strong technical signals (StochRSI + Bollinger)
+          adxTier = "weak";
+          adxPositionMultiplier = 0.4;
+          console.log(`📈 ${symbol} ADX weak but strong technical signals - allowing with reduced size`);
         } else {
-          // Only reject if ADX < 12 OR (ADX < 15 AND confidence < 70)
+          // Only reject if ADX too low AND no strong technical signals
           rejectedByMultiTimeframeAnalysis++;
           await supabase.from("signal_rejection_log").insert({
             user_id: userId,
             symbol,
-            rejection_reason: `Multi-Timeframe prerequisite failed: ADX too weak (${adx.toFixed(1)}) for confidence level (${confidence}%)`,
+            rejection_reason: `Multi-Timeframe prerequisite failed: ADX too weak (${adx.toFixed(1)}) with insufficient technical confirmation`,
             filters_status: {
               adx,
               confidence,
-              required: "ADX ≥ 12 with confidence ≥70%, or ADX ≥ 15",
+              adaptiveThresholds,
+              stochRsiSignal: stochRsiEval.signal,
+              bollingerSignal: bollingerEval.signal,
+              technicalBoost,
+              required: `ADX ≥ ${adaptiveThresholds.adxThresholdWeak} with confidence ≥65%, or strong technical signals`,
               trendConsistency,
             },
             trend_data: trendData,
@@ -424,7 +581,7 @@ serve(async (req) => {
 
         if (higherTimeframeFilter.aligned) {
           const meetsThreshold =
-            confidence >= riskParams.min_confidence_threshold && trendConsistency >= riskParams.min_trend_consistency;
+            confidence >= effectiveMinConfidence && trendConsistency >= effectiveMinConsistency;
           const hasMomentumConfirmation = trendData.momentum?.confirms || false;
           const momentumState = trendData.momentum?.state || "none";
           const volumeConfirms = trendData.momentum?.volumeConfirms || false;
@@ -436,51 +593,75 @@ serve(async (req) => {
 
           // Volume boost: 10% additional position size when volume confirms direction
           const volumeBoostMultiplier = volumeConfirms ? 1.1 : 1.0;
+          
+          // Apply technical indicator boost to position size (max +30%)
+          const technicalBoostMultiplier = 1 + Math.min(0.3, Math.max(0, technicalBoost));
 
           // Tier 1: Perfect conditions - full position size
           if (meetsThreshold && confirmedMomentum) {
             multiTimeframePass = true;
-            positionSizeMultiplier = 1.0 * adxPositionMultiplier * volumeBoostMultiplier;
+            positionSizeMultiplier = 1.0 * adxPositionMultiplier * volumeBoostMultiplier * technicalBoostMultiplier;
             const neutralAllowed = higherTimeframeFilter.neutralAllowedWithStrongHigherTimeframe || false;
-            const volumeNote = volumeConfirms ? " + volume confirmation" : "";
+            const volumeNote = volumeConfirms ? " + volume" : "";
+            const techNote = technicalBoost > 0 ? ` + tech(${stochRsiEval.signal}/${bollingerEval.signal})` : "";
             multiTimeframeReason = neutralAllowed
-              ? `Tier 1 (${(positionSizeMultiplier * 100).toFixed(0)}%): Enhanced alignment with confirmed momentum${volumeNote}`
-              : `Tier 1 (${(positionSizeMultiplier * 100).toFixed(0)}%): Standard aligned with confirmed momentum${volumeNote}`;
+              ? `Tier 1 (${(positionSizeMultiplier * 100).toFixed(0)}%): Enhanced alignment + confirmed momentum${volumeNote}${techNote}`
+              : `Tier 1 (${(positionSizeMultiplier * 100).toFixed(0)}%): Aligned + confirmed momentum${volumeNote}${techNote}`;
           }
           // Tier 2a: Building momentum with strong ADX (≥25) - early entry opportunity
           else if (meetsThreshold && buildingMomentum && adx >= 25 && confidence >= 55) {
             multiTimeframePass = true;
-            positionSizeMultiplier = 0.75 * adxPositionMultiplier * volumeBoostMultiplier;
-            const volumeNote = volumeConfirms ? " + volume confirmation" : "";
-            multiTimeframeReason = `Tier 2a (${(positionSizeMultiplier * 100).toFixed(0)}%): Building momentum with strong trend (ADX ${adx.toFixed(1)})${volumeNote}`;
+            positionSizeMultiplier = 0.75 * adxPositionMultiplier * volumeBoostMultiplier * technicalBoostMultiplier;
+            const volumeNote = volumeConfirms ? " + volume" : "";
+            const techNote = technicalBoost > 0 ? ` + tech signals` : "";
+            multiTimeframeReason = `Tier 2a (${(positionSizeMultiplier * 100).toFixed(0)}%): Building momentum + strong trend (ADX ${adx.toFixed(1)})${volumeNote}${techNote}`;
           }
           // Tier 2b: Building momentum with strong alignment - reduced position size
-          else if (meetsThreshold && buildingMomentum && confidence >= 65) {
+          else if (meetsThreshold && buildingMomentum && confidence >= 60) {
             multiTimeframePass = true;
-            positionSizeMultiplier = 0.7 * adxPositionMultiplier * volumeBoostMultiplier;
-            const volumeNote = volumeConfirms ? " + volume confirmation" : "";
-            multiTimeframeReason = `Tier 2b (${(positionSizeMultiplier * 100).toFixed(0)}%): Building momentum with strong alignment${volumeNote}`;
+            positionSizeMultiplier = 0.7 * adxPositionMultiplier * volumeBoostMultiplier * technicalBoostMultiplier;
+            const volumeNote = volumeConfirms ? " + volume" : "";
+            const techNote = technicalBoost > 0 ? ` + tech signals` : "";
+            multiTimeframeReason = `Tier 2b (${(positionSizeMultiplier * 100).toFixed(0)}%): Building momentum + strong alignment${volumeNote}${techNote}`;
+          }
+          // NEW Tier 2c: Strong technical signals with building/mixed momentum
+          else if (meetsThreshold && (buildingMomentum || mixedMomentum) && technicalBoost >= 0.15) {
+            multiTimeframePass = true;
+            positionSizeMultiplier = 0.6 * adxPositionMultiplier * volumeBoostMultiplier * technicalBoostMultiplier;
+            multiTimeframeReason = `Tier 2c (${(positionSizeMultiplier * 100).toFixed(0)}%): Strong tech signals (${stochRsiEval.signal}/${bollingerEval.signal}) + ${momentumState} momentum`;
           }
           // Tier 3: Mixed momentum but very strong confidence - minimal position size
-          else if (meetsThreshold && mixedMomentum && confidence >= 70 && adx >= 18) {
+          else if (meetsThreshold && mixedMomentum && confidence >= 65 && adx >= 16) {
             multiTimeframePass = true;
-            positionSizeMultiplier = 0.5 * adxPositionMultiplier * volumeBoostMultiplier;
-            const volumeNote = volumeConfirms ? " + volume confirmation" : "";
-            multiTimeframeReason = `Tier 3 (${(positionSizeMultiplier * 100).toFixed(0)}%): Mixed momentum with very strong confidence${volumeNote}`;
+            positionSizeMultiplier = 0.5 * adxPositionMultiplier * volumeBoostMultiplier * technicalBoostMultiplier;
+            const volumeNote = volumeConfirms ? " + volume" : "";
+            multiTimeframeReason = `Tier 3 (${(positionSizeMultiplier * 100).toFixed(0)}%): Mixed momentum + strong confidence${volumeNote}`;
           }
           // Tier 4: Exceptional ADX - very strong trend strength compensates for no momentum
-          else if (meetsThreshold && adx >= 40 && confidence >= 65) {
+          else if (meetsThreshold && adx >= 35 && confidence >= 60) {
             multiTimeframePass = true;
-            positionSizeMultiplier = 0.5 * volumeBoostMultiplier; // 50% size when ADX exceptionally high
-            const volumeNote = volumeConfirms ? " + volume confirmation" : "";
-            multiTimeframeReason = `Tier 4 (${(positionSizeMultiplier * 100).toFixed(0)}%): Exceptional trend strength (ADX ${adx.toFixed(1)}), no momentum${volumeNote}`;
+            positionSizeMultiplier = 0.5 * volumeBoostMultiplier * technicalBoostMultiplier;
+            const volumeNote = volumeConfirms ? " + volume" : "";
+            multiTimeframeReason = `Tier 4 (${(positionSizeMultiplier * 100).toFixed(0)}%): Exceptional trend strength (ADX ${adx.toFixed(1)})${volumeNote}`;
           }
           // Tier 5: No momentum but exceptional alignment - very minimal size
-          else if (meetsThreshold && confidence >= 75 && trendConsistency >= 70 && adx >= 20) {
+          else if (meetsThreshold && confidence >= 70 && trendConsistency >= 65 && adx >= 18) {
             multiTimeframePass = true;
-            positionSizeMultiplier = 0.4 * volumeBoostMultiplier; // 40% size
-            const volumeNote = volumeConfirms ? " + volume confirmation" : "";
+            positionSizeMultiplier = 0.4 * volumeBoostMultiplier * technicalBoostMultiplier;
+            const volumeNote = volumeConfirms ? " + volume" : "";
             multiTimeframeReason = `Tier 5 (${(positionSizeMultiplier * 100).toFixed(0)}%): Exceptional alignment, weak momentum${volumeNote}`;
+          }
+          // NEW Tier 6: Squeeze breakout opportunity - even with weak momentum
+          else if (meetsThreshold && bollingerEval.signal === "squeeze_breakout" && adx >= 15) {
+            multiTimeframePass = true;
+            positionSizeMultiplier = 0.5 * adxPositionMultiplier;
+            multiTimeframeReason = `Tier 6 (${(positionSizeMultiplier * 100).toFixed(0)}%): Bollinger squeeze breakout opportunity`;
+          }
+          // NEW Tier 7: StochRSI extreme with decent alignment
+          else if (meetsThreshold && (stochRsiEval.signal === "strong_oversold" || stochRsiEval.signal === "strong_overbought")) {
+            multiTimeframePass = true;
+            positionSizeMultiplier = 0.45 * adxPositionMultiplier;
+            multiTimeframeReason = `Tier 7 (${(positionSizeMultiplier * 100).toFixed(0)}%): StochRSI extreme (${stochRsiEval.signal})`;
           }
           // Reject only if none of the tiers pass
           else {
@@ -493,19 +674,23 @@ serve(async (req) => {
               momentumState,
               adx,
               adxTier,
+              adaptiveThresholds,
+              stochRsiSignal: stochRsiEval.signal,
+              bollingerSignal: bollingerEval.signal,
+              technicalBoost,
               trend4h: trendData.timeframes?.["4h"]?.trend,
               trend1h: trendData.timeframes?.["1h"]?.trend,
               aligned: higherTimeframeFilter.aligned,
               required: !meetsThreshold
-                ? "confidence/consistency threshold"
-                : `stronger conditions needed (momentum: ${momentumState}, confidence: ${confidence}%, ADX: ${adx.toFixed(1)})`,
+                ? `confidence ≥${effectiveMinConfidence}% / consistency ≥${effectiveMinConsistency}%`
+                : `stronger momentum/technical conditions needed`,
             };
             await supabase.from("signal_rejection_log").insert({
               user_id: userId,
               symbol,
               rejection_reason: !meetsThreshold
-                ? "Multi-Timeframe prerequisite failed: confidence or trend consistency below threshold"
-                : `Multi-Timeframe prerequisite failed: insufficient signal quality (momentum: ${momentumState}, confidence: ${confidence}%, ADX: ${adx.toFixed(1)})`,
+                ? `Multi-Timeframe prerequisite failed: confidence (${confidence}%) or consistency (${trendConsistency}%) below adaptive threshold`
+                : `Multi-Timeframe prerequisite failed: insufficient signal quality (momentum: ${momentumState}, tech boost: ${(technicalBoost * 100).toFixed(0)}%)`,
               filters_status: rejectionData,
               trend_data: trendData,
               checked_at: new Date().toISOString(),
@@ -521,30 +706,30 @@ serve(async (req) => {
             const tf15m = trendData.timeframes?.["15m"];
             const tf4h = trendData.timeframes?.["4h"];
             const trendAligned = tf30m && tf15m && tf4h && tf30m.trend === tf4h.trend && tf15m.trend === tf4h.trend;
-            // RELAXED: Accept pullback with confirmed OR building momentum
-            if (trendAligned && (hasMomentumConfirmation || momentumState === "building")) {
+            // RELAXED: Accept pullback with confirmed, building OR mixed momentum + technical signals
+            const momentumOk = hasMomentumConfirmation || momentumState === "building" || (momentumState === "mixed" && technicalBoost >= 0.1);
+            if (trendAligned && momentumOk) {
               multiTimeframePass = true;
               const baseSize = (riskParams.pullback_position_size_percent || 50) / 100;
-              positionSizeMultiplier = hasMomentumConfirmation ? baseSize : baseSize * 0.8; // Reduce by 20% if only building
+              const momentumReduction = hasMomentumConfirmation ? 1.0 : momentumState === "building" ? 0.85 : 0.7;
+              positionSizeMultiplier = baseSize * momentumReduction * (1 + Math.min(0.15, technicalBoost));
               confidenceCap = 70;
-              multiTimeframeReason = hasMomentumConfirmation
-                ? "Pullback opportunity with confirmed momentum"
-                : "Pullback opportunity with building momentum (reduced size)";
+              multiTimeframeReason = `Pullback opportunity (${momentumState} momentum, tech: ${stochRsiEval.signal})`;
             }
           } else if (divergenceType === "early_reversal" && riskParams.enable_early_reversal_signals) {
             const tf30m = trendData.timeframes?.["30m"];
             const tf15m = trendData.timeframes?.["15m"];
             const tf1h = trendData.timeframes?.["1h"];
             const trendAligned = tf30m && tf15m && tf1h && tf30m.trend === tf1h.trend && tf15m.trend === tf1h.trend;
-            // RELAXED: Accept early reversal with confirmed OR building momentum
-            if (trendAligned && (hasMomentumConfirmation || momentumState === "building")) {
+            // RELAXED: Accept early reversal with confirmed, building OR mixed momentum + technical signals
+            const momentumOk = hasMomentumConfirmation || momentumState === "building" || (momentumState === "mixed" && technicalBoost >= 0.1);
+            if (trendAligned && momentumOk) {
               multiTimeframePass = true;
               const baseSize = (riskParams.early_reversal_position_size_percent || 40) / 100;
-              positionSizeMultiplier = hasMomentumConfirmation ? baseSize : baseSize * 0.8; // Reduce by 20% if only building
+              const momentumReduction = hasMomentumConfirmation ? 1.0 : momentumState === "building" ? 0.85 : 0.7;
+              positionSizeMultiplier = baseSize * momentumReduction * (1 + Math.min(0.15, technicalBoost));
               confidenceCap = 65;
-              multiTimeframeReason = hasMomentumConfirmation
-                ? "Early reversal with confirmed momentum"
-                : "Early reversal with building momentum (reduced size)";
+              multiTimeframeReason = `Early reversal (${momentumState} momentum, tech: ${stochRsiEval.signal})`;
             }
           }
           if (!multiTimeframePass) {
@@ -557,6 +742,9 @@ serve(async (req) => {
               pullbackEnabled: riskParams.enable_pullback_signals,
               earlyReversalEnabled: riskParams.enable_early_reversal_signals,
               momentum: trendData.momentum,
+              stochRsiSignal: stochRsiEval.signal,
+              bollingerSignal: bollingerEval.signal,
+              technicalBoost,
               consecutive15mBullish: trendData.momentum?.consecutive15mBullish || 0,
               consecutive15mBearish: trendData.momentum?.consecutive15mBearish || 0,
               consecutive30mBullish: trendData.momentum?.consecutive30mBullish || 0,
@@ -570,7 +758,7 @@ serve(async (req) => {
               user_id: userId,
               symbol,
               rejection_reason:
-                "Multi-Timeframe prerequisite failed: divergence conditions not met or momentum missing",
+                "Multi-Timeframe prerequisite failed: divergence conditions not met or insufficient momentum/technical confirmation",
               filters_status: rejectionData,
               trend_data: trendData,
               checked_at: new Date().toISOString(),
@@ -586,6 +774,9 @@ serve(async (req) => {
             confidence,
             trendConsistency,
             momentum: trendData.momentum,
+            stochRsiSignal: stochRsiEval.signal,
+            bollingerSignal: bollingerEval.signal,
+            technicalBoost,
             consecutive15mBullish: trendData.momentum?.consecutive15mBullish || 0,
             consecutive15mBearish: trendData.momentum?.consecutive15mBearish || 0,
             consecutive30mBullish: trendData.momentum?.consecutive30mBullish || 0,
@@ -746,6 +937,10 @@ serve(async (req) => {
               stopLossPercent,
               takeProfitPercent,
               positionSizePercent: strategyPositionSize,
+              // Include technical indicator signals in the response
+              stochRsiSignal: stochRsiEval.signal,
+              bollingerSignal: bollingerEval.signal,
+              technicalBoost: (technicalBoost * 100).toFixed(0) + "%",
             },
             expires_at: new Date(Date.now() + 60000).toISOString(),
             created_by_rebalancer: false,
@@ -765,7 +960,7 @@ serve(async (req) => {
             } as SignalData);
             totalSignalsGenerated++;
             console.log(
-              `✅ Created ${signalType.toUpperCase()} signal for ${symbol} using "${strategy.name}" (now ${currentTradeCount}/${riskParams.max_trades_per_symbol} trades, 1 active signal)`,
+              `✅ Created ${signalType.toUpperCase()} signal for ${symbol} using "${strategy.name}" (${multiTimeframeReason})`,
             );
             // Mark symbol as having a signal to avoid duplicates within this cycle
             existingSignalsSet.add(symbol);
