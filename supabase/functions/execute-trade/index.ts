@@ -120,18 +120,25 @@ serve(async (req) => {
     }
 
     // Check circuit breaker: Stop trading if daily loss limit exceeded
-    const dailyLossPercent = (currentDailyLoss / riskParams.portfolio_value) * 100;
+    const dailyLossPercent = riskParams.portfolio_value > 0 
+      ? (currentDailyLoss / riskParams.portfolio_value) * 100 
+      : 0;
     if (dailyLossPercent >= riskParams.daily_loss_limit_percent) {
       console.error(`❌ CIRCUIT BREAKER TRIGGERED: Daily loss ${dailyLossPercent.toFixed(2)}% >= limit ${riskParams.daily_loss_limit_percent}%`);
       throw new Error(`Daily loss limit reached (${dailyLossPercent.toFixed(2)}% of ${riskParams.daily_loss_limit_percent}%). Trading halted for today.`);
     }
 
     // Get signal details
-    const { data: signal } = await supabase
+    const { data: signal, error: signalError } = await supabase
       .from('trading_signals')
       .select('*')
       .eq('id', signalId)
-      .single();
+      .maybeSingle();
+
+    if (signalError) {
+      console.error('Error fetching signal:', signalError);
+      throw new Error('Failed to fetch signal');
+    }
 
     if (!signal) {
       throw new Error('Signal not found');
@@ -163,6 +170,29 @@ serve(async (req) => {
     }
 
     console.log(`✓ Symbol check passed: ${signal.symbol} has ${openPositionsForSymbol}/${maxPerSymbol} positions`);
+
+    // ============================================================
+    // EARLY DUPLICATE CHECK - Prevent race condition by checking BEFORE order execution
+    // ============================================================
+    const { data: existingPosition } = await supabase
+      .from('positions')
+      .select('id')
+      .eq('signal_id', signalId)
+      .maybeSingle();
+
+    if (existingPosition) {
+      console.log(`Signal ${signalId} already executed as position ${existingPosition.id}`);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'This signal has already been executed',
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 400,
+        }
+      );
+    }
 
     // Get real-time trend analysis before executing trade
     const { data: trendData, error: trendError } = await supabase.functions.invoke('calculate-trend', {
@@ -308,19 +338,26 @@ serve(async (req) => {
       console.warn('Failed to fetch klines for volume profile analysis, proceeding with basic checks');
     } else {
       const klines = await klineResponse.json();
-      const volumes = klines.map((k: any[]) => parseFloat(k[5])); // Volume is at index 5
-      const closes = klines.map((k: any[]) => parseFloat(k[4])); // Close price at index 4
       
-      // Calculate basic volume metrics
-      const recentVolumes = volumes.slice(-20);
-      const avgVolume = recentVolumes.reduce((a: number, b: number) => a + b, 0) / recentVolumes.length;
-      const currentVolume = volumes[volumes.length - 1];
-      const volumeRatio = currentVolume / avgVolume;
+      // Safety check for empty or invalid klines data
+      if (!Array.isArray(klines) || klines.length < 20) {
+        console.warn('Insufficient kline data for volume analysis, skipping advanced filters');
+      } else {
+        const volumes = klines.map((k: any[]) => parseFloat(k[5])); // Volume is at index 5
+        const closes = klines.map((k: any[]) => parseFloat(k[4])); // Close price at index 4
+        
+        // Calculate basic volume metrics with safety checks
+        const recentVolumes = volumes.slice(-20);
+        const avgVolume = recentVolumes.length > 0 
+          ? recentVolumes.reduce((a: number, b: number) => a + b, 0) / recentVolumes.length 
+          : 1;
+        const currentVolume = volumes[volumes.length - 1] || 0;
+        const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
 
-      console.log(`📊 Current 15m Volume: ${currentVolume.toFixed(2)}, Avg: ${avgVolume.toFixed(2)}, Ratio: ${volumeRatio.toFixed(2)}x`);
+        console.log(`📊 Current 15m Volume: ${currentVolume.toFixed(2)}, Avg: ${avgVolume.toFixed(2)}, Ratio: ${volumeRatio.toFixed(2)}x`);
 
-      // FILTER 7: Avoid extremely low volume periods (< 30% of average)
-      if (volumeRatio < 0.3) {
+        // FILTER 7: Avoid extremely low volume periods (< 30% of average)
+        if (volumeRatio < 0.3) {
         throw new Error(`Current volume too low (${(volumeRatio * 100).toFixed(0)}% of average) - trade cancelled to avoid illiquid entry`);
       }
 
@@ -345,11 +382,11 @@ serve(async (req) => {
         obvValues.push(obv);
       }
 
-      // Calculate OBV trend (compare recent OBV to older OBV)
+      // Calculate OBV trend (compare recent OBV to older OBV) with safety checks
       const recentOBV = obvValues.slice(-10);
       const olderOBV = obvValues.slice(-20, -10);
-      const avgRecentOBV = recentOBV.reduce((a, b) => a + b, 0) / recentOBV.length;
-      const avgOlderOBV = olderOBV.reduce((a, b) => a + b, 0) / olderOBV.length;
+      const avgRecentOBV = recentOBV.length > 0 ? recentOBV.reduce((a, b) => a + b, 0) / recentOBV.length : 0;
+      const avgOlderOBV = olderOBV.length > 0 ? olderOBV.reduce((a, b) => a + b, 0) / olderOBV.length : 0;
       
       const obvTrend = avgRecentOBV > avgOlderOBV ? 'rising' : avgRecentOBV < avgOlderOBV ? 'falling' : 'flat';
       const obvChange = avgOlderOBV !== 0 ? ((avgRecentOBV - avgOlderOBV) / Math.abs(avgOlderOBV)) * 100 : 0;
@@ -413,12 +450,14 @@ serve(async (req) => {
         vwapValues.push(cumulativeTPV / cumulativeVolume);
       }
       
-      const currentVWAP = vwapValues[vwapValues.length - 1];
-      const vwapDeviation = ((currentPrice - currentVWAP) / currentVWAP) * 100;
+      const currentVWAP = vwapValues[vwapValues.length - 1] || currentPrice;
+      const vwapDeviation = currentVWAP > 0 ? ((currentPrice - currentVWAP) / currentVWAP) * 100 : 0;
       
-      // Calculate VWAP bands (standard deviation from VWAP)
-      const vwapDiffs = closes.map((c: number, i: number) => Math.pow(c - vwapValues[i], 2));
-      const vwapStdDev = Math.sqrt(vwapDiffs.reduce((a: number, b: number) => a + b, 0) / vwapDiffs.length);
+      // Calculate VWAP bands (standard deviation from VWAP) with safety check
+      const vwapDiffs = closes.map((c: number, i: number) => Math.pow(c - (vwapValues[i] || currentPrice), 2));
+      const vwapStdDev = vwapDiffs.length > 0 
+        ? Math.sqrt(vwapDiffs.reduce((a: number, b: number) => a + b, 0) / vwapDiffs.length)
+        : 0;
       const vwapUpperBand = currentVWAP + (vwapStdDev * 2);
       const vwapLowerBand = currentVWAP - (vwapStdDev * 2);
       
@@ -474,7 +513,8 @@ serve(async (req) => {
       // Store VWAP boost for position sizing
       (signal as any).vwapBoostMultiplier = vwapBoostMultiplier;
       console.log(`📈 Final VWAP Boost Multiplier: ${vwapBoostMultiplier.toFixed(2)}x`);
-    }
+      } // Close inner else block (klines valid)
+    } // Close outer else block (klineResponse ok)
 
     // ============================================================
     // SLIPPAGE PROTECTION - Pre-trade price validation
@@ -629,6 +669,12 @@ serve(async (req) => {
     // Round quantity to appropriate decimal places
     quantity = Math.floor(quantity * 1000) / 1000;
 
+    // Safety check: Ensure quantity is not zero or too small
+    const minQuantityValue = 0.001; // Minimum viable trade quantity
+    if (quantity < minQuantityValue) {
+      throw new Error(`Calculated quantity (${quantity}) is too small to execute. Minimum: ${minQuantityValue}`);
+    }
+
     const side = signal.signal_type === 'long' ? 'BUY' : 'SELL';
     let orderData: any;
     let executedPrice = currentPrice; // Use current price instead of signal entry price
@@ -691,27 +737,6 @@ serve(async (req) => {
       if (postExecutionSlippage > 0.3) {
         console.warn(`⚠️ HIGH SLIPPAGE WARNING: ${postExecutionSlippage.toFixed(2)}% slippage on execution`);
       }
-    }
-
-    // Check if this signal has already been executed
-    const { data: existingPosition } = await supabase
-      .from('positions')
-      .select('id')
-      .eq('signal_id', signalId)
-      .maybeSingle();
-
-    if (existingPosition) {
-      console.log(`Signal ${signalId} already executed as position ${existingPosition.id}`);
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'This signal has already been executed',
-        }),
-        {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 400,
-        }
-      );
     }
 
     // Create position record with all trade data
@@ -806,11 +831,15 @@ serve(async (req) => {
       }
     }
 
-    // Delete the signal after trade execution
-    await supabase
+    // Delete the signal after trade execution (non-critical - don't fail if this fails)
+    const { error: deleteSignalError } = await supabase
       .from('trading_signals')
       .delete()
       .eq('id', signalId);
+    
+    if (deleteSignalError) {
+      console.warn(`Failed to delete signal ${signalId} after execution:`, deleteSignalError);
+    }
 
     // Update risk parameters - sync with actual active positions count
     const { count: activeCount } = await supabase
