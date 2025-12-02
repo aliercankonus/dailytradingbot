@@ -452,18 +452,37 @@ function calculateADX(klines: any[], period = 14): number {
   return Math.round(adx * 10) / 10;
 }
 
-async function fetchBinanceKlines(symbol: string, interval: string = "1h", limit: number = 100): Promise<any[]> {
-  try {
-    const response = await fetch(
-      `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
-    );
-    if (!response.ok) throw new Error(`Binance API error: ${response.status}`);
-    const klines = await response.json();
-    return Array.isArray(klines) ? klines : [];
-  } catch (error) {
-    console.error(`Failed to fetch Binance klines for ${symbol} on ${interval}:`, error);
-    throw error;
+async function fetchBinanceKlines(symbol: string, interval: string = "1h", limit: number = 100, retries: number = 2): Promise<any[]> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(
+        `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+      );
+      
+      if (!response.ok) {
+        // Don't retry on client errors (4xx)
+        if (response.status >= 400 && response.status < 500) {
+          throw new Error(`Binance API error: ${response.status} - ${response.statusText}`);
+        }
+        throw new Error(`Binance API error: ${response.status}`);
+      }
+      
+      const klines = await response.json();
+      return Array.isArray(klines) ? klines : [];
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.error(`Failed to fetch Binance klines for ${symbol} on ${interval} (attempt ${attempt + 1}/${retries + 1}):`, lastError.message);
+      
+      // Wait before retry (exponential backoff)
+      if (attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)));
+      }
+    }
   }
+  
+  throw lastError || new Error(`Failed to fetch klines for ${symbol}`);
 }
 
 function validateMarketStructure(
@@ -635,8 +654,24 @@ serve(async (req) => {
   }
 
   try {
-    const { symbol } = await req.json();
-    if (!symbol || typeof symbol !== "string") throw new Error("Symbol is required and must be a string");
+    // Parse request body with proper error handling
+    let body: { symbol?: string };
+    try {
+      body = await req.json();
+    } catch (parseError) {
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON in request body" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    
+    const { symbol } = body;
+    if (!symbol || typeof symbol !== "string") {
+      return new Response(
+        JSON.stringify({ error: "Symbol is required and must be a string" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     console.log(`Multi-timeframe analysis for ${symbol}`);
 
@@ -1148,35 +1183,38 @@ serve(async (req) => {
           bandwidth: bb1h.bandwidth,
         },
         // Stochastic RSI analysis across timeframes - earlier overbought/oversold detection
-        stochasticRsi: {
-          "15m": stochRsi15m,
-          "30m": stochRsi30m,
-          "1h": stochRsi1h,
-          "4h": stochRsi4h,
-          // Aggregated signals for quick reference
-          primarySignal: stochRsi1h.signal,
-          primaryK: stochRsi1h.k,
-          primaryD: stochRsi1h.d,
-          // Cross-timeframe overbought/oversold
-          overboughtCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "overbought").length,
-          oversoldCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "oversold").length,
-          bullishCrossCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "bullish_cross").length,
-          bearishCrossCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "bearish_cross").length,
-          // Trading recommendations based on StochRSI
-          recommendation: (() => {
-            const ob = [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "overbought").length;
-            const os = [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "oversold").length;
-            const bc = [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "bullish_cross").length;
-            const bearC = [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "bearish_cross").length;
-            if (ob >= 3) return "strong_sell_warning";
-            if (os >= 3) return "strong_buy_opportunity";
-            if (ob >= 2 && stochRsi1h.signal === "overbought") return "sell_warning";
-            if (os >= 2 && stochRsi1h.signal === "oversold") return "buy_opportunity";
-            if (bc >= 2) return "bullish_momentum";
-            if (bearC >= 2) return "bearish_momentum";
-            return "neutral";
-          })(),
-        },
+        // Pre-calculate counts once to avoid redundant array operations
+        stochasticRsi: (() => {
+          const allStochRsi = [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h];
+          const overboughtCount = allStochRsi.filter(s => s.signal === "overbought").length;
+          const oversoldCount = allStochRsi.filter(s => s.signal === "oversold").length;
+          const bullishCrossCount = allStochRsi.filter(s => s.signal === "bullish_cross").length;
+          const bearishCrossCount = allStochRsi.filter(s => s.signal === "bearish_cross").length;
+          
+          // Calculate recommendation using pre-computed counts
+          let recommendation = "neutral";
+          if (overboughtCount >= 3) recommendation = "strong_sell_warning";
+          else if (oversoldCount >= 3) recommendation = "strong_buy_opportunity";
+          else if (overboughtCount >= 2 && stochRsi1h.signal === "overbought") recommendation = "sell_warning";
+          else if (oversoldCount >= 2 && stochRsi1h.signal === "oversold") recommendation = "buy_opportunity";
+          else if (bullishCrossCount >= 2) recommendation = "bullish_momentum";
+          else if (bearishCrossCount >= 2) recommendation = "bearish_momentum";
+          
+          return {
+            "15m": stochRsi15m,
+            "30m": stochRsi30m,
+            "1h": stochRsi1h,
+            "4h": stochRsi4h,
+            primarySignal: stochRsi1h.signal,
+            primaryK: stochRsi1h.k,
+            primaryD: stochRsi1h.d,
+            overboughtCount,
+            oversoldCount,
+            bullishCrossCount,
+            bearishCrossCount,
+            recommendation,
+          };
+        })(),
         indicators: trend1h.indicators,
         trendConsistency: Math.round(weightedConsistency),
       }),
