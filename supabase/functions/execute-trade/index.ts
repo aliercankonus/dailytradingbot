@@ -67,15 +67,24 @@ serve(async (req) => {
     const binanceApiSecret = Deno.env.get('BINANCE_API_SECRET');
 
     // Get risk parameters for the user
-    const { data: riskParams } = await supabase
+    const { data: riskParams, error: riskParamsError } = await supabase
       .from('risk_parameters')
       .select('*')
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
+
+    if (riskParamsError) {
+      console.error('Error fetching risk parameters:', riskParamsError);
+      throw new Error('Failed to fetch risk parameters');
+    }
+
+    if (!riskParams) {
+      throw new Error('Risk parameters not configured. Please configure your trading settings first.');
+    }
 
     // Allow manual execution even if is_trading_enabled is false (bot is off)
     // But still require is_trading_enabled=true for automatic execution
-    if (!riskParams?.is_trading_enabled && !isManualExecution) {
+    if (!riskParams.is_trading_enabled && !isManualExecution) {
       throw new Error('Trading is currently disabled. Please enable the bot to execute trades automatically.');
     }
 
@@ -166,7 +175,8 @@ serve(async (req) => {
 
     const currentTrend = trendData?.trend || signal.trend;
     const trendConsistency = trendData?.trendConsistency || 0;
-    const atrPercent = trendData?.atrPercent || 1.5;
+    // Fix: atrPercent is under volatility object in calculate-trend response
+    const atrPercent = trendData?.volatility?.atrPercent || trendData?.ranging?.atrPercent || 1.5;
     
     console.log(`Current market trend: ${currentTrend}, Consistency: ${trendConsistency}, ATR: ${atrPercent}%, Signal: ${signal.signal_type}`);
 
@@ -203,12 +213,25 @@ serve(async (req) => {
 
     // Get current price for ATR-based stop loss calculation
     const priceResponse = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${signal.symbol}`);
+    if (!priceResponse.ok) {
+      const errorText = await priceResponse.text();
+      console.error('Binance price API error:', errorText);
+      throw new Error(`Failed to fetch current price for ${signal.symbol}: ${priceResponse.status}`);
+    }
     const priceData = await priceResponse.json();
+    if (!priceData.price) {
+      throw new Error(`No price data returned for ${signal.symbol}`);
+    }
     const currentPrice = parseFloat(priceData.price);
 
     // Use strategy's configured stop loss and take profit from signal
     const stopLoss = signal.stop_loss;
     const takeProfit = signal.take_profit;
+
+    // Validate SL/TP are present
+    if (!stopLoss || !takeProfit) {
+      throw new Error(`Signal missing stop_loss (${stopLoss}) or take_profit (${takeProfit})`);
+    }
 
     console.log(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)} (from strategy configuration)`);
 
@@ -389,13 +412,21 @@ serve(async (req) => {
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
 
-      await fetch(
+      const slResponse = await fetch(
         `https://api.binance.com/api/v3/order?${slQueryString}&signature=${slSignatureHex}`,
         {
           method: 'POST',
           headers: { 'X-MBX-APIKEY': binanceApiKey! },
         }
       );
+
+      if (!slResponse.ok) {
+        const slErrorText = await slResponse.text();
+        console.error(`⚠️ Failed to place stop-loss order for position ${position.id}:`, slErrorText);
+        // Don't throw - position is already created, just log the warning
+      } else {
+        console.log(`✓ Stop-loss order placed for position ${position.id}`);
+      }
 
       // Place take-profit order
       const tpQueryString = `symbol=${signal.symbol}&side=${side === 'BUY' ? 'SELL' : 'BUY'}&type=TAKE_PROFIT_LIMIT&quantity=${quantity}&price=${takeProfit}&stopPrice=${takeProfit}&timeInForce=GTC&timestamp=${Date.now()}`;
@@ -405,13 +436,21 @@ serve(async (req) => {
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
 
-      await fetch(
+      const tpResponse = await fetch(
         `https://api.binance.com/api/v3/order?${tpQueryString}&signature=${tpSignatureHex}`,
         {
           method: 'POST',
           headers: { 'X-MBX-APIKEY': binanceApiKey! },
         }
       );
+
+      if (!tpResponse.ok) {
+        const tpErrorText = await tpResponse.text();
+        console.error(`⚠️ Failed to place take-profit order for position ${position.id}:`, tpErrorText);
+        // Don't throw - position is already created, just log the warning
+      } else {
+        console.log(`✓ Take-profit order placed for position ${position.id}`);
+      }
     }
 
     // Delete the signal after trade execution
