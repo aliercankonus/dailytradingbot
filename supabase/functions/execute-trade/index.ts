@@ -520,6 +520,42 @@ serve(async (req) => {
 
     console.log(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)} (from strategy configuration)`);
 
+    // ============================================================
+    // FILTER 11: RISK/REWARD RATIO VALIDATION
+    // Minimum R:R ratio of 1.5:1 required for all trades
+    // ============================================================
+    const signalSideForRR = signal.signal_type === 'long' ? 'BUY' : 'SELL';
+    let riskAmount: number;
+    let rewardAmount: number;
+    
+    if (signalSideForRR === 'BUY') {
+      // LONG: Risk = entry - stop loss, Reward = take profit - entry
+      riskAmount = currentPrice - stopLoss;
+      rewardAmount = takeProfit - currentPrice;
+    } else {
+      // SHORT: Risk = stop loss - entry, Reward = entry - take profit
+      riskAmount = stopLoss - currentPrice;
+      rewardAmount = currentPrice - takeProfit;
+    }
+    
+    // Validate risk and reward are positive
+    if (riskAmount <= 0) {
+      throw new Error(`Invalid stop loss: ${signalSideForRR === 'BUY' ? 'SL must be below' : 'SL must be above'} entry price (Entry: $${currentPrice.toFixed(2)}, SL: $${stopLoss.toFixed(2)})`);
+    }
+    if (rewardAmount <= 0) {
+      throw new Error(`Invalid take profit: ${signalSideForRR === 'BUY' ? 'TP must be above' : 'TP must be below'} entry price (Entry: $${currentPrice.toFixed(2)}, TP: $${takeProfit.toFixed(2)})`);
+    }
+    
+    const riskRewardRatio = rewardAmount / riskAmount;
+    const minRiskReward = 1.5; // Minimum 1.5:1 R:R required
+    
+    console.log(`📊 Risk/Reward Analysis: Risk=$${riskAmount.toFixed(2)} (${((riskAmount/currentPrice)*100).toFixed(2)}%), Reward=$${rewardAmount.toFixed(2)} (${((rewardAmount/currentPrice)*100).toFixed(2)}%), R:R=${riskRewardRatio.toFixed(2)}:1`);
+    
+    if (riskRewardRatio < minRiskReward) {
+      throw new Error(`Risk/Reward ratio too low (${riskRewardRatio.toFixed(2)}:1 < ${minRiskReward}:1 required) - trade cancelled`);
+    }
+    console.log(`✓ R:R check passed: ${riskRewardRatio.toFixed(2)}:1 >= ${minRiskReward}:1 minimum`);
+
     // Fetch strategy's risk settings to get positionSizePercent
     let positionSizePercent = 1.0; // Default fallback if strategy not found
     
