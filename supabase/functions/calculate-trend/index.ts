@@ -752,15 +752,16 @@ serve(async (req) => {
     // SIMPLIFIED MOMENTUM CONFIRMATION WITH VOLUME
     // ============================================================
     // Get last and previous close prices from 1h timeframe (consistent with MACD)
-    const lastClose = prices1h[prices1h.length - 1];
-    const prevClose = prices1h[prices1h.length - 2];
+    // CRITICAL: Check array bounds before accessing
+    const lastClose = prices1h.length >= 1 ? prices1h[prices1h.length - 1] : 0;
+    const prevClose = prices1h.length >= 2 ? prices1h[prices1h.length - 2] : lastClose;
 
     // Get MACD histogram from 1h timeframe (primary momentum timeframe)
     const macdHistogram = trend1h.indicators.macdHistogram;
     
     // Get previous MACD histogram for divergence detection using 1h data
     const prevMacdHistogram = prices1h.length >= 27 ? 
-      calculateMACD(prices1h.slice(0, -1)).histogram : 0;
+      calculateMACD(prices1h.slice(0, -1)).histogram : macdHistogram;
 
     // Determine effective trend for momentum direction
     let effectiveTrendForMomentum = dominantTrend;
@@ -796,7 +797,11 @@ serve(async (req) => {
 
     // Bearish divergence: price up but MACD down
     // Bullish divergence: price down but MACD up
-    if (Math.abs(priceMovement) > 0.0001 && Math.abs(macdMovement) > 0.0001) {
+    // Use percentage-based threshold (0.1%) instead of fixed value for price-independent detection
+    const priceMovementPercent = prevClose !== 0 ? Math.abs(priceMovement / prevClose) : 0;
+    const macdMovementPercent = prevMacdHistogram !== 0 ? Math.abs(macdMovement / prevMacdHistogram) : 0;
+    
+    if (priceMovementPercent > 0.001 && macdMovementPercent > 0.05) {
       hasDivergence = (priceMovement > 0 && macdMovement < 0) || (priceMovement < 0 && macdMovement > 0);
     }
 
