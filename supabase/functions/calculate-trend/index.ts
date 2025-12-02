@@ -38,7 +38,7 @@ function calculateEMAArray(prices: number[], period: number): number[] {
   return emaArray;
 }
 
-// Fixed: Proper Wilder’s RSI from the very first average
+// Fixed: Proper Wilder's RSI from the very first average
 function calculateRSI(prices: number[], period = 14): number {
   if (prices.length < period + 1) return 50;
 
@@ -393,9 +393,12 @@ function calculateHistoricalATRAvg(klines: any[], atrPeriod: number, atrLookback
   return historicalATRCount > 0 ? historicalATRSum / historicalATRCount : currentATR;
 }
 
-// Fixed: Proper Wilder’s ADX with correct smoothing
+// Wilder's ADX: measures trend strength (0-100)
+// <20 = weak/ranging, 20-40 = trending, >40 = strong trend
 function calculateADX(klines: any[], period = 14): number {
-  if (klines.length < period + 2) return 0;
+  // Need 2*period + 1 candles for stable ADX (period for DI smoothing + period for ADX smoothing)
+  const minRequired = 2 * period + 1;
+  if (klines.length < minRequired) return 0;
 
   const trueRanges: number[] = [];
   const plusDMs: number[] = [];
@@ -407,6 +410,12 @@ function calculateADX(klines: any[], period = 14): number {
     const prevHigh = parseFloat(klines[i - 1][2]);
     const prevLow = parseFloat(klines[i - 1][3]);
     const prevClose = parseFloat(klines[i - 1][4]);
+
+    // Skip invalid values
+    if (!Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(prevClose) ||
+        !Number.isFinite(prevHigh) || !Number.isFinite(prevLow)) {
+      continue;
+    }
 
     const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
     const upMove = high - prevHigh;
@@ -420,18 +429,23 @@ function calculateADX(klines: any[], period = 14): number {
     minusDMs.push(minusDM);
   }
 
-  if (trueRanges.length < period) return 0;
+  if (trueRanges.length < 2 * period) return 0;
 
+  // Step 1: Initial smoothed values using SUM of first 'period' values (Wilder's method)
   let smoothedTR = trueRanges.slice(0, period).reduce((a, b) => a + b, 0);
   let smoothedPlusDM = plusDMs.slice(0, period).reduce((a, b) => a + b, 0);
   let smoothedMinusDM = minusDMs.slice(0, period).reduce((a, b) => a + b, 0);
 
-  let dxValues: number[] = [];
+  // Step 2: Calculate DX values
+  const dxValues: number[] = [];
+  
+  // First DX from initial smoothed values
   let plusDI = smoothedTR > 0 ? (smoothedPlusDM / smoothedTR) * 100 : 0;
   let minusDI = smoothedTR > 0 ? (smoothedMinusDM / smoothedTR) * 100 : 0;
   let dx = plusDI + minusDI > 0 ? Math.abs(plusDI - minusDI) / (plusDI + minusDI) * 100 : 0;
   dxValues.push(dx);
 
+  // Continue with Wilder's smoothing: smoothed = prev - prev/period + current
   for (let i = period; i < trueRanges.length; i++) {
     smoothedTR = smoothedTR - smoothedTR / period + trueRanges[i];
     smoothedPlusDM = smoothedPlusDM - smoothedPlusDM / period + plusDMs[i];
@@ -445,11 +459,17 @@ function calculateADX(klines: any[], period = 14): number {
 
   if (dxValues.length < period) return 0;
 
+  // Step 3: Calculate ADX using Wilder's smoothing of DX values
+  // Initial ADX = average of first 'period' DX values
   let adx = dxValues.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  
+  // Continue Wilder's smoothing for remaining DX values
   for (let i = period; i < dxValues.length; i++) {
     adx = (adx * (period - 1) + dxValues[i]) / period;
   }
-  return Math.round(adx * 10) / 10;
+  
+  // Clamp to valid range [0, 100] and round
+  return Math.max(0, Math.min(100, Math.round(adx * 10) / 10));
 }
 
 async function fetchBinanceKlines(symbol: string, interval: string = "1h", limit: number = 100, retries: number = 2): Promise<any[]> {
@@ -748,47 +768,33 @@ serve(async (req) => {
     let weightedConsistency: number;
     if (dominantTrend === "neutral") {
       // When 4h is neutral, derive direction from lower timeframes
-      // 1) If ALL lower timeframes agree, we already use full weighting
       const lowerTimeframesAligned =
         trend1h.trend === trend30m.trend && trend30m.trend === trend15m.trend && trend1h.trend !== "neutral";
       if (lowerTimeframesAligned) {
-        // All lower timeframes aligned - weight them normally plus 4h contribution
         weightedConsistency =
-          dominantConfidence * 0.3 + // 4h contributes but with reduced weight when neutral
-          trend1h.confidence * 0.35 + // 1h: 35%
-          trend30m.confidence * 0.2 + // 30m: 20%
-          trend15m.confidence * 0.15; // 15m: 15%
+          dominantConfidence * 0.3 +
+          trend1h.confidence * 0.35 +
+          trend30m.confidence * 0.2 +
+          trend15m.confidence * 0.15;
       } else {
-        // 2) PARTIAL ALIGNMENT: use majority vote among 1h/30m/15m
         const trends = [trend1h.trend, trend30m.trend, trend15m.trend].filter((t) => t !== "neutral");
         const bullishCount = trends.filter((t) => t === "bullish").length;
         const bearishCount = trends.filter((t) => t === "bearish").length;
         const majorityTrend =
           bullishCount > bearishCount ? "bullish" : bearishCount > bullishCount ? "bearish" : "neutral";
         if (majorityTrend === "neutral") {
-          // No clear majority - fall back to 4h only
           weightedConsistency = dominantConfidence * 0.3;
         } else {
-          // Use only timeframes that match the majority direction
           const use1h = trend1h.trend === majorityTrend;
           const use30m = trend30m.trend === majorityTrend;
           const use15m = trend15m.trend === majorityTrend;
-          // Base weights (must sum to 1.0)
-          const baseWeights = {
-            tf4h: 0.25,
-            tf1h: 0.3,
-            tf30m: 0.25,
-            tf15m: 0.2,
-          };
-          // Calculate sum of included weights
+          const baseWeights = { tf4h: 0.25, tf1h: 0.3, tf30m: 0.25, tf15m: 0.2 };
           const includedWeightSum =
-            baseWeights.tf4h + // 4h always included as stabilizer
+            baseWeights.tf4h +
             (use1h ? baseWeights.tf1h : 0) +
             (use30m ? baseWeights.tf30m : 0) +
             (use15m ? baseWeights.tf15m : 0);
-          // Normalize: scale weights so they sum to 1.0
           const scaleFactor = includedWeightSum > 0 ? 1.0 / includedWeightSum : 0;
-          // Apply normalized weights
           const normalized4h = baseWeights.tf4h * scaleFactor;
           const normalized1h = use1h ? baseWeights.tf1h * scaleFactor : 0;
           const normalized30m = use30m ? baseWeights.tf30m * scaleFactor : 0;
@@ -801,37 +807,30 @@ serve(async (req) => {
         }
       }
     } else {
-      // Standard calculation when 4h has a directional trend
-      // Base weights for standard case
       const baseWeights = {
         tf4h: 0.45,
         tf1h_aligned: 0.3,
-        tf1h_neutral: 0.15, // 0.5x multiplier for neutral 1h
+        tf1h_neutral: 0.15,
         tf30m_aligned: 0.15,
-        tf30m_neutral: 0.075, // 0.5x multiplier for neutral 30m
+        tf30m_neutral: 0.075,
         tf15m_aligned: 0.1,
-        tf15m_neutral: 0.05, // 0.5x multiplier for neutral 15m
+        tf15m_neutral: 0.05,
       };
-      // Determine timeframe contributions
-      // Aligned = full weight, Neutral = 0.5x weight, Opposing = excluded
       const use1h_aligned = confirmation1h;
       const use1h_neutral = !confirmation1h && trend1h.trend === "neutral" && !opposing1h;
       const use30m_aligned = confirmation30m;
       const use30m_neutral = !confirmation30m && trend30m.trend === "neutral" && !opposing30m;
       const use15m_aligned = confirmation15m;
       const use15m_neutral = !confirmation15m && trend15m.trend === "neutral" && !opposing15m;
-      // Calculate sum of included weights
       const includedWeightSum =
-        baseWeights.tf4h + // 4h always included
+        baseWeights.tf4h +
         (use1h_aligned ? baseWeights.tf1h_aligned : 0) +
         (use1h_neutral ? baseWeights.tf1h_neutral : 0) +
         (use30m_aligned ? baseWeights.tf30m_aligned : 0) +
         (use30m_neutral ? baseWeights.tf30m_neutral : 0) +
         (use15m_aligned ? baseWeights.tf15m_aligned : 0) +
         (use15m_neutral ? baseWeights.tf15m_neutral : 0);
-      // Normalize: scale weights so they sum to 1.0
       const scaleFactor = includedWeightSum > 0 ? 1.0 / includedWeightSum : 0;
-      // Apply normalized weights
       const normalized4h = baseWeights.tf4h * scaleFactor;
       const normalized1h_aligned = use1h_aligned ? baseWeights.tf1h_aligned * scaleFactor : 0;
       const normalized1h_neutral = use1h_neutral ? baseWeights.tf1h_neutral * scaleFactor : 0;
@@ -848,26 +847,19 @@ serve(async (req) => {
         (use15m_aligned ? trend15m.confidence * normalized15m_aligned : 0) +
         (use15m_neutral ? trend15m.confidence * normalized15m_neutral : 0);
     }
-    // ============================================================
-    // ENHANCED ALIGNMENT: Allow 1h=neutral with strong 4h trend
-    // ============================================================
-    // Standard alignment: 4h directional and 1h does NOT oppose (neutral is OK)
+
     const standardAlignment = dominantTrend !== "neutral" && !opposing1h;
     console.log(
       `${symbol} ALIGNMENT: 4h=${dominantTrend} 1h=${trend1h.trend} 30m=${trend30m.trend} 15m=${trend15m.trend} | opposing: 1h=${opposing1h} 30m=${opposing30m} 15m=${opposing15m} | standardAlignment=${standardAlignment}`,
     );
-    // Enhanced alignment: Allow 1h=neutral when 4h is strong and conditions are met
+
     let neutralAllowedWithStrongHigherTimeframe = false;
     if (!standardAlignment && dominantTrend !== "neutral" && trend1h.trend === "neutral") {
-      // Check if 4h trend is strong enough (≥60% confidence)
       const strong4h = dominantConfidence >= 60;
-      // Check if 1h MACD histogram aligns with 4h direction
       const macd1h = trend1h.indicators.macdHistogram;
       const macdAligned = dominantTrend === "bullish" ? macd1h >= 0 : macd1h <= 0;
-      // Use pre-calculated ADX and relativeATR (calculated at top of function)
-      const hasActivity = adx >= 20; // Standardized ADX threshold
-      const atrNotExtremelyCompressed = relativeATR >= 0.5; // Less strict than ranging detection (0.6)
-      // Allow if all conditions are met
+      const hasActivity = adx >= 20;
+      const atrNotExtremelyCompressed = relativeATR >= 0.5;
       if (strong4h && macdAligned && (hasActivity || atrNotExtremelyCompressed)) {
         neutralAllowedWithStrongHigherTimeframe = true;
         console.log(
@@ -879,37 +871,28 @@ serve(async (req) => {
         );
       }
     }
-    // High timeframe alignment: standard OR enhanced neutral allowance
+
     const highTimeframeAligned = standardAlignment || neutralAllowedWithStrongHigherTimeframe;
-    // ============================================================
-    // DIVERGENCE CLASSIFICATION FOR OPPORTUNITY CAPTURE
-    // ============================================================
+
     let divergenceType: "aligned" | "pullback" | "early_reversal" | "ranging_conflict" = "aligned";
-    let divergenceConfidence = 100; // Base confidence, will be adjusted
+    let divergenceConfidence = 100;
     let allowDivergenceSignal = false;
     if (!highTimeframeAligned) {
-      // Case 1: PULLBACK - 4h strong, 1h temporarily opposes (trade WITH 4h direction)
       if (dominantTrend !== "neutral" && dominantConfidence >= 60 && trend1h.confidence >= 50) {
-        // Strong 4h trend, moderate 1h counter-move = pullback opportunity
         divergenceType = "pullback";
-        divergenceConfidence = Math.min(dominantConfidence * 0.75, 70); // Max 70% confidence
+        divergenceConfidence = Math.min(dominantConfidence * 0.75, 70);
         allowDivergenceSignal = true;
         console.log(
           `${dominantTrend.toUpperCase()} PULLBACK detected: 4h=${dominantConfidence}% vs 1h=${trend1h.trend}`,
         );
-      }
-      // Case 2: EARLY REVERSAL - 1h strongly reversing, 4h weak/neutral
-      else if (trend1h.confidence >= 70 && (dominantTrend === "neutral" || dominantConfidence < 60)) {
-        // Strong 1h reversal, weak 4h = early trend change (trade WITH 1h direction)
+      } else if (trend1h.confidence >= 70 && (dominantTrend === "neutral" || dominantConfidence < 60)) {
         divergenceType = "early_reversal";
-        divergenceConfidence = Math.min(trend1h.confidence * 0.7, 65); // Max 65% confidence
+        divergenceConfidence = Math.min(trend1h.confidence * 0.7, 65);
         allowDivergenceSignal = true;
         console.log(
           `EARLY REVERSAL detected: 1h=${trend1h.trend}(${trend1h.confidence}%) vs weak/neutral 4h=${dominantTrend}(${dominantConfidence}%)`,
         );
-      }
-      // Case 3: RANGING CONFLICT - Contradictory signals, skip
-      else {
+      } else {
         divergenceType = "ranging_conflict";
         divergenceConfidence = 0;
         allowDivergenceSignal = false;
@@ -918,19 +901,15 @@ serve(async (req) => {
     }
     let primaryTrend: "bullish" | "bearish" | "neutral" | "ranging" = dominantTrend;
     
-    // ADX and ATR already calculated at top of function - reuse pre-calculated values
-    // Calculate volume analysis for all timeframes
     const volume15m = calculateVolumeAnalysis(klines15m);
     const volume30m = calculateVolumeAnalysis(klines30m);
     const volume1h = calculateVolumeAnalysis(klines1h);
     
-    // Calculate Bollinger Bands for all timeframes
     const bb15m = calculateBollingerBands(prices15m, 20, 2);
     const bb30m = calculateBollingerBands(prices30m, 20, 2);
     const bb1h = calculateBollingerBands(prices1h, 20, 2);
     const bb4h = calculateBollingerBands(prices4h, 20, 2);
     
-    // Detect potential breakout conditions
     const bollingerSqueezeActive = bb1h.squeeze || bb4h.squeeze;
     const squeezeBreakoutPotential = bollingerSqueezeActive && bb1h.squeezeIntensity > 50;
     
@@ -938,10 +917,7 @@ serve(async (req) => {
       `${symbol} BOLLINGER: 1h squeeze=${bb1h.squeeze}(${bb1h.squeezeIntensity}%) 4h squeeze=${bb4h.squeeze}(${bb4h.squeezeIntensity}%) position=${bb1h.pricePosition} %B=${bb1h.percentB}`
     );
     const volume4h = calculateVolumeAnalysis(klines4h);
-    // COMBINED RANGING DETECTION:
-    // Market is ranging if BOTH conditions are true:
-    // 1. Relative ATR < 0.6 (current volatility 40% below historical average)
-    // 2. ADX < 20 (weak trend strength) - standardized threshold
+
     const atrCompressed = relativeATR < 0.6;
     const adxWeak = adx < 20;
     const isRanging = atrCompressed && adxWeak;
@@ -956,55 +932,40 @@ serve(async (req) => {
         `${symbol}: TRENDING MARKET - ATR: ${atrPercent.toFixed(2)}% (relative: ${relativeATR.toFixed(2)}x), ADX: ${adx.toFixed(1)}`,
       );
     }
-    // ============================================================
-    // PULLBACK DETECTION
-    // ============================================================
+
     let inPullback = false;
     let pullbackPercent = 0;
     if (dominantTrend === "bullish" || dominantTrend === "bearish") {
-      // Find recent swing high/low over last 24 candles (24 hours on 1h chart)
       const recentKlines = klines1h.slice(-24);
       const recentHighs = recentKlines.map((k: any) => parseFloat(k[2])).filter(Number.isFinite);
       const recentLows = recentKlines.map((k: any) => parseFloat(k[3])).filter(Number.isFinite);
       if (dominantTrend === "bullish") {
-        // For bullish trend, check if we're pulling back from recent high
         const swingHigh = recentHighs.length > 0 ? Math.max(...recentHighs) : 0;
-        const recentLows12 = recentLows.slice(-12); // Cache slice to avoid duplicate computation
-        const swingLow = recentLows12.length > 0 ? Math.min(...recentLows12) : 0; // Low from last 12 hours
+        const recentLows12 = recentLows.slice(-12);
+        const swingLow = recentLows12.length > 0 ? Math.min(...recentLows12) : 0;
         const range = swingHigh - swingLow;
         const pullback = swingHigh - currentPrice;
         pullbackPercent = range !== 0 ? (pullback / range) * 100 : 0;
-        // Ideal entry: 10-55% retracement (more natural range)
         inPullback = pullbackPercent >= 10 && pullbackPercent <= 65;
       } else if (dominantTrend === "bearish") {
-        // For bearish trend, check if we're pulling back from recent low
         const swingLow = recentLows.length > 0 ? Math.min(...recentLows) : 0;
-        const recentHighs12 = recentHighs.slice(-12); // Cache slice to avoid duplicate computation
-        const swingHigh = recentHighs12.length > 0 ? Math.max(...recentHighs12) : 0; // High from last 12 hours
+        const recentHighs12 = recentHighs.slice(-12);
+        const swingHigh = recentHighs12.length > 0 ? Math.max(...recentHighs12) : 0;
         const range = swingHigh - swingLow;
         const pullback = currentPrice - swingLow;
         pullbackPercent = range !== 0 ? (pullback / range) * 100 : 0;
-        // Ideal entry: 10-55% retracement (more natural range)
         inPullback = pullbackPercent >= 10 && pullbackPercent <= 65;
       }
     }
-    // ============================================================
-    // SIMPLIFIED MOMENTUM CONFIRMATION WITH VOLUME
-    // ============================================================
-    // Get last and previous close prices from 1h timeframe (consistent with MACD)
-    // CRITICAL: Check array bounds before accessing
+
     const lastClose = prices1h.length >= 1 ? prices1h[prices1h.length - 1] : 0;
     const prevClose = prices1h.length >= 2 ? prices1h[prices1h.length - 2] : lastClose;
 
-    // Get MACD histogram from 1h timeframe (primary momentum timeframe)
     const macdHistogram = trend1h.indicators.macdHistogram;
     
-    // Get previous MACD histogram for divergence detection using 1h data
-    // MACD requires 35 periods (26 for EMA + 9 for signal), so check >= 36 for slice(0, -1)
     const prevMacdHistogram = prices1h.length >= 36 ? 
       calculateMACD(prices1h.slice(0, -1)).histogram : macdHistogram;
 
-    // Determine effective trend for momentum direction
     let effectiveTrendForMomentum = dominantTrend;
     if (dominantTrend === "neutral") {
       const bullishVotes = [trend1h.trend, trend30m.trend, trend15m.trend].filter((t) => t === "bullish").length;
@@ -1016,29 +977,22 @@ serve(async (req) => {
       }
     }
 
-    // Volume confirmation: check if volume supports the momentum
-    // Both bullish and bearish trends need increasing volume (panic selling = high volume)
     const volumeConfirmsDirection = 
       (effectiveTrendForMomentum === "bullish" && volume1h.volumeTrend === "increasing") ||
       (effectiveTrendForMomentum === "bearish" && volume1h.volumeTrend === "increasing") ||
-      volume1h.volumeSpike; // Volume spike is always confirmatory
+      volume1h.volumeSpike;
     
-    const volumeBoost = volumeConfirmsDirection ? 1.15 : 1.0; // 15% confidence boost with volume confirmation
+    const volumeBoost = volumeConfirmsDirection ? 1.15 : 1.0;
 
-    // Check if last close aligns with trend direction
     const lastCloseAlignsWithTrend =
       (effectiveTrendForMomentum === "bullish" && lastClose > prevClose) ||
       (effectiveTrendForMomentum === "bearish" && lastClose < prevClose) ||
       effectiveTrendForMomentum === "neutral";
 
-    // Check for divergence (price vs MACD) using 1h timeframe data
     let hasDivergence = false;
     const priceMovement = lastClose - prevClose;
     const macdMovement = macdHistogram - prevMacdHistogram;
 
-    // Bearish divergence: price up but MACD down
-    // Bullish divergence: price down but MACD up
-    // Use percentage-based threshold (0.1%) instead of fixed value for price-independent detection
     const priceMovementPercent = prevClose !== 0 ? Math.abs(priceMovement / prevClose) : 0;
     const macdMovementPercent = prevMacdHistogram !== 0 ? Math.abs(macdMovement / prevMacdHistogram) : 0;
     
@@ -1046,26 +1000,15 @@ serve(async (req) => {
       hasDivergence = (priceMovement > 0 && macdMovement < 0) || (priceMovement < 0 && macdMovement > 0);
     }
 
-    // MACD histogram must be expanding AND aligned with trend direction
-    // For bullish: histogram > 0 AND expanding
-    // For bearish: histogram < 0 AND expanding (more negative)
     const macdDirectionAligned =
       (effectiveTrendForMomentum === "bullish" && macdHistogram > 0) ||
       (effectiveTrendForMomentum === "bearish" && macdHistogram < 0) ||
       effectiveTrendForMomentum === "neutral";
 
-    // Increased threshold from 0.01 to 0.05 to reduce noise sensitivity
     const macdExpanding = Math.abs(macdHistogram) > 0.05 && macdDirectionAligned;
     const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned;
 
-    // NEW SIMPLIFIED MOMENTUM GATE (volume is optional boost, not required):
-    // 1. MACD histogram expanding in correct direction
-    // 2. Last close aligns with trend direction
-    // 3. No divergence detected
-    // 4. ADX >= 20 for sufficient trend strength (calculated earlier for ranging detection)
-    // Volume confirmation is NOT required but provides 15% position size boost when present
     const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= 20;
-    // Momentum state classification
     let momentumState: "none" | "mixed" | "confirmed" = "none";
     if (momentumConfirms) {
       momentumState = "confirmed";
@@ -1075,7 +1018,6 @@ serve(async (req) => {
     console.log(
       `${symbol} MOMENTUM: lastClose=${lastClose.toFixed(2)} prevClose=${prevClose.toFixed(2)} alignsWithTrend=${lastCloseAlignsWithTrend} divergence=${hasDivergence} macd=${macdHistogram.toFixed(3)} expanding=${macdExpanding} adx=${adx.toFixed(1)} volumeConfirms=${volumeConfirmsDirection} confirms=${momentumConfirms} state=${momentumState}`,
     );
-    // Validate market structure on 1h timeframe
     const marketStructure = validateMarketStructure(klines1h, trend1h.trend);
     console.log(
       `${symbol}: 4h=${trend4h.trend} 1h=${trend1h.trend} 30m=${trend30m.trend} aligned=${highTimeframeAligned} pullback=${inPullback}(${pullbackPercent.toFixed(1)}%) momentum=${momentumConfirms} ranging=${isRanging}`,
@@ -1086,7 +1028,6 @@ serve(async (req) => {
         currentPrice,
         trend: dominantTrend,
         confidence: dominantConfidence,
-        // Higher timeframe dominance
         higherTimeframeFilter: {
           trend4h: trend4h.trend,
           trend1h: trend1h.trend,
@@ -1094,27 +1035,22 @@ serve(async (req) => {
           neutralAllowedWithStrongHigherTimeframe: neutralAllowedWithStrongHigherTimeframe,
           dominantConfidence: dominantConfidence,
           weightedConsistency: Math.round(weightedConsistency),
-          // NEW: Divergence opportunity detection
           divergenceType: divergenceType,
           divergenceConfidence: Math.round(divergenceConfidence),
           allowDivergenceSignal: allowDivergenceSignal,
-          // Guidance for signal generators - refactored for readability
           recommendedPositionSize: calculateRecommendedPositionSize(divergenceType),
           tradeDirection: calculateTradeDirection(divergenceType, dominantTrend, trend1h.trend, primaryTrend),
         },
-        // Pullback detection
         pullback: {
           inPullback,
           pullbackPercent: Math.round(pullbackPercent * 10) / 10,
           ideal: inPullback && pullbackPercent >= 10 && pullbackPercent <= 55,
         },
-        // Ranging detection
         ranging: {
           isRanging,
           atrPercent: Math.round(atrPercent * 100) / 100,
           safe: atrPercent >= 2.0 && atrPercent <= 5.0,
         },
-        // Momentum confirmation
         momentum: {
           confirms: momentumConfirms,
           state: momentumState,
@@ -1128,7 +1064,6 @@ serve(async (req) => {
           volumeConfirms: volumeConfirmsDirection,
           volumeBoost: volumeBoost,
         },
-        // Multi-timeframe details (legacy format for compatibility)
         multiTimeframe: {
           trend15m: trend15m.trend,
           trend30m: trend30m.trend,
@@ -1139,7 +1074,6 @@ serve(async (req) => {
           confidence1h: trend1h.confidence,
           confidence4h: trend4h.confidence,
         },
-        // Structured timeframes for divergence validation
         timeframes: {
           "15m": trend15m,
           "30m": trend30m,
@@ -1159,31 +1093,25 @@ serve(async (req) => {
           atrCompressed,
           adxWeak,
         },
-        // Volume analysis across timeframes
         volume: {
           "15m": volume15m,
           "30m": volume30m,
           "1h": volume1h,
           "4h": volume4h,
         },
-        // Bollinger Bands analysis across timeframes
         bollingerBands: {
           "15m": bb15m,
           "30m": bb30m,
           "1h": bb1h,
           "4h": bb4h,
-          // Aggregated squeeze analysis
           squeezeActive: bollingerSqueezeActive,
           breakoutPotential: squeezeBreakoutPotential,
-          // Primary timeframe (1h) details for quick access
           squeeze: bb1h.squeeze,
           squeezeIntensity: bb1h.squeezeIntensity,
           pricePosition: bb1h.pricePosition,
           percentB: bb1h.percentB,
           bandwidth: bb1h.bandwidth,
         },
-        // Stochastic RSI analysis across timeframes - earlier overbought/oversold detection
-        // Pre-calculate counts once to avoid redundant array operations
         stochasticRsi: (() => {
           const allStochRsi = [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h];
           const overboughtCount = allStochRsi.filter(s => s.signal === "overbought").length;
@@ -1191,7 +1119,6 @@ serve(async (req) => {
           const bullishCrossCount = allStochRsi.filter(s => s.signal === "bullish_cross").length;
           const bearishCrossCount = allStochRsi.filter(s => s.signal === "bearish_cross").length;
           
-          // Calculate recommendation using pre-computed counts
           let recommendation = "neutral";
           if (overboughtCount >= 3) recommendation = "strong_sell_warning";
           else if (oversoldCount >= 3) recommendation = "strong_buy_opportunity";
@@ -1215,6 +1142,12 @@ serve(async (req) => {
             recommendation,
           };
         })(),
+        aggregated: {
+          overboughtCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "overbought").length,
+          oversoldCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "oversold").length,
+          bullishCrossCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "bullish_cross").length,
+          bearishCrossCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "bearish_cross").length,
+        },
         indicators: trend1h.indicators,
         trendConsistency: Math.round(weightedConsistency),
       }),
