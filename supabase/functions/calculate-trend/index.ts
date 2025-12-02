@@ -436,6 +436,24 @@ serve(async (req) => {
     const dominantTrend = trend4h.trend;
     const dominantConfidence = trend4h.confidence;
 
+    // Pre-calculate ADX and ATR once to avoid duplicate calculations
+    const adx = calculateADX(klines1h, 14);
+    const atrPeriod = 14;
+    const atrLookback = 30;
+    const atrKlines = klines1h.slice(-atrPeriod - 1);
+    let atrSum = 0;
+    for (let i = 1; i < atrKlines.length; i++) {
+      const high = parseFloat(atrKlines[i][2]);
+      const low = parseFloat(atrKlines[i][3]);
+      const prevClose = parseFloat(atrKlines[i - 1][4]);
+      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+      atrSum += tr;
+    }
+    const currentATR = atrKlines.length > 1 ? atrSum / (atrKlines.length - 1) : 0;
+    const atrPercent = currentPrice !== 0 ? (currentATR / currentPrice) * 100 : 0;
+    const historicalATRAvg = calculateHistoricalATRAvg(klines1h, atrPeriod, atrLookback, currentATR);
+    const relativeATR = historicalATRAvg !== 0 ? currentATR / historicalATRAvg : 0;
+
     const isOpposing = (tfTrend: string, dominantTrend: string) => {
       if (dominantTrend === "neutral") return false;
       if (tfTrend === "neutral") return false;
@@ -570,30 +588,14 @@ serve(async (req) => {
       // Check if 1h MACD histogram aligns with 4h direction
       const macd1h = trend1h.indicators.macdHistogram;
       const macdAligned = dominantTrend === "bullish" ? macd1h >= 0 : macd1h <= 0;
-      // Check if 1h has sufficient activity (not dead/ranging)
-      const adx1h = calculateADX(klines1h, 14);
-      const hasActivity = adx1h >= 20; // Standardized ADX threshold
-      // Check relative ATR on 1h (not extremely compressed)
-      const atr1hPeriod = 14;
-      const atr1hLookback = 30;
-      const atr1hKlines = klines1h.slice(-atr1hPeriod - 1);
-      let atr1hSum = 0;
-      for (let i = 1; i < atr1hKlines.length; i++) {
-        const high = parseFloat(atr1hKlines[i][2]);
-        const low = parseFloat(atr1hKlines[i][3]);
-        const prevClose = parseFloat(atr1hKlines[i - 1][4]);
-        const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-        atr1hSum += tr;
-      }
-      const currentATR1h = atr1hKlines.length > 1 ? atr1hSum / (atr1hKlines.length - 1) : 0;
-      const historical1hATRAvg = calculateHistoricalATRAvg(klines1h, atr1hPeriod, atr1hLookback, currentATR1h);
-      const relative1hATR = historical1hATRAvg !== 0 ? currentATR1h / historical1hATRAvg : 0;
-      const atrNotExtremelyCompressed = relative1hATR >= 0.5; // Less strict than ranging detection (0.6)
+      // Use pre-calculated ADX and relativeATR (calculated at top of function)
+      const hasActivity = adx >= 20; // Standardized ADX threshold
+      const atrNotExtremelyCompressed = relativeATR >= 0.5; // Less strict than ranging detection (0.6)
       // Allow if all conditions are met
       if (strong4h && macdAligned && (hasActivity || atrNotExtremelyCompressed)) {
         neutralAllowedWithStrongHigherTimeframe = true;
         console.log(
-          `${symbol}: 1h=neutral ALLOWED with strong 4h=${dominantTrend}(${dominantConfidence}%) - MACD=${macd1h.toFixed(3)} ADX=${adx1h.toFixed(1)} relATR=${relative1hATR.toFixed(2)}`,
+          `${symbol}: 1h=neutral ALLOWED with strong 4h=${dominantTrend}(${dominantConfidence}%) - MACD=${macd1h.toFixed(3)} ADX=${adx.toFixed(1)} relATR=${relativeATR.toFixed(2)}`,
         );
       } else {
         console.log(
@@ -639,28 +641,8 @@ serve(async (req) => {
       }
     }
     let primaryTrend: "bullish" | "bearish" | "neutral" | "ranging" = dominantTrend;
-    // ============================================================
-    // ADAPTIVE RANGING MARKET DETECTION (Relative ATR + ADX)
-    // ============================================================
-    const atrPeriod = 14;
-    const atrLookback = 30; // For historical ATR average
-    // Calculate current ATR
-    const atrKlines = klines1h.slice(-atrPeriod - 1);
-    let atrSum = 0;
-    for (let i = 1; i < atrKlines.length; i++) {
-      const high = parseFloat(atrKlines[i][2]);
-      const low = parseFloat(atrKlines[i][3]);
-      const prevClose = parseFloat(atrKlines[i - 1][4]);
-      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-      atrSum += tr;
-    }
-    const currentATR = atrKlines.length > 1 ? atrSum / (atrKlines.length - 1) : 0;
-    const atrPercent = currentPrice !== 0 ? (currentATR / currentPrice) * 100 : 0;
-    const historicalATRAvg = calculateHistoricalATRAvg(klines1h, atrPeriod, atrLookback, currentATR);
-    const relativeATR = historicalATRAvg !== 0 ? currentATR / historicalATRAvg : 0;
-    // Calculate ADX for trend strength
-    const adx = calculateADX(klines1h, 14);
-
+    
+    // ADX and ATR already calculated at top of function - reuse pre-calculated values
     // Calculate volume analysis for all timeframes
     const volume15m = calculateVolumeAnalysis(klines15m);
     const volume30m = calculateVolumeAnalysis(klines30m);
@@ -726,7 +708,8 @@ serve(async (req) => {
     const macdHistogram = trend1h.indicators.macdHistogram;
     
     // Get previous MACD histogram for divergence detection using 1h data
-    const prevMacdHistogram = prices1h.length >= 27 ? 
+    // MACD requires 35 periods (26 for EMA + 9 for signal), so check >= 36 for slice(0, -1)
+    const prevMacdHistogram = prices1h.length >= 36 ? 
       calculateMACD(prices1h.slice(0, -1)).histogram : macdHistogram;
 
     // Determine effective trend for momentum direction
