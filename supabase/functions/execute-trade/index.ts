@@ -394,6 +394,86 @@ serve(async (req) => {
 
       // Store OBV boost for later use in position sizing
       (signal as any).obvBoostMultiplier = obvBoostMultiplier;
+
+      // ============================================================
+      // VWAP (Volume Weighted Average Price) - Entry Point Optimization
+      // ============================================================
+      const highs = klines.map((k: any[]) => parseFloat(k[2])); // High at index 2
+      const lows = klines.map((k: any[]) => parseFloat(k[3])); // Low at index 3
+      
+      // Calculate VWAP: Sum(Typical Price * Volume) / Sum(Volume)
+      let cumulativeTPV = 0; // Cumulative Typical Price * Volume
+      let cumulativeVolume = 0;
+      const vwapValues: number[] = [];
+      
+      for (let i = 0; i < closes.length; i++) {
+        const typicalPrice = (highs[i] + lows[i] + closes[i]) / 3;
+        cumulativeTPV += typicalPrice * volumes[i];
+        cumulativeVolume += volumes[i];
+        vwapValues.push(cumulativeTPV / cumulativeVolume);
+      }
+      
+      const currentVWAP = vwapValues[vwapValues.length - 1];
+      const vwapDeviation = ((currentPrice - currentVWAP) / currentVWAP) * 100;
+      
+      // Calculate VWAP bands (standard deviation from VWAP)
+      const vwapDiffs = closes.map((c: number, i: number) => Math.pow(c - vwapValues[i], 2));
+      const vwapStdDev = Math.sqrt(vwapDiffs.reduce((a: number, b: number) => a + b, 0) / vwapDiffs.length);
+      const vwapUpperBand = currentVWAP + (vwapStdDev * 2);
+      const vwapLowerBand = currentVWAP - (vwapStdDev * 2);
+      
+      console.log(`📈 VWAP Analysis: VWAP=$${currentVWAP.toFixed(2)}, Current=$${currentPrice.toFixed(2)}, Deviation=${vwapDeviation.toFixed(2)}%`);
+      console.log(`📈 VWAP Bands: Lower=$${vwapLowerBand.toFixed(2)}, Upper=$${vwapUpperBand.toFixed(2)}`);
+      
+      // VWAP position analysis for entry optimization
+      let vwapBoostMultiplier = 1.0;
+      const vwapSignalSide = signal.signal_type === 'long' ? 'BUY' : 'SELL';
+      
+      if (vwapSignalSide === 'BUY') {
+        if (currentPrice < currentVWAP) {
+          // Buying below VWAP = good entry (institutional buyers accumulate below VWAP)
+          const discountPercent = Math.abs(vwapDeviation);
+          if (discountPercent > 1) {
+            vwapBoostMultiplier = 1.2; // 20% boost for significant discount
+            console.log(`✅ VWAP confirms LONG: Price ${discountPercent.toFixed(2)}% below VWAP - excellent entry`);
+          } else {
+            vwapBoostMultiplier = 1.1; // 10% boost for minor discount
+            console.log(`✅ VWAP supports LONG: Price slightly below VWAP - good entry`);
+          }
+        } else if (currentPrice > vwapUpperBand) {
+          // Buying above upper VWAP band = overextended
+          vwapBoostMultiplier = 0.8; // 20% reduction
+          console.warn(`⚠️ VWAP Warning: Price above upper VWAP band - overextended entry`);
+        } else if (vwapDeviation > 0.5) {
+          // Buying above VWAP but within bands
+          vwapBoostMultiplier = 0.9; // 10% reduction
+          console.log(`📊 VWAP neutral: Price ${vwapDeviation.toFixed(2)}% above VWAP`);
+        }
+      } else if (vwapSignalSide === 'SELL') {
+        if (currentPrice > currentVWAP) {
+          // Selling above VWAP = good entry (institutional sellers distribute above VWAP)
+          const premiumPercent = vwapDeviation;
+          if (premiumPercent > 1) {
+            vwapBoostMultiplier = 1.2; // 20% boost for significant premium
+            console.log(`✅ VWAP confirms SHORT: Price ${premiumPercent.toFixed(2)}% above VWAP - excellent entry`);
+          } else {
+            vwapBoostMultiplier = 1.1; // 10% boost for minor premium
+            console.log(`✅ VWAP supports SHORT: Price slightly above VWAP - good entry`);
+          }
+        } else if (currentPrice < vwapLowerBand) {
+          // Selling below lower VWAP band = oversold
+          vwapBoostMultiplier = 0.8; // 20% reduction
+          console.warn(`⚠️ VWAP Warning: Price below lower VWAP band - oversold entry`);
+        } else if (vwapDeviation < -0.5) {
+          // Selling below VWAP but within bands
+          vwapBoostMultiplier = 0.9; // 10% reduction
+          console.log(`📊 VWAP neutral: Price ${Math.abs(vwapDeviation).toFixed(2)}% below VWAP`);
+        }
+      }
+      
+      // Store VWAP boost for position sizing
+      (signal as any).vwapBoostMultiplier = vwapBoostMultiplier;
+      console.log(`📈 Final VWAP Boost Multiplier: ${vwapBoostMultiplier.toFixed(2)}x`);
     }
 
     // ============================================================
@@ -483,6 +563,13 @@ serve(async (req) => {
     if (bbBoostMultiplier !== 1.0) {
       quantity *= bbBoostMultiplier;
       console.log(`Bollinger Bands adjustment applied: ${bbBoostMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
+    }
+
+    // Apply VWAP boost multiplier if available
+    const vwapBoostMultiplier = (signal as any).vwapBoostMultiplier || 1.0;
+    if (vwapBoostMultiplier !== 1.0) {
+      quantity *= vwapBoostMultiplier;
+      console.log(`VWAP adjustment applied: ${vwapBoostMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
     // Apply confidence-based position size scaling
