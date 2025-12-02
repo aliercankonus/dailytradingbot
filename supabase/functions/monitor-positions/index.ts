@@ -65,7 +65,8 @@ serve(async (req) => {
     console.log(`Loaded trailing stop settings for ${userSettingsMap.size} users`);
   // Fetch current prices and ATR for all symbols
   const symbols = [...new Set(positions.map((p) => p.symbol))];
-  // Fetch prices and calculate ATR for trailing stop loss using 1-HOUR klines (consistent with calculate-trend)
+  
+  // Enhanced data fetching: prices, ATR, historical ATR (for volatility spike), and volume
   const symbolDataPromises = symbols.map(async (symbol) => {
     try {
       // Get current price
@@ -74,46 +75,141 @@ serve(async (req) => {
       const priceData = await priceResponse.json();
       if (!priceData.price) throw new Error(`No price data for ${symbol}`);
       const price = parseFloat(priceData.price);
-      // Get last 30 1-HOUR klines to calculate ATR (consistent with calculate-trend)
+
+      // Get last 50 1-HOUR klines for ATR and volatility analysis
       const klinesResponse = await fetch(
-        `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=30`,
+        `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=50`,
       );
       if (!klinesResponse.ok) throw new Error(`Klines fetch failed for ${symbol}: ${klinesResponse.status}`);
       const klines = await klinesResponse.json();
-      if (!Array.isArray(klines) || klines.length < 16) // Need 16 for ATR calculation (14 + 1 for prevClose + safety)
+      if (!Array.isArray(klines) || klines.length < 16)
         throw new Error(`Invalid or insufficient klines data for ${symbol}`);
-      // Calculate ATR (Average True Range) using 1-hour data
+
+      // Calculate current ATR (last 14 candles)
       const atrPeriod = 14;
-      let atrSum = 0;
-      const startIdx = Math.max(1, klines.length - atrPeriod); // Ensure we never access index -1
+      let currentAtrSum = 0;
+      const startIdx = klines.length - atrPeriod;
       for (let i = startIdx; i < klines.length; i++) {
         const high = parseFloat(klines[i][2]);
         const low = parseFloat(klines[i][3]);
         const prevClose = parseFloat(klines[i - 1][4]);
         const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-        atrSum += tr;
+        currentAtrSum += tr;
       }
-      const actualPeriods = klines.length - startIdx;
-      const atr = actualPeriods > 0 ? atrSum / actualPeriods : 0;
-      const atrPercent = (atr / price) * 100;
-      return { symbol, price, atr, atrPercent };
+      const currentAtr = currentAtrSum / atrPeriod;
+      const atrPercent = (currentAtr / price) * 100;
+
+      // Calculate historical average ATR (for volatility spike detection)
+      // Use ATR from 20-34 candles ago as baseline
+      let historicalAtrSum = 0;
+      const histStartIdx = Math.max(1, klines.length - 34);
+      const histEndIdx = klines.length - 20;
+      let histCount = 0;
+      for (let i = histStartIdx; i < histEndIdx && i < klines.length - 1; i++) {
+        const high = parseFloat(klines[i][2]);
+        const low = parseFloat(klines[i][3]);
+        const prevClose = parseFloat(klines[i - 1][4]);
+        const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+        historicalAtrSum += tr;
+        histCount++;
+      }
+      const historicalAtr = histCount > 0 ? historicalAtrSum / histCount : currentAtr;
+      const atrRatio = currentAtr / historicalAtr; // >1.5 = volatility spike
+
+      // Get 24h price change for flash crash detection
+      const ticker24hResponse = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
+      let priceChange24h = 0;
+      let volume24h = 0;
+      let avgVolume = 0;
+      if (ticker24hResponse.ok) {
+        const ticker24h = await ticker24hResponse.json();
+        priceChange24h = parseFloat(ticker24h.priceChangePercent || "0");
+        volume24h = parseFloat(ticker24h.volume || "0");
+        avgVolume = parseFloat(ticker24h.quoteVolume || "0") / 24; // Rough hourly average
+      }
+
+      // Calculate recent price movement (last 2 candles) for flash crash
+      const lastCandle = klines[klines.length - 1];
+      const prevCandle = klines[klines.length - 2];
+      const lastClose = parseFloat(lastCandle[4]);
+      const prevClose = parseFloat(prevCandle[4]);
+      const recentPriceChange = ((lastClose - prevClose) / prevClose) * 100;
+
+      // Volume analysis (current vs average)
+      const currentVolume = parseFloat(lastCandle[5]);
+      const avgCandleVolume = klines.slice(-20).reduce((sum, k) => sum + parseFloat(k[5]), 0) / 20;
+      const volumeRatio = currentVolume / avgCandleVolume; // >3 = volume spike
+
+      // MACD calculation for divergence detection
+      const closes = klines.map((k: any) => parseFloat(k[4]));
+      const ema12 = calculateEMA(closes, 12);
+      const ema26 = calculateEMA(closes, 26);
+      const macdLine = ema12 - ema26;
+      
+      // Calculate MACD from 3 candles ago for divergence check
+      const closes3Ago = closes.slice(0, -2);
+      const ema12_3ago = calculateEMA(closes3Ago, 12);
+      const ema26_3ago = calculateEMA(closes3Ago, 26);
+      const macdLine3Ago = ema12_3ago - ema26_3ago;
+      
+      const macdTrending = macdLine > macdLine3Ago ? "up" : "down";
+      const priceTrending = lastClose > parseFloat(klines[klines.length - 4][4]) ? "up" : "down";
+      const hasDivergence = macdTrending !== priceTrending;
+
+      return { 
+        symbol, 
+        price, 
+        atr: currentAtr, 
+        atrPercent,
+        atrRatio, // For volatility spike
+        recentPriceChange, // For flash crash
+        priceChange24h,
+        volumeRatio, // For volume spike
+        hasDivergence, // For momentum divergence
+        macdTrending,
+        priceTrending,
+      };
     } catch (error) {
       console.error(`Error fetching data for ${symbol}:`, error);
-      return { symbol, price: null, atr: null, atrPercent: null };
+      return { symbol, price: null, atr: null, atrPercent: null, atrRatio: 1, recentPriceChange: 0, volumeRatio: 1, hasDivergence: false };
     }
   });
+
+  // Helper function for EMA calculation
+  function calculateEMA(prices: number[], period: number): number {
+    if (prices.length < period) return prices[prices.length - 1] || 0;
+    const multiplier = 2 / (period + 1);
+    let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < prices.length; i++) {
+      ema = (prices[i] - ema) * multiplier + ema;
+    }
+    return ema;
+  }
+
     const symbolData = await Promise.all(symbolDataPromises);
     const priceMap = new Map(symbolData.filter((d) => d.price !== null).map((d) => [d.symbol, d.price]));
     const atrMap = new Map(
-      symbolData.filter((d) => d.atr !== null).map((d) => [d.symbol, { atr: d.atr, atrPercent: d.atrPercent }]),
+      symbolData.filter((d) => d.atr !== null).map((d) => [d.symbol, { 
+        atr: d.atr, 
+        atrPercent: d.atrPercent,
+        atrRatio: d.atrRatio,
+        recentPriceChange: d.recentPriceChange,
+        volumeRatio: d.volumeRatio,
+        hasDivergence: d.hasDivergence,
+        macdTrending: d.macdTrending,
+        priceTrending: d.priceTrending,
+      }]),
     );
     const updates = [];
     const closedPositions = [];
     const trailingStopUpdates = [];
-    const breakEvenUpdates = []; // Track break-even stop movements
+    const breakEvenUpdates = [];
     const trendExits = [];
-    const partialTpTaken = []; // Track partial take profits
-    // Fetch trend data for all symbols in PARALLEL to check for trend reversals
+    const partialTpTaken = [];
+    const emergencyExits = []; // NEW: Track emergency exits
+    const volatilityAlerts = []; // NEW: Track volatility alerts
+    
+    // Fetch trend data for all symbols in PARALLEL
     const trendDataMap = new Map();
     const trendPromises = symbols.map(async (symbol) => {
       try {
@@ -142,6 +238,109 @@ serve(async (req) => {
 
       // Get current trend for this position's symbol
       const trendData = trendDataMap.get(position.symbol);
+
+      // ============================================================
+      // 🚨 EMERGENCY PROTECTION SYSTEMS
+      // ============================================================
+
+      // 1️⃣ FLASH CRASH PROTECTION - Immediate exit on sudden 5%+ adverse move
+      const FLASH_CRASH_THRESHOLD = 5.0; // 5% sudden move
+      const recentPriceChange = atrData?.recentPriceChange || 0;
+      
+      let isFlashCrash = false;
+      if (position.side === "BUY" && recentPriceChange <= -FLASH_CRASH_THRESHOLD) {
+        isFlashCrash = true;
+        console.log(`🚨 FLASH CRASH DETECTED for LONG ${position.symbol}: ${recentPriceChange.toFixed(2)}% drop in last hour!`);
+      } else if (position.side === "SELL" && recentPriceChange >= FLASH_CRASH_THRESHOLD) {
+        isFlashCrash = true;
+        console.log(`🚨 FLASH CRASH DETECTED for SHORT ${position.symbol}: ${recentPriceChange.toFixed(2)}% surge in last hour!`);
+      }
+
+      // 2️⃣ VOLATILITY SPIKE DETECTION - ATR 2x normal = high risk
+      const VOLATILITY_SPIKE_THRESHOLD = 2.0; // ATR 2x higher than normal
+      const atrRatio = atrData?.atrRatio || 1.0;
+      const isVolatilitySpike = atrRatio >= VOLATILITY_SPIKE_THRESHOLD;
+      
+      if (isVolatilitySpike) {
+        console.log(`⚡ VOLATILITY SPIKE for ${position.symbol}: ATR ${atrRatio.toFixed(2)}x normal - high risk environment!`);
+        volatilityAlerts.push({
+          symbol: position.symbol,
+          atrRatio,
+          message: `ATR ${atrRatio.toFixed(2)}x above normal`,
+        });
+      }
+
+      // 3️⃣ MOMENTUM DIVERGENCE EXIT - Price up but MACD down (or vice versa)
+      const hasDivergence = atrData?.hasDivergence || false;
+      const macdTrending = atrData?.macdTrending || "neutral";
+      const priceTrending = atrData?.priceTrending || "neutral";
+      
+      let divergenceExit = false;
+      // For LONG: Exit if price going up but MACD going down (bearish divergence)
+      if (position.side === "BUY" && hasDivergence && priceTrending === "up" && macdTrending === "down") {
+        divergenceExit = true;
+        console.log(`📉 BEARISH DIVERGENCE for LONG ${position.symbol}: Price up but MACD down - momentum weakening!`);
+      }
+      // For SHORT: Exit if price going down but MACD going up (bullish divergence)
+      else if (position.side === "SELL" && hasDivergence && priceTrending === "down" && macdTrending === "up") {
+        divergenceExit = true;
+        console.log(`📈 BULLISH DIVERGENCE for SHORT ${position.symbol}: Price down but MACD up - momentum weakening!`);
+      }
+
+      // 4️⃣ VOLUME SPIKE ALERT - Unusual volume may signal reversal
+      const VOLUME_SPIKE_THRESHOLD = 3.0; // 3x average volume
+      const volumeRatio = atrData?.volumeRatio || 1.0;
+      const isVolumeSpike = volumeRatio >= VOLUME_SPIKE_THRESHOLD;
+      
+      if (isVolumeSpike) {
+        console.log(`📊 VOLUME SPIKE for ${position.symbol}: ${volumeRatio.toFixed(1)}x average volume - potential reversal signal!`);
+        volatilityAlerts.push({
+          symbol: position.symbol,
+          volumeRatio,
+          message: `Volume ${volumeRatio.toFixed(1)}x above average`,
+        });
+      }
+
+      // ============================================================
+      // EMERGENCY EXIT DECISION
+      // ============================================================
+      let emergencyClose = false;
+      let emergencyReason = "";
+      
+      // Flash crash = immediate exit (highest priority)
+      if (isFlashCrash) {
+        emergencyClose = true;
+        emergencyReason = "flash_crash";
+      }
+      // Volatility spike + divergence = exit (compound risk)
+      else if (isVolatilitySpike && divergenceExit) {
+        emergencyClose = true;
+        emergencyReason = "volatility_divergence";
+      }
+      // Strong divergence with volume spike = exit
+      else if (divergenceExit && isVolumeSpike) {
+        emergencyClose = true;
+        emergencyReason = "divergence_volume_spike";
+      }
+      // Extreme volatility (3x) alone = exit
+      else if (atrRatio >= 3.0) {
+        emergencyClose = true;
+        emergencyReason = "extreme_volatility";
+      }
+
+      if (emergencyClose) {
+        emergencyExits.push({
+          symbol: position.symbol,
+          side: position.side,
+          reason: emergencyReason,
+          details: {
+            recentPriceChange: recentPriceChange.toFixed(2) + "%",
+            atrRatio: atrRatio.toFixed(2) + "x",
+            volumeRatio: volumeRatio.toFixed(1) + "x",
+            hasDivergence,
+          }
+        });
+      }
       const pnl =
         position.side === "BUY"
           ? (currentPrice - position.entry_price) * position.quantity
@@ -335,7 +534,22 @@ serve(async (req) => {
       let shouldClose = false;
       let closeReason = "";
 
-      if (trendData) {
+      // 🚨 EMERGENCY EXITS HAVE HIGHEST PRIORITY
+      if (emergencyClose) {
+        shouldClose = true;
+        closeReason = emergencyReason;
+        console.log(`🚨 EMERGENCY EXIT: ${position.symbol} ${position.side} - Reason: ${emergencyReason}`);
+        trendExits.push({
+          symbol: position.symbol,
+          side: position.side,
+          reason: `EMERGENCY: ${emergencyReason}`,
+          trend: "emergency",
+          confidence: 100,
+          pnlPercent,
+        });
+      }
+
+      if (!shouldClose && trendData) {
         const currentTrend = trendData.trend; // 'bullish', 'bearish', or 'ranging'
         const trendConfidence = trendData.confidence || 0;
         const trend1h = trendData.higherTimeframeFilter?.trend1h || 'neutral';
@@ -709,7 +923,9 @@ serve(async (req) => {
       breakEvenUpdates,
       trendExits,
       partialTpTaken,
-      message: `Updated ${updates.length} positions, ${trailingStopUpdates.length} trailing stops adjusted, ${breakEvenUpdates.length} break-even stops, ${partialTpTaken.length} partial TPs taken, closed ${closedPositions.length} positions (${trendExits.length} trend exits)`,
+      emergencyExits,
+      volatilityAlerts,
+      message: `Updated ${updates.length} positions, ${trailingStopUpdates.length} trailing stops, ${breakEvenUpdates.length} break-even stops, ${partialTpTaken.length} partial TPs, closed ${closedPositions.length} positions (${trendExits.length} trend exits, ${emergencyExits.length} emergency exits), ${volatilityAlerts.length} volatility alerts`,
     };
     const message = JSON.stringify(responseData);
     for (const client of clients) {
