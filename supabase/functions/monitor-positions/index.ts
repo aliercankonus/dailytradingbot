@@ -184,19 +184,30 @@ serve(async (req) => {
         }
         // Update stop loss in database if trailing was activated
         if (trailingActivated) {
-          const { error: posUpdateError } = await supabase
+          // Use optimistic locking - only update if position is still active
+          const { data: updatedPos, error: posUpdateError } = await supabase
             .from("positions")
             .update({ stop_loss: newStopLoss })
-            .eq("id", position.id);
-          if (posUpdateError) throw posUpdateError;
-          trailingStopUpdates.push({
-            symbol: position.symbol,
-            side: position.side,
-            oldStopLoss: position.stop_loss,
-            newStopLoss,
-            currentPrice,
-            pnlPercent,
-          });
+            .eq("id", position.id)
+            .eq("status", "active") // RACE CONDITION FIX: Only update if still active
+            .select()
+            .maybeSingle();
+          
+          if (posUpdateError) {
+            console.error(`Error updating trailing stop for ${position.id}:`, posUpdateError);
+            continue;
+          }
+          
+          // Only log/track if we actually updated the position
+          if (updatedPos) {
+            trailingStopUpdates.push({
+              symbol: position.symbol,
+              side: position.side,
+              oldStopLoss: position.stop_loss,
+              newStopLoss,
+              currentPrice,
+              pnlPercent,
+            });
           // Send notification about trailing stop activation
           try {
             // Get user's notification preferences
@@ -206,15 +217,6 @@ serve(async (req) => {
               .eq("user_id", position.user_id)
               .single();
             if (riskParamsError) throw riskParamsError;
-            // Create notification record in database
-            //await supabase
-            //.from('notifications')
-            //.insert({
-            // user_id: position.user_id,
-            // trade_id: position.trade_id,
-            // type: 'trailing_stop_activated',
-            // message: `Trailing stop activated for ${position.symbol} ${position.side}. Stop loss moved from $${position.stop_loss.toFixed(2)} to $${newStopLoss.toFixed(2)} (P&L: +${pnlPercent.toFixed(2)}%)`,
-            // });
             // Send email/SMS notification if enabled
             if (riskParams?.email_notifications_enabled) {
               const { error: notifyError } = await supabase.functions.invoke("send-notification", {
@@ -238,6 +240,7 @@ serve(async (req) => {
             console.error("Error sending trailing stop notification:", notifError);
             // Don't fail the monitoring if notification fails
           }
+          } // Close if (updatedPos)
         }
       }
       // TREND-AWARE EXIT CHECK - Close position if trend has flipped against us
@@ -351,8 +354,9 @@ serve(async (req) => {
         }
       }
       if (shouldClose) {
-        // Close the position
-        const { error: closePosError } = await supabase
+        // Close the position with optimistic locking to prevent race conditions
+        // Only update if status is still 'active' - prevents double-closing
+        const { data: updatedPosition, error: closePosError } = await supabase
           .from("positions")
           .update({
             status: "closed",
@@ -363,19 +367,34 @@ serve(async (req) => {
             closed_at: new Date().toISOString(),
             close_reason: closeReason,
           })
-          .eq("id", position.id);
-        if (closePosError) throw closePosError;
-        closedPositions.push({
-          symbol: position.symbol,
-          side: position.side,
-          reason: closeReason,
-          exitPrice: currentPrice,
-          pnl,
-          pnlPercent,
-        });
-        console.log(
-          `Closed position ${position.id} - ${position.symbol} ${position.side} - ${closeReason} at ${currentPrice}`,
-        );
+          .eq("id", position.id)
+          .eq("status", "active") // RACE CONDITION FIX: Only close if still active
+          .select()
+          .maybeSingle();
+
+        if (closePosError) {
+          console.error(`Error closing position ${position.id}:`, closePosError);
+          continue; // Skip to next position instead of throwing
+        }
+
+        // Only count as closed if we actually updated a row (wasn't already closed by another process)
+        if (updatedPosition) {
+          closedPositions.push({
+            symbol: position.symbol,
+            side: position.side,
+            reason: closeReason,
+            exitPrice: currentPrice,
+            pnl,
+            pnlPercent,
+          });
+          console.log(
+            `Closed position ${position.id} - ${position.symbol} ${position.side} - ${closeReason} at ${currentPrice}`,
+          );
+        } else {
+          console.log(
+            `Position ${position.id} was already closed by another process - skipping`,
+          );
+        }
       }
       // Note: No database updates for active positions - UI uses live WebSocket prices
       updates.push({
