@@ -6,6 +6,16 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+interface UserProcessResult {
+  userId: string;
+  success: boolean;
+  signals?: number;
+  executed?: number;
+  rejected?: number;
+  message?: string;
+  error?: string;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -14,9 +24,8 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
     
-    if (!supabaseUrl || !supabaseServiceKey || !supabaseAnonKey) {
+    if (!supabaseUrl || !supabaseServiceKey) {
       throw new Error("Missing required environment variables");
     }
     
@@ -49,75 +58,87 @@ serve(async (req) => {
 
     console.log(`Processing ${activeUsers.length} users with trading enabled`);
 
-    const results = [];
+    // Process users in parallel with concurrency limit to avoid overwhelming the system
+    const BATCH_SIZE = 3; // Process 3 users at a time
+    const results: UserProcessResult[] = [];
 
-    // Process each user by calling strategy-analyzer
-    for (const userParams of activeUsers) {
-      try {
-        console.log(`Processing user: ${userParams.user_id}`);
-        
-        // Get a session token for this user to call strategy-analyzer
-        // Since we're using service role, we need to create a mock auth header
-        // Strategy-analyzer requires auth, so we'll use service role with user context
-        
-        const { data: analyzerResult, error: analyzerError } = await supabase.functions.invoke("strategy-analyzer", {
-          headers: {
-            // Use service role to bypass auth, strategy-analyzer will use user_id from the request
-            Authorization: `Bearer ${supabaseServiceKey}`,
-          },
-          body: {
-            user_id: userParams.user_id,
-          },
-        });
+    for (let i = 0; i < activeUsers.length; i += BATCH_SIZE) {
+      const batch = activeUsers.slice(i, i + BATCH_SIZE);
+      
+      const batchResults = await Promise.all(
+        batch.map(async (userParams): Promise<UserProcessResult> => {
+          try {
+            console.log(`Processing user: ${userParams.user_id}`);
+            
+            // Call strategy-analyzer with service role + user_id in body
+            const { data: analyzerResult, error: analyzerError } = await supabase.functions.invoke("strategy-analyzer", {
+              headers: {
+                Authorization: `Bearer ${supabaseServiceKey}`,
+              },
+              body: {
+                user_id: userParams.user_id,
+              },
+            });
 
-        if (analyzerError) {
-          console.error(`Strategy analyzer error for user ${userParams.user_id}:`, analyzerError);
-          results.push({
-            userId: userParams.user_id,
-            success: false,
-            signals: 0,
-            executed: 0,
-            error: analyzerError.message || "Strategy analyzer failed",
-          });
-          continue;
-        }
+            if (analyzerError) {
+              const errorMessage = typeof analyzerError === 'object' && analyzerError !== null
+                ? (analyzerError as any).message || JSON.stringify(analyzerError)
+                : String(analyzerError);
+              console.error(`Strategy analyzer error for user ${userParams.user_id}:`, errorMessage);
+              return {
+                userId: userParams.user_id,
+                success: false,
+                signals: 0,
+                executed: 0,
+                error: errorMessage,
+              };
+            }
 
-        const signalsGenerated = analyzerResult?.totalSignalsGenerated || 0;
-        const signalsExecuted = analyzerResult?.executedSignals || 0;
-        const rejected = analyzerResult?.rejectedByMultiTimeframeAnalysis || 0;
+            const signalsGenerated = analyzerResult?.totalSignalsGenerated || 0;
+            const signalsExecuted = analyzerResult?.executedSignals || 0;
+            const rejected = analyzerResult?.rejectedByMultiTimeframeAnalysis || 0;
 
-        results.push({
-          userId: userParams.user_id,
-          success: true,
-          signals: signalsGenerated,
-          executed: signalsExecuted,
-          rejected,
-          message: analyzerResult?.message || 'Auto-trader processing completed',
-        });
+            console.log(`User ${userParams.user_id}: Generated ${signalsGenerated} signals, executed ${signalsExecuted}, rejected ${rejected}`);
 
-        console.log(`User ${userParams.user_id}: Generated ${signalsGenerated} signals, executed ${signalsExecuted}, rejected ${rejected}`);
-      } catch (userError) {
-        console.error(`Error processing user ${userParams.user_id}:`, userError);
-        results.push({
-          userId: userParams.user_id,
-          success: false,
-          error: userError instanceof Error ? userError.message : "Unknown error",
-        });
-      }
+            return {
+              userId: userParams.user_id,
+              success: true,
+              signals: signalsGenerated,
+              executed: signalsExecuted,
+              rejected,
+              message: analyzerResult?.message || 'Auto-trader processing completed',
+            };
+          } catch (userError) {
+            const errorMessage = userError instanceof Error ? userError.message : "Unknown error";
+            console.error(`Error processing user ${userParams.user_id}:`, errorMessage);
+            return {
+              userId: userParams.user_id,
+              success: false,
+              error: errorMessage,
+            };
+          }
+        })
+      );
+
+      results.push(...batchResults);
     }
 
     const totalSignals = results.reduce((sum, r) => sum + (r.signals || 0), 0);
     const totalExecuted = results.reduce((sum, r) => sum + (r.executed || 0), 0);
     const totalRejected = results.reduce((sum, r) => sum + (r.rejected || 0), 0);
+    const successfulUsers = results.filter(r => r.success).length;
+    const failedUsers = results.filter(r => !r.success).length;
 
     console.log(
-      `Auto-trader completed: Processed ${activeUsers.length} users, generated ${totalSignals} signals, executed ${totalExecuted} trades, rejected ${totalRejected}`
+      `Auto-trader completed: Processed ${activeUsers.length} users (${successfulUsers} success, ${failedUsers} failed), generated ${totalSignals} signals, executed ${totalExecuted} trades, rejected ${totalRejected}`
     );
 
     return new Response(
       JSON.stringify({
         success: true,
         processedUsers: activeUsers.length,
+        successfulUsers,
+        failedUsers,
         totalSignals,
         totalExecuted,
         totalRejected,
