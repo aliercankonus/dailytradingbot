@@ -6,6 +6,7 @@ interface MomentumData {
   momentum: {
     confirms: boolean;
     building: boolean;
+    state: "none" | "mixed" | "confirmed";
     lastCloseAlignsWithTrend: boolean;
     hasDivergence: boolean;
     macdHistogram: number;

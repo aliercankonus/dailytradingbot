@@ -69,12 +69,14 @@ export const MomentumStatusDetails = () => {
 
                       const { momentum, higherTimeframeFilter, multiTimeframe, trend } = data;
                       const confirms = momentum?.confirms ?? false;
+                      const momentumState = momentum?.state ?? "none";
                       const lastCloseAligns = momentum?.lastCloseAlignsWithTrend ?? false;
                       const noDivergence = !(momentum?.hasDivergence ?? false);
                       const macdDirectionOK = momentum?.macdDirectionAligned ?? false;
                       const macdExpandingOK = momentum?.macdExpanding ?? false;
                       const macdOK = macdDirectionOK && macdExpandingOK;
                       const adxOK = (momentum?.adx ?? 0) >= 20;
+                      const volumeConfirms = momentum?.volumeConfirms ?? false;
 
                       return (
                         <div
@@ -90,15 +92,25 @@ export const MomentumStatusDetails = () => {
                               <span className={`font-semibold text-lg ${confirms ? "text-gray-900 dark:text-gray-100" : ""}`}>
                                 {data.symbol}
                               </span>
-                              {confirms ? (
+                              {momentumState === "confirmed" ? (
                                 <Badge className="bg-green-500 hover:bg-green-600">
                                   <CheckCircle className="h-3 w-3 mr-1" />
-                                  Momentum Confirmed
+                                  Confirmed
+                                </Badge>
+                              ) : momentumState === "mixed" ? (
+                                <Badge className="bg-yellow-500 hover:bg-yellow-600">
+                                  <AlertTriangle className="h-3 w-3 mr-1" />
+                                  Mixed
+                                </Badge>
+                              ) : momentum?.building ? (
+                                <Badge className="bg-blue-500 hover:bg-blue-600">
+                                  <Activity className="h-3 w-3 mr-1" />
+                                  Building
                                 </Badge>
                               ) : (
                                 <Badge variant="secondary">
                                   <XCircle className="h-3 w-3 mr-1" />
-                                  No Momentum
+                                  None
                                 </Badge>
                               )}
                             </div>
@@ -270,24 +282,24 @@ export const MomentumStatusDetails = () => {
 
                             <div className="flex items-center justify-between text-sm">
                               <span className={confirms ? "text-gray-700 dark:text-gray-300" : "text-muted-foreground"}>
-                                Volume Confirmation:
+                                Volume (Optional Boost):
                               </span>
                               <div className="flex items-center gap-2">
                                 <span
                                   className={
-                                    momentum?.volumeConfirms
+                                    volumeConfirms
                                       ? "text-green-700 dark:text-green-300 font-medium"
                                       : confirms
                                         ? "text-gray-900 dark:text-gray-100"
                                         : "text-muted-foreground"
                                   }
                                 >
-                                  {momentum?.volumeConfirms ? "Confirmed" : "Not Confirmed"}
+                                  {volumeConfirms ? `+${((momentum?.volumeBoost ?? 1) - 1) * 100}% Boost` : "No Boost"}
                                 </span>
-                                {momentum?.volumeConfirms ? (
+                                {volumeConfirms ? (
                                   <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
                                 ) : (
-                                  <XCircle
+                                  <Minus
                                     className={`h-4 w-4 ${confirms ? "text-gray-600 dark:text-gray-400" : "text-muted-foreground"}`}
                                   />
                                 )}
@@ -303,11 +315,9 @@ export const MomentumStatusDetails = () => {
                                 {!noDivergence && "No divergence between price and MACD"}
                                 {!noDivergence && (!macdOK || !adxOK) && ", "}
                                 {!macdOK && !macdDirectionOK && "MACD histogram direction must align with trend"}
-                                {!macdOK && macdDirectionOK && !macdExpandingOK && "MACD histogram needs >0.01 expansion"}
+                                {!macdOK && macdDirectionOK && !macdExpandingOK && "MACD histogram needs >0.05 expansion"}
                                 {!macdOK && !adxOK && ", "}
                                 {!adxOK && "ADX ≥20 required"}
-                                {!adxOK && !momentum?.volumeConfirms && ", "}
-                                {!momentum?.volumeConfirms && "Volume should increase with trend"}
                               </p>
                             </div>
                           )}
