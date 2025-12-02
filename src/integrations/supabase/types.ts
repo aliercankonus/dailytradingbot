@@ -530,6 +530,8 @@ export type Database = {
         Row: {
           auto_execute_signals: boolean | null
           auto_rebalance_enabled: boolean | null
+          break_even_activation_percent: number | null
+          break_even_enabled: boolean | null
           consecutive_loss_threshold: number
           consecutive_losses: number | null
           current_open_trades: number | null
@@ -568,6 +570,8 @@ export type Database = {
         Insert: {
           auto_execute_signals?: boolean | null
           auto_rebalance_enabled?: boolean | null
+          break_even_activation_percent?: number | null
+          break_even_enabled?: boolean | null
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
           current_open_trades?: number | null
@@ -606,6 +610,8 @@ export type Database = {
         Update: {
           auto_execute_signals?: boolean | null
           auto_rebalance_enabled?: boolean | null
+          break_even_activation_percent?: number | null
+          break_even_enabled?: boolean | null
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
           current_open_trades?: number | null

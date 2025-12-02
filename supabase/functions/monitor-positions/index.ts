@@ -46,7 +46,7 @@ serve(async (req) => {
     const userIds = [...new Set(positions.map((p) => p.user_id))];
     const { data: riskParamsList, error: riskError } = await supabase
       .from("risk_parameters")
-      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier")
+      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent")
       .in("user_id", userIds);
     if (riskError) throw riskError;
     // Create a map of user settings
@@ -57,6 +57,8 @@ serve(async (req) => {
           enabled: rp.trailing_stop_enabled ?? true,
           activationPercent: rp.trailing_stop_activation_percent ?? 1.0,
           distanceMultiplier: rp.trailing_stop_distance_multiplier ?? 1.5,
+          breakEvenEnabled: rp.break_even_enabled ?? true,
+          breakEvenActivationPercent: rp.break_even_activation_percent ?? 0.5,
         },
       ]) || [],
     );
@@ -106,6 +108,7 @@ serve(async (req) => {
     const updates = [];
     const closedPositions = [];
     const trailingStopUpdates = [];
+    const breakEvenUpdates = []; // Track break-even stop movements
     const trendExits = [];
     const partialTpTaken = []; // Track partial take profits
     // Fetch trend data for all symbols in PARALLEL to check for trend reversals
@@ -150,6 +153,8 @@ serve(async (req) => {
         enabled: true,
         activationPercent: 1.0,
         distanceMultiplier: 1.5,
+        breakEvenEnabled: true,
+        breakEvenActivationPercent: 0.5,
       };
       // TRAILING STOP LOSS LOGIC - Position-specific calculation
       let newStopLoss = position.stop_loss;
@@ -244,6 +249,86 @@ serve(async (req) => {
           } // Close if (updatedPos)
         }
       }
+
+      // ============================================================
+      // BREAK-EVEN STOP LOGIC - Move stop to entry price when profitable
+      // This activates at a lower threshold than trailing stop for early protection
+      // ============================================================
+      const isBreakEvenEligible = userSettings.breakEvenEnabled && 
+                                  pnlPercent >= userSettings.breakEvenActivationPercent &&
+                                  !trailingActivated; // Don't apply if trailing stop already moved
+
+      if (isBreakEvenEligible) {
+        const entryPrice = position.entry_price;
+        let shouldMoveToBreakEven = false;
+
+        if (position.side === "BUY") {
+          // For LONG: Move stop to entry if current stop is below entry
+          if (position.stop_loss < entryPrice) {
+            shouldMoveToBreakEven = true;
+          }
+        } else {
+          // For SHORT: Move stop to entry if current stop is above entry
+          if (position.stop_loss > entryPrice) {
+            shouldMoveToBreakEven = true;
+          }
+        }
+
+        if (shouldMoveToBreakEven) {
+          console.log(`🛡️ BREAK-EVEN: Moving stop to entry for ${position.symbol} (P&L: ${pnlPercent.toFixed(2)}%, Entry: ${entryPrice.toFixed(2)})`);
+          
+          // Use optimistic locking
+          const { data: updatedBEPos, error: beUpdateError } = await supabase
+            .from("positions")
+            .update({ stop_loss: entryPrice })
+            .eq("id", position.id)
+            .eq("status", "active")
+            .select()
+            .maybeSingle();
+
+          if (beUpdateError) {
+            console.error(`Error updating break-even stop for ${position.id}:`, beUpdateError);
+          } else if (updatedBEPos) {
+            breakEvenUpdates.push({
+              symbol: position.symbol,
+              side: position.side,
+              oldStopLoss: position.stop_loss,
+              newStopLoss: entryPrice,
+              currentPrice,
+              pnlPercent,
+            });
+
+            // Send notification
+            try {
+              const { data: riskParams } = await supabase
+                .from("risk_parameters")
+                .select("notification_email, email_notifications_enabled")
+                .eq("user_id", position.user_id)
+                .single();
+
+              if (riskParams?.email_notifications_enabled) {
+                await supabase.functions.invoke("send-notification", {
+                  body: {
+                    type: "break_even_activated",
+                    userId: position.user_id,
+                    positionId: position.id,
+                    symbol: position.symbol,
+                    side: position.side,
+                    price: currentPrice,
+                    entryPrice,
+                    pnlPercent,
+                    email: riskParams.notification_email,
+                  },
+                });
+                console.log(`📧 Break-even notification sent for ${position.symbol}`);
+              }
+            } catch (notifError) {
+              console.error("Error sending break-even notification:", notifError);
+            }
+          }
+        }
+      }
+
       // TREND-AWARE EXIT CHECK - Close position if trend has flipped against us
       let shouldClose = false;
       let closeReason = "";
@@ -576,9 +661,10 @@ serve(async (req) => {
       updates,
       closedPositions,
       trailingStopUpdates,
+      breakEvenUpdates,
       trendExits,
       partialTpTaken,
-      message: `Updated ${updates.length} positions, ${trailingStopUpdates.length} trailing stops adjusted, ${partialTpTaken.length} partial TPs taken, closed ${closedPositions.length} positions (${trendExits.length} trend exits)`,
+      message: `Updated ${updates.length} positions, ${trailingStopUpdates.length} trailing stops adjusted, ${breakEvenUpdates.length} break-even stops, ${partialTpTaken.length} partial TPs taken, closed ${closedPositions.length} positions (${trendExits.length} trend exits)`,
     };
     const message = JSON.stringify(responseData);
     for (const client of clients) {
