@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -27,14 +27,30 @@ interface RebalanceConfig {
   is_trading_enabled: boolean;
 }
 
+interface RebalanceResult {
+  user_id: string;
+  success: boolean;
+  positions_closed?: number;
+  signals_generated?: number;
+  positions_analyzed?: number;
+  positions_underwater?: number;
+  positions_conflicting?: number;
+  error?: string;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    
+    if (!supabaseUrl || !supabaseServiceKey) {
+      throw new Error('Missing required environment variables');
+    }
+    
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     console.log('Starting position rebalancing cycle...');
@@ -59,7 +75,7 @@ serve(async (req) => {
       );
     }
 
-    const results = [];
+    const results: RebalanceResult[] = [];
 
     for (const config of configs) {
       console.log(`\n=== Processing rebalancing for user ${config.user_id} ===`);
@@ -123,30 +139,50 @@ async function rebalanceUserPositions(
     return { success: true, positions_closed: 0, signals_generated: 0 };
   }
 
-  // Fetch live prices from Binance for accurate P&L calculation
+  // Fetch live prices from Binance for accurate P&L calculation - PARALLEL
   const symbolSet = new Set<string>();
   positions.forEach((p: any) => symbolSet.add(String(p.symbol)));
   const priceMap = new Map<string, number>();
   
-  for (const symbol of symbolSet) {
+  const pricePromises = Array.from(symbolSet).map(async (symbol) => {
     try {
       const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
       const data = await response.json() as { price?: string };
       if (data.price) {
-        priceMap.set(symbol, parseFloat(data.price));
-        console.log(`Fetched live price for ${symbol}: ${data.price}`);
+        const price = parseFloat(data.price);
+        if (Number.isFinite(price) && price > 0) {
+          console.log(`Fetched live price for ${symbol}: ${data.price}`);
+          return { symbol, price };
+        }
       }
+      return { symbol, price: null };
     } catch (error) {
       console.error(`Failed to fetch price for ${symbol}:`, error);
+      return { symbol, price: null };
     }
-  }
+  });
+
+  const priceResults = await Promise.all(pricePromises);
+  priceResults.forEach(({ symbol, price }) => {
+    if (price !== null) {
+      priceMap.set(symbol, price);
+    }
+  });
 
   // Calculate unrealized P&L for each position using live prices
   const positionsWithPnL = positions.map((pos: any) => {
     const currentPrice = priceMap.get(pos.symbol) || pos.entry_price;
+    const entryPrice = pos.entry_price || 0;
+    
+    // Protect against division by zero
+    if (entryPrice <= 0) {
+      console.warn(`Invalid entry price for position ${pos.id}: ${entryPrice}`);
+      return { ...pos, unrealized_pnl_percent: 0 };
+    }
+    
     const unrealized_pnl_percent = pos.side === 'BUY'
-      ? ((currentPrice - pos.entry_price) / pos.entry_price) * 100
-      : ((pos.entry_price - currentPrice) / pos.entry_price) * 100;
+      ? ((currentPrice - entryPrice) / entryPrice) * 100
+      : ((entryPrice - currentPrice) / entryPrice) * 100;
     return { ...pos, unrealized_pnl_percent };
   });
 
@@ -174,22 +210,31 @@ async function rebalanceUserPositions(
 
   console.log(`User ${user_id}: Found ${positionsToRebalance.length} positions below threshold`);
 
-  // Get current market trends for affected symbols
+  // Get current market trends for affected symbols - PARALLEL
   const trendData: Record<string, any> = {};
-  for (const symbol of symbolsToAnalyze) {
+  const trendPromises = Array.from(symbolsToAnalyze).map(async (symbol) => {
     try {
       const { data, error } = await supabase.functions.invoke('calculate-trend', {
         body: { symbol }
       });
       
       if (!error && data) {
-        trendData[symbol] = data;
         console.log(`  ${symbol}: ${data.trend} (confidence: ${data.confidence}%, consistency: ${data.trendConsistency}%)`);
+        return { symbol, data };
       }
+      return { symbol, data: null };
     } catch (error) {
       console.warn(`Failed to get trend for ${symbol}:`, error);
+      return { symbol, data: null };
     }
-  }
+  });
+
+  const trendResults = await Promise.all(trendPromises);
+  trendResults.forEach(({ symbol, data }) => {
+    if (data) {
+      trendData[symbol] = data;
+    }
+  });
 
   // Identify positions that conflict with current market trend
   const positionsToClose: (Position & { unrealized_pnl_percent: number })[] = [];
@@ -243,11 +288,21 @@ async function rebalanceUserPositions(
       const trend = trendData[position.symbol];
       if (trend) {
         // Fetch user's divergence settings
-        const { data: riskParams } = await supabase
+        const { data: riskParams, error: riskError } = await supabase
           .from('risk_parameters')
           .select('enable_pullback_signals, enable_early_reversal_signals, pullback_position_size_percent, early_reversal_position_size_percent, divergence_sl_multiplier, divergence_tp_multiplier, standard_tp_multiplier, max_risk_per_trade_percent')
           .eq('user_id', user_id)
-          .single();
+          .maybeSingle();
+
+        if (riskError) {
+          console.error(`Failed to fetch risk params for user ${user_id}:`, riskError);
+          continue;
+        }
+
+        if (!riskParams) {
+          console.warn(`No risk params found for user ${user_id}`);
+          continue;
+        }
 
         let shouldCreateSignal = false;
         let positionSizePercent = 1.0; // Default 1% of portfolio
@@ -272,9 +327,8 @@ async function rebalanceUserPositions(
                 tf30m.trend === tf4h.trend && 
                 tf15m.trend === tf4h.trend) {
               shouldCreateSignal = true;
-              // pullback_position_size_percent is percentage of normal (e.g., 50 = 50% of normal 1% = 0.5%)
               const sizeReduction = (riskParams.pullback_position_size_percent || 50) / 100;
-              positionSizePercent = 1.0 * sizeReduction; // e.g., 1% * 0.5 = 0.5%
+              positionSizePercent = 1.0 * sizeReduction;
               confidenceCap = 70;
               signalReason = `Rebalancing: Pullback opportunity confirmed by 30m/15m after closing ${position.side} position`;
             } else {
@@ -290,9 +344,8 @@ async function rebalanceUserPositions(
                 tf30m.trend === tf1h.trend && 
                 tf15m.trend === tf1h.trend) {
               shouldCreateSignal = true;
-              // early_reversal_position_size_percent is percentage of normal (e.g., 40 = 40% of normal 1% = 0.4%)
               const sizeReduction = (riskParams.early_reversal_position_size_percent || 40) / 100;
-              positionSizePercent = 1.0 * sizeReduction; // e.g., 1% * 0.4 = 0.4%
+              positionSizePercent = 1.0 * sizeReduction;
               confidenceCap = 65;
               signalReason = `Rebalancing: Early reversal confirmed by 30m/15m after closing ${position.side} position`;
             } else {
@@ -305,12 +358,20 @@ async function rebalanceUserPositions(
           const newSignalType = trend.trend === 'bullish' ? 'long' : 'short';
           const finalConfidence = Math.min(trend.confidence, confidenceCap);
           
-          // Adjust stop loss and take profit for divergence signals (shorter timeframes)
+          // Get current price - use priceMap first, then trend.currentPrice as fallback
+          const currentPrice = priceMap.get(position.symbol) || trend.currentPrice || position.entry_price;
+          
+          if (!currentPrice || currentPrice <= 0) {
+            console.warn(`Invalid current price for ${position.symbol}, skipping signal generation`);
+            continue;
+          }
+          
+          // Adjust stop loss and take profit for divergence signals
           const isDivergenceSignal = trend.higherTimeframeFilter?.divergenceType;
           const maxRiskPercent = (riskParams.max_risk_per_trade_percent || 1.5) / 100;
           const divergenceSlMultiplier = riskParams.divergence_sl_multiplier || 0.67;
           const stopLossPercent = isDivergenceSignal 
-            ? maxRiskPercent * divergenceSlMultiplier  // Use configured divergence SL multiplier
+            ? maxRiskPercent * divergenceSlMultiplier
             : maxRiskPercent;
           const divergenceTpMultiplier = riskParams.divergence_tp_multiplier || 2.0;
           const standardTpMultiplier = riskParams.standard_tp_multiplier || 2.5;
@@ -327,14 +388,14 @@ async function rebalanceUserPositions(
               signal_type: newSignalType,
               trend: trend.trend,
               confidence_score: finalConfidence,
-              entry_price: trend.currentPrice,
+              entry_price: currentPrice,
               created_by_rebalancer: true,
               stop_loss: newSignalType === 'long' 
-                ? trend.currentPrice * (1 - stopLossPercent)
-                : trend.currentPrice * (1 + stopLossPercent),
+                ? currentPrice * (1 - stopLossPercent)
+                : currentPrice * (1 + stopLossPercent),
               take_profit: newSignalType === 'long'
-                ? trend.currentPrice * (1 + takeProfitPercent)
-                : trend.currentPrice * (1 - takeProfitPercent),
+                ? currentPrice * (1 + takeProfitPercent)
+                : currentPrice * (1 - takeProfitPercent),
               strategy_name: 'Auto Rebalance',
               reason: signalReason,
               indicators: {
@@ -350,6 +411,8 @@ async function rebalanceUserPositions(
           if (!signalError) {
             signalsGenerated++;
             console.log(`  ✓ Generated ${newSignalType.toUpperCase()} signal for ${position.symbol} (${trend.higherTimeframeFilter?.divergenceType || 'aligned'})`);
+          } else {
+            console.error(`Failed to insert signal for ${position.symbol}:`, signalError);
           }
         }
       }
