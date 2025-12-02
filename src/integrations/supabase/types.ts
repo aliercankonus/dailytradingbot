@@ -285,6 +285,8 @@ export type Database = {
           opened_at: string | null
           opened_by_rebalancer: boolean | null
           order_type: string | null
+          original_quantity: number | null
+          partial_tp_level: number | null
           quantity: number
           realized_pnl: number | null
           realized_pnl_percent: number | null
@@ -295,6 +297,9 @@ export type Database = {
           strategy_name: string | null
           symbol: string
           take_profit: number | null
+          tp1_price: number | null
+          tp2_price: number | null
+          tp3_price: number | null
           trend: string | null
           trend_consistency: number | null
           updated_at: string | null
@@ -314,6 +319,8 @@ export type Database = {
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
+          original_quantity?: number | null
+          partial_tp_level?: number | null
           quantity: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
@@ -324,6 +331,9 @@ export type Database = {
           strategy_name?: string | null
           symbol: string
           take_profit?: number | null
+          tp1_price?: number | null
+          tp2_price?: number | null
+          tp3_price?: number | null
           trend?: string | null
           trend_consistency?: number | null
           updated_at?: string | null
@@ -343,6 +353,8 @@ export type Database = {
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
+          original_quantity?: number | null
+          partial_tp_level?: number | null
           quantity?: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
@@ -353,6 +365,9 @@ export type Database = {
           strategy_name?: string | null
           symbol?: string
           take_profit?: number | null
+          tp1_price?: number | null
+          tp2_price?: number | null
+          tp3_price?: number | null
           trend?: string | null
           trend_consistency?: number | null
           updated_at?: string | null
@@ -384,6 +399,8 @@ export type Database = {
           opened_at: string | null
           opened_by_rebalancer: boolean | null
           order_type: string | null
+          original_quantity: number | null
+          partial_tp_level: number | null
           quantity: number
           realized_pnl: number | null
           realized_pnl_percent: number | null
@@ -394,6 +411,9 @@ export type Database = {
           strategy_name: string | null
           symbol: string
           take_profit: number | null
+          tp1_price: number | null
+          tp2_price: number | null
+          tp3_price: number | null
           trend: string | null
           trend_consistency: number | null
           updated_at: string | null
@@ -414,6 +434,8 @@ export type Database = {
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
+          original_quantity?: number | null
+          partial_tp_level?: number | null
           quantity: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
@@ -424,6 +446,9 @@ export type Database = {
           strategy_name?: string | null
           symbol: string
           take_profit?: number | null
+          tp1_price?: number | null
+          tp2_price?: number | null
+          tp3_price?: number | null
           trend?: string | null
           trend_consistency?: number | null
           updated_at?: string | null
@@ -444,6 +469,8 @@ export type Database = {
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
+          original_quantity?: number | null
+          partial_tp_level?: number | null
           quantity?: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
@@ -454,6 +481,9 @@ export type Database = {
           strategy_name?: string | null
           symbol?: string
           take_profit?: number | null
+          tp1_price?: number | null
+          tp2_price?: number | null
+          tp3_price?: number | null
           trend?: string | null
           trend_consistency?: number | null
           updated_at?: string | null
@@ -969,6 +999,8 @@ export type Database = {
           opened_at: string | null
           opened_by_rebalancer: boolean | null
           order_type: string | null
+          original_quantity: number | null
+          partial_tp_level: number | null
           quantity: number | null
           realized_pnl: number | null
           realized_pnl_percent: number | null
@@ -979,6 +1011,9 @@ export type Database = {
           strategy_name: string | null
           symbol: string | null
           take_profit: number | null
+          tp1_price: number | null
+          tp2_price: number | null
+          tp3_price: number | null
           trend: string | null
           trend_consistency: number | null
           updated_at: string | null

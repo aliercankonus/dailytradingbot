@@ -107,6 +107,7 @@ serve(async (req) => {
     const closedPositions = [];
     const trailingStopUpdates = [];
     const trendExits = [];
+    const partialTpTaken = []; // Track partial take profits
     // Fetch trend data for all symbols in PARALLEL to check for trend reversals
     const trendDataMap = new Map();
     const trendPromises = symbols.map(async (symbol) => {
@@ -327,6 +328,172 @@ serve(async (req) => {
           }
         }
       }
+      // ============================================================
+      // PARTIAL TAKE PROFIT LOGIC - Professional ladder exit system
+      // TP1 (33% distance): Close 50% of position
+      // TP2 (66% distance): Close 30% of position
+      // TP3 (100% distance): Close remaining 20%
+      // ============================================================
+      const currentTpLevel = position.partial_tp_level || 0;
+      const originalQty = position.original_quantity || position.quantity;
+      
+      // Calculate TP prices if not set (first time check)
+      let tp1Price = position.tp1_price;
+      let tp2Price = position.tp2_price;
+      let tp3Price = position.tp3_price || position.take_profit;
+      
+      if (!tp1Price || !tp2Price) {
+        const tpDistance = Math.abs(position.take_profit - position.entry_price);
+        if (position.side === "BUY") {
+          tp1Price = position.entry_price + (tpDistance * 0.33);
+          tp2Price = position.entry_price + (tpDistance * 0.66);
+          tp3Price = position.take_profit;
+        } else {
+          tp1Price = position.entry_price - (tpDistance * 0.33);
+          tp2Price = position.entry_price - (tpDistance * 0.66);
+          tp3Price = position.take_profit;
+        }
+        
+        // Save TP prices to position
+        await supabase
+          .from("positions")
+          .update({ 
+            tp1_price: tp1Price, 
+            tp2_price: tp2Price, 
+            tp3_price: tp3Price,
+            original_quantity: originalQty 
+          })
+          .eq("id", position.id)
+          .eq("status", "active");
+          
+        console.log(`📊 Set partial TP levels for ${position.symbol}: TP1=$${tp1Price.toFixed(2)}, TP2=$${tp2Price.toFixed(2)}, TP3=$${tp3Price.toFixed(2)}`);
+      }
+      
+      // Check partial TP levels (only if not already at that level)
+      let partialTpTriggered = false;
+      let partialClosePercent = 0;
+      let newTpLevel = currentTpLevel;
+      let partialCloseReason = "";
+      
+      if (position.side === "BUY") {
+        // LONG: TP when price goes UP
+        if (currentTpLevel < 1 && currentPrice >= tp1Price) {
+          partialTpTriggered = true;
+          partialClosePercent = 50; // Close 50%
+          newTpLevel = 1;
+          partialCloseReason = "partial_tp_1";
+          console.log(`🎯 TP1 HIT for LONG ${position.symbol}: Price $${currentPrice.toFixed(2)} >= TP1 $${tp1Price.toFixed(2)}`);
+        } else if (currentTpLevel < 2 && currentTpLevel >= 1 && currentPrice >= tp2Price) {
+          partialTpTriggered = true;
+          partialClosePercent = 60; // Close 60% of remaining (30% of original)
+          newTpLevel = 2;
+          partialCloseReason = "partial_tp_2";
+          console.log(`🎯 TP2 HIT for LONG ${position.symbol}: Price $${currentPrice.toFixed(2)} >= TP2 $${tp2Price.toFixed(2)}`);
+        }
+      } else {
+        // SHORT: TP when price goes DOWN
+        if (currentTpLevel < 1 && currentPrice <= tp1Price) {
+          partialTpTriggered = true;
+          partialClosePercent = 50;
+          newTpLevel = 1;
+          partialCloseReason = "partial_tp_1";
+          console.log(`🎯 TP1 HIT for SHORT ${position.symbol}: Price $${currentPrice.toFixed(2)} <= TP1 $${tp1Price.toFixed(2)}`);
+        } else if (currentTpLevel < 2 && currentTpLevel >= 1 && currentPrice <= tp2Price) {
+          partialTpTriggered = true;
+          partialClosePercent = 60;
+          newTpLevel = 2;
+          partialCloseReason = "partial_tp_2";
+          console.log(`🎯 TP2 HIT for SHORT ${position.symbol}: Price $${currentPrice.toFixed(2)} <= TP2 $${tp2Price.toFixed(2)}`);
+        }
+      }
+      
+      // Execute partial close if triggered
+      if (partialTpTriggered) {
+        const closeQuantity = position.quantity * (partialClosePercent / 100);
+        const remainingQuantity = position.quantity - closeQuantity;
+        const partialPnl = position.side === "BUY"
+          ? (currentPrice - position.entry_price) * closeQuantity
+          : (position.entry_price - currentPrice) * closeQuantity;
+        const partialPnlPercent = position.side === "BUY"
+          ? ((currentPrice - position.entry_price) / position.entry_price) * 100
+          : ((position.entry_price - currentPrice) / position.entry_price) * 100;
+        
+        // Update position with reduced quantity and new TP level
+        const { data: updatedPartialPos, error: partialUpdateError } = await supabase
+          .from("positions")
+          .update({
+            quantity: remainingQuantity,
+            partial_tp_level: newTpLevel,
+            // Also move stop loss to break-even after first TP hit
+            stop_loss: newTpLevel === 1 ? position.entry_price : position.stop_loss,
+          })
+          .eq("id", position.id)
+          .eq("status", "active")
+          .select()
+          .maybeSingle();
+        
+        if (partialUpdateError) {
+          console.error(`Error executing partial TP for ${position.id}:`, partialUpdateError);
+        } else if (updatedPartialPos) {
+          partialTpTaken.push({
+            symbol: position.symbol,
+            side: position.side,
+            tpLevel: newTpLevel,
+            closedQuantity: closeQuantity,
+            remainingQuantity,
+            exitPrice: currentPrice,
+            partialPnl,
+            partialPnlPercent,
+            reason: partialCloseReason,
+          });
+          
+          console.log(`✅ Partial TP${newTpLevel} executed: ${position.symbol} closed ${closeQuantity.toFixed(4)} (${partialClosePercent}%), remaining ${remainingQuantity.toFixed(4)}, P&L: $${partialPnl.toFixed(2)} (${partialPnlPercent.toFixed(2)}%)`);
+          
+          // Move stop loss to break-even after TP1
+          if (newTpLevel === 1) {
+            console.log(`🔒 Stop loss moved to break-even ($${position.entry_price.toFixed(2)}) after TP1`);
+          }
+          
+          // Send notification for partial TP
+          try {
+            const { data: riskParams } = await supabase
+              .from("risk_parameters")
+              .select("notification_email, email_notifications_enabled")
+              .eq("user_id", position.user_id)
+              .single();
+            
+            if (riskParams?.email_notifications_enabled) {
+              await supabase.functions.invoke("send-notification", {
+                body: {
+                  type: "partial_take_profit",
+                  userId: position.user_id,
+                  positionId: position.id,
+                  symbol: position.symbol,
+                  side: position.side,
+                  tpLevel: newTpLevel,
+                  closedQuantity: closeQuantity,
+                  remainingQuantity,
+                  exitPrice: currentPrice,
+                  partialPnl,
+                  partialPnlPercent,
+                  email: riskParams.notification_email,
+                },
+              });
+            }
+          } catch (notifError) {
+            console.error("Error sending partial TP notification:", notifError);
+          }
+        }
+        
+        // Update position object for further checks in this loop iteration
+        position.quantity = remainingQuantity;
+        position.partial_tp_level = newTpLevel;
+        if (newTpLevel === 1) {
+          position.stop_loss = position.entry_price;
+          newStopLoss = position.entry_price;
+        }
+      }
+      
       // Check if take profit or stop loss is hit (use updated stop loss)
       if (!shouldClose && position.side === "BUY") {
         // LONG: TP when price goes UP, SL when price goes DOWN
@@ -410,7 +577,8 @@ serve(async (req) => {
       closedPositions,
       trailingStopUpdates,
       trendExits,
-      message: `Updated ${updates.length} positions, ${trailingStopUpdates.length} trailing stops adjusted, closed ${closedPositions.length} positions (${trendExits.length} trend exits)`,
+      partialTpTaken,
+      message: `Updated ${updates.length} positions, ${trailingStopUpdates.length} trailing stops adjusted, ${partialTpTaken.length} partial TPs taken, closed ${closedPositions.length} positions (${trendExits.length} trend exits)`,
     };
     const message = JSON.stringify(responseData);
     for (const client of clients) {
