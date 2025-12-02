@@ -80,19 +80,21 @@ serve(async (req) => {
       );
       if (!klinesResponse.ok) throw new Error(`Klines fetch failed for ${symbol}: ${klinesResponse.status}`);
       const klines = await klinesResponse.json();
-      if (!Array.isArray(klines) || klines.length < 15)
+      if (!Array.isArray(klines) || klines.length < 16) // Need 16 for ATR calculation (14 + 1 for prevClose + safety)
         throw new Error(`Invalid or insufficient klines data for ${symbol}`);
       // Calculate ATR (Average True Range) using 1-hour data
       const atrPeriod = 14;
       let atrSum = 0;
-      for (let i = klines.length - atrPeriod; i < klines.length; i++) {
+      const startIdx = Math.max(1, klines.length - atrPeriod); // Ensure we never access index -1
+      for (let i = startIdx; i < klines.length; i++) {
         const high = parseFloat(klines[i][2]);
         const low = parseFloat(klines[i][3]);
         const prevClose = parseFloat(klines[i - 1][4]);
         const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
         atrSum += tr;
       }
-      const atr = atrSum / atrPeriod;
+      const actualPeriods = klines.length - startIdx;
+      const atr = actualPeriods > 0 ? atrSum / actualPeriods : 0;
       const atrPercent = (atr / price) * 100;
       return { symbol, price, atr, atrPercent };
     } catch (error) {
@@ -336,8 +338,8 @@ serve(async (req) => {
       if (trendData) {
         const currentTrend = trendData.trend; // 'bullish', 'bearish', or 'ranging'
         const trendConfidence = trendData.confidence || 0;
-        const trend1h = trendData.higherTimeframeFilter?.trend1h;
-        const trend4h = trendData.higherTimeframeFilter?.trend4h;
+        const trend1h = trendData.higherTimeframeFilter?.trend1h || 'neutral';
+        const trend4h = trendData.higherTimeframeFilter?.trend4h || 'neutral';
 
         // For SHORT positions: Exit if trend turns bullish OR ranging (market indecision) with lower threshold
         // Also exit if there's higher timeframe conflict (4h bearish vs 1h bullish = dangerous for shorts)
@@ -466,18 +468,21 @@ serve(async (req) => {
       
       if (!tp1Price || !tp2Price) {
         const tpDistance = Math.abs(position.take_profit - position.entry_price);
+        // Safety check: If TP is same as entry (shouldn't happen), use ATR-based default
+        const effectiveTpDistance = tpDistance > 0 ? tpDistance : (position.entry_price * atrPercent / 100) * 2;
+        
         if (position.side === "BUY") {
-          tp1Price = position.entry_price + (tpDistance * 0.33);
-          tp2Price = position.entry_price + (tpDistance * 0.66);
-          tp3Price = position.take_profit;
+          tp1Price = position.entry_price + (effectiveTpDistance * 0.33);
+          tp2Price = position.entry_price + (effectiveTpDistance * 0.66);
+          tp3Price = position.take_profit || position.entry_price + effectiveTpDistance;
         } else {
-          tp1Price = position.entry_price - (tpDistance * 0.33);
-          tp2Price = position.entry_price - (tpDistance * 0.66);
-          tp3Price = position.take_profit;
+          tp1Price = position.entry_price - (effectiveTpDistance * 0.33);
+          tp2Price = position.entry_price - (effectiveTpDistance * 0.66);
+          tp3Price = position.take_profit || position.entry_price - effectiveTpDistance;
         }
         
-        // Save TP prices to position
-        await supabase
+        // Save TP prices to position with error handling
+        const { error: tpUpdateError } = await supabase
           .from("positions")
           .update({ 
             tp1_price: tp1Price, 
@@ -487,8 +492,12 @@ serve(async (req) => {
           })
           .eq("id", position.id)
           .eq("status", "active");
-          
-        console.log(`📊 Set partial TP levels for ${position.symbol}: TP1=$${tp1Price.toFixed(2)}, TP2=$${tp2Price.toFixed(2)}, TP3=$${tp3Price.toFixed(2)}`);
+        
+        if (tpUpdateError) {
+          console.error(`Failed to set partial TP levels for ${position.symbol}:`, tpUpdateError);
+        } else {
+          console.log(`📊 Set partial TP levels for ${position.symbol}: TP1=$${tp1Price.toFixed(2)}, TP2=$${tp2Price.toFixed(2)}, TP3=$${tp3Price.toFixed(2)}`);
+        }
       }
       
       // Check partial TP levels (only if not already at that level)
@@ -622,11 +631,11 @@ serve(async (req) => {
         if (position.take_profit && currentPrice >= position.take_profit) {
           shouldClose = true;
           closeReason = "take_profit";
-      } else if (newStopLoss && currentPrice <= newStopLoss) {
+        } else if (newStopLoss && currentPrice <= newStopLoss) {
           shouldClose = true;
-          // Check if trailing stop was ever activated (stop loss was moved from original)
-          // If the stop loss is higher than entry price for a LONG, trailing was activated
-          const trailingWasActivated = userSettings.enabled && newStopLoss > position.entry_price * (1 - 0.02);
+          // Trailing was activated if: stop was moved UP from entry (for LONG, stop > entry = profit locked)
+          // More accurate: check if we're in profit but hit stop (trailing scenario)
+          const trailingWasActivated = userSettings.enabled && newStopLoss > position.entry_price;
           closeReason = trailingWasActivated ? "trailing_stop_loss" : "stop_loss";
         }
       } else if (!shouldClose && position.side === "SELL") {
@@ -636,9 +645,8 @@ serve(async (req) => {
           closeReason = "take_profit";
         } else if (newStopLoss && currentPrice >= newStopLoss) {
           shouldClose = true;
-          // Check if trailing stop was ever activated (stop loss was moved from original)
-          // If the stop loss is lower than entry price for a SHORT, trailing was activated
-          const trailingWasActivated = userSettings.enabled && newStopLoss < position.entry_price * (1 + 0.02);
+          // Trailing was activated if: stop was moved DOWN from entry (for SHORT, stop < entry = profit locked)
+          const trailingWasActivated = userSettings.enabled && newStopLoss < position.entry_price;
           closeReason = trailingWasActivated ? "trailing_stop_loss" : "stop_loss";
         }
       }
