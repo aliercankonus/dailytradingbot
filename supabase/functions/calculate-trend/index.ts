@@ -67,6 +67,104 @@ function calculateRSI(prices: number[], period = 14): number {
   return 100 - 100 / (1 + rs);
 }
 
+// Stochastic RSI calculation - earlier overbought/oversold detection
+function calculateStochasticRSI(prices: number[], rsiPeriod = 14, stochPeriod = 14, kSmooth = 3, dSmooth = 3): {
+  k: number;
+  d: number;
+  signal: "overbought" | "oversold" | "bullish_cross" | "bearish_cross" | "neutral";
+  strength: number;
+} {
+  if (prices.length < rsiPeriod + stochPeriod + Math.max(kSmooth, dSmooth)) {
+    return { k: 50, d: 50, signal: "neutral", strength: 0 };
+  }
+
+  // Calculate RSI values for the required period
+  const rsiValues: number[] = [];
+  for (let i = rsiPeriod; i < prices.length; i++) {
+    const priceSlice = prices.slice(0, i + 1);
+    const rsi = calculateRSI(priceSlice, rsiPeriod);
+    rsiValues.push(rsi);
+  }
+
+  if (rsiValues.length < stochPeriod) {
+    return { k: 50, d: 50, signal: "neutral", strength: 0 };
+  }
+
+  // Calculate raw Stochastic K values from RSI
+  const rawKValues: number[] = [];
+  for (let i = stochPeriod - 1; i < rsiValues.length; i++) {
+    const rsiWindow = rsiValues.slice(i - stochPeriod + 1, i + 1);
+    const maxRsi = Math.max(...rsiWindow);
+    const minRsi = Math.min(...rsiWindow);
+    const currentRsi = rsiValues[i];
+    
+    // Stochastic formula: (Current - Lowest) / (Highest - Lowest) * 100
+    const rawK = maxRsi !== minRsi 
+      ? ((currentRsi - minRsi) / (maxRsi - minRsi)) * 100 
+      : 50;
+    rawKValues.push(rawK);
+  }
+
+  if (rawKValues.length < kSmooth) {
+    return { k: 50, d: 50, signal: "neutral", strength: 0 };
+  }
+
+  // Smooth K with SMA (this gives us %K)
+  const smoothedKValues: number[] = [];
+  for (let i = kSmooth - 1; i < rawKValues.length; i++) {
+    const kWindow = rawKValues.slice(i - kSmooth + 1, i + 1);
+    const smoothedK = kWindow.reduce((a, b) => a + b, 0) / kSmooth;
+    smoothedKValues.push(smoothedK);
+  }
+
+  if (smoothedKValues.length < dSmooth) {
+    return { k: 50, d: 50, signal: "neutral", strength: 0 };
+  }
+
+  // Calculate %D (SMA of %K)
+  const dValues: number[] = [];
+  for (let i = dSmooth - 1; i < smoothedKValues.length; i++) {
+    const dWindow = smoothedKValues.slice(i - dSmooth + 1, i + 1);
+    const dValue = dWindow.reduce((a, b) => a + b, 0) / dSmooth;
+    dValues.push(dValue);
+  }
+
+  const k = smoothedKValues[smoothedKValues.length - 1];
+  const d = dValues[dValues.length - 1];
+  const prevK = smoothedKValues.length > 1 ? smoothedKValues[smoothedKValues.length - 2] : k;
+  const prevD = dValues.length > 1 ? dValues[dValues.length - 2] : d;
+
+  // Determine signal
+  let signal: "overbought" | "oversold" | "bullish_cross" | "bearish_cross" | "neutral" = "neutral";
+  let strength = 0;
+
+  // Overbought/Oversold zones (more sensitive than regular RSI)
+  if (k > 80 && d > 80) {
+    signal = "overbought";
+    strength = Math.min((k - 80) / 20, 1) * 100;
+  } else if (k < 20 && d < 20) {
+    signal = "oversold";
+    strength = Math.min((20 - k) / 20, 1) * 100;
+  } 
+  // Bullish crossover: K crosses above D from oversold zone
+  else if (k > d && prevK <= prevD && k < 50) {
+    signal = "bullish_cross";
+    strength = Math.min((k - d) / 10, 1) * 80;
+  }
+  // Bearish crossover: K crosses below D from overbought zone
+  else if (k < d && prevK >= prevD && k > 50) {
+    signal = "bearish_cross";
+    strength = Math.min((d - k) / 10, 1) * 80;
+  }
+
+  return {
+    k: Math.round(k * 10) / 10,
+    d: Math.round(d * 10) / 10,
+    signal,
+    strength: Math.round(strength)
+  };
+}
+
 // Fixed: Uses aligned EMA arrays → correct MACD line and signal with full EMA history
 function calculateMACD(prices: number[]): { macd: number; signal: number; histogram: number } {
   if (prices.length < 35) return { macd: 0, signal: 0, histogram: 0 };
@@ -522,6 +620,16 @@ serve(async (req) => {
     const trend30m = calculateTrend(prices30m);
     const trend1h = calculateTrend(prices1h);
     const trend4h = calculateTrend(prices4h);
+
+    // Calculate Stochastic RSI for all timeframes
+    const stochRsi15m = calculateStochasticRSI(prices15m);
+    const stochRsi30m = calculateStochasticRSI(prices30m);
+    const stochRsi1h = calculateStochasticRSI(prices1h);
+    const stochRsi4h = calculateStochasticRSI(prices4h);
+
+    console.log(
+      `${symbol} StochRSI: 1h K=${stochRsi1h.k} D=${stochRsi1h.d} signal=${stochRsi1h.signal} | 4h K=${stochRsi4h.k} D=${stochRsi4h.d} signal=${stochRsi4h.signal}`
+    );
 
     const dominantTrend = trend4h.trend;
     const dominantConfidence = trend4h.confidence;
@@ -993,6 +1101,36 @@ serve(async (req) => {
           pricePosition: bb1h.pricePosition,
           percentB: bb1h.percentB,
           bandwidth: bb1h.bandwidth,
+        },
+        // Stochastic RSI analysis across timeframes - earlier overbought/oversold detection
+        stochasticRsi: {
+          "15m": stochRsi15m,
+          "30m": stochRsi30m,
+          "1h": stochRsi1h,
+          "4h": stochRsi4h,
+          // Aggregated signals for quick reference
+          primarySignal: stochRsi1h.signal,
+          primaryK: stochRsi1h.k,
+          primaryD: stochRsi1h.d,
+          // Cross-timeframe overbought/oversold
+          overboughtCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "overbought").length,
+          oversoldCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "oversold").length,
+          bullishCrossCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "bullish_cross").length,
+          bearishCrossCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "bearish_cross").length,
+          // Trading recommendations based on StochRSI
+          recommendation: (() => {
+            const ob = [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "overbought").length;
+            const os = [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "oversold").length;
+            const bc = [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "bullish_cross").length;
+            const bearC = [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "bearish_cross").length;
+            if (ob >= 3) return "strong_sell_warning";
+            if (os >= 3) return "strong_buy_opportunity";
+            if (ob >= 2 && stochRsi1h.signal === "overbought") return "sell_warning";
+            if (os >= 2 && stochRsi1h.signal === "oversold") return "buy_opportunity";
+            if (bc >= 2) return "bullish_momentum";
+            if (bearC >= 2) return "bearish_momentum";
+            return "neutral";
+          })(),
         },
         indicators: trend1h.indicators,
         trendConsistency: Math.round(weightedConsistency),
