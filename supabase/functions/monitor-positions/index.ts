@@ -61,43 +61,43 @@ serve(async (req) => {
       ]) || [],
     );
     console.log(`Loaded trailing stop settings for ${userSettingsMap.size} users`);
-    // Fetch current prices and ATR for all symbols
-    const symbols = [...new Set(positions.map((p) => p.symbol))];
-    // Fetch prices and calculate ATR for trailing stop loss
-    const symbolDataPromises = symbols.map(async (symbol) => {
-      try {
-        // Get current price
-        const priceResponse = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
-        if (!priceResponse.ok) throw new Error(`Price fetch failed for ${symbol}: ${priceResponse.status}`);
-        const priceData = await priceResponse.json();
-        if (!priceData.price) throw new Error(`No price data for ${symbol}`);
-        const price = parseFloat(priceData.price);
-        // Get last 30 klines to calculate ATR
-        const klinesResponse = await fetch(
-          `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=30`,
-        );
-        if (!klinesResponse.ok) throw new Error(`Klines fetch failed for ${symbol}: ${klinesResponse.status}`);
-        const klines = await klinesResponse.json();
-        if (!Array.isArray(klines) || klines.length < 15)
-          throw new Error(`Invalid or insufficient klines data for ${symbol}`);
-        // Calculate ATR (Average True Range)
-        const atrPeriod = 14;
-        let atrSum = 0;
-        for (let i = klines.length - atrPeriod; i < klines.length; i++) {
-          const high = parseFloat(klines[i][2]);
-          const low = parseFloat(klines[i][3]);
-          const prevClose = parseFloat(klines[i - 1][4]);
-          const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-          atrSum += tr;
-        }
-        const atr = atrSum / atrPeriod;
-        const atrPercent = (atr / price) * 100;
-        return { symbol, price, atr, atrPercent };
-      } catch (error) {
-        console.error(`Error fetching data for ${symbol}:`, error);
-        return { symbol, price: null, atr: null, atrPercent: null };
+  // Fetch current prices and ATR for all symbols
+  const symbols = [...new Set(positions.map((p) => p.symbol))];
+  // Fetch prices and calculate ATR for trailing stop loss using 1-HOUR klines (consistent with calculate-trend)
+  const symbolDataPromises = symbols.map(async (symbol) => {
+    try {
+      // Get current price
+      const priceResponse = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+      if (!priceResponse.ok) throw new Error(`Price fetch failed for ${symbol}: ${priceResponse.status}`);
+      const priceData = await priceResponse.json();
+      if (!priceData.price) throw new Error(`No price data for ${symbol}`);
+      const price = parseFloat(priceData.price);
+      // Get last 30 1-HOUR klines to calculate ATR (consistent with calculate-trend)
+      const klinesResponse = await fetch(
+        `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=30`,
+      );
+      if (!klinesResponse.ok) throw new Error(`Klines fetch failed for ${symbol}: ${klinesResponse.status}`);
+      const klines = await klinesResponse.json();
+      if (!Array.isArray(klines) || klines.length < 15)
+        throw new Error(`Invalid or insufficient klines data for ${symbol}`);
+      // Calculate ATR (Average True Range) using 1-hour data
+      const atrPeriod = 14;
+      let atrSum = 0;
+      for (let i = klines.length - atrPeriod; i < klines.length; i++) {
+        const high = parseFloat(klines[i][2]);
+        const low = parseFloat(klines[i][3]);
+        const prevClose = parseFloat(klines[i - 1][4]);
+        const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+        atrSum += tr;
       }
-    });
+      const atr = atrSum / atrPeriod;
+      const atrPercent = (atr / price) * 100;
+      return { symbol, price, atr, atrPercent };
+    } catch (error) {
+      console.error(`Error fetching data for ${symbol}:`, error);
+      return { symbol, price: null, atr: null, atrPercent: null };
+    }
+  });
     const symbolData = await Promise.all(symbolDataPromises);
     const priceMap = new Map(symbolData.filter((d) => d.price !== null).map((d) => [d.symbol, d.price]));
     const atrMap = new Map(
@@ -107,24 +107,27 @@ serve(async (req) => {
     const closedPositions = [];
     const trailingStopUpdates = [];
     const trendExits = [];
-    // Fetch trend data for all symbols to check for trend reversals
+    // Fetch trend data for all symbols in PARALLEL to check for trend reversals
     const trendDataMap = new Map();
-    for (const symbol of symbols) {
+    const trendPromises = symbols.map(async (symbol) => {
       try {
         const trendResponse = await supabase.functions.invoke("calculate-trend", {
           body: { symbol },
         });
         if (trendResponse.error) throw trendResponse.error;
-        if (trendResponse.data) {
-          trendDataMap.set(symbol, trendResponse.data);
-          console.log(
-            `Trend for ${symbol}: ${trendResponse.data.trend} (confidence: ${trendResponse.data.confidence}%)`,
-          );
-        }
+        return { symbol, data: trendResponse.data };
       } catch (error) {
         console.error(`Failed to fetch trend for ${symbol}:`, error);
+        return { symbol, data: null };
       }
-    }
+    });
+    const trendResults = await Promise.all(trendPromises);
+    trendResults.forEach(({ symbol, data }) => {
+      if (data) {
+        trendDataMap.set(symbol, data);
+        console.log(`Trend for ${symbol}: ${data.trend} (confidence: ${data.confidence}%)`);
+      }
+    });
     for (const position of positions) {
       const currentPrice = priceMap.get(position.symbol);
       if (currentPrice === undefined || currentPrice === null) continue;
@@ -327,12 +330,12 @@ serve(async (req) => {
         if (position.take_profit && currentPrice >= position.take_profit) {
           shouldClose = true;
           closeReason = "take_profit";
-        } else if (newStopLoss && currentPrice <= newStopLoss) {
+      } else if (newStopLoss && currentPrice <= newStopLoss) {
           shouldClose = true;
-          // If position was profitable (above activation threshold) when it hit stop loss,
-          // it must be a trailing stop loss, not a regular stop loss
-          const wasTrailing = userSettings.enabled && pnlPercent > userSettings.activationPercent;
-          closeReason = wasTrailing ? "trailing_stop_loss" : "stop_loss";
+          // Check if trailing stop was ever activated (stop loss was moved from original)
+          // If the stop loss is higher than entry price for a LONG, trailing was activated
+          const trailingWasActivated = userSettings.enabled && newStopLoss > position.entry_price * (1 - 0.02);
+          closeReason = trailingWasActivated ? "trailing_stop_loss" : "stop_loss";
         }
       } else if (!shouldClose && position.side === "SELL") {
         // SHORT: TP when price goes DOWN, SL when price goes UP
@@ -341,10 +344,10 @@ serve(async (req) => {
           closeReason = "take_profit";
         } else if (newStopLoss && currentPrice >= newStopLoss) {
           shouldClose = true;
-          // If position was profitable (above activation threshold) when it hit stop loss,
-          // it must be a trailing stop loss, not a regular stop loss
-          const wasTrailing = userSettings.enabled && pnlPercent > userSettings.activationPercent;
-          closeReason = wasTrailing ? "trailing_stop_loss" : "stop_loss";
+          // Check if trailing stop was ever activated (stop loss was moved from original)
+          // If the stop loss is lower than entry price for a SHORT, trailing was activated
+          const trailingWasActivated = userSettings.enabled && newStopLoss < position.entry_price * (1 + 0.02);
+          closeReason = trailingWasActivated ? "trailing_stop_loss" : "stop_loss";
         }
       }
       if (shouldClose) {
