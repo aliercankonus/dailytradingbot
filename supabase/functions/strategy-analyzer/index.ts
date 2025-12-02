@@ -68,15 +68,24 @@ const getMomentumScore = (momentum: any): number => {
   const state = momentum.state || "none";
   const confirms = momentum.confirms || false;
   const volumeConfirms = momentum.volumeConfirms || false;
+  const building = momentum.building || false;
+  const macdExpanding = momentum.macdExpanding || false;
   
   let score = 0;
   
   if (state === "confirmed" && confirms) {
     score = 20;
-  } else if (state === "building") {
+  } else if (state === "mixed" && macdExpanding) {
+    // Mixed with expanding MACD is better than just mixed
     score = 14;
+  } else if (building && macdExpanding) {
+    // Building momentum with MACD expansion
+    score = 12;
   } else if (state === "mixed") {
     score = 7;
+  } else if (macdExpanding) {
+    // MACD expanding without full confirmation
+    score = 5;
   } else {
     score = 0;
   }
@@ -88,46 +97,89 @@ const getMomentumScore = (momentum: any): number => {
 };
 
 // Alignment Score (0-20 points)
-const getAlignmentScore = (confidence: number, consistency: number, aligned: boolean): number => {
-  if (!aligned) return 0;
-  
+const getAlignmentScore = (confidence: number, consistency: number, aligned: boolean, trendData: any): number => {
   let score = 0;
   
-  // Confidence component (0-10)
-  if (confidence >= 75) score += 10;
-  else if (confidence >= 65) score += 8;
-  else if (confidence >= 55) score += 5;
-  else if (confidence >= 45) score += 3;
+  // Full alignment bonus
+  if (aligned) {
+    score += 8;
+  } else {
+    // Partial alignment: check if lower timeframes agree even if 4h is neutral
+    const htf = trendData?.higherTimeframeFilter;
+    const mtf = trendData?.multiTimeframe;
+    if (htf && mtf) {
+      const trend4h = htf.trend4h || mtf.trend4h;
+      const trend1h = htf.trend1h || mtf.trend1h;
+      const trend30m = mtf.trend30m;
+      
+      // 4h neutral with 1h+30m aligned = partial alignment
+      if (trend4h === "neutral" && trend1h === trend30m && trend1h !== "neutral") {
+        score += 5;
+      }
+      // 1h and 30m agree but different from 4h (divergence scenario)
+      else if (trend1h === trend30m && trend1h !== "neutral") {
+        score += 3;
+      }
+    }
+  }
   
-  // Consistency component (0-10)
-  if (consistency >= 70) score += 10;
-  else if (consistency >= 60) score += 8;
-  else if (consistency >= 50) score += 5;
-  else if (consistency >= 40) score += 3;
+  // Confidence component (0-6)
+  if (confidence >= 75) score += 6;
+  else if (confidence >= 65) score += 5;
+  else if (confidence >= 55) score += 4;
+  else if (confidence >= 45) score += 2;
+  
+  // Consistency component (0-6)
+  if (consistency >= 70) score += 6;
+  else if (consistency >= 60) score += 5;
+  else if (consistency >= 50) score += 4;
+  else if (consistency >= 40) score += 2;
   
   return Math.min(20, score);
 };
 
 // Technical Indicator Score (0-15 points)
-const getTechnicalScore = (stochRsiSignal: string, bollingerSignal: string, trend: string): number => {
+const getTechnicalScore = (trendData: any, effectiveTrend: string): number => {
   let score = 0;
   
-  // StochRSI signals
-  if (trend === "bullish") {
-    if (stochRsiSignal === "strong_oversold") score += 8;
-    else if (stochRsiSignal === "bullish_cross") score += 5;
-    else if (stochRsiSignal === "overbought_warning") score -= 3;
-  } else if (trend === "bearish") {
-    if (stochRsiSignal === "strong_overbought") score += 8;
-    else if (stochRsiSignal === "bearish_cross") score += 5;
-    else if (stochRsiSignal === "oversold_warning") score -= 3;
+  const stochRsi = trendData?.stochasticRsi;
+  const bollinger = trendData?.bollingerBands;
+  
+  if (!stochRsi || !bollinger) return 0;
+  
+  // StochRSI signals - use actual values from calculate-trend
+  const primarySignal = stochRsi.primarySignal || stochRsi["1h"]?.signal;
+  const primaryK = stochRsi.primaryK || stochRsi["1h"]?.k || 50;
+  
+  if (effectiveTrend === "bullish") {
+    // Oversold on bullish trend = good entry
+    if (primarySignal === "oversold" || primaryK < 20) score += 8;
+    else if (primaryK < 30) score += 5;
+    // Overbought on bullish = risky
+    else if (primarySignal === "overbought" || primaryK > 80) score -= 2;
+  } else if (effectiveTrend === "bearish") {
+    // Overbought on bearish trend = good entry
+    if (primarySignal === "overbought" || primaryK > 80) score += 8;
+    else if (primaryK > 70) score += 5;
+    // Oversold on bearish = risky
+    else if (primarySignal === "oversold" || primaryK < 20) score -= 2;
   }
   
-  // Bollinger signals
-  if (bollingerSignal === "squeeze_breakout") score += 7;
-  else if (bollingerSignal === "squeeze") score += 4;
-  else if (trend === "bullish" && bollingerSignal === "near_lower_band") score += 5;
-  else if (trend === "bearish" && bollingerSignal === "near_upper_band") score += 5;
+  // Bollinger signals - use actual values
+  const squeeze = bollinger.squeeze || bollinger.squeezeActive || bollinger["1h"]?.squeeze;
+  const pricePosition = bollinger.pricePosition || bollinger["1h"]?.pricePosition;
+  const percentB = bollinger.percentB || bollinger["1h"]?.percentB || 50;
+  
+  if (squeeze) {
+    score += 5; // Squeeze = potential breakout
+  }
+  
+  // Price near bands in trend direction
+  if (effectiveTrend === "bullish" && (pricePosition === "lower_zone" || percentB < 30)) {
+    score += 4; // Good pullback entry for long
+  } else if (effectiveTrend === "bearish" && (pricePosition === "upper_zone" || percentB > 70)) {
+    score += 4; // Good pullback entry for short
+  }
   
   return Math.max(0, Math.min(15, score));
 };
@@ -691,8 +743,8 @@ serve(async (req) => {
         const qualityFactors: QualityFactors = {
           adxScore: getAdxScore(adx),
           momentumScore: getMomentumScore(momentum),
-          alignmentScore: getAlignmentScore(confidence, trendConsistency, higherTimeframeFilter?.aligned || false),
-          technicalScore: getTechnicalScore(stochRsiEval.signal, bollingerEval.signal, trend),
+          alignmentScore: getAlignmentScore(confidence, trendConsistency, higherTimeframeFilter?.aligned || false, trendData),
+          technicalScore: getTechnicalScore(trendData, trend),
           entryTimingScore: Math.max(0, pullbackAnalysis.entryTimingScore),
         };
 
