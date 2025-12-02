@@ -67,7 +67,50 @@ function calculateRSI(prices: number[], period = 14): number {
   return 100 - 100 / (1 + rs);
 }
 
+// Optimized: Calculate all RSI values in a single O(n) pass using Wilder's smoothing
+function calculateRSIArray(prices: number[], period = 14): number[] {
+  const rsiArray: number[] = [];
+  
+  if (prices.length < period + 1) return rsiArray;
+
+  let avgGain = 0;
+  let avgLoss = 0;
+
+  // Initial average calculation
+  for (let i = 1; i <= period; i++) {
+    const change = prices[i] - prices[i - 1];
+    if (change > 0) avgGain += change;
+    else avgLoss += Math.abs(change);
+  }
+  avgGain /= period;
+  avgLoss /= period;
+
+  // First RSI value at index = period
+  const firstRS = avgLoss === 0 ? 100 : avgGain / avgLoss;
+  rsiArray.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + firstRS));
+
+  // Subsequent RSI values using Wilder's smoothing
+  for (let i = period + 1; i < prices.length; i++) {
+    const change = prices[i] - prices[i - 1];
+    const gain = change > 0 ? change : 0;
+    const loss = change < 0 ? Math.abs(change) : 0;
+
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+
+    if (avgLoss === 0) {
+      rsiArray.push(100);
+    } else {
+      const rs = avgGain / avgLoss;
+      rsiArray.push(100 - 100 / (1 + rs));
+    }
+  }
+
+  return rsiArray;
+}
+
 // Stochastic RSI calculation - earlier overbought/oversold detection
+// Optimized: O(n) complexity using pre-calculated RSI array instead of O(n²)
 function calculateStochasticRSI(prices: number[], rsiPeriod = 14, stochPeriod = 14, kSmooth = 3, dSmooth = 3): {
   k: number;
   d: number;
@@ -78,13 +121,8 @@ function calculateStochasticRSI(prices: number[], rsiPeriod = 14, stochPeriod = 
     return { k: 50, d: 50, signal: "neutral", strength: 0 };
   }
 
-  // Calculate RSI values for the required period
-  const rsiValues: number[] = [];
-  for (let i = rsiPeriod; i < prices.length; i++) {
-    const priceSlice = prices.slice(0, i + 1);
-    const rsi = calculateRSI(priceSlice, rsiPeriod);
-    rsiValues.push(rsi);
-  }
+  // Optimized: Calculate all RSI values in single O(n) pass
+  const rsiValues = calculateRSIArray(prices, rsiPeriod);
 
   if (rsiValues.length < stochPeriod) {
     return { k: 50, d: 50, signal: "neutral", strength: 0 };
