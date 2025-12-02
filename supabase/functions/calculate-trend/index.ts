@@ -128,6 +128,45 @@ function calculateVolumeAnalysis(klines: any[]): {
   };
 }
 
+// Helper: Calculate historical ATR average using optimized sliding window O(n)
+function calculateHistoricalATRAvg(klines: any[], atrPeriod: number, atrLookback: number, currentATR: number): number {
+  const historicalKlines = klines.slice(-atrLookback - atrPeriod);
+  if (historicalKlines.length < atrPeriod + 1) return currentATR;
+  
+  let historicalATRSum = 0;
+  let historicalATRCount = 0;
+  let windowTRSum = 0;
+  
+  // Initialize first window
+  for (let i = 1; i <= atrPeriod; i++) {
+    const high = parseFloat(historicalKlines[i][2]);
+    const low = parseFloat(historicalKlines[i][3]);
+    const prevClose = parseFloat(historicalKlines[i - 1][4]);
+    windowTRSum += Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+  }
+  historicalATRSum += windowTRSum / atrPeriod;
+  historicalATRCount++;
+  
+  // Slide window through remaining data
+  for (let j = atrPeriod + 1; j < historicalKlines.length; j++) {
+    const oldHigh = parseFloat(historicalKlines[j - atrPeriod][2]);
+    const oldLow = parseFloat(historicalKlines[j - atrPeriod][3]);
+    const oldPrevClose = parseFloat(historicalKlines[j - atrPeriod - 1][4]);
+    const oldTR = Math.max(oldHigh - oldLow, Math.abs(oldHigh - oldPrevClose), Math.abs(oldLow - oldPrevClose));
+    
+    const newHigh = parseFloat(historicalKlines[j][2]);
+    const newLow = parseFloat(historicalKlines[j][3]);
+    const newPrevClose = parseFloat(historicalKlines[j - 1][4]);
+    const newTR = Math.max(newHigh - newLow, Math.abs(newHigh - newPrevClose), Math.abs(newLow - newPrevClose));
+    
+    windowTRSum = windowTRSum - oldTR + newTR;
+    historicalATRSum += windowTRSum / atrPeriod;
+    historicalATRCount++;
+  }
+  
+  return historicalATRCount > 0 ? historicalATRSum / historicalATRCount : currentATR;
+}
+
 // Fixed: Proper Wilder’s ADX with correct smoothing
 function calculateADX(klines: any[], period = 14): number {
   if (klines.length < period + 2) return 0;
@@ -547,44 +586,7 @@ serve(async (req) => {
         atr1hSum += tr;
       }
       const currentATR1h = atr1hKlines.length > 1 ? atr1hSum / (atr1hKlines.length - 1) : 0;
-      // Optimized: Calculate historical ATR using sliding window (O(n) instead of O(n²))
-      const historical1hKlines = klines1h.slice(-atr1hLookback - atr1hPeriod);
-      let historical1hATRSum = 0;
-      let historical1hATRCount = 0;
-      
-      if (historical1hKlines.length >= atr1hPeriod + 1) {
-        // Initialize first window
-        let windowTRSum = 0;
-        for (let i = 1; i <= atr1hPeriod; i++) {
-          const high = parseFloat(historical1hKlines[i][2]);
-          const low = parseFloat(historical1hKlines[i][3]);
-          const prevClose = parseFloat(historical1hKlines[i - 1][4]);
-          const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-          windowTRSum += tr;
-        }
-        historical1hATRSum += windowTRSum / atr1hPeriod;
-        historical1hATRCount++;
-        
-        // Slide window through remaining data
-        for (let j = atr1hPeriod + 1; j < historical1hKlines.length; j++) {
-          // Remove oldest TR from window
-          const oldHigh = parseFloat(historical1hKlines[j - atr1hPeriod][2]);
-          const oldLow = parseFloat(historical1hKlines[j - atr1hPeriod][3]);
-          const oldPrevClose = parseFloat(historical1hKlines[j - atr1hPeriod - 1][4]);
-          const oldTR = Math.max(oldHigh - oldLow, Math.abs(oldHigh - oldPrevClose), Math.abs(oldLow - oldPrevClose));
-          
-          // Add new TR to window
-          const newHigh = parseFloat(historical1hKlines[j][2]);
-          const newLow = parseFloat(historical1hKlines[j][3]);
-          const newPrevClose = parseFloat(historical1hKlines[j - 1][4]);
-          const newTR = Math.max(newHigh - newLow, Math.abs(newHigh - newPrevClose), Math.abs(newLow - newPrevClose));
-          
-          windowTRSum = windowTRSum - oldTR + newTR;
-          historical1hATRSum += windowTRSum / atr1hPeriod;
-          historical1hATRCount++;
-        }
-      }
-      const historical1hATRAvg = historical1hATRCount > 0 ? historical1hATRSum / historical1hATRCount : currentATR1h;
+      const historical1hATRAvg = calculateHistoricalATRAvg(klines1h, atr1hPeriod, atr1hLookback, currentATR1h);
       const relative1hATR = historical1hATRAvg !== 0 ? currentATR1h / historical1hATRAvg : 0;
       const atrNotExtremelyCompressed = relative1hATR >= 0.5; // Less strict than ranging detection (0.6)
       // Allow if all conditions are met
@@ -654,44 +656,7 @@ serve(async (req) => {
     }
     const currentATR = atrKlines.length > 1 ? atrSum / (atrKlines.length - 1) : 0;
     const atrPercent = currentPrice !== 0 ? (currentATR / currentPrice) * 100 : 0;
-    // Optimized: Calculate historical ATR using sliding window (O(n) instead of O(n²))
-    const historicalKlines = klines1h.slice(-atrLookback - atrPeriod);
-    let historicalATRSum = 0;
-    let historicalATRCount = 0;
-    
-    if (historicalKlines.length >= atrPeriod + 1) {
-      // Initialize first window
-      let windowTRSum = 0;
-      for (let i = 1; i <= atrPeriod; i++) {
-        const high = parseFloat(historicalKlines[i][2]);
-        const low = parseFloat(historicalKlines[i][3]);
-        const prevClose = parseFloat(historicalKlines[i - 1][4]);
-        const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-        windowTRSum += tr;
-      }
-      historicalATRSum += windowTRSum / atrPeriod;
-      historicalATRCount++;
-      
-      // Slide window through remaining data
-      for (let j = atrPeriod + 1; j < historicalKlines.length; j++) {
-        // Remove oldest TR from window
-        const oldHigh = parseFloat(historicalKlines[j - atrPeriod][2]);
-        const oldLow = parseFloat(historicalKlines[j - atrPeriod][3]);
-        const oldPrevClose = parseFloat(historicalKlines[j - atrPeriod - 1][4]);
-        const oldTR = Math.max(oldHigh - oldLow, Math.abs(oldHigh - oldPrevClose), Math.abs(oldLow - oldPrevClose));
-        
-        // Add new TR to window
-        const newHigh = parseFloat(historicalKlines[j][2]);
-        const newLow = parseFloat(historicalKlines[j][3]);
-        const newPrevClose = parseFloat(historicalKlines[j - 1][4]);
-        const newTR = Math.max(newHigh - newLow, Math.abs(newHigh - newPrevClose), Math.abs(newLow - newPrevClose));
-        
-        windowTRSum = windowTRSum - oldTR + newTR;
-        historicalATRSum += windowTRSum / atrPeriod;
-        historicalATRCount++;
-      }
-    }
-    const historicalATRAvg = historicalATRCount > 0 ? historicalATRSum / historicalATRCount : currentATR;
+    const historicalATRAvg = calculateHistoricalATRAvg(klines1h, atrPeriod, atrLookback, currentATR);
     const relativeATR = historicalATRAvg !== 0 ? currentATR / historicalATRAvg : 0;
     // Calculate ADX for trend strength
     const adx = calculateADX(klines1h, 14);
