@@ -272,7 +272,8 @@ async function rebalanceUserPositions(
         body: { 
           positionId: position.id,
           manualClose: false,
-          closedByRebalancer: true
+          closedByRebalancer: true,
+          user_id: position.user_id // Required for service role calls
         }
       });
 
