@@ -94,6 +94,92 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
   return { macd, signal: signalLine, histogram };
 }
 
+// Bollinger Bands calculation with squeeze detection
+function calculateBollingerBands(prices: number[], period = 20, stdDevMultiplier = 2): {
+  upper: number;
+  middle: number;
+  lower: number;
+  bandwidth: number;
+  percentB: number;
+  squeeze: boolean;
+  squeezeIntensity: number;
+  pricePosition: "above_upper" | "upper_zone" | "middle" | "lower_zone" | "below_lower";
+} {
+  if (prices.length < period) {
+    return {
+      upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50,
+      squeeze: false, squeezeIntensity: 0, pricePosition: "middle"
+    };
+  }
+
+  const recentPrices = prices.slice(-period);
+  const sma = recentPrices.reduce((a, b) => a + b, 0) / period;
+  
+  // Calculate standard deviation
+  const squaredDiffs = recentPrices.map(price => Math.pow(price - sma, 2));
+  const avgSquaredDiff = squaredDiffs.reduce((a, b) => a + b, 0) / period;
+  const stdDev = Math.sqrt(avgSquaredDiff);
+  
+  const upper = sma + (stdDevMultiplier * stdDev);
+  const lower = sma - (stdDevMultiplier * stdDev);
+  const currentPrice = prices[prices.length - 1];
+  
+  // Bandwidth: (Upper - Lower) / Middle * 100
+  const bandwidth = sma !== 0 ? ((upper - lower) / sma) * 100 : 0;
+  
+  // %B: (Price - Lower) / (Upper - Lower) * 100
+  const bandRange = upper - lower;
+  const percentB = bandRange !== 0 ? ((currentPrice - lower) / bandRange) * 100 : 50;
+  
+  // Squeeze detection: Compare current bandwidth to historical average
+  // Calculate historical bandwidths for last 50 periods
+  let historicalBandwidths: number[] = [];
+  for (let i = period; i <= Math.min(prices.length, period + 50); i++) {
+    const histPrices = prices.slice(i - period, i);
+    const histSma = histPrices.reduce((a, b) => a + b, 0) / period;
+    const histSquaredDiffs = histPrices.map(p => Math.pow(p - histSma, 2));
+    const histStdDev = Math.sqrt(histSquaredDiffs.reduce((a, b) => a + b, 0) / period);
+    const histUpper = histSma + (stdDevMultiplier * histStdDev);
+    const histLower = histSma - (stdDevMultiplier * histStdDev);
+    const histBandwidth = histSma !== 0 ? ((histUpper - histLower) / histSma) * 100 : 0;
+    historicalBandwidths.push(histBandwidth);
+  }
+  
+  const avgBandwidth = historicalBandwidths.length > 0 
+    ? historicalBandwidths.reduce((a, b) => a + b, 0) / historicalBandwidths.length 
+    : bandwidth;
+  
+  // Squeeze: current bandwidth < 75% of average bandwidth
+  const squeeze = bandwidth < avgBandwidth * 0.75;
+  // Squeeze intensity: how tight (0-100, higher = tighter)
+  const squeezeIntensity = avgBandwidth > 0 
+    ? Math.max(0, Math.min(100, (1 - bandwidth / avgBandwidth) * 100)) 
+    : 0;
+  
+  // Price position relative to bands
+  let pricePosition: "above_upper" | "upper_zone" | "middle" | "lower_zone" | "below_lower" = "middle";
+  if (currentPrice > upper) {
+    pricePosition = "above_upper";
+  } else if (currentPrice > sma + (stdDev * 1)) {
+    pricePosition = "upper_zone";
+  } else if (currentPrice < lower) {
+    pricePosition = "below_lower";
+  } else if (currentPrice < sma - (stdDev * 1)) {
+    pricePosition = "lower_zone";
+  }
+  
+  return {
+    upper: Math.round(upper * 100) / 100,
+    middle: Math.round(sma * 100) / 100,
+    lower: Math.round(lower * 100) / 100,
+    bandwidth: Math.round(bandwidth * 100) / 100,
+    percentB: Math.round(percentB * 10) / 10,
+    squeeze,
+    squeezeIntensity: Math.round(squeezeIntensity),
+    pricePosition
+  };
+}
+
 function calculateVolumeAnalysis(klines: any[]): {
   volumeSpike: boolean;
   volumeRatio: number;
@@ -651,6 +737,20 @@ serve(async (req) => {
     const volume15m = calculateVolumeAnalysis(klines15m);
     const volume30m = calculateVolumeAnalysis(klines30m);
     const volume1h = calculateVolumeAnalysis(klines1h);
+    
+    // Calculate Bollinger Bands for all timeframes
+    const bb15m = calculateBollingerBands(prices15m, 20, 2);
+    const bb30m = calculateBollingerBands(prices30m, 20, 2);
+    const bb1h = calculateBollingerBands(prices1h, 20, 2);
+    const bb4h = calculateBollingerBands(prices4h, 20, 2);
+    
+    // Detect potential breakout conditions
+    const bollingerSqueezeActive = bb1h.squeeze || bb4h.squeeze;
+    const squeezeBreakoutPotential = bollingerSqueezeActive && bb1h.squeezeIntensity > 50;
+    
+    console.log(
+      `${symbol} BOLLINGER: 1h squeeze=${bb1h.squeeze}(${bb1h.squeezeIntensity}%) 4h squeeze=${bb4h.squeeze}(${bb4h.squeezeIntensity}%) position=${bb1h.pricePosition} %B=${bb1h.percentB}`
+    );
     const volume4h = calculateVolumeAnalysis(klines4h);
     // COMBINED RANGING DETECTION:
     // Market is ranging if BOTH conditions are true:
@@ -877,6 +977,22 @@ serve(async (req) => {
           "30m": volume30m,
           "1h": volume1h,
           "4h": volume4h,
+        },
+        // Bollinger Bands analysis across timeframes
+        bollingerBands: {
+          "15m": bb15m,
+          "30m": bb30m,
+          "1h": bb1h,
+          "4h": bb4h,
+          // Aggregated squeeze analysis
+          squeezeActive: bollingerSqueezeActive,
+          breakoutPotential: squeezeBreakoutPotential,
+          // Primary timeframe (1h) details for quick access
+          squeeze: bb1h.squeeze,
+          squeezeIntensity: bb1h.squeezeIntensity,
+          pricePosition: bb1h.pricePosition,
+          percentB: bb1h.percentB,
+          bandwidth: bb1h.bandwidth,
         },
         indicators: trend1h.indicators,
         trendConsistency: Math.round(weightedConsistency),
