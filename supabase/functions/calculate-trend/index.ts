@@ -67,24 +67,28 @@ function calculateRSI(prices: number[], period = 14): number {
   return 100 - 100 / (1 + rs);
 }
 
-// Fixed: Uses aligned EMA arrays → correct MACD line and signal
+// Fixed: Uses aligned EMA arrays → correct MACD line and signal with full EMA history
 function calculateMACD(prices: number[]): { macd: number; signal: number; histogram: number } {
   if (prices.length < 35) return { macd: 0, signal: 0, histogram: 0 };
 
   const ema12Array = calculateEMAArray(prices, 12);
   const ema26Array = calculateEMAArray(prices, 26);
 
+  // Build full MACD line from index 25 (first valid point where both EMAs exist)
   const macdLine: number[] = [];
-  const startIdx = Math.max(34, prices.length - 100);
-
-  for (let i = startIdx; i < prices.length; i++) {
-    const e12 = ema12Array[i] ?? 0;
-    const e26 = ema26Array[i] ?? 0;
-    macdLine.push(e12 - e26);
+  for (let i = 25; i < prices.length; i++) {
+    const e12 = ema12Array[i];
+    const e26 = ema26Array[i];
+    if (!Number.isNaN(e12) && !Number.isNaN(e26)) {
+      macdLine.push(e12 - e26);
+    }
   }
 
+  if (macdLine.length === 0) return { macd: 0, signal: 0, histogram: 0 };
+
   const macd = macdLine[macdLine.length - 1];
-  const signalLine = macdLine.length >= 9 ? calculateEMA(macdLine.slice(-50), 9) : macd;
+  // Use full MACD line for signal EMA calculation (not truncated slice)
+  const signalLine = macdLine.length >= 9 ? calculateEMA(macdLine, 9) : macd;
   const histogram = macd - signalLine;
 
   return { macd, signal: signalLine, histogram };
