@@ -236,6 +236,27 @@ function validateMarketStructure(
   return { valid: false, confidence: 0 };
 }
 
+// Helper functions for cleaner divergence handling
+function calculateRecommendedPositionSize(divergenceType: string): number {
+  switch (divergenceType) {
+    case "aligned": return 100;
+    case "pullback": return 50;
+    case "early_reversal": return 40;
+    default: return 0;
+  }
+}
+
+function calculateTradeDirection(
+  divergenceType: string,
+  dominantTrend: "bullish" | "bearish" | "neutral",
+  trend1hTrend: "bullish" | "bearish" | "neutral",
+  primaryTrend: "bullish" | "bearish" | "neutral" | "ranging"
+): "bullish" | "bearish" | "neutral" | "ranging" {
+  if (divergenceType === "pullback") return dominantTrend;
+  if (divergenceType === "early_reversal") return trend1hTrend;
+  return primaryTrend;
+}
+
 function calculateTrend(prices: number[]): {
   trend: "bullish" | "bearish" | "neutral";
   confidence: number;
@@ -511,7 +532,7 @@ serve(async (req) => {
       const macdAligned = dominantTrend === "bullish" ? macd1h >= 0 : macd1h <= 0;
       // Check if 1h has sufficient activity (not dead/ranging)
       const adx1h = calculateADX(klines1h, 14);
-      const hasActivity = adx1h >= 15;
+      const hasActivity = adx1h >= 20; // Standardized ADX threshold
       // Check relative ATR on 1h (not extremely compressed)
       const atr1hPeriod = 14;
       const atr1hLookback = 30;
@@ -525,22 +546,40 @@ serve(async (req) => {
         atr1hSum += tr;
       }
       const currentATR1h = atr1hKlines.length > 1 ? atr1hSum / (atr1hKlines.length - 1) : 0;
+      // Optimized: Calculate historical ATR using sliding window (O(n) instead of O(n²))
       const historical1hKlines = klines1h.slice(-atr1hLookback - atr1hPeriod);
       let historical1hATRSum = 0;
       let historical1hATRCount = 0;
+      
       if (historical1hKlines.length >= atr1hPeriod + 1) {
-        for (let j = atr1hPeriod; j < historical1hKlines.length; j++) {
-          let periodATRSum = 0;
-          for (let i = 1; i <= atr1hPeriod; i++) {
-            const idx = j - atr1hPeriod + i;
-            if (idx >= historical1hKlines.length) continue;
-            const high = parseFloat(historical1hKlines[idx][2]);
-            const low = parseFloat(historical1hKlines[idx][3]);
-            const prevClose = parseFloat(historical1hKlines[idx - 1][4]);
-            const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-            periodATRSum += tr;
-          }
-          historical1hATRSum += periodATRSum / atr1hPeriod;
+        // Initialize first window
+        let windowTRSum = 0;
+        for (let i = 1; i <= atr1hPeriod; i++) {
+          const high = parseFloat(historical1hKlines[i][2]);
+          const low = parseFloat(historical1hKlines[i][3]);
+          const prevClose = parseFloat(historical1hKlines[i - 1][4]);
+          const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+          windowTRSum += tr;
+        }
+        historical1hATRSum += windowTRSum / atr1hPeriod;
+        historical1hATRCount++;
+        
+        // Slide window through remaining data
+        for (let j = atr1hPeriod + 1; j < historical1hKlines.length; j++) {
+          // Remove oldest TR from window
+          const oldHigh = parseFloat(historical1hKlines[j - atr1hPeriod][2]);
+          const oldLow = parseFloat(historical1hKlines[j - atr1hPeriod][3]);
+          const oldPrevClose = parseFloat(historical1hKlines[j - atr1hPeriod - 1][4]);
+          const oldTR = Math.max(oldHigh - oldLow, Math.abs(oldHigh - oldPrevClose), Math.abs(oldLow - oldPrevClose));
+          
+          // Add new TR to window
+          const newHigh = parseFloat(historical1hKlines[j][2]);
+          const newLow = parseFloat(historical1hKlines[j][3]);
+          const newPrevClose = parseFloat(historical1hKlines[j - 1][4]);
+          const newTR = Math.max(newHigh - newLow, Math.abs(newHigh - newPrevClose), Math.abs(newLow - newPrevClose));
+          
+          windowTRSum = windowTRSum - oldTR + newTR;
+          historical1hATRSum += windowTRSum / atr1hPeriod;
           historical1hATRCount++;
         }
       }
@@ -614,23 +653,40 @@ serve(async (req) => {
     }
     const currentATR = atrKlines.length > 1 ? atrSum / (atrKlines.length - 1) : 0;
     const atrPercent = currentPrice !== 0 ? (currentATR / currentPrice) * 100 : 0;
-    // Calculate historical ATR average (30-period lookback)
+    // Optimized: Calculate historical ATR using sliding window (O(n) instead of O(n²))
     const historicalKlines = klines1h.slice(-atrLookback - atrPeriod);
     let historicalATRSum = 0;
     let historicalATRCount = 0;
+    
     if (historicalKlines.length >= atrPeriod + 1) {
-      for (let j = atrPeriod; j < historicalKlines.length; j++) {
-        let periodATRSum = 0;
-        for (let i = 1; i <= atrPeriod; i++) {
-          const idx = j - atrPeriod + i;
-          if (idx >= historicalKlines.length) continue;
-          const high = parseFloat(historicalKlines[idx][2]);
-          const low = parseFloat(historicalKlines[idx][3]);
-          const prevClose = parseFloat(historicalKlines[idx - 1][4]);
-          const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-          periodATRSum += tr;
-        }
-        historicalATRSum += periodATRSum / atrPeriod;
+      // Initialize first window
+      let windowTRSum = 0;
+      for (let i = 1; i <= atrPeriod; i++) {
+        const high = parseFloat(historicalKlines[i][2]);
+        const low = parseFloat(historicalKlines[i][3]);
+        const prevClose = parseFloat(historicalKlines[i - 1][4]);
+        const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+        windowTRSum += tr;
+      }
+      historicalATRSum += windowTRSum / atrPeriod;
+      historicalATRCount++;
+      
+      // Slide window through remaining data
+      for (let j = atrPeriod + 1; j < historicalKlines.length; j++) {
+        // Remove oldest TR from window
+        const oldHigh = parseFloat(historicalKlines[j - atrPeriod][2]);
+        const oldLow = parseFloat(historicalKlines[j - atrPeriod][3]);
+        const oldPrevClose = parseFloat(historicalKlines[j - atrPeriod - 1][4]);
+        const oldTR = Math.max(oldHigh - oldLow, Math.abs(oldHigh - oldPrevClose), Math.abs(oldLow - oldPrevClose));
+        
+        // Add new TR to window
+        const newHigh = parseFloat(historicalKlines[j][2]);
+        const newLow = parseFloat(historicalKlines[j][3]);
+        const newPrevClose = parseFloat(historicalKlines[j - 1][4]);
+        const newTR = Math.max(newHigh - newLow, Math.abs(newHigh - newPrevClose), Math.abs(newLow - newPrevClose));
+        
+        windowTRSum = windowTRSum - oldTR + newTR;
+        historicalATRSum += windowTRSum / atrPeriod;
         historicalATRCount++;
       }
     }
@@ -647,9 +703,9 @@ serve(async (req) => {
     // COMBINED RANGING DETECTION:
     // Market is ranging if BOTH conditions are true:
     // 1. Relative ATR < 0.6 (current volatility 40% below historical average)
-    // 2. ADX < 25 (weak trend strength)
+    // 2. ADX < 20 (weak trend strength) - standardized threshold
     const atrCompressed = relativeATR < 0.6;
-    const adxWeak = adx < 25;
+    const adxWeak = adx < 20;
     const isRanging = atrCompressed && adxWeak;
     const volatilityNormal = !isRanging && atrPercent < 5.0;
     if (isRanging) {
@@ -730,10 +786,10 @@ serve(async (req) => {
     }
 
     // Volume confirmation: check if volume supports the momentum
-    // For high-conviction signals, volume should increase with trend
+    // Bullish trends need increasing volume, bearish trends need volume (either direction works in downtrends)
     const volumeConfirmsDirection = 
       (effectiveTrendForMomentum === "bullish" && volume1h.volumeTrend === "increasing") ||
-      (effectiveTrendForMomentum === "bearish" && volume1h.volumeTrend === "increasing") ||
+      (effectiveTrendForMomentum === "bearish" && (volume1h.volumeTrend === "increasing" || volume1h.volumeTrend === "decreasing")) ||
       volume1h.volumeSpike; // Volume spike is always confirmatory
     
     const volumeBoost = volumeConfirmsDirection ? 1.15 : 1.0; // 15% confidence boost with volume confirmation
@@ -763,7 +819,8 @@ serve(async (req) => {
       (effectiveTrendForMomentum === "bearish" && macdHistogram < 0) ||
       effectiveTrendForMomentum === "neutral";
 
-    const macdExpanding = Math.abs(macdHistogram) > 0.01 && macdDirectionAligned;
+    // Increased threshold from 0.01 to 0.05 to reduce noise sensitivity
+    const macdExpanding = Math.abs(macdHistogram) > 0.05 && macdDirectionAligned;
     const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned;
 
     // NEW SIMPLIFIED MOMENTUM GATE (volume is optional boost, not required):
@@ -806,21 +863,9 @@ serve(async (req) => {
           divergenceType: divergenceType,
           divergenceConfidence: Math.round(divergenceConfidence),
           allowDivergenceSignal: allowDivergenceSignal,
-          // Guidance for signal generators
-          recommendedPositionSize:
-            divergenceType === "aligned"
-              ? 100
-              : divergenceType === "pullback"
-                ? 50
-                : divergenceType === "early_reversal"
-                  ? 40
-                  : 0,
-          tradeDirection:
-            divergenceType === "pullback"
-              ? dominantTrend
-              : divergenceType === "early_reversal"
-                ? trend1h.trend
-                : primaryTrend,
+          // Guidance for signal generators - refactored for readability
+          recommendedPositionSize: calculateRecommendedPositionSize(divergenceType),
+          tradeDirection: calculateTradeDirection(divergenceType, dominantTrend, trend1h.trend, primaryTrend),
         },
         // Pullback detection
         pullback: {
