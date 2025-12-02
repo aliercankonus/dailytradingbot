@@ -12,9 +12,26 @@ serve(async (req) => {
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    // Validate environment variables
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('Missing required environment variables: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+    }
+    
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Parse request body with proper error handling
+    let body: { signalId?: string; action?: string };
+    try {
+      body = await req.json();
+    } catch (parseError) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Invalid JSON in request body' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Check for service-level user ID (from auto-trader)
     const serviceUserId = req.headers.get("x-user-id");
@@ -56,7 +73,7 @@ serve(async (req) => {
       console.log(`Execute trade called by user: ${user.id}`);
     }
 
-    const { signalId, action } = await req.json();
+    const { signalId, action } = body;
     console.log('Execute trade request:', { signalId, action, userId: user.id });
     
     // Check if this is a manual execution (from UI button click)
@@ -295,8 +312,9 @@ serve(async (req) => {
     }
     
     // Breakout detection - price moving from squeeze
-    const aggregatedBB = trendData?.aggregatedBollingerSignals || {};
-    if (aggregatedBB.breakoutPotential === 'high') {
+    // Fix: Use correct field from calculate-trend response
+    const breakoutPotential = trendData?.bollingerBands?.breakoutPotential || false;
+    if (breakoutPotential) {
       console.log(`🚀 HIGH BREAKOUT POTENTIAL detected - bands expanding after squeeze`);
       bollingerBoostMultiplier *= 1.1; // Additional 10% for breakout momentum
     }
