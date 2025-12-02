@@ -403,6 +403,7 @@ serve(async (req) => {
       return tfTrend !== dominantTrend;
     };
 
+    // Check trend alignment and opposition for weighted consistency calculation
     const confirmation1h = trend1h.trend === dominantTrend;
     const confirmation30m = trend30m.trend === dominantTrend;
     const confirmation15m = trend15m.trend === dominantTrend;
@@ -776,10 +777,10 @@ serve(async (req) => {
     }
 
     // Volume confirmation: check if volume supports the momentum
-    // Bullish trends need increasing volume, bearish trends need volume (either direction works in downtrends)
+    // Both bullish and bearish trends need increasing volume (panic selling = high volume)
     const volumeConfirmsDirection = 
       (effectiveTrendForMomentum === "bullish" && volume1h.volumeTrend === "increasing") ||
-      (effectiveTrendForMomentum === "bearish" && (volume1h.volumeTrend === "increasing" || volume1h.volumeTrend === "decreasing")) ||
+      (effectiveTrendForMomentum === "bearish" && volume1h.volumeTrend === "increasing") ||
       volume1h.volumeSpike; // Volume spike is always confirmatory
     
     const volumeBoost = volumeConfirmsDirection ? 1.15 : 1.0; // 15% confidence boost with volume confirmation
