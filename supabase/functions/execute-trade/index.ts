@@ -238,14 +238,18 @@ serve(async (req) => {
     }
     console.log(`✓ Volume check passed: $${(quoteVolume24h/1_000_000).toFixed(2)}M >= $${minQuoteVolume/1_000_000}M minimum`);
 
-    // Fetch recent klines to analyze volume profile (last 20 periods of 15m)
-    const klineResponse = await fetch(`https://api.binance.com/api/v3/klines?symbol=${signal.symbol}&interval=15m&limit=20`);
+    // Fetch recent klines to analyze volume profile (last 50 periods of 15m for OBV calculation)
+    const klineResponse = await fetch(`https://api.binance.com/api/v3/klines?symbol=${signal.symbol}&interval=15m&limit=50`);
     if (!klineResponse.ok) {
       console.warn('Failed to fetch klines for volume profile analysis, proceeding with basic checks');
     } else {
       const klines = await klineResponse.json();
       const volumes = klines.map((k: any[]) => parseFloat(k[5])); // Volume is at index 5
-      const avgVolume = volumes.reduce((a: number, b: number) => a + b, 0) / volumes.length;
+      const closes = klines.map((k: any[]) => parseFloat(k[4])); // Close price at index 4
+      
+      // Calculate basic volume metrics
+      const recentVolumes = volumes.slice(-20);
+      const avgVolume = recentVolumes.reduce((a: number, b: number) => a + b, 0) / recentVolumes.length;
       const currentVolume = volumes[volumes.length - 1];
       const volumeRatio = currentVolume / avgVolume;
 
@@ -260,6 +264,72 @@ serve(async (req) => {
       if (volumeRatio > 2.0) {
         console.log(`⚡ VOLUME SPIKE detected: ${volumeRatio.toFixed(2)}x average - high activity period`);
       }
+
+      // ============================================================
+      // OBV (On-Balance Volume) INDICATOR - Confirm trend with volume
+      // ============================================================
+      let obv = 0;
+      const obvValues: number[] = [0];
+      
+      for (let i = 1; i < closes.length; i++) {
+        if (closes[i] > closes[i - 1]) {
+          obv += volumes[i]; // Price up = add volume
+        } else if (closes[i] < closes[i - 1]) {
+          obv -= volumes[i]; // Price down = subtract volume
+        }
+        // If price unchanged, OBV stays the same
+        obvValues.push(obv);
+      }
+
+      // Calculate OBV trend (compare recent OBV to older OBV)
+      const recentOBV = obvValues.slice(-10);
+      const olderOBV = obvValues.slice(-20, -10);
+      const avgRecentOBV = recentOBV.reduce((a, b) => a + b, 0) / recentOBV.length;
+      const avgOlderOBV = olderOBV.reduce((a, b) => a + b, 0) / olderOBV.length;
+      
+      const obvTrend = avgRecentOBV > avgOlderOBV ? 'rising' : avgRecentOBV < avgOlderOBV ? 'falling' : 'flat';
+      const obvChange = avgOlderOBV !== 0 ? ((avgRecentOBV - avgOlderOBV) / Math.abs(avgOlderOBV)) * 100 : 0;
+
+      // OBV slope (recent direction)
+      const obvSlope = obvValues.length >= 5 
+        ? (obvValues[obvValues.length - 1] - obvValues[obvValues.length - 5]) / 5 
+        : 0;
+      const obvDirection = obvSlope > 0 ? 'bullish' : obvSlope < 0 ? 'bearish' : 'neutral';
+
+      console.log(`📈 OBV Analysis: Current=${obv.toFixed(0)}, Trend=${obvTrend}, Change=${obvChange.toFixed(2)}%, Direction=${obvDirection}`);
+
+      // FILTER 10: OBV trend confirmation
+      // For LONG signals, OBV should be rising (bullish volume accumulation)
+      // For SHORT signals, OBV should be falling (bearish volume distribution)
+      const signalSide = signal.signal_type === 'long' ? 'BUY' : 'SELL';
+      
+      if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -10) {
+        console.warn(`⚠️ OBV DIVERGENCE: LONG signal but OBV is bearish (${obvChange.toFixed(2)}% decline)`);
+        // Don't reject, but log the divergence - volume boost multiplier will handle this
+      }
+      
+      if (signalSide === 'SELL' && obvDirection === 'bullish' && obvChange > 10) {
+        console.warn(`⚠️ OBV DIVERGENCE: SHORT signal but OBV is bullish (${obvChange.toFixed(2)}% rise)`);
+        // Don't reject, but log the divergence
+      }
+
+      // Calculate volume boost multiplier based on OBV confirmation
+      let obvBoostMultiplier = 1.0;
+      
+      if (signalSide === 'BUY' && obvDirection === 'bullish' && obvChange > 5) {
+        obvBoostMultiplier = 1.15; // 15% boost for strong OBV confirmation
+        console.log(`✅ OBV confirms LONG: Volume accumulation detected, boost=${obvBoostMultiplier}x`);
+      } else if (signalSide === 'SELL' && obvDirection === 'bearish' && obvChange < -5) {
+        obvBoostMultiplier = 1.15; // 15% boost for strong OBV confirmation
+        console.log(`✅ OBV confirms SHORT: Volume distribution detected, boost=${obvBoostMultiplier}x`);
+      } else if ((signalSide === 'BUY' && obvDirection === 'bearish') || 
+                 (signalSide === 'SELL' && obvDirection === 'bullish')) {
+        obvBoostMultiplier = 0.85; // 15% reduction for OBV divergence
+        console.log(`⚠️ OBV divergence detected, reducing position size by 15%`);
+      }
+
+      // Store OBV boost for later use in position sizing
+      (signal as any).obvBoostMultiplier = obvBoostMultiplier;
     }
 
     // ============================================================
@@ -336,6 +406,13 @@ serve(async (req) => {
     let quantity = positionValue / currentPrice;
     
     console.log(`Position sizing: ${positionSizePercent}% of $${riskParams.portfolio_value} = $${positionValue.toFixed(2)} / $${currentPrice.toFixed(2)} = ${quantity.toFixed(4)} ${signal.symbol.replace('USDT', '')}`);
+
+    // Apply OBV boost multiplier if available
+    const obvBoostMultiplier = (signal as any).obvBoostMultiplier || 1.0;
+    if (obvBoostMultiplier !== 1.0) {
+      quantity *= obvBoostMultiplier;
+      console.log(`OBV adjustment applied: ${obvBoostMultiplier}x -> new quantity: ${quantity.toFixed(4)}`);
+    }
 
     // Apply confidence-based position size scaling
     const confidence = signal.confidence_score || 0;
