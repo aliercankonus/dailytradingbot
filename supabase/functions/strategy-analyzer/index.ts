@@ -279,7 +279,20 @@ serve(async (req) => {
       }
     });
     const marketDataResults = await Promise.all(marketDataPromises);
-    const marketDataMap = new Map(marketDataResults.filter((data) => data !== null).map((data) => [data.symbol, data]));
+    const marketDataMap = new Map(marketDataResults.filter((data) => data != null).map((data) => [data.symbol, data]));
+    
+    // Pre-fetch historical klines for ALL symbols in PARALLEL (performance optimization)
+    const historicalDataMap = new Map<string, { prices: number[]; volumes: number[] }>();
+    const historicalPromises = symbolsList.map(async (symbol) => {
+      const data = await fetchHistoricalKlines(symbol);
+      return { symbol, data };
+    });
+    const historicalResults = await Promise.all(historicalPromises);
+    historicalResults.forEach(({ symbol, data }) => {
+      historicalDataMap.set(symbol, data);
+    });
+    console.log(`Pre-fetched historical data for ${historicalDataMap.size} symbols`);
+    
     // Analyze each symbol
     for (const { symbol } of symbols) {
       const currentTradeCount = openTradesPerSymbol.get(symbol) || 0;
@@ -557,8 +570,9 @@ serve(async (req) => {
           });
           continue;
         }
-        // Determine signal type
-        const signalType = trend === "bullish" ? "long" : trend === "bearish" ? "short" : null;
+        // Determine signal type using tradeDirection from calculate-trend (considers divergence signals)
+        const tradeDirection = higherTimeframeFilter.tradeDirection || trend;
+        const signalType = tradeDirection === "bullish" ? "long" : tradeDirection === "bearish" ? "short" : null;
         if (!signalType) {
           await supabase.from("signal_rejection_log").insert({
             user_id: user.id,
@@ -576,7 +590,12 @@ serve(async (req) => {
         if (!marketData) continue;
         const currentPrice = parseFloat(marketData.lastPrice) || 0;
         const currentVolume = parseFloat(marketData.volume) || 0;
-        const { prices: historicalPrices, volumes: historicalVolumes } = await fetchHistoricalKlines(symbol);
+        
+        // Use pre-fetched historical data (parallelized earlier)
+        const historicalData = historicalDataMap.get(symbol);
+        if (!historicalData) continue;
+        const { prices: historicalPrices, volumes: historicalVolumes } = historicalData;
+        
         // Skip if insufficient historical data
         if (historicalPrices.length < 26) {
           console.warn(`Insufficient historical data for ${symbol} (${historicalPrices.length} candles)`);
