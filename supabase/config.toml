@@ -18,6 +18,9 @@ verify_jwt = false
 [functions.capture-portfolio-snapshot]
 verify_jwt = false
 
+[functions.auto-trader]
+verify_jwt = false
+
 [functions.cleanup-expired-signals.schedule]
 enabled = true
 cron = "* * * * *"
@@ -25,3 +28,7 @@ cron = "* * * * *"
 [functions.capture-portfolio-snapshot.schedule]
 enabled = true
 cron = "0 0 * * *"
+
+[functions.auto-trader.schedule]
+enabled = true
+cron = "*/5 * * * *"
