@@ -178,7 +178,13 @@ serve(async (req) => {
     // Fix: atrPercent is under volatility object in calculate-trend response
     const atrPercent = trendData?.volatility?.atrPercent || trendData?.ranging?.atrPercent || 1.5;
     
+    // Extract Bollinger Bands data from trend analysis
+    const bollingerData = trendData?.bollingerBands || {};
+    const bb1h = bollingerData['1h'] || {};
+    const bb4h = bollingerData['4h'] || {};
+    
     console.log(`Current market trend: ${currentTrend}, Consistency: ${trendConsistency}, ATR: ${atrPercent}%, Signal: ${signal.signal_type}`);
+    console.log(`📊 Bollinger Bands: 1h squeeze=${bb1h.squeeze}, %B=${bb1h.percentB?.toFixed(1)}% | 4h squeeze=${bb4h.squeeze}, %B=${bb4h.percentB?.toFixed(1)}%`);
 
     // FILTER 1: Validate trend matches signal direction
     const signalDirection = signal.signal_type === 'long' ? 'BUY' : 'SELL';
@@ -210,6 +216,64 @@ serve(async (req) => {
     if ((signal.confidence_score || 0) < minConfidence) {
       throw new Error(`Signal confidence too low (${signal.confidence_score}%) - minimum required: ${minConfidence}%`);
     }
+
+    // ============================================================
+    // BOLLINGER BANDS FILTER - Squeeze/Breakout Detection
+    // ============================================================
+    let bollingerBoostMultiplier = 1.0;
+    const signalSideForBB = signal.signal_type === 'long' ? 'BUY' : 'SELL';
+    
+    // Squeeze detection: Both 1h and 4h in squeeze = high probability breakout incoming
+    const is1hSqueeze = bb1h.squeeze === true;
+    const is4hSqueeze = bb4h.squeeze === true;
+    const percentB1h = bb1h.percentB || 50;
+    const percentB4h = bb4h.percentB || 50;
+    
+    if (is1hSqueeze && is4hSqueeze) {
+      // Double squeeze = volatility contraction, breakout imminent
+      console.log(`🔥 DOUBLE SQUEEZE detected: Both 1h and 4h bands contracted - breakout imminent`);
+      bollingerBoostMultiplier = 1.2; // 20% boost for squeeze breakout setup
+    } else if (is1hSqueeze || is4hSqueeze) {
+      console.log(`📊 Single timeframe squeeze detected: 1h=${is1hSqueeze}, 4h=${is4hSqueeze}`);
+      bollingerBoostMultiplier = 1.1; // 10% boost for single squeeze
+    }
+    
+    // %B position analysis - detect overbought/oversold for entry timing
+    // %B > 100 = price above upper band (overbought for LONG)
+    // %B < 0 = price below lower band (oversold for SHORT)
+    
+    if (signalSideForBB === 'BUY') {
+      if (percentB1h > 100) {
+        // Price above upper band - potential overextension
+        console.warn(`⚠️ BB Warning: Price above upper band (%B=${percentB1h.toFixed(1)}%) - potential overbought`);
+        bollingerBoostMultiplier *= 0.85; // 15% reduction for overbought entry
+      } else if (percentB1h < 20 && percentB4h < 30) {
+        // Price near lower band in both timeframes - good entry for LONG
+        console.log(`✅ BB confirms LONG: Price near lower band, good entry (%B 1h=${percentB1h.toFixed(1)}%, 4h=${percentB4h.toFixed(1)}%)`);
+        bollingerBoostMultiplier *= 1.15; // 15% boost for mean reversion entry
+      }
+    } else if (signalSideForBB === 'SELL') {
+      if (percentB1h < 0) {
+        // Price below lower band - potential oversold
+        console.warn(`⚠️ BB Warning: Price below lower band (%B=${percentB1h.toFixed(1)}%) - potential oversold`);
+        bollingerBoostMultiplier *= 0.85; // 15% reduction for oversold entry
+      } else if (percentB1h > 80 && percentB4h > 70) {
+        // Price near upper band in both timeframes - good entry for SHORT
+        console.log(`✅ BB confirms SHORT: Price near upper band, good entry (%B 1h=${percentB1h.toFixed(1)}%, 4h=${percentB4h.toFixed(1)}%)`);
+        bollingerBoostMultiplier *= 1.15; // 15% boost for mean reversion entry
+      }
+    }
+    
+    // Breakout detection - price moving from squeeze
+    const aggregatedBB = trendData?.aggregatedBollingerSignals || {};
+    if (aggregatedBB.breakoutPotential === 'high') {
+      console.log(`🚀 HIGH BREAKOUT POTENTIAL detected - bands expanding after squeeze`);
+      bollingerBoostMultiplier *= 1.1; // Additional 10% for breakout momentum
+    }
+    
+    // Store Bollinger boost for position sizing
+    (signal as any).bollingerBoostMultiplier = bollingerBoostMultiplier;
+    console.log(`📊 Final Bollinger Boost Multiplier: ${bollingerBoostMultiplier.toFixed(2)}x`);
 
     // ============================================================
     // VOLUME PROFILE FILTER - Fetch 24hr ticker data for volume analysis
@@ -412,6 +476,13 @@ serve(async (req) => {
     if (obvBoostMultiplier !== 1.0) {
       quantity *= obvBoostMultiplier;
       console.log(`OBV adjustment applied: ${obvBoostMultiplier}x -> new quantity: ${quantity.toFixed(4)}`);
+    }
+
+    // Apply Bollinger Bands boost multiplier if available
+    const bbBoostMultiplier = (signal as any).bollingerBoostMultiplier || 1.0;
+    if (bbBoostMultiplier !== 1.0) {
+      quantity *= bbBoostMultiplier;
+      console.log(`Bollinger Bands adjustment applied: ${bbBoostMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
     // Apply confidence-based position size scaling
