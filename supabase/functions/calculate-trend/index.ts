@@ -1012,7 +1012,11 @@ serve(async (req) => {
     let momentumState: "none" | "mixed" | "confirmed" = "none";
     if (momentumConfirms) {
       momentumState = "confirmed";
+    } else if (macdExpanding && (hasDivergence || !lastCloseAlignsWithTrend)) {
+      // Mixed: MACD expanding but divergence exists or price doesn't align
+      momentumState = "mixed";
     } else if (macdStrong) {
+      // Mixed: Strong MACD magnitude even without expansion
       momentumState = "mixed";
     }
     console.log(
