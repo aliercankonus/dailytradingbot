@@ -413,6 +413,43 @@ serve(async (req) => {
           }
         }
       }
+
+      // ============================================================
+      // TIME-BASED EXIT LOGIC - Close stale positions
+      // If position is open 24+ hours with minimal movement (<2%), free up capital
+      // ============================================================
+      if (!shouldClose && position.opened_at) {
+        const openedAt = new Date(position.opened_at);
+        const now = new Date();
+        const hoursOpen = (now.getTime() - openedAt.getTime()) / (1000 * 60 * 60);
+        const absMovement = Math.abs(pnlPercent);
+        
+        // Stale position: Open 24+ hours with less than 2% price movement
+        const minHoursForStaleCheck = 24;
+        const maxMovementForStale = 2.0; // 2% threshold
+        
+        if (hoursOpen >= minHoursForStaleCheck && absMovement < maxMovementForStale) {
+          shouldClose = true;
+          closeReason = "stale_position";
+          console.log(
+            `⏰ TIME EXIT: Closing stale ${position.symbol} ${position.side} - Open ${hoursOpen.toFixed(1)}h with only ${pnlPercent.toFixed(2)}% movement`
+          );
+          
+          trendExits.push({
+            symbol: position.symbol,
+            side: position.side,
+            reason: `Stale: ${hoursOpen.toFixed(1)}h open, ${pnlPercent.toFixed(2)}% P&L`,
+            trend: "stale",
+            confidence: 0,
+            pnlPercent,
+          });
+        } else if (hoursOpen >= minHoursForStaleCheck) {
+          console.log(
+            `📊 Position ${position.symbol} open ${hoursOpen.toFixed(1)}h - movement ${absMovement.toFixed(2)}% (above ${maxMovementForStale}% threshold, keeping open)`
+          );
+        }
+      }
+
       // ============================================================
       // PARTIAL TAKE PROFIT LOGIC - Professional ladder exit system
       // TP1 (33% distance): Close 50% of position
