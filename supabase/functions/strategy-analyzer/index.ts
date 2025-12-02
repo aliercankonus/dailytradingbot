@@ -33,27 +33,54 @@ serve(async (req) => {
       throw new Error("Missing required environment variables");
     }
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    // Get user from auth header
+    // Get user from auth header or request body (for auto-trader service role calls)
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       throw new Error("No authorization header");
     }
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
-    if (userError || !user) {
-      throw new Error("Unauthorized");
+    
+    let userId: string;
+    const token = authHeader.replace("Bearer ", "");
+    
+    // Check if this is a service role call with user_id in body
+    let requestBody: any = {};
+    try {
+      requestBody = await req.json();
+    } catch {
+      // No body or invalid JSON - that's ok for direct user calls
     }
-    console.log(`Analyzing signals for user ${user.id}`);
+    
+    if (requestBody?.user_id && token === supabaseServiceKey) {
+      // Service role call from auto-trader with explicit user_id
+      userId = requestBody.user_id;
+      console.log(`Service role call for user ${userId}`);
+    } else {
+      // Regular user auth call
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser(token);
+      if (userError || !user) {
+        throw new Error("Unauthorized");
+      }
+      userId = user.id;
+    }
+    
+    console.log(`Analyzing signals for user ${userId}`);
     // Fetch user's risk parameters including divergence settings
     const { data: riskParams, error: riskError } = await supabase
       .from("risk_parameters")
       .select("*")
-      .eq("user_id", user.id)
-      .single();
-    if (riskError || !riskParams) {
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (riskError) {
+      console.error("Error fetching risk parameters:", riskError);
       throw new Error("Failed to fetch risk parameters");
+    }
+    if (!riskParams) {
+      return new Response(JSON.stringify({ message: "Risk parameters not configured", signals: [] }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
     // Check if trading is enabled
     if (!riskParams.is_trading_enabled) {
@@ -65,7 +92,7 @@ serve(async (req) => {
     const { data: symbols, error: symbolsError } = await supabase
       .from("trading_symbols_config")
       .select("symbol")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("is_active", true);
     if (symbolsError || !symbols || symbols.length === 0) {
       return new Response(JSON.stringify({ message: "No active symbols configured", signals: [] }), {
@@ -77,7 +104,7 @@ serve(async (req) => {
     const { data: customStrategies, error: strategiesError } = await supabase
       .from("custom_strategies")
       .select("*")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("is_active", true);
     if (strategiesError) {
       console.error("Failed to fetch custom strategies:", strategiesError);
@@ -101,14 +128,14 @@ serve(async (req) => {
     const { data: existingSignals } = await supabase
       .from("trading_signals")
       .select("symbol")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .gte("created_at", oneMinuteAgo);
     const existingSignalsSet = new Set(existingSignals?.map((s) => s.symbol) || []);
     // Fetch active positions and count per symbol to respect max_trades_per_symbol
     const { data: activePositions } = await supabase
       .from("positions")
       .select("symbol")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("status", "active");
     // Count active positions per symbol
     const openTradesPerSymbol = new Map<string, number>();
@@ -166,15 +193,25 @@ serve(async (req) => {
       return emaArray;
     };
     const calculateMACD = (prices: number[]): { macd: number; signal: number; histogram: number } => {
+      if (prices.length < 26) {
+        return { macd: 0, signal: 0, histogram: 0 };
+      }
       const ema12Array = calculateEMAArray(prices, 12);
       const ema26Array = calculateEMAArray(prices, 26);
+      if (ema12Array.length === 0 || ema26Array.length === 0) {
+        return { macd: 0, signal: 0, histogram: 0 };
+      }
       const ema12 = ema12Array[ema12Array.length - 1] || 0;
       const ema26 = ema26Array[ema26Array.length - 1] || 0;
       const macd = ema12 - ema26;
       const macdValues: number[] = [];
-      const startIndex = Math.max(ema12Array.length - (prices.length - 26), 0);
-      for (let i = startIndex; i < ema12Array.length; i++) {
-        macdValues.push(ema12Array[i] - ema26Array[i]);
+      // Safe index calculation - ensure we don't go negative
+      const minLength = Math.min(ema12Array.length, ema26Array.length);
+      const startIndex = Math.max(0, minLength - Math.min(prices.length - 26, minLength));
+      for (let i = startIndex; i < minLength; i++) {
+        const ema12Val = ema12Array[i] || 0;
+        const ema26Val = ema26Array[i] || 0;
+        macdValues.push(ema12Val - ema26Val);
       }
       const signal = macdValues.length >= 9 ? calculateEMA(macdValues, 9) : macd * 0.9;
       const histogram = macd - signal;
@@ -305,7 +342,7 @@ serve(async (req) => {
             : "has recent signal (no open trades)";
         console.log(`⏭️ Skipping ${symbol} - ${statusMsg}`);
         await supabase.from("signal_rejection_log").insert({
-          user_id: user.id,
+          user_id: userId,
           symbol,
           rejection_reason: `Already has active signal from last minute (${statusMsg})`,
           filters_status: { currentTradeCount, maxTradesPerSymbol: riskParams.max_trades_per_symbol },
@@ -320,7 +357,7 @@ serve(async (req) => {
           `⏭️ Skipping ${symbol} - max trades limit reached (${currentTradeCount}/${riskParams.max_trades_per_symbol} trades active)`,
         );
         await supabase.from("signal_rejection_log").insert({
-          user_id: user.id,
+          user_id: userId,
           symbol,
           rejection_reason: `Max trades per symbol reached: ${currentTradeCount}/${riskParams.max_trades_per_symbol} trades active`,
           filters_status: { currentTradeCount, maxTradesPerSymbol: riskParams.max_trades_per_symbol },
@@ -364,7 +401,7 @@ serve(async (req) => {
           // Only reject if ADX < 12 OR (ADX < 15 AND confidence < 70)
           rejectedByMultiTimeframeAnalysis++;
           await supabase.from("signal_rejection_log").insert({
-            user_id: user.id,
+            user_id: userId,
             symbol,
             rejection_reason: `Multi-Timeframe prerequisite failed: ADX too weak (${adx.toFixed(1)}) for confidence level (${confidence}%)`,
             filters_status: {
@@ -464,7 +501,7 @@ serve(async (req) => {
                 : `stronger conditions needed (momentum: ${momentumState}, confidence: ${confidence}%, ADX: ${adx.toFixed(1)})`,
             };
             await supabase.from("signal_rejection_log").insert({
-              user_id: user.id,
+              user_id: userId,
               symbol,
               rejection_reason: !meetsThreshold
                 ? "Multi-Timeframe prerequisite failed: confidence or trend consistency below threshold"
@@ -530,7 +567,7 @@ serve(async (req) => {
               trend15m: trendData.timeframes?.["15m"]?.trend,
             };
             await supabase.from("signal_rejection_log").insert({
-              user_id: user.id,
+              user_id: userId,
               symbol,
               rejection_reason:
                 "Multi-Timeframe prerequisite failed: divergence conditions not met or momentum missing",
@@ -561,7 +598,7 @@ serve(async (req) => {
             required: "higher timeframes NOT aligned or ranging market detected",
           };
           await supabase.from("signal_rejection_log").insert({
-            user_id: user.id,
+            user_id: userId,
             symbol,
             rejection_reason: "Multi-Timeframe prerequisite failed: timeframes not aligned, no divergence opportunity",
             filters_status: rejectionData,
@@ -575,7 +612,7 @@ serve(async (req) => {
         const signalType = tradeDirection === "bullish" ? "long" : tradeDirection === "bearish" ? "short" : null;
         if (!signalType) {
           await supabase.from("signal_rejection_log").insert({
-            user_id: user.id,
+            user_id: userId,
             symbol,
             rejection_reason: "Multi-Timeframe prerequisite failed: ranging market",
             filters_status: { trend },
@@ -588,8 +625,18 @@ serve(async (req) => {
         // Now evaluate custom strategies since Multi-Timeframe prerequisite passed
         const marketData = marketDataMap.get(symbol);
         if (!marketData) continue;
-        const currentPrice = parseFloat(marketData.lastPrice) || 0;
-        const currentVolume = parseFloat(marketData.volume) || 0;
+        const currentPrice = parseFloat(marketData.lastPrice);
+        const currentVolume = parseFloat(marketData.volume);
+        
+        // Validate price and volume are valid numbers
+        if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+          console.warn(`Invalid price for ${symbol}: ${marketData.lastPrice}`);
+          continue;
+        }
+        if (!Number.isFinite(currentVolume)) {
+          console.warn(`Invalid volume for ${symbol}, using 0`);
+        }
+        const safeCurrentVolume = Number.isFinite(currentVolume) ? currentVolume : 0;
         
         // Use pre-fetched historical data (parallelized earlier)
         const historicalData = historicalDataMap.get(symbol);
@@ -607,26 +654,41 @@ serve(async (req) => {
           if (signals.some((s) => s.symbol === symbol && s.strategy_id === strategy.id)) {
             continue;
           }
+          
+          // Validate strategy has required fields
+          const indicators = strategy.indicators || [];
+          const entryConditions = strategy.entry_conditions || [];
+          
+          if (indicators.length === 0 || entryConditions.length === 0) {
+            console.warn(`Strategy "${strategy.name}" missing indicators or entry conditions`);
+            continue;
+          }
+          
           // Calculate all indicators for this strategy
           const indicatorValues = new Map<string, number>();
-          for (const indicatorConfig of strategy.indicators) {
+          for (const indicatorConfig of indicators) {
+            if (!indicatorConfig || !indicatorConfig.type) continue;
             const value = calculateIndicator(
               indicatorConfig,
               currentPrice,
-              currentVolume,
+              safeCurrentVolume,
               historicalPrices,
               historicalVolumes,
             );
             indicatorValues.set(indicatorConfig.name || indicatorConfig.type, value);
           }
           indicatorValues.set("Price", currentPrice);
-          indicatorValues.set("Volume", currentVolume);
-          const previousPrice = historicalPrices[historicalPrices.length - 2] || 0;
-          const previousVolume = historicalVolumes[historicalVolumes.length - 2] || 0;
-          const previousHistoricalPrices = historicalPrices.slice(0, -1);
-          const previousHistoricalVolumes = historicalVolumes.slice(0, -1);
+          indicatorValues.set("Volume", safeCurrentVolume);
+          
+          // Safe access for previous values
+          const previousPrice = historicalPrices.length >= 2 ? historicalPrices[historicalPrices.length - 2] : currentPrice;
+          const previousVolume = historicalVolumes.length >= 2 ? historicalVolumes[historicalVolumes.length - 2] : safeCurrentVolume;
+          const previousHistoricalPrices = historicalPrices.length >= 2 ? historicalPrices.slice(0, -1) : historicalPrices;
+          const previousHistoricalVolumes = historicalVolumes.length >= 2 ? historicalVolumes.slice(0, -1) : historicalVolumes;
+          
           const previousIndicatorValues = new Map<string, number>();
-          for (const indicatorConfig of strategy.indicators) {
+          for (const indicatorConfig of indicators) {
+            if (!indicatorConfig || !indicatorConfig.type) continue;
             const previousValue = calculateIndicator(
               indicatorConfig,
               previousPrice,
@@ -638,10 +700,18 @@ serve(async (req) => {
           }
           previousIndicatorValues.set("Price", previousPrice);
           previousIndicatorValues.set("Volume", previousVolume);
-          // Evaluate entry conditions
-          const entryConditionsMet = strategy.entry_conditions.every((condition: any) =>
-            evaluateCondition(condition, indicatorValues, previousIndicatorValues),
-          );
+          
+          // Evaluate entry conditions with error handling
+          let entryConditionsMet = false;
+          try {
+            entryConditionsMet = entryConditions.every((condition: any) =>
+              condition ? evaluateCondition(condition, indicatorValues, previousIndicatorValues) : false,
+            );
+          } catch (conditionError) {
+            console.warn(`Error evaluating conditions for strategy "${strategy.name}":`, conditionError);
+            continue;
+          }
+          
           if (!entryConditionsMet) {
             continue; // Skip this strategy if entry conditions not met
           }
@@ -653,7 +723,7 @@ serve(async (req) => {
           const strategyPositionSize = (strategy.risk_settings?.positionSizePercent || 100) * positionSizeMultiplier;
           // Create signal for custom strategy
           const customSignal = {
-            user_id: user.id,
+            user_id: userId,
             symbol,
             signal_type: signalType,
             trend,
