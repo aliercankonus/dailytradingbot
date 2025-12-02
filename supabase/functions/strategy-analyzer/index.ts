@@ -139,47 +139,76 @@ const getAlignmentScore = (confidence: number, consistency: number, aligned: boo
 };
 
 // Technical Indicator Score (0-15 points)
-const getTechnicalScore = (trendData: any, effectiveTrend: string): number => {
+const getTechnicalScore = (trendData: any, effectiveTrend: string, symbol: string): number => {
   let score = 0;
   
   const stochRsi = trendData?.stochasticRsi;
   const bollinger = trendData?.bollingerBands;
   
-  if (!stochRsi || !bollinger) return 0;
+  if (!stochRsi || !bollinger) {
+    console.log(`📊 ${symbol} TECH: No data available`);
+    return 0;
+  }
   
   // StochRSI signals - use actual values from calculate-trend
   const primarySignal = stochRsi.primarySignal || stochRsi["1h"]?.signal;
   const primaryK = stochRsi.primaryK || stochRsi["1h"]?.k || 50;
-  
-  if (effectiveTrend === "bullish") {
-    // Oversold on bullish trend = good entry
-    if (primarySignal === "oversold" || primaryK < 20) score += 8;
-    else if (primaryK < 30) score += 5;
-    // Overbought on bullish = risky
-    else if (primarySignal === "overbought" || primaryK > 80) score -= 2;
-  } else if (effectiveTrend === "bearish") {
-    // Overbought on bearish trend = good entry
-    if (primarySignal === "overbought" || primaryK > 80) score += 8;
-    else if (primaryK > 70) score += 5;
-    // Oversold on bearish = risky
-    else if (primarySignal === "oversold" || primaryK < 20) score -= 2;
-  }
   
   // Bollinger signals - use actual values
   const squeeze = bollinger.squeeze || bollinger.squeezeActive || bollinger["1h"]?.squeeze;
   const pricePosition = bollinger.pricePosition || bollinger["1h"]?.pricePosition;
   const percentB = bollinger.percentB || bollinger["1h"]?.percentB || 50;
   
-  if (squeeze) {
-    score += 5; // Squeeze = potential breakout
+  let stochScore = 0;
+  let bbScore = 0;
+  
+  if (effectiveTrend === "bullish") {
+    // Oversold on bullish trend = good entry
+    if (primarySignal === "oversold" || primaryK < 20) stochScore = 8;
+    else if (primaryK < 30) stochScore = 5;
+    else if (primaryK < 40) stochScore = 2;
+    else if (primarySignal === "overbought" || primaryK > 80) stochScore = -2;
+    
+    // Bollinger for bullish
+    if (pricePosition === "lower_zone" || percentB < 30) bbScore = 4;
+    else if (pricePosition === "middle" || (percentB >= 30 && percentB <= 70)) bbScore = 2;
+    
+  } else if (effectiveTrend === "bearish") {
+    // Overbought on bearish trend = good entry
+    if (primarySignal === "overbought" || primaryK > 80) stochScore = 8;
+    else if (primaryK > 70) stochScore = 5;
+    else if (primaryK > 60) stochScore = 2;
+    else if (primarySignal === "oversold" || primaryK < 20) stochScore = -2;
+    
+    // Bollinger for bearish
+    if (pricePosition === "upper_zone" || percentB > 70) bbScore = 4;
+    else if (pricePosition === "middle" || (percentB >= 30 && percentB <= 70)) bbScore = 2;
+    
+  } else {
+    // Neutral trend - give points for extreme conditions that indicate potential direction
+    // Extreme overbought in neutral = potential SHORT opportunity
+    if (primaryK > 85) stochScore = 4;
+    else if (primaryK > 75) stochScore = 2;
+    // Extreme oversold in neutral = potential LONG opportunity
+    else if (primaryK < 15) stochScore = 4;
+    else if (primaryK < 25) stochScore = 2;
+    // Middle zone in neutral = no clear edge
+    else stochScore = 1;
+    
+    // Bollinger in neutral - extremes are opportunities
+    if (percentB > 85 || percentB < 15) bbScore = 3;
+    else if (percentB > 75 || percentB < 25) bbScore = 2;
+    else bbScore = 1;
   }
   
-  // Price near bands in trend direction
-  if (effectiveTrend === "bullish" && (pricePosition === "lower_zone" || percentB < 30)) {
-    score += 4; // Good pullback entry for long
-  } else if (effectiveTrend === "bearish" && (pricePosition === "upper_zone" || percentB > 70)) {
-    score += 4; // Good pullback entry for short
+  // Squeeze bonus applies to all trends
+  if (squeeze) {
+    bbScore += 5;
   }
+  
+  score = stochScore + bbScore;
+  
+  console.log(`📊 ${symbol} TECH: trend=${effectiveTrend} K=${primaryK.toFixed(1)} signal=${primarySignal} stochScore=${stochScore} | BB pos=${pricePosition} %B=${percentB.toFixed(1)} squeeze=${squeeze} bbScore=${bbScore} | total=${Math.max(0, Math.min(15, score))}`);
   
   return Math.max(0, Math.min(15, score));
 };
@@ -744,7 +773,7 @@ serve(async (req) => {
           adxScore: getAdxScore(adx),
           momentumScore: getMomentumScore(momentum),
           alignmentScore: getAlignmentScore(confidence, trendConsistency, higherTimeframeFilter?.aligned || false, trendData),
-          technicalScore: getTechnicalScore(trendData, trend),
+          technicalScore: getTechnicalScore(trendData, trend, symbol),
           entryTimingScore: Math.max(0, pullbackAnalysis.entryTimingScore),
         };
 
