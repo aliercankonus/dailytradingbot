@@ -211,18 +211,89 @@ serve(async (req) => {
       throw new Error(`Signal confidence too low (${signal.confidence_score}%) - minimum required: ${minConfidence}%`);
     }
 
-    // Get current price for ATR-based stop loss calculation
-    const priceResponse = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${signal.symbol}`);
-    if (!priceResponse.ok) {
-      const errorText = await priceResponse.text();
-      console.error('Binance price API error:', errorText);
-      throw new Error(`Failed to fetch current price for ${signal.symbol}: ${priceResponse.status}`);
+    // ============================================================
+    // VOLUME PROFILE FILTER - Fetch 24hr ticker data for volume analysis
+    // ============================================================
+    const ticker24hResponse = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${signal.symbol}`);
+    if (!ticker24hResponse.ok) {
+      const errorText = await ticker24hResponse.text();
+      console.error('Binance 24hr ticker API error:', errorText);
+      throw new Error(`Failed to fetch 24hr ticker for ${signal.symbol}: ${ticker24hResponse.status}`);
     }
-    const priceData = await priceResponse.json();
-    if (!priceData.price) {
-      throw new Error(`No price data returned for ${signal.symbol}`);
+    const ticker24h = await ticker24hResponse.json();
+    const currentPrice = parseFloat(ticker24h.lastPrice);
+    const volume24h = parseFloat(ticker24h.volume); // Base asset volume
+    const quoteVolume24h = parseFloat(ticker24h.quoteVolume); // USDT volume
+    const priceChangePercent = parseFloat(ticker24h.priceChangePercent);
+
+    console.log(`📊 Volume Profile: 24h Volume=${volume24h.toFixed(2)}, Quote Volume=$${quoteVolume24h.toFixed(2)}, Price Change=${priceChangePercent.toFixed(2)}%`);
+
+    // FILTER 6: Minimum volume requirement (avoid illiquid periods)
+    // Require at least $10M USDT volume in last 24h for major pairs, $1M for others
+    const isMainPair = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'].includes(signal.symbol);
+    const minQuoteVolume = isMainPair ? 10_000_000 : 1_000_000;
+    
+    if (quoteVolume24h < minQuoteVolume) {
+      throw new Error(`Insufficient 24h volume ($${(quoteVolume24h/1_000_000).toFixed(2)}M < $${minQuoteVolume/1_000_000}M required) - trade cancelled to avoid illiquid market`);
     }
-    const currentPrice = parseFloat(priceData.price);
+    console.log(`✓ Volume check passed: $${(quoteVolume24h/1_000_000).toFixed(2)}M >= $${minQuoteVolume/1_000_000}M minimum`);
+
+    // Fetch recent klines to analyze volume profile (last 20 periods of 15m)
+    const klineResponse = await fetch(`https://api.binance.com/api/v3/klines?symbol=${signal.symbol}&interval=15m&limit=20`);
+    if (!klineResponse.ok) {
+      console.warn('Failed to fetch klines for volume profile analysis, proceeding with basic checks');
+    } else {
+      const klines = await klineResponse.json();
+      const volumes = klines.map((k: any[]) => parseFloat(k[5])); // Volume is at index 5
+      const avgVolume = volumes.reduce((a: number, b: number) => a + b, 0) / volumes.length;
+      const currentVolume = volumes[volumes.length - 1];
+      const volumeRatio = currentVolume / avgVolume;
+
+      console.log(`📊 Current 15m Volume: ${currentVolume.toFixed(2)}, Avg: ${avgVolume.toFixed(2)}, Ratio: ${volumeRatio.toFixed(2)}x`);
+
+      // FILTER 7: Avoid extremely low volume periods (< 30% of average)
+      if (volumeRatio < 0.3) {
+        throw new Error(`Current volume too low (${(volumeRatio * 100).toFixed(0)}% of average) - trade cancelled to avoid illiquid entry`);
+      }
+
+      // Log volume spike detection (informational)
+      if (volumeRatio > 2.0) {
+        console.log(`⚡ VOLUME SPIKE detected: ${volumeRatio.toFixed(2)}x average - high activity period`);
+      }
+    }
+
+    // ============================================================
+    // SLIPPAGE PROTECTION - Pre-trade price validation
+    // ============================================================
+    const maxSlippagePercent = 0.5; // Maximum 0.5% slippage tolerance
+    const signalEntryPrice = signal.entry_price || currentPrice;
+    const priceDeviation = Math.abs((currentPrice - signalEntryPrice) / signalEntryPrice) * 100;
+
+    console.log(`💱 Slippage Check: Signal Entry=$${signalEntryPrice.toFixed(2)}, Current=$${currentPrice.toFixed(2)}, Deviation=${priceDeviation.toFixed(3)}%`);
+
+    // FILTER 8: Pre-execution slippage check
+    if (priceDeviation > maxSlippagePercent) {
+      throw new Error(`Price moved ${priceDeviation.toFixed(2)}% since signal (max ${maxSlippagePercent}%) - trade cancelled to avoid slippage`);
+    }
+    console.log(`✓ Pre-trade slippage check passed: ${priceDeviation.toFixed(3)}% < ${maxSlippagePercent}% max`);
+
+    // Fetch order book depth for additional slippage analysis
+    const depthResponse = await fetch(`https://api.binance.com/api/v3/depth?symbol=${signal.symbol}&limit=10`);
+    if (depthResponse.ok) {
+      const depth = await depthResponse.json();
+      const bestBid = parseFloat(depth.bids[0][0]);
+      const bestAsk = parseFloat(depth.asks[0][0]);
+      const spread = ((bestAsk - bestBid) / bestBid) * 100;
+      
+      console.log(`📖 Order Book: Bid=$${bestBid.toFixed(2)}, Ask=$${bestAsk.toFixed(2)}, Spread=${spread.toFixed(4)}%`);
+
+      // FILTER 9: Wide spread protection (avoid illiquid order books)
+      const maxSpreadPercent = 0.1; // Max 0.1% spread
+      if (spread > maxSpreadPercent) {
+        throw new Error(`Order book spread too wide (${spread.toFixed(3)}% > ${maxSpreadPercent}%) - trade cancelled to avoid slippage`);
+      }
+      console.log(`✓ Spread check passed: ${spread.toFixed(4)}% < ${maxSpreadPercent}% max`);
+    }
 
     // Use strategy's configured stop loss and take profit from signal
     const stopLoss = signal.stop_loss;
@@ -338,6 +409,17 @@ serve(async (req) => {
       orderData = await orderResponse.json();
       console.log('Order executed:', orderData);
       executedPrice = parseFloat(orderData.fills?.[0]?.price || currentPrice);
+
+      // ============================================================
+      // POST-EXECUTION SLIPPAGE VALIDATION
+      // ============================================================
+      const postExecutionSlippage = Math.abs((executedPrice - currentPrice) / currentPrice) * 100;
+      console.log(`💱 Post-execution slippage: Expected=$${currentPrice.toFixed(2)}, Got=$${executedPrice.toFixed(2)}, Slippage=${postExecutionSlippage.toFixed(3)}%`);
+      
+      // Warn on high slippage (> 0.3%) but don't reject since order is already filled
+      if (postExecutionSlippage > 0.3) {
+        console.warn(`⚠️ HIGH SLIPPAGE WARNING: ${postExecutionSlippage.toFixed(2)}% slippage on execution`);
+      }
     }
 
     // Check if this signal has already been executed
