@@ -172,8 +172,8 @@ export const SignalRejectionReasons = () => {
           momentumDetails.push(`Divergence: ${m.hasDivergence ? "Yes ❌" : "None ✓"}`);
         }
         if (m.macdHistogram !== undefined) {
-          const macdOK = Math.abs(m.macdHistogram) > 0.01;
-          momentumDetails.push(`MACD: ${m.macdHistogram.toFixed(3)}${!macdOK ? " < 0.01 ❌" : " ✓"}`);
+          const macdOK = Math.abs(m.macdHistogram) > 0.05;
+          momentumDetails.push(`MACD: ${m.macdHistogram.toFixed(3)}${!macdOK ? " < 0.05 ❌" : " ✓"}`);
         }
         const momentumConfirmed = m.confirms ?? false;
         momentumDetails.push(momentumConfirmed ? "Momentum ✓" : "No momentum ❌");
@@ -271,7 +271,7 @@ export const SignalRejectionReasons = () => {
         }
       } else if (!macdExpanding) {
         if (macdHistogram !== undefined) {
-          details.push(`MACD histogram: ${macdHistogram.toFixed(4)} (need >0.01 expansion)`);
+          details.push(`MACD histogram: ${macdHistogram.toFixed(4)} (need >0.05 expansion)`);
         } else {
           details.push(`MACD histogram: unavailable`);
         }
