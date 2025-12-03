@@ -374,10 +374,11 @@ serve(async (req) => {
 
         console.log(`📊 Current 15m Volume: ${currentVolume.toFixed(2)}, Avg: ${avgVolume.toFixed(2)}, Ratio: ${volumeRatio.toFixed(2)}x`);
 
-        // FILTER 7: Avoid extremely low volume periods (< 30% of average)
-        if (volumeRatio < 0.3) {
-        throw new Error(`Current volume too low (${(volumeRatio * 100).toFixed(0)}% of average) - trade cancelled to avoid illiquid entry`);
-      }
+        // FILTER 7: Avoid extremely low volume periods (< 10% of average)
+        // Lowered from 30% to 10% to allow trades during low-activity periods
+        if (volumeRatio < 0.1) {
+          throw new Error(`Current volume too low (${(volumeRatio * 100).toFixed(0)}% of average) - trade cancelled to avoid illiquid entry`);
+        }
 
       // Log volume spike detection (informational)
       if (volumeRatio > 2.0) {
@@ -580,7 +581,7 @@ serve(async (req) => {
 
     // ============================================================
     // FILTER 11: RISK/REWARD RATIO VALIDATION
-    // Minimum R:R ratio of 1.5:1 required for all trades
+    // Minimum R:R ratio of 1.2:1 required for all trades
     // ============================================================
     const signalSideForRR = signal.signal_type === 'long' ? 'BUY' : 'SELL';
     let riskAmount: number;
@@ -605,7 +606,7 @@ serve(async (req) => {
     }
     
     const riskRewardRatio = rewardAmount / riskAmount;
-    const minRiskReward = 1.5; // Minimum 1.5:1 R:R required
+    const minRiskReward = 1.2; // Minimum 1.2:1 R:R required (lowered from 1.5 to allow more trades)
     
     console.log(`📊 Risk/Reward Analysis: Risk=$${riskAmount.toFixed(2)} (${((riskAmount/currentPrice)*100).toFixed(2)}%), Reward=$${rewardAmount.toFixed(2)} (${((rewardAmount/currentPrice)*100).toFixed(2)}%), R:R=${riskRewardRatio.toFixed(2)}:1`);
     

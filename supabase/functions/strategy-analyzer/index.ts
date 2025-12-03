@@ -1071,7 +1071,7 @@ serve(async (req) => {
       for (const signal of signals) {
         try {
           const { error: executeError } = await supabase.functions.invoke("execute-trade", {
-            headers: { Authorization: authHeader },
+            headers: { "x-user-id": userId },
             body: { signalId: signal.id, action: "execute" },
           });
           if (!executeError) {
