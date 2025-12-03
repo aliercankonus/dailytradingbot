@@ -5,7 +5,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { useToast } from '@/hooks/use-toast';
-import { AlertOctagon, Clock, TrendingDown, ShieldAlert } from 'lucide-react';
+import { AlertOctagon, Clock, TrendingDown, ShieldAlert, Scissors } from 'lucide-react';
 
 export const LossManagementSettings = () => {
   const { riskParams, updateRiskParameters } = useRiskParameters();
@@ -49,6 +49,20 @@ export const LossManagementSettings = () => {
         description: enabled 
           ? `Stops will tighten ${riskParams.dynamic_stop_tightening_percent}% per hour on aging losing positions` 
           : 'Dynamic tightening disabled',
+      });
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to update setting', variant: 'destructive' });
+    }
+  };
+
+  const handleTogglePartialLossTaking = async (enabled: boolean) => {
+    try {
+      await updateRiskParameters({ partial_loss_taking_enabled: enabled });
+      toast({
+        title: enabled ? 'Partial Loss Taking Enabled' : 'Partial Loss Taking Disabled',
+        description: enabled 
+          ? `Will close ${riskParams.partial_loss_close_percent}% of position at ${riskParams.partial_loss_trigger_percent}% loss toward stop` 
+          : 'Partial loss taking disabled',
       });
     } catch (error) {
       toast({ title: 'Error', description: 'Failed to update setting', variant: 'destructive' });
@@ -102,6 +116,22 @@ export const LossManagementSettings = () => {
     }
   };
 
+  const handleUpdatePartialLossTrigger = async (value: number) => {
+    try {
+      await updateRiskParameters({ partial_loss_trigger_percent: value });
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to update', variant: 'destructive' });
+    }
+  };
+
+  const handleUpdatePartialLossClose = async (value: number) => {
+    try {
+      await updateRiskParameters({ partial_loss_close_percent: value });
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to update', variant: 'destructive' });
+    }
+  };
+
   const currentDrawdown = riskParams.portfolio_peak_value > 0 
     ? ((riskParams.portfolio_peak_value - riskParams.portfolio_value) / riskParams.portfolio_peak_value) * 100
     : 0;
@@ -136,7 +166,54 @@ export const LossManagementSettings = () => {
         </div>
       )}
 
-      {/* 1. Drawdown Circuit Breaker */}
+      {/* 1. Partial Loss Taking */}
+      <div className="space-y-4 pb-4 border-b">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Scissors className="h-4 w-4 text-amber-500" />
+            <Label className="font-medium">Partial Loss Taking</Label>
+          </div>
+          <Switch
+            checked={riskParams.partial_loss_taking_enabled}
+            onCheckedChange={handleTogglePartialLossTaking}
+          />
+        </div>
+        
+        {riskParams.partial_loss_taking_enabled && (
+          <div className="space-y-4 pl-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Trigger at % of Stop Distance</Label>
+                <Input
+                  type="number"
+                  min="25"
+                  max="75"
+                  step="5"
+                  value={riskParams.partial_loss_trigger_percent}
+                  onChange={(e) => handleUpdatePartialLossTrigger(parseFloat(e.target.value))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Close % of Position</Label>
+                <Input
+                  type="number"
+                  min="25"
+                  max="75"
+                  step="5"
+                  value={riskParams.partial_loss_close_percent}
+                  onChange={(e) => handleUpdatePartialLossClose(parseFloat(e.target.value))}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              When price moves {riskParams.partial_loss_trigger_percent}% toward stop loss, closes {riskParams.partial_loss_close_percent}% of position.
+              Reduces exposure on losing trades before full stop is hit.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* 2. Drawdown Circuit Breaker */}
       <div className="space-y-4 pb-4 border-b">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -178,7 +255,7 @@ export const LossManagementSettings = () => {
         )}
       </div>
 
-      {/* 2. Time-Based Stops */}
+      {/* 3. Time-Based Stops */}
       <div className="space-y-4 pb-4 border-b">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -212,7 +289,7 @@ export const LossManagementSettings = () => {
         )}
       </div>
 
-      {/* 3. Dynamic Stop Tightening */}
+      {/* 4. Dynamic Stop Tightening */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
