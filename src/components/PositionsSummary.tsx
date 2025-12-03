@@ -34,19 +34,26 @@ export const PositionsSummary = () => {
     const trailingEnabled = riskParams?.trailing_stop_enabled ?? true;
 
     positions.forEach((position) => {
-      const currentPrice = Number(prices.get(position.symbol) ?? position.current_price ?? position.entry_price);
-      const entryPrice = Number(position.entry_price);
-      const qty = Number(position.quantity);
+      const wsPrice = prices.get(position.symbol);
+      const entryPrice = Number(position.entry_price) || 0;
+      const dbPrice = Number(position.current_price) || entryPrice;
+      const currentPrice = Number(wsPrice ?? dbPrice) || 0;
+      const qty = Number(position.quantity) || 0;
+
+      // Skip if we don't have valid prices
+      if (!currentPrice || !entryPrice || !qty) return;
+
+      const side = position.side?.toLowerCase();
 
       // Calculate unrealized P&L
-      const pnl = position.side === "buy"
+      const pnl = side === "buy"
         ? (currentPrice - entryPrice) * qty
         : (entryPrice - currentPrice) * qty;
       totalUnrealizedPnl += pnl;
 
       // Calculate trailing stop status
       if (trailingEnabled) {
-        const pnlPercent = position.side === "buy"
+        const pnlPercent = side === "buy"
           ? ((currentPrice - entryPrice) / entryPrice) * 100
           : ((entryPrice - currentPrice) / entryPrice) * 100;
 
