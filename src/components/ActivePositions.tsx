@@ -59,24 +59,27 @@ export const ActivePositions = () => {
         : ((position.entry_price - currentPrice) / position.entry_price) * 100;
 
       // Detect if stop loss has been adjusted by trailing/break-even system
-      // For BUY: original stop is below entry, if stop >= entry, it was adjusted
-      // For SELL: original stop is above entry, if stop <= entry, it was adjusted
-      const stopAdjusted = position.side === 'BUY'
-        ? position.stop_loss >= position.entry_price * 0.995 // Stop moved to within 0.5% of entry or above
-        : position.stop_loss <= position.entry_price * 1.005; // Stop moved to within 0.5% of entry or below
+      // Check if at break-even (stop is at or very close to entry price - within 0.2%)
+      const breakEvenTolerance = position.entry_price * 0.002;
+      const atBreakEven = Math.abs(position.stop_loss - position.entry_price) <= breakEvenTolerance;
       
-      // Check if at break-even (stop is exactly at entry price)
-      const atBreakEven = position.side === 'BUY'
-        ? Math.abs(position.stop_loss - position.entry_price) / position.entry_price < 0.002
-        : Math.abs(position.stop_loss - position.entry_price) / position.entry_price < 0.002;
+      // For BUY: SL adjusted means stop_loss > entry_price (trailing above entry)
+      // For SELL: SL adjusted means stop_loss < entry_price (trailing below entry)
+      const slAdjustedAboveBreakEven = position.side === 'BUY'
+        ? position.stop_loss > position.entry_price + breakEvenTolerance
+        : position.stop_loss < position.entry_price - breakEvenTolerance;
+
+      // Position qualifies for trailing protection (profitable enough)
+      const isTrailingEligible = pnlPercent > 1;
 
       return {
         ...position,
         live_current_price: currentPrice,
         live_unrealized_pnl: pnl,
         live_unrealized_pnl_percent: pnlPercent,
-        stop_adjusted: stopAdjusted,
-        at_break_even: atBreakEven
+        stop_adjusted: slAdjustedAboveBreakEven,
+        at_break_even: atBreakEven,
+        trailing_eligible: isTrailingEligible
       };
     });
   }, [filteredPositions, priceMap]);
@@ -185,22 +188,22 @@ export const ActivePositions = () => {
                      Auto-Rebalanced
                       </Badge>
                     )}
-                    {(position.live_unrealized_pnl_percent || 0) > 1 && (
-                      <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
-                        <Shield className="h-3 w-3" />
-                        Trailing
-                      </Badge>
-                    )}
                     {position.at_break_even && (
                       <Badge variant="outline" className="text-xs flex items-center gap-1 bg-green-500/10 text-green-500 border-green-500/20">
                         <Lock className="h-3 w-3" />
                         Break-Even
                       </Badge>
                     )}
-                    {position.stop_adjusted && !position.at_break_even && (
+                    {position.stop_adjusted && (
                       <Badge variant="outline" className="text-xs flex items-center gap-1 bg-amber-500/10 text-amber-500 border-amber-500/20">
                         <ArrowUp className="h-3 w-3" />
                         SL Adjusted
+                      </Badge>
+                    )}
+                    {position.trailing_eligible && !position.at_break_even && !position.stop_adjusted && (
+                      <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
+                        <Shield className="h-3 w-3" />
+                        Trailing Eligible
                       </Badge>
                     )}
                   </div>
@@ -322,22 +325,22 @@ export const ActivePositions = () => {
                        Auto-Rebalanced
                         </Badge>
                       )}
-                      {(position.live_unrealized_pnl_percent || 0) > 1 && (
-                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
-                          <Shield className="h-3 w-3" />
-                          Trailing
-                        </Badge>
-                      )}
                       {position.at_break_even && (
                         <Badge variant="outline" className="text-xs flex items-center gap-1 bg-green-500/10 text-green-500 border-green-500/20">
                           <Lock className="h-3 w-3" />
                           Break-Even
                         </Badge>
                       )}
-                      {position.stop_adjusted && !position.at_break_even && (
+                      {position.stop_adjusted && (
                         <Badge variant="outline" className="text-xs flex items-center gap-1 bg-amber-500/10 text-amber-500 border-amber-500/20">
                           <ArrowUp className="h-3 w-3" />
                           SL Adjusted
+                        </Badge>
+                      )}
+                      {position.trailing_eligible && !position.at_break_even && !position.stop_adjusted && (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
+                          <Shield className="h-3 w-3" />
+                          Trailing Eligible
                         </Badge>
                       )}
                     </div>
