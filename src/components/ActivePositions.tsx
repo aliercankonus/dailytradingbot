@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { usePositions } from '@/hooks/usePositions';
 import { useRealtimePricesContext } from '@/contexts/RealtimePricesContext';
 import { useRealtimePositionSync } from '@/hooks/useRealtimePositionSync';
-import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw, Filter } from 'lucide-react';
+import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw, Filter, Lock, ArrowUp } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useMemo } from 'react';
@@ -57,11 +57,25 @@ export const ActivePositions = () => {
         ? ((currentPrice - position.entry_price) / position.entry_price) * 100
         : ((position.entry_price - currentPrice) / position.entry_price) * 100;
 
+      // Detect if stop loss has been adjusted by trailing/break-even system
+      // For BUY: original stop is below entry, if stop >= entry, it was adjusted
+      // For SELL: original stop is above entry, if stop <= entry, it was adjusted
+      const stopAdjusted = position.side === 'BUY'
+        ? position.stop_loss >= position.entry_price * 0.995 // Stop moved to within 0.5% of entry or above
+        : position.stop_loss <= position.entry_price * 1.005; // Stop moved to within 0.5% of entry or below
+      
+      // Check if at break-even (stop is exactly at entry price)
+      const atBreakEven = position.side === 'BUY'
+        ? Math.abs(position.stop_loss - position.entry_price) / position.entry_price < 0.002
+        : Math.abs(position.stop_loss - position.entry_price) / position.entry_price < 0.002;
+
       return {
         ...position,
         live_current_price: currentPrice,
         live_unrealized_pnl: pnl,
-        live_unrealized_pnl_percent: pnlPercent
+        live_unrealized_pnl_percent: pnlPercent,
+        stop_adjusted: stopAdjusted,
+        at_break_even: atBreakEven
       };
     });
   }, [filteredPositions, priceMap]);
@@ -174,6 +188,18 @@ export const ActivePositions = () => {
                       <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
                         <Shield className="h-3 w-3" />
                         Trailing
+                      </Badge>
+                    )}
+                    {position.at_break_even && (
+                      <Badge variant="outline" className="text-xs flex items-center gap-1 bg-green-500/10 text-green-500 border-green-500/20">
+                        <Lock className="h-3 w-3" />
+                        Break-Even
+                      </Badge>
+                    )}
+                    {position.stop_adjusted && !position.at_break_even && (
+                      <Badge variant="outline" className="text-xs flex items-center gap-1 bg-amber-500/10 text-amber-500 border-amber-500/20">
+                        <ArrowUp className="h-3 w-3" />
+                        SL Adjusted
                       </Badge>
                     )}
                   </div>
@@ -299,6 +325,18 @@ export const ActivePositions = () => {
                         <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
                           <Shield className="h-3 w-3" />
                           Trailing
+                        </Badge>
+                      )}
+                      {position.at_break_even && (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-green-500/10 text-green-500 border-green-500/20">
+                          <Lock className="h-3 w-3" />
+                          Break-Even
+                        </Badge>
+                      )}
+                      {position.stop_adjusted && !position.at_break_even && (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-amber-500/10 text-amber-500 border-amber-500/20">
+                          <ArrowUp className="h-3 w-3" />
+                          SL Adjusted
                         </Badge>
                       )}
                     </div>
