@@ -188,18 +188,17 @@ export const ActivePositions = () => {
                      Auto-Rebalanced
                       </Badge>
                     )}
-                    {position.at_break_even && (
-                      <Badge variant="outline" className="text-xs flex items-center gap-1 bg-green-500/10 text-green-500 border-green-500/20">
-                        <Lock className="h-3 w-3" />
-                        Break-Even
-                      </Badge>
-                    )}
-                    {position.stop_adjusted && (
+                    {position.stop_adjusted ? (
                       <Badge variant="outline" className="text-xs flex items-center gap-1 bg-amber-500/10 text-amber-500 border-amber-500/20">
                         <ArrowUp className="h-3 w-3" />
                         SL Adjusted
                       </Badge>
-                    )}
+                    ) : position.at_break_even ? (
+                      <Badge variant="outline" className="text-xs flex items-center gap-1 bg-green-500/10 text-green-500 border-green-500/20">
+                        <Lock className="h-3 w-3" />
+                        Break-Even
+                      </Badge>
+                    ) : null}
                     {position.trailing_eligible && !position.at_break_even && !position.stop_adjusted && (
                       <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
                         <Shield className="h-3 w-3" />
@@ -325,18 +324,17 @@ export const ActivePositions = () => {
                        Auto-Rebalanced
                         </Badge>
                       )}
-                      {position.at_break_even && (
-                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-green-500/10 text-green-500 border-green-500/20">
-                          <Lock className="h-3 w-3" />
-                          Break-Even
-                        </Badge>
-                      )}
-                      {position.stop_adjusted && (
+                      {position.stop_adjusted ? (
                         <Badge variant="outline" className="text-xs flex items-center gap-1 bg-amber-500/10 text-amber-500 border-amber-500/20">
                           <ArrowUp className="h-3 w-3" />
                           SL Adjusted
                         </Badge>
-                      )}
+                      ) : position.at_break_even ? (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-green-500/10 text-green-500 border-green-500/20">
+                          <Lock className="h-3 w-3" />
+                          Break-Even
+                        </Badge>
+                      ) : null}
                       {position.trailing_eligible && !position.at_break_even && !position.stop_adjusted && (
                         <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
                           <Shield className="h-3 w-3" />
