@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 
 export const PositionsSummary = () => {
   const { positions } = usePositions();
-  const { prices, priceVersion } = useRealtimePricesContext();
+  const { priceVersion, getPrice } = useRealtimePricesContext();
 
   // Fetch risk parameters directly for trailing stop settings
   const { data: riskParams } = useQuery({
@@ -34,26 +34,25 @@ export const PositionsSummary = () => {
     const trailingEnabled = riskParams?.trailing_stop_enabled ?? true;
 
     positions.forEach((position) => {
-      const wsPrice = prices.get(position.symbol);
-      const entryPrice = Number(position.entry_price) || 0;
-      const dbPrice = Number(position.current_price) || entryPrice;
-      const currentPrice = Number(wsPrice ?? dbPrice) || 0;
-      const qty = Number(position.quantity) || 0;
+      const livePrice = getPrice(position.symbol);
+      const currentPrice = livePrice
+        ? parseFloat(livePrice.price)
+        : position.current_price ?? position.entry_price ?? 0;
+      const entryPrice = position.entry_price ?? 0;
+      const qty = position.quantity ?? 0;
 
       // Skip if we don't have valid prices
       if (!currentPrice || !entryPrice || !qty) return;
 
-      const side = position.side?.toLowerCase();
-
-      // Calculate unrealized P&L
-      const pnl = side === "buy"
+      // Calculate unrealized P&L (same as PortfolioMetrics)
+      const pnl = position.side === "BUY"
         ? (currentPrice - entryPrice) * qty
         : (entryPrice - currentPrice) * qty;
       totalUnrealizedPnl += pnl;
 
       // Calculate trailing stop status
       if (trailingEnabled) {
-        const pnlPercent = side === "buy"
+        const pnlPercent = position.side === "BUY"
           ? ((currentPrice - entryPrice) / entryPrice) * 100
           : ((entryPrice - currentPrice) / entryPrice) * 100;
 
@@ -71,7 +70,7 @@ export const PositionsSummary = () => {
       trailingActive,
       trailingPending,
     };
-  }, [positions, prices, priceVersion, riskParams]);
+  }, [positions, priceVersion, riskParams, getPrice]);
 
   const metrics = [
     {
