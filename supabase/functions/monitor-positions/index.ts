@@ -809,13 +809,25 @@ serve(async (req) => {
           : ((position.entry_price - currentPrice) / position.entry_price) * 100;
         
         // Update position with reduced quantity and new TP level
+        // For stop loss after TP1: Only move to break-even if NOT already above entry (BUY) or below entry (SHORT)
+        // This preserves trailing stop adjustments that are better than break-even
+        let newStopLossAfterTp = position.stop_loss;
+        if (newTpLevel === 1) {
+          if (position.side === "BUY") {
+            // For LONG: Only move to entry if current stop is below entry
+            newStopLossAfterTp = Math.max(position.entry_price, position.stop_loss);
+          } else {
+            // For SHORT: Only move to entry if current stop is above entry
+            newStopLossAfterTp = Math.min(position.entry_price, position.stop_loss);
+          }
+        }
+        
         const { data: updatedPartialPos, error: partialUpdateError } = await supabase
           .from("positions")
           .update({
             quantity: remainingQuantity,
             partial_tp_level: newTpLevel,
-            // Also move stop loss to break-even after first TP hit
-            stop_loss: newTpLevel === 1 ? position.entry_price : position.stop_loss,
+            stop_loss: newStopLossAfterTp,
           })
           .eq("id", position.id)
           .eq("status", "active")
@@ -839,9 +851,15 @@ serve(async (req) => {
           
           console.log(`✅ Partial TP${newTpLevel} executed: ${position.symbol} closed ${closeQuantity.toFixed(4)} (${partialClosePercent}%), remaining ${remainingQuantity.toFixed(4)}, P&L: $${partialPnl.toFixed(2)} (${partialPnlPercent.toFixed(2)}%)`);
           
-          // Move stop loss to break-even after TP1
+          // Log stop loss status after TP1
           if (newTpLevel === 1) {
-            console.log(`🔒 Stop loss moved to break-even ($${position.entry_price.toFixed(2)}) after TP1`);
+            if (newStopLossAfterTp > position.entry_price && position.side === "BUY") {
+              console.log(`🔒 Stop loss kept at trailing level ($${newStopLossAfterTp.toFixed(2)}) after TP1 (above break-even $${position.entry_price.toFixed(2)})`);
+            } else if (newStopLossAfterTp < position.entry_price && position.side === "SELL") {
+              console.log(`🔒 Stop loss kept at trailing level ($${newStopLossAfterTp.toFixed(2)}) after TP1 (below break-even $${position.entry_price.toFixed(2)})`);
+            } else {
+              console.log(`🔒 Stop loss moved to break-even ($${position.entry_price.toFixed(2)}) after TP1`);
+            }
           }
           
           // Send notification for partial TP
