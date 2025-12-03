@@ -514,11 +514,13 @@ const evaluateBollingerBands = (bollingerBands: any, trend: string): { boost: nu
 };
 
 // Calculate position size based on quality score
+// Must align with MIN_QUALITY_SCORE threshold (50)
 const getPositionSizeFromQuality = (qualityScore: number): number => {
   if (qualityScore >= 85) return 1.0;      // Full size for excellent signals
   if (qualityScore >= 75) return 0.85;     // Near full
   if (qualityScore >= 65) return 0.7;      // Reduced
-  if (qualityScore >= 60) return 0.5;      // Minimum acceptable
+  if (qualityScore >= 55) return 0.5;      // Lower acceptable
+  if (qualityScore >= 50) return 0.35;     // Minimum acceptable (matches MIN_QUALITY_SCORE)
   return 0;                                 // Don't trade
 };
 
