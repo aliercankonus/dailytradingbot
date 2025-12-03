@@ -872,17 +872,41 @@ serve(async (req) => {
         // Determine signal type
         const tradeDirection = higherTimeframeFilter?.tradeDirection || trend;
         const signalType = tradeDirection === "bullish" ? "long" : tradeDirection === "bearish" ? "short" : null;
-        if (!signalType) continue;
+        if (!signalType) {
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `Neutral trend direction - no clear trade signal (quality passed: ${qualityScore}/100)`,
+            filters_status: {
+              qualityScore, breakdown,
+              trend, tradeDirection,
+              trend4h: trendData.multiTimeframe?.trend4h,
+              trend1h: trendData.multiTimeframe?.trend1h,
+              regime: regime.regime,
+            },
+            trend_data: trendData,
+            checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
 
         // Get market data
         const marketData = marketDataMap.get(symbol);
-        if (!marketData) continue;
+        if (!marketData) {
+          console.log(`⚠️ ${symbol}: Missing market data`);
+          continue;
+        }
         const currentPrice = parseFloat(marketData.lastPrice);
-        if (!Number.isFinite(currentPrice) || currentPrice <= 0) continue;
+        if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+          console.log(`⚠️ ${symbol}: Invalid price: ${marketData.lastPrice}`);
+          continue;
+        }
         const currentVolume = parseFloat(marketData.volume) || 0;
 
         const historicalData = historicalDataMap.get(symbol);
-        if (!historicalData || historicalData.prices.length < 26) continue;
+        if (!historicalData || historicalData.prices.length < 26) {
+          console.log(`⚠️ ${symbol}: Missing or insufficient historical data (${historicalData?.prices?.length || 0} candles)`);
+          continue;
+        }
         const { prices: historicalPrices, volumes: historicalVolumes } = historicalData;
 
         // ============= IMPROVEMENT #4: Evaluate ALL strategies, pick best =============
