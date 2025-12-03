@@ -43,6 +43,10 @@ interface RiskParameters {
   partial_loss_taking_enabled: boolean;
   partial_loss_trigger_percent: number;
   partial_loss_close_percent: number;
+  // Loss Recovery Mode
+  loss_recovery_mode_enabled: boolean;
+  loss_recovery_position_size_percent: number;
+  loss_recovery_confidence_boost: number;
   updated_at: string;
 }
 
