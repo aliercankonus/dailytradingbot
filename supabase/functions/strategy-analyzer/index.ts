@@ -917,10 +917,15 @@ serve(async (req) => {
         }
         const candidates: StrategyCandidate[] = [];
 
+        console.log(`📋 ${symbol}: Evaluating ${customStrategies.length} strategies`);
+        
         for (const strategy of customStrategies) {
           const indicators = strategy.indicators || [];
           const entryConditions = strategy.entry_conditions || [];
-          if (!indicators.length || !entryConditions.length) continue;
+          if (!indicators.length || !entryConditions.length) {
+            console.log(`⚠️ ${symbol}: Strategy "${strategy.name}" skipped - no indicators/conditions`);
+            continue;
+          }
 
           const indicatorValues = new Map<string, number>();
           for (const config of indicators) {
@@ -944,7 +949,19 @@ serve(async (req) => {
           prevIndicatorValues.set("Volume", prevVolume);
 
           try {
-            const conditionsMet = entryConditions.every((c: any) => c ? evaluateCondition(c, indicatorValues, prevIndicatorValues) : false);
+            const conditionResults = entryConditions.map((c: any) => {
+              if (!c) return { condition: null, result: false };
+              const result = evaluateCondition(c, indicatorValues, prevIndicatorValues);
+              return { 
+                condition: `${c.indicator} ${c.comparison} ${c.value}`, 
+                result,
+                currentValue: indicatorValues.get(c.indicator)
+              };
+            });
+            
+            const conditionsMet = conditionResults.every((r: { result: boolean }) => r.result);
+            console.log(`📊 ${symbol} "${strategy.name}": ${conditionsMet ? '✅ PASS' : '❌ FAIL'} - ${JSON.stringify(conditionResults)}`);
+            
             if (conditionsMet) {
               // Calculate strategy-specific score bonus
               const strategyBonus = (strategy.risk_settings?.priority || 5) / 10; // 0-1 bonus
@@ -954,7 +971,10 @@ serve(async (req) => {
                 indicatorValues,
               });
             }
-          } catch { continue; }
+          } catch (err) {
+            console.log(`❌ ${symbol}: Strategy "${strategy.name}" error: ${err}`);
+            continue;
+          }
         }
 
         if (candidates.length === 0) {
@@ -977,6 +997,8 @@ serve(async (req) => {
         candidates.sort((a, b) => b.score - a.score);
         const best = candidates[0];
         const strategy = best.strategy;
+        console.log(`🎯 ${symbol}: Selected "${strategy.name}" (${candidates.length} strategies matched, best score: ${best.score})`);
+        
         const indicatorValues = best.indicatorValues;
 
         // Calculate position size from quality score
@@ -1017,8 +1039,6 @@ serve(async (req) => {
           },
           expires_at: new Date(Date.now() + 60000).toISOString(),
           created_by_rebalancer: false,
-          positionSizePercent: strategyPositionSize,
-          qualityScore,
         };
 
         const { data: insertedSignal, error: insertError } = await supabase
@@ -1026,6 +1046,10 @@ serve(async (req) => {
           .insert(signal)
           .select("id")
           .single();
+
+        if (insertError) {
+          console.log(`❌ ${symbol}: Signal insert error: ${insertError.message}`);
+        }
 
         if (!insertError && insertedSignal) {
           signals.push({ ...signal, id: insertedSignal.id });
