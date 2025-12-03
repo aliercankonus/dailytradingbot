@@ -45,101 +45,92 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get authenticated user
+    // Get authenticated user (optional for public backtests)
+    let userId: string | null = null;
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      throw new Error('No authorization header');
+    if (authHeader) {
+      const token = authHeader.replace('Bearer ', '');
+      const { data: { user } } = await supabase.auth.getUser(token);
+      if (user) {
+        userId = user.id;
+      }
     }
-
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    
-    if (authError || !user) {
-      throw new Error('Unauthorized');
-    }
-
-    const userId = user.id;
 
     // Fetch strategy configuration (custom or built-in)
     let strategy: any = null;
     let isCustomStrategy = false;
 
-    const { data: customStrategy, error: strategyError } = await supabase
-      .from('custom_strategies')
-      .select('*')
-      .eq('id', strategyId)
-      .maybeSingle();
+    // First check if strategyId is a built-in strategy name
+    const builtInStrategies: { [key: string]: any } = {
+      'mean-reversion': {
+        name: 'Mean Reversion',
+        indicators: [
+          { type: 'price', name: 'price' },
+          { type: 'bb_lower', name: 'bb_lower', period: 20 },
+          { type: 'bb_middle', name: 'bb_middle', period: 20 },
+          { type: 'rsi', name: 'rsi', period: 14 },
+        ],
+        entry_conditions: [
+          { indicator: 'price', operator: '<', value: 0, compareToIndicator: true, targetIndicator: 'bb_lower' },
+          { indicator: 'rsi', operator: '<', value: 30 },
+        ],
+        exit_conditions: [
+          { indicator: 'price', operator: '>=', value: 0, compareToIndicator: true, targetIndicator: 'bb_middle' },
+        ],
+        risk_management: { stopLossPercent: 2, takeProfitPercent: 4 },
+      },
+      'momentum': {
+        name: 'Momentum',
+        indicators: [
+          { type: 'macd', name: 'macd', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+          { type: 'macd_signal', name: 'macd_signal', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+        ],
+        entry_conditions: [
+          { indicator: 'macd', operator: '>', value: 0, compareToIndicator: true, targetIndicator: 'macd_signal' },
+        ],
+        exit_conditions: [
+          { indicator: 'macd', operator: '<', value: 0, compareToIndicator: true, targetIndicator: 'macd_signal' },
+        ],
+        risk_management: { stopLossPercent: 3, takeProfitPercent: 6 },
+      },
+      'grid': {
+        name: 'Grid Trading',
+        indicators: [
+          { type: 'price', name: 'price' },
+          { type: 'bb_lower', name: 'bb_lower', period: 20 },
+          { type: 'bb_upper', name: 'bb_upper', period: 20 },
+        ],
+        entry_conditions: [
+          { indicator: 'price', operator: '<=', value: 0, compareToIndicator: true, targetIndicator: 'bb_lower' },
+        ],
+        exit_conditions: [
+          { indicator: 'price', operator: '>=', value: 0, compareToIndicator: true, targetIndicator: 'bb_upper' },
+        ],
+        risk_management: { stopLossPercent: 1.5, takeProfitPercent: 1.5 },
+      },
+    };
 
-    if (strategyError) {
-      throw new Error(`Database error: ${strategyError.message}`);
-    }
-
-    if (customStrategy) {
-      strategy = customStrategy;
-      isCustomStrategy = true;
+    if (builtInStrategies[strategyId]) {
+      strategy = builtInStrategies[strategyId];
+      console.log('Using built-in strategy:', strategyId);
     } else {
-      // Try built-in strategies by id, then map to default configs
-      const { data: builtIn, error: builtInErr } = await supabase
-        .from('strategy_performance')
-        .select('id, strategy_name')
-        .eq('id', strategyId)
-        .maybeSingle();
+      // Try to fetch as custom strategy UUID
+      const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(strategyId);
+      
+      if (isValidUUID) {
+        const { data: customStrategy, error: strategyError } = await supabase
+          .from('custom_strategies')
+          .select('*')
+          .eq('id', strategyId)
+          .maybeSingle();
 
-      if (builtInErr) {
-        throw new Error(`Database error: ${builtInErr.message}`);
-      }
+        if (strategyError) {
+          console.error('Strategy query error:', strategyError);
+        }
 
-      if (builtIn) {
-        const name = (builtIn.strategy_name || '').toLowerCase();
-        if (name.includes('mean reversion')) {
-          strategy = {
-            name: builtIn.strategy_name,
-            indicators: [
-              { type: 'price', name: 'price' },
-              { type: 'bb_lower', name: 'bb_lower', period: 20 },
-              { type: 'bb_middle', name: 'bb_middle', period: 20 },
-              { type: 'rsi', name: 'rsi', period: 14 },
-            ],
-            entry_conditions: [
-              { indicator: 'price', operator: '<', value: 0, compareToIndicator: true, targetIndicator: 'bb_lower' },
-              { indicator: 'rsi', operator: '<', value: 30 },
-            ],
-            exit_conditions: [
-              { indicator: 'price', operator: '>=', value: 0, compareToIndicator: true, targetIndicator: 'bb_middle' },
-            ],
-            risk_management: { stopLossPercent: 2, takeProfitPercent: 4 },
-          };
-        } else if (name.includes('momentum')) {
-          strategy = {
-            name: builtIn.strategy_name,
-            indicators: [
-              { type: 'macd', name: 'macd', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
-              { type: 'macd_signal', name: 'macd_signal', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
-            ],
-            entry_conditions: [
-              { indicator: 'macd', operator: '>', value: 0, compareToIndicator: true, targetIndicator: 'macd_signal' },
-            ],
-            exit_conditions: [
-              { indicator: 'macd', operator: '<', value: 0, compareToIndicator: true, targetIndicator: 'macd_signal' },
-            ],
-            risk_management: { stopLossPercent: 3, takeProfitPercent: 6 },
-          };
-        } else if (name.includes('grid')) {
-          strategy = {
-            name: builtIn.strategy_name,
-            indicators: [
-              { type: 'price', name: 'price' },
-              { type: 'bb_lower', name: 'bb_lower', period: 20 },
-              { type: 'bb_upper', name: 'bb_upper', period: 20 },
-            ],
-            entry_conditions: [
-              { indicator: 'price', operator: '<=', value: 0, compareToIndicator: true, targetIndicator: 'bb_lower' },
-            ],
-            exit_conditions: [
-              { indicator: 'price', operator: '>=', value: 0, compareToIndicator: true, targetIndicator: 'bb_upper' },
-            ],
-            risk_management: { stopLossPercent: 1.5, takeProfitPercent: 1.5 },
-          };
+        if (customStrategy) {
+          strategy = customStrategy;
+          isCustomStrategy = true;
         }
       }
     }

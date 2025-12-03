@@ -42,3 +42,6 @@ cron = "*/1 * * * *"
 
 [functions.validate-adx]
 verify_jwt = false
+
+[functions.backtest-strategy]
+verify_jwt = false
