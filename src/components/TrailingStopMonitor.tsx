@@ -11,6 +11,7 @@ export const TrailingStopMonitor = () => {
     enabled: true,
     activationPercent: 1.0,
     distanceMultiplier: 1.5,
+    profitLockPercent: 50,
   });
   const { prices, priceVersion, getPrice } = useRealtimePricesContext();
 
@@ -25,7 +26,7 @@ export const TrailingStopMonitor = () => {
       const { data } = await supabase
         .from("risk_parameters")
         .select(
-          "trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier",
+          "trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, trailing_stop_profit_lock_percent",
         )
         .eq("user_id", user.id)
         .single();
@@ -35,6 +36,7 @@ export const TrailingStopMonitor = () => {
           enabled: data.trailing_stop_enabled ?? true,
           activationPercent: data.trailing_stop_activation_percent ?? 1.0,
           distanceMultiplier: data.trailing_stop_distance_multiplier ?? 1.5,
+          profitLockPercent: data.trailing_stop_profit_lock_percent ?? 50,
         });
       }
     };
@@ -124,14 +126,26 @@ export const TrailingStopMonitor = () => {
           ? p.entry_price + profitAbsolute - trailingDistanceAbsolute
           : p.entry_price - profitAbsolute + trailingDistanceAbsolute;
 
+        // Calculate profit lock values
+        const profitLockPercent = settings.profitLockPercent;
+        const lockedProfitPercent = pnlPercent * (profitLockPercent / 100);
+        const lockedProfitAbsolute = profitAbsolute * (profitLockPercent / 100);
+        const lockedStopPrice = p.side === "BUY"
+          ? p.entry_price + lockedProfitAbsolute
+          : p.entry_price - lockedProfitAbsolute;
+
         return {
           ...p,
           currentPrice: Number(currentPrice),
           pnlPercent: Number(pnlPercent),
-          stop_loss: Number(calculatedStopLoss), // Override with calculated position-specific stop
+          stop_loss: Number(calculatedStopLoss),
+          lockedProfitPercent: Number(lockedProfitPercent),
+          lockedProfitAbsolute: Number(lockedProfitAbsolute),
+          lockedStopPrice: Number(lockedStopPrice),
+          profitLockPercent: Number(profitLockPercent),
         };
       });
-  }, [positions, getPrice, priceVersion]);
+  }, [positions, getPrice, priceVersion, settings.profitLockPercent, settings.distanceMultiplier]);
 
   return (
     <Card>
@@ -202,6 +216,31 @@ export const TrailingStopMonitor = () => {
                         ${position.stop_loss?.toFixed(2) ?? "N/A"}
                       </span>
                     </div>
+
+                    {/* Profit Lock Calculation */}
+                    <div className="mt-2 rounded bg-muted/50 p-2">
+                      <div className="flex items-center gap-1 text-xs font-medium text-foreground mb-1">
+                        <TrendingUp className="h-3 w-3 text-green-500" />
+                        Profit Lock ({position.profitLockPercent}%)
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <div>
+                          <span>Locked Profit:</span>
+                          <span className="ml-1 font-medium text-green-500">
+                            +{position.lockedProfitPercent.toFixed(2)}%
+                          </span>
+                        </div>
+                        <div>
+                          <span>Lock Stop:</span>
+                          <span className="ml-1 font-medium text-amber-500">
+                            ${position.lockedStopPrice.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="col-span-2 mt-1 text-[10px] italic">
+                          {position.pnlPercent.toFixed(2)}% × {position.profitLockPercent}% = {position.lockedProfitPercent.toFixed(2)}% locked
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-1">
@@ -223,8 +262,8 @@ export const TrailingStopMonitor = () => {
               {(settings.distanceMultiplier * 2).toFixed(1)}-
               {(settings.distanceMultiplier * 3).toFixed(1)}%)
             </li>
+            <li>• Profit lock: {settings.profitLockPercent}% of gains protected</li>
             <li>• Only moves in favorable direction</li>
-            <li>• Automatically protects gains</li>
           </ul>
         </div>
       </CardContent>
