@@ -18,6 +18,7 @@ export const TrailingStopSettings = () => {
   const [distanceMultiplier, setDistanceMultiplier] = useState("1.5");
   const [breakEvenEnabled, setBreakEvenEnabled] = useState(true);
   const [breakEvenActivationPercent, setBreakEvenActivationPercent] = useState("0.5");
+  const [profitLockPercent, setProfitLockPercent] = useState("50");
 
   useEffect(() => {
     fetchSettings();
@@ -30,7 +31,7 @@ export const TrailingStopSettings = () => {
 
       const { data, error } = await supabase
         .from('risk_parameters')
-        .select('trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent')
+        .select('trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent')
         .eq('user_id', user.id)
         .single();
 
@@ -42,6 +43,7 @@ export const TrailingStopSettings = () => {
         setDistanceMultiplier((data.trailing_stop_distance_multiplier ?? 1.5).toString());
         setBreakEvenEnabled(data.break_even_enabled ?? true);
         setBreakEvenActivationPercent((data.break_even_activation_percent ?? 0.5).toString());
+        setProfitLockPercent((data.trailing_stop_profit_lock_percent ?? 50).toString());
       }
     } catch (error) {
       console.error('Error fetching trailing stop settings:', error);
@@ -58,6 +60,7 @@ export const TrailingStopSettings = () => {
       const activationValue = parseFloat(activationPercent);
       const multiplierValue = parseFloat(distanceMultiplier);
       const breakEvenValue = parseFloat(breakEvenActivationPercent);
+      const profitLockValue = parseFloat(profitLockPercent);
 
       if (isNaN(activationValue) || activationValue < 0.1 || activationValue > 10) {
         throw new Error('Activation threshold must be between 0.1% and 10%');
@@ -71,6 +74,10 @@ export const TrailingStopSettings = () => {
         throw new Error('Break-even threshold must be between 0.1% and 5%');
       }
 
+      if (isNaN(profitLockValue) || profitLockValue < 20 || profitLockValue > 90) {
+        throw new Error('Profit lock percentage must be between 20% and 90%');
+      }
+
       const { error } = await supabase
         .from('risk_parameters')
         .update({
@@ -79,6 +86,7 @@ export const TrailingStopSettings = () => {
           trailing_stop_distance_multiplier: multiplierValue,
           break_even_enabled: breakEvenEnabled,
           break_even_activation_percent: breakEvenValue,
+          trailing_stop_profit_lock_percent: profitLockValue,
         })
         .eq('user_id', user.id);
 
@@ -274,6 +282,45 @@ export const TrailingStopSettings = () => {
             </div>
             <p className="text-xs text-muted-foreground">
               Current: Stop loss trails at {distanceMultiplier}x ATR distance (typically {(parseFloat(distanceMultiplier) * 2).toFixed(1)}-{(parseFloat(distanceMultiplier) * 3).toFixed(1)}%)
+            </p>
+          </div>
+
+          {/* Profit Lock Percentage */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="profit-lock-percent">
+                Profit Lock Percentage
+              </Label>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Info className="h-4 w-4 text-muted-foreground" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="w-64">
+                      Percentage of unrealized profit to lock in when trailing stop activates.
+                      Higher = more aggressive profit protection, Lower = more room for price movement.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                id="profit-lock-percent"
+                type="number"
+                step="5"
+                min="20"
+                max="90"
+                value={profitLockPercent}
+                onChange={(e) => setProfitLockPercent(e.target.value)}
+                disabled={!enabled}
+                className="max-w-32"
+              />
+              <span className="text-sm text-muted-foreground">%</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              At {profitLockPercent}% lock: If +10% profit, stop moves to entry +{(parseFloat(profitLockPercent) / 10).toFixed(1)}%
             </p>
           </div>
 
