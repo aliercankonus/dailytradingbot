@@ -393,13 +393,32 @@ function calculateHistoricalATRAvg(klines: any[], atrPeriod: number, atrLookback
   return historicalATRCount > 0 ? historicalATRSum / historicalATRCount : currentATR;
 }
 
-// Wilder's ADX: measures trend strength (0-100)
-// <20 = weak/ranging, 20-40 = trending, >40 = strong trend
+/**
+ * Wilder's Average Directional Index (ADX) - measures trend strength (0-100)
+ * Reference: J. Welles Wilder Jr., "New Concepts in Technical Trading Systems" (1978)
+ * 
+ * Interpretation:
+ *   0-15  = Absent or very weak trend (avoid trend-following strategies)
+ *   15-25 = Weak trend (use with caution)
+ *   25-50 = Strong trend (ideal for trend-following)
+ *   50-75 = Very strong trend
+ *   75-100 = Extremely strong trend (rare)
+ * 
+ * Algorithm:
+ *   1. Calculate True Range (TR), +DM, -DM for each bar
+ *   2. Apply Wilder's smoothing to TR, +DM, -DM (initial sum, then recursive smoothing)
+ *   3. Calculate +DI and -DI from smoothed values
+ *   4. Calculate DX = |+DI - -DI| / (+DI + -DI) * 100
+ *   5. Apply Wilder's smoothing to DX to get ADX
+ */
 function calculateADX(klines: any[], period = 14): number {
-  // Need 2*period + 1 candles for stable ADX (period for DI smoothing + period for ADX smoothing)
+  // Minimum data requirement: 2*period candles for TR/DM smoothing + ADX smoothing
   const minRequired = 2 * period + 1;
-  if (klines.length < minRequired) return 0;
+  if (!klines || klines.length < minRequired) {
+    return 0;
+  }
 
+  // Step 1: Calculate True Range (TR) and Directional Movement (+DM, -DM) arrays
   const trueRanges: number[] = [];
   const plusDMs: number[] = [];
   const minusDMs: number[] = [];
@@ -411,64 +430,101 @@ function calculateADX(klines: any[], period = 14): number {
     const prevLow = parseFloat(klines[i - 1][3]);
     const prevClose = parseFloat(klines[i - 1][4]);
 
-    // Skip invalid values
+    // Skip bars with invalid/missing data
     if (!Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(prevClose) ||
-        !Number.isFinite(prevHigh) || !Number.isFinite(prevLow)) {
+        !Number.isFinite(prevHigh) || !Number.isFinite(prevLow) || high <= 0 || low <= 0) {
       continue;
     }
 
-    const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+    // True Range = max(High-Low, |High-PrevClose|, |Low-PrevClose|)
+    const tr = Math.max(
+      high - low,
+      Math.abs(high - prevClose),
+      Math.abs(low - prevClose)
+    );
+
+    // Directional Movement
     const upMove = high - prevHigh;
     const downMove = prevLow - low;
 
-    const plusDM = upMove > downMove && upMove > 0 ? upMove : 0;
-    const minusDM = downMove > upMove && downMove > 0 ? downMove : 0;
+    // +DM = upMove if upMove > downMove AND upMove > 0, else 0
+    // -DM = downMove if downMove > upMove AND downMove > 0, else 0
+    const plusDM = (upMove > downMove && upMove > 0) ? upMove : 0;
+    const minusDM = (downMove > upMove && downMove > 0) ? downMove : 0;
 
     trueRanges.push(tr);
     plusDMs.push(plusDM);
     minusDMs.push(minusDM);
   }
 
-  if (trueRanges.length < 2 * period) return 0;
+  // Validate we have enough data after filtering invalid bars
+  if (trueRanges.length < 2 * period) {
+    return 0;
+  }
 
-  // Step 1: Initial smoothed values using SUM of first 'period' values (Wilder's method)
-  let smoothedTR = trueRanges.slice(0, period).reduce((a, b) => a + b, 0);
-  let smoothedPlusDM = plusDMs.slice(0, period).reduce((a, b) => a + b, 0);
-  let smoothedMinusDM = minusDMs.slice(0, period).reduce((a, b) => a + b, 0);
+  // Step 2: Initialize Wilder's smoothing with SUM of first 'period' values
+  // Wilder's method uses sum (not average) for initialization to maintain proper scale
+  let smoothedTR = 0;
+  let smoothedPlusDM = 0;
+  let smoothedMinusDM = 0;
+  
+  for (let i = 0; i < period; i++) {
+    smoothedTR += trueRanges[i];
+    smoothedPlusDM += plusDMs[i];
+    smoothedMinusDM += minusDMs[i];
+  }
 
-  // Step 2: Calculate DX values
+  // Step 3: Calculate DX values array using continuous Wilder smoothing
   const dxValues: number[] = [];
-  
+
   // First DX from initial smoothed values
-  let plusDI = smoothedTR > 0 ? (smoothedPlusDM / smoothedTR) * 100 : 0;
-  let minusDI = smoothedTR > 0 ? (smoothedMinusDM / smoothedTR) * 100 : 0;
-  let dx = plusDI + minusDI > 0 ? Math.abs(plusDI - minusDI) / (plusDI + minusDI) * 100 : 0;
-  dxValues.push(dx);
-
-  // Continue with Wilder's smoothing: smoothed = prev - prev/period + current
-  for (let i = period; i < trueRanges.length; i++) {
-    smoothedTR = smoothedTR - smoothedTR / period + trueRanges[i];
-    smoothedPlusDM = smoothedPlusDM - smoothedPlusDM / period + plusDMs[i];
-    smoothedMinusDM = smoothedMinusDM - smoothedMinusDM / period + minusDMs[i];
-
-    plusDI = smoothedTR > 0 ? (smoothedPlusDM / smoothedTR) * 100 : 0;
-    minusDI = smoothedTR > 0 ? (smoothedMinusDM / smoothedTR) * 100 : 0;
-    dx = plusDI + minusDI > 0 ? Math.abs(plusDI - minusDI) / (plusDI + minusDI) * 100 : 0;
+  if (smoothedTR > 0) {
+    const plusDI = (smoothedPlusDM / smoothedTR) * 100;
+    const minusDI = (smoothedMinusDM / smoothedTR) * 100;
+    const diSum = plusDI + minusDI;
+    const dx = diSum > 0 ? (Math.abs(plusDI - minusDI) / diSum) * 100 : 0;
     dxValues.push(dx);
+  } else {
+    dxValues.push(0);
   }
 
-  if (dxValues.length < period) return 0;
+  // Continue calculating DX with Wilder's smoothing: smoothed = prev - prev/N + current
+  for (let i = period; i < trueRanges.length; i++) {
+    // Wilder's smoothing formula maintains the sum scale
+    smoothedTR = smoothedTR - (smoothedTR / period) + trueRanges[i];
+    smoothedPlusDM = smoothedPlusDM - (smoothedPlusDM / period) + plusDMs[i];
+    smoothedMinusDM = smoothedMinusDM - (smoothedMinusDM / period) + minusDMs[i];
 
-  // Step 3: Calculate ADX using Wilder's smoothing of DX values
-  // Initial ADX = average of first 'period' DX values
-  let adx = dxValues.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  
-  // Continue Wilder's smoothing for remaining DX values
+    if (smoothedTR > 0) {
+      const plusDI = (smoothedPlusDM / smoothedTR) * 100;
+      const minusDI = (smoothedMinusDM / smoothedTR) * 100;
+      const diSum = plusDI + minusDI;
+      const dx = diSum > 0 ? (Math.abs(plusDI - minusDI) / diSum) * 100 : 0;
+      dxValues.push(dx);
+    } else {
+      dxValues.push(0);
+    }
+  }
+
+  // Validate DX values
+  if (dxValues.length < period) {
+    return 0;
+  }
+
+  // Step 4: Calculate ADX using Wilder's smoothing of DX values
+  // Initial ADX = simple average of first 'period' DX values
+  let adx = 0;
+  for (let i = 0; i < period; i++) {
+    adx += dxValues[i];
+  }
+  adx /= period;
+
+  // Continue Wilder's smoothing: ADX = (prevADX * (N-1) + currentDX) / N
   for (let i = period; i < dxValues.length; i++) {
-    adx = (adx * (period - 1) + dxValues[i]) / period;
+    adx = ((adx * (period - 1)) + dxValues[i]) / period;
   }
-  
-  // Clamp to valid range [0, 100] and round
+
+  // Clamp to valid range [0, 100] and round to 1 decimal place
   return Math.max(0, Math.min(100, Math.round(adx * 10) / 10));
 }
 
