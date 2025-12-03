@@ -785,7 +785,23 @@ serve(async (req) => {
     let rejectedByRegime = 0;
     let rejectedByQuality = 0;
     let rejectedByStrategy = 0;
-    const MIN_QUALITY_SCORE = 50; // Lowered from 60 to allow momentum continuation entries
+    
+    // Loss Recovery Mode - increase quality threshold after consecutive losses
+    const isInRecoveryMode = riskParams.loss_recovery_mode_enabled && 
+      (riskParams.consecutive_losses || 0) >= (riskParams.consecutive_loss_threshold || 3);
+    const recoveryConfidenceBoost = riskParams.loss_recovery_confidence_boost || 10;
+    const recoveryPositionSizeMultiplier = (riskParams.loss_recovery_position_size_percent || 50) / 100;
+    
+    const BASE_MIN_QUALITY_SCORE = 50;
+    const MIN_QUALITY_SCORE = isInRecoveryMode 
+      ? BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost 
+      : BASE_MIN_QUALITY_SCORE;
+    
+    if (isInRecoveryMode) {
+      console.log(`🔄 LOSS RECOVERY MODE ACTIVE: ${riskParams.consecutive_losses} consecutive losses`);
+      console.log(`   → Quality threshold: ${MIN_QUALITY_SCORE} (base ${BASE_MIN_QUALITY_SCORE} + ${recoveryConfidenceBoost})`);
+      console.log(`   → Position size multiplier: ${recoveryPositionSizeMultiplier * 100}%`);
+    }
 
     // Analyze each symbol
     for (const { symbol } of symbols) {
@@ -1003,8 +1019,12 @@ serve(async (req) => {
         
         const indicatorValues = best.indicatorValues;
 
-        // Calculate position size from quality score
-        const positionSizeMultiplier = getPositionSizeFromQuality(qualityScore);
+        // Calculate position size from quality score, apply recovery mode reduction
+        let positionSizeMultiplier = getPositionSizeFromQuality(qualityScore);
+        if (isInRecoveryMode) {
+          positionSizeMultiplier *= recoveryPositionSizeMultiplier;
+          console.log(`🔄 ${symbol}: Recovery mode - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
         const strategyPositionSize = (strategy.risk_settings?.positionSizePercent || 100) * positionSizeMultiplier;
 
         const stopLossPercent = strategy.risk_settings?.stopLossPercent || riskParams.max_risk_per_trade_percent;

@@ -559,6 +559,9 @@ export type Database = {
           id: string
           is_trading_enabled: boolean | null
           last_loss_reset_date: string | null
+          loss_recovery_confidence_boost: number | null
+          loss_recovery_mode_enabled: boolean | null
+          loss_recovery_position_size_percent: number | null
           max_open_trades: number
           max_positions_to_close_per_cycle: number | null
           max_risk_per_trade_percent: number
@@ -613,6 +616,9 @@ export type Database = {
           id?: string
           is_trading_enabled?: boolean | null
           last_loss_reset_date?: string | null
+          loss_recovery_confidence_boost?: number | null
+          loss_recovery_mode_enabled?: boolean | null
+          loss_recovery_position_size_percent?: number | null
           max_open_trades?: number
           max_positions_to_close_per_cycle?: number | null
           max_risk_per_trade_percent?: number
@@ -667,6 +673,9 @@ export type Database = {
           id?: string
           is_trading_enabled?: boolean | null
           last_loss_reset_date?: string | null
+          loss_recovery_confidence_boost?: number | null
+          loss_recovery_mode_enabled?: boolean | null
+          loss_recovery_position_size_percent?: number | null
           max_open_trades?: number
           max_positions_to_close_per_cycle?: number | null
           max_risk_per_trade_percent?: number
