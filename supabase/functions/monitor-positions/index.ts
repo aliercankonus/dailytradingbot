@@ -900,6 +900,11 @@ serve(async (req) => {
             
             console.log(`✂️ PARTIAL LOSS: ${position.symbol} ${position.side} - Price ${lossProgressPercent.toFixed(1)}% toward stop, closing ${(closePercent * 100).toFixed(0)}%`);
             
+            // Calculate P&L percent for closed portion
+            const partialLossPercent = position.side === "BUY"
+              ? ((currentPrice - position.entry_price) / position.entry_price) * 100
+              : ((position.entry_price - currentPrice) / position.entry_price) * 100;
+            
             // Update position with reduced quantity and mark partial loss taken
             const { data: updatedPartialLossPos, error: partialLossError } = await supabase
               .from("positions")
@@ -915,7 +920,34 @@ serve(async (req) => {
             if (partialLossError) {
               console.error(`Error executing partial loss for ${position.id}:`, partialLossError);
             } else if (updatedPartialLossPos) {
-              console.log(`✅ Partial loss executed: ${position.symbol} closed ${closeQuantity.toFixed(4)} (${(closePercent * 100).toFixed(0)}%), remaining ${remainingQuantity.toFixed(4)}, Loss: $${partialLoss.toFixed(2)}`);
+              // Create a closed position record for the partial close (for history tracking)
+              const { error: partialCloseRecordError } = await supabase
+                .from("positions")
+                .insert({
+                  user_id: position.user_id,
+                  symbol: position.symbol,
+                  side: position.side,
+                  quantity: closeQuantity,
+                  entry_price: position.entry_price,
+                  exit_price: currentPrice,
+                  stop_loss: position.stop_loss,
+                  take_profit: position.take_profit,
+                  status: "closed",
+                  close_reason: "partial_loss",
+                  realized_pnl: partialLoss,
+                  realized_pnl_percent: partialLossPercent,
+                  opened_at: position.opened_at,
+                  closed_at: new Date().toISOString(),
+                  strategy_name: position.strategy_name,
+                  trend: position.trend,
+                  confidence_score: position.confidence_score,
+                });
+              
+              if (partialCloseRecordError) {
+                console.error(`Error creating partial loss record for ${position.symbol}:`, partialCloseRecordError);
+              }
+              
+              console.log(`✅ Partial loss executed: ${position.symbol} closed ${closeQuantity.toFixed(4)} (${(closePercent * 100).toFixed(0)}%), remaining ${remainingQuantity.toFixed(4)}, Loss: $${partialLoss.toFixed(2)} (${partialLossPercent.toFixed(2)}%)`);
               
               // Send notification
               try {
@@ -937,6 +969,7 @@ serve(async (req) => {
                       remainingQuantity,
                       exitPrice: currentPrice,
                       partialLoss,
+                      partialLossPercent,
                       lossProgressPercent,
                       email: riskParams.notification_email,
                     },
@@ -1078,6 +1111,33 @@ serve(async (req) => {
         if (partialUpdateError) {
           console.error(`Error executing partial TP for ${position.id}:`, partialUpdateError);
         } else if (updatedPartialPos) {
+          // Create a closed position record for the partial close (for history tracking)
+          const { error: partialTpRecordError } = await supabase
+            .from("positions")
+            .insert({
+              user_id: position.user_id,
+              symbol: position.symbol,
+              side: position.side,
+              quantity: closeQuantity,
+              entry_price: position.entry_price,
+              exit_price: currentPrice,
+              stop_loss: position.stop_loss,
+              take_profit: position.take_profit,
+              status: "closed",
+              close_reason: partialCloseReason,
+              realized_pnl: partialPnl,
+              realized_pnl_percent: partialPnlPercent,
+              opened_at: position.opened_at,
+              closed_at: new Date().toISOString(),
+              strategy_name: position.strategy_name,
+              trend: position.trend,
+              confidence_score: position.confidence_score,
+            });
+          
+          if (partialTpRecordError) {
+            console.error(`Error creating partial TP record for ${position.symbol}:`, partialTpRecordError);
+          }
+          
           partialTpTaken.push({
             symbol: position.symbol,
             side: position.side,
