@@ -12,6 +12,7 @@ import { useCustomStrategies } from '@/hooks/useCustomStrategies';
 import { useSymbols } from '@/hooks/useSymbols';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { formatPrice, formatPercent } from '@/lib/utils';
 
 interface BacktestingModuleProps {
   strategies: Array<{ id: string; name: string }>;
@@ -337,10 +338,10 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
                 <span className="text-sm font-medium">Net Profit</span>
               </div>
               <div className={`text-2xl font-bold ${latestResult.net_profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                ${latestResult.net_profit?.toFixed(2)}
+                {formatPrice(latestResult.net_profit, 2, '$')}
               </div>
               <div className="text-xs text-muted-foreground">
-                {((latestResult.net_profit / latestResult.initial_capital) * 100).toFixed(2)}% return
+                {formatPercent((latestResult.net_profit / latestResult.initial_capital) * 100)} return
               </div>
             </Card>
 
@@ -349,7 +350,7 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
                 <Target className="h-5 w-5 text-primary" />
                 <span className="text-sm font-medium">Win Rate</span>
               </div>
-              <div className="text-2xl font-bold">{latestResult.win_rate?.toFixed(1)}%</div>
+              <div className="text-2xl font-bold">{formatPercent(latestResult.win_rate, 1)}</div>
               <div className="text-xs text-muted-foreground">
                 {latestResult.winning_trades}/{latestResult.total_trades} trades
               </div>
@@ -361,7 +362,7 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
                 <span className="text-sm font-medium">Max Drawdown</span>
               </div>
               <div className="text-2xl font-bold text-red-500">
-                {latestResult.max_drawdown?.toFixed(2)}%
+                {formatPercent(latestResult.max_drawdown)}
               </div>
               <div className="text-xs text-muted-foreground">Largest decline</div>
             </Card>
@@ -371,7 +372,7 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
                 <Activity className="h-5 w-5 text-blue-500" />
                 <span className="text-sm font-medium">Sharpe Ratio</span>
               </div>
-              <div className="text-2xl font-bold">{latestResult.sharpe_ratio?.toFixed(2)}</div>
+              <div className="text-2xl font-bold">{latestResult.sharpe_ratio?.toFixed(2) ?? 'N/A'}</div>
               <div className="text-xs text-muted-foreground">Risk-adjusted return</div>
             </Card>
           </div>
@@ -386,23 +387,23 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Profit Factor</div>
-                <div className="text-xl font-bold">{latestResult.profit_factor?.toFixed(2)}</div>
+                <div className="text-xl font-bold">{latestResult.profit_factor?.toFixed(2) ?? 'N/A'}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Avg Win</div>
-                <div className="text-xl font-bold text-green-500">${latestResult.avg_win?.toFixed(2)}</div>
+                <div className="text-xl font-bold text-green-500">{formatPrice(latestResult.avg_win, 2, '$')}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Avg Loss</div>
-                <div className="text-xl font-bold text-red-500">${latestResult.avg_loss?.toFixed(2)}</div>
+                <div className="text-xl font-bold text-red-500">{formatPrice(latestResult.avg_loss, 2, '$')}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Largest Win</div>
-                <div className="text-xl font-bold text-green-500">${latestResult.largest_win?.toFixed(2)}</div>
+                <div className="text-xl font-bold text-green-500">{formatPrice(latestResult.largest_win, 2, '$')}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Largest Loss</div>
-                <div className="text-xl font-bold text-red-500">${latestResult.largest_loss?.toFixed(2)}</div>
+                <div className="text-xl font-bold text-red-500">{formatPrice(latestResult.largest_loss, 2, '$')}</div>
               </div>
             </div>
           </Card>

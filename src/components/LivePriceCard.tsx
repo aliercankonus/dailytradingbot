@@ -5,6 +5,7 @@ import { useSymbols } from "@/hooks/useSymbols";
 import { useEffect, useState } from "react";
 import { WebSocketStatus } from "@/components/WebSocketStatus";
 import { useToast } from "@/hooks/use-toast";
+import { formatPrice, formatPercent } from "@/lib/utils";
 
 export const LivePriceCard = () => {
   const { activeSymbols, loading: symbolsLoading } = useSymbols();
@@ -79,7 +80,7 @@ export const LivePriceCard = () => {
 
                 <div className="text-right">
                   <div className="font-mono font-semibold text-foreground">
-                    ${parseFloat(price.price).toFixed(4)}
+                    {formatPrice(parseFloat(price.price), 4, '$')}
                   </div>
                   <div className={`text-sm flex items-center justify-end gap-1 ${
                     isPositive ? 'text-profit' : 'text-loss'
@@ -89,7 +90,7 @@ export const LivePriceCard = () => {
                     ) : (
                       <TrendingDown className="h-3 w-3" />
                     )}
-                    {parseFloat(price.priceChangePercent).toFixed(2)}%
+                    {formatPercent(parseFloat(price.priceChangePercent))}
                   </div>
                 </div>
               </div>

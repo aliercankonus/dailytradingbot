@@ -18,6 +18,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
+import { formatPrice } from '@/lib/utils';
 
 export const RiskManagementControls = () => {
   const { riskParams, updateRiskParameters } = useRiskParameters();
@@ -127,7 +128,7 @@ export const RiskManagementControls = () => {
             <DollarSign className="h-5 w-5 text-green-500" />
             <span className="text-sm font-medium">Portfolio Value</span>
           </div>
-          <div className="text-2xl font-bold">${riskParams.portfolio_value.toFixed(2)}</div>
+          <div className="text-2xl font-bold">{formatPrice(riskParams.portfolio_value, 2, '$')}</div>
           <div className="text-xs text-muted-foreground">Total capital</div>
         </Card>
 
@@ -137,7 +138,7 @@ export const RiskManagementControls = () => {
             <span className="text-sm font-medium">Unrealized P&L</span>
           </div>
           <div className={`text-2xl font-bold ${totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-            ${totalPnL.toFixed(2)}
+            {formatPrice(totalPnL, 2, '$')}
           </div>
           <div className="text-xs text-muted-foreground">From open positions</div>
         </Card>
@@ -148,10 +149,10 @@ export const RiskManagementControls = () => {
             <span className="text-sm font-medium">Daily Loss</span>
           </div>
           <div className="text-2xl font-bold text-destructive">
-            ${(riskParams.daily_realized_loss || 0).toFixed(2)}
+            {formatPrice(riskParams.daily_realized_loss || 0, 2, '$')}
           </div>
           <div className="text-xs text-muted-foreground">
-            Limit: {riskParams.daily_loss_limit_percent}% (${((riskParams.portfolio_value * riskParams.daily_loss_limit_percent) / 100).toFixed(2)})
+            Limit: {riskParams.daily_loss_limit_percent}% ({formatPrice((riskParams.portfolio_value * riskParams.daily_loss_limit_percent) / 100, 2, '$')})
           </div>
         </Card>
       </div>
