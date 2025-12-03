@@ -322,6 +322,35 @@ export const TrailingStopSettings = () => {
             <p className="text-xs text-muted-foreground">
               At {profitLockPercent}% lock: If +10% profit, stop moves to entry +{(parseFloat(profitLockPercent) / 10).toFixed(1)}%
             </p>
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setProfitLockPercent("40")}
+                disabled={!enabled}
+              >
+                Aggressive
+                <span className="text-xs text-muted-foreground ml-1">(40%)</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setProfitLockPercent("50")}
+                disabled={!enabled}
+              >
+                Balanced
+                <span className="text-xs text-muted-foreground ml-1">(50%)</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setProfitLockPercent("60")}
+                disabled={!enabled}
+              >
+                Conservative
+                <span className="text-xs text-muted-foreground ml-1">(60%)</span>
+              </Button>
+            </div>
           </div>
 
           {/* Example Calculation */}
