@@ -209,6 +209,7 @@ serve(async (req) => {
     const partialTpTaken = [];
     const emergencyExits = []; // NEW: Track emergency exits
     const volatilityAlerts = []; // NEW: Track volatility alerts
+    const updatedStopLossMap = new Map<string, number>(); // Track updated stop losses by position ID
     
     // Fetch trend data for all symbols in PARALLEL
     const trendDataMap = new Map();
@@ -430,6 +431,9 @@ serve(async (req) => {
           
           // Only log/track if we actually updated the position
           if (updatedPos) {
+            // Track the updated stop loss so partial TP logic can use it
+            updatedStopLossMap.set(position.id, newStopLoss);
+            
             trailingStopUpdates.push({
               symbol: position.symbol,
               side: position.side,
@@ -811,14 +815,16 @@ serve(async (req) => {
         // Update position with reduced quantity and new TP level
         // For stop loss after TP1: Only move to break-even if NOT already above entry (BUY) or below entry (SHORT)
         // This preserves trailing stop adjustments that are better than break-even
-        let newStopLossAfterTp = position.stop_loss;
+        // IMPORTANT: Use the updated stop loss from trailing stop if available (from same run)
+        const currentStopLoss = updatedStopLossMap.get(position.id) ?? position.stop_loss;
+        let newStopLossAfterTp = currentStopLoss;
         if (newTpLevel === 1) {
           if (position.side === "BUY") {
             // For LONG: Only move to entry if current stop is below entry
-            newStopLossAfterTp = Math.max(position.entry_price, position.stop_loss);
+            newStopLossAfterTp = Math.max(position.entry_price, currentStopLoss);
           } else {
             // For SHORT: Only move to entry if current stop is above entry
-            newStopLossAfterTp = Math.min(position.entry_price, position.stop_loss);
+            newStopLossAfterTp = Math.min(position.entry_price, currentStopLoss);
           }
         }
         
