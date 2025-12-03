@@ -21,6 +21,9 @@ verify_jwt = false
 [functions.auto-trader]
 verify_jwt = false
 
+[functions.monitor-positions]
+verify_jwt = false
+
 [functions.cleanup-expired-signals.schedule]
 enabled = true
 cron = "* * * * *"
@@ -32,3 +35,7 @@ cron = "0 0 * * *"
 [functions.auto-trader.schedule]
 enabled = true
 cron = "*/5 * * * *"
+
+[functions.monitor-positions.schedule]
+enabled = true
+cron = "*/1 * * * *"
