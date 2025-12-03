@@ -8,7 +8,6 @@ import { ArrowLeft, TrendingUp, TrendingDown, Target, DollarSign, AlertTriangle,
 import { usePortfolioHistory } from "@/hooks/usePortfolioHistory";
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { format } from "date-fns";
-import { EarlyWarningExitsDashboard } from "@/components/EarlyWarningExitsDashboard";
 
 const Performance = () => {
   const navigate = useNavigate();
@@ -132,12 +131,11 @@ const Performance = () => {
           </Card>
         ) : (
           <Tabs defaultValue="portfolio" className="w-full">
-            <TabsList className="grid w-full grid-cols-5">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="portfolio">Portfolio Value</TabsTrigger>
               <TabsTrigger value="pnl">P&L Breakdown</TabsTrigger>
               <TabsTrigger value="winrate">Win Rate</TabsTrigger>
               <TabsTrigger value="drawdown">Drawdown & Risk</TabsTrigger>
-              <TabsTrigger value="exits">Early Exits</TabsTrigger>
             </TabsList>
 
             <TabsContent value="portfolio" className="space-y-4">
@@ -293,9 +291,6 @@ const Performance = () => {
               </Card>
             </TabsContent>
 
-            <TabsContent value="exits" className="space-y-4">
-              <EarlyWarningExitsDashboard />
-            </TabsContent>
           </Tabs>
         )}
       </div>

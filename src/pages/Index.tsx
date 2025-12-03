@@ -11,6 +11,7 @@ import { RiskManagementControls } from "@/components/RiskManagementControls";
 import { PerformanceAnalytics } from "@/components/PerformanceAnalytics";
 import { ActivePositions } from "@/components/ActivePositions";
 import { ClosedPositionsDashboard } from "@/components/ClosedPositionsDashboard";
+import { EarlyWarningExitsDashboard } from "@/components/EarlyWarningExitsDashboard";
 import { CloseAllTradesButton } from "@/components/CloseAllTradesButton";
 import { WebSocketHealthDashboard } from "@/components/WebSocketHealthDashboard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -106,8 +107,22 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="positions" className="space-y-6">
-            <TrailingStopMonitor />
-            <ActivePositions />
+            <Tabs defaultValue="active" className="w-full">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="active">Active</TabsTrigger>
+                <TabsTrigger value="trailing">Trailing Stops</TabsTrigger>
+                <TabsTrigger value="early-exits">Early Exits</TabsTrigger>
+              </TabsList>
+              <TabsContent value="active" className="mt-4">
+                <ActivePositions />
+              </TabsContent>
+              <TabsContent value="trailing" className="mt-4">
+                <TrailingStopMonitor />
+              </TabsContent>
+              <TabsContent value="early-exits" className="mt-4">
+                <EarlyWarningExitsDashboard />
+              </TabsContent>
+            </Tabs>
           </TabsContent>
 
           <TabsContent value="history">
