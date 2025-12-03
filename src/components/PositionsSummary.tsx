@@ -92,7 +92,7 @@ export const PositionsSummary = () => {
       color: "text-profit",
     },
     {
-      label: "Trailing Pending",
+      label: "Profitable (Pre-Trailing)",
       value: summary.trailingPending.toString(),
       icon: Target,
       color: "text-warning",
