@@ -206,14 +206,14 @@ export const TrailingStopMonitor = () => {
 
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <span className="text-xs">Entry:</span>
-                      <span>${position.entry_price.toFixed(2)}</span>
+                      <span>${position.entry_price.toFixed(4)}</span>
                       <span className="text-xs">Current:</span>
                       <span className="font-medium text-primary">
-                        ${position.currentPrice.toFixed(2)}
+                        ${position.currentPrice.toFixed(4)}
                       </span>
                       <span className="text-xs">Stop:</span>
                       <span className="text-destructive">
-                        ${position.stop_loss?.toFixed(2) ?? "N/A"}
+                        ${position.stop_loss?.toFixed(4) ?? "N/A"}
                       </span>
                     </div>
 
@@ -233,7 +233,7 @@ export const TrailingStopMonitor = () => {
                         <div>
                           <span>Lock Stop:</span>
                           <span className="ml-1 font-medium text-amber-500">
-                            ${position.lockedStopPrice.toFixed(2)}
+                            ${position.lockedStopPrice.toFixed(4)}
                           </span>
                         </div>
                         <div className="col-span-2 mt-1 text-[10px] italic">
