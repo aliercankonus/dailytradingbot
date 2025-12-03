@@ -357,35 +357,57 @@ serve(async (req) => {
         breakEvenEnabled: true,
         breakEvenActivationPercent: 0.5,
       };
-      // TRAILING STOP LOSS LOGIC - Position-specific calculation
+      // TRAILING STOP LOSS LOGIC - Position-specific calculation based on EACH position's entry price
       let newStopLoss = position.stop_loss;
       let trailingActivated = false;
       // Check if trailing stop is enabled and position is profitable enough
       if (userSettings.enabled && pnlPercent > userSettings.activationPercent) {
-        // Calculate trailing distance in absolute terms based on ATR
+        // Calculate ATR-based minimum distance (for volatility buffer)
         const atrAbsolute = (currentPrice * atrPercent) / 100;
-        const trailingDistanceAbsolute = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * 0.015); // Min 1.5% of current price
+        const minTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * 0.015); // Min 1.5% of current price
+        
+        // FIXED: Calculate trailing stop based on EACH position's entry price and profit
+        // Lock in a percentage of the profit (e.g., 50% profit protection)
+        const profitLockPercent = 0.5; // Lock in 50% of profit
         
         if (position.side === "BUY") {
-          // For LONG: Trail current price by fixed distance (independent of entry price)
-          const calculatedStopLoss = currentPrice - trailingDistanceAbsolute;
+          // For LONG: Calculate profit from THIS position's entry
+          const profitDistance = currentPrice - position.entry_price;
+          const lockedProfit = profitDistance * profitLockPercent;
+          
+          // Position-specific stop: entry + locked profit, but maintain minimum ATR distance from current price
+          const profitBasedStop = position.entry_price + lockedProfit;
+          const atrBasedStop = currentPrice - minTrailingDistance;
+          
+          // Use the HIGHER of the two (more protective)
+          const calculatedStopLoss = Math.max(profitBasedStop, atrBasedStop);
+          
           // Only update if new stop loss is HIGHER than current (never move down)
           if (calculatedStopLoss > position.stop_loss) {
             newStopLoss = calculatedStopLoss;
             trailingActivated = true;
             console.log(
-              `Trailing SL activated for ${position.symbol} (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
+              `Trailing SL activated for ${position.symbol} (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (profit-based: ${profitBasedStop.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
             );
           }
         } else {
-          // For SHORT: Trail current price by fixed distance (independent of entry price)
-          const calculatedStopLoss = currentPrice + trailingDistanceAbsolute;
+          // For SHORT: Calculate profit from THIS position's entry
+          const profitDistance = position.entry_price - currentPrice;
+          const lockedProfit = profitDistance * profitLockPercent;
+          
+          // Position-specific stop: entry - locked profit, but maintain minimum ATR distance from current price
+          const profitBasedStop = position.entry_price - lockedProfit;
+          const atrBasedStop = currentPrice + minTrailingDistance;
+          
+          // Use the LOWER of the two (more protective for shorts)
+          const calculatedStopLoss = Math.min(profitBasedStop, atrBasedStop);
+          
           // Only update if new stop loss is LOWER than current (never move up)
           if (calculatedStopLoss < position.stop_loss) {
             newStopLoss = calculatedStopLoss;
             trailingActivated = true;
             console.log(
-              `Trailing SL activated for ${position.symbol} (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
+              `Trailing SL activated for ${position.symbol} (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (profit-based: ${profitBasedStop.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
             );
           }
         }
