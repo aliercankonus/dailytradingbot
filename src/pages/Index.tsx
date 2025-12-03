@@ -19,6 +19,7 @@ import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
 import { TradeCounterSync } from "@/components/TradeCounterSync";
 import { TrailingStopMonitor } from "@/components/TrailingStopMonitor";
 import { SignalTimingMonitor } from "@/components/SignalTimingMonitor";
+import { PositionsSummary } from "@/components/PositionsSummary";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -107,6 +108,7 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="positions" className="space-y-6">
+            <PositionsSummary />
             <Tabs defaultValue="active" className="w-full">
               <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="active">Active</TabsTrigger>
