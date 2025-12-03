@@ -5,6 +5,7 @@ import { usePositions } from "@/hooks/usePositions";
 import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
+import { formatPrice } from "@/lib/utils";
 
 export const PositionsSummary = () => {
   const { positions } = usePositions();
@@ -81,7 +82,7 @@ export const PositionsSummary = () => {
     },
     {
       label: "Unrealized P&L",
-      value: `${summary.totalUnrealizedPnl >= 0 ? "+" : ""}$${summary.totalUnrealizedPnl.toFixed(2)}`,
+      value: `${summary.totalUnrealizedPnl >= 0 ? "+" : "-"}${formatPrice(Math.abs(summary.totalUnrealizedPnl), 2, '$')}`,
       icon: summary.totalUnrealizedPnl >= 0 ? TrendingUp : TrendingDown,
       color: summary.totalUnrealizedPnl >= 0 ? "text-profit" : "text-loss",
     },
