@@ -4,6 +4,7 @@ import { TrendingUp, Shield } from "lucide-react";
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
+import { formatPrice, formatPercent } from "@/lib/utils";
 
 export const TrailingStopMonitor = () => {
   const [positions, setPositions] = useState<any[]>([]);
@@ -200,20 +201,20 @@ export const TrailingStopMonitor = () => {
                         {position.side}
                       </Badge>
                       <Badge variant="outline" className="text-xs text-primary">
-                        +{position.pnlPercent.toFixed(2)}%
+                        {formatPercent(position.pnlPercent, 2, true)}
                       </Badge>
                     </div>
 
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <span className="text-xs">Entry:</span>
-                      <span>${position.entry_price.toFixed(4)}</span>
+                      <span>{formatPrice(position.entry_price, 4, '$')}</span>
                       <span className="text-xs">Current:</span>
                       <span className="font-medium text-primary">
-                        ${position.currentPrice.toFixed(4)}
+                        {formatPrice(position.currentPrice, 4, '$')}
                       </span>
                       <span className="text-xs">Stop:</span>
                       <span className="text-destructive">
-                        ${position.stop_loss?.toFixed(4) ?? "N/A"}
+                        {formatPrice(position.stop_loss, 4, '$')}
                       </span>
                     </div>
 
@@ -227,17 +228,17 @@ export const TrailingStopMonitor = () => {
                         <div>
                           <span>Locked Profit:</span>
                           <span className="ml-1 font-medium text-green-500">
-                            +{position.lockedProfitPercent.toFixed(2)}%
+                            {formatPercent(position.lockedProfitPercent, 2, true)}
                           </span>
                         </div>
                         <div>
                           <span>Lock Stop:</span>
                           <span className="ml-1 font-medium text-amber-500">
-                            ${position.lockedStopPrice.toFixed(4)}
+                            {formatPrice(position.lockedStopPrice, 4, '$')}
                           </span>
                         </div>
                         <div className="col-span-2 mt-1 text-[10px] italic">
-                          {position.pnlPercent.toFixed(2)}% × {position.profitLockPercent}% = {position.lockedProfitPercent.toFixed(2)}% locked
+                          {formatPercent(position.pnlPercent)} × {position.profitLockPercent}% = {formatPercent(position.lockedProfitPercent)} locked
                         </div>
                       </div>
                     </div>
