@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { formatPrice, formatPercent, formatQuantity } from '@/lib/utils';
 
 export const ClosedPositionsDashboard = () => {
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -184,7 +185,7 @@ export const ClosedPositionsDashboard = () => {
           <CardHeader className="pb-2">
             <CardDescription>Total P&L</CardDescription>
             <CardTitle className={`text-3xl ${stats.totalPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
-              ${stats.totalPnL.toFixed(2)}
+              {formatPrice(stats.totalPnL, 2, '$')}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -193,7 +194,7 @@ export const ClosedPositionsDashboard = () => {
           <CardHeader className="pb-2">
             <CardDescription>Win Rate</CardDescription>
             <CardTitle className="text-3xl">
-              {stats.total > 0 ? ((stats.profitable / stats.total) * 100).toFixed(1) : 0}%
+              {formatPercent(stats.total > 0 ? (stats.profitable / stats.total) * 100 : 0, 1)}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -202,7 +203,7 @@ export const ClosedPositionsDashboard = () => {
           <CardHeader className="pb-2">
             <CardDescription>Avg P&L</CardDescription>
             <CardTitle className={`text-3xl ${stats.avgPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
-              ${stats.avgPnL.toFixed(2)}
+              {formatPrice(stats.avgPnL, 2, '$')}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -356,9 +357,9 @@ const PositionsTable = ({ positions, getCloseReasonBadge }: PositionsTableProps)
                   {position.strategy_name || 'N/A'}
                 </span>
               </TableCell>
-              <TableCell className="text-right">${position.entry_price?.toFixed(4)}</TableCell>
-              <TableCell className="text-right">${position.exit_price?.toFixed(4)}</TableCell>
-              <TableCell className="text-right">{position.quantity?.toFixed(4)}</TableCell>
+              <TableCell className="text-right">{formatPrice(position.entry_price, 4, '$')}</TableCell>
+              <TableCell className="text-right">{formatPrice(position.exit_price, 4, '$')}</TableCell>
+              <TableCell className="text-right">{formatQuantity(position.quantity, 4)}</TableCell>
               <TableCell className="text-right">
                 <span className={(position.realized_pnl || 0) >= 0 ? 'text-success' : 'text-destructive'}>
                   {(position.realized_pnl || 0) >= 0 ? (
@@ -366,12 +367,12 @@ const PositionsTable = ({ positions, getCloseReasonBadge }: PositionsTableProps)
                   ) : (
                     <TrendingDown className="h-4 w-4 inline mr-1" />
                   )}
-                  ${Math.abs(position.realized_pnl || 0).toFixed(2)}
+                  {formatPrice(Math.abs(position.realized_pnl || 0), 2, '$')}
                 </span>
               </TableCell>
               <TableCell className="text-right">
                 <span className={(position.realized_pnl_percent || 0) >= 0 ? 'text-success' : 'text-destructive'}>
-                  {position.realized_pnl_percent?.toFixed(2) || '0.00'}%
+                  {formatPercent(position.realized_pnl_percent || 0)}
                 </span>
               </TableCell>
               <TableCell>{getCloseReasonBadge(position)}</TableCell>

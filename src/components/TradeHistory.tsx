@@ -5,6 +5,7 @@ import { ArrowUpRight, ArrowDownRight, Filter, Loader2, ChevronLeft, ChevronRigh
 import { useOpenTrades } from "@/hooks/useOpenTrades";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState, useMemo } from "react";
+import { formatPrice, formatQuantity } from "@/lib/utils";
 
 type SortColumn = 'symbol' | 'strategy_name' | 'profit_loss' | 'status' | 'side' | 'executed_at';
 type SortDirection = 'asc' | 'desc';
@@ -242,19 +243,19 @@ export const TradeHistory = () => {
                     </Badge>
                   </td>
                   <td className="py-3 px-2 text-right font-mono text-foreground">
-                    ${trade.entry_price.toFixed(4)}
+                    {formatPrice(trade.entry_price, 4, '$')}
                   </td>
                   <td className="py-3 px-2 text-right font-mono text-foreground">
-                    {trade.exit_price ? `$${trade.exit_price.toFixed(4)}` : '-'}
+                    {trade.exit_price ? formatPrice(trade.exit_price, 4, '$') : '-'}
                   </td>
                   <td className="py-3 px-2 text-right font-mono text-red-500">
-                    ${trade.stop_loss?.toFixed(4) || '-'}
+                    {trade.stop_loss ? formatPrice(trade.stop_loss, 4, '$') : '-'}
                   </td>
                   <td className="py-3 px-2 text-right font-mono text-green-500">
-                    ${trade.take_profit?.toFixed(4) || '-'}
+                    {trade.take_profit ? formatPrice(trade.take_profit, 4, '$') : '-'}
                   </td>
                   <td className="py-3 px-2 text-right font-mono text-muted-foreground">
-                    {trade.quantity.toFixed(4)}
+                    {formatQuantity(trade.quantity, 4)}
                   </td>
                   <td className="py-3 px-2 text-right">
                     {trade.realized_pnl !== null ? (
@@ -266,7 +267,7 @@ export const TradeHistory = () => {
                         ) : (
                           <ArrowDownRight className="h-3 w-3" />
                         )}
-                        {trade.realized_pnl >= 0 ? '+' : ''}${trade.realized_pnl.toFixed(2)}
+                        {trade.realized_pnl >= 0 ? '+' : ''}{formatPrice(trade.realized_pnl, 2, '$')}
                       </div>
                     ) : (
                       <span className="text-muted-foreground">-</span>
