@@ -144,6 +144,7 @@ const getTechnicalScore = (trendData: any, effectiveTrend: string, symbol: strin
   
   const stochRsi = trendData?.stochasticRsi;
   const bollinger = trendData?.bollingerBands;
+  const adx = trendData?.volatility?.adx || 0;
   
   if (!stochRsi || !bollinger) {
     console.log(`📊 ${symbol} TECH: No data available`);
@@ -162,37 +163,59 @@ const getTechnicalScore = (trendData: any, effectiveTrend: string, symbol: strin
   let stochScore = 0;
   let bbScore = 0;
   
+  // Strong ADX (>= 30) = momentum continuation is valid, don't penalize overbought/oversold
+  const isStrongTrend = adx >= 30;
+  
   if (effectiveTrend === "bullish") {
-    // Oversold on bullish trend = good entry
-    if (primarySignal === "oversold" || primaryK < 20) stochScore = 8;
-    else if (primaryK < 30) stochScore = 5;
-    else if (primaryK < 40) stochScore = 2;
-    else if (primarySignal === "overbought" || primaryK > 80) stochScore = -2;
+    if (isStrongTrend) {
+      // MOMENTUM CONTINUATION: Strong trend = overbought is NOT bad, it's momentum!
+      if (primaryK > 80) stochScore = 4; // Momentum continuation
+      else if (primaryK > 60) stochScore = 3; // Strong momentum
+      else if (primaryK < 30) stochScore = 6; // Pullback in strong trend = great entry
+      else stochScore = 2; // Neutral
+    } else {
+      // PULLBACK ENTRY: Normal trend, prefer pullback entries
+      if (primarySignal === "oversold" || primaryK < 20) stochScore = 8;
+      else if (primaryK < 30) stochScore = 5;
+      else if (primaryK < 40) stochScore = 2;
+      else if (primaryK > 80) stochScore = 0; // Not ideal but not penalty
+      else stochScore = 1;
+    }
     
     // Bollinger for bullish
     if (pricePosition === "lower_zone" || percentB < 30) bbScore = 4;
     else if (pricePosition === "middle" || (percentB >= 30 && percentB <= 70)) bbScore = 2;
+    else if (isStrongTrend && percentB > 70) bbScore = 2; // Momentum continuation
+    else bbScore = 1;
     
   } else if (effectiveTrend === "bearish") {
-    // Overbought on bearish trend = good entry
-    if (primarySignal === "overbought" || primaryK > 80) stochScore = 8;
-    else if (primaryK > 70) stochScore = 5;
-    else if (primaryK > 60) stochScore = 2;
-    else if (primarySignal === "oversold" || primaryK < 20) stochScore = -2;
+    if (isStrongTrend) {
+      // MOMENTUM CONTINUATION: Strong downtrend = oversold is NOT bad
+      if (primaryK < 20) stochScore = 4; // Momentum continuation
+      else if (primaryK < 40) stochScore = 3; // Strong momentum
+      else if (primaryK > 70) stochScore = 6; // Rally in strong downtrend = great short entry
+      else stochScore = 2; // Neutral
+    } else {
+      // PULLBACK ENTRY: Normal trend, prefer rally entries for shorts
+      if (primarySignal === "overbought" || primaryK > 80) stochScore = 8;
+      else if (primaryK > 70) stochScore = 5;
+      else if (primaryK > 60) stochScore = 2;
+      else if (primaryK < 20) stochScore = 0; // Not ideal but not penalty
+      else stochScore = 1;
+    }
     
     // Bollinger for bearish
     if (pricePosition === "upper_zone" || percentB > 70) bbScore = 4;
     else if (pricePosition === "middle" || (percentB >= 30 && percentB <= 70)) bbScore = 2;
+    else if (isStrongTrend && percentB < 30) bbScore = 2; // Momentum continuation
+    else bbScore = 1;
     
   } else {
-    // Neutral trend - give points for extreme conditions that indicate potential direction
-    // Extreme overbought in neutral = potential SHORT opportunity
+    // Neutral trend - extremes indicate potential direction
     if (primaryK > 85) stochScore = 4;
     else if (primaryK > 75) stochScore = 2;
-    // Extreme oversold in neutral = potential LONG opportunity
     else if (primaryK < 15) stochScore = 4;
     else if (primaryK < 25) stochScore = 2;
-    // Middle zone in neutral = no clear edge
     else stochScore = 1;
     
     // Bollinger in neutral - extremes are opportunities
@@ -287,10 +310,17 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
   const stochRsi = trendData.stochasticRsi?.aggregated || {};
   const bollingerBands = trendData.bollingerBands || {};
   const rsi = indicators.rsi || 50;
+  const adx = trendData?.volatility?.adx || 0;
+  const momentum = trendData?.momentum || {};
   
-  // For bullish trend, look for pullback (price dipped but trend intact)
+  // Strong ADX = momentum continuation is valid strategy
+  const isStrongTrend = adx >= 30;
+  const hasMacdExpanding = momentum.macdExpanding === true;
+  const isMomentumConfirmed = momentum.state === "confirmed" || momentum.state === "mixed";
+  
+  // For bullish trend, look for pullback OR momentum continuation
   if (trend === "bullish") {
-    // Oversold RSI in bullish trend = pullback opportunity
+    // PULLBACK ENTRIES: Oversold RSI in bullish trend = great entry
     if (rsi < 40 || stochRsi.oversoldCount >= 1) {
       return {
         isPullback: true,
@@ -320,7 +350,27 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
       };
     }
     
-    // RSI in neutral zone (not overbought) = acceptable entry
+    // MOMENTUM CONTINUATION: Strong trend + MACD expanding = ride the momentum!
+    if (isStrongTrend && (hasMacdExpanding || isMomentumConfirmed)) {
+      return {
+        isPullback: false,
+        pullbackDepth: 0,
+        entryTimingScore: 8,
+        reason: "Momentum continuation: Strong ADX with MACD expansion"
+      };
+    }
+    
+    // Strong trend but overbought - still give some points (momentum play)
+    if (isStrongTrend && rsi > 65) {
+      return {
+        isPullback: false,
+        pullbackDepth: 0,
+        entryTimingScore: 5,
+        reason: "Momentum continuation: Strong trend despite overbought"
+      };
+    }
+    
+    // RSI in neutral zone = acceptable entry
     if (rsi >= 40 && rsi <= 65) {
       return {
         isPullback: false,
@@ -330,13 +380,13 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
       };
     }
     
-    // Overbought - bad entry timing
+    // Overbought in weak trend - cautious but not blocking
     if (rsi > 70 || stochRsi.overboughtCount >= 2) {
       return {
         isPullback: false,
         pullbackDepth: 0,
-        entryTimingScore: -5,
-        reason: "Poor timing: Already overbought"
+        entryTimingScore: 2, // Changed from -5 to 2 - don't block, just reduce score
+        reason: "Cautious entry: Overbought but trend intact"
       };
     }
   }
@@ -383,13 +433,33 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
       };
     }
     
-    // Oversold - bad short entry timing
+    // MOMENTUM CONTINUATION: Strong downtrend + momentum = ride the momentum!
+    if (isStrongTrend && (hasMacdExpanding || isMomentumConfirmed)) {
+      return {
+        isPullback: false,
+        pullbackDepth: 0,
+        entryTimingScore: 8,
+        reason: "Momentum continuation: Strong ADX with MACD expansion"
+      };
+    }
+    
+    // Strong downtrend but oversold - still give some points
+    if (isStrongTrend && rsi < 35) {
+      return {
+        isPullback: false,
+        pullbackDepth: 0,
+        entryTimingScore: 5,
+        reason: "Momentum continuation: Strong downtrend despite oversold"
+      };
+    }
+    
+    // Oversold in weak downtrend - cautious but not blocking
     if (rsi < 30 || stochRsi.oversoldCount >= 2) {
       return {
         isPullback: false,
         pullbackDepth: 0,
-        entryTimingScore: -5,
-        reason: "Poor timing: Already oversold"
+        entryTimingScore: 2, // Changed from -5 to 2 - don't block, just reduce score
+        reason: "Cautious entry: Oversold but downtrend intact"
       };
     }
   }
@@ -713,7 +783,7 @@ serve(async (req) => {
     let rejectedByRegime = 0;
     let rejectedByQuality = 0;
     let rejectedByStrategy = 0;
-    const MIN_QUALITY_SCORE = 60;
+    const MIN_QUALITY_SCORE = 50; // Lowered from 60 to allow momentum continuation entries
 
     // Analyze each symbol
     for (const { symbol } of symbols) {
