@@ -27,6 +27,7 @@ interface RiskParameters {
   standard_tp_multiplier: number;
   divergence_tp_multiplier: number;
   divergence_sl_multiplier: number;
+  trailing_stop_profit_lock_percent: number;
   updated_at: string;
 }
 

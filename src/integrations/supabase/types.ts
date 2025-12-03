@@ -564,6 +564,7 @@ export type Database = {
           trailing_stop_activation_percent: number | null
           trailing_stop_distance_multiplier: number | null
           trailing_stop_enabled: boolean | null
+          trailing_stop_profit_lock_percent: number | null
           updated_at: string | null
           user_id: string
         }
@@ -604,6 +605,7 @@ export type Database = {
           trailing_stop_activation_percent?: number | null
           trailing_stop_distance_multiplier?: number | null
           trailing_stop_enabled?: boolean | null
+          trailing_stop_profit_lock_percent?: number | null
           updated_at?: string | null
           user_id: string
         }
@@ -644,6 +646,7 @@ export type Database = {
           trailing_stop_activation_percent?: number | null
           trailing_stop_distance_multiplier?: number | null
           trailing_stop_enabled?: boolean | null
+          trailing_stop_profit_lock_percent?: number | null
           updated_at?: string | null
           user_id?: string
         }

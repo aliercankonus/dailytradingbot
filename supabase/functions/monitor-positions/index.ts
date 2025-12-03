@@ -46,7 +46,7 @@ serve(async (req) => {
     const userIds = [...new Set(positions.map((p) => p.user_id))];
     const { data: riskParamsList, error: riskError } = await supabase
       .from("risk_parameters")
-      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent")
+      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent")
       .in("user_id", userIds);
     if (riskError) throw riskError;
     // Create a map of user settings
@@ -59,6 +59,7 @@ serve(async (req) => {
           distanceMultiplier: rp.trailing_stop_distance_multiplier ?? 1.5,
           breakEvenEnabled: rp.break_even_enabled ?? true,
           breakEvenActivationPercent: rp.break_even_activation_percent ?? 0.5,
+          profitLockPercent: (rp.trailing_stop_profit_lock_percent ?? 50) / 100, // Convert to decimal
         },
       ]) || [],
     );
@@ -356,6 +357,7 @@ serve(async (req) => {
         distanceMultiplier: 1.5,
         breakEvenEnabled: true,
         breakEvenActivationPercent: 0.5,
+        profitLockPercent: 0.5,
       };
       // TRAILING STOP LOSS LOGIC - Position-specific calculation based on EACH position's entry price
       let newStopLoss = position.stop_loss;
@@ -366,9 +368,8 @@ serve(async (req) => {
         const atrAbsolute = (currentPrice * atrPercent) / 100;
         const minTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * 0.015); // Min 1.5% of current price
         
-        // FIXED: Calculate trailing stop based on EACH position's entry price and profit
-        // Lock in a percentage of the profit (e.g., 50% profit protection)
-        const profitLockPercent = 0.5; // Lock in 50% of profit
+        // Use configurable profit lock percentage from user settings
+        const profitLockPercent = userSettings.profitLockPercent;
         
         if (position.side === "BUY") {
           // For LONG: Calculate profit from THIS position's entry
