@@ -46,7 +46,7 @@ serve(async (req) => {
     const userIds = [...new Set(positions.map((p) => p.user_id))];
     const { data: riskParamsList, error: riskError } = await supabase
       .from("risk_parameters")
-      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent")
+      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent, portfolio_value, portfolio_peak_value, drawdown_circuit_breaker_enabled, drawdown_circuit_breaker_percent, circuit_breaker_triggered, time_based_stop_enabled, time_based_stop_hours, dynamic_stop_tightening_enabled, dynamic_stop_tightening_hours, dynamic_stop_tightening_percent")
       .in("user_id", userIds);
     if (riskError) throw riskError;
     // Create a map of user settings
@@ -60,6 +60,17 @@ serve(async (req) => {
           breakEvenEnabled: rp.break_even_enabled ?? true,
           breakEvenActivationPercent: rp.break_even_activation_percent ?? 0.5,
           profitLockPercent: (rp.trailing_stop_profit_lock_percent ?? 50) / 100, // Convert to decimal
+          // Loss Management Settings
+          portfolioValue: rp.portfolio_value ?? 10000,
+          portfolioPeakValue: rp.portfolio_peak_value ?? 10000,
+          drawdownCircuitBreakerEnabled: rp.drawdown_circuit_breaker_enabled ?? true,
+          drawdownCircuitBreakerPercent: rp.drawdown_circuit_breaker_percent ?? 10,
+          circuitBreakerTriggered: rp.circuit_breaker_triggered ?? false,
+          timeBasedStopEnabled: rp.time_based_stop_enabled ?? true,
+          timeBasedStopHours: rp.time_based_stop_hours ?? 4,
+          dynamicStopTighteningEnabled: rp.dynamic_stop_tightening_enabled ?? true,
+          dynamicStopTighteningHours: rp.dynamic_stop_tightening_hours ?? 2,
+          dynamicStopTighteningPercent: rp.dynamic_stop_tightening_percent ?? 25,
         },
       ]) || [],
     );
@@ -238,6 +249,75 @@ serve(async (req) => {
       const atrData = atrMap.get(position.symbol);
       const atrPercent = atrData?.atrPercent || 1.5;
 
+      // Get user settings early for circuit breaker check
+      const userSettingsEarly = userSettingsMap.get(position.user_id);
+      
+      // ============================================================
+      // DRAWDOWN CIRCUIT BREAKER - Skip processing if triggered
+      // ============================================================
+      if (userSettingsEarly?.circuitBreakerTriggered) {
+        console.log(`🛑 CIRCUIT BREAKER ACTIVE for user ${position.user_id} - Skipping position monitoring`);
+        continue;
+      }
+
+      // Check and update circuit breaker status based on current drawdown
+      if (userSettingsEarly?.drawdownCircuitBreakerEnabled) {
+        const peakValue = userSettingsEarly.portfolioPeakValue || 10000;
+        const currentValue = userSettingsEarly.portfolioValue || 10000;
+        const drawdownPercent = ((peakValue - currentValue) / peakValue) * 100;
+        
+        if (drawdownPercent >= userSettingsEarly.drawdownCircuitBreakerPercent) {
+          console.log(`🚨 DRAWDOWN CIRCUIT BREAKER TRIGGERED: ${drawdownPercent.toFixed(2)}% drawdown exceeds ${userSettingsEarly.drawdownCircuitBreakerPercent}% threshold`);
+          
+          // Trigger circuit breaker in database
+          const { error: cbError } = await supabase
+            .from("risk_parameters")
+            .update({ 
+              circuit_breaker_triggered: true,
+              circuit_breaker_triggered_at: new Date().toISOString(),
+              is_trading_enabled: false // Also pause trading
+            })
+            .eq("user_id", position.user_id);
+          
+          if (cbError) {
+            console.error("Error triggering circuit breaker:", cbError);
+          } else {
+            // Send notification
+            try {
+              const { data: riskParams } = await supabase
+                .from("risk_parameters")
+                .select("notification_email, email_notifications_enabled")
+                .eq("user_id", position.user_id)
+                .single();
+              
+              if (riskParams?.email_notifications_enabled) {
+                await supabase.functions.invoke("send-notification", {
+                  body: {
+                    type: "circuit_breaker_triggered",
+                    userId: position.user_id,
+                    drawdownPercent,
+                    threshold: userSettingsEarly.drawdownCircuitBreakerPercent,
+                    email: riskParams.notification_email,
+                  },
+                });
+              }
+            } catch (notifError) {
+              console.error("Error sending circuit breaker notification:", notifError);
+            }
+          }
+          continue; // Skip further processing for this user
+        }
+        
+        // Update peak value if current portfolio is higher
+        if (currentValue > peakValue) {
+          await supabase
+            .from("risk_parameters")
+            .update({ portfolio_peak_value: currentValue })
+            .eq("user_id", position.user_id);
+          console.log(`📈 Updated portfolio peak for user ${position.user_id}: $${currentValue.toFixed(2)}`);
+        }
+      }
+
       // Get current trend for this position's symbol
       const trendData = trendDataMap.get(position.symbol);
 
@@ -359,6 +439,17 @@ serve(async (req) => {
         breakEvenEnabled: true,
         breakEvenActivationPercent: 0.5,
         profitLockPercent: 0.5,
+        // Loss Management defaults
+        portfolioValue: 10000,
+        portfolioPeakValue: 10000,
+        drawdownCircuitBreakerEnabled: true,
+        drawdownCircuitBreakerPercent: 10,
+        circuitBreakerTriggered: false,
+        timeBasedStopEnabled: true,
+        timeBasedStopHours: 4,
+        dynamicStopTighteningEnabled: true,
+        dynamicStopTighteningHours: 2,
+        dynamicStopTighteningPercent: 25,
       };
       // TRAILING STOP LOSS LOGIC - Position-specific calculation based on EACH position's entry price
       let newStopLoss = position.stop_loss;
@@ -680,30 +771,30 @@ serve(async (req) => {
       }
 
       // ============================================================
-      // TIME-BASED EXIT LOGIC - Close stale positions
-      // If position is open 24+ hours with minimal movement (<2%), free up capital
+      // TIME-BASED EXIT LOGIC - Close stale positions (CONFIGURABLE)
+      // If position is open X+ hours with minimal movement (<2%), free up capital
       // ============================================================
-      if (!shouldClose && position.opened_at) {
+      if (!shouldClose && position.opened_at && userSettings.timeBasedStopEnabled) {
         const openedAt = new Date(position.opened_at);
         const now = new Date();
         const hoursOpen = (now.getTime() - openedAt.getTime()) / (1000 * 60 * 60);
         const absMovement = Math.abs(pnlPercent);
         
-        // Stale position: Open 24+ hours with less than 2% price movement
-        const minHoursForStaleCheck = 24;
+        // Stale position: Open X+ hours with less than 2% price movement
+        const minHoursForStaleCheck = userSettings.timeBasedStopHours;
         const maxMovementForStale = 2.0; // 2% threshold
         
         if (hoursOpen >= minHoursForStaleCheck && absMovement < maxMovementForStale) {
           shouldClose = true;
-          closeReason = "stale_position";
+          closeReason = "time_based_stop";
           console.log(
-            `⏰ TIME EXIT: Closing stale ${position.symbol} ${position.side} - Open ${hoursOpen.toFixed(1)}h with only ${pnlPercent.toFixed(2)}% movement`
+            `⏰ TIME EXIT: Closing stale ${position.symbol} ${position.side} - Open ${hoursOpen.toFixed(1)}h with only ${pnlPercent.toFixed(2)}% movement (limit: ${minHoursForStaleCheck}h)`
           );
           
           trendExits.push({
             symbol: position.symbol,
             side: position.side,
-            reason: `Stale: ${hoursOpen.toFixed(1)}h open, ${pnlPercent.toFixed(2)}% P&L`,
+            reason: `Time-based: ${hoursOpen.toFixed(1)}h open, ${pnlPercent.toFixed(2)}% P&L`,
             trend: "stale",
             confidence: 0,
             pnlPercent,
@@ -712,6 +803,64 @@ serve(async (req) => {
           console.log(
             `📊 Position ${position.symbol} open ${hoursOpen.toFixed(1)}h - movement ${absMovement.toFixed(2)}% (above ${maxMovementForStale}% threshold, keeping open)`
           );
+        }
+      }
+
+      // ============================================================
+      // DYNAMIC STOP TIGHTENING - Tighten stops on aging losing positions
+      // Reduces exposure on positions that are losing and getting older
+      // ============================================================
+      if (!shouldClose && pnlPercent < 0 && userSettings.dynamicStopTighteningEnabled && position.opened_at) {
+        const openedAt = new Date(position.opened_at);
+        const now = new Date();
+        const hoursOpen = (now.getTime() - openedAt.getTime()) / (1000 * 60 * 60);
+        
+        // Only tighten after X hours and only for losing positions
+        if (hoursOpen >= userSettings.dynamicStopTighteningHours) {
+          const hoursOverThreshold = hoursOpen - userSettings.dynamicStopTighteningHours;
+          const tighteningFactor = Math.min(hoursOverThreshold * (userSettings.dynamicStopTighteningPercent / 100), 0.9); // Max 90% tightening
+          
+          if (position.side === "BUY") {
+            // For LONG: Move stop loss closer to current price (higher)
+            const distanceToEntry = position.entry_price - position.stop_loss;
+            const tightenedDistance = distanceToEntry * (1 - tighteningFactor);
+            const newTightenedStop = position.entry_price - tightenedDistance;
+            
+            // Only update if new stop is higher than current (tighter)
+            if (newTightenedStop > position.stop_loss) {
+              console.log(`🔧 DYNAMIC TIGHTENING: ${position.symbol} LONG - Stop ${position.stop_loss.toFixed(2)} → ${newTightenedStop.toFixed(2)} (${(tighteningFactor * 100).toFixed(0)}% tighter after ${hoursOverThreshold.toFixed(1)}h)`);
+              
+              const { error: tightenError } = await supabase
+                .from("positions")
+                .update({ stop_loss: newTightenedStop })
+                .eq("id", position.id)
+                .eq("status", "active");
+              
+              if (tightenError) {
+                console.error(`Error tightening stop for ${position.id}:`, tightenError);
+              }
+            }
+          } else {
+            // For SHORT: Move stop loss closer to current price (lower)
+            const distanceToEntry = position.stop_loss - position.entry_price;
+            const tightenedDistance = distanceToEntry * (1 - tighteningFactor);
+            const newTightenedStop = position.entry_price + tightenedDistance;
+            
+            // Only update if new stop is lower than current (tighter)
+            if (newTightenedStop < position.stop_loss) {
+              console.log(`🔧 DYNAMIC TIGHTENING: ${position.symbol} SHORT - Stop ${position.stop_loss.toFixed(2)} → ${newTightenedStop.toFixed(2)} (${(tighteningFactor * 100).toFixed(0)}% tighter after ${hoursOverThreshold.toFixed(1)}h)`);
+              
+              const { error: tightenError } = await supabase
+                .from("positions")
+                .update({ stop_loss: newTightenedStop })
+                .eq("id", position.id)
+                .eq("status", "active");
+              
+              if (tightenError) {
+                console.error(`Error tightening stop for ${position.id}:`, tightenError);
+              }
+            }
+          }
         }
       }
 

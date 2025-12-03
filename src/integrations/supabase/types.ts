@@ -532,6 +532,8 @@ export type Database = {
           auto_rebalance_enabled: boolean | null
           break_even_activation_percent: number | null
           break_even_enabled: boolean | null
+          circuit_breaker_triggered: boolean | null
+          circuit_breaker_triggered_at: string | null
           consecutive_loss_threshold: number
           consecutive_losses: number | null
           current_open_trades: number | null
@@ -539,6 +541,11 @@ export type Database = {
           daily_realized_loss: number | null
           divergence_sl_multiplier: number | null
           divergence_tp_multiplier: number | null
+          drawdown_circuit_breaker_enabled: boolean | null
+          drawdown_circuit_breaker_percent: number | null
+          dynamic_stop_tightening_enabled: boolean | null
+          dynamic_stop_tightening_hours: number | null
+          dynamic_stop_tightening_percent: number | null
           early_reversal_position_size_percent: number | null
           email_notifications_enabled: boolean | null
           enable_early_reversal_signals: boolean | null
@@ -555,12 +562,15 @@ export type Database = {
           notification_email: string | null
           notification_phone: string | null
           paper_trading_mode: boolean | null
+          portfolio_peak_value: number | null
           portfolio_value: number
           position_size_reduction_percent: number
           pullback_position_size_percent: number | null
           rebalance_loss_threshold_percent: number | null
           sms_notifications_enabled: boolean | null
           standard_tp_multiplier: number | null
+          time_based_stop_enabled: boolean | null
+          time_based_stop_hours: number | null
           trailing_stop_activation_percent: number | null
           trailing_stop_distance_multiplier: number | null
           trailing_stop_enabled: boolean | null
@@ -573,6 +583,8 @@ export type Database = {
           auto_rebalance_enabled?: boolean | null
           break_even_activation_percent?: number | null
           break_even_enabled?: boolean | null
+          circuit_breaker_triggered?: boolean | null
+          circuit_breaker_triggered_at?: string | null
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
           current_open_trades?: number | null
@@ -580,6 +592,11 @@ export type Database = {
           daily_realized_loss?: number | null
           divergence_sl_multiplier?: number | null
           divergence_tp_multiplier?: number | null
+          drawdown_circuit_breaker_enabled?: boolean | null
+          drawdown_circuit_breaker_percent?: number | null
+          dynamic_stop_tightening_enabled?: boolean | null
+          dynamic_stop_tightening_hours?: number | null
+          dynamic_stop_tightening_percent?: number | null
           early_reversal_position_size_percent?: number | null
           email_notifications_enabled?: boolean | null
           enable_early_reversal_signals?: boolean | null
@@ -596,12 +613,15 @@ export type Database = {
           notification_email?: string | null
           notification_phone?: string | null
           paper_trading_mode?: boolean | null
+          portfolio_peak_value?: number | null
           portfolio_value?: number
           position_size_reduction_percent?: number
           pullback_position_size_percent?: number | null
           rebalance_loss_threshold_percent?: number | null
           sms_notifications_enabled?: boolean | null
           standard_tp_multiplier?: number | null
+          time_based_stop_enabled?: boolean | null
+          time_based_stop_hours?: number | null
           trailing_stop_activation_percent?: number | null
           trailing_stop_distance_multiplier?: number | null
           trailing_stop_enabled?: boolean | null
@@ -614,6 +634,8 @@ export type Database = {
           auto_rebalance_enabled?: boolean | null
           break_even_activation_percent?: number | null
           break_even_enabled?: boolean | null
+          circuit_breaker_triggered?: boolean | null
+          circuit_breaker_triggered_at?: string | null
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
           current_open_trades?: number | null
@@ -621,6 +643,11 @@ export type Database = {
           daily_realized_loss?: number | null
           divergence_sl_multiplier?: number | null
           divergence_tp_multiplier?: number | null
+          drawdown_circuit_breaker_enabled?: boolean | null
+          drawdown_circuit_breaker_percent?: number | null
+          dynamic_stop_tightening_enabled?: boolean | null
+          dynamic_stop_tightening_hours?: number | null
+          dynamic_stop_tightening_percent?: number | null
           early_reversal_position_size_percent?: number | null
           email_notifications_enabled?: boolean | null
           enable_early_reversal_signals?: boolean | null
@@ -637,12 +664,15 @@ export type Database = {
           notification_email?: string | null
           notification_phone?: string | null
           paper_trading_mode?: boolean | null
+          portfolio_peak_value?: number | null
           portfolio_value?: number
           position_size_reduction_percent?: number
           pullback_position_size_percent?: number | null
           rebalance_loss_threshold_percent?: number | null
           sms_notifications_enabled?: boolean | null
           standard_tp_multiplier?: number | null
+          time_based_stop_enabled?: boolean | null
+          time_based_stop_hours?: number | null
           trailing_stop_activation_percent?: number | null
           trailing_stop_distance_multiplier?: number | null
           trailing_stop_enabled?: boolean | null
