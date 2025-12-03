@@ -286,6 +286,7 @@ export type Database = {
           opened_by_rebalancer: boolean | null
           order_type: string | null
           original_quantity: number | null
+          partial_loss_level: number | null
           partial_tp_level: number | null
           quantity: number
           realized_pnl: number | null
@@ -320,6 +321,7 @@ export type Database = {
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
           original_quantity?: number | null
+          partial_loss_level?: number | null
           partial_tp_level?: number | null
           quantity: number
           realized_pnl?: number | null
@@ -354,6 +356,7 @@ export type Database = {
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
           original_quantity?: number | null
+          partial_loss_level?: number | null
           partial_tp_level?: number | null
           quantity?: number
           realized_pnl?: number | null
@@ -400,6 +403,7 @@ export type Database = {
           opened_by_rebalancer: boolean | null
           order_type: string | null
           original_quantity: number | null
+          partial_loss_level: number | null
           partial_tp_level: number | null
           quantity: number
           realized_pnl: number | null
@@ -435,6 +439,7 @@ export type Database = {
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
           original_quantity?: number | null
+          partial_loss_level?: number | null
           partial_tp_level?: number | null
           quantity: number
           realized_pnl?: number | null
@@ -470,6 +475,7 @@ export type Database = {
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
           original_quantity?: number | null
+          partial_loss_level?: number | null
           partial_tp_level?: number | null
           quantity?: number
           realized_pnl?: number | null
@@ -562,6 +568,9 @@ export type Database = {
           notification_email: string | null
           notification_phone: string | null
           paper_trading_mode: boolean | null
+          partial_loss_close_percent: number | null
+          partial_loss_taking_enabled: boolean | null
+          partial_loss_trigger_percent: number | null
           portfolio_peak_value: number | null
           portfolio_value: number
           position_size_reduction_percent: number
@@ -613,6 +622,9 @@ export type Database = {
           notification_email?: string | null
           notification_phone?: string | null
           paper_trading_mode?: boolean | null
+          partial_loss_close_percent?: number | null
+          partial_loss_taking_enabled?: boolean | null
+          partial_loss_trigger_percent?: number | null
           portfolio_peak_value?: number | null
           portfolio_value?: number
           position_size_reduction_percent?: number
@@ -664,6 +676,9 @@ export type Database = {
           notification_email?: string | null
           notification_phone?: string | null
           paper_trading_mode?: boolean | null
+          partial_loss_close_percent?: number | null
+          partial_loss_taking_enabled?: boolean | null
+          partial_loss_trigger_percent?: number | null
           portfolio_peak_value?: number | null
           portfolio_value?: number
           position_size_reduction_percent?: number

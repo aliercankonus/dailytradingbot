@@ -39,6 +39,10 @@ interface RiskParameters {
   dynamic_stop_tightening_enabled: boolean;
   dynamic_stop_tightening_hours: number;
   dynamic_stop_tightening_percent: number;
+  // Partial Loss Taking
+  partial_loss_taking_enabled: boolean;
+  partial_loss_trigger_percent: number;
+  partial_loss_close_percent: number;
   updated_at: string;
 }
 

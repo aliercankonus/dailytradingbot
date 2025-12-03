@@ -46,7 +46,7 @@ serve(async (req) => {
     const userIds = [...new Set(positions.map((p) => p.user_id))];
     const { data: riskParamsList, error: riskError } = await supabase
       .from("risk_parameters")
-      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent, portfolio_value, portfolio_peak_value, drawdown_circuit_breaker_enabled, drawdown_circuit_breaker_percent, circuit_breaker_triggered, time_based_stop_enabled, time_based_stop_hours, dynamic_stop_tightening_enabled, dynamic_stop_tightening_hours, dynamic_stop_tightening_percent")
+      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent, portfolio_value, portfolio_peak_value, drawdown_circuit_breaker_enabled, drawdown_circuit_breaker_percent, circuit_breaker_triggered, time_based_stop_enabled, time_based_stop_hours, dynamic_stop_tightening_enabled, dynamic_stop_tightening_hours, dynamic_stop_tightening_percent, partial_loss_taking_enabled, partial_loss_trigger_percent, partial_loss_close_percent")
       .in("user_id", userIds);
     if (riskError) throw riskError;
     // Create a map of user settings
@@ -71,6 +71,10 @@ serve(async (req) => {
           dynamicStopTighteningEnabled: rp.dynamic_stop_tightening_enabled ?? true,
           dynamicStopTighteningHours: rp.dynamic_stop_tightening_hours ?? 2,
           dynamicStopTighteningPercent: rp.dynamic_stop_tightening_percent ?? 25,
+          // Partial Loss Taking
+          partialLossTakingEnabled: rp.partial_loss_taking_enabled ?? true,
+          partialLossTriggerPercent: rp.partial_loss_trigger_percent ?? 50,
+          partialLossClosePercent: rp.partial_loss_close_percent ?? 50,
         },
       ]) || [],
     );
@@ -450,6 +454,10 @@ serve(async (req) => {
         dynamicStopTighteningEnabled: true,
         dynamicStopTighteningHours: 2,
         dynamicStopTighteningPercent: 25,
+        // Partial Loss Taking defaults
+        partialLossTakingEnabled: true,
+        partialLossTriggerPercent: 50,
+        partialLossClosePercent: 50,
       };
       // TRAILING STOP LOSS LOGIC - Position-specific calculation based on EACH position's entry price
       let newStopLoss = position.stop_loss;
@@ -858,6 +866,84 @@ serve(async (req) => {
               
               if (tightenError) {
                 console.error(`Error tightening stop for ${position.id}:`, tightenError);
+              }
+            }
+          }
+        }
+      }
+
+      // ============================================================
+      // PARTIAL LOSS TAKING - Close part of losing position early
+      // Reduces exposure before full stop loss is hit
+      // ============================================================
+      const currentPartialLossLevel = position.partial_loss_level || 0;
+      
+      if (!shouldClose && pnlPercent < 0 && userSettings.partialLossTakingEnabled && currentPartialLossLevel === 0) {
+        // Calculate how far price has moved toward stop loss
+        const stopDistance = Math.abs(position.stop_loss - position.entry_price);
+        const currentLossDistance = position.side === "BUY"
+          ? position.entry_price - currentPrice // For LONG: loss when price drops
+          : currentPrice - position.entry_price; // For SHORT: loss when price rises
+        
+        // Only check if we're moving toward stop (positive loss distance)
+        if (currentLossDistance > 0 && stopDistance > 0) {
+          const lossProgressPercent = (currentLossDistance / stopDistance) * 100;
+          
+          if (lossProgressPercent >= userSettings.partialLossTriggerPercent) {
+            // Trigger partial loss close
+            const closePercent = userSettings.partialLossClosePercent / 100;
+            const closeQuantity = position.quantity * closePercent;
+            const remainingQuantity = position.quantity - closeQuantity;
+            const partialLoss = position.side === "BUY"
+              ? (currentPrice - position.entry_price) * closeQuantity
+              : (position.entry_price - currentPrice) * closeQuantity;
+            
+            console.log(`✂️ PARTIAL LOSS: ${position.symbol} ${position.side} - Price ${lossProgressPercent.toFixed(1)}% toward stop, closing ${(closePercent * 100).toFixed(0)}%`);
+            
+            // Update position with reduced quantity and mark partial loss taken
+            const { data: updatedPartialLossPos, error: partialLossError } = await supabase
+              .from("positions")
+              .update({
+                quantity: remainingQuantity,
+                partial_loss_level: 1,
+              })
+              .eq("id", position.id)
+              .eq("status", "active")
+              .select()
+              .maybeSingle();
+            
+            if (partialLossError) {
+              console.error(`Error executing partial loss for ${position.id}:`, partialLossError);
+            } else if (updatedPartialLossPos) {
+              console.log(`✅ Partial loss executed: ${position.symbol} closed ${closeQuantity.toFixed(4)} (${(closePercent * 100).toFixed(0)}%), remaining ${remainingQuantity.toFixed(4)}, Loss: $${partialLoss.toFixed(2)}`);
+              
+              // Send notification
+              try {
+                const { data: riskParams } = await supabase
+                  .from("risk_parameters")
+                  .select("notification_email, email_notifications_enabled")
+                  .eq("user_id", position.user_id)
+                  .single();
+                
+                if (riskParams?.email_notifications_enabled) {
+                  await supabase.functions.invoke("send-notification", {
+                    body: {
+                      type: "partial_loss_taken",
+                      userId: position.user_id,
+                      positionId: position.id,
+                      symbol: position.symbol,
+                      side: position.side,
+                      closedQuantity: closeQuantity,
+                      remainingQuantity,
+                      exitPrice: currentPrice,
+                      partialLoss,
+                      lossProgressPercent,
+                      email: riskParams.notification_email,
+                    },
+                  });
+                }
+              } catch (notifError) {
+                console.error("Error sending partial loss notification:", notifError);
               }
             }
           }
