@@ -559,8 +559,19 @@ serve(async (req) => {
         // Also exit if there's higher timeframe conflict (4h bearish vs 1h bullish = dangerous for shorts)
         if (position.side === "SELL") {
           const htfConflict = trend4h === "bearish" && trend1h === "bullish"; // Higher timeframe conflict
+          
+          // Get 4h confidence from timeframes data (early warning threshold)
+          const confidence4h = trendData.timeframes?.['4h']?.confidence || trendConfidence;
 
-          if (currentTrend === "bullish" && trendConfidence >= 45) {
+          // 🆕 EARLY WARNING EXIT: 1h bullish AND 4h confidence dropping below 70%
+          // This catches trend weakening before full reversal
+          if (trend1h === "bullish" && confidence4h < 70) {
+            shouldClose = true;
+            closeReason = "early_warning_1h_bullish";
+            console.log(
+              `⚠️ EARLY WARNING EXIT: Closing SHORT ${position.symbol} - 1h BULLISH + 4h weakening (4h conf: ${confidence4h}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+            );
+          } else if (currentTrend === "bullish" && trendConfidence >= 45) {
             shouldClose = true;
             closeReason = "trend_reversal_bullish";
             console.log(
@@ -584,7 +595,7 @@ serve(async (req) => {
             trendExits.push({
               symbol: position.symbol,
               side: position.side,
-              reason: `Trend: ${currentTrend} (${trendConfidence}%), 4h: ${trend4h}, 1h: ${trend1h}`,
+              reason: `Trend: ${currentTrend} (${trendConfidence}%), 4h: ${trend4h} (${confidence4h}%), 1h: ${trend1h}`,
               trend: currentTrend,
               confidence: trendConfidence,
               pnlPercent,
@@ -596,8 +607,19 @@ serve(async (req) => {
         // Also exit if there's higher timeframe conflict (4h bullish vs 1h bearish)
         if (position.side === "BUY") {
           const htfConflict = trend4h === "bullish" && trend1h === "bearish";
+          
+          // Get 4h confidence from timeframes data (early warning threshold)
+          const confidence4h = trendData.timeframes?.['4h']?.confidence || trendConfidence;
 
-          if (currentTrend === "bearish" && trendConfidence >= 45) {
+          // 🆕 EARLY WARNING EXIT: 1h bearish AND 4h confidence dropping below 70%
+          // This catches trend weakening before full reversal
+          if (!shouldClose && trend1h === "bearish" && confidence4h < 70) {
+            shouldClose = true;
+            closeReason = "early_warning_1h_bearish";
+            console.log(
+              `⚠️ EARLY WARNING EXIT: Closing LONG ${position.symbol} - 1h BEARISH + 4h weakening (4h conf: ${confidence4h}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+            );
+          } else if (currentTrend === "bearish" && trendConfidence >= 45) {
             shouldClose = true;
             closeReason = "trend_reversal_bearish";
             console.log(
@@ -621,7 +643,7 @@ serve(async (req) => {
             trendExits.push({
               symbol: position.symbol,
               side: position.side,
-              reason: `Trend: ${currentTrend} (${trendConfidence}%), 4h: ${trend4h}, 1h: ${trend1h}`,
+              reason: `Trend: ${currentTrend} (${trendConfidence}%), 4h: ${trend4h} (${confidence4h}%), 1h: ${trend1h}`,
               trend: currentTrend,
               confidence: trendConfidence,
               pnlPercent,
