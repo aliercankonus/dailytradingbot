@@ -12,6 +12,7 @@ import { useState, useEffect } from 'react';
 import { TrailingStopSettings } from '@/components/TrailingStopSettings';
 import { PositionRebalancingSettings } from '@/components/PositionRebalancingSettings';
 import { DivergenceSettings } from '@/components/DivergenceSettings';
+import { LossManagementSettings } from '@/components/LossManagementSettings';
 import {
   Accordion,
   AccordionContent,
@@ -409,6 +410,9 @@ export const RiskManagementControls = () => {
               </div>
             </AccordionTrigger>
             <AccordionContent className="px-6 pb-6 space-y-6 pt-4">
+
+              {/* Loss Management Strategies - NEW */}
+              <LossManagementSettings />
 
               {/* Trailing Stop Loss Settings */}
               <TrailingStopSettings />

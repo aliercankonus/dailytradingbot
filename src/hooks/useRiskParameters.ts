@@ -28,6 +28,17 @@ interface RiskParameters {
   divergence_tp_multiplier: number;
   divergence_sl_multiplier: number;
   trailing_stop_profit_lock_percent: number;
+  // Loss Management Settings
+  drawdown_circuit_breaker_enabled: boolean;
+  drawdown_circuit_breaker_percent: number;
+  portfolio_peak_value: number;
+  circuit_breaker_triggered: boolean;
+  circuit_breaker_triggered_at: string | null;
+  time_based_stop_enabled: boolean;
+  time_based_stop_hours: number;
+  dynamic_stop_tightening_enabled: boolean;
+  dynamic_stop_tightening_hours: number;
+  dynamic_stop_tightening_percent: number;
   updated_at: string;
 }
 
