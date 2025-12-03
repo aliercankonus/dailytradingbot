@@ -39,3 +39,6 @@ cron = "*/5 * * * *"
 [functions.monitor-positions.schedule]
 enabled = true
 cron = "*/1 * * * *"
+
+[functions.validate-adx]
+verify_jwt = false
