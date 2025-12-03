@@ -9,6 +9,7 @@ import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw, Filter, Lock, A
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useMemo } from 'react';
+import { formatPrice, formatPercent, formatQuantity } from '@/lib/utils';
 
 export const ActivePositions = () => {
   const { positions, loading, refetch } = usePositions();
@@ -219,10 +220,10 @@ export const ActivePositions = () => {
               <div className="flex items-center gap-3">
                 <div className="text-right">
                   <div className={`text-xl font-bold ${position.live_unrealized_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    ${position.live_unrealized_pnl.toFixed(2)}
+                    {formatPrice(position.live_unrealized_pnl, 2, '$')}
                   </div>
                   <div className={`text-sm ${position.live_unrealized_pnl_percent >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    {position.live_unrealized_pnl_percent.toFixed(2)}%
+                    {formatPercent(position.live_unrealized_pnl_percent)}
                   </div>
                 </div>
                 <Button
@@ -243,23 +244,23 @@ export const ActivePositions = () => {
             <div className="grid grid-cols-5 gap-2 text-sm">
               <div>
                 <div className="text-xs text-muted-foreground">Entry</div>
-                <div className="font-medium">${position.entry_price.toFixed(4)}</div>
+                <div className="font-medium">{formatPrice(position.entry_price, 4, '$')}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Current</div>
-                <div className="font-medium">${position.live_current_price.toFixed(4)}</div>
+                <div className="font-medium">{formatPrice(position.live_current_price, 4, '$')}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Quantity</div>
-                <div className="font-medium">{position.quantity.toFixed(6)}</div>
+                <div className="font-medium">{formatQuantity(position.quantity)}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Stop Loss</div>
-                <div className="font-medium text-red-500">${position.stop_loss.toFixed(4)}</div>
+                <div className="font-medium text-red-500">{formatPrice(position.stop_loss, 4, '$')}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Take Profit</div>
-                <div className="font-medium text-green-500">${position.take_profit.toFixed(4)}</div>
+                <div className="font-medium text-green-500">{formatPrice(position.take_profit, 4, '$')}</div>
               </div>
             </div>
 
@@ -289,7 +290,7 @@ export const ActivePositions = () => {
                 {position.trend_consistency !== undefined && position.trend_consistency !== null && (
                   <div>
                     <div className="text-xs text-muted-foreground">Trend Consistency</div>
-                    <div className="font-medium">{position.trend_consistency.toFixed(0)}%</div>
+                    <div className="font-medium">{formatPercent(position.trend_consistency, 0)}</div>
                   </div>
                 )}
               </div>
@@ -356,10 +357,10 @@ export const ActivePositions = () => {
                 <div className="flex items-center gap-3">
                   <div className="text-right">
                     <div className={`text-xl font-bold ${position.live_unrealized_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                      ${position.live_unrealized_pnl.toFixed(2)}
+                      {formatPrice(position.live_unrealized_pnl, 2, '$')}
                     </div>
                     <div className={`text-sm ${position.live_unrealized_pnl_percent >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                      {position.live_unrealized_pnl_percent.toFixed(2)}%
+                      {formatPercent(position.live_unrealized_pnl_percent)}
                     </div>
                   </div>
                   <Button
@@ -380,23 +381,23 @@ export const ActivePositions = () => {
               <div className="grid grid-cols-5 gap-2 text-sm">
                 <div>
                   <div className="text-xs text-muted-foreground">Entry</div>
-                  <div className="font-medium">${position.entry_price.toFixed(4)}</div>
+                  <div className="font-medium">{formatPrice(position.entry_price, 4, '$')}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Current</div>
-                  <div className="font-medium">${position.live_current_price.toFixed(4)}</div>
+                  <div className="font-medium">{formatPrice(position.live_current_price, 4, '$')}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Quantity</div>
-                  <div className="font-medium">{position.quantity.toFixed(6)}</div>
+                  <div className="font-medium">{formatQuantity(position.quantity)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Stop Loss</div>
-                  <div className="font-medium text-red-500">${position.stop_loss.toFixed(4)}</div>
+                  <div className="font-medium text-red-500">{formatPrice(position.stop_loss, 4, '$')}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Take Profit</div>
-                  <div className="font-medium text-green-500">${position.take_profit.toFixed(4)}</div>
+                  <div className="font-medium text-green-500">{formatPrice(position.take_profit, 4, '$')}</div>
                 </div>
               </div>
 
@@ -426,7 +427,7 @@ export const ActivePositions = () => {
                   {position.trend_consistency !== undefined && position.trend_consistency !== null && (
                     <div>
                       <div className="text-xs text-muted-foreground">Trend Consistency</div>
-                      <div className="font-medium">{position.trend_consistency.toFixed(0)}%</div>
+                      <div className="font-medium">{formatPercent(position.trend_consistency, 0)}</div>
                     </div>
                   )}
                 </div>

@@ -8,6 +8,7 @@ import { usePortfolioMetrics } from "@/hooks/usePortfolioMetrics";
 import { useRealtimePortfolioSync } from "@/hooks/useRealtimePortfolioSync";
 import { useRealtimePositionSync } from "@/hooks/useRealtimePositionSync";
 import { useMemo } from "react";
+import { formatPrice, formatPercent } from "@/lib/utils";
 export const PortfolioMetrics = () => {
   const { positions, loading: positionsLoading } = usePositions();
 
@@ -79,12 +80,12 @@ export const PortfolioMetrics = () => {
     const totalReturn = basePortfolio > 0 ? (totalPnL / basePortfolio) * 100 : 0;
 
     return {
-      portfolioValue: `$${currentValue.toFixed(2)}`,
-      totalPnL: `${totalPnL >= 0 ? "+" : ""}$${Math.abs(totalPnL).toFixed(2)}`,
-      realizedPnL: `${realizedPnL >= 0 ? "+" : ""}$${Math.abs(realizedPnL).toFixed(2)}`,
-      unrealizedPnL: `${unrealizedPnL >= 0 ? "+" : ""}$${Math.abs(unrealizedPnL).toFixed(2)}`,
-      totalReturn: `${totalReturn >= 0 ? "+" : ""}${totalReturn.toFixed(2)}%`,
-      winRate: `${(portfolioMetrics?.win_rate ?? 0).toFixed(1)}%`,
+      portfolioValue: formatPrice(currentValue, 2, '$'),
+      totalPnL: `${totalPnL >= 0 ? "+" : "-"}${formatPrice(Math.abs(totalPnL), 2, '$')}`,
+      realizedPnL: `${realizedPnL >= 0 ? "+" : "-"}${formatPrice(Math.abs(realizedPnL), 2, '$')}`,
+      unrealizedPnL: `${unrealizedPnL >= 0 ? "+" : "-"}${formatPrice(Math.abs(unrealizedPnL), 2, '$')}`,
+      totalReturn: formatPercent(totalReturn, 2, true),
+      winRate: formatPercent(portfolioMetrics?.win_rate ?? 0, 1),
       isPositivePnL: totalPnL >= 0,
       isPositiveRealizedPnL: realizedPnL >= 0,
       isPositiveUnrealizedPnL: unrealizedPnL >= 0,
