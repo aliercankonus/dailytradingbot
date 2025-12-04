@@ -825,6 +825,7 @@ serve(async (req) => {
       // ============================================================
       // DYNAMIC STOP TIGHTENING - Tighten stops on aging losing positions
       // Reduces exposure on positions that are losing and getting older
+      // IMPORTANT: Always maintain minimum 1% stop distance from entry
       // ============================================================
       if (!shouldClose && pnlPercent < 0 && userSettings.dynamicStopTighteningEnabled && position.opened_at) {
         const openedAt = new Date(position.opened_at);
@@ -836,15 +837,23 @@ serve(async (req) => {
           const hoursOverThreshold = hoursOpen - userSettings.dynamicStopTighteningHours;
           const tighteningFactor = Math.min(hoursOverThreshold * (userSettings.dynamicStopTighteningPercent / 100), 0.9); // Max 90% tightening
           
+          // Calculate minimum stop distance (1% of entry price)
+          const minStopDistancePercent = 1.0;
+          const minStopDistance = position.entry_price * (minStopDistancePercent / 100);
+          
           if (position.side === "BUY") {
-            // For LONG: Move stop loss closer to current price (higher)
+            // For LONG: Move stop loss closer to entry (higher), but respect 1% minimum
             const distanceToEntry = position.entry_price - position.stop_loss;
             const tightenedDistance = distanceToEntry * (1 - tighteningFactor);
-            const newTightenedStop = position.entry_price - tightenedDistance;
             
-            // Only update if new stop is higher than current (tighter)
+            // Enforce minimum 1% distance from entry
+            const clampedDistance = Math.max(tightenedDistance, minStopDistance);
+            const newTightenedStop = position.entry_price - clampedDistance;
+            
+            // Only update if new stop is higher than current (tighter) AND respects minimum
             if (newTightenedStop > position.stop_loss) {
-              console.log(`🔧 DYNAMIC TIGHTENING: ${position.symbol} LONG - Stop ${position.stop_loss.toFixed(2)} → ${newTightenedStop.toFixed(2)} (${(tighteningFactor * 100).toFixed(0)}% tighter after ${hoursOverThreshold.toFixed(1)}h)`);
+              const newDistancePercent = ((position.entry_price - newTightenedStop) / position.entry_price) * 100;
+              console.log(`🔧 DYNAMIC TIGHTENING: ${position.symbol} LONG - Stop ${position.stop_loss.toFixed(2)} → ${newTightenedStop.toFixed(2)} (${newDistancePercent.toFixed(2)}% from entry, min ${minStopDistancePercent}%)`);
               
               const { error: tightenError } = await supabase
                 .from("positions")
@@ -857,14 +866,18 @@ serve(async (req) => {
               }
             }
           } else {
-            // For SHORT: Move stop loss closer to current price (lower)
+            // For SHORT: Move stop loss closer to entry (lower), but respect 1% minimum
             const distanceToEntry = position.stop_loss - position.entry_price;
             const tightenedDistance = distanceToEntry * (1 - tighteningFactor);
-            const newTightenedStop = position.entry_price + tightenedDistance;
             
-            // Only update if new stop is lower than current (tighter)
+            // Enforce minimum 1% distance from entry
+            const clampedDistance = Math.max(tightenedDistance, minStopDistance);
+            const newTightenedStop = position.entry_price + clampedDistance;
+            
+            // Only update if new stop is lower than current (tighter) AND respects minimum
             if (newTightenedStop < position.stop_loss) {
-              console.log(`🔧 DYNAMIC TIGHTENING: ${position.symbol} SHORT - Stop ${position.stop_loss.toFixed(2)} → ${newTightenedStop.toFixed(2)} (${(tighteningFactor * 100).toFixed(0)}% tighter after ${hoursOverThreshold.toFixed(1)}h)`);
+              const newDistancePercent = ((newTightenedStop - position.entry_price) / position.entry_price) * 100;
+              console.log(`🔧 DYNAMIC TIGHTENING: ${position.symbol} SHORT - Stop ${position.stop_loss.toFixed(2)} → ${newTightenedStop.toFixed(2)} (${newDistancePercent.toFixed(2)}% from entry, min ${minStopDistancePercent}%)`);
               
               const { error: tightenError } = await supabase
                 .from("positions")
