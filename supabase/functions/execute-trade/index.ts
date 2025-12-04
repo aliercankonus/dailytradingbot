@@ -112,8 +112,39 @@ serve(async (req) => {
       throw new Error('Binance API credentials not configured for live trading');
     }
 
-    if (riskParams.current_open_trades >= riskParams.max_open_trades) {
-      throw new Error(`Maximum open trades limit reached (${riskParams.max_open_trades})`);
+    // ============================================================
+    // SMART RISK #1: DYNAMIC MAX TRADES
+    // Adjusts max trades based on volatility and performance
+    // ============================================================
+    let effectiveMaxTrades = riskParams.max_open_trades;
+    
+    if (riskParams.dynamic_max_trades_enabled !== false) {
+      // Get recent performance for dynamic adjustment
+      const { data: recentTrades } = await supabase
+        .from('positions')
+        .select('realized_pnl')
+        .eq('user_id', user.id)
+        .eq('status', 'closed')
+        .order('closed_at', { ascending: false })
+        .limit(10);
+      
+      const recentWins = recentTrades?.filter(t => (t.realized_pnl || 0) > 0).length || 0;
+      const recentWinRate = recentTrades?.length ? (recentWins / recentTrades.length) * 100 : 50;
+      
+      // Adjust based on recent performance
+      if (recentWinRate >= 70 && recentTrades && recentTrades.length >= 5) {
+        effectiveMaxTrades = Math.min(riskParams.max_open_trades + 2, 10); // Bonus for good performance
+        console.log(`📈 Dynamic Max Trades: +2 bonus for ${recentWinRate.toFixed(0)}% win rate → ${effectiveMaxTrades}`);
+      } else if (recentWinRate < 40 && recentTrades && recentTrades.length >= 5) {
+        effectiveMaxTrades = Math.max(Math.floor(riskParams.max_open_trades * 0.5), 1); // Reduce for poor performance
+        console.log(`📉 Dynamic Max Trades: Reduced for ${recentWinRate.toFixed(0)}% win rate → ${effectiveMaxTrades}`);
+      } else {
+        console.log(`📊 Dynamic Max Trades: Standard (${recentWinRate.toFixed(0)}% win rate) → ${effectiveMaxTrades}`);
+      }
+    }
+    
+    if (riskParams.current_open_trades >= effectiveMaxTrades) {
+      throw new Error(`Maximum open trades limit reached (${riskParams.current_open_trades}/${effectiveMaxTrades})`);
     }
 
     // ============================================================
@@ -123,26 +154,47 @@ serve(async (req) => {
     const lastResetDate = riskParams.last_loss_reset_date;
     let currentDailyLoss = riskParams.daily_realized_loss || 0;
 
-    // Reset daily loss counter if it's a new day
+    // Reset daily loss counter and peak P&L if it's a new day
     if (!lastResetDate || lastResetDate !== today) {
-      console.log(`Resetting daily loss counter (last reset: ${lastResetDate}, today: ${today})`);
+      console.log(`Resetting daily counters (last reset: ${lastResetDate}, today: ${today})`);
       await supabase
         .from('risk_parameters')
         .update({
           daily_realized_loss: 0,
+          daily_peak_pnl: 0,
           last_loss_reset_date: today
         })
         .eq('user_id', user.id);
       currentDailyLoss = 0;
     }
 
+    // ============================================================
+    // SMART RISK #3: TRAILING DAILY LIMIT
+    // Lock profits by tightening daily loss limit when in profit
+    // ============================================================
+    let effectiveDailyLossLimit = riskParams.daily_loss_limit_percent;
+    const dailyPeakPnl = riskParams.daily_peak_pnl || 0;
+    
+    if (riskParams.trailing_daily_limit_enabled !== false && dailyPeakPnl > 0) {
+      // Lock 50% of peak daily gains
+      const lockedProfit = dailyPeakPnl * 0.5;
+      const lockedProfitPercent = (lockedProfit / riskParams.portfolio_value) * 100;
+      
+      // New limit = original limit minus locked profit (tighter limit)
+      effectiveDailyLossLimit = Math.max(
+        riskParams.daily_loss_limit_percent - lockedProfitPercent,
+        1.0 // Minimum 1% limit
+      );
+      console.log(`🔒 Trailing Daily Limit: Peak P&L $${dailyPeakPnl.toFixed(2)} → Locking 50% → Effective limit: ${effectiveDailyLossLimit.toFixed(2)}% (was ${riskParams.daily_loss_limit_percent}%)`);
+    }
+    
     // Check circuit breaker: Stop trading if daily loss limit exceeded
     const dailyLossPercent = riskParams.portfolio_value > 0 
       ? (currentDailyLoss / riskParams.portfolio_value) * 100 
       : 0;
-    if (dailyLossPercent >= riskParams.daily_loss_limit_percent) {
-      console.error(`❌ CIRCUIT BREAKER TRIGGERED: Daily loss ${dailyLossPercent.toFixed(2)}% >= limit ${riskParams.daily_loss_limit_percent}%`);
-      throw new Error(`Daily loss limit reached (${dailyLossPercent.toFixed(2)}% of ${riskParams.daily_loss_limit_percent}%). Trading halted for today.`);
+    if (dailyLossPercent >= effectiveDailyLossLimit) {
+      console.error(`❌ CIRCUIT BREAKER TRIGGERED: Daily loss ${dailyLossPercent.toFixed(2)}% >= limit ${effectiveDailyLossLimit.toFixed(2)}%`);
+      throw new Error(`Daily loss limit reached (${dailyLossPercent.toFixed(2)}% of ${effectiveDailyLossLimit.toFixed(2)}%). Trading halted for today.`);
     }
 
     // Get signal details
@@ -667,11 +719,69 @@ serve(async (req) => {
       console.warn('Signal has no strategy_id or indicators.positionSizePercent, using default 1%');
     }
 
-    // Calculate position size based on strategy's positionSizePercent
-    const positionValue = (riskParams.portfolio_value * positionSizePercent) / 100;
+    // ============================================================
+    // SMART RISK #2: KELLY CRITERION POSITION SIZING
+    // Calculate optimal risk based on historical win rate and avg win/loss
+    // ============================================================
+    let kellyAdjustedPositionSize = positionSizePercent;
+    
+    if (riskParams.kelly_criterion_enabled !== false) {
+      const minTradesForKelly = riskParams.min_trades_for_kelly || 10;
+      const kellyMaxRiskCap = riskParams.kelly_max_risk_cap || 3.0;
+      
+      // Get historical performance for Kelly calculation
+      const { data: historicalTrades } = await supabase
+        .from('positions')
+        .select('realized_pnl, entry_price, exit_price, quantity')
+        .eq('user_id', user.id)
+        .eq('status', 'closed')
+        .not('realized_pnl', 'is', null)
+        .order('closed_at', { ascending: false })
+        .limit(50);
+      
+      if (historicalTrades && historicalTrades.length >= minTradesForKelly) {
+        const wins = historicalTrades.filter(t => (t.realized_pnl || 0) > 0);
+        const losses = historicalTrades.filter(t => (t.realized_pnl || 0) <= 0);
+        
+        const winRate = wins.length / historicalTrades.length;
+        const lossRate = 1 - winRate;
+        
+        const avgWin = wins.length > 0 
+          ? wins.reduce((sum, t) => sum + Math.abs(t.realized_pnl || 0), 0) / wins.length 
+          : 0;
+        const avgLoss = losses.length > 0 
+          ? losses.reduce((sum, t) => sum + Math.abs(t.realized_pnl || 0), 0) / losses.length 
+          : 1;
+        
+        // Kelly Formula: f* = W - (L / R) where W=win rate, L=loss rate, R=win/loss ratio
+        const winLossRatio = avgLoss > 0 ? avgWin / avgLoss : 1;
+        const kellyPercent = (winRate - (lossRate / winLossRatio)) * 100;
+        
+        // Apply half-Kelly for safety and cap at max risk
+        const halfKelly = Math.max(0, kellyPercent / 2);
+        const cappedKelly = Math.min(halfKelly, kellyMaxRiskCap);
+        
+        if (cappedKelly > 0) {
+          kellyAdjustedPositionSize = cappedKelly;
+          console.log(`🎯 Kelly Criterion: WinRate=${(winRate*100).toFixed(1)}%, AvgWin=$${avgWin.toFixed(2)}, AvgLoss=$${avgLoss.toFixed(2)}`);
+          console.log(`   → Full Kelly=${kellyPercent.toFixed(2)}%, Half Kelly=${halfKelly.toFixed(2)}%, Capped=${cappedKelly.toFixed(2)}%`);
+        } else {
+          console.log(`⚠️ Kelly suggests no bet (negative edge). Using strategy default: ${positionSizePercent}%`);
+          kellyAdjustedPositionSize = positionSizePercent * 0.5; // Reduce by 50% when Kelly is negative
+        }
+      } else {
+        console.log(`📊 Kelly: Insufficient data (${historicalTrades?.length || 0}/${minTradesForKelly} trades). Using strategy: ${positionSizePercent}%`);
+      }
+    }
+    
+    // Use Kelly-adjusted or strategy position size
+    const effectivePositionSize = riskParams.kelly_criterion_enabled !== false ? kellyAdjustedPositionSize : positionSizePercent;
+    
+    // Calculate position size based on effective position size
+    const positionValue = (riskParams.portfolio_value * effectivePositionSize) / 100;
     let quantity = positionValue / currentPrice;
     
-    console.log(`Position sizing: ${positionSizePercent}% of $${riskParams.portfolio_value} = $${positionValue.toFixed(2)} / $${currentPrice.toFixed(2)} = ${quantity.toFixed(4)} ${signal.symbol.replace('USDT', '')}`);
+    console.log(`Position sizing: ${effectivePositionSize.toFixed(2)}% of $${riskParams.portfolio_value} = $${positionValue.toFixed(2)} / $${currentPrice.toFixed(2)} = ${quantity.toFixed(4)} ${signal.symbol.replace('USDT', '')}`);
 
     // Apply OBV boost multiplier if available
     const obvBoostMultiplier = (signal as any).obvBoostMultiplier || 1.0;
@@ -694,14 +804,15 @@ serve(async (req) => {
       console.log(`VWAP adjustment applied: ${vwapBoostMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
-    // Apply confidence-based position size scaling
+    // Apply confidence-based position size scaling (reduced impact when Kelly is active)
     const confidence = signal.confidence_score || 0;
+    const confidenceMultiplier = riskParams.kelly_criterion_enabled !== false ? 0.5 : 1.0; // Reduce confidence impact when Kelly active
     if (confidence < 50) {
-      quantity *= 0.5; // Reduce by 50%
-      console.log(`Position size reduced by 50% due to low confidence (${confidence}%)`);
+      quantity *= (1 - 0.5 * confidenceMultiplier); // Reduce by 25-50%
+      console.log(`Position size reduced by ${(50 * confidenceMultiplier).toFixed(0)}% due to low confidence (${confidence}%)`);
     } else if (confidence > 75) {
-      quantity *= 1.25; // Increase by 25%
-      console.log(`Position size increased by 25% due to high confidence (${confidence}%)`);
+      quantity *= (1 + 0.25 * confidenceMultiplier); // Increase by 12.5-25%
+      console.log(`Position size increased by ${(25 * confidenceMultiplier).toFixed(0)}% due to high confidence (${confidence}%)`);
     } else {
       console.log(`Position size normal for confidence ${confidence}%`);
     }
