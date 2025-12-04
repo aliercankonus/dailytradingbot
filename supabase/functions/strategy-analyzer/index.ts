@@ -26,6 +26,143 @@ interface SignalData {
   qualityScore?: number;
 }
 
+// ============= BUILT-IN STRATEGY TEMPLATES =============
+// These templates are always available for signal generation, even if not added by user
+const BUILT_IN_TEMPLATES = [
+  {
+    id: 'builtin-rsi-oversold',
+    name: 'RSI Oversold/Overbought',
+    signal_direction: 'long',
+    entry_conditions: [{ indicator: 'RSI', operator: 'below', value: '30', compareToIndicator: false }],
+    exit_conditions: [{ indicator: 'RSI', operator: 'above', value: '70', compareToIndicator: false }],
+    indicators: [{ type: 'RSI', name: 'RSI', period: 14 }],
+    risk_settings: { stopLossPercent: 3, takeProfitPercent: 6, positionSizePercent: 2 }
+  },
+  {
+    id: 'builtin-rsi-overbought',
+    name: 'RSI Overbought Short',
+    signal_direction: 'short',
+    entry_conditions: [{ indicator: 'RSI', operator: 'above', value: '70', compareToIndicator: false }],
+    exit_conditions: [{ indicator: 'RSI', operator: 'below', value: '30', compareToIndicator: false }],
+    indicators: [{ type: 'RSI', name: 'RSI', period: 14 }],
+    risk_settings: { stopLossPercent: 3, takeProfitPercent: 6, positionSizePercent: 2 }
+  },
+  {
+    id: 'builtin-macd-crossover',
+    name: 'MACD Crossover',
+    signal_direction: 'long',
+    entry_conditions: [{ indicator: 'MACD', operator: 'above', value: '0', compareToIndicator: false }],
+    exit_conditions: [{ indicator: 'MACD', operator: 'below', value: '0', compareToIndicator: false }],
+    indicators: [{ type: 'MACD', name: 'MACD', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }],
+    risk_settings: { stopLossPercent: 2, takeProfitPercent: 4, positionSizePercent: 1.5 }
+  },
+  {
+    id: 'builtin-macd-bearish',
+    name: 'MACD Bearish Cross',
+    signal_direction: 'short',
+    entry_conditions: [{ indicator: 'MACD', operator: 'below', value: '0', compareToIndicator: false }],
+    exit_conditions: [{ indicator: 'MACD', operator: 'above', value: '0', compareToIndicator: false }],
+    indicators: [{ type: 'MACD', name: 'MACD', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }],
+    risk_settings: { stopLossPercent: 2, takeProfitPercent: 4, positionSizePercent: 1.5 }
+  },
+  {
+    id: 'builtin-ema-golden',
+    name: 'EMA Golden Cross',
+    signal_direction: 'long',
+    entry_conditions: [{ indicator: 'EMA_Fast', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'EMA_Slow' }],
+    exit_conditions: [{ indicator: 'EMA_Fast', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'EMA_Slow' }],
+    indicators: [{ type: 'EMA', name: 'EMA_Fast', period: 12 }, { type: 'EMA', name: 'EMA_Slow', period: 26 }],
+    risk_settings: { stopLossPercent: 2.5, takeProfitPercent: 5, positionSizePercent: 2 }
+  },
+  {
+    id: 'builtin-ema-death',
+    name: 'EMA Death Cross',
+    signal_direction: 'short',
+    entry_conditions: [{ indicator: 'EMA_Fast', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'EMA_Slow' }],
+    exit_conditions: [{ indicator: 'EMA_Fast', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'EMA_Slow' }],
+    indicators: [{ type: 'EMA', name: 'EMA_Fast', period: 12 }, { type: 'EMA', name: 'EMA_Slow', period: 26 }],
+    risk_settings: { stopLossPercent: 2.5, takeProfitPercent: 5, positionSizePercent: 2 }
+  },
+  {
+    id: 'builtin-momentum-breakout',
+    name: 'Momentum Breakout',
+    signal_direction: 'trend',
+    entry_conditions: [
+      { indicator: 'RSI', operator: 'above', value: '50', compareToIndicator: false },
+      { indicator: 'MACD', operator: 'above', value: '0', compareToIndicator: false }
+    ],
+    exit_conditions: [{ indicator: 'RSI', operator: 'below', value: '40', compareToIndicator: false }],
+    indicators: [{ type: 'RSI', name: 'RSI', period: 14 }, { type: 'MACD', name: 'MACD', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }],
+    risk_settings: { stopLossPercent: 3, takeProfitPercent: 6, positionSizePercent: 1.5 }
+  },
+  {
+    id: 'builtin-mean-reversion',
+    name: 'Mean Reversion',
+    signal_direction: 'long',
+    entry_conditions: [{ indicator: 'RSI', operator: 'below', value: '25', compareToIndicator: false }],
+    exit_conditions: [{ indicator: 'RSI', operator: 'above', value: '50', compareToIndicator: false }],
+    indicators: [{ type: 'RSI', name: 'RSI', period: 14 }],
+    risk_settings: { stopLossPercent: 4, takeProfitPercent: 8, positionSizePercent: 2.5 }
+  },
+  {
+    id: 'builtin-bollinger-breakout',
+    name: 'Bollinger Band Breakout',
+    signal_direction: 'trend',
+    entry_conditions: [{ indicator: 'Price', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'BB_Upper' }],
+    exit_conditions: [{ indicator: 'Price', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'BB_Middle' }],
+    indicators: [{ type: 'BB_Upper', name: 'BB_Upper', period: 20 }, { type: 'BB_Middle', name: 'BB_Middle', period: 20 }],
+    risk_settings: { stopLossPercent: 3, takeProfitPercent: 6, positionSizePercent: 2 }
+  },
+  {
+    id: 'builtin-bollinger-reversal',
+    name: 'Bollinger Band Reversal',
+    signal_direction: 'long',
+    entry_conditions: [{ indicator: 'Price', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'BB_Lower' }],
+    exit_conditions: [{ indicator: 'Price', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'BB_Upper' }],
+    indicators: [{ type: 'BB_Upper', name: 'BB_Upper', period: 20 }, { type: 'BB_Lower', name: 'BB_Lower', period: 20 }],
+    risk_settings: { stopLossPercent: 2.5, takeProfitPercent: 5, positionSizePercent: 2 }
+  },
+  {
+    id: 'builtin-grid-trading',
+    name: 'Grid Trading',
+    signal_direction: 'trend',
+    entry_conditions: [{ indicator: 'Price', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'BB_Lower' }],
+    exit_conditions: [{ indicator: 'Price', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'BB_Upper' }],
+    indicators: [{ type: 'BB_Upper', name: 'BB_Upper', period: 20 }, { type: 'BB_Lower', name: 'BB_Lower', period: 20 }],
+    risk_settings: { stopLossPercent: 1.5, takeProfitPercent: 1.5, positionSizePercent: 2.5 }
+  },
+  {
+    id: 'builtin-aggressive-momentum',
+    name: 'Aggressive Momentum',
+    signal_direction: 'trend',
+    entry_conditions: [
+      { indicator: 'RSI', operator: 'above', value: '60', compareToIndicator: false },
+      { indicator: 'MACD', operator: 'above', value: '0', compareToIndicator: false }
+    ],
+    exit_conditions: [{ indicator: 'RSI', operator: 'below', value: '50', compareToIndicator: false }],
+    indicators: [{ type: 'RSI', name: 'RSI', period: 14 }, { type: 'MACD', name: 'MACD', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }],
+    risk_settings: { stopLossPercent: 5, takeProfitPercent: 10, positionSizePercent: 3 }
+  },
+  {
+    id: 'builtin-conservative-swing',
+    name: 'Conservative Swing',
+    signal_direction: 'long',
+    entry_conditions: [{ indicator: 'RSI', operator: 'below', value: '35', compareToIndicator: false }],
+    exit_conditions: [{ indicator: 'RSI', operator: 'above', value: '55', compareToIndicator: false }],
+    indicators: [{ type: 'RSI', name: 'RSI', period: 14 }],
+    risk_settings: { stopLossPercent: 1.5, takeProfitPercent: 3, positionSizePercent: 1 }
+  },
+  {
+    id: 'builtin-macd-signal-cross',
+    name: 'MACD Signal Cross',
+    signal_direction: 'long',
+    entry_conditions: [{ indicator: 'MACD', operator: 'above', value: '', compareToIndicator: true, targetIndicator: 'MACD_Signal' }],
+    exit_conditions: [{ indicator: 'MACD', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'MACD_Signal' }],
+    indicators: [{ type: 'MACD', name: 'MACD', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }, { type: 'MACD_Signal', name: 'MACD_Signal', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }],
+    risk_settings: { stopLossPercent: 2, takeProfitPercent: 4, positionSizePercent: 1.5 }
+  }
+];
+
 // ============= IMPROVEMENT #1: Quality Score System =============
 // Replace tier-based filtering with unified 0-100 quality score
 interface QualityFactors {
@@ -598,14 +735,19 @@ serve(async (req) => {
       .eq("user_id", userId)
       .eq("is_active", true);
 
-    if (!customStrategies?.length) {
-      return new Response(JSON.stringify({
-        message: "No active custom strategies configured",
-        signals: [],
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-
-    console.log(`📊 ${symbols.length} symbols, ${customStrategies.length} strategies`);
+    // Combine user's custom strategies with built-in templates
+    // User strategies are evaluated first (they take priority), then built-ins fill gaps
+    const userStrategies = customStrategies || [];
+    const userStrategyNames = new Set(userStrategies.map(s => s.name.toLowerCase()));
+    
+    // Add built-in templates that don't duplicate user strategies
+    const builtInToInclude = BUILT_IN_TEMPLATES.filter(t => 
+      !userStrategyNames.has(t.name.toLowerCase())
+    );
+    
+    const allStrategies = [...userStrategies, ...builtInToInclude];
+    
+    console.log(`📊 ${symbols.length} symbols | ${userStrategies.length} user strategies + ${builtInToInclude.length} built-in templates = ${allStrategies.length} total`);
 
     // Fetch recent signals and active positions
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
@@ -920,9 +1062,9 @@ serve(async (req) => {
         }
         const candidates: StrategyCandidate[] = [];
 
-        console.log(`📋 ${symbol}: Evaluating ${customStrategies.length} strategies`);
+        console.log(`📋 ${symbol}: Evaluating ${allStrategies.length} strategies`);
         
-        for (const strategy of customStrategies) {
+        for (const strategy of allStrategies) {
           const indicators = strategy.indicators || [];
           const entryConditions = strategy.entry_conditions || [];
           if (!indicators.length || !entryConditions.length) {
@@ -1028,7 +1170,7 @@ serve(async (req) => {
             rejection_reason: `No strategy conditions met (quality passed: ${qualityScore}/100)`,
             filters_status: {
               qualityScore, breakdown,
-              strategiesEvaluated: customStrategies.length,
+              strategiesEvaluated: allStrategies.length,
               regime: regime.regime,
             },
             trend_data: trendData,
