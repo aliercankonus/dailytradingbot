@@ -460,8 +460,14 @@ serve(async (req) => {
         partialLossClosePercent: 50,
       };
       // TRAILING STOP LOSS LOGIC - Position-specific calculation based on EACH position's entry price
+      // IMPORTANT: Trailing stop must NEVER set stop closer than 1% to entry price
       let newStopLoss = position.stop_loss;
       let trailingActivated = false;
+      
+      // Minimum stop loss distance (1% from entry) - prevents premature exits
+      const MIN_TRAILING_STOP_DISTANCE_PERCENT = 1.0;
+      const minDistanceFromEntry = position.entry_price * (MIN_TRAILING_STOP_DISTANCE_PERCENT / 100);
+      
       // Check if trailing stop is enabled and position is profitable enough
       if (userSettings.enabled && pnlPercent > userSettings.activationPercent) {
         // Calculate ATR-based minimum distance (for volatility buffer)
@@ -481,15 +487,23 @@ serve(async (req) => {
           const atrBasedStop = currentPrice - minTrailingDistance;
           
           // Use the HIGHER of the two (more protective)
-          const calculatedStopLoss = Math.max(profitBasedStop, atrBasedStop);
+          let calculatedStopLoss = Math.max(profitBasedStop, atrBasedStop);
           
-          // Only update if new stop loss is HIGHER than current (never move down)
-          if (calculatedStopLoss > position.stop_loss) {
-            newStopLoss = calculatedStopLoss;
-            trailingActivated = true;
-            console.log(
-              `Trailing SL activated for ${position.symbol} (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (profit-based: ${profitBasedStop.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
-            );
+          // ENFORCE MINIMUM 1% DISTANCE FROM ENTRY - trailing stop must not be too close to entry
+          const minAllowedStop = position.entry_price - minDistanceFromEntry;
+          if (calculatedStopLoss < minAllowedStop) {
+            // Don't set trailing stop if it would be closer than 1% to entry
+            console.log(`⚠️ Trailing SL skipped for ${position.symbol} - calculated stop ${calculatedStopLoss.toFixed(2)} too close to entry ${position.entry_price.toFixed(2)} (min 1% distance required)`);
+          } else {
+            // Only update if new stop loss is HIGHER than current (never move down)
+            if (calculatedStopLoss > position.stop_loss) {
+              newStopLoss = calculatedStopLoss;
+              trailingActivated = true;
+              const distancePercent = ((position.entry_price - newStopLoss) / position.entry_price) * 100;
+              console.log(
+                `Trailing SL activated for ${position.symbol} (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, profit-based: ${profitBasedStop.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
+              );
+            }
           }
         } else {
           // For SHORT: Calculate profit from THIS position's entry
@@ -501,15 +515,23 @@ serve(async (req) => {
           const atrBasedStop = currentPrice + minTrailingDistance;
           
           // Use the LOWER of the two (more protective for shorts)
-          const calculatedStopLoss = Math.min(profitBasedStop, atrBasedStop);
+          let calculatedStopLoss = Math.min(profitBasedStop, atrBasedStop);
           
-          // Only update if new stop loss is LOWER than current (never move up)
-          if (calculatedStopLoss < position.stop_loss) {
-            newStopLoss = calculatedStopLoss;
-            trailingActivated = true;
-            console.log(
-              `Trailing SL activated for ${position.symbol} (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (profit-based: ${profitBasedStop.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
-            );
+          // ENFORCE MINIMUM 1% DISTANCE FROM ENTRY - trailing stop must not be too close to entry
+          const minAllowedStop = position.entry_price + minDistanceFromEntry;
+          if (calculatedStopLoss > minAllowedStop) {
+            // Don't set trailing stop if it would be closer than 1% to entry
+            console.log(`⚠️ Trailing SL skipped for ${position.symbol} - calculated stop ${calculatedStopLoss.toFixed(2)} too close to entry ${position.entry_price.toFixed(2)} (min 1% distance required)`);
+          } else {
+            // Only update if new stop loss is LOWER than current (never move up)
+            if (calculatedStopLoss < position.stop_loss) {
+              newStopLoss = calculatedStopLoss;
+              trailingActivated = true;
+              const distancePercent = ((newStopLoss - position.entry_price) / position.entry_price) * 100;
+              console.log(
+                `Trailing SL activated for ${position.symbol} (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, profit-based: ${profitBasedStop.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
+              );
+            }
           }
         }
         // Update stop loss in database if trailing was activated
