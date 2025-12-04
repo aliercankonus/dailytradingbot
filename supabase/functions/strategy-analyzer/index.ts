@@ -890,6 +890,41 @@ serve(async (req) => {
         // Determine signal type
         const tradeDirection = higherTimeframeFilter?.tradeDirection || trend;
         const signalType = tradeDirection === "bullish" ? "long" : tradeDirection === "bearish" ? "short" : null;
+        
+        // ============= 1H TREND VALIDATION =============
+        // Prevent opening positions when 1h trend opposes trade direction
+        const trend1h = higherTimeframeFilter?.trend1h || trendData.multiTimeframe?.trend1h;
+        
+        if (signalType === "long" && trend1h === "bearish") {
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `Cannot open BUY: 1h trend is bearish (quality: ${qualityScore}/100)`,
+            filters_status: {
+              qualityScore, breakdown,
+              signalType, trend1h,
+              trend4h: trendData.multiTimeframe?.trend4h || higherTimeframeFilter?.trend4h,
+            },
+            trend_data: trendData,
+            checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
+        if (signalType === "short" && trend1h === "bullish") {
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `Cannot open SELL: 1h trend is bullish (quality: ${qualityScore}/100)`,
+            filters_status: {
+              qualityScore, breakdown,
+              signalType, trend1h,
+              trend4h: trendData.multiTimeframe?.trend4h || higherTimeframeFilter?.trend4h,
+            },
+            trend_data: trendData,
+            checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
         if (!signalType) {
           await supabase.from("signal_rejection_log").insert({
             user_id: userId, symbol,
