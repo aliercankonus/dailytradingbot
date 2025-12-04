@@ -11,6 +11,7 @@ import { Settings as SettingsIcon, Key, Mail, Shield, ArrowLeft } from 'lucide-r
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { PerformanceSettings } from '@/components/PerformanceSettings';
 import { PerformanceMonitoringDashboard } from '@/components/PerformanceMonitoringDashboard';
+import SmartRiskSettings from '@/components/SmartRiskSettings';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function Settings() {
@@ -331,6 +332,9 @@ export default function Settings() {
               </div>
             </div>
           </Card>
+
+          {/* Smart Risk Management */}
+          <SmartRiskSettings />
 
           {/* Risk Management */}
           <PerformanceSettings />

@@ -270,10 +270,10 @@ async function closePosition(
       console.error('Failed to count active positions:', countError);
     }
 
-    // Get current risk parameters to update consecutive losses
+    // Get current risk parameters to update consecutive losses and peak P&L
     const { data: currentRiskParams, error: riskFetchError } = await supabase
       .from('risk_parameters')
-      .select('consecutive_losses, daily_realized_loss, last_loss_reset_date')
+      .select('consecutive_losses, daily_realized_loss, last_loss_reset_date, daily_peak_pnl, portfolio_value')
       .eq('user_id', position.user_id)
       .maybeSingle();
 
@@ -284,6 +284,12 @@ async function closePosition(
     // Update consecutive losses based on trade outcome
     let newConsecutiveLosses = 0;
     let updatedDailyLoss = currentRiskParams?.daily_realized_loss || 0;
+    let updatedDailyPeakPnl = currentRiskParams?.daily_peak_pnl || 0;
+
+    // Calculate running daily P&L (gains - losses)
+    const currentDailyPnl = pnl > 0 
+      ? (updatedDailyPeakPnl + pnl) // Add profit
+      : (updatedDailyPeakPnl - Math.abs(pnl)); // Subtract loss
 
     if (pnl < 0) {
       // Trade was a loss - increment consecutive losses and add to daily loss
@@ -293,6 +299,11 @@ async function closePosition(
     } else {
       // Trade was a win or breakeven - reset consecutive losses to 0
       newConsecutiveLosses = 0;
+      // Update peak daily P&L if current is higher
+      if (currentDailyPnl > updatedDailyPeakPnl) {
+        updatedDailyPeakPnl = currentDailyPnl;
+        console.log(`📈 New daily peak P&L: $${updatedDailyPeakPnl.toFixed(2)}`);
+      }
       console.log(`Trade win/breakeven - resetting consecutive losses to 0`);
     }
 
@@ -301,7 +312,8 @@ async function closePosition(
       .update({
         current_open_trades: activeCount ?? 0,
         consecutive_losses: newConsecutiveLosses,
-        daily_realized_loss: updatedDailyLoss
+        daily_realized_loss: updatedDailyLoss,
+        daily_peak_pnl: updatedDailyPeakPnl
       })
       .eq('user_id', position.user_id);
 

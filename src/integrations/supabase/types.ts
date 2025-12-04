@@ -544,11 +544,13 @@ export type Database = {
           consecutive_losses: number | null
           current_open_trades: number | null
           daily_loss_limit_percent: number
+          daily_peak_pnl: number | null
           daily_realized_loss: number | null
           divergence_sl_multiplier: number | null
           divergence_tp_multiplier: number | null
           drawdown_circuit_breaker_enabled: boolean | null
           drawdown_circuit_breaker_percent: number | null
+          dynamic_max_trades_enabled: boolean | null
           dynamic_stop_tightening_enabled: boolean | null
           dynamic_stop_tightening_hours: number | null
           dynamic_stop_tightening_percent: number | null
@@ -558,6 +560,8 @@ export type Database = {
           enable_pullback_signals: boolean | null
           id: string
           is_trading_enabled: boolean | null
+          kelly_criterion_enabled: boolean | null
+          kelly_max_risk_cap: number | null
           last_loss_reset_date: string | null
           loss_recovery_confidence_boost: number | null
           loss_recovery_mode_enabled: boolean | null
@@ -567,6 +571,7 @@ export type Database = {
           max_risk_per_trade_percent: number
           max_trades_per_symbol: number
           min_confidence_threshold: number
+          min_trades_for_kelly: number | null
           min_trend_consistency: number
           notification_email: string | null
           notification_phone: string | null
@@ -583,12 +588,14 @@ export type Database = {
           standard_tp_multiplier: number | null
           time_based_stop_enabled: boolean | null
           time_based_stop_hours: number | null
+          trailing_daily_limit_enabled: boolean | null
           trailing_stop_activation_percent: number | null
           trailing_stop_distance_multiplier: number | null
           trailing_stop_enabled: boolean | null
           trailing_stop_profit_lock_percent: number | null
           updated_at: string | null
           user_id: string
+          volatility_max_trades_reduction: number | null
         }
         Insert: {
           auto_execute_signals?: boolean | null
@@ -601,11 +608,13 @@ export type Database = {
           consecutive_losses?: number | null
           current_open_trades?: number | null
           daily_loss_limit_percent?: number
+          daily_peak_pnl?: number | null
           daily_realized_loss?: number | null
           divergence_sl_multiplier?: number | null
           divergence_tp_multiplier?: number | null
           drawdown_circuit_breaker_enabled?: boolean | null
           drawdown_circuit_breaker_percent?: number | null
+          dynamic_max_trades_enabled?: boolean | null
           dynamic_stop_tightening_enabled?: boolean | null
           dynamic_stop_tightening_hours?: number | null
           dynamic_stop_tightening_percent?: number | null
@@ -615,6 +624,8 @@ export type Database = {
           enable_pullback_signals?: boolean | null
           id?: string
           is_trading_enabled?: boolean | null
+          kelly_criterion_enabled?: boolean | null
+          kelly_max_risk_cap?: number | null
           last_loss_reset_date?: string | null
           loss_recovery_confidence_boost?: number | null
           loss_recovery_mode_enabled?: boolean | null
@@ -624,6 +635,7 @@ export type Database = {
           max_risk_per_trade_percent?: number
           max_trades_per_symbol?: number
           min_confidence_threshold?: number
+          min_trades_for_kelly?: number | null
           min_trend_consistency?: number
           notification_email?: string | null
           notification_phone?: string | null
@@ -640,12 +652,14 @@ export type Database = {
           standard_tp_multiplier?: number | null
           time_based_stop_enabled?: boolean | null
           time_based_stop_hours?: number | null
+          trailing_daily_limit_enabled?: boolean | null
           trailing_stop_activation_percent?: number | null
           trailing_stop_distance_multiplier?: number | null
           trailing_stop_enabled?: boolean | null
           trailing_stop_profit_lock_percent?: number | null
           updated_at?: string | null
           user_id: string
+          volatility_max_trades_reduction?: number | null
         }
         Update: {
           auto_execute_signals?: boolean | null
@@ -658,11 +672,13 @@ export type Database = {
           consecutive_losses?: number | null
           current_open_trades?: number | null
           daily_loss_limit_percent?: number
+          daily_peak_pnl?: number | null
           daily_realized_loss?: number | null
           divergence_sl_multiplier?: number | null
           divergence_tp_multiplier?: number | null
           drawdown_circuit_breaker_enabled?: boolean | null
           drawdown_circuit_breaker_percent?: number | null
+          dynamic_max_trades_enabled?: boolean | null
           dynamic_stop_tightening_enabled?: boolean | null
           dynamic_stop_tightening_hours?: number | null
           dynamic_stop_tightening_percent?: number | null
@@ -672,6 +688,8 @@ export type Database = {
           enable_pullback_signals?: boolean | null
           id?: string
           is_trading_enabled?: boolean | null
+          kelly_criterion_enabled?: boolean | null
+          kelly_max_risk_cap?: number | null
           last_loss_reset_date?: string | null
           loss_recovery_confidence_boost?: number | null
           loss_recovery_mode_enabled?: boolean | null
@@ -681,6 +699,7 @@ export type Database = {
           max_risk_per_trade_percent?: number
           max_trades_per_symbol?: number
           min_confidence_threshold?: number
+          min_trades_for_kelly?: number | null
           min_trend_consistency?: number
           notification_email?: string | null
           notification_phone?: string | null
@@ -697,12 +716,14 @@ export type Database = {
           standard_tp_multiplier?: number | null
           time_based_stop_enabled?: boolean | null
           time_based_stop_hours?: number | null
+          trailing_daily_limit_enabled?: boolean | null
           trailing_stop_activation_percent?: number | null
           trailing_stop_distance_multiplier?: number | null
           trailing_stop_enabled?: boolean | null
           trailing_stop_profit_lock_percent?: number | null
           updated_at?: string | null
           user_id?: string
+          volatility_max_trades_reduction?: number | null
         }
         Relationships: []
       }
