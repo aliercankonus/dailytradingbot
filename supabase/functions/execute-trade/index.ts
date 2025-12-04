@@ -6,6 +6,68 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-manual-execution',
 };
 
+// Calculate reversal risk score based on leading indicators
+function calculateReversalRiskForEntry(trendData: any, signalType: string): { riskScore: number; reasons: string[] } {
+  const reasons: string[] = [];
+  let riskScore = 0;
+  
+  if (!trendData) {
+    return { riskScore: 0, reasons: ['No trend data available'] };
+  }
+  
+  const momentum = trendData.momentum || {};
+  const stochRSI = trendData.stochRSI || {};
+  const tf1h = trendData.timeframes?.['1h'] || {};
+  const isLong = signalType === 'long';
+  const expectedTrend = isLong ? 'bullish' : 'bearish';
+  
+  // 1. MACD Divergence (momentum not confirming price)
+  if (momentum.divergence === true) {
+    riskScore += 30;
+    reasons.push('MACD divergence detected');
+  }
+  
+  // 2. Momentum not confirmed
+  if (momentum.confirms === false) {
+    riskScore += 15;
+    reasons.push('Momentum not confirmed');
+  }
+  
+  // 3. Last close doesn't align with trend
+  if (momentum.lastCloseAlignsWithTrend === false) {
+    riskScore += 10;
+    reasons.push('Last close opposing trend');
+  }
+  
+  // 4. MACD direction misaligned
+  const macdHistogram = momentum.macdHistogram || 0;
+  if ((isLong && macdHistogram < 0) || (!isLong && macdHistogram > 0)) {
+    riskScore += 15;
+    reasons.push('MACD direction misaligned');
+  }
+  
+  // 5. StochRSI opposing cross signals
+  const stoch1h = stochRSI['1h'] || {};
+  if ((isLong && stoch1h.signal === 'bearish_cross') || (!isLong && stoch1h.signal === 'bullish_cross')) {
+    riskScore += 25;
+    reasons.push(`StochRSI ${isLong ? 'bearish' : 'bullish'} cross on 1h`);
+  }
+  
+  // 6. StochRSI extreme readings (overbought for LONG, oversold for SHORT)
+  if ((isLong && stoch1h.signal === 'overbought') || (!isLong && stoch1h.signal === 'oversold')) {
+    riskScore += 15;
+    reasons.push(`StochRSI ${isLong ? 'overbought' : 'oversold'}`);
+  }
+  
+  // 7. 1h trend opposing signal direction
+  if ((isLong && tf1h.trend === 'bearish') || (!isLong && tf1h.trend === 'bullish')) {
+    riskScore += 20;
+    reasons.push(`1h trend is ${tf1h.trend}`);
+  }
+  
+  return { riskScore: Math.min(riskScore, 100), reasons };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -619,6 +681,18 @@ serve(async (req) => {
       }
       console.log(`✓ Spread check passed: ${spread.toFixed(4)}% < ${maxSpreadPercent}% max`);
     }
+
+    // ============================================================
+    // REVERSAL RISK FILTER - Block entries when leading indicators suggest reversal
+    // ============================================================
+    const reversalRiskScore = calculateReversalRiskForEntry(trendData, signal.signal_type);
+    console.log(`🔄 Reversal Risk Score: ${reversalRiskScore.riskScore}/100 - ${reversalRiskScore.reasons.join(', ')}`);
+    
+    const REVERSAL_RISK_THRESHOLD = 50; // Block if reversal risk >= 50%
+    if (reversalRiskScore.riskScore >= REVERSAL_RISK_THRESHOLD) {
+      throw new Error(`High reversal risk detected (${reversalRiskScore.riskScore}%) - ${reversalRiskScore.reasons.slice(0, 2).join(', ')} - trade cancelled`);
+    }
+    console.log(`✓ Reversal risk check passed: ${reversalRiskScore.riskScore}% < ${REVERSAL_RISK_THRESHOLD}% threshold`);
 
     // Use strategy's configured stop loss and take profit from signal
     let stopLoss = signal.stop_loss;

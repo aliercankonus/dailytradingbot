@@ -38,6 +38,67 @@ interface RebalanceResult {
   error?: string;
 }
 
+// Calculate reversal risk score for new signal generation
+function calculateReversalRiskForRebalance(trendData: any, signalType: string): { riskScore: number; reasons: string[] } {
+  const reasons: string[] = [];
+  let riskScore = 0;
+  
+  if (!trendData) {
+    return { riskScore: 0, reasons: ['No trend data available'] };
+  }
+  
+  const momentum = trendData.momentum || {};
+  const stochRSI = trendData.stochRSI || {};
+  const tf1h = trendData.timeframes?.['1h'] || {};
+  const isLong = signalType === 'long';
+  
+  // 1. MACD Divergence
+  if (momentum.divergence === true) {
+    riskScore += 30;
+    reasons.push('MACD divergence');
+  }
+  
+  // 2. Momentum not confirmed
+  if (momentum.confirms === false) {
+    riskScore += 15;
+    reasons.push('Momentum weak');
+  }
+  
+  // 3. Last close opposing
+  if (momentum.lastCloseAlignsWithTrend === false) {
+    riskScore += 10;
+    reasons.push('Price action opposing');
+  }
+  
+  // 4. MACD histogram misaligned
+  const macdHistogram = momentum.macdHistogram || 0;
+  if ((isLong && macdHistogram < 0) || (!isLong && macdHistogram > 0)) {
+    riskScore += 15;
+    reasons.push('MACD misaligned');
+  }
+  
+  // 5. StochRSI opposing cross
+  const stoch1h = stochRSI['1h'] || {};
+  if ((isLong && stoch1h.signal === 'bearish_cross') || (!isLong && stoch1h.signal === 'bullish_cross')) {
+    riskScore += 25;
+    reasons.push('StochRSI cross opposing');
+  }
+  
+  // 6. StochRSI extreme (overbought for LONG, oversold for SHORT)
+  if ((isLong && stoch1h.signal === 'overbought') || (!isLong && stoch1h.signal === 'oversold')) {
+    riskScore += 15;
+    reasons.push('StochRSI extreme');
+  }
+  
+  // 7. 1h trend opposing
+  if ((isLong && tf1h.trend === 'bearish') || (!isLong && tf1h.trend === 'bullish')) {
+    riskScore += 20;
+    reasons.push('1h opposing');
+  }
+  
+  return { riskScore: Math.min(riskScore, 100), reasons };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -357,6 +418,14 @@ async function rebalanceUserPositions(
 
         if (shouldCreateSignal) {
           const newSignalType = trend.trend === 'bullish' ? 'long' : 'short';
+          
+          // Check reversal risk before generating signal
+          const reversalRisk = calculateReversalRiskForRebalance(trend, newSignalType);
+          if (reversalRisk.riskScore >= 50) {
+            console.log(`  ⚠️ Skipping ${newSignalType.toUpperCase()} signal for ${position.symbol} - Reversal risk ${reversalRisk.riskScore}%: ${reversalRisk.reasons.join(', ')}`);
+            continue;
+          }
+          
           const finalConfidence = Math.min(trend.confidence, confidenceCap);
           
           // Get current price - use priceMap first, then trend.currentPrice as fallback
