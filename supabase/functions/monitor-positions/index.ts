@@ -712,6 +712,66 @@ serve(async (req) => {
         const trendConfidence = trendData.confidence || 0;
         const trend1h = trendData.higherTimeframeFilter?.trend1h || 'neutral';
         const trend4h = trendData.higherTimeframeFilter?.trend4h || 'neutral';
+        const momentum = trendData.momentum || {};
+        const stochRsi = trendData.stochasticRsi?.aggregated || trendData.stochasticRsi || {};
+
+        // ============= REVERSAL RISK DETECTION FOR EXITS =============
+        // Calculate reversal risk score for the CURRENT position direction
+        const detectReversalRiskForExit = (positionSide: string): { riskScore: number; signals: string[] } => {
+          const signals: string[] = [];
+          let riskScore = 0;
+          
+          // Check if momentum is turning against position
+          if (momentum.hasDivergence) {
+            riskScore += 25;
+            signals.push("MACD divergence detected");
+          }
+          if (!momentum.confirms && momentum.state !== "confirmed") {
+            riskScore += 15;
+            signals.push(`Momentum weakening (state: ${momentum.state || "none"})`);
+          }
+          if (!momentum.lastCloseAlignsWithTrend) {
+            riskScore += 10;
+            signals.push("Last close opposes trend");
+          }
+          if (!momentum.macdDirectionAligned) {
+            riskScore += 15;
+            signals.push("MACD direction misaligned");
+          }
+          
+          // For SHORT positions: check for bullish reversal signals
+          if (positionSide === "SELL") {
+            if (stochRsi.bullishCrossCount >= 1) {
+              riskScore += 25;
+              signals.push(`StochRSI bullish cross (${stochRsi.bullishCrossCount} TF)`);
+            }
+            if (stochRsi.oversoldCount >= 2) {
+              riskScore += 15;
+              signals.push(`StochRSI oversold on ${stochRsi.oversoldCount} TF (bounce risk)`);
+            }
+            if (trend1h === "bullish") {
+              riskScore += 20;
+              signals.push("1h trend turned bullish");
+            }
+          }
+          // For LONG positions: check for bearish reversal signals
+          else if (positionSide === "BUY") {
+            if (stochRsi.bearishCrossCount >= 1) {
+              riskScore += 25;
+              signals.push(`StochRSI bearish cross (${stochRsi.bearishCrossCount} TF)`);
+            }
+            if (stochRsi.overboughtCount >= 2) {
+              riskScore += 15;
+              signals.push(`StochRSI overbought on ${stochRsi.overboughtCount} TF (pullback risk)`);
+            }
+            if (trend1h === "bearish") {
+              riskScore += 20;
+              signals.push("1h trend turned bearish");
+            }
+          }
+          
+          return { riskScore: Math.min(100, riskScore), signals };
+        };
 
         // For SHORT positions: Exit if trend turns bullish OR ranging (market indecision) with lower threshold
         // Also exit if there's higher timeframe conflict (4h bearish vs 1h bullish = dangerous for shorts)
@@ -721,34 +781,46 @@ serve(async (req) => {
           // Get 4h confidence from timeframes data (early warning threshold)
           const confidence4h = trendData.timeframes?.['4h']?.confidence || trendConfidence;
 
-          // 🆕 EARLY WARNING EXIT: 1h bullish AND 4h confidence dropping below 70%
-          // This catches trend weakening before full reversal
-          // MINIMUM LOSS THRESHOLD: Only trigger if losing more than 0.2% to avoid closing on normal fluctuations
-          const EARLY_WARNING_MIN_LOSS_PERCENT = -0.2;
-          if (trend1h === "bullish" && confidence4h < 70 && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT) {
+          // 🆕 REVERSAL RISK EXIT: Check leading indicators for early reversal detection
+          const reversalRisk = detectReversalRiskForExit("SELL");
+          const REVERSAL_RISK_EXIT_THRESHOLD = 60; // Exit if risk >= 60
+          const MIN_LOSS_FOR_REVERSAL_EXIT = -0.1; // Only exit if losing at least 0.1%
+          
+          if (reversalRisk.riskScore >= REVERSAL_RISK_EXIT_THRESHOLD && pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
             shouldClose = true;
-            closeReason = "early_warning_1h_bullish";
+            closeReason = "reversal_risk_high";
             console.log(
-              `⚠️ EARLY WARNING EXIT: Closing SHORT ${position.symbol} - 1h BULLISH + 4h weakening (4h conf: ${confidence4h}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+              `⚠️ REVERSAL RISK EXIT: Closing SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}/100: ${reversalRisk.signals.join(", ")}`,
             );
-          } else if (currentTrend === "bullish" && trendConfidence >= 50) {
-            shouldClose = true;
-            closeReason = "trend_reversal_bullish";
-            console.log(
-              `🔄 TREND EXIT: Closing SHORT ${position.symbol} - Trend BULLISH (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
-            );
-          } else if (currentTrend === "ranging" && htfConflict && trendConfidence >= 30) {
-            shouldClose = true;
-            closeReason = "trend_reversal_ranging";
-            console.log(
-              `🔄 TREND EXIT: Closing SHORT ${position.symbol} - RANGING + HTF conflict (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
-            );
-          } else if (currentTrend === "ranging" && trendConfidence >= 40) {
-            shouldClose = true;
-            closeReason = "trend_reversal_ranging";
-            console.log(
-              `🔄 TREND EXIT: Closing SHORT ${position.symbol} - Trend RANGING (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
-            );
+          }
+          // Original early warning logic (kept as fallback)
+          else {
+            const EARLY_WARNING_MIN_LOSS_PERCENT = -0.2;
+            if (trend1h === "bullish" && confidence4h < 70 && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT) {
+              shouldClose = true;
+              closeReason = "early_warning_1h_bullish";
+              console.log(
+                `⚠️ EARLY WARNING EXIT: Closing SHORT ${position.symbol} - 1h BULLISH + 4h weakening (4h conf: ${confidence4h}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+              );
+            } else if (currentTrend === "bullish" && trendConfidence >= 50) {
+              shouldClose = true;
+              closeReason = "trend_reversal_bullish";
+              console.log(
+                `🔄 TREND EXIT: Closing SHORT ${position.symbol} - Trend BULLISH (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+              );
+            } else if (currentTrend === "ranging" && htfConflict && trendConfidence >= 30) {
+              shouldClose = true;
+              closeReason = "trend_reversal_ranging";
+              console.log(
+                `🔄 TREND EXIT: Closing SHORT ${position.symbol} - RANGING + HTF conflict (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+              );
+            } else if (currentTrend === "ranging" && trendConfidence >= 40) {
+              shouldClose = true;
+              closeReason = "trend_reversal_ranging";
+              console.log(
+                `🔄 TREND EXIT: Closing SHORT ${position.symbol} - Trend RANGING (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+              );
+            }
           }
 
           if (shouldClose) {
@@ -771,34 +843,46 @@ serve(async (req) => {
           // Get 4h confidence from timeframes data (early warning threshold)
           const confidence4h = trendData.timeframes?.['4h']?.confidence || trendConfidence;
 
-          // 🆕 EARLY WARNING EXIT: 1h bearish AND 4h confidence dropping below 70%
-          // This catches trend weakening before full reversal
-          // MINIMUM LOSS THRESHOLD: Only trigger if losing more than 0.2% to avoid closing on normal fluctuations
-          const EARLY_WARNING_MIN_LOSS_PERCENT_LONG = -0.2;
-          if (!shouldClose && trend1h === "bearish" && confidence4h < 70 && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT_LONG) {
+          // 🆕 REVERSAL RISK EXIT: Check leading indicators for early reversal detection
+          const reversalRisk = detectReversalRiskForExit("BUY");
+          const REVERSAL_RISK_EXIT_THRESHOLD = 60; // Exit if risk >= 60
+          const MIN_LOSS_FOR_REVERSAL_EXIT = -0.1; // Only exit if losing at least 0.1%
+          
+          if (!shouldClose && reversalRisk.riskScore >= REVERSAL_RISK_EXIT_THRESHOLD && pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
             shouldClose = true;
-            closeReason = "early_warning_1h_bearish";
+            closeReason = "reversal_risk_high";
             console.log(
-              `⚠️ EARLY WARNING EXIT: Closing LONG ${position.symbol} - 1h BEARISH + 4h weakening (4h conf: ${confidence4h}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+              `⚠️ REVERSAL RISK EXIT: Closing LONG ${position.symbol} - Risk ${reversalRisk.riskScore}/100: ${reversalRisk.signals.join(", ")}`,
             );
-          } else if (currentTrend === "bearish" && trendConfidence >= 50) {
-            shouldClose = true;
-            closeReason = "trend_reversal_bearish";
-            console.log(
-              `🔄 TREND EXIT: Closing LONG ${position.symbol} - Trend BEARISH (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
-            );
-          } else if (currentTrend === "ranging" && htfConflict && trendConfidence >= 30) {
-            shouldClose = true;
-            closeReason = "trend_reversal_ranging";
-            console.log(
-              `🔄 TREND EXIT: Closing LONG ${position.symbol} - RANGING + HTF conflict (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
-            );
-          } else if (currentTrend === "ranging" && trendConfidence >= 40) {
-            shouldClose = true;
-            closeReason = "trend_reversal_ranging";
-            console.log(
-              `🔄 TREND EXIT: Closing LONG ${position.symbol} - Trend RANGING (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
-            );
+          }
+          // Original early warning logic (kept as fallback)
+          else {
+            const EARLY_WARNING_MIN_LOSS_PERCENT_LONG = -0.2;
+            if (!shouldClose && trend1h === "bearish" && confidence4h < 70 && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT_LONG) {
+              shouldClose = true;
+              closeReason = "early_warning_1h_bearish";
+              console.log(
+                `⚠️ EARLY WARNING EXIT: Closing LONG ${position.symbol} - 1h BEARISH + 4h weakening (4h conf: ${confidence4h}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+              );
+            } else if (currentTrend === "bearish" && trendConfidence >= 50) {
+              shouldClose = true;
+              closeReason = "trend_reversal_bearish";
+              console.log(
+                `🔄 TREND EXIT: Closing LONG ${position.symbol} - Trend BEARISH (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+              );
+            } else if (currentTrend === "ranging" && htfConflict && trendConfidence >= 30) {
+              shouldClose = true;
+              closeReason = "trend_reversal_ranging";
+              console.log(
+                `🔄 TREND EXIT: Closing LONG ${position.symbol} - RANGING + HTF conflict (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+              );
+            } else if (currentTrend === "ranging" && trendConfidence >= 40) {
+              shouldClose = true;
+              closeReason = "trend_reversal_ranging";
+              console.log(
+                `🔄 TREND EXIT: Closing LONG ${position.symbol} - Trend RANGING (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+              );
+            }
           }
 
           if (shouldClose) {
