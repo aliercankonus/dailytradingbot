@@ -723,7 +723,9 @@ serve(async (req) => {
 
           // 🆕 EARLY WARNING EXIT: 1h bullish AND 4h confidence dropping below 70%
           // This catches trend weakening before full reversal
-          if (trend1h === "bullish" && confidence4h < 70) {
+          // MINIMUM LOSS THRESHOLD: Only trigger if losing more than 0.2% to avoid closing on normal fluctuations
+          const EARLY_WARNING_MIN_LOSS_PERCENT = -0.2;
+          if (trend1h === "bullish" && confidence4h < 70 && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT) {
             shouldClose = true;
             closeReason = "early_warning_1h_bullish";
             console.log(
@@ -771,7 +773,9 @@ serve(async (req) => {
 
           // 🆕 EARLY WARNING EXIT: 1h bearish AND 4h confidence dropping below 70%
           // This catches trend weakening before full reversal
-          if (!shouldClose && trend1h === "bearish" && confidence4h < 70) {
+          // MINIMUM LOSS THRESHOLD: Only trigger if losing more than 0.2% to avoid closing on normal fluctuations
+          const EARLY_WARNING_MIN_LOSS_PERCENT_LONG = -0.2;
+          if (!shouldClose && trend1h === "bearish" && confidence4h < 70 && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT_LONG) {
             shouldClose = true;
             closeReason = "early_warning_1h_bearish";
             console.log(
