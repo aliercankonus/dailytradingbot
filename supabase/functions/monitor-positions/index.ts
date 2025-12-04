@@ -731,7 +731,7 @@ serve(async (req) => {
             console.log(
               `⚠️ EARLY WARNING EXIT: Closing SHORT ${position.symbol} - 1h BULLISH + 4h weakening (4h conf: ${confidence4h}%, 4h: ${trend4h}, 1h: ${trend1h})`,
             );
-          } else if (currentTrend === "bullish" && trendConfidence >= 45) {
+          } else if (currentTrend === "bullish" && trendConfidence >= 50) {
             shouldClose = true;
             closeReason = "trend_reversal_bullish";
             console.log(
@@ -781,7 +781,7 @@ serve(async (req) => {
             console.log(
               `⚠️ EARLY WARNING EXIT: Closing LONG ${position.symbol} - 1h BEARISH + 4h weakening (4h conf: ${confidence4h}%, 4h: ${trend4h}, 1h: ${trend1h})`,
             );
-          } else if (currentTrend === "bearish" && trendConfidence >= 45) {
+          } else if (currentTrend === "bearish" && trendConfidence >= 50) {
             shouldClose = true;
             closeReason = "trend_reversal_bearish";
             console.log(
