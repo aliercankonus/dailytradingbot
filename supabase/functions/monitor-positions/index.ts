@@ -490,10 +490,11 @@ serve(async (req) => {
           let calculatedStopLoss = Math.max(profitBasedStop, atrBasedStop);
           
           // ENFORCE MINIMUM 1% DISTANCE FROM ENTRY - trailing stop must not be too close to entry
-          const minAllowedStop = position.entry_price - minDistanceFromEntry;
-          if (calculatedStopLoss < minAllowedStop) {
+          // For BUY: stop must be AT LEAST 1% below entry (stop_loss <= entry - 1%)
+          const maxAllowedStop = position.entry_price - minDistanceFromEntry;
+          if (calculatedStopLoss > maxAllowedStop) {
             // Don't set trailing stop if it would be closer than 1% to entry
-            console.log(`⚠️ Trailing SL skipped for ${position.symbol} - calculated stop ${calculatedStopLoss.toFixed(2)} too close to entry ${position.entry_price.toFixed(2)} (min 1% distance required)`);
+            console.log(`⚠️ Trailing SL skipped for ${position.symbol} BUY - calculated stop ${calculatedStopLoss.toFixed(2)} too close to entry ${position.entry_price.toFixed(2)} (must be <= ${maxAllowedStop.toFixed(2)} for 1% min distance)`);
           } else {
             // Only update if new stop loss is HIGHER than current (never move down)
             if (calculatedStopLoss > position.stop_loss) {
@@ -518,10 +519,11 @@ serve(async (req) => {
           let calculatedStopLoss = Math.min(profitBasedStop, atrBasedStop);
           
           // ENFORCE MINIMUM 1% DISTANCE FROM ENTRY - trailing stop must not be too close to entry
+          // For SHORT: stop must be AT LEAST 1% above entry (stop_loss >= entry + 1%)
           const minAllowedStop = position.entry_price + minDistanceFromEntry;
-          if (calculatedStopLoss > minAllowedStop) {
+          if (calculatedStopLoss < minAllowedStop) {
             // Don't set trailing stop if it would be closer than 1% to entry
-            console.log(`⚠️ Trailing SL skipped for ${position.symbol} - calculated stop ${calculatedStopLoss.toFixed(2)} too close to entry ${position.entry_price.toFixed(2)} (min 1% distance required)`);
+            console.log(`⚠️ Trailing SL skipped for ${position.symbol} SHORT - calculated stop ${calculatedStopLoss.toFixed(2)} too close to entry ${position.entry_price.toFixed(2)} (must be >= ${minAllowedStop.toFixed(2)} for 1% min distance)`);
           } else {
             // Only update if new stop loss is LOWER than current (never move up)
             if (calculatedStopLoss < position.stop_loss) {
