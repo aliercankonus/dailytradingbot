@@ -580,29 +580,37 @@ serve(async (req) => {
       // ============================================================
       // BREAK-EVEN STOP LOGIC - Move stop to entry price when profitable
       // This activates at a lower threshold than trailing stop for early protection
+      // IMPORTANT: Only activate break-even if profit exceeds minimum stop distance (1%)
+      // to prevent premature exits from normal market volatility
       // ============================================================
+      const MIN_STOP_DISTANCE_PERCENT = 1.0; // 1% minimum stop loss distance
       const isBreakEvenEligible = userSettings.breakEvenEnabled && 
-                                  pnlPercent >= userSettings.breakEvenActivationPercent &&
+                                  pnlPercent >= Math.max(userSettings.breakEvenActivationPercent, MIN_STOP_DISTANCE_PERCENT) &&
                                   !trailingActivated; // Don't apply if trailing stop already moved
 
       if (isBreakEvenEligible) {
         const entryPrice = position.entry_price;
         let shouldMoveToBreakEven = false;
+        
+        // Calculate minimum stop distance from current price
+        const minDistanceFromCurrent = currentPrice * (MIN_STOP_DISTANCE_PERCENT / 100);
 
         if (position.side === "BUY") {
-          // For LONG: Move stop to entry if current stop is below entry
-          if (position.stop_loss < entryPrice) {
+          // For LONG: Only move stop to entry if it maintains minimum distance from current price
+          // AND current stop is below entry
+          if (position.stop_loss < entryPrice && (currentPrice - entryPrice) >= minDistanceFromCurrent) {
             shouldMoveToBreakEven = true;
           }
         } else {
-          // For SHORT: Move stop to entry if current stop is above entry
-          if (position.stop_loss > entryPrice) {
+          // For SHORT: Only move stop to entry if it maintains minimum distance from current price
+          // AND current stop is above entry
+          if (position.stop_loss > entryPrice && (entryPrice - currentPrice) >= minDistanceFromCurrent) {
             shouldMoveToBreakEven = true;
           }
         }
 
         if (shouldMoveToBreakEven) {
-          console.log(`🛡️ BREAK-EVEN: Moving stop to entry for ${position.symbol} (P&L: ${pnlPercent.toFixed(2)}%, Entry: ${entryPrice.toFixed(2)})`);
+          console.log(`🛡️ BREAK-EVEN: Moving stop to entry for ${position.symbol} (P&L: ${pnlPercent.toFixed(2)}%, Entry: ${entryPrice.toFixed(2)}, Min distance maintained)`);
           
           // Use optimistic locking
           const { data: updatedBEPos, error: beUpdateError } = await supabase

@@ -569,7 +569,7 @@ serve(async (req) => {
     }
 
     // Use strategy's configured stop loss and take profit from signal
-    const stopLoss = signal.stop_loss;
+    let stopLoss = signal.stop_loss;
     const takeProfit = signal.take_profit;
 
     // Validate SL/TP are present
@@ -577,7 +577,34 @@ serve(async (req) => {
       throw new Error(`Signal missing stop_loss (${stopLoss}) or take_profit (${takeProfit})`);
     }
 
-    console.log(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)} (from strategy configuration)`);
+    // ============================================================
+    // MINIMUM STOP LOSS DISTANCE - Prevent premature exits from volatility
+    // Enforce minimum 1% distance from entry to prevent tight stops
+    // ============================================================
+    const MIN_STOP_DISTANCE_PERCENT = 1.0; // 1% minimum stop loss distance
+    const signalSide = signal.signal_type === 'long' ? 'BUY' : 'SELL';
+    
+    if (signalSide === 'BUY') {
+      // For LONG: Stop loss must be at least 1% below entry
+      const minStopLoss = currentPrice * (1 - MIN_STOP_DISTANCE_PERCENT / 100);
+      if (stopLoss > minStopLoss) {
+        const originalDistance = ((currentPrice - stopLoss) / currentPrice) * 100;
+        console.log(`⚠️ STOP LOSS TOO TIGHT: Original SL ${stopLoss.toFixed(2)} is only ${originalDistance.toFixed(2)}% from entry`);
+        stopLoss = minStopLoss;
+        console.log(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
+      }
+    } else {
+      // For SHORT: Stop loss must be at least 1% above entry
+      const minStopLoss = currentPrice * (1 + MIN_STOP_DISTANCE_PERCENT / 100);
+      if (stopLoss < minStopLoss) {
+        const originalDistance = ((stopLoss - currentPrice) / currentPrice) * 100;
+        console.log(`⚠️ STOP LOSS TOO TIGHT: Original SL ${stopLoss.toFixed(2)} is only ${originalDistance.toFixed(2)}% from entry`);
+        stopLoss = minStopLoss;
+        console.log(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
+      }
+    }
+
+    console.log(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)} (minimum ${MIN_STOP_DISTANCE_PERCENT}% distance enforced)`);
 
     // ============================================================
     // FILTER 11: RISK/REWARD RATIO VALIDATION
