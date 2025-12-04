@@ -373,6 +373,95 @@ const getTechnicalScore = (trendData: any, effectiveTrend: string, symbol: strin
   return Math.max(0, Math.min(15, score));
 };
 
+// ============= REVERSAL RISK FILTER =============
+// Block signals when leading indicators suggest potential reversal
+interface ReversalRiskResult {
+  isHighRisk: boolean;
+  riskScore: number;      // 0-100, higher = more risk
+  signals: string[];      // What indicators triggered the risk
+  reason: string;
+}
+
+const detectReversalRisk = (trendData: any, intendedDirection: string): ReversalRiskResult => {
+  const signals: string[] = [];
+  let riskScore = 0;
+  
+  const momentum = trendData?.momentum || {};
+  const stochRsi = trendData?.stochasticRsi?.aggregated || trendData?.stochasticRsi || {};
+  const trend1h = trendData?.higherTimeframeFilter?.trend1h || trendData?.multiTimeframe?.trend1h;
+  
+  // 1. Momentum divergence - price moving one way, MACD moving opposite
+  if (momentum.hasDivergence) {
+    riskScore += 30;
+    signals.push("MACD divergence detected");
+  }
+  
+  // 2. Momentum NOT confirmed despite trend
+  if (!momentum.confirms && momentum.state !== "confirmed") {
+    riskScore += 15;
+    signals.push(`Momentum not confirmed (state: ${momentum.state || "none"})`);
+  }
+  
+  // 3. Last close doesn't align with trend direction
+  if (!momentum.lastCloseAlignsWithTrend) {
+    riskScore += 10;
+    signals.push("Last close opposes trend direction");
+  }
+  
+  // 4. MACD direction misaligned (e.g., MACD negative in bullish trend)
+  if (!momentum.macdDirectionAligned) {
+    riskScore += 15;
+    signals.push("MACD direction misaligned with trend");
+  }
+  
+  // 5. StochRSI showing opposing cross
+  if (intendedDirection === "bullish" || intendedDirection === "long") {
+    // Trying to go LONG but StochRSI shows bearish signals
+    if (stochRsi.bearishCrossCount >= 1) {
+      riskScore += 25;
+      signals.push(`StochRSI bearish cross (${stochRsi.bearishCrossCount} timeframes)`);
+    }
+    if (stochRsi.overboughtCount >= 2) {
+      riskScore += 15;
+      signals.push(`StochRSI overbought on ${stochRsi.overboughtCount} timeframes`);
+    }
+    // 1h trend opposing the intended direction
+    if (trend1h === "bearish") {
+      riskScore += 20;
+      signals.push("1h trend is bearish (opposing LONG entry)");
+    }
+  } else if (intendedDirection === "bearish" || intendedDirection === "short") {
+    // Trying to go SHORT but StochRSI shows bullish signals
+    if (stochRsi.bullishCrossCount >= 1) {
+      riskScore += 25;
+      signals.push(`StochRSI bullish cross (${stochRsi.bullishCrossCount} timeframes)`);
+    }
+    if (stochRsi.oversoldCount >= 2) {
+      riskScore += 15;
+      signals.push(`StochRSI oversold on ${stochRsi.oversoldCount} timeframes`);
+    }
+    // 1h trend opposing the intended direction
+    if (trend1h === "bullish") {
+      riskScore += 20;
+      signals.push("1h trend is bullish (opposing SHORT entry)");
+    }
+  }
+  
+  // Cap at 100
+  riskScore = Math.min(100, riskScore);
+  
+  // High risk threshold: 50+ means multiple reversal indicators are firing
+  const isHighRisk = riskScore >= 50;
+  
+  const reason = isHighRisk 
+    ? `Reversal risk HIGH (${riskScore}/100): ${signals.join(", ")}`
+    : signals.length > 0 
+      ? `Reversal risk moderate (${riskScore}/100): ${signals.join(", ")}`
+      : `Reversal risk low (${riskScore}/100)`;
+  
+  return { isHighRisk, riskScore, signals, reason };
+};
+
 // ============= IMPROVEMENT #2: Market Regime Detection =============
 type MarketRegime = "trending" | "ranging" | "choppy" | "volatile";
 
@@ -927,6 +1016,7 @@ serve(async (req) => {
     let rejectedByRegime = 0;
     let rejectedByQuality = 0;
     let rejectedByStrategy = 0;
+    let rejectedByReversalRisk = 0;
     
     // Loss Recovery Mode - increase quality threshold after consecutive losses
     const isInRecoveryMode = riskParams.loss_recovery_mode_enabled && 
@@ -989,6 +1079,37 @@ serve(async (req) => {
             checked_at: new Date().toISOString(),
           });
           continue;
+        }
+
+        // ============= REVERSAL RISK FILTER =============
+        // Check for leading indicators that suggest potential reversal
+        const reversalRisk = detectReversalRisk(trendData, trend);
+        if (reversalRisk.isHighRisk) {
+          rejectedByReversalRisk++;
+          console.log(`⚠️ ${symbol}: ${reversalRisk.reason}`);
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `Reversal risk too high: ${reversalRisk.reason}`,
+            filters_status: { 
+              reversalRiskScore: reversalRisk.riskScore,
+              reversalSignals: reversalRisk.signals,
+              trend,
+              momentum: {
+                confirms: momentum?.confirms,
+                state: momentum?.state,
+                hasDivergence: momentum?.hasDivergence,
+                lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend,
+                macdDirectionAligned: momentum?.macdDirectionAligned
+              },
+              stochRsi: trendData.stochasticRsi?.aggregated,
+              trend1h: higherTimeframeFilter?.trend1h
+            },
+            trend_data: trendData,
+            checked_at: new Date().toISOString(),
+          });
+          continue;
+        } else if (reversalRisk.riskScore > 0) {
+          console.log(`📊 ${symbol}: ${reversalRisk.reason}`);
         }
 
         // ============= Technical Indicators =============
@@ -1275,7 +1396,7 @@ serve(async (req) => {
       }
     }
 
-    console.log(`📈 Summary: ${totalSignalsGenerated} signals | Rejected: regime=${rejectedByRegime} quality=${rejectedByQuality} strategy=${rejectedByStrategy}`);
+    console.log(`📈 Summary: ${totalSignalsGenerated} signals | Rejected: regime=${rejectedByRegime} reversal=${rejectedByReversalRisk} quality=${rejectedByQuality} strategy=${rejectedByStrategy}`);
 
     return new Response(JSON.stringify({
       signals,
@@ -1285,6 +1406,7 @@ serve(async (req) => {
       autoExecuteEnabled: riskParams.auto_execute_signals,
       rejections: {
         byRegime: rejectedByRegime,
+        byReversalRisk: rejectedByReversalRisk,
         byQuality: rejectedByQuality,
         byStrategy: rejectedByStrategy,
       },
