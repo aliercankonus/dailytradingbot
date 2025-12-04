@@ -768,6 +768,64 @@ serve(async (req) => {
     }
     console.log(`✓ R:R check passed: ${riskRewardRatio.toFixed(2)}:1 >= ${minRiskReward}:1 minimum`);
 
+    // ============================================================
+    // AI-POWERED SIGNAL ENHANCEMENT (Optional)
+    // Get AI second opinion on signal quality
+    // ============================================================
+    let aiPositionMultiplier = 1.0;
+    let aiConfidenceAdjustment = 0;
+    
+    try {
+      const { data: aiAnalysis, error: aiError } = await supabase.functions.invoke('ai-signal-analyzer', {
+        body: {
+          symbol: signal.symbol,
+          signalType: signal.signal_type,
+          trendData: {
+            trend: currentTrend,
+            confidence: signal.confidence_score || 0,
+            trendConsistency: trendConsistency,
+            adx: trendData?.adx || 0,
+            rsi: trendData?.rsi || 50,
+            macdHistogram: trendData?.macd?.histogram || 0,
+            stochRSI: trendData?.stochRSI?.['1h'] || { k: 50, d: 50, signal: 'neutral' },
+            bollingerBands: {
+              percentB: bb1h.percentB || 50,
+              squeeze: bb1h.squeeze || false
+            },
+            momentum: trendData?.momentum || { confirms: false, divergence: false },
+            volumeConfirms: trendData?.volumeConfirms || false
+          },
+          strategyName: signal.strategy_name || 'Unknown',
+          entryPrice: currentPrice,
+          stopLoss: stopLoss,
+          takeProfit: takeProfit
+        }
+      });
+
+      if (!aiError && aiAnalysis?.success && aiAnalysis?.analysis) {
+        const analysis = aiAnalysis.analysis;
+        aiPositionMultiplier = analysis.positionSizeMultiplier || 1.0;
+        aiConfidenceAdjustment = analysis.confidenceAdjustment || 0;
+        
+        console.log(`🤖 AI Analysis: ${analysis.recommendation.toUpperCase()}`);
+        console.log(`   Risk Level: ${analysis.riskLevel} | Conf Adj: ${aiConfidenceAdjustment > 0 ? '+' : ''}${aiConfidenceAdjustment} | Size: ${aiPositionMultiplier}x`);
+        console.log(`   Factors: ${analysis.keyFactors?.slice(0, 3).join(' | ')}`);
+        
+        // AI can BLOCK a trade if it recommends "avoid"
+        if (analysis.recommendation === 'avoid') {
+          throw new Error(`AI recommends AVOID: ${analysis.reasoning?.slice(0, 100)}`);
+        }
+      } else if (aiError) {
+        console.warn('AI analysis unavailable, proceeding with standard filters:', aiError);
+      }
+    } catch (aiException) {
+      // Don't block trades if AI service fails (unless it explicitly recommends avoid)
+      if (aiException instanceof Error && aiException.message.includes('AI recommends AVOID')) {
+        throw aiException;
+      }
+      console.warn('AI analysis skipped:', aiException instanceof Error ? aiException.message : 'Unknown error');
+    }
+
     // Fetch strategy's risk settings to get positionSizePercent
     let positionSizePercent = 1.0; // Default fallback if strategy not found
     
@@ -878,8 +936,15 @@ serve(async (req) => {
       console.log(`VWAP adjustment applied: ${vwapBoostMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
-    // Apply confidence-based position size scaling (reduced impact when Kelly is active)
-    const confidence = signal.confidence_score || 0;
+    // Apply AI-powered position size adjustment
+    if (aiPositionMultiplier !== 1.0) {
+      quantity *= aiPositionMultiplier;
+      console.log(`🤖 AI position adjustment applied: ${aiPositionMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
+    }
+
+    // Apply confidence-based position size scaling (include AI adjustment)
+    const adjustedConfidence = Math.max(0, Math.min(100, (signal.confidence_score || 0) + aiConfidenceAdjustment));
+    const confidence = adjustedConfidence;
     const confidenceMultiplier = riskParams.kelly_criterion_enabled !== false ? 0.5 : 1.0; // Reduce confidence impact when Kelly active
     if (confidence < 50) {
       quantity *= (1 - 0.5 * confidenceMultiplier); // Reduce by 25-50%
