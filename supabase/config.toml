@@ -45,3 +45,6 @@ verify_jwt = false
 
 [functions.backtest-strategy]
 verify_jwt = false
+
+[functions.ai-signal-analyzer]
+verify_jwt = false
