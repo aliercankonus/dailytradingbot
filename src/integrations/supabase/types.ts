@@ -117,6 +117,7 @@ export type Database = {
           is_active: boolean | null
           name: string
           risk_settings: Json | null
+          signal_direction: string | null
           updated_at: string | null
           user_id: string | null
         }
@@ -130,6 +131,7 @@ export type Database = {
           is_active?: boolean | null
           name: string
           risk_settings?: Json | null
+          signal_direction?: string | null
           updated_at?: string | null
           user_id?: string | null
         }
@@ -143,6 +145,7 @@ export type Database = {
           is_active?: boolean | null
           name?: string
           risk_settings?: Json | null
+          signal_direction?: string | null
           updated_at?: string | null
           user_id?: string | null
         }

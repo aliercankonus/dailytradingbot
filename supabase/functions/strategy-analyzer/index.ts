@@ -887,60 +887,9 @@ serve(async (req) => {
           continue;
         }
 
-        // Determine signal type
+        // Store trend info for strategy-level filtering
         const tradeDirection = higherTimeframeFilter?.tradeDirection || trend;
-        const signalType = tradeDirection === "bullish" ? "long" : tradeDirection === "bearish" ? "short" : null;
-        
-        // ============= 1H TREND VALIDATION =============
-        // Prevent opening positions when 1h trend opposes trade direction
         const trend1h = higherTimeframeFilter?.trend1h || trendData.multiTimeframe?.trend1h;
-        
-        if (signalType === "long" && trend1h === "bearish") {
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `Cannot open BUY: 1h trend is bearish (quality: ${qualityScore}/100)`,
-            filters_status: {
-              qualityScore, breakdown,
-              signalType, trend1h,
-              trend4h: trendData.multiTimeframe?.trend4h || higherTimeframeFilter?.trend4h,
-            },
-            trend_data: trendData,
-            checked_at: new Date().toISOString(),
-          });
-          continue;
-        }
-        
-        if (signalType === "short" && trend1h === "bullish") {
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `Cannot open SELL: 1h trend is bullish (quality: ${qualityScore}/100)`,
-            filters_status: {
-              qualityScore, breakdown,
-              signalType, trend1h,
-              trend4h: trendData.multiTimeframe?.trend4h || higherTimeframeFilter?.trend4h,
-            },
-            trend_data: trendData,
-            checked_at: new Date().toISOString(),
-          });
-          continue;
-        }
-        
-        if (!signalType) {
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `Neutral trend direction - no clear trade signal (quality passed: ${qualityScore}/100)`,
-            filters_status: {
-              qualityScore, breakdown,
-              trend, tradeDirection,
-              trend4h: trendData.multiTimeframe?.trend4h,
-              trend1h: trendData.multiTimeframe?.trend1h,
-              regime: regime.regime,
-            },
-            trend_data: trendData,
-            checked_at: new Date().toISOString(),
-          });
-          continue;
-        }
 
         // Get market data
         const marketData = marketDataMap.get(symbol);
@@ -967,6 +916,7 @@ serve(async (req) => {
           strategy: any;
           score: number;
           indicatorValues: Map<string, number>;
+          signalType: "long" | "short";
         }
         const candidates: StrategyCandidate[] = [];
 
@@ -1016,12 +966,53 @@ serve(async (req) => {
             console.log(`📊 ${symbol} "${strategy.name}": ${conditionsMet ? '✅ PASS' : '❌ FAIL'} - ${JSON.stringify(conditionResults)}`);
             
             if (conditionsMet) {
+              // ============= SIGNAL DIRECTION FILTERING =============
+              // Check if strategy's signal_direction is compatible with current trend
+              const strategyDirection = strategy.signal_direction || 'trend';
+              
+              // Determine what signal type this strategy would generate
+              let strategySignalType: "long" | "short" | null = null;
+              if (strategyDirection === 'long') {
+                // Strategy only generates LONG signals - only valid in bullish/neutral trends
+                if (tradeDirection === 'bearish') {
+                  console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - long-only strategy in bearish trend`);
+                  continue;
+                }
+                strategySignalType = 'long';
+              } else if (strategyDirection === 'short') {
+                // Strategy only generates SHORT signals - only valid in bearish/neutral trends  
+                if (tradeDirection === 'bullish') {
+                  console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - short-only strategy in bullish trend`);
+                  continue;
+                }
+                strategySignalType = 'short';
+              } else {
+                // 'trend' mode - follow the current trend direction
+                if (tradeDirection === 'bullish') strategySignalType = 'long';
+                else if (tradeDirection === 'bearish') strategySignalType = 'short';
+                else {
+                  console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - neutral trend, no clear direction`);
+                  continue;
+                }
+              }
+              
+              // 1H TREND VALIDATION - prevent opening against immediate trend
+              if (strategySignalType === 'long' && trend1h === 'bearish') {
+                console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - LONG signal but 1h is bearish`);
+                continue;
+              }
+              if (strategySignalType === 'short' && trend1h === 'bullish') {
+                console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - SHORT signal but 1h is bullish`);
+                continue;
+              }
+              
               // Calculate strategy-specific score bonus
               const strategyBonus = (strategy.risk_settings?.priority || 5) / 10; // 0-1 bonus
               candidates.push({
                 strategy,
                 score: qualityScore + strategyBonus * 5,
                 indicatorValues,
+                signalType: strategySignalType,
               });
             }
           } catch (err) {
@@ -1050,7 +1041,8 @@ serve(async (req) => {
         candidates.sort((a, b) => b.score - a.score);
         const best = candidates[0];
         const strategy = best.strategy;
-        console.log(`🎯 ${symbol}: Selected "${strategy.name}" (${candidates.length} strategies matched, best score: ${best.score})`);
+        const signalType = best.signalType;
+        console.log(`🎯 ${symbol}: Selected "${strategy.name}" (${candidates.length} strategies matched, best score: ${best.score}, direction: ${signalType})`);
         
         const indicatorValues = best.indicatorValues;
 
