@@ -579,16 +579,12 @@ serve(async (req) => {
             }
           }
         }
-        // Update stop loss AND peak P&L in database if trailing was activated or peak updated
-        if (trailingActivated || peakUpdated) {
-          const updateData: { stop_loss?: number; peak_pnl_percent?: number } = {};
-          if (trailingActivated) updateData.stop_loss = newStopLoss;
-          if (peakUpdated) updateData.peak_pnl_percent = newPeakPnl;
-          
+        // Update stop loss in database if trailing was activated
+        if (trailingActivated) {
           // Use optimistic locking - only update if position is still active
           const { data: updatedPos, error: posUpdateError } = await supabase
             .from("positions")
-            .update(updateData)
+            .update({ stop_loss: newStopLoss, peak_pnl_percent: newPeakPnl })
             .eq("id", position.id)
             .eq("status", "active") // RACE CONDITION FIX: Only update if still active
             .select()
@@ -645,6 +641,22 @@ serve(async (req) => {
             // Don't fail the monitoring if notification fails
           }
           } // Close if (updatedPos)
+        }
+      }
+      
+      // ALWAYS update peak P&L for profitable positions (even if trailing stop not activated yet)
+      // This ensures peak is tracked for ratcheting when trailing DOES activate later
+      if (peakUpdated && !trailingActivated && pnlPercent > 0) {
+        const { error: peakUpdateError } = await supabase
+          .from("positions")
+          .update({ peak_pnl_percent: newPeakPnl })
+          .eq("id", position.id)
+          .eq("status", "active");
+        
+        if (peakUpdateError) {
+          console.error(`Error updating peak P&L for ${position.id}:`, peakUpdateError);
+        } else {
+          console.log(`📈 Peak P&L updated for ${position.symbol}: ${currentPeakPnl.toFixed(2)}% → ${newPeakPnl.toFixed(2)}%`);
         }
       }
 
