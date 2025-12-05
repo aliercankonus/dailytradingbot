@@ -47,30 +47,55 @@ export const SignalTimingMonitor = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const getTierInfo = (reason: string) => {
-    if (reason.includes('Tier 2a')) {
-      return { tier: '2a', color: 'bg-yellow-500', label: 'Building Momentum (Early Entry)' };
-    } else if (reason.includes('Tier 1')) {
-      return { tier: '1', color: 'bg-green-500', label: 'Confirmed Momentum' };
-    } else if (reason.includes('Tier 2b')) {
-      return { tier: '2b', color: 'bg-blue-500', label: 'Building Momentum' };
-    } else if (reason.includes('Tier 3')) {
-      return { tier: '3', color: 'bg-orange-500', label: 'Mixed Momentum' };
-    } else if (reason.includes('Tier 4')) {
-      return { tier: '4', color: 'bg-purple-500', label: 'Exceptional Alignment' };
-    }
-    return { tier: 'N/A', color: 'bg-muted', label: 'Unknown' };
-  };
-
   const getADX = (indicators: any) => {
-    return indicators?.adx?.toFixed(1) || 'N/A';
+    // Extract ADX from qualityBreakdown like "ADX:25/25 MOM:0/25..."
+    const breakdown = indicators?.qualityBreakdown;
+    if (breakdown && typeof breakdown === 'string') {
+      const adxMatch = breakdown.match(/ADX:(\d+)\/25/);
+      if (adxMatch) {
+        return adxMatch[1];
+      }
+    }
+    // Fallback to direct adx field if exists
+    if (indicators?.adx !== undefined) {
+      return indicators.adx.toFixed(1);
+    }
+    return 'N/A';
   };
 
-  const getMomentumState = (reason: string) => {
-    if (reason.includes('confirmed momentum')) return 'Confirmed';
-    if (reason.includes('Building momentum')) return 'Building';
-    if (reason.includes('Mixed momentum')) return 'Mixed';
+  const getQualityInfo = (indicators: any) => {
+    const score = indicators?.qualityScore;
+    if (score === undefined || score === null) return { score: 'N/A', color: 'bg-muted', label: 'Unknown' };
+    
+    if (score >= 75) {
+      return { score, color: 'bg-green-500', label: 'Excellent' };
+    } else if (score >= 65) {
+      return { score, color: 'bg-blue-500', label: 'Good' };
+    } else if (score >= 55) {
+      return { score, color: 'bg-yellow-500', label: 'Fair' };
+    } else {
+      return { score, color: 'bg-orange-500', label: 'Low' };
+    }
+  };
+
+  const getMomentumInfo = (indicators: any) => {
+    // Extract momentum score from qualityBreakdown
+    const breakdown = indicators?.qualityBreakdown;
+    if (breakdown && typeof breakdown === 'string') {
+      const momMatch = breakdown.match(/MOM:(\d+)\/25/);
+      if (momMatch) {
+        const momScore = parseInt(momMatch[1]);
+        if (momScore >= 20) return 'Confirmed';
+        if (momScore >= 10) return 'Building';
+        if (momScore > 0) return 'Weak';
+        return 'None';
+      }
+    }
     return 'N/A';
+  };
+
+  const getMarketRegime = (indicators: any) => {
+    return indicators?.marketRegime || 'N/A';
   };
 
   if (loading) {
@@ -89,7 +114,7 @@ export const SignalTimingMonitor = () => {
     );
   }
 
-  const tier2aSignals = signals.filter(s => s.reason?.includes('Tier 2a'));
+  const highQualitySignals = signals.filter(s => (s.indicators?.qualityScore || 0) >= 65);
   const totalSignals = signals.length;
 
   return (
@@ -101,8 +126,8 @@ export const SignalTimingMonitor = () => {
         </CardTitle>
         <div className="flex gap-4 text-sm text-muted-foreground mt-2">
           <span>Total Signals: {totalSignals}</span>
-          <span className="text-yellow-600 font-semibold">
-            Early Entry (Tier 2a): {tier2aSignals.length}
+          <span className="text-green-600 font-semibold">
+            High Quality (≥65): {highQualitySignals.length}
           </span>
         </div>
       </CardHeader>
@@ -112,9 +137,10 @@ export const SignalTimingMonitor = () => {
         ) : (
           <div className="space-y-3">
             {signals.map((signal) => {
-              const tierInfo = getTierInfo(signal.reason || '');
+              const qualityInfo = getQualityInfo(signal.indicators);
               const adx = getADX(signal.indicators);
-              const momentum = getMomentumState(signal.reason || '');
+              const momentum = getMomentumInfo(signal.indicators);
+              const regime = getMarketRegime(signal.indicators);
               
               return (
                 <div
@@ -135,7 +161,7 @@ export const SignalTimingMonitor = () => {
                     </div>
                   </div>
                   
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
                     <Badge variant="outline" className="text-xs">
                       ADX: {adx}
                     </Badge>
@@ -143,10 +169,13 @@ export const SignalTimingMonitor = () => {
                       {momentum}
                     </Badge>
                     <Badge variant="outline" className="text-xs">
-                      Conf: {signal.confidence_score?.toFixed(0)}%
+                      Conf: {signal.confidence_score?.toFixed(0) || 'N/A'}%
                     </Badge>
-                    <Badge className={`${tierInfo.color} text-white text-xs`}>
-                      Tier {tierInfo.tier}
+                    <Badge variant="outline" className="text-xs capitalize">
+                      {regime}
+                    </Badge>
+                    <Badge className={`${qualityInfo.color} text-white text-xs`}>
+                      Q: {qualityInfo.score}
                     </Badge>
                   </div>
                 </div>
@@ -155,11 +184,10 @@ export const SignalTimingMonitor = () => {
           </div>
         )}
         
-        {tier2aSignals.length > 0 && (
-          <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-            <p className="text-sm text-yellow-700 dark:text-yellow-400">
-              ✓ Building momentum signals (Tier 2a) are being generated with ADX ≥25, 
-              enabling earlier trend change detection.
+        {highQualitySignals.length > 0 && (
+          <div className="mt-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+            <p className="text-sm text-green-700 dark:text-green-400">
+              ✓ {highQualitySignals.length} high-quality signals (≥65 score) generated with confirmed ADX strength and momentum.
             </p>
           </div>
         )}
