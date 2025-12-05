@@ -32,6 +32,9 @@ export const ClosedPositionsDashboard = () => {
         case 'time_based_stop': return 'Time-Based Exit';
         case 'partial_loss': return 'Partial Loss';
         case 'partial_tp_close': return 'Partial TP';
+        case 'partial_tp_1': return 'Partial TP 1';
+        case 'partial_tp_2': return 'Partial TP 2';
+        case 'partial_tp_3': return 'Partial TP 3';
         case 'reversal_risk_high': return 'Reversal Risk';
         case 'early_warning_exit': return 'Early Warning';
         case 'manual': return 'Manual Close';
@@ -74,7 +77,7 @@ export const ClosedPositionsDashboard = () => {
     
     positions.forEach(p => {
       const closeReason = getCloseReason(p);
-      if (closeReason === 'Take Profit') takeProfitCount++;
+      if (closeReason === 'Take Profit' || closeReason.includes('Partial TP')) takeProfitCount++;
       else if (closeReason === 'Stop Loss') stopLossCount++;
       else if (closeReason === 'Trailing Stop') trailingStopCount++;
       else if (closeReason.includes('Trend Exit')) trendExitCount++;
@@ -133,7 +136,7 @@ export const ClosedPositionsDashboard = () => {
       );
     }
     
-    if (reason === 'Take Profit' || reason === 'Partial TP') {
+    if (reason === 'Take Profit' || reason.includes('Partial TP')) {
       return (
         <Badge variant="default" className="gap-1 bg-success/10 text-success border-success/20">
           <Target className="h-3 w-3" />
