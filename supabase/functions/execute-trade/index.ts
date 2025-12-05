@@ -812,16 +812,19 @@ serve(async (req) => {
         console.log(`   Risk Level: ${analysis.riskLevel} | Conf Adj: ${aiConfidenceAdjustment > 0 ? '+' : ''}${aiConfidenceAdjustment} | Size: ${aiPositionMultiplier}x`);
         console.log(`   Factors: ${analysis.keyFactors?.slice(0, 3).join(' | ')}`);
         
-        // AI can BLOCK a trade if it recommends "avoid"
+        // AI can BLOCK a trade if it recommends "avoid" OR risk level is "high"
         if (analysis.recommendation === 'avoid') {
           throw new Error(`AI recommends AVOID: ${analysis.reasoning?.slice(0, 100)}`);
+        }
+        if (analysis.riskLevel === 'high') {
+          throw new Error(`AI risk level HIGH: ${analysis.keyFactors?.slice(0, 2).join(', ')}`);
         }
       } else if (aiError) {
         console.warn('AI analysis unavailable, proceeding with standard filters:', aiError);
       }
     } catch (aiException) {
-      // Don't block trades if AI service fails (unless it explicitly recommends avoid)
-      if (aiException instanceof Error && aiException.message.includes('AI recommends AVOID')) {
+      // Don't block trades if AI service fails (unless it explicitly recommends avoid or high risk)
+      if (aiException instanceof Error && (aiException.message.includes('AI recommends AVOID') || aiException.message.includes('AI risk level HIGH'))) {
         throw aiException;
       }
       console.warn('AI analysis skipped:', aiException instanceof Error ? aiException.message : 'Unknown error');
