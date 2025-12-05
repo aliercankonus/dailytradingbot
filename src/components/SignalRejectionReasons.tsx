@@ -13,6 +13,8 @@ import {
   Zap,
   Layers,
   Timer,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { useSignalRejections } from "@/hooks/useSignalRejections";
 import { formatDistanceToNow } from "date-fns";
@@ -325,6 +327,13 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
   
   if (adx === undefined && confidence === undefined) return null;
   
+  // Pass/fail checks
+  const adxPassing = (adx || 0) >= 20;
+  const confidencePassing = (confidence || 0) >= minConfidence;
+  const alignmentPassing = (trendConsistency || 0) >= minConsistency;
+  const allPassing = adxPassing && confidencePassing && alignmentPassing;
+  const passCount = [adxPassing, confidencePassing, alignmentPassing].filter(Boolean).length;
+  
   // ADX scoring: 0-15 (red), 15-20 (orange), 20-30 (yellow), 30+ (green)
   const getAdxStyles = (value: number) => {
     if (value >= 30) return { text: 'text-green-400', bg: 'bg-green-500/20', border: 'border-green-500/30', bar: 'bg-green-500' };
@@ -365,6 +374,43 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
           className={`text-[10px] px-1.5 py-0 capitalize ${getRegimeStyles(regime || 'weak')}`}
         >
           {regime || "weak"}
+        </Badge>
+      </div>
+      
+      {/* Compact Summary Row */}
+      <div className={`flex items-center justify-between px-2 py-1 rounded text-[10px] ${allPassing ? 'bg-green-500/10 border border-green-500/20' : 'bg-red-500/10 border border-red-500/20'}`}>
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground">Status:</span>
+          <div className="flex items-center gap-1">
+            {adxPassing ? (
+              <CheckCircle2 className="h-3 w-3 text-green-500" />
+            ) : (
+              <XCircle className="h-3 w-3 text-red-500" />
+            )}
+            <span className={adxPassing ? 'text-green-400' : 'text-red-400'}>ADX</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {confidencePassing ? (
+              <CheckCircle2 className="h-3 w-3 text-green-500" />
+            ) : (
+              <XCircle className="h-3 w-3 text-red-500" />
+            )}
+            <span className={confidencePassing ? 'text-green-400' : 'text-red-400'}>Conf</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {alignmentPassing ? (
+              <CheckCircle2 className="h-3 w-3 text-green-500" />
+            ) : (
+              <XCircle className="h-3 w-3 text-red-500" />
+            )}
+            <span className={alignmentPassing ? 'text-green-400' : 'text-red-400'}>Align</span>
+          </div>
+        </div>
+        <Badge 
+          variant="outline" 
+          className={`text-[9px] px-1 py-0 ${allPassing ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}
+        >
+          {passCount}/3
         </Badge>
       </div>
       
