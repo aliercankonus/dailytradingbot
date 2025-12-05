@@ -1017,6 +1017,7 @@ serve(async (req) => {
     let rejectedByQuality = 0;
     let rejectedByStrategy = 0;
     let rejectedByReversalRisk = 0;
+    let rejectedByStochRsiExtreme = 0;
     
     // Loss Recovery Mode - increase quality threshold after consecutive losses
     const isInRecoveryMode = riskParams.loss_recovery_mode_enabled && 
@@ -1110,6 +1111,65 @@ serve(async (req) => {
           continue;
         } else if (reversalRisk.riskScore > 0) {
           console.log(`📊 ${symbol}: ${reversalRisk.reason}`);
+        }
+
+        // ============= STOCHRSI EXTREME FILTER =============
+        // Prevent entries at extreme oversold/overbought 4h levels where bounces are likely
+        const stochRsi4h = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi?.aggregated;
+        const stochRsiK4h = stochRsi4h?.k ?? 50;
+        const STOCHRSI_OVERSOLD_THRESHOLD = 10;  // Below 10 = extreme oversold, bounce likely
+        const STOCHRSI_OVERBOUGHT_THRESHOLD = 90; // Above 90 = extreme overbought, pullback likely
+        
+        // Check if we're at extreme StochRSI levels
+        const isExtremOversold4h = stochRsiK4h < STOCHRSI_OVERSOLD_THRESHOLD;
+        const isExtremeOverbought4h = stochRsiK4h > STOCHRSI_OVERBOUGHT_THRESHOLD;
+        
+        // Determine intended trade direction from trend
+        const intendedTradeDirection = trend === "bullish" ? "long" : trend === "bearish" ? "short" : null;
+        
+        // Block SHORT entries at extreme oversold (bounce likely)
+        if (intendedTradeDirection === "short" && isExtremOversold4h) {
+          rejectedByStochRsiExtreme++;
+          console.log(`⛔ ${symbol}: Blocking SHORT - 4h StochRSI K=${stochRsiK4h.toFixed(1)} is extreme oversold (<${STOCHRSI_OVERSOLD_THRESHOLD}), bounce likely`);
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `StochRSI extreme filter: 4h K=${stochRsiK4h.toFixed(1)} oversold, bounce likely for SHORT entry`,
+            filters_status: { 
+              stochRsiK4h: stochRsiK4h.toFixed(1),
+              threshold: STOCHRSI_OVERSOLD_THRESHOLD,
+              intendedDirection: "short",
+              trend,
+              reason: "Extreme oversold 4h = high probability bounce, delaying SHORT entry"
+            },
+            trend_data: trendData,
+            checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
+        // Block LONG entries at extreme overbought (pullback likely)
+        if (intendedTradeDirection === "long" && isExtremeOverbought4h) {
+          rejectedByStochRsiExtreme++;
+          console.log(`⛔ ${symbol}: Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} is extreme overbought (>${STOCHRSI_OVERBOUGHT_THRESHOLD}), pullback likely`);
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `StochRSI extreme filter: 4h K=${stochRsiK4h.toFixed(1)} overbought, pullback likely for LONG entry`,
+            filters_status: { 
+              stochRsiK4h: stochRsiK4h.toFixed(1),
+              threshold: STOCHRSI_OVERBOUGHT_THRESHOLD,
+              intendedDirection: "long",
+              trend,
+              reason: "Extreme overbought 4h = high probability pullback, delaying LONG entry"
+            },
+            trend_data: trendData,
+            checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
+        // Log StochRSI status for monitoring
+        if (stochRsiK4h < 20 || stochRsiK4h > 80) {
+          console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} (near extreme but proceeding with ${intendedTradeDirection || "neutral"} direction)`);
         }
 
         // ============= Technical Indicators =============
@@ -1438,7 +1498,7 @@ serve(async (req) => {
       }
     }
 
-    console.log(`📈 Summary: ${totalSignalsGenerated} signals | Rejected: regime=${rejectedByRegime} reversal=${rejectedByReversalRisk} quality=${rejectedByQuality} strategy=${rejectedByStrategy}`);
+    console.log(`📈 Summary: ${totalSignalsGenerated} signals | Rejected: regime=${rejectedByRegime} reversal=${rejectedByReversalRisk} stochRsiExtreme=${rejectedByStochRsiExtreme} quality=${rejectedByQuality} strategy=${rejectedByStrategy}`);
 
     return new Response(JSON.stringify({
       signals,
@@ -1449,6 +1509,7 @@ serve(async (req) => {
       rejections: {
         byRegime: rejectedByRegime,
         byReversalRisk: rejectedByReversalRisk,
+        byStochRsiExtreme: rejectedByStochRsiExtreme,
         byQuality: rejectedByQuality,
         byStrategy: rejectedByStrategy,
       },
