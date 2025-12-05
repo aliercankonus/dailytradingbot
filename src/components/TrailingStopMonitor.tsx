@@ -113,37 +113,43 @@ export const TrailingStopMonitor = () => {
             ? ((currentPrice - p.entry_price) / p.entry_price) * 100
             : ((p.entry_price - currentPrice) / p.entry_price) * 100;
 
-        // Calculate position-specific trailing stop based on entry + profit - distance
-        // This makes each position's stop independent even for the same symbol
+        // Calculate position-specific trailing values for display
         const profitAbsolute = p.side === "BUY" 
           ? currentPrice - p.entry_price 
           : p.entry_price - currentPrice;
         
-        // Use trailing distance from settings or default 1.5% of current price
-        const trailingDistancePercent = (settings.distanceMultiplier || 1.5) * 1.5; // Default 2.25%
-        const trailingDistanceAbsolute = currentPrice * (trailingDistancePercent / 100);
+        // IMPORTANT: Use actual stop_loss from database - this is the HIGH WATER MARK
+        // The backend only moves stops in favorable direction, never backward
+        const actualStopLoss = Number(p.stop_loss);
         
-        const calculatedStopLoss = p.side === "BUY"
-          ? p.entry_price + profitAbsolute - trailingDistanceAbsolute
-          : p.entry_price - profitAbsolute + trailingDistanceAbsolute;
-
-        // Calculate profit lock values
+        // Calculate what the current profit lock WOULD be (for informational display)
         const profitLockPercent = settings.profitLockPercent;
-        const lockedProfitPercent = pnlPercent * (profitLockPercent / 100);
-        const lockedProfitAbsolute = profitAbsolute * (profitLockPercent / 100);
-        const lockedStopPrice = p.side === "BUY"
-          ? p.entry_price + lockedProfitAbsolute
-          : p.entry_price - lockedProfitAbsolute;
+        const theoreticalLockedPercent = pnlPercent * (profitLockPercent / 100);
+        const theoreticalLockedAbsolute = profitAbsolute * (profitLockPercent / 100);
+        const theoreticalLockStop = p.side === "BUY"
+          ? p.entry_price + theoreticalLockedAbsolute
+          : p.entry_price - theoreticalLockedAbsolute;
+
+        // Calculate the actual locked profit based on the database stop loss (high water mark)
+        const actualLockedAbsolute = p.side === "BUY"
+          ? actualStopLoss - p.entry_price
+          : p.entry_price - actualStopLoss;
+        const actualLockedPercent = (actualLockedAbsolute / p.entry_price) * 100;
 
         return {
           ...p,
           currentPrice: Number(currentPrice),
           pnlPercent: Number(pnlPercent),
-          stop_loss: Number(calculatedStopLoss),
-          lockedProfitPercent: Number(lockedProfitPercent),
-          lockedProfitAbsolute: Number(lockedProfitAbsolute),
-          lockedStopPrice: Number(lockedStopPrice),
+          // Use ACTUAL stop loss from database (high water mark)
+          stop_loss: actualStopLoss,
+          // Show actual locked values (based on DB stop loss)
+          lockedProfitPercent: Number(actualLockedPercent),
+          lockedProfitAbsolute: Number(actualLockedAbsolute),
+          lockedStopPrice: actualStopLoss,
           profitLockPercent: Number(profitLockPercent),
+          // Also show theoretical for context
+          theoreticalLockedPercent: Number(theoreticalLockedPercent),
+          theoreticalLockStop: Number(theoreticalLockStop),
         };
       });
   }, [positions, getPrice, priceVersion, settings.profitLockPercent, settings.distanceMultiplier]);
@@ -218,11 +224,11 @@ export const TrailingStopMonitor = () => {
                       </span>
                     </div>
 
-                    {/* Profit Lock Calculation */}
+                    {/* Profit Lock - Shows actual locked stop (high water mark) */}
                     <div className="mt-2 rounded bg-muted/50 p-2">
                       <div className="flex items-center gap-1 text-xs font-medium text-foreground mb-1">
                         <TrendingUp className="h-3 w-3 text-green-500" />
-                        Profit Lock ({position.profitLockPercent}%)
+                        Profit Lock (High Water Mark)
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         <div>
@@ -232,13 +238,13 @@ export const TrailingStopMonitor = () => {
                           </span>
                         </div>
                         <div>
-                          <span>Lock Stop:</span>
+                          <span>Locked Stop:</span>
                           <span className="ml-1 font-medium text-amber-500">
                             {formatPrice(position.lockedStopPrice, 4, '$')}
                           </span>
                         </div>
-                        <div className="col-span-2 mt-1 text-[10px] italic">
-                          {formatPercent(position.pnlPercent)} × {position.profitLockPercent}% = {formatPercent(position.lockedProfitPercent)} locked
+                        <div className="col-span-2 mt-1 text-[10px] italic text-muted-foreground/70">
+                          Stop only moves up, never back down (ratchet protection)
                         </div>
                       </div>
                     </div>
