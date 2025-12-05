@@ -450,9 +450,8 @@ const detectReversalRisk = (trendData: any, intendedDirection: string): Reversal
   // Cap at 100
   riskScore = Math.min(100, riskScore);
   
-  // High risk threshold: 80+ for testing (normally 50+)
-  // TODO: Revert to 50 after testing AI analysis
-  const isHighRisk = riskScore >= 80;
+  // High risk threshold: 50+ blocks signal generation
+  const isHighRisk = riskScore >= 50;
   
   const reason = isHighRisk 
     ? `Reversal risk HIGH (${riskScore}/100): ${signals.join(", ")}`
