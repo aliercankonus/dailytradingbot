@@ -130,19 +130,11 @@ export const TrailingStopMonitor = () => {
           ? p.entry_price + theoreticalLockedAbsolute
           : p.entry_price - theoreticalLockedAbsolute;
 
-        // Calculate the actual locked profit based on the database stop loss
-        // This is the guaranteed profit if stop is hit - can be negative, zero, or positive
+        // Calculate the actual locked profit based on the database stop loss (high water mark)
         const actualLockedAbsolute = p.side === "BUY"
-          ? actualStopLoss - p.entry_price  // Positive if stop > entry, negative if stop < entry
-          : p.entry_price - actualStopLoss; // Positive if stop < entry, negative if stop > entry
+          ? actualStopLoss - p.entry_price
+          : p.entry_price - actualStopLoss;
         const actualLockedPercent = (actualLockedAbsolute / p.entry_price) * 100;
-        
-        // Determine lock status for display
-        const isBreakEven = Math.abs(actualStopLoss - p.entry_price) < 0.0001;
-        const isProfitLocked = actualLockedAbsolute > 0;
-        
-        // Only show "should lock" if theoretical is HIGHER than actual (profit went up, stop needs to catch up)
-        const shouldStopMoveUp = theoreticalLockedPercent > actualLockedPercent + 0.01; // Small buffer
 
         return {
           ...p,
@@ -151,14 +143,11 @@ export const TrailingStopMonitor = () => {
           // Use ACTUAL stop loss from database (high water mark)
           stop_loss: actualStopLoss,
           // Show actual locked values (based on DB stop loss)
-          isBreakEven,
-          isProfitLocked,
           lockedProfitPercent: Number(actualLockedPercent),
           lockedProfitAbsolute: Number(actualLockedAbsolute),
           lockedStopPrice: actualStopLoss,
           profitLockPercent: Number(profitLockPercent),
-          // Only show theoretical if stop should move up
-          shouldStopMoveUp,
+          // Also show theoretical for context
           theoreticalLockedPercent: Number(theoreticalLockedPercent),
           theoreticalLockStop: Number(theoreticalLockStop),
         };
@@ -235,48 +224,27 @@ export const TrailingStopMonitor = () => {
                       </span>
                     </div>
 
-                    {/* Profit Lock - High Water Mark */}
+                    {/* Profit Lock - Shows actual locked stop (high water mark) */}
                     <div className="mt-2 rounded bg-muted/50 p-2">
                       <div className="flex items-center gap-1 text-xs font-medium text-foreground mb-1">
                         <TrendingUp className="h-3 w-3 text-green-500" />
-                        Profit Lock ({position.profitLockPercent}% of peak)
+                        Profit Lock (High Water Mark)
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         <div>
-                          <span>Locked:</span>
-                          <span className={`ml-1 font-medium ${
-                            position.isProfitLocked ? 'text-green-500' : 
-                            position.isBreakEven ? 'text-amber-500' : 'text-destructive'
-                          }`}>
-                            {position.isBreakEven ? 'Break-even' : formatPercent(position.lockedProfitPercent, 2, true)}
+                          <span>Locked Profit:</span>
+                          <span className="ml-1 font-medium text-green-500">
+                            {formatPercent(position.lockedProfitPercent, 2, true)}
                           </span>
                         </div>
                         <div>
-                          <span>Lock Stop:</span>
+                          <span>Locked Stop:</span>
                           <span className="ml-1 font-medium text-amber-500">
                             {formatPrice(position.lockedStopPrice, 4, '$')}
                           </span>
                         </div>
-                        {position.shouldStopMoveUp && (
-                          <>
-                            <div>
-                              <span>Pending:</span>
-                              <span className="ml-1 font-medium text-blue-500">
-                                {formatPercent(position.theoreticalLockedPercent, 2, true)}
-                              </span>
-                            </div>
-                            <div>
-                              <span>New Stop:</span>
-                              <span className="ml-1 font-medium text-blue-500">
-                                {formatPrice(position.theoreticalLockStop, 4, '$')}
-                              </span>
-                            </div>
-                          </>
-                        )}
                         <div className="col-span-2 mt-1 text-[10px] italic text-muted-foreground/70">
-                          {position.shouldStopMoveUp 
-                            ? 'Stop will move up on next monitor cycle' 
-                            : 'Stop never moves back down (high water mark)'}
+                          Stop only moves up, never back down (ratchet protection)
                         </div>
                       </div>
                     </div>
