@@ -221,11 +221,14 @@ const MarketRegimeDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
   const confidence = filtersStatus?.confidence;
   const trendConsistency = filtersStatus?.trendConsistency;
   const regime = filtersStatus?.regime;
+  const minConfidence = filtersStatus?.minConfidence || 60;
+  const minConsistency = filtersStatus?.minConsistency || 50;
   
   if (adx === undefined && confidence === undefined) return null;
   
   const adxPassing = adx >= 20;
-  const confidencePassing = confidence >= 60;
+  const confidencePassing = confidence >= minConfidence;
+  const consistencyPassing = (trendConsistency || 0) >= minConsistency;
   
   return (
     <div className="space-y-2 p-2 bg-muted/30 rounded-md">
@@ -255,13 +258,14 @@ const MarketRegimeDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
           <div className={`text-sm font-mono ${confidencePassing ? 'text-green-400' : 'text-red-400'}`}>
             {confidence || '—'}%
           </div>
-          <div className="text-[9px] text-muted-foreground">min: 60%</div>
+          <div className="text-[9px] text-muted-foreground">min: {minConfidence}%</div>
         </div>
         <div className="text-center">
           <div className="text-[10px] text-muted-foreground mb-0.5">Consistency</div>
-          <div className={`text-sm font-mono ${(trendConsistency || 0) >= 50 ? 'text-green-400' : 'text-yellow-400'}`}>
-            {trendConsistency || '—'}%
+          <div className={`text-sm font-mono ${consistencyPassing ? 'text-green-400' : 'text-red-400'}`}>
+            {trendConsistency?.toFixed(0) || '—'}%
           </div>
+          <div className="text-[9px] text-muted-foreground">min: {minConsistency}%</div>
         </div>
       </div>
     </div>
