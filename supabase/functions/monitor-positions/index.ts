@@ -1372,10 +1372,20 @@ serve(async (req) => {
           closeReason = "take_profit";
         } else if (newStopLoss && currentPrice <= newStopLoss) {
           shouldClose = true;
-          // Trailing was activated if: stop was moved UP from entry (for LONG, stop > entry = profit locked)
-          // More accurate: check if we're in profit but hit stop (trailing scenario)
-          const trailingWasActivated = userSettings.enabled && newStopLoss > position.entry_price;
-          closeReason = trailingWasActivated ? "trailing_stop_loss" : "stop_loss";
+          // Determine close reason based on stop loss state:
+          // 1. Break-even: stop_loss equals entry_price (protection at entry)
+          // 2. Trailing stop: stop_loss is above entry_price (profit locked in)
+          // 3. Regular stop loss: stop_loss is below entry_price (loss taken)
+          if (Math.abs(newStopLoss - position.entry_price) < 0.0001) {
+            // Stop loss is at entry price = break-even stop
+            closeReason = "break_even";
+          } else if (userSettings.enabled && newStopLoss > position.entry_price) {
+            // Stop was moved above entry = trailing stop locked profit
+            closeReason = "trailing_stop_loss";
+          } else {
+            // Regular stop loss
+            closeReason = "stop_loss";
+          }
         }
       } else if (!shouldClose && position.side === "SELL") {
         // SHORT: TP when price goes DOWN, SL when price goes UP
@@ -1384,9 +1394,20 @@ serve(async (req) => {
           closeReason = "take_profit";
         } else if (newStopLoss && currentPrice >= newStopLoss) {
           shouldClose = true;
-          // Trailing was activated if: stop was moved DOWN from entry (for SHORT, stop < entry = profit locked)
-          const trailingWasActivated = userSettings.enabled && newStopLoss < position.entry_price;
-          closeReason = trailingWasActivated ? "trailing_stop_loss" : "stop_loss";
+          // Determine close reason based on stop loss state:
+          // 1. Break-even: stop_loss equals entry_price (protection at entry)
+          // 2. Trailing stop: stop_loss is below entry_price (profit locked in)
+          // 3. Regular stop loss: stop_loss is above entry_price (loss taken)
+          if (Math.abs(newStopLoss - position.entry_price) < 0.0001) {
+            // Stop loss is at entry price = break-even stop
+            closeReason = "break_even";
+          } else if (userSettings.enabled && newStopLoss < position.entry_price) {
+            // Stop was moved below entry = trailing stop locked profit
+            closeReason = "trailing_stop_loss";
+          } else {
+            // Regular stop loss
+            closeReason = "stop_loss";
+          }
         }
       }
       if (shouldClose) {

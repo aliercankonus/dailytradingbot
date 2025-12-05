@@ -33,6 +33,7 @@ export const ClosedPositionsDashboard = () => {
         case 'take_profit': return 'Take Profit';
         case 'stop_loss': return 'Stop Loss';
         case 'trailing_stop_loss': return 'Trailing Stop';
+        case 'break_even': return 'Break-Even';
         case 'trend_reversal_bullish': return 'Trend Exit (Bullish)';
         case 'trend_reversal_bearish': return 'Trend Exit (Bearish)';
         case 'trend_reversal_ranging': return 'Trend Exit (Ranging)';
@@ -217,6 +218,13 @@ export const ClosedPositionsDashboard = () => {
         <Badge variant="outline" className="gap-1 bg-purple-500/10 text-purple-500 border-purple-500/20">
           <TrendingDown className="h-3 w-3" />
           {reason}
+        </Badge>
+      );
+    } else if (reason === 'Break-Even') {
+      return (
+        <Badge variant="outline" className="gap-1 bg-cyan-500/10 text-cyan-600 border-cyan-500/20">
+          <ShieldAlert className="h-3 w-3" />
+          Break-Even
         </Badge>
       );
     } else if (reason === 'Time-Based Exit') {
