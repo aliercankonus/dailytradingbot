@@ -617,6 +617,145 @@ function calculateTradeDirection(
   return primaryTrend;
 }
 
+// Enhanced confidence calculation - adds ADX and volume to base confidence
+function enhanceConfidenceWithIndicators(
+  baseConfidence: number,
+  adx: number,
+  volumeConfirms: boolean,
+  volumeRatio: number
+): number {
+  let enhanced = baseConfidence;
+  
+  // ADX contribution: Strong trend (ADX > 25) adds up to 10 points
+  // Weak trend (ADX < 15) subtracts up to 10 points
+  if (adx >= 40) {
+    enhanced += 10;
+  } else if (adx >= 30) {
+    enhanced += 7;
+  } else if (adx >= 25) {
+    enhanced += 5;
+  } else if (adx >= 20) {
+    enhanced += 2;
+  } else if (adx < 15) {
+    enhanced -= 10;
+  } else if (adx < 18) {
+    enhanced -= 5;
+  }
+  
+  // Volume contribution: Confirming volume adds up to 8 points
+  if (volumeConfirms) {
+    if (volumeRatio >= 2.0) {
+      enhanced += 8; // Strong volume spike
+    } else if (volumeRatio >= 1.5) {
+      enhanced += 5;
+    } else {
+      enhanced += 3;
+    }
+  } else if (volumeRatio < 0.5) {
+    enhanced -= 5; // Very low volume = less confidence
+  }
+  
+  // Clamp to 30-95 range (wider than before)
+  return Math.min(Math.max(Math.round(enhanced), 30), 95);
+}
+
+// True alignment score - measures actual direction agreement across timeframes
+function calculateTrueAlignmentScore(
+  trend4h: { trend: string; confidence: number; indicators: any },
+  trend1h: { trend: string; confidence: number; indicators: any },
+  trend30m: { trend: string; confidence: number; indicators: any },
+  trend15m: { trend: string; confidence: number; indicators: any },
+  dominantTrend: string
+): { score: number; breakdown: { directionScore: number; indicatorScore: number; penaltyScore: number } } {
+  let directionScore = 0;
+  let indicatorScore = 0;
+  let penaltyScore = 0;
+  
+  const trends = [
+    { tf: "4h", trend: trend4h.trend, weight: 35, indicators: trend4h.indicators },
+    { tf: "1h", trend: trend1h.trend, weight: 30, indicators: trend1h.indicators },
+    { tf: "30m", trend: trend30m.trend, weight: 20, indicators: trend30m.indicators },
+    { tf: "15m", trend: trend15m.trend, weight: 15, indicators: trend15m.indicators },
+  ];
+  
+  // Direction alignment scoring (max 60 points)
+  // Full points if matches dominant trend, half if neutral, penalty if opposing
+  for (const tf of trends) {
+    if (dominantTrend === "neutral") {
+      // When dominant is neutral, score based on internal agreement
+      const agreesWithMajority = tf.trend === trend1h.trend;
+      if (agreesWithMajority && tf.trend !== "neutral") {
+        directionScore += tf.weight * 0.6;
+      } else if (tf.trend === "neutral") {
+        directionScore += tf.weight * 0.3;
+      }
+    } else {
+      if (tf.trend === dominantTrend) {
+        directionScore += tf.weight * 0.6; // Full points for alignment
+      } else if (tf.trend === "neutral") {
+        directionScore += tf.weight * 0.3; // Half points for neutral
+      } else {
+        // Opposing trend - apply penalty
+        penaltyScore += tf.weight * 0.3;
+      }
+    }
+  }
+  
+  // Indicator agreement scoring (max 25 points)
+  // Check if MACD histograms agree across timeframes
+  const macdHistograms = [
+    trend4h.indicators?.macdHistogram || 0,
+    trend1h.indicators?.macdHistogram || 0,
+    trend30m.indicators?.macdHistogram || 0,
+    trend15m.indicators?.macdHistogram || 0,
+  ];
+  
+  const macdBullish = macdHistograms.filter(m => m > 0).length;
+  const macdBearish = macdHistograms.filter(m => m < 0).length;
+  const macdAgreement = Math.max(macdBullish, macdBearish);
+  
+  if (macdAgreement === 4) {
+    indicatorScore += 15; // All MACDs agree
+  } else if (macdAgreement === 3) {
+    indicatorScore += 10;
+  } else if (macdAgreement === 2) {
+    indicatorScore += 5;
+  }
+  
+  // Check if RSI signals agree
+  const rsiSignals = [
+    trend4h.indicators?.rsiSignal || "neutral",
+    trend1h.indicators?.rsiSignal || "neutral",
+    trend30m.indicators?.rsiSignal || "neutral",
+    trend15m.indicators?.rsiSignal || "neutral",
+  ];
+  
+  const rsiBullish = rsiSignals.filter(s => s === "bullish" || s === "strong_bullish" || s === "overbought").length;
+  const rsiBearish = rsiSignals.filter(s => s === "bearish" || s === "oversold").length;
+  const rsiAgreement = Math.max(rsiBullish, rsiBearish);
+  
+  if (rsiAgreement >= 3) {
+    indicatorScore += 10;
+  } else if (rsiAgreement >= 2) {
+    indicatorScore += 5;
+  }
+  
+  // Calculate final score (max 85 points possible, subtract penalties)
+  const rawScore = directionScore + indicatorScore - penaltyScore;
+  
+  // Normalize to 0-100 scale
+  const normalizedScore = Math.min(Math.max(Math.round(rawScore * 1.18), 0), 100);
+  
+  return {
+    score: normalizedScore,
+    breakdown: {
+      directionScore: Math.round(directionScore),
+      indicatorScore: Math.round(indicatorScore),
+      penaltyScore: Math.round(penaltyScore),
+    },
+  };
+}
+
 function calculateTrend(prices: number[]): {
   trend: "bullish" | "bearish" | "neutral";
   confidence: number;
@@ -635,7 +774,7 @@ function calculateTrend(prices: number[]): {
   if (prices.length < 30) {
     return {
       trend: "neutral",
-      confidence: 40,
+      confidence: 35, // Lower floor for insufficient data
       indicators: {
         ema12: 0, ema26: 0, emaSignal: "neutral",
         rsi: 50, rsiSignal: "neutral",
@@ -653,6 +792,7 @@ function calculateTrend(prices: number[]): {
   let bearishSignals = 0;
   let totalWeight = 0;
 
+  // EMA signal (weight 3)
   const emaWeight = 3;
   let emaSignal = "neutral";
   if (ema12 > ema26) {
@@ -670,7 +810,8 @@ function calculateTrend(prices: number[]): {
   }
   totalWeight += emaWeight;
 
-  const rsiWeight = 2;
+  // RSI signal (weight 2.5 - slightly increased)
+  const rsiWeight = 2.5;
   let rsiSignal = "neutral";
   if (rsi > 55) {
     bullishSignals += rsiWeight * ((rsi - 55) / 45);
@@ -685,7 +826,8 @@ function calculateTrend(prices: number[]): {
   }
   totalWeight += rsiWeight;
 
-  const macdWeight = 3;
+  // MACD signal (weight 3.5 - slightly increased)
+  const macdWeight = 3.5;
   let macdTrend = "neutral";
   if (histogram > 0 && macd > signal) {
     const macdStrength = Math.min(Math.abs(histogram) / Math.abs(macd || 1), 1);
@@ -700,8 +842,11 @@ function calculateTrend(prices: number[]): {
 
   const netSignal = bullishSignals - bearishSignals;
   const rawConfidence = (Math.abs(netSignal) / totalWeight) * 100;
-  let confidence = 40 + rawConfidence * 0.5;
-  confidence = Math.min(Math.max(confidence, 40), 90);
+  
+  // Wider confidence range: 30-95 instead of 40-90
+  // More sensitive to signal strength
+  let confidence = 30 + rawConfidence * 0.65;
+  confidence = Math.min(Math.max(confidence, 30), 95);
 
   let trend: "bullish" | "bearish" | "neutral" = "neutral";
   if (netSignal >= 3.0) trend = "bullish";
@@ -974,6 +1119,32 @@ serve(async (req) => {
     );
     const volume4h = calculateVolumeAnalysis(klines4h);
 
+    // Calculate ADX for each timeframe for enhanced confidence
+    const adx15m = calculateADX(klines15m, 14);
+    const adx30m = calculateADX(klines30m, 14);
+    const adx4h = calculateADX(klines4h, 14);
+
+    // Enhance confidence with ADX and volume for each timeframe
+    const enhancedConfidence15m = enhanceConfidenceWithIndicators(
+      trend15m.confidence, adx15m, volume15m.volumeSpike || volume15m.volumeTrend === "increasing", volume15m.volumeRatio
+    );
+    const enhancedConfidence30m = enhanceConfidenceWithIndicators(
+      trend30m.confidence, adx30m, volume30m.volumeSpike || volume30m.volumeTrend === "increasing", volume30m.volumeRatio
+    );
+    const enhancedConfidence1h = enhanceConfidenceWithIndicators(
+      trend1h.confidence, adx, volume1h.volumeSpike || volume1h.volumeTrend === "increasing", volume1h.volumeRatio
+    );
+    const enhancedConfidence4h = enhanceConfidenceWithIndicators(
+      trend4h.confidence, adx4h, volume4h.volumeSpike || volume4h.volumeTrend === "increasing", volume4h.volumeRatio
+    );
+
+    // Calculate true alignment score (replaces old weightedConsistency)
+    const trueAlignment = calculateTrueAlignmentScore(trend4h, trend1h, trend30m, trend15m, dominantTrend);
+    
+    console.log(
+      `${symbol} ENHANCED CONFIDENCE: 4h=${trend4h.confidence}->${enhancedConfidence4h} 1h=${trend1h.confidence}->${enhancedConfidence1h} | ALIGNMENT: score=${trueAlignment.score} (dir=${trueAlignment.breakdown.directionScore} ind=${trueAlignment.breakdown.indicatorScore} pen=${trueAlignment.breakdown.penaltyScore})`
+    );
+
     const atrCompressed = relativeATR < 0.6;
     const adxWeak = adx < 20;
     const isRanging = atrCompressed && adxWeak;
@@ -1087,14 +1258,14 @@ serve(async (req) => {
         symbol,
         currentPrice,
         trend: dominantTrend,
-        confidence: dominantConfidence,
+        confidence: enhancedConfidence4h, // Use enhanced confidence
         higherTimeframeFilter: {
           trend4h: trend4h.trend,
           trend1h: trend1h.trend,
           aligned: highTimeframeAligned,
           neutralAllowedWithStrongHigherTimeframe: neutralAllowedWithStrongHigherTimeframe,
-          dominantConfidence: dominantConfidence,
-          weightedConsistency: Math.round(weightedConsistency),
+          dominantConfidence: enhancedConfidence4h, // Enhanced
+          weightedConsistency: trueAlignment.score, // Use true alignment score
           divergenceType: divergenceType,
           divergenceConfidence: Math.round(divergenceConfidence),
           allowDivergenceSignal: allowDivergenceSignal,
@@ -1129,11 +1300,12 @@ serve(async (req) => {
           trend30m: trend30m.trend,
           trend1h: trend1h.trend,
           trend4h: trend4h.trend,
-          confidence15m: trend15m.confidence,
-          confidence30m: trend30m.confidence,
-          confidence1h: trend1h.confidence,
-          confidence4h: trend4h.confidence,
+          confidence15m: enhancedConfidence15m, // Enhanced
+          confidence30m: enhancedConfidence30m, // Enhanced
+          confidence1h: enhancedConfidence1h, // Enhanced
+          confidence4h: enhancedConfidence4h, // Enhanced
         },
+        alignmentBreakdown: trueAlignment.breakdown, // New: detailed breakdown
         timeframes: {
           "15m": trend15m,
           "30m": trend30m,
@@ -1209,7 +1381,7 @@ serve(async (req) => {
           bearishCrossCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "bearish_cross").length,
         },
         indicators: trend1h.indicators,
-        trendConsistency: Math.round(weightedConsistency),
+        trendConsistency: trueAlignment.score,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
