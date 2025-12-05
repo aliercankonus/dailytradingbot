@@ -11,6 +11,19 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // CRON_SECRET validation - protect against unauthorized invocations
+  const cronSecret = Deno.env.get("CRON_SECRET");
+  const providedSecret = req.headers.get("x-cron-secret");
+  
+  // Allow if either: CRON_SECRET is not set (development), or secrets match
+  if (cronSecret && providedSecret !== cronSecret) {
+    console.error("Unauthorized: Invalid or missing cron secret");
+    return new Response(
+      JSON.stringify({ success: false, error: "Unauthorized" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
   try {
     console.log("Starting portfolio snapshot capture...");
 
