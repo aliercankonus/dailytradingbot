@@ -216,13 +216,90 @@ const MaxTradesDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
   );
 };
 
-const MarketRegimeDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
+const AlignmentBreakdownDisplay = ({ alignmentBreakdown }: { alignmentBreakdown: any }) => {
+  if (!alignmentBreakdown) return null;
+  
+  const { directionScore, indicatorScore, penaltyScore } = alignmentBreakdown;
+  const total = (directionScore || 0) + (indicatorScore || 0) - (penaltyScore || 0);
+  
+  const getScoreColor = (score: number, max: number) => {
+    const pct = (score / max) * 100;
+    if (pct >= 80) return 'text-green-400';
+    if (pct >= 60) return 'text-yellow-400';
+    if (pct >= 40) return 'text-orange-400';
+    return 'text-red-400';
+  };
+  
+  return (
+    <div className="space-y-1.5 pt-2 border-t border-border/50">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-muted-foreground">Alignment Breakdown</span>
+        <Badge 
+          variant={total >= 60 ? "default" : "destructive"} 
+          className="text-[9px] px-1 py-0"
+        >
+          {total}/85
+        </Badge>
+      </div>
+      <div className="grid grid-cols-3 gap-1">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="text-center p-1 bg-background/50 rounded">
+                <div className="text-[9px] text-muted-foreground">Direction</div>
+                <div className={`text-xs font-mono ${getScoreColor(directionScore || 0, 60)}`}>
+                  {directionScore || 0}/60
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px]">
+              <p>How many timeframes agree on trend direction</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="text-center p-1 bg-background/50 rounded">
+                <div className="text-[9px] text-muted-foreground">Indicators</div>
+                <div className={`text-xs font-mono ${getScoreColor(indicatorScore || 0, 25)}`}>
+                  {indicatorScore || 0}/25
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px]">
+              <p>MACD and RSI agreement across timeframes</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="text-center p-1 bg-background/50 rounded">
+                <div className="text-[9px] text-muted-foreground">Penalty</div>
+                <div className={`text-xs font-mono ${(penaltyScore || 0) > 0 ? 'text-red-400' : 'text-green-400'}`}>
+                  -{penaltyScore || 0}
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px]">
+              <p>Deductions for opposing timeframe trends</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+    </div>
+  );
+};
+
+const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const adx = filtersStatus?.adx;
   const confidence = filtersStatus?.confidence;
   const trendConsistency = filtersStatus?.trendConsistency;
   const regime = filtersStatus?.regime;
   const minConfidence = filtersStatus?.minConfidence || 60;
   const minConsistency = filtersStatus?.minConsistency || 50;
+  const alignmentBreakdown = trendData?.alignmentBreakdown || filtersStatus?.alignmentBreakdown;
   
   if (adx === undefined && confidence === undefined) return null;
   
@@ -261,13 +338,16 @@ const MarketRegimeDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
           <div className="text-[9px] text-muted-foreground">min: {minConfidence}%</div>
         </div>
         <div className="text-center">
-          <div className="text-[10px] text-muted-foreground mb-0.5">Consistency</div>
+          <div className="text-[10px] text-muted-foreground mb-0.5">Alignment</div>
           <div className={`text-sm font-mono ${consistencyPassing ? 'text-green-400' : 'text-red-400'}`}>
             {trendConsistency?.toFixed(0) || '—'}%
           </div>
           <div className="text-[9px] text-muted-foreground">min: {minConsistency}%</div>
         </div>
       </div>
+      
+      {/* Alignment Breakdown Section */}
+      <AlignmentBreakdownDisplay alignmentBreakdown={alignmentBreakdown} />
     </div>
   );
 };
@@ -405,13 +485,18 @@ export const SignalRejectionReasons = () => {
     
     // Market regime rejection (ranging, insufficient trend, etc.)
     if (reason.includes("Market regime") || reason.includes("Insufficient trend") || fs?.regime) {
-      return <MarketRegimeDisplay filtersStatus={fs} />;
+      return <MarketRegimeDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
-    // Default filter details
+    // Default filter details - also show alignment breakdown if available
     return (
-      <div className="text-xs text-muted-foreground">
-        {getFilterDetails(fs)}
+      <div className="space-y-2">
+        <div className="text-xs text-muted-foreground">
+          {getFilterDetails(fs)}
+        </div>
+        {rejection.trend_data?.alignmentBreakdown && (
+          <MarketRegimeDisplay filtersStatus={fs} trendData={rejection.trend_data} />
+        )}
       </div>
     );
   };
