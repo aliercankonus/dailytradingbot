@@ -1162,7 +1162,7 @@ serve(async (req) => {
             rejection_reason: `Signal confidence too low: ${confidence}% (min: ${minConfidence}%)`,
             filters_status: {
               confidence, minConfidence, trendConsistency, minConsistency,
-              qualityScore, breakdown,
+              qualityScore, breakdown, adx,
               regime: regime.regime,
             },
             trend_data: trendData,
@@ -1178,7 +1178,7 @@ serve(async (req) => {
             rejection_reason: `Trend not consistent enough: ${trendConsistency.toFixed(0)}% (min: ${minConsistency}%)`,
             filters_status: {
               confidence, minConfidence, trendConsistency, minConsistency,
-              qualityScore, breakdown,
+              qualityScore, breakdown, adx,
               regime: regime.regime,
             },
             trend_data: trendData,
