@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useClosedPositions } from '@/hooks/useClosedPositions';
-import { Loader2, TrendingUp, TrendingDown, Target, ShieldAlert, RotateCw, Archive } from 'lucide-react';
+import { Loader2, TrendingUp, TrendingDown, Target, ShieldAlert, RotateCw, Archive, Filter, X } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMemo, useState } from 'react';
@@ -11,6 +11,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { formatPrice, formatPercent, formatQuantity } from '@/lib/utils';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export const ClosedPositionsDashboard = () => {
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -18,6 +19,12 @@ export const ClosedPositionsDashboard = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState<'all' | 'profitable' | 'losses'>('all');
   const positionsPerPage = 10;
+  
+  // Filter states
+  const [symbolFilter, setSymbolFilter] = useState<string>('all');
+  const [sideFilter, setSideFilter] = useState<string>('all');
+  const [strategyFilter, setStrategyFilter] = useState<string>('all');
+  const [closeReasonFilter, setCloseReasonFilter] = useState<string>('all');
 
   const getCloseReason = (position: any): string => {
     // Use stored close_reason if available
@@ -106,19 +113,66 @@ export const ClosedPositionsDashboard = () => {
     };
   }, [positions]);
 
-  // Filter positions based on active tab
+  // Get unique filter options from positions
+  const filterOptions = useMemo(() => {
+    if (!positions) return { symbols: [], strategies: [], closeReasons: [] };
+    
+    const symbols = [...new Set(positions.map(p => p.symbol))].sort();
+    const strategies = [...new Set(positions.map(p => p.strategy_name).filter(Boolean))].sort();
+    const closeReasons = [...new Set(positions.map(p => getCloseReason(p)))].sort();
+    
+    return { symbols, strategies, closeReasons };
+  }, [positions]);
+
+  // Filter positions based on active tab and filters
   const filteredPositions = useMemo(() => {
     if (!positions) return [];
     
+    let filtered = positions;
+    
+    // Tab filter
     switch (activeTab) {
       case 'profitable':
-        return positions.filter(p => (p.realized_pnl || 0) > 0);
+        filtered = filtered.filter(p => (p.realized_pnl || 0) > 0);
+        break;
       case 'losses':
-        return positions.filter(p => (p.realized_pnl || 0) <= 0);
-      default:
-        return positions;
+        filtered = filtered.filter(p => (p.realized_pnl || 0) <= 0);
+        break;
     }
-  }, [positions, activeTab]);
+    
+    // Symbol filter
+    if (symbolFilter !== 'all') {
+      filtered = filtered.filter(p => p.symbol === symbolFilter);
+    }
+    
+    // Side filter
+    if (sideFilter !== 'all') {
+      filtered = filtered.filter(p => p.side === sideFilter);
+    }
+    
+    // Strategy filter
+    if (strategyFilter !== 'all') {
+      filtered = filtered.filter(p => p.strategy_name === strategyFilter);
+    }
+    
+    // Close reason filter
+    if (closeReasonFilter !== 'all') {
+      filtered = filtered.filter(p => getCloseReason(p) === closeReasonFilter);
+    }
+    
+    return filtered;
+  }, [positions, activeTab, symbolFilter, sideFilter, strategyFilter, closeReasonFilter]);
+
+  // Check if any filter is active
+  const hasActiveFilters = symbolFilter !== 'all' || sideFilter !== 'all' || strategyFilter !== 'all' || closeReasonFilter !== 'all';
+
+  // Clear all filters
+  const clearFilters = () => {
+    setSymbolFilter('all');
+    setSideFilter('all');
+    setStrategyFilter('all');
+    setCloseReasonFilter('all');
+  };
 
   // Pagination logic
   const totalPages = Math.ceil(filteredPositions.length / positionsPerPage);
@@ -126,10 +180,10 @@ export const ClosedPositionsDashboard = () => {
   const endIndex = startIndex + positionsPerPage;
   const paginatedPositions = filteredPositions.slice(startIndex, endIndex);
 
-  // Reset to page 1 when tab changes
+  // Reset to page 1 when tab or filters change
   useMemo(() => {
     setCurrentPage(1);
-  }, [activeTab]);
+  }, [activeTab, symbolFilter, sideFilter, strategyFilter, closeReasonFilter]);
 
   const getCloseReasonBadge = (position: any) => {
     const reason = getCloseReason(position);
@@ -305,11 +359,79 @@ export const ClosedPositionsDashboard = () => {
         </CardHeader>
         <CardContent>
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'all' | 'profitable' | 'losses')}>
-            <TabsList className="mb-4">
-              <TabsTrigger value="all">All ({stats.total})</TabsTrigger>
-              <TabsTrigger value="profitable">Profitable ({stats.profitable})</TabsTrigger>
-              <TabsTrigger value="losses">Losses ({stats.losses})</TabsTrigger>
-            </TabsList>
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
+              <TabsList>
+                <TabsTrigger value="all">All ({stats.total})</TabsTrigger>
+                <TabsTrigger value="profitable">Profitable ({stats.profitable})</TabsTrigger>
+                <TabsTrigger value="losses">Losses ({stats.losses})</TabsTrigger>
+              </TabsList>
+              
+              {/* Filters */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Filter className="h-4 w-4 text-muted-foreground" />
+                
+                <Select value={symbolFilter} onValueChange={setSymbolFilter}>
+                  <SelectTrigger className="w-[130px] h-8">
+                    <SelectValue placeholder="Symbol" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Symbols</SelectItem>
+                    {filterOptions.symbols.map(symbol => (
+                      <SelectItem key={symbol} value={symbol}>{symbol}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                
+                <Select value={sideFilter} onValueChange={setSideFilter}>
+                  <SelectTrigger className="w-[100px] h-8">
+                    <SelectValue placeholder="Side" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Sides</SelectItem>
+                    <SelectItem value="BUY">BUY</SelectItem>
+                    <SelectItem value="SHORT">SHORT</SelectItem>
+                  </SelectContent>
+                </Select>
+                
+                <Select value={strategyFilter} onValueChange={setStrategyFilter}>
+                  <SelectTrigger className="w-[160px] h-8">
+                    <SelectValue placeholder="Strategy" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Strategies</SelectItem>
+                    {filterOptions.strategies.map(strategy => (
+                      <SelectItem key={strategy} value={strategy}>{strategy}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                
+                <Select value={closeReasonFilter} onValueChange={setCloseReasonFilter}>
+                  <SelectTrigger className="w-[150px] h-8">
+                    <SelectValue placeholder="Close Reason" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Reasons</SelectItem>
+                    {filterOptions.closeReasons.map(reason => (
+                      <SelectItem key={reason} value={reason}>{reason}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                
+                {hasActiveFilters && (
+                  <Button variant="ghost" size="sm" onClick={clearFilters} className="h-8 px-2">
+                    <X className="h-4 w-4 mr-1" />
+                    Clear
+                  </Button>
+                )}
+              </div>
+            </div>
+            
+            {/* Active filter summary */}
+            {hasActiveFilters && (
+              <div className="text-sm text-muted-foreground mb-2">
+                Showing {filteredPositions.length} of {positions?.length || 0} positions
+              </div>
+            )}
 
             <TabsContent value={activeTab} className="space-y-4">
               <PositionsTable positions={paginatedPositions} getCloseReasonBadge={getCloseReasonBadge} />
