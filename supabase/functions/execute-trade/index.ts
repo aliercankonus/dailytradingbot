@@ -780,6 +780,7 @@ serve(async (req) => {
         body: {
           symbol: signal.symbol,
           signalType: signal.signal_type,
+          userId: user.id,
           trendData: {
             trend: currentTrend,
             confidence: signal.confidence_score || 0,

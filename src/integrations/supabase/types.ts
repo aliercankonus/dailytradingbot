@@ -14,6 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_signal_analysis: {
+        Row: {
+          confidence_adjustment: number | null
+          created_at: string
+          entry_price: number | null
+          id: string
+          key_factors: Json | null
+          position_size_multiplier: number | null
+          recommendation: string
+          risk_level: string | null
+          signal_type: string
+          stop_loss: number | null
+          strategy_name: string | null
+          symbol: string
+          take_profit: number | null
+          trend_data: Json | null
+          user_id: string
+        }
+        Insert: {
+          confidence_adjustment?: number | null
+          created_at?: string
+          entry_price?: number | null
+          id?: string
+          key_factors?: Json | null
+          position_size_multiplier?: number | null
+          recommendation: string
+          risk_level?: string | null
+          signal_type: string
+          stop_loss?: number | null
+          strategy_name?: string | null
+          symbol: string
+          take_profit?: number | null
+          trend_data?: Json | null
+          user_id: string
+        }
+        Update: {
+          confidence_adjustment?: number | null
+          created_at?: string
+          entry_price?: number | null
+          id?: string
+          key_factors?: Json | null
+          position_size_multiplier?: number | null
+          recommendation?: string
+          risk_level?: string | null
+          signal_type?: string
+          stop_loss?: number | null
+          strategy_name?: string | null
+          symbol?: string
+          take_profit?: number | null
+          trend_data?: Json | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       backtesting_results: {
         Row: {
           avg_loss: number | null

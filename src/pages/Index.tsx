@@ -20,6 +20,7 @@ import { TradeCounterSync } from "@/components/TradeCounterSync";
 import { TrailingStopMonitor } from "@/components/TrailingStopMonitor";
 import { SignalTimingMonitor } from "@/components/SignalTimingMonitor";
 import { PositionsSummary } from "@/components/PositionsSummary";
+import { AIAnalysisDashboard } from "@/components/AIAnalysisDashboard";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -105,6 +106,7 @@ const Index = () => {
           <TabsContent value="signals" className="space-y-6">
             <SignalTimingMonitor />
             <TradingSignalsDashboard />
+            <AIAnalysisDashboard />
           </TabsContent>
 
           <TabsContent value="positions" className="space-y-6">

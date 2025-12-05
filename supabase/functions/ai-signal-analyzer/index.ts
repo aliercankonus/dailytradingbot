@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,6 +8,7 @@ const corsHeaders = {
 
 interface SignalAnalysisRequest {
   symbol: string;
+  userId?: string;
   signalType: "long" | "short";
   trendData: {
     trend: string;
@@ -184,6 +186,34 @@ Evaluate the signal quality and provide your analysis.`;
 
     console.log(`🤖 AI Analysis for ${symbol}: ${analysis.recommendation} (conf adj: ${analysis.confidenceAdjustment > 0 ? '+' : ''}${analysis.confidenceAdjustment}, size: ${analysis.positionSizeMultiplier}x)`);
     console.log(`   Risk: ${analysis.riskLevel} | Factors: ${analysis.keyFactors.join(', ')}`);
+
+    // Save analysis to database for dashboard visibility
+    if (request.userId) {
+      try {
+        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+        const supabase = createClient(supabaseUrl, supabaseKey);
+        
+        await supabase.from("ai_signal_analysis").insert({
+          user_id: request.userId,
+          symbol,
+          signal_type: signalType,
+          strategy_name: strategyName,
+          recommendation: analysis.recommendation,
+          confidence_adjustment: analysis.confidenceAdjustment,
+          position_size_multiplier: analysis.positionSizeMultiplier,
+          risk_level: analysis.riskLevel,
+          key_factors: analysis.keyFactors,
+          trend_data: trendData,
+          entry_price: entryPrice,
+          stop_loss: stopLoss,
+          take_profit: takeProfit
+        });
+        console.log(`📊 AI analysis saved to database for ${symbol}`);
+      } catch (dbError) {
+        console.error("Failed to save AI analysis to database:", dbError);
+      }
+    }
 
     return new Response(
       JSON.stringify({
