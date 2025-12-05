@@ -225,12 +225,36 @@ export const SignalRejectionReasons = () => {
         details.push(`Ranging: ATR ${atrPercent.toFixed(2)}%, ADX ${adx.toFixed(1)}`);
       }
     }
+    // Reversal risk rejections
+    if (rejection.rejection_reason?.includes("Reversal risk")) {
+      if (td?.multiTimeframe) {
+        const mt = td.multiTimeframe;
+        details.push(`4H: ${mt.trend4h ?? "unknown"} | 1H: ${mt.trend1h ?? "unknown"}`);
+      }
+      if (td?.momentum) {
+        const m = td.momentum;
+        details.push(`Momentum: ${m.state ?? "unknown"}`);
+        if (m.macdDirectionAligned === false) {
+          details.push(`MACD misaligned`);
+        }
+      }
+      if (td?.stochasticRsi?.overboughtCount > 0) {
+        details.push(`Overbought: ${td.stochasticRsi.overboughtCount} TFs`);
+      }
+      if (td?.stochasticRsi?.oversoldCount > 0) {
+        details.push(`Oversold: ${td.stochasticRsi.oversoldCount} TFs`);
+      }
+    }
     // Other timeframe alignment issues
     else if (
       rejection.rejection_reason?.includes("timeframes NOT aligned") ||
       rejection.rejection_reason?.includes("timeframe")
     ) {
-      if (fs.trend4h !== undefined || fs.trend1h !== undefined) {
+      // First try to get from multiTimeframe in trend_data
+      if (td?.multiTimeframe) {
+        const mt = td.multiTimeframe;
+        details.push(`4H: ${mt.trend4h ?? "unknown"} | 1H: ${mt.trend1h ?? "unknown"}`);
+      } else if (fs.trend4h !== undefined || fs.trend1h !== undefined) {
         details.push(`4H: ${fs.trend4h ?? "unknown"} | 1H: ${fs.trend1h ?? "unknown"}`);
       }
     }
