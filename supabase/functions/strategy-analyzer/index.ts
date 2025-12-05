@@ -1150,6 +1150,43 @@ serve(async (req) => {
           continue;
         }
 
+        // ============= CHECK USER'S EXECUTION THRESHOLDS =============
+        // Prevent creating signals that execute-trade will reject
+        const minConfidence = riskParams.min_confidence_threshold || 60;
+        const minConsistency = riskParams.min_trend_consistency || 50;
+
+        if (confidence < minConfidence) {
+          rejectedByQuality++;
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `Signal confidence too low: ${confidence}% (min: ${minConfidence}%)`,
+            filters_status: {
+              confidence, minConfidence, trendConsistency, minConsistency,
+              qualityScore, breakdown,
+              regime: regime.regime,
+            },
+            trend_data: trendData,
+            checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+
+        if (trendConsistency < minConsistency) {
+          rejectedByQuality++;
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `Trend not consistent enough: ${trendConsistency.toFixed(0)}% (min: ${minConsistency}%)`,
+            filters_status: {
+              confidence, minConfidence, trendConsistency, minConsistency,
+              qualityScore, breakdown,
+              regime: regime.regime,
+            },
+            trend_data: trendData,
+            checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+
         // Store trend info for strategy-level filtering
         const tradeDirection = higherTimeframeFilter?.tradeDirection || trend;
         const trend1h = higherTimeframeFilter?.trend1h || trendData.multiTimeframe?.trend1h;
