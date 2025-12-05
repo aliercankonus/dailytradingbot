@@ -539,12 +539,17 @@ serve(async (req) => {
           // Use the LOWER of the two (more protective for shorts)
           let calculatedStopLoss = Math.min(profitBasedStop, atrBasedStop);
           
-          // ENFORCE MINIMUM 1% DISTANCE FROM ENTRY - trailing stop must not be too close to entry
-          // For SHORT: stop must be AT LEAST 1% above entry (stop_loss >= entry + 1%)
-          const minAllowedStop = position.entry_price + minDistanceFromEntry;
-          if (calculatedStopLoss < minAllowedStop) {
-            // Don't set trailing stop if it would be closer than 1% to entry
-            console.log(`⚠️ Trailing SL skipped for ${position.symbol} SHORT - calculated stop ${calculatedStopLoss.toFixed(2)} too close to entry ${position.entry_price.toFixed(2)} (must be >= ${minAllowedStop.toFixed(2)} for 1% min distance)`);
+          // ENFORCE MINIMUM 1% DISTANCE FROM CURRENT PRICE for trailing stops
+          // For SHORT: trailing stop should be ABOVE current price by at least the ATR buffer
+          // The stop must also not be too close to entry in the WRONG direction
+          // For a profitable SHORT, stop should be BELOW entry (locking profit)
+          // Only reject if the stop is ABOVE entry and within 1% (which would be a losing stop)
+          const maxAllowedStop = position.entry_price + minDistanceFromEntry;
+          const isStopTooCloseAboveEntry = calculatedStopLoss > position.entry_price && calculatedStopLoss < maxAllowedStop;
+          
+          if (isStopTooCloseAboveEntry) {
+            // Don't set trailing stop if it's above entry but within 1% (losing position with tight stop)
+            console.log(`⚠️ Trailing SL skipped for ${position.symbol} SHORT - calculated stop ${calculatedStopLoss.toFixed(2)} too close above entry ${position.entry_price.toFixed(2)} (must be >= ${maxAllowedStop.toFixed(2)} if above entry)`);
           } else {
             // 🔒 RATCHETING MECHANISM: Stop can ONLY move DOWN for SHORT positions (never up)
             // This ensures we never give back locked-in profit when price bounces
