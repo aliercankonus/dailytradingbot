@@ -510,13 +510,20 @@ serve(async (req) => {
             // Don't set trailing stop if it would be closer than 1% to entry
             console.log(`⚠️ Trailing SL skipped for ${position.symbol} BUY - calculated stop ${calculatedStopLoss.toFixed(2)} too close to entry ${position.entry_price.toFixed(2)} (must be <= ${maxAllowedStop.toFixed(2)} for 1% min distance)`);
           } else {
-            // Only update if new stop loss is HIGHER than current (never move down)
+            // 🔒 RATCHETING MECHANISM: Stop can ONLY move UP for BUY positions (never down)
+            // This ensures we never give back locked-in profit when price pulls back
+            // Current stop_loss represents the "high-water mark" of protection
             if (calculatedStopLoss > position.stop_loss) {
               newStopLoss = calculatedStopLoss;
               trailingActivated = true;
               const distancePercent = ((position.entry_price - newStopLoss) / position.entry_price) * 100;
               console.log(
-                `Trailing SL activated for ${position.symbol} (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, profit-based: ${profitBasedStop.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
+                `🔺 Trailing SL RAISED for ${position.symbol} BUY (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, profit-based: ${profitBasedStop.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
+              );
+            } else {
+              // Log when ratchet prevents regression
+              console.log(
+                `🔒 Trailing SL HELD at peak for ${position.symbol} BUY - calculated ${calculatedStopLoss.toFixed(2)} would be lower than current ${position.stop_loss.toFixed(2)} (ratchet prevents regression)`,
               );
             }
           }
@@ -539,13 +546,20 @@ serve(async (req) => {
             // Don't set trailing stop if it would be closer than 1% to entry
             console.log(`⚠️ Trailing SL skipped for ${position.symbol} SHORT - calculated stop ${calculatedStopLoss.toFixed(2)} too close to entry ${position.entry_price.toFixed(2)} (must be >= ${minAllowedStop.toFixed(2)} for 1% min distance)`);
           } else {
-            // Only update if new stop loss is LOWER than current (never move up)
+            // 🔒 RATCHETING MECHANISM: Stop can ONLY move DOWN for SHORT positions (never up)
+            // This ensures we never give back locked-in profit when price bounces
+            // Current stop_loss represents the "low-water mark" of protection
             if (calculatedStopLoss < position.stop_loss) {
               newStopLoss = calculatedStopLoss;
               trailingActivated = true;
               const distancePercent = ((newStopLoss - position.entry_price) / position.entry_price) * 100;
               console.log(
-                `Trailing SL activated for ${position.symbol} (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, profit-based: ${profitBasedStop.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
+                `🔻 Trailing SL LOWERED for ${position.symbol} SHORT (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, profit-based: ${profitBasedStop.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
+              );
+            } else {
+              // Log when ratchet prevents regression
+              console.log(
+                `🔒 Trailing SL HELD at peak for ${position.symbol} SHORT - calculated ${calculatedStopLoss.toFixed(2)} would be higher than current ${position.stop_loss.toFixed(2)} (ratchet prevents regression)`,
               );
             }
           }
