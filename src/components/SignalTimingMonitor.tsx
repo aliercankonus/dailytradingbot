@@ -13,6 +13,7 @@ interface SignalTiming {
   reason: string;
   confidence_score: number;
   indicators: any;
+  strategy_name: string | null;
 }
 
 export const SignalTimingMonitor = () => {
@@ -158,6 +159,11 @@ export const SignalTimingMonitor = () => {
                       <div className="text-xs text-muted-foreground">
                         {format(new Date(signal.created_at), 'MMM dd, HH:mm:ss')}
                       </div>
+                      {signal.strategy_name && (
+                        <div className="text-xs text-primary font-medium">
+                          {signal.strategy_name}
+                        </div>
+                      )}
                     </div>
                   </div>
                   
