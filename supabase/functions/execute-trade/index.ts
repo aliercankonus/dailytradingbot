@@ -819,6 +819,11 @@ serve(async (req) => {
         if (analysis.riskLevel === 'high') {
           throw new Error(`AI risk level HIGH: ${analysis.keyFactors?.slice(0, 2).join(', ')}`);
         }
+        // Medium risk: reduce position size by 50%
+        if (analysis.riskLevel === 'medium') {
+          aiPositionMultiplier *= 0.5;
+          console.log(`⚠️ AI medium risk detected - position size reduced by 50% (multiplier: ${aiPositionMultiplier}x)`);
+        }
       } else if (aiError) {
         console.warn('AI analysis unavailable, proceeding with standard filters:', aiError);
       }
