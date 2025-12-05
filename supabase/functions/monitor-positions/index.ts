@@ -503,12 +503,17 @@ serve(async (req) => {
           // Use the HIGHER of the two (more protective)
           let calculatedStopLoss = Math.max(profitBasedStop, atrBasedStop);
           
-          // ENFORCE MINIMUM 1% DISTANCE FROM ENTRY - trailing stop must not be too close to entry
-          // For BUY: stop must be AT LEAST 1% below entry (stop_loss <= entry - 1%)
-          const maxAllowedStop = position.entry_price - minDistanceFromEntry;
-          if (calculatedStopLoss > maxAllowedStop) {
-            // Don't set trailing stop if it would be closer than 1% to entry
-            console.log(`⚠️ Trailing SL skipped for ${position.symbol} BUY - calculated stop ${calculatedStopLoss.toFixed(2)} too close to entry ${position.entry_price.toFixed(2)} (must be <= ${maxAllowedStop.toFixed(2)} for 1% min distance)`);
+          // ENFORCE MINIMUM 1% DISTANCE FROM CURRENT PRICE for trailing stops
+          // For BUY: trailing stop should be BELOW current price by at least the ATR buffer
+          // The stop must also not be too close to entry in the WRONG direction
+          // For a profitable BUY, stop should be ABOVE entry (locking profit)
+          // Only reject if the stop is BELOW entry and within 1% (which would be a losing stop)
+          const minAllowedStop = position.entry_price - minDistanceFromEntry;
+          const isStopTooCloseBelowEntry = calculatedStopLoss < position.entry_price && calculatedStopLoss > minAllowedStop;
+          
+          if (isStopTooCloseBelowEntry) {
+            // Don't set trailing stop if it's below entry but within 1% (losing position with tight stop)
+            console.log(`⚠️ Trailing SL skipped for ${position.symbol} BUY - calculated stop ${calculatedStopLoss.toFixed(2)} too close below entry ${position.entry_price.toFixed(2)} (must be <= ${minAllowedStop.toFixed(2)} if below entry)`);
           } else {
             // 🔒 RATCHETING MECHANISM: Stop can ONLY move UP for BUY positions (never down)
             // This ensures we never give back locked-in profit when price pulls back
@@ -516,9 +521,9 @@ serve(async (req) => {
             if (calculatedStopLoss > position.stop_loss) {
               newStopLoss = calculatedStopLoss;
               trailingActivated = true;
-              const distancePercent = ((position.entry_price - newStopLoss) / position.entry_price) * 100;
+              const distancePercent = ((newStopLoss - position.entry_price) / position.entry_price) * 100;
               console.log(
-                `🔺 Trailing SL RAISED for ${position.symbol} BUY (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, profit-based: ${profitBasedStop.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
+                `🔺 Trailing SL RAISED for ${position.symbol} BUY (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${distancePercent.toFixed(2)}% from entry, profit-based: ${profitBasedStop.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
               );
             } else {
               // Log when ratchet prevents regression
