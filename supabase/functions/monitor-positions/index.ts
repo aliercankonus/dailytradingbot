@@ -478,6 +478,11 @@ serve(async (req) => {
       let newStopLoss = position.stop_loss;
       let trailingActivated = false;
       
+      // Track peak P&L for ratcheting mechanism (persisted to database)
+      const currentPeakPnl = position.peak_pnl_percent || 0;
+      const newPeakPnl = Math.max(currentPeakPnl, pnlPercent);
+      const peakUpdated = newPeakPnl > currentPeakPnl;
+      
       // Minimum stop loss distance (1% from entry) - prevents premature exits
       const MIN_TRAILING_STOP_DISTANCE_PERCENT = 1.0;
       const minDistanceFromEntry = position.entry_price * (MIN_TRAILING_STOP_DISTANCE_PERCENT / 100);
@@ -574,16 +579,25 @@ serve(async (req) => {
             }
           }
         }
-        // Update stop loss in database if trailing was activated
-        if (trailingActivated) {
+        // Update stop loss AND peak P&L in database if trailing was activated
+        if (trailingActivated || peakUpdated) {
+          const updateData: { stop_loss?: number; peak_pnl_percent?: number } = {};
+          if (trailingActivated) updateData.stop_loss = newStopLoss;
+          if (peakUpdated) updateData.peak_pnl_percent = newPeakPnl;
+          
           // Use optimistic locking - only update if position is still active
           const { data: updatedPos, error: posUpdateError } = await supabase
             .from("positions")
-            .update({ stop_loss: newStopLoss })
+            .update(updateData)
             .eq("id", position.id)
             .eq("status", "active") // RACE CONDITION FIX: Only update if still active
             .select()
             .maybeSingle();
+          
+          if (posUpdateError) {
+            console.error(`Error updating trailing stop for ${position.id}:`, posUpdateError);
+            continue;
+          }
           
           if (posUpdateError) {
             console.error(`Error updating trailing stop for ${position.id}:`, posUpdateError);

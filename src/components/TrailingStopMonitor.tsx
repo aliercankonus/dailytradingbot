@@ -14,8 +14,6 @@ export const TrailingStopMonitor = () => {
     distanceMultiplier: 1.5,
     profitLockPercent: 50,
   });
-  // Track peak P&L for each position to show correct locked profit (ratchet mechanism)
-  const [peakPnlMap, setPeakPnlMap] = useState<Record<string, number>>({});
   const { prices, priceVersion, getPrice } = useRealtimePricesContext();
 
   useEffect(() => {
@@ -115,14 +113,10 @@ export const TrailingStopMonitor = () => {
             ? ((currentPrice - p.entry_price) / p.entry_price) * 100
             : ((p.entry_price - currentPrice) / p.entry_price) * 100;
 
-        // 🔒 RATCHET: Use peak P&L for locked profit calculation, never current
-        const previousPeak = peakPnlMap[p.id] || 0;
-        const currentPeak = Math.max(previousPeak, pnlPercent);
-        
-        // Update peak map if new peak reached
-        if (currentPeak > previousPeak) {
-          setPeakPnlMap(prev => ({ ...prev, [p.id]: currentPeak }));
-        }
+        // 🔒 RATCHET: Use peak P&L from database (persisted), fallback to current if not set
+        // The database peak is updated by monitor-positions and survives page refreshes
+        const dbPeak = p.peak_pnl_percent || 0;
+        const currentPeak = Math.max(dbPeak, pnlPercent);
 
         // Calculate position-specific trailing stop based on entry + profit - distance
         // This makes each position's stop independent even for the same symbol
