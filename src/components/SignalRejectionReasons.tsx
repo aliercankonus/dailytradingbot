@@ -516,6 +516,77 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
         </TooltipProvider>
       </div>
       
+      {/* Enhanced Confidence Calculation Breakdown */}
+      {(trendData?.baseConfidence !== undefined || filtersStatus?.baseConfidence !== undefined) && (
+        <div className="space-y-1.5 pt-2 border-t border-border/50">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-muted-foreground">Confidence Calculation</span>
+            <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${confStyles.text} ${confStyles.bg} ${confStyles.border}`}>
+              = {confidence || 0}%
+            </Badge>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="text-center p-1.5 rounded border bg-muted/30 border-border/50">
+                    <div className="text-[9px] text-muted-foreground mb-0.5">Base</div>
+                    <div className="text-xs font-mono font-medium text-foreground">
+                      {(trendData?.baseConfidence || filtersStatus?.baseConfidence || 0).toFixed(0)}%
+                    </div>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-[10px]">
+                  <p>Base confidence from multi-timeframe alignment</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className={`text-center p-1.5 rounded border ${
+                    (trendData?.adxBoost || filtersStatus?.adxBoost || 0) > 0 
+                      ? 'bg-green-500/20 border-green-500/30' 
+                      : 'bg-muted/30 border-border/50'
+                  }`}>
+                    <div className="text-[9px] text-muted-foreground mb-0.5">ADX Boost</div>
+                    <div className={`text-xs font-mono font-medium ${
+                      (trendData?.adxBoost || filtersStatus?.adxBoost || 0) > 0 ? 'text-green-400' : 'text-muted-foreground'
+                    }`}>
+                      +{(trendData?.adxBoost || filtersStatus?.adxBoost || 0).toFixed(0)}%
+                    </div>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-[10px]">
+                  <p>Bonus from strong ADX (≥30: +5%, ≥40: +10%)</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className={`text-center p-1.5 rounded border ${
+                    (trendData?.volumeBoost || filtersStatus?.volumeBoost || 0) > 0 
+                      ? 'bg-blue-500/20 border-blue-500/30' 
+                      : 'bg-muted/30 border-border/50'
+                  }`}>
+                    <div className="text-[9px] text-muted-foreground mb-0.5">Vol Boost</div>
+                    <div className={`text-xs font-mono font-medium ${
+                      (trendData?.volumeBoost || filtersStatus?.volumeBoost || 0) > 0 ? 'text-blue-400' : 'text-muted-foreground'
+                    }`}>
+                      +{(trendData?.volumeBoost || filtersStatus?.volumeBoost || 0).toFixed(0)}%
+                    </div>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-[10px]">
+                  <p>Bonus from volume confirmation (spike: +3%, confirms direction: +2%)</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        </div>
+      )}
+      
       {/* Alignment Breakdown Section */}
       <AlignmentBreakdownDisplay alignmentBreakdown={alignmentBreakdown} />
     </div>
