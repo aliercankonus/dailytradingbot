@@ -325,9 +325,33 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
   
   if (adx === undefined && confidence === undefined) return null;
   
-  const adxPassing = adx >= 20;
-  const confidencePassing = confidence >= minConfidence;
-  const consistencyPassing = (trendConsistency || 0) >= minConsistency;
+  // ADX scoring: 0-15 (red), 15-20 (orange), 20-30 (yellow), 30+ (green)
+  const getAdxStyles = (value: number) => {
+    if (value >= 30) return { text: 'text-green-400', bg: 'bg-green-500/20', border: 'border-green-500/30', bar: 'bg-green-500' };
+    if (value >= 20) return { text: 'text-yellow-400', bg: 'bg-yellow-500/20', border: 'border-yellow-500/30', bar: 'bg-yellow-500' };
+    if (value >= 15) return { text: 'text-orange-400', bg: 'bg-orange-500/20', border: 'border-orange-500/30', bar: 'bg-orange-500' };
+    return { text: 'text-red-400', bg: 'bg-red-500/20', border: 'border-red-500/30', bar: 'bg-red-500' };
+  };
+  
+  // Confidence/Alignment: based on percentage vs min threshold
+  const getPercentStyles = (value: number, min: number) => {
+    const ratio = value / min;
+    if (ratio >= 1.2) return { text: 'text-green-400', bg: 'bg-green-500/20', border: 'border-green-500/30', bar: 'bg-green-500' };
+    if (ratio >= 1.0) return { text: 'text-yellow-400', bg: 'bg-yellow-500/20', border: 'border-yellow-500/30', bar: 'bg-yellow-500' };
+    if (ratio >= 0.8) return { text: 'text-orange-400', bg: 'bg-orange-500/20', border: 'border-orange-500/30', bar: 'bg-orange-500' };
+    return { text: 'text-red-400', bg: 'bg-red-500/20', border: 'border-red-500/30', bar: 'bg-red-500' };
+  };
+  
+  // Regime badge styling
+  const getRegimeStyles = (r: string) => {
+    if (r === 'trending') return 'bg-green-500/20 text-green-400 border-green-500/30';
+    if (r === 'weak') return 'bg-orange-500/20 text-orange-400 border-orange-500/30';
+    return 'bg-red-500/20 text-red-400 border-red-500/30';
+  };
+  
+  const adxStyles = getAdxStyles(adx || 0);
+  const confStyles = getPercentStyles(confidence || 0, minConfidence);
+  const alignStyles = getPercentStyles(trendConsistency || 0, minConsistency);
   
   return (
     <div className="space-y-2 p-2 bg-muted/30 rounded-md">
@@ -338,34 +362,81 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
         </div>
         <Badge 
           variant="outline" 
-          className="text-[10px] px-1.5 py-0 capitalize bg-orange-500/10 text-orange-400 border-orange-500/30"
+          className={`text-[10px] px-1.5 py-0 capitalize ${getRegimeStyles(regime || 'weak')}`}
         >
           {regime || "weak"}
         </Badge>
       </div>
       
-      <div className="grid grid-cols-3 gap-2">
-        <div className="text-center">
-          <div className="text-[10px] text-muted-foreground mb-0.5">ADX</div>
-          <div className={`text-sm font-mono ${adxPassing ? 'text-green-400' : 'text-red-400'}`}>
-            {adx?.toFixed(1) || '—'}
-          </div>
-          <div className="text-[9px] text-muted-foreground">min: 20</div>
-        </div>
-        <div className="text-center">
-          <div className="text-[10px] text-muted-foreground mb-0.5">Confidence</div>
-          <div className={`text-sm font-mono ${confidencePassing ? 'text-green-400' : 'text-red-400'}`}>
-            {confidence || '—'}%
-          </div>
-          <div className="text-[9px] text-muted-foreground">min: {minConfidence}%</div>
-        </div>
-        <div className="text-center">
-          <div className="text-[10px] text-muted-foreground mb-0.5">Alignment</div>
-          <div className={`text-sm font-mono ${consistencyPassing ? 'text-green-400' : 'text-red-400'}`}>
-            {trendConsistency?.toFixed(0) || '—'}%
-          </div>
-          <div className="text-[9px] text-muted-foreground">min: {minConsistency}%</div>
-        </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={`text-center p-1.5 rounded border ${adxStyles.bg} ${adxStyles.border}`}>
+                <div className="text-[9px] text-muted-foreground mb-0.5">ADX</div>
+                <div className={`text-sm font-mono font-medium ${adxStyles.text}`}>
+                  {adx?.toFixed(1) || '—'}
+                </div>
+                <div className="text-[8px] text-muted-foreground">min: 20</div>
+                <div className="mt-1 h-1 bg-muted/50 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full ${adxStyles.bar}`}
+                    style={{ width: `${Math.min((adx || 0) / 50 * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px]">
+              <p>Trend strength indicator. ≥20 required, ≥30 is strong</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={`text-center p-1.5 rounded border ${confStyles.bg} ${confStyles.border}`}>
+                <div className="text-[9px] text-muted-foreground mb-0.5">Confidence</div>
+                <div className={`text-sm font-mono font-medium ${confStyles.text}`}>
+                  {confidence || '—'}%
+                </div>
+                <div className="text-[8px] text-muted-foreground">min: {minConfidence}%</div>
+                <div className="mt-1 h-1 bg-muted/50 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full ${confStyles.bar}`}
+                    style={{ width: `${Math.min((confidence || 0), 100)}%` }}
+                  />
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px]">
+              <p>Signal confidence based on trend strength and indicators</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={`text-center p-1.5 rounded border ${alignStyles.bg} ${alignStyles.border}`}>
+                <div className="text-[9px] text-muted-foreground mb-0.5">Alignment</div>
+                <div className={`text-sm font-mono font-medium ${alignStyles.text}`}>
+                  {trendConsistency?.toFixed(0) || '—'}%
+                </div>
+                <div className="text-[8px] text-muted-foreground">min: {minConsistency}%</div>
+                <div className="mt-1 h-1 bg-muted/50 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full ${alignStyles.bar}`}
+                    style={{ width: `${Math.min((trendConsistency || 0), 100)}%` }}
+                  />
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px]">
+              <p>Multi-timeframe trend agreement score</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
       
       {/* Alignment Breakdown Section */}
