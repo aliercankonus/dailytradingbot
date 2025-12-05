@@ -1320,11 +1320,14 @@ serve(async (req) => {
         const stopLossPercent = strategy.risk_settings?.stopLossPercent || riskParams.max_risk_per_trade_percent;
         const takeProfitPercent = strategy.risk_settings?.takeProfitPercent || stopLossPercent * 2.5;
 
+        // Map "neutral" to "ranging" for database enum compatibility
+        const dbTrend = trend === "neutral" ? "ranging" : trend;
+        
         const signal: SignalData = {
           user_id: userId,
           symbol,
           signal_type: signalType,
-          trend,
+          trend: dbTrend,
           confidence_score: Math.min(confidence, 100),
           entry_price: currentPrice,
           stop_loss: signalType === "long"
