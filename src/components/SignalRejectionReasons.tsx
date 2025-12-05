@@ -1,15 +1,23 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import {
   AlertCircle,
   TrendingDown,
   TrendingUp,
   Activity,
   Minimize2,
+  BarChart3,
+  Target,
+  Zap,
+  Layers,
+  Timer,
 } from "lucide-react";
 import { useSignalRejections } from "@/hooks/useSignalRejections";
 import { formatDistanceToNow } from "date-fns";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+
 interface SignalRejection {
   id: string;
   symbol: string;
@@ -18,15 +26,239 @@ interface SignalRejection {
   filters_status: any;
   trend_data: any;
 }
+
+interface ScoreBreakdown {
+  adx: { score: number; max: number };
+  momentum: { score: number; max: number };
+  alignment: { score: number; max: number };
+  technical: { score: number; max: number };
+  entry: { score: number; max: number };
+  total: number;
+  minRequired: number;
+}
+
+const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
+  if (!breakdown) return null;
+  
+  // Parse format like "ADX:22/25 MOM:0/25 ALIGN:12/20 TECH:10/15 ENTRY:12/15"
+  const pattern = /(\w+):(\d+)\/(\d+)/g;
+  const scores: Record<string, { score: number; max: number }> = {};
+  let match;
+  
+  while ((match = pattern.exec(breakdown)) !== null) {
+    const [, key, score, max] = match;
+    scores[key.toLowerCase()] = { score: parseInt(score), max: parseInt(max) };
+  }
+  
+  if (Object.keys(scores).length === 0) return null;
+  
+  return {
+    adx: scores.adx || { score: 0, max: 25 },
+    momentum: scores.mom || { score: 0, max: 25 },
+    alignment: scores.align || { score: 0, max: 20 },
+    technical: scores.tech || { score: 0, max: 15 },
+    entry: scores.entry || { score: 0, max: 15 },
+    total: (scores.adx?.score || 0) + (scores.mom?.score || 0) + (scores.align?.score || 0) + (scores.tech?.score || 0) + (scores.entry?.score || 0),
+    minRequired: 50,
+  };
+};
+
+const ScoreBar = ({ 
+  label, 
+  score, 
+  max, 
+  icon: Icon 
+}: { 
+  label: string; 
+  score: number; 
+  max: number; 
+  icon: React.ElementType;
+}) => {
+  const percentage = (score / max) * 100;
+  const getColor = () => {
+    if (percentage >= 80) return "bg-green-500";
+    if (percentage >= 60) return "bg-yellow-500";
+    if (percentage >= 40) return "bg-orange-500";
+    return "bg-red-500";
+  };
+  
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Icon className="h-3 w-3 text-muted-foreground shrink-0" />
+            <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden min-w-[40px]">
+              <div 
+                className={`h-full rounded-full transition-all ${getColor()}`}
+                style={{ width: `${percentage}%` }}
+              />
+            </div>
+            <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+              {score}/{max}
+            </span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">
+          <p>{label}: {score}/{max} ({percentage.toFixed(0)}%)</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
+
+const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
+  const breakdown = parseBreakdown(filtersStatus?.breakdown);
+  const qualityScore = filtersStatus?.qualityScore;
+  const minRequired = filtersStatus?.minRequired || 50;
+  
+  if (!breakdown && qualityScore === undefined) return null;
+  
+  const totalScore = breakdown?.total || qualityScore || 0;
+  const isPassing = totalScore >= minRequired;
+  
+  return (
+    <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+      {/* Total Score Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium">Quality Score</span>
+        </div>
+        <Badge 
+          variant={isPassing ? "default" : "destructive"} 
+          className="text-[10px] px-1.5 py-0"
+        >
+          {totalScore}/{100} {isPassing ? "✓" : `(min: ${minRequired})`}
+        </Badge>
+      </div>
+      
+      {/* Overall Progress */}
+      <div className="relative">
+        <Progress 
+          value={totalScore} 
+          className="h-2"
+        />
+        {/* Min threshold marker */}
+        <div 
+          className="absolute top-0 h-2 w-0.5 bg-foreground/50"
+          style={{ left: `${minRequired}%` }}
+        />
+      </div>
+      
+      {/* Individual Score Breakdown */}
+      {breakdown && (
+        <div className="grid grid-cols-1 gap-1 pt-1 border-t border-border/50">
+          <ScoreBar 
+            label="ADX Strength" 
+            score={breakdown.adx.score} 
+            max={breakdown.adx.max} 
+            icon={Activity}
+          />
+          <ScoreBar 
+            label="Momentum" 
+            score={breakdown.momentum.score} 
+            max={breakdown.momentum.max} 
+            icon={Zap}
+          />
+          <ScoreBar 
+            label="Alignment" 
+            score={breakdown.alignment.score} 
+            max={breakdown.alignment.max} 
+            icon={Layers}
+          />
+          <ScoreBar 
+            label="Technical" 
+            score={breakdown.technical.score} 
+            max={breakdown.technical.max} 
+            icon={Target}
+          />
+          <ScoreBar 
+            label="Entry Timing" 
+            score={breakdown.entry.score} 
+            max={breakdown.entry.max} 
+            icon={Timer}
+          />
+        </div>
+      )}
+      
+      {/* Market Regime */}
+      {filtersStatus?.regime && (
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground pt-1 border-t border-border/50">
+          <span>Market:</span>
+          <Badge variant="outline" className="text-[10px] px-1 py-0 capitalize">
+            {filtersStatus.regime}
+          </Badge>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const MaxTradesDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
+  const current = filtersStatus?.currentTradeCount;
+  const max = filtersStatus?.maxTradesPerSymbol;
+  
+  if (current === undefined || max === undefined) return null;
+  
+  return (
+    <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-md">
+      <div className="flex-1">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs font-medium">Active Trades</span>
+          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+            {current}/{max}
+          </Badge>
+        </div>
+        <Progress value={(current / max) * 100} className="h-1.5" />
+      </div>
+    </div>
+  );
+};
+
 export const SignalRejectionReasons = () => {
   const { rejections, loading } = useSignalRejections();
+
   const getReasonIcon = (reason: string) => {
+    if (reason.includes("Max trades")) return <Layers className="h-4 w-4" />;
+    if (reason.includes("Quality score")) return <BarChart3 className="h-4 w-4" />;
     if (reason.includes("timeframe")) return <TrendingDown className="h-4 w-4" />;
     if (reason.includes("momentum")) return <Activity className="h-4 w-4" />;
     if (reason.includes("ranging")) return <Minimize2 className="h-4 w-4" />;
     if (reason.includes("pullback")) return <TrendingUp className="h-4 w-4" />;
+    if (reason.includes("strategy")) return <Target className="h-4 w-4" />;
     return <AlertCircle className="h-4 w-4" />;
   };
+
+  const getReasonBadgeVariant = (reason: string): "default" | "secondary" | "destructive" | "outline" => {
+    if (reason.includes("Max trades")) return "secondary";
+    if (reason.includes("Quality score")) return "destructive";
+    if (reason.includes("No strategy")) return "outline";
+    return "destructive";
+  };
+
+  const renderFilterDetails = (rejection: SignalRejection) => {
+    const fs = rejection.filters_status;
+    const reason = rejection.rejection_reason || "";
+    
+    // Quality score rejection - show breakdown
+    if (reason.includes("Quality score") || reason.includes("No strategy conditions met")) {
+      return <QualityScoreBreakdown filtersStatus={fs} />;
+    }
+    
+    // Max trades rejection
+    if (reason.includes("Max trades")) {
+      return <MaxTradesDisplay filtersStatus={fs} />;
+    }
+    
+    // Default filter details
+    return (
+      <div className="text-xs text-muted-foreground">
+        {getFilterDetails(fs)}
+      </div>
+    );
+  };
+
   const getFilterDetails = (filtersStatus: any) => {
     const details = [];
     if (filtersStatus?.aligned === false) {
@@ -43,278 +275,73 @@ export const SignalRejectionReasons = () => {
     }
     return details.length > 0 ? details.join(" | ") : filtersStatus?.required || "Check filters";
   };
+
   const getRejectionDetails = (rejection: SignalRejection) => {
     const details = [];
     const fs = rejection.filters_status;
     const td = rejection.trend_data;
-    if (!fs) return "No data";
+
+    if (!fs && !td) return "No data";
     
+    // Skip for quality score rejections (handled by visual component)
+    if (rejection.rejection_reason?.includes("Quality score") || 
+        rejection.rejection_reason?.includes("No strategy conditions met")) {
+      // Show strategies evaluated if available
+      if (fs?.strategiesEvaluated) {
+        return `${fs.strategiesEvaluated} strategies evaluated`;
+      }
+      return null;
+    }
+    
+    // Max trades rejection (handled by visual component)
+    if (rejection.rejection_reason?.includes("Max trades")) {
+      return null;
+    }
+
     // ADX below 20 rejection
     if (rejection.rejection_reason?.includes("ADX below 20")) {
       const adx = fs.adx ?? td?.volatility?.adx;
       if (adx !== undefined) {
-        details.push(`ADX: ${adx.toFixed(1)} (needs ≥20 for trend strength)`);
-      }
-      const confidence = fs.confidence ?? td?.confidence;
-      const trendConsistency = fs.trendConsistency ?? td?.trendConsistency;
-      if (confidence !== undefined) {
-        details.push(`Confidence: ${confidence.toFixed(1)}%`);
-      }
-      if (trendConsistency !== undefined) {
-        details.push(`Consistency: ${trendConsistency.toFixed(1)}%`);
+        details.push(`ADX: ${adx.toFixed(1)} (needs ≥20)`);
       }
       return details.join(" | ");
     }
-    
-    // Confidence or trend consistency below threshold
-    if (rejection.rejection_reason?.includes("confidence or trend consistency below threshold")) {
-      const confidence = fs.confidence ?? td?.confidence;
-      const trendConsistency = fs.trendConsistency ?? td?.trendConsistency;
-      // Always show the values and whether they meet the threshold
-      if (confidence !== undefined) {
-        const meetsConfidence = confidence >= 60;
-        details.push(`Confidence: ${confidence}%${!meetsConfidence ? " ❌" : " ✓"}`);
-      }
-      if (trendConsistency !== undefined) {
-        const meetsConsistency = trendConsistency >= 50;
-        details.push(`Consistency: ${trendConsistency}%${!meetsConsistency ? " ❌" : " ✓"}`);
-      }
-      // If meetsThreshold is explicitly false but values seem to pass defaults,
-      // it means user has custom thresholds - indicate this
-      if (
-        fs.meetsThreshold === false &&
-        confidence !== undefined &&
-        trendConsistency !== undefined &&
-        confidence >= 60 &&
-        trendConsistency >= 50
-      ) {
-        details.push("(Custom thresholds set higher than defaults)");
-      }
-      // Show timeframe conflicts if confidence is the issue
-      if (confidence !== undefined && confidence < 60) {
-        if (td?.multiTimeframe) {
-          const mt = td.multiTimeframe;
-          const conflicts = [];
-          if (mt.trend4h && mt.trend1h && mt.trend4h !== mt.trend1h) {
-            conflicts.push(`4h ${mt.trend4h} vs 1h ${mt.trend1h}`);
-          }
-          if (mt.trend1h && mt.trend30m && mt.trend1h !== mt.trend30m) {
-            conflicts.push(`1h ${mt.trend1h} vs 30m ${mt.trend30m}`);
-          }
-          if (mt.trend30m && mt.trend15m && mt.trend30m !== mt.trend15m) {
-            conflicts.push(`30m ${mt.trend30m} vs 15m ${mt.trend15m}`);
-          }
-          if (conflicts.length > 0) {
-            details.push(`Conflicts: ${conflicts.join(", ")}`);
-          }
-          // Show individual timeframe confidences
-          const tfConfidences = [];
-          if (mt.confidence4h !== undefined) tfConfidences.push(`4h: ${mt.confidence4h}%`);
-          if (mt.confidence1h !== undefined) tfConfidences.push(`1h: ${mt.confidence1h}%`);
-          if (mt.confidence30m !== undefined) tfConfidences.push(`30m: ${mt.confidence30m}%`);
-          if (mt.confidence15m !== undefined) tfConfidences.push(`15m: ${mt.confidence15m}%`);
-          if (tfConfidences.length > 0) {
-            details.push(`TF confidence: ${tfConfidences.join(", ")}`);
-          }
-        }
-      }
-    }
-    // Timeframes not aligned with no divergence opportunity
-    if (rejection.rejection_reason?.includes("timeframes not aligned, no divergence opportunity")) {
-      // Show all timeframe trends
-      if (td?.multiTimeframe) {
-        const mt = td.multiTimeframe;
-        const trends = [];
-        if (mt.trend4h !== undefined) trends.push(`4h: ${mt.trend4h}`);
-        if (mt.trend1h !== undefined) trends.push(`1h: ${mt.trend1h}`);
-        if (mt.trend30m !== undefined) trends.push(`30m: ${mt.trend30m}`);
-        if (mt.trend15m !== undefined) trends.push(`15m: ${mt.trend15m}`);
-        if (trends.length > 0) {
-          details.push(trends.join(", "));
-        }
-        // Show confidence levels for each timeframe
-        const confidences = [];
-        if (mt.confidence4h !== undefined) confidences.push(`4h: ${mt.confidence4h}%`);
-        if (mt.confidence1h !== undefined) confidences.push(`1h: ${mt.confidence1h}%`);
-        if (mt.confidence30m !== undefined) confidences.push(`30m: ${mt.confidence30m}%`);
-        if (mt.confidence15m !== undefined) confidences.push(`15m: ${mt.confidence15m}%`);
-        if (confidences.length > 0) {
-          details.push(`Confidence: ${confidences.join(", ")}`);
-        }
-      } else if (fs.trend4h !== undefined || fs.trend1h !== undefined) {
-        details.push(`4h: ${fs.trend4h ?? "unknown"}, 1h: ${fs.trend1h ?? "unknown"}`);
-      }
-      // Show overall confidence and consistency if available
-      const overallConfidence = td?.confidence ?? fs.confidence;
-      const trendConsistency = td?.trendConsistency ?? fs.trendConsistency;
-      if (overallConfidence !== undefined || trendConsistency !== undefined) {
-        const thresholdDetails = [];
-        if (overallConfidence !== undefined) {
-          const meetsConfidence = overallConfidence >= 60;
-          thresholdDetails.push(`Overall: ${overallConfidence}%${!meetsConfidence ? " < 60% ❌" : " ✓"}`);
-        }
-        if (trendConsistency !== undefined) {
-          const meetsConsistency = trendConsistency >= 50;
-          thresholdDetails.push(`Consistency: ${trendConsistency}%${!meetsConsistency ? " < 50% ❌" : " ✓"}`);
-        }
-        if (thresholdDetails.length > 0) {
-          details.push(thresholdDetails.join(", "));
-        }
-      }
-      if (td?.momentum) {
-        const m = td.momentum;
-        const momentumDetails = [];
-        if (m.lastCloseAlignsWithTrend !== undefined) {
-          momentumDetails.push(`Price align: ${m.lastCloseAlignsWithTrend ? "✓" : "❌"}`);
-        }
 
-        if (m.hasDivergence !== undefined) {
-          momentumDetails.push(`Divergence: ${m.hasDivergence ? "Yes ❌" : "None ✓"}`);
-        }
-        if (m.macdHistogram !== undefined) {
-          const macdOK = Math.abs(m.macdHistogram) > 0.05;
-          momentumDetails.push(`MACD: ${m.macdHistogram.toFixed(3)}${!macdOK ? " < 0.05 ❌" : " ✓"}`);
-        }
-        const momentumConfirmed = m.confirms ?? false;
-        momentumDetails.push(momentumConfirmed ? "Momentum ✓" : "No momentum ❌");
-        details.push(momentumDetails.join(" | "));
-      }
-      // Show why no divergence
-      if (td?.higherTimeframeFilter) {
-        const htf = td.higherTimeframeFilter;
-        if (htf.aligned) {
-          details.push("Aligned (standard signal requires confidence/momentum)");
-        } else {
-          // Check if divergence signals are enabled
-          const pullbackEnabled = fs.pullbackEnabled ?? true;
-          const earlyReversalEnabled = fs.earlyReversalEnabled ?? true;
-          if (!pullbackEnabled && !earlyReversalEnabled) {
-            details.push("Divergence signals disabled");
-          } else {
-            // Show specific divergence conditions
-            const divergenceChecks = [];
-            // Pullback conditions
-            if (pullbackEnabled && td.multiTimeframe) {
-              const mt = td.multiTimeframe;
-              const confidence4h = mt.confidence4h ?? 0;
-              const strongHigherTF = confidence4h >= 60;
-              if (!strongHigherTF) {
-                divergenceChecks.push(`Pullback: 4h ${confidence4h}% < 60%`);
-              }
-            }
-            // Early reversal conditions
-            if (earlyReversalEnabled && td.multiTimeframe) {
-              const mt = td.multiTimeframe;
-              const confidence1h = mt.confidence1h ?? 0;
-              const confidence4h = mt.confidence4h ?? 0;
-              const strongReversal = confidence1h >= 70 && confidence4h < 60;
-              if (!strongReversal) {
-                divergenceChecks.push(`Reversal: 1h ${confidence1h}% (needs ≥70%) & 4h ${confidence4h}% (needs <60%)`);
-              }
-            }
-            if (divergenceChecks.length > 0) {
-              details.push(divergenceChecks.join(" | "));
-            }
-          }
-        }
-      }
-      // Show ranging market if applicable
-      if (td?.ranging?.isRanging === true) {
-        const atrPercent = td.ranging.atrPercent ?? 0;
-        const adx = td.volatility?.adx ?? 0;
-        details.push(`Ranging: ATR ${atrPercent.toFixed(2)}%, ADX ${adx.toFixed(1)}`);
-      }
-    }
     // Reversal risk rejections
     if (rejection.rejection_reason?.includes("Reversal risk")) {
       if (td?.multiTimeframe) {
         const mt = td.multiTimeframe;
-        details.push(`4H: ${mt.trend4h ?? "unknown"} | 1H: ${mt.trend1h ?? "unknown"}`);
+        details.push(`4H: ${mt.trend4h ?? "?"} | 1H: ${mt.trend1h ?? "?"}`);
       }
-      if (td?.momentum) {
-        const m = td.momentum;
-        details.push(`Momentum: ${m.state ?? "unknown"}`);
-        if (m.macdDirectionAligned === false) {
-          details.push(`MACD misaligned`);
-        }
+      if (td?.momentum?.state) {
+        details.push(`Momentum: ${td.momentum.state}`);
       }
-      if (td?.stochasticRsi?.overboughtCount > 0) {
-        details.push(`Overbought: ${td.stochasticRsi.overboughtCount} TFs`);
-      }
-      if (td?.stochasticRsi?.oversoldCount > 0) {
-        details.push(`Oversold: ${td.stochasticRsi.oversoldCount} TFs`);
-      }
+      return details.join(" | ");
     }
-    // Other timeframe alignment issues
-    else if (
-      rejection.rejection_reason?.includes("timeframes NOT aligned") ||
-      rejection.rejection_reason?.includes("timeframe")
-    ) {
-      // First try to get from multiTimeframe in trend_data
+
+    // Timeframe alignment issues
+    if (rejection.rejection_reason?.includes("timeframe")) {
       if (td?.multiTimeframe) {
         const mt = td.multiTimeframe;
-        details.push(`4H: ${mt.trend4h ?? "unknown"} | 1H: ${mt.trend1h ?? "unknown"}`);
-      } else if (fs.trend4h !== undefined || fs.trend1h !== undefined) {
-        details.push(`4H: ${fs.trend4h ?? "unknown"} | 1H: ${fs.trend1h ?? "unknown"}`);
+        details.push(`4H: ${mt.trend4h ?? "?"} | 1H: ${mt.trend1h ?? "?"}`);
       }
+      return details.join(" | ");
     }
-    // Pullback issues
-    if (rejection.rejection_reason?.includes("pullback")) {
-      if (fs.pullbackPercent !== undefined && fs.pullbackPercent !== null) {
-        details.push(`Retracement: ${fs.pullbackPercent.toFixed(1)}%`);
-      }
-    }
-    // Momentum issues - show specific failure point
+
+    // Momentum issues
     if (rejection.rejection_reason?.includes("momentum")) {
-      // Check if last close aligns with trend
-      const lastCloseAligns = td?.momentum?.lastCloseAlignsWithTrend ?? fs.momentum?.lastCloseAlignsWithTrend ?? false;
-
-      // Check for divergence
-      const hasDivergence = td?.momentum?.hasDivergence ?? fs.momentum?.hasDivergence ?? false;
-      // Check MACD histogram
-      const macdHistogram = td?.momentum?.macdHistogram ?? fs.momentum?.macdHistogram;
-      const macdDirectionAligned = td?.momentum?.macdDirectionAligned ?? fs.momentum?.macdDirectionAligned ?? false;
-      const macdExpanding = td?.momentum?.macdExpanding ?? fs.momentum?.macdExpanding ?? false;
-
-      // Check ADX
-      const adx = td?.momentum?.adx ?? fs.momentum?.adx;
-      const adxOK = adx !== undefined && adx >= 20;
-      if (!lastCloseAligns) {
-        details.push(`Last close does not align with trend direction`);
+      const m = td?.momentum || fs?.momentum;
+      if (m) {
+        if (!m.lastCloseAlignsWithTrend) details.push("Price not aligned");
+        if (m.hasDivergence) details.push("Divergence detected");
+        if (!m.macdDirectionAligned) details.push("MACD misaligned");
       }
-
-      if (hasDivergence) {
-        details.push(`Price/MACD divergence detected`);
-      }
-
-      if (!macdDirectionAligned) {
-        if (macdHistogram !== undefined) {
-          details.push(`MACD histogram: ${macdHistogram.toFixed(4)} (wrong direction for trend)`);
-        } else {
-          details.push(`MACD histogram: unavailable`);
-        }
-      } else if (!macdExpanding) {
-        if (macdHistogram !== undefined) {
-          details.push(`MACD histogram: ${macdHistogram.toFixed(4)} (need >0.05 expansion)`);
-        } else {
-          details.push(`MACD histogram: unavailable`);
-        }
-      }
-
-      if (!adxOK) {
-        if (adx !== undefined) {
-          details.push(`ADX: ${adx.toFixed(1)} (need ≥20)`);
-        } else {
-          details.push(`ADX: unavailable`);
-        }
-      }
+      return details.join(" | ");
     }
-    // Ranging market
-    if (rejection.rejection_reason?.includes("ranging") && fs.isRanging === true) {
-      details.push(`Market: Ranging`);
-    }
-    return details.length > 0 ? details.join(" | ") : "No specific values";
+
+    return details.length > 0 ? details.join(" | ") : null;
   };
+
   if (loading) {
     return (
       <Card>
@@ -325,6 +352,7 @@ export const SignalRejectionReasons = () => {
       </Card>
     );
   }
+
   if (rejections.length === 0) {
     return (
       <Card>
@@ -340,6 +368,7 @@ export const SignalRejectionReasons = () => {
       </Card>
     );
   }
+
   return (
     <Card>
       <CardHeader>
@@ -353,11 +382,11 @@ export const SignalRejectionReasons = () => {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Symbol</TableHead>
-              <TableHead>Rejection Reason</TableHead>
-              <TableHead>Filter Details</TableHead>
-              <TableHead>Rejection Values</TableHead>
-              <TableHead>Last Checked</TableHead>
+              <TableHead className="w-[100px]">Symbol</TableHead>
+              <TableHead className="w-[200px]">Rejection Reason</TableHead>
+              <TableHead className="min-w-[250px]">Score Breakdown</TableHead>
+              <TableHead>Details</TableHead>
+              <TableHead className="w-[100px]">Checked</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -367,17 +396,26 @@ export const SignalRejectionReasons = () => {
                 <TableCell>
                   <div className="flex items-center gap-2">
                     {getReasonIcon(rejection.rejection_reason ?? "")}
-                    <span className="text-sm">{rejection.rejection_reason}</span>
+                    <Badge 
+                      variant={getReasonBadgeVariant(rejection.rejection_reason ?? "")}
+                      className="text-[10px] font-normal max-w-[160px] truncate"
+                    >
+                      {rejection.rejection_reason?.replace(/\s*\([^)]*\)/g, '')}
+                    </Badge>
                   </div>
                 </TableCell>
                 <TableCell>
-                  <div className="text-xs text-muted-foreground">{getFilterDetails(rejection.filters_status)}</div>
+                  {renderFilterDetails(rejection)}
                 </TableCell>
                 <TableCell>
-                  <div className="text-xs font-medium text-destructive">{getRejectionDetails(rejection)}</div>
+                  {getRejectionDetails(rejection) && (
+                    <div className="text-xs text-muted-foreground">
+                      {getRejectionDetails(rejection)}
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell>
-                  <Badge variant="outline" className="text-xs">
+                  <Badge variant="outline" className="text-[10px]">
                     {formatDistanceToNow(new Date(rejection.checked_at), { addSuffix: true })}
                   </Badge>
                 </TableCell>
