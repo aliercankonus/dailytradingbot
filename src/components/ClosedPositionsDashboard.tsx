@@ -62,7 +62,7 @@ export const ClosedPositionsDashboard = () => {
     if (!positions || positions.length === 0) {
       return { 
         total: 0, profitable: 0, losses: 0, totalPnL: 0, avgPnL: 0, 
-        takeProfitCount: 0, stopLossCount: 0, trailingStopCount: 0, trendExitCount: 0, manualCount: 0 
+        takeProfitCount: 0, stopLossCount: 0, trailingStopCount: 0, trendExitCount: 0, emergencyExitCount: 0, manualCount: 0 
       };
     }
     
@@ -76,7 +76,10 @@ export const ClosedPositionsDashboard = () => {
     let stopLossCount = 0;
     let trailingStopCount = 0;
     let trendExitCount = 0;
+    let emergencyExitCount = 0;
     let manualCount = 0;
+    
+    const emergencyReasons = ['Emergency Exit', 'Flash Crash Exit', 'Volatility Exit', 'Reversal Risk', 'Early Warning'];
     
     positions.forEach(p => {
       const closeReason = getCloseReason(p);
@@ -84,6 +87,7 @@ export const ClosedPositionsDashboard = () => {
       else if (closeReason === 'Stop Loss') stopLossCount++;
       else if (closeReason === 'Trailing Stop') trailingStopCount++;
       else if (closeReason.includes('Trend Exit')) trendExitCount++;
+      else if (emergencyReasons.includes(closeReason)) emergencyExitCount++;
       else manualCount++;
     });
     
@@ -97,6 +101,7 @@ export const ClosedPositionsDashboard = () => {
       stopLossCount,
       trailingStopCount,
       trendExitCount,
+      emergencyExitCount,
       manualCount,
     };
   }, [positions]);
@@ -248,7 +253,7 @@ export const ClosedPositionsDashboard = () => {
           <CardDescription>How positions were closed</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <div className="text-center p-4 border rounded-lg bg-success/5">
               <div className="text-2xl font-bold text-success">{stats.takeProfitCount}</div>
               <div className="text-sm text-muted-foreground">Take Profit</div>
@@ -260,6 +265,10 @@ export const ClosedPositionsDashboard = () => {
             <div className="text-center p-4 border rounded-lg bg-purple-500/5">
               <div className="text-2xl font-bold text-purple-500">{stats.trendExitCount}</div>
               <div className="text-sm text-muted-foreground">Trend Exit</div>
+            </div>
+            <div className="text-center p-4 border rounded-lg bg-orange-500/5">
+              <div className="text-2xl font-bold text-orange-500">{stats.emergencyExitCount}</div>
+              <div className="text-sm text-muted-foreground">Emergency</div>
             </div>
             <div className="text-center p-4 border rounded-lg bg-destructive/5">
               <div className="text-2xl font-bold text-destructive">{stats.stopLossCount}</div>
