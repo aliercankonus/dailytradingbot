@@ -14,6 +14,8 @@ export const TrailingStopMonitor = () => {
     distanceMultiplier: 1.5,
     profitLockPercent: 50,
   });
+  // Track peak P&L for each position to show correct locked profit (ratchet mechanism)
+  const [peakPnlMap, setPeakPnlMap] = useState<Record<string, number>>({});
   const { prices, priceVersion, getPrice } = useRealtimePricesContext();
 
   useEffect(() => {
@@ -113,6 +115,15 @@ export const TrailingStopMonitor = () => {
             ? ((currentPrice - p.entry_price) / p.entry_price) * 100
             : ((p.entry_price - currentPrice) / p.entry_price) * 100;
 
+        // 🔒 RATCHET: Use peak P&L for locked profit calculation, never current
+        const previousPeak = peakPnlMap[p.id] || 0;
+        const currentPeak = Math.max(previousPeak, pnlPercent);
+        
+        // Update peak map if new peak reached
+        if (currentPeak > previousPeak) {
+          setPeakPnlMap(prev => ({ ...prev, [p.id]: currentPeak }));
+        }
+
         // Calculate position-specific trailing stop based on entry + profit - distance
         // This makes each position's stop independent even for the same symbol
         const profitAbsolute = p.side === "BUY" 
@@ -127,10 +138,11 @@ export const TrailingStopMonitor = () => {
           ? p.entry_price + profitAbsolute - trailingDistanceAbsolute
           : p.entry_price - profitAbsolute + trailingDistanceAbsolute;
 
-        // Calculate profit lock values
+        // Calculate profit lock values using PEAK P&L (ratchet mechanism)
         const profitLockPercent = settings.profitLockPercent;
-        const lockedProfitPercent = pnlPercent * (profitLockPercent / 100);
-        const lockedProfitAbsolute = profitAbsolute * (profitLockPercent / 100);
+        const lockedProfitPercent = currentPeak * (profitLockPercent / 100);
+        const peakProfitAbsolute = p.entry_price * (currentPeak / 100);
+        const lockedProfitAbsolute = peakProfitAbsolute * (profitLockPercent / 100);
         const lockedStopPrice = p.side === "BUY"
           ? p.entry_price + lockedProfitAbsolute
           : p.entry_price - lockedProfitAbsolute;
@@ -139,6 +151,7 @@ export const TrailingStopMonitor = () => {
           ...p,
           currentPrice: Number(currentPrice),
           pnlPercent: Number(pnlPercent),
+          peakPnlPercent: Number(currentPeak),
           stop_loss: Number(calculatedStopLoss),
           lockedProfitPercent: Number(lockedProfitPercent),
           lockedProfitAbsolute: Number(lockedProfitAbsolute),
@@ -226,6 +239,12 @@ export const TrailingStopMonitor = () => {
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         <div>
+                          <span>Peak P&L:</span>
+                          <span className="ml-1 font-medium text-blue-500">
+                            {formatPercent(position.peakPnlPercent, 2, true)}
+                          </span>
+                        </div>
+                        <div>
                           <span>Locked Profit:</span>
                           <span className="ml-1 font-medium text-green-500">
                             {formatPercent(position.lockedProfitPercent, 2, true)}
@@ -238,7 +257,7 @@ export const TrailingStopMonitor = () => {
                           </span>
                         </div>
                         <div className="col-span-2 mt-1 text-[10px] italic">
-                          {formatPercent(position.pnlPercent)} × {position.profitLockPercent}% = {formatPercent(position.lockedProfitPercent)} locked
+                          Peak {formatPercent(position.peakPnlPercent)} × {position.profitLockPercent}% = {formatPercent(position.lockedProfitPercent)} locked
                         </div>
                       </div>
                     </div>
