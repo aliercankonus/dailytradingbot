@@ -324,6 +324,8 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
   const minConfidence = filtersStatus?.minConfidence || 60;
   const minConsistency = filtersStatus?.minConsistency || 50;
   const alignmentBreakdown = trendData?.alignmentBreakdown || filtersStatus?.alignmentBreakdown;
+  const momentum = trendData?.momentum || filtersStatus?.momentum;
+  const momentumState = momentum?.state || 'none';
   
   if (adx === undefined && confidence === undefined) return null;
   
@@ -331,8 +333,9 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
   const adxPassing = (adx || 0) >= 20;
   const confidencePassing = (confidence || 0) >= minConfidence;
   const alignmentPassing = (trendConsistency || 0) >= minConsistency;
-  const allPassing = adxPassing && confidencePassing && alignmentPassing;
-  const passCount = [adxPassing, confidencePassing, alignmentPassing].filter(Boolean).length;
+  const momentumPassing = momentumState === 'confirmed';
+  const allPassing = adxPassing && confidencePassing && alignmentPassing && momentumPassing;
+  const passCount = [adxPassing, confidencePassing, alignmentPassing, momentumPassing].filter(Boolean).length;
   
   // ADX scoring: 0-15 (red), 15-20 (orange), 20-30 (yellow), 30+ (green)
   const getAdxStyles = (value: number) => {
@@ -351,6 +354,13 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
     return { text: 'text-red-400', bg: 'bg-red-500/20', border: 'border-red-500/30', bar: 'bg-red-500' };
   };
   
+  // Momentum state styling
+  const getMomentumStyles = (state: string) => {
+    if (state === 'confirmed') return { text: 'text-green-400', icon: true };
+    if (state === 'building') return { text: 'text-yellow-400', icon: false };
+    return { text: 'text-red-400', icon: false };
+  };
+  
   // Regime badge styling
   const getRegimeStyles = (r: string) => {
     if (r === 'trending') return 'bg-green-500/20 text-green-400 border-green-500/30';
@@ -361,6 +371,7 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
   const adxStyles = getAdxStyles(adx || 0);
   const confStyles = getPercentStyles(confidence || 0, minConfidence);
   const alignStyles = getPercentStyles(trendConsistency || 0, minConsistency);
+  const momStyles = getMomentumStyles(momentumState);
   
   return (
     <div className="space-y-2 p-2 bg-muted/30 rounded-md">
@@ -379,7 +390,7 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
       
       {/* Compact Summary Row */}
       <div className={`flex items-center justify-between px-2 py-1 rounded text-[10px] ${allPassing ? 'bg-green-500/10 border border-green-500/20' : 'bg-red-500/10 border border-red-500/20'}`}>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-muted-foreground">Status:</span>
           <div className="flex items-center gap-1">
             {adxPassing ? (
@@ -405,12 +416,32 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
             )}
             <span className={alignmentPassing ? 'text-green-400' : 'text-red-400'}>Align</span>
           </div>
+          <div className="flex items-center gap-1">
+            {momentumPassing ? (
+              <CheckCircle2 className="h-3 w-3 text-green-500" />
+            ) : momentumState === 'building' ? (
+              <Zap className="h-3 w-3 text-yellow-500" />
+            ) : (
+              <XCircle className="h-3 w-3 text-red-500" />
+            )}
+            <span className={momStyles.text}>Mom</span>
+            <Badge 
+              variant="outline" 
+              className={`text-[8px] px-1 py-0 capitalize ${
+                momentumState === 'confirmed' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                momentumState === 'building' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+                'bg-red-500/20 text-red-400 border-red-500/30'
+              }`}
+            >
+              {momentumState}
+            </Badge>
+          </div>
         </div>
         <Badge 
           variant="outline" 
           className={`text-[9px] px-1 py-0 ${allPassing ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}
         >
-          {passCount}/3
+          {passCount}/4
         </Badge>
       </div>
       
