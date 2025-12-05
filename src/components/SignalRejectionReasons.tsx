@@ -216,6 +216,58 @@ const MaxTradesDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
   );
 };
 
+const MarketRegimeDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
+  const adx = filtersStatus?.adx;
+  const confidence = filtersStatus?.confidence;
+  const trendConsistency = filtersStatus?.trendConsistency;
+  const regime = filtersStatus?.regime;
+  
+  if (adx === undefined && confidence === undefined) return null;
+  
+  const adxPassing = adx >= 20;
+  const confidencePassing = confidence >= 60;
+  
+  return (
+    <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium">Market Regime</span>
+        </div>
+        <Badge 
+          variant="outline" 
+          className="text-[10px] px-1.5 py-0 capitalize bg-orange-500/10 text-orange-400 border-orange-500/30"
+        >
+          {regime || "weak"}
+        </Badge>
+      </div>
+      
+      <div className="grid grid-cols-3 gap-2">
+        <div className="text-center">
+          <div className="text-[10px] text-muted-foreground mb-0.5">ADX</div>
+          <div className={`text-sm font-mono ${adxPassing ? 'text-green-400' : 'text-red-400'}`}>
+            {adx?.toFixed(1) || '—'}
+          </div>
+          <div className="text-[9px] text-muted-foreground">min: 20</div>
+        </div>
+        <div className="text-center">
+          <div className="text-[10px] text-muted-foreground mb-0.5">Confidence</div>
+          <div className={`text-sm font-mono ${confidencePassing ? 'text-green-400' : 'text-red-400'}`}>
+            {confidence || '—'}%
+          </div>
+          <div className="text-[9px] text-muted-foreground">min: 60%</div>
+        </div>
+        <div className="text-center">
+          <div className="text-[10px] text-muted-foreground mb-0.5">Consistency</div>
+          <div className={`text-sm font-mono ${(trendConsistency || 0) >= 50 ? 'text-green-400' : 'text-yellow-400'}`}>
+            {trendConsistency || '—'}%
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const SignalRejectionReasons = () => {
   const { rejections, loading } = useSignalRejections();
 
@@ -249,6 +301,11 @@ export const SignalRejectionReasons = () => {
     // Max trades rejection
     if (reason.includes("Max trades")) {
       return <MaxTradesDisplay filtersStatus={fs} />;
+    }
+    
+    // Market regime rejection (ranging, insufficient trend, etc.)
+    if (reason.includes("Market regime") || reason.includes("Insufficient trend") || fs?.regime) {
+      return <MarketRegimeDisplay filtersStatus={fs} />;
     }
     
     // Default filter details
