@@ -133,9 +133,13 @@ export const TrailingStopMonitor = () => {
         // Calculate the actual locked profit based on the database stop loss (high water mark)
         // For BUY: profit is locked only if stop > entry (stop moved above entry)
         // For SHORT: profit is locked only if stop < entry (stop moved below entry)
+        const hasProfitLocked = p.side === "BUY"
+          ? actualStopLoss > p.entry_price
+          : actualStopLoss < p.entry_price;
+        
         const actualLockedAbsolute = p.side === "BUY"
-          ? Math.max(0, actualStopLoss - p.entry_price)  // Positive only if stop > entry
-          : Math.max(0, p.entry_price - actualStopLoss); // Positive only if stop < entry
+          ? Math.max(0, actualStopLoss - p.entry_price)
+          : Math.max(0, p.entry_price - actualStopLoss);
         const actualLockedPercent = (actualLockedAbsolute / p.entry_price) * 100;
 
         return {
@@ -145,9 +149,11 @@ export const TrailingStopMonitor = () => {
           // Use ACTUAL stop loss from database (high water mark)
           stop_loss: actualStopLoss,
           // Show actual locked values (based on DB stop loss)
+          hasProfitLocked,
           lockedProfitPercent: Number(actualLockedPercent),
           lockedProfitAbsolute: Number(actualLockedAbsolute),
-          lockedStopPrice: actualStopLoss,
+          // Only show locked stop if profit is actually locked (stop moved past entry)
+          lockedStopPrice: hasProfitLocked ? actualStopLoss : null,
           profitLockPercent: Number(profitLockPercent),
           // Also show theoretical for context
           theoreticalLockedPercent: Number(theoreticalLockedPercent),
@@ -230,25 +236,35 @@ export const TrailingStopMonitor = () => {
                     <div className="mt-2 rounded bg-muted/50 p-2">
                       <div className="flex items-center gap-1 text-xs font-medium text-foreground mb-1">
                         <TrendingUp className="h-3 w-3 text-green-500" />
-                        Profit Lock (High Water Mark)
+                        Profit Lock Status
                       </div>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                        <div>
-                          <span>Locked Profit:</span>
-                          <span className="ml-1 font-medium text-green-500">
-                            {formatPercent(position.lockedProfitPercent, 2, true)}
-                          </span>
+                      {position.hasProfitLocked ? (
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          <div>
+                            <span>Locked Profit:</span>
+                            <span className="ml-1 font-medium text-green-500">
+                              {formatPercent(position.lockedProfitPercent, 2, true)}
+                            </span>
+                          </div>
+                          <div>
+                            <span>Locked Stop:</span>
+                            <span className="ml-1 font-medium text-amber-500">
+                              {formatPrice(position.lockedStopPrice, 4, '$')}
+                            </span>
+                          </div>
+                          <div className="col-span-2 mt-1 text-[10px] italic text-muted-foreground/70">
+                            Stop only moves in favorable direction (ratchet protection)
+                          </div>
                         </div>
-                        <div>
-                          <span>Locked Stop:</span>
-                          <span className="ml-1 font-medium text-amber-500">
-                            {formatPrice(position.lockedStopPrice, 4, '$')}
-                          </span>
+                      ) : (
+                        <div className="text-xs text-muted-foreground">
+                          <span className="text-amber-500 font-medium">Not yet locked</span>
+                          <span className="ml-1">- Stop at break-even ({formatPrice(position.entry_price, 4, '$')})</span>
+                          <div className="mt-1 text-[10px] italic text-muted-foreground/70">
+                            Profit locks when trailing stop moves past entry price
+                          </div>
                         </div>
-                        <div className="col-span-2 mt-1 text-[10px] italic text-muted-foreground/70">
-                          Stop only moves up, never back down (ratchet protection)
-                        </div>
-                      </div>
+                      )}
                     </div>
                   </div>
 
