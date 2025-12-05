@@ -268,12 +268,96 @@ const MarketRegimeDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
   );
 };
 
+const ActiveSignalDisplay = () => {
+  return (
+    <div className="flex items-center gap-2 p-2 bg-green-500/10 rounded-md border border-green-500/20">
+      <Zap className="h-4 w-4 text-green-500" />
+      <span className="text-xs text-green-400">Signal already generated and awaiting execution</span>
+    </div>
+  );
+};
+
+const ReversalRiskDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
+  const riskScore = filtersStatus?.reversalRiskScore || 0;
+  const signals = filtersStatus?.reversalSignals || [];
+  const trend = filtersStatus?.trend;
+  const trend1h = filtersStatus?.trend1h;
+  const momentum = filtersStatus?.momentum;
+  
+  const getRiskColor = () => {
+    if (riskScore >= 70) return "text-red-500";
+    if (riskScore >= 50) return "text-orange-500";
+    return "text-yellow-500";
+  };
+  
+  return (
+    <div className="space-y-2 p-2 bg-red-500/10 rounded-md border border-red-500/20">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <AlertCircle className="h-3.5 w-3.5 text-red-500" />
+          <span className="text-xs font-medium text-red-400">Reversal Risk</span>
+        </div>
+        <Badge 
+          variant="destructive" 
+          className="text-[10px] px-1.5 py-0"
+        >
+          {riskScore}/100
+        </Badge>
+      </div>
+      
+      {/* Risk Progress Bar */}
+      <div className="relative h-1.5 bg-muted rounded-full overflow-hidden">
+        <div 
+          className={`h-full rounded-full ${riskScore >= 70 ? 'bg-red-500' : riskScore >= 50 ? 'bg-orange-500' : 'bg-yellow-500'}`}
+          style={{ width: `${riskScore}%` }}
+        />
+        <div className="absolute top-0 h-full w-0.5 bg-foreground/50" style={{ left: '50%' }} />
+      </div>
+      
+      {/* Trend Info */}
+      {(trend || trend1h) && (
+        <div className="flex items-center gap-2 text-[10px]">
+          {trend && (
+            <Badge variant="outline" className="text-[10px] px-1 py-0 capitalize">
+              Trend: {trend}
+            </Badge>
+          )}
+          {trend1h && (
+            <Badge variant="outline" className="text-[10px] px-1 py-0 capitalize">
+              1H: {trend1h}
+            </Badge>
+          )}
+          {momentum?.state && (
+            <Badge variant="outline" className="text-[10px] px-1 py-0 capitalize">
+              Mom: {momentum.state}
+            </Badge>
+          )}
+        </div>
+      )}
+      
+      {/* Risk Signals */}
+      {signals.length > 0 && (
+        <div className="space-y-0.5">
+          {signals.slice(0, 3).map((signal: string, idx: number) => (
+            <div key={idx} className="text-[10px] text-muted-foreground flex items-center gap-1">
+              <span className="text-red-400">•</span>
+              {signal}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const SignalRejectionReasons = () => {
   const { rejections, loading } = useSignalRejections();
 
   const getReasonIcon = (reason: string) => {
     if (reason.includes("Max trades")) return <Layers className="h-4 w-4" />;
     if (reason.includes("Quality score")) return <BarChart3 className="h-4 w-4" />;
+    if (reason.includes("active signal")) return <Zap className="h-4 w-4 text-green-500" />;
+    if (reason.includes("Reversal risk")) return <AlertCircle className="h-4 w-4 text-red-500" />;
     if (reason.includes("timeframe")) return <TrendingDown className="h-4 w-4" />;
     if (reason.includes("momentum")) return <Activity className="h-4 w-4" />;
     if (reason.includes("ranging")) return <Minimize2 className="h-4 w-4" />;
@@ -283,8 +367,10 @@ export const SignalRejectionReasons = () => {
   };
 
   const getReasonBadgeVariant = (reason: string): "default" | "secondary" | "destructive" | "outline" => {
+    if (reason.includes("active signal")) return "default";
     if (reason.includes("Max trades")) return "secondary";
     if (reason.includes("Quality score")) return "destructive";
+    if (reason.includes("Reversal risk")) return "destructive";
     if (reason.includes("No strategy")) return "outline";
     return "destructive";
   };
@@ -292,6 +378,16 @@ export const SignalRejectionReasons = () => {
   const renderFilterDetails = (rejection: SignalRejection) => {
     const fs = rejection.filters_status;
     const reason = rejection.rejection_reason || "";
+    
+    // Already has active signal
+    if (reason.includes("active signal")) {
+      return <ActiveSignalDisplay />;
+    }
+    
+    // Reversal risk rejection
+    if (reason.includes("Reversal risk")) {
+      return <ReversalRiskDisplay filtersStatus={fs} />;
+    }
     
     // Quality score rejection - show breakdown
     if (reason.includes("Quality score") || reason.includes("No strategy conditions met")) {
@@ -354,24 +450,22 @@ export const SignalRejectionReasons = () => {
     if (rejection.rejection_reason?.includes("Max trades")) {
       return null;
     }
+    
+    // Active signal rejection (handled by visual component)
+    if (rejection.rejection_reason?.includes("active signal")) {
+      return null;
+    }
+    
+    // Reversal risk rejection (handled by visual component)
+    if (rejection.rejection_reason?.includes("Reversal risk")) {
+      return null;
+    }
 
     // ADX below 20 rejection
     if (rejection.rejection_reason?.includes("ADX below 20")) {
       const adx = fs.adx ?? td?.volatility?.adx;
       if (adx !== undefined) {
         details.push(`ADX: ${adx.toFixed(1)} (needs ≥20)`);
-      }
-      return details.join(" | ");
-    }
-
-    // Reversal risk rejections
-    if (rejection.rejection_reason?.includes("Reversal risk")) {
-      if (td?.multiTimeframe) {
-        const mt = td.multiTimeframe;
-        details.push(`4H: ${mt.trend4h ?? "?"} | 1H: ${mt.trend1h ?? "?"}`);
-      }
-      if (td?.momentum?.state) {
-        details.push(`Momentum: ${td.momentum.state}`);
       }
       return details.join(" | ");
     }
