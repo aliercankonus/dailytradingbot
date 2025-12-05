@@ -131,9 +131,11 @@ export const TrailingStopMonitor = () => {
           : p.entry_price - theoreticalLockedAbsolute;
 
         // Calculate the actual locked profit based on the database stop loss (high water mark)
+        // For BUY: profit is locked only if stop > entry (stop moved above entry)
+        // For SHORT: profit is locked only if stop < entry (stop moved below entry)
         const actualLockedAbsolute = p.side === "BUY"
-          ? actualStopLoss - p.entry_price
-          : p.entry_price - actualStopLoss;
+          ? Math.max(0, actualStopLoss - p.entry_price)  // Positive only if stop > entry
+          : Math.max(0, p.entry_price - actualStopLoss); // Positive only if stop < entry
         const actualLockedPercent = (actualLockedAbsolute / p.entry_price) * 100;
 
         return {
