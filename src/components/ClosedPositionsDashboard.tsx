@@ -29,6 +29,11 @@ export const ClosedPositionsDashboard = () => {
         case 'trend_reversal_bullish': return 'Trend Exit (Bullish)';
         case 'trend_reversal_bearish': return 'Trend Exit (Bearish)';
         case 'trend_reversal_ranging': return 'Trend Exit (Ranging)';
+        case 'time_based_stop': return 'Time-Based Exit';
+        case 'partial_loss': return 'Partial Loss';
+        case 'partial_tp_close': return 'Partial TP';
+        case 'reversal_risk_high': return 'Reversal Risk';
+        case 'early_warning_exit': return 'Early Warning';
         case 'manual': return 'Manual Close';
         default: return position.close_reason;
       }
@@ -128,11 +133,11 @@ export const ClosedPositionsDashboard = () => {
       );
     }
     
-    if (reason === 'Take Profit') {
+    if (reason === 'Take Profit' || reason === 'Partial TP') {
       return (
         <Badge variant="default" className="gap-1 bg-success/10 text-success border-success/20">
           <Target className="h-3 w-3" />
-          Take Profit
+          {reason}
         </Badge>
       );
     } else if (reason === 'Trailing Stop') {
@@ -149,6 +154,27 @@ export const ClosedPositionsDashboard = () => {
           {reason}
         </Badge>
       );
+    } else if (reason === 'Time-Based Exit') {
+      return (
+        <Badge variant="outline" className="gap-1 bg-orange-500/10 text-orange-500 border-orange-500/20">
+          <ShieldAlert className="h-3 w-3" />
+          Time-Based Exit
+        </Badge>
+      );
+    } else if (reason === 'Partial Loss') {
+      return (
+        <Badge variant="outline" className="gap-1 bg-amber-500/10 text-amber-600 border-amber-500/20">
+          <ShieldAlert className="h-3 w-3" />
+          Partial Loss
+        </Badge>
+      );
+    } else if (reason === 'Reversal Risk' || reason === 'Early Warning') {
+      return (
+        <Badge variant="outline" className="gap-1 bg-red-500/10 text-red-500 border-red-500/20">
+          <ShieldAlert className="h-3 w-3" />
+          {reason}
+        </Badge>
+      );
     } else if (reason === 'Stop Loss') {
       return (
         <Badge variant="destructive" className="gap-1">
@@ -157,7 +183,7 @@ export const ClosedPositionsDashboard = () => {
         </Badge>
       );
     }
-    return <Badge variant="secondary">Manual Close</Badge>;
+    return <Badge variant="secondary">{reason}</Badge>;
   };
 
   if (isLoading) {
