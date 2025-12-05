@@ -37,6 +37,9 @@ export const ClosedPositionsDashboard = () => {
         case 'partial_tp_3': return 'Partial TP 3';
         case 'reversal_risk_high': return 'Reversal Risk';
         case 'early_warning_exit': return 'Early Warning';
+        case 'divergence_volume_spike': return 'Emergency Exit';
+        case 'flash_crash': return 'Flash Crash Exit';
+        case 'volatility_spike': return 'Volatility Exit';
         case 'manual': return 'Manual Close';
         default: return position.close_reason;
       }
