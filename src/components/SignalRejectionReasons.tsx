@@ -222,33 +222,43 @@ const AlignmentBreakdownDisplay = ({ alignmentBreakdown }: { alignmentBreakdown:
   const { directionScore, indicatorScore, penaltyScore } = alignmentBreakdown;
   const total = (directionScore || 0) + (indicatorScore || 0) - (penaltyScore || 0);
   
-  const getScoreColor = (score: number, max: number) => {
+  const getScoreStyles = (score: number, max: number) => {
     const pct = (score / max) * 100;
-    if (pct >= 80) return 'text-green-400';
-    if (pct >= 60) return 'text-yellow-400';
-    if (pct >= 40) return 'text-orange-400';
-    return 'text-red-400';
+    if (pct >= 80) return { text: 'text-green-400', bg: 'bg-green-500/20', border: 'border-green-500/30', bar: 'bg-green-500' };
+    if (pct >= 60) return { text: 'text-yellow-400', bg: 'bg-yellow-500/20', border: 'border-yellow-500/30', bar: 'bg-yellow-500' };
+    if (pct >= 40) return { text: 'text-orange-400', bg: 'bg-orange-500/20', border: 'border-orange-500/30', bar: 'bg-orange-500' };
+    return { text: 'text-red-400', bg: 'bg-red-500/20', border: 'border-red-500/30', bar: 'bg-red-500' };
   };
+  
+  const dirStyles = getScoreStyles(directionScore || 0, 60);
+  const indStyles = getScoreStyles(indicatorScore || 0, 25);
+  const totalStyles = getScoreStyles(total, 85);
   
   return (
     <div className="space-y-1.5 pt-2 border-t border-border/50">
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground">Alignment Breakdown</span>
         <Badge 
-          variant={total >= 60 ? "default" : "destructive"} 
-          className="text-[9px] px-1 py-0"
+          variant="outline"
+          className={`text-[9px] px-1.5 py-0 ${totalStyles.text} ${totalStyles.bg} ${totalStyles.border}`}
         >
           {total}/85
         </Badge>
       </div>
-      <div className="grid grid-cols-3 gap-1">
+      <div className="grid grid-cols-3 gap-1.5">
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="text-center p-1 bg-background/50 rounded">
-                <div className="text-[9px] text-muted-foreground">Direction</div>
-                <div className={`text-xs font-mono ${getScoreColor(directionScore || 0, 60)}`}>
+              <div className={`text-center p-1.5 rounded border ${dirStyles.bg} ${dirStyles.border}`}>
+                <div className="text-[9px] text-muted-foreground mb-0.5">Direction</div>
+                <div className={`text-xs font-mono font-medium ${dirStyles.text}`}>
                   {directionScore || 0}/60
+                </div>
+                <div className="mt-1 h-1 bg-muted/50 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full ${dirStyles.bar}`}
+                    style={{ width: `${((directionScore || 0) / 60) * 100}%` }}
+                  />
                 </div>
               </div>
             </TooltipTrigger>
@@ -260,10 +270,16 @@ const AlignmentBreakdownDisplay = ({ alignmentBreakdown }: { alignmentBreakdown:
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="text-center p-1 bg-background/50 rounded">
-                <div className="text-[9px] text-muted-foreground">Indicators</div>
-                <div className={`text-xs font-mono ${getScoreColor(indicatorScore || 0, 25)}`}>
+              <div className={`text-center p-1.5 rounded border ${indStyles.bg} ${indStyles.border}`}>
+                <div className="text-[9px] text-muted-foreground mb-0.5">Indicators</div>
+                <div className={`text-xs font-mono font-medium ${indStyles.text}`}>
                   {indicatorScore || 0}/25
+                </div>
+                <div className="mt-1 h-1 bg-muted/50 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full ${indStyles.bar}`}
+                    style={{ width: `${((indicatorScore || 0) / 25) * 100}%` }}
+                  />
                 </div>
               </div>
             </TooltipTrigger>
@@ -275,10 +291,16 @@ const AlignmentBreakdownDisplay = ({ alignmentBreakdown }: { alignmentBreakdown:
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="text-center p-1 bg-background/50 rounded">
-                <div className="text-[9px] text-muted-foreground">Penalty</div>
-                <div className={`text-xs font-mono ${(penaltyScore || 0) > 0 ? 'text-red-400' : 'text-green-400'}`}>
-                  -{penaltyScore || 0}
+              <div className={`text-center p-1.5 rounded border ${(penaltyScore || 0) > 0 ? 'bg-red-500/20 border-red-500/30' : 'bg-green-500/20 border-green-500/30'}`}>
+                <div className="text-[9px] text-muted-foreground mb-0.5">Penalty</div>
+                <div className={`text-xs font-mono font-medium ${(penaltyScore || 0) > 0 ? 'text-red-400' : 'text-green-400'}`}>
+                  {(penaltyScore || 0) > 0 ? `-${penaltyScore}` : '0'}
+                </div>
+                <div className="mt-1 h-1 bg-muted/50 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full ${(penaltyScore || 0) > 0 ? 'bg-red-500' : 'bg-green-500'}`}
+                    style={{ width: (penaltyScore || 0) > 0 ? `${Math.min((penaltyScore / 30) * 100, 100)}%` : '100%' }}
+                  />
                 </div>
               </div>
             </TooltipTrigger>
