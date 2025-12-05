@@ -15,6 +15,9 @@ import {
   Timer,
   CheckCircle2,
   XCircle,
+  Gauge,
+  ArrowUpCircle,
+  ArrowDownCircle,
 } from "lucide-react";
 import { useSignalRejections } from "@/hooks/useSignalRejections";
 import { formatDistanceToNow } from "date-fns";
@@ -675,6 +678,187 @@ const ReversalRiskDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
   );
 };
 
+const StochRsiExtremeDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
+  const stochRsiK = parseFloat(filtersStatus?.stochRsiK4h) || 0;
+  const threshold = filtersStatus?.threshold || (stochRsiK < 50 ? 10 : 90);
+  const intendedDirection = filtersStatus?.intendedDirection;
+  const trend = filtersStatus?.trend;
+  const reason = filtersStatus?.reason;
+  
+  const isOversold = stochRsiK < 50;
+  const extremeLevel = isOversold ? 10 : 90;
+  const dangerZone = isOversold ? 20 : 80;
+  
+  // Calculate how deep into extreme we are (0-100%)
+  const extremeDepth = isOversold 
+    ? Math.max(0, Math.min(100, ((extremeLevel - stochRsiK) / extremeLevel) * 100 + 50))
+    : Math.max(0, Math.min(100, ((stochRsiK - dangerZone) / (100 - dangerZone)) * 100));
+  
+  // Get StochRSI zone label
+  const getZoneLabel = () => {
+    if (isOversold) {
+      if (stochRsiK <= 5) return "Extreme Oversold";
+      if (stochRsiK <= 10) return "Oversold";
+      if (stochRsiK <= 20) return "Near Oversold";
+      return "Neutral";
+    } else {
+      if (stochRsiK >= 95) return "Extreme Overbought";
+      if (stochRsiK >= 90) return "Overbought";
+      if (stochRsiK >= 80) return "Near Overbought";
+      return "Neutral";
+    }
+  };
+  
+  const getZoneColor = () => {
+    if (isOversold) {
+      if (stochRsiK <= 5) return { bg: 'bg-red-500/20', border: 'border-red-500/30', text: 'text-red-400', bar: 'bg-red-500' };
+      if (stochRsiK <= 10) return { bg: 'bg-orange-500/20', border: 'border-orange-500/30', text: 'text-orange-400', bar: 'bg-orange-500' };
+      return { bg: 'bg-yellow-500/20', border: 'border-yellow-500/30', text: 'text-yellow-400', bar: 'bg-yellow-500' };
+    } else {
+      if (stochRsiK >= 95) return { bg: 'bg-red-500/20', border: 'border-red-500/30', text: 'text-red-400', bar: 'bg-red-500' };
+      if (stochRsiK >= 90) return { bg: 'bg-orange-500/20', border: 'border-orange-500/30', text: 'text-orange-400', bar: 'bg-orange-500' };
+      return { bg: 'bg-yellow-500/20', border: 'border-yellow-500/30', text: 'text-yellow-400', bar: 'bg-yellow-500' };
+    }
+  };
+  
+  const zoneColors = getZoneColor();
+  
+  return (
+    <div className={`space-y-2 p-2 rounded-md border ${zoneColors.bg} ${zoneColors.border}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Gauge className={`h-3.5 w-3.5 ${zoneColors.text}`} />
+          <span className="text-xs font-medium">StochRSI Extreme Filter</span>
+        </div>
+        <Badge 
+          variant="outline" 
+          className={`text-[10px] px-1.5 py-0 ${zoneColors.text} ${zoneColors.bg} ${zoneColors.border}`}
+        >
+          {getZoneLabel()}
+        </Badge>
+      </div>
+      
+      {/* Visual StochRSI Gauge */}
+      <div className="relative">
+        <div className="h-3 bg-gradient-to-r from-red-500/30 via-green-500/30 to-red-500/30 rounded-full overflow-hidden">
+          {/* Marker for current value */}
+          <div 
+            className="absolute top-0 h-3 w-1 bg-foreground rounded-full shadow-lg transition-all"
+            style={{ left: `calc(${stochRsiK}% - 2px)` }}
+          />
+          {/* Danger zone overlays */}
+          <div className="absolute top-0 left-0 h-full w-[10%] bg-red-500/40 rounded-l-full" />
+          <div className="absolute top-0 right-0 h-full w-[10%] bg-red-500/40 rounded-r-full" />
+          {/* Warning zone */}
+          <div className="absolute top-0 left-[10%] h-full w-[10%] bg-orange-500/30" />
+          <div className="absolute top-0 right-[10%] h-full w-[10%] bg-orange-500/30" />
+        </div>
+        {/* Scale markers */}
+        <div className="flex justify-between text-[8px] text-muted-foreground mt-0.5">
+          <span>0</span>
+          <span>10</span>
+          <span>50</span>
+          <span>90</span>
+          <span>100</span>
+        </div>
+      </div>
+      
+      {/* Detailed Info Grid */}
+      <div className="grid grid-cols-3 gap-1.5">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={`text-center p-1.5 rounded border ${zoneColors.bg} ${zoneColors.border}`}>
+                <div className="text-[9px] text-muted-foreground mb-0.5">4H StochRSI K</div>
+                <div className={`text-sm font-mono font-bold ${zoneColors.text}`}>
+                  {stochRsiK.toFixed(1)}
+                </div>
+                <div className="text-[8px] text-muted-foreground">
+                  {isOversold ? `< ${threshold} blocked` : `> ${threshold} blocked`}
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px] max-w-[200px]">
+              <p>Current 4-hour StochRSI %K value</p>
+              <p className="text-muted-foreground mt-1">
+                {isOversold 
+                  ? "Oversold = high bounce probability, SHORT entries blocked"
+                  : "Overbought = high pullback probability, LONG entries blocked"
+                }
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="text-center p-1.5 rounded border bg-muted/30 border-border/50">
+                <div className="text-[9px] text-muted-foreground mb-0.5">Intended</div>
+                <div className="flex items-center justify-center gap-1">
+                  {intendedDirection === "short" ? (
+                    <ArrowDownCircle className="h-4 w-4 text-red-400" />
+                  ) : (
+                    <ArrowUpCircle className="h-4 w-4 text-green-400" />
+                  )}
+                  <span className={`text-xs font-medium uppercase ${intendedDirection === "short" ? "text-red-400" : "text-green-400"}`}>
+                    {intendedDirection}
+                  </span>
+                </div>
+                <div className="text-[8px] text-muted-foreground">blocked</div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px]">
+              <p>Trade direction that was blocked</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="text-center p-1.5 rounded border bg-muted/30 border-border/50">
+                <div className="text-[9px] text-muted-foreground mb-0.5">4H Trend</div>
+                <div className={`text-xs font-medium capitalize ${
+                  trend === "bullish" ? "text-green-400" : 
+                  trend === "bearish" ? "text-red-400" : "text-muted-foreground"
+                }`}>
+                  {trend || "—"}
+                </div>
+                <div className="text-[8px] text-muted-foreground">current</div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px]">
+              <p>Dominant trend direction from 4H analysis</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+      
+      {/* Explanation */}
+      <div className="pt-1.5 border-t border-border/50">
+        <div className="flex items-start gap-1.5">
+          <AlertCircle className={`h-3 w-3 mt-0.5 ${zoneColors.text} shrink-0`} />
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            {isOversold 
+              ? `StochRSI at ${stochRsiK.toFixed(1)} indicates extreme oversold conditions. SHORT entries blocked to avoid entering before expected bounce.`
+              : `StochRSI at ${stochRsiK.toFixed(1)} indicates extreme overbought conditions. LONG entries blocked to avoid entering before expected pullback.`
+            }
+          </p>
+        </div>
+      </div>
+      
+      {/* Wait Recommendation */}
+      <div className="flex items-center justify-between px-2 py-1 bg-muted/50 rounded text-[10px]">
+        <span className="text-muted-foreground">Wait for:</span>
+        <Badge variant="outline" className="text-[9px] px-1.5 py-0">
+          {isOversold ? "StochRSI K > 15-20" : "StochRSI K < 80-85"}
+        </Badge>
+      </div>
+    </div>
+  );
+};
+
 export const SignalRejectionReasons = () => {
   const { rejections, loading } = useSignalRejections();
 
@@ -683,6 +867,7 @@ export const SignalRejectionReasons = () => {
     if (reason.includes("Quality score")) return <BarChart3 className="h-4 w-4" />;
     if (reason.includes("active signal")) return <Zap className="h-4 w-4 text-green-500" />;
     if (reason.includes("Reversal risk")) return <AlertCircle className="h-4 w-4 text-red-500" />;
+    if (reason.includes("StochRSI extreme")) return <Gauge className="h-4 w-4 text-orange-500" />;
     if (reason.includes("timeframe")) return <TrendingDown className="h-4 w-4" />;
     if (reason.includes("momentum")) return <Activity className="h-4 w-4" />;
     if (reason.includes("ranging")) return <Minimize2 className="h-4 w-4" />;
@@ -696,6 +881,7 @@ export const SignalRejectionReasons = () => {
     if (reason.includes("Max trades")) return "secondary";
     if (reason.includes("Quality score")) return "destructive";
     if (reason.includes("Reversal risk")) return "destructive";
+    if (reason.includes("StochRSI extreme")) return "secondary";
     if (reason.includes("No strategy")) return "outline";
     return "destructive";
   };
@@ -712,6 +898,11 @@ export const SignalRejectionReasons = () => {
     // Reversal risk rejection
     if (reason.includes("Reversal risk")) {
       return <ReversalRiskDisplay filtersStatus={fs} />;
+    }
+    
+    // StochRSI extreme rejection
+    if (reason.includes("StochRSI extreme")) {
+      return <StochRsiExtremeDisplay filtersStatus={fs} />;
     }
     
     // Quality score rejection - show breakdown
@@ -788,6 +979,11 @@ export const SignalRejectionReasons = () => {
     
     // Reversal risk rejection (handled by visual component)
     if (rejection.rejection_reason?.includes("Reversal risk")) {
+      return null;
+    }
+    
+    // StochRSI extreme rejection (handled by visual component)
+    if (rejection.rejection_reason?.includes("StochRSI extreme")) {
       return null;
     }
 
