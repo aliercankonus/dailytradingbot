@@ -43,8 +43,9 @@ cron = "*/1 * * * *"
 [functions.validate-adx]
 verify_jwt = false
 
+# User-facing functions now require JWT authentication
 [functions.backtest-strategy]
-verify_jwt = false
+verify_jwt = true
 
 [functions.ai-signal-analyzer]
-verify_jwt = false
+verify_jwt = true
