@@ -338,11 +338,14 @@ export type Database = {
           entry_price: number
           executed_at: string | null
           exit_price: number | null
+          hedge_position_id: string | null
           id: string
+          is_hedge: boolean | null
           opened_at: string | null
           opened_by_rebalancer: boolean | null
           order_type: string | null
           original_quantity: number | null
+          parent_position_id: string | null
           partial_loss_level: number | null
           partial_tp_level: number | null
           quantity: number
@@ -373,11 +376,14 @@ export type Database = {
           entry_price: number
           executed_at?: string | null
           exit_price?: number | null
+          hedge_position_id?: string | null
           id?: string
+          is_hedge?: boolean | null
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
           original_quantity?: number | null
+          parent_position_id?: string | null
           partial_loss_level?: number | null
           partial_tp_level?: number | null
           quantity: number
@@ -408,11 +414,14 @@ export type Database = {
           entry_price?: number
           executed_at?: string | null
           exit_price?: number | null
+          hedge_position_id?: string | null
           id?: string
+          is_hedge?: boolean | null
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
           original_quantity?: number | null
+          parent_position_id?: string | null
           partial_loss_level?: number | null
           partial_tp_level?: number | null
           quantity?: number
@@ -434,6 +443,20 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "positions_hedge_position_id_fkey"
+            columns: ["hedge_position_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "positions_parent_position_id_fkey"
+            columns: ["parent_position_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "positions_signal_id_fkey"
             columns: ["signal_id"]
@@ -615,6 +638,10 @@ export type Database = {
           email_notifications_enabled: boolean | null
           enable_early_reversal_signals: boolean | null
           enable_pullback_signals: boolean | null
+          hedge_position_size_percent: number | null
+          hedge_reversal_risk_max: number | null
+          hedge_reversal_risk_min: number | null
+          hedging_enabled: boolean | null
           id: string
           is_trading_enabled: boolean | null
           kelly_criterion_enabled: boolean | null
@@ -679,6 +706,10 @@ export type Database = {
           email_notifications_enabled?: boolean | null
           enable_early_reversal_signals?: boolean | null
           enable_pullback_signals?: boolean | null
+          hedge_position_size_percent?: number | null
+          hedge_reversal_risk_max?: number | null
+          hedge_reversal_risk_min?: number | null
+          hedging_enabled?: boolean | null
           id?: string
           is_trading_enabled?: boolean | null
           kelly_criterion_enabled?: boolean | null
@@ -743,6 +774,10 @@ export type Database = {
           email_notifications_enabled?: boolean | null
           enable_early_reversal_signals?: boolean | null
           enable_pullback_signals?: boolean | null
+          hedge_position_size_percent?: number | null
+          hedge_reversal_risk_max?: number | null
+          hedge_reversal_risk_min?: number | null
+          hedging_enabled?: boolean | null
           id?: string
           is_trading_enabled?: boolean | null
           kelly_criterion_enabled?: boolean | null

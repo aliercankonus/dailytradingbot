@@ -12,6 +12,7 @@ import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { PerformanceSettings } from '@/components/PerformanceSettings';
 import { PerformanceMonitoringDashboard } from '@/components/PerformanceMonitoringDashboard';
 import SmartRiskSettings from '@/components/SmartRiskSettings';
+import { HedgingSettings } from '@/components/HedgingSettings';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function Settings() {
@@ -332,6 +333,9 @@ export default function Settings() {
               </div>
             </div>
           </Card>
+
+          {/* Hedging Settings */}
+          <HedgingSettings />
 
           {/* Smart Risk Management */}
           <SmartRiskSettings />

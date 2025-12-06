@@ -60,7 +60,7 @@ serve(async (req) => {
     const userIds = [...new Set(positions.map((p) => p.user_id))];
     const { data: riskParamsList, error: riskError } = await supabase
       .from("risk_parameters")
-      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent, portfolio_value, portfolio_peak_value, drawdown_circuit_breaker_enabled, drawdown_circuit_breaker_percent, circuit_breaker_triggered, time_based_stop_enabled, time_based_stop_hours, dynamic_stop_tightening_enabled, dynamic_stop_tightening_hours, dynamic_stop_tightening_percent, partial_loss_taking_enabled, partial_loss_trigger_percent, partial_loss_close_percent")
+      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent, portfolio_value, portfolio_peak_value, drawdown_circuit_breaker_enabled, drawdown_circuit_breaker_percent, circuit_breaker_triggered, time_based_stop_enabled, time_based_stop_hours, dynamic_stop_tightening_enabled, dynamic_stop_tightening_hours, dynamic_stop_tightening_percent, partial_loss_taking_enabled, partial_loss_trigger_percent, partial_loss_close_percent, hedging_enabled, hedge_reversal_risk_min, hedge_reversal_risk_max, hedge_position_size_percent")
       .in("user_id", userIds);
     if (riskError) throw riskError;
     // Create a map of user settings
@@ -89,6 +89,11 @@ serve(async (req) => {
           partialLossTakingEnabled: rp.partial_loss_taking_enabled ?? true,
           partialLossTriggerPercent: rp.partial_loss_trigger_percent ?? 50,
           partialLossClosePercent: rp.partial_loss_close_percent ?? 50,
+          // Hedging Settings
+          hedgingEnabled: rp.hedging_enabled ?? false,
+          hedgeReversalRiskMin: rp.hedge_reversal_risk_min ?? 50,
+          hedgeReversalRiskMax: rp.hedge_reversal_risk_max ?? 70,
+          hedgePositionSizePercent: rp.hedge_position_size_percent ?? 50,
         },
       ]) || [],
     );
@@ -238,6 +243,8 @@ serve(async (req) => {
     const partialTpTaken = [];
     const emergencyExits = []; // NEW: Track emergency exits
     const volatilityAlerts = []; // NEW: Track volatility alerts
+    const hedgesOpened = []; // NEW: Track hedges opened for reversal risk
+    const hedgesClosed = []; // NEW: Track hedges closed when risk drops
     const updatedStopLossMap = new Map<string, number>(); // Track updated stop losses by position ID
     
     // Fetch trend data for all symbols in PARALLEL
@@ -472,6 +479,11 @@ serve(async (req) => {
         partialLossTakingEnabled: true,
         partialLossTriggerPercent: 50,
         partialLossClosePercent: 50,
+        // Hedging defaults
+        hedgingEnabled: false,
+        hedgeReversalRiskMin: 50,
+        hedgeReversalRiskMax: 70,
+        hedgePositionSizePercent: 50,
       };
       // TRAILING STOP LOSS LOGIC - Position-specific calculation based on EACH position's entry price
       // IMPORTANT: Trailing stop must NEVER set stop closer than 1% to entry price
@@ -819,20 +831,119 @@ serve(async (req) => {
           // Get 4h confidence from timeframes data (early warning threshold)
           const confidence4h = trendData.timeframes?.['4h']?.confidence || trendConfidence;
 
-          // 🆕 REVERSAL RISK EXIT: Check leading indicators for early reversal detection
+          // 🆕 REVERSAL RISK HANDLING: Hedge or Exit based on risk level
           const reversalRisk = detectReversalRiskForExit("SELL");
-          const REVERSAL_RISK_EXIT_THRESHOLD = 60; // Exit if risk >= 60
-          const MIN_LOSS_FOR_REVERSAL_EXIT = -0.1; // Only exit if losing at least 0.1%
+          const MIN_LOSS_FOR_REVERSAL_EXIT = -0.1; // Only act if losing at least 0.1%
           
-          if (reversalRisk.riskScore >= REVERSAL_RISK_EXIT_THRESHOLD && pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
+          // Check if position already has a hedge or is a hedge
+          const hasHedge = position.hedge_position_id !== null;
+          const isHedge = position.is_hedge === true;
+          
+          // Apply hedging logic if enabled and risk is in hedge range (50-70%)
+          if (userSettings.hedgingEnabled && 
+              !isHedge && // Don't hedge a hedge
+              !hasHedge && // Don't open duplicate hedge
+              reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin && 
+              reversalRisk.riskScore < userSettings.hedgeReversalRiskMax &&
+              pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
+            // Open a hedge position (opposite direction)
+            const hedgeQuantity = position.quantity * (userSettings.hedgePositionSizePercent / 100);
+            const hedgeSide = "BUY"; // Opposite of SELL
+            
+            console.log(`🛡️ HEDGE: Opening ${hedgeSide} hedge for SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}% (${userSettings.hedgeReversalRiskMin}-${userSettings.hedgeReversalRiskMax}%)`);
+            
+            // Insert hedge position
+            const { data: hedgePosition, error: hedgeError } = await supabase
+              .from("positions")
+              .insert({
+                user_id: position.user_id,
+                symbol: position.symbol,
+                side: hedgeSide,
+                quantity: hedgeQuantity,
+                entry_price: currentPrice,
+                current_price: currentPrice,
+                stop_loss: currentPrice * 0.98, // 2% stop for hedge
+                take_profit: currentPrice * 1.02, // 2% TP for hedge
+                status: "active",
+                is_hedge: true,
+                parent_position_id: position.id,
+                strategy_name: "Reversal Risk Hedge",
+                trend: currentTrend,
+                confidence_score: reversalRisk.riskScore,
+              })
+              .select()
+              .single();
+            
+            if (!hedgeError && hedgePosition) {
+              // Link hedge to parent position
+              await supabase
+                .from("positions")
+                .update({ hedge_position_id: hedgePosition.id })
+                .eq("id", position.id);
+              
+              hedgesOpened.push({
+                symbol: position.symbol,
+                parentSide: position.side,
+                hedgeSide,
+                hedgeQuantity,
+                reversalRisk: reversalRisk.riskScore,
+                parentPositionId: position.id,
+                hedgePositionId: hedgePosition.id,
+              });
+              console.log(`✅ Hedge opened: ${hedgeSide} ${hedgeQuantity} ${position.symbol} at ${currentPrice}`);
+            } else {
+              console.error(`❌ Failed to open hedge: ${hedgeError?.message}`);
+            }
+          }
+          // If risk is HIGH (>= max threshold), close position instead
+          else if (reversalRisk.riskScore >= userSettings.hedgeReversalRiskMax && pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
             shouldClose = true;
             closeReason = "reversal_risk_high";
             console.log(
               `⚠️ REVERSAL RISK EXIT: Closing SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}/100: ${reversalRisk.signals.join(", ")}`,
             );
           }
+          
+          // 🆕 HEDGE MANAGEMENT: Close hedge if risk drops below threshold
+          if (hasHedge && 
+              reversalRisk.riskScore < userSettings.hedgeReversalRiskMin * 0.7 && // Risk dropped significantly (30% below hedge trigger)
+              position.hedge_position_id) {
+            console.log(`🛡️ HEDGE CLOSE: Risk dropped to ${reversalRisk.riskScore}% - closing hedge for SHORT ${position.symbol}`);
+            
+            // Close the hedge position
+            const { data: closedHedge, error: closeHedgeError } = await supabase
+              .from("positions")
+              .update({
+                status: "closed",
+                current_price: currentPrice,
+                exit_price: currentPrice,
+                closed_at: new Date().toISOString(),
+                close_reason: "hedge_risk_dropped",
+              })
+              .eq("id", position.hedge_position_id)
+              .eq("status", "active")
+              .select()
+              .maybeSingle();
+            
+            if (!closeHedgeError && closedHedge) {
+              // Unlink hedge from parent
+              await supabase
+                .from("positions")
+                .update({ hedge_position_id: null })
+                .eq("id", position.id);
+              
+              hedgesClosed.push({
+                symbol: position.symbol,
+                parentSide: position.side,
+                hedgePositionId: position.hedge_position_id,
+                riskScore: reversalRisk.riskScore,
+              });
+              console.log(`✅ Hedge closed for ${position.symbol} - risk dropped`);
+            }
+          }
+          
           // Original early warning logic (kept as fallback)
-          else {
+          if (!shouldClose) {
             const EARLY_WARNING_MIN_LOSS_PERCENT = -0.2;
             if (trend1h === "bullish" && confidence4h < 70 && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT) {
               shouldClose = true;
@@ -881,22 +992,121 @@ serve(async (req) => {
           // Get 4h confidence from timeframes data (early warning threshold)
           const confidence4h = trendData.timeframes?.['4h']?.confidence || trendConfidence;
 
-          // 🆕 REVERSAL RISK EXIT: Check leading indicators for early reversal detection
+          // 🆕 REVERSAL RISK HANDLING: Hedge or Exit based on risk level
           const reversalRisk = detectReversalRiskForExit("BUY");
-          const REVERSAL_RISK_EXIT_THRESHOLD = 60; // Exit if risk >= 60
-          const MIN_LOSS_FOR_REVERSAL_EXIT = -0.1; // Only exit if losing at least 0.1%
+          const MIN_LOSS_FOR_REVERSAL_EXIT = -0.1; // Only act if losing at least 0.1%
           
-          if (!shouldClose && reversalRisk.riskScore >= REVERSAL_RISK_EXIT_THRESHOLD && pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
+          // Check if position already has a hedge or is a hedge
+          const hasHedge = position.hedge_position_id !== null;
+          const isHedge = position.is_hedge === true;
+          
+          // Apply hedging logic if enabled and risk is in hedge range (50-70%)
+          if (!shouldClose && userSettings.hedgingEnabled && 
+              !isHedge && // Don't hedge a hedge
+              !hasHedge && // Don't open duplicate hedge
+              reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin && 
+              reversalRisk.riskScore < userSettings.hedgeReversalRiskMax &&
+              pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
+            // Open a hedge position (opposite direction)
+            const hedgeQuantity = position.quantity * (userSettings.hedgePositionSizePercent / 100);
+            const hedgeSide = "SELL"; // Opposite of BUY
+            
+            console.log(`🛡️ HEDGE: Opening ${hedgeSide} hedge for LONG ${position.symbol} - Risk ${reversalRisk.riskScore}% (${userSettings.hedgeReversalRiskMin}-${userSettings.hedgeReversalRiskMax}%)`);
+            
+            // Insert hedge position
+            const { data: hedgePosition, error: hedgeError } = await supabase
+              .from("positions")
+              .insert({
+                user_id: position.user_id,
+                symbol: position.symbol,
+                side: hedgeSide,
+                quantity: hedgeQuantity,
+                entry_price: currentPrice,
+                current_price: currentPrice,
+                stop_loss: currentPrice * 1.02, // 2% stop for hedge (opposite direction)
+                take_profit: currentPrice * 0.98, // 2% TP for hedge
+                status: "active",
+                is_hedge: true,
+                parent_position_id: position.id,
+                strategy_name: "Reversal Risk Hedge",
+                trend: currentTrend,
+                confidence_score: reversalRisk.riskScore,
+              })
+              .select()
+              .single();
+            
+            if (!hedgeError && hedgePosition) {
+              // Link hedge to parent position
+              await supabase
+                .from("positions")
+                .update({ hedge_position_id: hedgePosition.id })
+                .eq("id", position.id);
+              
+              hedgesOpened.push({
+                symbol: position.symbol,
+                parentSide: position.side,
+                hedgeSide,
+                hedgeQuantity,
+                reversalRisk: reversalRisk.riskScore,
+                parentPositionId: position.id,
+                hedgePositionId: hedgePosition.id,
+              });
+              console.log(`✅ Hedge opened: ${hedgeSide} ${hedgeQuantity} ${position.symbol} at ${currentPrice}`);
+            } else {
+              console.error(`❌ Failed to open hedge: ${hedgeError?.message}`);
+            }
+          }
+          // If risk is HIGH (>= max threshold), close position instead
+          else if (!shouldClose && reversalRisk.riskScore >= userSettings.hedgeReversalRiskMax && pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
             shouldClose = true;
             closeReason = "reversal_risk_high";
             console.log(
               `⚠️ REVERSAL RISK EXIT: Closing LONG ${position.symbol} - Risk ${reversalRisk.riskScore}/100: ${reversalRisk.signals.join(", ")}`,
             );
           }
+          
+          // 🆕 HEDGE MANAGEMENT: Close hedge if risk drops below threshold
+          if (hasHedge && 
+              reversalRisk.riskScore < userSettings.hedgeReversalRiskMin * 0.7 && // Risk dropped significantly (30% below hedge trigger)
+              position.hedge_position_id) {
+            console.log(`🛡️ HEDGE CLOSE: Risk dropped to ${reversalRisk.riskScore}% - closing hedge for LONG ${position.symbol}`);
+            
+            // Close the hedge position
+            const { data: closedHedge, error: closeHedgeError } = await supabase
+              .from("positions")
+              .update({
+                status: "closed",
+                current_price: currentPrice,
+                exit_price: currentPrice,
+                closed_at: new Date().toISOString(),
+                close_reason: "hedge_risk_dropped",
+              })
+              .eq("id", position.hedge_position_id)
+              .eq("status", "active")
+              .select()
+              .maybeSingle();
+            
+            if (!closeHedgeError && closedHedge) {
+              // Unlink hedge from parent
+              await supabase
+                .from("positions")
+                .update({ hedge_position_id: null })
+                .eq("id", position.id);
+              
+              hedgesClosed.push({
+                symbol: position.symbol,
+                parentSide: position.side,
+                hedgePositionId: position.hedge_position_id,
+                riskScore: reversalRisk.riskScore,
+              });
+              console.log(`✅ Hedge closed for ${position.symbol} - risk dropped`);
+            }
+          }
+          
           // Original early warning logic (kept as fallback)
-          else {
+          if (!shouldClose) {
             const EARLY_WARNING_MIN_LOSS_PERCENT_LONG = -0.2;
-            if (!shouldClose && trend1h === "bearish" && confidence4h < 70 && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT_LONG) {
+            if (trend1h === "bearish" && confidence4h < 70 && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT_LONG) {
               shouldClose = true;
               closeReason = "early_warning_1h_bearish";
               console.log(
@@ -1481,7 +1691,9 @@ serve(async (req) => {
       partialTpTaken,
       emergencyExits,
       volatilityAlerts,
-      message: `Updated ${updates.length} positions, ${trailingStopUpdates.length} trailing stops, ${breakEvenUpdates.length} break-even stops, ${partialTpTaken.length} partial TPs, closed ${closedPositions.length} positions (${trendExits.length} trend exits, ${emergencyExits.length} emergency exits), ${volatilityAlerts.length} volatility alerts`,
+      hedgesOpened,
+      hedgesClosed,
+      message: `Updated ${updates.length} positions, ${trailingStopUpdates.length} trailing stops, ${breakEvenUpdates.length} break-even stops, ${partialTpTaken.length} partial TPs, closed ${closedPositions.length} positions (${trendExits.length} trend exits, ${emergencyExits.length} emergency exits), ${volatilityAlerts.length} volatility alerts, ${hedgesOpened.length} hedges opened`,
     };
     const message = JSON.stringify(responseData);
     for (const client of clients) {
