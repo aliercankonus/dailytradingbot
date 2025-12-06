@@ -478,11 +478,6 @@ serve(async (req) => {
       let newStopLoss = position.stop_loss;
       let trailingActivated = false;
       
-      // Track peak P&L for ratcheting mechanism (persisted to database)
-      const currentPeakPnl = position.peak_pnl_percent || 0;
-      const newPeakPnl = Math.max(currentPeakPnl, pnlPercent);
-      const peakUpdated = newPeakPnl > currentPeakPnl;
-      
       // Minimum stop loss distance (1% from entry) - prevents premature exits
       const MIN_TRAILING_STOP_DISTANCE_PERCENT = 1.0;
       const minDistanceFromEntry = position.entry_price * (MIN_TRAILING_STOP_DISTANCE_PERCENT / 100);
@@ -584,7 +579,7 @@ serve(async (req) => {
           // Use optimistic locking - only update if position is still active
           const { data: updatedPos, error: posUpdateError } = await supabase
             .from("positions")
-            .update({ stop_loss: newStopLoss, peak_pnl_percent: newPeakPnl })
+            .update({ stop_loss: newStopLoss })
             .eq("id", position.id)
             .eq("status", "active") // RACE CONDITION FIX: Only update if still active
             .select()
@@ -641,22 +636,6 @@ serve(async (req) => {
             // Don't fail the monitoring if notification fails
           }
           } // Close if (updatedPos)
-        }
-      }
-      
-      // ALWAYS update peak P&L for profitable positions (even if trailing stop not activated yet)
-      // This ensures peak is tracked for ratcheting when trailing DOES activate later
-      if (peakUpdated && !trailingActivated && pnlPercent > 0) {
-        const { error: peakUpdateError } = await supabase
-          .from("positions")
-          .update({ peak_pnl_percent: newPeakPnl })
-          .eq("id", position.id)
-          .eq("status", "active");
-        
-        if (peakUpdateError) {
-          console.error(`Error updating peak P&L for ${position.id}:`, peakUpdateError);
-        } else {
-          console.log(`📈 Peak P&L updated for ${position.symbol}: ${currentPeakPnl.toFixed(2)}% → ${newPeakPnl.toFixed(2)}%`);
         }
       }
 

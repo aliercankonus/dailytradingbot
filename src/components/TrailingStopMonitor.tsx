@@ -113,11 +113,6 @@ export const TrailingStopMonitor = () => {
             ? ((currentPrice - p.entry_price) / p.entry_price) * 100
             : ((p.entry_price - currentPrice) / p.entry_price) * 100;
 
-        // 🔒 RATCHET: Use peak P&L from database (persisted), fallback to current if not set
-        // The database peak is updated by monitor-positions and survives page refreshes
-        const dbPeak = p.peak_pnl_percent || 0;
-        const currentPeak = Math.max(dbPeak, pnlPercent);
-
         // Calculate position-specific trailing stop based on entry + profit - distance
         // This makes each position's stop independent even for the same symbol
         const profitAbsolute = p.side === "BUY" 
@@ -132,11 +127,11 @@ export const TrailingStopMonitor = () => {
           ? p.entry_price + profitAbsolute - trailingDistanceAbsolute
           : p.entry_price - profitAbsolute + trailingDistanceAbsolute;
 
-        // Calculate profit lock values based on PEAK P&L (ratcheting)
+        // Calculate profit lock values based on current P&L
         const profitLockPercent = settings.profitLockPercent;
-        const lockedProfitPercent = currentPeak * (profitLockPercent / 100);
-        const peakProfitAbsolute = p.entry_price * (currentPeak / 100);
-        const lockedProfitAbsolute = peakProfitAbsolute * (profitLockPercent / 100);
+        const lockedProfitPercent = pnlPercent * (profitLockPercent / 100);
+        const profitAbsoluteValue = p.entry_price * (pnlPercent / 100);
+        const lockedProfitAbsolute = profitAbsoluteValue * (profitLockPercent / 100);
         const lockedStopPrice = p.side === "BUY"
           ? p.entry_price + lockedProfitAbsolute
           : p.entry_price - lockedProfitAbsolute;
@@ -145,7 +140,6 @@ export const TrailingStopMonitor = () => {
           ...p,
           currentPrice: Number(currentPrice),
           pnlPercent: Number(pnlPercent),
-          peakPnlPercent: Number(currentPeak),
           stop_loss: Number(calculatedStopLoss),
           lockedProfitPercent: Number(lockedProfitPercent),
           lockedProfitAbsolute: Number(lockedProfitAbsolute),
