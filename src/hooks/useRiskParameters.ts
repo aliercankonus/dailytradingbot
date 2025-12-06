@@ -47,6 +47,11 @@ interface RiskParameters {
   loss_recovery_mode_enabled: boolean;
   loss_recovery_position_size_percent: number;
   loss_recovery_confidence_boost: number;
+  // Hedging Settings
+  hedging_enabled: boolean;
+  hedge_reversal_risk_min: number;
+  hedge_reversal_risk_max: number;
+  hedge_position_size_percent: number;
   updated_at: string;
 }
 
