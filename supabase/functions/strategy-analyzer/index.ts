@@ -389,6 +389,18 @@ const detectReversalRisk = (trendData: any, intendedDirection: string): Reversal
   const momentum = trendData?.momentum || {};
   const stochRsi = trendData?.stochasticRsi?.aggregated || trendData?.stochasticRsi || {};
   const trend1h = trendData?.higherTimeframeFilter?.trend1h || trendData?.multiTimeframe?.trend1h;
+  const adx = trendData?.adx || trendData?.indicators?.adx || 20;
+  
+  // ADX-based adaptive reversal weight:
+  // Strong trend (high ADX) = lower reversal impact
+  // Weak trend (low ADX) = full reversal impact
+  const getAdxReversalWeight = (adxValue: number): number => {
+    if (adxValue >= 35) return 0.5;  // Strong trend, reduce reversal impact
+    if (adxValue >= 20) return 0.7;  // Moderate trend
+    return 1.0;                       // Weak trend, full reversal impact
+  };
+  
+  const adxWeight = getAdxReversalWeight(adx);
   
   // 1. Momentum divergence - price moving one way, MACD moving opposite
   if (momentum.hasDivergence) {
@@ -447,19 +459,20 @@ const detectReversalRisk = (trendData: any, intendedDirection: string): Reversal
     }
   }
   
-  // Cap at 100
+  // Cap at 100, then apply ADX-based weight
   riskScore = Math.min(100, riskScore);
+  const adjustedRiskScore = Math.round(riskScore * adxWeight);
   
   // High risk threshold: 50+ blocks signal generation
-  const isHighRisk = riskScore >= 50;
+  const isHighRisk = adjustedRiskScore >= 50;
   
   const reason = isHighRisk 
-    ? `Reversal risk HIGH (${riskScore}/100): ${signals.join(", ")}`
+    ? `Reversal risk HIGH (${adjustedRiskScore}/100, raw=${riskScore}, ADX=${adx.toFixed(1)}, weight=${adxWeight}): ${signals.join(", ")}`
     : signals.length > 0 
-      ? `Reversal risk moderate (${riskScore}/100): ${signals.join(", ")}`
-      : `Reversal risk low (${riskScore}/100)`;
+      ? `Reversal risk moderate (${adjustedRiskScore}/100, raw=${riskScore}, ADX=${adx.toFixed(1)}, weight=${adxWeight}): ${signals.join(", ")}`
+      : `Reversal risk low (${adjustedRiskScore}/100)`;
   
-  return { isHighRisk, riskScore, signals, reason };
+  return { isHighRisk, riskScore: adjustedRiskScore, signals, reason };
 };
 
 // ============= IMPROVEMENT #2: Market Regime Detection =============
