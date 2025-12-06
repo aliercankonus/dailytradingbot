@@ -1128,56 +1128,73 @@ serve(async (req) => {
 
         // ============= STOCHRSI EXTREME FILTER =============
         // Prevent entries at extreme oversold/overbought 4h levels where bounces are likely
+        // UNLESS trend is strong (ADX >= 30), where oversold can stay oversold (trend continuation)
         const stochRsi4h = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi?.aggregated;
         const stochRsiK4h = stochRsi4h?.k ?? 50;
         const STOCHRSI_OVERSOLD_THRESHOLD = 10;  // Below 10 = extreme oversold, bounce likely
         const STOCHRSI_OVERBOUGHT_THRESHOLD = 90; // Above 90 = extreme overbought, pullback likely
+        const STRONG_TREND_ADX_THRESHOLD = 30;    // ADX >= 30 = strong trend, allow extreme entries
         
         // Check if we're at extreme StochRSI levels
         const isExtremOversold4h = stochRsiK4h < STOCHRSI_OVERSOLD_THRESHOLD;
         const isExtremeOverbought4h = stochRsiK4h > STOCHRSI_OVERBOUGHT_THRESHOLD;
+        const isTrendStrong = adx >= STRONG_TREND_ADX_THRESHOLD;
         
         // Determine intended trade direction from trend
         const intendedTradeDirection = trend === "bullish" ? "long" : trend === "bearish" ? "short" : null;
         
-        // Block SHORT entries at extreme oversold (bounce likely)
+        // Block SHORT entries at extreme oversold ONLY if trend is weak
+        // Strong downtrends can stay oversold (trend continuation)
         if (intendedTradeDirection === "short" && isExtremOversold4h) {
-          rejectedByStochRsiExtreme++;
-          console.log(`⛔ ${symbol}: Blocking SHORT - 4h StochRSI K=${stochRsiK4h.toFixed(1)} is extreme oversold (<${STOCHRSI_OVERSOLD_THRESHOLD}), bounce likely`);
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `StochRSI extreme filter: 4h K=${stochRsiK4h.toFixed(1)} oversold, bounce likely for SHORT entry`,
-            filters_status: { 
-              stochRsiK4h: stochRsiK4h.toFixed(1),
-              threshold: STOCHRSI_OVERSOLD_THRESHOLD,
-              intendedDirection: "short",
-              trend,
-              reason: "Extreme oversold 4h = high probability bounce, delaying SHORT entry"
-            },
-            trend_data: trendData,
-            checked_at: new Date().toISOString(),
-          });
-          continue;
+          if (isTrendStrong) {
+            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme oversold but ADX=${adx.toFixed(1)} strong - allowing SHORT (trend continuation)`);
+          } else {
+            rejectedByStochRsiExtreme++;
+            console.log(`⛔ ${symbol}: Blocking SHORT - 4h StochRSI K=${stochRsiK4h.toFixed(1)} oversold + weak trend (ADX=${adx.toFixed(1)}), bounce likely`);
+            await supabase.from("signal_rejection_log").insert({
+              user_id: userId, symbol,
+              rejection_reason: `StochRSI extreme filter: 4h K=${stochRsiK4h.toFixed(1)} oversold + weak ADX=${adx.toFixed(1)}, bounce likely`,
+              filters_status: { 
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                adx: adx.toFixed(1),
+                threshold: STOCHRSI_OVERSOLD_THRESHOLD,
+                adxThreshold: STRONG_TREND_ADX_THRESHOLD,
+                intendedDirection: "short",
+                trend,
+                reason: "Extreme oversold 4h + weak trend = high probability bounce"
+              },
+              trend_data: trendData,
+              checked_at: new Date().toISOString(),
+            });
+            continue;
+          }
         }
         
-        // Block LONG entries at extreme overbought (pullback likely)
+        // Block LONG entries at extreme overbought ONLY if trend is weak
+        // Strong uptrends can stay overbought (trend continuation)
         if (intendedTradeDirection === "long" && isExtremeOverbought4h) {
-          rejectedByStochRsiExtreme++;
-          console.log(`⛔ ${symbol}: Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} is extreme overbought (>${STOCHRSI_OVERBOUGHT_THRESHOLD}), pullback likely`);
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `StochRSI extreme filter: 4h K=${stochRsiK4h.toFixed(1)} overbought, pullback likely for LONG entry`,
-            filters_status: { 
-              stochRsiK4h: stochRsiK4h.toFixed(1),
-              threshold: STOCHRSI_OVERBOUGHT_THRESHOLD,
-              intendedDirection: "long",
-              trend,
-              reason: "Extreme overbought 4h = high probability pullback, delaying LONG entry"
-            },
-            trend_data: trendData,
-            checked_at: new Date().toISOString(),
-          });
-          continue;
+          if (isTrendStrong) {
+            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought but ADX=${adx.toFixed(1)} strong - allowing LONG (trend continuation)`);
+          } else {
+            rejectedByStochRsiExtreme++;
+            console.log(`⛔ ${symbol}: Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} overbought + weak trend (ADX=${adx.toFixed(1)}), pullback likely`);
+            await supabase.from("signal_rejection_log").insert({
+              user_id: userId, symbol,
+              rejection_reason: `StochRSI extreme filter: 4h K=${stochRsiK4h.toFixed(1)} overbought + weak ADX=${adx.toFixed(1)}, pullback likely`,
+              filters_status: { 
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                adx: adx.toFixed(1),
+                threshold: STOCHRSI_OVERBOUGHT_THRESHOLD,
+                adxThreshold: STRONG_TREND_ADX_THRESHOLD,
+                intendedDirection: "long",
+                trend,
+                reason: "Extreme overbought 4h + weak trend = high probability pullback"
+              },
+              trend_data: trendData,
+              checked_at: new Date().toISOString(),
+            });
+            continue;
+          }
         }
         
         // Log StochRSI status for monitoring
