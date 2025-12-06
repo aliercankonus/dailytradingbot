@@ -14,18 +14,15 @@ export const TrailingStopMonitor = () => {
     distanceMultiplier: 1.5,
     profitLockPercent: 50,
   });
-
   const { getPrice, priceVersion } = useRealtimePricesContext();
 
   // ----------- HELPERS -----------
   const resolveCurrentPrice = (p: any) => {
     const live = getPrice ? getPrice(p.symbol) : undefined;
-
     if (live?.price != null) {
       const val = Number(live.price);
       if (!isNaN(val)) return val;
     }
-
     if (typeof p.current_price === "number") return p.current_price;
     return p.entry_price;
   };
@@ -36,11 +33,8 @@ export const TrailingStopMonitor = () => {
 
   const calculateTrailingStop = (position: any, currentPrice: number) => {
     const { side, entry_price } = position;
-
-    // Kullanıcı multiplier → doğrudan % hesaplanır (1.5 = %1.5)
     const trailingPercent = settings.distanceMultiplier;
     const trailingDistanceAbs = currentPrice * (trailingPercent / 100);
-
     if (side === "BUY") {
       const profitAbs = currentPrice - entry_price;
       return entry_price + profitAbs - trailingDistanceAbs;
@@ -53,13 +47,10 @@ export const TrailingStopMonitor = () => {
   const calculateProfitLock = (position: any, pnlPercent: number) => {
     const { side, entry_price } = position;
     const profitLockPercent = settings.profitLockPercent;
-
     const lockedProfitPercent = pnlPercent * (profitLockPercent / 100);
     const profitAbsolute = entry_price * (pnlPercent / 100);
     const lockedProfitAbsolute = profitAbsolute * (profitLockPercent / 100);
-
     const lockedStopPrice = side === "BUY" ? entry_price + lockedProfitAbsolute : entry_price - lockedProfitAbsolute;
-
     return {
       lockedProfitPercent,
       lockedProfitAbsolute,
@@ -74,7 +65,6 @@ export const TrailingStopMonitor = () => {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) return;
-
       const { data } = await supabase
         .from("risk_parameters")
         .select(
@@ -82,7 +72,6 @@ export const TrailingStopMonitor = () => {
         )
         .eq("user_id", user.id)
         .single();
-
       if (data) {
         setSettings({
           enabled: data.trailing_stop_enabled ?? true,
@@ -95,7 +84,6 @@ export const TrailingStopMonitor = () => {
 
     const fetchPositions = async () => {
       const { data } = await supabase.from("positions").select("*").eq("status", "active");
-
       if (data) setPositions(data);
     };
 
@@ -129,18 +117,15 @@ export const TrailingStopMonitor = () => {
       .map((p) => {
         const currentPrice = resolveCurrentPrice(p);
         const pnlPercent = calculatePnlPercent(p.side, p.entry_price, currentPrice);
-
         return { position: p, currentPrice, pnlPercent };
       })
-      .filter((item) => item.pnlPercent > settings.activationPercent) // artık hard-coded değil
+      .filter((item) => item.pnlPercent > settings.activationPercent)
       .map(({ position, currentPrice, pnlPercent }) => {
         const stop_loss = calculateTrailingStop(position, currentPrice);
-
         const { lockedProfitPercent, lockedProfitAbsolute, lockedStopPrice } = calculateProfitLock(
           position,
           pnlPercent,
         );
-
         return {
           ...position,
           currentPrice,
@@ -152,7 +137,7 @@ export const TrailingStopMonitor = () => {
           profitLockPercent: settings.profitLockPercent,
         };
       });
-  }, [positions, priceVersion, settings.activationPercent, settings.distanceMultiplier, settings.profitLockPercent]);
+  }, [positions, priceVersion, settings]);
 
   // ----------- UI (DEĞİŞTİRİLMEDİ) -----------
   return (
@@ -180,7 +165,6 @@ export const TrailingStopMonitor = () => {
             </div>
           </div>
         )}
-
         <div className="space-y-3">
           {activeTrailingPositions.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">
@@ -202,7 +186,6 @@ export const TrailingStopMonitor = () => {
                         {formatPercent(position.pnlPercent, 2, true)}
                       </Badge>
                     </div>
-
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <span className="text-xs">Entry:</span>
                       <span>{formatPrice(position.entry_price, 4, "$")}</span>
@@ -211,14 +194,12 @@ export const TrailingStopMonitor = () => {
                       <span className="text-xs">Stop:</span>
                       <span className="text-destructive">{formatPrice(position.stop_loss, 4, "$")}</span>
                     </div>
-
                     {/* Profit Lock */}
                     <div className="mt-2 rounded bg-muted/50 p-2">
                       <div className="mb-1 flex items-center gap-1 text-xs font-medium text-foreground">
                         <TrendingUp className="h-3 w-3 text-green-500" />
                         Profit Lock ({position.profitLockPercent}%)
                       </div>
-
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         <div>
                           <span>Locked Profit:</span>
@@ -226,14 +207,12 @@ export const TrailingStopMonitor = () => {
                             {formatPercent(position.lockedProfitPercent, 2, true)}
                           </span>
                         </div>
-
                         <div>
                           <span>Lock Stop:</span>
                           <span className="ml-1 font-medium text-amber-500">
                             {formatPrice(position.lockedStopPrice, 4, "$")}
                           </span>
                         </div>
-
                         <div className="col-span-2 mt-1 text-[10px] italic">
                           {formatPercent(position.pnlPercent)} × {position.profitLockPercent}% ={" "}
                           {formatPercent(position.lockedProfitPercent)} locked
@@ -241,7 +220,6 @@ export const TrailingStopMonitor = () => {
                       </div>
                     </div>
                   </div>
-
                   <div className="flex items-center gap-1">
                     <Shield className="h-4 w-4 text-primary" />
                   </div>
@@ -250,7 +228,6 @@ export const TrailingStopMonitor = () => {
             ))
           )}
         </div>
-
         <div className="mt-4 rounded-lg bg-muted/50 p-3">
           <h4 className="mb-2 text-sm font-medium text-foreground">Current Settings:</h4>
           <ul className="space-y-1 text-xs text-muted-foreground">
