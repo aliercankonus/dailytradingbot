@@ -10,7 +10,6 @@ import { Shield, AlertTriangle, DollarSign, TrendingDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useEffect } from 'react';
 import { TrailingStopSettings } from '@/components/TrailingStopSettings';
-import { PositionRebalancingSettings } from '@/components/PositionRebalancingSettings';
 import { DivergenceSettings } from '@/components/DivergenceSettings';
 import { LossManagementSettings } from '@/components/LossManagementSettings';
 import {
@@ -405,7 +404,7 @@ export const RiskManagementControls = () => {
                 <AlertTriangle className="h-5 w-5 text-primary" />
                 <div className="text-left">
                   <h3 className="text-lg font-semibold">Position Management</h3>
-                  <p className="text-sm text-muted-foreground">Trailing stops, rebalancing, and divergence strategies</p>
+                  <p className="text-sm text-muted-foreground">Trailing stops, loss management, and divergence strategies</p>
                 </div>
               </div>
             </AccordionTrigger>
@@ -416,9 +415,6 @@ export const RiskManagementControls = () => {
 
               {/* Trailing Stop Loss Settings */}
               <TrailingStopSettings />
-
-              {/* Automated Position Rebalancing */}
-              <PositionRebalancingSettings />
 
               {/* Divergence Opportunity Strategy */}
               <DivergenceSettings />
