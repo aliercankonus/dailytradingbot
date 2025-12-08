@@ -45,9 +45,13 @@ export const ClosedPositionsDashboard = () => {
         case 'partial_tp_3': return 'Partial TP 3';
         case 'reversal_risk_high': return 'Reversal Risk';
         case 'early_warning_exit': return 'Early Warning';
+        case 'early_warning_1h_bullish': return 'Early Warning (1h Bullish)';
+        case 'early_warning_1h_bearish': return 'Early Warning (1h Bearish)';
         case 'divergence_volume_spike': return 'Emergency Exit';
         case 'flash_crash': return 'Flash Crash Exit';
         case 'volatility_spike': return 'Volatility Exit';
+        case 'parent_closed': return 'Parent Closed';
+        case 'hedge_take_profit': return 'Hedge TP';
         case 'manual': return 'Manual Close';
         default: return position.close_reason;
       }

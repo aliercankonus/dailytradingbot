@@ -244,7 +244,7 @@ serve(async (req) => {
     const emergencyExits = []; // NEW: Track emergency exits
     const volatilityAlerts = []; // NEW: Track volatility alerts
     const hedgesOpened = []; // NEW: Track hedges opened for reversal risk
-    const hedgesClosed = []; // NEW: Track hedges closed when risk drops
+    const hedgesClosed: { symbol: string; parentSide: string; hedgePositionId: string; riskScore: number }[] = []; // NEW: Track hedges closed when risk drops
     const updatedStopLossMap = new Map<string, number>(); // Track updated stop losses by position ID
     
     // Fetch trend data for all symbols in PARALLEL
@@ -852,7 +852,20 @@ serve(async (req) => {
             
             console.log(`🛡️ HEDGE: Opening ${hedgeSide} hedge for SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}% (${userSettings.hedgeReversalRiskMin}-${userSettings.hedgeReversalRiskMax}%)`);
             
-            // Insert hedge position
+            // Calculate hedge TP based on parent position's loss (to cover the loss)
+            // Parent is SHORT, so parent loss = (currentPrice - entryPrice) / entryPrice * 100
+            const parentLossPercent = ((currentPrice - position.entry_price) / position.entry_price) * 100;
+            const parentLossAmount = Math.abs(parentLossPercent);
+            
+            // Hedge TP should cover the parent's loss + some profit (1.5x coverage)
+            // BUY hedge profits when price goes UP
+            const hedgeTpPercent = Math.max(parentLossAmount * 1.5, 1.0); // At least 1% TP
+            const hedgeTpPrice = currentPrice * (1 + hedgeTpPercent / 100);
+            const hedgeSlPrice = currentPrice * 0.985; // 1.5% stop for hedge (tighter for protection)
+            
+            console.log(`🛡️ HEDGE CALC: Parent SHORT loss ${parentLossPercent.toFixed(2)}%, Hedge TP target ${hedgeTpPercent.toFixed(2)}% at $${hedgeTpPrice.toFixed(4)}`);
+            
+            // Insert hedge position with dynamic TP to cover parent loss
             const { data: hedgePosition, error: hedgeError } = await supabase
               .from("positions")
               .insert({
@@ -862,8 +875,8 @@ serve(async (req) => {
                 quantity: hedgeQuantity,
                 entry_price: currentPrice,
                 current_price: currentPrice,
-                stop_loss: currentPrice * 0.98, // 2% stop for hedge
-                take_profit: currentPrice * 1.02, // 2% TP for hedge
+                stop_loss: hedgeSlPrice,
+                take_profit: hedgeTpPrice,
                 status: "active",
                 is_hedge: true,
                 parent_position_id: position.id,
@@ -904,43 +917,9 @@ serve(async (req) => {
             );
           }
           
-          // 🆕 HEDGE MANAGEMENT: Close hedge if risk drops below threshold
-          if (hasHedge && 
-              reversalRisk.riskScore < userSettings.hedgeReversalRiskMin * 0.7 && // Risk dropped significantly (30% below hedge trigger)
-              position.hedge_position_id) {
-            console.log(`🛡️ HEDGE CLOSE: Risk dropped to ${reversalRisk.riskScore}% - closing hedge for SHORT ${position.symbol}`);
-            
-            // Close the hedge position
-            const { data: closedHedge, error: closeHedgeError } = await supabase
-              .from("positions")
-              .update({
-                status: "closed",
-                current_price: currentPrice,
-                exit_price: currentPrice,
-                closed_at: new Date().toISOString(),
-                close_reason: "hedge_risk_dropped",
-              })
-              .eq("id", position.hedge_position_id)
-              .eq("status", "active")
-              .select()
-              .maybeSingle();
-            
-            if (!closeHedgeError && closedHedge) {
-              // Unlink hedge from parent
-              await supabase
-                .from("positions")
-                .update({ hedge_position_id: null })
-                .eq("id", position.id);
-              
-              hedgesClosed.push({
-                symbol: position.symbol,
-                parentSide: position.side,
-                hedgePositionId: position.hedge_position_id,
-                riskScore: reversalRisk.riskScore,
-              });
-              console.log(`✅ Hedge closed for ${position.symbol} - risk dropped`);
-            }
-          }
+          // 🆕 HEDGE MANAGEMENT: Let hedge run with trailing stop - DON'T close just because risk dropped
+          // Hedge should aim to cover the parent's loss, not close prematurely
+          // The hedge will be closed by: its own TP, trailing stop, or when parent closes
           
           // Original early warning logic (kept as fallback)
           if (!shouldClose) {
@@ -1013,7 +992,20 @@ serve(async (req) => {
             
             console.log(`🛡️ HEDGE: Opening ${hedgeSide} hedge for LONG ${position.symbol} - Risk ${reversalRisk.riskScore}% (${userSettings.hedgeReversalRiskMin}-${userSettings.hedgeReversalRiskMax}%)`);
             
-            // Insert hedge position
+            // Calculate hedge TP based on parent position's loss (to cover the loss)
+            // Parent is BUY (LONG), so parent loss = (entryPrice - currentPrice) / entryPrice * 100
+            const parentLossPercent = ((position.entry_price - currentPrice) / position.entry_price) * 100;
+            const parentLossAmount = Math.abs(parentLossPercent);
+            
+            // Hedge TP should cover the parent's loss + some profit (1.5x coverage)
+            // SELL hedge profits when price goes DOWN
+            const hedgeTpPercent = Math.max(parentLossAmount * 1.5, 1.0); // At least 1% TP
+            const hedgeTpPrice = currentPrice * (1 - hedgeTpPercent / 100);
+            const hedgeSlPrice = currentPrice * 1.015; // 1.5% stop for hedge (tighter for protection)
+            
+            console.log(`🛡️ HEDGE CALC: Parent LONG loss ${parentLossPercent.toFixed(2)}%, Hedge TP target ${hedgeTpPercent.toFixed(2)}% at $${hedgeTpPrice.toFixed(4)}`);
+            
+            // Insert hedge position with dynamic TP to cover parent loss
             const { data: hedgePosition, error: hedgeError } = await supabase
               .from("positions")
               .insert({
@@ -1023,8 +1015,8 @@ serve(async (req) => {
                 quantity: hedgeQuantity,
                 entry_price: currentPrice,
                 current_price: currentPrice,
-                stop_loss: currentPrice * 1.02, // 2% stop for hedge (opposite direction)
-                take_profit: currentPrice * 0.98, // 2% TP for hedge
+                stop_loss: hedgeSlPrice,
+                take_profit: hedgeTpPrice,
                 status: "active",
                 is_hedge: true,
                 parent_position_id: position.id,
@@ -1065,43 +1057,9 @@ serve(async (req) => {
             );
           }
           
-          // 🆕 HEDGE MANAGEMENT: Close hedge if risk drops below threshold
-          if (hasHedge && 
-              reversalRisk.riskScore < userSettings.hedgeReversalRiskMin * 0.7 && // Risk dropped significantly (30% below hedge trigger)
-              position.hedge_position_id) {
-            console.log(`🛡️ HEDGE CLOSE: Risk dropped to ${reversalRisk.riskScore}% - closing hedge for LONG ${position.symbol}`);
-            
-            // Close the hedge position
-            const { data: closedHedge, error: closeHedgeError } = await supabase
-              .from("positions")
-              .update({
-                status: "closed",
-                current_price: currentPrice,
-                exit_price: currentPrice,
-                closed_at: new Date().toISOString(),
-                close_reason: "hedge_risk_dropped",
-              })
-              .eq("id", position.hedge_position_id)
-              .eq("status", "active")
-              .select()
-              .maybeSingle();
-            
-            if (!closeHedgeError && closedHedge) {
-              // Unlink hedge from parent
-              await supabase
-                .from("positions")
-                .update({ hedge_position_id: null })
-                .eq("id", position.id);
-              
-              hedgesClosed.push({
-                symbol: position.symbol,
-                parentSide: position.side,
-                hedgePositionId: position.hedge_position_id,
-                riskScore: reversalRisk.riskScore,
-              });
-              console.log(`✅ Hedge closed for ${position.symbol} - risk dropped`);
-            }
-          }
+          // 🆕 HEDGE MANAGEMENT: Let hedge run with trailing stop - DON'T close just because risk dropped
+          // Hedge should aim to cover the parent's loss, not close prematurely
+          // The hedge will be closed by: its own TP, trailing stop, or when parent closes
           
           // Original early warning logic (kept as fallback)
           if (!shouldClose) {
@@ -1667,6 +1625,53 @@ serve(async (req) => {
           console.log(
             `Closed position ${position.id} - ${position.symbol} ${position.side} - ${closeReason} at ${currentPrice}`,
           );
+          
+          // 🆕 HEDGE CLEANUP: If parent position had a hedge, close the hedge too
+          if (position.hedge_position_id) {
+            console.log(`🛡️ HEDGE CLEANUP: Closing hedge for parent ${position.symbol} ${position.side}`);
+            
+            // Get the hedge position to calculate its P&L
+            const { data: hedgePos } = await supabase
+              .from("positions")
+              .select("*")
+              .eq("id", position.hedge_position_id)
+              .eq("status", "active")
+              .maybeSingle();
+            
+            if (hedgePos) {
+              // Calculate hedge P&L
+              const hedgePnl = hedgePos.side === "BUY"
+                ? (currentPrice - hedgePos.entry_price) * hedgePos.quantity
+                : (hedgePos.entry_price - currentPrice) * hedgePos.quantity;
+              const hedgePnlPercent = hedgePos.side === "BUY"
+                ? ((currentPrice - hedgePos.entry_price) / hedgePos.entry_price) * 100
+                : ((hedgePos.entry_price - currentPrice) / hedgePos.entry_price) * 100;
+              
+              const { error: closeHedgeError } = await supabase
+                .from("positions")
+                .update({
+                  status: "closed",
+                  current_price: currentPrice,
+                  exit_price: currentPrice,
+                  realized_pnl: hedgePnl,
+                  realized_pnl_percent: hedgePnlPercent,
+                  closed_at: new Date().toISOString(),
+                  close_reason: "parent_closed",
+                })
+                .eq("id", position.hedge_position_id)
+                .eq("status", "active");
+              
+              if (!closeHedgeError) {
+                hedgesClosed.push({
+                  symbol: position.symbol,
+                  parentSide: position.side,
+                  hedgePositionId: position.hedge_position_id,
+                  riskScore: 0,
+                });
+                console.log(`✅ Hedge closed with parent: ${hedgePos.side} ${hedgePos.symbol}, P&L: $${hedgePnl.toFixed(2)} (${hedgePnlPercent.toFixed(2)}%)`);
+              }
+            }
+          }
         } else {
           console.log(
             `Position ${position.id} was already closed by another process - skipping`,
