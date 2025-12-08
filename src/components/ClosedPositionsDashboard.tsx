@@ -34,23 +34,27 @@ export const ClosedPositionsDashboard = () => {
         case 'stop_loss': return 'Stop Loss';
         case 'trailing_stop_loss': return 'Trailing Stop';
         case 'break_even': return 'Break-Even';
-        case 'trend_reversal_bullish': return 'Trend Exit (Bullish)';
-        case 'trend_reversal_bearish': return 'Trend Exit (Bearish)';
-        case 'trend_reversal_ranging': return 'Trend Exit (Ranging)';
-        case 'time_based_stop': return 'Time-Based Exit';
+        // Trend exits - all grouped together
+        case 'trend_reversal_bullish': return 'Trend Exit';
+        case 'trend_reversal_bearish': return 'Trend Exit';
+        case 'trend_reversal_ranging': return 'Trend Exit';
+        case 'early_warning_1h_bullish': return 'Trend Exit';
+        case 'early_warning_1h_bearish': return 'Trend Exit';
+        case 'early_warning_exit': return 'Trend Exit';
+        case 'time_based_stop': return 'Time Exit';
+        // Partial closes
         case 'partial_loss': return 'Partial Loss';
         case 'partial_tp_close': return 'Partial TP';
         case 'partial_tp_1': return 'Partial TP 1';
         case 'partial_tp_2': return 'Partial TP 2';
         case 'partial_tp_3': return 'Partial TP 3';
-        case 'reversal_risk_high': return 'Reversal Risk';
-        case 'early_warning_exit': return 'Early Warning';
-        case 'early_warning_1h_bullish': return 'Early Warning (1h Bullish)';
-        case 'early_warning_1h_bearish': return 'Early Warning (1h Bearish)';
+        // Emergency exits
+        case 'reversal_risk_high': return 'Emergency Exit';
         case 'divergence_volume_spike': return 'Emergency Exit';
-        case 'flash_crash': return 'Flash Crash Exit';
-        case 'volatility_spike': return 'Volatility Exit';
-        case 'parent_closed': return 'Parent Closed';
+        case 'flash_crash': return 'Emergency Exit';
+        case 'volatility_spike': return 'Emergency Exit';
+        // Hedge closes
+        case 'parent_closed': return 'Hedge Closed';
         case 'hedge_take_profit': return 'Hedge TP';
         case 'manual': return 'Manual Close';
         default: return position.close_reason;
@@ -91,15 +95,17 @@ export const ClosedPositionsDashboard = () => {
     let emergencyExitCount = 0;
     let manualCount = 0;
     
-    const emergencyReasons = ['Emergency Exit', 'Flash Crash Exit', 'Volatility Exit', 'Reversal Risk', 'Early Warning'];
+    const emergencyReasons = ['Emergency Exit'];
+    const hedgeReasons = ['Hedge Closed', 'Hedge TP'];
     
     positions.forEach(p => {
       const closeReason = getCloseReason(p);
       if (closeReason === 'Take Profit' || closeReason.includes('Partial TP')) takeProfitCount++;
       else if (closeReason === 'Stop Loss') stopLossCount++;
-      else if (closeReason === 'Trailing Stop') trailingStopCount++;
-      else if (closeReason.includes('Trend Exit')) trendExitCount++;
+      else if (closeReason === 'Trailing Stop' || closeReason === 'Break-Even') trailingStopCount++;
+      else if (closeReason === 'Trend Exit' || closeReason === 'Time Exit') trendExitCount++;
       else if (emergencyReasons.includes(closeReason)) emergencyExitCount++;
+      else if (hedgeReasons.includes(closeReason)) manualCount++; // Count hedges in "other"
       else manualCount++;
     });
     
