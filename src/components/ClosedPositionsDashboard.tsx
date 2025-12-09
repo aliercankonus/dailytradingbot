@@ -57,6 +57,7 @@ export const ClosedPositionsDashboard = () => {
         case 'parent_closed': return 'Hedge Closed';
         case 'hedge_take_profit': return 'Hedge TP';
         case 'hedge_stop_loss': return 'Hedge SL';
+        case 'hedge_risk_dropped': return 'Hedge Exit';
         case 'manual': return 'Manual Close';
         default: return position.close_reason;
       }
@@ -99,7 +100,7 @@ export const ClosedPositionsDashboard = () => {
     let manualCount = 0;
     
     const emergencyReasons = ['Emergency Exit'];
-    const hedgeReasons = ['Hedge Closed', 'Hedge TP', 'Hedge SL'];
+    const hedgeReasons = ['Hedge Closed', 'Hedge TP', 'Hedge SL', 'Hedge Exit'];
     
     positions.forEach(p => {
       const closeReason = getCloseReason(p);
@@ -245,7 +246,7 @@ export const ClosedPositionsDashboard = () => {
           Partial Loss
         </Badge>
       );
-    } else if (reason === 'Hedge Closed' || reason === 'Hedge TP' || reason === 'Hedge SL') {
+    } else if (reason === 'Hedge Closed' || reason === 'Hedge TP' || reason === 'Hedge SL' || reason === 'Hedge Exit') {
       return (
         <Badge variant="outline" className="gap-1 bg-indigo-500/10 text-indigo-500 border-indigo-500/20">
           <Layers className="h-3 w-3" />
