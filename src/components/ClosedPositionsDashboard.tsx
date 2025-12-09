@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useClosedPositions } from '@/hooks/useClosedPositions';
-import { Loader2, TrendingUp, TrendingDown, Target, ShieldAlert, Archive, Filter, X } from 'lucide-react';
+import { Loader2, TrendingUp, TrendingDown, Target, ShieldAlert, Archive, Filter, X, Layers } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMemo, useState } from 'react';
@@ -56,6 +56,7 @@ export const ClosedPositionsDashboard = () => {
         // Hedge closes
         case 'parent_closed': return 'Hedge Closed';
         case 'hedge_take_profit': return 'Hedge TP';
+        case 'hedge_stop_loss': return 'Hedge SL';
         case 'manual': return 'Manual Close';
         default: return position.close_reason;
       }
@@ -78,7 +79,8 @@ export const ClosedPositionsDashboard = () => {
     if (!positions || positions.length === 0) {
       return { 
         total: 0, profitable: 0, losses: 0, totalPnL: 0, avgPnL: 0, 
-        takeProfitCount: 0, stopLossCount: 0, trailingStopCount: 0, trendExitCount: 0, emergencyExitCount: 0, manualCount: 0 
+        takeProfitCount: 0, stopLossCount: 0, trailingStopCount: 0, trendExitCount: 0, 
+        emergencyExitCount: 0, hedgeCount: 0, manualCount: 0 
       };
     }
     
@@ -93,10 +95,11 @@ export const ClosedPositionsDashboard = () => {
     let trailingStopCount = 0;
     let trendExitCount = 0;
     let emergencyExitCount = 0;
+    let hedgeCount = 0;
     let manualCount = 0;
     
     const emergencyReasons = ['Emergency Exit'];
-    const hedgeReasons = ['Hedge Closed', 'Hedge TP'];
+    const hedgeReasons = ['Hedge Closed', 'Hedge TP', 'Hedge SL'];
     
     positions.forEach(p => {
       const closeReason = getCloseReason(p);
@@ -105,7 +108,7 @@ export const ClosedPositionsDashboard = () => {
       else if (closeReason === 'Trailing Stop' || closeReason === 'Break-Even') trailingStopCount++;
       else if (closeReason === 'Trend Exit' || closeReason === 'Time Exit') trendExitCount++;
       else if (emergencyReasons.includes(closeReason)) emergencyExitCount++;
-      else if (hedgeReasons.includes(closeReason)) manualCount++; // Count hedges in "other"
+      else if (hedgeReasons.includes(closeReason)) hedgeCount++;
       else manualCount++;
     });
     
@@ -120,6 +123,7 @@ export const ClosedPositionsDashboard = () => {
       trailingStopCount,
       trendExitCount,
       emergencyExitCount,
+      hedgeCount,
       manualCount,
     };
   }, [positions]);
@@ -227,11 +231,11 @@ export const ClosedPositionsDashboard = () => {
           Break-Even
         </Badge>
       );
-    } else if (reason === 'Time-Based Exit') {
+    } else if (reason === 'Time Exit') {
       return (
         <Badge variant="outline" className="gap-1 bg-orange-500/10 text-orange-500 border-orange-500/20">
           <ShieldAlert className="h-3 w-3" />
-          Time-Based Exit
+          Time Exit
         </Badge>
       );
     } else if (reason === 'Partial Loss') {
@@ -241,11 +245,18 @@ export const ClosedPositionsDashboard = () => {
           Partial Loss
         </Badge>
       );
-    } else if (reason === 'Reversal Risk' || reason === 'Early Warning') {
+    } else if (reason === 'Hedge Closed' || reason === 'Hedge TP' || reason === 'Hedge SL') {
+      return (
+        <Badge variant="outline" className="gap-1 bg-indigo-500/10 text-indigo-500 border-indigo-500/20">
+          <Layers className="h-3 w-3" />
+          {reason}
+        </Badge>
+      );
+    } else if (reason === 'Emergency Exit') {
       return (
         <Badge variant="outline" className="gap-1 bg-red-500/10 text-red-500 border-red-500/20">
           <ShieldAlert className="h-3 w-3" />
-          {reason}
+          Emergency Exit
         </Badge>
       );
     } else if (reason === 'Stop Loss') {
@@ -315,7 +326,7 @@ export const ClosedPositionsDashboard = () => {
           <CardDescription>How positions were closed</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
             <div className="text-center p-4 border rounded-lg bg-success/5">
               <div className="text-2xl font-bold text-success">{stats.takeProfitCount}</div>
               <div className="text-sm text-muted-foreground">Take Profit</div>
@@ -327,6 +338,10 @@ export const ClosedPositionsDashboard = () => {
             <div className="text-center p-4 border rounded-lg bg-purple-500/5">
               <div className="text-2xl font-bold text-purple-500">{stats.trendExitCount}</div>
               <div className="text-sm text-muted-foreground">Trend Exit</div>
+            </div>
+            <div className="text-center p-4 border rounded-lg bg-indigo-500/5">
+              <div className="text-2xl font-bold text-indigo-500">{stats.hedgeCount}</div>
+              <div className="text-sm text-muted-foreground">Hedge</div>
             </div>
             <div className="text-center p-4 border rounded-lg bg-orange-500/5">
               <div className="text-2xl font-bold text-orange-500">{stats.emergencyExitCount}</div>
@@ -517,7 +532,17 @@ const PositionsTable = ({ positions, getCloseReasonBadge }: PositionsTableProps)
         <TableBody>
           {positions.map((position) => (
             <TableRow key={position.id}>
-              <TableCell className="font-medium">{position.symbol}</TableCell>
+              <TableCell className="font-medium">
+                <div className="flex items-center gap-2">
+                  {position.symbol}
+                  {position.is_hedge && (
+                    <Badge variant="outline" className="text-xs bg-indigo-500/10 text-indigo-500 border-indigo-500/20">
+                      <Layers className="h-3 w-3 mr-1" />
+                      Hedge
+                    </Badge>
+                  )}
+                </div>
+              </TableCell>
               <TableCell>
                 <Badge variant={position.side === 'BUY' ? 'default' : 'secondary'}>
                   {position.side}

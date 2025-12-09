@@ -18,6 +18,8 @@ interface Position {
   strategy_name?: string;
   opened_by_rebalancer?: boolean;
   closed_by_rebalancer?: boolean;
+  is_hedge?: boolean;
+  parent_position_id?: string;
 }
 
 const fetchPositions = async (): Promise<Position[]> => {

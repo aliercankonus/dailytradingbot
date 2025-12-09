@@ -18,6 +18,8 @@ export interface ClosedPosition {
   opened_by_rebalancer?: boolean;
   closed_by_rebalancer?: boolean;
   close_reason?: string | null;
+  is_hedge?: boolean;
+  parent_position_id?: string | null;
 }
 
 export const useClosedPositions = (includeArchived: boolean = false) => {
