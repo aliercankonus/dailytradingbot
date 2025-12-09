@@ -532,17 +532,7 @@ const PositionsTable = ({ positions, getCloseReasonBadge }: PositionsTableProps)
         <TableBody>
           {positions.map((position) => (
             <TableRow key={position.id}>
-              <TableCell className="font-medium">
-                <div className="flex items-center gap-2">
-                  {position.symbol}
-                  {position.is_hedge && (
-                    <Badge variant="outline" className="text-xs bg-indigo-500/10 text-indigo-500 border-indigo-500/20">
-                      <Layers className="h-3 w-3 mr-1" />
-                      Hedge
-                    </Badge>
-                  )}
-                </div>
-              </TableCell>
+              <TableCell className="font-medium">{position.symbol}</TableCell>
               <TableCell>
                 <Badge variant={position.side === 'BUY' ? 'default' : 'secondary'}>
                   {position.side}
