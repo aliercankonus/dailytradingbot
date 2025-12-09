@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { usePositions } from '@/hooks/usePositions';
 import { useRealtimePricesContext } from '@/contexts/RealtimePricesContext';
 import { useRealtimePositionSync } from '@/hooks/useRealtimePositionSync';
-import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw, Filter, Lock, ArrowUp } from 'lucide-react';
+import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw, Filter, Lock, ArrowUp, Layers } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useMemo } from 'react';
@@ -180,32 +180,38 @@ export const ActivePositions = () => {
                   <TrendingDown className="h-6 w-6 text-red-500" />
                 )}
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-lg">{position.symbol}</h3>
-                    {position.opened_by_rebalancer && (
-                      <Badge variant="outline" className="text-xs flex items-center gap-1 bg-blue-500/10 text-blue-500 border-blue-500/20">
-                        <RotateCw className="h-3 w-3" />
-                     Auto-Rebalanced
-                      </Badge>
-                    )}
-                    {position.stop_adjusted ? (
-                      <Badge variant="outline" className="text-xs flex items-center gap-1 bg-amber-500/10 text-amber-500 border-amber-500/20">
-                        <ArrowUp className="h-3 w-3" />
-                        SL Adjusted
-                      </Badge>
-                    ) : position.at_break_even ? (
-                      <Badge variant="outline" className="text-xs flex items-center gap-1 bg-green-500/10 text-green-500 border-green-500/20">
-                        <Lock className="h-3 w-3" />
-                        Break-Even
-                      </Badge>
-                    ) : null}
-                    {position.trailing_eligible && !position.at_break_even && !position.stop_adjusted && (
-                      <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
-                        <Shield className="h-3 w-3" />
-                        Trailing Eligible
-                      </Badge>
-                    )}
-                  </div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-lg">{position.symbol}</h3>
+                      {position.is_hedge && (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-indigo-500/10 text-indigo-500 border-indigo-500/20">
+                          <Layers className="h-3 w-3" />
+                          Hedge
+                        </Badge>
+                      )}
+                      {position.opened_by_rebalancer && (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-blue-500/10 text-blue-500 border-blue-500/20">
+                          <RotateCw className="h-3 w-3" />
+                       Auto-Rebalanced
+                        </Badge>
+                      )}
+                      {position.stop_adjusted ? (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-amber-500/10 text-amber-500 border-amber-500/20">
+                          <ArrowUp className="h-3 w-3" />
+                          SL Adjusted
+                        </Badge>
+                      ) : position.at_break_even ? (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-green-500/10 text-green-500 border-green-500/20">
+                          <Lock className="h-3 w-3" />
+                          Break-Even
+                        </Badge>
+                      ) : null}
+                      {position.trailing_eligible && !position.at_break_even && !position.stop_adjusted && (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
+                          <Shield className="h-3 w-3" />
+                          Trailing Eligible
+                        </Badge>
+                      )}
+                    </div>
                   <Badge variant={position.side === 'BUY' ? 'default' : 'destructive'} className="text-xs">
                     {position.side}
                   </Badge>
@@ -318,6 +324,12 @@ export const ActivePositions = () => {
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="font-bold text-lg">{position.symbol}</h3>
+                      {position.is_hedge && (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-indigo-500/10 text-indigo-500 border-indigo-500/20">
+                          <Layers className="h-3 w-3" />
+                          Hedge
+                        </Badge>
+                      )}
                       {position.opened_by_rebalancer && (
                         <Badge variant="outline" className="text-xs flex items-center gap-1 bg-blue-500/10 text-blue-500 border-blue-500/20">
                           <RotateCw className="h-3 w-3" />
