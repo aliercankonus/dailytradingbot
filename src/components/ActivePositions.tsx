@@ -212,7 +212,7 @@ export const ActivePositions = () => {
                         </Badge>
                       )}
                     </div>
-                  <Badge className={`text-xs ${position.side === 'BUY' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+                  <Badge className={`text-xs ${position.side === 'BUY' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'}`}>
                     {position.side}
                   </Badge>
                   {position.strategy_name && (
@@ -354,7 +354,7 @@ export const ActivePositions = () => {
                         </Badge>
                       )}
                     </div>
-                    <Badge className={`text-xs ${position.side === 'BUY' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+                    <Badge className={`text-xs ${position.side === 'BUY' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'}`}>
                       {position.side}
                     </Badge>
                     {position.strategy_name && (
