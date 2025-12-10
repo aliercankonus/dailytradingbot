@@ -413,7 +413,7 @@ export const ClosedPositionsDashboard = () => {
                   <SelectContent>
                     <SelectItem value="all">All Sides</SelectItem>
                     <SelectItem value="BUY">BUY</SelectItem>
-                    <SelectItem value="SHORT">SHORT</SelectItem>
+                    <SelectItem value="SELL">SELL</SelectItem>
                   </SelectContent>
                 </Select>
                 
