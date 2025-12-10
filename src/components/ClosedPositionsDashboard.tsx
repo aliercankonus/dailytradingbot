@@ -535,7 +535,7 @@ const PositionsTable = ({ positions, getCloseReasonBadge }: PositionsTableProps)
             <TableRow key={position.id}>
               <TableCell className="font-medium">{position.symbol}</TableCell>
               <TableCell>
-                <Badge className={`${position.side === 'BUY' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+                <Badge className={`${position.side === 'BUY' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'}`}>
                   {position.side}
                 </Badge>
               </TableCell>
