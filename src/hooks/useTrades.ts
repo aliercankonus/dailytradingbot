@@ -24,8 +24,7 @@ const fetchTrades = async (): Promise<Trade[]> => {
   const { data, error: queryError } = await supabase
     .from('positions')
     .select('*')
-    .order('executed_at', { ascending: false })
-    .limit(100); // Limit to recent 100 trades for performance
+    .order('executed_at', { ascending: false });
 
   if (queryError) throw queryError;
   return data || [];
