@@ -190,7 +190,17 @@ const Performance = () => {
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
-                    <YAxis stroke="hsl(var(--muted-foreground))" />
+                    <YAxis 
+                      stroke="hsl(var(--muted-foreground))" 
+                      domain={[(dataMin: number) => {
+                        const padding = Math.max(Math.abs(dataMin) * 0.1, 10);
+                        return Math.floor(dataMin - padding);
+                      }, (dataMax: number) => {
+                        const padding = Math.max(Math.abs(dataMax) * 0.1, 10);
+                        return Math.ceil(dataMax + padding);
+                      }]}
+                      tickFormatter={(value) => `$${value.toFixed(0)}`}
+                    />
                     <Tooltip
                       contentStyle={{
                         backgroundColor: "hsl(var(--card))",
