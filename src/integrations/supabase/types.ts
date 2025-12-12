@@ -875,6 +875,7 @@ export type Database = {
       }
       signal_rejection_log: {
         Row: {
+          ai_analysis: Json | null
           checked_at: string
           created_at: string | null
           filters_status: Json | null
@@ -885,6 +886,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          ai_analysis?: Json | null
           checked_at?: string
           created_at?: string | null
           filters_status?: Json | null
@@ -895,6 +897,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          ai_analysis?: Json | null
           checked_at?: string
           created_at?: string | null
           filters_status?: Json | null

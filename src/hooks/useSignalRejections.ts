@@ -1,6 +1,13 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
+interface AIValidationResult {
+  isValid: boolean;
+  issues: string[];
+  confidence: "high" | "medium" | "low";
+  summary: string;
+}
+
 interface SignalRejection {
   id: string;
   symbol: string;
@@ -8,6 +15,7 @@ interface SignalRejection {
   rejection_reason: string;
   filters_status: any;
   trend_data: any;
+  ai_analysis: AIValidationResult | null;
 }
 
 export const useSignalRejections = () => {
@@ -35,7 +43,15 @@ export const useSignalRejections = () => {
         const latestBySymbol = new Map<string, SignalRejection>();
         data?.forEach((rejection) => {
           if (!latestBySymbol.has(rejection.symbol)) {
-            latestBySymbol.set(rejection.symbol, rejection);
+            latestBySymbol.set(rejection.symbol, {
+              id: rejection.id,
+              symbol: rejection.symbol,
+              checked_at: rejection.checked_at,
+              rejection_reason: rejection.rejection_reason,
+              filters_status: rejection.filters_status,
+              trend_data: rejection.trend_data,
+              ai_analysis: rejection.ai_analysis as unknown as AIValidationResult | null,
+            });
           }
         });
 

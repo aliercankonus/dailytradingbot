@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -28,8 +28,13 @@ import {
 import { useSignalRejections } from "@/hooks/useSignalRejections";
 import { formatDistanceToNow } from "date-fns";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
+
+interface AIValidationResult {
+  isValid: boolean;
+  issues: string[];
+  confidence: "high" | "medium" | "low";
+  summary: string;
+}
 
 interface SignalRejection {
   id: string;
@@ -38,13 +43,7 @@ interface SignalRejection {
   rejection_reason: string;
   filters_status: any;
   trend_data: any;
-}
-
-interface AIValidationResult {
-  isValid: boolean;
-  issues: string[];
-  confidence: "high" | "medium" | "low";
-  summary: string;
+  ai_analysis: AIValidationResult | null;
 }
 
 interface ScoreBreakdown {
@@ -997,76 +996,11 @@ export const SignalRejectionReasons = () => {
     const stored = localStorage.getItem(AI_ANALYSIS_STORAGE_KEY);
     return stored === 'true';
   });
-  const [aiResults, setAiResults] = useState<Record<string, AIValidationResult>>({});
-  const [aiLoading, setAiLoading] = useState<Record<string, boolean>>({});
-  const [aiErrors, setAiErrors] = useState<Record<string, string>>({});
 
   // Persist AI enabled state to localStorage
   useEffect(() => {
     localStorage.setItem(AI_ANALYSIS_STORAGE_KEY, String(aiEnabled));
   }, [aiEnabled]);
-
-  // Analyze rejection with AI
-  const analyzeRejection = useCallback(async (rejection: SignalRejection) => {
-    if (aiResults[rejection.id] || aiLoading[rejection.id]) return;
-
-    setAiLoading(prev => ({ ...prev, [rejection.id]: true }));
-    setAiErrors(prev => {
-      const newErrors = { ...prev };
-      delete newErrors[rejection.id];
-      return newErrors;
-    });
-
-    try {
-      const { data, error } = await supabase.functions.invoke('ai-rejection-analyzer', {
-        body: { 
-          rejection: {
-            symbol: rejection.symbol,
-            rejection_reason: rejection.rejection_reason,
-            filters_status: rejection.filters_status,
-            trend_data: rejection.trend_data,
-          }
-        }
-      });
-
-      if (error) throw error;
-      
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      setAiResults(prev => ({ ...prev, [rejection.id]: data }));
-    } catch (err) {
-      console.error('AI analysis error:', err);
-      const errorMsg = err instanceof Error ? err.message : 'Analysis failed';
-      setAiErrors(prev => ({ ...prev, [rejection.id]: errorMsg }));
-      
-      // Show toast for rate limit errors
-      if (errorMsg.includes('Rate limit') || errorMsg.includes('credits')) {
-        toast.error(errorMsg);
-      }
-    } finally {
-      setAiLoading(prev => ({ ...prev, [rejection.id]: false }));
-    }
-  }, [aiResults, aiLoading]);
-
-  // Trigger AI analysis when enabled
-  useEffect(() => {
-    if (!aiEnabled || loading || rejections.length === 0) return;
-
-    // Analyze rejections one by one with delay to avoid rate limiting
-    const analyzeAll = async () => {
-      for (const rejection of rejections) {
-        if (!aiResults[rejection.id] && !aiLoading[rejection.id] && !aiErrors[rejection.id]) {
-          await analyzeRejection(rejection);
-          // Small delay between requests
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      }
-    };
-
-    analyzeAll();
-  }, [aiEnabled, rejections, loading, analyzeRejection, aiResults, aiLoading, aiErrors]);
 
   const getReasonIcon = (reason: string) => {
     if (reason.includes("Max trades")) return <Layers className="h-4 w-4" />;
@@ -1323,9 +1257,9 @@ export const SignalRejectionReasons = () => {
                 {aiEnabled && (
                   <TableCell>
                     <AIAnalysisCell
-                      result={aiResults[rejection.id]}
-                      isLoading={aiLoading[rejection.id] || false}
-                      error={aiErrors[rejection.id]}
+                      result={rejection.ai_analysis}
+                      isLoading={false}
+                      error={undefined}
                     />
                   </TableCell>
                 )}
