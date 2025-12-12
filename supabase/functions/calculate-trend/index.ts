@@ -810,16 +810,17 @@ function calculateTrend(prices: number[]): {
   }
   totalWeight += emaWeight;
 
-  // RSI signal (weight 2.5 - slightly increased)
+  // RSI signal (weight 2.5) - TIGHTENED thresholds to reduce weak signals
+  // Previous: >55 bullish, <35 bearish - too permissive
   const rsiWeight = 2.5;
   let rsiSignal = "neutral";
-  if (rsi > 55) {
-    bullishSignals += rsiWeight * ((rsi - 55) / 45);
+  if (rsi > 60) { // Raised from 55 to 60
+    bullishSignals += rsiWeight * ((rsi - 60) / 40); // Scaled from 60
     if (rsi > 70) rsiSignal = "overbought";
     else if (rsi > 65) rsiSignal = "strong_bullish";
     else rsiSignal = "bullish";
-  } else if (rsi < 35) {
-    bearishSignals += rsiWeight * ((35 - rsi) / 35);
+  } else if (rsi < 40) { // Raised from 35 to 40
+    bearishSignals += rsiWeight * ((40 - rsi) / 40); // Scaled from 40
     rsiSignal = rsi < 30 ? "oversold" : "bearish";
   } else {
     rsiSignal = "neutral";
@@ -848,9 +849,11 @@ function calculateTrend(prices: number[]): {
   let confidence = 30 + rawConfidence * 0.65;
   confidence = Math.min(Math.max(confidence, 30), 95);
 
+  // TIGHTENED: Require higher net signal for trend determination
+  // Previous threshold of 3.0 was too loose
   let trend: "bullish" | "bearish" | "neutral" = "neutral";
-  if (netSignal >= 3.0) trend = "bullish";
-  else if (netSignal <= -3.0) trend = "bearish";
+  if (netSignal >= 4.0) trend = "bullish"; // Raised from 3.0 to 4.0
+  else if (netSignal <= -4.0) trend = "bearish"; // Raised from -3.0 to -4.0
 
   return {
     trend,
@@ -1079,19 +1082,24 @@ serve(async (req) => {
     let divergenceConfidence = 100;
     let allowDivergenceSignal = false;
     if (!highTimeframeAligned) {
-      if (dominantTrend !== "neutral" && dominantConfidence >= 60 && trend1h.confidence >= 50) {
+      // TIGHTENED: Pullback requires stronger 4h confirmation (70% vs 60%)
+      // and 1h must be sufficiently strong (60% vs 50%)
+      if (dominantTrend !== "neutral" && dominantConfidence >= 70 && trend1h.confidence >= 60) {
         divergenceType = "pullback";
-        divergenceConfidence = Math.min(dominantConfidence * 0.75, 70);
+        divergenceConfidence = Math.min(dominantConfidence * 0.7, 65); // Reduced from 0.75, 70
         allowDivergenceSignal = true;
         console.log(
           `${dominantTrend.toUpperCase()} PULLBACK detected: 4h=${dominantConfidence}% vs 1h=${trend1h.trend}`,
         );
-      } else if (trend1h.confidence >= 70 && (dominantTrend === "neutral" || dominantConfidence < 60)) {
+      } 
+      // TIGHTENED: Early reversal requires very strong 1h (75% vs 70%)
+      // and ADX must show trend strength
+      else if (trend1h.confidence >= 75 && (dominantTrend === "neutral" || dominantConfidence < 55) && adx >= 18) {
         divergenceType = "early_reversal";
-        divergenceConfidence = Math.min(trend1h.confidence * 0.7, 65);
+        divergenceConfidence = Math.min(trend1h.confidence * 0.65, 60); // Reduced from 0.7, 65
         allowDivergenceSignal = true;
         console.log(
-          `EARLY REVERSAL detected: 1h=${trend1h.trend}(${trend1h.confidence}%) vs weak/neutral 4h=${dominantTrend}(${dominantConfidence}%)`,
+          `EARLY REVERSAL detected: 1h=${trend1h.trend}(${trend1h.confidence}%) vs weak/neutral 4h=${dominantTrend}(${dominantConfidence}%) ADX=${adx.toFixed(1)}`,
         );
       } else {
         divergenceType = "ranging_conflict";
@@ -1204,12 +1212,20 @@ serve(async (req) => {
       }
     }
 
-    const volumeConfirmsDirection = 
+    // TIGHTENED: Volume confirmation now requires price alignment too
+    // Volume spikes alone don't confirm direction - need price movement agreement
+    const priceDirectionMatches = 
+      (effectiveTrendForMomentum === "bullish" && lastClose > prevClose) ||
+      (effectiveTrendForMomentum === "bearish" && lastClose < prevClose);
+    
+    const volumeConfirmsDirection = priceDirectionMatches && (
       (effectiveTrendForMomentum === "bullish" && volume1h.volumeTrend === "increasing") ||
       (effectiveTrendForMomentum === "bearish" && volume1h.volumeTrend === "increasing") ||
-      volume1h.volumeSpike;
+      volume1h.volumeSpike
+    );
     
-    const volumeBoost = volumeConfirmsDirection ? 1.15 : 1.0;
+    // Reduce volume boost - was giving too much credit to volume
+    const volumeBoost = volumeConfirmsDirection ? 1.10 : 1.0; // Reduced from 1.15
 
     const lastCloseAlignsWithTrend =
       (effectiveTrendForMomentum === "bullish" && lastClose > prevClose) ||
@@ -1232,18 +1248,22 @@ serve(async (req) => {
       (effectiveTrendForMomentum === "bearish" && macdHistogram < 0) ||
       effectiveTrendForMomentum === "neutral";
 
-    const macdExpanding = Math.abs(macdHistogram) > 0.05 && macdDirectionAligned;
-    const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned;
+    // TIGHTENED: MACD expanding now requires minimum ADX threshold
+    // Previously macdExpanding had no ADX check, allowing weak signals as "mixed"
+    const macdExpanding = Math.abs(macdHistogram) > 0.05 && macdDirectionAligned && adx >= 15;
+    const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned && adx >= 15;
 
-    const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= 20;
+    // TIGHTENED: Momentum confirmation requires ADX >= 22 (raised from 20)
+    const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= 22;
     let momentumState: "none" | "mixed" | "confirmed" = "none";
     if (momentumConfirms) {
       momentumState = "confirmed";
     } else if (macdExpanding && (hasDivergence || !lastCloseAlignsWithTrend)) {
       // Mixed: MACD expanding but divergence exists or price doesn't align
-      momentumState = "mixed";
-    } else if (macdStrong) {
-      // Mixed: Strong MACD magnitude even without expansion
+      // Only allow mixed if ADX shows some trend (prevents weak signals)
+      momentumState = adx >= 18 ? "mixed" : "none";
+    } else if (macdStrong && adx >= 20) {
+      // Mixed: Strong MACD magnitude even without expansion, but needs ADX confirmation
       momentumState = "mixed";
     }
     console.log(
