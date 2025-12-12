@@ -688,7 +688,7 @@ serve(async (req) => {
     const reversalRiskScore = calculateReversalRiskForEntry(trendData, signal.signal_type);
     console.log(`🔄 Reversal Risk Score: ${reversalRiskScore.riskScore}/100 - ${reversalRiskScore.reasons.join(', ')}`);
     
-    const REVERSAL_RISK_THRESHOLD = 50; // Block if reversal risk >= 50%
+    const REVERSAL_RISK_THRESHOLD = 65; // Block if reversal risk >= 65% (increased from 50% to reduce premature exits)
     if (reversalRiskScore.riskScore >= REVERSAL_RISK_THRESHOLD) {
       throw new Error(`High reversal risk detected (${reversalRiskScore.riskScore}%) - ${reversalRiskScore.reasons.slice(0, 2).join(', ')} - trade cancelled`);
     }

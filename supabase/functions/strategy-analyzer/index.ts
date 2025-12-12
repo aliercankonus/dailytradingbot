@@ -463,8 +463,8 @@ const detectReversalRisk = (trendData: any, intendedDirection: string): Reversal
   riskScore = Math.min(100, riskScore);
   const adjustedRiskScore = Math.round(riskScore * adxWeight);
   
-  // High risk threshold: 50+ blocks signal generation
-  const isHighRisk = adjustedRiskScore >= 50;
+  // High risk threshold: 65+ blocks signal generation (reduced from 50 to improve win rate)
+  const isHighRisk = adjustedRiskScore >= 65;
   
   const reason = isHighRisk 
     ? `Reversal risk HIGH (${adjustedRiskScore}/100, raw=${riskScore}, ADX=${adx.toFixed(1)}, weight=${adxWeight}): ${signals.join(", ")}`
