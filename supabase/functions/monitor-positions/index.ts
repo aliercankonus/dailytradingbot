@@ -847,7 +847,7 @@ serve(async (req) => {
 
           // 🆕 REVERSAL RISK HANDLING: Hedge or Exit based on risk level
           const reversalRisk = detectReversalRiskForExit("SELL");
-          const MIN_LOSS_FOR_REVERSAL_EXIT = -0.1; // Only act if losing at least 0.1%
+          const MIN_LOSS_FOR_REVERSAL_EXIT = -0.5; // Only act if losing at least 0.5% (was -0.1%)
           
           // Check if position already has a hedge or is a hedge
           const hasHedge = position.hedge_position_id !== null;
@@ -936,13 +936,21 @@ serve(async (req) => {
                    reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin) {
             console.log(`🚫 HEDGE BLOCKED: SHORT ${position.symbol} - StochRSI 4h K=${stochRsiK4h.toFixed(1)} > 80 (overbought, price likely to drop - helps SHORT)`);
           }
-          // If risk is HIGH (>= max threshold), close position instead
-          // Only apply if position has met minimum hold time
-          else if (hasMetMinHoldTime && reversalRisk.riskScore >= userSettings.hedgeReversalRiskMax && pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
+          // If risk is HIGH (>= 80%), close position instead (ONLY if losing significantly)
+          // Raised threshold to 80% to reduce premature exits - these had 0% win rate in analysis
+          // Only apply if position has met minimum hold time AND position age > 1 hour
+          const positionAgeHours = positionAgeMinutes / 60;
+          const MIN_AGE_FOR_REVERSAL_EXIT_HOURS = 1.0; // Don't exit on reversal risk in first hour
+          const REVERSAL_RISK_EXIT_THRESHOLD = 80; // Raised from 70% default
+          
+          if (hasMetMinHoldTime && 
+              positionAgeHours >= MIN_AGE_FOR_REVERSAL_EXIT_HOURS &&
+              reversalRisk.riskScore >= REVERSAL_RISK_EXIT_THRESHOLD && 
+              pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
             shouldClose = true;
             closeReason = "reversal_risk_high";
             console.log(
-              `⚠️ REVERSAL RISK EXIT: Closing SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}/100: ${reversalRisk.signals.join(", ")}`,
+              `⚠️ REVERSAL RISK EXIT: Closing SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}/100, Age: ${positionAgeHours.toFixed(1)}h: ${reversalRisk.signals.join(", ")}`,
             );
           }
           
@@ -950,35 +958,28 @@ serve(async (req) => {
           // Hedge should aim to cover the parent's loss, not close prematurely
           // The hedge will be closed by: its own TP, trailing stop, or when parent closes
           
-          // Original early warning logic (kept as fallback)
-          // Only apply if position has met minimum hold time
-          if (!shouldClose && hasMetMinHoldTime) {
-            const EARLY_WARNING_MIN_LOSS_PERCENT = -0.2;
-            if (trend1h === "bullish" && confidence4h < 70 && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT) {
+          // Original early warning logic (kept as fallback) - TIGHTENED THRESHOLDS
+          // Only apply if position has met minimum hold time AND losing more than 1%
+          // These exits were causing 0% win rate - making much more conservative
+          if (!shouldClose && hasMetMinHoldTime && positionAgeHours >= 1.0) {
+            const EARLY_WARNING_MIN_LOSS_PERCENT = -1.0; // Increased from -0.2% to -1%
+            const EARLY_WARNING_MIN_CONFIDENCE_4H = 50; // Reduced from 70% (4h must be very weak)
+            
+            if (trend1h === "bullish" && confidence4h < EARLY_WARNING_MIN_CONFIDENCE_4H && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT) {
               shouldClose = true;
               closeReason = "early_warning_1h_bullish";
               console.log(
-                `⚠️ EARLY WARNING EXIT: Closing SHORT ${position.symbol} - 1h BULLISH + 4h weakening (4h conf: ${confidence4h}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+                `⚠️ EARLY WARNING EXIT: Closing SHORT ${position.symbol} - 1h BULLISH + 4h very weak (4h conf: ${confidence4h}%, P&L: ${pnlPercent.toFixed(2)}%)`,
               );
-            } else if (currentTrend === "bullish" && trendConfidence >= 50) {
+            } else if (currentTrend === "bullish" && trendConfidence >= 65) { // Raised from 50%
               shouldClose = true;
               closeReason = "trend_reversal_bullish";
               console.log(
-                `🔄 TREND EXIT: Closing SHORT ${position.symbol} - Trend BULLISH (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
-              );
-            } else if (currentTrend === "ranging" && htfConflict && trendConfidence >= 30) {
-              shouldClose = true;
-              closeReason = "trend_reversal_ranging";
-              console.log(
-                `🔄 TREND EXIT: Closing SHORT ${position.symbol} - RANGING + HTF conflict (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
-              );
-            } else if (currentTrend === "ranging" && trendConfidence >= 40) {
-              shouldClose = true;
-              closeReason = "trend_reversal_ranging";
-              console.log(
-                `🔄 TREND EXIT: Closing SHORT ${position.symbol} - Trend RANGING (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+                `🔄 TREND EXIT: Closing SHORT ${position.symbol} - Strong BULLISH trend (conf: ${trendConfidence}%)`,
               );
             }
+            // REMOVED: Ranging market exits - these were too aggressive and hurt win rate
+            // Let positions ride through ranging periods as long as they're not hitting stops
           }
 
           if (shouldClose) {
@@ -1003,7 +1004,7 @@ serve(async (req) => {
 
           // 🆕 REVERSAL RISK HANDLING: Hedge or Exit based on risk level
           const reversalRisk = detectReversalRiskForExit("BUY");
-          const MIN_LOSS_FOR_REVERSAL_EXIT = -0.1; // Only act if losing at least 0.1%
+          const MIN_LOSS_FOR_REVERSAL_EXIT = -0.5; // Only act if losing at least 0.5% (was -0.1%)
           
           // Check if position already has a hedge or is a hedge
           const hasHedge = position.hedge_position_id !== null;
@@ -1092,13 +1093,21 @@ serve(async (req) => {
                    reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin) {
             console.log(`🚫 HEDGE BLOCKED: LONG ${position.symbol} - StochRSI 4h K=${stochRsiK4hLong.toFixed(1)} < 20 (oversold, price likely to bounce - helps LONG)`);
           }
-          // If risk is HIGH (>= max threshold), close position instead
-          // Only apply if position has met minimum hold time
-          else if (!shouldClose && hasMetMinHoldTime && reversalRisk.riskScore >= userSettings.hedgeReversalRiskMax && pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
+          // If risk is HIGH (>= 80%), close position instead (ONLY if losing significantly)
+          // Raised threshold to 80% to reduce premature exits - these had 0% win rate in analysis
+          // Only apply if position has met minimum hold time AND position age > 1 hour
+          const positionAgeHoursLong = positionAgeMinutes / 60;
+          const MIN_AGE_FOR_REVERSAL_EXIT_HOURS_LONG = 1.0;
+          const REVERSAL_RISK_EXIT_THRESHOLD_LONG = 80; // Raised from 70% default
+          
+          if (!shouldClose && hasMetMinHoldTime && 
+              positionAgeHoursLong >= MIN_AGE_FOR_REVERSAL_EXIT_HOURS_LONG &&
+              reversalRisk.riskScore >= REVERSAL_RISK_EXIT_THRESHOLD_LONG && 
+              pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
             shouldClose = true;
             closeReason = "reversal_risk_high";
             console.log(
-              `⚠️ REVERSAL RISK EXIT: Closing LONG ${position.symbol} - Risk ${reversalRisk.riskScore}/100: ${reversalRisk.signals.join(", ")}`,
+              `⚠️ REVERSAL RISK EXIT: Closing LONG ${position.symbol} - Risk ${reversalRisk.riskScore}/100, Age: ${positionAgeHoursLong.toFixed(1)}h: ${reversalRisk.signals.join(", ")}`,
             );
           }
           
@@ -1106,35 +1115,28 @@ serve(async (req) => {
           // Hedge should aim to cover the parent's loss, not close prematurely
           // The hedge will be closed by: its own TP, trailing stop, or when parent closes
           
-          // Original early warning logic (kept as fallback)
-          // Only apply if position has met minimum hold time
-          if (!shouldClose && hasMetMinHoldTime) {
-            const EARLY_WARNING_MIN_LOSS_PERCENT_LONG = -0.2;
-            if (trend1h === "bearish" && confidence4h < 70 && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT_LONG) {
+          // Original early warning logic (kept as fallback) - TIGHTENED THRESHOLDS
+          // Only apply if position has met minimum hold time AND losing more than 1%
+          // These exits were causing 0% win rate - making much more conservative
+          if (!shouldClose && hasMetMinHoldTime && positionAgeHoursLong >= 1.0) {
+            const EARLY_WARNING_MIN_LOSS_PERCENT_LONG = -1.0; // Increased from -0.2% to -1%
+            const EARLY_WARNING_MIN_CONFIDENCE_4H_LONG = 50; // Reduced from 70% (4h must be very weak)
+            
+            if (trend1h === "bearish" && confidence4h < EARLY_WARNING_MIN_CONFIDENCE_4H_LONG && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT_LONG) {
               shouldClose = true;
               closeReason = "early_warning_1h_bearish";
               console.log(
-                `⚠️ EARLY WARNING EXIT: Closing LONG ${position.symbol} - 1h BEARISH + 4h weakening (4h conf: ${confidence4h}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+                `⚠️ EARLY WARNING EXIT: Closing LONG ${position.symbol} - 1h BEARISH + 4h very weak (4h conf: ${confidence4h}%, P&L: ${pnlPercent.toFixed(2)}%)`,
               );
-            } else if (currentTrend === "bearish" && trendConfidence >= 50) {
+            } else if (currentTrend === "bearish" && trendConfidence >= 65) { // Raised from 50%
               shouldClose = true;
               closeReason = "trend_reversal_bearish";
               console.log(
-                `🔄 TREND EXIT: Closing LONG ${position.symbol} - Trend BEARISH (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
-              );
-            } else if (currentTrend === "ranging" && htfConflict && trendConfidence >= 30) {
-              shouldClose = true;
-              closeReason = "trend_reversal_ranging";
-              console.log(
-                `🔄 TREND EXIT: Closing LONG ${position.symbol} - RANGING + HTF conflict (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
-              );
-            } else if (currentTrend === "ranging" && trendConfidence >= 40) {
-              shouldClose = true;
-              closeReason = "trend_reversal_ranging";
-              console.log(
-                `🔄 TREND EXIT: Closing LONG ${position.symbol} - Trend RANGING (conf: ${trendConfidence}%, 4h: ${trend4h}, 1h: ${trend1h})`,
+                `🔄 TREND EXIT: Closing LONG ${position.symbol} - Strong BEARISH trend (conf: ${trendConfidence}%)`,
               );
             }
+            // REMOVED: Ranging market exits - these were too aggressive and hurt win rate
+            // Let positions ride through ranging periods as long as they're not hitting stops
           }
 
           if (shouldClose) {
@@ -1151,38 +1153,43 @@ serve(async (req) => {
       }
 
       // ============================================================
-      // TIME-BASED EXIT LOGIC - Close stale positions (CONFIGURABLE)
-      // If position is open X+ hours with minimal movement (<2%), free up capital
+      // TIME-BASED EXIT LOGIC - RELAXED to reduce premature exits
+      // Only close if position is LOSING after extended time period
+      // Previously closed break-even/profitable positions which hurt win rate
       // ============================================================
       if (!shouldClose && position.opened_at && userSettings.timeBasedStopEnabled) {
         const openedAt = new Date(position.opened_at);
         const now = new Date();
         const hoursOpen = (now.getTime() - openedAt.getTime()) / (1000 * 60 * 60);
-        const absMovement = Math.abs(pnlPercent);
         
-        // Stale position: Open X+ hours with less than 2% price movement
-        const minHoursForStaleCheck = userSettings.timeBasedStopHours;
-        const maxMovementForStale = 2.0; // 2% threshold
+        // Give 50% more time than configured before considering time-based exit
+        const TIME_STOP_MULTIPLIER = 1.5;
+        const effectiveTimeLimit = userSettings.timeBasedStopHours * TIME_STOP_MULTIPLIER;
+        const MIN_LOSS_FOR_TIME_EXIT = -0.5; // Only close if losing more than 0.5%
         
-        if (hoursOpen >= minHoursForStaleCheck && absMovement < maxMovementForStale) {
-          shouldClose = true;
-          closeReason = "time_based_stop";
-          console.log(
-            `⏰ TIME EXIT: Closing stale ${position.symbol} ${position.side} - Open ${hoursOpen.toFixed(1)}h with only ${pnlPercent.toFixed(2)}% movement (limit: ${minHoursForStaleCheck}h)`
-          );
-          
-          trendExits.push({
-            symbol: position.symbol,
-            side: position.side,
-            reason: `Time-based: ${hoursOpen.toFixed(1)}h open, ${pnlPercent.toFixed(2)}% P&L`,
-            trend: "stale",
-            confidence: 0,
-            pnlPercent,
-          });
-        } else if (hoursOpen >= minHoursForStaleCheck) {
-          console.log(
-            `📊 Position ${position.symbol} open ${hoursOpen.toFixed(1)}h - movement ${absMovement.toFixed(2)}% (above ${maxMovementForStale}% threshold, keeping open)`
-          );
+        if (hoursOpen >= effectiveTimeLimit) {
+          // ONLY close if position is losing significantly
+          // Let break-even or profitable positions continue running
+          if (pnlPercent < MIN_LOSS_FOR_TIME_EXIT) {
+            shouldClose = true;
+            closeReason = "time_based_stop";
+            console.log(
+              `⏰ TIME EXIT: Closing losing ${position.symbol} ${position.side} - Open ${hoursOpen.toFixed(1)}h (>${effectiveTimeLimit.toFixed(1)}h), P&L: ${pnlPercent.toFixed(2)}%`
+            );
+            
+            trendExits.push({
+              symbol: position.symbol,
+              side: position.side,
+              reason: `Time-based: ${hoursOpen.toFixed(1)}h open, ${pnlPercent.toFixed(2)}% P&L (losing)`,
+              trend: "stale",
+              confidence: 0,
+              pnlPercent,
+            });
+          } else {
+            console.log(
+              `⏰ TIME EXIT SKIPPED: ${position.symbol} - Not losing enough (${pnlPercent.toFixed(2)}% > ${MIN_LOSS_FOR_TIME_EXIT}%) - letting it run`
+            );
+          }
         }
       }
 
@@ -1263,7 +1270,9 @@ serve(async (req) => {
       // ============================================================
       const currentPartialLossLevel = position.partial_loss_level || 0;
       
-      if (!shouldClose && pnlPercent < 0 && userSettings.partialLossTakingEnabled && currentPartialLossLevel === 0) {
+      // ADDED: Minimum position age check before partial loss taking
+      const minAgeForPartialLoss = Math.max(userSettings.minHoldTimeMinutes * 2, 40); // At least 2x hold time or 40 mins
+      if (!shouldClose && pnlPercent < 0 && userSettings.partialLossTakingEnabled && currentPartialLossLevel === 0 && positionAgeMinutes >= minAgeForPartialLoss) {
         // Calculate how far price has moved toward stop loss
         const stopDistance = Math.abs(position.stop_loss - position.entry_price);
         const currentLossDistance = position.side === "BUY"
