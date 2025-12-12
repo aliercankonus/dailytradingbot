@@ -131,6 +131,7 @@ export const TrailingStopMonitor = () => {
     // Helper moved inside useMemo to capture latest getPrice
     const resolvePrice = (p: any) => {
       const live = getPrice ? getPrice(p.symbol) : undefined;
+      console.log('[TrailingStopMonitor] Resolving price for', p.symbol, 'priceVersion', priceVersion, 'live', live?.price, 'db current_price', p.current_price, 'entry', p.entry_price);
       if (live?.price != null) {
         const val = Number(live.price);
         if (!isNaN(val)) return val;
