@@ -135,12 +135,29 @@ export const PerformanceAnalytics = () => {
           <h3 className="text-lg font-semibold mb-4">Equity Curve</h3>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={equityCurve}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="trade" />
-              <YAxis />
-              <Tooltip />
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="trade" stroke="hsl(var(--muted-foreground))" />
+              <YAxis 
+                stroke="hsl(var(--muted-foreground))"
+                domain={[(dataMin: number) => {
+                  const padding = Math.max(Math.abs(dataMin - 10000) * 0.5, 50);
+                  return Math.floor(dataMin - padding);
+                }, (dataMax: number) => {
+                  const padding = Math.max(Math.abs(dataMax - 10000) * 0.5, 50);
+                  return Math.ceil(dataMax + padding);
+                }]}
+                tickFormatter={(value) => `$${value.toLocaleString()}`}
+              />
+              <Tooltip 
+                contentStyle={{
+                  backgroundColor: "hsl(var(--card))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: "8px",
+                }}
+                formatter={(value: number) => [`$${value.toFixed(2)}`, "Equity"]}
+              />
               <Legend />
-              <Line type="monotone" dataKey="equity" stroke="hsl(var(--primary))" strokeWidth={2} />
+              <Line type="monotone" dataKey="equity" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </Card>
