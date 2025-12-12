@@ -1,20 +1,22 @@
 import { Card } from '@/components/ui/card';
 import { useTrades } from '@/hooks/useTrades';
-import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { TrendingUp, TrendingDown, Target, Activity } from 'lucide-react';
 
 export const PerformanceAnalytics = () => {
   const { trades } = useTrades();
 
-  // Calculate equity curve
+  // Calculate equity curve and cumulative P&L
   const equityCurve = trades
     .filter(t => t.closed_at)
     .sort((a, b) => new Date(a.closed_at!).getTime() - new Date(b.closed_at!).getTime())
     .reduce((acc, trade, index) => {
       const prevEquity = index > 0 ? acc[index - 1].equity : 10000;
+      const prevPnL = index > 0 ? acc[index - 1].cumulativePnL : 0;
       acc.push({
         trade: index + 1,
         equity: prevEquity + (trade.realized_pnl || 0),
+        cumulativePnL: prevPnL + (trade.realized_pnl || 0),
         date: new Date(trade.closed_at!).toLocaleDateString(),
       });
       return acc;
@@ -159,6 +161,58 @@ export const PerformanceAnalytics = () => {
               <Legend />
               <Line type="monotone" dataKey="equity" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
             </LineChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+
+      {/* Cumulative P&L Chart */}
+      {equityCurve.length > 0 && (
+        <Card className="p-6">
+          <h3 className="text-lg font-semibold mb-4">Cumulative P&L</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={equityCurve}>
+              <defs>
+                <linearGradient id="pnlGradientPositive" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="hsl(var(--profit))" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="hsl(var(--profit))" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="pnlGradientNegative" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="hsl(var(--loss))" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="hsl(var(--loss))" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="trade" stroke="hsl(var(--muted-foreground))" />
+              <YAxis 
+                stroke="hsl(var(--muted-foreground))"
+                domain={[(dataMin: number) => {
+                  const padding = Math.max(Math.abs(dataMin) * 0.2, 10);
+                  return Math.floor(dataMin - padding);
+                }, (dataMax: number) => {
+                  const padding = Math.max(Math.abs(dataMax) * 0.2, 10);
+                  return Math.ceil(dataMax + padding);
+                }]}
+                tickFormatter={(value) => `$${value.toFixed(0)}`}
+              />
+              <Tooltip 
+                contentStyle={{
+                  backgroundColor: "hsl(var(--card))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: "8px",
+                }}
+                formatter={(value: number) => [`$${value.toFixed(2)}`, "Cumulative P&L"]}
+              />
+              <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+              <Legend />
+              <Area 
+                type="monotone" 
+                dataKey="cumulativePnL" 
+                stroke={totalPnL >= 0 ? "hsl(var(--profit))" : "hsl(var(--loss))"} 
+                fill={totalPnL >= 0 ? "url(#pnlGradientPositive)" : "url(#pnlGradientNegative)"}
+                strokeWidth={2}
+                name="Cumulative P&L"
+              />
+            </AreaChart>
           </ResponsiveContainer>
         </Card>
       )}
