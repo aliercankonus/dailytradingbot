@@ -87,7 +87,7 @@ serve(async (req) => {
           dynamicStopTighteningPercent: rp.dynamic_stop_tightening_percent ?? 25,
           // Partial Loss Taking
           partialLossTakingEnabled: rp.partial_loss_taking_enabled ?? true,
-          partialLossTriggerPercent: rp.partial_loss_trigger_percent ?? 50,
+          partialLossTriggerPercent: rp.partial_loss_trigger_percent ?? 70,
           partialLossClosePercent: rp.partial_loss_close_percent ?? 50,
           // Hedging Settings
           hedgingEnabled: rp.hedging_enabled ?? false,
@@ -475,9 +475,9 @@ serve(async (req) => {
         dynamicStopTighteningEnabled: true,
         dynamicStopTighteningHours: 2,
         dynamicStopTighteningPercent: 25,
-        // Partial Loss Taking defaults
+        // Partial Loss Taking defaults (increased trigger to 70% to reduce premature closures)
         partialLossTakingEnabled: true,
-        partialLossTriggerPercent: 50,
+        partialLossTriggerPercent: 70,
         partialLossClosePercent: 50,
         // Hedging defaults
         hedgingEnabled: false,
