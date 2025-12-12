@@ -853,11 +853,19 @@ serve(async (req) => {
           const hasHedge = position.hedge_position_id !== null;
           const isHedge = position.is_hedge === true;
           
+          // 🆕 StochRSI filter for hedge opening - prevent hedges at extreme levels
+          // For SHORT positions: Don't hedge when StochRSI K > 80 (overbought - price likely to drop, helping SHORT)
+          const stochRsi4h = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi?.aggregated || {};
+          const stochRsiK4h = stochRsi4h?.k ?? 50;
+          const STOCHRSI_HEDGE_BLOCK_THRESHOLD_SHORT = 80; // Don't hedge SHORT when K > 80
+          const shouldBlockHedgeByStochRsi = stochRsiK4h > STOCHRSI_HEDGE_BLOCK_THRESHOLD_SHORT;
+          
           // Apply hedging logic if enabled and risk is in hedge range (50-70%)
-          // Only apply if position has met minimum hold time
+          // Only apply if position has met minimum hold time AND StochRSI allows
           if (hasMetMinHoldTime && userSettings.hedgingEnabled && 
               !isHedge && // Don't hedge a hedge
               !hasHedge && // Don't open duplicate hedge
+              !shouldBlockHedgeByStochRsi && // StochRSI filter
               reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin && 
               reversalRisk.riskScore < userSettings.hedgeReversalRiskMax &&
               pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
@@ -865,7 +873,7 @@ serve(async (req) => {
             const hedgeQuantity = position.quantity * (userSettings.hedgePositionSizePercent / 100);
             const hedgeSide = "BUY"; // Opposite of SELL
             
-            console.log(`🛡️ HEDGE: Opening ${hedgeSide} hedge for SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}% (${userSettings.hedgeReversalRiskMin}-${userSettings.hedgeReversalRiskMax}%)`);
+            console.log(`🛡️ HEDGE: Opening ${hedgeSide} hedge for SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}% | StochRSI 4h K=${stochRsiK4h.toFixed(1)}`);
             
             // Calculate hedge TP based on parent position's loss (to cover the loss)
             // Parent is SHORT, so parent loss = (currentPrice - entryPrice) / entryPrice * 100
@@ -922,6 +930,11 @@ serve(async (req) => {
             } else {
               console.error(`❌ Failed to open hedge: ${hedgeError?.message}`);
             }
+          }
+          // Log when hedge was blocked by StochRSI filter
+          else if (shouldBlockHedgeByStochRsi && hasMetMinHoldTime && userSettings.hedgingEnabled && 
+                   reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin) {
+            console.log(`🚫 HEDGE BLOCKED: SHORT ${position.symbol} - StochRSI 4h K=${stochRsiK4h.toFixed(1)} > 80 (overbought, price likely to drop - helps SHORT)`);
           }
           // If risk is HIGH (>= max threshold), close position instead
           // Only apply if position has met minimum hold time
@@ -996,11 +1009,19 @@ serve(async (req) => {
           const hasHedge = position.hedge_position_id !== null;
           const isHedge = position.is_hedge === true;
           
+          // 🆕 StochRSI filter for hedge opening - prevent hedges at extreme levels
+          // For LONG positions: Don't hedge when StochRSI K < 20 (oversold - price likely to bounce up, helping LONG)
+          const stochRsi4hLong = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi?.aggregated || {};
+          const stochRsiK4hLong = stochRsi4hLong?.k ?? 50;
+          const STOCHRSI_HEDGE_BLOCK_THRESHOLD_LONG = 20; // Don't hedge LONG when K < 20
+          const shouldBlockHedgeByStochRsiLong = stochRsiK4hLong < STOCHRSI_HEDGE_BLOCK_THRESHOLD_LONG;
+          
           // Apply hedging logic if enabled and risk is in hedge range (50-70%)
-          // Only apply if position has met minimum hold time
+          // Only apply if position has met minimum hold time AND StochRSI allows
           if (!shouldClose && hasMetMinHoldTime && userSettings.hedgingEnabled && 
               !isHedge && // Don't hedge a hedge
               !hasHedge && // Don't open duplicate hedge
+              !shouldBlockHedgeByStochRsiLong && // StochRSI filter
               reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin && 
               reversalRisk.riskScore < userSettings.hedgeReversalRiskMax &&
               pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
@@ -1008,7 +1029,7 @@ serve(async (req) => {
             const hedgeQuantity = position.quantity * (userSettings.hedgePositionSizePercent / 100);
             const hedgeSide = "SELL"; // Opposite of BUY
             
-            console.log(`🛡️ HEDGE: Opening ${hedgeSide} hedge for LONG ${position.symbol} - Risk ${reversalRisk.riskScore}% (${userSettings.hedgeReversalRiskMin}-${userSettings.hedgeReversalRiskMax}%)`);
+            console.log(`🛡️ HEDGE: Opening ${hedgeSide} hedge for LONG ${position.symbol} - Risk ${reversalRisk.riskScore}% | StochRSI 4h K=${stochRsiK4hLong.toFixed(1)}`);
             
             // Calculate hedge TP based on parent position's loss (to cover the loss)
             // Parent is BUY (LONG), so parent loss = (entryPrice - currentPrice) / entryPrice * 100
@@ -1065,6 +1086,11 @@ serve(async (req) => {
             } else {
               console.error(`❌ Failed to open hedge: ${hedgeError?.message}`);
             }
+          }
+          // Log when hedge was blocked by StochRSI filter
+          else if (shouldBlockHedgeByStochRsiLong && hasMetMinHoldTime && userSettings.hedgingEnabled && 
+                   reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin) {
+            console.log(`🚫 HEDGE BLOCKED: LONG ${position.symbol} - StochRSI 4h K=${stochRsiK4hLong.toFixed(1)} < 20 (oversold, price likely to bounce - helps LONG)`);
           }
           // If risk is HIGH (>= max threshold), close position instead
           // Only apply if position has met minimum hold time
