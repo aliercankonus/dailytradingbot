@@ -1560,44 +1560,9 @@ serve(async (req) => {
           continue;
         }
 
-        // ============= CHECK USER'S EXECUTION THRESHOLDS =============
-        // Prevent creating signals that execute-trade will reject
-        const minConfidence = riskParams.min_confidence_threshold || 60;
-        const minConsistency = riskParams.min_trend_consistency || 50;
-
-        if (confidence < minConfidence) {
-          rejectedByQuality++;
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `Signal confidence too low: ${confidence}% (min: ${minConfidence}%)`,
-            filters_status: {
-              confidence, minConfidence, trendConsistency, minConsistency,
-              qualityScore, breakdown, adx,
-              regime: regime.regime,
-              alignmentBreakdown: trendData.alignmentBreakdown,
-            },
-            trend_data: trendData,
-            checked_at: new Date().toISOString(),
-          });
-          continue;
-        }
-
-        if (trendConsistency < minConsistency) {
-          rejectedByQuality++;
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `Trend not consistent enough: ${trendConsistency.toFixed(0)}% (min: ${minConsistency}%)`,
-            filters_status: {
-              confidence, minConfidence, trendConsistency, minConsistency,
-              qualityScore, breakdown, adx,
-              regime: regime.regime,
-              alignmentBreakdown: trendData.alignmentBreakdown,
-            },
-            trend_data: trendData,
-            checked_at: new Date().toISOString(),
-          });
-          continue;
-        }
+        // NOTE: Confidence and consistency thresholds are now incorporated into the quality score
+        // via alignmentScore and confidencePenalty, eliminating redundant filtering that was
+        // blocking high-quality signals (e.g., 73/100 quality rejected for 61% confidence)
 
         // Store trend info for strategy-level filtering
         const tradeDirection = higherTimeframeFilter?.tradeDirection || trend;
