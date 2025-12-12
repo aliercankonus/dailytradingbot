@@ -92,7 +92,7 @@ export type Database = {
           total_loss: number | null
           total_profit: number | null
           total_trades: number | null
-          user_id: string | null
+          user_id: string
           win_rate: number | null
           winning_trades: number | null
         }
@@ -119,7 +119,7 @@ export type Database = {
           total_loss?: number | null
           total_profit?: number | null
           total_trades?: number | null
-          user_id?: string | null
+          user_id: string
           win_rate?: number | null
           winning_trades?: number | null
         }
@@ -146,7 +146,7 @@ export type Database = {
           total_loss?: number | null
           total_profit?: number | null
           total_trades?: number | null
-          user_id?: string | null
+          user_id?: string
           win_rate?: number | null
           winning_trades?: number | null
         }
@@ -173,7 +173,7 @@ export type Database = {
           risk_settings: Json | null
           signal_direction: string | null
           updated_at: string | null
-          user_id: string | null
+          user_id: string
         }
         Insert: {
           created_at?: string | null
@@ -187,7 +187,7 @@ export type Database = {
           risk_settings?: Json | null
           signal_direction?: string | null
           updated_at?: string | null
-          user_id?: string | null
+          user_id: string
         }
         Update: {
           created_at?: string | null
@@ -201,7 +201,7 @@ export type Database = {
           risk_settings?: Json | null
           signal_direction?: string | null
           updated_at?: string | null
-          user_id?: string | null
+          user_id?: string
         }
         Relationships: []
       }
@@ -212,7 +212,7 @@ export type Database = {
           position_id: string | null
           sent_at: string | null
           type: string
-          user_id: string | null
+          user_id: string
         }
         Insert: {
           id?: string
@@ -220,7 +220,7 @@ export type Database = {
           position_id?: string | null
           sent_at?: string | null
           type: string
-          user_id?: string | null
+          user_id: string
         }
         Update: {
           id?: string
@@ -228,7 +228,7 @@ export type Database = {
           position_id?: string | null
           sent_at?: string | null
           type?: string
-          user_id?: string | null
+          user_id?: string
         }
         Relationships: [
           {
@@ -364,7 +364,7 @@ export type Database = {
           trend: string | null
           trend_consistency: number | null
           updated_at: string | null
-          user_id: string | null
+          user_id: string
         }
         Insert: {
           binance_order_id?: string | null
@@ -402,7 +402,7 @@ export type Database = {
           trend?: string | null
           trend_consistency?: number | null
           updated_at?: string | null
-          user_id?: string | null
+          user_id: string
         }
         Update: {
           binance_order_id?: string | null
@@ -440,7 +440,7 @@ export type Database = {
           trend?: string | null
           trend_consistency?: number | null
           updated_at?: string | null
-          user_id?: string | null
+          user_id?: string
         }
         Relationships: [
           {
@@ -918,7 +918,7 @@ export type Database = {
           strategy_name: string
           total_profit: number | null
           total_trades: number | null
-          user_id: string | null
+          user_id: string
           winning_trades: number | null
         }
         Insert: {
@@ -929,7 +929,7 @@ export type Database = {
           strategy_name: string
           total_profit?: number | null
           total_trades?: number | null
-          user_id?: string | null
+          user_id: string
           winning_trades?: number | null
         }
         Update: {
@@ -940,7 +940,7 @@ export type Database = {
           strategy_name?: string
           total_profit?: number | null
           total_trades?: number | null
-          user_id?: string | null
+          user_id?: string
           winning_trades?: number | null
         }
         Relationships: []
@@ -995,7 +995,7 @@ export type Database = {
           rotated_at: string | null
           to_strategy_id: string | null
           to_strategy_name: string
-          user_id: string | null
+          user_id: string
         }
         Insert: {
           from_strategy_id?: string | null
@@ -1007,7 +1007,7 @@ export type Database = {
           rotated_at?: string | null
           to_strategy_id?: string | null
           to_strategy_name: string
-          user_id?: string | null
+          user_id: string
         }
         Update: {
           from_strategy_id?: string | null
@@ -1019,7 +1019,7 @@ export type Database = {
           rotated_at?: string | null
           to_strategy_id?: string | null
           to_strategy_name?: string
-          user_id?: string | null
+          user_id?: string
         }
         Relationships: []
       }
@@ -1041,7 +1041,7 @@ export type Database = {
           symbol: string
           take_profit: number | null
           trend: Database["public"]["Enums"]["market_trend"]
-          user_id: string | null
+          user_id: string
         }
         Insert: {
           confidence_score?: number | null
@@ -1060,7 +1060,7 @@ export type Database = {
           symbol: string
           take_profit?: number | null
           trend: Database["public"]["Enums"]["market_trend"]
-          user_id?: string | null
+          user_id: string
         }
         Update: {
           confidence_score?: number | null
@@ -1079,7 +1079,7 @@ export type Database = {
           symbol?: string
           take_profit?: number | null
           trend?: Database["public"]["Enums"]["market_trend"]
-          user_id?: string | null
+          user_id?: string
         }
         Relationships: [
           {
