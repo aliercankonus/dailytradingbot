@@ -120,21 +120,17 @@ export const TrailingStopMonitor = () => {
     };
   }, []);
 
-  const activeTrailingPositions = useMemo(() => {
-    // Build a per-symbol price map exactly like ActivePositions
-    const priceMap = new Map<string, number>();
-
+  // Build price map exactly like ActivePositions - separate useMemo for price resolution
+  const priceMap = useMemo(() => {
+    const map = new Map<string, number>();
     positions.forEach((p) => {
-      const live = getPrice ? getPrice(p.symbol) : undefined;
-      const liveVal = live?.price != null ? Number(live.price) : NaN;
-      const resolved = !isNaN(liveVal)
-        ? liveVal
-        : typeof p.current_price === "number"
-          ? p.current_price
-          : p.entry_price;
-      priceMap.set(p.symbol, resolved);
+      const livePrice = getPrice(p.symbol);
+      map.set(p.symbol, livePrice ? parseFloat(livePrice.price) : p.current_price || p.entry_price);
     });
+    return map;
+  }, [positions, getPrice, priceVersion]);
 
+  const activeTrailingPositions = useMemo(() => {
     return positions
       .map((p) => {
         const currentPrice = priceMap.get(p.symbol) ?? p.entry_price;
@@ -164,7 +160,7 @@ export const TrailingStopMonitor = () => {
           profitLockPercent: settings.profitLockPercent,
         };
       });
-  }, [positions, priceVersion, settings, getPrice]);
+  }, [positions, priceMap, settings]);
 
   // ----------- UI (DEĞİŞTİRİLMEDİ) -----------
   return (
