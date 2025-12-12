@@ -1,10 +1,7 @@
-import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import {
   AlertCircle,
   TrendingDown,
@@ -26,6 +23,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { useSignalRejections } from "@/hooks/useSignalRejections";
+import { useRiskParameters } from "@/hooks/useRiskParameters";
 import { formatDistanceToNow } from "date-fns";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -987,20 +985,12 @@ const AIAnalysisCell = ({
   );
 };
 
-const AI_ANALYSIS_STORAGE_KEY = 'signal-rejection-ai-analysis-enabled';
-
 export const SignalRejectionReasons = () => {
   const { rejections, loading } = useSignalRejections();
-  const [aiEnabled, setAiEnabled] = useState(() => {
-    // Initialize from localStorage
-    const stored = localStorage.getItem(AI_ANALYSIS_STORAGE_KEY);
-    return stored === 'true';
-  });
-
-  // Persist AI enabled state to localStorage
-  useEffect(() => {
-    localStorage.setItem(AI_ANALYSIS_STORAGE_KEY, String(aiEnabled));
-  }, [aiEnabled]);
+  const { riskParams } = useRiskParameters();
+  
+  // Use global AI analysis toggle from risk parameters
+  const aiEnabled = riskParams?.ai_analysis_enabled ?? false;
 
   const getReasonIcon = (reason: string) => {
     if (reason.includes("Max trades")) return <Layers className="h-4 w-4" />;
@@ -1197,17 +1187,12 @@ export const SignalRejectionReasons = () => {
             </CardTitle>
             <CardDescription>Why signals are not being generated for each symbol</CardDescription>
           </div>
-          <div className="flex items-center gap-2 px-3 py-2 bg-muted/30 rounded-lg border">
-            <Bot className="h-4 w-4 text-primary" />
-            <Label htmlFor="ai-toggle" className="text-sm font-medium cursor-pointer">
-              AI Analysis
-            </Label>
-            <Switch
-              id="ai-toggle"
-              checked={aiEnabled}
-              onCheckedChange={setAiEnabled}
-            />
-          </div>
+          {aiEnabled && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-green-500/10 rounded-lg border border-green-500/20">
+              <Bot className="h-4 w-4 text-green-500" />
+              <span className="text-sm font-medium text-green-500">AI Analysis On</span>
+            </div>
+          )}
         </div>
       </CardHeader>
       <CardContent>
