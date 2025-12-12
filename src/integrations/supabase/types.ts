@@ -614,6 +614,7 @@ export type Database = {
       }
       risk_parameters: {
         Row: {
+          ai_analysis_enabled: boolean | null
           auto_execute_signals: boolean | null
           auto_rebalance_enabled: boolean | null
           break_even_activation_percent: number | null
@@ -683,6 +684,7 @@ export type Database = {
           volatility_max_trades_reduction: number | null
         }
         Insert: {
+          ai_analysis_enabled?: boolean | null
           auto_execute_signals?: boolean | null
           auto_rebalance_enabled?: boolean | null
           break_even_activation_percent?: number | null
@@ -752,6 +754,7 @@ export type Database = {
           volatility_max_trades_reduction?: number | null
         }
         Update: {
+          ai_analysis_enabled?: boolean | null
           auto_execute_signals?: boolean | null
           auto_rebalance_enabled?: boolean | null
           break_even_activation_percent?: number | null

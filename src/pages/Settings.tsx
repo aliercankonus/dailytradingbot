@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Settings as SettingsIcon, Key, Mail, Shield, ArrowLeft } from 'lucide-react';
+import { Settings as SettingsIcon, Key, Mail, Shield, ArrowLeft, Brain } from 'lucide-react';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { PerformanceSettings } from '@/components/PerformanceSettings';
 import { PerformanceMonitoringDashboard } from '@/components/PerformanceMonitoringDashboard';
@@ -190,6 +190,24 @@ export default function Settings() {
     }
   };
 
+  const handleToggleAIAnalysis = async (enabled: boolean) => {
+    try {
+      await updateRiskParameters({ ai_analysis_enabled: enabled });
+      toast({
+        title: enabled ? "AI Analysis Enabled" : "AI Analysis Disabled",
+        description: enabled 
+          ? "AI will analyze signals and trades for additional validation" 
+          : "AI analysis is now completely disabled - no AI usage",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update AI settings",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="container mx-auto p-6 space-y-6">
       <div className="flex items-center gap-3 mb-6">
@@ -238,6 +256,37 @@ export default function Settings() {
                 <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
                   <p className="text-sm text-destructive font-medium">
                     ⚠️ Live Trading Active - Real money will be used for trades
+                  </p>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* AI Analysis */}
+          <Card className="p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <Brain className="h-5 w-5 text-primary" />
+              <h2 className="text-xl font-semibold">AI Analysis</h2>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 border rounded-lg">
+                <div className="space-y-1">
+                  <div className="font-medium">Enable AI Analysis</div>
+                  <p className="text-sm text-muted-foreground">
+                    Use AI to analyze signals for additional validation and risk assessment. Disabling stops all AI usage.
+                  </p>
+                </div>
+                <Switch
+                  checked={riskParams?.ai_analysis_enabled !== false}
+                  onCheckedChange={handleToggleAIAnalysis}
+                />
+              </div>
+              
+              {riskParams?.ai_analysis_enabled === false && (
+                <div className="p-4 bg-muted/50 border border-muted rounded-lg">
+                  <p className="text-sm text-muted-foreground">
+                    AI analysis is disabled. No AI calls will be made for signal validation or rejection analysis.
                   </p>
                 </div>
               )}
