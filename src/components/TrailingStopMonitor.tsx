@@ -126,30 +126,30 @@ export const TrailingStopMonitor = () => {
     };
   }, []);
 
-  // ----------- MAIN CALCULATION -----------
   const activeTrailingPositions = useMemo(() => {
-    // Helper moved inside useMemo to capture latest getPrice
-    const resolvePrice = (p: any) => {
+    // Build a per-symbol price map exactly like ActivePositions
+    const priceMap = new Map<string, number>();
+
+    positions.forEach((p) => {
       const live = getPrice ? getPrice(p.symbol) : undefined;
-      console.log('[TrailingStopMonitor] Resolving price for', p.symbol, 'priceVersion', priceVersion, 'live', live?.price, 'db current_price', p.current_price, 'entry', p.entry_price);
-      if (live?.price != null) {
-        const val = Number(live.price);
-        if (!isNaN(val)) return val;
-      }
-      if (typeof p.current_price === "number") return p.current_price;
-      return p.entry_price;
-    };
+      const liveVal = live?.price != null ? Number(live.price) : NaN;
+      const resolved = !isNaN(liveVal)
+        ? liveVal
+        : typeof p.current_price === "number"
+          ? p.current_price
+          : p.entry_price;
+      priceMap.set(p.symbol, resolved);
+    });
 
     return positions
       .map((p) => {
-        const currentPrice = resolvePrice(p);
+        const currentPrice = priceMap.get(p.symbol) ?? p.entry_price;
         const pnlPercent = calculatePnlPercent(p.side, p.entry_price, currentPrice);
         return { position: p, currentPrice, pnlPercent };
       })
       .filter((item) => item.pnlPercent > settings.activationPercent)
       .map(({ position, currentPrice, pnlPercent }) => {
-        // Use actual database stop_loss (set by monitor-positions with ratcheting) 
-        // instead of recalculating - each position has its own individual stop
+        // Use actual database stop_loss (set by monitor-positions with ratcheting)
         const actualDbStopLoss = position.stop_loss;
         const theoreticalStop = calculateTrailingStop(position, currentPrice);
         const { lockedProfitPercent, lockedProfitAbsolute, lockedStopPrice, peakPnlPercent } = calculateProfitLock(
