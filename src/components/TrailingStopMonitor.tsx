@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, Shield } from "lucide-react";
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
 import { formatPrice, formatPercent } from "@/lib/utils";
@@ -15,9 +15,6 @@ export const TrailingStopMonitor = () => {
     profitLockPercent: 50,
   });
   const { getPrice, priceVersion } = useRealtimePricesContext();
-  
-  // Track peak P&L for each position (ratcheting - never decreases)
-  const peakPnlMap = useRef<Map<string, number>>(new Map());
 
   // ----------- HELPERS -----------
   const resolveCurrentPrice = (p: any) => {
@@ -47,29 +44,26 @@ export const TrailingStopMonitor = () => {
     }
   };
 
-  // Calculate profit lock using PEAK P&L (ratcheting - never decreases)
+  // Calculate profit lock using PERSISTED peak_pnl_percent from database (ratcheting - never decreases)
   const calculateProfitLock = (position: any, currentPnlPercent: number) => {
-    const { side, entry_price, id } = position;
+    const { side, entry_price, peak_pnl_percent } = position;
     const profitLockPercent = settings.profitLockPercent;
     
-    // Get current peak, update if current is higher (ratcheting mechanism)
-    const currentPeak = peakPnlMap.current.get(id) || 0;
-    const newPeak = Math.max(currentPeak, currentPnlPercent);
-    if (newPeak > currentPeak) {
-      peakPnlMap.current.set(id, newPeak);
-    }
+    // Use persisted peak P&L from database (set by monitor-positions)
+    // Fallback to current P&L if peak not yet persisted
+    const peakPnlPercent = Math.max(peak_pnl_percent || 0, currentPnlPercent);
     
-    // Use peak P&L for lock calculation - this ensures lock stop never decreases
-    const lockedProfitPercent = newPeak * (profitLockPercent / 100);
-    const profitAbsolute = entry_price * (newPeak / 100);
+    // Calculate locked profit based on peak P&L
+    const profitAbsolute = entry_price * (peakPnlPercent / 100);
     const lockedProfitAbsolute = profitAbsolute * (profitLockPercent / 100);
+    const lockedProfitPercent = peakPnlPercent * (profitLockPercent / 100);
     const lockedStopPrice = side === "BUY" ? entry_price + lockedProfitAbsolute : entry_price - lockedProfitAbsolute;
     
     return {
       lockedProfitPercent,
       lockedProfitAbsolute,
       lockedStopPrice,
-      peakPnlPercent: newPeak,
+      peakPnlPercent,
     };
   };
 

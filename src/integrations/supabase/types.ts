@@ -348,6 +348,7 @@ export type Database = {
           parent_position_id: string | null
           partial_loss_level: number | null
           partial_tp_level: number | null
+          peak_pnl_percent: number | null
           quantity: number
           realized_pnl: number | null
           realized_pnl_percent: number | null
@@ -386,6 +387,7 @@ export type Database = {
           parent_position_id?: string | null
           partial_loss_level?: number | null
           partial_tp_level?: number | null
+          peak_pnl_percent?: number | null
           quantity: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
@@ -424,6 +426,7 @@ export type Database = {
           parent_position_id?: string | null
           partial_loss_level?: number | null
           partial_tp_level?: number | null
+          peak_pnl_percent?: number | null
           quantity?: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
@@ -485,6 +488,7 @@ export type Database = {
           original_quantity: number | null
           partial_loss_level: number | null
           partial_tp_level: number | null
+          peak_pnl_percent: number | null
           quantity: number
           realized_pnl: number | null
           realized_pnl_percent: number | null
@@ -521,6 +525,7 @@ export type Database = {
           original_quantity?: number | null
           partial_loss_level?: number | null
           partial_tp_level?: number | null
+          peak_pnl_percent?: number | null
           quantity: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
@@ -557,6 +562,7 @@ export type Database = {
           original_quantity?: number | null
           partial_loss_level?: number | null
           partial_tp_level?: number | null
+          peak_pnl_percent?: number | null
           quantity?: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
