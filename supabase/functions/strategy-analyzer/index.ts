@@ -1126,42 +1126,84 @@ serve(async (req) => {
           console.log(`📊 ${symbol}: ${reversalRisk.reason}`);
         }
 
-        // ============= STOCHRSI EXTREME FILTER =============
+        // ============= STOCHRSI EXTREME FILTER WITH SMART EXCEPTIONS =============
         // Prevent entries at extreme oversold/overbought 4h levels where bounces are likely
-        // UNLESS trend is strong (ADX >= 30), where oversold can stay oversold (trend continuation)
+        // BUT allow if multiple strong trend continuation signals are present
         const stochRsi4h = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi?.aggregated;
+        const stochRsi1h = trendData.stochasticRsi?.["1h"];
         const stochRsiK4h = stochRsi4h?.k ?? 50;
-        const STOCHRSI_OVERSOLD_THRESHOLD = 10;  // Below 10 = extreme oversold, bounce likely
-        const STOCHRSI_OVERBOUGHT_THRESHOLD = 90; // Above 90 = extreme overbought, pullback likely
-        const STRONG_TREND_ADX_THRESHOLD = 30;    // ADX >= 30 = strong trend, allow extreme entries
+        const stochRsiD4h = stochRsi4h?.d ?? 50;
+        const stochRsiK1h = stochRsi1h?.k ?? 50;
+        const STOCHRSI_OVERSOLD_THRESHOLD = 10;  // Below 10 = extreme oversold
+        const STOCHRSI_OVERBOUGHT_THRESHOLD = 90; // Above 90 = extreme overbought
+        const STRONG_TREND_ADX_THRESHOLD = 30;    // ADX >= 30 = strong trend
+        
+        // Get trend data for both timeframes (for StochRSI filter)
+        const stochFilterTrend4h = trendData.higherTimeframeFilter?.trend4h || "neutral";
+        const stochFilterTrend1h = trendData.higherTimeframeFilter?.trend1h || "neutral";
+        const stochFilterConf4h = trendData.confidenceBreakdown?.["4h"]?.confidence || 50;
+        const stochFilterConf1h = trendData.confidenceBreakdown?.["1h"]?.confidence || 50;
+        
+        // Get momentum and divergence info
+        const hasBearishDivergence = trendData.momentum?.hasDivergence && trend === "bullish";
+        const hasBullishDivergence = trendData.momentum?.hasDivergence && trend === "bearish";
+        const macdHistogram = trendData.momentum?.macdHistogram ?? 0;
+        const macdExpanding = trendData.momentum?.macdExpanding ?? false;
+        
+        // Get Bollinger Band info for breakout detection
+        const bollingerPosition = trendData.bollingerBands?.aggregated?.pricePosition || "middle";
+        const percentB = trendData.bollingerBands?.aggregated?.percentB ?? 50;
+        
+        // Determine if StochRSI is rising or falling (K vs D comparison)
+        const stochRsiRising = stochRsiK4h > stochRsiD4h;
+        const stochRsiFalling = stochRsiK4h < stochRsiD4h;
         
         // Check if we're at extreme StochRSI levels
-        const isExtremOversold4h = stochRsiK4h < STOCHRSI_OVERSOLD_THRESHOLD;
+        const isExtremeOversold4h = stochRsiK4h < STOCHRSI_OVERSOLD_THRESHOLD;
         const isExtremeOverbought4h = stochRsiK4h > STOCHRSI_OVERBOUGHT_THRESHOLD;
         const isTrendStrong = adx >= STRONG_TREND_ADX_THRESHOLD;
         
         // Determine intended trade direction from trend
         const intendedTradeDirection = trend === "bullish" ? "long" : trend === "bearish" ? "short" : null;
         
-        // Block SHORT entries at extreme oversold ONLY if trend is weak
-        // Strong downtrends can stay oversold (trend continuation)
-        if (intendedTradeDirection === "short" && isExtremOversold4h) {
-          if (isTrendStrong) {
-            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme oversold but ADX=${adx.toFixed(1)} strong - allowing SHORT (trend continuation)`);
+        // ===== SMART EXCEPTION FOR LONG AT OVERBOUGHT =====
+        // Allow LONG when StochRSI > 90 IF:
+        // 1. Strong uptrend on 4h (bullish + confidence >= 65%)
+        // 2. Strong uptrend on 1h (bullish + confidence >= 60%)
+        // 3. No bearish divergence
+        // 4. Breakout or higher low pattern (price at/above upper BB or %B > 70)
+        // 5. StochRSI is rising (K > D) - momentum still building
+        if (intendedTradeDirection === "long" && isExtremeOverbought4h) {
+          const strongUptrend4h = stochFilterTrend4h === "bullish" && stochFilterConf4h >= 65;
+          const strongUptrend1h = stochFilterTrend1h === "bullish" && stochFilterConf1h >= 60;
+          const noBearishDiv = !hasBearishDivergence;
+          const breakoutOrHigherLow = bollingerPosition === "above_upper" || bollingerPosition === "upper_zone" || percentB > 70;
+          const stochMomentumUp = stochRsiRising && macdHistogram > 0;
+          
+          const allowExtremeOverbought = strongUptrend4h && strongUptrend1h && noBearishDiv && breakoutOrHigherLow && stochMomentumUp;
+          
+          if (allowExtremeOverbought || isTrendStrong) {
+            const reason = allowExtremeOverbought 
+              ? `strong uptrend both TFs, no bearish div, breakout pattern, StochRSI rising`
+              : `ADX=${adx.toFixed(1)} strong trend`;
+            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG (${reason})`);
           } else {
             rejectedByStochRsiExtreme++;
-            console.log(`⛔ ${symbol}: Blocking SHORT - 4h StochRSI K=${stochRsiK4h.toFixed(1)} oversold + weak trend (ADX=${adx.toFixed(1)}), bounce likely`);
+            console.log(`⛔ ${symbol}: Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} overbought | 4h=${stochFilterTrend4h}(${stochFilterConf4h}%) 1h=${stochFilterTrend1h}(${stochFilterConf1h}%) div=${hasBearishDivergence} BB=${bollingerPosition} stochRising=${stochRsiRising}`);
             await supabase.from("signal_rejection_log").insert({
               user_id: userId, symbol,
-              rejection_reason: `StochRSI extreme filter: 4h K=${stochRsiK4h.toFixed(1)} oversold + weak ADX=${adx.toFixed(1)}, bounce likely`,
+              rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought, failed smart exception checks`,
               filters_status: { 
                 stochRsiK4h: stochRsiK4h.toFixed(1),
+                stochRsiD4h: stochRsiD4h.toFixed(1),
+                stochRsiRising,
+                trend4h: stochFilterTrend4h, confidence4h: stochFilterConf4h,
+                trend1h: stochFilterTrend1h, confidence1h: stochFilterConf1h,
+                hasBearishDivergence,
+                bollingerPosition, percentB,
+                macdHistogram,
                 adx: adx.toFixed(1),
-                threshold: STOCHRSI_OVERSOLD_THRESHOLD,
-                adxThreshold: STRONG_TREND_ADX_THRESHOLD,
-                intendedDirection: "short",
-                trend,
-                reason: "Extreme oversold 4h + weak trend = high probability bounce"
+                reason: "Overbought without strong trend continuation signals"
               },
               trend_data: trendData,
               checked_at: new Date().toISOString(),
@@ -1170,25 +1212,44 @@ serve(async (req) => {
           }
         }
         
-        // Block LONG entries at extreme overbought ONLY if trend is weak
-        // Strong uptrends can stay overbought (trend continuation)
-        if (intendedTradeDirection === "long" && isExtremeOverbought4h) {
-          if (isTrendStrong) {
-            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought but ADX=${adx.toFixed(1)} strong - allowing LONG (trend continuation)`);
+        // ===== SMART EXCEPTION FOR SHORT AT OVERSOLD =====
+        // Allow SHORT when StochRSI < 10 IF:
+        // 1. Strong downtrend on 4h (bearish + confidence >= 65%)
+        // 2. Strong downtrend on 1h (bearish + confidence >= 60%)
+        // 3. No bullish divergence
+        // 4. Breakdown or lower high pattern (price at/below lower BB or %B < 30)
+        // 5. StochRSI is falling (K < D) - not curling up
+        if (intendedTradeDirection === "short" && isExtremeOversold4h) {
+          const strongDowntrend4h = stochFilterTrend4h === "bearish" && stochFilterConf4h >= 65;
+          const strongDowntrend1h = stochFilterTrend1h === "bearish" && stochFilterConf1h >= 60;
+          const noBullishDiv = !hasBullishDivergence;
+          const breakdownOrLowerHigh = bollingerPosition === "below_lower" || bollingerPosition === "lower_zone" || percentB < 30;
+          const stochMomentumDown = stochRsiFalling && macdHistogram < 0;
+          
+          const allowExtremeOversold = strongDowntrend4h && strongDowntrend1h && noBullishDiv && breakdownOrLowerHigh && stochMomentumDown;
+          
+          if (allowExtremeOversold || isTrendStrong) {
+            const reason = allowExtremeOversold 
+              ? `strong downtrend both TFs, no bullish div, breakdown pattern, StochRSI falling`
+              : `ADX=${adx.toFixed(1)} strong trend`;
+            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme oversold - ALLOWING SHORT (${reason})`);
           } else {
             rejectedByStochRsiExtreme++;
-            console.log(`⛔ ${symbol}: Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} overbought + weak trend (ADX=${adx.toFixed(1)}), pullback likely`);
+            console.log(`⛔ ${symbol}: Blocking SHORT - 4h StochRSI K=${stochRsiK4h.toFixed(1)} oversold | 4h=${stochFilterTrend4h}(${stochFilterConf4h}%) 1h=${stochFilterTrend1h}(${stochFilterConf1h}%) div=${hasBullishDivergence} BB=${bollingerPosition} stochFalling=${stochRsiFalling}`);
             await supabase.from("signal_rejection_log").insert({
               user_id: userId, symbol,
-              rejection_reason: `StochRSI extreme filter: 4h K=${stochRsiK4h.toFixed(1)} overbought + weak ADX=${adx.toFixed(1)}, pullback likely`,
+              rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold, failed smart exception checks`,
               filters_status: { 
                 stochRsiK4h: stochRsiK4h.toFixed(1),
+                stochRsiD4h: stochRsiD4h.toFixed(1),
+                stochRsiFalling,
+                trend4h: stochFilterTrend4h, confidence4h: stochFilterConf4h,
+                trend1h: stochFilterTrend1h, confidence1h: stochFilterConf1h,
+                hasBullishDivergence,
+                bollingerPosition, percentB,
+                macdHistogram,
                 adx: adx.toFixed(1),
-                threshold: STOCHRSI_OVERBOUGHT_THRESHOLD,
-                adxThreshold: STRONG_TREND_ADX_THRESHOLD,
-                intendedDirection: "long",
-                trend,
-                reason: "Extreme overbought 4h + weak trend = high probability pullback"
+                reason: "Oversold without strong trend continuation signals"
               },
               trend_data: trendData,
               checked_at: new Date().toISOString(),
