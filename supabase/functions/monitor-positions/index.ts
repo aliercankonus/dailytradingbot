@@ -60,7 +60,7 @@ serve(async (req) => {
     const userIds = [...new Set(positions.map((p) => p.user_id))];
     const { data: riskParamsList, error: riskError } = await supabase
       .from("risk_parameters")
-      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent, portfolio_value, portfolio_peak_value, drawdown_circuit_breaker_enabled, drawdown_circuit_breaker_percent, circuit_breaker_triggered, time_based_stop_enabled, time_based_stop_hours, dynamic_stop_tightening_enabled, dynamic_stop_tightening_hours, dynamic_stop_tightening_percent, partial_loss_taking_enabled, partial_loss_trigger_percent, partial_loss_close_percent, hedging_enabled, hedge_reversal_risk_min, hedge_reversal_risk_max, hedge_position_size_percent")
+      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent, portfolio_value, portfolio_peak_value, drawdown_circuit_breaker_enabled, drawdown_circuit_breaker_percent, circuit_breaker_triggered, time_based_stop_enabled, time_based_stop_hours, dynamic_stop_tightening_enabled, dynamic_stop_tightening_hours, dynamic_stop_tightening_percent, partial_loss_taking_enabled, partial_loss_trigger_percent, partial_loss_close_percent, hedging_enabled, hedge_reversal_risk_min, hedge_reversal_risk_max, hedge_position_size_percent, min_hold_time_minutes")
       .in("user_id", userIds);
     if (riskError) throw riskError;
     // Create a map of user settings
@@ -94,6 +94,8 @@ serve(async (req) => {
           hedgeReversalRiskMin: rp.hedge_reversal_risk_min ?? 50,
           hedgeReversalRiskMax: rp.hedge_reversal_risk_max ?? 70,
           hedgePositionSizePercent: rp.hedge_position_size_percent ?? 50,
+          // Minimum Hold Time (prevents early exits)
+          minHoldTimeMinutes: rp.min_hold_time_minutes ?? 20,
         },
       ]) || [],
     );
@@ -484,7 +486,19 @@ serve(async (req) => {
         hedgeReversalRiskMin: 50,
         hedgeReversalRiskMax: 70,
         hedgePositionSizePercent: 50,
+        // Minimum Hold Time defaults
+        minHoldTimeMinutes: 20,
       };
+      
+      // 🆕 MINIMUM HOLD TIME CHECK - Prevents early exits on new positions
+      const positionOpenedAt = new Date(position.opened_at || position.executed_at || Date.now());
+      const positionAgeMinutes = (Date.now() - positionOpenedAt.getTime()) / (1000 * 60);
+      const hasMetMinHoldTime = positionAgeMinutes >= userSettings.minHoldTimeMinutes;
+      
+      if (!hasMetMinHoldTime) {
+        console.log(`⏳ ${position.symbol}: Position age ${positionAgeMinutes.toFixed(1)}min < ${userSettings.minHoldTimeMinutes}min hold time - skipping reversal/hedge/early exit checks`);
+      }
+      
       // TRAILING STOP LOSS LOGIC - Position-specific calculation based on EACH position's entry price
       // IMPORTANT: Trailing stop must NEVER set stop closer than 1% to entry price
       let newStopLoss = position.stop_loss;
@@ -840,7 +854,8 @@ serve(async (req) => {
           const isHedge = position.is_hedge === true;
           
           // Apply hedging logic if enabled and risk is in hedge range (50-70%)
-          if (userSettings.hedgingEnabled && 
+          // Only apply if position has met minimum hold time
+          if (hasMetMinHoldTime && userSettings.hedgingEnabled && 
               !isHedge && // Don't hedge a hedge
               !hasHedge && // Don't open duplicate hedge
               reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin && 
@@ -909,7 +924,8 @@ serve(async (req) => {
             }
           }
           // If risk is HIGH (>= max threshold), close position instead
-          else if (reversalRisk.riskScore >= userSettings.hedgeReversalRiskMax && pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
+          // Only apply if position has met minimum hold time
+          else if (hasMetMinHoldTime && reversalRisk.riskScore >= userSettings.hedgeReversalRiskMax && pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
             shouldClose = true;
             closeReason = "reversal_risk_high";
             console.log(
@@ -922,7 +938,8 @@ serve(async (req) => {
           // The hedge will be closed by: its own TP, trailing stop, or when parent closes
           
           // Original early warning logic (kept as fallback)
-          if (!shouldClose) {
+          // Only apply if position has met minimum hold time
+          if (!shouldClose && hasMetMinHoldTime) {
             const EARLY_WARNING_MIN_LOSS_PERCENT = -0.2;
             if (trend1h === "bullish" && confidence4h < 70 && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT) {
               shouldClose = true;
@@ -980,7 +997,8 @@ serve(async (req) => {
           const isHedge = position.is_hedge === true;
           
           // Apply hedging logic if enabled and risk is in hedge range (50-70%)
-          if (!shouldClose && userSettings.hedgingEnabled && 
+          // Only apply if position has met minimum hold time
+          if (!shouldClose && hasMetMinHoldTime && userSettings.hedgingEnabled && 
               !isHedge && // Don't hedge a hedge
               !hasHedge && // Don't open duplicate hedge
               reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin && 
@@ -1049,7 +1067,8 @@ serve(async (req) => {
             }
           }
           // If risk is HIGH (>= max threshold), close position instead
-          else if (!shouldClose && reversalRisk.riskScore >= userSettings.hedgeReversalRiskMax && pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
+          // Only apply if position has met minimum hold time
+          else if (!shouldClose && hasMetMinHoldTime && reversalRisk.riskScore >= userSettings.hedgeReversalRiskMax && pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
             shouldClose = true;
             closeReason = "reversal_risk_high";
             console.log(
@@ -1062,7 +1081,8 @@ serve(async (req) => {
           // The hedge will be closed by: its own TP, trailing stop, or when parent closes
           
           // Original early warning logic (kept as fallback)
-          if (!shouldClose) {
+          // Only apply if position has met minimum hold time
+          if (!shouldClose && hasMetMinHoldTime) {
             const EARLY_WARNING_MIN_LOSS_PERCENT_LONG = -0.2;
             if (trend1h === "bearish" && confidence4h < 70 && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT_LONG) {
               shouldClose = true;

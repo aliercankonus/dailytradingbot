@@ -49,6 +49,8 @@ interface RiskParameters {
   hedge_reversal_risk_min: number;
   hedge_reversal_risk_max: number;
   hedge_position_size_percent: number;
+  // Minimum Hold Time
+  min_hold_time_minutes: number;
   updated_at: string;
 }
 
