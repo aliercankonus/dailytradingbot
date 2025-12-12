@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, Shield } from "lucide-react";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
 import { formatPrice, formatPercent } from "@/lib/utils";
@@ -15,6 +15,9 @@ export const TrailingStopMonitor = () => {
     profitLockPercent: 50,
   });
   const { getPrice, priceVersion } = useRealtimePricesContext();
+  
+  // Track peak P&L for each position (ratcheting - never decreases)
+  const peakPnlMap = useRef<Map<string, number>>(new Map());
 
   // ----------- HELPERS -----------
   const resolveCurrentPrice = (p: any) => {
@@ -44,17 +47,29 @@ export const TrailingStopMonitor = () => {
     }
   };
 
-  const calculateProfitLock = (position: any, pnlPercent: number) => {
-    const { side, entry_price } = position;
+  // Calculate profit lock using PEAK P&L (ratcheting - never decreases)
+  const calculateProfitLock = (position: any, currentPnlPercent: number) => {
+    const { side, entry_price, id } = position;
     const profitLockPercent = settings.profitLockPercent;
-    const lockedProfitPercent = pnlPercent * (profitLockPercent / 100);
-    const profitAbsolute = entry_price * (pnlPercent / 100);
+    
+    // Get current peak, update if current is higher (ratcheting mechanism)
+    const currentPeak = peakPnlMap.current.get(id) || 0;
+    const newPeak = Math.max(currentPeak, currentPnlPercent);
+    if (newPeak > currentPeak) {
+      peakPnlMap.current.set(id, newPeak);
+    }
+    
+    // Use peak P&L for lock calculation - this ensures lock stop never decreases
+    const lockedProfitPercent = newPeak * (profitLockPercent / 100);
+    const profitAbsolute = entry_price * (newPeak / 100);
     const lockedProfitAbsolute = profitAbsolute * (profitLockPercent / 100);
     const lockedStopPrice = side === "BUY" ? entry_price + lockedProfitAbsolute : entry_price - lockedProfitAbsolute;
+    
     return {
       lockedProfitPercent,
       lockedProfitAbsolute,
       lockedStopPrice,
+      peakPnlPercent: newPeak,
     };
   };
 
@@ -122,7 +137,7 @@ export const TrailingStopMonitor = () => {
       .filter((item) => item.pnlPercent > settings.activationPercent)
       .map(({ position, currentPrice, pnlPercent }) => {
         const stop_loss = calculateTrailingStop(position, currentPrice);
-        const { lockedProfitPercent, lockedProfitAbsolute, lockedStopPrice } = calculateProfitLock(
+        const { lockedProfitPercent, lockedProfitAbsolute, lockedStopPrice, peakPnlPercent } = calculateProfitLock(
           position,
           pnlPercent,
         );
@@ -130,6 +145,7 @@ export const TrailingStopMonitor = () => {
           ...position,
           currentPrice,
           pnlPercent,
+          peakPnlPercent,
           stop_loss,
           lockedProfitPercent,
           lockedProfitAbsolute,
@@ -214,7 +230,7 @@ export const TrailingStopMonitor = () => {
                           </span>
                         </div>
                         <div className="col-span-2 mt-1 text-[10px] italic">
-                          {formatPercent(position.pnlPercent)} × {position.profitLockPercent}% ={" "}
+                          Peak: {formatPercent(position.peakPnlPercent)} × {position.profitLockPercent}% ={" "}
                           {formatPercent(position.lockedProfitPercent)} locked
                         </div>
                       </div>
