@@ -988,12 +988,23 @@ const AIAnalysisCell = ({
   );
 };
 
+const AI_ANALYSIS_STORAGE_KEY = 'signal-rejection-ai-analysis-enabled';
+
 export const SignalRejectionReasons = () => {
   const { rejections, loading } = useSignalRejections();
-  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(() => {
+    // Initialize from localStorage
+    const stored = localStorage.getItem(AI_ANALYSIS_STORAGE_KEY);
+    return stored === 'true';
+  });
   const [aiResults, setAiResults] = useState<Record<string, AIValidationResult>>({});
   const [aiLoading, setAiLoading] = useState<Record<string, boolean>>({});
   const [aiErrors, setAiErrors] = useState<Record<string, string>>({});
+
+  // Persist AI enabled state to localStorage
+  useEffect(() => {
+    localStorage.setItem(AI_ANALYSIS_STORAGE_KEY, String(aiEnabled));
+  }, [aiEnabled]);
 
   // Analyze rejection with AI
   const analyzeRejection = useCallback(async (rejection: SignalRejection) => {
