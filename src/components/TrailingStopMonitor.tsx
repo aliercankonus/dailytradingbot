@@ -128,9 +128,20 @@ export const TrailingStopMonitor = () => {
 
   // ----------- MAIN CALCULATION -----------
   const activeTrailingPositions = useMemo(() => {
+    // Helper moved inside useMemo to capture latest getPrice
+    const resolvePrice = (p: any) => {
+      const live = getPrice ? getPrice(p.symbol) : undefined;
+      if (live?.price != null) {
+        const val = Number(live.price);
+        if (!isNaN(val)) return val;
+      }
+      if (typeof p.current_price === "number") return p.current_price;
+      return p.entry_price;
+    };
+
     return positions
       .map((p) => {
-        const currentPrice = resolveCurrentPrice(p);
+        const currentPrice = resolvePrice(p);
         const pnlPercent = calculatePnlPercent(p.side, p.entry_price, currentPrice);
         return { position: p, currentPrice, pnlPercent };
       })
@@ -153,7 +164,7 @@ export const TrailingStopMonitor = () => {
           profitLockPercent: settings.profitLockPercent,
         };
       });
-  }, [positions, priceVersion, settings]);
+  }, [positions, priceVersion, settings, getPrice]);
 
   // ----------- UI (DEĞİŞTİRİLMEDİ) -----------
   return (
