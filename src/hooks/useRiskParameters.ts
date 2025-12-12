@@ -51,6 +51,8 @@ interface RiskParameters {
   hedge_position_size_percent: number;
   // Minimum Hold Time
   min_hold_time_minutes: number;
+  // AI Analysis Toggle
+  ai_analysis_enabled: boolean;
   updated_at: string;
 }
 

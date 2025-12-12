@@ -109,7 +109,7 @@ const logRejectionWithAI = async (
   rejectionReason: string,
   filtersStatus: any,
   trendData: any,
-  enableAI: boolean = true
+  enableAI: boolean = false  // Default to false, controlled by ai_analysis_enabled
 ) => {
   const { data, error } = await supabase
     .from("signal_rejection_log")
@@ -1338,7 +1338,8 @@ serve(async (req) => {
             symbol,
             `Market regime not tradeable: ${regime.reason}`,
             { regime: regime.regime, reason: regime.reason, adx, confidence, trendConsistency },
-            trendData
+            trendData,
+            riskParams.ai_analysis_enabled !== false
           );
           continue;
         }
@@ -1368,7 +1369,8 @@ serve(async (req) => {
               stochRsi: trendData.stochasticRsi?.aggregated,
               trend1h: higherTimeframeFilter?.trend1h
             },
-            trendData
+            trendData,
+            riskParams.ai_analysis_enabled !== false
           );
           continue;
         } else if (reversalRisk.riskScore > 0) {

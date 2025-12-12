@@ -804,8 +804,12 @@ serve(async (req) => {
     let aiPositionMultiplier = 1.0;
     let aiConfidenceAdjustment = 0;
     
-    try {
-      const { data: aiAnalysis, error: aiError } = await supabase.functions.invoke('ai-signal-analyzer', {
+    // Check if AI analysis is globally enabled
+    const aiAnalysisEnabled = riskParams.ai_analysis_enabled !== false;
+    
+    if (aiAnalysisEnabled) {
+      try {
+        const { data: aiAnalysis, error: aiError } = await supabase.functions.invoke('ai-signal-analyzer', {
         body: {
           symbol: signal.symbol,
           signalType: signal.signal_type,
@@ -856,12 +860,15 @@ serve(async (req) => {
       } else if (aiError) {
         console.warn('AI analysis unavailable, proceeding with standard filters:', aiError);
       }
-    } catch (aiException) {
-      // Don't block trades if AI service fails (unless it explicitly recommends avoid or high risk)
-      if (aiException instanceof Error && (aiException.message.includes('AI recommends AVOID') || aiException.message.includes('AI risk level HIGH'))) {
-        throw aiException;
+      } catch (aiException) {
+        // Don't block trades if AI service fails (unless it explicitly recommends avoid or high risk)
+        if (aiException instanceof Error && (aiException.message.includes('AI recommends AVOID') || aiException.message.includes('AI risk level HIGH'))) {
+          throw aiException;
+        }
+        console.warn('AI analysis skipped:', aiException instanceof Error ? aiException.message : 'Unknown error');
       }
-      console.warn('AI analysis skipped:', aiException instanceof Error ? aiException.message : 'Unknown error');
+    } else {
+      console.log('🤖 AI analysis disabled by user setting');
     }
 
     // Fetch strategy's risk settings to get positionSizePercent
