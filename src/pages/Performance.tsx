@@ -151,13 +151,24 @@ const Performance = () => {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
-                    <YAxis stroke="hsl(var(--muted-foreground))" />
+                    <YAxis 
+                      stroke="hsl(var(--muted-foreground))" 
+                      domain={[(dataMin: number) => {
+                        const range = Math.max(dataMin * 0.02, 100);
+                        return Math.floor((dataMin - range) / 10) * 10;
+                      }, (dataMax: number) => {
+                        const range = Math.max(dataMax * 0.02, 100);
+                        return Math.ceil((dataMax + range) / 10) * 10;
+                      }]}
+                      tickFormatter={(value) => `$${value.toLocaleString()}`}
+                    />
                     <Tooltip
                       contentStyle={{
                         backgroundColor: "hsl(var(--card))",
                         border: "1px solid hsl(var(--border))",
                         borderRadius: "8px",
                       }}
+                      formatter={(value: number) => [`$${value.toFixed(2)}`, "Portfolio Value"]}
                     />
                     <Legend />
                     <Area
