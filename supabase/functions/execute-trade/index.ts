@@ -734,7 +734,8 @@ serve(async (req) => {
 
     // ============================================================
     // FILTER 11: RISK/REWARD RATIO VALIDATION
-    // Minimum R:R ratio of 1.2:1 required for all trades
+    // Minimum R:R ratio of 1.5:1 required for all trades (INCREASED from 1.2)
+    // This ensures we only take trades with sufficient profit potential
     // ============================================================
     const signalSideForRR = signal.signal_type === 'long' ? 'BUY' : 'SELL';
     let riskAmount: number;
@@ -759,7 +760,7 @@ serve(async (req) => {
     }
     
     const riskRewardRatio = rewardAmount / riskAmount;
-    const minRiskReward = 1.2; // Minimum 1.2:1 R:R required (lowered from 1.5 to allow more trades)
+    const minRiskReward = 1.5; // INCREASED: Minimum 1.5:1 R:R required (was 1.2)
     
     console.log(`📊 Risk/Reward Analysis: Risk=$${riskAmount.toFixed(2)} (${((riskAmount/currentPrice)*100).toFixed(2)}%), Reward=$${rewardAmount.toFixed(2)} (${((rewardAmount/currentPrice)*100).toFixed(2)}%), R:R=${riskRewardRatio.toFixed(2)}:1`);
     

@@ -300,12 +300,14 @@ const BUILT_IN_TEMPLATES = [
 
 // ============= IMPROVEMENT #1: Quality Score System =============
 // Replace tier-based filtering with unified 0-100 quality score
+// NEW: Added confidence penalty and pullback bonus for confidence inversion fix
 interface QualityFactors {
   adxScore: number;          // 0-25 points based on trend strength
   momentumScore: number;     // 0-25 points based on momentum confirmation
   alignmentScore: number;    // 0-20 points based on timeframe alignment
   technicalScore: number;    // 0-15 points based on StochRSI/Bollinger signals
-  entryTimingScore: number;  // 0-15 points based on pullback/entry timing
+  entryTimingScore: number;  // 0-20 points based on pullback/entry timing (INCREASED from 15)
+  confidencePenalty: number; // 0 to -15 penalty for high confidence (inversion fix)
 }
 
 const calculateQualityScore = (factors: QualityFactors): { score: number; breakdown: string } => {
@@ -314,12 +316,26 @@ const calculateQualityScore = (factors: QualityFactors): { score: number; breakd
     factors.momentumScore +
     factors.alignmentScore +
     factors.technicalScore +
-    factors.entryTimingScore
+    factors.entryTimingScore +
+    factors.confidencePenalty  // Can be negative!
   ));
   
-  const breakdown = `ADX:${factors.adxScore}/25 MOM:${factors.momentumScore}/25 ALIGN:${factors.alignmentScore}/20 TECH:${factors.technicalScore}/15 ENTRY:${factors.entryTimingScore}/15`;
+  const penaltyStr = factors.confidencePenalty < 0 ? ` CONF_PEN:${factors.confidencePenalty}` : '';
+  const breakdown = `ADX:${factors.adxScore}/25 MOM:${factors.momentumScore}/25 ALIGN:${factors.alignmentScore}/20 TECH:${factors.technicalScore}/15 ENTRY:${factors.entryTimingScore}/20${penaltyStr}`;
   
   return { score, breakdown };
+};
+
+// ============= CONFIDENCE INVERSION FIX =============
+// High confidence = trend exhaustion, penalize entries
+// Optimal entry zone: 50-70% confidence (trend confirmed but not exhausted)
+const getConfidencePenalty = (confidence: number): number => {
+  if (confidence >= 85) return -15;   // Heavy penalty for extreme confidence
+  if (confidence >= 80) return -12;   // Strong penalty
+  if (confidence >= 75) return -8;    // Moderate penalty
+  if (confidence >= 70) return -4;    // Light penalty
+  if (confidence >= 50 && confidence < 70) return 0;  // Optimal zone
+  return -2;  // Too low confidence also not ideal
 };
 
 // ADX Score (0-25 points)
@@ -671,179 +687,226 @@ const detectMarketRegime = (trendData: any): { regime: MarketRegime; tradeable: 
   };
 };
 
-// ============= IMPROVEMENT #3: Pullback Entry Detection =============
+// ============= IMPROVEMENT #3: ENHANCED PULLBACK ENTRY DETECTION =============
+// CRITICAL FIX: Require BOTH RSI pullback AND Bollinger touch for highest score
 interface PullbackAnalysis {
   isPullback: boolean;
   pullbackDepth: number;     // 0-100% of recent swing
-  entryTimingScore: number;  // 0-15 bonus points
+  entryTimingScore: number;  // 0-20 bonus points (INCREASED for pullback importance)
   reason: string;
+  hasBothConditions: boolean; // RSI + Bollinger combined
 }
 
 const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis => {
   const indicators = trendData.indicators || {};
   const stochRsi = trendData.stochasticRsi?.aggregated || {};
   const bollingerBands = trendData.bollingerBands || {};
+  const bb1h = bollingerBands["1h"] || {};
   const rsi = indicators.rsi || 50;
   const adx = trendData?.volatility?.adx || 0;
   const momentum = trendData?.momentum || {};
+  const percentB = bb1h.percentB || 50;
   
   // Strong ADX = momentum continuation is valid strategy
   const isStrongTrend = adx >= 30;
   const hasMacdExpanding = momentum.macdExpanding === true;
   const isMomentumConfirmed = momentum.state === "confirmed" || momentum.state === "mixed";
   
-  // For bullish trend, look for pullback OR momentum continuation
+  // Define pullback conditions
+  const rsiPullbackBullish = rsi < 45;  // RSI showing pullback in uptrend
+  const rsiPullbackBearish = rsi > 55;  // RSI showing rally in downtrend
+  const bollingerPullbackBullish = percentB < 35 || bb1h.pricePosition === "lower_zone";
+  const bollingerPullbackBearish = percentB > 65 || bb1h.pricePosition === "upper_zone";
+  
+  // For bullish trend, look for pullback entries
   if (trend === "bullish") {
-    // PULLBACK ENTRIES: Oversold RSI in bullish trend = great entry
+    // BEST ENTRY: Both RSI oversold AND near lower Bollinger
+    if ((rsi < 40 || stochRsi.oversoldCount >= 1) && bollingerPullbackBullish) {
+      return {
+        isPullback: true,
+        hasBothConditions: true,
+        pullbackDepth: 100 - rsi,
+        entryTimingScore: 20,  // MAX SCORE for combined conditions
+        reason: "OPTIMAL: RSI oversold + near lower Bollinger band"
+      };
+    }
+    
+    // GOOD ENTRY: RSI pullback only
     if (rsi < 40 || stochRsi.oversoldCount >= 1) {
       return {
         isPullback: true,
+        hasBothConditions: false,
         pullbackDepth: 100 - rsi,
-        entryTimingScore: 12,
+        entryTimingScore: 14,
         reason: "Bullish pullback: RSI oversold in uptrend"
       };
     }
     
-    // Near lower Bollinger band in bullish trend
-    if (bollingerBands["1h"]?.pricePosition === "lower_zone") {
+    // GOOD ENTRY: Bollinger pullback only
+    if (bollingerPullbackBullish) {
       return {
         isPullback: true,
+        hasBothConditions: false,
         pullbackDepth: 30,
-        entryTimingScore: 10,
+        entryTimingScore: 12,
         reason: "Bullish pullback: Price near lower Bollinger band"
       };
     }
     
-    // StochRSI bullish cross = reversal from pullback
+    // ACCEPTABLE: StochRSI bullish cross = reversal from pullback
     if (stochRsi.bullishCrossCount >= 1) {
       return {
         isPullback: true,
+        hasBothConditions: false,
         pullbackDepth: 25,
-        entryTimingScore: 8,
+        entryTimingScore: 10,
         reason: "Bullish pullback: StochRSI bullish cross"
       };
     }
     
-    // MOMENTUM CONTINUATION: Strong trend + MACD expanding = ride the momentum!
-    if (isStrongTrend && (hasMacdExpanding || isMomentumConfirmed)) {
+    // MOMENTUM CONTINUATION: Only if very strong trend + confirmed momentum
+    if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsi < 65) {
       return {
         isPullback: false,
+        hasBothConditions: false,
         pullbackDepth: 0,
-        entryTimingScore: 8,
+        entryTimingScore: 6,  // Reduced from 8 - prefer pullbacks
         reason: "Momentum continuation: Strong ADX with MACD expansion"
       };
     }
     
-    // Strong trend but overbought - still give some points (momentum play)
+    // POOR ENTRY: Strong trend but overbought - low score
     if (isStrongTrend && rsi > 65) {
       return {
         isPullback: false,
+        hasBothConditions: false,
         pullbackDepth: 0,
-        entryTimingScore: 5,
-        reason: "Momentum continuation: Strong trend despite overbought"
+        entryTimingScore: 2,  // Reduced from 5
+        reason: "Poor entry: Overbought in strong trend"
       };
     }
     
-    // RSI in neutral zone = acceptable entry
+    // POOR ENTRY: RSI in neutral zone = not ideal timing
     if (rsi >= 40 && rsi <= 65) {
       return {
         isPullback: false,
+        hasBothConditions: false,
         pullbackDepth: 0,
-        entryTimingScore: 5,
-        reason: "Acceptable entry: RSI in neutral zone"
+        entryTimingScore: 4,  // Reduced from 5
+        reason: "Neutral entry: RSI in middle zone"
       };
     }
     
-    // Overbought in weak trend - cautious but not blocking
+    // AVOID: Overbought in weak trend
     if (rsi > 70 || stochRsi.overboughtCount >= 2) {
       return {
         isPullback: false,
+        hasBothConditions: false,
         pullbackDepth: 0,
-        entryTimingScore: 2, // Changed from -5 to 2 - don't block, just reduce score
-        reason: "Cautious entry: Overbought but trend intact"
+        entryTimingScore: 0,  // Changed from 2 to 0 - bad entry
+        reason: "Avoid: Overbought in weak trend"
       };
     }
   }
   
   // For bearish trend, look for rally (price spiked but downtrend intact)
   if (trend === "bearish") {
-    // Overbought RSI in bearish trend = shorting opportunity
+    // BEST ENTRY: Both RSI overbought AND near upper Bollinger
+    if ((rsi > 60 || stochRsi.overboughtCount >= 1) && bollingerPullbackBearish) {
+      return {
+        isPullback: true,
+        hasBothConditions: true,
+        pullbackDepth: rsi - 50,
+        entryTimingScore: 20,  // MAX SCORE
+        reason: "OPTIMAL: RSI overbought + near upper Bollinger band"
+      };
+    }
+    
+    // GOOD ENTRY: RSI rally only
     if (rsi > 60 || stochRsi.overboughtCount >= 1) {
       return {
         isPullback: true,
+        hasBothConditions: false,
         pullbackDepth: rsi - 50,
-        entryTimingScore: 12,
+        entryTimingScore: 14,
         reason: "Bearish rally: RSI overbought in downtrend"
       };
     }
     
-    // Near upper Bollinger band in bearish trend
-    if (bollingerBands["1h"]?.pricePosition === "upper_zone") {
+    // GOOD ENTRY: Bollinger rally only
+    if (bollingerPullbackBearish) {
       return {
         isPullback: true,
+        hasBothConditions: false,
         pullbackDepth: 30,
-        entryTimingScore: 10,
+        entryTimingScore: 12,
         reason: "Bearish rally: Price near upper Bollinger band"
       };
     }
     
-    // StochRSI bearish cross = reversal from rally
+    // ACCEPTABLE: StochRSI bearish cross
     if (stochRsi.bearishCrossCount >= 1) {
       return {
         isPullback: true,
+        hasBothConditions: false,
         pullbackDepth: 25,
-        entryTimingScore: 8,
+        entryTimingScore: 10,
         reason: "Bearish rally: StochRSI bearish cross"
       };
     }
     
-    // RSI in neutral zone (not oversold) = acceptable entry
-    if (rsi <= 60 && rsi >= 35) {
+    // MOMENTUM CONTINUATION: Only if very strong trend
+    if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsi > 35) {
       return {
         isPullback: false,
+        hasBothConditions: false,
         pullbackDepth: 0,
-        entryTimingScore: 5,
-        reason: "Acceptable entry: RSI in neutral zone"
-      };
-    }
-    
-    // MOMENTUM CONTINUATION: Strong downtrend + momentum = ride the momentum!
-    if (isStrongTrend && (hasMacdExpanding || isMomentumConfirmed)) {
-      return {
-        isPullback: false,
-        pullbackDepth: 0,
-        entryTimingScore: 8,
+        entryTimingScore: 6,  // Reduced
         reason: "Momentum continuation: Strong ADX with MACD expansion"
       };
     }
     
-    // Strong downtrend but oversold - still give some points
-    if (isStrongTrend && rsi < 35) {
+    // POOR ENTRY: RSI in neutral zone
+    if (rsi <= 60 && rsi >= 35) {
       return {
         isPullback: false,
+        hasBothConditions: false,
         pullbackDepth: 0,
-        entryTimingScore: 5,
-        reason: "Momentum continuation: Strong downtrend despite oversold"
+        entryTimingScore: 4,
+        reason: "Neutral entry: RSI in middle zone"
       };
     }
     
-    // Oversold in weak downtrend - cautious but not blocking
+    // POOR ENTRY: Strong downtrend but oversold
+    if (isStrongTrend && rsi < 35) {
+      return {
+        isPullback: false,
+        hasBothConditions: false,
+        pullbackDepth: 0,
+        entryTimingScore: 2,
+        reason: "Poor entry: Oversold in strong downtrend"
+      };
+    }
+    
+    // AVOID: Oversold in weak downtrend
     if (rsi < 30 || stochRsi.oversoldCount >= 2) {
       return {
         isPullback: false,
+        hasBothConditions: false,
         pullbackDepth: 0,
-        entryTimingScore: 2, // Changed from -5 to 2 - don't block, just reduce score
-        reason: "Cautious entry: Oversold but downtrend intact"
+        entryTimingScore: 0,  // Bad entry
+        reason: "Avoid: Oversold in weak downtrend"
       };
     }
   }
   
-  // Default - neutral timing
+  // Default - neutral timing (not ideal)
   return {
     isPullback: false,
+    hasBothConditions: false,
     pullbackDepth: 0,
-    entryTimingScore: 3,
-    reason: "Neutral entry timing"
+    entryTimingScore: 2,
+    reason: "No pullback detected - not ideal entry timing"
   };
 };
 
@@ -965,6 +1028,45 @@ serve(async (req) => {
       });
     }
 
+    // ============= SYMBOL PERFORMANCE FILTER =============
+    // Disable symbols with win rate below 35% (based on last 20 trades)
+    const SYMBOL_WIN_RATE_THRESHOLD = 35;
+    const SYMBOL_MIN_TRADES_FOR_FILTER = 10;
+    
+    const { data: symbolPerformance } = await supabase
+      .from("positions")
+      .select("symbol, realized_pnl")
+      .eq("user_id", userId)
+      .eq("status", "closed")
+      .order("closed_at", { ascending: false })
+      .limit(200);  // Get recent trades to analyze
+    
+    // Calculate win rate per symbol
+    const symbolWinRates = new Map<string, { wins: number; total: number; winRate: number }>();
+    const disabledSymbols = new Set<string>();
+    
+    if (symbolPerformance?.length) {
+      for (const trade of symbolPerformance) {
+        const current = symbolWinRates.get(trade.symbol) || { wins: 0, total: 0, winRate: 0 };
+        current.total++;
+        if ((trade.realized_pnl || 0) > 0) current.wins++;
+        current.winRate = (current.wins / current.total) * 100;
+        symbolWinRates.set(trade.symbol, current);
+      }
+      
+      // Check each symbol's performance
+      for (const [symbol, stats] of symbolWinRates.entries()) {
+        if (stats.total >= SYMBOL_MIN_TRADES_FOR_FILTER && stats.winRate < SYMBOL_WIN_RATE_THRESHOLD) {
+          disabledSymbols.add(symbol);
+          console.log(`⛔ SYMBOL FILTER: ${symbol} disabled - win rate ${stats.winRate.toFixed(1)}% < ${SYMBOL_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades)`);
+        }
+      }
+    }
+    
+    // Filter out disabled symbols
+    const activeSymbols = symbols.filter(s => !disabledSymbols.has(s.symbol));
+    console.log(`📊 Symbol filter: ${symbols.length} total → ${activeSymbols.length} active (${disabledSymbols.size} disabled due to low win rate)`);
+
     // Fetch custom strategies (REQUIRED)
     const { data: customStrategies, error: strategiesError } = await supabase
       .from("custom_strategies")
@@ -984,7 +1086,7 @@ serve(async (req) => {
     
     const allStrategies = [...userStrategies, ...builtInToInclude];
     
-    console.log(`📊 ${symbols.length} symbols | ${userStrategies.length} user strategies + ${builtInToInclude.length} built-in templates = ${allStrategies.length} total`);
+    console.log(`📊 ${activeSymbols.length} symbols | ${userStrategies.length} user strategies + ${builtInToInclude.length} built-in templates = ${allStrategies.length} total`);
 
     // Fetch recent signals and active positions
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
@@ -1120,8 +1222,8 @@ serve(async (req) => {
       }
     };
 
-    // Fetch market data in parallel
-    const symbolsList = symbols.map((s) => s.symbol);
+    // Fetch market data in parallel - use filtered activeSymbols
+    const symbolsList = activeSymbols.map((s) => s.symbol);
     const [marketDataResults, historicalResults] = await Promise.all([
       Promise.all(symbolsList.map(async (symbol) => {
         try {
@@ -1136,13 +1238,13 @@ serve(async (req) => {
     const historicalDataMap = new Map<string, { prices: number[]; volumes: number[] }>();
     historicalResults.forEach(({ symbol, data }) => historicalDataMap.set(symbol, data));
 
-    // Fetch trend data in PARALLEL for eligible symbols
+    // Fetch trend data in PARALLEL for eligible symbols (already filtered by win rate)
     const eligibleSymbols = symbolsList.filter((symbol) => {
       const count = openTradesPerSymbol.get(symbol) || 0;
       return !existingSignalsSet.has(symbol) && count < riskParams.max_trades_per_symbol;
     });
 
-    console.log(`🚀 Fetching trend data for ${eligibleSymbols.length} eligible symbols`);
+    console.log(`🚀 Fetching trend data for ${eligibleSymbols.length} eligible symbols (after win rate filter)`);
 
     const trendResults = await Promise.all(eligibleSymbols.map(async (symbol) => {
       try {
@@ -1184,8 +1286,8 @@ serve(async (req) => {
       console.log(`   → Position size multiplier: ${recoveryPositionSizeMultiplier * 100}%`);
     }
 
-    // Analyze each symbol
-    for (const { symbol } of symbols) {
+    // Analyze each symbol (using filtered activeSymbols that passed win rate check)
+    for (const { symbol } of activeSymbols) {
       const currentTradeCount = openTradesPerSymbol.get(symbol) || 0;
 
       if (existingSignalsSet.has(symbol)) {
@@ -1407,18 +1509,24 @@ serve(async (req) => {
         // ============= IMPROVEMENT #3: Pullback Entry Detection =============
         const pullbackAnalysis = analyzePullbackEntry(trendData, trend);
 
-        // ============= IMPROVEMENT #1: Quality Score System =============
+        // ============= IMPROVEMENT #1: Quality Score System with CONFIDENCE INVERSION =============
+        const confidencePenalty = getConfidencePenalty(confidence);
         const qualityFactors: QualityFactors = {
           adxScore: getAdxScore(adx),
           momentumScore: getMomentumScore(momentum),
           alignmentScore: getAlignmentScore(confidence, trendConsistency, higherTimeframeFilter?.aligned || false, trendData),
           technicalScore: getTechnicalScore(trendData, trend, symbol),
           entryTimingScore: Math.max(0, pullbackAnalysis.entryTimingScore),
+          confidencePenalty: confidencePenalty,  // Penalize high confidence entries
         };
 
         const { score: qualityScore, breakdown } = calculateQualityScore(qualityFactors);
 
-        console.log(`📊 ${symbol} Quality: ${qualityScore}/100 [${breakdown}] | Regime: ${regime.regime} | Entry: ${pullbackAnalysis.reason}`);
+        // Log confidence inversion impact
+        if (confidencePenalty < 0) {
+          console.log(`⚠️ ${symbol} Confidence penalty: ${confidencePenalty} (confidence=${confidence}% is above optimal 50-70% zone)`);
+        }
+        console.log(`📊 ${symbol} Quality: ${qualityScore}/100 [${breakdown}] | Regime: ${regime.regime} | Entry: ${pullbackAnalysis.reason} | Pullback: ${pullbackAnalysis.hasBothConditions ? 'OPTIMAL' : pullbackAnalysis.isPullback ? 'YES' : 'NO'}`);
 
         // Check minimum quality threshold
         if (qualityScore < MIN_QUALITY_SCORE) {
