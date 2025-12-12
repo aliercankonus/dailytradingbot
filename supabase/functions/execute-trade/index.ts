@@ -788,7 +788,7 @@ serve(async (req) => {
     }
     
     const riskRewardRatio = rewardAmount / riskAmount;
-    const minRiskReward = 1.8; // INCREASED: Minimum 1.8:1 R:R required for better win rate
+    const minRiskReward = 1.5; // Optimal for high win rate - closer TPs are more likely to hit
     
     console.log(`📊 Risk/Reward Analysis: Risk=$${riskAmount.toFixed(2)} (${((riskAmount/currentPrice)*100).toFixed(2)}%), Reward=$${rewardAmount.toFixed(2)} (${((rewardAmount/currentPrice)*100).toFixed(2)}%), R:R=${riskRewardRatio.toFixed(2)}:1`);
     
