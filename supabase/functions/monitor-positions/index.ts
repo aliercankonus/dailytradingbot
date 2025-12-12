@@ -501,12 +501,22 @@ serve(async (req) => {
       
       // TRAILING STOP LOSS LOGIC - Position-specific calculation based on EACH position's entry price
       // IMPORTANT: Trailing stop must NEVER set stop closer than 1% to entry price
+      // Uses PERSISTED peak_pnl_percent for ratcheting lock stop calculation
       let newStopLoss = position.stop_loss;
       let trailingActivated = false;
+      let peakPnlUpdated = false;
       
       // Minimum stop loss distance (1% from entry) - prevents premature exits
       const MIN_TRAILING_STOP_DISTANCE_PERCENT = 1.0;
       const minDistanceFromEntry = position.entry_price * (MIN_TRAILING_STOP_DISTANCE_PERCENT / 100);
+      
+      // Get persisted peak P&L and update if current is higher (ratcheting)
+      const currentPeakPnl = position.peak_pnl_percent || 0;
+      const newPeakPnl = Math.max(currentPeakPnl, pnlPercent);
+      if (newPeakPnl > currentPeakPnl) {
+        peakPnlUpdated = true;
+        console.log(`📈 Peak P&L updated for ${position.symbol} ${position.side}: ${currentPeakPnl.toFixed(2)}% → ${newPeakPnl.toFixed(2)}%`);
+      }
       
       // Check if trailing stop is enabled and position is profitable enough
       if (userSettings.enabled && pnlPercent > userSettings.activationPercent) {
@@ -518,11 +528,12 @@ serve(async (req) => {
         const profitLockPercent = userSettings.profitLockPercent;
         
         if (position.side === "BUY") {
-          // For LONG: Calculate profit from THIS position's entry
-          const profitDistance = currentPrice - position.entry_price;
-          const lockedProfit = profitDistance * profitLockPercent;
+          // For LONG: Calculate LOCK STOP based on PEAK P&L (persisted, never decreases)
+          // This ensures lock stop ratchets and never gives back profit
+          const peakProfitDistance = position.entry_price * (newPeakPnl / 100);
+          const lockedProfit = peakProfitDistance * profitLockPercent;
           
-          // Position-specific stop: entry + locked profit (LOCK STOP PRICE)
+          // Position-specific stop: entry + locked profit based on PEAK (LOCK STOP PRICE)
           const lockStopPrice = position.entry_price + lockedProfit;
           const atrBasedStop = currentPrice - minTrailingDistance;
           
@@ -541,39 +552,36 @@ serve(async (req) => {
             // Don't set trailing stop if it's below entry but within 1% (losing position with tight stop)
             console.log(`⚠️ Trailing SL skipped for ${position.symbol} BUY - calculated stop ${calculatedStopLoss.toFixed(2)} too close below entry ${position.entry_price.toFixed(2)} (must be <= ${minAllowedStop.toFixed(2)} if below entry)`);
           } else {
-            // 🔒 RATCHETING MECHANISM: Stop can ONLY move UP for BUY positions (never down)
-            // This ensures we never give back locked-in profit when price pulls back
-            // Current stop_loss represents the "high-water mark" of protection
-            if (calculatedStopLoss > position.stop_loss) {
+            // 🔒 LOCK STOP FLOOR: Stop must be at least at lock stop price (based on peak P&L)
+            // This ensures we ALWAYS protect the locked profit percentage
+            if (lockStopPrice > position.stop_loss) {
+              newStopLoss = lockStopPrice;
+              trailingActivated = true;
+              const distancePercent = ((newStopLoss - position.entry_price) / position.entry_price) * 100;
+              console.log(
+                `🔐 LOCK STOP SET for ${position.symbol} BUY (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${distancePercent.toFixed(2)}% from entry, peak P&L: ${newPeakPnl.toFixed(2)}%, lock: ${(profitLockPercent * 100).toFixed(0)}% of peak)`,
+              );
+            } else if (calculatedStopLoss > position.stop_loss) {
+              // ATR-based stop is higher - use it
               newStopLoss = calculatedStopLoss;
               trailingActivated = true;
               const distancePercent = ((newStopLoss - position.entry_price) / position.entry_price) * 100;
               console.log(
-                `🔺 Trailing SL RAISED for ${position.symbol} BUY (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${distancePercent.toFixed(2)}% from entry, lock-stop: ${lockStopPrice.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
+                `🔺 Trailing SL RAISED for ${position.symbol} BUY (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${distancePercent.toFixed(2)}% from entry, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
               );
             } else {
-              // 🔒 LOCK STOP FLOOR: Even if ratchet prevents update, check if current stop_loss is below lock stop floor
-              // This ensures the lock stop ALWAYS protects locked profit, even when first activated
-              if (lockStopPrice > position.stop_loss) {
-                newStopLoss = lockStopPrice;
-                trailingActivated = true;
-                console.log(
-                  `🔐 LOCK STOP FLOOR enforced for ${position.symbol} BUY: ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (lock price protects ${(profitLockPercent * 100).toFixed(0)}% of profit)`,
-                );
-              } else {
-                // Log when ratchet prevents regression
-                console.log(
-                  `🔒 Trailing SL HELD at peak for ${position.symbol} BUY - calculated ${calculatedStopLoss.toFixed(2)} would be lower than current ${position.stop_loss.toFixed(2)} (ratchet prevents regression)`,
-                );
-              }
+              // Log when ratchet prevents regression
+              console.log(
+                `🔒 Trailing SL HELD at peak for ${position.symbol} BUY - lock stop ${lockStopPrice.toFixed(2)}, current SL ${position.stop_loss.toFixed(2)} (ratchet prevents regression)`,
+              );
             }
           }
         } else {
-          // For SHORT: Calculate profit from THIS position's entry
-          const profitDistance = position.entry_price - currentPrice;
-          const lockedProfit = profitDistance * profitLockPercent;
+          // For SHORT: Calculate LOCK STOP based on PEAK P&L (persisted, never decreases)
+          const peakProfitDistance = position.entry_price * (newPeakPnl / 100);
+          const lockedProfit = peakProfitDistance * profitLockPercent;
           
-          // Position-specific stop: entry - locked profit (LOCK STOP PRICE)
+          // Position-specific stop: entry - locked profit based on PEAK (LOCK STOP PRICE)
           const lockStopPrice = position.entry_price - lockedProfit;
           const atrBasedStop = currentPrice + minTrailingDistance;
           
@@ -592,40 +600,45 @@ serve(async (req) => {
             // Don't set trailing stop if it's above entry but within 1% (losing position with tight stop)
             console.log(`⚠️ Trailing SL skipped for ${position.symbol} SHORT - calculated stop ${calculatedStopLoss.toFixed(2)} too close above entry ${position.entry_price.toFixed(2)} (must be >= ${maxAllowedStop.toFixed(2)} if above entry)`);
           } else {
-            // 🔒 RATCHETING MECHANISM: Stop can ONLY move DOWN for SHORT positions (never up)
-            // This ensures we never give back locked-in profit when price bounces
-            // Current stop_loss represents the "low-water mark" of protection
-            if (calculatedStopLoss < position.stop_loss) {
+            // 🔒 LOCK STOP FLOOR: Stop must be at least at lock stop price (based on peak P&L)
+            // This ensures we ALWAYS protect the locked profit percentage
+            if (lockStopPrice < position.stop_loss) {
+              newStopLoss = lockStopPrice;
+              trailingActivated = true;
+              const distancePercent = ((newStopLoss - position.entry_price) / position.entry_price) * 100;
+              console.log(
+                `🔐 LOCK STOP SET for ${position.symbol} SHORT (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, peak P&L: ${newPeakPnl.toFixed(2)}%, lock: ${(profitLockPercent * 100).toFixed(0)}% of peak)`,
+              );
+            } else if (calculatedStopLoss < position.stop_loss) {
+              // ATR-based stop is lower - use it
               newStopLoss = calculatedStopLoss;
               trailingActivated = true;
               const distancePercent = ((newStopLoss - position.entry_price) / position.entry_price) * 100;
               console.log(
-                `🔻 Trailing SL LOWERED for ${position.symbol} SHORT (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, lock-stop: ${lockStopPrice.toFixed(2)}, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
+                `🔻 Trailing SL LOWERED for ${position.symbol} SHORT (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
               );
             } else {
-              // 🔒 LOCK STOP FLOOR: Even if ratchet prevents update, check if current stop_loss is above lock stop floor
-              // This ensures the lock stop ALWAYS protects locked profit, even when first activated
-              if (lockStopPrice < position.stop_loss) {
-                newStopLoss = lockStopPrice;
-                trailingActivated = true;
-                console.log(
-                  `🔐 LOCK STOP FLOOR enforced for ${position.symbol} SHORT: ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (lock price protects ${(profitLockPercent * 100).toFixed(0)}% of profit)`,
-                );
-              } else {
-                // Log when ratchet prevents regression
-                console.log(
-                  `🔒 Trailing SL HELD at peak for ${position.symbol} SHORT - calculated ${calculatedStopLoss.toFixed(2)} would be higher than current ${position.stop_loss.toFixed(2)} (ratchet prevents regression)`,
-                );
-              }
+              // Log when ratchet prevents regression
+              console.log(
+                `🔒 Trailing SL HELD at peak for ${position.symbol} SHORT - lock stop ${lockStopPrice.toFixed(2)}, current SL ${position.stop_loss.toFixed(2)} (ratchet prevents regression)`,
+              );
             }
           }
         }
-        // Update stop loss in database if trailing was activated
-        if (trailingActivated) {
+        // Update stop loss AND peak_pnl_percent in database if trailing was activated or peak updated
+        if (trailingActivated || peakPnlUpdated) {
+          const updatePayload: { stop_loss?: number; peak_pnl_percent?: number } = {};
+          if (trailingActivated) {
+            updatePayload.stop_loss = newStopLoss;
+          }
+          if (peakPnlUpdated) {
+            updatePayload.peak_pnl_percent = newPeakPnl;
+          }
+          
           // Use optimistic locking - only update if position is still active
           const { data: updatedPos, error: posUpdateError } = await supabase
             .from("positions")
-            .update({ stop_loss: newStopLoss })
+            .update(updatePayload)
             .eq("id", position.id)
             .eq("status", "active") // RACE CONDITION FIX: Only update if still active
             .select()
