@@ -361,19 +361,24 @@ const getMomentumScore = (momentum: any): number => {
   
   let score = 0;
   
+  // STRICTER MOMENTUM SCORING - only confirmed momentum gets high scores
   if (state === "confirmed" && confirms) {
-    score = 20;
-  } else if (state === "mixed" && macdExpanding) {
-    // Mixed with expanding MACD is better than just mixed
-    score = 14;
-  } else if (building && macdExpanding) {
-    // Building momentum with MACD expansion
+    score = 22;  // Confirmed momentum = best
+  } else if (state === "confirmed" && macdExpanding) {
+    score = 18;  // Confirmed state with MACD expansion
+  } else if (building && macdExpanding && confirms) {
+    // Building momentum with MACD expansion AND confirmation
     score = 12;
-  } else if (state === "mixed") {
-    score = 7;
-  } else if (macdExpanding) {
-    // MACD expanding without full confirmation
+  } else if (state === "mixed" && macdExpanding && confirms) {
+    // Mixed with expanding MACD AND confirmation
+    score = 8;
+  } else if (building && macdExpanding) {
+    // Building without full confirmation - weak
     score = 5;
+  } else if (state === "mixed") {
+    score = 2;  // Reduced from 7 - mixed momentum is poor
+  } else if (macdExpanding) {
+    score = 3;  // MACD expanding alone is weak
   } else {
     score = 0;
   }
@@ -411,17 +416,20 @@ const getAlignmentScore = (confidence: number, consistency: number, aligned: boo
     }
   }
   
-  // Confidence component (0-6)
-  if (confidence >= 75) score += 6;
-  else if (confidence >= 65) score += 5;
-  else if (confidence >= 55) score += 4;
-  else if (confidence >= 45) score += 2;
+  // Confidence component (0-6) - optimal zone is 55-70% (matches confidence inversion logic)
+  // High confidence gets penalty elsewhere, so here we reward the sweet spot
+  if (confidence >= 55 && confidence < 70) score += 6;  // Sweet spot!
+  else if (confidence >= 70 && confidence < 80) score += 4;  // Slightly exhausted
+  else if (confidence >= 50 && confidence < 55) score += 3;  // Building
+  else if (confidence >= 80) score += 2;  // Over-extended (penalty elsewhere)
+  else score += 1;  // Too low
   
-  // Consistency component (0-6)
-  if (consistency >= 70) score += 6;
-  else if (consistency >= 60) score += 5;
-  else if (consistency >= 50) score += 4;
-  else if (consistency >= 40) score += 2;
+  // Consistency component (0-6) - STRICTER thresholds
+  if (consistency >= 75) score += 6;  // Was 70
+  else if (consistency >= 65) score += 5;  // Was 60
+  else if (consistency >= 55) score += 3;  // Was 50 gave 4
+  else if (consistency >= 45) score += 1;  // Was 40 gave 2
+  // Below 45% = 0 points
   
   return Math.min(20, score);
 };
@@ -614,8 +622,8 @@ const detectReversalRisk = (trendData: any, intendedDirection: string): Reversal
   riskScore = Math.min(100, riskScore);
   const adjustedRiskScore = Math.round(riskScore * adxWeight);
   
-  // High risk threshold: 65+ blocks signal generation (reduced from 50 to improve win rate)
-  const isHighRisk = adjustedRiskScore >= 65;
+  // High risk threshold: 55+ blocks signal generation (stricter for better win rate)
+  const isHighRisk = adjustedRiskScore >= 55;
   
   const reason = isHighRisk 
     ? `Reversal risk HIGH (${adjustedRiskScore}/100, raw=${riskScore}, ADX=${adx.toFixed(1)}, weight=${adxWeight}): ${signals.join(", ")}`
@@ -662,8 +670,8 @@ const detectMarketRegime = (trendData: any): { regime: MarketRegime; tradeable: 
     };
   }
   
-  // Trending market - tradeable
-  if (adx >= 20 || (adx >= 15 && confidence >= 60)) {
+  // Trending market - tradeable (STRICTER: require ADX >= 18 minimum)
+  if (adx >= 22 || (adx >= 18 && confidence >= 65)) {
     return { 
       regime: "trending", 
       tradeable: true, 
@@ -671,12 +679,13 @@ const detectMarketRegime = (trendData: any): { regime: MarketRegime; tradeable: 
     };
   }
   
-  // Edge case - weak trend but acceptable
-  if (adx >= 12 && confidence >= 65 && consistency >= 55) {
+  // Edge case - REMOVED weak trend allowance (ADX >= 12) - was causing poor entries
+  // Only allow borderline cases with very strong alignment
+  if (adx >= 18 && confidence >= 70 && consistency >= 65) {
     return { 
       regime: "trending", 
       tradeable: true, 
-      reason: `Weak trend with good alignment (ADX ${adx.toFixed(1)}, confidence ${confidence}%)` 
+      reason: `Moderate trend with strong alignment (ADX ${adx.toFixed(1)}, confidence ${confidence}%, consistency ${consistency}%)` 
     };
   }
   
@@ -951,13 +960,13 @@ const evaluateBollingerBands = (bollingerBands: any, trend: string): { boost: nu
 };
 
 // Calculate position size based on quality score
-// Must align with MIN_QUALITY_SCORE threshold (50)
+// Must align with MIN_QUALITY_SCORE threshold (58)
 const getPositionSizeFromQuality = (qualityScore: number): number => {
   if (qualityScore >= 85) return 1.0;      // Full size for excellent signals
-  if (qualityScore >= 75) return 0.85;     // Near full
-  if (qualityScore >= 65) return 0.7;      // Reduced
-  if (qualityScore >= 55) return 0.5;      // Lower acceptable
-  if (qualityScore >= 50) return 0.35;     // Minimum acceptable (matches MIN_QUALITY_SCORE)
+  if (qualityScore >= 78) return 0.85;     // Near full
+  if (qualityScore >= 70) return 0.7;      // Moderate
+  if (qualityScore >= 65) return 0.55;     // Reduced
+  if (qualityScore >= 58) return 0.4;      // Minimum acceptable (matches MIN_QUALITY_SCORE)
   return 0;                                 // Don't trade
 };
 
@@ -1275,7 +1284,8 @@ serve(async (req) => {
     const recoveryConfidenceBoost = riskParams.loss_recovery_confidence_boost || 10;
     const recoveryPositionSizeMultiplier = (riskParams.loss_recovery_position_size_percent || 50) / 100;
     
-    const BASE_MIN_QUALITY_SCORE = 50;
+    // RAISED minimum quality threshold for better win rate
+    const BASE_MIN_QUALITY_SCORE = 58;  // Was 50 - too many weak signals passing
     const MIN_QUALITY_SCORE = isInRecoveryMode 
       ? BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost 
       : BASE_MIN_QUALITY_SCORE;
@@ -1413,8 +1423,9 @@ serve(async (req) => {
         // 4. Breakout or higher low pattern (price at/above upper BB or %B > 70)
         // 5. StochRSI is rising (K > D) - momentum still building
         if (intendedTradeDirection === "long" && isExtremeOverbought4h) {
-          const strongUptrend4h = stochFilterTrend4h === "bullish" && stochFilterConf4h >= 65;
-          const strongUptrend1h = stochFilterTrend1h === "bullish" && stochFilterConf1h >= 60;
+          // STRICTER: Require stronger confirmation for extreme entries
+          const strongUptrend4h = stochFilterTrend4h === "bullish" && stochFilterConf4h >= 75;  // Was 65
+          const strongUptrend1h = stochFilterTrend1h === "bullish" && stochFilterConf1h >= 70;  // Was 60
           const noBearishDiv = !hasBearishDivergence;
           const breakoutOrHigherLow = bollingerPosition === "above_upper" || bollingerPosition === "upper_zone" || percentB > 70;
           const stochMomentumUp = stochRsiRising && macdHistogram > 0;
@@ -1459,8 +1470,9 @@ serve(async (req) => {
         // 4. Breakdown or lower high pattern (price at/below lower BB or %B < 30)
         // 5. StochRSI is falling (K < D) - not curling up
         if (intendedTradeDirection === "short" && isExtremeOversold4h) {
-          const strongDowntrend4h = stochFilterTrend4h === "bearish" && stochFilterConf4h >= 65;
-          const strongDowntrend1h = stochFilterTrend1h === "bearish" && stochFilterConf1h >= 60;
+          // STRICTER: Require stronger confirmation for extreme entries
+          const strongDowntrend4h = stochFilterTrend4h === "bearish" && stochFilterConf4h >= 75;  // Was 65
+          const strongDowntrend1h = stochFilterTrend1h === "bearish" && stochFilterConf1h >= 70;  // Was 60
           const noBullishDiv = !hasBullishDivergence;
           const breakdownOrLowerHigh = bollingerPosition === "below_lower" || bollingerPosition === "lower_zone" || percentB < 30;
           const stochMomentumDown = stochRsiFalling && macdHistogram < 0;
