@@ -488,9 +488,9 @@ serve(async (req) => {
 
         console.log(`📊 Current 15m Volume: ${currentVolume.toFixed(2)}, Avg: ${avgVolume.toFixed(2)}, Ratio: ${volumeRatio.toFixed(2)}x`);
 
-        // FILTER 7: Avoid extremely low volume periods (< 10% of average)
-        // Lowered from 30% to 10% to allow trades during low-activity periods
-        if (volumeRatio < 0.1) {
+        // FILTER 7: Avoid extremely low volume periods (< 20% of average)
+        // Stricter than before (was 10%) to avoid illiquid entries
+        if (volumeRatio < 0.2) {
           throw new Error(`Current volume too low (${(volumeRatio * 100).toFixed(0)}% of average) - trade cancelled to avoid illiquid entry`);
         }
 
@@ -537,14 +537,21 @@ serve(async (req) => {
       // For SHORT signals, OBV should be falling (bearish volume distribution)
       const signalSide = signal.signal_type === 'long' ? 'BUY' : 'SELL';
       
-      if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -10) {
-        console.warn(`⚠️ OBV DIVERGENCE: LONG signal but OBV is bearish (${obvChange.toFixed(2)}% decline)`);
-        // Don't reject, but log the divergence - volume boost multiplier will handle this
+      // FILTER 10: OBV trend confirmation - BLOCK on strong divergence
+      if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -15) {
+        throw new Error(`OBV divergence: LONG signal but volume strongly bearish (${obvChange.toFixed(1)}% decline) - trade cancelled`);
       }
       
+      if (signalSide === 'SELL' && obvDirection === 'bullish' && obvChange > 15) {
+        throw new Error(`OBV divergence: SHORT signal but volume strongly bullish (${obvChange.toFixed(1)}% rise) - trade cancelled`);
+      }
+      
+      // Warn on moderate divergence (don't block)
+      if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -10) {
+        console.warn(`⚠️ OBV DIVERGENCE: LONG signal but OBV is bearish (${obvChange.toFixed(2)}% decline)`);
+      }
       if (signalSide === 'SELL' && obvDirection === 'bullish' && obvChange > 10) {
         console.warn(`⚠️ OBV DIVERGENCE: SHORT signal but OBV is bullish (${obvChange.toFixed(2)}% rise)`);
-        // Don't reject, but log the divergence
       }
 
       // Calculate volume boost multiplier based on OBV confirmation
@@ -613,9 +620,13 @@ serve(async (req) => {
             console.log(`✅ VWAP supports LONG: Price slightly below VWAP - good entry`);
           }
         } else if (currentPrice > vwapUpperBand) {
-          // Buying above upper VWAP band = overextended
-          vwapBoostMultiplier = 0.8; // 20% reduction
-          console.warn(`⚠️ VWAP Warning: Price above upper VWAP band - overextended entry`);
+          // Buying above upper VWAP band = overextended - BLOCK trade
+          console.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} above upper VWAP band $${vwapUpperBand.toFixed(2)}`);
+          throw new Error(`Price above upper VWAP band - overextended LONG entry blocked`);
+        } else if (vwapDeviation > 1.0) {
+          // Buying significantly above VWAP - reduce position
+          vwapBoostMultiplier = 0.75; // 25% reduction for above-VWAP entry
+          console.log(`📊 VWAP: Price ${vwapDeviation.toFixed(2)}% above VWAP - reducing position`);
         } else if (vwapDeviation > 0.5) {
           // Buying above VWAP but within bands
           vwapBoostMultiplier = 0.9; // 10% reduction
@@ -633,9 +644,13 @@ serve(async (req) => {
             console.log(`✅ VWAP supports SHORT: Price slightly above VWAP - good entry`);
           }
         } else if (currentPrice < vwapLowerBand) {
-          // Selling below lower VWAP band = oversold
-          vwapBoostMultiplier = 0.8; // 20% reduction
-          console.warn(`⚠️ VWAP Warning: Price below lower VWAP band - oversold entry`);
+          // Selling below lower VWAP band = oversold - BLOCK trade
+          console.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)}`);
+          throw new Error(`Price below lower VWAP band - oversold SHORT entry blocked`);
+        } else if (vwapDeviation < -1.0) {
+          // Selling significantly below VWAP - reduce position
+          vwapBoostMultiplier = 0.75; // 25% reduction
+          console.log(`📊 VWAP: Price ${Math.abs(vwapDeviation).toFixed(2)}% below VWAP - reducing position`);
         } else if (vwapDeviation < -0.5) {
           // Selling below VWAP but within bands
           vwapBoostMultiplier = 0.9; // 10% reduction
@@ -688,7 +703,7 @@ serve(async (req) => {
     const reversalRiskScore = calculateReversalRiskForEntry(trendData, signal.signal_type);
     console.log(`🔄 Reversal Risk Score: ${reversalRiskScore.riskScore}/100 - ${reversalRiskScore.reasons.join(', ')}`);
     
-    const REVERSAL_RISK_THRESHOLD = 65; // Block if reversal risk >= 65% (increased from 50% to reduce premature exits)
+    const REVERSAL_RISK_THRESHOLD = 55; // Block if reversal risk >= 55% (stricter for better win rate)
     if (reversalRiskScore.riskScore >= REVERSAL_RISK_THRESHOLD) {
       throw new Error(`High reversal risk detected (${reversalRiskScore.riskScore}%) - ${reversalRiskScore.reasons.slice(0, 2).join(', ')} - trade cancelled`);
     }
@@ -760,7 +775,7 @@ serve(async (req) => {
     }
     
     const riskRewardRatio = rewardAmount / riskAmount;
-    const minRiskReward = 1.5; // INCREASED: Minimum 1.5:1 R:R required (was 1.2)
+    const minRiskReward = 1.8; // INCREASED: Minimum 1.8:1 R:R required for better win rate
     
     console.log(`📊 Risk/Reward Analysis: Risk=$${riskAmount.toFixed(2)} (${((riskAmount/currentPrice)*100).toFixed(2)}%), Reward=$${rewardAmount.toFixed(2)} (${((rewardAmount/currentPrice)*100).toFixed(2)}%), R:R=${riskRewardRatio.toFixed(2)}:1`);
     
@@ -952,18 +967,24 @@ serve(async (req) => {
       console.log(`🤖 AI position adjustment applied: ${aiPositionMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
-    // Apply confidence-based position size scaling (include AI adjustment)
+    // Apply confidence-based position size scaling (INVERTED: high confidence = REDUCE size)
+    // High confidence indicates trend exhaustion, not strength
     const adjustedConfidence = Math.max(0, Math.min(100, (signal.confidence_score || 0) + aiConfidenceAdjustment));
     const confidence = adjustedConfidence;
-    const confidenceMultiplier = riskParams.kelly_criterion_enabled !== false ? 0.5 : 1.0; // Reduce confidence impact when Kelly active
-    if (confidence < 50) {
-      quantity *= (1 - 0.5 * confidenceMultiplier); // Reduce by 25-50%
-      console.log(`Position size reduced by ${(50 * confidenceMultiplier).toFixed(0)}% due to low confidence (${confidence}%)`);
-    } else if (confidence > 75) {
-      quantity *= (1 + 0.25 * confidenceMultiplier); // Increase by 12.5-25%
-      console.log(`Position size increased by ${(25 * confidenceMultiplier).toFixed(0)}% due to high confidence (${confidence}%)`);
+    
+    // CONFIDENCE INVERSION FIX: High confidence = reduce position (trend exhaustion)
+    if (confidence >= 80) {
+      quantity *= 0.6; // 40% reduction for very high confidence (likely exhaustion)
+      console.log(`⚠️ Position size REDUCED by 40% due to high confidence (${confidence}%) - trend may be exhausted`);
+    } else if (confidence >= 70) {
+      quantity *= 0.8; // 20% reduction for high confidence
+      console.log(`⚠️ Position size REDUCED by 20% due to elevated confidence (${confidence}%)`);
+    } else if (confidence < 50) {
+      quantity *= 0.7; // 30% reduction for low confidence (weak signal)
+      console.log(`Position size reduced by 30% due to low confidence (${confidence}%)`);
     } else {
-      console.log(`Position size normal for confidence ${confidence}%`);
+      // Sweet spot: 50-70% confidence - no adjustment
+      console.log(`✓ Position size normal for optimal confidence zone (${confidence}%)`);
     }
 
     // Apply position size reduction if consecutive losses
