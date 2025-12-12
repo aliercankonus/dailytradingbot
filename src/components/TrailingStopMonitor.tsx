@@ -148,7 +148,10 @@ export const TrailingStopMonitor = () => {
       })
       .filter((item) => item.pnlPercent > settings.activationPercent)
       .map(({ position, currentPrice, pnlPercent }) => {
-        const stop_loss = calculateTrailingStop(position, currentPrice);
+        // Use actual database stop_loss (set by monitor-positions with ratcheting) 
+        // instead of recalculating - each position has its own individual stop
+        const actualDbStopLoss = position.stop_loss;
+        const theoreticalStop = calculateTrailingStop(position, currentPrice);
         const { lockedProfitPercent, lockedProfitAbsolute, lockedStopPrice, peakPnlPercent } = calculateProfitLock(
           position,
           pnlPercent,
@@ -158,7 +161,9 @@ export const TrailingStopMonitor = () => {
           currentPrice,
           pnlPercent,
           peakPnlPercent,
-          stop_loss,
+          // Use actual DB stop_loss (individual per position), fallback to theoretical
+          stop_loss: actualDbStopLoss ?? theoreticalStop,
+          theoreticalStop,
           lockedProfitPercent,
           lockedProfitAbsolute,
           lockedStopPrice,
