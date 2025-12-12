@@ -655,6 +655,7 @@ export type Database = {
           max_risk_per_trade_percent: number
           max_trades_per_symbol: number
           min_confidence_threshold: number
+          min_hold_time_minutes: number | null
           min_trades_for_kelly: number | null
           min_trend_consistency: number
           notification_email: string | null
@@ -723,6 +724,7 @@ export type Database = {
           max_risk_per_trade_percent?: number
           max_trades_per_symbol?: number
           min_confidence_threshold?: number
+          min_hold_time_minutes?: number | null
           min_trades_for_kelly?: number | null
           min_trend_consistency?: number
           notification_email?: string | null
@@ -791,6 +793,7 @@ export type Database = {
           max_risk_per_trade_percent?: number
           max_trades_per_symbol?: number
           min_confidence_threshold?: number
+          min_hold_time_minutes?: number | null
           min_trades_for_kelly?: number | null
           min_trend_consistency?: number
           notification_email?: string | null
