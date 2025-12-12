@@ -28,21 +28,27 @@ export default function Settings() {
     notificationPhone: riskParams?.notification_phone || '',
   });
 
+  const [hasEncryptedKeys, setHasEncryptedKeys] = useState(false);
+
   const fetchApiKeys = async () => {
     try {
       setApiKeysLoading(true);
       const { data, error } = await supabase
         .from('user_api_keys' as any)
-        .select('*')
+        .select('binance_api_key, binance_api_secret, keys_encrypted')
         .maybeSingle();
 
       if (error) throw error;
       
       if (data) {
+        const isEncrypted = (data as any).keys_encrypted === true;
+        setHasEncryptedKeys(isEncrypted);
+        
+        // If keys are encrypted, show masked version; otherwise show actual keys
         setFormData(prev => ({
           ...prev,
-          binanceApiKey: (data as any).binance_api_key || '',
-          binanceApiSecret: (data as any).binance_api_secret || '',
+          binanceApiKey: isEncrypted ? '' : ((data as any).binance_api_key || ''),
+          binanceApiSecret: isEncrypted ? '' : ((data as any).binance_api_secret || ''),
         }));
       }
     } catch (error) {
@@ -256,12 +262,20 @@ export default function Settings() {
                 </div>
               ) : (
                 <div className="space-y-4">
+                  {hasEncryptedKeys && (
+                    <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                      <p className="text-sm text-green-600 dark:text-green-400 font-medium">
+                        🔐 Your API keys are encrypted and stored securely in the vault. Enter new keys below to update them.
+                      </p>
+                    </div>
+                  )}
+                  
                   <div className="space-y-2">
                     <Label htmlFor="binance-api-key">Binance API Key</Label>
                     <Input
                       id="binance-api-key"
                       type="text"
-                      placeholder="Enter your Binance API Key"
+                      placeholder={hasEncryptedKeys ? "Keys encrypted - enter new key to update" : "Enter your Binance API Key"}
                       value={formData.binanceApiKey}
                       onChange={(e) => setFormData({ ...formData, binanceApiKey: e.target.value })}
                     />
@@ -272,7 +286,7 @@ export default function Settings() {
                     <Input
                       id="binance-api-secret"
                       type="password"
-                      placeholder="Enter your Binance API Secret"
+                      placeholder={hasEncryptedKeys ? "Keys encrypted - enter new secret to update" : "Enter your Binance API Secret"}
                       value={formData.binanceApiSecret}
                       onChange={(e) => setFormData({ ...formData, binanceApiSecret: e.target.value })}
                     />
@@ -282,13 +296,13 @@ export default function Settings() {
                     onClick={handleUpdateBinanceKeys}
                     disabled={loading}
                   >
-                    {loading ? 'Saving...' : 'Save Binance Keys'}
+                    {loading ? 'Encrypting & Saving...' : (hasEncryptedKeys ? 'Update & Re-encrypt Keys' : 'Save Binance Keys')}
                   </Button>
                 </div>
               )}
               
               <p className="text-xs text-muted-foreground border-l-2 border-primary/50 pl-3 py-2">
-                🔒 Security Note: Your API keys are encrypted and stored securely in the database.
+                🔒 Security: Your API keys are encrypted using Supabase Vault and stored securely. Only your edge functions can decrypt them.
               </p>
             </div>
           </Card>

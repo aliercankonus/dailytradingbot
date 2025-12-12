@@ -1124,25 +1124,34 @@ export type Database = {
       user_api_keys: {
         Row: {
           binance_api_key: string | null
+          binance_api_key_vault_id: string | null
           binance_api_secret: string | null
+          binance_api_secret_vault_id: string | null
           created_at: string | null
           id: string
+          keys_encrypted: boolean | null
           updated_at: string | null
           user_id: string
         }
         Insert: {
           binance_api_key?: string | null
+          binance_api_key_vault_id?: string | null
           binance_api_secret?: string | null
+          binance_api_secret_vault_id?: string | null
           created_at?: string | null
           id?: string
+          keys_encrypted?: boolean | null
           updated_at?: string | null
           user_id: string
         }
         Update: {
           binance_api_key?: string | null
+          binance_api_key_vault_id?: string | null
           binance_api_secret?: string | null
+          binance_api_secret_vault_id?: string | null
           created_at?: string | null
           id?: string
+          keys_encrypted?: boolean | null
           updated_at?: string | null
           user_id?: string
         }
@@ -1210,6 +1219,25 @@ export type Database = {
         Returns: {
           archived_count: number
         }[]
+      }
+      delete_encrypted_api_key: {
+        Args: { p_key_type: string; p_user_id: string }
+        Returns: boolean
+      }
+      get_encrypted_api_key: {
+        Args: { p_key_type: string; p_user_id: string }
+        Returns: string
+      }
+      get_user_binance_credentials: {
+        Args: { p_user_id: string }
+        Returns: {
+          api_key: string
+          api_secret: string
+        }[]
+      }
+      store_encrypted_api_key: {
+        Args: { p_key_type: string; p_key_value: string; p_user_id: string }
+        Returns: string
       }
     }
     Enums: {

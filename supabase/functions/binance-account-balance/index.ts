@@ -59,9 +59,22 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Fetch real Binance balance (only if API creds exist)
-    const apiKey = Deno.env.get('BINANCE_API_KEY');
-    const apiSecret = Deno.env.get('BINANCE_API_SECRET');
+    // Fetch real Binance balance - get user-specific credentials from vault
+    let apiKey = Deno.env.get('BINANCE_API_KEY');
+    let apiSecret = Deno.env.get('BINANCE_API_SECRET');
+
+    // If user is authenticated, try to get their personal API keys from vault
+    if (userId) {
+      const { data: credentials, error: credError } = await supabase.rpc('get_user_binance_credentials', {
+        p_user_id: userId
+      });
+      
+      if (!credError && credentials && credentials.length > 0 && credentials[0].api_key && credentials[0].api_secret) {
+        apiKey = credentials[0].api_key;
+        apiSecret = credentials[0].api_secret;
+        console.log('Using user-specific encrypted Binance credentials from vault');
+      }
+    }
 
     if (!apiKey || !apiSecret) {
       console.warn('Binance API credentials not configured, returning paper balance');

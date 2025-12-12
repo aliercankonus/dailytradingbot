@@ -142,8 +142,21 @@ serve(async (req) => {
     const isManualExecution = req.headers.get('x-manual-execution') === 'true';
     console.log('Is manual execution:', isManualExecution);
 
-    const binanceApiKey = Deno.env.get('BINANCE_API_KEY');
-    const binanceApiSecret = Deno.env.get('BINANCE_API_SECRET');
+    // Get Binance credentials - first try user-specific from vault, fallback to env
+    let binanceApiKey = Deno.env.get('BINANCE_API_KEY');
+    let binanceApiSecret = Deno.env.get('BINANCE_API_SECRET');
+
+    // Try to get user-specific API keys from vault (encrypted)
+    const { data: vaultCredentials, error: vaultError } = await supabase.rpc('get_user_binance_credentials', {
+      p_user_id: user.id
+    });
+    
+    if (!vaultError && vaultCredentials && vaultCredentials.length > 0 && 
+        vaultCredentials[0].api_key && vaultCredentials[0].api_secret) {
+      binanceApiKey = vaultCredentials[0].api_key;
+      binanceApiSecret = vaultCredentials[0].api_secret;
+      console.log('Using user-specific encrypted Binance credentials from vault');
+    }
 
     // Get risk parameters for the user
     const { data: riskParams, error: riskParamsError } = await supabase
@@ -171,7 +184,7 @@ serve(async (req) => {
     console.log('Paper trading mode:', isPaperTrading);
 
     if (!isPaperTrading && (!binanceApiKey || !binanceApiSecret)) {
-      throw new Error('Binance API credentials not configured for live trading');
+      throw new Error('Binance API credentials not configured for live trading. Please add your API keys in Settings.');
     }
 
     // ============================================================
