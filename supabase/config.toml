@@ -46,3 +46,6 @@ verify_jwt = true
 
 [functions.ai-signal-analyzer]
 verify_jwt = true
+
+[functions.ai-rejection-analyzer]
+verify_jwt = true

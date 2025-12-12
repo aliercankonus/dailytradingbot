@@ -1,7 +1,10 @@
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   AlertCircle,
   TrendingDown,
@@ -18,10 +21,15 @@ import {
   Gauge,
   ArrowUpCircle,
   ArrowDownCircle,
+  Bot,
+  Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import { useSignalRejections } from "@/hooks/useSignalRejections";
 import { formatDistanceToNow } from "date-fns";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface SignalRejection {
   id: string;
@@ -30,6 +38,13 @@ interface SignalRejection {
   rejection_reason: string;
   filters_status: any;
   trend_data: any;
+}
+
+interface AIValidationResult {
+  isValid: boolean;
+  issues: string[];
+  confidence: "high" | "medium" | "low";
+  summary: string;
 }
 
 interface ScoreBreakdown {
@@ -859,8 +874,188 @@ const StochRsiExtremeDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
   );
 };
 
+// AI Analysis display component
+const AIAnalysisCell = ({ 
+  result, 
+  isLoading, 
+  error 
+}: { 
+  result?: AIValidationResult; 
+  isLoading: boolean; 
+  error?: string;
+}) => {
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-1 text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        <span className="text-xs">Analyzing...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-1 text-orange-400">
+              <AlertTriangle className="h-3 w-3" />
+              <span className="text-xs">Error</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs max-w-[200px]">
+            <p>{error}</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  if (!result) {
+    return (
+      <span className="text-xs text-muted-foreground">-</span>
+    );
+  }
+
+  const isValid = result.isValid;
+  const hasIssues = result.issues && result.issues.length > 0;
+  
+  const confidenceColors = {
+    high: "text-green-400",
+    medium: "text-yellow-400",
+    low: "text-orange-400",
+  };
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="space-y-1 max-w-[180px]">
+            <div className="flex items-center gap-1.5">
+              {isValid && !hasIssues ? (
+                <>
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-[10px] px-1.5">
+                    OK
+                  </Badge>
+                </>
+              ) : hasIssues ? (
+                <>
+                  <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                  <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 text-[10px] px-1.5">
+                    {result.issues.length} Issue{result.issues.length > 1 ? 's' : ''}
+                  </Badge>
+                </>
+              ) : (
+                <>
+                  <XCircle className="h-4 w-4 text-red-500" />
+                  <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-[10px] px-1.5">
+                    Invalid
+                  </Badge>
+                </>
+              )}
+              <span className={`text-[9px] ${confidenceColors[result.confidence]}`}>
+                ({result.confidence})
+              </span>
+            </div>
+            {hasIssues && (
+              <div className="text-[10px] text-yellow-400 truncate">
+                {result.issues[0]}
+              </div>
+            )}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="left" className="text-xs max-w-[300px]">
+          <div className="space-y-2">
+            <p className="font-medium">{result.summary}</p>
+            {hasIssues && (
+              <div className="space-y-1">
+                <p className="font-medium text-yellow-400">Issues Found:</p>
+                <ul className="list-disc pl-4 space-y-0.5">
+                  {result.issues.map((issue, i) => (
+                    <li key={i} className="text-muted-foreground">{issue}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <p className="text-muted-foreground">
+              Confidence: <span className={confidenceColors[result.confidence]}>{result.confidence}</span>
+            </p>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
+
 export const SignalRejectionReasons = () => {
   const { rejections, loading } = useSignalRejections();
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiResults, setAiResults] = useState<Record<string, AIValidationResult>>({});
+  const [aiLoading, setAiLoading] = useState<Record<string, boolean>>({});
+  const [aiErrors, setAiErrors] = useState<Record<string, string>>({});
+
+  // Analyze rejection with AI
+  const analyzeRejection = useCallback(async (rejection: SignalRejection) => {
+    if (aiResults[rejection.id] || aiLoading[rejection.id]) return;
+
+    setAiLoading(prev => ({ ...prev, [rejection.id]: true }));
+    setAiErrors(prev => {
+      const newErrors = { ...prev };
+      delete newErrors[rejection.id];
+      return newErrors;
+    });
+
+    try {
+      const { data, error } = await supabase.functions.invoke('ai-rejection-analyzer', {
+        body: { 
+          rejection: {
+            symbol: rejection.symbol,
+            rejection_reason: rejection.rejection_reason,
+            filters_status: rejection.filters_status,
+            trend_data: rejection.trend_data,
+          }
+        }
+      });
+
+      if (error) throw error;
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      setAiResults(prev => ({ ...prev, [rejection.id]: data }));
+    } catch (err) {
+      console.error('AI analysis error:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Analysis failed';
+      setAiErrors(prev => ({ ...prev, [rejection.id]: errorMsg }));
+      
+      // Show toast for rate limit errors
+      if (errorMsg.includes('Rate limit') || errorMsg.includes('credits')) {
+        toast.error(errorMsg);
+      }
+    } finally {
+      setAiLoading(prev => ({ ...prev, [rejection.id]: false }));
+    }
+  }, [aiResults, aiLoading]);
+
+  // Trigger AI analysis when enabled
+  useEffect(() => {
+    if (!aiEnabled || loading || rejections.length === 0) return;
+
+    // Analyze rejections one by one with delay to avoid rate limiting
+    const analyzeAll = async () => {
+      for (const rejection of rejections) {
+        if (!aiResults[rejection.id] && !aiLoading[rejection.id] && !aiErrors[rejection.id]) {
+          await analyzeRejection(rejection);
+          // Small delay between requests
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+    };
+
+    analyzeAll();
+  }, [aiEnabled, rejections, loading, analyzeRejection, aiResults, aiLoading, aiErrors]);
 
   const getReasonIcon = (reason: string) => {
     if (reason.includes("Max trades")) return <Layers className="h-4 w-4" />;
@@ -1049,11 +1244,26 @@ export const SignalRejectionReasons = () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <AlertCircle className="h-5 w-5 text-muted-foreground" />
-          Signal Rejection Reasons (Last 30 Minutes)
-        </CardTitle>
-        <CardDescription>Why signals are not being generated for each symbol</CardDescription>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-muted-foreground" />
+              Signal Rejection Reasons (Last 30 Minutes)
+            </CardTitle>
+            <CardDescription>Why signals are not being generated for each symbol</CardDescription>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-2 bg-muted/30 rounded-lg border">
+            <Bot className="h-4 w-4 text-primary" />
+            <Label htmlFor="ai-toggle" className="text-sm font-medium cursor-pointer">
+              AI Analysis
+            </Label>
+            <Switch
+              id="ai-toggle"
+              checked={aiEnabled}
+              onCheckedChange={setAiEnabled}
+            />
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
         <Table>
@@ -1063,6 +1273,14 @@ export const SignalRejectionReasons = () => {
               <TableHead className="w-[200px]">Rejection Reason</TableHead>
               <TableHead className="min-w-[250px]">Score Breakdown</TableHead>
               <TableHead>Details</TableHead>
+              {aiEnabled && (
+                <TableHead className="w-[180px]">
+                  <div className="flex items-center gap-1">
+                    <Bot className="h-3.5 w-3.5" />
+                    AI Analysis
+                  </div>
+                </TableHead>
+              )}
               <TableHead className="w-[100px]">Checked</TableHead>
             </TableRow>
           </TableHeader>
@@ -1091,6 +1309,15 @@ export const SignalRejectionReasons = () => {
                     </div>
                   )}
                 </TableCell>
+                {aiEnabled && (
+                  <TableCell>
+                    <AIAnalysisCell
+                      result={aiResults[rejection.id]}
+                      isLoading={aiLoading[rejection.id] || false}
+                      error={aiErrors[rejection.id]}
+                    />
+                  </TableCell>
+                )}
                 <TableCell>
                   <Badge variant="outline" className="text-[10px]">
                     {formatDistanceToNow(new Date(rejection.checked_at), { addSuffix: true })}
