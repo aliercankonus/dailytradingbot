@@ -6,6 +6,141 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// ============= AI REJECTION ANALYZER HELPER =============
+// Calls AI to validate rejections and stores results in database
+const analyzeRejectionWithAI = async (
+  supabase: any,
+  rejectionId: string,
+  rejection: { symbol: string; rejection_reason: string; filters_status: any; trend_data: any }
+) => {
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  if (!LOVABLE_API_KEY) {
+    console.log(`🤖 AI analysis skipped for ${rejection.symbol}: API key not configured`);
+    return;
+  }
+
+  try {
+    const systemPrompt = `You are an expert trading signal analyzer. Validate whether a signal rejection was correct.
+
+VALIDATION RULES:
+1. ADX Filter: ADX >= 20 for signal generation. If ADX < 20, rejection is VALID.
+2. Momentum: State should be "confirmed" or "building". "none"/"mixed" with low confidence = VALID rejection.
+3. StochRSI Extremes: LONG blocked if 4h K > 90 without strong uptrend; SHORT blocked if K < 10 without strong downtrend.
+4. Multi-Timeframe: 4h and 1h trends should align with trade direction.
+5. Quality Score: Must be >= 60.
+6. Reversal Risk: > 50% usually means VALID rejection unless ADX > 35.
+
+Analyze and return structured assessment.`;
+
+    const userPrompt = `Symbol: ${rejection.symbol}
+Rejection Reason: ${rejection.rejection_reason}
+Filters Status: ${JSON.stringify(rejection.filters_status, null, 2)}
+Trend Data: ${JSON.stringify(rejection.trend_data, null, 2)}`;
+
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "validate_rejection",
+            description: "Validate signal rejection",
+            parameters: {
+              type: "object",
+              properties: {
+                isValid: { type: "boolean", description: "True if rejection is correct" },
+                issues: { type: "array", items: { type: "string" }, description: "Concerns found" },
+                confidence: { type: "string", enum: ["high", "medium", "low"] },
+                summary: { type: "string", description: "Brief summary" },
+              },
+              required: ["isValid", "issues", "confidence", "summary"],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: "function", function: { name: "validate_rejection" } },
+      }),
+    });
+
+    if (!response.ok) {
+      console.warn(`🤖 AI analysis failed for ${rejection.symbol}: HTTP ${response.status}`);
+      return;
+    }
+
+    const data = await response.json();
+    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    if (!toolCall) {
+      console.warn(`🤖 AI analysis: No tool call in response for ${rejection.symbol}`);
+      return;
+    }
+
+    const aiResult = JSON.parse(toolCall.function.arguments);
+    
+    // Update the rejection record with AI analysis
+    const { error } = await supabase
+      .from("signal_rejection_log")
+      .update({ ai_analysis: aiResult })
+      .eq("id", rejectionId);
+
+    if (error) {
+      console.error(`🤖 Failed to store AI analysis for ${rejection.symbol}:`, error);
+    } else {
+      console.log(`🤖 AI analysis stored for ${rejection.symbol}: isValid=${aiResult.isValid}, confidence=${aiResult.confidence}`);
+    }
+  } catch (error) {
+    console.error(`🤖 AI analysis error for ${rejection.symbol}:`, error);
+  }
+};
+
+// Helper function to log rejection with optional AI analysis
+const logRejectionWithAI = async (
+  supabase: any,
+  userId: string,
+  symbol: string,
+  rejectionReason: string,
+  filtersStatus: any,
+  trendData: any,
+  enableAI: boolean = true
+) => {
+  const { data, error } = await supabase
+    .from("signal_rejection_log")
+    .insert({
+      user_id: userId,
+      symbol,
+      rejection_reason: rejectionReason,
+      filters_status: filtersStatus,
+      trend_data: trendData,
+      checked_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    console.error(`Failed to log rejection for ${symbol}:`, error);
+    return;
+  }
+
+  // Trigger AI analysis in background (don't await to avoid slowing down signal generation)
+  if (enableAI && data?.id && trendData) {
+    // Fire and forget - don't block signal generation
+    analyzeRejectionWithAI(supabase, data.id, {
+      symbol,
+      rejection_reason: rejectionReason,
+      filters_status: filtersStatus,
+      trend_data: trendData,
+    }).catch(err => console.error(`AI analysis failed for ${symbol}:`, err));
+  }
+};
+
 interface SignalData {
   id?: string;
   user_id: string;
@@ -1085,13 +1220,14 @@ serve(async (req) => {
         const regime = detectMarketRegime(trendData);
         if (!regime.tradeable) {
           rejectedByRegime++;
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `Market regime not tradeable: ${regime.reason}`,
-            filters_status: { regime: regime.regime, reason: regime.reason, adx, confidence, trendConsistency },
-            trend_data: trendData,
-            checked_at: new Date().toISOString(),
-          });
+          await logRejectionWithAI(
+            supabase,
+            userId,
+            symbol,
+            `Market regime not tradeable: ${regime.reason}`,
+            { regime: regime.regime, reason: regime.reason, adx, confidence, trendConsistency },
+            trendData
+          );
           continue;
         }
 
@@ -1101,10 +1237,12 @@ serve(async (req) => {
         if (reversalRisk.isHighRisk) {
           rejectedByReversalRisk++;
           console.log(`⚠️ ${symbol}: ${reversalRisk.reason}`);
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `Reversal risk too high: ${reversalRisk.reason}`,
-            filters_status: { 
+          await logRejectionWithAI(
+            supabase,
+            userId,
+            symbol,
+            `Reversal risk too high: ${reversalRisk.reason}`,
+            { 
               reversalRiskScore: reversalRisk.riskScore,
               reversalSignals: reversalRisk.signals,
               trend,
@@ -1118,9 +1256,8 @@ serve(async (req) => {
               stochRsi: trendData.stochasticRsi?.aggregated,
               trend1h: higherTimeframeFilter?.trend1h
             },
-            trend_data: trendData,
-            checked_at: new Date().toISOString(),
-          });
+            trendData
+          );
           continue;
         } else if (reversalRisk.riskScore > 0) {
           console.log(`📊 ${symbol}: ${reversalRisk.reason}`);
