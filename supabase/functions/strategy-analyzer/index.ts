@@ -1721,6 +1721,52 @@ serve(async (req) => {
         // ============= IMPROVEMENT #3: Pullback Entry Detection =============
         const pullbackAnalysis = analyzePullbackEntry(trendData, trend);
 
+        // ============= RECOVERY MODE = STRICT MODE =============
+        // Recovery mode reduces frequency, not gambles smaller
+        // Must meet ALL strict conditions to trade during recovery
+        if (isInRecoveryMode) {
+          // STRICT 1: ADX must be >= 25 (stronger trend required)
+          if (adx < 25) {
+            rejectedByHardGates++;
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `RECOVERY MODE: ADX too low (${adx.toFixed(1)} < 25) - only strong trends during recovery`,
+              { adx: adx.toFixed(1), gate: "RECOVERY_ADX_STRICT", consecutiveLosses: riskParams.consecutive_losses },
+              trendData,
+              riskParams.ai_analysis_enabled !== false
+            );
+            continue;
+          }
+          
+          // STRICT 2: Must have BOTH pullback conditions (RSI + Bollinger)
+          if (!pullbackAnalysis.hasBothConditions) {
+            rejectedByHardGates++;
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `RECOVERY MODE: No optimal pullback entry (need RSI + BB conditions)`,
+              { pullbackReason: pullbackAnalysis.reason, hasBoth: false, gate: "RECOVERY_PULLBACK_STRICT", consecutiveLosses: riskParams.consecutive_losses },
+              trendData,
+              riskParams.ai_analysis_enabled !== false
+            );
+            continue;
+          }
+          
+          // STRICT 3: Confidence must be in optimal zone (50-70%) - NOT dead zone
+          if (confidence >= 70) {
+            rejectedByHardGates++;
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `RECOVERY MODE: Confidence too high (${confidence}% >= 70) - late entries during recovery`,
+              { confidence, gate: "RECOVERY_CONFIDENCE_STRICT", consecutiveLosses: riskParams.consecutive_losses },
+              trendData,
+              riskParams.ai_analysis_enabled !== false
+            );
+            continue;
+          }
+          
+          console.log(`🔄 ${symbol}: Passed RECOVERY STRICT MODE checks (ADX=${adx.toFixed(1)}, pullback=BOTH, conf=${confidence}%)`);
+        }
+
         // ============= IMPROVEMENT #1: Quality Score System with CONFIDENCE INVERSION =============
         const confidencePenalty = getConfidencePenalty(confidence);
         // Direction bonus: +3 for SHORT/SELL signals (historically 38% vs 31% win rate)
