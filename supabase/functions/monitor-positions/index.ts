@@ -287,6 +287,32 @@ serve(async (req) => {
       const userSettingsEarly = userSettingsMap.get(position.user_id);
       
       // ============================================================
+      // DYNAMIC THRESHOLDS (aligned with strategy-analyzer)
+      // Use ADX and volume to determine exit sensitivity
+      // ============================================================
+      const trendDataForPosition = trendDataMap.get(position.symbol);
+      const positionAdx = trendDataForPosition?.volatility?.adx || trendDataForPosition?.momentum?.adx || 20;
+      const positionVolumeScore = trendDataForPosition?.volumeScore ?? 0;
+      
+      // ADX-based reversal risk threshold adjustment
+      // Higher ADX = more lenient (allow higher reversal risk before exit)
+      let dynamicReversalThreshold = 60; // Base threshold
+      if (positionAdx >= 35) {
+        dynamicReversalThreshold = 70; // Very strong trend - allow more reversal risk
+      } else if (positionAdx >= 25) {
+        dynamicReversalThreshold = 65; // Strong trend
+      } else if (positionAdx < 20) {
+        dynamicReversalThreshold = 55; // Weak trend - exit earlier
+      }
+      
+      // Volume-aware exit: High volume confirmation = hold longer
+      if (positionVolumeScore >= 7) {
+        dynamicReversalThreshold += 5; // Volume strongly confirms - be more patient
+      } else if (positionVolumeScore <= 2 && positionAdx < 25) {
+        dynamicReversalThreshold -= 5; // Low volume + weak trend = exit sooner
+      }
+      
+      // ============================================================
       // DRAWDOWN CIRCUIT BREAKER - Skip processing if triggered
       // ============================================================
       if (userSettingsEarly?.circuitBreakerTriggered) {
@@ -981,7 +1007,8 @@ serve(async (req) => {
           // Only apply if position has met minimum hold time AND position age > 1 hour
           const positionAgeHours = positionAgeMinutes / 60;
           const MIN_AGE_FOR_REVERSAL_EXIT_HOURS = 1.0; // Don't exit on reversal risk in first hour
-          const REVERSAL_RISK_EXIT_THRESHOLD = 85; // Raised from 80% to reduce false early exits
+          // Use dynamic threshold from earlier calculation (aligned with strategy-analyzer)
+          const REVERSAL_RISK_EXIT_THRESHOLD = dynamicReversalThreshold;
           
           if (hasMetMinHoldTime && 
               positionAgeHours >= MIN_AGE_FOR_REVERSAL_EXIT_HOURS &&
@@ -990,7 +1017,7 @@ serve(async (req) => {
             shouldClose = true;
             closeReason = "reversal_risk_high";
             console.log(
-              `⚠️ REVERSAL RISK EXIT: Closing SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}/100, Age: ${positionAgeHours.toFixed(1)}h: ${reversalRisk.signals.join(", ")}`,
+              `⚠️ REVERSAL RISK EXIT: Closing SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}/100 >= ${REVERSAL_RISK_EXIT_THRESHOLD} (dynamic), Age: ${positionAgeHours.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}`,
             );
           }
           
@@ -1138,7 +1165,8 @@ serve(async (req) => {
           // Only apply if position has met minimum hold time AND position age > 1 hour
           const positionAgeHoursLong = positionAgeMinutes / 60;
           const MIN_AGE_FOR_REVERSAL_EXIT_HOURS_LONG = 1.0;
-          const REVERSAL_RISK_EXIT_THRESHOLD_LONG = 85; // Raised from 80% to reduce false early exits
+          // Use dynamic threshold from earlier calculation (aligned with strategy-analyzer)
+          const REVERSAL_RISK_EXIT_THRESHOLD_LONG = dynamicReversalThreshold;
           
           if (!shouldClose && hasMetMinHoldTime && 
               positionAgeHoursLong >= MIN_AGE_FOR_REVERSAL_EXIT_HOURS_LONG &&
@@ -1147,7 +1175,7 @@ serve(async (req) => {
             shouldClose = true;
             closeReason = "reversal_risk_high";
             console.log(
-              `⚠️ REVERSAL RISK EXIT: Closing LONG ${position.symbol} - Risk ${reversalRisk.riskScore}/100, Age: ${positionAgeHoursLong.toFixed(1)}h: ${reversalRisk.signals.join(", ")}`,
+              `⚠️ REVERSAL RISK EXIT: Closing LONG ${position.symbol} - Risk ${reversalRisk.riskScore}/100 >= ${REVERSAL_RISK_EXIT_THRESHOLD_LONG} (dynamic), Age: ${positionAgeHoursLong.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}`,
             );
           }
           
