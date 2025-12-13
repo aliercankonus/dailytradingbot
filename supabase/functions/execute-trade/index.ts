@@ -6,31 +6,43 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-manual-execution',
 };
 
-// Calculate reversal risk score based on leading indicators
-function calculateReversalRiskForEntry(trendData: any, signalType: string): { riskScore: number; reasons: string[] } {
+// ============= REVERSAL RISK CALCULATION (aligned with strategy-analyzer) =============
+// ADX-adaptive weighting: Strong trends = lower reversal impact
+function calculateReversalRiskForEntry(trendData: any, signalType: string): { riskScore: number; reasons: string[]; adxWeight: number } {
   const reasons: string[] = [];
   let riskScore = 0;
   
   if (!trendData) {
-    return { riskScore: 0, reasons: ['No trend data available'] };
+    return { riskScore: 0, reasons: ['No trend data available'], adxWeight: 1.0 };
   }
   
   const momentum = trendData.momentum || {};
-  const stochRSI = trendData.stochRSI || {};
+  const stochRSI = trendData.stochasticRsi || trendData.stochRSI || {};
   const tf1h = trendData.timeframes?.['1h'] || {};
+  const adx = trendData.volatility?.adx || trendData.momentum?.adx || 20;
   const isLong = signalType === 'long';
-  const expectedTrend = isLong ? 'bullish' : 'bearish';
+  
+  // ADX-based adaptive reversal weight (aligned with strategy-analyzer)
+  // Strong trend (high ADX) = lower reversal impact
+  // Weak trend (low ADX) = full reversal impact
+  const getAdxReversalWeight = (adxValue: number): number => {
+    if (adxValue >= 35) return 0.5;  // Strong trend, reduce reversal impact
+    if (adxValue >= 20) return 0.7;  // Moderate trend
+    return 1.0;                       // Weak trend, full reversal impact
+  };
+  
+  const adxWeight = getAdxReversalWeight(adx);
   
   // 1. MACD Divergence (momentum not confirming price)
-  if (momentum.divergence === true) {
+  if (momentum.hasDivergence === true || momentum.divergence === true) {
     riskScore += 30;
     reasons.push('MACD divergence detected');
   }
   
-  // 2. Momentum not confirmed
-  if (momentum.confirms === false) {
+  // 2. Momentum not confirmed despite trend
+  if (!momentum.confirms && momentum.state !== "confirmed") {
     riskScore += 15;
-    reasons.push('Momentum not confirmed');
+    reasons.push(`Momentum not confirmed (state: ${momentum.state || "none"})`);
   }
   
   // 3. Last close doesn't align with trend
@@ -40,32 +52,45 @@ function calculateReversalRiskForEntry(trendData: any, signalType: string): { ri
   }
   
   // 4. MACD direction misaligned
-  const macdHistogram = momentum.macdHistogram || 0;
-  if ((isLong && macdHistogram < 0) || (!isLong && macdHistogram > 0)) {
+  if (!momentum.macdDirectionAligned) {
     riskScore += 15;
-    reasons.push('MACD direction misaligned');
+    reasons.push('MACD direction misaligned with trend');
   }
   
-  // 5. StochRSI opposing cross signals
-  const stoch1h = stochRSI['1h'] || {};
-  if ((isLong && stoch1h.signal === 'bearish_cross') || (!isLong && stoch1h.signal === 'bullish_cross')) {
-    riskScore += 25;
-    reasons.push(`StochRSI ${isLong ? 'bearish' : 'bullish'} cross on 1h`);
+  // 5. StochRSI opposing cross signals (check aggregated data)
+  const stochAggregated = stochRSI.aggregated || stochRSI;
+  if (isLong) {
+    if ((stochAggregated.bearishCrossCount || 0) >= 1) {
+      riskScore += 25;
+      reasons.push(`StochRSI bearish cross (${stochAggregated.bearishCrossCount} TF)`);
+    }
+    if ((stochAggregated.overboughtCount || 0) >= 2) {
+      riskScore += 15;
+      reasons.push(`StochRSI overbought on ${stochAggregated.overboughtCount} timeframes`);
+    }
+  } else {
+    if ((stochAggregated.bullishCrossCount || 0) >= 1) {
+      riskScore += 25;
+      reasons.push(`StochRSI bullish cross (${stochAggregated.bullishCrossCount} TF)`);
+    }
+    if ((stochAggregated.oversoldCount || 0) >= 2) {
+      riskScore += 15;
+      reasons.push(`StochRSI oversold on ${stochAggregated.oversoldCount} timeframes`);
+    }
   }
   
-  // 6. StochRSI extreme readings (overbought for LONG, oversold for SHORT)
-  if ((isLong && stoch1h.signal === 'overbought') || (!isLong && stoch1h.signal === 'oversold')) {
-    riskScore += 15;
-    reasons.push(`StochRSI ${isLong ? 'overbought' : 'oversold'}`);
-  }
-  
-  // 7. 1h trend opposing signal direction
-  if ((isLong && tf1h.trend === 'bearish') || (!isLong && tf1h.trend === 'bullish')) {
+  // 6. 1h trend opposing signal direction
+  const trend1h = trendData.higherTimeframeFilter?.trend1h || trendData.multiTimeframe?.trend1h || tf1h.trend;
+  if ((isLong && trend1h === 'bearish') || (!isLong && trend1h === 'bullish')) {
     riskScore += 20;
-    reasons.push(`1h trend is ${tf1h.trend}`);
+    reasons.push(`1h trend is ${trend1h} (opposing ${isLong ? 'LONG' : 'SHORT'} entry)`);
   }
   
-  return { riskScore: Math.min(riskScore, 100), reasons };
+  // Cap at 100, then apply ADX-based weight
+  riskScore = Math.min(100, riskScore);
+  const adjustedRiskScore = Math.round(riskScore * adxWeight);
+  
+  return { riskScore: adjustedRiskScore, reasons, adxWeight };
 }
 
 serve(async (req) => {
@@ -289,6 +314,42 @@ serve(async (req) => {
     }
 
     console.log(`Executing trade for signal from strategy: ${signal.strategy_name || 'Unknown'}`);
+
+    // ============================================================
+    // STRATEGY PERFORMANCE FILTER (aligned with strategy-analyzer)
+    // Block underperforming strategies, boost high performers
+    // ============================================================
+    const STRATEGY_WIN_RATE_THRESHOLD = 40;
+    const STRATEGY_MIN_TRADES_FOR_FILTER = 10;
+    const STRATEGY_HIGH_PERFORMER_THRESHOLD = 60;
+    
+    let strategyPerformanceBonus = 0; // Quality score bonus for high performers
+    
+    const { data: strategyTrades } = await supabase
+      .from('positions')
+      .select('realized_pnl')
+      .eq('user_id', user.id)
+      .eq('status', 'closed')
+      .eq('strategy_name', signal.strategy_name || '')
+      .order('closed_at', { ascending: false })
+      .limit(20);
+    
+    if (strategyTrades && strategyTrades.length >= STRATEGY_MIN_TRADES_FOR_FILTER) {
+      const wins = strategyTrades.filter(t => (t.realized_pnl || 0) > 0).length;
+      const winRate = (wins / strategyTrades.length) * 100;
+      
+      if (winRate < STRATEGY_WIN_RATE_THRESHOLD) {
+        console.log(`⛔ STRATEGY PERFORMANCE BLOCK: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% < ${STRATEGY_WIN_RATE_THRESHOLD}%`);
+        throw new Error(`Strategy "${signal.strategy_name}" underperforming (${winRate.toFixed(0)}% win rate) - trade cancelled`);
+      }
+      
+      if (winRate >= STRATEGY_HIGH_PERFORMER_THRESHOLD) {
+        strategyPerformanceBonus = 5; // +5 quality bonus for high performers (aligned with strategy-analyzer)
+        console.log(`⭐ Strategy high performer bonus: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% → +${strategyPerformanceBonus} quality`);
+      } else {
+        console.log(`✓ Strategy performance check: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% >= ${STRATEGY_WIN_RATE_THRESHOLD}%`);
+      }
+    }
 
     // ============================================================
     // NEW: PER-SYMBOL POSITION LIMIT CHECK
@@ -762,15 +823,16 @@ serve(async (req) => {
 
     // ============================================================
     // REVERSAL RISK FILTER - Block entries when leading indicators suggest reversal
+    // Uses ADX-adaptive weighting (aligned with strategy-analyzer)
     // ============================================================
-    const reversalRiskScore = calculateReversalRiskForEntry(trendData, signal.signal_type);
-    console.log(`🔄 Reversal Risk Score: ${reversalRiskScore.riskScore}/100 - ${reversalRiskScore.reasons.join(', ')}`);
+    const reversalRiskResult = calculateReversalRiskForEntry(trendData, signal.signal_type);
+    console.log(`🔄 Reversal Risk: ${reversalRiskResult.riskScore}/100 (ADX weight: ${reversalRiskResult.adxWeight}) - ${reversalRiskResult.reasons.slice(0, 3).join(', ')}`);
     
     const REVERSAL_RISK_THRESHOLD = 55; // Block if reversal risk >= 55% (aligned with strategy-analyzer)
-    if (reversalRiskScore.riskScore >= REVERSAL_RISK_THRESHOLD) {
-      throw new Error(`High reversal risk detected (${reversalRiskScore.riskScore}%) - ${reversalRiskScore.reasons.slice(0, 2).join(', ')} - trade cancelled`);
+    if (reversalRiskResult.riskScore >= REVERSAL_RISK_THRESHOLD) {
+      throw new Error(`High reversal risk detected (${reversalRiskResult.riskScore}%) - ${reversalRiskResult.reasons.slice(0, 2).join(', ')} - trade cancelled`);
     }
-    console.log(`✓ Reversal risk check passed: ${reversalRiskScore.riskScore}% < ${REVERSAL_RISK_THRESHOLD}% threshold`);
+    console.log(`✓ Reversal risk check passed: ${reversalRiskResult.riskScore}% < ${REVERSAL_RISK_THRESHOLD}% threshold`);
 
     // Use strategy's configured stop loss and take profit from signal
     let stopLoss = signal.stop_loss;
