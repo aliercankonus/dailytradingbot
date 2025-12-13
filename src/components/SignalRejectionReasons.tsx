@@ -51,6 +51,7 @@ interface ScoreBreakdown {
   technical: { score: number; max: number };
   entry: { score: number; max: number };
   confidencePenalty: number;
+  directionBonus: number;
   subtotal: number;
   total: number;
   minRequired: number;
@@ -59,7 +60,7 @@ interface ScoreBreakdown {
 const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
   if (!breakdown) return null;
   
-  // Parse format like "ADX:22/25 MOM:0/25 ALIGN:12/20 TECH:10/15 ENTRY:12/20 CONF_PEN:-4"
+  // Parse format like "ADX:22/25 MOM:0/20 ALIGN:12/20 TECH:10/15 ENTRY:12/25 CONF_PEN:-4 DIR_BONUS:+3"
   const pattern = /(\w+):(-?\d+)\/(\d+)/g;
   const scores: Record<string, { score: number; max: number }> = {};
   let match;
@@ -69,9 +70,13 @@ const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
     scores[key.toLowerCase()] = { score: parseInt(score), max: parseInt(max) };
   }
   
-  // Also parse CONF_PEN:-4 format (no max value)
+  // Parse CONF_PEN:-4 format (no max value)
   const confPenMatch = breakdown.match(/CONF_PEN:(-?\d+)/);
   const confidencePenalty = confPenMatch ? parseInt(confPenMatch[1]) : 0;
+  
+  // Parse DIR_BONUS:+3 format (no max value)
+  const dirBonusMatch = breakdown.match(/DIR_BONUS:\+?(-?\d+)/);
+  const directionBonus = dirBonusMatch ? parseInt(dirBonusMatch[1]) : 0;
   
   if (Object.keys(scores).length === 0) return null;
   
@@ -79,13 +84,14 @@ const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
   
   return {
     adx: scores.adx || { score: 0, max: 25 },
-    momentum: scores.mom || { score: 0, max: 25 },
+    momentum: scores.mom || { score: 0, max: 20 },
     alignment: scores.align || { score: 0, max: 20 },
     technical: scores.tech || { score: 0, max: 15 },
-    entry: scores.entry || { score: 0, max: 20 },
+    entry: scores.entry || { score: 0, max: 25 },
     confidencePenalty,
+    directionBonus,
     subtotal,
-    total: subtotal + confidencePenalty,
+    total: subtotal + confidencePenalty + directionBonus,
     minRequired: 50,
   };
 };
@@ -144,6 +150,7 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
   const totalScore = breakdown?.total || qualityScore || 0;
   const isPassing = totalScore >= minRequired;
   const hasConfidencePenalty = breakdown && breakdown.confidencePenalty !== 0;
+  const hasDirectionBonus = breakdown && breakdown.directionBonus > 0;
   
   return (
     <div className="space-y-2 p-2 bg-muted/30 rounded-md">
@@ -170,6 +177,7 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
                   <p className="font-mono text-[10px]">
                     {breakdown.adx.score} + {breakdown.momentum.score} + {breakdown.alignment.score} + {breakdown.technical.score} + {breakdown.entry.score}
                     {hasConfidencePenalty && ` ${breakdown.confidencePenalty >= 0 ? '+' : ''}${breakdown.confidencePenalty}`}
+                    {hasDirectionBonus && ` +${breakdown.directionBonus}`}
                     {' = '}{totalScore}
                   </p>
                 </div>
@@ -231,29 +239,49 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
             />
           </div>
           
-          {/* Subtotal and Penalty section */}
-          {hasConfidencePenalty && (
-            <div className="pt-1 mt-1 border-t border-border/30">
+          {/* Subtotal, Bonus/Penalty section */}
+          {(hasConfidencePenalty || hasDirectionBonus) && (
+            <div className="pt-1 mt-1 border-t border-border/30 space-y-0.5">
               <div className="flex items-center justify-between text-[10px]">
                 <span className="text-muted-foreground">Subtotal:</span>
                 <span className="font-mono">{breakdown.subtotal}/100</span>
               </div>
-              <div className="flex items-center justify-between text-[10px]">
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="text-red-400 cursor-help flex items-center gap-1">
-                        <AlertTriangle className="h-3 w-3" />
-                        Confidence Penalty:
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="text-xs max-w-[180px]">
-                      <p>Penalty applied when confidence is too high (&gt;70%), which may indicate trend exhaustion rather than trend beginning.</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                <span className="font-mono text-red-400">{breakdown.confidencePenalty}</span>
-              </div>
+              {hasDirectionBonus && (
+                <div className="flex items-center justify-between text-[10px]">
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-green-400 cursor-help flex items-center gap-1">
+                          <TrendingDown className="h-3 w-3" />
+                          SELL Bonus:
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs max-w-[180px]">
+                        <p>+3 bonus for SHORT/SELL signals based on historical win rate analysis (38% vs 31% for BUY).</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <span className="font-mono text-green-400">+{breakdown.directionBonus}</span>
+                </div>
+              )}
+              {hasConfidencePenalty && (
+                <div className="flex items-center justify-between text-[10px]">
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-red-400 cursor-help flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3" />
+                          Confidence Penalty:
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs max-w-[180px]">
+                        <p>Penalty applied when confidence is too high (&gt;70%), which may indicate trend exhaustion rather than trend beginning.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <span className="font-mono text-red-400">{breakdown.confidencePenalty}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between text-[10px] font-medium pt-0.5">
                 <span className="text-muted-foreground">Final Score:</span>
                 <span className={`font-mono ${isPassing ? 'text-green-400' : 'text-red-400'}`}>
