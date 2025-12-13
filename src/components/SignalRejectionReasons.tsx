@@ -426,7 +426,9 @@ const AlignmentBreakdownDisplay = ({ alignmentBreakdown }: { alignmentBreakdown:
 };
 
 const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
-  const adx = filtersStatus?.adx;
+  // Ensure adx is a number - it might be nested in an object
+  const rawAdx = filtersStatus?.adx;
+  const adx = typeof rawAdx === 'number' ? rawAdx : (typeof rawAdx === 'object' ? rawAdx?.value : undefined);
   const confidence = filtersStatus?.confidence;
   const trendConsistency = filtersStatus?.trendConsistency;
   const regime = filtersStatus?.regime;
