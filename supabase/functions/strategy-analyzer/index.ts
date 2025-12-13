@@ -303,11 +303,12 @@ const BUILT_IN_TEMPLATES = [
 // NEW: Added confidence penalty and pullback bonus for confidence inversion fix
 interface QualityFactors {
   adxScore: number;          // 0-25 points based on trend strength
-  momentumScore: number;     // 0-25 points based on momentum confirmation
+  momentumScore: number;     // 0-20 points based on momentum confirmation (REDUCED from 25)
   alignmentScore: number;    // 0-20 points based on timeframe alignment
   technicalScore: number;    // 0-15 points based on StochRSI/Bollinger signals
-  entryTimingScore: number;  // 0-20 points based on pullback/entry timing (INCREASED from 15)
-  confidencePenalty: number; // 0 to -15 penalty for high confidence (inversion fix)
+  entryTimingScore: number;  // 0-25 points based on pullback/entry timing (INCREASED from 20)
+  confidencePenalty: number; // 0 to -20 penalty for high confidence (inversion fix)
+  directionBonus: number;    // +3 for SHORT signals (SELL outperforms BUY historically)
 }
 
 const calculateQualityScore = (factors: QualityFactors): { score: number; breakdown: string } => {
@@ -317,11 +318,13 @@ const calculateQualityScore = (factors: QualityFactors): { score: number; breakd
     factors.alignmentScore +
     factors.technicalScore +
     factors.entryTimingScore +
-    factors.confidencePenalty  // Can be negative!
+    factors.confidencePenalty +  // Can be negative!
+    factors.directionBonus       // +3 for SELL signals
   ));
   
   const penaltyStr = factors.confidencePenalty < 0 ? ` CONF_PEN:${factors.confidencePenalty}` : '';
-  const breakdown = `ADX:${factors.adxScore}/25 MOM:${factors.momentumScore}/25 ALIGN:${factors.alignmentScore}/20 TECH:${factors.technicalScore}/15 ENTRY:${factors.entryTimingScore}/20${penaltyStr}`;
+  const bonusStr = factors.directionBonus > 0 ? ` DIR_BONUS:+${factors.directionBonus}` : '';
+  const breakdown = `ADX:${factors.adxScore}/25 MOM:${factors.momentumScore}/20 ALIGN:${factors.alignmentScore}/20 TECH:${factors.technicalScore}/15 ENTRY:${factors.entryTimingScore}/25${penaltyStr}${bonusStr}`;
   
   return { score, breakdown };
 };
@@ -330,12 +333,12 @@ const calculateQualityScore = (factors: QualityFactors): { score: number; breakd
 // High confidence = trend exhaustion, penalize entries
 // Optimal entry zone: 50-70% confidence (trend confirmed but not exhausted)
 const getConfidencePenalty = (confidence: number): number => {
-  if (confidence >= 85) return -15;   // Heavy penalty for extreme confidence
-  if (confidence >= 80) return -12;   // Strong penalty
-  if (confidence >= 75) return -8;    // Moderate penalty
-  if (confidence >= 70) return -4;    // Light penalty
+  if (confidence >= 85) return -20;   // Heavy penalty for extreme confidence (was -15)
+  if (confidence >= 80) return -15;   // Strong penalty (was -12)
+  if (confidence >= 75) return -10;   // Moderate penalty (was -8)
+  if (confidence >= 70) return -6;    // Light penalty (was -4)
   if (confidence >= 50 && confidence < 70) return 0;  // Optimal zone
-  return -2;  // Too low confidence also not ideal
+  return -3;  // Too low confidence also not ideal (was -2)
 };
 
 // ADX Score (0-25 points)
@@ -349,7 +352,7 @@ const getAdxScore = (adx: number): number => {
   return 0;                       // No trend
 };
 
-// Momentum Score (0-25 points)
+// Momentum Score (0-20 points) - REDUCED from 25 based on win rate correlation
 const getMomentumScore = (momentum: any): number => {
   if (!momentum) return 0;
   
@@ -363,30 +366,30 @@ const getMomentumScore = (momentum: any): number => {
   
   // STRICTER MOMENTUM SCORING - only confirmed momentum gets high scores
   if (state === "confirmed" && confirms) {
-    score = 22;  // Confirmed momentum = best
+    score = 17;  // Confirmed momentum = best (was 22)
   } else if (state === "confirmed" && macdExpanding) {
-    score = 18;  // Confirmed state with MACD expansion
+    score = 14;  // Confirmed state with MACD expansion (was 18)
   } else if (building && macdExpanding && confirms) {
     // Building momentum with MACD expansion AND confirmation
-    score = 12;
+    score = 10;  // was 12
   } else if (state === "mixed" && macdExpanding && confirms) {
     // Mixed with expanding MACD AND confirmation
-    score = 8;
+    score = 6;   // was 8
   } else if (building && macdExpanding) {
     // Building without full confirmation - weak
-    score = 5;
+    score = 4;   // was 5
   } else if (state === "mixed") {
-    score = 2;  // Reduced from 7 - mixed momentum is poor
+    score = 2;   // Reduced from 7 - mixed momentum is poor
   } else if (macdExpanding) {
-    score = 3;  // MACD expanding alone is weak
+    score = 2;   // MACD expanding alone is weak (was 3)
   } else {
     score = 0;
   }
   
   // Volume bonus
-  if (volumeConfirms) score += 5;
+  if (volumeConfirms) score += 4;  // was 5
   
-  return Math.min(25, score);
+  return Math.min(20, score);  // MAX 20 (was 25)
 };
 
 // Alignment Score (0-20 points)
@@ -701,7 +704,7 @@ const detectMarketRegime = (trendData: any): { regime: MarketRegime; tradeable: 
 interface PullbackAnalysis {
   isPullback: boolean;
   pullbackDepth: number;     // 0-100% of recent swing
-  entryTimingScore: number;  // 0-20 bonus points (INCREASED for pullback importance)
+  entryTimingScore: number;  // 0-25 bonus points (INCREASED from 20 based on win rate data)
   reason: string;
   hasBothConditions: boolean; // RSI + Bollinger combined
 }
@@ -735,7 +738,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
         isPullback: true,
         hasBothConditions: true,
         pullbackDepth: 100 - rsi,
-        entryTimingScore: 20,  // MAX SCORE for combined conditions
+        entryTimingScore: 25,  // MAX SCORE for combined conditions (was 20)
         reason: "OPTIMAL: RSI oversold + near lower Bollinger band"
       };
     }
@@ -746,7 +749,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
         isPullback: true,
         hasBothConditions: false,
         pullbackDepth: 100 - rsi,
-        entryTimingScore: 14,
+        entryTimingScore: 18,  // was 14
         reason: "Bullish pullback: RSI oversold in uptrend"
       };
     }
@@ -757,7 +760,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
         isPullback: true,
         hasBothConditions: false,
         pullbackDepth: 30,
-        entryTimingScore: 12,
+        entryTimingScore: 15,  // was 12
         reason: "Bullish pullback: Price near lower Bollinger band"
       };
     }
@@ -768,7 +771,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
         isPullback: true,
         hasBothConditions: false,
         pullbackDepth: 25,
-        entryTimingScore: 10,
+        entryTimingScore: 12,  // was 10
         reason: "Bullish pullback: StochRSI bullish cross"
       };
     }
@@ -779,7 +782,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
         isPullback: false,
         hasBothConditions: false,
         pullbackDepth: 0,
-        entryTimingScore: 6,  // Reduced from 8 - prefer pullbacks
+        entryTimingScore: 8,  // was 6
         reason: "Momentum continuation: Strong ADX with MACD expansion"
       };
     }
@@ -826,7 +829,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
         isPullback: true,
         hasBothConditions: true,
         pullbackDepth: rsi - 50,
-        entryTimingScore: 20,  // MAX SCORE
+        entryTimingScore: 25,  // MAX SCORE (was 20)
         reason: "OPTIMAL: RSI overbought + near upper Bollinger band"
       };
     }
@@ -837,7 +840,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
         isPullback: true,
         hasBothConditions: false,
         pullbackDepth: rsi - 50,
-        entryTimingScore: 14,
+        entryTimingScore: 18,  // was 14
         reason: "Bearish rally: RSI overbought in downtrend"
       };
     }
@@ -848,7 +851,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
         isPullback: true,
         hasBothConditions: false,
         pullbackDepth: 30,
-        entryTimingScore: 12,
+        entryTimingScore: 15,  // was 12
         reason: "Bearish rally: Price near upper Bollinger band"
       };
     }
@@ -859,7 +862,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
         isPullback: true,
         hasBothConditions: false,
         pullbackDepth: 25,
-        entryTimingScore: 10,
+        entryTimingScore: 12,  // was 10
         reason: "Bearish rally: StochRSI bearish cross"
       };
     }
@@ -870,7 +873,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
         isPullback: false,
         hasBothConditions: false,
         pullbackDepth: 0,
-        entryTimingScore: 6,  // Reduced
+        entryTimingScore: 8,  // was 6
         reason: "Momentum continuation: Strong ADX with MACD expansion"
       };
     }
@@ -960,13 +963,13 @@ const evaluateBollingerBands = (bollingerBands: any, trend: string): { boost: nu
 };
 
 // Calculate position size based on quality score
-// Must align with MIN_QUALITY_SCORE threshold (58)
+// Must align with MIN_QUALITY_SCORE threshold (50)
 const getPositionSizeFromQuality = (qualityScore: number): number => {
   if (qualityScore >= 85) return 1.0;      // Full size for excellent signals
-  if (qualityScore >= 78) return 0.85;     // Near full
-  if (qualityScore >= 70) return 0.7;      // Moderate
-  if (qualityScore >= 65) return 0.55;     // Reduced
-  if (qualityScore >= 58) return 0.4;      // Minimum acceptable (matches MIN_QUALITY_SCORE)
+  if (qualityScore >= 75) return 0.85;     // Near full
+  if (qualityScore >= 65) return 0.7;      // Moderate
+  if (qualityScore >= 58) return 0.55;     // Good
+  if (qualityScore >= 50) return 0.4;      // Minimum acceptable (matches MIN_QUALITY_SCORE)
   return 0;                                 // Don't trade
 };
 
@@ -1284,8 +1287,8 @@ serve(async (req) => {
     const recoveryConfidenceBoost = riskParams.loss_recovery_confidence_boost || 10;
     const recoveryPositionSizeMultiplier = (riskParams.loss_recovery_position_size_percent || 50) / 100;
     
-    // RAISED minimum quality threshold for better win rate
-    const BASE_MIN_QUALITY_SCORE = 58;  // Was 50 - too many weak signals passing
+    // LOWERED minimum quality threshold based on win rate correlation analysis
+    const BASE_MIN_QUALITY_SCORE = 50;  // Was 58 - lower scores (50-59) have higher win rates
     const MIN_QUALITY_SCORE = isInRecoveryMode 
       ? BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost 
       : BASE_MIN_QUALITY_SCORE;
@@ -1525,6 +1528,8 @@ serve(async (req) => {
 
         // ============= IMPROVEMENT #1: Quality Score System with CONFIDENCE INVERSION =============
         const confidencePenalty = getConfidencePenalty(confidence);
+        // Direction bonus: +3 for SHORT/SELL signals (historically 38% vs 31% win rate)
+        const directionBonus = trend === "bearish" ? 3 : 0;
         const qualityFactors: QualityFactors = {
           adxScore: getAdxScore(adx),
           momentumScore: getMomentumScore(momentum),
@@ -1532,6 +1537,7 @@ serve(async (req) => {
           technicalScore: getTechnicalScore(trendData, trend, symbol),
           entryTimingScore: Math.max(0, pullbackAnalysis.entryTimingScore),
           confidencePenalty: confidencePenalty,  // Penalize high confidence entries
+          directionBonus: directionBonus,        // +3 for SHORT signals
         };
 
         const { score: qualityScore, breakdown } = calculateQualityScore(qualityFactors);
