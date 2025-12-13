@@ -1652,6 +1652,68 @@ serve(async (req) => {
         
         console.log(`✅ ${symbol}: Passed all hard gates (ADX=${adx.toFixed(1)}, momentum=${momentumState}/${momentumConfirms}, HTF=${htfAligned || `conf=${confidence}%`}, conf=${confidence}%)`);
 
+        // ============= GATE 5: STRATEGY SUPPORT FOR TREND DIRECTION =============
+        // Check if any strategy can support the current trend direction BEFORE quality scoring
+        // Strategies validate signals, not rescue weak ones
+        const tradeDirectionForGate = higherTimeframeFilter?.tradeDirection || trend;
+        
+        // Count strategies that could generate a signal for this trend
+        let strategiesWithDirectionalSupport = 0;
+        let strategiesWithConditionBasis = 0;
+        
+        for (const strategy of allStrategies) {
+          const strategyDirection = strategy.signal_direction || 'trend';
+          const hasConditions = (strategy.entry_conditions?.length || 0) > 0;
+          const hasIndicators = (strategy.indicators?.length || 0) > 0;
+          
+          // Check if this strategy can support the current trend direction
+          let canSupportTrend = false;
+          if (strategyDirection === 'trend') {
+            // Trend-following strategies support any directional trend
+            canSupportTrend = tradeDirectionForGate === 'bullish' || tradeDirectionForGate === 'bearish';
+          } else if (strategyDirection === 'long' && tradeDirectionForGate === 'bullish') {
+            canSupportTrend = true;
+          } else if (strategyDirection === 'short' && tradeDirectionForGate === 'bearish') {
+            canSupportTrend = true;
+          }
+          
+          if (canSupportTrend) {
+            strategiesWithDirectionalSupport++;
+            // Check if it has actual conditions (not just trend-follow decoration)
+            if (hasConditions && hasIndicators) {
+              strategiesWithConditionBasis++;
+            }
+          }
+        }
+        
+        // GATE: Must have at least 1 strategy with directional support
+        if (strategiesWithDirectionalSupport === 0) {
+          rejectedByHardGates++;
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `HARD GATE: No strategy supports ${tradeDirectionForGate} trend direction`,
+            { tradeDirection: tradeDirectionForGate, totalStrategies: allStrategies.length, gate: "NO_STRATEGY_SUPPORT" },
+            trendData,
+            riskParams.ai_analysis_enabled !== false
+          );
+          continue;
+        }
+        
+        // GATE: Must have at least 1 strategy with actual conditions (not just trend-follow)
+        if (strategiesWithConditionBasis === 0) {
+          rejectedByHardGates++;
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `HARD GATE: No condition-based strategy for ${tradeDirectionForGate} (${strategiesWithDirectionalSupport} trend-followers only)`,
+            { tradeDirection: tradeDirectionForGate, directionalSupport: strategiesWithDirectionalSupport, conditionBased: 0, gate: "NO_CONDITION_STRATEGY" },
+            trendData,
+            riskParams.ai_analysis_enabled !== false
+          );
+          continue;
+        }
+        
+        console.log(`📋 ${symbol}: ${strategiesWithConditionBasis}/${allStrategies.length} strategies support ${tradeDirectionForGate} with conditions`);
+
         // ============= Technical Indicators =============
         const stochRsiEval = evaluateStochRSI(trendData.stochasticRsi, trend);
         const bollingerEval = evaluateBollingerBands(trendData.bollingerBands, trend);
