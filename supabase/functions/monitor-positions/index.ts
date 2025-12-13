@@ -28,11 +28,18 @@ serve(async (req) => {
   }
   
   // CRON_SECRET validation - protect against unauthorized invocations
+  // Accept secret via header (x-cron-secret) or Authorization Bearer token
   const cronSecret = Deno.env.get("CRON_SECRET");
-  const providedSecret = req.headers.get("x-cron-secret");
+  const providedSecretHeader = req.headers.get("x-cron-secret");
+  const authHeader = req.headers.get("authorization");
+  const providedSecretBearer = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  const providedSecret = providedSecretHeader || providedSecretBearer;
   
-  // Allow if either: CRON_SECRET is not set (development), or secrets match
-  if (cronSecret && providedSecret !== cronSecret) {
+  // Also check if it's a scheduled cron call (Supabase internal scheduler)
+  const isScheduledCron = req.headers.get("x-supabase-function-source") === "scheduler";
+  
+  // Allow if: no CRON_SECRET set (dev), secrets match, or it's a scheduled cron call
+  if (cronSecret && !isScheduledCron && providedSecret !== cronSecret) {
     console.error("Unauthorized: Invalid or missing cron secret");
     return new Response(
       JSON.stringify({ success: false, error: "Unauthorized" }),
