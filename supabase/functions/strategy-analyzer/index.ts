@@ -331,14 +331,16 @@ const calculateQualityScore = (factors: QualityFactors): { score: number; breakd
 
 // ============= CONFIDENCE INVERSION FIX =============
 // High confidence = trend exhaustion, penalize entries
-// Optimal entry zone: 50-70% confidence (trend confirmed but not exhausted)
+// Optimal entry zone: 50-60% confidence (trend confirmed but not exhausted)
+// CRITICAL FIX: 60-69 zone has 17% win rate vs 50-59 at 46% - add penalty!
 const getConfidencePenalty = (confidence: number): number => {
-  if (confidence >= 85) return -20;   // Heavy penalty for extreme confidence (was -15)
-  if (confidence >= 80) return -15;   // Strong penalty (was -12)
-  if (confidence >= 75) return -10;   // Moderate penalty (was -8)
-  if (confidence >= 70) return -6;    // Light penalty (was -4)
-  if (confidence >= 50 && confidence < 70) return 0;  // Optimal zone
-  return -3;  // Too low confidence also not ideal (was -2)
+  if (confidence >= 85) return -20;   // Heavy penalty for extreme confidence
+  if (confidence >= 80) return -15;   // Strong penalty
+  if (confidence >= 75) return -10;   // Moderate penalty
+  if (confidence >= 70) return -6;    // Light penalty
+  if (confidence >= 60) return -8;    // NEW: 60-69 zone penalty (17% win rate!)
+  if (confidence >= 50) return 0;     // Optimal zone: 50-59 (46% win rate)
+  return -3;  // Too low confidence also not ideal
 };
 
 // ADX Score (0-25 points)
@@ -419,11 +421,11 @@ const getAlignmentScore = (confidence: number, consistency: number, aligned: boo
     }
   }
   
-  // Confidence component (0-6) - optimal zone is 55-70% (matches confidence inversion logic)
-  // High confidence gets penalty elsewhere, so here we reward the sweet spot
-  if (confidence >= 55 && confidence < 70) score += 6;  // Sweet spot!
-  else if (confidence >= 70 && confidence < 80) score += 4;  // Slightly exhausted
-  else if (confidence >= 50 && confidence < 55) score += 3;  // Building
+  // Confidence component (0-6) - optimal zone is 50-59% (data shows 46% win rate)
+  // CRITICAL: 60-69 zone has 17% win rate - penalize it!
+  if (confidence >= 50 && confidence < 60) score += 6;  // Best zone: 50-59 (46% win rate)
+  else if (confidence >= 70 && confidence < 80) score += 4;  // 70-79 recovered well (67% after optimizations)
+  else if (confidence >= 60 && confidence < 70) score += 1;  // DANGER ZONE: 60-69 (17% win rate!)
   else if (confidence >= 80) score += 2;  // Over-extended (penalty elsewhere)
   else score += 1;  // Too low
   
