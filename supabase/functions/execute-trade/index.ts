@@ -385,6 +385,18 @@ serve(async (req) => {
       throw new Error(`Market volatility too high (ATR: ${atrPercent.toFixed(2)}%) - trade cancelled`);
     }
 
+    // FILTER 5: ADX HARD GATE - Require minimum trend strength
+    const adxValue = typeof trendData?.volatility?.adx === 'number' 
+      ? trendData.volatility.adx 
+      : (typeof trendData?.volatility?.adx === 'object' ? trendData.volatility.adx?.value : 0);
+    const MIN_ADX_THRESHOLD = 20;
+    
+    if (adxValue < MIN_ADX_THRESHOLD) {
+      console.log(`❌ ADX HARD GATE: ADX ${adxValue?.toFixed(1) || 0} < ${MIN_ADX_THRESHOLD} - trade cancelled`);
+      throw new Error(`Trend strength too weak (ADX: ${adxValue?.toFixed(1) || 0}) - minimum required: ${MIN_ADX_THRESHOLD}`);
+    }
+    console.log(`✓ ADX hard gate passed: ${adxValue?.toFixed(1)} >= ${MIN_ADX_THRESHOLD}`);
+
     // NOTE: Confidence filter removed - quality score calculation already incorporates
     // confidence penalties. Signal quality score (stored in indicators.qualityScore) is the
     // primary filter. Having a separate confidence gate was causing double-filtering and
