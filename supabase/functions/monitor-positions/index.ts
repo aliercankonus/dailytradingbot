@@ -293,6 +293,23 @@ serve(async (req) => {
       const trendDataForPosition = trendDataMap.get(position.symbol);
       const positionAdx = trendDataForPosition?.volatility?.adx || trendDataForPosition?.momentum?.adx || 20;
       const positionVolumeScore = trendDataForPosition?.volumeScore ?? 0;
+      const positionConfidence = trendDataForPosition?.confidence ?? 50;
+      
+      // ============================================================
+      // CONFIDENCE PENALTY FUNCTION (aligned with strategy-analyzer)
+      // High confidence = trend exhaustion, penalize accordingly
+      // ============================================================
+      const getConfidencePenalty = (confidence: number): number => {
+        if (confidence >= 85) return -25;   // Heavy penalty for extreme confidence
+        if (confidence >= 80) return -18;   // Strong penalty
+        if (confidence >= 75) return -12;   // Moderate penalty
+        if (confidence >= 70) return -8;    // Light penalty
+        if (confidence >= 60) return -12;   // DEAD ZONE: 60-69 penalty
+        if (confidence >= 50) return 0;     // Optimal zone: 50-59
+        return -3;  // Too low confidence
+      };
+      
+      const confidencePenalty = getConfidencePenalty(positionConfidence);
       
       // ADX-based reversal risk threshold adjustment
       // Higher ADX = more lenient (allow higher reversal risk before exit)
@@ -311,6 +328,17 @@ serve(async (req) => {
       } else if (positionVolumeScore <= 2 && positionAdx < 25) {
         dynamicReversalThreshold -= 5; // Low volume + weak trend = exit sooner
       }
+      
+      // Apply confidence penalty to reversal threshold
+      // High confidence (trend exhaustion) = tighter exit threshold
+      if (confidencePenalty < -10) {
+        dynamicReversalThreshold -= 5; // Exit sooner when confidence indicates exhaustion
+        console.log(`📊 ${position.symbol}: Confidence penalty ${confidencePenalty} applied - threshold ${dynamicReversalThreshold}`);
+      }
+      
+      // Log dynamic threshold calculation
+      console.log(`📊 ${position.symbol}: Dynamic exit threshold=${dynamicReversalThreshold} (ADX=${positionAdx.toFixed(1)}, Vol=${positionVolumeScore}, Conf=${positionConfidence}%)`);
+      
       
       // ============================================================
       // DRAWDOWN CIRCUIT BREAKER - Skip processing if triggered
@@ -845,11 +873,21 @@ serve(async (req) => {
         const momentum = trendData.momentum || {};
         const stochRsi = trendData.stochasticRsi?.aggregated || trendData.stochasticRsi || {};
 
-        // ============= REVERSAL RISK DETECTION FOR EXITS =============
+        // ============= REVERSAL RISK DETECTION FOR EXITS (aligned with strategy-analyzer) =============
         // Calculate reversal risk score for the CURRENT position direction
-        const detectReversalRiskForExit = (positionSide: string): { riskScore: number; signals: string[] } => {
+        // Uses ADX-adaptive weighting for consistency across functions
+        const detectReversalRiskForExit = (positionSide: string): { riskScore: number; signals: string[]; adxWeight: number } => {
           const signals: string[] = [];
           let riskScore = 0;
+          
+          // ADX-based adaptive reversal weight (aligned with strategy-analyzer)
+          const getAdxReversalWeight = (adxValue: number): number => {
+            if (adxValue >= 35) return 0.5;  // Strong trend, reduce reversal impact
+            if (adxValue >= 20) return 0.7;  // Moderate trend
+            return 1.0;                       // Weak trend, full reversal impact
+          };
+          
+          const adxWeight = getAdxReversalWeight(positionAdx);
           
           // Check if momentum is turning against position
           if (momentum.hasDivergence) {
@@ -871,11 +909,11 @@ serve(async (req) => {
           
           // For SHORT positions: check for bullish reversal signals
           if (positionSide === "SELL") {
-            if (stochRsi.bullishCrossCount >= 1) {
+            if ((stochRsi.bullishCrossCount || 0) >= 1) {
               riskScore += 25;
               signals.push(`StochRSI bullish cross (${stochRsi.bullishCrossCount} TF)`);
             }
-            if (stochRsi.oversoldCount >= 2) {
+            if ((stochRsi.oversoldCount || 0) >= 2) {
               riskScore += 15;
               signals.push(`StochRSI oversold on ${stochRsi.oversoldCount} TF (bounce risk)`);
             }
@@ -886,11 +924,11 @@ serve(async (req) => {
           }
           // For LONG positions: check for bearish reversal signals
           else if (positionSide === "BUY") {
-            if (stochRsi.bearishCrossCount >= 1) {
+            if ((stochRsi.bearishCrossCount || 0) >= 1) {
               riskScore += 25;
               signals.push(`StochRSI bearish cross (${stochRsi.bearishCrossCount} TF)`);
             }
-            if (stochRsi.overboughtCount >= 2) {
+            if ((stochRsi.overboughtCount || 0) >= 2) {
               riskScore += 15;
               signals.push(`StochRSI overbought on ${stochRsi.overboughtCount} TF (pullback risk)`);
             }
@@ -900,7 +938,11 @@ serve(async (req) => {
             }
           }
           
-          return { riskScore: Math.min(100, riskScore), signals };
+          // Cap at 100, then apply ADX-based weight
+          riskScore = Math.min(100, riskScore);
+          const adjustedRiskScore = Math.round(riskScore * adxWeight);
+          
+          return { riskScore: adjustedRiskScore, signals, adxWeight };
         };
 
         // For SHORT positions: Exit if trend turns bullish OR ranging (market indecision) with lower threshold
@@ -1017,7 +1059,7 @@ serve(async (req) => {
             shouldClose = true;
             closeReason = "reversal_risk_high";
             console.log(
-              `⚠️ REVERSAL RISK EXIT: Closing SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}/100 >= ${REVERSAL_RISK_EXIT_THRESHOLD} (dynamic), Age: ${positionAgeHours.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}`,
+              `⚠️ REVERSAL RISK EXIT: Closing SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD} (dynamic), Age: ${positionAgeHours.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%`,
             );
           }
           
@@ -1175,7 +1217,7 @@ serve(async (req) => {
             shouldClose = true;
             closeReason = "reversal_risk_high";
             console.log(
-              `⚠️ REVERSAL RISK EXIT: Closing LONG ${position.symbol} - Risk ${reversalRisk.riskScore}/100 >= ${REVERSAL_RISK_EXIT_THRESHOLD_LONG} (dynamic), Age: ${positionAgeHoursLong.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}`,
+              `⚠️ REVERSAL RISK EXIT: Closing LONG ${position.symbol} - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD_LONG} (dynamic), Age: ${positionAgeHoursLong.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%`,
             );
           }
           
