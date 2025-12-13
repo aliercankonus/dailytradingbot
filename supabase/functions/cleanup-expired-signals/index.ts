@@ -32,7 +32,8 @@ Deno.serve(async (req) => {
 
     console.log('Starting expired signals cleanup...');
 
-    // Clean up signal_rejection_log FIRST - keep only last 200 rows
+    // Clean up signal_rejection_log - keep only last 500 rows
+    // Delete using timestamp cutoff instead of fetching IDs (more efficient)
     console.log('Cleaning up signal_rejection_log table...');
     
     const { count: totalCount } = await supabase
@@ -40,33 +41,37 @@ Deno.serve(async (req) => {
       .select('*', { count: 'exact', head: true });
 
     let rejectionLogsDeleted = 0;
+    const MAX_REJECTION_LOGS = 500;
     
-    if (totalCount && totalCount > 200) {
-      const rowsToDelete = totalCount - 200;
+    if (totalCount && totalCount > MAX_REJECTION_LOGS) {
+      console.log(`Found ${totalCount} rejection logs, need to delete ${totalCount - MAX_REJECTION_LOGS}`);
       
-      const { data: oldestLogs, error: fetchOldestError } = await supabase
+      // Get the timestamp cutoff - the checked_at of the 500th newest log
+      const { data: cutoffLog, error: cutoffError } = await supabase
         .from('signal_rejection_log')
-        .select('id')
-        .order('checked_at', { ascending: true })
-        .limit(rowsToDelete);
+        .select('checked_at')
+        .order('checked_at', { ascending: false })
+        .range(MAX_REJECTION_LOGS - 1, MAX_REJECTION_LOGS - 1)
+        .single();
 
-      if (fetchOldestError) {
-        console.error('Error fetching oldest rejection logs:', fetchOldestError);
-      } else if (oldestLogs && oldestLogs.length > 0) {
-        const { error: deleteLogsError } = await supabase
+      if (cutoffError) {
+        console.error('Error getting cutoff timestamp:', cutoffError);
+      } else if (cutoffLog) {
+        // Delete all logs older than the cutoff timestamp
+        const { error: deleteLogsError, count: deletedCount } = await supabase
           .from('signal_rejection_log')
-          .delete()
-          .in('id', oldestLogs.map(log => log.id));
+          .delete({ count: 'exact' })
+          .lt('checked_at', cutoffLog.checked_at);
 
         if (deleteLogsError) {
           console.error('Error deleting old rejection logs:', deleteLogsError);
         } else {
-          rejectionLogsDeleted = oldestLogs.length;
-          console.log(`Deleted ${rejectionLogsDeleted} old rejection logs, keeping last 200`);
+          rejectionLogsDeleted = deletedCount || 0;
+          console.log(`Deleted ${rejectionLogsDeleted} old rejection logs, keeping last ${MAX_REJECTION_LOGS}`);
         }
       }
     } else {
-      console.log(`Rejection logs count (${totalCount}) is within limit of 200`);
+      console.log(`Rejection logs count (${totalCount}) is within limit of ${MAX_REJECTION_LOGS}`);
     }
 
     // Get all expired signals (expires_at < NOW)
