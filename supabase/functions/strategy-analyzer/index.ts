@@ -1350,19 +1350,55 @@ serve(async (req) => {
           continue;
         }
 
-        // ============= REVERSAL RISK FILTER =============
+        // ============= REVERSAL RISK FILTER (TWO-TIER) =============
         // Check for leading indicators that suggest potential reversal
+        // Tier 1: Block high risk (score >= 55) regardless of trend strength
+        // Tier 2: Block medium risk (score >= 45) in weak trends (ADX < 25)
         const reversalRisk = detectReversalRisk(trendData, trend);
-        if (reversalRisk.isHighRisk) {
+        
+        // TIER 2: Medium risk in weak trend = reject
+        if (reversalRisk.riskScore >= 45 && adx < 25) {
           rejectedByReversalRisk++;
-          console.log(`⚠️ ${symbol}: ${reversalRisk.reason}`);
+          console.log(`⚠️ ${symbol}: Medium reversal risk (${reversalRisk.riskScore}%) in weak trend (ADX=${adx.toFixed(1)})`);
           await logRejectionWithAI(
             supabase,
             userId,
             symbol,
-            `Reversal risk too high: ${reversalRisk.reason}`,
+            `Reversal risk medium in weak trend: score=${reversalRisk.riskScore}%, ADX=${adx.toFixed(1)} - ${reversalRisk.reason}`,
             { 
               reversalRiskScore: reversalRisk.riskScore,
+              adx: adx.toFixed(1),
+              tier: "MEDIUM_WEAK_TREND",
+              reversalSignals: reversalRisk.signals,
+              trend,
+              momentum: {
+                confirms: momentum?.confirms,
+                state: momentum?.state,
+                hasDivergence: momentum?.hasDivergence,
+                lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend,
+                macdDirectionAligned: momentum?.macdDirectionAligned
+              },
+              stochRsi: trendData.stochasticRsi?.aggregated,
+              trend1h: higherTimeframeFilter?.trend1h
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false
+          );
+          continue;
+        }
+        
+        // TIER 1: High risk = reject regardless of ADX
+        if (reversalRisk.riskScore >= 55) {
+          rejectedByReversalRisk++;
+          console.log(`⚠️ ${symbol}: High reversal risk (${reversalRisk.riskScore}%) - ${reversalRisk.reason}`);
+          await logRejectionWithAI(
+            supabase,
+            userId,
+            symbol,
+            `Reversal risk high: score=${reversalRisk.riskScore}% - ${reversalRisk.reason}`,
+            { 
+              reversalRiskScore: reversalRisk.riskScore,
+              tier: "HIGH",
               reversalSignals: reversalRisk.signals,
               trend,
               momentum: {
@@ -1380,7 +1416,7 @@ serve(async (req) => {
           );
           continue;
         } else if (reversalRisk.riskScore > 0) {
-          console.log(`📊 ${symbol}: ${reversalRisk.reason}`);
+          console.log(`📊 ${symbol}: Reversal risk acceptable (${reversalRisk.riskScore}%, ADX=${adx.toFixed(1)})`);
         }
 
         // ============= STOCHRSI EXTREME FILTER WITH SMART EXCEPTIONS =============
