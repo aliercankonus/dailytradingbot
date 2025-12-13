@@ -969,12 +969,12 @@ serve(async (req) => {
                    reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin) {
             console.log(`🚫 HEDGE BLOCKED: SHORT ${position.symbol} - StochRSI 4h K=${stochRsiK4h.toFixed(1)} > 80 (overbought, price likely to drop - helps SHORT)`);
           }
-          // If risk is HIGH (>= 80%), close position instead (ONLY if losing significantly)
-          // Raised threshold to 80% to reduce premature exits - these had 0% win rate in analysis
+          // If risk is VERY HIGH (>= 85%), close position instead (ONLY if losing significantly)
+          // Raised threshold to 85% to reduce premature exits - these had 0% win rate in analysis
           // Only apply if position has met minimum hold time AND position age > 1 hour
           const positionAgeHours = positionAgeMinutes / 60;
           const MIN_AGE_FOR_REVERSAL_EXIT_HOURS = 1.0; // Don't exit on reversal risk in first hour
-          const REVERSAL_RISK_EXIT_THRESHOLD = 80; // Raised from 70% default
+          const REVERSAL_RISK_EXIT_THRESHOLD = 85; // Raised from 80% to reduce false early exits
           
           if (hasMetMinHoldTime && 
               positionAgeHours >= MIN_AGE_FOR_REVERSAL_EXIT_HOURS &&
@@ -1126,12 +1126,12 @@ serve(async (req) => {
                    reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin) {
             console.log(`🚫 HEDGE BLOCKED: LONG ${position.symbol} - StochRSI 4h K=${stochRsiK4hLong.toFixed(1)} < 20 (oversold, price likely to bounce - helps LONG)`);
           }
-          // If risk is HIGH (>= 80%), close position instead (ONLY if losing significantly)
-          // Raised threshold to 80% to reduce premature exits - these had 0% win rate in analysis
+          // If risk is VERY HIGH (>= 85%), close position instead (ONLY if losing significantly)
+          // Raised threshold to 85% to reduce premature exits - these had 0% win rate in analysis
           // Only apply if position has met minimum hold time AND position age > 1 hour
           const positionAgeHoursLong = positionAgeMinutes / 60;
           const MIN_AGE_FOR_REVERSAL_EXIT_HOURS_LONG = 1.0;
-          const REVERSAL_RISK_EXIT_THRESHOLD_LONG = 80; // Raised from 70% default
+          const REVERSAL_RISK_EXIT_THRESHOLD_LONG = 85; // Raised from 80% to reduce false early exits
           
           if (!shouldClose && hasMetMinHoldTime && 
               positionAgeHoursLong >= MIN_AGE_FOR_REVERSAL_EXIT_HOURS_LONG &&
