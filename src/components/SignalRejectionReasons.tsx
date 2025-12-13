@@ -50,6 +50,8 @@ interface ScoreBreakdown {
   alignment: { score: number; max: number };
   technical: { score: number; max: number };
   entry: { score: number; max: number };
+  confidencePenalty: number;
+  subtotal: number;
   total: number;
   minRequired: number;
 }
@@ -57,8 +59,8 @@ interface ScoreBreakdown {
 const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
   if (!breakdown) return null;
   
-  // Parse format like "ADX:22/25 MOM:0/25 ALIGN:12/20 TECH:10/15 ENTRY:12/15"
-  const pattern = /(\w+):(\d+)\/(\d+)/g;
+  // Parse format like "ADX:22/25 MOM:0/25 ALIGN:12/20 TECH:10/15 ENTRY:12/20 CONF_PEN:-4"
+  const pattern = /(\w+):(-?\d+)\/(\d+)/g;
   const scores: Record<string, { score: number; max: number }> = {};
   let match;
   
@@ -67,15 +69,23 @@ const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
     scores[key.toLowerCase()] = { score: parseInt(score), max: parseInt(max) };
   }
   
+  // Also parse CONF_PEN:-4 format (no max value)
+  const confPenMatch = breakdown.match(/CONF_PEN:(-?\d+)/);
+  const confidencePenalty = confPenMatch ? parseInt(confPenMatch[1]) : 0;
+  
   if (Object.keys(scores).length === 0) return null;
+  
+  const subtotal = (scores.adx?.score || 0) + (scores.mom?.score || 0) + (scores.align?.score || 0) + (scores.tech?.score || 0) + (scores.entry?.score || 0);
   
   return {
     adx: scores.adx || { score: 0, max: 25 },
     momentum: scores.mom || { score: 0, max: 25 },
     alignment: scores.align || { score: 0, max: 20 },
     technical: scores.tech || { score: 0, max: 15 },
-    entry: scores.entry || { score: 0, max: 15 },
-    total: (scores.adx?.score || 0) + (scores.mom?.score || 0) + (scores.align?.score || 0) + (scores.tech?.score || 0) + (scores.entry?.score || 0),
+    entry: scores.entry || { score: 0, max: 20 },
+    confidencePenalty,
+    subtotal,
+    total: subtotal + confidencePenalty,
     minRequired: 50,
   };
 };
@@ -133,6 +143,7 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
   
   const totalScore = breakdown?.total || qualityScore || 0;
   const isPassing = totalScore >= minRequired;
+  const hasConfidencePenalty = breakdown && breakdown.confidencePenalty !== 0;
   
   return (
     <div className="space-y-2 p-2 bg-muted/30 rounded-md">
@@ -142,18 +153,38 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
           <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
           <span className="text-xs font-medium">Quality Score</span>
         </div>
-        <Badge 
-          variant={isPassing ? "default" : "destructive"} 
-          className="text-[10px] px-1.5 py-0"
-        >
-          {totalScore}/{100} {isPassing ? "✓" : `(min: ${minRequired})`}
-        </Badge>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge 
+                variant={isPassing ? "default" : "destructive"} 
+                className="text-[10px] px-1.5 py-0 cursor-help"
+              >
+                {totalScore}/100 {isPassing ? "✓" : `(min: ${minRequired})`}
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs max-w-[200px]">
+              {breakdown ? (
+                <div className="space-y-1">
+                  <p className="font-medium">Score Calculation:</p>
+                  <p className="font-mono text-[10px]">
+                    {breakdown.adx.score} + {breakdown.momentum.score} + {breakdown.alignment.score} + {breakdown.technical.score} + {breakdown.entry.score}
+                    {hasConfidencePenalty && ` ${breakdown.confidencePenalty >= 0 ? '+' : ''}${breakdown.confidencePenalty}`}
+                    {' = '}{totalScore}
+                  </p>
+                </div>
+              ) : (
+                <p>Quality score from strategy analyzer</p>
+              )}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
       
       {/* Overall Progress */}
       <div className="relative">
         <Progress 
-          value={totalScore} 
+          value={Math.max(0, totalScore)} 
           className="h-2"
         />
         {/* Min threshold marker */}
@@ -165,37 +196,72 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
       
       {/* Individual Score Breakdown */}
       {breakdown && (
-        <div className="grid grid-cols-1 gap-1 pt-1 border-t border-border/50">
-          <ScoreBar 
-            label="ADX Strength" 
-            score={breakdown.adx.score} 
-            max={breakdown.adx.max} 
-            icon={Activity}
-          />
-          <ScoreBar 
-            label="Momentum" 
-            score={breakdown.momentum.score} 
-            max={breakdown.momentum.max} 
-            icon={Zap}
-          />
-          <ScoreBar 
-            label="Alignment" 
-            score={breakdown.alignment.score} 
-            max={breakdown.alignment.max} 
-            icon={Layers}
-          />
-          <ScoreBar 
-            label="Technical" 
-            score={breakdown.technical.score} 
-            max={breakdown.technical.max} 
-            icon={Target}
-          />
-          <ScoreBar 
-            label="Entry Timing" 
-            score={breakdown.entry.score} 
-            max={breakdown.entry.max} 
-            icon={Timer}
-          />
+        <div className="space-y-1 pt-1 border-t border-border/50">
+          {/* Component scores */}
+          <div className="grid grid-cols-1 gap-1">
+            <ScoreBar 
+              label="ADX Strength" 
+              score={breakdown.adx.score} 
+              max={breakdown.adx.max} 
+              icon={Activity}
+            />
+            <ScoreBar 
+              label="Momentum" 
+              score={breakdown.momentum.score} 
+              max={breakdown.momentum.max} 
+              icon={Zap}
+            />
+            <ScoreBar 
+              label="Alignment" 
+              score={breakdown.alignment.score} 
+              max={breakdown.alignment.max} 
+              icon={Layers}
+            />
+            <ScoreBar 
+              label="Technical" 
+              score={breakdown.technical.score} 
+              max={breakdown.technical.max} 
+              icon={Target}
+            />
+            <ScoreBar 
+              label="Entry Timing" 
+              score={breakdown.entry.score} 
+              max={breakdown.entry.max} 
+              icon={Timer}
+            />
+          </div>
+          
+          {/* Subtotal and Penalty section */}
+          {hasConfidencePenalty && (
+            <div className="pt-1 mt-1 border-t border-border/30">
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="text-muted-foreground">Subtotal:</span>
+                <span className="font-mono">{breakdown.subtotal}/100</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px]">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="text-red-400 cursor-help flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3" />
+                        Confidence Penalty:
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs max-w-[180px]">
+                      <p>Penalty applied when confidence is too high (&gt;70%), which may indicate trend exhaustion rather than trend beginning.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <span className="font-mono text-red-400">{breakdown.confidencePenalty}</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-medium pt-0.5">
+                <span className="text-muted-foreground">Final Score:</span>
+                <span className={`font-mono ${isPassing ? 'text-green-400' : 'text-red-400'}`}>
+                  {totalScore}/100
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       )}
       
