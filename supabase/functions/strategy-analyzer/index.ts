@@ -334,11 +334,11 @@ const calculateQualityScore = (factors: QualityFactors): { score: number; breakd
 // Optimal entry zone: 50-60% confidence (trend confirmed but not exhausted)
 // CRITICAL FIX: 60-69 zone has 17% win rate vs 50-59 at 46% - add penalty!
 const getConfidencePenalty = (confidence: number): number => {
-  if (confidence >= 85) return -20;   // Heavy penalty for extreme confidence
-  if (confidence >= 80) return -15;   // Strong penalty
-  if (confidence >= 75) return -10;   // Moderate penalty
-  if (confidence >= 70) return -6;    // Light penalty
-  if (confidence >= 60) return -8;    // NEW: 60-69 zone penalty (17% win rate!)
+  if (confidence >= 85) return -25;   // Heavy penalty for extreme confidence (increased from -20)
+  if (confidence >= 80) return -18;   // Strong penalty (increased from -15)
+  if (confidence >= 75) return -12;   // Moderate penalty (increased from -10)
+  if (confidence >= 70) return -8;    // Light penalty (increased from -6)
+  if (confidence >= 60) return -12;   // DEAD ZONE: 60-69 penalty STRENGTHENED (from -8 to -12)
   if (confidence >= 50) return 0;     // Optimal zone: 50-59 (46% win rate)
   return -3;  // Too low confidence also not ideal
 };
@@ -965,13 +965,13 @@ const evaluateBollingerBands = (bollingerBands: any, trend: string): { boost: nu
 };
 
 // Calculate position size based on quality score
-// Must align with MIN_QUALITY_SCORE threshold (50)
+// Must align with MIN_QUALITY_SCORE threshold (55)
 const getPositionSizeFromQuality = (qualityScore: number): number => {
   if (qualityScore >= 85) return 1.0;      // Full size for excellent signals
   if (qualityScore >= 75) return 0.85;     // Near full
   if (qualityScore >= 65) return 0.7;      // Moderate
-  if (qualityScore >= 58) return 0.55;     // Good
-  if (qualityScore >= 50) return 0.4;      // Minimum acceptable (matches MIN_QUALITY_SCORE)
+  if (qualityScore >= 60) return 0.55;     // Good (adjusted for new threshold)
+  if (qualityScore >= 55) return 0.45;     // Minimum acceptable (matches MIN_QUALITY_SCORE)
   return 0;                                 // Don't trade
 };
 
@@ -1290,8 +1290,8 @@ serve(async (req) => {
     const recoveryConfidenceBoost = riskParams.loss_recovery_confidence_boost || 10;
     const recoveryPositionSizeMultiplier = (riskParams.loss_recovery_position_size_percent || 50) / 100;
     
-    // LOWERED minimum quality threshold based on win rate correlation analysis
-    const BASE_MIN_QUALITY_SCORE = 50;  // Was 58 - lower scores (50-59) have higher win rates
+    // INCREASED minimum quality threshold for better win rate
+    const BASE_MIN_QUALITY_SCORE = 55;  // Increased from 50 to 55 for higher quality signals
     const MIN_QUALITY_SCORE = isInRecoveryMode 
       ? BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost 
       : BASE_MIN_QUALITY_SCORE;
