@@ -1600,7 +1600,26 @@ serve(async (req) => {
           await logRejectionWithAI(
             supabase, userId, symbol,
             `HARD GATE: ADX too low (${adx.toFixed(1)} < 20) - no trend strength`,
-            { adx: adx.toFixed(1), gate: "ADX_TOO_LOW" },
+            { 
+              gate: "ADX_TOO_LOW",
+              adx: adx.toFixed(1),
+              adxRequired: 20,
+              trend,
+              confidence,
+              trendConsistency: trendData.trendConsistency?.toFixed(1),
+              // Additional context for UI
+              momentum: {
+                state: momentum?.state || "none",
+                confirms: momentum?.confirms ?? false,
+                macdHistogram: momentum?.macdHistogram?.toFixed(4),
+                lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend
+              },
+              stochRsi: trendData.stochasticRsi?.aggregated,
+              volatility: {
+                atrPercent: trendData.volatility?.atrPercent?.toFixed(2),
+                isRanging: trendData.ranging?.isRanging
+              }
+            },
             trendData,
             riskParams.ai_analysis_enabled !== false
           );
@@ -1615,7 +1634,29 @@ serve(async (req) => {
           await logRejectionWithAI(
             supabase, userId, symbol,
             `HARD GATE: No momentum confirmation (state=${momentumState}, confirms=${momentumConfirms})`,
-            { momentumState, momentumConfirms, gate: "NO_MOMENTUM_CONFIRMATION" },
+            { 
+              gate: "NO_MOMENTUM_CONFIRMATION",
+              momentumState,
+              momentumConfirms,
+              adx: adx.toFixed(1),
+              trend,
+              confidence,
+              // Detailed momentum analysis
+              momentum: {
+                state: momentumState,
+                confirms: momentumConfirms,
+                macdHistogram: momentum?.macdHistogram?.toFixed(4),
+                macdDirectionAligned: momentum?.macdDirectionAligned,
+                lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend,
+                hasDivergence: momentum?.hasDivergence
+              },
+              stochRsi: trendData.stochasticRsi?.aggregated,
+              htfFilter: {
+                aligned: higherTimeframeFilter?.aligned,
+                trend4h: higherTimeframeFilter?.trend4h,
+                trend1h: higherTimeframeFilter?.trend1h
+              }
+            },
             trendData,
             riskParams.ai_analysis_enabled !== false
           );

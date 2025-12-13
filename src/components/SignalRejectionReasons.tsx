@@ -704,6 +704,325 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
   );
 };
 
+// ============= HARD GATE DISPLAY COMPONENTS =============
+
+const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const adx = parseFloat(filtersStatus?.adx) || 0;
+  const adxRequired = filtersStatus?.adxRequired || 20;
+  const trend = filtersStatus?.trend || trendData?.trend || "unknown";
+  const confidence = filtersStatus?.confidence || trendData?.confidence || 0;
+  const trendConsistency = filtersStatus?.trendConsistency || trendData?.trendConsistency || 0;
+  const momentum = filtersStatus?.momentum || trendData?.momentum;
+  const stochRsi = filtersStatus?.stochRsi || trendData?.stochasticRsi?.aggregated;
+  const volatility = filtersStatus?.volatility || trendData?.volatility;
+  
+  const adxPercent = Math.min((adx / 40) * 100, 100);
+  const adxDeficit = adxRequired - adx;
+  
+  return (
+    <div className="space-y-3 p-3 bg-red-500/10 rounded-md border border-red-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <XCircle className="h-4 w-4 text-red-500" />
+          <span className="text-xs font-semibold text-red-400">HARD GATE: ADX Too Low</span>
+        </div>
+        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+          Need +{adxDeficit.toFixed(1)}
+        </Badge>
+      </div>
+      
+      {/* ADX Visual Bar */}
+      <div className="space-y-1">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">ADX Trend Strength</span>
+          <span className="font-mono text-red-400">{adx.toFixed(1)} / {adxRequired} required</span>
+        </div>
+        <div className="relative h-2 bg-muted/50 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-red-500 rounded-full transition-all"
+            style={{ width: `${adxPercent}%` }}
+          />
+          <div 
+            className="absolute top-0 h-full w-0.5 bg-yellow-400"
+            style={{ left: `${(adxRequired / 40) * 100}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-[9px] text-muted-foreground">
+          <span>Weak (0)</span>
+          <span>Required ({adxRequired})</span>
+          <span>Strong (40+)</span>
+        </div>
+      </div>
+      
+      {/* Context Grid */}
+      <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Trend</div>
+          <div className="font-medium capitalize">{trend}</div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Confidence</div>
+          <div className="font-medium">{confidence}%</div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Alignment</div>
+          <div className="font-medium">{parseFloat(trendConsistency).toFixed(0)}%</div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Momentum</div>
+          <div className="font-medium capitalize">{momentum?.state || "none"}</div>
+        </div>
+      </div>
+      
+      {/* Detailed Momentum Info */}
+      {momentum && (
+        <div className="flex flex-wrap gap-1.5 text-[9px]">
+          <Badge variant="outline" className="text-[9px] px-1 py-0">
+            MACD: {momentum.macdHistogram || "N/A"}
+          </Badge>
+          <Badge variant="outline" className={`text-[9px] px-1 py-0 ${momentum.confirms ? 'text-green-400' : 'text-red-400'}`}>
+            Confirms: {momentum.confirms ? "Yes" : "No"}
+          </Badge>
+          {stochRsi && (
+            <Badge variant="outline" className="text-[9px] px-1 py-0">
+              StochRSI: {stochRsi.signal || "neutral"}
+            </Badge>
+          )}
+          {volatility && (
+            <Badge variant="outline" className="text-[9px] px-1 py-0">
+              ATR: {volatility.atrPercent}%
+            </Badge>
+          )}
+        </div>
+      )}
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-red-400">⚠️ Why blocked:</span> ADX below 20 indicates no clear trend direction. 
+        Wait for trend strength to develop before entry.
+      </div>
+    </div>
+  );
+};
+
+const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const momentumState = filtersStatus?.momentumState || filtersStatus?.momentum?.state || "none";
+  const momentumConfirms = filtersStatus?.momentumConfirms ?? filtersStatus?.momentum?.confirms ?? false;
+  const momentum = filtersStatus?.momentum || trendData?.momentum;
+  const adx = parseFloat(filtersStatus?.adx) || trendData?.volatility?.adx || 0;
+  const trend = filtersStatus?.trend || trendData?.trend || "unknown";
+  const confidence = filtersStatus?.confidence || trendData?.confidence || 0;
+  const htfFilter = filtersStatus?.htfFilter || {};
+  const stochRsi = filtersStatus?.stochRsi || trendData?.stochasticRsi?.aggregated;
+  
+  const getMomentumStateColor = (state: string) => {
+    if (state === "confirmed") return "text-green-400 bg-green-500/20";
+    if (state === "building") return "text-yellow-400 bg-yellow-500/20";
+    if (state === "mixed") return "text-orange-400 bg-orange-500/20";
+    return "text-red-400 bg-red-500/20";
+  };
+  
+  return (
+    <div className="space-y-3 p-3 bg-orange-500/10 rounded-md border border-orange-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Activity className="h-4 w-4 text-orange-500" />
+          <span className="text-xs font-semibold text-orange-400">HARD GATE: No Momentum Confirmation</span>
+        </div>
+        <Badge className={`text-[10px] px-1.5 py-0 ${getMomentumStateColor(momentumState)}`}>
+          {momentumState}
+        </Badge>
+      </div>
+      
+      {/* Momentum Checklist */}
+      <div className="space-y-1.5">
+        <div className="text-[10px] text-muted-foreground mb-1">Momentum Requirements:</div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${momentumState !== "none" ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+            {momentumState !== "none" ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+            <span>State: {momentumState}</span>
+          </div>
+          <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${momentumConfirms ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+            {momentumConfirms ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+            <span>Confirms: {momentumConfirms ? "Yes" : "No"}</span>
+          </div>
+          <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${momentum?.macdDirectionAligned ? 'bg-green-500/10' : 'bg-muted/30'}`}>
+            {momentum?.macdDirectionAligned ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-muted-foreground" />}
+            <span>MACD Aligned: {momentum?.macdDirectionAligned ? "Yes" : "No"}</span>
+          </div>
+          <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${momentum?.lastCloseAlignsWithTrend ? 'bg-green-500/10' : 'bg-muted/30'}`}>
+            {momentum?.lastCloseAlignsWithTrend ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-muted-foreground" />}
+            <span>Close Aligns: {momentum?.lastCloseAlignsWithTrend ? "Yes" : "No"}</span>
+          </div>
+        </div>
+      </div>
+      
+      {/* Divergence Check */}
+      {momentum?.hasDivergence && (
+        <div className="flex items-center gap-1.5 p-1.5 bg-red-500/20 rounded text-[10px] text-red-400">
+          <AlertTriangle className="h-3 w-3" />
+          <span>⚠️ Divergence Detected - Price and MACD moving in opposite directions</span>
+        </div>
+      )}
+      
+      {/* Context Info */}
+      <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">ADX</div>
+          <div className="font-medium">{adx.toFixed(1)}</div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Trend</div>
+          <div className="font-medium capitalize">{trend}</div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">4H</div>
+          <div className="font-medium capitalize">{htfFilter.trend4h || "N/A"}</div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">1H</div>
+          <div className="font-medium capitalize">{htfFilter.trend1h || "N/A"}</div>
+        </div>
+      </div>
+      
+      {/* StochRSI Info */}
+      {stochRsi && (
+        <div className="flex flex-wrap gap-1.5 text-[9px]">
+          <Badge variant="outline" className="text-[9px] px-1 py-0">
+            StochRSI: {stochRsi.signal || "neutral"}
+          </Badge>
+          <Badge variant="outline" className="text-[9px] px-1 py-0">
+            MACD: {momentum?.macdHistogram || "N/A"}
+          </Badge>
+        </div>
+      )}
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-orange-400">⚠️ Why blocked:</span> Momentum must be "confirmed" with MACD alignment 
+        and no divergence. Current state "{momentumState}" doesn't meet entry requirements.
+      </div>
+    </div>
+  );
+};
+
+const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const htfAligned = filtersStatus?.htfAligned ?? false;
+  const confidence = filtersStatus?.confidence || trendData?.confidence || 0;
+  const trend4h = trendData?.timeframes?.['4h']?.trend || filtersStatus?.trend4h || "unknown";
+  const trend1h = trendData?.timeframes?.['1h']?.trend || filtersStatus?.trend1h || "unknown";
+  const conf4h = trendData?.timeframes?.['4h']?.confidence || 0;
+  const conf1h = trendData?.timeframes?.['1h']?.confidence || 0;
+  
+  return (
+    <div className="space-y-3 p-3 bg-yellow-500/10 rounded-md border border-yellow-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Layers className="h-4 w-4 text-yellow-500" />
+          <span className="text-xs font-semibold text-yellow-400">HARD GATE: HTF Not Aligned</span>
+        </div>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-yellow-400 border-yellow-500/30">
+          Conf: {confidence}%
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        Higher timeframes must align OR confidence must be ≥65%
+      </div>
+      
+      {/* Timeframe Grid */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className={`p-2 rounded border ${trend4h === trend1h ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+          <div className="text-[10px] text-muted-foreground">4H Trend</div>
+          <div className="font-medium capitalize text-sm">{trend4h}</div>
+          <div className="text-[9px] text-muted-foreground">Conf: {conf4h}%</div>
+        </div>
+        <div className={`p-2 rounded border ${trend4h === trend1h ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+          <div className="text-[10px] text-muted-foreground">1H Trend</div>
+          <div className="font-medium capitalize text-sm">{trend1h}</div>
+          <div className="text-[9px] text-muted-foreground">Conf: {conf1h}%</div>
+        </div>
+      </div>
+      
+      {/* Requirements Check */}
+      <div className="space-y-1">
+        <div className={`flex items-center gap-1.5 text-[10px] ${htfAligned ? 'text-green-400' : 'text-red-400'}`}>
+          {htfAligned ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+          HTF Aligned: {htfAligned ? "Yes" : "No"}
+        </div>
+        <div className={`flex items-center gap-1.5 text-[10px] ${confidence >= 65 ? 'text-green-400' : 'text-red-400'}`}>
+          {confidence >= 65 ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+          Confidence ≥ 65%: {confidence}%
+        </div>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-yellow-400">⚠️ Why blocked:</span> 4H and 1H trends must agree, or overall 
+        confidence must be ≥65% to bypass alignment requirement.
+      </div>
+    </div>
+  );
+};
+
+const HardGateConfidenceDeadZoneDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const confidence = filtersStatus?.confidence || trendData?.confidence || 0;
+  const adx = parseFloat(filtersStatus?.adx) || trendData?.volatility?.adx || 0;
+  
+  return (
+    <div className="space-y-3 p-3 bg-purple-500/10 rounded-md border border-purple-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <AlertTriangle className="h-4 w-4 text-purple-500" />
+          <span className="text-xs font-semibold text-purple-400">HARD GATE: Confidence Dead Zone</span>
+        </div>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-purple-400 border-purple-500/30">
+          60-69% Zone
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        Confidence 60-69% has only 31.73% win rate vs 46.34% for 50-59%
+      </div>
+      
+      {/* Visual Confidence Zones */}
+      <div className="space-y-1.5">
+        <div className="relative h-3 bg-muted/30 rounded-full overflow-hidden">
+          <div className="absolute h-full bg-green-500/50" style={{ left: '50%', width: '10%' }} />
+          <div className="absolute h-full bg-red-500/50" style={{ left: '60%', width: '10%' }} />
+          <div className="absolute h-full bg-yellow-500/50" style={{ left: '70%', width: '30%' }} />
+          <div 
+            className="absolute h-full w-1 bg-foreground rounded-full"
+            style={{ left: `${confidence}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-[9px] text-muted-foreground">
+          <span>Low (&lt;50)</span>
+          <span className="text-green-400">Optimal (50-59)</span>
+          <span className="text-red-400">Dead Zone (60-69)</span>
+          <span className="text-yellow-400">High (70+)</span>
+        </div>
+      </div>
+      
+      {/* Current Values */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="p-2 bg-red-500/20 rounded border border-red-500/30 text-center">
+          <div className="text-[10px] text-muted-foreground">Confidence</div>
+          <div className="font-medium text-red-400">{confidence}%</div>
+          <div className="text-[9px] text-muted-foreground">In dead zone</div>
+        </div>
+        <div className={`p-2 rounded border text-center ${adx >= 30 ? 'bg-green-500/20 border-green-500/30' : 'bg-muted/30 border-muted/50'}`}>
+          <div className="text-[10px] text-muted-foreground">ADX</div>
+          <div className={`font-medium ${adx >= 30 ? 'text-green-400' : ''}`}>{adx.toFixed(1)}</div>
+          <div className="text-[9px] text-muted-foreground">{adx >= 30 ? "Would bypass" : "Need ≥30"}</div>
+        </div>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-purple-400">⚠️ Why blocked:</span> 60-69% confidence indicates trend exhaustion. 
+        ADX ≥30 required to bypass this zone. Wait for pullback to 50-59% zone or stronger trend.
+      </div>
+    </div>
+  );
+};
+
 const ActiveSignalDisplay = () => {
   return (
     <div className="flex items-center gap-2 p-2 bg-green-500/10 rounded-md border border-green-500/20">
@@ -1119,6 +1438,26 @@ export const SignalRejectionReasons = () => {
     // Already has active signal
     if (reason.includes("active signal")) {
       return <ActiveSignalDisplay />;
+    }
+    
+    // HARD GATE: ADX too low
+    if (reason.includes("HARD GATE: ADX too low") || fs?.gate === "ADX_TOO_LOW") {
+      return <HardGateAdxDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // HARD GATE: No momentum confirmation
+    if (reason.includes("HARD GATE: No momentum") || fs?.gate === "NO_MOMENTUM_CONFIRMATION") {
+      return <HardGateMomentumDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // HARD GATE: HTF not aligned
+    if (reason.includes("HARD GATE: HTF not aligned") || fs?.gate === "HTF_NOT_ALIGNED") {
+      return <HardGateHtfDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // HARD GATE: Confidence dead zone
+    if (reason.includes("HARD GATE: Confidence dead zone") || fs?.gate === "CONFIDENCE_DEAD_ZONE") {
+      return <HardGateConfidenceDeadZoneDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // Reversal risk rejection
