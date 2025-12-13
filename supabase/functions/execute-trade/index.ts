@@ -397,6 +397,44 @@ serve(async (req) => {
     }
     console.log(`✓ ADX hard gate passed: ${adxValue?.toFixed(1)} >= ${MIN_ADX_THRESHOLD}`);
 
+    // ============================================================
+    // DYNAMIC QUALITY THRESHOLD (aligned with strategy-analyzer)
+    // Adjust quality threshold based on ADX and recovery mode
+    // ============================================================
+    const isInRecoveryMode = riskParams.consecutive_losses >= riskParams.consecutive_loss_threshold;
+    let dynamicQualityThreshold = 55; // Base threshold
+    
+    if (isInRecoveryMode) {
+      dynamicQualityThreshold = 65; // Stricter in recovery mode
+      console.log(`🔒 Recovery Mode: Quality threshold raised to ${dynamicQualityThreshold}`);
+    } else if (adxValue >= 35) {
+      dynamicQualityThreshold = 50; // Relaxed in very strong trends
+      console.log(`📈 Strong trend (ADX ${adxValue.toFixed(1)}): Quality threshold lowered to ${dynamicQualityThreshold}`);
+    } else if (adxValue >= 25) {
+      dynamicQualityThreshold = 53;
+    }
+    
+    // Check signal quality score from indicators
+    const signalQualityScore = signal.indicators?.qualityScore ?? 0;
+    if (signalQualityScore > 0 && signalQualityScore < dynamicQualityThreshold) {
+      throw new Error(`Signal quality score (${signalQualityScore}) below dynamic threshold (${dynamicQualityThreshold}) - trade cancelled`);
+    }
+    console.log(`✓ Quality check: ${signalQualityScore} >= ${dynamicQualityThreshold} threshold`);
+
+    // ============================================================
+    // VOLUME SCORE VALIDATION (aligned with strategy-analyzer)
+    // Volume score from calculate-trend provides additional confirmation
+    // ============================================================
+    const volumeScore = trendData?.volumeScore ?? 0;
+    const volumeConfirms = trendData?.momentum?.volumeConfirms ?? false;
+    
+    // Warn on low volume but don't block unless extremely low
+    if (volumeScore === 0 && !volumeConfirms) {
+      console.warn(`⚠️ Low volume score (${volumeScore}) - trade may have higher risk`);
+    } else if (volumeScore >= 5) {
+      console.log(`✅ Volume confirms trend: score=${volumeScore}/10`);
+    }
+
     // NOTE: Confidence filter removed - quality score calculation already incorporates
     // confidence penalties. Signal quality score (stored in indicators.qualityScore) is the
     // primary filter. Having a separate confidence gate was causing double-filtering and

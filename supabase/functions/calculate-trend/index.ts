@@ -1351,6 +1351,22 @@ serve(async (req) => {
           "1h": volume1h,
           "4h": volume4h,
         },
+        // NEW: Volume Score for strategy-analyzer quality scoring (0-10 points)
+        volumeScore: (() => {
+          const volumeConfirms = volumeConfirmsDirection;
+          const volumeSpike = volume1h.volumeSpike ?? false;
+          const volumeRatio = volume1h.volumeRatio ?? 1.0;
+          
+          // Best case: Volume confirms AND spike detected with high ratio
+          if (volumeConfirms && volumeSpike && volumeRatio > 2.0) return 10;
+          if (volumeConfirms && volumeSpike) return 8;
+          if (volumeConfirms && volumeRatio > 1.5) return 7;
+          if (volumeConfirms) return 5;
+          if (volumeRatio > 1.5) return 3;
+          if (volumeRatio > 1.2) return 2;
+          if (dominantTrend === "neutral") return 1;
+          return 0;
+        })(),
         bollingerBands: {
           "15m": bb15m,
           "30m": bb30m,
