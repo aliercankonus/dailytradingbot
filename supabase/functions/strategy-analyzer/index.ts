@@ -300,13 +300,14 @@ const BUILT_IN_TEMPLATES = [
 
 // ============= IMPROVEMENT #1: Quality Score System =============
 // Replace tier-based filtering with unified 0-100 quality score
-// NEW: Added confidence penalty and pullback bonus for confidence inversion fix
+// NEW: Added confidence penalty, pullback bonus, volume score, and strategy performance bonus
 interface QualityFactors {
   adxScore: number;          // 0-25 points based on trend strength
   momentumScore: number;     // 0-20 points based on momentum confirmation (REDUCED from 25)
   alignmentScore: number;    // 0-20 points based on timeframe alignment
   technicalScore: number;    // 0-15 points based on StochRSI/Bollinger signals
   entryTimingScore: number;  // 0-25 points based on pullback/entry timing (INCREASED from 20)
+  volumeScore: number;       // 0-10 points based on volume confirmation (NEW)
   confidencePenalty: number; // 0 to -20 penalty for high confidence (inversion fix)
   directionBonus: number;    // +3 for SHORT signals (SELL outperforms BUY historically)
 }
@@ -318,15 +319,66 @@ const calculateQualityScore = (factors: QualityFactors): { score: number; breakd
     factors.alignmentScore +
     factors.technicalScore +
     factors.entryTimingScore +
+    factors.volumeScore +        // NEW: Volume score
     factors.confidencePenalty +  // Can be negative!
     factors.directionBonus       // +3 for SELL signals
   ));
   
   const penaltyStr = factors.confidencePenalty < 0 ? ` CONF_PEN:${factors.confidencePenalty}` : '';
   const bonusStr = factors.directionBonus > 0 ? ` DIR_BONUS:+${factors.directionBonus}` : '';
-  const breakdown = `ADX:${factors.adxScore}/25 MOM:${factors.momentumScore}/20 ALIGN:${factors.alignmentScore}/20 TECH:${factors.technicalScore}/15 ENTRY:${factors.entryTimingScore}/25${penaltyStr}${bonusStr}`;
+  const volumeStr = factors.volumeScore > 0 ? ` VOL:${factors.volumeScore}/10` : '';
+  const breakdown = `ADX:${factors.adxScore}/25 MOM:${factors.momentumScore}/20 ALIGN:${factors.alignmentScore}/20 TECH:${factors.technicalScore}/15 ENTRY:${factors.entryTimingScore}/25${volumeStr}${penaltyStr}${bonusStr}`;
   
   return { score, breakdown };
+};
+
+// ============= NEW: Volume Score Component (0-10 points) =============
+// Volume confirms trend direction and indicates conviction
+const getVolumeScore = (trendData: any, trend: string): number => {
+  const momentum = trendData?.momentum || {};
+  const volatility = trendData?.volatility || {};
+  
+  const volumeConfirms = momentum.volumeConfirms ?? false;
+  const volumeSpike = volatility.volumeSpike ?? false;
+  const volumeRatio = volatility.volumeRatio ?? 1.0;
+  
+  // Best case: Volume confirms AND spike detected with high ratio
+  if (volumeConfirms && volumeSpike && volumeRatio > 2.0) {
+    return 10;  // Strong volume surge confirming trend
+  }
+  
+  // Volume confirms with spike
+  if (volumeConfirms && volumeSpike) {
+    return 8;
+  }
+  
+  // Volume confirms with above-average volume
+  if (volumeConfirms && volumeRatio > 1.5) {
+    return 7;
+  }
+  
+  // Volume confirms only
+  if (volumeConfirms) {
+    return 5;
+  }
+  
+  // Above average volume without confirmation
+  if (volumeRatio > 1.5) {
+    return 3;
+  }
+  
+  // Slightly above average
+  if (volumeRatio > 1.2) {
+    return 2;
+  }
+  
+  // Neutral trend - no volume penalty
+  if (trend === "neutral") {
+    return 1;
+  }
+  
+  // Low volume in directional trend - no bonus
+  return 0;
 };
 
 // ============= CONFIDENCE INVERSION FIX =============
@@ -1047,39 +1099,73 @@ serve(async (req) => {
     const SYMBOL_WIN_RATE_THRESHOLD = 35;
     const SYMBOL_MIN_TRADES_FOR_FILTER = 10;
     
-    const { data: symbolPerformance } = await supabase
+    // ============= NEW: STRATEGY PERFORMANCE FILTER =============
+    // Disable strategies with win rate below 40% (based on last 20 trades per strategy)
+    const STRATEGY_WIN_RATE_THRESHOLD = 40;
+    const STRATEGY_MIN_TRADES_FOR_FILTER = 10;
+    const STRATEGY_HIGH_PERFORMER_THRESHOLD = 60; // Strategies above 60% get bonus
+    
+    const { data: recentPositions } = await supabase
       .from("positions")
-      .select("symbol, realized_pnl")
+      .select("symbol, strategy_name, realized_pnl")
       .eq("user_id", userId)
       .eq("status", "closed")
       .order("closed_at", { ascending: false })
-      .limit(200);  // Get recent trades to analyze
+      .limit(500);  // Get more trades to analyze both symbol and strategy performance
     
     // Calculate win rate per symbol
     const symbolWinRates = new Map<string, { wins: number; total: number; winRate: number }>();
     const disabledSymbols = new Set<string>();
     
-    if (symbolPerformance?.length) {
-      for (const trade of symbolPerformance) {
-        const current = symbolWinRates.get(trade.symbol) || { wins: 0, total: 0, winRate: 0 };
-        current.total++;
-        if ((trade.realized_pnl || 0) > 0) current.wins++;
-        current.winRate = (current.wins / current.total) * 100;
-        symbolWinRates.set(trade.symbol, current);
+    // Calculate win rate per strategy
+    const strategyWinRates = new Map<string, { wins: number; total: number; winRate: number }>();
+    const disabledStrategies = new Set<string>();
+    const highPerformingStrategies = new Set<string>();
+    
+    if (recentPositions?.length) {
+      for (const trade of recentPositions) {
+        // Symbol performance
+        const symbolStats = symbolWinRates.get(trade.symbol) || { wins: 0, total: 0, winRate: 0 };
+        symbolStats.total++;
+        if ((trade.realized_pnl || 0) > 0) symbolStats.wins++;
+        symbolStats.winRate = (symbolStats.wins / symbolStats.total) * 100;
+        symbolWinRates.set(trade.symbol, symbolStats);
+        
+        // Strategy performance
+        const strategyName = trade.strategy_name || "Unknown";
+        const strategyStats = strategyWinRates.get(strategyName) || { wins: 0, total: 0, winRate: 0 };
+        strategyStats.total++;
+        if ((trade.realized_pnl || 0) > 0) strategyStats.wins++;
+        strategyStats.winRate = (strategyStats.wins / strategyStats.total) * 100;
+        strategyWinRates.set(strategyName, strategyStats);
       }
       
-      // Check each symbol's performance
+      // Check symbol performance
       for (const [symbol, stats] of symbolWinRates.entries()) {
         if (stats.total >= SYMBOL_MIN_TRADES_FOR_FILTER && stats.winRate < SYMBOL_WIN_RATE_THRESHOLD) {
           disabledSymbols.add(symbol);
           console.log(`⛔ SYMBOL FILTER: ${symbol} disabled - win rate ${stats.winRate.toFixed(1)}% < ${SYMBOL_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades)`);
         }
       }
+      
+      // Check strategy performance
+      for (const [strategy, stats] of strategyWinRates.entries()) {
+        if (stats.total >= STRATEGY_MIN_TRADES_FOR_FILTER) {
+          if (stats.winRate < STRATEGY_WIN_RATE_THRESHOLD) {
+            disabledStrategies.add(strategy);
+            console.log(`⛔ STRATEGY FILTER: "${strategy}" disabled - win rate ${stats.winRate.toFixed(1)}% < ${STRATEGY_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades)`);
+          } else if (stats.winRate >= STRATEGY_HIGH_PERFORMER_THRESHOLD) {
+            highPerformingStrategies.add(strategy);
+            console.log(`⭐ STRATEGY BOOST: "${strategy}" is high performer - win rate ${stats.winRate.toFixed(1)}% (${stats.wins}/${stats.total} trades)`);
+          }
+        }
+      }
     }
     
     // Filter out disabled symbols
     const activeSymbols = symbols.filter(s => !disabledSymbols.has(s.symbol));
-    console.log(`📊 Symbol filter: ${symbols.length} total → ${activeSymbols.length} active (${disabledSymbols.size} disabled due to low win rate)`);
+    console.log(`📊 Symbol filter: ${symbols.length} total → ${activeSymbols.length} active (${disabledSymbols.size} disabled)`);
+    console.log(`📊 Strategy filter: ${disabledStrategies.size} disabled, ${highPerformingStrategies.size} high performers`);
 
     // Fetch custom strategies (REQUIRED)
     const { data: customStrategies, error: strategiesError } = await supabase
@@ -1090,17 +1176,18 @@ serve(async (req) => {
 
     // Combine user's custom strategies with built-in templates
     // User strategies are evaluated first (they take priority), then built-ins fill gaps
-    const userStrategies = customStrategies || [];
+    // FILTER OUT disabled strategies based on performance
+    const userStrategies = (customStrategies || []).filter(s => !disabledStrategies.has(s.name));
     const userStrategyNames = new Set(userStrategies.map(s => s.name.toLowerCase()));
     
-    // Add built-in templates that don't duplicate user strategies
+    // Add built-in templates that don't duplicate user strategies AND aren't disabled
     const builtInToInclude = BUILT_IN_TEMPLATES.filter(t => 
-      !userStrategyNames.has(t.name.toLowerCase())
+      !userStrategyNames.has(t.name.toLowerCase()) && !disabledStrategies.has(t.name)
     );
     
     const allStrategies = [...userStrategies, ...builtInToInclude];
     
-    console.log(`📊 ${activeSymbols.length} symbols | ${userStrategies.length} user strategies + ${builtInToInclude.length} built-in templates = ${allStrategies.length} total`);
+    console.log(`📊 ${activeSymbols.length} symbols | ${userStrategies.length} user strategies + ${builtInToInclude.length} built-in templates = ${allStrategies.length} total (after performance filter)`);
 
     // Fetch recent signals and active positions
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
@@ -1290,15 +1377,27 @@ serve(async (req) => {
     const recoveryConfidenceBoost = riskParams.loss_recovery_confidence_boost || 10;
     const recoveryPositionSizeMultiplier = (riskParams.loss_recovery_position_size_percent || 50) / 100;
     
-    // INCREASED minimum quality threshold for better win rate
-    const BASE_MIN_QUALITY_SCORE = 55;  // Increased from 50 to 55 for higher quality signals
-    const MIN_QUALITY_SCORE = isInRecoveryMode 
-      ? BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost 
-      : BASE_MIN_QUALITY_SCORE;
+    // ============= DYNAMIC QUALITY THRESHOLD =============
+    // Adjust threshold based on market conditions:
+    // - Strong ADX (≥35): Allow lower quality (more signals in strong trends)
+    // - Normal ADX (20-35): Standard threshold
+    // - Recovery mode: Higher threshold (fewer, higher quality signals)
+    const BASE_MIN_QUALITY_SCORE = 55;
+    const DEFAULT_MIN_QUALITY = BASE_MIN_QUALITY_SCORE;
+    
+    const getMinQualityScore = (adx: number, inRecovery: boolean): number => {
+      if (inRecovery) {
+        return BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost; // 65 in recovery
+      }
+      // Dynamic based on ADX - strong trends = allow more signals
+      if (adx >= 35) return 50;  // Strong trend: lower threshold
+      if (adx >= 25) return 53;  // Good trend: slightly lower
+      return BASE_MIN_QUALITY_SCORE;  // Normal: 55
+    };
     
     if (isInRecoveryMode) {
       console.log(`🔄 LOSS RECOVERY MODE ACTIVE: ${riskParams.consecutive_losses} consecutive losses`);
-      console.log(`   → Quality threshold: ${MIN_QUALITY_SCORE} (base ${BASE_MIN_QUALITY_SCORE} + ${recoveryConfidenceBoost})`);
+      console.log(`   → Quality threshold: ${BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost} (base ${BASE_MIN_QUALITY_SCORE} + ${recoveryConfidenceBoost})`);
       console.log(`   → Position size multiplier: ${recoveryPositionSizeMultiplier * 100}%`);
     }
 
@@ -1812,14 +1911,18 @@ serve(async (req) => {
         const confidencePenalty = getConfidencePenalty(confidence);
         // Direction bonus: +3 for SHORT/SELL signals (historically 38% vs 31% win rate)
         const directionBonus = trend === "bearish" ? 3 : 0;
+        // NEW: Volume score component
+        const volumeScore = getVolumeScore(trendData, trend);
+        
         const qualityFactors: QualityFactors = {
           adxScore: getAdxScore(adx),
           momentumScore: getMomentumScore(momentum),
           alignmentScore: getAlignmentScore(confidence, trendConsistency, higherTimeframeFilter?.aligned || false, trendData),
           technicalScore: getTechnicalScore(trendData, trend, symbol),
           entryTimingScore: Math.max(0, pullbackAnalysis.entryTimingScore),
-          confidencePenalty: confidencePenalty,  // Penalize high confidence entries
-          directionBonus: directionBonus,        // +3 for SHORT signals
+          volumeScore: volumeScore,                // NEW: Volume confirmation
+          confidencePenalty: confidencePenalty,    // Penalize high confidence entries
+          directionBonus: directionBonus,          // +3 for SHORT signals
         };
 
         const { score: qualityScore, breakdown } = calculateQualityScore(qualityFactors);
@@ -1828,16 +1931,26 @@ serve(async (req) => {
         if (confidencePenalty < 0) {
           console.log(`⚠️ ${symbol} Confidence penalty: ${confidencePenalty} (confidence=${confidence}% is above optimal 50-70% zone)`);
         }
+        // Log volume score
+        if (volumeScore > 0) {
+          console.log(`📊 ${symbol} Volume score: +${volumeScore}/10 pts`);
+        }
         console.log(`📊 ${symbol} Quality: ${qualityScore}/100 [${breakdown}] | Regime: ${regime.regime} | Entry: ${pullbackAnalysis.reason} | Pullback: ${pullbackAnalysis.hasBothConditions ? 'OPTIMAL' : pullbackAnalysis.isPullback ? 'YES' : 'NO'}`);
 
+        // ============= DYNAMIC QUALITY THRESHOLD =============
+        // Calculate threshold based on ADX for this specific symbol
+        const MIN_QUALITY_SCORE = getMinQualityScore(adx, isInRecoveryMode);
+        
         // Check minimum quality threshold
         if (qualityScore < MIN_QUALITY_SCORE) {
           rejectedByQuality++;
           await supabase.from("signal_rejection_log").insert({
             user_id: userId, symbol,
-            rejection_reason: `Quality score too low: ${qualityScore}/100 (min: ${MIN_QUALITY_SCORE})`,
+            rejection_reason: `Quality score too low: ${qualityScore}/100 (min: ${MIN_QUALITY_SCORE}, ADX=${adx.toFixed(1)})`,
             filters_status: {
               qualityScore, breakdown, minRequired: MIN_QUALITY_SCORE,
+              dynamicThreshold: true,
+              adx: adx.toFixed(1),
               factors: qualityFactors,
               regime: regime.regime,
               entryTiming: pullbackAnalysis.reason,
@@ -2003,11 +2116,23 @@ serve(async (req) => {
         }
 
         // Select BEST strategy (highest score)
-        candidates.sort((a, b) => b.score - a.score);
+        // NEW: Apply strategy performance bonus for high performers
+        candidates.sort((a, b) => {
+          let scoreA = a.score;
+          let scoreB = b.score;
+          
+          // +5 bonus for high-performing strategies
+          if (highPerformingStrategies.has(a.strategy.name)) scoreA += 5;
+          if (highPerformingStrategies.has(b.strategy.name)) scoreB += 5;
+          
+          return scoreB - scoreA;
+        });
+        
         const best = candidates[0];
         const strategy = best.strategy;
         const signalType = best.signalType;
-        console.log(`🎯 ${symbol}: Selected "${strategy.name}" (${candidates.length} strategies matched, best score: ${best.score}, direction: ${signalType})`);
+        const isHighPerformer = highPerformingStrategies.has(strategy.name);
+        console.log(`🎯 ${symbol}: Selected "${strategy.name}"${isHighPerformer ? ' ⭐' : ''} (${candidates.length} strategies matched, best score: ${best.score}, direction: ${signalType})`);
         
         const indicatorValues = best.indicatorValues;
 
@@ -2116,8 +2241,13 @@ serve(async (req) => {
         byQuality: rejectedByQuality,
         byStrategy: rejectedByStrategy,
       },
-      minQualityScore: MIN_QUALITY_SCORE,
-      message: `Quality Score System active (min: ${MIN_QUALITY_SCORE}/100)`,
+      filters: {
+        disabledSymbols: Array.from(disabledSymbols),
+        disabledStrategies: Array.from(disabledStrategies),
+        highPerformingStrategies: Array.from(highPerformingStrategies),
+      },
+      minQualityScore: DEFAULT_MIN_QUALITY,
+      message: `Quality Score System active (dynamic threshold based on ADX)`,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (error) {
