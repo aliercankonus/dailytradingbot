@@ -385,11 +385,11 @@ serve(async (req) => {
       throw new Error(`Market volatility too high (ATR: ${atrPercent.toFixed(2)}%) - trade cancelled`);
     }
 
-    // FILTER 5: Require confidence > configurable threshold
-    const minConfidence = riskParams.min_confidence_threshold || 60;
-    if ((signal.confidence_score || 0) < minConfidence) {
-      throw new Error(`Signal confidence too low (${signal.confidence_score}%) - minimum required: ${minConfidence}%`);
-    }
+    // NOTE: Confidence filter removed - quality score calculation already incorporates
+    // confidence penalties. Signal quality score (stored in indicators.qualityScore) is the
+    // primary filter. Having a separate confidence gate was causing double-filtering and
+    // blocking signals that passed quality threshold but had lower raw confidence scores.
+    console.log(`📊 Signal confidence: ${signal.confidence_score}% (no separate gate - quality score is primary filter)`);
 
     // ============================================================
     // BOLLINGER BANDS FILTER - Squeeze/Breakout Detection
