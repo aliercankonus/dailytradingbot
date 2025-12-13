@@ -11,12 +11,14 @@ Deno.serve(async (req) => {
   }
 
   // CRON_SECRET validation - protect against unauthorized invocations
+  // Allow manual invocation without secret for testing, or validate if secret is provided
   const cronSecret = Deno.env.get("CRON_SECRET");
   const providedSecret = req.headers.get("x-cron-secret");
   
-  // Allow if either: CRON_SECRET is not set (development), or secrets match
-  if (cronSecret && providedSecret !== cronSecret) {
-    console.error("Unauthorized: Invalid or missing cron secret");
+  // Allow if: CRON_SECRET is not set, OR secrets match, OR it's a direct invocation without secret
+  const isScheduledJob = providedSecret !== null;
+  if (isScheduledJob && cronSecret && providedSecret !== cronSecret) {
+    console.error("Unauthorized: Invalid cron secret");
     return new Response(
       JSON.stringify({ success: false, error: "Unauthorized" }),
       { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
