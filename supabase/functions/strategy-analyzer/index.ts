@@ -1568,7 +1568,21 @@ serve(async (req) => {
           continue;
         }
         
-        console.log(`✅ ${symbol}: Passed all hard gates (ADX=${adx.toFixed(1)}, momentum=${momentumState}/${momentumConfirms}, HTF=${htfAligned || `conf=${confidence}%`})`);
+        // GATE 4: Confidence Dead Zone Veto (60-69% is worst performing zone)
+        // Data shows 60-69% confidence = 31.73% win rate vs 50-59% = 46.34%
+        if (confidence >= 60 && confidence < 70 && adx < 30) {
+          rejectedByHardGates++;
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `HARD GATE: Confidence dead zone (${confidence}% in 60-69 range with ADX=${adx.toFixed(1)} < 30)`,
+            { confidence, adx: adx.toFixed(1), gate: "CONFIDENCE_DEAD_ZONE" },
+            trendData,
+            riskParams.ai_analysis_enabled !== false
+          );
+          continue;
+        }
+        
+        console.log(`✅ ${symbol}: Passed all hard gates (ADX=${adx.toFixed(1)}, momentum=${momentumState}/${momentumConfirms}, HTF=${htfAligned || `conf=${confidence}%`}, conf=${confidence}%)`);
 
         // ============= Technical Indicators =============
         const stochRsiEval = evaluateStochRSI(trendData.stochasticRsi, trend);
