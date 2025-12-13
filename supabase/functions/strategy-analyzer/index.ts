@@ -1353,11 +1353,11 @@ serve(async (req) => {
         // ============= REVERSAL RISK FILTER (TWO-TIER) =============
         // Check for leading indicators that suggest potential reversal
         // Tier 1: Block high risk (score >= 55) regardless of trend strength
-        // Tier 2: Block medium risk (score >= 45) in weak trends (ADX < 25)
+        // Tier 2: Block medium risk (score >= 50) in weak trends (ADX < 25)
         const reversalRisk = detectReversalRisk(trendData, trend);
         
-        // TIER 2: Medium risk in weak trend = reject
-        if (reversalRisk.riskScore >= 45 && adx < 25) {
+        // TIER 2: Medium risk in weak trend = reject (50-54% with ADX < 25)
+        if (reversalRisk.riskScore >= 50 && reversalRisk.riskScore < 55 && adx < 25) {
           rejectedByReversalRisk++;
           console.log(`⚠️ ${symbol}: Medium reversal risk (${reversalRisk.riskScore}%) in weak trend (ADX=${adx.toFixed(1)})`);
           await logRejectionWithAI(
