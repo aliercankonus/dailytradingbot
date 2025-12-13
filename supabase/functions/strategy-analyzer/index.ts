@@ -1278,6 +1278,7 @@ serve(async (req) => {
     const signals: SignalData[] = [];
     let totalSignalsGenerated = 0;
     let rejectedByRegime = 0;
+    let rejectedByHardGates = 0;  // NEW: Track hard gate rejections
     let rejectedByQuality = 0;
     let rejectedByStrategy = 0;
     let rejectedByReversalRisk = 0;
@@ -1520,6 +1521,54 @@ serve(async (req) => {
         if (stochRsiK4h < 20 || stochRsiK4h > 80) {
           console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} (near extreme but proceeding with ${intendedTradeDirection || "neutral"} direction)`);
         }
+
+        // ================= HARD ENTRY GATES =================
+        // These are non-negotiable requirements for ANY signal
+        // Quality score should RANK good trades, not RESCUE weak ones
+        
+        // GATE 1: ADX must be >= 20 for any trade (trend strength required)
+        if (adx < 20) {
+          rejectedByHardGates++;
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `HARD GATE: ADX too low (${adx.toFixed(1)} < 20) - no trend strength`,
+            { adx: adx.toFixed(1), gate: "ADX_TOO_LOW" },
+            trendData,
+            riskParams.ai_analysis_enabled !== false
+          );
+          continue;
+        }
+        
+        // GATE 2: Momentum must be confirmed (not "none" or unconfirmed)
+        const momentumState = momentum?.state || "none";
+        const momentumConfirms = momentum?.confirms ?? false;
+        if (momentumState === "none" || !momentumConfirms) {
+          rejectedByHardGates++;
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `HARD GATE: No momentum confirmation (state=${momentumState}, confirms=${momentumConfirms})`,
+            { momentumState, momentumConfirms, gate: "NO_MOMENTUM_CONFIRMATION" },
+            trendData,
+            riskParams.ai_analysis_enabled !== false
+          );
+          continue;
+        }
+        
+        // GATE 3: Higher timeframe alignment required (or high confidence)
+        const htfAligned = higherTimeframeFilter?.aligned ?? false;
+        if (!htfAligned && confidence < 65) {
+          rejectedByHardGates++;
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `HARD GATE: HTF not aligned and confidence too low (aligned=${htfAligned}, confidence=${confidence}%)`,
+            { htfAligned, confidence, gate: "HTF_NOT_ALIGNED" },
+            trendData,
+            riskParams.ai_analysis_enabled !== false
+          );
+          continue;
+        }
+        
+        console.log(`✅ ${symbol}: Passed all hard gates (ADX=${adx.toFixed(1)}, momentum=${momentumState}/${momentumConfirms}, HTF=${htfAligned || `conf=${confidence}%`})`);
 
         // ============= Technical Indicators =============
         const stochRsiEval = evaluateStochRSI(trendData.stochasticRsi, trend);
@@ -1821,7 +1870,7 @@ serve(async (req) => {
       }
     }
 
-    console.log(`📈 Summary: ${totalSignalsGenerated} signals | Rejected: regime=${rejectedByRegime} reversal=${rejectedByReversalRisk} stochRsiExtreme=${rejectedByStochRsiExtreme} quality=${rejectedByQuality} strategy=${rejectedByStrategy}`);
+    console.log(`📈 Summary: ${totalSignalsGenerated} signals | Rejected: hardGates=${rejectedByHardGates} regime=${rejectedByRegime} reversal=${rejectedByReversalRisk} stochRsiExtreme=${rejectedByStochRsiExtreme} quality=${rejectedByQuality} strategy=${rejectedByStrategy}`);
 
     return new Response(JSON.stringify({
       signals,
