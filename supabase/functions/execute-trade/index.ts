@@ -744,9 +744,18 @@ serve(async (req) => {
             console.log(`✅ VWAP supports LONG: Price slightly below VWAP - good entry`);
           }
         } else if (currentPrice > vwapUpperBand) {
-          // Buying above upper VWAP band = overextended - BLOCK trade
-          console.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} above upper VWAP band $${vwapUpperBand.toFixed(2)}`);
-          throw new Error(`Price above upper VWAP band - overextended LONG entry blocked`);
+          // Buying above upper VWAP band = overextended - BLOCK trade UNLESS ADX is strong
+          const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
+          const ADX_EXCEPTION_THRESHOLD = 30; // Allow if trend is strong
+          
+          if (adxValue >= ADX_EXCEPTION_THRESHOLD) {
+            // Strong trend exception - allow LONG even at overbought levels
+            vwapBoostMultiplier = 0.8; // 20% reduction for caution
+            console.log(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band but ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} - allowing LONG with reduced size`);
+          } else {
+            console.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} above upper VWAP band $${vwapUpperBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD})`);
+            throw new Error(`Price above upper VWAP band - overextended LONG entry blocked (ADX too weak)`);
+          }
         } else if (vwapDeviation > 1.0) {
           // Buying significantly above VWAP - reduce position
           vwapBoostMultiplier = 0.75; // 25% reduction for above-VWAP entry
@@ -768,9 +777,18 @@ serve(async (req) => {
             console.log(`✅ VWAP supports SHORT: Price slightly above VWAP - good entry`);
           }
         } else if (currentPrice < vwapLowerBand) {
-          // Selling below lower VWAP band = oversold - BLOCK trade
-          console.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)}`);
-          throw new Error(`Price below lower VWAP band - oversold SHORT entry blocked`);
+          // Selling below lower VWAP band = oversold - BLOCK trade UNLESS ADX is strong
+          const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
+          const ADX_EXCEPTION_THRESHOLD = 30; // Allow if trend is strong
+          
+          if (adxValue >= ADX_EXCEPTION_THRESHOLD) {
+            // Strong trend exception - allow SHORT even at oversold levels
+            vwapBoostMultiplier = 0.8; // 20% reduction for caution
+            console.log(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band but ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} - allowing SHORT with reduced size`);
+          } else {
+            console.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD})`);
+            throw new Error(`Price below lower VWAP band - oversold SHORT entry blocked (ADX too weak)`);
+          }
         } else if (vwapDeviation < -1.0) {
           // Selling significantly below VWAP - reduce position
           vwapBoostMultiplier = 0.75; // 25% reduction
