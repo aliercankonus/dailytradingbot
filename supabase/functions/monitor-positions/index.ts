@@ -572,11 +572,24 @@ serve(async (req) => {
       const minDistanceFromEntry = position.entry_price * (MIN_TRAILING_STOP_DISTANCE_PERCENT / 100);
       
       // Get persisted peak P&L and update if current is higher (ratcheting)
+      // IMPORTANT: Track peak P&L ALWAYS, not just when trailing is enabled - this ensures
+      // we have the peak value ready when trailing activates
       const currentPeakPnl = position.peak_pnl_percent || 0;
       const newPeakPnl = Math.max(currentPeakPnl, pnlPercent);
-      if (newPeakPnl > currentPeakPnl) {
+      if (newPeakPnl > currentPeakPnl && pnlPercent > 0) {
         peakPnlUpdated = true;
         console.log(`📈 Peak P&L updated for ${position.symbol} ${position.side}: ${currentPeakPnl.toFixed(2)}% → ${newPeakPnl.toFixed(2)}%`);
+        
+        // Update peak_pnl_percent immediately in database (even before trailing activates)
+        const { error: peakUpdateError } = await supabase
+          .from("positions")
+          .update({ peak_pnl_percent: newPeakPnl })
+          .eq("id", position.id)
+          .eq("status", "active");
+        
+        if (peakUpdateError) {
+          console.error(`Error updating peak P&L for ${position.id}:`, peakUpdateError);
+        }
       }
       
       // Check if trailing stop is enabled and position is profitable enough
@@ -686,20 +699,13 @@ serve(async (req) => {
             }
           }
         }
-        // Update stop loss AND peak_pnl_percent in database if trailing was activated or peak updated
-        if (trailingActivated || peakPnlUpdated) {
-          const updatePayload: { stop_loss?: number; peak_pnl_percent?: number } = {};
-          if (trailingActivated) {
-            updatePayload.stop_loss = newStopLoss;
-          }
-          if (peakPnlUpdated) {
-            updatePayload.peak_pnl_percent = newPeakPnl;
-          }
-          
+        // Update stop loss in database if trailing was activated
+        // NOTE: peak_pnl_percent is updated earlier (outside activation check) to track peak always
+        if (trailingActivated) {
           // Use optimistic locking - only update if position is still active
           const { data: updatedPos, error: posUpdateError } = await supabase
             .from("positions")
-            .update(updatePayload)
+            .update({ stop_loss: newStopLoss })
             .eq("id", position.id)
             .eq("status", "active") // RACE CONDITION FIX: Only update if still active
             .select()
