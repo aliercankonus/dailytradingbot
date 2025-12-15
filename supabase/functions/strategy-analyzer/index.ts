@@ -430,14 +430,39 @@ const getVolumeScore = (trendData: any, trend: string): number => {
 // High confidence = trend exhaustion, penalize entries
 // Optimal entry zone: 50-60% confidence (trend confirmed but not exhausted)
 // CRITICAL FIX: 60-69 zone has 17% win rate vs 50-59 at 46% - add penalty!
-const getConfidencePenalty = (confidence: number): number => {
-  if (confidence >= 85) return -25;   // Heavy penalty for extreme confidence (increased from -20)
-  if (confidence >= 80) return -18;   // Strong penalty (increased from -15)
-  if (confidence >= 75) return -12;   // Moderate penalty (increased from -10)
-  if (confidence >= 70) return -8;    // Light penalty (increased from -6)
-  if (confidence >= 60) return -12;   // DEAD ZONE: 60-69 penalty STRENGTHENED (from -8 to -12)
-  if (confidence >= 50) return 0;     // Optimal zone: 50-59 (46% win rate)
-  return -3;  // Too low confidence also not ideal
+// FIX: Reduce penalty when ADX ≥ 30 or momentum confirmed to avoid double punishment with hard gate
+const getConfidencePenalty = (confidence: number, adx: number = 0, momentumConfirmed: boolean = false): number => {
+  // Calculate base penalty
+  let basePenalty = 0;
+  if (confidence >= 85) basePenalty = -25;        // Heavy penalty for extreme confidence
+  else if (confidence >= 80) basePenalty = -18;   // Strong penalty
+  else if (confidence >= 75) basePenalty = -12;   // Moderate penalty
+  else if (confidence >= 70) basePenalty = -8;    // Light penalty
+  else if (confidence >= 60) basePenalty = -12;   // DEAD ZONE: 60-69 penalty
+  else if (confidence >= 50) basePenalty = 0;     // Optimal zone: 50-59 (46% win rate)
+  else basePenalty = -3;                          // Too low confidence also not ideal
+  
+  // ============= PENALTY REDUCTION FOR FAVORABLE CONDITIONS =============
+  // If signal passed the hard gate (ADX ≥ 30 or momentum confirmed), reduce penalty severity
+  // This prevents double punishment: hard gate already filters weak signals
+  if (basePenalty < 0) {
+    let reductionFactor = 1.0; // No reduction by default
+    
+    // Strong trend (ADX ≥ 30) reduces penalty by 40%
+    if (adx >= ADX_THRESHOLDS.VERY_STRONG) {
+      reductionFactor -= 0.4;
+    }
+    // Confirmed momentum reduces penalty by 30%
+    if (momentumConfirmed) {
+      reductionFactor -= 0.3;
+    }
+    // Cap reduction at 60% (don't eliminate penalty entirely)
+    reductionFactor = Math.max(0.4, reductionFactor);
+    
+    return Math.round(basePenalty * reductionFactor);
+  }
+  
+  return basePenalty;
 };
 
 // ADX Score (0-25 points) - Uses centralized ADX_THRESHOLDS
@@ -2187,7 +2212,9 @@ serve(async (req) => {
         }
 
         // ============= IMPROVEMENT #1: Quality Score System with CONFIDENCE INVERSION =============
-        const confidencePenalty = getConfidencePenalty(confidence);
+        // Pass ADX and momentum state to reduce penalty for favorable conditions (avoids double punishment with hard gate)
+        const momentumConfirmed = momentum?.confirms === true && momentum?.state === "confirmed";
+        const confidencePenalty = getConfidencePenalty(confidence, adx, momentumConfirmed);
         // Direction bonus: +3 for SHORT/SELL signals (historically 38% vs 31% win rate)
         const directionBonus = trend === "bearish" ? 3 : 0;
         // NEW: Volume score component
