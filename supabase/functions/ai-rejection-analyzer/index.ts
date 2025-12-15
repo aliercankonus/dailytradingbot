@@ -39,17 +39,41 @@ serve(async (req) => {
     // Build a detailed prompt for the AI to analyze the rejection
     const systemPrompt = `You are an expert trading signal analyzer. Your job is to validate whether a signal rejection was correct based on the technical data provided.
 
-IMPORTANT VALIDATION RULES:
-1. ADX Filter: ADX should be >= 20 for signal generation. If ADX < 20, rejection is VALID.
-2. Momentum Confirmation: Momentum state should be "confirmed" or at least "building". If "none" or "mixed" with low confidence, rejection may be VALID.
-3. StochRSI Extremes: 
-   - For LONG signals: If 4h StochRSI K > 90, need strong uptrend + no bearish divergence + StochRSI rising
-   - For SHORT signals: If 4h StochRSI K < 10, need strong downtrend + no bullish divergence + StochRSI falling
-4. Multi-Timeframe Alignment: 4h and 1h trends should align with the intended trade direction
-5. Quality Score: Should be >= 60 for signal generation
-6. Reversal Risk: If reversal risk > 50%, rejection is usually VALID unless ADX is very strong (>35)
+UNIFIED REVERSAL SCORE SYSTEM (0-100 points):
+- Score >= 60 → BLOCK (rejection is VALID)
+- Score 40-59 → REDUCE (50% position size, entry still allowed - rejection may be INVALID if this range)
+- Score < 40 → NORMAL (full position size allowed)
 
-Analyze the provided data and determine if the rejection reason is VALID or if there might be an issue with the logic.
+Score components:
+- StochRSI bullish/bearish crosses: +30 each (max 50)
+- StochRSI extreme zones (K>90 or K<10): +25
+- Momentum state mixed: +20, state none: +30
+- Momentum not confirmed: +15
+- MACD divergence: +30
+- 1h trend opposing entry direction: +20
+- Volume confirming reversal: +15
+
+ADX-ADAPTIVE WEIGHTING (reduces reversal impact in strong trends):
+- ADX >= 40: weight = 0.4
+- ADX >= 35: weight = 0.5
+- ADX >= 30: weight = 0.6
+- ADX >= 25: weight = 0.7
+- ADX < 25: weight = 1.0
+
+Final reversal score = raw_score × ADX_weight
+
+HARD ENTRY GATES (must pass before quality scoring):
+1. ADX >= 20 minimum for any signal
+2. Momentum must be "confirmed" (state not "none", confirms = true)
+3. HTF aligned OR confidence >= 65%
+
+STOCHRSI EXTREME FILTER:
+- LONG blocked if 4h StochRSI K > 90 UNLESS: strong uptrend + no bearish divergence + StochRSI rising
+- SHORT blocked if 4h StochRSI K < 10 UNLESS: strong downtrend + no bullish divergence + StochRSI falling
+
+QUALITY SCORE: Dynamic threshold based on ADX (50-65 minimum required)
+
+Analyze the provided data and determine if the rejection reason is VALID based on these rules.
 
 Return a JSON object with:
 - isValid: boolean (true if rejection appears correct)
