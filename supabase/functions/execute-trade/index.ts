@@ -137,13 +137,33 @@ function calculateUnifiedReversalScore(trendData: any, signalType: string): Unif
     }
   }
   
-  // 2. StochRSI ZONES (0-25 points)
+  // 2. StochRSI ZONES (0-25 points) - Apply RSI conflict resolution
+  // When RSI pullback + momentum confirms, reduce StochRSI zone penalty by 50%
+  const rsi4h = trendData.timeframes?.['4h']?.rsi ?? 50;
+  const rsiIndicatesPullback = isLong 
+    ? (rsi4h < RSI_THRESHOLDS.BULLISH_PULLBACK || rsi4h < RSI_THRESHOLDS.NEUTRAL_LOW)
+    : (rsi4h > RSI_THRESHOLDS.BEARISH_RALLY || rsi4h > RSI_THRESHOLDS.NEUTRAL_HIGH);
+  const momentumConfirms = momentum.confirms === true;
+  const shouldReduceStochZonePenalty = rsiIndicatesPullback && momentumConfirms;
+  
   if (isLong && k4h > STOCHRSI_THRESHOLDS.DEEPLY_OVERBOUGHT) {
-    rawScore += 15;
-    reasons.push(`4h StochRSI overbought (K=${k4h.toFixed(1)})`);
+    let zoneScore = 15;
+    if (shouldReduceStochZonePenalty) {
+      zoneScore = Math.round(zoneScore * 0.5);
+      reasons.push(`4h StochRSI overbought (K=${k4h.toFixed(1)}) - reduced 50% (RSI pullback + momentum)`);
+    } else {
+      reasons.push(`4h StochRSI overbought (K=${k4h.toFixed(1)})`);
+    }
+    rawScore += zoneScore;
   } else if (!isLong && k4h < STOCHRSI_THRESHOLDS.DEEPLY_OVERSOLD) {
-    rawScore += 15;
-    reasons.push(`4h StochRSI oversold (K=${k4h.toFixed(1)})`);
+    let zoneScore = 15;
+    if (shouldReduceStochZonePenalty) {
+      zoneScore = Math.round(zoneScore * 0.5);
+      reasons.push(`4h StochRSI oversold (K=${k4h.toFixed(1)}) - reduced 50% (RSI pullback + momentum)`);
+    } else {
+      reasons.push(`4h StochRSI oversold (K=${k4h.toFixed(1)})`);
+    }
+    rawScore += zoneScore;
   }
   
   // 3. MOMENTUM STATE (0-30 points) - Uses centralized ADX_THRESHOLDS
