@@ -2151,27 +2151,33 @@ serve(async (req) => {
           }
           
           // STRICT: Require full smart exception conditions (NO ADX-ONLY BYPASS)
+          // CRITICAL FIX: Also require momentum.confirms = true for any extreme entry
           const strongUptrend4h = stochFilterTrend4h === "bullish" && stochFilterConf4h >= 75;
           const strongUptrend1h = stochFilterTrend1h === "bullish" && stochFilterConf1h >= 70;
           const breakoutOrHigherLow = bollingerPosition === "above_upper" || bollingerPosition === "upper_zone" || percentB > 70;
           const stochMomentumUp = stochRsiRising && macdHistogram > 0;
+          const momentumConfirmedForLong = momentum?.confirms === true && momentum?.state !== "none";
           
-          const allowExtremeOverbought = strongUptrend4h && strongUptrend1h && breakoutOrHigherLow && stochMomentumUp;
+          const allowExtremeOverbought = strongUptrend4h && strongUptrend1h && breakoutOrHigherLow && stochMomentumUp && momentumConfirmedForLong;
           
           if (allowExtremeOverbought) {
-            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG (strong uptrend both TFs, breakout, StochRSI rising)`);
+            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG (strong uptrend both TFs, breakout, StochRSI rising, momentum confirmed)`);
           } else {
             rejectedByStochRsiExtreme++;
-            console.log(`⛔ ${symbol}: Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} overbought | 4h=${stochFilterTrend4h}(${stochFilterConf4h}%) 1h=${stochFilterTrend1h}(${stochFilterConf1h}%) BB=${bollingerPosition}`);
+            const blockReason = !momentumConfirmedForLong 
+              ? `momentum not confirmed (confirms=${momentum?.confirms}, state=${momentum?.state})` 
+              : "failed smart exception conditions";
+            console.log(`⛔ ${symbol}: Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} overbought | ${blockReason}`);
             await supabase.from("signal_rejection_log").insert({
               user_id: userId, symbol,
-              rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought, failed smart exception (no ADX bypass)`,
+              rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought, ${blockReason}`,
               filters_status: { 
                 stochRsiK4h: stochRsiK4h.toFixed(1), stochRsiD4h: stochRsiD4h.toFixed(1), stochRsiRising,
                 trend4h: stochFilterTrend4h, confidence4h: stochFilterConf4h,
                 trend1h: stochFilterTrend1h, confidence1h: stochFilterConf1h,
                 bollingerPosition, percentB, macdHistogram, adx: adx.toFixed(1),
-                reason: "Overbought without ALL smart exception conditions met"
+                momentumConfirms: momentum?.confirms, momentumState: momentum?.state,
+                reason: blockReason
               },
               trend_data: trendData, checked_at: new Date().toISOString(),
             });
@@ -2248,27 +2254,33 @@ serve(async (req) => {
           }
           
           // STRICT: Require full smart exception conditions (NO ADX-ONLY BYPASS)
+          // CRITICAL FIX: Also require momentum.confirms = true for any extreme entry
           const strongDowntrend4h = stochFilterTrend4h === "bearish" && stochFilterConf4h >= 75;
           const strongDowntrend1h = stochFilterTrend1h === "bearish" && stochFilterConf1h >= 70;
           const breakdownOrLowerHigh = bollingerPosition === "below_lower" || bollingerPosition === "lower_zone" || percentB < 30;
           const stochMomentumDown = stochRsiFalling && macdHistogram < 0;
+          const momentumConfirmedForShort = momentum?.confirms === true && momentum?.state !== "none";
           
-          const allowExtremeOversold = strongDowntrend4h && strongDowntrend1h && breakdownOrLowerHigh && stochMomentumDown;
+          const allowExtremeOversold = strongDowntrend4h && strongDowntrend1h && breakdownOrLowerHigh && stochMomentumDown && momentumConfirmedForShort;
           
           if (allowExtremeOversold) {
-            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme oversold - ALLOWING SHORT (strong downtrend both TFs, breakdown, StochRSI falling)`);
+            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme oversold - ALLOWING SHORT (strong downtrend both TFs, breakdown, StochRSI falling, momentum confirmed)`);
           } else {
             rejectedByStochRsiExtreme++;
-            console.log(`⛔ ${symbol}: Blocking SHORT - 4h StochRSI K=${stochRsiK4h.toFixed(1)} oversold | 4h=${stochFilterTrend4h}(${stochFilterConf4h}%) 1h=${stochFilterTrend1h}(${stochFilterConf1h}%) BB=${bollingerPosition}`);
+            const blockReason = !momentumConfirmedForShort 
+              ? `momentum not confirmed (confirms=${momentum?.confirms}, state=${momentum?.state})` 
+              : "failed smart exception conditions";
+            console.log(`⛔ ${symbol}: Blocking SHORT - 4h StochRSI K=${stochRsiK4h.toFixed(1)} oversold | ${blockReason}`);
             await supabase.from("signal_rejection_log").insert({
               user_id: userId, symbol,
-              rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold, failed smart exception (no ADX bypass)`,
+              rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold, ${blockReason}`,
               filters_status: { 
                 stochRsiK4h: stochRsiK4h.toFixed(1), stochRsiD4h: stochRsiD4h.toFixed(1), stochRsiFalling,
                 trend4h: stochFilterTrend4h, confidence4h: stochFilterConf4h,
                 trend1h: stochFilterTrend1h, confidence1h: stochFilterConf1h,
                 bollingerPosition, percentB, macdHistogram, adx: adx.toFixed(1),
-                reason: "Oversold without ALL smart exception conditions met"
+                momentumConfirms: momentum?.confirms, momentumState: momentum?.state,
+                reason: blockReason
               },
               trend_data: trendData, checked_at: new Date().toISOString(),
             });
