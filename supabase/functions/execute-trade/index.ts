@@ -90,9 +90,9 @@ function calculateUnifiedReversalScore(trendData: any, signalType: string): Unif
     reasons.push(`4h StochRSI oversold (K=${k4h.toFixed(1)})`);
   }
   
-  // 3. MOMENTUM STATE (0-30 points)
+  // 3. MOMENTUM STATE (0-30 points) - Uses centralized ADX_THRESHOLDS
   const momentumState = momentum.state || "none";
-  if (momentumState === "mixed" && adx < 30) {
+  if (momentumState === "mixed" && adx < ADX_THRESHOLDS.VERY_STRONG) {
     rawScore += 30;
     reasons.push(`Mixed momentum with weak ADX`);
   } else if (!momentum.confirms && momentumState !== "confirmed") {
@@ -505,21 +505,20 @@ serve(async (req) => {
       throw new Error(`Market volatility too high (ATR: ${atrPercent.toFixed(2)}%) - trade cancelled`);
     }
 
-    // FILTER 5: ADX HARD GATE - Require minimum trend strength
+    // FILTER 5: ADX HARD GATE - Require minimum trend strength (uses centralized ADX_THRESHOLDS)
     const adxValue = typeof trendData?.volatility?.adx === 'number' 
       ? trendData.volatility.adx 
       : (typeof trendData?.volatility?.adx === 'object' ? trendData.volatility.adx?.value : 0);
-    const MIN_ADX_THRESHOLD = 20;
     
-    if (adxValue < MIN_ADX_THRESHOLD) {
-      console.log(`❌ ADX HARD GATE: ADX ${adxValue?.toFixed(1) || 0} < ${MIN_ADX_THRESHOLD} - trade cancelled`);
-      throw new Error(`Trend strength too weak (ADX: ${adxValue?.toFixed(1) || 0}) - minimum required: ${MIN_ADX_THRESHOLD}`);
+    if (adxValue < ADX_THRESHOLDS.MINIMUM) {
+      console.log(`❌ ADX HARD GATE: ADX ${adxValue?.toFixed(1) || 0} < ${ADX_THRESHOLDS.MINIMUM} - trade cancelled`);
+      throw new Error(`Trend strength too weak (ADX: ${adxValue?.toFixed(1) || 0}) - minimum required: ${ADX_THRESHOLDS.MINIMUM}`);
     }
-    console.log(`✓ ADX hard gate passed: ${adxValue?.toFixed(1)} >= ${MIN_ADX_THRESHOLD}`);
+    console.log(`✓ ADX hard gate passed: ${adxValue?.toFixed(1)} >= ${ADX_THRESHOLDS.MINIMUM}`);
 
     // ============================================================
     // DYNAMIC QUALITY THRESHOLD (aligned with strategy-analyzer)
-    // Adjust quality threshold based on ADX and recovery mode
+    // Adjust quality threshold based on ADX and recovery mode - Uses centralized ADX_THRESHOLDS
     // ============================================================
     const isInRecoveryMode = riskParams.consecutive_losses >= riskParams.consecutive_loss_threshold;
     let dynamicQualityThreshold = 55; // Base threshold
@@ -527,10 +526,10 @@ serve(async (req) => {
     if (isInRecoveryMode) {
       dynamicQualityThreshold = 65; // Stricter in recovery mode
       console.log(`🔒 Recovery Mode: Quality threshold raised to ${dynamicQualityThreshold}`);
-    } else if (adxValue >= 35) {
+    } else if (adxValue >= ADX_THRESHOLDS.EXCEPTIONAL) {
       dynamicQualityThreshold = 50; // Relaxed in very strong trends
       console.log(`📈 Strong trend (ADX ${adxValue.toFixed(1)}): Quality threshold lowered to ${dynamicQualityThreshold}`);
-    } else if (adxValue >= 25) {
+    } else if (adxValue >= ADX_THRESHOLDS.STRONG) {
       dynamicQualityThreshold = 53;
     }
     

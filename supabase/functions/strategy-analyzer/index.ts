@@ -523,8 +523,8 @@ const getTechnicalScore = (trendData: any, effectiveTrend: string, symbol: strin
   let stochScore = 0;
   let bbScore = 0;
   
-  // Strong ADX (>= 30) = momentum continuation is valid, don't penalize overbought/oversold
-  const isStrongTrend = adx >= 30;
+  // Strong ADX (>= VERY_STRONG) = momentum continuation is valid, don't penalize overbought/oversold
+  const isStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG;
   
   if (effectiveTrend === "bullish") {
     if (isStrongTrend) {
@@ -768,8 +768,8 @@ const calculateUnifiedReversalScore = (
     breakdown.momentumScore = 25;
     signals.push(`Momentum not confirmed (state: ${momentumState})`);
   } else if (momentumState === "mixed") {
-    // HARD GATE: Mixed momentum + weak ADX = block
-    if (adx < 30) {
+    // HARD GATE: Mixed momentum + weak ADX = block - Uses centralized ADX_THRESHOLDS
+    if (adx < ADX_THRESHOLDS.VERY_STRONG) {
       breakdown.momentumScore = 30;  // Max score for mixed in weak trend
       signals.push(`Mixed momentum with weak trend (ADX=${adx.toFixed(1)})`);
     } else {
@@ -915,7 +915,7 @@ const detectMarketRegime = (trendData: any): { regime: MarketRegime; tradeable: 
   const consistency = trendData.trendConsistency || 0;
   
   // Check for ranging market (ADX low, mixed signals)
-  if (adx < 15 && confidence < 50) {
+  if (adx < 15 && confidence < 50) {  // 15 is intentional (below VERY_WEAK for severe ranging detection)
     return { 
       regime: "ranging", 
       tradeable: false, 
@@ -933,7 +933,7 @@ const detectMarketRegime = (trendData: any): { regime: MarketRegime; tradeable: 
   }
   
   // Check for excessive volatility (may be news event)
-  if (atrPercent > 4.0 && adx < 25) {
+  if (atrPercent > 4.0 && adx < ADX_THRESHOLDS.STRONG) {
     return { 
       regime: "volatile", 
       tradeable: false, 
@@ -941,8 +941,8 @@ const detectMarketRegime = (trendData: any): { regime: MarketRegime; tradeable: 
     };
   }
   
-  // Trending market - tradeable (STRICTER: require ADX >= 18 minimum)
-  if (adx >= 22 || (adx >= 18 && confidence >= 65)) {
+  // Trending market - tradeable (STRICTER: require ADX >= WEAK minimum)
+  if (adx >= ADX_THRESHOLDS.MODERATE || (adx >= ADX_THRESHOLDS.WEAK && confidence >= 65)) {
     return { 
       regime: "trending", 
       tradeable: true, 
@@ -952,7 +952,7 @@ const detectMarketRegime = (trendData: any): { regime: MarketRegime; tradeable: 
   
   // Edge case - REMOVED weak trend allowance (ADX >= 12) - was causing poor entries
   // Only allow borderline cases with very strong alignment
-  if (adx >= 18 && confidence >= 70 && consistency >= 65) {
+  if (adx >= ADX_THRESHOLDS.WEAK && confidence >= 70 && consistency >= 65) {
     return { 
       regime: "trending", 
       tradeable: true, 
@@ -988,7 +988,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
   const percentB = bb1h.percentB || 50;
   
   // Strong ADX = momentum continuation is valid strategy
-  const isStrongTrend = adx >= 30;
+  const isStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG;
   const hasMacdExpanding = momentum.macdExpanding === true;
   const isMomentumConfirmed = momentum.state === "confirmed" || momentum.state === "mixed";
   
@@ -1604,9 +1604,9 @@ serve(async (req) => {
         return BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost; // 65 in recovery
       }
       // Dynamic based on ADX - strong trends = allow more signals
-      if (adx >= 35) return 50;  // Strong trend: lower threshold
-      if (adx >= 25) return 53;  // Good trend: slightly lower
-      return BASE_MIN_QUALITY_SCORE;  // Normal: 55
+      if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) return 50;  // Strong trend: lower threshold
+      if (adx >= ADX_THRESHOLDS.STRONG) return 53;       // Good trend: slightly lower
+      return BASE_MIN_QUALITY_SCORE;                      // Normal: 55
     };
     
     if (isInRecoveryMode) {
@@ -1722,7 +1722,7 @@ serve(async (req) => {
         const stochRsiK1h = stochRsi1h?.k ?? 50;
         const STOCHRSI_OVERSOLD_THRESHOLD = 10;  // Below 10 = extreme oversold
         const STOCHRSI_OVERBOUGHT_THRESHOLD = 90; // Above 90 = extreme overbought
-        const STRONG_TREND_ADX_THRESHOLD = 30;    // ADX >= 30 = strong trend
+        const STRONG_TREND_ADX_THRESHOLD = ADX_THRESHOLDS.VERY_STRONG;  // ADX >= 30 = strong trend
         
         // Get trend data for both timeframes (for StochRSI filter)
         const stochFilterTrend4h = trendData.higherTimeframeFilter?.trend4h || "neutral";
@@ -1887,16 +1887,16 @@ serve(async (req) => {
         // These are non-negotiable requirements for ANY signal
         // Quality score should RANK good trades, not RESCUE weak ones
         
-        // GATE 1: ADX must be >= 20 for any trade (trend strength required)
-        if (adx < 20) {
+        // GATE 1: ADX must be >= MINIMUM for any trade (trend strength required)
+        if (adx < ADX_THRESHOLDS.MINIMUM) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: ADX too low (${adx.toFixed(1)} < 20) - no trend strength`,
+            `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.MINIMUM}) - no trend strength`,
             { 
               gate: "ADX_TOO_LOW",
               adx: adx.toFixed(1),
-              adxRequired: 20,
+              adxRequired: ADX_THRESHOLDS.MINIMUM,
               trend,
               confidence,
               trendConsistency: trendData.trendConsistency?.toFixed(1),
@@ -1970,13 +1970,13 @@ serve(async (req) => {
           continue;
         }
         
-        // GATE 4: Confidence Dead Zone Veto (60-69% is worst performing zone)
+        // GATE 4: Confidence Dead Zone Veto (60-69% is worst performing zone) - Uses centralized ADX_THRESHOLDS
         // Data shows 60-69% confidence = 31.73% win rate vs 50-59% = 46.34%
-        if (confidence >= 60 && confidence < 70 && adx < 30) {
+        if (confidence >= 60 && confidence < 70 && adx < ADX_THRESHOLDS.VERY_STRONG) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: Confidence dead zone (${confidence}% in 60-69 range with ADX=${adx.toFixed(1)} < 30)`,
+            `HARD GATE: Confidence dead zone (${confidence}% in 60-69 range with ADX=${adx.toFixed(1)} < ${ADX_THRESHOLDS.VERY_STRONG})`,
             { confidence, adx: adx.toFixed(1), gate: "CONFIDENCE_DEAD_ZONE" },
             trendData,
             riskParams.ai_analysis_enabled !== false
@@ -2059,12 +2059,12 @@ serve(async (req) => {
         // Recovery mode reduces frequency, not gambles smaller
         // Must meet ALL strict conditions to trade during recovery
         if (isInRecoveryMode) {
-          // STRICT 1: ADX must be >= 25 (stronger trend required)
-          if (adx < 25) {
+          // STRICT 1: ADX must be >= STRONG (stronger trend required during recovery)
+          if (adx < ADX_THRESHOLDS.STRONG) {
             rejectedByHardGates++;
             await logRejectionWithAI(
               supabase, userId, symbol,
-              `RECOVERY MODE: ADX too low (${adx.toFixed(1)} < 25) - only strong trends during recovery`,
+              `RECOVERY MODE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.STRONG}) - only strong trends during recovery`,
               { adx: adx.toFixed(1), gate: "RECOVERY_ADX_STRICT", consecutiveLosses: riskParams.consecutive_losses },
               trendData,
               riskParams.ai_analysis_enabled !== false

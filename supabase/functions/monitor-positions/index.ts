@@ -334,21 +334,21 @@ serve(async (req) => {
       
       const confidencePenalty = getConfidencePenalty(positionConfidence);
       
-      // ADX-based reversal risk threshold adjustment
+      // ADX-based reversal risk threshold adjustment - Uses centralized ADX_THRESHOLDS
       // Higher ADX = more lenient (allow higher reversal risk before exit)
       let dynamicReversalThreshold = 60; // Base threshold
-      if (positionAdx >= 35) {
+      if (positionAdx >= ADX_THRESHOLDS.EXCEPTIONAL) {
         dynamicReversalThreshold = 70; // Very strong trend - allow more reversal risk
-      } else if (positionAdx >= 25) {
+      } else if (positionAdx >= ADX_THRESHOLDS.STRONG) {
         dynamicReversalThreshold = 65; // Strong trend
-      } else if (positionAdx < 20) {
+      } else if (positionAdx < ADX_THRESHOLDS.MINIMUM) {
         dynamicReversalThreshold = 55; // Weak trend - exit earlier
       }
       
       // Volume-aware exit: High volume confirmation = hold longer
       if (positionVolumeScore >= 7) {
         dynamicReversalThreshold += 5; // Volume strongly confirms - be more patient
-      } else if (positionVolumeScore <= 2 && positionAdx < 25) {
+      } else if (positionVolumeScore <= 2 && positionAdx < ADX_THRESHOLDS.STRONG) {
         dynamicReversalThreshold -= 5; // Low volume + weak trend = exit sooner
       }
       
