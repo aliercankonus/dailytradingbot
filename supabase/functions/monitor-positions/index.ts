@@ -994,15 +994,30 @@ serve(async (req) => {
             signals.push("MACD direction misaligned");
           }
           
+          // RSI pullback detection for conflict resolution
+          const rsi4h = trendData.timeframes?.['4h']?.rsi ?? 50;
+          const momentumConfirms = momentum.confirms === true;
+          
           // For SHORT positions: check for bullish reversal signals
           if (positionSide === "SELL") {
+            // RSI indicates SHORT pullback (price rallying = good for exit timing)
+            const rsiIndicatesPullback = rsi4h > RSI_THRESHOLDS.BEARISH_RALLY || rsi4h > RSI_THRESHOLDS.NEUTRAL_HIGH;
+            const shouldReduceStochZonePenalty = rsiIndicatesPullback && momentumConfirms;
+            
             if ((stochRsi.bullishCrossCount || 0) >= 1) {
               riskScore += 25;
               signals.push(`StochRSI bullish cross (${stochRsi.bullishCrossCount} TF)`);
             }
             if ((stochRsi.oversoldCount || 0) >= 2) {
-              riskScore += 15;
-              signals.push(`StochRSI oversold on ${stochRsi.oversoldCount} TF (bounce risk)`);
+              // Apply 50% reduction if RSI pullback + momentum confirms
+              let zoneScore = 15;
+              if (shouldReduceStochZonePenalty) {
+                zoneScore = Math.round(zoneScore * 0.5);
+                signals.push(`StochRSI oversold on ${stochRsi.oversoldCount} TF - reduced 50% (RSI pullback + momentum)`);
+              } else {
+                signals.push(`StochRSI oversold on ${stochRsi.oversoldCount} TF (bounce risk)`);
+              }
+              riskScore += zoneScore;
             }
             if (trend1h === "bullish") {
               riskScore += 20;
@@ -1011,13 +1026,24 @@ serve(async (req) => {
           }
           // For LONG positions: check for bearish reversal signals
           else if (positionSide === "BUY") {
+            // RSI indicates LONG pullback (price dipping = good for entry/hold timing)
+            const rsiIndicatesPullback = rsi4h < RSI_THRESHOLDS.BULLISH_PULLBACK || rsi4h < RSI_THRESHOLDS.NEUTRAL_LOW;
+            const shouldReduceStochZonePenalty = rsiIndicatesPullback && momentumConfirms;
+            
             if ((stochRsi.bearishCrossCount || 0) >= 1) {
               riskScore += 25;
               signals.push(`StochRSI bearish cross (${stochRsi.bearishCrossCount} TF)`);
             }
             if ((stochRsi.overboughtCount || 0) >= 2) {
-              riskScore += 15;
-              signals.push(`StochRSI overbought on ${stochRsi.overboughtCount} TF (pullback risk)`);
+              // Apply 50% reduction if RSI pullback + momentum confirms
+              let zoneScore = 15;
+              if (shouldReduceStochZonePenalty) {
+                zoneScore = Math.round(zoneScore * 0.5);
+                signals.push(`StochRSI overbought on ${stochRsi.overboughtCount} TF - reduced 50% (RSI pullback + momentum)`);
+              } else {
+                signals.push(`StochRSI overbought on ${stochRsi.overboughtCount} TF (pullback risk)`);
+              }
+              riskScore += zoneScore;
             }
             if (trend1h === "bearish") {
               riskScore += 20;
