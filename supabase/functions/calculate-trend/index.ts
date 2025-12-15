@@ -1356,8 +1356,8 @@ serve(async (req) => {
     let allowDivergenceSignal = false;
     if (!highTimeframeAligned) {
       // TIGHTENED: Pullback requires stronger 4h confirmation (70% vs 60%)
-      // and 1h must be sufficiently strong (60% vs 50%)
-      if (dominantTrend !== "neutral" && dominantConfidence >= 70 && trend1h.confidence >= 60) {
+      // and 1h must be sufficiently strong (62% vs 50%) - raised for consistency with 68% strong 4h
+      if (dominantTrend !== "neutral" && dominantConfidence >= 70 && trend1h.confidence >= 62) {
         divergenceType = "pullback";
         divergenceConfidence = Math.min(dominantConfidence * 0.7, 65); // Reduced from 0.75, 70
         allowDivergenceSignal = true;
@@ -1366,8 +1366,8 @@ serve(async (req) => {
         );
       } 
       // TIGHTENED: Early reversal requires very strong 1h (75% vs 70%)
-      // and ADX must show trend strength
-      else if (trend1h.confidence >= 75 && (dominantTrend === "neutral" || dominantConfidence < 55) && adx >= ADX_THRESHOLDS.WEAK) {
+      // and 4h must be weak (<58% vs <55%) - widened gap from 68% strong threshold
+      else if (trend1h.confidence >= 75 && (dominantTrend === "neutral" || dominantConfidence < 58) && adx >= ADX_THRESHOLDS.WEAK) {
         divergenceType = "early_reversal";
         divergenceConfidence = Math.min(trend1h.confidence * 0.65, 60); // Reduced from 0.7, 65
         allowDivergenceSignal = true;
@@ -1515,8 +1515,9 @@ serve(async (req) => {
       const hasMinimumActivity = adx >= ADX_THRESHOLDS.WEAK; // ADX >= 18
       
       // Require at least 2 aligned timeframes (stronger agreement, not just simple majority)
-      const strongBullishAlignment = bullishVotes >= 2 && trend1h.confidence >= 55;
-      const strongBearishAlignment = bearishVotes >= 2 && trend1h.confidence >= 55;
+      // Raised 1h threshold from 55% to 58% for consistency with 68% strong 4h
+      const strongBullishAlignment = bullishVotes >= 2 && trend1h.confidence >= 58;
+      const strongBearishAlignment = bearishVotes >= 2 && trend1h.confidence >= 58;
       
       if (hasMinimumActivity) {
         if (strongBullishAlignment && bullishVotes > bearishVotes) {
