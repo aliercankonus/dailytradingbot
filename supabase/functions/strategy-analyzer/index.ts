@@ -1358,51 +1358,72 @@ serve(async (req) => {
       .order("closed_at", { ascending: false })
       .limit(500);  // Get more trades to analyze both symbol and strategy performance
     
-    // Calculate win rate per symbol
-    const symbolWinRates = new Map<string, { wins: number; total: number; winRate: number }>();
+    // ============= STATISTICAL CONTAMINATION FIX =============
+    // Segment stats to prevent cross-contamination:
+    // - Strategy stats require minimum unique symbols (strategy-agnostic)
+    // - Symbol stats require minimum unique strategies (symbol-agnostic)
+    const STRATEGY_MIN_UNIQUE_SYMBOLS = 3;  // Strategy must have trades across 3+ symbols to be disabled
+    const SYMBOL_MIN_UNIQUE_STRATEGIES = 2; // Symbol must have trades from 2+ strategies to be disabled
+    
+    // Calculate win rate per symbol with strategy diversity tracking
+    const symbolWinRates = new Map<string, { wins: number; total: number; winRate: number; uniqueStrategies: Set<string> }>();
     const disabledSymbols = new Set<string>();
     
-    // Calculate win rate per strategy
-    const strategyWinRates = new Map<string, { wins: number; total: number; winRate: number }>();
+    // Calculate win rate per strategy with symbol diversity tracking
+    const strategyWinRates = new Map<string, { wins: number; total: number; winRate: number; uniqueSymbols: Set<string> }>();
     const disabledStrategies = new Set<string>();
     const highPerformingStrategies = new Set<string>();
     
     if (recentPositions?.length) {
       for (const trade of recentPositions) {
-        // Symbol performance
-        const symbolStats = symbolWinRates.get(trade.symbol) || { wins: 0, total: 0, winRate: 0 };
+        const strategyName = trade.strategy_name || "Unknown";
+        
+        // Symbol performance with strategy diversity tracking
+        const symbolStats = symbolWinRates.get(trade.symbol) || { wins: 0, total: 0, winRate: 0, uniqueStrategies: new Set() };
         symbolStats.total++;
         if ((trade.realized_pnl || 0) > 0) symbolStats.wins++;
         symbolStats.winRate = (symbolStats.wins / symbolStats.total) * 100;
+        symbolStats.uniqueStrategies.add(strategyName);
         symbolWinRates.set(trade.symbol, symbolStats);
         
-        // Strategy performance
-        const strategyName = trade.strategy_name || "Unknown";
-        const strategyStats = strategyWinRates.get(strategyName) || { wins: 0, total: 0, winRate: 0 };
+        // Strategy performance with symbol diversity tracking
+        const strategyStats = strategyWinRates.get(strategyName) || { wins: 0, total: 0, winRate: 0, uniqueSymbols: new Set() };
         strategyStats.total++;
         if ((trade.realized_pnl || 0) > 0) strategyStats.wins++;
         strategyStats.winRate = (strategyStats.wins / strategyStats.total) * 100;
+        strategyStats.uniqueSymbols.add(trade.symbol);
         strategyWinRates.set(strategyName, strategyStats);
       }
       
-      // Check symbol performance
+      // Check symbol performance (require trades from multiple strategies to prevent strategy-specific bias)
       for (const [symbol, stats] of symbolWinRates.entries()) {
-        if (stats.total >= SYMBOL_MIN_TRADES_FOR_FILTER && stats.winRate < SYMBOL_WIN_RATE_THRESHOLD) {
+        const hasEnoughTrades = stats.total >= SYMBOL_MIN_TRADES_FOR_FILTER;
+        const hasEnoughDiversity = stats.uniqueStrategies.size >= SYMBOL_MIN_UNIQUE_STRATEGIES;
+        const isBelowThreshold = stats.winRate < SYMBOL_WIN_RATE_THRESHOLD;
+        
+        if (hasEnoughTrades && hasEnoughDiversity && isBelowThreshold) {
           disabledSymbols.add(symbol);
-          console.log(`⛔ SYMBOL FILTER: ${symbol} disabled - win rate ${stats.winRate.toFixed(1)}% < ${SYMBOL_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades)`);
+          console.log(`⛔ SYMBOL FILTER: ${symbol} disabled - win rate ${stats.winRate.toFixed(1)}% < ${SYMBOL_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades across ${stats.uniqueStrategies.size} strategies)`);
+        } else if (hasEnoughTrades && !hasEnoughDiversity && isBelowThreshold) {
+          console.log(`⚠️ SYMBOL SKIP: ${symbol} low win rate ${stats.winRate.toFixed(1)}% but only ${stats.uniqueStrategies.size} strategy(s) - need ${SYMBOL_MIN_UNIQUE_STRATEGIES}+ for filter`);
         }
       }
       
-      // Check strategy performance
+      // Check strategy performance (require trades across multiple symbols to prevent symbol-specific bias)
       for (const [strategy, stats] of strategyWinRates.entries()) {
-        if (stats.total >= STRATEGY_MIN_TRADES_FOR_FILTER) {
+        const hasEnoughTrades = stats.total >= STRATEGY_MIN_TRADES_FOR_FILTER;
+        const hasEnoughDiversity = stats.uniqueSymbols.size >= STRATEGY_MIN_UNIQUE_SYMBOLS;
+        
+        if (hasEnoughTrades && hasEnoughDiversity) {
           if (stats.winRate < STRATEGY_WIN_RATE_THRESHOLD) {
             disabledStrategies.add(strategy);
-            console.log(`⛔ STRATEGY FILTER: "${strategy}" disabled - win rate ${stats.winRate.toFixed(1)}% < ${STRATEGY_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades)`);
+            console.log(`⛔ STRATEGY FILTER: "${strategy}" disabled - win rate ${stats.winRate.toFixed(1)}% < ${STRATEGY_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades across ${stats.uniqueSymbols.size} symbols)`);
           } else if (stats.winRate >= STRATEGY_HIGH_PERFORMER_THRESHOLD) {
             highPerformingStrategies.add(strategy);
-            console.log(`⭐ STRATEGY BOOST: "${strategy}" is high performer - win rate ${stats.winRate.toFixed(1)}% (${stats.wins}/${stats.total} trades)`);
+            console.log(`⭐ STRATEGY BOOST: "${strategy}" is high performer - win rate ${stats.winRate.toFixed(1)}% (${stats.wins}/${stats.total} trades across ${stats.uniqueSymbols.size} symbols)`);
           }
+        } else if (hasEnoughTrades && !hasEnoughDiversity && stats.winRate < STRATEGY_WIN_RATE_THRESHOLD) {
+          console.log(`⚠️ STRATEGY SKIP: "${strategy}" low win rate ${stats.winRate.toFixed(1)}% but only ${stats.uniqueSymbols.size} symbol(s) - need ${STRATEGY_MIN_UNIQUE_SYMBOLS}+ for filter`);
         }
       }
     }
