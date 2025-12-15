@@ -177,52 +177,71 @@ serve(async (req) => {
       return 100 - (100 / (1 + rs));
     };
 
+    // O(n) EMA without slice()
     const calculateEMA = (prices: number[], period: number): number => {
       if (prices.length < period) return prices[prices.length - 1];
-      
       const multiplier = 2 / (period + 1);
-      let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
-      
+      let ema = 0;
+      for (let i = 0; i < period; i++) ema += prices[i];
+      ema /= period;
       for (let i = period; i < prices.length; i++) {
         ema = (prices[i] - ema) * multiplier + ema;
       }
-      
       return ema;
     };
 
+    // O(n) MACD using incremental EMA calculation instead of O(n²) slice() per iteration
     const calculateMACD = (prices: number[], fastPeriod: number = 12, slowPeriod: number = 26, signalPeriod: number = 9) => {
-      const fastEMA = calculateEMA(prices, fastPeriod);
-      const slowEMA = calculateEMA(prices, slowPeriod);
-      const macdLine = fastEMA - slowEMA;
-      
-      const macdHistory = [];
-      for (let i = slowPeriod; i < prices.length; i++) {
-        const fast = calculateEMA(prices.slice(0, i + 1), fastPeriod);
-        const slow = calculateEMA(prices.slice(0, i + 1), slowPeriod);
-        macdHistory.push(fast - slow);
+      if (prices.length < slowPeriod) {
+        return { macdLine: 0, signalLine: 0, histogram: 0 };
       }
       
-      const signalLine = calculateEMA(macdHistory, signalPeriod);
+      const fastMult = 2 / (fastPeriod + 1);
+      const slowMult = 2 / (slowPeriod + 1);
+      
+      // Initialize EMAs
+      let fastEMA = 0, slowEMA = 0;
+      for (let i = 0; i < fastPeriod; i++) fastEMA += prices[i];
+      fastEMA /= fastPeriod;
+      for (let i = 0; i < slowPeriod; i++) slowEMA += prices[i];
+      slowEMA /= slowPeriod;
+      
+      // Build MACD history incrementally
+      const macdHistory: number[] = [];
+      for (let i = slowPeriod; i < prices.length; i++) {
+        fastEMA = (prices[i] - fastEMA) * fastMult + fastEMA;
+        slowEMA = (prices[i] - slowEMA) * slowMult + slowEMA;
+        macdHistory.push(fastEMA - slowEMA);
+      }
+      
+      const macdLine = macdHistory[macdHistory.length - 1] || 0;
+      const signalLine = macdHistory.length >= signalPeriod ? calculateEMA(macdHistory, signalPeriod) : macdLine * 0.9;
       
       return { macdLine, signalLine, histogram: macdLine - signalLine };
     };
 
-    const calculateBollingerBands = (prices: number[], period: number = 20, stdDev: number = 2) => {
+    // O(n) Bollinger Bands using sum and sum-of-squares for variance
+    const calculateBollingerBands = (prices: number[], period: number = 20, stdDevMultiplier: number = 2) => {
       if (prices.length < period) {
         const currentPrice = prices[prices.length - 1] || 0;
         return { upper: currentPrice, middle: currentPrice, lower: currentPrice };
       }
       
-      const recentPrices = prices.slice(-period);
-      const middle = recentPrices.reduce((a, b) => a + b, 0) / period;
-      
-      const variance = recentPrices.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / period;
+      const startIdx = prices.length - period;
+      let sum = 0, sumSq = 0;
+      for (let i = startIdx; i < prices.length; i++) {
+        sum += prices[i];
+        sumSq += prices[i] * prices[i];
+      }
+      const middle = sum / period;
+      // Variance = E[X²] - E[X]²
+      const variance = Math.max(0, (sumSq / period) - (middle * middle));
       const standardDeviation = Math.sqrt(variance);
       
       return {
-        upper: middle + (standardDeviation * stdDev),
+        upper: middle + (standardDeviation * stdDevMultiplier),
         middle: middle,
-        lower: middle - (standardDeviation * stdDev)
+        lower: middle - (standardDeviation * stdDevMultiplier)
       };
     };
 
@@ -241,13 +260,18 @@ serve(async (req) => {
       return obv;
     };
 
+    // O(n) average volume calculation without slice()
     const calculateAverageVolume = (volumes: number[], period: number = 20): number => {
+      if (volumes.length === 0) return 0;
       if (volumes.length < period) {
-        return volumes.reduce((a, b) => a + b, 0) / volumes.length;
+        let sum = 0;
+        for (let i = 0; i < volumes.length; i++) sum += volumes[i];
+        return sum / volumes.length;
       }
-      
-      const recentVolumes = volumes.slice(-period);
-      return recentVolumes.reduce((a, b) => a + b, 0) / period;
+      let sum = 0;
+      const startIdx = volumes.length - period;
+      for (let i = startIdx; i < volumes.length; i++) sum += volumes[i];
+      return sum / period;
     };
 
     const calculateIndicator = (type: string, prices: number[], volumes: number[], config: IndicatorConfig): number => {

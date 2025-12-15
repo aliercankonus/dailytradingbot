@@ -1552,21 +1552,27 @@ serve(async (req) => {
       return avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
     };
 
+    // O(n) EMA without slice()
     const calculateEMA = (prices: number[], period: number): number => {
       if (prices.length < period) return prices[prices.length - 1] || 0;
       const multiplier = 2 / (period + 1);
-      let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+      let ema = 0;
+      for (let i = 0; i < period; i++) ema += prices[i];
+      ema /= period;
       for (let i = period; i < prices.length; i++) {
         ema = (prices[i] - ema) * multiplier + ema;
       }
       return ema;
     };
 
+    // O(n) EMA Array without slice()
     const calculateEMAArray = (prices: number[], period: number): number[] => {
       const emaArray: number[] = [];
       if (prices.length < period) return emaArray;
       const multiplier = 2 / (period + 1);
-      let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+      let ema = 0;
+      for (let i = 0; i < period; i++) ema += prices[i];
+      ema /= period;
       for (let i = 0; i < period - 1; i++) emaArray.push(0);
       emaArray.push(ema);
       for (let i = period; i < prices.length; i++) {
@@ -1591,16 +1597,24 @@ serve(async (req) => {
       return { macd, signal, histogram: macd - signal };
     };
 
-    const calculateBollingerBands = (prices: number[], period = 20, stdDev = 2) => {
+    // O(n) Bollinger Bands using sum and sum-of-squares for variance
+    const calculateBollingerBands = (prices: number[], period = 20, stdDevMultiplier = 2) => {
       if (prices.length < period) {
         const p = prices[prices.length - 1] || 0;
         return { upper: p, middle: p, lower: p };
       }
-      const recentPrices = prices.slice(-period);
-      const middle = recentPrices.reduce((a, b) => a + b, 0) / period;
-      const variance = recentPrices.reduce((sum, p) => sum + Math.pow(p - middle, 2), 0) / period;
+      // Calculate using rolling sum from last `period` elements
+      const startIdx = prices.length - period;
+      let sum = 0, sumSq = 0;
+      for (let i = startIdx; i < prices.length; i++) {
+        sum += prices[i];
+        sumSq += prices[i] * prices[i];
+      }
+      const middle = sum / period;
+      // Variance = E[X²] - E[X]²
+      const variance = Math.max(0, (sumSq / period) - (middle * middle));
       const sd = Math.sqrt(variance);
-      return { upper: middle + sd * stdDev, middle, lower: middle - sd * stdDev };
+      return { upper: middle + sd * stdDevMultiplier, middle, lower: middle - sd * stdDevMultiplier };
     };
 
     const calculateIndicator = (config: any, price: number, volume: number, prices: number[], volumes: number[]): number => {
