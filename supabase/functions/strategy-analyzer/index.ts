@@ -1214,8 +1214,10 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     }
     
     // MOMENTUM CONTINUATION: Only if very strong trend + confirmed momentum
-    if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsi < RSI_THRESHOLDS.BULLISH_STRONG) {
-      const weighted = applyStochRsiWeight(8, "Momentum continuation: Strong ADX with MACD expansion");
+    // RSI must be in 45-65 range to prevent late entries near trend reversals
+    const rsiInMomentumZone = rsi > RSI_THRESHOLDS.NEUTRAL_LOW && rsi < RSI_THRESHOLDS.BULLISH_STRONG; // 45-65
+    if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsiInMomentumZone) {
+      const weighted = applyStochRsiWeight(8, `Momentum continuation: Strong ADX + MACD expansion (RSI=${rsi.toFixed(1)})`);
       return {
         isPullback: false,
         hasBothConditions: false,
@@ -1309,9 +1311,11 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
       };
     }
     
-    // MOMENTUM CONTINUATION: Only if very strong trend + RSI > NEUTRAL_LOW (symmetric with bullish < BULLISH_STRONG)
-    if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsi > RSI_THRESHOLDS.NEUTRAL_LOW) {
-      const weighted = applyStochRsiWeight(8, "Momentum continuation: Strong ADX with MACD expansion");
+    // MOMENTUM CONTINUATION: Only if very strong trend + confirmed momentum
+    // RSI must be in 35-55 range to prevent late entries near trend reversals (inverted for shorts)
+    const rsiInMomentumZone = rsi > RSI_THRESHOLDS.BEARISH_PULLBACK && rsi < RSI_THRESHOLDS.NEUTRAL_HIGH; // 35-55
+    if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsiInMomentumZone) {
+      const weighted = applyStochRsiWeight(8, `Momentum continuation: Strong ADX + MACD expansion (RSI=${rsi.toFixed(1)})`);
       return {
         isPullback: false,
         hasBothConditions: false,
