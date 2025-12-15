@@ -58,26 +58,64 @@ const BUILT_IN_STRATEGIES = {
   }
 };
 
+// O(n) optimized RSI calculation
 function calculateRSI(prices: number[], period = 14): number {
   if (prices.length < period + 1) return 50;
-  const changes = prices.slice(1).map((price, i) => price - prices[i]);
-  const gains = changes.map(c => c > 0 ? c : 0);
-  const losses = changes.map(c => c < 0 ? -c : 0);
-  const avgGain = gains.slice(-period).reduce((a, b) => a + b, 0) / period;
-  const avgLoss = losses.slice(-period).reduce((a, b) => a + b, 0) / period;
+  
+  // Calculate gains and losses for the last period directly without slice()
+  const startIdx = prices.length - period;
+  let gainSum = 0;
+  let lossSum = 0;
+  
+  for (let i = startIdx; i < prices.length; i++) {
+    const change = prices[i] - prices[i - 1];
+    if (change > 0) gainSum += change;
+    else lossSum += Math.abs(change);
+  }
+  
+  const avgGain = gainSum / period;
+  const avgLoss = lossSum / period;
   if (avgLoss === 0) return 100;
   const rs = avgGain / avgLoss;
   return 100 - (100 / (1 + rs));
 }
 
+// O(n) optimized EMA calculation
 function calculateEMA(prices: number[], period: number): number {
   if (prices.length < period) return prices[prices.length - 1];
   const k = 2 / (period + 1);
-  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  
+  // O(n) initial SMA without slice()
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    sum += prices[i];
+  }
+  let ema = sum / period;
+  
   for (let i = period; i < prices.length; i++) {
     ema = prices[i] * k + ema * (1 - k);
   }
   return ema;
+}
+
+// O(n) optimized RSI calculation at specific index without slice()
+function calculateRSIWindow(prices: number[], endIdx: number, period = 14): number {
+  if (endIdx < period) return 50;
+  
+  let gainSum = 0;
+  let lossSum = 0;
+  
+  for (let i = endIdx - period + 1; i <= endIdx; i++) {
+    const change = prices[i] - prices[i - 1];
+    if (change > 0) gainSum += change;
+    else lossSum += Math.abs(change);
+  }
+  
+  const avgGain = gainSum / period;
+  const avgLoss = lossSum / period;
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
 }
 
 async function runBacktest(strategyName: string, config: any, symbol: string, supabase: any) {
@@ -101,14 +139,33 @@ async function runBacktest(strategyName: string, config: any, symbol: string, su
   let capital = 10000;
   let position: { type: 'long' | 'short'; entryPrice: number; quantity: number } | null = null;
 
+  // Pre-calculate EMA values incrementally for O(n) total complexity
+  const ema20Values: number[] = new Array(closePrices.length).fill(0);
+  const ema50Values: number[] = new Array(closePrices.length).fill(0);
+  
+  // Initialize EMAs
+  let sum20 = 0, sum50 = 0;
+  for (let i = 0; i < 20 && i < closePrices.length; i++) sum20 += closePrices[i];
+  for (let i = 0; i < 50 && i < closePrices.length; i++) sum50 += closePrices[i];
+  
+  const k20 = 2 / 21, k50 = 2 / 51;
+  ema20Values[19] = closePrices.length >= 20 ? sum20 / 20 : closePrices[closePrices.length - 1];
+  ema50Values[49] = closePrices.length >= 50 ? sum50 / 50 : closePrices[closePrices.length - 1];
+  
+  for (let i = 20; i < closePrices.length; i++) {
+    ema20Values[i] = closePrices[i] * k20 + ema20Values[i - 1] * (1 - k20);
+  }
   for (let i = 50; i < closePrices.length; i++) {
-    const priceWindow = closePrices.slice(0, i + 1);
+    ema50Values[i] = closePrices[i] * k50 + ema50Values[i - 1] * (1 - k50);
+  }
+
+  for (let i = 50; i < closePrices.length; i++) {
     const currentPrice = closePrices[i];
 
-    // Calculate indicators
-    const rsi = calculateRSI(priceWindow);
-    const ema20 = calculateEMA(priceWindow, 20);
-    const ema50 = calculateEMA(priceWindow, 50);
+    // Use pre-calculated EMA values and calculate RSI for current window
+    const rsi = calculateRSIWindow(closePrices, i, 14);
+    const ema20 = ema20Values[i];
+    const ema50 = ema50Values[i];
 
     // Check exit conditions first
     if (position) {
