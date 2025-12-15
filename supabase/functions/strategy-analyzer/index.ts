@@ -2120,6 +2120,40 @@ serve(async (req) => {
           }
         }
         
+        // ===== NEW: BEARISH REVERSAL SHORT ENTRY AT OVERBOUGHT =====
+        // Allow SHORT when 4h StochRSI is overbought AND showing bearish reversal signals
+        // This catches trend reversal opportunities (inverse of bullish reversal logic)
+        const isOverboughtReversalZone = stochRsiK4h > STOCHRSI_THRESHOLDS.OVERBOUGHT; // K > 80
+        
+        if (intendedTradeDirection === "short" && isOverboughtReversalZone && !isExtremeOverbought4h) {
+          // Check for bearish reversal conditions
+          const stochRsiTurningDown = stochRsiFalling; // K < D
+          const has1hBearishTurn = stochFilterTrend1h === "bearish" || 
+            (stochRsi1h?.signal === "bearish_cross") ||
+            (stochRsiK1h < 70 && stochRsiK1h < (stochRsi1h?.d ?? 100)); // 1h showing early bearish
+          const bollingerAtUpper = bollingerPosition === "above_upper" || bollingerPosition === "upper_zone" || percentB > 70;
+          
+          // ALLOW bearish reversal SHORT if:
+          // - StochRSI turning down (K < D)
+          // - AND (bearish divergence OR 1h bearish turn)
+          // - AND price at upper Bollinger (overbought confirmation)
+          const allowBearishReversal = stochRsiTurningDown && 
+            (hasBearishDivergence || has1hBearishTurn) && 
+            bollingerAtUpper;
+          
+          if (allowBearishReversal) {
+            // Reversal entries get reduced position size (configurable, default 40%)
+            const reversalSizePercent = (riskParams.early_reversal_position_size_percent || 40) / 100;
+            reversalPositionMultiplier = Math.min(reversalPositionMultiplier, reversalSizePercent);
+            
+            console.log(`🔄 ${symbol}: BEARISH REVERSAL SHORT ALLOWED at overbought K=${stochRsiK4h.toFixed(1)}`);
+            console.log(`   StochRSI falling: K=${stochRsiK4h.toFixed(1)} < D=${stochRsiD4h.toFixed(1)}`);
+            console.log(`   1h bearish turn: ${has1hBearishTurn}, Bearish divergence: ${hasBearishDivergence}`);
+            console.log(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)})`);
+            console.log(`   Position size reduced to ${(reversalSizePercent * 100).toFixed(0)}% for reversal entry`);
+          }
+        }
+
         // ===== SMART EXCEPTION FOR SHORT AT OVERSOLD =====
         // Allow SHORT when StochRSI < 10 IF:
         // 1. Strong downtrend on 4h (bearish + confidence >= 65%)
@@ -2183,9 +2217,54 @@ serve(async (req) => {
           }
         }
         
+        // ===== NEW: BULLISH REVERSAL LONG ENTRY AT OVERSOLD =====
+        // Allow LONG when 4h StochRSI is oversold AND showing bullish reversal signals
+        // This catches trend reversal opportunities that were previously missed
+        // Key conditions:
+        // 1. StochRSI oversold (K < 20) - reversal zone
+        // 2. StochRSI rising (K > D) - momentum turning up
+        // 3. Bullish divergence OR 1h turning bullish - reversal confirmation
+        // 4. No strong downtrend continuation (ADX not extreme + stoch falling)
+        const isOversoldReversalZone = stochRsiK4h < STOCHRSI_THRESHOLDS.OVERSOLD; // K < 20
+        
+        if (intendedTradeDirection === "long" && isOversoldReversalZone) {
+          // Check for bullish reversal conditions
+          const stochRsiTurningUp = stochRsiRising; // K > D
+          const has1hBullishTurn = stochFilterTrend1h === "bullish" || 
+            (stochRsi1h?.signal === "bullish_cross") ||
+            (stochRsiK1h > 30 && stochRsiK1h > (stochRsi1h?.d ?? 0)); // 1h showing early bullish
+          const bollingerAtLower = bollingerPosition === "below_lower" || bollingerPosition === "lower_zone" || percentB < 30;
+          
+          // ALLOW bullish reversal LONG if:
+          // - StochRSI turning up (K > D)
+          // - AND (bullish divergence OR 1h bullish turn)
+          // - AND price at lower Bollinger (oversold confirmation)
+          const allowBullishReversal = stochRsiTurningUp && 
+            (hasBullishDivergence || has1hBullishTurn) && 
+            bollingerAtLower;
+          
+          if (allowBullishReversal) {
+            // Reversal entries get reduced position size (configurable, default 40%)
+            const reversalSizePercent = (riskParams.early_reversal_position_size_percent || 40) / 100;
+            reversalPositionMultiplier = Math.min(reversalPositionMultiplier, reversalSizePercent);
+            
+            console.log(`🔄 ${symbol}: BULLISH REVERSAL LONG ALLOWED at oversold K=${stochRsiK4h.toFixed(1)}`);
+            console.log(`   StochRSI rising: K=${stochRsiK4h.toFixed(1)} > D=${stochRsiD4h.toFixed(1)}`);
+            console.log(`   1h bullish turn: ${has1hBullishTurn}, Bullish divergence: ${hasBullishDivergence}`);
+            console.log(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)})`);
+            console.log(`   Position size reduced to ${(reversalSizePercent * 100).toFixed(0)}% for reversal entry`);
+          } else if (!stochRsiTurningUp) {
+            // Log why reversal was not allowed - StochRSI not rising
+            console.log(`📊 ${symbol}: Oversold LONG blocked - StochRSI not rising (K=${stochRsiK4h.toFixed(1)} <= D=${stochRsiD4h.toFixed(1)})`);
+          } else {
+            // Log other missing conditions
+            console.log(`📊 ${symbol}: Oversold LONG blocked - missing reversal confirmation (1h bullish: ${has1hBullishTurn}, divergence: ${hasBullishDivergence}, BB lower: ${bollingerAtLower})`);
+          }
+        }
+        
         // Log StochRSI status for monitoring
         if (stochRsiK4h < STOCHRSI_THRESHOLDS.OVERSOLD || stochRsiK4h > STOCHRSI_THRESHOLDS.OVERBOUGHT) {
-          console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} (near extreme but proceeding with ${intendedTradeDirection || "neutral"} direction)`);
+          console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} (proceeding with ${intendedTradeDirection || "neutral"} direction)`);
         }
 
         // ================= HARD ENTRY GATES =================
