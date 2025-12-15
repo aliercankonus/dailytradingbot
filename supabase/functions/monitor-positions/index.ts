@@ -47,6 +47,12 @@ const RSI_THRESHOLDS = {
   OVERBOUGHT: 70,          // Classic overbought level
 } as const;
 
+// ============= RSI MOMENTUM ZONE CONSTRAINTS =============
+// Momentum continuation entries require RSI in specific zones to prevent late entries
+// LONG momentum zone: 45-65 (NEUTRAL_LOW to BULLISH_STRONG)
+// SHORT momentum zone: 35-55 (BEARISH_PULLBACK to NEUTRAL_HIGH)
+// Entries outside these zones get 50% score reduction in strategy-analyzer
+
 // ============= StochRSI-RSI CONFLICT RESOLUTION =============
 // When StochRSI is at extremes, RSI signals are weighted at 50% to prevent
 // self-canceling signals where RSI momentum continuation conflicts with StochRSI reversal risk

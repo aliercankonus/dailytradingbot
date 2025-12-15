@@ -613,6 +613,9 @@ const getTechnicalScore = (trendData: any, effectiveTrend: string, symbol: strin
   // Strong ADX (>= VERY_STRONG) = momentum continuation is valid, don't penalize overbought/oversold
   const isStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG;
   
+  // RSI for momentum zone validation
+  const rsi4h = trendData?.timeframes?.['4h']?.rsi ?? 50;
+  
   // ============= STOCHRSI-RSI CONFLICT RESOLUTION =============
   // Check if StochRSI is at extreme that would cause self-canceling signals
   const isLong = effectiveTrend === "bullish";
@@ -620,19 +623,27 @@ const getTechnicalScore = (trendData: any, effectiveTrend: string, symbol: strin
     ? k4h > STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT  // 90+ for bullish
     : k4h < STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD;   // 10- for bearish
   
+  // RSI must be in momentum zone for continuation entries (prevents late trend entries)
+  // LONG: RSI 45-65, SHORT: RSI 35-55
+  const rsiInMomentumZoneLong = rsi4h > RSI_THRESHOLDS.NEUTRAL_LOW && rsi4h < RSI_THRESHOLDS.BULLISH_STRONG; // 45-65
+  const rsiInMomentumZoneShort = rsi4h > RSI_THRESHOLDS.BEARISH_PULLBACK && rsi4h < RSI_THRESHOLDS.NEUTRAL_HIGH; // 35-55
+  
   if (effectiveTrend === "bullish") {
     if (isStrongTrend) {
       // MOMENTUM CONTINUATION: Strong trend = overbought is NOT bad, it's momentum!
+      // But RSI must be in 45-65 zone to prevent late entries
       let baseStochScore = 0;
       if (primaryK > 80) baseStochScore = 4; // Momentum continuation
       else if (primaryK > 60) baseStochScore = 3; // Strong momentum
       else if (primaryK < 30) baseStochScore = 6; // Pullback in strong trend = great entry
       else baseStochScore = 2; // Neutral
       
-      // If StochRSI extreme, reduce momentum continuation score by 50%
-      if (isStochRsiExtreme && primaryK > 60) {
+      // If StochRSI extreme OR RSI outside momentum zone, reduce momentum continuation score
+      const shouldReduceScore = isStochRsiExtreme || (!rsiInMomentumZoneLong && primaryK > 60);
+      if (shouldReduceScore && primaryK > 60) {
         stochScore = Math.round(baseStochScore * 0.5);
-        console.log(`📊 ${symbol} TECH: StochRSI extreme (K=${k4h.toFixed(1)}) - momentum score ${baseStochScore} -> ${stochScore}`);
+        const reason = isStochRsiExtreme ? `StochRSI extreme (K=${k4h.toFixed(1)})` : `RSI outside zone (${rsi4h.toFixed(1)})`;
+        console.log(`📊 ${symbol} TECH: ${reason} - momentum score ${baseStochScore} -> ${stochScore}`);
       } else {
         stochScore = baseStochScore;
       }
@@ -654,16 +665,19 @@ const getTechnicalScore = (trendData: any, effectiveTrend: string, symbol: strin
   } else if (effectiveTrend === "bearish") {
     if (isStrongTrend) {
       // MOMENTUM CONTINUATION: Strong downtrend = oversold is NOT bad
+      // But RSI must be in 35-55 zone to prevent late entries
       let baseStochScore = 0;
       if (primaryK < 20) baseStochScore = 4; // Momentum continuation
       else if (primaryK < 40) baseStochScore = 3; // Strong momentum
       else if (primaryK > 70) baseStochScore = 6; // Rally in strong downtrend = great short entry
       else baseStochScore = 2; // Neutral
       
-      // If StochRSI extreme, reduce momentum continuation score by 50%
-      if (isStochRsiExtreme && primaryK < 40) {
+      // If StochRSI extreme OR RSI outside momentum zone, reduce momentum continuation score
+      const shouldReduceScore = isStochRsiExtreme || (!rsiInMomentumZoneShort && primaryK < 40);
+      if (shouldReduceScore && primaryK < 40) {
         stochScore = Math.round(baseStochScore * 0.5);
-        console.log(`📊 ${symbol} TECH: StochRSI extreme (K=${k4h.toFixed(1)}) - momentum score ${baseStochScore} -> ${stochScore}`);
+        const reason = isStochRsiExtreme ? `StochRSI extreme (K=${k4h.toFixed(1)})` : `RSI outside zone (${rsi4h.toFixed(1)})`;
+        console.log(`📊 ${symbol} TECH: ${reason} - momentum score ${baseStochScore} -> ${stochScore}`);
       } else {
         stochScore = baseStochScore;
       }
