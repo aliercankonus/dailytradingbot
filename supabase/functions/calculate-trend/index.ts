@@ -650,7 +650,7 @@ function enhanceConfidenceWithIndicators(
     enhanced += 5;
   } else if (adx >= ADX_THRESHOLDS.MINIMUM) {
     enhanced += 2;
-  } else if (adx < 15) {
+  } else if (adx < 15) {  // Below VERY_WEAK threshold (15 is intentionally < VERY_WEAK=12, keeping 15 for severe penalty)
     enhanced -= 10;
   } else if (adx < ADX_THRESHOLDS.WEAK) {
     enhanced -= 5;
@@ -1076,7 +1076,7 @@ serve(async (req) => {
       const strong4h = dominantConfidence >= 60;
       const macd1h = trend1h.indicators.macdHistogram;
       const macdAligned = dominantTrend === "bullish" ? macd1h >= 0 : macd1h <= 0;
-      const hasActivity = adx >= 20;
+      const hasActivity = adx >= ADX_THRESHOLDS.MINIMUM;
       const atrNotExtremelyCompressed = relativeATR >= 0.5;
       if (strong4h && macdAligned && (hasActivity || atrNotExtremelyCompressed)) {
         neutralAllowedWithStrongHigherTimeframe = true;
@@ -1108,7 +1108,7 @@ serve(async (req) => {
       } 
       // TIGHTENED: Early reversal requires very strong 1h (75% vs 70%)
       // and ADX must show trend strength
-      else if (trend1h.confidence >= 75 && (dominantTrend === "neutral" || dominantConfidence < 55) && adx >= 18) {
+      else if (trend1h.confidence >= 75 && (dominantTrend === "neutral" || dominantConfidence < 55) && adx >= ADX_THRESHOLDS.WEAK) {
         divergenceType = "early_reversal";
         divergenceConfidence = Math.min(trend1h.confidence * 0.65, 60); // Reduced from 0.7, 65
         allowDivergenceSignal = true;
@@ -1168,7 +1168,7 @@ serve(async (req) => {
     );
 
     const atrCompressed = relativeATR < 0.6;
-    const adxWeak = adx < 20;
+    const adxWeak = adx < ADX_THRESHOLDS.MINIMUM;
     const isRanging = atrCompressed && adxWeak;
     const volatilityNormal = !isRanging && atrPercent < 5.0;
     if (isRanging) {
@@ -1264,7 +1264,7 @@ serve(async (req) => {
 
     // TIGHTENED: MACD expanding now requires minimum ADX threshold - Uses centralized ADX_THRESHOLDS
     // Previously macdExpanding had no ADX check, allowing weak signals as "mixed"
-    const macdExpanding = Math.abs(macdHistogram) > 0.05 && macdDirectionAligned && adx >= 15;
+    const macdExpanding = Math.abs(macdHistogram) > 0.05 && macdDirectionAligned && adx >= 15;  // 15 is intentional (below WEAK threshold for early MACD signals)
     const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned && adx >= 15;
 
     // TIGHTENED: Momentum confirmation requires ADX >= MODERATE (22)

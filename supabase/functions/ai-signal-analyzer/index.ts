@@ -6,6 +6,20 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// ============= CENTRALIZED ADX THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: strategy-analyzer, calculate-trend, execute-trade, monitor-positions
+const ADX_THRESHOLDS = {
+  VERY_WEAK: 12,    // Essentially no trend, avoid trading
+  WEAK: 18,         // Weak trend, mixed momentum allowed with caution
+  MINIMUM: 20,      // Hard gate for any signal generation
+  MODERATE: 22,     // Momentum confirmation threshold
+  STRONG: 25,       // Strong trend, reduced reversal weight
+  VERY_STRONG: 30,  // Very strong trend, momentum continuation valid
+  EXCEPTIONAL: 35,  // Exceptional trend, relaxed quality thresholds
+  EXTREME: 40,      // Extreme trend, maximum confidence bonus
+} as const;
+
 interface SignalAnalysisRequest {
   symbol: string;
   userId?: string;
@@ -245,12 +259,12 @@ function getFallbackAnalysis(trendData: SignalAnalysisRequest['trendData'], sign
   let sizeMultiplier = 1.0;
   let riskLevel: "low" | "medium" | "high" = "medium";
 
-  // ADX analysis
-  if (trendData.adx >= 30) {
-    keyFactors.push("Strong trend (ADX ≥30)");
+  // ADX analysis - Uses centralized ADX_THRESHOLDS
+  if (trendData.adx >= ADX_THRESHOLDS.VERY_STRONG) {
+    keyFactors.push(`Strong trend (ADX ≥${ADX_THRESHOLDS.VERY_STRONG})`);
     confidenceAdj += 5;
-  } else if (trendData.adx < 20) {
-    keyFactors.push("Weak trend (ADX <20)");
+  } else if (trendData.adx < ADX_THRESHOLDS.MINIMUM) {
+    keyFactors.push(`Weak trend (ADX <${ADX_THRESHOLDS.MINIMUM})`);
     confidenceAdj -= 5;
     sizeMultiplier *= 0.8;
   }
