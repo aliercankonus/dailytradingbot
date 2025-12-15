@@ -629,11 +629,30 @@ function calculateHistoricalATRAvg(klines: any[], atrPeriod: number, atrLookback
  *   4. Calculate DX = |+DI - -DI| / (+DI + -DI) * 100
  *   5. Apply Wilder's smoothing to DX to get ADX
  */
-function calculateADX(klines: any[], period = 14): number {
-  // Minimum data requirement: 2*period candles for TR/DM smoothing + ADX smoothing
-  const minRequired = 2 * period + 1;
+/**
+ * ADX with direction tracking for fake breakout detection.
+ * Returns current ADX, previous ADX, and whether ADX is rising.
+ * 
+ * CRITICAL INSIGHT (user feedback):
+ * - ADX level alone doesn't detect fake breakouts
+ * - ADX rising + MACD expanding = genuine momentum
+ * - ADX falling + MACD expanding = FAKE BREAKOUT RISK
+ * 
+ * @returns { adx, prevAdx, adxRising } - adxRising = current > previous
+ */
+interface ADXResult {
+  adx: number;
+  prevAdx: number;
+  adxRising: boolean;
+}
+
+function calculateADXWithDirection(klines: any[], period = 14): ADXResult {
+  const defaultResult: ADXResult = { adx: 0, prevAdx: 0, adxRising: false };
+  
+  // Minimum data requirement: 2*period candles for TR/DM smoothing + ADX smoothing + 1 for prev
+  const minRequired = 2 * period + 2;
   if (!klines || klines.length < minRequired) {
-    return 0;
+    return defaultResult;
   }
 
   // Step 1: Calculate True Range (TR) and Directional Movement (+DM, -DM) arrays
@@ -677,7 +696,7 @@ function calculateADX(klines: any[], period = 14): number {
 
   // Validate we have enough data after filtering invalid bars
   if (trueRanges.length < 2 * period) {
-    return 0;
+    return defaultResult;
   }
 
   // Step 2: Initialize Wilder's smoothing with SUM of first 'period' values
@@ -725,25 +744,44 @@ function calculateADX(klines: any[], period = 14): number {
   }
 
   // Validate DX values
-  if (dxValues.length < period) {
-    return 0;
+  if (dxValues.length < period + 1) {
+    return defaultResult;
   }
 
-  // Step 4: Calculate ADX using Wilder's smoothing of DX values
+  // Step 4: Calculate ADX values using Wilder's smoothing of DX values
+  // We need at least 2 ADX values to get direction
+  const adxValues: number[] = [];
+  
   // Initial ADX = simple average of first 'period' DX values
   let adx = 0;
   for (let i = 0; i < period; i++) {
     adx += dxValues[i];
   }
   adx /= period;
+  adxValues.push(adx);
 
   // Continue Wilder's smoothing: ADX = (prevADX * (N-1) + currentDX) / N
   for (let i = period; i < dxValues.length; i++) {
     adx = ((adx * (period - 1)) + dxValues[i]) / period;
+    adxValues.push(adx);
   }
 
-  // Clamp to valid range [0, 100] and round to 1 decimal place
-  return Math.max(0, Math.min(100, Math.round(adx * 10) / 10));
+  // Get current and previous ADX
+  const currentAdx = Math.max(0, Math.min(100, Math.round(adx * 10) / 10));
+  const prevAdx = adxValues.length >= 2 
+    ? Math.max(0, Math.min(100, Math.round(adxValues[adxValues.length - 2] * 10) / 10))
+    : currentAdx;
+  
+  return {
+    adx: currentAdx,
+    prevAdx: prevAdx,
+    adxRising: currentAdx > prevAdx
+  };
+}
+
+// Legacy wrapper for backward compatibility
+function calculateADX(klines: any[], period = 14): number {
+  return calculateADXWithDirection(klines, period).adx;
 }
 
 async function fetchBinanceKlines(symbol: string, interval: string = "1h", limit: number = 100, retries: number = 2): Promise<any[]> {
@@ -1178,7 +1216,10 @@ serve(async (req) => {
     const dominantConfidence = trend4h.confidence;
 
     // CONSOLIDATED: Use unified ATR utility instead of inline calculation
-    const adx = calculateADX(klines1h, 14);
+    // NEW: Get ADX with direction for fake breakout detection
+    const adxResult = calculateADXWithDirection(klines1h, 14);
+    const adx = adxResult.adx;
+    const adxRising = adxResult.adxRising;
     const atrPeriod = 14;
     const atrLookback = 30;
     const currentATR = calculateATR(klines1h, atrPeriod);
@@ -1533,21 +1574,35 @@ serve(async (req) => {
     const macdExpanding = Math.abs(macdHistogram) > 0.05 && macdDirectionAligned && adx >= 15;  // 15 is intentional (below WEAK threshold for early MACD signals)
     const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned && adx >= 15;
 
-    // TIGHTENED: Momentum confirmation requires ADX >= MODERATE (22)
-    const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= ADX_THRESHOLDS.MODERATE;
+    // ============= FAKE BREAKOUT DETECTION =============
+    // ADX direction reveals true momentum vs fake breakouts:
+    // - ADX rising + MACD expanding = genuine momentum (trend strengthening)
+    // - ADX falling + MACD expanding = FAKE BREAKOUT RISK (trend weakening despite MACD)
+    const fakeBreakoutRisk = macdExpanding && !adxRising;
+    const genuineMomentum = macdExpanding && adxRising;
+
+    // TIGHTENED: Momentum confirmation requires ADX >= MODERATE (22) AND ADX rising (no fake breakout)
+    // Changed from: momentumConfirms = macdExpanding && ... && adx >= MODERATE
+    // To: Also require ADX rising to filter fake breakouts
+    const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= ADX_THRESHOLDS.MODERATE && adxRising;
     let momentumState: "none" | "mixed" | "confirmed" = "none";
     if (momentumConfirms) {
       momentumState = "confirmed";
-    } else if (macdExpanding && (hasDivergence || !lastCloseAlignsWithTrend)) {
-      // Mixed: MACD expanding but divergence exists or price doesn't align
+    } else if (macdExpanding && adxRising && (hasDivergence || !lastCloseAlignsWithTrend)) {
+      // Mixed: MACD expanding + ADX rising but divergence exists or price doesn't align
       // Only allow mixed if ADX shows some trend (prevents weak signals)
       momentumState = adx >= ADX_THRESHOLDS.WEAK ? "mixed" : "none";
-    } else if (macdStrong && adx >= ADX_THRESHOLDS.MINIMUM) {
-      // Mixed: Strong MACD magnitude even without expansion, but needs ADX confirmation
+    } else if (fakeBreakoutRisk && adx >= ADX_THRESHOLDS.MODERATE) {
+      // WARNING: MACD expanding but ADX falling = potential fake breakout
+      // Downgrade to mixed even with strong MACD to add caution
+      momentumState = "mixed";
+      console.log(`${symbol}: FAKE BREAKOUT WARNING - MACD expanding but ADX falling (${adxResult.prevAdx.toFixed(1)} → ${adx.toFixed(1)})`);
+    } else if (macdStrong && adx >= ADX_THRESHOLDS.MINIMUM && adxRising) {
+      // Mixed: Strong MACD magnitude + ADX rising, but needs ADX confirmation
       momentumState = "mixed";
     }
     console.log(
-      `${symbol} MOMENTUM: lastClose=${lastClose.toFixed(2)} prevClose=${prevClose.toFixed(2)} alignsWithTrend=${lastCloseAlignsWithTrend} divergence=${hasDivergence} macd=${macdHistogram.toFixed(3)} expanding=${macdExpanding} adx=${adx.toFixed(1)} volumeConfirms=${volumeConfirmsDirection} confirms=${momentumConfirms} state=${momentumState}`,
+      `${symbol} MOMENTUM: lastClose=${lastClose.toFixed(2)} prevClose=${prevClose.toFixed(2)} alignsWithTrend=${lastCloseAlignsWithTrend} divergence=${hasDivergence} macd=${macdHistogram.toFixed(3)} expanding=${macdExpanding} adx=${adx.toFixed(1)} adxRising=${adxRising} fakeBreakout=${fakeBreakoutRisk} volumeConfirms=${volumeConfirmsDirection} confirms=${momentumConfirms} state=${momentumState}`,
     );
     const marketStructure = validateMarketStructure(klines1h, trend1h.trend);
     console.log(
@@ -1585,13 +1640,16 @@ serve(async (req) => {
         momentum: {
           confirms: momentumConfirms,
           state: momentumState,
-          building: macdExpanding && !hasDivergence,
+          building: macdExpanding && !hasDivergence && adxRising, // Now also requires ADX rising
           lastCloseAlignsWithTrend,
           hasDivergence,
           macdHistogram: Math.round(macdHistogram * 1000) / 1000,
           macdExpanding,
           macdDirectionAligned,
           adx: Math.round(adx * 10) / 10,
+          adxRising,  // NEW: ADX direction for fake breakout detection
+          fakeBreakoutRisk,  // NEW: MACD expanding + ADX falling = warning
+          genuineMomentum,   // NEW: MACD expanding + ADX rising = real momentum
           volumeConfirms: volumeConfirmsDirection,
           volumeBoost: volumeBoost,
         },
