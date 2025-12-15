@@ -2083,12 +2083,20 @@ serve(async (req) => {
         // NEW: Volume score component
         const volumeScore = getVolumeScore(trendData, trend);
         
+        // Cap pullback score when volume doesn't confirm - prevents "perfect pullback, no volume" trap
+        let entryTimingScore = Math.max(0, pullbackAnalysis.entryTimingScore);
+        const volumeConfirms = momentum?.volumeConfirms ?? false;
+        if (!volumeConfirms && entryTimingScore > 15) {
+          console.log(`⚠️ ${symbol}: Capping pullback score ${entryTimingScore}→15 (volume not confirming)`);
+          entryTimingScore = 15;
+        }
+        
         const qualityFactors: QualityFactors = {
           adxScore: getAdxScore(adx),
           momentumScore: getMomentumScore(momentum),
           alignmentScore: getAlignmentScore(confidence, trendConsistency, higherTimeframeFilter?.aligned || false, trendData),
           technicalScore: getTechnicalScore(trendData, trend, symbol),
-          entryTimingScore: Math.max(0, pullbackAnalysis.entryTimingScore),
+          entryTimingScore: entryTimingScore,
           volumeScore: volumeScore,                // NEW: Volume confirmation
           confidencePenalty: confidencePenalty,    // Penalize high confidence entries
           directionBonus: directionBonus,          // +3 for SHORT signals
