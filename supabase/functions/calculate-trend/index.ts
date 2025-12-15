@@ -169,7 +169,15 @@ function calculateRSIArray(prices: number[], period = 14): number[] {
 
 // Stochastic RSI calculation - earlier overbought/oversold detection
 // Optimized: O(n) complexity using pre-calculated RSI array instead of O(n²)
-function calculateStochasticRSI(prices: number[], rsiPeriod = 14, stochPeriod = 14, kSmooth = 3, dSmooth = 3): {
+// FURTHER OPTIMIZED: Accepts optional pre-calculated RSI array to avoid duplicate RSI calculation
+function calculateStochasticRSI(
+  prices: number[], 
+  rsiPeriod = 14, 
+  stochPeriod = 14, 
+  kSmooth = 3, 
+  dSmooth = 3,
+  preCalculatedRsiArray?: number[]  // Optional: reuse RSI array from calculateTrend
+): {
   k: number;
   d: number;
   signal: "overbought" | "oversold" | "bullish_cross" | "bearish_cross" | "neutral";
@@ -179,8 +187,8 @@ function calculateStochasticRSI(prices: number[], rsiPeriod = 14, stochPeriod = 
     return { k: 50, d: 50, signal: "neutral", strength: 0 };
   }
 
-  // Optimized: Calculate all RSI values in single O(n) pass
-  const rsiValues = calculateRSIArray(prices, rsiPeriod);
+  // Use pre-calculated RSI array if provided, otherwise calculate
+  const rsiValues = preCalculatedRsiArray ?? calculateRSIArray(prices, rsiPeriod);
 
   if (rsiValues.length < stochPeriod) {
     return { k: 50, d: 50, signal: "neutral", strength: 0 };
@@ -916,7 +924,7 @@ function calculateTrueAlignmentScore(
   };
 }
 
-// OPTIMIZED: Now returns macdHistogramArray to avoid duplicate MACD calculation
+// OPTIMIZED: Returns macdHistogramArray and rsiArray to avoid duplicate calculations
 function calculateTrend(prices: number[]): {
   trend: "bullish" | "bearish" | "neutral";
   confidence: number;
@@ -926,6 +934,7 @@ function calculateTrend(prices: number[]): {
     emaSignal: string;
     rsi: number;
     rsiSignal: string;
+    rsiArray: number[];  // Added for StochRSI reuse
     macd: number;
     macdSignal: number;
     macdHistogram: number;
@@ -939,7 +948,7 @@ function calculateTrend(prices: number[]): {
       confidence: 35, // Lower floor for insufficient data
       indicators: {
         ema12: 0, ema26: 0, emaSignal: "neutral",
-        rsi: 50, rsiSignal: "neutral",
+        rsi: 50, rsiSignal: "neutral", rsiArray: [],
         macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral",
         macdHistogramArray: []
       }
@@ -948,7 +957,9 @@ function calculateTrend(prices: number[]): {
 
   const ema12 = calculateEMA(prices, 12);
   const ema26 = calculateEMA(prices, 26);
-  const rsi = calculateRSI(prices, 14);
+  // OPTIMIZED: Use RSI array and extract last value (avoids duplicate calculation for StochRSI)
+  const rsiArray = calculateRSIArray(prices, 14);
+  const rsi = rsiArray.length > 0 ? rsiArray[rsiArray.length - 1] : 50;
   const { macd, signal, histogram, histogramArray } = calculateMACD(prices);
 
   let bullishSignals = 0;
@@ -1027,6 +1038,7 @@ function calculateTrend(prices: number[]): {
       emaSignal,
       rsi: Math.round(rsi * 100) / 100,
       rsiSignal,
+      rsiArray,  // Full RSI array for StochRSI reuse
       macd: Math.round(macd * 100) / 100,
       macdSignal: Math.round(signal * 100) / 100,
       macdHistogram: Math.round(histogram * 100) / 100,
@@ -1087,11 +1099,11 @@ serve(async (req) => {
     const trend1h = calculateTrend(prices1h);
     const trend4h = calculateTrend(prices4h);
 
-    // Calculate Stochastic RSI for all timeframes
-    const stochRsi15m = calculateStochasticRSI(prices15m);
-    const stochRsi30m = calculateStochasticRSI(prices30m);
-    const stochRsi1h = calculateStochasticRSI(prices1h);
-    const stochRsi4h = calculateStochasticRSI(prices4h);
+    // OPTIMIZED: Pass pre-calculated RSI arrays from calculateTrend to avoid duplicate RSI calculation
+    const stochRsi15m = calculateStochasticRSI(prices15m, 14, 14, 3, 3, trend15m.indicators.rsiArray);
+    const stochRsi30m = calculateStochasticRSI(prices30m, 14, 14, 3, 3, trend30m.indicators.rsiArray);
+    const stochRsi1h = calculateStochasticRSI(prices1h, 14, 14, 3, 3, trend1h.indicators.rsiArray);
+    const stochRsi4h = calculateStochasticRSI(prices4h, 14, 14, 3, 3, trend4h.indicators.rsiArray);
 
     console.log(
       `${symbol} StochRSI: 1h K=${stochRsi1h.k} D=${stochRsi1h.d} signal=${stochRsi1h.signal} | 4h K=${stochRsi4h.k} D=${stochRsi4h.d} signal=${stochRsi4h.signal}`
