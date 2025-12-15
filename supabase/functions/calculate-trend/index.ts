@@ -898,11 +898,13 @@ function calculateTradeDirection(
 }
 
 // Enhanced confidence calculation - adds ADX and volume to base confidence
+// CRITICAL: volumeSpike alone is NOT directional - requires rangeExpansion confirmation
 function enhanceConfidenceWithIndicators(
   baseConfidence: number,
   adx: number,
   volumeConfirms: boolean,
-  volumeRatio: number
+  volumeRatio: number,
+  hasRangeExpansion: boolean = false // ATR > historical avg confirms genuine movement
 ): number {
   let enhanced = baseConfidence;
   
@@ -922,14 +924,19 @@ function enhanceConfidenceWithIndicators(
     enhanced -= 5;
   }
   
-  // Volume contribution: Confirming volume adds up to 8 points
+  // Volume contribution: Confirming volume adds points
+  // CRITICAL FIX: volumeSpike without range expansion gets reduced bonus
   if (volumeConfirms) {
-    if (volumeRatio >= 2.0) {
-      enhanced += 8; // Strong volume spike
+    if (volumeRatio >= 2.0 && hasRangeExpansion) {
+      enhanced += 8; // Strong volume spike + range expansion = genuine breakout
+    } else if (volumeRatio >= 2.0) {
+      enhanced += 5; // High volume but no range expansion = reduced confidence
+    } else if (volumeRatio >= 1.5 && hasRangeExpansion) {
+      enhanced += 5; // Above average + range expansion
     } else if (volumeRatio >= 1.5) {
-      enhanced += 5;
+      enhanced += 3; // Above average without expansion = reduced
     } else {
-      enhanced += 3;
+      enhanced += 2; // Basic volume confirmation
     }
   } else if (volumeRatio < 0.5) {
     enhanced -= 5; // Very low volume = less confidence
@@ -1430,22 +1437,25 @@ serve(async (req) => {
     const adx4h = calculateADX(klines4h, 14);
 
     // Enhance confidence with ADX and volume for each timeframe
+    // CRITICAL: Only 1h has relativeATR available, others use conservative false
+    const hasRangeExpansion1h = relativeATR > 1.0; // ATR above historical average
     const enhancedConfidence15m = enhanceConfidenceWithIndicators(
-      trend15m.confidence, adx15m, volume15m.volumeSpike || volume15m.volumeTrend === "increasing", volume15m.volumeRatio
+      trend15m.confidence, adx15m, volume15m.volumeSpike || volume15m.volumeTrend === "increasing", volume15m.volumeRatio, false
     );
     const enhancedConfidence30m = enhanceConfidenceWithIndicators(
-      trend30m.confidence, adx30m, volume30m.volumeSpike || volume30m.volumeTrend === "increasing", volume30m.volumeRatio
+      trend30m.confidence, adx30m, volume30m.volumeSpike || volume30m.volumeTrend === "increasing", volume30m.volumeRatio, false
     );
     const enhancedConfidence1h = enhanceConfidenceWithIndicators(
-      trend1h.confidence, adx, volume1h.volumeSpike || volume1h.volumeTrend === "increasing", volume1h.volumeRatio
+      trend1h.confidence, adx, volume1h.volumeSpike || volume1h.volumeTrend === "increasing", volume1h.volumeRatio, hasRangeExpansion1h
     );
     const enhancedConfidence4h = enhanceConfidenceWithIndicators(
-      trend4h.confidence, adx4h, volume4h.volumeSpike || volume4h.volumeTrend === "increasing", volume4h.volumeRatio
+      trend4h.confidence, adx4h, volume4h.volumeSpike || volume4h.volumeTrend === "increasing", volume4h.volumeRatio, false
     );
 
     // Calculate true alignment score (replaces old weightedConsistency)
     // Pass ADX and volume confirms for neutral trend protection
-    const volumeConfirmsAny = volume1h.volumeSpike || volume4h.volumeSpike || 
+    // CRITICAL: volumeConfirmsAny now requires range expansion for spike-based confirmation
+    const volumeConfirmsAny = (volume1h.volumeSpike && hasRangeExpansion1h) || volume4h.volumeSpike || 
                                volume1h.volumeTrend === "increasing" || volume4h.volumeTrend === "increasing";
     const trueAlignment = calculateTrueAlignmentScore(
       trend4h, trend1h, trend30m, trend15m, dominantTrend, adx, volumeConfirmsAny
