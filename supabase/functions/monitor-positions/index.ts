@@ -273,11 +273,13 @@ serve(async (req) => {
     }
   });
 
-  // Helper function for EMA calculation
+  // Helper function for EMA calculation - O(n) without slice()
   function calculateEMA(prices: number[], period: number): number {
     if (prices.length < period) return prices[prices.length - 1] || 0;
     const multiplier = 2 / (period + 1);
-    let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    let ema = 0;
+    for (let i = 0; i < period; i++) ema += prices[i];
+    ema /= period;
     for (let i = period; i < prices.length; i++) {
       ema = (prices[i] - ema) * multiplier + ema;
     }
