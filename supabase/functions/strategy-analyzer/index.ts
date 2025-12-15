@@ -20,6 +20,22 @@ const ADX_THRESHOLDS = {
   EXTREME: 40,      // Extreme trend, maximum confidence bonus
 } as const;
 
+// ============= CENTRALIZED STOCHRSI THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: calculate-trend, execute-trade, monitor-positions, ai-signal-analyzer
+const STOCHRSI_THRESHOLDS = {
+  EXTREME_OVERSOLD: 10,    // Extremely oversold, strong bounce risk for SHORT
+  DEEPLY_OVERSOLD: 15,     // Deeply oversold zone
+  OVERSOLD: 20,            // Standard oversold threshold
+  OVERSOLD_ZONE: 25,       // Entering oversold territory
+  NEUTRAL_LOW: 30,         // Lower neutral boundary
+  NEUTRAL_HIGH: 70,        // Upper neutral boundary
+  OVERBOUGHT_ZONE: 75,     // Entering overbought territory
+  OVERBOUGHT: 80,          // Standard overbought threshold
+  DEEPLY_OVERBOUGHT: 85,   // Deeply overbought zone
+  EXTREME_OVERBOUGHT: 90,  // Extremely overbought, strong pullback risk for LONG
+} as const;
+
 // ============= AI REJECTION ANALYZER HELPER =============
 // Calls AI to validate rejections and stores results in database
 const analyzeRejectionWithAI = async (
@@ -729,31 +745,31 @@ const calculateUnifiedReversalScore = (
   
   if (isLong) {
     // SHORT entry blocked if 4h StochRSI is oversold (bounce risk)
-    if (k4h < 15) {
+    if (k4h < STOCHRSI_THRESHOLDS.DEEPLY_OVERSOLD) {
       breakdown.stochRsiZoneScore += 15;
       signals.push(`4h StochRSI deeply oversold (K=${k4h.toFixed(1)})`);
-    } else if (k4h < 25) {
+    } else if (k4h < STOCHRSI_THRESHOLDS.OVERSOLD_ZONE) {
       breakdown.stochRsiZoneScore += 8;
       signals.push(`4h StochRSI oversold zone (K=${k4h.toFixed(1)})`);
     }
     
     // Overbought warning for LONG entry (reduced by ADX weight in strong trends)
-    if (k4h > 90) {
+    if (k4h > STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT) {
       breakdown.stochRsiZoneScore += 10;
       signals.push(`4h StochRSI extremely overbought (K=${k4h.toFixed(1)})`);
     }
   } else {
     // LONG entry blocked if 4h StochRSI is overbought (pullback risk)
-    if (k4h > 85) {
+    if (k4h > STOCHRSI_THRESHOLDS.DEEPLY_OVERBOUGHT) {
       breakdown.stochRsiZoneScore += 15;
       signals.push(`4h StochRSI deeply overbought (K=${k4h.toFixed(1)})`);
-    } else if (k4h > 75) {
+    } else if (k4h > STOCHRSI_THRESHOLDS.OVERBOUGHT_ZONE) {
       breakdown.stochRsiZoneScore += 8;
       signals.push(`4h StochRSI overbought zone (K=${k4h.toFixed(1)})`);
     }
     
     // Oversold warning for SHORT entry (reduced by ADX weight in strong trends)
-    if (k4h < 10) {
+    if (k4h < STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD) {
       breakdown.stochRsiZoneScore += 10;
       signals.push(`4h StochRSI extremely oversold (K=${k4h.toFixed(1)})`);
     }
@@ -1879,7 +1895,7 @@ serve(async (req) => {
         }
         
         // Log StochRSI status for monitoring
-        if (stochRsiK4h < 20 || stochRsiK4h > 80) {
+        if (stochRsiK4h < STOCHRSI_THRESHOLDS.OVERSOLD || stochRsiK4h > STOCHRSI_THRESHOLDS.OVERBOUGHT) {
           console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} (near extreme but proceeding with ${intendedTradeDirection || "neutral"} direction)`);
         }
 

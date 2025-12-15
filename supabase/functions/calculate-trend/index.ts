@@ -19,6 +19,22 @@ const ADX_THRESHOLDS = {
   EXTREME: 40,      // Extreme trend, maximum confidence bonus
 } as const;
 
+// ============= CENTRALIZED STOCHRSI THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: strategy-analyzer, execute-trade, monitor-positions, ai-signal-analyzer
+const STOCHRSI_THRESHOLDS = {
+  EXTREME_OVERSOLD: 10,    // Extremely oversold, strong bounce risk for SHORT
+  DEEPLY_OVERSOLD: 15,     // Deeply oversold zone
+  OVERSOLD: 20,            // Standard oversold threshold
+  OVERSOLD_ZONE: 25,       // Entering oversold territory
+  NEUTRAL_LOW: 30,         // Lower neutral boundary
+  NEUTRAL_HIGH: 70,        // Upper neutral boundary
+  OVERBOUGHT_ZONE: 75,     // Entering overbought territory
+  OVERBOUGHT: 80,          // Standard overbought threshold
+  DEEPLY_OVERBOUGHT: 85,   // Deeply overbought zone
+  EXTREME_OVERBOUGHT: 90,  // Extremely overbought, strong pullback risk for LONG
+} as const;
+
 // Fixed: Proper EMA calculation (single value)
 function calculateEMA(prices: number[], period: number): number {
   if (prices.length === 0) return 0;
@@ -191,12 +207,12 @@ function calculateStochasticRSI(prices: number[], rsiPeriod = 14, stochPeriod = 
   let strength = 0;
 
   // Overbought/Oversold zones (more sensitive than regular RSI)
-  if (k > 80 && d > 80) {
+  if (k > STOCHRSI_THRESHOLDS.OVERBOUGHT && d > STOCHRSI_THRESHOLDS.OVERBOUGHT) {
     signal = "overbought";
-    strength = Math.min((k - 80) / 20, 1) * 100;
-  } else if (k < 20 && d < 20) {
+    strength = Math.min((k - STOCHRSI_THRESHOLDS.OVERBOUGHT) / (100 - STOCHRSI_THRESHOLDS.OVERBOUGHT), 1) * 100;
+  } else if (k < STOCHRSI_THRESHOLDS.OVERSOLD && d < STOCHRSI_THRESHOLDS.OVERSOLD) {
     signal = "oversold";
-    strength = Math.min((20 - k) / 20, 1) * 100;
+    strength = Math.min((STOCHRSI_THRESHOLDS.OVERSOLD - k) / STOCHRSI_THRESHOLDS.OVERSOLD, 1) * 100;
   } 
   // Bullish crossover: K crosses above D from oversold zone
   else if (k > d && prevK <= prevD && k < 50) {

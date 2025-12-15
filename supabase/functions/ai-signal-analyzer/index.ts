@@ -20,6 +20,22 @@ const ADX_THRESHOLDS = {
   EXTREME: 40,      // Extreme trend, maximum confidence bonus
 } as const;
 
+// ============= CENTRALIZED STOCHRSI THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: strategy-analyzer, calculate-trend, execute-trade, monitor-positions
+const STOCHRSI_THRESHOLDS = {
+  EXTREME_OVERSOLD: 10,    // Extremely oversold, strong bounce risk for SHORT
+  DEEPLY_OVERSOLD: 15,     // Deeply oversold zone
+  OVERSOLD: 20,            // Standard oversold threshold
+  OVERSOLD_ZONE: 25,       // Entering oversold territory
+  NEUTRAL_LOW: 30,         // Lower neutral boundary
+  NEUTRAL_HIGH: 70,        // Upper neutral boundary
+  OVERBOUGHT_ZONE: 75,     // Entering overbought territory
+  OVERBOUGHT: 80,          // Standard overbought threshold
+  DEEPLY_OVERBOUGHT: 85,   // Deeply overbought zone
+  EXTREME_OVERBOUGHT: 90,  // Extremely overbought, strong pullback risk for LONG
+} as const;
+
 interface SignalAnalysisRequest {
   symbol: string;
   userId?: string;
