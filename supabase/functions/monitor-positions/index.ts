@@ -1168,7 +1168,7 @@ serve(async (req) => {
                 status: "active",
                 is_hedge: true,
                 parent_position_id: position.id,
-                strategy_name: "Reversal Risk Hedge",
+                strategy_name: null, // Hedge positions have NULL strategy to prevent strategy stat pollution
                 trend: currentTrend,
                 confidence_score: reversalRisk.riskScore,
               })
@@ -1325,7 +1325,7 @@ serve(async (req) => {
                 status: "active",
                 is_hedge: true,
                 parent_position_id: position.id,
-                strategy_name: "Reversal Risk Hedge",
+                strategy_name: null, // Hedge positions have NULL strategy to prevent strategy stat pollution
                 trend: currentTrend,
                 confidence_score: reversalRisk.riskScore,
               })
