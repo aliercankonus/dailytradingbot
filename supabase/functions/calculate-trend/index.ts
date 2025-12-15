@@ -1332,7 +1332,7 @@ serve(async (req) => {
 
     let neutralAllowedWithStrongHigherTimeframe = false;
     if (!standardAlignment && dominantTrend !== "neutral" && trend1h.trend === "neutral") {
-      const strong4h = dominantConfidence >= 60;
+      const strong4h = dominantConfidence >= 68; // Raised from 60 to prevent fake continuations
       const macd1h = trend1h.indicators.macdHistogram;
       const macdAligned = dominantTrend === "bullish" ? macd1h >= 0 : macd1h <= 0;
       const hasActivity = adx >= ADX_THRESHOLDS.MINIMUM;
