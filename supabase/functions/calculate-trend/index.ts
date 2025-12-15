@@ -50,13 +50,19 @@ const RSI_THRESHOLDS = {
   OVERBOUGHT: 70,          // Classic overbought level
 } as const;
 
-// Fixed: Proper EMA calculation (single value)
+// Fixed: Proper EMA calculation (single value) - O(n) without slice()
 function calculateEMA(prices: number[], period: number): number {
   if (prices.length === 0) return 0;
   if (prices.length < period) return prices[prices.length - 1] || 0;
 
   const k = 2 / (period + 1);
-  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  
+  // Calculate initial SMA without slice()
+  let ema = 0;
+  for (let i = 0; i < period; i++) {
+    ema += prices[i];
+  }
+  ema /= period;
 
   for (let i = period; i < prices.length; i++) {
     ema = prices[i] * k + ema * (1 - k);
@@ -64,13 +70,19 @@ function calculateEMA(prices: number[], period: number): number {
   return ema;
 }
 
-// Fixed: Properly aligned EMA array — emaArray[i] corresponds to prices[i]
+// Fixed: Properly aligned EMA array — emaArray[i] corresponds to prices[i] - O(n) without slice()
 function calculateEMAArray(prices: number[], period: number): number[] {
   const emaArray: number[] = [];
   if (prices.length < period) return emaArray;
 
   const k = 2 / (period + 1);
-  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  
+  // Calculate initial SMA without slice()
+  let ema = 0;
+  for (let i = 0; i < period; i++) {
+    ema += prices[i];
+  }
+  ema /= period;
 
   // Align: first valid EMA at index = period - 1
   for (let i = 0; i < period - 1; i++) emaArray.push(NaN);
@@ -320,7 +332,7 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
   return { macd, signal: signalLine, histogram };
 }
 
-// Bollinger Bands calculation with squeeze detection
+// Bollinger Bands calculation with squeeze detection - O(n) optimized
 function calculateBollingerBands(prices: number[], period = 20, stdDevMultiplier = 2): {
   upper: number;
   middle: number;
@@ -338,71 +350,87 @@ function calculateBollingerBands(prices: number[], period = 20, stdDevMultiplier
     };
   }
 
-  const recentPrices = prices.slice(-period);
-  const sma = recentPrices.reduce((a, b) => a + b, 0) / period;
+  // O(n) calculation using rolling sum and sum of squares
+  // stdDev = sqrt( (sumOfSquares/n) - (sum/n)^2 )
+  const historyWindow = Math.min(50, prices.length - period);
+  const historicalBandwidths: number[] = [];
   
-  // Calculate standard deviation
-  const squaredDiffs = recentPrices.map(price => Math.pow(price - sma, 2));
-  const avgSquaredDiff = squaredDiffs.reduce((a, b) => a + b, 0) / period;
-  const stdDev = Math.sqrt(avgSquaredDiff);
+  // Initialize rolling sums for first window
+  let rollingSum = 0;
+  let rollingSumSq = 0;
+  const startIdx = prices.length - period - historyWindow;
+  const actualStartIdx = Math.max(0, startIdx);
   
-  const upper = sma + (stdDevMultiplier * stdDev);
-  const lower = sma - (stdDevMultiplier * stdDev);
-  const currentPrice = prices[prices.length - 1];
-  
-  // Bandwidth: (Upper - Lower) / Middle * 100
-  const bandwidth = sma !== 0 ? ((upper - lower) / sma) * 100 : 0;
-  
-  // %B: (Price - Lower) / (Upper - Lower) * 100
-  const bandRange = upper - lower;
-  const percentB = bandRange !== 0 ? ((currentPrice - lower) / bandRange) * 100 : 50;
-  
-  // Squeeze detection: Compare current bandwidth to historical average
-  // Calculate historical bandwidths for last 50 periods
-  let historicalBandwidths: number[] = [];
-  for (let i = period; i <= Math.min(prices.length, period + 50); i++) {
-    const histPrices = prices.slice(i - period, i);
-    const histSma = histPrices.reduce((a, b) => a + b, 0) / period;
-    const histSquaredDiffs = histPrices.map(p => Math.pow(p - histSma, 2));
-    const histStdDev = Math.sqrt(histSquaredDiffs.reduce((a, b) => a + b, 0) / period);
-    const histUpper = histSma + (stdDevMultiplier * histStdDev);
-    const histLower = histSma - (stdDevMultiplier * histStdDev);
-    const histBandwidth = histSma !== 0 ? ((histUpper - histLower) / histSma) * 100 : 0;
-    historicalBandwidths.push(histBandwidth);
+  for (let i = actualStartIdx; i < actualStartIdx + period; i++) {
+    rollingSum += prices[i];
+    rollingSumSq += prices[i] * prices[i];
   }
   
-  const avgBandwidth = historicalBandwidths.length > 0 
-    ? historicalBandwidths.reduce((a, b) => a + b, 0) / historicalBandwidths.length 
-    : bandwidth;
-  
-  // Squeeze: current bandwidth < 75% of average bandwidth
-  const squeeze = bandwidth < avgBandwidth * 0.75;
-  // Squeeze intensity: how tight (0-100, higher = tighter)
-  const squeezeIntensity = avgBandwidth > 0 
-    ? Math.max(0, Math.min(100, (1 - bandwidth / avgBandwidth) * 100)) 
-    : 0;
-  
-  // Price position relative to bands
-  let pricePosition: "above_upper" | "upper_zone" | "middle" | "lower_zone" | "below_lower" = "middle";
-  if (currentPrice > upper) {
-    pricePosition = "above_upper";
-  } else if (currentPrice > sma + (stdDev * 1)) {
-    pricePosition = "upper_zone";
-  } else if (currentPrice < lower) {
-    pricePosition = "below_lower";
-  } else if (currentPrice < sma - (stdDev * 1)) {
-    pricePosition = "lower_zone";
+  // Calculate bandwidths using O(n) sliding window
+  for (let windowEnd = actualStartIdx + period; windowEnd <= prices.length; windowEnd++) {
+    const sma = rollingSum / period;
+    // Variance = E[X²] - E[X]²
+    const variance = (rollingSumSq / period) - (sma * sma);
+    const stdDev = Math.sqrt(Math.max(0, variance)); // Clamp to prevent negative due to floating point
+    
+    const upper = sma + (stdDevMultiplier * stdDev);
+    const lower = sma - (stdDevMultiplier * stdDev);
+    const bw = sma !== 0 ? ((upper - lower) / sma) * 100 : 0;
+    
+    if (windowEnd < prices.length) {
+      // Store historical bandwidth
+      historicalBandwidths.push(bw);
+      // Slide window: remove oldest, add newest
+      const removeIdx = windowEnd - period;
+      const addIdx = windowEnd;
+      rollingSum = rollingSum - prices[removeIdx] + prices[addIdx];
+      rollingSumSq = rollingSumSq - (prices[removeIdx] * prices[removeIdx]) + (prices[addIdx] * prices[addIdx]);
+    } else {
+      // This is the current (final) bandwidth
+      const currentPrice = prices[prices.length - 1];
+      const bandRange = upper - lower;
+      const percentB = bandRange !== 0 ? ((currentPrice - lower) / bandRange) * 100 : 50;
+      
+      const avgBandwidth = historicalBandwidths.length > 0 
+        ? historicalBandwidths.reduce((a, b) => a + b, 0) / historicalBandwidths.length 
+        : bw;
+      
+      // Squeeze: current bandwidth < 75% of average bandwidth
+      const squeeze = bw < avgBandwidth * 0.75;
+      // Squeeze intensity: how tight (0-100, higher = tighter)
+      const squeezeIntensity = avgBandwidth > 0 
+        ? Math.max(0, Math.min(100, (1 - bw / avgBandwidth) * 100)) 
+        : 0;
+      
+      // Price position relative to bands
+      let pricePosition: "above_upper" | "upper_zone" | "middle" | "lower_zone" | "below_lower" = "middle";
+      if (currentPrice > upper) {
+        pricePosition = "above_upper";
+      } else if (currentPrice > sma + (stdDev * 1)) {
+        pricePosition = "upper_zone";
+      } else if (currentPrice < lower) {
+        pricePosition = "below_lower";
+      } else if (currentPrice < sma - (stdDev * 1)) {
+        pricePosition = "lower_zone";
+      }
+      
+      return {
+        upper: Math.round(upper * 100) / 100,
+        middle: Math.round(sma * 100) / 100,
+        lower: Math.round(lower * 100) / 100,
+        bandwidth: Math.round(bw * 100) / 100,
+        percentB: Math.round(percentB * 10) / 10,
+        squeeze,
+        squeezeIntensity: Math.round(squeezeIntensity),
+        pricePosition
+      };
+    }
   }
   
+  // Fallback (shouldn't reach here)
   return {
-    upper: Math.round(upper * 100) / 100,
-    middle: Math.round(sma * 100) / 100,
-    lower: Math.round(lower * 100) / 100,
-    bandwidth: Math.round(bandwidth * 100) / 100,
-    percentB: Math.round(percentB * 10) / 10,
-    squeeze,
-    squeezeIntensity: Math.round(squeezeIntensity),
-    pricePosition
+    upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50,
+    squeeze: false, squeezeIntensity: 0, pricePosition: "middle"
   };
 }
 
