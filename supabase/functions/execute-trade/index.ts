@@ -1279,7 +1279,18 @@ serve(async (req) => {
       }
     }
 
-    // Create position record with all trade data
+    // Extract reversal decision from signal indicators for analytics
+    const signalIndicators = signal.indicators || {};
+    const reversalDecision = signalIndicators.reversalDecision || unifiedReversalResult.decision || 'NORMAL';
+    const reversalScore = signalIndicators.reversalScore ?? unifiedReversalResult.score ?? 0;
+    const reversalDetails = signalIndicators.reversalDetails || {
+      breakdown: {},
+      signals: unifiedReversalResult.reasons,
+      adxWeight: unifiedReversalResult.adxWeight,
+      positionSizeMultiplier: unifiedReversalResult.positionSizeMultiplier,
+    };
+
+    // Create position record with all trade data including reversal tracking
     const { data: position, error: positionError } = await supabase
       .from('positions')
       .insert({
@@ -1301,6 +1312,10 @@ serve(async (req) => {
         binance_order_id: isPaperTrading ? null : orderData.orderId?.toString(),
         strategy_name: signal.strategy_name || 'Unknown',
         executed_at: new Date().toISOString(),
+        // NEW: Reversal decision tracking for analytics
+        reversal_decision: reversalDecision,
+        reversal_score: reversalScore,
+        reversal_details: reversalDetails,
       })
       .select()
       .single();

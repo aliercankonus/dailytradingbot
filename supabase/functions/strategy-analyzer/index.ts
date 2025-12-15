@@ -599,6 +599,7 @@ interface UnifiedReversalResult {
     volumeScore: number;         // 0-15 max (optional boost)
   };
   reason: string;
+  adxWeight: number;             // ADX-based weight applied to score
 }
 
 // Count StochRSI signals opposing the intended trade direction
@@ -854,7 +855,8 @@ const calculateUnifiedReversalScore = (
     positionSizeMultiplier,
     signals, 
     breakdown, 
-    reason 
+    reason,
+    adxWeight,
   };
 };
 
@@ -2345,6 +2347,15 @@ serve(async (req) => {
             positionSizePercent: strategyPositionSize,
             stopLossPercent,
             takeProfitPercent,
+            // Reversal decision tracking for analytics
+            reversalDecision: unifiedReversal.decision,
+            reversalScore: unifiedReversal.score,
+            reversalDetails: {
+              breakdown: unifiedReversal.breakdown,
+              signals: unifiedReversal.signals,
+              adxWeight: unifiedReversal.adxWeight,
+              positionSizeMultiplier: unifiedReversal.positionSizeMultiplier,
+            },
           },
           expires_at: new Date(Date.now() + 60000).toISOString(),
           created_by_rebalancer: false,
