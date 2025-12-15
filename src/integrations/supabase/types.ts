@@ -352,6 +352,9 @@ export type Database = {
           quantity: number
           realized_pnl: number | null
           realized_pnl_percent: number | null
+          reversal_decision: string | null
+          reversal_details: Json | null
+          reversal_score: number | null
           side: string
           signal_id: string | null
           status: string
@@ -391,6 +394,9 @@ export type Database = {
           quantity: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
+          reversal_decision?: string | null
+          reversal_details?: Json | null
+          reversal_score?: number | null
           side: string
           signal_id?: string | null
           status?: string
@@ -430,6 +436,9 @@ export type Database = {
           quantity?: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
+          reversal_decision?: string | null
+          reversal_details?: Json | null
+          reversal_score?: number | null
           side?: string
           signal_id?: string | null
           status?: string
@@ -492,6 +501,9 @@ export type Database = {
           quantity: number
           realized_pnl: number | null
           realized_pnl_percent: number | null
+          reversal_decision: string | null
+          reversal_details: Json | null
+          reversal_score: number | null
           side: string
           signal_id: string | null
           status: string
@@ -529,6 +541,9 @@ export type Database = {
           quantity: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
+          reversal_decision?: string | null
+          reversal_details?: Json | null
+          reversal_score?: number | null
           side: string
           signal_id?: string | null
           status: string
@@ -566,6 +581,9 @@ export type Database = {
           quantity?: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
+          reversal_decision?: string | null
+          reversal_details?: Json | null
+          reversal_score?: number | null
           side?: string
           signal_id?: string | null
           status?: string
