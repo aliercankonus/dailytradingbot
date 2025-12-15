@@ -36,6 +36,21 @@ const STOCHRSI_THRESHOLDS = {
   EXTREME_OVERBOUGHT: 90,  // Extremely overbought, strong pullback risk for LONG
 } as const;
 
+// ============= CENTRALIZED RSI THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: strategy-analyzer, calculate-trend, monitor-positions, ai-signal-analyzer
+const RSI_THRESHOLDS = {
+  OVERSOLD: 30,            // Classic oversold level
+  BEARISH_PULLBACK: 35,    // RSI showing bearish weakness / SHORT pullback
+  BULLISH_PULLBACK: 40,    // RSI showing bullish pullback opportunity
+  NEUTRAL_LOW: 45,         // Lower neutral/pullback zone for momentum continuation
+  NEUTRAL: 50,             // Neutral RSI
+  NEUTRAL_HIGH: 55,        // Upper neutral/rally zone for SHORT momentum continuation
+  BEARISH_RALLY: 60,       // RSI showing bearish rally (SHORT entry opportunity)
+  BULLISH_STRONG: 65,      // Strong bullish momentum / overbought warning
+  OVERBOUGHT: 70,          // Classic overbought level
+} as const;
+
 // ============= UNIFIED REVERSAL SCORE SYSTEM =============
 // Aligned with strategy-analyzer for consistent reversal detection
 // Three-tier decision: BLOCK (>=60), REDUCE (40-60), NORMAL (<40)

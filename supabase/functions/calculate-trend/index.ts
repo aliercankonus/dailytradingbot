@@ -35,6 +35,21 @@ const STOCHRSI_THRESHOLDS = {
   EXTREME_OVERBOUGHT: 90,  // Extremely overbought, strong pullback risk for LONG
 } as const;
 
+// ============= CENTRALIZED RSI THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: strategy-analyzer, execute-trade, monitor-positions, ai-signal-analyzer
+const RSI_THRESHOLDS = {
+  OVERSOLD: 30,            // Classic oversold level
+  BEARISH_PULLBACK: 35,    // RSI showing bearish weakness / SHORT pullback
+  BULLISH_PULLBACK: 40,    // RSI showing bullish pullback opportunity
+  NEUTRAL_LOW: 45,         // Lower neutral/pullback zone for momentum continuation
+  NEUTRAL: 50,             // Neutral RSI
+  NEUTRAL_HIGH: 55,        // Upper neutral/rally zone for SHORT momentum continuation
+  BEARISH_RALLY: 60,       // RSI showing bearish rally (SHORT entry opportunity)
+  BULLISH_STRONG: 65,      // Strong bullish momentum / overbought warning
+  OVERBOUGHT: 70,          // Classic overbought level
+} as const;
+
 // Fixed: Proper EMA calculation (single value)
 function calculateEMA(prices: number[], period: number): number {
   if (prices.length === 0) return 0;
@@ -844,14 +859,14 @@ function calculateTrend(prices: number[]): {
   // Previous: >55 bullish, <35 bearish - too permissive
   const rsiWeight = 2.5;
   let rsiSignal = "neutral";
-  if (rsi > 60) { // Raised from 55 to 60
-    bullishSignals += rsiWeight * ((rsi - 60) / 40); // Scaled from 60
-    if (rsi > 70) rsiSignal = "overbought";
-    else if (rsi > 65) rsiSignal = "strong_bullish";
+  if (rsi > RSI_THRESHOLDS.BEARISH_RALLY) { // Raised from 55 to 60
+    bullishSignals += rsiWeight * ((rsi - RSI_THRESHOLDS.BEARISH_RALLY) / (100 - RSI_THRESHOLDS.BEARISH_RALLY)); // Scaled from 60
+    if (rsi > RSI_THRESHOLDS.OVERBOUGHT) rsiSignal = "overbought";
+    else if (rsi > RSI_THRESHOLDS.BULLISH_STRONG) rsiSignal = "strong_bullish";
     else rsiSignal = "bullish";
-  } else if (rsi < 40) { // Raised from 35 to 40
-    bearishSignals += rsiWeight * ((40 - rsi) / 40); // Scaled from 40
-    rsiSignal = rsi < 30 ? "oversold" : "bearish";
+  } else if (rsi < RSI_THRESHOLDS.BULLISH_PULLBACK) { // Raised from 35 to 40
+    bearishSignals += rsiWeight * ((RSI_THRESHOLDS.BULLISH_PULLBACK - rsi) / RSI_THRESHOLDS.BULLISH_PULLBACK); // Scaled from 40
+    rsiSignal = rsi < RSI_THRESHOLDS.OVERSOLD ? "oversold" : "bearish";
   } else {
     rsiSignal = "neutral";
   }
