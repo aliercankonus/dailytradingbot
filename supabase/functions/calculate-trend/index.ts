@@ -173,43 +173,88 @@ function calculateStochasticRSI(prices: number[], rsiPeriod = 14, stochPeriod = 
     return { k: 50, d: 50, signal: "neutral", strength: 0 };
   }
 
-  // Calculate raw Stochastic K values from RSI
+  // Calculate raw Stochastic K values from RSI using O(n) sliding window min/max
   const rawKValues: number[] = [];
-  for (let i = stochPeriod - 1; i < rsiValues.length; i++) {
-    const rsiWindow = rsiValues.slice(i - stochPeriod + 1, i + 1);
-    const maxRsi = Math.max(...rsiWindow);
-    const minRsi = Math.min(...rsiWindow);
+  
+  // Initialize sliding window with deque-style tracking for min/max
+  // Using monotonic deque approach for O(n) complexity instead of O(n²) slice()
+  const maxDeque: number[] = []; // Stores indices of potential max values (monotonically decreasing)
+  const minDeque: number[] = []; // Stores indices of potential min values (monotonically increasing)
+  
+  for (let i = 0; i < rsiValues.length; i++) {
     const currentRsi = rsiValues[i];
     
-    // Stochastic formula: (Current - Lowest) / (Highest - Lowest) * 100
-    const rawK = maxRsi !== minRsi 
-      ? ((currentRsi - minRsi) / (maxRsi - minRsi)) * 100 
-      : 50;
-    rawKValues.push(rawK);
+    // Remove elements outside the window from front
+    while (maxDeque.length > 0 && maxDeque[0] <= i - stochPeriod) {
+      maxDeque.shift();
+    }
+    while (minDeque.length > 0 && minDeque[0] <= i - stochPeriod) {
+      minDeque.shift();
+    }
+    
+    // Remove elements smaller than current from maxDeque (maintain decreasing order)
+    while (maxDeque.length > 0 && rsiValues[maxDeque[maxDeque.length - 1]] <= currentRsi) {
+      maxDeque.pop();
+    }
+    // Remove elements larger than current from minDeque (maintain increasing order)
+    while (minDeque.length > 0 && rsiValues[minDeque[minDeque.length - 1]] >= currentRsi) {
+      minDeque.pop();
+    }
+    
+    maxDeque.push(i);
+    minDeque.push(i);
+    
+    // Only start calculating once we have a full window
+    if (i >= stochPeriod - 1) {
+      const maxRsi = rsiValues[maxDeque[0]];
+      const minRsi = rsiValues[minDeque[0]];
+      
+      // Stochastic formula: (Current - Lowest) / (Highest - Lowest) * 100
+      const rawK = maxRsi !== minRsi 
+        ? ((currentRsi - minRsi) / (maxRsi - minRsi)) * 100 
+        : 50;
+      rawKValues.push(rawK);
+    }
   }
 
   if (rawKValues.length < kSmooth) {
     return { k: 50, d: 50, signal: "neutral", strength: 0 };
   }
 
-  // Smooth K with SMA (this gives us %K)
+  // Smooth K with SMA using O(n) rolling sum instead of O(n²) slice()
   const smoothedKValues: number[] = [];
-  for (let i = kSmooth - 1; i < rawKValues.length; i++) {
-    const kWindow = rawKValues.slice(i - kSmooth + 1, i + 1);
-    const smoothedK = kWindow.reduce((a, b) => a + b, 0) / kSmooth;
-    smoothedKValues.push(smoothedK);
+  let kRollingSum = 0;
+  
+  for (let i = 0; i < rawKValues.length; i++) {
+    kRollingSum += rawKValues[i];
+    
+    if (i >= kSmooth) {
+      kRollingSum -= rawKValues[i - kSmooth];
+    }
+    
+    if (i >= kSmooth - 1) {
+      smoothedKValues.push(kRollingSum / kSmooth);
+    }
   }
 
   if (smoothedKValues.length < dSmooth) {
     return { k: 50, d: 50, signal: "neutral", strength: 0 };
   }
 
-  // Calculate %D (SMA of %K)
+  // Calculate %D using O(n) rolling sum instead of O(n²) slice()
   const dValues: number[] = [];
-  for (let i = dSmooth - 1; i < smoothedKValues.length; i++) {
-    const dWindow = smoothedKValues.slice(i - dSmooth + 1, i + 1);
-    const dValue = dWindow.reduce((a, b) => a + b, 0) / dSmooth;
-    dValues.push(dValue);
+  let dRollingSum = 0;
+  
+  for (let i = 0; i < smoothedKValues.length; i++) {
+    dRollingSum += smoothedKValues[i];
+    
+    if (i >= dSmooth) {
+      dRollingSum -= smoothedKValues[i - dSmooth];
+    }
+    
+    if (i >= dSmooth - 1) {
+      dValues.push(dRollingSum / dSmooth);
+    }
   }
 
   const k = smoothedKValues[smoothedKValues.length - 1];
