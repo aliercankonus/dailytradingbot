@@ -307,8 +307,14 @@ function calculateStochasticRSI(prices: number[], rsiPeriod = 14, stochPeriod = 
 }
 
 // Fixed: Uses aligned EMA arrays → correct MACD line and signal with full EMA history
-function calculateMACD(prices: number[]): { macd: number; signal: number; histogram: number } {
-  if (prices.length < 35) return { macd: 0, signal: 0, histogram: 0 };
+// OPTIMIZED: Returns histogram array to avoid duplicate MACD calculation for prev histogram
+function calculateMACD(prices: number[]): { 
+  macd: number; 
+  signal: number; 
+  histogram: number;
+  histogramArray: number[];  // Full histogram history for prev value lookup
+} {
+  if (prices.length < 35) return { macd: 0, signal: 0, histogram: 0, histogramArray: [] };
 
   const ema12Array = calculateEMAArray(prices, 12);
   const ema26Array = calculateEMAArray(prices, 26);
@@ -323,14 +329,31 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
     }
   }
 
-  if (macdLine.length === 0) return { macd: 0, signal: 0, histogram: 0 };
+  if (macdLine.length === 0) return { macd: 0, signal: 0, histogram: 0, histogramArray: [] };
+
+  // Build signal line array and histogram array (for prev value lookup)
+  const histogramArray: number[] = [];
+  let signalEma = macdLine[0];
+  const signalMultiplier = 2 / (9 + 1);
+  
+  for (let i = 0; i < macdLine.length; i++) {
+    if (i < 8) {
+      // Not enough data for signal EMA yet, use MACD as signal
+      histogramArray.push(0);
+    } else if (i === 8) {
+      // First signal point: use SMA of first 9 MACD values
+      signalEma = macdLine.slice(0, 9).reduce((a, b) => a + b, 0) / 9;
+      histogramArray.push(macdLine[i] - signalEma);
+    } else {
+      signalEma = (macdLine[i] - signalEma) * signalMultiplier + signalEma;
+      histogramArray.push(macdLine[i] - signalEma);
+    }
+  }
 
   const macd = macdLine[macdLine.length - 1];
-  // Use full MACD line for signal EMA calculation (not truncated slice)
-  const signalLine = macdLine.length >= 9 ? calculateEMA(macdLine, 9) : macd;
-  const histogram = macd - signalLine;
+  const histogram = histogramArray.length > 0 ? histogramArray[histogramArray.length - 1] : 0;
 
-  return { macd, signal: signalLine, histogram };
+  return { macd, signal: signalEma, histogram, histogramArray };
 }
 
 // Bollinger Bands calculation with squeeze detection - O(n) optimized
@@ -1339,10 +1362,12 @@ serve(async (req) => {
     const lastClose = prices1h.length >= 1 ? prices1h[prices1h.length - 1] : 0;
     const prevClose = prices1h.length >= 2 ? prices1h[prices1h.length - 2] : lastClose;
 
-    const macdHistogram = trend1h.indicators.macdHistogram;
-    
-    const prevMacdHistogram = prices1h.length >= 36 ? 
-      calculateMACD(prices1h.slice(0, -1)).histogram : macdHistogram;
+    // OPTIMIZED: Use histogram array from single MACD calculation instead of recalculating
+    const macd1h = calculateMACD(prices1h);
+    const macdHistogram = macd1h.histogram;
+    const prevMacdHistogram = macd1h.histogramArray.length >= 2 
+      ? macd1h.histogramArray[macd1h.histogramArray.length - 2] 
+      : macdHistogram;
 
     let effectiveTrendForMomentum = dominantTrend;
     if (dominantTrend === "neutral") {
