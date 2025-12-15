@@ -53,6 +53,38 @@ const RSI_THRESHOLDS = {
 // SHORT momentum zone: 35-55 (BEARISH_PULLBACK to NEUTRAL_HIGH)
 // Entries outside these zones get 50% score reduction in strategy-analyzer
 
+// ============= CONSOLIDATED ATR UTILITIES =============
+// CRITICAL: Keep these aligned with calculate-trend to ensure consistent ATR calculations
+function calculateTrueRange(high: number, low: number, prevClose: number): number {
+  return Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+}
+
+function calculateATR(klines: any[], period: number = 14): number {
+  if (klines.length < period + 1) return 0;
+  const startIdx = klines.length - period;
+  let trSum = 0;
+  for (let i = startIdx; i < klines.length; i++) {
+    const high = parseFloat(klines[i][2]);
+    const low = parseFloat(klines[i][3]);
+    const prevClose = parseFloat(klines[i - 1][4]);
+    trSum += calculateTrueRange(high, low, prevClose);
+  }
+  return trSum / period;
+}
+
+function calculateHistoricalATR(klines: any[], histStartIdx: number, histEndIdx: number): { atr: number; count: number } {
+  let trSum = 0;
+  let count = 0;
+  for (let i = histStartIdx; i < histEndIdx && i < klines.length - 1; i++) {
+    const high = parseFloat(klines[i][2]);
+    const low = parseFloat(klines[i][3]);
+    const prevClose = parseFloat(klines[i - 1][4]);
+    trSum += calculateTrueRange(high, low, prevClose);
+    count++;
+  }
+  return { atr: count > 0 ? trSum / count : 0, count };
+}
+
 // ============= StochRSI-RSI CONFLICT RESOLUTION =============
 // When StochRSI is at extremes, RSI signals are weighted at 50% to prevent
 // self-canceling signals where RSI momentum continuation conflicts with StochRSI reversal risk
@@ -214,36 +246,18 @@ serve(async (req) => {
       if (!Array.isArray(klines) || klines.length < 16)
         throw new Error(`Invalid or insufficient klines data for ${symbol}`);
 
-      // Calculate current ATR (last 14 candles)
+      // CONSOLIDATED: Use ATR utilities instead of inline calculation
       const atrPeriod = 14;
-      let currentAtrSum = 0;
-      const startIdx = klines.length - atrPeriod;
-      for (let i = startIdx; i < klines.length; i++) {
-        const high = parseFloat(klines[i][2]);
-        const low = parseFloat(klines[i][3]);
-        const prevClose = parseFloat(klines[i - 1][4]);
-        const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-        currentAtrSum += tr;
-      }
-      const currentAtr = currentAtrSum / atrPeriod;
+      const currentAtr = calculateATR(klines, atrPeriod);
       const atrPercent = (currentAtr / price) * 100;
 
       // Calculate historical average ATR (for volatility spike detection)
       // Use ATR from 20-34 candles ago as baseline
-      let historicalAtrSum = 0;
       const histStartIdx = Math.max(1, klines.length - 34);
       const histEndIdx = klines.length - 20;
-      let histCount = 0;
-      for (let i = histStartIdx; i < histEndIdx && i < klines.length - 1; i++) {
-        const high = parseFloat(klines[i][2]);
-        const low = parseFloat(klines[i][3]);
-        const prevClose = parseFloat(klines[i - 1][4]);
-        const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-        historicalAtrSum += tr;
-        histCount++;
-      }
-      const historicalAtr = histCount > 0 ? historicalAtrSum / histCount : currentAtr;
-      const atrRatio = currentAtr / historicalAtr; // >1.5 = volatility spike
+      const { atr: historicalAtr, count: histCount } = calculateHistoricalATR(klines, histStartIdx, histEndIdx);
+      const effectiveHistoricalAtr = histCount > 0 ? historicalAtr : currentAtr;
+      const atrRatio = currentAtr / effectiveHistoricalAtr; // >1.5 = volatility spike
 
       // Get 24h price change for flash crash detection
       const ticker24hResponse = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
