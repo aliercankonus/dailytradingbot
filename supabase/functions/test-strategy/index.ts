@@ -65,12 +65,18 @@ function calculateRSI(prices: number[], period = 14): number {
   return 100 - 100 / (1 + rs);
 }
 
-// Calculate EMA
+// Calculate EMA - O(n) optimized
 function calculateEMA(prices: number[], period: number): number {
   if (prices.length < period) return prices[prices.length - 1] || 0;
 
   const multiplier = 2 / (period + 1);
-  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  
+  // O(n) initial SMA calculation without slice()
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    sum += prices[i];
+  }
+  let ema = sum / period;
 
   for (let i = period; i < prices.length; i++) {
     ema = (prices[i] - ema) * multiplier + ema;
@@ -90,7 +96,7 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
   return { macd, signal, histogram };
 }
 
-// Calculate Bollinger Bands
+// Calculate Bollinger Bands - O(n) optimized
 function calculateBollingerBands(
   prices: number[],
   period = 20,
@@ -101,11 +107,18 @@ function calculateBollingerBands(
     return { upper: currentPrice, middle: currentPrice, lower: currentPrice };
   }
 
-  const recentPrices = prices.slice(-period);
-  const middle = recentPrices.reduce((a, b) => a + b, 0) / period;
-
-  const variance = recentPrices.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / period;
-  const standardDeviation = Math.sqrt(variance);
+  // O(n) calculation without slice() - compute sum and sumSq for last period
+  const startIdx = prices.length - period;
+  let sum = 0;
+  let sumSq = 0;
+  for (let i = startIdx; i < prices.length; i++) {
+    sum += prices[i];
+    sumSq += prices[i] * prices[i];
+  }
+  
+  const middle = sum / period;
+  const variance = sumSq / period - middle * middle;
+  const standardDeviation = Math.sqrt(Math.max(0, variance));
 
   return {
     upper: middle + standardDeviation * stdDev,
@@ -130,14 +143,21 @@ function calculateOBV(prices: number[], volumes: number[]): number {
   return obv;
 }
 
-// Calculate Average Volume
+// Calculate Average Volume - O(n) optimized
 function calculateAverageVolume(volumes: number[], period = 20): number {
   if (volumes.length < period) {
-    return volumes.reduce((a, b) => a + b, 0) / volumes.length;
+    let sum = 0;
+    for (let i = 0; i < volumes.length; i++) sum += volumes[i];
+    return sum / volumes.length;
   }
 
-  const recentVolumes = volumes.slice(-period);
-  return recentVolumes.reduce((a, b) => a + b, 0) / period;
+  // O(n) without slice() - sum last period elements
+  let sum = 0;
+  const startIdx = volumes.length - period;
+  for (let i = startIdx; i < volumes.length; i++) {
+    sum += volumes[i];
+  }
+  return sum / period;
 }
 
 // Detect trend
@@ -211,15 +231,28 @@ function calculateIndicator(
     case "OBV":
       return calculateOBV(historicalPrices, historicalVolumes);
     case "OBV_Avg":
-      const obvValues: number[] = [];
-      for (
-        let i = Math.max(0, historicalPrices.length - (indicatorConfig.period || 20));
-        i < historicalPrices.length;
-        i++
-      ) {
-        obvValues.push(calculateOBV(historicalPrices.slice(0, i + 1), historicalVolumes.slice(0, i + 1)));
+      // O(n) optimized - calculate incremental OBV values without slice()
+      const period = indicatorConfig.period || 20;
+      const startIdx = Math.max(1, historicalPrices.length - period);
+      
+      // Calculate base OBV up to startIdx
+      let baseObv = 0;
+      for (let j = 1; j < startIdx; j++) {
+        if (historicalPrices[j] > historicalPrices[j - 1]) baseObv += historicalVolumes[j];
+        else if (historicalPrices[j] < historicalPrices[j - 1]) baseObv -= historicalVolumes[j];
       }
-      return obvValues.reduce((a, b) => a + b, 0) / obvValues.length;
+      
+      // Calculate incremental OBV values and average
+      let obvSum = 0;
+      let obvCount = 0;
+      let runningObv = baseObv;
+      for (let i = startIdx; i < historicalPrices.length; i++) {
+        if (historicalPrices[i] > historicalPrices[i - 1]) runningObv += historicalVolumes[i];
+        else if (historicalPrices[i] < historicalPrices[i - 1]) runningObv -= historicalVolumes[i];
+        obvSum += runningObv;
+        obvCount++;
+      }
+      return obvCount > 0 ? obvSum / obvCount : 0;
     case "Price":
       return currentPrice;
     default:
