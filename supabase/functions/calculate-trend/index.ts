@@ -916,6 +916,7 @@ function calculateTrueAlignmentScore(
   };
 }
 
+// OPTIMIZED: Now returns macdHistogramArray to avoid duplicate MACD calculation
 function calculateTrend(prices: number[]): {
   trend: "bullish" | "bearish" | "neutral";
   confidence: number;
@@ -929,6 +930,7 @@ function calculateTrend(prices: number[]): {
     macdSignal: number;
     macdHistogram: number;
     macdTrend: string;
+    macdHistogramArray: number[];  // Added for prev histogram lookup
   };
 } {
   if (prices.length < 30) {
@@ -938,7 +940,8 @@ function calculateTrend(prices: number[]): {
       indicators: {
         ema12: 0, ema26: 0, emaSignal: "neutral",
         rsi: 50, rsiSignal: "neutral",
-        macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral"
+        macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral",
+        macdHistogramArray: []
       }
     };
   }
@@ -946,7 +949,7 @@ function calculateTrend(prices: number[]): {
   const ema12 = calculateEMA(prices, 12);
   const ema26 = calculateEMA(prices, 26);
   const rsi = calculateRSI(prices, 14);
-  const { macd, signal, histogram } = calculateMACD(prices);
+  const { macd, signal, histogram, histogramArray } = calculateMACD(prices);
 
   let bullishSignals = 0;
   let bearishSignals = 0;
@@ -1028,6 +1031,7 @@ function calculateTrend(prices: number[]): {
       macdSignal: Math.round(signal * 100) / 100,
       macdHistogram: Math.round(histogram * 100) / 100,
       macdTrend,
+      macdHistogramArray: histogramArray,  // Full array for prev histogram lookup
     },
   };
 }
@@ -1362,11 +1366,11 @@ serve(async (req) => {
     const lastClose = prices1h.length >= 1 ? prices1h[prices1h.length - 1] : 0;
     const prevClose = prices1h.length >= 2 ? prices1h[prices1h.length - 2] : lastClose;
 
-    // OPTIMIZED: Use histogram array from single MACD calculation instead of recalculating
-    const macd1h = calculateMACD(prices1h);
-    const macdHistogram = macd1h.histogram;
-    const prevMacdHistogram = macd1h.histogramArray.length >= 2 
-      ? macd1h.histogramArray[macd1h.histogramArray.length - 2] 
+    // OPTIMIZED: Use histogram array from calculateTrend (no duplicate MACD calculation)
+    const macdHistogram = trend1h.indicators.macdHistogram;
+    const histArr = trend1h.indicators.macdHistogramArray;
+    const prevMacdHistogram = histArr.length >= 2 
+      ? histArr[histArr.length - 2] 
       : macdHistogram;
 
     let effectiveTrendForMomentum = dominantTrend;
