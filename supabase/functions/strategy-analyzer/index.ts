@@ -699,6 +699,17 @@ const calculateUnifiedReversalScore = (
   
   // ============= 2. StochRSI EXTREME ZONES (0-25 points) =============
   // Being in extreme zone when entering = high bounce/reversal risk
+  //
+  // IMPORTANT DESIGN NOTE: These scores seem to contradict the "strong ADX allows 
+  // overbought/oversold continuation" rule from stochrsi-extreme-entry-exception-strong-trends.
+  // This is INTENTIONAL and CORRECT because:
+  // 1. The ADX-adaptive weight (calculated later) already reduces reversal score impact in strong trends
+  //    - ADX ≥35: weight = 0.5 (halves this score)
+  //    - ADX 20-35: weight = 0.7
+  //    - ADX <20: weight = 1.0
+  // 2. So a +10 extreme zone score becomes +5 in a strong trend after weighting
+  // 3. This provides a "soft caution" even in strong trends, not a hard block
+  // DO NOT "FIX" this by adding ADX checks here - the weighting already handles it!
   const k4h = stoch4h.k ?? 50;
   const k1h = stoch1h.k ?? 50;
   
@@ -712,7 +723,7 @@ const calculateUnifiedReversalScore = (
       signals.push(`4h StochRSI oversold zone (K=${k4h.toFixed(1)})`);
     }
     
-    // Overbought warning for LONG entry
+    // Overbought warning for LONG entry (reduced by ADX weight in strong trends)
     if (k4h > 90) {
       breakdown.stochRsiZoneScore += 10;
       signals.push(`4h StochRSI extremely overbought (K=${k4h.toFixed(1)})`);
@@ -727,7 +738,7 @@ const calculateUnifiedReversalScore = (
       signals.push(`4h StochRSI overbought zone (K=${k4h.toFixed(1)})`);
     }
     
-    // Oversold warning for SHORT entry
+    // Oversold warning for SHORT entry (reduced by ADX weight in strong trends)
     if (k4h < 10) {
       breakdown.stochRsiZoneScore += 10;
       signals.push(`4h StochRSI extremely oversold (K=${k4h.toFixed(1)})`);
