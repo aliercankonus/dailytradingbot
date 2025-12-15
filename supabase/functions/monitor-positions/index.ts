@@ -15,6 +15,22 @@ const ADX_THRESHOLDS = {
   EXTREME: 40,      // Extreme trend, maximum confidence bonus
 } as const;
 
+// ============= CENTRALIZED STOCHRSI THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: strategy-analyzer, calculate-trend, execute-trade, ai-signal-analyzer
+const STOCHRSI_THRESHOLDS = {
+  EXTREME_OVERSOLD: 10,    // Extremely oversold, strong bounce risk for SHORT
+  DEEPLY_OVERSOLD: 15,     // Deeply oversold zone
+  OVERSOLD: 20,            // Standard oversold threshold
+  OVERSOLD_ZONE: 25,       // Entering oversold territory
+  NEUTRAL_LOW: 30,         // Lower neutral boundary
+  NEUTRAL_HIGH: 70,        // Upper neutral boundary
+  OVERBOUGHT_ZONE: 75,     // Entering overbought territory
+  OVERBOUGHT: 80,          // Standard overbought threshold
+  DEEPLY_OVERBOUGHT: 85,   // Deeply overbought zone
+  EXTREME_OVERBOUGHT: 90,  // Extremely overbought, strong pullback risk for LONG
+} as const;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -991,11 +1007,10 @@ serve(async (req) => {
           const isHedge = position.is_hedge === true;
           
           // 🆕 StochRSI filter for hedge opening - prevent hedges at extreme levels
-          // For SHORT positions: Don't hedge when StochRSI K > 80 (overbought - price likely to drop, helping SHORT)
+          // For SHORT positions: Don't hedge when StochRSI K > OVERBOUGHT (overbought - price likely to drop, helping SHORT)
           const stochRsi4h = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi?.aggregated || {};
           const stochRsiK4h = stochRsi4h?.k ?? 50;
-          const STOCHRSI_HEDGE_BLOCK_THRESHOLD_SHORT = 80; // Don't hedge SHORT when K > 80
-          const shouldBlockHedgeByStochRsi = stochRsiK4h > STOCHRSI_HEDGE_BLOCK_THRESHOLD_SHORT;
+          const shouldBlockHedgeByStochRsi = stochRsiK4h > STOCHRSI_THRESHOLDS.OVERBOUGHT;
           
           // Apply hedging logic if enabled and risk is in hedge range (50-70%)
           // Only apply if position has met minimum hold time AND StochRSI allows
@@ -1071,7 +1086,7 @@ serve(async (req) => {
           // Log when hedge was blocked by StochRSI filter
           else if (shouldBlockHedgeByStochRsi && hasMetMinHoldTime && userSettings.hedgingEnabled && 
                    reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin) {
-            console.log(`🚫 HEDGE BLOCKED: SHORT ${position.symbol} - StochRSI 4h K=${stochRsiK4h.toFixed(1)} > 80 (overbought, price likely to drop - helps SHORT)`);
+            console.log(`🚫 HEDGE BLOCKED: SHORT ${position.symbol} - StochRSI 4h K=${stochRsiK4h.toFixed(1)} > ${STOCHRSI_THRESHOLDS.OVERBOUGHT} (overbought, price likely to drop - helps SHORT)`);
           }
           // If risk is VERY HIGH (>= 85%), close position instead (ONLY if losing significantly)
           // Raised threshold to 85% to reduce premature exits - these had 0% win rate in analysis
@@ -1149,11 +1164,10 @@ serve(async (req) => {
           const isHedge = position.is_hedge === true;
           
           // 🆕 StochRSI filter for hedge opening - prevent hedges at extreme levels
-          // For LONG positions: Don't hedge when StochRSI K < 20 (oversold - price likely to bounce up, helping LONG)
+          // For LONG positions: Don't hedge when StochRSI K < OVERSOLD (oversold - price likely to bounce up, helping LONG)
           const stochRsi4hLong = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi?.aggregated || {};
           const stochRsiK4hLong = stochRsi4hLong?.k ?? 50;
-          const STOCHRSI_HEDGE_BLOCK_THRESHOLD_LONG = 20; // Don't hedge LONG when K < 20
-          const shouldBlockHedgeByStochRsiLong = stochRsiK4hLong < STOCHRSI_HEDGE_BLOCK_THRESHOLD_LONG;
+          const shouldBlockHedgeByStochRsiLong = stochRsiK4hLong < STOCHRSI_THRESHOLDS.OVERSOLD;
           
           // Apply hedging logic if enabled and risk is in hedge range (50-70%)
           // Only apply if position has met minimum hold time AND StochRSI allows
@@ -1229,7 +1243,7 @@ serve(async (req) => {
           // Log when hedge was blocked by StochRSI filter
           else if (shouldBlockHedgeByStochRsiLong && hasMetMinHoldTime && userSettings.hedgingEnabled && 
                    reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin) {
-            console.log(`🚫 HEDGE BLOCKED: LONG ${position.symbol} - StochRSI 4h K=${stochRsiK4hLong.toFixed(1)} < 20 (oversold, price likely to bounce - helps LONG)`);
+            console.log(`🚫 HEDGE BLOCKED: LONG ${position.symbol} - StochRSI 4h K=${stochRsiK4hLong.toFixed(1)} < ${STOCHRSI_THRESHOLDS.OVERSOLD} (oversold, price likely to bounce - helps LONG)`);
           }
           // If risk is VERY HIGH (>= 85%), close position instead (ONLY if losing significantly)
           // Raised threshold to 85% to reduce premature exits - these had 0% win rate in analysis

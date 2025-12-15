@@ -20,6 +20,22 @@ const ADX_THRESHOLDS = {
   EXTREME: 40,      // Extreme trend, maximum confidence bonus
 } as const;
 
+// ============= CENTRALIZED STOCHRSI THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: strategy-analyzer, calculate-trend, monitor-positions, ai-signal-analyzer
+const STOCHRSI_THRESHOLDS = {
+  EXTREME_OVERSOLD: 10,    // Extremely oversold, strong bounce risk for SHORT
+  DEEPLY_OVERSOLD: 15,     // Deeply oversold zone
+  OVERSOLD: 20,            // Standard oversold threshold
+  OVERSOLD_ZONE: 25,       // Entering oversold territory
+  NEUTRAL_LOW: 30,         // Lower neutral boundary
+  NEUTRAL_HIGH: 70,        // Upper neutral boundary
+  OVERBOUGHT_ZONE: 75,     // Entering overbought territory
+  OVERBOUGHT: 80,          // Standard overbought threshold
+  DEEPLY_OVERBOUGHT: 85,   // Deeply overbought zone
+  EXTREME_OVERBOUGHT: 90,  // Extremely overbought, strong pullback risk for LONG
+} as const;
+
 // ============= UNIFIED REVERSAL SCORE SYSTEM =============
 // Aligned with strategy-analyzer for consistent reversal detection
 // Three-tier decision: BLOCK (>=60), REDUCE (40-60), NORMAL (<40)
@@ -82,10 +98,10 @@ function calculateUnifiedReversalScore(trendData: any, signalType: string): Unif
   }
   
   // 2. StochRSI ZONES (0-25 points)
-  if (isLong && k4h > 85) {
+  if (isLong && k4h > STOCHRSI_THRESHOLDS.DEEPLY_OVERBOUGHT) {
     rawScore += 15;
     reasons.push(`4h StochRSI overbought (K=${k4h.toFixed(1)})`);
-  } else if (!isLong && k4h < 15) {
+  } else if (!isLong && k4h < STOCHRSI_THRESHOLDS.DEEPLY_OVERSOLD) {
     rawScore += 15;
     reasons.push(`4h StochRSI oversold (K=${k4h.toFixed(1)})`);
   }
