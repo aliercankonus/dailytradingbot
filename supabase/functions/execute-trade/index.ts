@@ -1305,15 +1305,16 @@ serve(async (req) => {
     const confidence = adjustedConfidence;
     
     // CONFIDENCE INVERSION FIX: High confidence = reduce position (trend exhaustion)
-    if (confidence >= 80) {
+    // Uses CONFIDENCE_THRESHOLDS for consistency across codebase
+    if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_STRONG) {
       quantity *= 0.6; // 40% reduction for very high confidence (likely exhaustion)
-      console.log(`⚠️ Position size REDUCED by 40% due to high confidence (${confidence}%) - trend may be exhausted`);
-    } else if (confidence >= 70) {
+      console.log(`⚠️ Position size REDUCED by 40% due to high confidence (${confidence}% >= ${CONFIDENCE_THRESHOLDS.PENALTY_STRONG}%) - trend may be exhausted`);
+    } else if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_LIGHT) {
       quantity *= 0.8; // 20% reduction for high confidence
-      console.log(`⚠️ Position size REDUCED by 20% due to elevated confidence (${confidence}%)`);
-    } else if (confidence < 50) {
+      console.log(`⚠️ Position size REDUCED by 20% due to elevated confidence (${confidence}% >= ${CONFIDENCE_THRESHOLDS.PENALTY_LIGHT}%)`);
+    } else if (confidence < CONFIDENCE_THRESHOLDS.LOW) {
       quantity *= 0.7; // 30% reduction for low confidence (weak signal)
-      console.log(`Position size reduced by 30% due to low confidence (${confidence}%)`);
+      console.log(`Position size reduced by 30% due to low confidence (${confidence}% < ${CONFIDENCE_THRESHOLDS.LOW}%)`);
     } else {
       // Sweet spot: 50-70% confidence - no adjustment
       console.log(`✓ Position size normal for optimal confidence zone (${confidence}%)`);
