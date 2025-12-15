@@ -10,6 +10,7 @@ const corsHeaders = {
 // Changes here should be mirrored in: strategy-analyzer, execute-trade, monitor-positions
 const ADX_THRESHOLDS = {
   VERY_WEAK: 12,    // Essentially no trend, avoid trading
+  SEVERE_PENALTY: 15, // Below this = severe penalty (-10), consistent mental model
   WEAK: 18,         // Weak trend, mixed momentum allowed with caution
   MINIMUM: 20,      // Hard gate for any signal generation
   MODERATE: 22,     // Momentum confirmation threshold
@@ -757,7 +758,7 @@ function enhanceConfidenceWithIndicators(
     enhanced += 5;
   } else if (adx >= ADX_THRESHOLDS.MINIMUM) {
     enhanced += 2;
-  } else if (adx < 15) {  // Below VERY_WEAK threshold (15 is intentionally < VERY_WEAK=12, keeping 15 for severe penalty)
+  } else if (adx < ADX_THRESHOLDS.SEVERE_PENALTY) {
     enhanced -= 10;
   } else if (adx < ADX_THRESHOLDS.WEAK) {
     enhanced -= 5;
