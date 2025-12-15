@@ -782,13 +782,16 @@ function enhanceConfidenceWithIndicators(
 }
 
 // True alignment score - measures actual direction agreement across timeframes
+// NEUTRAL TREND PROTECTION: When dominant is neutral + ADX < 20, cap score to 60 and require volume
 function calculateTrueAlignmentScore(
   trend4h: { trend: string; confidence: number; indicators: any },
   trend1h: { trend: string; confidence: number; indicators: any },
   trend30m: { trend: string; confidence: number; indicators: any },
   trend15m: { trend: string; confidence: number; indicators: any },
-  dominantTrend: string
-): { score: number; breakdown: { directionScore: number; indicatorScore: number; penaltyScore: number } } {
+  dominantTrend: string,
+  adx: number = 25,
+  volumeConfirms: boolean = false
+): { score: number; breakdown: { directionScore: number; indicatorScore: number; penaltyScore: number }; neutralCapped: boolean } {
   let directionScore = 0;
   let indicatorScore = 0;
   let penaltyScore = 0;
@@ -866,7 +869,18 @@ function calculateTrueAlignmentScore(
   const rawScore = directionScore + indicatorScore - penaltyScore;
   
   // Normalize to 0-100 scale
-  const normalizedScore = Math.min(Math.max(Math.round(rawScore * 1.18), 0), 100);
+  let normalizedScore = Math.min(Math.max(Math.round(rawScore * 1.18), 0), 100);
+  
+  // NEUTRAL TREND PROTECTION: When dominant is neutral + ADX weak, cap score and require volume
+  // This prevents inflated alignment scores when 1h is used as reference (may be wrong)
+  let neutralCapped = false;
+  if (dominantTrend === "neutral" && adx < 20) {
+    const maxNeutralScore = volumeConfirms ? 70 : 60; // Volume can raise cap to 70
+    if (normalizedScore > maxNeutralScore) {
+      normalizedScore = maxNeutralScore;
+      neutralCapped = true;
+    }
+  }
   
   return {
     score: normalizedScore,
@@ -875,6 +889,7 @@ function calculateTrueAlignmentScore(
       indicatorScore: Math.round(indicatorScore),
       penaltyScore: Math.round(penaltyScore),
     },
+    neutralCapped,
   };
 }
 
@@ -1269,10 +1284,16 @@ serve(async (req) => {
     );
 
     // Calculate true alignment score (replaces old weightedConsistency)
-    const trueAlignment = calculateTrueAlignmentScore(trend4h, trend1h, trend30m, trend15m, dominantTrend);
+    // Pass ADX and volume confirms for neutral trend protection
+    const volumeConfirmsAny = volume1h.volumeSpike || volume4h.volumeSpike || 
+                               volume1h.volumeTrend === "increasing" || volume4h.volumeTrend === "increasing";
+    const trueAlignment = calculateTrueAlignmentScore(
+      trend4h, trend1h, trend30m, trend15m, dominantTrend, adx, volumeConfirmsAny
+    );
     
+    const neutralCapLog = trueAlignment.neutralCapped ? ` [NEUTRAL CAPPED]` : '';
     console.log(
-      `${symbol} ENHANCED CONFIDENCE: 4h=${trend4h.confidence}->${enhancedConfidence4h} 1h=${trend1h.confidence}->${enhancedConfidence1h} | ALIGNMENT: score=${trueAlignment.score} (dir=${trueAlignment.breakdown.directionScore} ind=${trueAlignment.breakdown.indicatorScore} pen=${trueAlignment.breakdown.penaltyScore})`
+      `${symbol} ENHANCED CONFIDENCE: 4h=${trend4h.confidence}->${enhancedConfidence4h} 1h=${trend1h.confidence}->${enhancedConfidence1h} | ALIGNMENT: score=${trueAlignment.score} (dir=${trueAlignment.breakdown.directionScore} ind=${trueAlignment.breakdown.indicatorScore} pen=${trueAlignment.breakdown.penaltyScore})${neutralCapLog}`
     );
 
     const atrCompressed = relativeATR < 0.6;
