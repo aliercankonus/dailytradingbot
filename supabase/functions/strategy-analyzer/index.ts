@@ -2144,7 +2144,14 @@ serve(async (req) => {
         }
         
         // GATE: Must have at least 1 strategy with actual conditions (not just trend-follow)
-        if (strategiesWithConditionBasis === 0) {
+        // EXCEPTION: Allow trend-followers when market conditions are exceptionally strong
+        const hasStrongTrendException = 
+          adx >= ADX_THRESHOLDS.EXCEPTIONAL &&  // ADX ≥ 35 (very strong trend)
+          momentum?.confirms === true &&         // Momentum confirmed
+          momentum?.state === "confirmed" &&
+          (higherTimeframeFilter?.aligned || false); // HTF aligned
+        
+        if (strategiesWithConditionBasis === 0 && !hasStrongTrendException) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
@@ -2156,7 +2163,11 @@ serve(async (req) => {
           continue;
         }
         
-        console.log(`📋 ${symbol}: ${strategiesWithConditionBasis}/${allStrategies.length} strategies support ${tradeDirectionForGate} with conditions`);
+        if (strategiesWithConditionBasis === 0 && hasStrongTrendException) {
+          console.log(`✅ ${symbol}: No condition-based strategies, but STRONG TREND EXCEPTION applies (ADX=${adx.toFixed(1)} ≥ 35, momentum confirmed, HTF aligned)`);
+        } else {
+          console.log(`📋 ${symbol}: ${strategiesWithConditionBasis}/${allStrategies.length} strategies support ${tradeDirectionForGate} with conditions`);
+        }
 
         // ============= Technical Indicators =============
         const stochRsiEval = evaluateStochRSI(trendData.stochasticRsi, trend);
