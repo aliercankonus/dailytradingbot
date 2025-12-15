@@ -105,7 +105,7 @@ export const ClosedPositionsDashboard = () => {
     positions.forEach(p => {
       const closeReason = getCloseReason(p);
       if (closeReason === 'Take Profit' || closeReason.includes('Partial TP')) takeProfitCount++;
-      else if (closeReason === 'Stop Loss') stopLossCount++;
+      else if (closeReason === 'Stop Loss' || closeReason === 'Partial Loss') stopLossCount++;
       else if (closeReason === 'Trailing Stop' || closeReason === 'Break-Even') trailingStopCount++;
       else if (closeReason === 'Trend Exit' || closeReason === 'Time Exit') trendExitCount++;
       else if (emergencyReasons.includes(closeReason)) emergencyExitCount++;
