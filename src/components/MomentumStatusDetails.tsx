@@ -259,6 +259,26 @@ export const MomentumStatusDetails = () => {
                                 ADX (Trend Strength):
                               </span>
                               <div className="flex items-center gap-2">
+                                {momentum?.adxRising !== undefined && (
+                                  <div className={`flex items-center gap-1 px-2 py-0.5 rounded ${
+                                    momentum.adxRising 
+                                      ? "bg-green-100 dark:bg-green-950" 
+                                      : "bg-orange-100 dark:bg-orange-950"
+                                  }`}>
+                                    {momentum.adxRising ? (
+                                      <TrendingUp className="h-3 w-3 text-green-600 dark:text-green-400" />
+                                    ) : (
+                                      <TrendingDown className="h-3 w-3 text-orange-600 dark:text-orange-400" />
+                                    )}
+                                    <span className={`text-xs font-medium ${
+                                      momentum.adxRising 
+                                        ? "text-green-700 dark:text-green-300" 
+                                        : "text-orange-700 dark:text-orange-300"
+                                    }`}>
+                                      {momentum.adxRising ? "Rising" : "Falling"}
+                                    </span>
+                                  </div>
+                                )}
                                 <span
                                   className={
                                     adxOK
@@ -279,6 +299,24 @@ export const MomentumStatusDetails = () => {
                                 )}
                               </div>
                             </div>
+
+                            {momentum?.fakeBreakoutRisk && (
+                              <div className="flex items-center gap-2 p-2 rounded bg-orange-100 dark:bg-orange-950 border border-orange-300 dark:border-orange-700">
+                                <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                                <span className="text-xs text-orange-700 dark:text-orange-300 font-medium">
+                                  Fake Breakout Risk: MACD expanding but ADX falling
+                                </span>
+                              </div>
+                            )}
+
+                            {momentum?.genuineMomentum && (
+                              <div className="flex items-center gap-2 p-2 rounded bg-green-100 dark:bg-green-950 border border-green-300 dark:border-green-700">
+                                <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                                <span className="text-xs text-green-700 dark:text-green-300 font-medium">
+                                  Genuine Momentum: MACD expanding + ADX rising
+                                </span>
+                              </div>
+                            )}
 
                             <div className="flex items-center justify-between text-sm">
                               <span className={confirms ? "text-gray-700 dark:text-gray-300" : "text-muted-foreground"}>
