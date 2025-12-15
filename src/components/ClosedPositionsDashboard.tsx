@@ -58,7 +58,11 @@ export const ClosedPositionsDashboard = () => {
         case 'hedge_take_profit': return 'Hedge TP';
         case 'hedge_stop_loss': return 'Hedge SL';
         case 'hedge_risk_dropped': return 'Hedge Exit';
+        // Manual and system closes
         case 'manual': return 'Manual Close';
+        case 'manual_close': return 'Manual Close';
+        case 'rebalancer': return 'Rebalancer';
+        case 'system': return 'System Close';
         default: return position.close_reason;
       }
     }
@@ -101,6 +105,7 @@ export const ClosedPositionsDashboard = () => {
     
     const emergencyReasons = ['Emergency Exit'];
     const hedgeReasons = ['Hedge Closed', 'Hedge TP', 'Hedge SL', 'Hedge Exit'];
+    const systemReasons = ['Rebalancer', 'System Close'];
     
     positions.forEach(p => {
       const closeReason = getCloseReason(p);
@@ -110,6 +115,7 @@ export const ClosedPositionsDashboard = () => {
       else if (closeReason === 'Trend Exit' || closeReason === 'Time Exit') trendExitCount++;
       else if (emergencyReasons.includes(closeReason)) emergencyExitCount++;
       else if (hedgeReasons.includes(closeReason)) hedgeCount++;
+      else if (systemReasons.includes(closeReason)) stopLossCount++; // Group with stop loss
       else manualCount++;
     });
     
