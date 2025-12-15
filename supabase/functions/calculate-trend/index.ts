@@ -353,7 +353,6 @@ function calculateBollingerBands(prices: number[], period = 20, stdDevMultiplier
   // O(n) calculation using rolling sum and sum of squares
   // stdDev = sqrt( (sumOfSquares/n) - (sum/n)^2 )
   const historyWindow = Math.min(50, prices.length - period);
-  const historicalBandwidths: number[] = [];
   
   // Initialize rolling sums for first window
   let rollingSum = 0;
@@ -365,6 +364,10 @@ function calculateBollingerBands(prices: number[], period = 20, stdDevMultiplier
     rollingSum += prices[i];
     rollingSumSq += prices[i] * prices[i];
   }
+  
+  // Use running bandwidth sum instead of array + reduce()
+  let bandwidthSum = 0;
+  let bandwidthCount = 0;
   
   // Calculate bandwidths using O(n) sliding window
   for (let windowEnd = actualStartIdx + period; windowEnd <= prices.length; windowEnd++) {
@@ -378,8 +381,9 @@ function calculateBollingerBands(prices: number[], period = 20, stdDevMultiplier
     const bw = sma !== 0 ? ((upper - lower) / sma) * 100 : 0;
     
     if (windowEnd < prices.length) {
-      // Store historical bandwidth
-      historicalBandwidths.push(bw);
+      // Accumulate bandwidth sum directly (no array storage)
+      bandwidthSum += bw;
+      bandwidthCount++;
       // Slide window: remove oldest, add newest
       const removeIdx = windowEnd - period;
       const addIdx = windowEnd;
@@ -391,9 +395,8 @@ function calculateBollingerBands(prices: number[], period = 20, stdDevMultiplier
       const bandRange = upper - lower;
       const percentB = bandRange !== 0 ? ((currentPrice - lower) / bandRange) * 100 : 50;
       
-      const avgBandwidth = historicalBandwidths.length > 0 
-        ? historicalBandwidths.reduce((a, b) => a + b, 0) / historicalBandwidths.length 
-        : bw;
+      // O(1) average calculation using running sum
+      const avgBandwidth = bandwidthCount > 0 ? bandwidthSum / bandwidthCount : bw;
       
       // Squeeze: current bandwidth < 75% of average bandwidth
       const squeeze = bw < avgBandwidth * 0.75;
