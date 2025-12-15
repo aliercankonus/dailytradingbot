@@ -507,12 +507,43 @@ function calculateVolumeAnalysis(klines: any[]): {
   };
 }
 
-// CONSOLIDATED: Single True Range calculation helper used by all ATR functions
+/**
+ * ============= CONSOLIDATED ATR UTILITIES =============
+ * 
+ * These are the CANONICAL ATR calculation functions for the trading system.
+ * All edge functions should use these utilities or read ATR from calculate-trend response.
+ * 
+ * USAGE ACROSS EDGE FUNCTIONS:
+ * - calculate-trend: Uses these utilities directly (canonical source)
+ * - monitor-positions: Copies these utilities (edge functions can't import from each other)
+ * - strategy-analyzer: Reads ATR from calculate-trend response (trendData.volatility.atrPercent)
+ * - execute-trade: Reads ATR from calculate-trend response (trendData.volatility.atrPercent)
+ * 
+ * WHY SIMPLE MOVING AVERAGE (SMA) INSTEAD OF WILDER'S SMOOTHING:
+ * - ATR here measures recent volatility for position sizing and risk management
+ * - SMA provides a straightforward average of True Range over the period
+ * - This is the standard ATR calculation used by most trading platforms
+ * - For trend strength (ADX), we use Wilder's smoothing in validate-adx (different purpose)
+ * 
+ * FORMULA:
+ *   True Range (TR) = MAX(high - low, |high - prevClose|, |low - prevClose|)
+ *   ATR = SUM(TR over N periods) / N
+ * 
+ * CRITICAL: When modifying these utilities, also update monitor-positions to match!
+ * ====================================================================================
+ */
+
+// Single True Range calculation helper - the fundamental volatility measure
 function calculateTrueRange(high: number, low: number, prevClose: number): number {
   return Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
 }
 
-// CONSOLIDATED: Unified ATR calculation function
+/**
+ * Calculate current ATR (Average True Range) using Simple Moving Average
+ * @param klines - Binance kline data array
+ * @param period - ATR period (default: 14)
+ * @returns ATR value in price units
+ */
 function calculateATR(klines: any[], period: number = 14): number {
   const atrKlines = klines.slice(-period - 1);
   if (atrKlines.length < 2) return 0;
@@ -527,8 +558,21 @@ function calculateATR(klines: any[], period: number = 14): number {
   return trSum / (atrKlines.length - 1);
 }
 
-// CONSOLIDATED: Historical ATR average using optimized sliding window O(n)
-// Now uses shared calculateTrueRange helper
+/**
+ * Calculate historical ATR average using optimized sliding window O(n)
+ * Used for relative ATR calculation (currentATR / historicalATR) to detect volatility changes
+ * 
+ * @param klines - Binance kline data array
+ * @param atrPeriod - Period for each ATR calculation (default: 14)
+ * @param atrLookback - How many historical ATR values to average (default: 30)
+ * @param currentATR - Fallback value if insufficient data
+ * @returns Average of historical ATR values
+ * 
+ * RELATIVE ATR INTERPRETATION:
+ * - relativeATR < 0.6: Compressed volatility (potential breakout coming)
+ * - relativeATR ~ 1.0: Normal volatility
+ * - relativeATR > 1.5: Volatility spike (caution - potential news event)
+ */
 function calculateHistoricalATRAvg(klines: any[], atrPeriod: number, atrLookback: number, currentATR: number): number {
   const historicalKlines = klines.slice(-atrLookback - atrPeriod);
   if (historicalKlines.length < atrPeriod + 1) return currentATR;
@@ -547,7 +591,7 @@ function calculateHistoricalATRAvg(klines: any[], atrPeriod: number, atrLookback
   historicalATRSum += windowTRSum / atrPeriod;
   historicalATRCount++;
   
-  // Slide window through remaining data
+  // Slide window through remaining data (O(n) optimization)
   for (let j = atrPeriod + 1; j < historicalKlines.length; j++) {
     const oldHigh = parseFloat(historicalKlines[j - atrPeriod][2]);
     const oldLow = parseFloat(historicalKlines[j - atrPeriod][3]);
