@@ -424,13 +424,14 @@ serve(async (req) => {
       // CONFIDENCE PENALTY FUNCTION (aligned with strategy-analyzer)
       // High confidence = trend exhaustion, penalize accordingly
       // ============================================================
+      // Uses CONFIDENCE_THRESHOLDS for consistency across codebase
       const getConfidencePenalty = (confidence: number): number => {
-        if (confidence >= 85) return -25;   // Heavy penalty for extreme confidence
-        if (confidence >= 80) return -18;   // Strong penalty
-        if (confidence >= 75) return -12;   // Moderate penalty
-        if (confidence >= 70) return -8;    // Light penalty
-        if (confidence >= 60) return -12;   // DEAD ZONE: 60-69 penalty
-        if (confidence >= 50) return 0;     // Optimal zone: 50-59
+        if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_HEAVY) return -25;   // Heavy penalty for extreme confidence
+        if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_STRONG) return -18;  // Strong penalty
+        if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_MODERATE) return -12; // Moderate penalty
+        if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_LIGHT) return -8;    // Light penalty
+        if (confidence >= CONFIDENCE_THRESHOLDS.DEAD_ZONE_LOWER) return -12; // DEAD ZONE: 60-69 penalty
+        if (confidence >= CONFIDENCE_THRESHOLDS.OPTIMAL_LOWER) return 0;     // Optimal zone: 50-59
         return -3;  // Too low confidence
       };
       

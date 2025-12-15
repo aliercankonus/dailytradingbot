@@ -483,15 +483,15 @@ const getVolumeScore = (trendData: any, trend: string): number => {
 // CRITICAL FIX: 60-69 zone has 17% win rate vs 50-59 at 46% - add penalty!
 // FIX: Reduce penalty when ADX ≥ 30 or momentum confirmed to avoid double punishment with hard gate
 const getConfidencePenalty = (confidence: number, adx: number = 0, momentumConfirmed: boolean = false): number => {
-  // Calculate base penalty
+  // Calculate base penalty - Uses CONFIDENCE_THRESHOLDS for consistency
   let basePenalty = 0;
-  if (confidence >= 85) basePenalty = -25;        // Heavy penalty for extreme confidence
-  else if (confidence >= 80) basePenalty = -18;   // Strong penalty
-  else if (confidence >= 75) basePenalty = -12;   // Moderate penalty
-  else if (confidence >= 70) basePenalty = -8;    // Light penalty
-  else if (confidence >= 60) basePenalty = -12;   // DEAD ZONE: 60-69 penalty
-  else if (confidence >= 50) basePenalty = 0;     // Optimal zone: 50-59 (46% win rate)
-  else basePenalty = -3;                          // Too low confidence also not ideal
+  if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_HEAVY) basePenalty = -25;        // Heavy penalty for extreme confidence
+  else if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_STRONG) basePenalty = -18;   // Strong penalty
+  else if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_MODERATE) basePenalty = -12; // Moderate penalty
+  else if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_LIGHT) basePenalty = -8;     // Light penalty
+  else if (confidence >= CONFIDENCE_THRESHOLDS.DEAD_ZONE_LOWER) basePenalty = -12;  // DEAD ZONE: 60-69 penalty
+  else if (confidence >= CONFIDENCE_THRESHOLDS.OPTIMAL_LOWER) basePenalty = 0;      // Optimal zone: 50-59 (46% win rate)
+  else basePenalty = -3;                                                             // Too low confidence also not ideal
   
   // ============= PENALTY REDUCTION FOR FAVORABLE CONDITIONS =============
   // If signal passed the hard gate (ADX ≥ 30 or momentum confirmed), reduce penalty severity
