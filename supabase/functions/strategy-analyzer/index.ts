@@ -2054,8 +2054,67 @@ serve(async (req) => {
         const isExtremeOverbought4h = stochRsiK4h > STOCHRSI_OVERBOUGHT_THRESHOLD;
         const isTrendStrong = adx >= STRONG_TREND_ADX_THRESHOLD;
         
-        // Determine intended trade direction from trend
-        const intendedTradeDirection = trend === "bullish" ? "long" : trend === "bearish" ? "short" : null;
+        // ===== DIRECTION OVERRIDE: BULLISH REVERSAL AT EXTREME OVERSOLD =====
+        // When at extreme oversold (K < 20) with bullish reversal signals, OVERRIDE to LONG
+        // even though the dominant trend is bearish - this catches reversal opportunities
+        const isOversoldReversalCandidate = stochRsiK4h < STOCHRSI_THRESHOLDS.OVERSOLD; // K < 20
+        const stochRsiTurningUpCheck = stochRsiK4h > stochRsiD4h; // K > D = momentum turning up
+        const has1hBullishTurnCheck = stochFilterTrend1h === "bullish" || 
+          (stochRsi1h?.signal === "bullish_cross") ||
+          (stochRsiK1h > 30 && stochRsiK1h > (stochRsi1h?.d ?? 0));
+        const bollingerAtLowerCheck = bollingerPosition === "below_lower" || bollingerPosition === "lower_zone" || percentB < 30;
+        
+        // Check for bullish divergence (price lower but RSI/MACD higher)
+        const has1hBullishDivergenceCheck = hasBullishDivergence;
+        
+        // OVERRIDE: Switch to LONG direction if bullish reversal conditions met at oversold
+        const overrideToLongReversal = isOversoldReversalCandidate && 
+          stochRsiTurningUpCheck && 
+          (has1hBullishDivergenceCheck || has1hBullishTurnCheck) && 
+          bollingerAtLowerCheck;
+        
+        // ===== DIRECTION OVERRIDE: BEARISH REVERSAL AT EXTREME OVERBOUGHT =====
+        const isOverboughtReversalCandidate = stochRsiK4h > STOCHRSI_THRESHOLDS.OVERBOUGHT; // K > 80
+        const stochRsiTurningDownCheck = stochRsiK4h < stochRsiD4h; // K < D = momentum turning down
+        const has1hBearishTurnCheck = stochFilterTrend1h === "bearish" || 
+          (stochRsi1h?.signal === "bearish_cross") ||
+          (stochRsiK1h < 70 && stochRsiK1h < (stochRsi1h?.d ?? 100));
+        const bollingerAtUpperCheck = bollingerPosition === "above_upper" || bollingerPosition === "upper_zone" || percentB > 70;
+        
+        const overrideToShortReversal = isOverboughtReversalCandidate && 
+          stochRsiTurningDownCheck && 
+          (hasBearishDivergence || has1hBearishTurnCheck) && 
+          bollingerAtUpperCheck;
+        
+        // Determine intended trade direction from trend, WITH REVERSAL OVERRIDES
+        let intendedTradeDirection: "long" | "short" | null = trend === "bullish" ? "long" : trend === "bearish" ? "short" : null;
+        let isReversalEntry = false;
+        let reversalPositionSizeOverride = 1.0;
+        
+        if (overrideToLongReversal && trend === "bearish") {
+          intendedTradeDirection = "long";
+          isReversalEntry = true;
+          reversalPositionSizeOverride = (riskParams.early_reversal_position_size_percent || 40) / 100;
+          console.log(`🔄 ${symbol}: BULLISH REVERSAL OVERRIDE - Switching from SHORT to LONG at oversold K=${stochRsiK4h.toFixed(1)}`);
+          console.log(`   StochRSI rising: K=${stochRsiK4h.toFixed(1)} > D=${stochRsiD4h.toFixed(1)}, 1h bullish: ${has1hBullishTurnCheck}, divergence: ${has1hBullishDivergenceCheck}`);
+          console.log(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)}), Position size: ${(reversalPositionSizeOverride * 100).toFixed(0)}%`);
+        } else if (overrideToShortReversal && trend === "bullish") {
+          intendedTradeDirection = "short";
+          isReversalEntry = true;
+          reversalPositionSizeOverride = (riskParams.early_reversal_position_size_percent || 40) / 100;
+          console.log(`🔄 ${symbol}: BEARISH REVERSAL OVERRIDE - Switching from LONG to SHORT at overbought K=${stochRsiK4h.toFixed(1)}`);
+          console.log(`   StochRSI falling: K=${stochRsiK4h.toFixed(1)} < D=${stochRsiD4h.toFixed(1)}, 1h bearish: ${has1hBearishTurnCheck}, divergence: ${hasBearishDivergence}`);
+          console.log(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)}), Position size: ${(reversalPositionSizeOverride * 100).toFixed(0)}%`);
+        } else if (isOversoldReversalCandidate && trend === "bearish" && !overrideToLongReversal) {
+          // Log why reversal override was NOT triggered
+          console.log(`📊 ${symbol}: Oversold but NO reversal override - K=${stochRsiK4h.toFixed(1)} rising:${stochRsiTurningUpCheck} 1hBullish:${has1hBullishTurnCheck} divergence:${has1hBullishDivergenceCheck} BBLower:${bollingerAtLowerCheck}`);
+        }
+        
+        // Apply reversal position size override if direction was overridden
+        if (isReversalEntry && reversalPositionSizeOverride < 1.0) {
+          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, reversalPositionSizeOverride);
+          console.log(`📉 ${symbol}: Reversal entry - position size reduced to ${(reversalPositionMultiplier * 100).toFixed(0)}%`);
+        }
         
         // ===== SMART EXCEPTION FOR LONG AT OVERBOUGHT =====
         // Allow LONG when StochRSI > 90 IF:
