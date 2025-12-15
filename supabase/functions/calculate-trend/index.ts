@@ -1386,6 +1386,28 @@ serve(async (req) => {
       trend4h, trend1h, trend30m, trend15m, dominantTrend, adx, volumeConfirmsAny
     );
     
+    // ============= DIVERGENCE ALIGNMENT SCORE VALIDATION =============
+    // Separate thresholds for pullback vs early_reversal to prevent 4h dominance
+    // from drowning early 1h signals while still requiring confirmation for pullbacks
+    const PULLBACK_ALIGNMENT_THRESHOLD = 55;      // Pullbacks need stronger alignment (relying on 4h)
+    const EARLY_REVERSAL_ALIGNMENT_THRESHOLD = 45; // Early reversals can tolerate lower alignment (catching trend change)
+    
+    if (divergenceType === "pullback" && trueAlignment.score < PULLBACK_ALIGNMENT_THRESHOLD) {
+      console.log(
+        `${symbol}: PULLBACK REJECTED - alignment score ${trueAlignment.score} < ${PULLBACK_ALIGNMENT_THRESHOLD} threshold`
+      );
+      divergenceType = "ranging_conflict";
+      divergenceConfidence = 0;
+      allowDivergenceSignal = false;
+    } else if (divergenceType === "early_reversal" && trueAlignment.score < EARLY_REVERSAL_ALIGNMENT_THRESHOLD) {
+      console.log(
+        `${symbol}: EARLY REVERSAL REJECTED - alignment score ${trueAlignment.score} < ${EARLY_REVERSAL_ALIGNMENT_THRESHOLD} threshold`
+      );
+      divergenceType = "ranging_conflict";
+      divergenceConfidence = 0;
+      allowDivergenceSignal = false;
+    }
+    
     const neutralCapLog = trueAlignment.neutralCapped ? ` [NEUTRAL CAPPED]` : '';
     console.log(
       `${symbol} ENHANCED CONFIDENCE: 4h=${trend4h.confidence}->${enhancedConfidence4h} 1h=${trend1h.confidence}->${enhancedConfidence1h} | ALIGNMENT: score=${trueAlignment.score} (dir=${trueAlignment.breakdown.directionScore} ind=${trueAlignment.breakdown.indicatorScore} pen=${trueAlignment.breakdown.penaltyScore})${neutralCapLog}`
