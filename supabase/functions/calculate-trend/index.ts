@@ -1385,14 +1385,32 @@ serve(async (req) => {
       ? histArr[histArr.length - 2] 
       : macdHistogram;
 
+    // FIXED: Softened majority vote logic for neutral 4h to prevent fake momentum in ranging markets
+    // Now requires: (1) ADX showing some activity, (2) stronger alignment between lower timeframes
     let effectiveTrendForMomentum = dominantTrend;
     if (dominantTrend === "neutral") {
       const bullishVotes = [trend1h.trend, trend30m.trend, trend15m.trend].filter((t) => t === "bullish").length;
       const bearishVotes = [trend1h.trend, trend30m.trend, trend15m.trend].filter((t) => t === "bearish").length;
-      if (bullishVotes > bearishVotes) {
-        effectiveTrendForMomentum = "bullish";
-      } else if (bearishVotes > bullishVotes) {
-        effectiveTrendForMomentum = "bearish";
+      
+      // Require minimum ADX to derive momentum from lower timeframes (prevents ranging market fake signals)
+      const hasMinimumActivity = adx >= ADX_THRESHOLDS.WEAK; // ADX >= 18
+      
+      // Require at least 2 aligned timeframes (stronger agreement, not just simple majority)
+      const strongBullishAlignment = bullishVotes >= 2 && trend1h.confidence >= 55;
+      const strongBearishAlignment = bearishVotes >= 2 && trend1h.confidence >= 55;
+      
+      if (hasMinimumActivity) {
+        if (strongBullishAlignment && bullishVotes > bearishVotes) {
+          effectiveTrendForMomentum = "bullish";
+          console.log(`${symbol}: Neutral 4h → derived BULLISH momentum (votes: ${bullishVotes}/${bearishVotes}, ADX=${adx.toFixed(1)}, 1h conf=${trend1h.confidence}%)`);
+        } else if (strongBearishAlignment && bearishVotes > bullishVotes) {
+          effectiveTrendForMomentum = "bearish";
+          console.log(`${symbol}: Neutral 4h → derived BEARISH momentum (votes: ${bearishVotes}/${bullishVotes}, ADX=${adx.toFixed(1)}, 1h conf=${trend1h.confidence}%)`);
+        } else {
+          console.log(`${symbol}: Neutral 4h → NO momentum derived (alignment insufficient: bull=${bullishVotes} bear=${bearishVotes}, 1h conf=${trend1h.confidence}%)`);
+        }
+      } else {
+        console.log(`${symbol}: Neutral 4h → NO momentum derived (ADX too weak: ${adx.toFixed(1)} < ${ADX_THRESHOLDS.WEAK})`);
       }
     }
 
