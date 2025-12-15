@@ -446,11 +446,12 @@ const getMomentumScore = (momentum: any): number => {
   return Math.min(20, score);  // MAX 20 (was 25)
 };
 
-// Alignment Score (0-20 points)
+// Alignment Score (0-14 points) - DIRECTIONAL CONSISTENCY ONLY
+// All confidence psychology logic is in getConfidencePenalty() - no double-counting
 const getAlignmentScore = (confidence: number, consistency: number, aligned: boolean, trendData: any): number => {
   let score = 0;
   
-  // Full alignment bonus
+  // Full alignment bonus (0-8)
   if (aligned) {
     score += 8;
   } else {
@@ -473,22 +474,14 @@ const getAlignmentScore = (confidence: number, consistency: number, aligned: boo
     }
   }
   
-  // Confidence component (0-6) - optimal zone is 50-59% (data shows 46% win rate)
-  // CRITICAL: 60-69 zone has 17% win rate - penalize it!
-  if (confidence >= 50 && confidence < 60) score += 6;  // Best zone: 50-59 (46% win rate)
-  else if (confidence >= 70 && confidence < 80) score += 4;  // 70-79 recovered well (67% after optimizations)
-  else if (confidence >= 60 && confidence < 70) score += 1;  // DANGER ZONE: 60-69 (17% win rate!)
-  else if (confidence >= 80) score += 2;  // Over-extended (penalty elsewhere)
-  else score += 1;  // Too low
-  
-  // Consistency component (0-6) - STRICTER thresholds
-  if (consistency >= 75) score += 6;  // Was 70
-  else if (consistency >= 65) score += 5;  // Was 60
-  else if (consistency >= 55) score += 3;  // Was 50 gave 4
-  else if (consistency >= 45) score += 1;  // Was 40 gave 2
+  // Consistency component only (0-6) - NO confidence logic here
+  if (consistency >= 75) score += 6;
+  else if (consistency >= 65) score += 5;
+  else if (consistency >= 55) score += 3;
+  else if (consistency >= 45) score += 1;
   // Below 45% = 0 points
   
-  return Math.min(20, score);
+  return Math.min(14, score);  // Max 14 (was 20)
 };
 
 // Technical Indicator Score (0-15 points)
