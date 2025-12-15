@@ -507,7 +507,28 @@ function calculateVolumeAnalysis(klines: any[]): {
   };
 }
 
-// Helper: Calculate historical ATR average using optimized sliding window O(n)
+// CONSOLIDATED: Single True Range calculation helper used by all ATR functions
+function calculateTrueRange(high: number, low: number, prevClose: number): number {
+  return Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+}
+
+// CONSOLIDATED: Unified ATR calculation function
+function calculateATR(klines: any[], period: number = 14): number {
+  const atrKlines = klines.slice(-period - 1);
+  if (atrKlines.length < 2) return 0;
+  
+  let trSum = 0;
+  for (let i = 1; i < atrKlines.length; i++) {
+    const high = parseFloat(atrKlines[i][2]);
+    const low = parseFloat(atrKlines[i][3]);
+    const prevClose = parseFloat(atrKlines[i - 1][4]);
+    trSum += calculateTrueRange(high, low, prevClose);
+  }
+  return trSum / (atrKlines.length - 1);
+}
+
+// CONSOLIDATED: Historical ATR average using optimized sliding window O(n)
+// Now uses shared calculateTrueRange helper
 function calculateHistoricalATRAvg(klines: any[], atrPeriod: number, atrLookback: number, currentATR: number): number {
   const historicalKlines = klines.slice(-atrLookback - atrPeriod);
   if (historicalKlines.length < atrPeriod + 1) return currentATR;
@@ -521,7 +542,7 @@ function calculateHistoricalATRAvg(klines: any[], atrPeriod: number, atrLookback
     const high = parseFloat(historicalKlines[i][2]);
     const low = parseFloat(historicalKlines[i][3]);
     const prevClose = parseFloat(historicalKlines[i - 1][4]);
-    windowTRSum += Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+    windowTRSum += calculateTrueRange(high, low, prevClose);
   }
   historicalATRSum += windowTRSum / atrPeriod;
   historicalATRCount++;
@@ -531,12 +552,12 @@ function calculateHistoricalATRAvg(klines: any[], atrPeriod: number, atrLookback
     const oldHigh = parseFloat(historicalKlines[j - atrPeriod][2]);
     const oldLow = parseFloat(historicalKlines[j - atrPeriod][3]);
     const oldPrevClose = parseFloat(historicalKlines[j - atrPeriod - 1][4]);
-    const oldTR = Math.max(oldHigh - oldLow, Math.abs(oldHigh - oldPrevClose), Math.abs(oldLow - oldPrevClose));
+    const oldTR = calculateTrueRange(oldHigh, oldLow, oldPrevClose);
     
     const newHigh = parseFloat(historicalKlines[j][2]);
     const newLow = parseFloat(historicalKlines[j][3]);
     const newPrevClose = parseFloat(historicalKlines[j - 1][4]);
-    const newTR = Math.max(newHigh - newLow, Math.abs(newHigh - newPrevClose), Math.abs(newLow - newPrevClose));
+    const newTR = calculateTrueRange(newHigh, newLow, newPrevClose);
     
     windowTRSum = windowTRSum - oldTR + newTR;
     historicalATRSum += windowTRSum / atrPeriod;
@@ -1112,20 +1133,11 @@ serve(async (req) => {
     const dominantTrend = trend4h.trend;
     const dominantConfidence = trend4h.confidence;
 
-    // Pre-calculate ADX and ATR once to avoid duplicate calculations
+    // CONSOLIDATED: Use unified ATR utility instead of inline calculation
     const adx = calculateADX(klines1h, 14);
     const atrPeriod = 14;
     const atrLookback = 30;
-    const atrKlines = klines1h.slice(-atrPeriod - 1);
-    let atrSum = 0;
-    for (let i = 1; i < atrKlines.length; i++) {
-      const high = parseFloat(atrKlines[i][2]);
-      const low = parseFloat(atrKlines[i][3]);
-      const prevClose = parseFloat(atrKlines[i - 1][4]);
-      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-      atrSum += tr;
-    }
-    const currentATR = atrKlines.length > 1 ? atrSum / (atrKlines.length - 1) : 0;
+    const currentATR = calculateATR(klines1h, atrPeriod);
     const atrPercent = currentPrice !== 0 ? (currentATR / currentPrice) * 100 : 0;
     const historicalATRAvg = calculateHistoricalATRAvg(klines1h, atrPeriod, atrLookback, currentATR);
     const relativeATR = historicalATRAvg !== 0 ? currentATR / historicalATRAvg : 0;
