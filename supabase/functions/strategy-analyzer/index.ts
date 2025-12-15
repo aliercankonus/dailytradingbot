@@ -1110,8 +1110,8 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
       };
     }
     
-    // MOMENTUM CONTINUATION: Only if very strong trend
-    if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsi > 35) {
+    // MOMENTUM CONTINUATION: Only if very strong trend + RSI > 45 (symmetric with bullish < 65)
+    if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsi > 45) {
       return {
         isPullback: false,
         hasBothConditions: false,
