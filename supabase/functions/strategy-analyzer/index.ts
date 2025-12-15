@@ -6,6 +6,20 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// ============= CENTRALIZED ADX THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: calculate-trend, execute-trade, monitor-positions
+const ADX_THRESHOLDS = {
+  VERY_WEAK: 12,    // Essentially no trend, avoid trading
+  WEAK: 18,         // Weak trend, mixed momentum allowed with caution
+  MINIMUM: 20,      // Hard gate for any signal generation
+  MODERATE: 22,     // Momentum confirmation threshold
+  STRONG: 25,       // Strong trend, reduced reversal weight
+  VERY_STRONG: 30,  // Very strong trend, momentum continuation valid
+  EXCEPTIONAL: 35,  // Exceptional trend, relaxed quality thresholds
+  EXTREME: 40,      // Extreme trend, maximum confidence bonus
+} as const;
+
 // ============= AI REJECTION ANALYZER HELPER =============
 // Calls AI to validate rejections and stores results in database
 const analyzeRejectionWithAI = async (
@@ -395,15 +409,15 @@ const getConfidencePenalty = (confidence: number): number => {
   return -3;  // Too low confidence also not ideal
 };
 
-// ADX Score (0-25 points)
+// ADX Score (0-25 points) - Uses centralized ADX_THRESHOLDS
 const getAdxScore = (adx: number): number => {
-  if (adx >= 40) return 25;      // Exceptional trend
-  if (adx >= 30) return 22;      // Very strong trend
-  if (adx >= 25) return 18;      // Strong trend
-  if (adx >= 20) return 14;      // Moderate trend
-  if (adx >= 15) return 8;       // Weak trend
-  if (adx >= 12) return 4;       // Very weak
-  return 0;                       // No trend
+  if (adx >= ADX_THRESHOLDS.EXTREME) return 25;      // Exceptional trend
+  if (adx >= ADX_THRESHOLDS.VERY_STRONG) return 22;  // Very strong trend
+  if (adx >= ADX_THRESHOLDS.STRONG) return 18;       // Strong trend
+  if (adx >= ADX_THRESHOLDS.MINIMUM) return 14;      // Moderate trend
+  if (adx >= ADX_THRESHOLDS.WEAK) return 8;          // Weak trend
+  if (adx >= ADX_THRESHOLDS.VERY_WEAK) return 4;     // Very weak
+  return 0;                                           // No trend
 };
 
 // Momentum Score (0-20 points) - REDUCED from 25 based on win rate correlation
@@ -820,13 +834,13 @@ const calculateUnifiedReversalScore = (
                    breakdown.momentumScore + breakdown.macdScore + 
                    breakdown.timeframeScore + breakdown.volumeScore;
   
-  // ADX-based adaptive weight (strong trends reduce reversal impact)
+  // ADX-based adaptive weight (strong trends reduce reversal impact) - Uses centralized ADX_THRESHOLDS
   const getAdxWeight = (adxValue: number): number => {
-    if (adxValue >= 40) return 0.4;  // Very strong trend
-    if (adxValue >= 35) return 0.5;
-    if (adxValue >= 30) return 0.6;
-    if (adxValue >= 25) return 0.75;
-    if (adxValue >= 20) return 0.85;
+    if (adxValue >= ADX_THRESHOLDS.EXTREME) return 0.4;      // Extreme trend
+    if (adxValue >= ADX_THRESHOLDS.EXCEPTIONAL) return 0.5;  // Exceptional trend
+    if (adxValue >= ADX_THRESHOLDS.VERY_STRONG) return 0.6;  // Very strong trend
+    if (adxValue >= ADX_THRESHOLDS.STRONG) return 0.75;      // Strong trend
+    if (adxValue >= ADX_THRESHOLDS.MINIMUM) return 0.85;     // Moderate trend
     return 1.0;  // Weak trend = full weight
   };
   

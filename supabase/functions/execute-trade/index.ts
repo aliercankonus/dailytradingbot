@@ -6,6 +6,20 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-manual-execution',
 };
 
+// ============= CENTRALIZED ADX THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: strategy-analyzer, calculate-trend, monitor-positions
+const ADX_THRESHOLDS = {
+  VERY_WEAK: 12,    // Essentially no trend, avoid trading
+  WEAK: 18,         // Weak trend, mixed momentum allowed with caution
+  MINIMUM: 20,      // Hard gate for any signal generation
+  MODERATE: 22,     // Momentum confirmation threshold
+  STRONG: 25,       // Strong trend, reduced reversal weight
+  VERY_STRONG: 30,  // Very strong trend, momentum continuation valid
+  EXCEPTIONAL: 35,  // Exceptional trend, relaxed quality thresholds
+  EXTREME: 40,      // Extreme trend, maximum confidence bonus
+} as const;
+
 // ============= UNIFIED REVERSAL SCORE SYSTEM =============
 // Aligned with strategy-analyzer for consistent reversal detection
 // Three-tier decision: BLOCK (>=60), REDUCE (40-60), NORMAL (<40)
@@ -107,13 +121,13 @@ function calculateUnifiedReversalScore(trendData: any, signalType: string): Unif
     reasons.push('Volume confirms - risk reduced');
   }
   
-  // ADX-based adaptive weight
+  // ADX-based adaptive weight - Uses centralized ADX_THRESHOLDS
   const getAdxWeight = (adxValue: number): number => {
-    if (adxValue >= 40) return 0.4;
-    if (adxValue >= 35) return 0.5;
-    if (adxValue >= 30) return 0.6;
-    if (adxValue >= 25) return 0.75;
-    if (adxValue >= 20) return 0.85;
+    if (adxValue >= ADX_THRESHOLDS.EXTREME) return 0.4;
+    if (adxValue >= ADX_THRESHOLDS.EXCEPTIONAL) return 0.5;
+    if (adxValue >= ADX_THRESHOLDS.VERY_STRONG) return 0.6;
+    if (adxValue >= ADX_THRESHOLDS.STRONG) return 0.75;
+    if (adxValue >= ADX_THRESHOLDS.MINIMUM) return 0.85;
     return 1.0;
   };
   

@@ -5,6 +5,20 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// ============= CENTRALIZED ADX THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: strategy-analyzer, execute-trade, monitor-positions
+const ADX_THRESHOLDS = {
+  VERY_WEAK: 12,    // Essentially no trend, avoid trading
+  WEAK: 18,         // Weak trend, mixed momentum allowed with caution
+  MINIMUM: 20,      // Hard gate for any signal generation
+  MODERATE: 22,     // Momentum confirmation threshold
+  STRONG: 25,       // Strong trend, reduced reversal weight
+  VERY_STRONG: 30,  // Very strong trend, momentum continuation valid
+  EXCEPTIONAL: 35,  // Exceptional trend, relaxed quality thresholds
+  EXTREME: 40,      // Extreme trend, maximum confidence bonus
+} as const;
+
 // Fixed: Proper EMA calculation (single value)
 function calculateEMA(prices: number[], period: number): number {
   if (prices.length === 0) return 0;
@@ -626,19 +640,19 @@ function enhanceConfidenceWithIndicators(
 ): number {
   let enhanced = baseConfidence;
   
-  // ADX contribution: Strong trend (ADX > 25) adds up to 10 points
-  // Weak trend (ADX < 15) subtracts up to 10 points
-  if (adx >= 40) {
+  // ADX contribution - Uses centralized ADX_THRESHOLDS
+  // Strong trend (ADX > 25) adds up to 10 points, Weak trend (ADX < 15) subtracts up to 10 points
+  if (adx >= ADX_THRESHOLDS.EXTREME) {
     enhanced += 10;
-  } else if (adx >= 30) {
+  } else if (adx >= ADX_THRESHOLDS.VERY_STRONG) {
     enhanced += 7;
-  } else if (adx >= 25) {
+  } else if (adx >= ADX_THRESHOLDS.STRONG) {
     enhanced += 5;
-  } else if (adx >= 20) {
+  } else if (adx >= ADX_THRESHOLDS.MINIMUM) {
     enhanced += 2;
   } else if (adx < 15) {
     enhanced -= 10;
-  } else if (adx < 18) {
+  } else if (adx < ADX_THRESHOLDS.WEAK) {
     enhanced -= 5;
   }
   
@@ -1248,21 +1262,21 @@ serve(async (req) => {
       (effectiveTrendForMomentum === "bearish" && macdHistogram < 0) ||
       effectiveTrendForMomentum === "neutral";
 
-    // TIGHTENED: MACD expanding now requires minimum ADX threshold
+    // TIGHTENED: MACD expanding now requires minimum ADX threshold - Uses centralized ADX_THRESHOLDS
     // Previously macdExpanding had no ADX check, allowing weak signals as "mixed"
     const macdExpanding = Math.abs(macdHistogram) > 0.05 && macdDirectionAligned && adx >= 15;
     const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned && adx >= 15;
 
-    // TIGHTENED: Momentum confirmation requires ADX >= 22 (raised from 20)
-    const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= 22;
+    // TIGHTENED: Momentum confirmation requires ADX >= MODERATE (22)
+    const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= ADX_THRESHOLDS.MODERATE;
     let momentumState: "none" | "mixed" | "confirmed" = "none";
     if (momentumConfirms) {
       momentumState = "confirmed";
     } else if (macdExpanding && (hasDivergence || !lastCloseAlignsWithTrend)) {
       // Mixed: MACD expanding but divergence exists or price doesn't align
       // Only allow mixed if ADX shows some trend (prevents weak signals)
-      momentumState = adx >= 18 ? "mixed" : "none";
-    } else if (macdStrong && adx >= 20) {
+      momentumState = adx >= ADX_THRESHOLDS.WEAK ? "mixed" : "none";
+    } else if (macdStrong && adx >= ADX_THRESHOLDS.MINIMUM) {
       // Mixed: Strong MACD magnitude even without expansion, but needs ADX confirmation
       momentumState = "mixed";
     }
