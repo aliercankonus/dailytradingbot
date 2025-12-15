@@ -13,6 +13,9 @@ interface MomentumData {
     macdExpanding: boolean;
     macdDirectionAligned: boolean;
     adx: number;
+    adxRising?: boolean;  // NEW: ADX direction for fake breakout detection
+    fakeBreakoutRisk?: boolean;  // NEW: MACD expanding + ADX falling = warning
+    genuineMomentum?: boolean;   // NEW: MACD expanding + ADX rising = real momentum
     volumeConfirms?: boolean;
     volumeBoost?: number;
   };
