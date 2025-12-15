@@ -1694,6 +1694,8 @@ serve(async (req) => {
     let rejectedByStrategy = 0;
     let rejectedByReversalRisk = 0;
     let rejectedByStochRsiExtreme = 0;
+    let strongTrendExceptionUsed = 0;  // Track when strong trend exception allows signal
+    let strongTrendExceptionNotApplicable = 0;  // Track when exception didn't apply (conditions not met)
     
     // Loss Recovery Mode - increase quality threshold after consecutive losses
     const isInRecoveryMode = riskParams.loss_recovery_mode_enabled && 
@@ -2153,10 +2155,24 @@ serve(async (req) => {
         
         if (strategiesWithConditionBasis === 0 && !hasStrongTrendException) {
           rejectedByHardGates++;
+          strongTrendExceptionNotApplicable++;
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: No condition-based strategy for ${tradeDirectionForGate} (${strategiesWithDirectionalSupport} trend-followers only)`,
-            { tradeDirection: tradeDirectionForGate, directionalSupport: strategiesWithDirectionalSupport, conditionBased: 0, gate: "NO_CONDITION_STRATEGY" },
+            `HARD GATE: No condition-based strategy for ${tradeDirectionForGate} (${strategiesWithDirectionalSupport} trend-followers only). Strong Trend Exception not met: ADX=${adx.toFixed(1)} (need ≥35), momentum=${momentum?.state}/${momentum?.confirms}, HTF=${higherTimeframeFilter?.aligned}`,
+            { 
+              tradeDirection: tradeDirectionForGate, 
+              directionalSupport: strategiesWithDirectionalSupport, 
+              conditionBased: 0, 
+              gate: "NO_CONDITION_STRATEGY",
+              strongTrendExceptionCheck: {
+                adx: adx.toFixed(1),
+                adxRequired: ADX_THRESHOLDS.EXCEPTIONAL,
+                momentumState: momentum?.state,
+                momentumConfirms: momentum?.confirms,
+                htfAligned: higherTimeframeFilter?.aligned,
+                exceptionApplied: false
+              }
+            },
             trendData,
             riskParams.ai_analysis_enabled !== false
           );
@@ -2164,7 +2180,8 @@ serve(async (req) => {
         }
         
         if (strategiesWithConditionBasis === 0 && hasStrongTrendException) {
-          console.log(`✅ ${symbol}: No condition-based strategies, but STRONG TREND EXCEPTION applies (ADX=${adx.toFixed(1)} ≥ 35, momentum confirmed, HTF aligned)`);
+          strongTrendExceptionUsed++;
+          console.log(`✅ ${symbol}: STRONG TREND EXCEPTION USED - No condition-based strategies, but ADX=${adx.toFixed(1)} ≥ 35, momentum confirmed, HTF aligned`);
         } else {
           console.log(`📋 ${symbol}: ${strategiesWithConditionBasis}/${allStrategies.length} strategies support ${tradeDirectionForGate} with conditions`);
         }
@@ -2594,7 +2611,7 @@ serve(async (req) => {
       }
     }
 
-    console.log(`📈 Summary: ${totalSignalsGenerated} signals | Rejected: hardGates=${rejectedByHardGates} regime=${rejectedByRegime} reversal=${rejectedByReversalRisk} stochRsiExtreme=${rejectedByStochRsiExtreme} quality=${rejectedByQuality} strategy=${rejectedByStrategy}`);
+    console.log(`📈 Summary: ${totalSignalsGenerated} signals | Rejected: hardGates=${rejectedByHardGates} regime=${rejectedByRegime} reversal=${rejectedByReversalRisk} stochRsiExtreme=${rejectedByStochRsiExtreme} quality=${rejectedByQuality} strategy=${rejectedByStrategy} | StrongTrendException: used=${strongTrendExceptionUsed} notApplicable=${strongTrendExceptionNotApplicable}`);
 
     return new Response(JSON.stringify({
       signals,
@@ -2608,6 +2625,13 @@ serve(async (req) => {
         byStochRsiExtreme: rejectedByStochRsiExtreme,
         byQuality: rejectedByQuality,
         byStrategy: rejectedByStrategy,
+      },
+      strongTrendException: {
+        used: strongTrendExceptionUsed,
+        notApplicable: strongTrendExceptionNotApplicable,
+        effectivenessRatio: strongTrendExceptionUsed + strongTrendExceptionNotApplicable > 0 
+          ? (strongTrendExceptionUsed / (strongTrendExceptionUsed + strongTrendExceptionNotApplicable) * 100).toFixed(1) + '%'
+          : 'N/A'
       },
       filters: {
         disabledSymbols: Array.from(disabledSymbols),
