@@ -36,6 +36,21 @@ const STOCHRSI_THRESHOLDS = {
   EXTREME_OVERBOUGHT: 90,  // Extremely overbought, strong pullback risk for LONG
 } as const;
 
+// ============= CENTRALIZED RSI THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: calculate-trend, execute-trade, monitor-positions, ai-signal-analyzer
+const RSI_THRESHOLDS = {
+  OVERSOLD: 30,            // Classic oversold level
+  BEARISH_PULLBACK: 35,    // RSI showing bearish weakness / SHORT pullback
+  BULLISH_PULLBACK: 40,    // RSI showing bullish pullback opportunity
+  NEUTRAL_LOW: 45,         // Lower neutral/pullback zone for momentum continuation
+  NEUTRAL: 50,             // Neutral RSI
+  NEUTRAL_HIGH: 55,        // Upper neutral/rally zone for SHORT momentum continuation
+  BEARISH_RALLY: 60,       // RSI showing bearish rally (SHORT entry opportunity)
+  BULLISH_STRONG: 65,      // Strong bullish momentum / overbought warning
+  OVERBOUGHT: 70,          // Classic overbought level
+} as const;
+
 // ============= AI REJECTION ANALYZER HELPER =============
 // Calls AI to validate rejections and stores results in database
 const analyzeRejectionWithAI = async (
@@ -1009,15 +1024,15 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
   const isMomentumConfirmed = momentum.state === "confirmed" || momentum.state === "mixed";
   
   // Define pullback conditions
-  const rsiPullbackBullish = rsi < 45;  // RSI showing pullback in uptrend
-  const rsiPullbackBearish = rsi > 55;  // RSI showing rally in downtrend
+  const rsiPullbackBullish = rsi < RSI_THRESHOLDS.NEUTRAL_LOW;  // RSI showing pullback in uptrend
+  const rsiPullbackBearish = rsi > RSI_THRESHOLDS.NEUTRAL_HIGH;  // RSI showing rally in downtrend
   const bollingerPullbackBullish = percentB < 35 || bb1h.pricePosition === "lower_zone";
   const bollingerPullbackBearish = percentB > 65 || bb1h.pricePosition === "upper_zone";
   
   // For bullish trend, look for pullback entries
   if (trend === "bullish") {
     // BEST ENTRY: Both RSI oversold AND near lower Bollinger
-    if ((rsi < 40 || stochRsi.oversoldCount >= 1) && bollingerPullbackBullish) {
+    if ((rsi < RSI_THRESHOLDS.BULLISH_PULLBACK || stochRsi.oversoldCount >= 1) && bollingerPullbackBullish) {
       return {
         isPullback: true,
         hasBothConditions: true,
@@ -1028,7 +1043,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     }
     
     // GOOD ENTRY: RSI pullback only
-    if (rsi < 40 || stochRsi.oversoldCount >= 1) {
+    if (rsi < RSI_THRESHOLDS.BULLISH_PULLBACK || stochRsi.oversoldCount >= 1) {
       return {
         isPullback: true,
         hasBothConditions: false,
@@ -1061,7 +1076,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     }
     
     // MOMENTUM CONTINUATION: Only if very strong trend + confirmed momentum
-    if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsi < 65) {
+    if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsi < RSI_THRESHOLDS.BULLISH_STRONG) {
       return {
         isPullback: false,
         hasBothConditions: false,
@@ -1072,7 +1087,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     }
     
     // POOR ENTRY: Strong trend but overbought - low score
-    if (isStrongTrend && rsi > 65) {
+    if (isStrongTrend && rsi > RSI_THRESHOLDS.BULLISH_STRONG) {
       return {
         isPullback: false,
         hasBothConditions: false,
@@ -1083,7 +1098,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     }
     
     // POOR ENTRY: RSI in neutral zone = not ideal timing
-    if (rsi >= 40 && rsi <= 65) {
+    if (rsi >= RSI_THRESHOLDS.BULLISH_PULLBACK && rsi <= RSI_THRESHOLDS.BULLISH_STRONG) {
       return {
         isPullback: false,
         hasBothConditions: false,
@@ -1094,7 +1109,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     }
     
     // AVOID: Overbought in weak trend
-    if (rsi > 70 || stochRsi.overboughtCount >= 2) {
+    if (rsi > RSI_THRESHOLDS.OVERBOUGHT || stochRsi.overboughtCount >= 2) {
       return {
         isPullback: false,
         hasBothConditions: false,
@@ -1108,22 +1123,22 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
   // For bearish trend, look for rally (price spiked but downtrend intact)
   if (trend === "bearish") {
     // BEST ENTRY: Both RSI overbought AND near upper Bollinger
-    if ((rsi > 60 || stochRsi.overboughtCount >= 1) && bollingerPullbackBearish) {
+    if ((rsi > RSI_THRESHOLDS.BEARISH_RALLY || stochRsi.overboughtCount >= 1) && bollingerPullbackBearish) {
       return {
         isPullback: true,
         hasBothConditions: true,
-        pullbackDepth: rsi - 50,
+        pullbackDepth: rsi - RSI_THRESHOLDS.NEUTRAL,
         entryTimingScore: 25,  // MAX SCORE (was 20)
         reason: "OPTIMAL: RSI overbought + near upper Bollinger band"
       };
     }
     
     // GOOD ENTRY: RSI rally only
-    if (rsi > 60 || stochRsi.overboughtCount >= 1) {
+    if (rsi > RSI_THRESHOLDS.BEARISH_RALLY || stochRsi.overboughtCount >= 1) {
       return {
         isPullback: true,
         hasBothConditions: false,
-        pullbackDepth: rsi - 50,
+        pullbackDepth: rsi - RSI_THRESHOLDS.NEUTRAL,
         entryTimingScore: 18,  // was 14
         reason: "Bearish rally: RSI overbought in downtrend"
       };
@@ -1151,8 +1166,8 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
       };
     }
     
-    // MOMENTUM CONTINUATION: Only if very strong trend + RSI > 45 (symmetric with bullish < 65)
-    if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsi > 45) {
+    // MOMENTUM CONTINUATION: Only if very strong trend + RSI > NEUTRAL_LOW (symmetric with bullish < BULLISH_STRONG)
+    if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsi > RSI_THRESHOLDS.NEUTRAL_LOW) {
       return {
         isPullback: false,
         hasBothConditions: false,
@@ -1163,7 +1178,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     }
     
     // POOR ENTRY: RSI in neutral zone
-    if (rsi <= 60 && rsi >= 35) {
+    if (rsi <= RSI_THRESHOLDS.BEARISH_RALLY && rsi >= RSI_THRESHOLDS.BEARISH_PULLBACK) {
       return {
         isPullback: false,
         hasBothConditions: false,
@@ -1174,7 +1189,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     }
     
     // POOR ENTRY: Strong downtrend but oversold
-    if (isStrongTrend && rsi < 35) {
+    if (isStrongTrend && rsi < RSI_THRESHOLDS.BEARISH_PULLBACK) {
       return {
         isPullback: false,
         hasBothConditions: false,
@@ -1185,7 +1200,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     }
     
     // AVOID: Oversold in weak downtrend
-    if (rsi < 30 || stochRsi.oversoldCount >= 2) {
+    if (rsi < RSI_THRESHOLDS.OVERSOLD || stochRsi.oversoldCount >= 2) {
       return {
         isPullback: false,
         hasBothConditions: false,
