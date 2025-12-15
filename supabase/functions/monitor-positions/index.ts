@@ -1,5 +1,20 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
+
+// ============= CENTRALIZED ADX THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: strategy-analyzer, calculate-trend, execute-trade
+const ADX_THRESHOLDS = {
+  VERY_WEAK: 12,    // Essentially no trend, avoid trading
+  WEAK: 18,         // Weak trend, mixed momentum allowed with caution
+  MINIMUM: 20,      // Hard gate for any signal generation
+  MODERATE: 22,     // Momentum confirmation threshold
+  STRONG: 25,       // Strong trend, reduced reversal weight
+  VERY_STRONG: 30,  // Very strong trend, momentum continuation valid
+  EXCEPTIONAL: 35,  // Exceptional trend, relaxed quality thresholds
+  EXTREME: 40,      // Extreme trend, maximum confidence bonus
+} as const;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -894,11 +909,11 @@ serve(async (req) => {
           const signals: string[] = [];
           let riskScore = 0;
           
-          // ADX-based adaptive reversal weight (aligned with strategy-analyzer)
+          // ADX-based adaptive reversal weight - Uses centralized ADX_THRESHOLDS
           const getAdxReversalWeight = (adxValue: number): number => {
-            if (adxValue >= 35) return 0.5;  // Strong trend, reduce reversal impact
-            if (adxValue >= 20) return 0.7;  // Moderate trend
-            return 1.0;                       // Weak trend, full reversal impact
+            if (adxValue >= ADX_THRESHOLDS.EXCEPTIONAL) return 0.5;  // Strong trend, reduce reversal impact
+            if (adxValue >= ADX_THRESHOLDS.MINIMUM) return 0.7;      // Moderate trend
+            return 1.0;                                               // Weak trend, full reversal impact
           };
           
           const adxWeight = getAdxReversalWeight(positionAdx);
