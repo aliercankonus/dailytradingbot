@@ -51,6 +51,30 @@ const RSI_THRESHOLDS = {
   OVERBOUGHT: 70,          // Classic overbought level
 } as const;
 
+// ============= CENTRALIZED CONFIDENCE THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: strategy-analyzer, execute-trade, monitor-positions, ai-signal-analyzer
+const CONFIDENCE_THRESHOLDS = {
+  VERY_LOW: 40,            // Very weak confidence, heavy position reduction
+  LOW: 50,                 // Low confidence, optimal zone lower bound
+  OPTIMAL_LOWER: 50,       // Optimal zone start (46% win rate historically)
+  OPTIMAL_UPPER: 59,       // Optimal zone end
+  DEAD_ZONE_LOWER: 60,     // Dead zone start (31% win rate - avoid!)
+  STRONG_1H_MIN: 62,       // Minimum 1h confidence for pullback signals
+  HTF_EXCEPTION: 65,       // HTF alignment exception threshold
+  STRONG_4H: 68,           // Strong 4h threshold for neutral exceptions
+  DEAD_ZONE_UPPER: 69,     // Dead zone end
+  PULLBACK_4H_MIN: 70,     // Minimum 4h confidence for pullback opportunities
+  RECOVERY_MAX: 70,        // Maximum confidence in recovery mode
+  STRONG_1H_REVERSAL: 75,  // Strong 1h for early reversal signals
+  PENALTY_LIGHT: 70,       // Light penalty threshold
+  PENALTY_MODERATE: 75,    // Moderate penalty threshold  
+  PENALTY_STRONG: 80,      // Strong penalty threshold
+  PENALTY_HEAVY: 85,       // Heavy penalty threshold (exhaustion risk)
+  WEAK_4H: 58,             // Weak 4h threshold for early reversal
+  STRONG_ALIGNMENT_1H: 58, // Minimum 1h for strong alignment
+} as const;
+
 // Fixed: Proper EMA calculation (single value) - O(n) without slice()
 function calculateEMA(prices: number[], period: number): number {
   if (prices.length === 0) return 0;
@@ -1332,7 +1356,7 @@ serve(async (req) => {
 
     let neutralAllowedWithStrongHigherTimeframe = false;
     if (!standardAlignment && dominantTrend !== "neutral" && trend1h.trend === "neutral") {
-      const strong4h = dominantConfidence >= 68; // Raised from 60 to prevent fake continuations
+      const strong4h = dominantConfidence >= CONFIDENCE_THRESHOLDS.STRONG_4H; // 68% to prevent fake continuations
       const macd1h = trend1h.indicators.macdHistogram;
       const macdAligned = dominantTrend === "bullish" ? macd1h >= 0 : macd1h <= 0;
       const hasActivity = adx >= ADX_THRESHOLDS.MINIMUM;
@@ -1355,21 +1379,21 @@ serve(async (req) => {
     let divergenceConfidence = 100;
     let allowDivergenceSignal = false;
     if (!highTimeframeAligned) {
-      // TIGHTENED: Pullback requires stronger 4h confirmation (70% vs 60%)
-      // and 1h must be sufficiently strong (62% vs 50%) - raised for consistency with 68% strong 4h
-      if (dominantTrend !== "neutral" && dominantConfidence >= 70 && trend1h.confidence >= 62) {
+      // TIGHTENED: Pullback requires stronger 4h confirmation and 1h must be sufficiently strong
+      // Uses CONFIDENCE_THRESHOLDS for consistency across codebase
+      if (dominantTrend !== "neutral" && dominantConfidence >= CONFIDENCE_THRESHOLDS.PULLBACK_4H_MIN && trend1h.confidence >= CONFIDENCE_THRESHOLDS.STRONG_1H_MIN) {
         divergenceType = "pullback";
-        divergenceConfidence = Math.min(dominantConfidence * 0.7, 65); // Reduced from 0.75, 70
+        divergenceConfidence = Math.min(dominantConfidence * 0.7, CONFIDENCE_THRESHOLDS.HTF_EXCEPTION); // Cap at 65%
         allowDivergenceSignal = true;
         console.log(
           `${dominantTrend.toUpperCase()} PULLBACK detected: 4h=${dominantConfidence}% vs 1h=${trend1h.trend}`,
         );
       } 
-      // TIGHTENED: Early reversal requires very strong 1h (75% vs 70%)
-      // and 4h must be weak (<58% vs <55%) - widened gap from 68% strong threshold
-      else if (trend1h.confidence >= 75 && (dominantTrend === "neutral" || dominantConfidence < 58) && adx >= ADX_THRESHOLDS.WEAK) {
+      // TIGHTENED: Early reversal requires very strong 1h and 4h must be weak
+      // Uses CONFIDENCE_THRESHOLDS for consistency across codebase
+      else if (trend1h.confidence >= CONFIDENCE_THRESHOLDS.STRONG_1H_REVERSAL && (dominantTrend === "neutral" || dominantConfidence < CONFIDENCE_THRESHOLDS.WEAK_4H) && adx >= ADX_THRESHOLDS.WEAK) {
         divergenceType = "early_reversal";
-        divergenceConfidence = Math.min(trend1h.confidence * 0.65, 60); // Reduced from 0.7, 65
+        divergenceConfidence = Math.min(trend1h.confidence * 0.65, CONFIDENCE_THRESHOLDS.DEAD_ZONE_LOWER); // Cap at 60%
         allowDivergenceSignal = true;
         console.log(
           `EARLY REVERSAL detected: 1h=${trend1h.trend}(${trend1h.confidence}%) vs weak/neutral 4h=${dominantTrend}(${dominantConfidence}%) ADX=${adx.toFixed(1)}`,
@@ -1515,9 +1539,9 @@ serve(async (req) => {
       const hasMinimumActivity = adx >= ADX_THRESHOLDS.WEAK; // ADX >= 18
       
       // Require at least 2 aligned timeframes (stronger agreement, not just simple majority)
-      // Raised 1h threshold from 55% to 58% for consistency with 68% strong 4h
-      const strongBullishAlignment = bullishVotes >= 2 && trend1h.confidence >= 58;
-      const strongBearishAlignment = bearishVotes >= 2 && trend1h.confidence >= 58;
+      // Uses CONFIDENCE_THRESHOLDS for consistency across codebase
+      const strongBullishAlignment = bullishVotes >= 2 && trend1h.confidence >= CONFIDENCE_THRESHOLDS.STRONG_ALIGNMENT_1H;
+      const strongBearishAlignment = bearishVotes >= 2 && trend1h.confidence >= CONFIDENCE_THRESHOLDS.STRONG_ALIGNMENT_1H;
       
       if (hasMinimumActivity) {
         if (strongBullishAlignment && bullishVotes > bearishVotes) {

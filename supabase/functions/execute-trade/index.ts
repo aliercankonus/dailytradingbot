@@ -52,6 +52,30 @@ const RSI_THRESHOLDS = {
   OVERBOUGHT: 70,          // Classic overbought level
 } as const;
 
+// ============= CENTRALIZED CONFIDENCE THRESHOLDS =============
+// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
+// Changes here should be mirrored in: strategy-analyzer, calculate-trend, monitor-positions, ai-signal-analyzer
+const CONFIDENCE_THRESHOLDS = {
+  VERY_LOW: 40,            // Very weak confidence, heavy position reduction
+  LOW: 50,                 // Low confidence, optimal zone lower bound
+  OPTIMAL_LOWER: 50,       // Optimal zone start (46% win rate historically)
+  OPTIMAL_UPPER: 59,       // Optimal zone end
+  DEAD_ZONE_LOWER: 60,     // Dead zone start (31% win rate - avoid!)
+  STRONG_1H_MIN: 62,       // Minimum 1h confidence for pullback signals
+  HTF_EXCEPTION: 65,       // HTF alignment exception threshold
+  STRONG_4H: 68,           // Strong 4h threshold for neutral exceptions
+  DEAD_ZONE_UPPER: 69,     // Dead zone end
+  PULLBACK_4H_MIN: 70,     // Minimum 4h confidence for pullback opportunities
+  RECOVERY_MAX: 70,        // Maximum confidence in recovery mode
+  STRONG_1H_REVERSAL: 75,  // Strong 1h for early reversal signals
+  PENALTY_LIGHT: 70,       // Light penalty threshold
+  PENALTY_MODERATE: 75,    // Moderate penalty threshold  
+  PENALTY_STRONG: 80,      // Strong penalty threshold
+  PENALTY_HEAVY: 85,       // Heavy penalty threshold (exhaustion risk)
+  WEAK_4H: 58,             // Weak 4h threshold for early reversal
+  STRONG_ALIGNMENT_1H: 58, // Minimum 1h for strong alignment
+} as const;
+
 // ============= RSI MOMENTUM ZONE CONSTRAINTS =============
 // Momentum continuation entries require RSI in specific zones to prevent late entries
 // LONG momentum zone: 45-65 (NEUTRAL_LOW to BULLISH_STRONG)
