@@ -20,6 +20,7 @@ interface Position {
   closed_by_rebalancer?: boolean;
   is_hedge?: boolean;
   parent_position_id?: string;
+  peak_pnl_percent?: number;
 }
 
 const fetchPositions = async (): Promise<Position[]> => {
