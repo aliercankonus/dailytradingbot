@@ -47,6 +47,30 @@ const RSI_THRESHOLDS = {
   OVERBOUGHT: 70,          // Classic overbought level
 } as const;
 
+// ============= StochRSI-RSI CONFLICT RESOLUTION =============
+// When StochRSI is at extremes, RSI signals are weighted at 50% to prevent
+// self-canceling signals where RSI momentum continuation conflicts with StochRSI reversal risk
+const getStochRsiWeightedRsiScore = (
+  rsiScore: number,
+  stochRsiK: number,
+  isLong: boolean
+): { score: number; wasReduced: boolean } => {
+  const extremeThreshold = isLong 
+    ? STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT  // 90
+    : STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD;   // 10
+    
+  const isExtreme = isLong 
+    ? stochRsiK > extremeThreshold
+    : stochRsiK < extremeThreshold;
+  
+  if (isExtreme) {
+    // StochRSI extreme = RSI signal weighted at 50%
+    return { score: Math.round(rsiScore * 0.5), wasReduced: true };
+  }
+  
+  return { score: rsiScore, wasReduced: false };
+};
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
