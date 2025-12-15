@@ -2423,15 +2423,30 @@ serve(async (req) => {
         
         // Select BEST strategy (highest score)
         // Apply regime-aware strategy performance bonus for high performers
+        // CAPPED to prevent bonus from overpowering technical quality differences
+        const MAX_STRATEGY_BONUS = 5;
+        const MIN_QUALITY_DIFF_FOR_OVERRIDE = 8; // Technical score must differ by at least this much for bonus to matter
+        
         regimeFilteredCandidates.sort((a, b) => {
-          let scoreA = a.score;
-          let scoreB = b.score;
+          const baseScoreA = a.score;
+          const baseScoreB = b.score;
           
-          // +5 bonus for high-performing strategies IN THIS REGIME
-          if (isStrategyHighPerformerForRegime(a.strategy.name, currentRegimeType)) scoreA += 5;
-          if (isStrategyHighPerformerForRegime(b.strategy.name, currentRegimeType)) scoreB += 5;
+          // Calculate strategy bonus (capped)
+          const isHighPerformerA = isStrategyHighPerformerForRegime(a.strategy.name, currentRegimeType);
+          const isHighPerformerB = isStrategyHighPerformerForRegime(b.strategy.name, currentRegimeType);
+          const bonusA = isHighPerformerA ? MAX_STRATEGY_BONUS : 0;
+          const bonusB = isHighPerformerB ? MAX_STRATEGY_BONUS : 0;
           
-          return scoreB - scoreA;
+          // Apply bonus only if technical scores are close enough
+          // This prevents a mediocre setup with hot strategy from beating a clearly superior setup
+          const technicalDiff = Math.abs(baseScoreA - baseScoreB);
+          const effectiveBonusA = technicalDiff < MIN_QUALITY_DIFF_FOR_OVERRIDE ? bonusA : 0;
+          const effectiveBonusB = technicalDiff < MIN_QUALITY_DIFF_FOR_OVERRIDE ? bonusB : 0;
+          
+          const finalScoreA = baseScoreA + effectiveBonusA;
+          const finalScoreB = baseScoreB + effectiveBonusB;
+          
+          return finalScoreB - finalScoreA;
         });
         
         const best = regimeFilteredCandidates[0];
