@@ -1703,6 +1703,7 @@ serve(async (req) => {
           atr: currentATR,
           atrPercent: Math.round(atrPercent * 100) / 100,
           relativeATR: Math.round(relativeATR * 100) / 100,
+          rangeExpansion: relativeATR > 1.0, // ATR above historical average = genuine range expansion
           adx: Math.round(adx * 10) / 10,
           normal: volatilityNormal,
           atrCompressed,
@@ -1715,18 +1716,26 @@ serve(async (req) => {
           "4h": volume4h,
         },
         // NEW: Volume Score for strategy-analyzer quality scoring (0-10 points)
+        // CRITICAL: volumeSpike alone is NOT directional - requires rangeExpansion confirmation
         volumeScore: (() => {
           const volumeConfirms = volumeConfirmsDirection;
           const volumeSpike = volume1h.volumeSpike ?? false;
           const volumeRatio = volume1h.volumeRatio ?? 1.0;
+          const hasRangeExpansion = relativeATR > 1.0; // Confirms genuine breakout/momentum
           
-          // Best case: Volume confirms AND spike detected with high ratio
-          if (volumeConfirms && volumeSpike && volumeRatio > 2.0) return 10;
-          if (volumeConfirms && volumeSpike) return 8;
+          // Best case: Volume confirms AND spike with range expansion AND high ratio
+          if (volumeConfirms && volumeSpike && hasRangeExpansion && volumeRatio > 2.0) return 10;
+          // Volume confirms with spike + range expansion
+          if (volumeConfirms && volumeSpike && hasRangeExpansion) return 8;
+          // Volume confirms with spike but no range expansion (activity without direction)
+          if (volumeConfirms && volumeSpike) return 6; // Reduced from 8
           if (volumeConfirms && volumeRatio > 1.5) return 7;
           if (volumeConfirms) return 5;
-          if (volumeRatio > 1.5) return 3;
-          if (volumeRatio > 1.2) return 2;
+          // Spike without confirmation needs range expansion to score
+          if (volumeSpike && hasRangeExpansion && volumeRatio > 1.5) return 4;
+          if (volumeRatio > 1.5 && hasRangeExpansion) return 3;
+          if (volumeRatio > 1.5) return 2; // Reduced from 3 - no range expansion
+          if (volumeRatio > 1.2) return 1; // Reduced from 2
           if (dominantTrend === "neutral") return 1;
           return 0;
         })(),
