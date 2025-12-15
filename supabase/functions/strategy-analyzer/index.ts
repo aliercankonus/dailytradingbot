@@ -1344,15 +1344,16 @@ serve(async (req) => {
     const SYMBOL_WIN_RATE_THRESHOLD = 35;
     const SYMBOL_MIN_TRADES_FOR_FILTER = 10;
     
-    // ============= NEW: STRATEGY PERFORMANCE FILTER =============
-    // Disable strategies with win rate below 40% (based on last 20 trades per strategy)
+    // ============= NEW: STRATEGY PERFORMANCE FILTER (REGIME-AWARE) =============
+    // Disable strategies with win rate below 40% (based on last 20 trades per strategy PER REGIME)
     const STRATEGY_WIN_RATE_THRESHOLD = 40;
     const STRATEGY_MIN_TRADES_FOR_FILTER = 10;
     const STRATEGY_HIGH_PERFORMER_THRESHOLD = 60; // Strategies above 60% get bonus
     
+    // Fetch positions with trend to determine regime at time of trade
     const { data: recentPositions } = await supabase
       .from("positions")
-      .select("symbol, strategy_name, realized_pnl")
+      .select("symbol, strategy_name, realized_pnl, trend")
       .eq("user_id", userId)
       .eq("status", "closed")
       .order("closed_at", { ascending: false })
@@ -1369,16 +1370,32 @@ serve(async (req) => {
     const symbolWinRates = new Map<string, { wins: number; total: number; winRate: number; uniqueStrategies: Set<string> }>();
     const disabledSymbols = new Set<string>();
     
-    // Calculate win rate per strategy with symbol diversity tracking
-    const strategyWinRates = new Map<string, { wins: number; total: number; winRate: number; uniqueSymbols: Set<string> }>();
-    const disabledStrategies = new Set<string>();
-    const highPerformingStrategies = new Set<string>();
+    // ============= REGIME-AWARE STRATEGY STATS =============
+    // Track strategy performance per regime to prevent regime-specific bias
+    type RegimeType = "trending" | "ranging";
+    type StrategyRegimeStats = { wins: number; total: number; winRate: number; uniqueSymbols: Set<string> };
+    const strategyWinRatesByRegime = new Map<string, Map<RegimeType, StrategyRegimeStats>>();
+    const disabledStrategiesByRegime = new Map<RegimeType, Set<string>>();
+    const highPerformingStrategiesByRegime = new Map<RegimeType, Set<string>>();
+    
+    // Initialize regime maps
+    disabledStrategiesByRegime.set("trending", new Set());
+    disabledStrategiesByRegime.set("ranging", new Set());
+    highPerformingStrategiesByRegime.set("trending", new Set());
+    highPerformingStrategiesByRegime.set("ranging", new Set());
+    
+    // Helper: Derive regime from trend stored in position
+    const getRegimeFromTrend = (trend: string | null): RegimeType => {
+      if (trend === "bullish" || trend === "bearish") return "trending";
+      return "ranging"; // neutral, ranging, or null
+    };
     
     if (recentPositions?.length) {
       for (const trade of recentPositions) {
         const strategyName = trade.strategy_name || "Unknown";
+        const regime = getRegimeFromTrend(trade.trend);
         
-        // Symbol performance with strategy diversity tracking
+        // Symbol performance with strategy diversity tracking (regime-agnostic for symbols)
         const symbolStats = symbolWinRates.get(trade.symbol) || { wins: 0, total: 0, winRate: 0, uniqueStrategies: new Set() };
         symbolStats.total++;
         if ((trade.realized_pnl || 0) > 0) symbolStats.wins++;
@@ -1386,13 +1403,17 @@ serve(async (req) => {
         symbolStats.uniqueStrategies.add(strategyName);
         symbolWinRates.set(trade.symbol, symbolStats);
         
-        // Strategy performance with symbol diversity tracking
-        const strategyStats = strategyWinRates.get(strategyName) || { wins: 0, total: 0, winRate: 0, uniqueSymbols: new Set() };
+        // Strategy performance BY REGIME with symbol diversity tracking
+        if (!strategyWinRatesByRegime.has(strategyName)) {
+          strategyWinRatesByRegime.set(strategyName, new Map());
+        }
+        const strategyRegimes = strategyWinRatesByRegime.get(strategyName)!;
+        const strategyStats = strategyRegimes.get(regime) || { wins: 0, total: 0, winRate: 0, uniqueSymbols: new Set() };
         strategyStats.total++;
         if ((trade.realized_pnl || 0) > 0) strategyStats.wins++;
         strategyStats.winRate = (strategyStats.wins / strategyStats.total) * 100;
         strategyStats.uniqueSymbols.add(trade.symbol);
-        strategyWinRates.set(strategyName, strategyStats);
+        strategyRegimes.set(regime, strategyStats);
       }
       
       // Check symbol performance (require trades from multiple strategies to prevent strategy-specific bias)
@@ -1409,21 +1430,23 @@ serve(async (req) => {
         }
       }
       
-      // Check strategy performance (require trades across multiple symbols to prevent symbol-specific bias)
-      for (const [strategy, stats] of strategyWinRates.entries()) {
-        const hasEnoughTrades = stats.total >= STRATEGY_MIN_TRADES_FOR_FILTER;
-        const hasEnoughDiversity = stats.uniqueSymbols.size >= STRATEGY_MIN_UNIQUE_SYMBOLS;
-        
-        if (hasEnoughTrades && hasEnoughDiversity) {
-          if (stats.winRate < STRATEGY_WIN_RATE_THRESHOLD) {
-            disabledStrategies.add(strategy);
-            console.log(`⛔ STRATEGY FILTER: "${strategy}" disabled - win rate ${stats.winRate.toFixed(1)}% < ${STRATEGY_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades across ${stats.uniqueSymbols.size} symbols)`);
-          } else if (stats.winRate >= STRATEGY_HIGH_PERFORMER_THRESHOLD) {
-            highPerformingStrategies.add(strategy);
-            console.log(`⭐ STRATEGY BOOST: "${strategy}" is high performer - win rate ${stats.winRate.toFixed(1)}% (${stats.wins}/${stats.total} trades across ${stats.uniqueSymbols.size} symbols)`);
+      // Check strategy performance PER REGIME (require trades across multiple symbols to prevent symbol-specific bias)
+      for (const [strategy, regimeStats] of strategyWinRatesByRegime.entries()) {
+        for (const [regime, stats] of regimeStats.entries()) {
+          const hasEnoughTrades = stats.total >= STRATEGY_MIN_TRADES_FOR_FILTER;
+          const hasEnoughDiversity = stats.uniqueSymbols.size >= STRATEGY_MIN_UNIQUE_SYMBOLS;
+          
+          if (hasEnoughTrades && hasEnoughDiversity) {
+            if (stats.winRate < STRATEGY_WIN_RATE_THRESHOLD) {
+              disabledStrategiesByRegime.get(regime)!.add(strategy);
+              console.log(`⛔ STRATEGY FILTER [${regime.toUpperCase()}]: "${strategy}" disabled - win rate ${stats.winRate.toFixed(1)}% < ${STRATEGY_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades across ${stats.uniqueSymbols.size} symbols)`);
+            } else if (stats.winRate >= STRATEGY_HIGH_PERFORMER_THRESHOLD) {
+              highPerformingStrategiesByRegime.get(regime)!.add(strategy);
+              console.log(`⭐ STRATEGY BOOST [${regime.toUpperCase()}]: "${strategy}" is high performer - win rate ${stats.winRate.toFixed(1)}% (${stats.wins}/${stats.total} trades across ${stats.uniqueSymbols.size} symbols)`);
+            }
+          } else if (hasEnoughTrades && !hasEnoughDiversity && stats.winRate < STRATEGY_WIN_RATE_THRESHOLD) {
+            console.log(`⚠️ STRATEGY SKIP [${regime.toUpperCase()}]: "${strategy}" low win rate ${stats.winRate.toFixed(1)}% but only ${stats.uniqueSymbols.size} symbol(s) - need ${STRATEGY_MIN_UNIQUE_SYMBOLS}+ for filter`);
           }
-        } else if (hasEnoughTrades && !hasEnoughDiversity && stats.winRate < STRATEGY_WIN_RATE_THRESHOLD) {
-          console.log(`⚠️ STRATEGY SKIP: "${strategy}" low win rate ${stats.winRate.toFixed(1)}% but only ${stats.uniqueSymbols.size} symbol(s) - need ${STRATEGY_MIN_UNIQUE_SYMBOLS}+ for filter`);
         }
       }
     }
@@ -1431,7 +1454,7 @@ serve(async (req) => {
     // Filter out disabled symbols
     const activeSymbols = symbols.filter(s => !disabledSymbols.has(s.symbol));
     console.log(`📊 Symbol filter: ${symbols.length} total → ${activeSymbols.length} active (${disabledSymbols.size} disabled)`);
-    console.log(`📊 Strategy filter: ${disabledStrategies.size} disabled, ${highPerformingStrategies.size} high performers`);
+    console.log(`📊 Strategy filter by regime: trending=${disabledStrategiesByRegime.get("trending")!.size} disabled/${highPerformingStrategiesByRegime.get("trending")!.size} high, ranging=${disabledStrategiesByRegime.get("ranging")!.size} disabled/${highPerformingStrategiesByRegime.get("ranging")!.size} high`);
 
     // Fetch custom strategies (REQUIRED)
     const { data: customStrategies, error: strategiesError } = await supabase
@@ -1442,18 +1465,28 @@ serve(async (req) => {
 
     // Combine user's custom strategies with built-in templates
     // User strategies are evaluated first (they take priority), then built-ins fill gaps
-    // FILTER OUT disabled strategies based on performance
-    const userStrategies = (customStrategies || []).filter(s => !disabledStrategies.has(s.name));
+    // NOTE: Strategy filtering is now DEFERRED to per-symbol evaluation based on regime
+    const userStrategies = customStrategies || [];
     const userStrategyNames = new Set(userStrategies.map(s => s.name.toLowerCase()));
     
-    // Add built-in templates that don't duplicate user strategies AND aren't disabled
+    // Add built-in templates that don't duplicate user strategies
     const builtInToInclude = BUILT_IN_TEMPLATES.filter(t => 
-      !userStrategyNames.has(t.name.toLowerCase()) && !disabledStrategies.has(t.name)
+      !userStrategyNames.has(t.name.toLowerCase())
     );
     
     const allStrategies = [...userStrategies, ...builtInToInclude];
     
-    console.log(`📊 ${activeSymbols.length} symbols | ${userStrategies.length} user strategies + ${builtInToInclude.length} built-in templates = ${allStrategies.length} total (after performance filter)`);
+    // Helper: Check if strategy is disabled for a given regime
+    const isStrategyDisabledForRegime = (strategyName: string, regime: RegimeType): boolean => {
+      return disabledStrategiesByRegime.get(regime)?.has(strategyName) || false;
+    };
+    
+    // Helper: Check if strategy is high performer for a given regime
+    const isStrategyHighPerformerForRegime = (strategyName: string, regime: RegimeType): boolean => {
+      return highPerformingStrategiesByRegime.get(regime)?.has(strategyName) || false;
+    };
+    
+    console.log(`📊 ${activeSymbols.length} symbols | ${userStrategies.length} user strategies + ${builtInToInclude.length} built-in templates = ${allStrategies.length} total (regime-aware filtering applied per symbol)`);
 
     // Fetch recent signals and active positions
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
@@ -2369,24 +2402,43 @@ serve(async (req) => {
           continue;
         }
 
+        // ============= REGIME-AWARE STRATEGY FILTERING =============
+        // Convert detected regime to type for performance lookup
+        const currentRegimeType: RegimeType = regime.regime === "trending" ? "trending" : "ranging";
+        
+        // Filter out strategies disabled for this regime
+        const regimeFilteredCandidates = candidates.filter(c => 
+          !isStrategyDisabledForRegime(c.strategy.name, currentRegimeType)
+        );
+        
+        if (regimeFilteredCandidates.length === 0) {
+          rejectedByStrategy++;
+          console.log(`📊 ${symbol}: All ${candidates.length} strategies disabled for ${currentRegimeType} regime`);
+          await logRejectionWithAI(supabase, userId, symbol, 
+            `All matching strategies disabled for ${currentRegimeType} regime`, 
+            { regime: currentRegimeType, strategiesFiltered: candidates.map(c => c.strategy.name) },
+            trendData, riskParams.ai_analysis_enabled !== false);
+          continue;
+        }
+        
         // Select BEST strategy (highest score)
-        // NEW: Apply strategy performance bonus for high performers
-        candidates.sort((a, b) => {
+        // Apply regime-aware strategy performance bonus for high performers
+        regimeFilteredCandidates.sort((a, b) => {
           let scoreA = a.score;
           let scoreB = b.score;
           
-          // +5 bonus for high-performing strategies
-          if (highPerformingStrategies.has(a.strategy.name)) scoreA += 5;
-          if (highPerformingStrategies.has(b.strategy.name)) scoreB += 5;
+          // +5 bonus for high-performing strategies IN THIS REGIME
+          if (isStrategyHighPerformerForRegime(a.strategy.name, currentRegimeType)) scoreA += 5;
+          if (isStrategyHighPerformerForRegime(b.strategy.name, currentRegimeType)) scoreB += 5;
           
           return scoreB - scoreA;
         });
         
-        const best = candidates[0];
+        const best = regimeFilteredCandidates[0];
         const strategy = best.strategy;
         const signalType = best.signalType;
-        const isHighPerformer = highPerformingStrategies.has(strategy.name);
-        console.log(`🎯 ${symbol}: Selected "${strategy.name}"${isHighPerformer ? ' ⭐' : ''} (${candidates.length} strategies matched, best score: ${best.score}, direction: ${signalType})`);
+        const isHighPerformer = isStrategyHighPerformerForRegime(strategy.name, currentRegimeType);
+        console.log(`🎯 ${symbol}: Selected "${strategy.name}"${isHighPerformer ? ' ⭐' : ''} [${currentRegimeType}] (${regimeFilteredCandidates.length}/${candidates.length} strategies after regime filter, best score: ${best.score}, direction: ${signalType})`);
         
         const indicatorValues = best.indicatorValues;
 
@@ -2506,8 +2558,14 @@ serve(async (req) => {
       },
       filters: {
         disabledSymbols: Array.from(disabledSymbols),
-        disabledStrategies: Array.from(disabledStrategies),
-        highPerformingStrategies: Array.from(highPerformingStrategies),
+        disabledStrategiesByRegime: {
+          trending: Array.from(disabledStrategiesByRegime.get("trending") || []),
+          ranging: Array.from(disabledStrategiesByRegime.get("ranging") || []),
+        },
+        highPerformingStrategiesByRegime: {
+          trending: Array.from(highPerformingStrategiesByRegime.get("trending") || []),
+          ranging: Array.from(highPerformingStrategiesByRegime.get("ranging") || []),
+        },
       },
       minQualityScore: DEFAULT_MIN_QUALITY,
       message: `Quality Score System active (dynamic threshold based on ADX)`,
