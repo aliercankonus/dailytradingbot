@@ -430,6 +430,7 @@ const calculateQualityScore = (factors: QualityFactors): { score: number; breakd
 
 // ============= NEW: Volume Score Component (0-10 points) =============
 // Volume confirms trend direction and indicates conviction
+// CRITICAL: volumeSpike alone is NOT directional - requires rangeExpansion confirmation
 const getVolumeScore = (trendData: any, trend: string): number => {
   const momentum = trendData?.momentum || {};
   const volatility = trendData?.volatility || {};
@@ -437,15 +438,22 @@ const getVolumeScore = (trendData: any, trend: string): number => {
   const volumeConfirms = momentum.volumeConfirms ?? false;
   const volumeSpike = volatility.volumeSpike ?? false;
   const volumeRatio = volatility.volumeRatio ?? 1.0;
+  const relativeATR = volatility.relativeATR ?? 1.0;
+  const hasRangeExpansion = relativeATR > 1.0; // Confirms genuine breakout/momentum
   
-  // Best case: Volume confirms AND spike detected with high ratio
-  if (volumeConfirms && volumeSpike && volumeRatio > 2.0) {
-    return 10;  // Strong volume surge confirming trend
+  // Best case: Volume confirms AND spike with range expansion AND high ratio
+  if (volumeConfirms && volumeSpike && hasRangeExpansion && volumeRatio > 2.0) {
+    return 10;  // Strong volume surge with confirmed range expansion
   }
   
-  // Volume confirms with spike
-  if (volumeConfirms && volumeSpike) {
+  // Volume confirms with spike + range expansion
+  if (volumeConfirms && volumeSpike && hasRangeExpansion) {
     return 8;
+  }
+  
+  // Volume confirms with spike but no range expansion (activity without direction)
+  if (volumeConfirms && volumeSpike) {
+    return 6;  // Reduced from 8 - spike without range expansion is less reliable
   }
   
   // Volume confirms with above-average volume
@@ -458,14 +466,24 @@ const getVolumeScore = (trendData: any, trend: string): number => {
     return 5;
   }
   
-  // Above average volume without confirmation
-  if (volumeRatio > 1.5) {
+  // Spike without confirmation needs range expansion to score
+  if (volumeSpike && hasRangeExpansion && volumeRatio > 1.5) {
+    return 4;
+  }
+  
+  // Above average volume with range expansion
+  if (volumeRatio > 1.5 && hasRangeExpansion) {
     return 3;
+  }
+  
+  // Above average volume without range expansion (less reliable)
+  if (volumeRatio > 1.5) {
+    return 2;  // Reduced from 3
   }
   
   // Slightly above average
   if (volumeRatio > 1.2) {
-    return 2;
+    return 1;  // Reduced from 2
   }
   
   // Neutral trend - no volume penalty
