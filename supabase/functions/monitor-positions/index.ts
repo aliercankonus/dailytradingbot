@@ -6,6 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
 // Changes here should be mirrored in: strategy-analyzer, calculate-trend, execute-trade
 const ADX_THRESHOLDS = {
   VERY_WEAK: 12,    // Essentially no trend, avoid trading
+  SEVERE_PENALTY: 15, // Below this = severe penalty (-10), consistent mental model
   WEAK: 18,         // Weak trend, mixed momentum allowed with caution
   MINIMUM: 20,      // Hard gate for any signal generation
   MODERATE: 22,     // Momentum confirmation threshold
