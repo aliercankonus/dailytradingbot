@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { usePositions } from '@/hooks/usePositions';
 import { useRealtimePricesContext } from '@/contexts/RealtimePricesContext';
 import { useRealtimePositionSync } from '@/hooks/useRealtimePositionSync';
-import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw, Filter, Lock, ArrowUp, Layers } from 'lucide-react';
+import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw, Filter, Lock, ArrowUp, Layers, RefreshCw, AlertTriangle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useMemo } from 'react';
@@ -72,6 +72,13 @@ export const ActivePositions = () => {
       // Position qualifies for trailing protection (profitable enough)
       const isTrailingEligible = pnlPercent > 1;
 
+      // Detect pullback vs actual loss
+      // Pullback: position was profitable before (peak > 0) but currently in loss
+      // Actual loss: position was never significantly profitable (peak <= 0.1%)
+      const peakPnl = position.peak_pnl_percent || 0;
+      const isInPullback = pnlPercent < 0 && peakPnl > 0.1;
+      const isActualLoss = pnlPercent < 0 && peakPnl <= 0.1;
+
       return {
         ...position,
         live_current_price: currentPrice,
@@ -79,7 +86,10 @@ export const ActivePositions = () => {
         live_unrealized_pnl_percent: pnlPercent,
         stop_adjusted: slAdjustedAboveBreakEven,
         at_break_even: atBreakEven,
-        trailing_eligible: isTrailingEligible
+        trailing_eligible: isTrailingEligible,
+        is_in_pullback: isInPullback,
+        is_actual_loss: isActualLoss,
+        peak_pnl: peakPnl
       };
     });
   }, [filteredPositions, priceMap]);
@@ -209,6 +219,18 @@ export const ActivePositions = () => {
                         <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
                           <Shield className="h-3 w-3" />
                           Trailing Eligible
+                        </Badge>
+                      )}
+                      {position.is_in_pullback && (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-cyan-500/10 text-cyan-500 border-cyan-500/20">
+                          <RefreshCw className="h-3 w-3" />
+                          Pullback ({position.peak_pnl?.toFixed(2)}% peak)
+                        </Badge>
+                      )}
+                      {position.is_actual_loss && (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-orange-500/10 text-orange-500 border-orange-500/20">
+                          <AlertTriangle className="h-3 w-3" />
+                          Loss
                         </Badge>
                       )}
                     </div>
@@ -351,6 +373,18 @@ export const ActivePositions = () => {
                         <Badge variant="outline" className="text-xs flex items-center gap-1 bg-primary/10 text-primary border-primary/20">
                           <Shield className="h-3 w-3" />
                           Trailing Eligible
+                        </Badge>
+                      )}
+                      {position.is_in_pullback && (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-cyan-500/10 text-cyan-500 border-cyan-500/20">
+                          <RefreshCw className="h-3 w-3" />
+                          Pullback ({position.peak_pnl?.toFixed(2)}% peak)
+                        </Badge>
+                      )}
+                      {position.is_actual_loss && (
+                        <Badge variant="outline" className="text-xs flex items-center gap-1 bg-orange-500/10 text-orange-500 border-orange-500/20">
+                          <AlertTriangle className="h-3 w-3" />
+                          Loss
                         </Badge>
                       )}
                     </div>
