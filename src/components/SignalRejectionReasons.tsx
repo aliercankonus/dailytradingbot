@@ -648,7 +648,7 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
               <div className={`text-center p-1.5 rounded border ${adxStyles.bg} ${adxStyles.border}`}>
                 <div className="text-[9px] text-muted-foreground mb-0.5">ADX</div>
                 <div className={`text-sm font-mono font-medium ${adxStyles.text}`}>
-                  {adx?.toFixed(1) || '—'}
+                  {typeof adx === 'number' && !isNaN(adx) ? adx.toFixed(1) : '—'}
                 </div>
                 <div className="text-[8px] text-muted-foreground">min: 20</div>
                 <div className="mt-1 h-1 bg-muted/50 rounded-full overflow-hidden">
@@ -671,7 +671,7 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
               <div className={`text-center p-1.5 rounded border ${confStyles.bg} ${confStyles.border}`}>
                 <div className="text-[9px] text-muted-foreground mb-0.5">Confidence</div>
                 <div className={`text-sm font-mono font-medium ${confStyles.text}`}>
-                  {confidence !== undefined && confidence !== null ? confidence : '—'}%
+                  {!isNaN(Number(confidence)) && confidence !== null && confidence !== undefined ? Number(confidence) : '—'}%
                 </div>
                 <div className="text-[8px] text-muted-foreground">min: {minConfidence}%</div>
                 <div className="mt-1 h-1 bg-muted/50 rounded-full overflow-hidden">
@@ -694,7 +694,7 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
               <div className={`text-center p-1.5 rounded border ${alignStyles.bg} ${alignStyles.border}`}>
                 <div className="text-[9px] text-muted-foreground mb-0.5">Alignment</div>
                 <div className={`text-sm font-mono font-medium ${alignStyles.text}`}>
-                  {typeof trendConsistency === 'number' ? trendConsistency.toFixed(0) : '—'}%
+                  {!isNaN(Number(trendConsistency)) && trendConsistency !== null && trendConsistency !== undefined ? Number(trendConsistency).toFixed(0) : '—'}%
                 </div>
                 <div className="text-[8px] text-muted-foreground">min: {minConsistency}%</div>
                 <div className="mt-1 h-1 bg-muted/50 rounded-full overflow-hidden">
@@ -718,7 +718,7 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-muted-foreground">Confidence Calculation</span>
             <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${confStyles.text} ${confStyles.bg} ${confStyles.border}`}>
-              = {confidence ?? 0}%
+              = {!isNaN(Number(confidence)) ? Number(confidence) : 0}%
             </Badge>
           </div>
           <div className="grid grid-cols-3 gap-1.5">
@@ -851,7 +851,7 @@ const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
         </div>
         <div className="p-1.5 bg-muted/30 rounded text-center">
           <div className="text-muted-foreground">Alignment</div>
-          <div className="font-medium">{parseFloat(trendConsistency).toFixed(0)}%</div>
+          <div className="font-medium">{!isNaN(Number(trendConsistency)) ? Number(trendConsistency).toFixed(0) : '—'}%</div>
         </div>
         <div className="p-1.5 bg-muted/30 rounded text-center">
           <div className="text-muted-foreground">Momentum</div>
