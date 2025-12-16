@@ -104,10 +104,52 @@ const coerceNumeric = (value: any, fallback = 0): number => {
     return Number.isFinite(n) ? n : fallback;
   }
   if (typeof value === "object") {
-    const n = Number((value as any)?.score ?? (value as any)?.value);
-    return Number.isFinite(n) ? n : fallback;
+    // Try to extract numeric value from common object structures
+    const candidates = [
+      value?.score,
+      value?.value,
+      value?.confidence,
+      value?.weightedConsistency,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === "number" && Number.isFinite(candidate)) {
+        return candidate;
+      }
+    }
+    // Try nested score (e.g., {score: {score: 45}})
+    if (typeof value?.score === "object" && typeof value?.score?.score === "number") {
+      return value.score.score;
+    }
   }
   return fallback;
+};
+
+// Helper to extract confidence from various data structures
+const extractConfidence = (filtersStatus: any, trendData: any): number => {
+  // Direct numeric values
+  if (typeof filtersStatus?.confidence === "number") return filtersStatus.confidence;
+  if (typeof trendData?.confidence === "number") return trendData.confidence;
+  
+  // Object with score property
+  if (typeof filtersStatus?.confidence?.score === "number") return filtersStatus.confidence.score;
+  if (typeof trendData?.confidence?.score === "number") return trendData.confidence.score;
+  
+  // Weighted consistency (common in trend data)
+  if (typeof trendData?.weightedConsistency === "number") return trendData.weightedConsistency;
+  
+  // True alignment score
+  if (typeof trendData?.trueAlignment?.score === "number") return trendData.trueAlignment.score;
+  
+  // Average of timeframe confidences
+  const conf4h = trendData?.timeframes?.['4h']?.confidence;
+  const conf1h = trendData?.timeframes?.['1h']?.confidence;
+  if (typeof conf4h === "number" && typeof conf1h === "number") {
+    return Math.round((conf4h * 0.6 + conf1h * 0.4)); // 4h weighted higher
+  }
+  if (typeof conf4h === "number") return conf4h;
+  if (typeof conf1h === "number") return conf1h;
+  
+  return 0;
 };
 
 const ScoreBar = ({
@@ -155,10 +197,10 @@ const ScoreBar = ({
 };
 
 // Market Regime Details component for early rejections
-const MarketRegimeDetails = ({ filtersStatus }: { filtersStatus: any }) => {
-  const adx = coerceNumeric(filtersStatus?.adx, undefined as any);
-  const confidence = coerceNumeric(filtersStatus?.confidence, undefined as any);
-  const consistency = coerceNumeric(filtersStatus?.consistency, undefined as any);
+const MarketRegimeDetails = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, undefined as any);
+  const confidence = extractConfidence(filtersStatus, trendData) || undefined;
+  const consistency = coerceNumeric(filtersStatus?.consistency ?? trendData?.trueAlignment?.score, undefined as any);
   const regime = filtersStatus?.regime;
   
   if (adx === undefined && confidence === undefined && !regime) return null;
@@ -533,8 +575,13 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
       return Number.isFinite(n) ? n : undefined;
     }
     if (typeof value === "object") {
-      const n = Number((value as any)?.value ?? (value as any)?.score);
-      return Number.isFinite(n) ? n : undefined;
+      // Try multiple possible numeric properties
+      const candidates = [value?.score, value?.value, value?.confidence, value?.weightedConsistency];
+      for (const candidate of candidates) {
+        if (typeof candidate === "number" && Number.isFinite(candidate)) {
+          return candidate;
+        }
+      }
     }
     return undefined;
   };
@@ -549,10 +596,12 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
 
   const reasonText = filtersStatus?.reason;
 
-  const adx = coerceNumber(filtersStatus?.adx);
-  const confidence =
-    coerceNumber(filtersStatus?.confidence ?? trendData?.confidence) ??
-    parsePercentFromText(reasonText, "confidence");
+  const adx = coerceNumber(filtersStatus?.adx ?? trendData?.volatility?.adx);
+  
+  // Use extractConfidence helper for robust confidence extraction
+  const confidence = extractConfidence(filtersStatus, trendData) || 
+    parsePercentFromText(reasonText, "confidence") || 
+    undefined;
 
   const trendConsistency =
     coerceNumber(
@@ -854,7 +903,7 @@ const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
     trendData?.dominantTrend ||
     trendData?.trend ||
     "unknown";
-  const confidence = coerceNumeric(filtersStatus?.confidence ?? trendData?.confidence, 0);
+  const confidence = extractConfidence(filtersStatus, trendData);
   const trendConsistency = coerceNumeric(
     filtersStatus?.trendConsistency ??
       trendData?.trueAlignment?.score ??
@@ -977,7 +1026,7 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
     trendData?.dominantTrend ||
     trendData?.trend ||
     "unknown";
-  const confidence = coerceNumeric(filtersStatus?.confidence ?? trendData?.confidence, 0);
+  const confidence = extractConfidence(filtersStatus, trendData);
 
   const htfFilter = filtersStatus?.htfFilter || {};
   const trend4h = htfFilter.trend4h || trendData?.timeframes?.["4h"]?.trend;
@@ -1091,7 +1140,7 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
 
 const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const htfAligned = filtersStatus?.htfAligned ?? false;
-  const confidence = coerceNumeric(filtersStatus?.confidence ?? trendData?.confidence, 0);
+  const confidence = extractConfidence(filtersStatus, trendData);
   const trend4h = trendData?.timeframes?.['4h']?.trend || filtersStatus?.trend4h || "unknown";
   const trend1h = trendData?.timeframes?.['1h']?.trend || filtersStatus?.trend1h || "unknown";
   const conf4h = coerceNumeric(trendData?.timeframes?.['4h']?.confidence, 0);
@@ -1148,7 +1197,7 @@ const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
 };
 
 const HardGateConfidenceDeadZoneDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
-  const confidence = coerceNumeric(filtersStatus?.confidence ?? trendData?.confidence, 0);
+  const confidence = extractConfidence(filtersStatus, trendData);
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   
   return (
