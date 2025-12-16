@@ -52,12 +52,38 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
 
       if (error) throw error;
 
+      // Map from calculate-trend response structure to MomentumData
+      const timeframes = data.timeframes || {};
+      const volatility = data.volatility || {};
+      
       return {
         symbol,
-        momentum: data.momentum,
-        higherTimeframeFilter: data.higherTimeframeFilter,
-        multiTimeframe: data.multiTimeframe,
-        trend: data.trend,
+        momentum: {
+          confirms: data.momentum?.confirms ?? false,
+          building: data.momentum?.macdExpanding && !data.momentum?.confirms,
+          state: data.momentum?.state ?? 'none',
+          lastCloseAlignsWithTrend: data.momentum?.lastCloseAlignsWithTrend ?? false,
+          hasDivergence: data.momentum?.hasDivergence ?? false,
+          macdHistogram: timeframes['1h']?.indicators?.macd?.histogram ?? 0,
+          macdExpanding: data.momentum?.macdExpanding ?? false,
+          macdDirectionAligned: data.momentum?.macdStrong || data.momentum?.macdExpanding,
+          adx: volatility.adx ?? 0,
+          adxRising: data.momentum?.adxRising,
+          fakeBreakoutRisk: data.momentum?.fakeBreakoutRisk,
+          genuineMomentum: data.momentum?.genuineMomentum,
+          volumeConfirms: data.momentum?.volumeConfirms ?? false,
+          volumeBoost: data.volume?.['1h']?.ratio,
+        },
+        higherTimeframeFilter: {
+          trend4h: timeframes['4h']?.trend ?? 'unknown',
+          trend1h: timeframes['1h']?.trend ?? 'unknown',
+          aligned: data.isAligned ?? false,
+        },
+        multiTimeframe: {
+          trend15m: timeframes['15m']?.trend ?? 'unknown',
+          trend30m: timeframes['30m']?.trend ?? 'unknown',
+        },
+        trend: data.primaryTrend ?? 'unknown',
       } as MomentumData;
     } catch (err) {
       return {
