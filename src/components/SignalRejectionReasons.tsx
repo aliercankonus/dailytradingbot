@@ -140,12 +140,97 @@ const ScoreBar = ({
   );
 };
 
+// Market Regime Details component for early rejections
+const MarketRegimeDetails = ({ filtersStatus }: { filtersStatus: any }) => {
+  const adx = filtersStatus?.adx;
+  const confidence = filtersStatus?.confidence;
+  const consistency = filtersStatus?.consistency;
+  const regime = filtersStatus?.regime;
+  
+  if (adx === undefined && confidence === undefined && !regime) return null;
+  
+  const getRegimeColor = (regime: string) => {
+    switch (regime?.toLowerCase()) {
+      case 'trending': return 'text-green-500';
+      case 'ranging': return 'text-yellow-500';
+      case 'choppy': return 'text-red-500';
+      case 'volatile': return 'text-orange-500';
+      default: return 'text-muted-foreground';
+    }
+  };
+  
+  const getRegimeIcon = (regime: string) => {
+    switch (regime?.toLowerCase()) {
+      case 'trending': return TrendingUp;
+      case 'ranging': return Activity;
+      case 'choppy': return AlertTriangle;
+      case 'volatile': return Zap;
+      default: return Activity;
+    }
+  };
+  
+  const RegimeIcon = getRegimeIcon(regime);
+  
+  return (
+    <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <RegimeIcon className={`h-3.5 w-3.5 ${getRegimeColor(regime)}`} />
+          <span className="text-xs font-medium">Market Regime</span>
+        </div>
+        <Badge 
+          variant="outline" 
+          className={`text-[10px] px-1.5 py-0 ${getRegimeColor(regime)}`}
+        >
+          {regime || 'Unknown'}
+        </Badge>
+      </div>
+      
+      <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/50">
+        {adx !== undefined && (
+          <div className="text-center">
+            <div className="text-[10px] text-muted-foreground">ADX</div>
+            <div className={`text-xs font-mono font-medium ${adx >= 25 ? 'text-green-500' : adx >= 20 ? 'text-yellow-500' : 'text-red-500'}`}>
+              {typeof adx === 'number' ? adx.toFixed(1) : adx}
+            </div>
+          </div>
+        )}
+        {confidence !== undefined && (
+          <div className="text-center">
+            <div className="text-[10px] text-muted-foreground">Confidence</div>
+            <div className={`text-xs font-mono font-medium ${confidence >= 60 ? 'text-green-500' : confidence >= 40 ? 'text-yellow-500' : 'text-red-500'}`}>
+              {confidence}%
+            </div>
+          </div>
+        )}
+        {consistency !== undefined && (
+          <div className="text-center">
+            <div className="text-[10px] text-muted-foreground">Consistency</div>
+            <div className={`text-xs font-mono font-medium ${consistency >= 50 ? 'text-green-500' : consistency >= 30 ? 'text-yellow-500' : 'text-red-500'}`}>
+              {consistency}%
+            </div>
+          </div>
+        )}
+      </div>
+      
+      {filtersStatus?.reason && (
+        <div className="text-[10px] text-muted-foreground pt-1 border-t border-border/30">
+          {filtersStatus.reason}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
   const breakdown = parseBreakdown(filtersStatus?.breakdown);
   const qualityScore = filtersStatus?.qualityScore;
   const minRequired = filtersStatus?.minRequired || 50;
   
-  if (!breakdown && qualityScore === undefined) return null;
+  // If no breakdown and no quality score, show regime details instead
+  if (!breakdown && qualityScore === undefined) {
+    return <MarketRegimeDetails filtersStatus={filtersStatus} />;
+  }
   
   const totalScore = breakdown?.total || qualityScore || 0;
   const isPassing = totalScore >= minRequired;
