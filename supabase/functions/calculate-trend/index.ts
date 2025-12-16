@@ -1,394 +1,20 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
+// ============= SHARED MODULES - Single source of truth =============
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS } from "../_shared/constants.ts";
+import { 
+  calculateEMA, calculateEMAArray, calculateRSI, calculateRSIArray, calculateMACD,
+  calculateStochasticRSI, calculateATR, calculateHistoricalATRAvg,
+  calculateADXWithDirection, calculateADX, calculateVolumeAnalysis, ADXResult
+} from "../_shared/indicators.ts";
+import { calculateTrend, enhanceConfidenceWithIndicators, TrendResult } from "../_shared/trend-core.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// ============= CENTRALIZED ADX THRESHOLDS =============
-// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
-// Changes here should be mirrored in: strategy-analyzer, execute-trade, monitor-positions
-const ADX_THRESHOLDS = {
-  VERY_WEAK: 12,    // Essentially no trend, avoid trading
-  SEVERE_PENALTY: 15, // Below this = severe penalty (-10), consistent mental model
-  WEAK: 18,         // Weak trend, mixed momentum allowed with caution
-  MINIMUM: 20,      // Hard gate for any signal generation
-  MODERATE: 22,     // Momentum confirmation threshold
-  STRONG: 25,       // Strong trend, reduced reversal weight
-  VERY_STRONG: 30,  // Very strong trend, momentum continuation valid
-  EXCEPTIONAL: 35,  // Exceptional trend, relaxed quality thresholds
-  EXTREME: 40,      // Extreme trend, maximum confidence bonus
-} as const;
-
-// ============= CENTRALIZED STOCHRSI THRESHOLDS =============
-// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
-// Changes here should be mirrored in: strategy-analyzer, execute-trade, monitor-positions, ai-signal-analyzer
-const STOCHRSI_THRESHOLDS = {
-  EXTREME_OVERSOLD: 10,    // Extremely oversold, strong bounce risk for SHORT
-  DEEPLY_OVERSOLD: 15,     // Deeply oversold zone
-  OVERSOLD: 20,            // Standard oversold threshold
-  OVERSOLD_ZONE: 25,       // Entering oversold territory
-  NEUTRAL_LOW: 30,         // Lower neutral boundary
-  NEUTRAL_HIGH: 70,        // Upper neutral boundary
-  OVERBOUGHT_ZONE: 75,     // Entering overbought territory
-  OVERBOUGHT: 80,          // Standard overbought threshold
-  DEEPLY_OVERBOUGHT: 85,   // Deeply overbought zone
-  EXTREME_OVERBOUGHT: 90,  // Extremely overbought, strong pullback risk for LONG
-} as const;
-
-// ============= CENTRALIZED RSI THRESHOLDS =============
-// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
-// Changes here should be mirrored in: strategy-analyzer, execute-trade, monitor-positions, ai-signal-analyzer
-const RSI_THRESHOLDS = {
-  OVERSOLD: 30,            // Classic oversold level
-  BEARISH_PULLBACK: 35,    // RSI showing bearish weakness / SHORT pullback
-  BULLISH_PULLBACK: 40,    // RSI showing bullish pullback opportunity
-  NEUTRAL_LOW: 45,         // Lower neutral/pullback zone for momentum continuation
-  NEUTRAL: 50,             // Neutral RSI
-  NEUTRAL_HIGH: 55,        // Upper neutral/rally zone for SHORT momentum continuation
-  BEARISH_RALLY: 60,       // RSI showing bearish rally (SHORT entry opportunity)
-  BULLISH_STRONG: 65,      // Strong bullish momentum / overbought warning
-  OVERBOUGHT: 70,          // Classic overbought level
-} as const;
-
-// ============= CENTRALIZED CONFIDENCE THRESHOLDS =============
-// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
-// Changes here should be mirrored in: strategy-analyzer, execute-trade, monitor-positions, ai-signal-analyzer
-const CONFIDENCE_THRESHOLDS = {
-  VERY_LOW: 40,            // Very weak confidence, heavy position reduction
-  LOW: 50,                 // Low confidence, optimal zone lower bound
-  OPTIMAL_LOWER: 50,       // Optimal zone start (46% win rate historically)
-  OPTIMAL_UPPER: 59,       // Optimal zone end
-  DEAD_ZONE_LOWER: 60,     // Dead zone start (31% win rate - avoid!)
-  STRONG_1H_MIN: 62,       // Minimum 1h confidence for pullback signals
-  HTF_EXCEPTION: 65,       // HTF alignment exception threshold
-  STRONG_4H: 68,           // Strong 4h threshold for neutral exceptions
-  DEAD_ZONE_UPPER: 69,     // Dead zone end
-  PULLBACK_4H_MIN: 70,     // Minimum 4h confidence for pullback opportunities
-  RECOVERY_MAX: 70,        // Maximum confidence in recovery mode
-  STRONG_1H_REVERSAL: 75,  // Strong 1h for early reversal signals
-  PENALTY_LIGHT: 70,       // Light penalty threshold
-  PENALTY_MODERATE: 75,    // Moderate penalty threshold  
-  PENALTY_STRONG: 80,      // Strong penalty threshold
-  PENALTY_HEAVY: 85,       // Heavy penalty threshold (exhaustion risk)
-  WEAK_4H: 58,             // Weak 4h threshold for early reversal
-  STRONG_ALIGNMENT_1H: 58, // Minimum 1h for strong alignment
-} as const;
-
-// Fixed: Proper EMA calculation (single value) - O(n) without slice()
-function calculateEMA(prices: number[], period: number): number {
-  if (prices.length === 0) return 0;
-  if (prices.length < period) return prices[prices.length - 1] || 0;
-
-  const k = 2 / (period + 1);
-  
-  // Calculate initial SMA without slice()
-  let ema = 0;
-  for (let i = 0; i < period; i++) {
-    ema += prices[i];
-  }
-  ema /= period;
-
-  for (let i = period; i < prices.length; i++) {
-    ema = prices[i] * k + ema * (1 - k);
-  }
-  return ema;
-}
-
-// Fixed: Properly aligned EMA array — emaArray[i] corresponds to prices[i] - O(n) without slice()
-function calculateEMAArray(prices: number[], period: number): number[] {
-  const emaArray: number[] = [];
-  if (prices.length < period) return emaArray;
-
-  const k = 2 / (period + 1);
-  
-  // Calculate initial SMA without slice()
-  let ema = 0;
-  for (let i = 0; i < period; i++) {
-    ema += prices[i];
-  }
-  ema /= period;
-
-  // Align: first valid EMA at index = period - 1
-  for (let i = 0; i < period - 1; i++) emaArray.push(NaN);
-  emaArray.push(ema);
-
-  for (let i = period; i < prices.length; i++) {
-    ema = prices[i] * k + ema * (1 - k);
-    emaArray.push(ema);
-  }
-  return emaArray;
-}
-
-// Fixed: Proper Wilder's RSI from the very first average
-function calculateRSI(prices: number[], period = 14): number {
-  if (prices.length < period + 1) return 50;
-
-  let avgGain = 0;
-  let avgLoss = 0;
-
-  for (let i = 1; i <= period; i++) {
-    const change = prices[i] - prices[i - 1];
-    if (change > 0) avgGain += change;
-    else avgLoss += Math.abs(change);
-  }
-  avgGain /= period;
-  avgLoss /= period;
-
-  for (let i = period + 1; i < prices.length; i++) {
-    const change = prices[i] - prices[i - 1];
-    const gain = change > 0 ? change : 0;
-    const loss = change < 0 ? Math.abs(change) : 0;
-
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-  }
-
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - 100 / (1 + rs);
-}
-
-// Optimized: Calculate all RSI values in a single O(n) pass using Wilder's smoothing
-function calculateRSIArray(prices: number[], period = 14): number[] {
-  const rsiArray: number[] = [];
-  
-  if (prices.length < period + 1) return rsiArray;
-
-  let avgGain = 0;
-  let avgLoss = 0;
-
-  // Initial average calculation
-  for (let i = 1; i <= period; i++) {
-    const change = prices[i] - prices[i - 1];
-    if (change > 0) avgGain += change;
-    else avgLoss += Math.abs(change);
-  }
-  avgGain /= period;
-  avgLoss /= period;
-
-  // First RSI value at index = period
-  const firstRS = avgLoss === 0 ? 100 : avgGain / avgLoss;
-  rsiArray.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + firstRS));
-
-  // Subsequent RSI values using Wilder's smoothing
-  for (let i = period + 1; i < prices.length; i++) {
-    const change = prices[i] - prices[i - 1];
-    const gain = change > 0 ? change : 0;
-    const loss = change < 0 ? Math.abs(change) : 0;
-
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-
-    if (avgLoss === 0) {
-      rsiArray.push(100);
-    } else {
-      const rs = avgGain / avgLoss;
-      rsiArray.push(100 - 100 / (1 + rs));
-    }
-  }
-
-  return rsiArray;
-}
-
-// Stochastic RSI calculation - earlier overbought/oversold detection
-// Optimized: O(n) complexity using pre-calculated RSI array instead of O(n²)
-// FURTHER OPTIMIZED: Accepts optional pre-calculated RSI array to avoid duplicate RSI calculation
-function calculateStochasticRSI(
-  prices: number[], 
-  rsiPeriod = 14, 
-  stochPeriod = 14, 
-  kSmooth = 3, 
-  dSmooth = 3,
-  preCalculatedRsiArray?: number[]  // Optional: reuse RSI array from calculateTrend
-): {
-  k: number;
-  d: number;
-  signal: "overbought" | "oversold" | "bullish_cross" | "bearish_cross" | "neutral";
-  strength: number;
-} {
-  if (prices.length < rsiPeriod + stochPeriod + Math.max(kSmooth, dSmooth)) {
-    return { k: 50, d: 50, signal: "neutral", strength: 0 };
-  }
-
-  // Use pre-calculated RSI array if provided, otherwise calculate
-  const rsiValues = preCalculatedRsiArray ?? calculateRSIArray(prices, rsiPeriod);
-
-  if (rsiValues.length < stochPeriod) {
-    return { k: 50, d: 50, signal: "neutral", strength: 0 };
-  }
-
-  // Calculate raw Stochastic K values from RSI using O(n) sliding window min/max
-  const rawKValues: number[] = [];
-  
-  // Initialize sliding window with deque-style tracking for min/max
-  // Using monotonic deque approach for O(n) complexity instead of O(n²) slice()
-  const maxDeque: number[] = []; // Stores indices of potential max values (monotonically decreasing)
-  const minDeque: number[] = []; // Stores indices of potential min values (monotonically increasing)
-  
-  for (let i = 0; i < rsiValues.length; i++) {
-    const currentRsi = rsiValues[i];
-    
-    // Remove elements outside the window from front
-    while (maxDeque.length > 0 && maxDeque[0] <= i - stochPeriod) {
-      maxDeque.shift();
-    }
-    while (minDeque.length > 0 && minDeque[0] <= i - stochPeriod) {
-      minDeque.shift();
-    }
-    
-    // Remove elements smaller than current from maxDeque (maintain decreasing order)
-    while (maxDeque.length > 0 && rsiValues[maxDeque[maxDeque.length - 1]] <= currentRsi) {
-      maxDeque.pop();
-    }
-    // Remove elements larger than current from minDeque (maintain increasing order)
-    while (minDeque.length > 0 && rsiValues[minDeque[minDeque.length - 1]] >= currentRsi) {
-      minDeque.pop();
-    }
-    
-    maxDeque.push(i);
-    minDeque.push(i);
-    
-    // Only start calculating once we have a full window
-    if (i >= stochPeriod - 1) {
-      const maxRsi = rsiValues[maxDeque[0]];
-      const minRsi = rsiValues[minDeque[0]];
-      
-      // Stochastic formula: (Current - Lowest) / (Highest - Lowest) * 100
-      const rawK = maxRsi !== minRsi 
-        ? ((currentRsi - minRsi) / (maxRsi - minRsi)) * 100 
-        : 50;
-      rawKValues.push(rawK);
-    }
-  }
-
-  if (rawKValues.length < kSmooth) {
-    return { k: 50, d: 50, signal: "neutral", strength: 0 };
-  }
-
-  // Smooth K with SMA using O(n) rolling sum instead of O(n²) slice()
-  const smoothedKValues: number[] = [];
-  let kRollingSum = 0;
-  
-  for (let i = 0; i < rawKValues.length; i++) {
-    kRollingSum += rawKValues[i];
-    
-    if (i >= kSmooth) {
-      kRollingSum -= rawKValues[i - kSmooth];
-    }
-    
-    if (i >= kSmooth - 1) {
-      smoothedKValues.push(kRollingSum / kSmooth);
-    }
-  }
-
-  if (smoothedKValues.length < dSmooth) {
-    return { k: 50, d: 50, signal: "neutral", strength: 0 };
-  }
-
-  // Calculate %D using O(n) rolling sum instead of O(n²) slice()
-  const dValues: number[] = [];
-  let dRollingSum = 0;
-  
-  for (let i = 0; i < smoothedKValues.length; i++) {
-    dRollingSum += smoothedKValues[i];
-    
-    if (i >= dSmooth) {
-      dRollingSum -= smoothedKValues[i - dSmooth];
-    }
-    
-    if (i >= dSmooth - 1) {
-      dValues.push(dRollingSum / dSmooth);
-    }
-  }
-
-  const k = smoothedKValues[smoothedKValues.length - 1];
-  const d = dValues[dValues.length - 1];
-  const prevK = smoothedKValues.length > 1 ? smoothedKValues[smoothedKValues.length - 2] : k;
-  const prevD = dValues.length > 1 ? dValues[dValues.length - 2] : d;
-
-  // Determine signal
-  let signal: "overbought" | "oversold" | "bullish_cross" | "bearish_cross" | "neutral" = "neutral";
-  let strength = 0;
-
-  // Overbought/Oversold zones (more sensitive than regular RSI)
-  if (k > STOCHRSI_THRESHOLDS.OVERBOUGHT && d > STOCHRSI_THRESHOLDS.OVERBOUGHT) {
-    signal = "overbought";
-    strength = Math.min((k - STOCHRSI_THRESHOLDS.OVERBOUGHT) / (100 - STOCHRSI_THRESHOLDS.OVERBOUGHT), 1) * 100;
-  } else if (k < STOCHRSI_THRESHOLDS.OVERSOLD && d < STOCHRSI_THRESHOLDS.OVERSOLD) {
-    signal = "oversold";
-    strength = Math.min((STOCHRSI_THRESHOLDS.OVERSOLD - k) / STOCHRSI_THRESHOLDS.OVERSOLD, 1) * 100;
-  } 
-  // Bullish crossover: K crosses above D from oversold zone
-  else if (k > d && prevK <= prevD && k < 50) {
-    signal = "bullish_cross";
-    strength = Math.min((k - d) / 10, 1) * 80;
-  }
-  // Bearish crossover: K crosses below D from overbought zone
-  else if (k < d && prevK >= prevD && k > 50) {
-    signal = "bearish_cross";
-    strength = Math.min((d - k) / 10, 1) * 80;
-  }
-
-  return {
-    k: Math.round(k * 10) / 10,
-    d: Math.round(d * 10) / 10,
-    signal,
-    strength: Math.round(strength)
-  };
-}
-
-// Fixed: Uses aligned EMA arrays → correct MACD line and signal with full EMA history
-// OPTIMIZED: Returns histogram array to avoid duplicate MACD calculation for prev histogram
-function calculateMACD(prices: number[]): { 
-  macd: number; 
-  signal: number; 
-  histogram: number;
-  histogramArray: number[];  // Full histogram history for prev value lookup
-} {
-  if (prices.length < 35) return { macd: 0, signal: 0, histogram: 0, histogramArray: [] };
-
-  const ema12Array = calculateEMAArray(prices, 12);
-  const ema26Array = calculateEMAArray(prices, 26);
-
-  // Build full MACD line from index 25 (first valid point where both EMAs exist)
-  const macdLine: number[] = [];
-  for (let i = 25; i < prices.length; i++) {
-    const e12 = ema12Array[i];
-    const e26 = ema26Array[i];
-    if (!Number.isNaN(e12) && !Number.isNaN(e26)) {
-      macdLine.push(e12 - e26);
-    }
-  }
-
-  if (macdLine.length === 0) return { macd: 0, signal: 0, histogram: 0, histogramArray: [] };
-
-  // Build signal line array and histogram array (for prev value lookup)
-  const histogramArray: number[] = [];
-  let signalEma = macdLine[0];
-  const signalMultiplier = 2 / (9 + 1);
-  
-  for (let i = 0; i < macdLine.length; i++) {
-    if (i < 8) {
-      // Not enough data for signal EMA yet, use MACD as signal
-      histogramArray.push(0);
-    } else if (i === 8) {
-      // First signal point: use SMA of first 9 MACD values
-      signalEma = macdLine.slice(0, 9).reduce((a, b) => a + b, 0) / 9;
-      histogramArray.push(macdLine[i] - signalEma);
-    } else {
-      signalEma = (macdLine[i] - signalEma) * signalMultiplier + signalEma;
-      histogramArray.push(macdLine[i] - signalEma);
-    }
-  }
-
-  const macd = macdLine[macdLine.length - 1];
-  const histogram = histogramArray.length > 0 ? histogramArray[histogramArray.length - 1] : 0;
-
-  return { macd, signal: signalEma, histogram, histogramArray };
-}
-
-// Bollinger Bands calculation with squeeze detection - O(n) optimized
+// ============= BOLLINGER BANDS (specific to calculate-trend) =============
 function calculateBollingerBands(prices: number[], period = 20, stdDevMultiplier = 2): {
   upper: number;
   middle: number;
@@ -406,13 +32,8 @@ function calculateBollingerBands(prices: number[], period = 20, stdDevMultiplier
     };
   }
 
-  // O(n) calculation using rolling sum and sum of squares
-  // stdDev = sqrt( (sumOfSquares/n) - (sum/n)^2 )
   const historyWindow = Math.min(50, prices.length - period);
-  
-  // Initialize rolling sums for first window
-  let rollingSum = 0;
-  let rollingSumSq = 0;
+  let rollingSum = 0, rollingSumSq = 0;
   const startIdx = prices.length - period - historyWindow;
   const actualStartIdx = Math.max(0, startIdx);
   
@@ -421,57 +42,39 @@ function calculateBollingerBands(prices: number[], period = 20, stdDevMultiplier
     rollingSumSq += prices[i] * prices[i];
   }
   
-  // Use running bandwidth sum instead of array + reduce()
-  let bandwidthSum = 0;
-  let bandwidthCount = 0;
+  let bandwidthSum = 0, bandwidthCount = 0;
   
-  // Calculate bandwidths using O(n) sliding window
   for (let windowEnd = actualStartIdx + period; windowEnd <= prices.length; windowEnd++) {
     const sma = rollingSum / period;
-    // Variance = E[X²] - E[X]²
     const variance = (rollingSumSq / period) - (sma * sma);
-    const stdDev = Math.sqrt(Math.max(0, variance)); // Clamp to prevent negative due to floating point
+    const stdDev = Math.sqrt(Math.max(0, variance));
     
     const upper = sma + (stdDevMultiplier * stdDev);
     const lower = sma - (stdDevMultiplier * stdDev);
     const bw = sma !== 0 ? ((upper - lower) / sma) * 100 : 0;
     
     if (windowEnd < prices.length) {
-      // Accumulate bandwidth sum directly (no array storage)
       bandwidthSum += bw;
       bandwidthCount++;
-      // Slide window: remove oldest, add newest
       const removeIdx = windowEnd - period;
       const addIdx = windowEnd;
       rollingSum = rollingSum - prices[removeIdx] + prices[addIdx];
       rollingSumSq = rollingSumSq - (prices[removeIdx] * prices[removeIdx]) + (prices[addIdx] * prices[addIdx]);
     } else {
-      // This is the current (final) bandwidth
       const currentPrice = prices[prices.length - 1];
       const bandRange = upper - lower;
       const percentB = bandRange !== 0 ? ((currentPrice - lower) / bandRange) * 100 : 50;
-      
-      // O(1) average calculation using running sum
       const avgBandwidth = bandwidthCount > 0 ? bandwidthSum / bandwidthCount : bw;
-      
-      // Squeeze: current bandwidth < 75% of average bandwidth
       const squeeze = bw < avgBandwidth * 0.75;
-      // Squeeze intensity: how tight (0-100, higher = tighter)
       const squeezeIntensity = avgBandwidth > 0 
         ? Math.max(0, Math.min(100, (1 - bw / avgBandwidth) * 100)) 
         : 0;
       
-      // Price position relative to bands
       let pricePosition: "above_upper" | "upper_zone" | "middle" | "lower_zone" | "below_lower" = "middle";
-      if (currentPrice > upper) {
-        pricePosition = "above_upper";
-      } else if (currentPrice > sma + (stdDev * 1)) {
-        pricePosition = "upper_zone";
-      } else if (currentPrice < lower) {
-        pricePosition = "below_lower";
-      } else if (currentPrice < sma - (stdDev * 1)) {
-        pricePosition = "lower_zone";
-      }
+      if (currentPrice > upper) pricePosition = "above_upper";
+      else if (currentPrice > sma + (stdDev * 1)) pricePosition = "upper_zone";
+      else if (currentPrice < lower) pricePosition = "below_lower";
+      else if (currentPrice < sma - (stdDev * 1)) pricePosition = "lower_zone";
       
       return {
         upper: Math.round(upper * 100) / 100,
@@ -486,328 +89,13 @@ function calculateBollingerBands(prices: number[], period = 20, stdDevMultiplier
     }
   }
   
-  // Fallback (shouldn't reach here)
   return {
     upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50,
     squeeze: false, squeezeIntensity: 0, pricePosition: "middle"
   };
 }
 
-function calculateVolumeAnalysis(klines: any[]): {
-  volumeSpike: boolean;
-  volumeRatio: number;
-  volumeTrend: "increasing" | "decreasing" | "neutral";
-  currentVolume: number;
-  avgVolume: number;
-} {
-  if (klines.length < 21) {
-    return { volumeSpike: false, volumeRatio: 1.0, volumeTrend: "neutral", currentVolume: 0, avgVolume: 0 };
-  }
-
-  const volumes = klines.map((k: any) => parseFloat(k[5])).filter(v => Number.isFinite(v) && v > 0);
-  if (volumes.length < 21) return { volumeSpike: false, volumeRatio: 1.0, volumeTrend: "neutral", currentVolume: 0, avgVolume: 0 };
-
-  const historicalVolumes = volumes.slice(-21, -1);
-  const avgVolume = historicalVolumes.reduce((sum, v) => sum + v, 0) / historicalVolumes.length;
-  const currentVolume = volumes[volumes.length - 1];
-  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1.0;
-  const volumeSpike = volumeRatio > 1.5;
-
-  const recentVolumes = volumes.slice(-3);
-  const previousVolumes = volumes.slice(-6, -3);
-  const recentAvg = recentVolumes.reduce((sum, v) => sum + v, 0) / recentVolumes.length;
-  const previousAvg = previousVolumes.reduce((sum, v) => sum + v, 0) / previousVolumes.length;
-
-  let volumeTrend: "increasing" | "decreasing" | "neutral" = "neutral";
-  if (recentAvg > previousAvg * 1.2) volumeTrend = "increasing";
-  else if (recentAvg < previousAvg * 0.8) volumeTrend = "decreasing";
-
-  return {
-    volumeSpike,
-    volumeRatio: Math.round(volumeRatio * 100) / 100,
-    volumeTrend,
-    currentVolume: Math.round(currentVolume),
-    avgVolume: Math.round(avgVolume),
-  };
-}
-
-/**
- * ============= CONSOLIDATED ATR UTILITIES =============
- * 
- * These are the CANONICAL ATR calculation functions for the trading system.
- * All edge functions should use these utilities or read ATR from calculate-trend response.
- * 
- * USAGE ACROSS EDGE FUNCTIONS:
- * - calculate-trend: Uses these utilities directly (canonical source)
- * - monitor-positions: Copies these utilities (edge functions can't import from each other)
- * - strategy-analyzer: Reads ATR from calculate-trend response (trendData.volatility.atrPercent)
- * - execute-trade: Reads ATR from calculate-trend response (trendData.volatility.atrPercent)
- * 
- * WHY SIMPLE MOVING AVERAGE (SMA) INSTEAD OF WILDER'S SMOOTHING:
- * - ATR here measures recent volatility for position sizing and risk management
- * - SMA provides a straightforward average of True Range over the period
- * - This is the standard ATR calculation used by most trading platforms
- * - For trend strength (ADX), we use Wilder's smoothing in validate-adx (different purpose)
- * 
- * FORMULA:
- *   True Range (TR) = MAX(high - low, |high - prevClose|, |low - prevClose|)
- *   ATR = SUM(TR over N periods) / N
- * 
- * CRITICAL: When modifying these utilities, also update monitor-positions to match!
- * ====================================================================================
- */
-
-// Single True Range calculation helper - the fundamental volatility measure
-function calculateTrueRange(high: number, low: number, prevClose: number): number {
-  return Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-}
-
-/**
- * Calculate current ATR (Average True Range) using Simple Moving Average
- * @param klines - Binance kline data array
- * @param period - ATR period (default: 14)
- * @returns ATR value in price units
- */
-function calculateATR(klines: any[], period: number = 14): number {
-  const atrKlines = klines.slice(-period - 1);
-  if (atrKlines.length < 2) return 0;
-  
-  let trSum = 0;
-  for (let i = 1; i < atrKlines.length; i++) {
-    const high = parseFloat(atrKlines[i][2]);
-    const low = parseFloat(atrKlines[i][3]);
-    const prevClose = parseFloat(atrKlines[i - 1][4]);
-    trSum += calculateTrueRange(high, low, prevClose);
-  }
-  return trSum / (atrKlines.length - 1);
-}
-
-/**
- * Calculate historical ATR average using optimized sliding window O(n)
- * Used for relative ATR calculation (currentATR / historicalATR) to detect volatility changes
- * 
- * @param klines - Binance kline data array
- * @param atrPeriod - Period for each ATR calculation (default: 14)
- * @param atrLookback - How many historical ATR values to average (default: 30)
- * @param currentATR - Fallback value if insufficient data
- * @returns Average of historical ATR values
- * 
- * RELATIVE ATR INTERPRETATION:
- * - relativeATR < 0.6: Compressed volatility (potential breakout coming)
- * - relativeATR ~ 1.0: Normal volatility
- * - relativeATR > 1.5: Volatility spike (caution - potential news event)
- */
-function calculateHistoricalATRAvg(klines: any[], atrPeriod: number, atrLookback: number, currentATR: number): number {
-  const historicalKlines = klines.slice(-atrLookback - atrPeriod);
-  if (historicalKlines.length < atrPeriod + 1) return currentATR;
-  
-  let historicalATRSum = 0;
-  let historicalATRCount = 0;
-  let windowTRSum = 0;
-  
-  // Initialize first window
-  for (let i = 1; i <= atrPeriod; i++) {
-    const high = parseFloat(historicalKlines[i][2]);
-    const low = parseFloat(historicalKlines[i][3]);
-    const prevClose = parseFloat(historicalKlines[i - 1][4]);
-    windowTRSum += calculateTrueRange(high, low, prevClose);
-  }
-  historicalATRSum += windowTRSum / atrPeriod;
-  historicalATRCount++;
-  
-  // Slide window through remaining data (O(n) optimization)
-  for (let j = atrPeriod + 1; j < historicalKlines.length; j++) {
-    const oldHigh = parseFloat(historicalKlines[j - atrPeriod][2]);
-    const oldLow = parseFloat(historicalKlines[j - atrPeriod][3]);
-    const oldPrevClose = parseFloat(historicalKlines[j - atrPeriod - 1][4]);
-    const oldTR = calculateTrueRange(oldHigh, oldLow, oldPrevClose);
-    
-    const newHigh = parseFloat(historicalKlines[j][2]);
-    const newLow = parseFloat(historicalKlines[j][3]);
-    const newPrevClose = parseFloat(historicalKlines[j - 1][4]);
-    const newTR = calculateTrueRange(newHigh, newLow, newPrevClose);
-    
-    windowTRSum = windowTRSum - oldTR + newTR;
-    historicalATRSum += windowTRSum / atrPeriod;
-    historicalATRCount++;
-  }
-  
-  return historicalATRCount > 0 ? historicalATRSum / historicalATRCount : currentATR;
-}
-
-/**
- * Wilder's Average Directional Index (ADX) - measures trend strength (0-100)
- * Reference: J. Welles Wilder Jr., "New Concepts in Technical Trading Systems" (1978)
- * 
- * Interpretation:
- *   0-15  = Absent or very weak trend (avoid trend-following strategies)
- *   15-25 = Weak trend (use with caution)
- *   25-50 = Strong trend (ideal for trend-following)
- *   50-75 = Very strong trend
- *   75-100 = Extremely strong trend (rare)
- * 
- * Algorithm:
- *   1. Calculate True Range (TR), +DM, -DM for each bar
- *   2. Apply Wilder's smoothing to TR, +DM, -DM (initial sum, then recursive smoothing)
- *   3. Calculate +DI and -DI from smoothed values
- *   4. Calculate DX = |+DI - -DI| / (+DI + -DI) * 100
- *   5. Apply Wilder's smoothing to DX to get ADX
- */
-/**
- * ADX with direction tracking for fake breakout detection.
- * Returns current ADX, previous ADX, and whether ADX is rising.
- * 
- * CRITICAL INSIGHT (user feedback):
- * - ADX level alone doesn't detect fake breakouts
- * - ADX rising + MACD expanding = genuine momentum
- * - ADX falling + MACD expanding = FAKE BREAKOUT RISK
- * 
- * @returns { adx, prevAdx, adxRising } - adxRising = current > previous
- */
-interface ADXResult {
-  adx: number;
-  prevAdx: number;
-  adxRising: boolean;
-}
-
-function calculateADXWithDirection(klines: any[], period = 14): ADXResult {
-  const defaultResult: ADXResult = { adx: 0, prevAdx: 0, adxRising: false };
-  
-  // Minimum data requirement: 2*period candles for TR/DM smoothing + ADX smoothing + 1 for prev
-  const minRequired = 2 * period + 2;
-  if (!klines || klines.length < minRequired) {
-    return defaultResult;
-  }
-
-  // Step 1: Calculate True Range (TR) and Directional Movement (+DM, -DM) arrays
-  const trueRanges: number[] = [];
-  const plusDMs: number[] = [];
-  const minusDMs: number[] = [];
-
-  for (let i = 1; i < klines.length; i++) {
-    const high = parseFloat(klines[i][2]);
-    const low = parseFloat(klines[i][3]);
-    const prevHigh = parseFloat(klines[i - 1][2]);
-    const prevLow = parseFloat(klines[i - 1][3]);
-    const prevClose = parseFloat(klines[i - 1][4]);
-
-    // Skip bars with invalid/missing data
-    if (!Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(prevClose) ||
-        !Number.isFinite(prevHigh) || !Number.isFinite(prevLow) || high <= 0 || low <= 0) {
-      continue;
-    }
-
-    // True Range = max(High-Low, |High-PrevClose|, |Low-PrevClose|)
-    const tr = Math.max(
-      high - low,
-      Math.abs(high - prevClose),
-      Math.abs(low - prevClose)
-    );
-
-    // Directional Movement
-    const upMove = high - prevHigh;
-    const downMove = prevLow - low;
-
-    // +DM = upMove if upMove > downMove AND upMove > 0, else 0
-    // -DM = downMove if downMove > upMove AND downMove > 0, else 0
-    const plusDM = (upMove > downMove && upMove > 0) ? upMove : 0;
-    const minusDM = (downMove > upMove && downMove > 0) ? downMove : 0;
-
-    trueRanges.push(tr);
-    plusDMs.push(plusDM);
-    minusDMs.push(minusDM);
-  }
-
-  // Validate we have enough data after filtering invalid bars
-  if (trueRanges.length < 2 * period) {
-    return defaultResult;
-  }
-
-  // Step 2: Initialize Wilder's smoothing with SUM of first 'period' values
-  // Wilder's method uses sum (not average) for initialization to maintain proper scale
-  let smoothedTR = 0;
-  let smoothedPlusDM = 0;
-  let smoothedMinusDM = 0;
-  
-  for (let i = 0; i < period; i++) {
-    smoothedTR += trueRanges[i];
-    smoothedPlusDM += plusDMs[i];
-    smoothedMinusDM += minusDMs[i];
-  }
-
-  // Step 3: Calculate DX values array using continuous Wilder smoothing
-  const dxValues: number[] = [];
-
-  // First DX from initial smoothed values
-  if (smoothedTR > 0) {
-    const plusDI = (smoothedPlusDM / smoothedTR) * 100;
-    const minusDI = (smoothedMinusDM / smoothedTR) * 100;
-    const diSum = plusDI + minusDI;
-    const dx = diSum > 0 ? (Math.abs(plusDI - minusDI) / diSum) * 100 : 0;
-    dxValues.push(dx);
-  } else {
-    dxValues.push(0);
-  }
-
-  // Continue calculating DX with Wilder's smoothing: smoothed = prev - prev/N + current
-  for (let i = period; i < trueRanges.length; i++) {
-    // Wilder's smoothing formula maintains the sum scale
-    smoothedTR = smoothedTR - (smoothedTR / period) + trueRanges[i];
-    smoothedPlusDM = smoothedPlusDM - (smoothedPlusDM / period) + plusDMs[i];
-    smoothedMinusDM = smoothedMinusDM - (smoothedMinusDM / period) + minusDMs[i];
-
-    if (smoothedTR > 0) {
-      const plusDI = (smoothedPlusDM / smoothedTR) * 100;
-      const minusDI = (smoothedMinusDM / smoothedTR) * 100;
-      const diSum = plusDI + minusDI;
-      const dx = diSum > 0 ? (Math.abs(plusDI - minusDI) / diSum) * 100 : 0;
-      dxValues.push(dx);
-    } else {
-      dxValues.push(0);
-    }
-  }
-
-  // Validate DX values
-  if (dxValues.length < period + 1) {
-    return defaultResult;
-  }
-
-  // Step 4: Calculate ADX values using Wilder's smoothing of DX values
-  // We need at least 2 ADX values to get direction
-  const adxValues: number[] = [];
-  
-  // Initial ADX = simple average of first 'period' DX values
-  let adx = 0;
-  for (let i = 0; i < period; i++) {
-    adx += dxValues[i];
-  }
-  adx /= period;
-  adxValues.push(adx);
-
-  // Continue Wilder's smoothing: ADX = (prevADX * (N-1) + currentDX) / N
-  for (let i = period; i < dxValues.length; i++) {
-    adx = ((adx * (period - 1)) + dxValues[i]) / period;
-    adxValues.push(adx);
-  }
-
-  // Get current and previous ADX
-  const currentAdx = Math.max(0, Math.min(100, Math.round(adx * 10) / 10));
-  const prevAdx = adxValues.length >= 2 
-    ? Math.max(0, Math.min(100, Math.round(adxValues[adxValues.length - 2] * 10) / 10))
-    : currentAdx;
-  
-  return {
-    adx: currentAdx,
-    prevAdx: prevAdx,
-    adxRising: currentAdx > prevAdx
-  };
-}
-
-// Legacy wrapper for backward compatibility
-function calculateADX(klines: any[], period = 14): number {
-  return calculateADXWithDirection(klines, period).adx;
-}
-
+// ============= BINANCE API =============
 async function fetchBinanceKlines(symbol: string, interval: string = "1h", limit: number = 100, retries: number = 2): Promise<any[]> {
   let lastError: Error | null = null;
   
@@ -818,7 +106,6 @@ async function fetchBinanceKlines(symbol: string, interval: string = "1h", limit
       );
       
       if (!response.ok) {
-        // Don't retry on client errors (4xx)
         if (response.status >= 400 && response.status < 500) {
           throw new Error(`Binance API error: ${response.status} - ${response.statusText}`);
         }
@@ -831,7 +118,6 @@ async function fetchBinanceKlines(symbol: string, interval: string = "1h", limit
       lastError = error instanceof Error ? error : new Error(String(error));
       console.error(`Failed to fetch Binance klines for ${symbol} on ${interval} (attempt ${attempt + 1}/${retries + 1}):`, lastError.message);
       
-      // Wait before retry (exponential backoff)
       if (attempt < retries) {
         await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)));
       }
@@ -841,6 +127,7 @@ async function fetchBinanceKlines(symbol: string, interval: string = "1h", limit
   throw lastError || new Error(`Failed to fetch klines for ${symbol}`);
 }
 
+// ============= MARKET STRUCTURE VALIDATION =============
 function validateMarketStructure(
   klines: any[],
   trend: "bullish" | "bearish" | "neutral",
@@ -851,8 +138,7 @@ function validateMarketStructure(
   const lows = klines.slice(-10).map((k: any) => parseFloat(k[3])).filter(Number.isFinite);
 
   if (trend === "bullish") {
-    let higherHighs = 0;
-    let higherLows = 0;
+    let higherHighs = 0, higherLows = 0;
     for (let i = 1; i < highs.length; i++) {
       if (highs[i] > highs[i - 1]) higherHighs++;
       if (lows[i] > lows[i - 1]) higherLows++;
@@ -862,8 +148,7 @@ function validateMarketStructure(
     const structureScore = (hhPercent + hlPercent) / 2;
     return { valid: structureScore > 50, confidence: structureScore };
   } else if (trend === "bearish") {
-    let lowerHighs = 0;
-    let lowerLows = 0;
+    let lowerHighs = 0, lowerLows = 0;
     for (let i = 1; i < highs.length; i++) {
       if (highs[i] < highs[i - 1]) lowerHighs++;
       if (lows[i] < lows[i - 1]) lowerLows++;
@@ -876,7 +161,7 @@ function validateMarketStructure(
   return { valid: false, confidence: 0 };
 }
 
-// Helper functions for cleaner divergence handling
+// ============= HELPER FUNCTIONS =============
 function calculateRecommendedPositionSize(divergenceType: string): number {
   switch (divergenceType) {
     case "aligned": return 100;
@@ -897,57 +182,7 @@ function calculateTradeDirection(
   return primaryTrend;
 }
 
-// Enhanced confidence calculation - adds ADX and volume to base confidence
-// CRITICAL: volumeSpike alone is NOT directional - requires rangeExpansion confirmation
-function enhanceConfidenceWithIndicators(
-  baseConfidence: number,
-  adx: number,
-  volumeConfirms: boolean,
-  volumeRatio: number,
-  hasRangeExpansion: boolean = false // ATR > historical avg confirms genuine movement
-): number {
-  let enhanced = baseConfidence;
-  
-  // ADX contribution - Uses centralized ADX_THRESHOLDS
-  // Strong trend (ADX > 25) adds up to 10 points, Weak trend (ADX < 15) subtracts up to 10 points
-  if (adx >= ADX_THRESHOLDS.EXTREME) {
-    enhanced += 10;
-  } else if (adx >= ADX_THRESHOLDS.VERY_STRONG) {
-    enhanced += 7;
-  } else if (adx >= ADX_THRESHOLDS.STRONG) {
-    enhanced += 5;
-  } else if (adx >= ADX_THRESHOLDS.MINIMUM) {
-    enhanced += 2;
-  } else if (adx < ADX_THRESHOLDS.SEVERE_PENALTY) {
-    enhanced -= 10;
-  } else if (adx < ADX_THRESHOLDS.WEAK) {
-    enhanced -= 5;
-  }
-  
-  // Volume contribution: Confirming volume adds points
-  // CRITICAL FIX: volumeSpike without range expansion gets reduced bonus
-  if (volumeConfirms) {
-    if (volumeRatio >= 2.0 && hasRangeExpansion) {
-      enhanced += 8; // Strong volume spike + range expansion = genuine breakout
-    } else if (volumeRatio >= 2.0) {
-      enhanced += 5; // High volume but no range expansion = reduced confidence
-    } else if (volumeRatio >= 1.5 && hasRangeExpansion) {
-      enhanced += 5; // Above average + range expansion
-    } else if (volumeRatio >= 1.5) {
-      enhanced += 3; // Above average without expansion = reduced
-    } else {
-      enhanced += 2; // Basic volume confirmation
-    }
-  } else if (volumeRatio < 0.5) {
-    enhanced -= 5; // Very low volume = less confidence
-  }
-  
-  // Clamp to 30-95 range (wider than before)
-  return Math.min(Math.max(Math.round(enhanced), 30), 95);
-}
-
-// True alignment score - measures actual direction agreement across timeframes
-// NEUTRAL TREND PROTECTION: When dominant is neutral + ADX < 20, cap score to 60 and require volume
+// ============= TRUE ALIGNMENT SCORE =============
 function calculateTrueAlignmentScore(
   trend4h: { trend: string; confidence: number; indicators: any },
   trend1h: { trend: string; confidence: number; indicators: any },
@@ -957,9 +192,7 @@ function calculateTrueAlignmentScore(
   adx: number = 25,
   volumeConfirms: boolean = false
 ): { score: number; breakdown: { directionScore: number; indicatorScore: number; penaltyScore: number }; neutralCapped: boolean } {
-  let directionScore = 0;
-  let indicatorScore = 0;
-  let penaltyScore = 0;
+  let directionScore = 0, indicatorScore = 0, penaltyScore = 0;
   
   const trends = [
     { tf: "4h", trend: trend4h.trend, weight: 35, indicators: trend4h.indicators },
@@ -968,11 +201,8 @@ function calculateTrueAlignmentScore(
     { tf: "15m", trend: trend15m.trend, weight: 15, indicators: trend15m.indicators },
   ];
   
-  // Direction alignment scoring (max 60 points)
-  // Full points if matches dominant trend, half if neutral, penalty if opposing
   for (const tf of trends) {
     if (dominantTrend === "neutral") {
-      // When dominant is neutral, score based on internal agreement
       const agreesWithMajority = tf.trend === trend1h.trend;
       if (agreesWithMajority && tf.trend !== "neutral") {
         directionScore += tf.weight * 0.6;
@@ -981,18 +211,15 @@ function calculateTrueAlignmentScore(
       }
     } else {
       if (tf.trend === dominantTrend) {
-        directionScore += tf.weight * 0.6; // Full points for alignment
+        directionScore += tf.weight * 0.6;
       } else if (tf.trend === "neutral") {
-        directionScore += tf.weight * 0.3; // Half points for neutral
+        directionScore += tf.weight * 0.3;
       } else {
-        // Opposing trend - apply penalty
         penaltyScore += tf.weight * 0.3;
       }
     }
   }
   
-  // Indicator agreement scoring (max 25 points)
-  // Check if MACD histograms agree across timeframes
   const macdHistograms = [
     trend4h.indicators?.macdHistogram || 0,
     trend1h.indicators?.macdHistogram || 0,
@@ -1004,15 +231,10 @@ function calculateTrueAlignmentScore(
   const macdBearish = macdHistograms.filter(m => m < 0).length;
   const macdAgreement = Math.max(macdBullish, macdBearish);
   
-  if (macdAgreement === 4) {
-    indicatorScore += 15; // All MACDs agree
-  } else if (macdAgreement === 3) {
-    indicatorScore += 10;
-  } else if (macdAgreement === 2) {
-    indicatorScore += 5;
-  }
+  if (macdAgreement === 4) indicatorScore += 15;
+  else if (macdAgreement === 3) indicatorScore += 10;
+  else if (macdAgreement === 2) indicatorScore += 5;
   
-  // Check if RSI signals agree
   const rsiSignals = [
     trend4h.indicators?.rsiSignal || "neutral",
     trend1h.indicators?.rsiSignal || "neutral",
@@ -1024,23 +246,15 @@ function calculateTrueAlignmentScore(
   const rsiBearish = rsiSignals.filter(s => s === "bearish" || s === "oversold").length;
   const rsiAgreement = Math.max(rsiBullish, rsiBearish);
   
-  if (rsiAgreement >= 3) {
-    indicatorScore += 10;
-  } else if (rsiAgreement >= 2) {
-    indicatorScore += 5;
-  }
+  if (rsiAgreement >= 3) indicatorScore += 10;
+  else if (rsiAgreement >= 2) indicatorScore += 5;
   
-  // Calculate final score (max 85 points possible, subtract penalties)
   const rawScore = directionScore + indicatorScore - penaltyScore;
-  
-  // Normalize to 0-100 scale
   let normalizedScore = Math.min(Math.max(Math.round(rawScore * 1.18), 0), 100);
   
-  // NEUTRAL TREND PROTECTION: When dominant is neutral + ADX weak, cap score and require volume
-  // This prevents inflated alignment scores when 1h is used as reference (may be wrong)
   let neutralCapped = false;
   if (dominantTrend === "neutral" && adx < 20) {
-    const maxNeutralScore = volumeConfirms ? 70 : 60; // Volume can raise cap to 70
+    const maxNeutralScore = volumeConfirms ? 70 : 60;
     if (normalizedScore > maxNeutralScore) {
       normalizedScore = maxNeutralScore;
       neutralCapped = true;
@@ -1058,158 +272,20 @@ function calculateTrueAlignmentScore(
   };
 }
 
-// OPTIMIZED: Returns macdHistogramArray and rsiArray to avoid duplicate calculations
-function calculateTrend(prices: number[]): {
-  trend: "bullish" | "bearish" | "neutral";
-  confidence: number;
-  indicators: {
-    ema12: number;
-    ema26: number;
-    emaSignal: string;
-    rsi: number;
-    rsiSignal: string;
-    rsiArray: number[];  // Added for StochRSI reuse
-    macd: number;
-    macdSignal: number;
-    macdHistogram: number;
-    macdTrend: string;
-    macdHistogramArray: number[];  // Added for prev histogram lookup
-  };
-} {
-  if (prices.length < 30) {
-    return {
-      trend: "neutral",
-      confidence: 35, // Lower floor for insufficient data
-      indicators: {
-        ema12: 0, ema26: 0, emaSignal: "neutral",
-        rsi: 50, rsiSignal: "neutral", rsiArray: [],
-        macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral",
-        macdHistogramArray: []
-      }
-    };
-  }
-
-  const ema12 = calculateEMA(prices, 12);
-  const ema26 = calculateEMA(prices, 26);
-  // OPTIMIZED: Use RSI array and extract last value (avoids duplicate calculation for StochRSI)
-  const rsiArray = calculateRSIArray(prices, 14);
-  const rsi = rsiArray.length > 0 ? rsiArray[rsiArray.length - 1] : 50;
-  const { macd, signal, histogram, histogramArray } = calculateMACD(prices);
-
-  let bullishSignals = 0;
-  let bearishSignals = 0;
-  let totalWeight = 0;
-
-  // EMA signal (weight 3)
-  const emaWeight = 3;
-  let emaSignal = "neutral";
-  if (ema12 > ema26) {
-    const emaDiff = ema26 !== 0 ? ((ema12 - ema26) / ema26) * 100 : 0;
-    if (emaDiff > 0.1) {
-      bullishSignals += emaWeight;
-      emaSignal = "bullish";
-    }
-  } else if (ema12 < ema26) {
-    const emaDiff = ema26 !== 0 ? ((ema26 - ema12) / ema26) * 100 : 0;
-    if (emaDiff > 0.1) {
-      bearishSignals += emaWeight;
-      emaSignal = "bearish";
-    }
-  }
-  totalWeight += emaWeight;
-
-  // RSI signal (weight 2.5) - TIGHTENED thresholds to reduce weak signals
-  // Previous: >55 bullish, <35 bearish - too permissive
-  const rsiWeight = 2.5;
-  let rsiSignal = "neutral";
-  if (rsi > RSI_THRESHOLDS.BEARISH_RALLY) { // Raised from 55 to 60
-    bullishSignals += rsiWeight * ((rsi - RSI_THRESHOLDS.BEARISH_RALLY) / (100 - RSI_THRESHOLDS.BEARISH_RALLY)); // Scaled from 60
-    if (rsi > RSI_THRESHOLDS.OVERBOUGHT) rsiSignal = "overbought";
-    else if (rsi > RSI_THRESHOLDS.BULLISH_STRONG) rsiSignal = "strong_bullish";
-    else rsiSignal = "bullish";
-  } else if (rsi < RSI_THRESHOLDS.BULLISH_PULLBACK) { // Raised from 35 to 40
-    bearishSignals += rsiWeight * ((RSI_THRESHOLDS.BULLISH_PULLBACK - rsi) / RSI_THRESHOLDS.BULLISH_PULLBACK); // Scaled from 40
-    rsiSignal = rsi < RSI_THRESHOLDS.OVERSOLD ? "oversold" : "bearish";
-  } else {
-    rsiSignal = "neutral";
-  }
-  totalWeight += rsiWeight;
-
-  // MACD signal (weight 3.5 - slightly increased)
-  const macdWeight = 3.5;
-  let macdTrend = "neutral";
-  if (histogram > 0 && macd > signal) {
-    const macdStrength = Math.min(Math.abs(histogram) / Math.abs(macd || 1), 1);
-    bullishSignals += macdWeight * macdStrength;
-    macdTrend = "bullish";
-  } else if (histogram < 0 && macd < signal) {
-    const macdStrength = Math.min(Math.abs(histogram) / Math.abs(macd || 1), 1);
-    bearishSignals += macdWeight * macdStrength;
-    macdTrend = "bearish";
-  }
-  totalWeight += macdWeight;
-
-  const netSignal = bullishSignals - bearishSignals;
-  const rawConfidence = (Math.abs(netSignal) / totalWeight) * 100;
-  
-  // Wider confidence range: 30-95 instead of 40-90
-  // More sensitive to signal strength
-  let confidence = 30 + rawConfidence * 0.65;
-  confidence = Math.min(Math.max(confidence, 30), 95);
-
-  // TIGHTENED: Require higher net signal for trend determination
-  // Previous threshold of 3.0 was too loose
-  let trend: "bullish" | "bearish" | "neutral" = "neutral";
-  if (netSignal >= 4.0) trend = "bullish"; // Raised from 3.0 to 4.0
-  else if (netSignal <= -4.0) trend = "bearish"; // Raised from -3.0 to -4.0
-
-  return {
-    trend,
-    confidence: Math.round(confidence),
-    indicators: {
-      ema12: Math.round(ema12 * 100) / 100,
-      ema26: Math.round(ema26 * 100) / 100,
-      emaSignal,
-      rsi: Math.round(rsi * 100) / 100,
-      rsiSignal,
-      rsiArray,  // Full RSI array for StochRSI reuse
-      macd: Math.round(macd * 100) / 100,
-      macdSignal: Math.round(signal * 100) / 100,
-      macdHistogram: Math.round(histogram * 100) / 100,
-      macdTrend,
-      macdHistogramArray: histogramArray,  // Full array for prev histogram lookup
-    },
-  };
-}
-
+// ============= MAIN HTTP HANDLER =============
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    // Parse request body with proper error handling
     let body: { 
       symbol?: string; 
-      // BACKTEST MODE: Accept pre-fetched historical klines instead of fetching from Binance
-      historicalKlines?: {
-        '15m': any[];
-        '30m': any[];
-        '1h': any[];
-        '4h': any[];
-      };
+      historicalKlines?: { '15m': any[]; '30m': any[]; '1h': any[]; '4h': any[] };
       backtestMode?: boolean;
-      // BATCH MODE: Process multiple kline sets in one call for faster backtesting
-      batchKlines?: Array<{
-        timestamp: number;
-        klines: {
-          '15m': any[];
-          '30m': any[];
-          '1h': any[];
-          '4h': any[];
-        };
-      }>;
+      batchKlines?: Array<{ timestamp: number; klines: { '15m': any[]; '30m': any[]; '1h': any[]; '4h': any[] } }>;
     };
+    
     try {
       body = await req.json();
     } catch (parseError) {
@@ -1222,7 +298,6 @@ serve(async (req) => {
     const { symbol, historicalKlines, backtestMode, batchKlines } = body;
     
     // ============= BATCH MODE FOR BACKTESTING =============
-    // Process multiple kline sets in one call - dramatically improves backtest performance
     if (batchKlines && batchKlines.length > 0 && symbol) {
       console.log(`BATCH MODE: Processing ${batchKlines.length} candles for ${symbol}`);
       
@@ -1230,20 +305,14 @@ serve(async (req) => {
       
       for (const batch of batchKlines) {
         try {
-          const bKlines15m = batch.klines['15m'] || [];
-          const bKlines30m = batch.klines['30m'] || [];
           const bKlines1h = batch.klines['1h'] || [];
           const bKlines4h = batch.klines['4h'] || [];
           
-          // Skip if not enough data
           if (bKlines1h.length < 50 || bKlines4h.length < 20) {
             results.push({ timestamp: batch.timestamp, data: null, error: 'insufficient_data' });
             continue;
           }
           
-          // Process using same logic as single mode (inlined for batch)
-          const bPrices15m = bKlines15m.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
-          const bPrices30m = bKlines30m.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
           const bPrices1h = bKlines1h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
           const bPrices4h = bKlines4h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
           
@@ -1253,8 +322,6 @@ serve(async (req) => {
           }
           
           const bCurrentPrice = bPrices1h[bPrices1h.length - 1];
-          const bTrend15m = calculateTrend(bPrices15m);
-          const bTrend30m = calculateTrend(bPrices30m);
           const bTrend1h = calculateTrend(bPrices1h);
           const bTrend4h = calculateTrend(bPrices4h);
           
@@ -1268,14 +335,11 @@ serve(async (req) => {
           const bHistoricalATRAvg = calculateHistoricalATRAvg(bKlines1h, 14, 30, bCurrentATR);
           const bRelativeATR = bHistoricalATRAvg !== 0 ? bCurrentATR / bHistoricalATRAvg : 0;
           
-          // Simplified alignment check
           const bIsAligned = bTrend4h.trend !== "neutral" && 
             (bTrend1h.trend === bTrend4h.trend || bTrend1h.trend === "neutral");
           
-          // Volume analysis (simplified)
           const bVolume1h = calculateVolumeAnalysis(bKlines1h);
           
-          // Momentum state (simplified)
           const bMacdExpanding = Math.abs(bTrend1h.indicators.macdHistogram) > 
             Math.abs(bTrend1h.indicators.macdHistogramArray?.[bTrend1h.indicators.macdHistogramArray.length - 2] || 0);
           const bLastClose = bPrices1h[bPrices1h.length - 1] || 0;
@@ -1341,19 +405,19 @@ serve(async (req) => {
     const prices1h = klines1h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
     const prices4h = klines4h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
 
-    // Safety check for empty price arrays
     if (prices1h.length === 0) {
       throw new Error(`No valid 1h price data for ${symbol}`);
     }
 
     const currentPrice = prices1h[prices1h.length - 1];
 
+    // Calculate trends using shared module
     const trend15m = calculateTrend(prices15m);
     const trend30m = calculateTrend(prices30m);
     const trend1h = calculateTrend(prices1h);
     const trend4h = calculateTrend(prices4h);
 
-    // OPTIMIZED: Pass pre-calculated RSI arrays from calculateTrend to avoid duplicate RSI calculation
+    // StochRSI using shared module (pass pre-calculated RSI arrays)
     const stochRsi15m = calculateStochasticRSI(prices15m, 14, 14, 3, 3, trend15m.indicators.rsiArray);
     const stochRsi30m = calculateStochasticRSI(prices30m, 14, 14, 3, 3, trend30m.indicators.rsiArray);
     const stochRsi1h = calculateStochasticRSI(prices1h, 14, 14, 3, 3, trend1h.indicators.rsiArray);
@@ -1366,90 +430,42 @@ serve(async (req) => {
     const dominantTrend = trend4h.trend;
     const dominantConfidence = trend4h.confidence;
 
-    // CONSOLIDATED: Use unified ATR utility instead of inline calculation
-    // NEW: Get ADX with direction for fake breakout detection
+    // ADX and ATR using shared modules
     const adxResult = calculateADXWithDirection(klines1h, 14);
     const adx = adxResult.adx;
     const adxRising = adxResult.adxRising;
-    const atrPeriod = 14;
-    const atrLookback = 30;
-    const currentATR = calculateATR(klines1h, atrPeriod);
+    const currentATR = calculateATR(klines1h, 14);
     const atrPercent = currentPrice !== 0 ? (currentATR / currentPrice) * 100 : 0;
-    const historicalATRAvg = calculateHistoricalATRAvg(klines1h, atrPeriod, atrLookback, currentATR);
-    const relativeATR = historicalATRAvg !== 0 ? currentATR / historicalATRAvg : 0;
+    const historicalATRAvg = calculateHistoricalATRAvg(klines1h, 14, 30, currentATR);
+    const relativeATR = historicalATRAvg !== 0 ? currentATR / historicalATRAvg : 1.0;
 
-    const isOpposing = (tfTrend: string, dominantTrend: string) => {
-      if (dominantTrend === "neutral") return false;
-      if (tfTrend === "neutral") return false;
-      return tfTrend !== dominantTrend;
-    };
+    console.log(
+      `${symbol} ADX: ${adx.toFixed(1)} (${adxRising ? 'rising' : 'falling'}) | ATR: ${currentATR.toFixed(4)} (${atrPercent.toFixed(2)}%) | Relative ATR: ${relativeATR.toFixed(2)}x`
+    );
 
-    // Check trend alignment and opposition for weighted consistency calculation
+    // Alignment checks
+    const opposing1h = dominantTrend !== "neutral" && trend1h.trend !== "neutral" && trend1h.trend !== dominantTrend;
+    const opposing30m = dominantTrend !== "neutral" && trend30m.trend !== "neutral" && trend30m.trend !== dominantTrend;
+    const opposing15m = dominantTrend !== "neutral" && trend15m.trend !== "neutral" && trend15m.trend !== dominantTrend;
     const confirmation1h = trend1h.trend === dominantTrend;
     const confirmation30m = trend30m.trend === dominantTrend;
     const confirmation15m = trend15m.trend === dominantTrend;
-    const opposing1h = isOpposing(trend1h.trend, dominantTrend);
-    const opposing30m = isOpposing(trend30m.trend, dominantTrend);
-    const opposing15m = isOpposing(trend15m.trend, dominantTrend);
 
-    // Calculate weighted trend consistency
-    let weightedConsistency: number;
-    if (dominantTrend === "neutral") {
-      // When 4h is neutral, derive direction from lower timeframes
-      const lowerTimeframesAligned =
-        trend1h.trend === trend30m.trend && trend30m.trend === trend15m.trend && trend1h.trend !== "neutral";
-      if (lowerTimeframesAligned) {
-        weightedConsistency =
-          dominantConfidence * 0.3 +
-          trend1h.confidence * 0.35 +
-          trend30m.confidence * 0.2 +
-          trend15m.confidence * 0.15;
-      } else {
-        const trends = [trend1h.trend, trend30m.trend, trend15m.trend].filter((t) => t !== "neutral");
-        const bullishCount = trends.filter((t) => t === "bullish").length;
-        const bearishCount = trends.filter((t) => t === "bearish").length;
-        const majorityTrend =
-          bullishCount > bearishCount ? "bullish" : bearishCount > bullishCount ? "bearish" : "neutral";
-        if (majorityTrend === "neutral") {
-          weightedConsistency = dominantConfidence * 0.3;
-        } else {
-          const use1h = trend1h.trend === majorityTrend;
-          const use30m = trend30m.trend === majorityTrend;
-          const use15m = trend15m.trend === majorityTrend;
-          const baseWeights = { tf4h: 0.25, tf1h: 0.3, tf30m: 0.25, tf15m: 0.2 };
-          const includedWeightSum =
-            baseWeights.tf4h +
-            (use1h ? baseWeights.tf1h : 0) +
-            (use30m ? baseWeights.tf30m : 0) +
-            (use15m ? baseWeights.tf15m : 0);
-          const scaleFactor = includedWeightSum > 0 ? 1.0 / includedWeightSum : 0;
-          const normalized4h = baseWeights.tf4h * scaleFactor;
-          const normalized1h = use1h ? baseWeights.tf1h * scaleFactor : 0;
-          const normalized30m = use30m ? baseWeights.tf30m * scaleFactor : 0;
-          const normalized15m = use15m ? baseWeights.tf15m * scaleFactor : 0;
-          weightedConsistency =
-            dominantConfidence * normalized4h +
-            (use1h ? trend1h.confidence * normalized1h : 0) +
-            (use30m ? trend30m.confidence * normalized30m : 0) +
-            (use15m ? trend15m.confidence * normalized15m : 0);
-        }
-      }
-    } else {
-      const baseWeights = {
-        tf4h: 0.45,
-        tf1h_aligned: 0.3,
-        tf1h_neutral: 0.15,
-        tf30m_aligned: 0.15,
-        tf30m_neutral: 0.075,
-        tf15m_aligned: 0.1,
-        tf15m_neutral: 0.05,
-      };
+    // Weighted consistency calculation
+    const baseWeights = {
+      tf4h: 0.35, tf1h_aligned: 0.30, tf1h_neutral: 0.15, tf30m_aligned: 0.20,
+      tf30m_neutral: 0.10, tf15m_aligned: 0.15, tf15m_neutral: 0.08,
+    };
+
+    let weightedConsistency = dominantConfidence;
+    if (dominantTrend !== "neutral") {
       const use1h_aligned = confirmation1h;
       const use1h_neutral = !confirmation1h && trend1h.trend === "neutral" && !opposing1h;
       const use30m_aligned = confirmation30m;
       const use30m_neutral = !confirmation30m && trend30m.trend === "neutral" && !opposing30m;
       const use15m_aligned = confirmation15m;
       const use15m_neutral = !confirmation15m && trend15m.trend === "neutral" && !opposing15m;
+      
       const includedWeightSum =
         baseWeights.tf4h +
         (use1h_aligned ? baseWeights.tf1h_aligned : 0) +
@@ -1458,6 +474,7 @@ serve(async (req) => {
         (use30m_neutral ? baseWeights.tf30m_neutral : 0) +
         (use15m_aligned ? baseWeights.tf15m_aligned : 0) +
         (use15m_neutral ? baseWeights.tf15m_neutral : 0);
+      
       const scaleFactor = includedWeightSum > 0 ? 1.0 / includedWeightSum : 0;
       const normalized4h = baseWeights.tf4h * scaleFactor;
       const normalized1h_aligned = use1h_aligned ? baseWeights.tf1h_aligned * scaleFactor : 0;
@@ -1466,6 +483,7 @@ serve(async (req) => {
       const normalized30m_neutral = use30m_neutral ? baseWeights.tf30m_neutral * scaleFactor : 0;
       const normalized15m_aligned = use15m_aligned ? baseWeights.tf15m_aligned * scaleFactor : 0;
       const normalized15m_neutral = use15m_neutral ? baseWeights.tf15m_neutral * scaleFactor : 0;
+      
       weightedConsistency =
         dominantConfidence * normalized4h +
         (use1h_aligned ? trend1h.confidence * normalized1h_aligned : 0) +
@@ -1483,7 +501,7 @@ serve(async (req) => {
 
     let neutralAllowedWithStrongHigherTimeframe = false;
     if (!standardAlignment && dominantTrend !== "neutral" && trend1h.trend === "neutral") {
-      const strong4h = dominantConfidence >= CONFIDENCE_THRESHOLDS.STRONG_4H; // 68% to prevent fake continuations
+      const strong4h = dominantConfidence >= CONFIDENCE_THRESHOLDS.STRONG_4H;
       const macd1h = trend1h.indicators.macdHistogram;
       const macdAligned = dominantTrend === "bullish" ? macd1h >= 0 : macd1h <= 0;
       const hasActivity = adx >= ADX_THRESHOLDS.MINIMUM;
@@ -1505,26 +523,18 @@ serve(async (req) => {
     let divergenceType: "aligned" | "pullback" | "early_reversal" | "ranging_conflict" = "aligned";
     let divergenceConfidence = 100;
     let allowDivergenceSignal = false;
+    
     if (!highTimeframeAligned) {
-      // TIGHTENED: Pullback requires stronger 4h confirmation and 1h must be sufficiently strong
-      // Uses CONFIDENCE_THRESHOLDS for consistency across codebase
       if (dominantTrend !== "neutral" && dominantConfidence >= CONFIDENCE_THRESHOLDS.PULLBACK_4H_MIN && trend1h.confidence >= CONFIDENCE_THRESHOLDS.STRONG_1H_MIN) {
         divergenceType = "pullback";
-        divergenceConfidence = Math.min(dominantConfidence * 0.7, CONFIDENCE_THRESHOLDS.HTF_EXCEPTION); // Cap at 65%
+        divergenceConfidence = Math.min(dominantConfidence * 0.7, CONFIDENCE_THRESHOLDS.HTF_EXCEPTION);
         allowDivergenceSignal = true;
-        console.log(
-          `${dominantTrend.toUpperCase()} PULLBACK detected: 4h=${dominantConfidence}% vs 1h=${trend1h.trend}`,
-        );
-      } 
-      // TIGHTENED: Early reversal requires very strong 1h and 4h must be weak
-      // Uses CONFIDENCE_THRESHOLDS for consistency across codebase
-      else if (trend1h.confidence >= CONFIDENCE_THRESHOLDS.STRONG_1H_REVERSAL && (dominantTrend === "neutral" || dominantConfidence < CONFIDENCE_THRESHOLDS.WEAK_4H) && adx >= ADX_THRESHOLDS.WEAK) {
+        console.log(`${dominantTrend.toUpperCase()} PULLBACK detected: 4h=${dominantConfidence}% vs 1h=${trend1h.trend}`);
+      } else if (trend1h.confidence >= CONFIDENCE_THRESHOLDS.STRONG_1H_REVERSAL && (dominantTrend === "neutral" || dominantConfidence < CONFIDENCE_THRESHOLDS.WEAK_4H) && adx >= ADX_THRESHOLDS.WEAK) {
         divergenceType = "early_reversal";
-        divergenceConfidence = Math.min(trend1h.confidence * 0.65, CONFIDENCE_THRESHOLDS.DEAD_ZONE_LOWER); // Cap at 60%
+        divergenceConfidence = Math.min(trend1h.confidence * 0.65, CONFIDENCE_THRESHOLDS.DEAD_ZONE_LOWER);
         allowDivergenceSignal = true;
-        console.log(
-          `EARLY REVERSAL detected: 1h=${trend1h.trend}(${trend1h.confidence}%) vs weak/neutral 4h=${dominantTrend}(${dominantConfidence}%) ADX=${adx.toFixed(1)}`,
-        );
+        console.log(`EARLY REVERSAL detected: 1h=${trend1h.trend}(${trend1h.confidence}%) vs weak/neutral 4h=${dominantTrend}(${dominantConfidence}%) ADX=${adx.toFixed(1)}`);
       } else {
         divergenceType = "ranging_conflict";
         divergenceConfidence = 0;
@@ -1532,12 +542,16 @@ serve(async (req) => {
         console.log(`RANGING CONFLICT: Skipping - unclear divergence pattern`);
       }
     }
+    
     let primaryTrend: "bullish" | "bearish" | "neutral" | "ranging" = dominantTrend;
     
+    // Volume analysis using shared module
     const volume15m = calculateVolumeAnalysis(klines15m);
     const volume30m = calculateVolumeAnalysis(klines30m);
     const volume1h = calculateVolumeAnalysis(klines1h);
+    const volume4h = calculateVolumeAnalysis(klines4h);
     
+    // Bollinger Bands
     const bb15m = calculateBollingerBands(prices15m, 20, 2);
     const bb30m = calculateBollingerBands(prices30m, 20, 2);
     const bb1h = calculateBollingerBands(prices1h, 20, 2);
@@ -1549,16 +563,14 @@ serve(async (req) => {
     console.log(
       `${symbol} BOLLINGER: 1h squeeze=${bb1h.squeeze}(${bb1h.squeezeIntensity}%) 4h squeeze=${bb4h.squeeze}(${bb4h.squeezeIntensity}%) position=${bb1h.pricePosition} %B=${bb1h.percentB}`
     );
-    const volume4h = calculateVolumeAnalysis(klines4h);
 
-    // Calculate ADX for each timeframe for enhanced confidence
+    // ADX for each timeframe for enhanced confidence
     const adx15m = calculateADX(klines15m, 14);
     const adx30m = calculateADX(klines30m, 14);
     const adx4h = calculateADX(klines4h, 14);
 
-    // Enhance confidence with ADX and volume for each timeframe
-    // CRITICAL: Only 1h has relativeATR available, others use conservative false
-    const hasRangeExpansion1h = relativeATR > 1.0; // ATR above historical average
+    // Enhanced confidence using shared module
+    const hasRangeExpansion1h = relativeATR > 1.0;
     const enhancedConfidence15m = enhanceConfidenceWithIndicators(
       trend15m.confidence, adx15m, volume15m.volumeSpike || volume15m.volumeTrend === "increasing", volume15m.volumeRatio, false
     );
@@ -1572,32 +584,24 @@ serve(async (req) => {
       trend4h.confidence, adx4h, volume4h.volumeSpike || volume4h.volumeTrend === "increasing", volume4h.volumeRatio, false
     );
 
-    // Calculate true alignment score (replaces old weightedConsistency)
-    // Pass ADX and volume confirms for neutral trend protection
-    // CRITICAL: volumeConfirmsAny now requires range expansion for spike-based confirmation
+    // True alignment score
     const volumeConfirmsAny = (volume1h.volumeSpike && hasRangeExpansion1h) || volume4h.volumeSpike || 
                                volume1h.volumeTrend === "increasing" || volume4h.volumeTrend === "increasing";
     const trueAlignment = calculateTrueAlignmentScore(
       trend4h, trend1h, trend30m, trend15m, dominantTrend, adx, volumeConfirmsAny
     );
     
-    // ============= DIVERGENCE ALIGNMENT SCORE VALIDATION =============
-    // Separate thresholds for pullback vs early_reversal to prevent 4h dominance
-    // from drowning early 1h signals while still requiring confirmation for pullbacks
-    const PULLBACK_ALIGNMENT_THRESHOLD = 55;      // Pullbacks need stronger alignment (relying on 4h)
-    const EARLY_REVERSAL_ALIGNMENT_THRESHOLD = 45; // Early reversals can tolerate lower alignment (catching trend change)
+    // Divergence alignment validation
+    const PULLBACK_ALIGNMENT_THRESHOLD = 55;
+    const EARLY_REVERSAL_ALIGNMENT_THRESHOLD = 45;
     
     if (divergenceType === "pullback" && trueAlignment.score < PULLBACK_ALIGNMENT_THRESHOLD) {
-      console.log(
-        `${symbol}: PULLBACK REJECTED - alignment score ${trueAlignment.score} < ${PULLBACK_ALIGNMENT_THRESHOLD} threshold`
-      );
+      console.log(`${symbol}: PULLBACK REJECTED - alignment score ${trueAlignment.score} < ${PULLBACK_ALIGNMENT_THRESHOLD} threshold`);
       divergenceType = "ranging_conflict";
       divergenceConfidence = 0;
       allowDivergenceSignal = false;
     } else if (divergenceType === "early_reversal" && trueAlignment.score < EARLY_REVERSAL_ALIGNMENT_THRESHOLD) {
-      console.log(
-        `${symbol}: EARLY REVERSAL REJECTED - alignment score ${trueAlignment.score} < ${EARLY_REVERSAL_ALIGNMENT_THRESHOLD} threshold`
-      );
+      console.log(`${symbol}: EARLY REVERSAL REJECTED - alignment score ${trueAlignment.score} < ${EARLY_REVERSAL_ALIGNMENT_THRESHOLD} threshold`);
       divergenceType = "ranging_conflict";
       divergenceConfidence = 0;
       allowDivergenceSignal = false;
@@ -1608,39 +612,37 @@ serve(async (req) => {
       `${symbol} ENHANCED CONFIDENCE: 4h=${trend4h.confidence}->${enhancedConfidence4h} 1h=${trend1h.confidence}->${enhancedConfidence1h} | ALIGNMENT: score=${trueAlignment.score} (dir=${trueAlignment.breakdown.directionScore} ind=${trueAlignment.breakdown.indicatorScore} pen=${trueAlignment.breakdown.penaltyScore})${neutralCapLog}`
     );
 
+    // Ranging market detection
     const atrCompressed = relativeATR < 0.6;
     const adxWeak = adx < ADX_THRESHOLDS.MINIMUM;
     const isRanging = atrCompressed && adxWeak;
     const volatilityNormal = !isRanging && atrPercent < 5.0;
+    
     if (isRanging) {
       primaryTrend = "ranging";
-      console.log(
-        `${symbol}: RANGING MARKET DETECTED - ATR: ${atrPercent.toFixed(2)}% (relative: ${relativeATR.toFixed(2)}x), ADX: ${adx.toFixed(1)} - skipping signals`,
-      );
+      console.log(`${symbol}: RANGING MARKET DETECTED - ATR: ${atrPercent.toFixed(2)}% (relative: ${relativeATR.toFixed(2)}x), ADX: ${adx.toFixed(1)} - skipping signals`);
     } else {
-      console.log(
-        `${symbol}: TRENDING MARKET - ATR: ${atrPercent.toFixed(2)}% (relative: ${relativeATR.toFixed(2)}x), ADX: ${adx.toFixed(1)}`,
-      );
+      console.log(`${symbol}: TRENDING MARKET - ATR: ${atrPercent.toFixed(2)}% (relative: ${relativeATR.toFixed(2)}x), ADX: ${adx.toFixed(1)}`);
     }
 
+    // Pullback detection
     let inPullback = false;
     let pullbackPercent = 0;
     if (dominantTrend === "bullish" || dominantTrend === "bearish") {
       const recentKlines = klines1h.slice(-24);
       const recentHighs = recentKlines.map((k: any) => parseFloat(k[2])).filter(Number.isFinite);
       const recentLows = recentKlines.map((k: any) => parseFloat(k[3])).filter(Number.isFinite);
+      
       if (dominantTrend === "bullish") {
         const swingHigh = recentHighs.length > 0 ? Math.max(...recentHighs) : 0;
-        const recentLows12 = recentLows.slice(-12);
-        const swingLow = recentLows12.length > 0 ? Math.min(...recentLows12) : 0;
+        const swingLow = recentLows.slice(-12).length > 0 ? Math.min(...recentLows.slice(-12)) : 0;
         const range = swingHigh - swingLow;
         const pullback = swingHigh - currentPrice;
         pullbackPercent = range !== 0 ? (pullback / range) * 100 : 0;
         inPullback = pullbackPercent >= 10 && pullbackPercent <= 65;
       } else if (dominantTrend === "bearish") {
         const swingLow = recentLows.length > 0 ? Math.min(...recentLows) : 0;
-        const recentHighs12 = recentHighs.slice(-12);
-        const swingHigh = recentHighs12.length > 0 ? Math.max(...recentHighs12) : 0;
+        const swingHigh = recentHighs.slice(-12).length > 0 ? Math.max(...recentHighs.slice(-12)) : 0;
         const range = swingHigh - swingLow;
         const pullback = currentPrice - swingLow;
         pullbackPercent = range !== 0 ? (pullback / range) * 100 : 0;
@@ -1648,28 +650,18 @@ serve(async (req) => {
       }
     }
 
+    // Momentum state calculation
     const lastClose = prices1h.length >= 1 ? prices1h[prices1h.length - 1] : 0;
     const prevClose = prices1h.length >= 2 ? prices1h[prices1h.length - 2] : lastClose;
-
-    // OPTIMIZED: Use histogram array from calculateTrend (no duplicate MACD calculation)
     const macdHistogram = trend1h.indicators.macdHistogram;
     const histArr = trend1h.indicators.macdHistogramArray;
-    const prevMacdHistogram = histArr.length >= 2 
-      ? histArr[histArr.length - 2] 
-      : macdHistogram;
+    const prevMacdHistogram = histArr.length >= 2 ? histArr[histArr.length - 2] : macdHistogram;
 
-    // FIXED: Softened majority vote logic for neutral 4h to prevent fake momentum in ranging markets
-    // Now requires: (1) ADX showing some activity, (2) stronger alignment between lower timeframes
     let effectiveTrendForMomentum = dominantTrend;
     if (dominantTrend === "neutral") {
       const bullishVotes = [trend1h.trend, trend30m.trend, trend15m.trend].filter((t) => t === "bullish").length;
       const bearishVotes = [trend1h.trend, trend30m.trend, trend15m.trend].filter((t) => t === "bearish").length;
-      
-      // Require minimum ADX to derive momentum from lower timeframes (prevents ranging market fake signals)
-      const hasMinimumActivity = adx >= ADX_THRESHOLDS.WEAK; // ADX >= 18
-      
-      // Require at least 2 aligned timeframes (stronger agreement, not just simple majority)
-      // Uses CONFIDENCE_THRESHOLDS for consistency across codebase
+      const hasMinimumActivity = adx >= ADX_THRESHOLDS.WEAK;
       const strongBullishAlignment = bullishVotes >= 2 && trend1h.confidence >= CONFIDENCE_THRESHOLDS.STRONG_ALIGNMENT_1H;
       const strongBearishAlignment = bearishVotes >= 2 && trend1h.confidence >= CONFIDENCE_THRESHOLDS.STRONG_ALIGNMENT_1H;
       
@@ -1688,8 +680,7 @@ serve(async (req) => {
       }
     }
 
-    // TIGHTENED: Volume confirmation now requires price alignment too
-    // Volume spikes alone don't confirm direction - need price movement agreement
+    // Volume confirmation
     const priceDirectionMatches = 
       (effectiveTrendForMomentum === "bullish" && lastClose > prevClose) ||
       (effectiveTrendForMomentum === "bearish" && lastClose < prevClose);
@@ -1700,18 +691,17 @@ serve(async (req) => {
       volume1h.volumeSpike
     );
     
-    // Reduce volume boost - was giving too much credit to volume
-    const volumeBoost = volumeConfirmsDirection ? 1.10 : 1.0; // Reduced from 1.15
+    const volumeBoost = volumeConfirmsDirection ? 1.10 : 1.0;
 
     const lastCloseAlignsWithTrend =
       (effectiveTrendForMomentum === "bullish" && lastClose > prevClose) ||
       (effectiveTrendForMomentum === "bearish" && lastClose < prevClose) ||
       effectiveTrendForMomentum === "neutral";
 
+    // Divergence detection
     let hasDivergence = false;
     const priceMovement = lastClose - prevClose;
     const macdMovement = macdHistogram - prevMacdHistogram;
-
     const priceMovementPercent = prevClose !== 0 ? Math.abs(priceMovement / prevClose) : 0;
     const macdMovementPercent = prevMacdHistogram !== 0 ? Math.abs(macdMovement / prevMacdHistogram) : 0;
     
@@ -1724,210 +714,128 @@ serve(async (req) => {
       (effectiveTrendForMomentum === "bearish" && macdHistogram < 0) ||
       effectiveTrendForMomentum === "neutral";
 
-    // TIGHTENED: MACD expanding now requires minimum ADX threshold - Uses centralized ADX_THRESHOLDS
-    // Previously macdExpanding had no ADX check, allowing weak signals as "mixed"
-    const macdExpanding = Math.abs(macdHistogram) > 0.05 && macdDirectionAligned && adx >= 15;  // 15 is intentional (below WEAK threshold for early MACD signals)
+    const macdExpanding = Math.abs(macdHistogram) > 0.05 && macdDirectionAligned && adx >= 15;
     const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned && adx >= 15;
 
-    // ============= FAKE BREAKOUT DETECTION =============
-    // ADX direction reveals true momentum vs fake breakouts:
-    // - ADX rising + MACD expanding = genuine momentum (trend strengthening)
-    // - ADX falling + MACD expanding = FAKE BREAKOUT RISK (trend weakening despite MACD)
+    // Fake breakout detection
     const fakeBreakoutRisk = macdExpanding && !adxRising;
     const genuineMomentum = macdExpanding && adxRising;
 
-    // TIGHTENED: Momentum confirmation requires ADX >= MODERATE (22) AND ADX rising (no fake breakout)
-    // Changed from: momentumConfirms = macdExpanding && ... && adx >= MODERATE
-    // To: Also require ADX rising to filter fake breakouts
     const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= ADX_THRESHOLDS.MODERATE && adxRising;
     let momentumState: "none" | "mixed" | "confirmed" = "none";
     if (momentumConfirms) {
       momentumState = "confirmed";
     } else if (macdExpanding && adxRising && (hasDivergence || !lastCloseAlignsWithTrend)) {
-      // Mixed: MACD expanding + ADX rising but divergence exists or price doesn't align
-      // Only allow mixed if ADX shows some trend (prevents weak signals)
       momentumState = adx >= ADX_THRESHOLDS.WEAK ? "mixed" : "none";
     } else if (fakeBreakoutRisk && adx >= ADX_THRESHOLDS.MODERATE) {
-      // WARNING: MACD expanding but ADX falling = potential fake breakout
-      // Downgrade to mixed even with strong MACD to add caution
       momentumState = "mixed";
       console.log(`${symbol}: FAKE BREAKOUT WARNING - MACD expanding but ADX falling (${adxResult.prevAdx.toFixed(1)} → ${adx.toFixed(1)})`);
-    } else if (macdStrong && adx >= ADX_THRESHOLDS.MINIMUM && adxRising) {
-      // Mixed: Strong MACD magnitude + ADX rising, but needs ADX confirmation
-      momentumState = "mixed";
     }
+
     console.log(
-      `${symbol} MOMENTUM: lastClose=${lastClose.toFixed(2)} prevClose=${prevClose.toFixed(2)} alignsWithTrend=${lastCloseAlignsWithTrend} divergence=${hasDivergence} macd=${macdHistogram.toFixed(3)} expanding=${macdExpanding} adx=${adx.toFixed(1)} adxRising=${adxRising} fakeBreakout=${fakeBreakoutRisk} volumeConfirms=${volumeConfirmsDirection} confirms=${momentumConfirms} state=${momentumState}`,
+      `${symbol} MOMENTUM: state=${momentumState} macdExpanding=${macdExpanding} lastCloseAligns=${lastCloseAlignsWithTrend} ` +
+      `divergence=${hasDivergence} volumeConfirms=${volumeConfirmsDirection} ADX=${adx.toFixed(1)} adxRising=${adxRising} ` +
+      `fakeBreakoutRisk=${fakeBreakoutRisk} genuineMomentum=${genuineMomentum}`
     );
-    const marketStructure = validateMarketStructure(klines1h, trend1h.trend);
-    console.log(
-      `${symbol}: 4h=${trend4h.trend} 1h=${trend1h.trend} 30m=${trend30m.trend} aligned=${highTimeframeAligned} pullback=${inPullback}(${pullbackPercent.toFixed(1)}%) momentum=${momentumConfirms} ranging=${isRanging}`,
-    );
+
+    // Market structure validation
+    const marketStructure = validateMarketStructure(klines1h, dominantTrend);
+
+    // Build response
+    const response = {
+      symbol,
+      timestamp: new Date().toISOString(),
+      currentPrice,
+      primaryTrend: calculateTradeDirection(divergenceType, dominantTrend, trend1h.trend, primaryTrend),
+      confidence: divergenceType !== "aligned" ? divergenceConfidence : Math.round(weightedConsistency * volumeBoost),
+      isAligned: highTimeframeAligned || allowDivergenceSignal,
+      divergence: {
+        type: divergenceType,
+        confidence: divergenceConfidence,
+        allowSignal: allowDivergenceSignal,
+        recommendedPositionSize: calculateRecommendedPositionSize(divergenceType),
+      },
+      trueAlignment: trueAlignment,
+      timeframes: {
+        "15m": { trend: trend15m.trend, confidence: trend15m.confidence, enhancedConfidence: enhancedConfidence15m, indicators: trend15m.indicators },
+        "30m": { trend: trend30m.trend, confidence: trend30m.confidence, enhancedConfidence: enhancedConfidence30m, indicators: trend30m.indicators },
+        "1h": { trend: trend1h.trend, confidence: trend1h.confidence, enhancedConfidence: enhancedConfidence1h, indicators: trend1h.indicators },
+        "4h": { trend: trend4h.trend, confidence: trend4h.confidence, enhancedConfidence: enhancedConfidence4h, indicators: trend4h.indicators },
+      },
+      stochasticRsi: {
+        "15m": stochRsi15m,
+        "30m": stochRsi30m,
+        "1h": stochRsi1h,
+        "4h": stochRsi4h,
+      },
+      momentum: {
+        state: momentumState,
+        macdExpanding,
+        macdStrong,
+        lastCloseAlignsWithTrend,
+        hasDivergence,
+        confirms: momentumConfirms,
+        volumeConfirms: volumeConfirmsDirection,
+        adxRising,
+        fakeBreakoutRisk,
+        genuineMomentum,
+      },
+      volatility: {
+        atr: Math.round(currentATR * 100) / 100,
+        atrPercent: Math.round(atrPercent * 100) / 100,
+        relativeATR: Math.round(relativeATR * 100) / 100,
+        historicalATRAvg: Math.round(historicalATRAvg * 100) / 100,
+        isCompressed: atrCompressed,
+        adx: Math.round(adx * 10) / 10,
+        adx15m: Math.round(adx15m * 10) / 10,
+        adx30m: Math.round(adx30m * 10) / 10,
+        adx4h: Math.round(adx4h * 10) / 10,
+        volatilityNormal,
+        isRanging,
+      },
+      volume: {
+        "15m": volume15m,
+        "30m": volume30m,
+        "1h": volume1h,
+        "4h": volume4h,
+        confirmsDirection: volumeConfirmsDirection,
+        hasRangeExpansion1h,
+      },
+      bollingerBands: {
+        "15m": bb15m,
+        "30m": bb30m,
+        "1h": bb1h,
+        "4h": bb4h,
+        squeezeActive: bollingerSqueezeActive,
+        squeezeBreakoutPotential,
+      },
+      pullback: {
+        inPullback,
+        pullbackPercent: Math.round(pullbackPercent * 10) / 10,
+        pullbackConditionsMet: inPullback && rsiInPullbackZone(trend1h.indicators.rsi, effectiveTrendForMomentum),
+      },
+      marketStructure,
+    };
+
     return new Response(
-      JSON.stringify({
-        symbol,
-        currentPrice,
-        trend: dominantTrend,
-        confidence: enhancedConfidence4h, // Use enhanced confidence
-        higherTimeframeFilter: {
-          trend4h: trend4h.trend,
-          trend1h: trend1h.trend,
-          aligned: highTimeframeAligned,
-          neutralAllowedWithStrongHigherTimeframe: neutralAllowedWithStrongHigherTimeframe,
-          dominantConfidence: enhancedConfidence4h, // Enhanced
-          weightedConsistency: trueAlignment.score, // Use true alignment score
-          divergenceType: divergenceType,
-          divergenceConfidence: Math.round(divergenceConfidence),
-          allowDivergenceSignal: allowDivergenceSignal,
-          recommendedPositionSize: calculateRecommendedPositionSize(divergenceType),
-          tradeDirection: calculateTradeDirection(divergenceType, dominantTrend, trend1h.trend, primaryTrend),
-        },
-        pullback: {
-          inPullback,
-          pullbackPercent: Math.round(pullbackPercent * 10) / 10,
-          ideal: inPullback && pullbackPercent >= 10 && pullbackPercent <= 55,
-        },
-        ranging: {
-          isRanging,
-          atrPercent: Math.round(atrPercent * 100) / 100,
-          safe: atrPercent >= 2.0 && atrPercent <= 5.0,
-        },
-        momentum: {
-          confirms: momentumConfirms,
-          state: momentumState,
-          building: macdExpanding && !hasDivergence && adxRising, // Now also requires ADX rising
-          lastCloseAlignsWithTrend,
-          hasDivergence,
-          macdHistogram: Math.round(macdHistogram * 1000) / 1000,
-          macdExpanding,
-          macdDirectionAligned,
-          adx: Math.round(adx * 10) / 10,
-          adxRising,  // NEW: ADX direction for fake breakout detection
-          fakeBreakoutRisk,  // NEW: MACD expanding + ADX falling = warning
-          genuineMomentum,   // NEW: MACD expanding + ADX rising = real momentum
-          volumeConfirms: volumeConfirmsDirection,
-          volumeBoost: volumeBoost,
-        },
-        multiTimeframe: {
-          trend15m: trend15m.trend,
-          trend30m: trend30m.trend,
-          trend1h: trend1h.trend,
-          trend4h: trend4h.trend,
-          confidence15m: enhancedConfidence15m, // Enhanced
-          confidence30m: enhancedConfidence30m, // Enhanced
-          confidence1h: enhancedConfidence1h, // Enhanced
-          confidence4h: enhancedConfidence4h, // Enhanced
-        },
-        alignmentBreakdown: trueAlignment.breakdown, // New: detailed breakdown
-        timeframes: {
-          "15m": trend15m,
-          "30m": trend30m,
-          "1h": trend1h,
-          "4h": trend4h,
-        },
-        marketStructure: {
-          valid: marketStructure.valid,
-          confidence: Math.round(marketStructure.confidence),
-        },
-        volatility: {
-          atr: currentATR,
-          atrPercent: Math.round(atrPercent * 100) / 100,
-          relativeATR: Math.round(relativeATR * 100) / 100,
-          rangeExpansion: relativeATR > 1.0, // ATR above historical average = genuine range expansion
-          adx: Math.round(adx * 10) / 10,
-          normal: volatilityNormal,
-          atrCompressed,
-          adxWeak,
-        },
-        volume: {
-          "15m": volume15m,
-          "30m": volume30m,
-          "1h": volume1h,
-          "4h": volume4h,
-        },
-        // NEW: Volume Score for strategy-analyzer quality scoring (0-10 points)
-        // CRITICAL: volumeSpike alone is NOT directional - requires rangeExpansion confirmation
-        volumeScore: (() => {
-          const volumeConfirms = volumeConfirmsDirection;
-          const volumeSpike = volume1h.volumeSpike ?? false;
-          const volumeRatio = volume1h.volumeRatio ?? 1.0;
-          const hasRangeExpansion = relativeATR > 1.0; // Confirms genuine breakout/momentum
-          
-          // Best case: Volume confirms AND spike with range expansion AND high ratio
-          if (volumeConfirms && volumeSpike && hasRangeExpansion && volumeRatio > 2.0) return 10;
-          // Volume confirms with spike + range expansion
-          if (volumeConfirms && volumeSpike && hasRangeExpansion) return 8;
-          // Volume confirms with spike but no range expansion (activity without direction)
-          if (volumeConfirms && volumeSpike) return 6; // Reduced from 8
-          if (volumeConfirms && volumeRatio > 1.5) return 7;
-          if (volumeConfirms) return 5;
-          // Spike without confirmation needs range expansion to score
-          if (volumeSpike && hasRangeExpansion && volumeRatio > 1.5) return 4;
-          if (volumeRatio > 1.5 && hasRangeExpansion) return 3;
-          if (volumeRatio > 1.5) return 2; // Reduced from 3 - no range expansion
-          if (volumeRatio > 1.2) return 1; // Reduced from 2
-          if (dominantTrend === "neutral") return 1;
-          return 0;
-        })(),
-        bollingerBands: {
-          "15m": bb15m,
-          "30m": bb30m,
-          "1h": bb1h,
-          "4h": bb4h,
-          squeezeActive: bollingerSqueezeActive,
-          breakoutPotential: squeezeBreakoutPotential,
-          squeeze: bb1h.squeeze,
-          squeezeIntensity: bb1h.squeezeIntensity,
-          pricePosition: bb1h.pricePosition,
-          percentB: bb1h.percentB,
-          bandwidth: bb1h.bandwidth,
-        },
-        stochasticRsi: (() => {
-          const allStochRsi = [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h];
-          const overboughtCount = allStochRsi.filter(s => s.signal === "overbought").length;
-          const oversoldCount = allStochRsi.filter(s => s.signal === "oversold").length;
-          const bullishCrossCount = allStochRsi.filter(s => s.signal === "bullish_cross").length;
-          const bearishCrossCount = allStochRsi.filter(s => s.signal === "bearish_cross").length;
-          
-          let recommendation = "neutral";
-          if (overboughtCount >= 3) recommendation = "strong_sell_warning";
-          else if (oversoldCount >= 3) recommendation = "strong_buy_opportunity";
-          else if (overboughtCount >= 2 && stochRsi1h.signal === "overbought") recommendation = "sell_warning";
-          else if (oversoldCount >= 2 && stochRsi1h.signal === "oversold") recommendation = "buy_opportunity";
-          else if (bullishCrossCount >= 2) recommendation = "bullish_momentum";
-          else if (bearishCrossCount >= 2) recommendation = "bearish_momentum";
-          
-          return {
-            "15m": stochRsi15m,
-            "30m": stochRsi30m,
-            "1h": stochRsi1h,
-            "4h": stochRsi4h,
-            primarySignal: stochRsi1h.signal,
-            primaryK: stochRsi1h.k,
-            primaryD: stochRsi1h.d,
-            overboughtCount,
-            oversoldCount,
-            bullishCrossCount,
-            bearishCrossCount,
-            recommendation,
-          };
-        })(),
-        aggregated: {
-          overboughtCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "overbought").length,
-          oversoldCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "oversold").length,
-          bullishCrossCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "bullish_cross").length,
-          bearishCrossCount: [stochRsi15m, stochRsi30m, stochRsi1h, stochRsi4h].filter(s => s.signal === "bearish_cross").length,
-        },
-        indicators: trend1h.indicators,
-        trendConsistency: trueAlignment.score,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      JSON.stringify(response),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
     console.error("Error in calculate-trend:", error);
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
 });
+
+// Helper for pullback RSI zone check
+function rsiInPullbackZone(rsi: number, trend: string): boolean {
+  if (trend === "bullish") {
+    return rsi < RSI_THRESHOLDS.NEUTRAL_HIGH && rsi > RSI_THRESHOLDS.OVERSOLD;
+  } else if (trend === "bearish") {
+    return rsi > RSI_THRESHOLDS.NEUTRAL_LOW && rsi < RSI_THRESHOLDS.OVERBOUGHT;
+  }
+  return false;
+}
