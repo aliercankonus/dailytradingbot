@@ -121,19 +121,30 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
       return;
     }
 
+    if (!formData.symbol) {
+      toast({
+        title: "Symbol Required",
+        description: "Please select a trading symbol",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       toast({
         title: "Running Backtest",
-        description: "Analyzing historical data...",
+        description: `Testing ${formData.symbol} with selected strategy...`,
       });
 
-      await runBacktest(formData);
+      const result = await runBacktest(formData);
+      console.log('Backtest completed with result:', result);
 
       toast({
         title: "Backtest Complete",
-        description: "Results have been generated successfully",
+        description: `Analyzed ${result?.results?.total_trades || 0} trades`,
       });
     } catch (error) {
+      console.error('Backtest error:', error);
       toast({
         title: "Backtest Failed",
         description: error instanceof Error ? error.message : 'Failed to run backtest',
