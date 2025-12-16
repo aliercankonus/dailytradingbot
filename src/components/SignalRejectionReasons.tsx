@@ -694,7 +694,7 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
               <div className={`text-center p-1.5 rounded border ${alignStyles.bg} ${alignStyles.border}`}>
                 <div className="text-[9px] text-muted-foreground mb-0.5">Alignment</div>
                 <div className={`text-sm font-mono font-medium ${alignStyles.text}`}>
-                  {trendConsistency !== undefined && trendConsistency !== null ? trendConsistency.toFixed(0) : '—'}%
+                  {typeof trendConsistency === 'number' ? trendConsistency.toFixed(0) : '—'}%
                 </div>
                 <div className="text-[8px] text-muted-foreground">min: {minConsistency}%</div>
                 <div className="mt-1 h-1 bg-muted/50 rounded-full overflow-hidden">
