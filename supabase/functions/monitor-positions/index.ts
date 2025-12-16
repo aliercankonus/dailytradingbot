@@ -897,17 +897,20 @@ serve(async (req) => {
       // IMPORTANT: Only activate break-even if profit exceeds minimum stop distance (1%)
       // to prevent premature exits from normal market volatility
       // ============================================================
-      const MIN_STOP_DISTANCE_PERCENT = 1.0; // 1% minimum stop loss distance
+      // Break-even activation uses USER's configured threshold (not hardcoded 1%)
+      // The 1% minimum distance is only checked when placing the stop, not for eligibility
+      // This allows break-even to activate at 0.5% profit as configured, protecting profits earlier
       const isBreakEvenEligible = userSettings.breakEvenEnabled && 
-                                  pnlPercent >= Math.max(userSettings.breakEvenActivationPercent, MIN_STOP_DISTANCE_PERCENT) &&
+                                  pnlPercent >= userSettings.breakEvenActivationPercent &&
                                   !trailingActivated; // Don't apply if trailing stop already moved
 
       if (isBreakEvenEligible) {
         const entryPrice = position.entry_price;
         let shouldMoveToBreakEven = false;
         
-        // Calculate minimum stop distance from current price
-        const minDistanceFromCurrent = currentPrice * (MIN_STOP_DISTANCE_PERCENT / 100);
+        // Calculate minimum stop distance from current price (0.5% for break-even to allow earlier protection)
+        const BREAK_EVEN_MIN_DISTANCE_PERCENT = 0.5;
+        const minDistanceFromCurrent = currentPrice * (BREAK_EVEN_MIN_DISTANCE_PERCENT / 100);
 
         if (position.side === "BUY") {
           // For LONG: Only move stop to entry if it maintains minimum distance from current price
