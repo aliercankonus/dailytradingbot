@@ -2025,8 +2025,10 @@ serve(async (req) => {
         const stochRsiK4h = stochRsi4h?.k ?? 50;
         const stochRsiD4h = stochRsi4h?.d ?? 50;
         const stochRsiK1h = stochRsi1h?.k ?? 50;
-        const STOCHRSI_OVERSOLD_THRESHOLD = 10;  // Below 10 = extreme oversold
-        const STOCHRSI_OVERBOUGHT_THRESHOLD = 90; // Above 90 = extreme overbought
+        // CRITICAL FIX: Raised from 10 to 20 - entries at K=10-20 were still causing bounce losses
+        // Smart exception still allows legitimate continuation in strong trends
+        const STOCHRSI_OVERSOLD_THRESHOLD = 20;  // Below 20 = oversold (bounce risk for shorts)
+        const STOCHRSI_OVERBOUGHT_THRESHOLD = 80; // Above 80 = overbought (bounce risk for longs)
         const STRONG_TREND_ADX_THRESHOLD = ADX_THRESHOLDS.VERY_STRONG;  // ADX >= 30 = strong trend
         
         // Get trend data for both timeframes (for StochRSI filter)
