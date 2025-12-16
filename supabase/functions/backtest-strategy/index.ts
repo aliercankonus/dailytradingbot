@@ -164,6 +164,58 @@ serve(async (req) => {
       return allKlines.slice(Math.max(0, actualEndIndex - count), actualEndIndex);
     }
 
+    // ============= VOLUME ANALYSIS HELPER =============
+    // Calculates volume metrics from kline data for scoring
+    function analyzeVolume(klines: any[], trend: string): {
+      volumeConfirms: boolean;
+      volumeSpike: boolean;
+      volumeRatio: number;
+      hasRangeExpansion: boolean;
+    } {
+      if (klines.length < 20) {
+        return { volumeConfirms: false, volumeSpike: false, volumeRatio: 1.0, hasRangeExpansion: false };
+      }
+
+      // Get current and recent volumes
+      const currentVolume = parseFloat(klines[klines.length - 1][5]);
+      const recentVolumes = klines.slice(-20).map((k: any) => parseFloat(k[5]));
+      const avgVolume = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
+      
+      // Volume ratio (current vs average)
+      const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1.0;
+      
+      // Volume spike detection (>2x average)
+      const volumeSpike = volumeRatio > 2.0;
+      
+      // Volume confirms trend direction
+      // For bullish: volume should increase on up candles
+      // For bearish: volume should increase on down candles
+      const currentCandle = klines[klines.length - 1];
+      const prevCandle = klines[klines.length - 2];
+      const currentClose = parseFloat(currentCandle[4]);
+      const currentOpen = parseFloat(currentCandle[1]);
+      const prevVolume = parseFloat(prevCandle[5]);
+      
+      const isBullishCandle = currentClose > currentOpen;
+      const isBearishCandle = currentClose < currentOpen;
+      const volumeIncreasing = currentVolume > prevVolume;
+      
+      let volumeConfirms = false;
+      if (trend === 'bullish' && isBullishCandle && volumeIncreasing && volumeRatio > 1.2) {
+        volumeConfirms = true;
+      } else if (trend === 'bearish' && isBearishCandle && volumeIncreasing && volumeRatio > 1.2) {
+        volumeConfirms = true;
+      }
+      
+      // Range expansion: current candle range vs recent average range
+      const currentRange = parseFloat(currentCandle[2]) - parseFloat(currentCandle[3]);
+      const recentRanges = klines.slice(-20).map((k: any) => parseFloat(k[2]) - parseFloat(k[3]));
+      const avgRange = recentRanges.reduce((a, b) => a + b, 0) / recentRanges.length;
+      const hasRangeExpansion = avgRange > 0 ? (currentRange / avgRange) > 1.0 : false;
+      
+      return { volumeConfirms, volumeSpike, volumeRatio, hasRangeExpansion };
+    }
+
     for (let i = startIdx; i < allKlines1h.length; i++) {
       const currentCandle = allKlines1h[i];
       const candleTimestamp = currentCandle[0];
@@ -324,8 +376,15 @@ serve(async (req) => {
           { higherTimeframeFilter: { trend4h: trend4h.trend, trend1h: trend1h.trend } }
         );
         
-        // Volume data (backtest uses simplified volume - no separate volume structure available)
-        const volumeScore = getVolumeScore(false, false, 1.0, false, trend4h.trend);
+        // Volume analysis from real kline data
+        const volumeAnalysis = analyzeVolume(klines1hSlice, trend4h.trend);
+        const volumeScore = getVolumeScore(
+          volumeAnalysis.volumeConfirms, 
+          volumeAnalysis.volumeSpike, 
+          volumeAnalysis.volumeRatio, 
+          volumeAnalysis.hasRangeExpansion, 
+          trend4h.trend
+        );
         
         // Base quality score (40) + components
         let qualityScore = 40 + adxScore + momentumScore + alignmentScore + volumeScore + confidencePenalty;
