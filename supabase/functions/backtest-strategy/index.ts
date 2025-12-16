@@ -2,9 +2,17 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
 
 // Import shared modules - same code as calculate-trend uses
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RISK_PARAMS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RISK_PARAMS, CONFIDENCE_THRESHOLDS } from "../_shared/constants.ts";
 import { calculateATR } from "../_shared/indicators.ts";
 import { analyzeMultiTimeframe, MultiTimeframeTrendData } from "../_shared/trend-core.ts";
+import { 
+  getAdxScore, 
+  getMomentumScore, 
+  getConfidencePenalty, 
+  getAlignmentScore,
+  getVolumeScore,
+  calculateUnifiedReversalScore
+} from "../_shared/scoring.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -300,17 +308,43 @@ serve(async (req) => {
         if (entryType === 'short' && stochRsi4h.k < STOCHRSI_THRESHOLDS.OVERSOLD) continue;
         if (entryType === 'long' && stochRsi4h.k > STOCHRSI_THRESHOLDS.OVERBOUGHT) continue;
 
-        // Quality score (simplified version of live system)
-        let qualityScore = 40;
-        if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) qualityScore += 20;
-        else if (adx >= ADX_THRESHOLDS.STRONG) qualityScore += 15;
-        else if (adx >= ADX_THRESHOLDS.MINIMUM) qualityScore += 10;
-        if (momentum.confirms) qualityScore += 15;
-        if (trend4h.trend === trend1h.trend && trend1h.trend !== 'neutral') qualityScore += 10;
-        if (trend4h.confidence >= 85) qualityScore -= 20;
-        else if (trend4h.confidence >= 80) qualityScore -= 15;
-        else if (trend4h.confidence >= 75) qualityScore -= 10;
-        else if (trend4h.confidence >= 70) qualityScore -= 6;
+        // Quality score using SHARED scoring module (aligned with live system)
+        const adxScore = getAdxScore(adx);
+        const momentumScore = getMomentumScore(momentum);
+        const confidencePenalty = getConfidencePenalty(trend4h.confidence, adx, momentum.confirms);
+        
+        // Calculate consistency from trend agreement
+        const trendsAgree = trend4h.trend === trend1h.trend && trend1h.trend !== 'neutral';
+        const calculatedConsistency = trendsAgree ? 75 : (isAligned ? 60 : 40);
+        
+        const alignmentScore = getAlignmentScore(
+          trend4h.confidence, 
+          calculatedConsistency, 
+          isAligned, 
+          { higherTimeframeFilter: { trend4h: trend4h.trend, trend1h: trend1h.trend } }
+        );
+        
+        // Volume data (backtest uses simplified volume - no separate volume structure available)
+        const volumeScore = getVolumeScore(false, false, 1.0, false, trend4h.trend);
+        
+        // Base quality score (40) + components
+        let qualityScore = 40 + adxScore + momentumScore + alignmentScore + volumeScore + confidencePenalty;
+        
+        // Unified reversal score check (aligned with execute-trade)
+        const reversalResult = calculateUnifiedReversalScore(
+          { 
+            momentum, 
+            stochasticRsi: { '4h': stochRsi4h, '1h': stochRsi1h },
+            higherTimeframeFilter: { trend4h: trend4h.trend, trend1h: trend1h.trend },
+            volatility: { adx, atrPercent }
+          }, 
+          entryType, 
+          symbol
+        );
+        if (reversalResult.decision === "BLOCK") continue;
+        if (reversalResult.decision === "REDUCE") {
+          qualityScore = Math.round(qualityScore * 0.8); // Reduce quality for high reversal risk
+        }
 
         if (qualityScore < RISK_PARAMS.MIN_QUALITY_THRESHOLD) continue;
 
