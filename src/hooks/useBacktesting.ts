@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
 interface BacktestResult {
@@ -27,11 +27,46 @@ interface BacktestResult {
   created_at: string;
 }
 
+export interface BacktestProgress {
+  status: 'idle' | 'fetching' | 'processing' | 'analyzing' | 'complete';
+  totalCandles: number;
+  processedCandles: number;
+  currentBatch: number;
+  totalBatches: number;
+  estimatedTimeRemaining: number | null;
+  startTime: number | null;
+}
+
+const BATCH_SIZE = 50;
+const AVG_BATCH_TIME_MS = 400; // Estimated time per batch
+
 export const useBacktesting = () => {
   const [results, setResults] = useState<BacktestResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [runningBacktest, setRunningBacktest] = useState(false);
+  const [progress, setProgress] = useState<BacktestProgress>({
+    status: 'idle',
+    totalCandles: 0,
+    processedCandles: 0,
+    currentBatch: 0,
+    totalBatches: 0,
+    estimatedTimeRemaining: null,
+    startTime: null,
+  });
+  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const resetProgress = () => {
+    setProgress({
+      status: 'idle',
+      totalCandles: 0,
+      processedCandles: 0,
+      currentBatch: 0,
+      totalBatches: 0,
+      estimatedTimeRemaining: null,
+      startTime: null,
+    });
+  };
 
   const fetchResults = async () => {
     try {
@@ -61,14 +96,75 @@ export const useBacktesting = () => {
   }) => {
     try {
       setRunningBacktest(true);
+      
+      // Calculate estimated candles (1h timeframe)
+      const startMs = new Date(params.startDate).getTime();
+      const endMs = new Date(params.endDate).getTime();
+      const hoursInRange = Math.ceil((endMs - startMs) / (1000 * 60 * 60));
+      const totalCandles = Math.max(hoursInRange, 1);
+      const totalBatches = Math.ceil(totalCandles / BATCH_SIZE);
+      const startTime = Date.now();
+      
+      // Initialize progress
+      setProgress({
+        status: 'fetching',
+        totalCandles,
+        processedCandles: 0,
+        currentBatch: 0,
+        totalBatches,
+        estimatedTimeRemaining: totalBatches * AVG_BATCH_TIME_MS,
+        startTime,
+      });
+
+      // Simulate progress during execution
+      let currentBatch = 0;
+      progressIntervalRef.current = setInterval(() => {
+        currentBatch++;
+        if (currentBatch <= totalBatches) {
+          const processedCandles = Math.min(currentBatch * BATCH_SIZE, totalCandles);
+          const elapsed = Date.now() - startTime;
+          const avgTimePerBatch = elapsed / currentBatch;
+          const remainingBatches = totalBatches - currentBatch;
+          
+          setProgress(prev => ({
+            ...prev,
+            status: currentBatch < totalBatches * 0.1 ? 'fetching' : 
+                   currentBatch < totalBatches * 0.9 ? 'processing' : 'analyzing',
+            processedCandles,
+            currentBatch,
+            estimatedTimeRemaining: Math.max(0, remainingBatches * avgTimePerBatch),
+          }));
+        }
+      }, AVG_BATCH_TIME_MS);
+
       const { data, error: backtestError } = await supabase.functions.invoke('backtest-strategy', {
         body: params,
       });
 
+      // Clear interval and mark complete
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+
       if (backtestError) throw backtestError;
+      
+      setProgress(prev => ({
+        ...prev,
+        status: 'complete',
+        processedCandles: totalCandles,
+        currentBatch: totalBatches,
+        estimatedTimeRemaining: 0,
+      }));
+
       await fetchResults();
       return data;
     } catch (err) {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+      resetProgress();
       console.error('Error running backtest:', err);
       throw err;
     } finally {
@@ -78,7 +174,12 @@ export const useBacktesting = () => {
 
   useEffect(() => {
     fetchResults();
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+    };
   }, []);
 
-  return { results, loading, error, runningBacktest, runBacktest };
+  return { results, loading, error, runningBacktest, runBacktest, progress };
 };

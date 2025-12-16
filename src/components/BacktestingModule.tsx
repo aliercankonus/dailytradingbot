@@ -5,13 +5,14 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useBacktesting } from '@/hooks/useBacktesting';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Bar, Area } from 'recharts';
-import { TrendingUp, TrendingDown, Target, Activity, Info } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Activity, Info, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useEffect } from 'react';
 import { useCustomStrategies } from '@/hooks/useCustomStrategies';
 import { useSymbols } from '@/hooks/useSymbols';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Progress } from '@/components/ui/progress';
 import { formatPrice, formatPercent } from '@/lib/utils';
 
 interface BacktestingModuleProps {
@@ -19,7 +20,7 @@ interface BacktestingModuleProps {
 }
 
 export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
-  const { results, runningBacktest, runBacktest } = useBacktesting();
+  const { results, runningBacktest, runBacktest, progress } = useBacktesting();
   const { toast } = useToast();
   const { strategies: customStrategies } = useCustomStrategies();
   const { activeSymbols, symbols } = useSymbols();
@@ -223,8 +224,45 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
           disabled={runningBacktest || !formData.strategyId}
           className="w-full mt-4"
         >
-          {runningBacktest ? 'Running Backtest...' : 'Run Historical Backtest'}
+          {runningBacktest ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Running Backtest...
+            </>
+          ) : 'Run Historical Backtest'}
         </Button>
+
+        {runningBacktest && progress.status !== 'idle' && (
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">
+                  {progress.status === 'fetching' && 'Fetching market data...'}
+                  {progress.status === 'processing' && 'Processing candles...'}
+                  {progress.status === 'analyzing' && 'Analyzing trades...'}
+                  {progress.status === 'complete' && 'Complete!'}
+                </span>
+              </div>
+              <span className="font-mono text-xs text-muted-foreground">
+                Batch {progress.currentBatch}/{progress.totalBatches}
+              </span>
+            </div>
+            <Progress 
+              value={progress.totalCandles > 0 
+                ? (progress.processedCandles / progress.totalCandles) * 100 
+                : 0
+              } 
+              className="h-2"
+            />
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>{progress.processedCandles.toLocaleString()} / {progress.totalCandles.toLocaleString()} candles</span>
+              {progress.estimatedTimeRemaining !== null && progress.estimatedTimeRemaining > 0 && (
+                <span>~{Math.ceil(progress.estimatedTimeRemaining / 1000)}s remaining</span>
+              )}
+            </div>
+          </div>
+        )}
+
         <p className="text-xs text-muted-foreground mt-2 text-center">
           Tests your strategy against past market data to see how it would have performed
         </p>
