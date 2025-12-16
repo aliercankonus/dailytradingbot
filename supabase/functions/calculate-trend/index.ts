@@ -1189,7 +1189,18 @@ serve(async (req) => {
 
   try {
     // Parse request body with proper error handling
-    let body: { symbol?: string };
+    let body: { 
+      symbol?: string; 
+      // BACKTEST MODE: Accept pre-fetched historical klines instead of fetching from Binance
+      // This allows backtest-strategy to reuse the live system's analysis logic
+      historicalKlines?: {
+        '15m': any[];
+        '30m': any[];
+        '1h': any[];
+        '4h': any[];
+      };
+      backtestMode?: boolean;
+    };
     try {
       body = await req.json();
     } catch (parseError) {
@@ -1199,7 +1210,7 @@ serve(async (req) => {
       );
     }
     
-    const { symbol } = body;
+    const { symbol, historicalKlines, backtestMode } = body;
     if (!symbol || typeof symbol !== "string") {
       return new Response(
         JSON.stringify({ error: "Symbol is required and must be a string" }),
@@ -1207,14 +1218,26 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Multi-timeframe analysis for ${symbol}`);
-
-    const [klines15m, klines30m, klines1h, klines4h] = await Promise.all([
-      fetchBinanceKlines(symbol, "15m", 100),
-      fetchBinanceKlines(symbol, "30m", 100),
-      fetchBinanceKlines(symbol, "1h", 100),
-      fetchBinanceKlines(symbol, "4h", 50),
-    ]);
+    // BACKTEST MODE: Use provided historical klines OR fetch live from Binance
+    let klines15m: any[], klines30m: any[], klines1h: any[], klines4h: any[];
+    
+    if (historicalKlines && backtestMode) {
+      // Backtest mode: use provided historical data
+      klines15m = historicalKlines['15m'] || [];
+      klines30m = historicalKlines['30m'] || [];
+      klines1h = historicalKlines['1h'] || [];
+      klines4h = historicalKlines['4h'] || [];
+      // Reduced logging in backtest mode to prevent spam
+    } else {
+      // Live mode: fetch from Binance
+      console.log(`Multi-timeframe analysis for ${symbol}`);
+      [klines15m, klines30m, klines1h, klines4h] = await Promise.all([
+        fetchBinanceKlines(symbol, "15m", 100),
+        fetchBinanceKlines(symbol, "30m", 100),
+        fetchBinanceKlines(symbol, "1h", 100),
+        fetchBinanceKlines(symbol, "4h", 50),
+      ]);
+    }
 
     const prices15m = klines15m.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
     const prices30m = klines30m.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
