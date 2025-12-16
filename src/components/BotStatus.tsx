@@ -118,21 +118,23 @@ export const BotStatus = () => {
                   <TooltipContent className="max-w-xs">
                     <div className="space-y-2 text-xs">
                       <p className="font-semibold">Technical Indicators (1m candles):</p>
-                      {trendData?.indicators && (
+                      {trendData?.indicators ? (
                         <>
                           <div>
-                            <span className="font-medium">EMA:</span> 12={trendData.indicators.ema12}, 26=
-                            {trendData.indicators.ema26} ({trendData.indicators.emaSignal})
+                            <span className="font-medium">EMA:</span> 12={trendData.indicators.ema12 ?? 'N/A'}, 26=
+                            {trendData.indicators.ema26 ?? 'N/A'} ({trendData.indicators.emaSignal ?? 'N/A'})
                           </div>
                           <div>
-                            <span className="font-medium">RSI:</span> {trendData.indicators.rsi} (
-                            {trendData.indicators.rsiSignal})
+                            <span className="font-medium">RSI:</span> {trendData.indicators.rsi ?? 'N/A'} (
+                            {trendData.indicators.rsiSignal ?? 'N/A'})
                           </div>
                           <div>
-                            <span className="font-medium">MACD:</span> {trendData.indicators.macd?.toFixed(2)} / Signal:{" "}
-                            {trendData.indicators.macdSignal?.toFixed(2)} ({trendData.indicators.macdTrend})
+                            <span className="font-medium">MACD:</span> {trendData.indicators.macd?.toFixed(2) ?? 'N/A'} / Signal:{" "}
+                            {trendData.indicators.macdSignal?.toFixed(2) ?? 'N/A'} ({trendData.indicators.macdTrend ?? 'N/A'})
                           </div>
                         </>
+                      ) : (
+                        <p className="text-muted-foreground">No indicator data available</p>
                       )}
                     </div>
                   </TooltipContent>
