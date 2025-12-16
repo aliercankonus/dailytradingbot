@@ -1,80 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS } from "../_shared/constants.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-// ============= CENTRALIZED ADX THRESHOLDS =============
-// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
-// Changes here should be mirrored in: calculate-trend, execute-trade, monitor-positions
-const ADX_THRESHOLDS = {
-  VERY_WEAK: 12,    // Essentially no trend, avoid trading
-  SEVERE_PENALTY: 15, // Below this = severe penalty (-10), consistent mental model
-  WEAK: 18,         // Weak trend, mixed momentum allowed with caution
-  MINIMUM: 20,      // Hard gate for any signal generation
-  MODERATE: 22,     // Momentum confirmation threshold
-  STRONG: 25,       // Strong trend, reduced reversal weight
-  VERY_STRONG: 30,  // Very strong trend, momentum continuation valid
-  EXCEPTIONAL: 35,  // Exceptional trend, relaxed quality thresholds
-  EXTREME: 40,      // Extreme trend, maximum confidence bonus
-} as const;
-
-// ============= CENTRALIZED STOCHRSI THRESHOLDS =============
-// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
-// Changes here should be mirrored in: calculate-trend, execute-trade, monitor-positions, ai-signal-analyzer
-const STOCHRSI_THRESHOLDS = {
-  EXTREME_OVERSOLD: 10,    // Extremely oversold, strong bounce risk for SHORT
-  DEEPLY_OVERSOLD: 15,     // Deeply oversold zone
-  OVERSOLD: 20,            // Standard oversold threshold
-  OVERSOLD_ZONE: 25,       // Entering oversold territory
-  NEUTRAL_LOW: 30,         // Lower neutral boundary
-  NEUTRAL_HIGH: 70,        // Upper neutral boundary
-  OVERBOUGHT_ZONE: 75,     // Entering overbought territory
-  OVERBOUGHT: 80,          // Standard overbought threshold
-  DEEPLY_OVERBOUGHT: 85,   // Deeply overbought zone
-  EXTREME_OVERBOUGHT: 90,  // Extremely overbought, strong pullback risk for LONG
-} as const;
-
-// ============= CENTRALIZED RSI THRESHOLDS =============
-// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
-// Changes here should be mirrored in: calculate-trend, execute-trade, monitor-positions, ai-signal-analyzer
-const RSI_THRESHOLDS = {
-  OVERSOLD: 30,            // Classic oversold level
-  BEARISH_PULLBACK: 35,    // RSI showing bearish weakness / SHORT pullback
-  BULLISH_PULLBACK: 40,    // RSI showing bullish pullback opportunity
-  NEUTRAL_LOW: 45,         // Lower neutral/pullback zone for momentum continuation
-  NEUTRAL: 50,             // Neutral RSI
-  NEUTRAL_HIGH: 55,        // Upper neutral/rally zone for SHORT momentum continuation
-  BEARISH_RALLY: 60,       // RSI showing bearish rally (SHORT entry opportunity)
-  BULLISH_STRONG: 65,      // Strong bullish momentum / overbought warning
-  OVERBOUGHT: 70,          // Classic overbought level
-} as const;
-
-// ============= CENTRALIZED CONFIDENCE THRESHOLDS =============
-// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
-// Changes here should be mirrored in: calculate-trend, execute-trade, monitor-positions, ai-signal-analyzer
-const CONFIDENCE_THRESHOLDS = {
-  VERY_LOW: 40,            // Very weak confidence, heavy position reduction
-  LOW: 50,                 // Low confidence, optimal zone lower bound
-  OPTIMAL_LOWER: 50,       // Optimal zone start (46% win rate historically)
-  OPTIMAL_UPPER: 59,       // Optimal zone end
-  DEAD_ZONE_LOWER: 60,     // Dead zone start (31% win rate - avoid!)
-  STRONG_1H_MIN: 62,       // Minimum 1h confidence for pullback signals
-  HTF_EXCEPTION: 65,       // HTF alignment exception threshold
-  STRONG_4H: 68,           // Strong 4h threshold for neutral exceptions
-  DEAD_ZONE_UPPER: 69,     // Dead zone end
-  PULLBACK_4H_MIN: 70,     // Minimum 4h confidence for pullback opportunities
-  RECOVERY_MAX: 70,        // Maximum confidence in recovery mode
-  STRONG_1H_REVERSAL: 75,  // Strong 1h for early reversal signals
-  PENALTY_LIGHT: 70,       // Light penalty threshold
-  PENALTY_MODERATE: 75,    // Moderate penalty threshold  
-  PENALTY_STRONG: 80,      // Strong penalty threshold
-  PENALTY_HEAVY: 85,       // Heavy penalty threshold (exhaustion risk)
-  WEAK_4H: 58,             // Weak 4h threshold for early reversal
-  STRONG_ALIGNMENT_1H: 58, // Minimum 1h for strong alignment
-} as const;
 
 // ============= STOCHRSI-WEIGHTED RSI SCORE HELPER =============
 // When StochRSI is at extreme levels, RSI signals have reduced reliability
