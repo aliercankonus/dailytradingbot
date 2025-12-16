@@ -118,7 +118,7 @@ export const BotStatus = () => {
                   <TooltipContent className="max-w-xs">
                     <div className="space-y-2 text-xs">
                       <p className="font-semibold">Technical Indicators (1m candles):</p>
-                      {trendData && (
+                      {trendData?.indicators && (
                         <>
                           <div>
                             <span className="font-medium">EMA:</span> 12={trendData.indicators.ema12}, 26=
@@ -129,8 +129,8 @@ export const BotStatus = () => {
                             {trendData.indicators.rsiSignal})
                           </div>
                           <div>
-                            <span className="font-medium">MACD:</span> {trendData.indicators.macd.toFixed(2)} / Signal:{" "}
-                            {trendData.indicators.macdSignal.toFixed(2)} ({trendData.indicators.macdTrend})
+                            <span className="font-medium">MACD:</span> {trendData.indicators.macd?.toFixed(2)} / Signal:{" "}
+                            {trendData.indicators.macdSignal?.toFixed(2)} ({trendData.indicators.macdTrend})
                           </div>
                         </>
                       )}
