@@ -125,7 +125,7 @@ const coerceNumeric = (value: any, fallback = 0): number => {
 };
 
 // Helper to extract confidence from various data structures
-const extractConfidence = (filtersStatus: any, trendData: any): number => {
+const extractConfidence = (filtersStatus: any, trendData: any): number | undefined => {
   // Direct numeric values
   if (typeof filtersStatus?.confidence === "number") return filtersStatus.confidence;
   if (typeof trendData?.confidence === "number") return trendData.confidence;
@@ -149,7 +149,7 @@ const extractConfidence = (filtersStatus: any, trendData: any): number => {
   if (typeof conf4h === "number") return conf4h;
   if (typeof conf1h === "number") return conf1h;
   
-  return 0;
+  return undefined;
 };
 
 const ScoreBar = ({
@@ -199,7 +199,7 @@ const ScoreBar = ({
 // Market Regime Details component for early rejections
 const MarketRegimeDetails = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, undefined as any);
-  const confidence = extractConfidence(filtersStatus, trendData) || undefined;
+  const confidence = extractConfidence(filtersStatus, trendData);
   const consistency = coerceNumeric(filtersStatus?.consistency ?? trendData?.trueAlignment?.score, undefined as any);
   const regime = filtersStatus?.regime;
   
@@ -599,9 +599,9 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
   const adx = coerceNumber(filtersStatus?.adx ?? trendData?.volatility?.adx);
   
   // Use extractConfidence helper for robust confidence extraction
-  const confidence = extractConfidence(filtersStatus, trendData) || 
-    parsePercentFromText(reasonText, "confidence") || 
-    undefined;
+  const extractedConf = extractConfidence(filtersStatus, trendData);
+  const confidence = extractedConf !== undefined ? extractedConf : 
+    parsePercentFromText(reasonText, "confidence");
 
   const trendConsistency =
     coerceNumber(
