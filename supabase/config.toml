@@ -45,7 +45,7 @@ verify_jwt = false
 
 # User-facing functions now require JWT authentication
 [functions.backtest-strategy]
-verify_jwt = true
+verify_jwt = false
 
 [functions.ai-signal-analyzer]
 verify_jwt = true
