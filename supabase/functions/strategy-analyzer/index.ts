@@ -1,36 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS } from "../_shared/constants.ts";
+// Note: Scoring functions have local implementations with different signatures to integrate with QualityFactors interface
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
-// ============= STOCHRSI-WEIGHTED RSI SCORE HELPER =============
-// When StochRSI is at extreme levels, RSI signals have reduced reliability
-// because both indicators are measuring the same underlying momentum
-// This prevents RSI pullback signals from conflicting with StochRSI extreme rejections
-const getStochRsiWeightedRsiScore = (
-  rsiScore: number,
-  stochRsiK: number,
-  isLong: boolean
-): { score: number; isExtreme: boolean } => {
-  // Determine if StochRSI is at extreme level for the intended direction
-  const extremeThreshold = isLong 
-    ? STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT  // 90 - overbought extreme for longs
-    : STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD;   // 10 - oversold extreme for shorts
-    
-  const isExtreme = isLong 
-    ? stochRsiK > extremeThreshold
-    : stochRsiK < extremeThreshold;
-  
-  if (isExtreme) {
-    // StochRSI extreme = RSI signal gets 50% weight to reduce conflict
-    return { score: Math.round(rsiScore * 0.5), isExtreme: true };
-  }
-  
-  return { score: rsiScore, isExtreme: false };
 };
 
 // ============= AI REJECTION ANALYZER HELPER =============
