@@ -137,9 +137,13 @@ export const useBacktesting = () => {
         }
       }, AVG_BATCH_TIME_MS);
 
+      console.log('Calling backtest-strategy with params:', params);
+      
       const { data, error: backtestError } = await supabase.functions.invoke('backtest-strategy', {
         body: params,
       });
+
+      console.log('Backtest response:', { data, error: backtestError });
 
       // Clear interval and mark complete
       if (progressIntervalRef.current) {
@@ -147,7 +151,10 @@ export const useBacktesting = () => {
         progressIntervalRef.current = null;
       }
 
-      if (backtestError) throw backtestError;
+      if (backtestError) {
+        console.error('Backtest error:', backtestError);
+        throw backtestError;
+      }
       
       setProgress(prev => ({
         ...prev,
@@ -158,36 +165,43 @@ export const useBacktesting = () => {
       }));
 
       // Use returned results directly instead of re-fetching from database
-      // (handles case where results aren't saved due to auth issues)
       if (data?.success && data?.results) {
         const result = data.results;
-        setResults(prev => [{
+        console.log('Setting backtest result:', result);
+        
+        const newResult: BacktestResult = {
           id: result.id || `temp-${Date.now()}`,
-          strategy_name: result.strategy_name,
-          symbol: result.symbol,
-          start_date: result.start_date,
-          end_date: result.end_date,
-          initial_capital: result.initial_capital,
-          final_capital: result.final_capital,
-          total_trades: result.total_trades,
-          winning_trades: result.winning_trades,
-          losing_trades: result.losing_trades,
-          win_rate: result.win_rate,
-          total_profit: result.total_profit,
-          total_loss: result.total_loss,
-          net_profit: result.net_profit,
-          max_drawdown: result.max_drawdown,
-          sharpe_ratio: result.sharpe_ratio,
-          profit_factor: result.profit_factor,
-          avg_win: result.avg_win,
-          avg_loss: result.avg_loss,
-          largest_win: result.largest_win,
-          largest_loss: result.largest_loss,
-          results_data: result.results_data,
+          strategy_name: result.strategy_name || 'Unknown',
+          symbol: result.symbol || params.symbol,
+          start_date: result.start_date || params.startDate,
+          end_date: result.end_date || params.endDate,
+          initial_capital: result.initial_capital ?? params.initialCapital,
+          final_capital: result.final_capital ?? params.initialCapital,
+          total_trades: result.total_trades ?? 0,
+          winning_trades: result.winning_trades ?? 0,
+          losing_trades: result.losing_trades ?? 0,
+          win_rate: result.win_rate ?? 0,
+          total_profit: result.total_profit ?? 0,
+          total_loss: result.total_loss ?? 0,
+          net_profit: result.net_profit ?? 0,
+          max_drawdown: result.max_drawdown ?? 0,
+          sharpe_ratio: result.sharpe_ratio ?? 0,
+          profit_factor: result.profit_factor ?? 0,
+          avg_win: result.avg_win ?? 0,
+          avg_loss: result.avg_loss ?? 0,
+          largest_win: result.largest_win ?? 0,
+          largest_loss: result.largest_loss ?? 0,
+          results_data: result.results_data || {},
           created_at: result.created_at || new Date().toISOString(),
-        }, ...prev.slice(0, 9)]);
+        };
+        
+        setResults(prev => [newResult, ...prev.slice(0, 9)]);
+        return { success: true, results: newResult };
+      } else if (data?.error) {
+        console.error('Backtest returned error:', data.error);
+        throw new Error(data.error);
       } else {
-        // Fallback to fetching from database
+        console.warn('No results in backtest response, fetching from database');
         await fetchResults();
       }
       return data;
