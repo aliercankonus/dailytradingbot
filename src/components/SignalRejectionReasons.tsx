@@ -96,15 +96,29 @@ const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
   };
 };
 
-const ScoreBar = ({ 
-  label, 
-  score, 
-  max, 
-  icon: Icon 
-}: { 
-  label: string; 
-  score: number; 
-  max: number; 
+const coerceNumeric = (value: any, fallback = 0): number => {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+  if (typeof value === "string") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  if (typeof value === "object") {
+    const n = Number((value as any)?.score ?? (value as any)?.value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  return fallback;
+};
+
+const ScoreBar = ({
+  label,
+  score,
+  max,
+  icon: Icon,
+}: {
+  label: string;
+  score: number;
+  max: number;
   icon: React.ElementType;
 }) => {
   const percentage = (score / max) * 100;
@@ -142,9 +156,9 @@ const ScoreBar = ({
 
 // Market Regime Details component for early rejections
 const MarketRegimeDetails = ({ filtersStatus }: { filtersStatus: any }) => {
-  const adx = filtersStatus?.adx;
-  const confidence = filtersStatus?.confidence;
-  const consistency = filtersStatus?.consistency;
+  const adx = coerceNumeric(filtersStatus?.adx, undefined as any);
+  const confidence = coerceNumeric(filtersStatus?.confidence, undefined as any);
+  const consistency = coerceNumeric(filtersStatus?.consistency, undefined as any);
   const regime = filtersStatus?.regime;
   
   if (adx === undefined && confidence === undefined && !regime) return null;
@@ -832,20 +846,23 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
 // ============= HARD GATE DISPLAY COMPONENTS =============
 
 const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
-  const adx = parseFloat(filtersStatus?.adx) || 0;
-  const adxRequired = filtersStatus?.adxRequired || 20;
+  const adx = coerceNumeric(filtersStatus?.adx, 0);
+  const adxRequired = coerceNumeric(filtersStatus?.adxRequired, 20);
   const trend =
     filtersStatus?.trend ||
     trendData?.primaryTrend ||
     trendData?.dominantTrend ||
     trendData?.trend ||
     "unknown";
-  const confidence = filtersStatus?.confidence ?? trendData?.confidence ?? 0;
-  const trendConsistency =
+  const confidence = coerceNumeric(filtersStatus?.confidence ?? trendData?.confidence, 0);
+  const trendConsistency = coerceNumeric(
     filtersStatus?.trendConsistency ??
-    trendData?.marketStructure?.confidence ??
-    trendData?.trendConsistency ??
-    0;
+      trendData?.trueAlignment?.score ??
+      trendData?.marketStructure?.confidence ??
+      trendData?.weightedConsistency ??
+      trendData?.trendConsistency,
+    0,
+  );
   const momentum = filtersStatus?.momentum || trendData?.momentum;
   const macdHistogramValue =
     momentum?.macdHistogram ??
@@ -953,14 +970,14 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
   const momentumState = filtersStatus?.momentumState || filtersStatus?.momentum?.state || "none";
   const momentumConfirms = filtersStatus?.momentumConfirms ?? filtersStatus?.momentum?.confirms ?? false;
   const momentum = filtersStatus?.momentum || trendData?.momentum;
-  const adx = parseFloat(filtersStatus?.adx) || trendData?.volatility?.adx || 0;
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   const trend =
     filtersStatus?.trend ||
     trendData?.primaryTrend ||
     trendData?.dominantTrend ||
     trendData?.trend ||
     "unknown";
-  const confidence = filtersStatus?.confidence ?? trendData?.confidence ?? 0;
+  const confidence = coerceNumeric(filtersStatus?.confidence ?? trendData?.confidence, 0);
 
   const htfFilter = filtersStatus?.htfFilter || {};
   const trend4h = htfFilter.trend4h || trendData?.timeframes?.["4h"]?.trend;
@@ -1074,11 +1091,11 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
 
 const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const htfAligned = filtersStatus?.htfAligned ?? false;
-  const confidence = filtersStatus?.confidence || trendData?.confidence || 0;
+  const confidence = coerceNumeric(filtersStatus?.confidence ?? trendData?.confidence, 0);
   const trend4h = trendData?.timeframes?.['4h']?.trend || filtersStatus?.trend4h || "unknown";
   const trend1h = trendData?.timeframes?.['1h']?.trend || filtersStatus?.trend1h || "unknown";
-  const conf4h = trendData?.timeframes?.['4h']?.confidence || 0;
-  const conf1h = trendData?.timeframes?.['1h']?.confidence || 0;
+  const conf4h = coerceNumeric(trendData?.timeframes?.['4h']?.confidence, 0);
+  const conf1h = coerceNumeric(trendData?.timeframes?.['1h']?.confidence, 0);
   
   return (
     <div className="space-y-3 p-3 bg-yellow-500/10 rounded-md border border-yellow-500/30">
@@ -1131,8 +1148,8 @@ const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
 };
 
 const HardGateConfidenceDeadZoneDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
-  const confidence = filtersStatus?.confidence || trendData?.confidence || 0;
-  const adx = parseFloat(filtersStatus?.adx) || trendData?.volatility?.adx || 0;
+  const confidence = coerceNumeric(filtersStatus?.confidence ?? trendData?.confidence, 0);
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   
   return (
     <div className="space-y-3 p-3 bg-purple-500/10 rounded-md border border-purple-500/30">
