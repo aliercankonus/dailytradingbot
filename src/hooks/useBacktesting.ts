@@ -157,7 +157,39 @@ export const useBacktesting = () => {
         estimatedTimeRemaining: 0,
       }));
 
-      await fetchResults();
+      // Use returned results directly instead of re-fetching from database
+      // (handles case where results aren't saved due to auth issues)
+      if (data?.success && data?.results) {
+        const result = data.results;
+        setResults(prev => [{
+          id: result.id || `temp-${Date.now()}`,
+          strategy_name: result.strategy_name,
+          symbol: result.symbol,
+          start_date: result.start_date,
+          end_date: result.end_date,
+          initial_capital: result.initial_capital,
+          final_capital: result.final_capital,
+          total_trades: result.total_trades,
+          winning_trades: result.winning_trades,
+          losing_trades: result.losing_trades,
+          win_rate: result.win_rate,
+          total_profit: result.total_profit,
+          total_loss: result.total_loss,
+          net_profit: result.net_profit,
+          max_drawdown: result.max_drawdown,
+          sharpe_ratio: result.sharpe_ratio,
+          profit_factor: result.profit_factor,
+          avg_win: result.avg_win,
+          avg_loss: result.avg_loss,
+          largest_win: result.largest_win,
+          largest_loss: result.largest_loss,
+          results_data: result.results_data,
+          created_at: result.created_at || new Date().toISOString(),
+        }, ...prev.slice(0, 9)]);
+      } else {
+        // Fallback to fetching from database
+        await fetchResults();
+      }
       return data;
     } catch (err) {
       if (progressIntervalRef.current) {
