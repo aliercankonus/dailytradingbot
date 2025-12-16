@@ -60,7 +60,7 @@ function mapResponseToTrendData(data: any, symbol: string): TrendData | null {
       symbol: data.symbol || symbol,
       currentPrice: data.currentPrice ?? 0,
       trend: data.primaryTrend || data.dominantTrend || 'neutral',
-      confidence: data.weightedConsistency ?? data.trueAlignment ?? 0,
+      confidence: data.weightedConsistency ?? data.trueAlignment?.score ?? 0,
       indicators,
       timestamp: new Date().toISOString(),
       volatility: data.volatility ? {
