@@ -189,7 +189,7 @@ serve(async (req) => {
     const simulationKlines1h = allKlines1h.filter((k: any) => k[0] >= startTime);
     console.log(`Simulating ${simulationKlines1h.length} candles from ${startDate} to ${endDate}`);
 
-    // ============= BACKTEST SIMULATION =============
+    // ============= BACKTEST SIMULATION WITH BATCH PROCESSING =============
     const trades: Trade[] = [];
     const volumeData: Array<{ timestamp: string; price: number; volume: number }> = [];
     let currentCapital = initialCapital;
@@ -218,7 +218,63 @@ serve(async (req) => {
       return allKlines.slice(startIndex, actualEndIndex);
     }
 
-    // Process each candle in the simulation
+    // ============= BATCH PROCESS TREND DATA =============
+    // Call calculate-trend with batch mode for all candles at once
+    const BATCH_SIZE = 50; // Process 50 candles per API call
+    const trendDataMap = new Map<number, any>();
+    
+    console.log(`Preparing batch trend calculations for ${simulationKlines1h.length} candles...`);
+    
+    for (let batchStart = 0; batchStart < simulationKlines1h.length; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, simulationKlines1h.length);
+      const batchKlines: Array<{ timestamp: number; klines: any }> = [];
+      
+      for (let i = batchStart; i < batchEnd; i++) {
+        const currentCandle = simulationKlines1h[i];
+        const candleTimestamp = currentCandle[0];
+        
+        batchKlines.push({
+          timestamp: candleTimestamp,
+          klines: {
+            '15m': getKlinesSlice(allKlines15m, candleTimestamp, 100),
+            '30m': getKlinesSlice(allKlines30m, candleTimestamp, 100),
+            '1h': getKlinesSlice(allKlines1h, candleTimestamp, 100),
+            '4h': getKlinesSlice(allKlines4h, candleTimestamp, 50),
+          },
+        });
+      }
+      
+      // Call batch endpoint
+      try {
+        const trendResponse = await supabase.functions.invoke('calculate-trend', {
+          body: { symbol, batchKlines },
+        });
+
+        if (trendResponse.error) {
+          console.error(`Batch ${batchStart}-${batchEnd} error:`, trendResponse.error);
+          continue;
+        }
+
+        if (trendResponse.data?.batch && trendResponse.data?.results) {
+          for (const result of trendResponse.data.results) {
+            if (result.data) {
+              trendDataMap.set(result.timestamp, result.data);
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`Batch ${batchStart}-${batchEnd} failed:`, err);
+      }
+      
+      // Small delay between batches
+      if (batchStart + BATCH_SIZE < simulationKlines1h.length) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+    }
+    
+    console.log(`Trend data calculated for ${trendDataMap.size}/${simulationKlines1h.length} candles`);
+
+    // ============= SIMULATE TRADING =============
     for (let i = 0; i < simulationKlines1h.length; i++) {
       const currentCandle = simulationKlines1h[i];
       const candleTimestamp = currentCandle[0];
@@ -233,45 +289,11 @@ serve(async (req) => {
         volumeData.push({ timestamp, price: currentPrice, volume: currentVolume });
       }
 
-      // Get historical klines slices for calculate-trend
-      const historicalKlines = {
-        '15m': getKlinesSlice(allKlines15m, candleTimestamp, 100),
-        '30m': getKlinesSlice(allKlines30m, candleTimestamp, 100),
-        '1h': getKlinesSlice(allKlines1h, candleTimestamp, 100),
-        '4h': getKlinesSlice(allKlines4h, candleTimestamp, 50),
-      };
-
-      // Skip if not enough data
-      if (historicalKlines['1h'].length < 50 || historicalKlines['4h'].length < 20) {
-        continue;
-      }
-
-      // ============= CALL LIVE CALCULATE-TREND =============
-      // This ensures 100% alignment with live system
-      let trendData: any = null;
-      try {
-        const trendResponse = await supabase.functions.invoke('calculate-trend', {
-          body: {
-            symbol,
-            historicalKlines,
-            backtestMode: true,
-          },
-        });
-
-        if (trendResponse.error) {
-          console.error('calculate-trend error:', trendResponse.error);
-          continue;
-        }
-
-        trendData = trendResponse.data;
-      } catch (err) {
-        console.error('Failed to call calculate-trend:', err);
-        continue;
-      }
-
+      // Get pre-calculated trend data
+      const trendData = trendDataMap.get(candleTimestamp);
       if (!trendData) continue;
 
-      // Extract key indicators from live system response
+      // Extract key indicators from batch response
       const trend4h = trendData.trend4h?.trend || 'neutral';
       const confidence4h = trendData.trend4h?.confidence || 50;
       const trend1h = trendData.trend1h?.trend || 'neutral';
@@ -499,10 +521,6 @@ serve(async (req) => {
         };
       }
 
-      // Throttle API calls slightly
-      if (i % 50 === 0 && i > 0) {
-        await new Promise(r => setTimeout(r, 50));
-      }
     }
 
     // ============= CALCULATE STATISTICS =============
@@ -539,46 +557,56 @@ serve(async (req) => {
     console.log(`ALIGNED backtest completed: ${trades.length} trades, Win Rate: ${winRate.toFixed(2)}%, Net Profit: ${netProfit.toFixed(2)}`);
     console.log('Exit reasons:', exitReasons);
 
-    // Store results in database
-    const { data: backtestResult, error: dbError } = await supabase
-      .from('backtesting_results')
-      .insert({
-        user_id: userId,
-        strategy_id: isCustomStrategy ? strategyId : null,
-        strategy_name: strategy.name,
-        symbol,
-        start_date: startDate,
-        end_date: endDate,
-        initial_capital: initialCapital,
-        final_capital: currentCapital,
-        total_trades: trades.length,
-        winning_trades: winningTrades,
-        losing_trades: losingTrades,
-        win_rate: winRate,
-        total_profit: totalProfit,
-        total_loss: totalLoss,
-        net_profit: netProfit,
-        max_drawdown: maxDrawdown,
-        sharpe_ratio: sharpeRatio,
-        profit_factor: profitFactor,
-        avg_win: avgWin,
-        avg_loss: avgLoss,
-        largest_win: largestWin,
-        largest_loss: largestLoss,
-        results_data: { 
-          trades, 
-          volumeData, 
-          exitReasons,
-          alignedWithLiveSystem: true,
-          systemVersion: '2.0',
-        },
-      })
-      .select()
-      .single();
+    // Store results in database (only if user is authenticated)
+    let backtestResult: any = {
+      strategy_name: strategy.name,
+      symbol,
+      start_date: startDate,
+      end_date: endDate,
+      initial_capital: initialCapital,
+      final_capital: currentCapital,
+      total_trades: trades.length,
+      winning_trades: winningTrades,
+      losing_trades: losingTrades,
+      win_rate: winRate,
+      total_profit: totalProfit,
+      total_loss: totalLoss,
+      net_profit: netProfit,
+      max_drawdown: maxDrawdown,
+      sharpe_ratio: sharpeRatio,
+      profit_factor: profitFactor,
+      avg_win: avgWin,
+      avg_loss: avgLoss,
+      largest_win: largestWin,
+      largest_loss: largestLoss,
+      results_data: { 
+        trades, 
+        volumeData, 
+        exitReasons,
+        alignedWithLiveSystem: true,
+        systemVersion: '2.1-batch',
+      },
+    };
 
-    if (dbError) {
-      console.error('Error storing backtest results:', dbError);
-      throw dbError;
+    if (userId) {
+      const { data: dbResult, error: dbError } = await supabase
+        .from('backtesting_results')
+        .insert({
+          user_id: userId,
+          strategy_id: isCustomStrategy ? strategyId : null,
+          ...backtestResult,
+        })
+        .select()
+        .single();
+
+      if (dbError) {
+        console.error('Error storing backtest results:', dbError);
+        // Don't throw - still return results even if DB save fails
+      } else {
+        backtestResult = dbResult;
+      }
+    } else {
+      console.log('No authenticated user - returning results without saving to database');
     }
 
     return new Response(

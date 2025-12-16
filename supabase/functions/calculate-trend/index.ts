@@ -1192,7 +1192,6 @@ serve(async (req) => {
     let body: { 
       symbol?: string; 
       // BACKTEST MODE: Accept pre-fetched historical klines instead of fetching from Binance
-      // This allows backtest-strategy to reuse the live system's analysis logic
       historicalKlines?: {
         '15m': any[];
         '30m': any[];
@@ -1200,6 +1199,16 @@ serve(async (req) => {
         '4h': any[];
       };
       backtestMode?: boolean;
+      // BATCH MODE: Process multiple kline sets in one call for faster backtesting
+      batchKlines?: Array<{
+        timestamp: number;
+        klines: {
+          '15m': any[];
+          '30m': any[];
+          '1h': any[];
+          '4h': any[];
+        };
+      }>;
     };
     try {
       body = await req.json();
@@ -1210,7 +1219,98 @@ serve(async (req) => {
       );
     }
     
-    const { symbol, historicalKlines, backtestMode } = body;
+    const { symbol, historicalKlines, backtestMode, batchKlines } = body;
+    
+    // ============= BATCH MODE FOR BACKTESTING =============
+    // Process multiple kline sets in one call - dramatically improves backtest performance
+    if (batchKlines && batchKlines.length > 0 && symbol) {
+      console.log(`BATCH MODE: Processing ${batchKlines.length} candles for ${symbol}`);
+      
+      const results: Array<{ timestamp: number; data: any; error?: string }> = [];
+      
+      for (const batch of batchKlines) {
+        try {
+          const bKlines15m = batch.klines['15m'] || [];
+          const bKlines30m = batch.klines['30m'] || [];
+          const bKlines1h = batch.klines['1h'] || [];
+          const bKlines4h = batch.klines['4h'] || [];
+          
+          // Skip if not enough data
+          if (bKlines1h.length < 50 || bKlines4h.length < 20) {
+            results.push({ timestamp: batch.timestamp, data: null, error: 'insufficient_data' });
+            continue;
+          }
+          
+          // Process using same logic as single mode (inlined for batch)
+          const bPrices15m = bKlines15m.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+          const bPrices30m = bKlines30m.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+          const bPrices1h = bKlines1h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+          const bPrices4h = bKlines4h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+          
+          if (bPrices1h.length === 0) {
+            results.push({ timestamp: batch.timestamp, data: null, error: 'no_price_data' });
+            continue;
+          }
+          
+          const bCurrentPrice = bPrices1h[bPrices1h.length - 1];
+          const bTrend15m = calculateTrend(bPrices15m);
+          const bTrend30m = calculateTrend(bPrices30m);
+          const bTrend1h = calculateTrend(bPrices1h);
+          const bTrend4h = calculateTrend(bPrices4h);
+          
+          const bStochRsi1h = calculateStochasticRSI(bPrices1h, 14, 14, 3, 3, bTrend1h.indicators.rsiArray);
+          const bStochRsi4h = calculateStochasticRSI(bPrices4h, 14, 14, 3, 3, bTrend4h.indicators.rsiArray);
+          
+          const bAdxResult = calculateADXWithDirection(bKlines1h, 14);
+          const bAdx = bAdxResult.adx;
+          const bCurrentATR = calculateATR(bKlines1h, 14);
+          const bAtrPercent = bCurrentPrice !== 0 ? (bCurrentATR / bCurrentPrice) * 100 : 0;
+          const bHistoricalATRAvg = calculateHistoricalATRAvg(bKlines1h, 14, 30, bCurrentATR);
+          const bRelativeATR = bHistoricalATRAvg !== 0 ? bCurrentATR / bHistoricalATRAvg : 0;
+          
+          // Simplified alignment check
+          const bIsAligned = bTrend4h.trend !== "neutral" && 
+            (bTrend1h.trend === bTrend4h.trend || bTrend1h.trend === "neutral");
+          
+          // Volume analysis (simplified)
+          const bVolume1h = calculateVolumeAnalysis(bKlines1h);
+          
+          // Momentum state (simplified)
+          const bMacdExpanding = Math.abs(bTrend1h.indicators.macdHistogram) > 
+            Math.abs(bTrend1h.indicators.macdHistogramArray?.[bTrend1h.indicators.macdHistogramArray.length - 2] || 0);
+          const bLastClose = bPrices1h[bPrices1h.length - 1] || 0;
+          const bPrevClose = bPrices1h[bPrices1h.length - 2] || bLastClose;
+          const bLastCloseAligns = bTrend4h.trend === "bullish" ? bLastClose > bPrevClose : 
+            bTrend4h.trend === "bearish" ? bLastClose < bPrevClose : true;
+          const bMomentumConfirms = bMacdExpanding && bLastCloseAligns && bAdx >= ADX_THRESHOLDS.MINIMUM;
+          
+          results.push({
+            timestamp: batch.timestamp,
+            data: {
+              trend4h: { trend: bTrend4h.trend, confidence: bTrend4h.confidence },
+              trend1h: { trend: bTrend1h.trend, confidence: bTrend1h.confidence },
+              stochRsi4h: { k: bStochRsi4h.k, d: bStochRsi4h.d, signal: bStochRsi4h.signal },
+              stochRsi1h: { k: bStochRsi1h.k, d: bStochRsi1h.d, signal: bStochRsi1h.signal },
+              volatility: { adx: bAdx, atrPercent: bAtrPercent },
+              momentum: { confirms: bMomentumConfirms, state: bMomentumConfirms ? 'confirmed' : 'mixed' },
+              isAligned: bIsAligned,
+              volumeConfirms: bVolume1h.volumeTrend === 'increasing' || bVolume1h.volumeSpike,
+              currentPrice: bCurrentPrice,
+            }
+          });
+        } catch (err) {
+          results.push({ timestamp: batch.timestamp, data: null, error: err instanceof Error ? err.message : 'unknown' });
+        }
+      }
+      
+      console.log(`BATCH MODE: Completed ${results.filter(r => r.data).length}/${batchKlines.length} successful`);
+      
+      return new Response(
+        JSON.stringify({ batch: true, results }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    
     if (!symbol || typeof symbol !== "string") {
       return new Response(
         JSON.stringify({ error: "Symbol is required and must be a string" }),
@@ -1218,18 +1318,15 @@ serve(async (req) => {
       );
     }
 
-    // BACKTEST MODE: Use provided historical klines OR fetch live from Binance
+    // SINGLE MODE: Use provided historical klines OR fetch live from Binance
     let klines15m: any[], klines30m: any[], klines1h: any[], klines4h: any[];
     
     if (historicalKlines && backtestMode) {
-      // Backtest mode: use provided historical data
       klines15m = historicalKlines['15m'] || [];
       klines30m = historicalKlines['30m'] || [];
       klines1h = historicalKlines['1h'] || [];
       klines4h = historicalKlines['4h'] || [];
-      // Reduced logging in backtest mode to prevent spam
     } else {
-      // Live mode: fetch from Binance
       console.log(`Multi-timeframe analysis for ${symbol}`);
       [klines15m, klines30m, klines1h, klines4h] = await Promise.all([
         fetchBinanceKlines(symbol, "15m", 100),
