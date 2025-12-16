@@ -201,15 +201,15 @@ const MarketRegimeDetails = ({ filtersStatus }: { filtersStatus: any }) => {
       </div>
       
       <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/50">
-        {adx !== undefined && (
+        {adx !== undefined && typeof adx === 'number' && (
           <div className="text-center">
             <div className="text-[10px] text-muted-foreground">ADX</div>
             <div className={`text-xs font-mono font-medium ${adx >= 25 ? 'text-green-500' : adx >= 20 ? 'text-yellow-500' : 'text-red-500'}`}>
-              {typeof adx === 'number' ? adx.toFixed(1) : adx}
+              {adx.toFixed(1)}
             </div>
           </div>
         )}
-        {confidence !== undefined && (
+        {confidence !== undefined && typeof confidence === 'number' && (
           <div className="text-center">
             <div className="text-[10px] text-muted-foreground">Confidence</div>
             <div className={`text-xs font-mono font-medium ${confidence >= 60 ? 'text-green-500' : confidence >= 40 ? 'text-yellow-500' : 'text-red-500'}`}>
@@ -217,7 +217,7 @@ const MarketRegimeDetails = ({ filtersStatus }: { filtersStatus: any }) => {
             </div>
           </div>
         )}
-        {consistency !== undefined && (
+        {consistency !== undefined && typeof consistency === 'number' && (
           <div className="text-center">
             <div className="text-[10px] text-muted-foreground">Consistency</div>
             <div className={`text-xs font-mono font-medium ${consistency >= 50 ? 'text-green-500' : consistency >= 30 ? 'text-yellow-500' : 'text-red-500'}`}>
