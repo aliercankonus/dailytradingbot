@@ -549,6 +549,7 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
         filtersStatus?.alignmentScore ??
         trendData?.trueAlignment?.score ??
         trendData?.weightedConsistency ??
+        trendData?.marketStructure?.confidence ??
         trendData?.trendConsistency ??
         trendData?.consistency ??
         trendData?.trend_consistency ??
@@ -833,11 +834,31 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
 const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const adx = parseFloat(filtersStatus?.adx) || 0;
   const adxRequired = filtersStatus?.adxRequired || 20;
-  const trend = filtersStatus?.trend || trendData?.trend || "unknown";
-  const confidence = filtersStatus?.confidence || trendData?.confidence || 0;
-  const trendConsistency = filtersStatus?.trendConsistency || trendData?.trendConsistency || 0;
+  const trend =
+    filtersStatus?.trend ||
+    trendData?.primaryTrend ||
+    trendData?.dominantTrend ||
+    trendData?.trend ||
+    "unknown";
+  const confidence = filtersStatus?.confidence ?? trendData?.confidence ?? 0;
+  const trendConsistency =
+    filtersStatus?.trendConsistency ??
+    trendData?.marketStructure?.confidence ??
+    trendData?.trendConsistency ??
+    0;
   const momentum = filtersStatus?.momentum || trendData?.momentum;
-  const stochRsi = filtersStatus?.stochRsi || trendData?.stochasticRsi?.aggregated;
+  const macdHistogramValue =
+    momentum?.macdHistogram ??
+    trendData?.timeframes?.["1h"]?.indicators?.macdHistogram ??
+    trendData?.timeframes?.["4h"]?.indicators?.macdHistogram;
+  const macdHistogramDisplay =
+    typeof macdHistogramValue === "number"
+      ? macdHistogramValue.toFixed(4)
+      : macdHistogramValue || "N/A";
+  const stochRsi =
+    filtersStatus?.stochRsi ||
+    trendData?.stochasticRsi?.aggregated ||
+    trendData?.stochasticRsi?.["4h"]; // fallback: show 4h stoch
   const volatility = filtersStatus?.volatility || trendData?.volatility;
   
   const adxPercent = Math.min((adx / 40) * 100, 100);
@@ -902,7 +923,7 @@ const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
       {momentum && (
         <div className="flex flex-wrap gap-1.5 text-[9px]">
           <Badge variant="outline" className="text-[9px] px-1 py-0">
-            MACD: {momentum.macdHistogram || "N/A"}
+            MACD: {macdHistogramDisplay}
           </Badge>
           <Badge variant="outline" className={`text-[9px] px-1 py-0 ${momentum.confirms ? 'text-green-400' : 'text-red-400'}`}>
             Confirms: {momentum.confirms ? "Yes" : "No"}
@@ -933,10 +954,33 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
   const momentumConfirms = filtersStatus?.momentumConfirms ?? filtersStatus?.momentum?.confirms ?? false;
   const momentum = filtersStatus?.momentum || trendData?.momentum;
   const adx = parseFloat(filtersStatus?.adx) || trendData?.volatility?.adx || 0;
-  const trend = filtersStatus?.trend || trendData?.trend || "unknown";
-  const confidence = filtersStatus?.confidence || trendData?.confidence || 0;
+  const trend =
+    filtersStatus?.trend ||
+    trendData?.primaryTrend ||
+    trendData?.dominantTrend ||
+    trendData?.trend ||
+    "unknown";
+  const confidence = filtersStatus?.confidence ?? trendData?.confidence ?? 0;
+
   const htfFilter = filtersStatus?.htfFilter || {};
-  const stochRsi = filtersStatus?.stochRsi || trendData?.stochasticRsi?.aggregated;
+  const trend4h = htfFilter.trend4h || trendData?.timeframes?.["4h"]?.trend;
+  const trend1h = htfFilter.trend1h || trendData?.timeframes?.["1h"]?.trend;
+  const trend4hDisplay = trend4h || "N/A";
+  const trend1hDisplay = trend1h || "N/A";
+
+  const stochRsi =
+    filtersStatus?.stochRsi ||
+    trendData?.stochasticRsi?.aggregated ||
+    trendData?.stochasticRsi?.["4h"]; // fallback: show 4h stoch
+
+  const macdHistogramValue =
+    momentum?.macdHistogram ??
+    trendData?.timeframes?.["1h"]?.indicators?.macdHistogram ??
+    trendData?.timeframes?.["4h"]?.indicators?.macdHistogram;
+  const macdHistogramDisplay =
+    typeof macdHistogramValue === "number"
+      ? macdHistogramValue.toFixed(4)
+      : macdHistogramValue || "N/A";
   
   const getMomentumStateColor = (state: string) => {
     if (state === "confirmed") return "text-green-400 bg-green-500/20";
@@ -1000,11 +1044,11 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
         </div>
         <div className="p-1.5 bg-muted/30 rounded text-center">
           <div className="text-muted-foreground">4H</div>
-          <div className="font-medium capitalize">{htfFilter.trend4h || "N/A"}</div>
+          <div className="font-medium capitalize">{trend4hDisplay}</div>
         </div>
         <div className="p-1.5 bg-muted/30 rounded text-center">
           <div className="text-muted-foreground">1H</div>
-          <div className="font-medium capitalize">{htfFilter.trend1h || "N/A"}</div>
+          <div className="font-medium capitalize">{trend1hDisplay}</div>
         </div>
       </div>
       
@@ -1015,7 +1059,7 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
             StochRSI: {stochRsi.signal || "neutral"}
           </Badge>
           <Badge variant="outline" className="text-[9px] px-1 py-0">
-            MACD: {momentum?.macdHistogram || "N/A"}
+            MACD: {macdHistogramDisplay}
           </Badge>
         </div>
       )}
