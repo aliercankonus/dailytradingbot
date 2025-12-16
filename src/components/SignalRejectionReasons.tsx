@@ -511,24 +511,61 @@ const AlignmentBreakdownDisplay = ({ alignmentBreakdown }: { alignmentBreakdown:
 };
 
 const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
-  // Ensure adx is a number - it might be nested in an object
-  const rawAdx = filtersStatus?.adx;
-  const adx = typeof rawAdx === 'number' ? rawAdx : (typeof rawAdx === 'object' ? rawAdx?.value : undefined);
-  const confidence = filtersStatus?.confidence;
-  const trendConsistency = filtersStatus?.trendConsistency;
+  const coerceNumber = (value: any): number | undefined => {
+    if (value === null || value === undefined) return undefined;
+    if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+    if (typeof value === "string") {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : undefined;
+    }
+    if (typeof value === "object") {
+      const n = Number((value as any)?.value ?? (value as any)?.score);
+      return Number.isFinite(n) ? n : undefined;
+    }
+    return undefined;
+  };
+
+  const parsePercentFromText = (text: any, key: string): number | undefined => {
+    if (typeof text !== "string") return undefined;
+    const m = text.match(new RegExp(`${key}\\s*\\(?\\s*([0-9]+(?:\\.[0-9]+)?)%`, "i"));
+    if (!m?.[1]) return undefined;
+    const n = Number(m[1]);
+    return Number.isFinite(n) ? n : undefined;
+  };
+
+  const reasonText = filtersStatus?.reason;
+
+  const adx = coerceNumber(filtersStatus?.adx);
+  const confidence =
+    coerceNumber(filtersStatus?.confidence ?? trendData?.confidence) ??
+    parsePercentFromText(reasonText, "confidence");
+
+  const trendConsistency =
+    coerceNumber(
+      filtersStatus?.trendConsistency ??
+        filtersStatus?.consistency ??
+        filtersStatus?.trend_consistency ??
+        filtersStatus?.alignment ??
+        filtersStatus?.alignmentScore ??
+        trendData?.trendConsistency ??
+        trendData?.consistency ??
+        trendData?.trend_consistency ??
+        trendData?.alignmentScore,
+    ) ??
+    parsePercentFromText(reasonText, "consistency");
   const regime = filtersStatus?.regime;
-  const minConfidence = filtersStatus?.minConfidence || 60;
-  const minConsistency = filtersStatus?.minConsistency || 50;
+  const minConfidence = coerceNumber(filtersStatus?.minConfidence ?? filtersStatus?.min_confidence) ?? 60;
+  const minConsistency = coerceNumber(filtersStatus?.minConsistency ?? filtersStatus?.min_consistency) ?? 50;
   const alignmentBreakdown = trendData?.alignmentBreakdown || filtersStatus?.alignmentBreakdown;
   const momentum = trendData?.momentum || filtersStatus?.momentum;
   const momentumState = momentum?.state || 'none';
-  
-  if (adx === undefined && confidence === undefined) return null;
-  
+
+  if (adx === undefined && confidence === undefined && trendConsistency === undefined) return null;
+
   // Pass/fail checks
-  const adxPassing = (adx || 0) >= 20;
-  const confidencePassing = (confidence || 0) >= minConfidence;
-  const alignmentPassing = (trendConsistency || 0) >= minConsistency;
+  const adxPassing = (adx ?? 0) >= 20;
+  const confidencePassing = (confidence ?? 0) >= minConfidence;
+  const alignmentPassing = (trendConsistency ?? 0) >= minConsistency;
   const momentumPassing = momentumState === 'confirmed';
   const allPassing = adxPassing && confidencePassing && alignmentPassing && momentumPassing;
   const passCount = [adxPassing, confidencePassing, alignmentPassing, momentumPassing].filter(Boolean).length;
