@@ -547,6 +547,8 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
         filtersStatus?.trend_consistency ??
         filtersStatus?.alignment ??
         filtersStatus?.alignmentScore ??
+        trendData?.trueAlignment?.score ??
+        trendData?.weightedConsistency ??
         trendData?.trendConsistency ??
         trendData?.consistency ??
         trendData?.trend_consistency ??
@@ -556,7 +558,7 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
   const regime = filtersStatus?.regime;
   const minConfidence = coerceNumber(filtersStatus?.minConfidence ?? filtersStatus?.min_confidence) ?? 60;
   const minConsistency = coerceNumber(filtersStatus?.minConsistency ?? filtersStatus?.min_consistency) ?? 50;
-  const alignmentBreakdown = trendData?.alignmentBreakdown || filtersStatus?.alignmentBreakdown;
+  const alignmentBreakdown = trendData?.trueAlignment?.breakdown || trendData?.alignmentBreakdown || filtersStatus?.alignmentBreakdown;
   const momentum = trendData?.momentum || filtersStatus?.momentum;
   const momentumState = momentum?.state || 'none';
 
