@@ -747,7 +747,11 @@ serve(async (req) => {
       timestamp: new Date().toISOString(),
       currentPrice,
       primaryTrend: calculateTradeDirection(divergenceType, dominantTrend, trend1h.trend, primaryTrend),
-      confidence: divergenceType !== "aligned" ? divergenceConfidence : Math.round(weightedConsistency * volumeBoost),
+      confidence: divergenceType === "ranging_conflict" 
+        ? Math.round((trend4h.confidence * 0.6 + trend1h.confidence * 0.4))  // Use weighted avg for ranging
+        : divergenceType !== "aligned" 
+          ? divergenceConfidence 
+          : Math.round(weightedConsistency * volumeBoost),
       isAligned: highTimeframeAligned || allowDivergenceSignal,
       divergence: {
         type: divergenceType,
