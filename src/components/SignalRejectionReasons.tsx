@@ -129,13 +129,17 @@ const coerceNumeric = (value: any, fallback = 0): number => {
 };
 
 // Helper to extract trend direction from timeframe data
-// The trend is stored in timeframes.[tf].indicators.emaSignal
 const extractTimeframeTrend = (trendData: any, timeframe: string): string => {
+  // For 4h, use primaryTrend first since it represents the dominant 4h trend
+  if (timeframe === '4h' && trendData?.primaryTrend) {
+    return trendData.primaryTrend;
+  }
+  
   // Try indicators.emaSignal first (actual structure from calculate-trend)
   const emaSignal = trendData?.timeframes?.[timeframe]?.indicators?.emaSignal;
   if (emaSignal) return emaSignal;
   
-  // Try direct trend property (in case structure changes)
+  // Try direct trend property
   const directTrend = trendData?.timeframes?.[timeframe]?.trend;
   if (directTrend) return directTrend;
   
