@@ -128,6 +128,23 @@ const coerceNumeric = (value: any, fallback = 0): number => {
   return fallback;
 };
 
+// Helper to extract trend direction from timeframe data
+// The trend is stored in timeframes.[tf].indicators.emaSignal
+const extractTimeframeTrend = (trendData: any, timeframe: string): string => {
+  // Try indicators.emaSignal first (actual structure from calculate-trend)
+  const emaSignal = trendData?.timeframes?.[timeframe]?.indicators?.emaSignal;
+  if (emaSignal) return emaSignal;
+  
+  // Try direct trend property (in case structure changes)
+  const directTrend = trendData?.timeframes?.[timeframe]?.trend;
+  if (directTrend) return directTrend;
+  
+  // Fallback to primaryTrend for overall direction
+  if (trendData?.primaryTrend) return trendData.primaryTrend;
+  
+  return "unknown";
+};
+
 // Helper to extract confidence from various data structures
 const extractConfidence = (filtersStatus: any, trendData: any): number | undefined => {
   // Direct numeric values
@@ -1093,8 +1110,8 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
   const confidence = extractConfidence(filtersStatus, trendData);
 
   const htfFilter = filtersStatus?.htfFilter || {};
-  const trend4h = htfFilter.trend4h || trendData?.timeframes?.["4h"]?.trend;
-  const trend1h = htfFilter.trend1h || trendData?.timeframes?.["1h"]?.trend;
+  const trend4h = htfFilter.trend4h || extractTimeframeTrend(trendData, "4h");
+  const trend1h = htfFilter.trend1h || extractTimeframeTrend(trendData, "1h");
   const trend4hDisplay = trend4h || "N/A";
   const trend1hDisplay = trend1h || "N/A";
 
@@ -1205,8 +1222,8 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
 const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const htfAligned = filtersStatus?.htfAligned ?? false;
   const confidence = extractConfidence(filtersStatus, trendData);
-  const trend4h = trendData?.timeframes?.['4h']?.trend || filtersStatus?.trend4h || "unknown";
-  const trend1h = trendData?.timeframes?.['1h']?.trend || filtersStatus?.trend1h || "unknown";
+  const trend4h = filtersStatus?.trend4h || extractTimeframeTrend(trendData, "4h");
+  const trend1h = filtersStatus?.trend1h || extractTimeframeTrend(trendData, "1h");
   const conf4h = coerceNumeric(trendData?.timeframes?.['4h']?.confidence, 0);
   const conf1h = coerceNumeric(trendData?.timeframes?.['1h']?.confidence, 0);
   
@@ -1407,7 +1424,7 @@ const StochRsiExtremeDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
   const stochRsiK = parseFloat(filtersStatus?.stochRsiK4h) || 0;
   const threshold = filtersStatus?.threshold || (stochRsiK < 50 ? 10 : 90);
   const intendedDirection = filtersStatus?.intendedDirection;
-  const trend = filtersStatus?.trend;
+  const trend = filtersStatus?.trend || filtersStatus?.primaryTrend || "unknown";
   const reason = filtersStatus?.reason;
   
   const isOversold = stochRsiK < 50;

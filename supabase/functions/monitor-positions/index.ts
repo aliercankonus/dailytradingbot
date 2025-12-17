@@ -907,9 +907,9 @@ serve(async (req) => {
       if (!shouldClose && trendData) {
         const currentTrend = trendData.primaryTrend; // 'bullish', 'bearish', or 'ranging'
         const trendConfidence = trendData.confidence || 0;
-        // Use correct paths from calculate-trend response
-        const trend1h = trendData.timeframes?.['1h']?.trend || 'neutral';
-        const trend4h = trendData.timeframes?.['4h']?.trend || 'neutral';
+        // Use correct paths from calculate-trend response with emaSignal fallback
+        const trend1h = trendData.timeframes?.['1h']?.trend || trendData.timeframes?.['1h']?.indicators?.emaSignal || 'neutral';
+        const trend4h = trendData.timeframes?.['4h']?.trend || trendData.timeframes?.['4h']?.indicators?.emaSignal || 'neutral';
         const momentum = trendData.momentum || {};
         const stochRsi = trendData.stochasticRsi?.aggregated || trendData.stochasticRsi || {};
 
