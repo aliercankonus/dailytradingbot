@@ -1854,7 +1854,7 @@ serve(async (req) => {
       if (!trendData) continue;
 
       try {
-        const { trend, confidence, trueAlignment, isAligned, timeframes } = trendData;
+        const { primaryTrend: trend, confidence, trueAlignment, isAligned, timeframes } = trendData;
         const trendConsistency = trueAlignment?.score || 0;
         const adx = trendData.volatility?.adx || 0;
         const momentum = trendData.momentum;
