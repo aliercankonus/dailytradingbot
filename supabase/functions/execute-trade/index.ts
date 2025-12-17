@@ -330,7 +330,7 @@ serve(async (req) => {
       console.warn('Failed to get current trend, using signal trend:', trendError);
     }
 
-    const currentTrend = trendData?.trend || signal.trend;
+    const currentTrend = trendData?.primaryTrend || signal.trend;
     const trendConsistency = trendData?.trueAlignment?.score || 0;
     // Fix: atrPercent is under volatility object in calculate-trend response
     const atrPercent = trendData?.volatility?.atrPercent || trendData?.ranging?.atrPercent || 1.5;
