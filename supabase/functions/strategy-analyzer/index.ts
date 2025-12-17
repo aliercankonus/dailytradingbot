@@ -870,9 +870,10 @@ const calculateUnifiedReversalScore = (
   // Mixed or unconfirmed momentum = directional uncertainty
   // (momentumState and momentumConfirms already defined above for RSI-StochRSI conflict resolution)
   
-  if (momentumState === "none" || !momentumConfirms) {
+  // NEW: "building" state now counts as acceptable momentum (from aligned trends)
+  if (momentumState === "none") {
     breakdown.momentumScore = 25;
-    signals.push(`Momentum not confirmed (state: ${momentumState})`);
+    signals.push(`No momentum (state: ${momentumState})`);
   } else if (momentumState === "mixed") {
     // HARD GATE: Mixed momentum + weak ADX = block - Uses centralized ADX_THRESHOLDS
     if (adx < ADX_THRESHOLDS.VERY_STRONG) {
@@ -882,9 +883,14 @@ const calculateUnifiedReversalScore = (
       breakdown.momentumScore = 15;  // Allow in strong trends
       signals.push(`Mixed momentum (ADX=${adx.toFixed(1)} allows)`);
     }
-  } else if (momentumState === "building" && !momentumConfirms) {
-    breakdown.momentumScore = 10;
-    signals.push("Momentum building but not confirmed");
+  } else if (momentumState === "building") {
+    // "building" = aligned trends but not full confirmation (e.g., single candle bounce)
+    // Lower penalty than "mixed" since trend alignment is confirmed
+    breakdown.momentumScore = 8;
+    signals.push(`Momentum building (aligned trends, partial confirmation)`);
+  } else if (!momentumConfirms) {
+    breakdown.momentumScore = 15;
+    signals.push(`Momentum state ${momentumState} but not confirmed`);
   }
   
   // ============= 4. MACD ALIGNMENT (0-15 points) =============
@@ -1047,8 +1053,9 @@ const detectMarketRegime = (trendData: any): { regime: MarketRegime; tradeable: 
     };
   }
   
-  // Trending market - tradeable (STRICTER: require ADX >= WEAK minimum)
-  if (adx >= ADX_THRESHOLDS.MODERATE || (adx >= ADX_THRESHOLDS.WEAK && confidence >= 65)) {
+  // Trending market - tradeable (RELAXED: allow ADX >= MINIMUM 20)
+  // FIX: Previously required ADX >= 22 which rejected valid signals during 3-5% drops
+  if (adx >= ADX_THRESHOLDS.MINIMUM) {
     return { 
       regime: "trending", 
       tradeable: true, 
@@ -1056,13 +1063,12 @@ const detectMarketRegime = (trendData: any): { regime: MarketRegime; tradeable: 
     };
   }
   
-  // Edge case - REMOVED weak trend allowance (ADX >= 12) - was causing poor entries
-  // Only allow borderline cases with very strong alignment
-  if (adx >= ADX_THRESHOLDS.WEAK && confidence >= 70 && consistency >= 65) {
+  // Allow weaker trends if alignment is strong (ADX 18-20 with good confidence)
+  if (adx >= ADX_THRESHOLDS.WEAK && confidence >= 60 && consistency >= 50) {
     return { 
       regime: "trending", 
       tradeable: true, 
-      reason: `Moderate trend with strong alignment (ADX ${adx.toFixed(1)}, confidence ${confidence}%, consistency ${consistency}%)` 
+      reason: `Moderate trend with alignment (ADX ${adx.toFixed(1)}, confidence ${confidence}%, consistency ${consistency}%)` 
     };
   }
   
@@ -2062,22 +2068,34 @@ serve(async (req) => {
             continue;
           }
           
-          // STRICT: Require full smart exception conditions (NO ADX-ONLY BYPASS)
-          // CRITICAL FIX: Also require momentum.confirms = true for any extreme entry
-          const strongUptrend4h = stochFilterTrend4h === "bullish" && stochFilterConf4h >= 75;
-          const strongUptrend1h = stochFilterTrend1h === "bullish" && stochFilterConf1h >= 70;
+          // RELAXED: Allow entries at extreme overbought if trends are strongly aligned
+          // FIX: Previously required momentum.confirms=true AND 75%+ confidence which rejected valid signals
+          const strongUptrend4h = stochFilterTrend4h === "bullish" && stochFilterConf4h >= 60;
+          const strongUptrend1h = stochFilterTrend1h === "bullish" && stochFilterConf1h >= 55;
           const breakoutOrHigherLow = bollingerPosition === "above_upper" || bollingerPosition === "upper_zone" || percentB > 70;
           const stochMomentumUp = stochRsiRising && macdHistogram > 0;
-          const momentumConfirmedForLong = momentum?.confirms === true && momentum?.state !== "none";
+          // RELAXED: Accept "building" OR "confirmed" momentum state
+          const momentumAcceptable = (momentum?.confirms === true || momentum?.state === "building") && momentum?.state !== "none";
           
-          const allowExtremeOverbought = strongUptrend4h && strongUptrend1h && breakoutOrHigherLow && stochMomentumUp && momentumConfirmedForLong;
+          // PRIMARY: Full smart exception conditions
+          const allowExtremeOverbought = strongUptrend4h && strongUptrend1h && breakoutOrHigherLow && stochMomentumUp && momentumAcceptable;
+          
+          // SECONDARY: Strong aligned trends override (allows entry with reduced position size)
+          const alignedTrendOverride = stochFilterTrend4h === "bullish" && stochFilterTrend1h === "bullish" && 
+            adx >= ADX_THRESHOLDS.MINIMUM && // ADX >= 20
+            !hasBearishDivergence && 
+            stochRsiRising;
           
           if (allowExtremeOverbought) {
-            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG (strong uptrend both TFs, breakout, StochRSI rising, momentum confirmed)`);
+            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG (strong uptrend both TFs, breakout, StochRSI rising, momentum ${momentum?.state})`);
+          } else if (alignedTrendOverride) {
+            // Allow with reduced position size (50%)
+            reversalPositionMultiplier = Math.min(reversalPositionMultiplier, 0.5);
+            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG with 50% position (aligned 4h+1h bullish, ADX=${adx.toFixed(1)}, StochRSI rising)`);
           } else {
             rejectedByStochRsiExtreme++;
-            const blockReason = !momentumConfirmedForLong 
-              ? `momentum not confirmed (confirms=${momentum?.confirms}, state=${momentum?.state})` 
+            const blockReason = !momentumAcceptable 
+              ? `momentum not acceptable (confirms=${momentum?.confirms}, state=${momentum?.state})` 
               : "failed smart exception conditions";
             console.log(`⛔ ${symbol}: Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} overbought | ${blockReason}`);
             await supabase.from("signal_rejection_log").insert({
@@ -2089,6 +2107,7 @@ serve(async (req) => {
                 trend1h: stochFilterTrend1h, confidence1h: stochFilterConf1h,
                 bollingerPosition, percentB, macdHistogram, adx: adx.toFixed(1),
                 momentumConfirms: momentum?.confirms, momentumState: momentum?.state,
+                alignedTrendOverride,
                 reason: blockReason
               },
               trend_data: trendData, checked_at: new Date().toISOString(),
@@ -2165,22 +2184,36 @@ serve(async (req) => {
             continue;
           }
           
-          // STRICT: Require full smart exception conditions (NO ADX-ONLY BYPASS)
-          // CRITICAL FIX: Also require momentum.confirms = true for any extreme entry
-          const strongDowntrend4h = stochFilterTrend4h === "bearish" && stochFilterConf4h >= 75;
-          const strongDowntrend1h = stochFilterTrend1h === "bearish" && stochFilterConf1h >= 70;
+          // RELAXED: Allow entries at extreme oversold if trends are strongly aligned
+          // FIX: Previously required momentum.confirms=true AND 75%+ confidence which rejected valid signals
+          // Now: Accept "building" momentum state AND 60%+ confidence for both timeframes
+          const strongDowntrend4h = stochFilterTrend4h === "bearish" && stochFilterConf4h >= 60;
+          const strongDowntrend1h = stochFilterTrend1h === "bearish" && stochFilterConf1h >= 55;
           const breakdownOrLowerHigh = bollingerPosition === "below_lower" || bollingerPosition === "lower_zone" || percentB < 30;
           const stochMomentumDown = stochRsiFalling && macdHistogram < 0;
-          const momentumConfirmedForShort = momentum?.confirms === true && momentum?.state !== "none";
+          // RELAXED: Accept "building" OR "confirmed" momentum state
+          const momentumAcceptable = (momentum?.confirms === true || momentum?.state === "building") && momentum?.state !== "none";
           
-          const allowExtremeOversold = strongDowntrend4h && strongDowntrend1h && breakdownOrLowerHigh && stochMomentumDown && momentumConfirmedForShort;
+          // PRIMARY: Full smart exception conditions
+          const allowExtremeOversold = strongDowntrend4h && strongDowntrend1h && breakdownOrLowerHigh && stochMomentumDown && momentumAcceptable;
+          
+          // SECONDARY: Strong aligned trends override (allows entry with reduced position size)
+          // This captures continuation during strong downtrends even without all conditions
+          const alignedTrendOverride = stochFilterTrend4h === "bearish" && stochFilterTrend1h === "bearish" && 
+            adx >= ADX_THRESHOLDS.MINIMUM && // ADX >= 20
+            !hasBullishDivergence && 
+            stochRsiFalling;
           
           if (allowExtremeOversold) {
-            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme oversold - ALLOWING SHORT (strong downtrend both TFs, breakdown, StochRSI falling, momentum confirmed)`);
+            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme oversold - ALLOWING SHORT (strong downtrend both TFs, breakdown, StochRSI falling, momentum ${momentum?.state})`);
+          } else if (alignedTrendOverride) {
+            // Allow with reduced position size (50%)
+            reversalPositionMultiplier = Math.min(reversalPositionMultiplier, 0.5);
+            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme oversold - ALLOWING SHORT with 50% position (aligned 4h+1h bearish, ADX=${adx.toFixed(1)}, StochRSI falling)`);
           } else {
             rejectedByStochRsiExtreme++;
-            const blockReason = !momentumConfirmedForShort 
-              ? `momentum not confirmed (confirms=${momentum?.confirms}, state=${momentum?.state})` 
+            const blockReason = !momentumAcceptable 
+              ? `momentum not acceptable (confirms=${momentum?.confirms}, state=${momentum?.state})` 
               : "failed smart exception conditions";
             console.log(`⛔ ${symbol}: Blocking SHORT - 4h StochRSI K=${stochRsiK4h.toFixed(1)} oversold | ${blockReason}`);
             await supabase.from("signal_rejection_log").insert({
@@ -2192,6 +2225,7 @@ serve(async (req) => {
                 trend1h: stochFilterTrend1h, confidence1h: stochFilterConf1h,
                 bollingerPosition, percentB, macdHistogram, adx: adx.toFixed(1),
                 momentumConfirms: momentum?.confirms, momentumState: momentum?.state,
+                alignedTrendOverride,
                 reason: blockReason
               },
               trend_data: trendData, checked_at: new Date().toISOString(),
