@@ -1424,13 +1424,24 @@ const ReversalRiskDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
   );
 };
 
-const StochRsiExtremeDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
+const StochRsiExtremeDisplay = ({
+  filtersStatus,
+  trendData,
+}: {
+  filtersStatus: any;
+  trendData?: any;
+}) => {
   const stochRsiK = parseFloat(filtersStatus?.stochRsiK4h) || 0;
   const threshold = filtersStatus?.threshold || (stochRsiK < 50 ? 10 : 90);
   const intendedDirection = filtersStatus?.intendedDirection;
-  const trend = filtersStatus?.trend4h || filtersStatus?.trend || filtersStatus?.primaryTrend || "unknown";
+  const trend =
+    filtersStatus?.trend4h ||
+    filtersStatus?.trend ||
+    filtersStatus?.primaryTrend ||
+    extractTimeframeTrend(trendData, "4h") ||
+    "unknown";
   const reason = filtersStatus?.reason;
-  
+
   const isOversold = stochRsiK < 50;
   const extremeLevel = isOversold ? 10 : 90;
   const dangerZone = isOversold ? 20 : 80;
@@ -1794,9 +1805,9 @@ export const SignalRejectionReasons = () => {
     
     // StochRSI extreme rejection
     if (reason.includes("StochRSI extreme")) {
-      return <StochRsiExtremeDisplay filtersStatus={fs} />;
+      return <StochRsiExtremeDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
-    
+
     // Quality score rejection - show breakdown
     if (reason.includes("Quality score") || reason.includes("No strategy conditions met")) {
       return <QualityScoreBreakdown filtersStatus={fs} />;

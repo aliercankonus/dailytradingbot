@@ -55,17 +55,20 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
       // Map from calculate-trend response structure to MomentumData
       const timeframes = data.timeframes || {};
       const volatility = data.volatility || {};
-      
+
+      const getTfTrend = (tf: string) =>
+        timeframes?.[tf]?.trend ?? timeframes?.[tf]?.indicators?.emaSignal ?? "unknown";
+
       return {
         symbol,
         momentum: {
           confirms: data.momentum?.confirms ?? false,
           // "building" state from calculate-trend indicates aligned trends with partial confirmation
           building: data.momentum?.state === "building",
-          state: data.momentum?.state ?? 'none',
+          state: data.momentum?.state ?? "none",
           lastCloseAlignsWithTrend: data.momentum?.lastCloseAlignsWithTrend ?? false,
           hasDivergence: data.momentum?.hasDivergence ?? false,
-          macdHistogram: timeframes['1h']?.indicators?.macd?.histogram ?? 0,
+          macdHistogram: timeframes["1h"]?.indicators?.macd?.histogram ?? 0,
           macdExpanding: data.momentum?.macdExpanding ?? false,
           macdDirectionAligned: data.momentum?.macdStrong || data.momentum?.macdExpanding,
           adx: volatility.adx ?? 0,
@@ -73,18 +76,18 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
           fakeBreakoutRisk: data.momentum?.fakeBreakoutRisk,
           genuineMomentum: data.momentum?.genuineMomentum,
           volumeConfirms: data.momentum?.volumeConfirms ?? false,
-          volumeBoost: data.volume?.['1h']?.ratio,
+          volumeBoost: data.volume?.["1h"]?.ratio,
         },
         higherTimeframeFilter: {
-          trend4h: timeframes['4h']?.trend ?? 'unknown',
-          trend1h: timeframes['1h']?.trend ?? 'unknown',
+          trend4h: getTfTrend("4h"),
+          trend1h: getTfTrend("1h"),
           aligned: data.isAligned ?? false,
         },
         multiTimeframe: {
-          trend15m: timeframes['15m']?.trend ?? 'unknown',
-          trend30m: timeframes['30m']?.trend ?? 'unknown',
+          trend15m: getTfTrend("15m"),
+          trend30m: getTfTrend("30m"),
         },
-        trend: data.primaryTrend ?? 'unknown',
+        trend: data.primaryTrend ?? "unknown",
       } as MomentumData;
     } catch (err) {
       return {
