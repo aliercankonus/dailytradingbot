@@ -625,7 +625,7 @@ export const detectMarketRegime = (trendData: any): {
   const adx = trendData?.volatility?.adx || 0;
   const atrPercent = trendData?.volatility?.atrPercent || 0;
   const confidence = trendData?.confidence || 0;
-  const consistency = trendData?.trendConsistency || 0;
+  const consistency = trendData?.trueAlignment?.score || 0;
   
   // Ranging market (ADX low, mixed signals)
   if (adx < 15 && confidence < 50) {
@@ -690,7 +690,7 @@ export const calculateQualityScore = (
 } => {
   const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
   const confidence = trendData?.confidence || 50;
-  const consistency = trendData?.trendConsistency || 50;
+  const consistency = trendData?.trueAlignment?.score || 50;
   const momentum = trendData?.momentum || {};
   const aligned = trendData?.higherTimeframeFilter?.aligned ?? false;
   
