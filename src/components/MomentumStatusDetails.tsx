@@ -30,7 +30,7 @@ export const MomentumStatusDetails = () => {
           Momentum Status Details
         </CardTitle>
         <CardDescription>
-          MACD histogram expanding + last close aligns with trend + no divergence + volume confirmation
+          <strong>Confirmed:</strong> Full conditions met. <strong>Building:</strong> Aligned 4h+1h trends (allows signals). <strong>Mixed/None:</strong> Insufficient.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -92,27 +92,27 @@ export const MomentumStatusDetails = () => {
                               <span className={`font-semibold text-lg ${confirms ? "text-gray-900 dark:text-gray-100" : ""}`}>
                                 {data.symbol}
                               </span>
-                              {momentumState === "confirmed" ? (
-                                <Badge className="bg-green-500 hover:bg-green-600">
-                                  <CheckCircle className="h-3 w-3 mr-1" />
-                                  Confirmed
-                                </Badge>
-                              ) : momentumState === "mixed" ? (
-                                <Badge className="bg-yellow-500 hover:bg-yellow-600">
-                                  <AlertTriangle className="h-3 w-3 mr-1" />
-                                  Mixed
-                                </Badge>
-                              ) : momentum?.building ? (
-                                <Badge className="bg-blue-500 hover:bg-blue-600">
-                                  <Activity className="h-3 w-3 mr-1" />
-                                  Building
-                                </Badge>
-                              ) : (
-                                <Badge variant="secondary">
-                                  <XCircle className="h-3 w-3 mr-1" />
-                                  None
-                                </Badge>
-                              )}
+                            {momentumState === "confirmed" ? (
+                              <Badge className="bg-green-500 hover:bg-green-600">
+                                <CheckCircle className="h-3 w-3 mr-1" />
+                                Confirmed
+                              </Badge>
+                            ) : momentumState === "building" ? (
+                              <Badge className="bg-blue-500 hover:bg-blue-600">
+                                <Activity className="h-3 w-3 mr-1" />
+                                Building
+                              </Badge>
+                            ) : momentumState === "mixed" ? (
+                              <Badge className="bg-yellow-500 hover:bg-yellow-600">
+                                <AlertTriangle className="h-3 w-3 mr-1" />
+                                Mixed
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary">
+                                <XCircle className="h-3 w-3 mr-1" />
+                                None
+                              </Badge>
+                            )}
                             </div>
                             <Badge
                               variant={trend === "bullish" ? "default" : trend === "bearish" ? "destructive" : "outline"}
