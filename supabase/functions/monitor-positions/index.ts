@@ -907,8 +907,9 @@ serve(async (req) => {
       if (!shouldClose && trendData) {
         const currentTrend = trendData.trend; // 'bullish', 'bearish', or 'ranging'
         const trendConfidence = trendData.confidence || 0;
-        const trend1h = trendData.higherTimeframeFilter?.trend1h || 'neutral';
-        const trend4h = trendData.higherTimeframeFilter?.trend4h || 'neutral';
+        // Use correct paths from calculate-trend response
+        const trend1h = trendData.timeframes?.['1h']?.trend || 'neutral';
+        const trend4h = trendData.timeframes?.['4h']?.trend || 'neutral';
         const momentum = trendData.momentum || {};
         const stochRsi = trendData.stochasticRsi?.aggregated || trendData.stochasticRsi || {};
 

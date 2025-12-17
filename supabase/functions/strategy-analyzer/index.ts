@@ -501,12 +501,11 @@ const getAlignmentScore = (confidence: number, consistency: number, aligned: boo
     score += 8;
   } else {
     // Partial alignment: check if lower timeframes agree even if 4h is neutral
-    const htf = trendData?.higherTimeframeFilter;
-    const mtf = trendData?.multiTimeframe;
-    if (htf && mtf) {
-      const trend4h = htf.trend4h || mtf.trend4h;
-      const trend1h = htf.trend1h || mtf.trend1h;
-      const trend30m = mtf.trend30m;
+    const tf = trendData?.timeframes;
+    if (tf) {
+      const trend4h = tf['4h']?.trend || "neutral";
+      const trend1h = tf['1h']?.trend || "neutral";
+      const trend30m = tf['30m']?.trend || "neutral";
       
       // 4h neutral with 1h+30m aligned = partial alignment
       if (trend4h === "neutral" && trend1h === trend30m && trend1h !== "neutral") {
@@ -750,16 +749,17 @@ const calculateUnifiedReversalScore = (
   const momentum = trendData?.momentum || {};
   const stochRsi = trendData?.stochasticRsi || {};
   const aggregated = stochRsi.aggregated || {};
-  const htf = trendData?.higherTimeframeFilter || {};
-  const mtf = trendData?.multiTimeframe || {};
+  const tf = trendData?.timeframes || {};
+  const tf1h = tf['1h'] || {};
+  const tf4h = tf['4h'] || {};
   const adx = trendData?.volatility?.adx || trendData?.adx || 20;
   const volatility = trendData?.volatility || {};
   const indicators = trendData?.indicators || {};
-  const rsi = indicators.rsi || 50;
+  const rsi = tf1h.indicators?.rsi || indicators.rsi || 50;
   
   const isLong = intendedDirection === "bullish" || intendedDirection === "long";
-  const trend1h = htf.trend1h || mtf.trend1h || "neutral";
-  const trend4h = htf.trend4h || "neutral";
+  const trend1h = tf1h.trend || "neutral";
+  const trend4h = tf4h.trend || "neutral";
   const stoch4h = stochRsi['4h'] || {};
   const stoch1h = stochRsi['1h'] || {};
   
@@ -1854,10 +1854,13 @@ serve(async (req) => {
       if (!trendData) continue;
 
       try {
-        const { trend, confidence, trueAlignment, higherTimeframeFilter } = trendData;
+        const { trend, confidence, trueAlignment, isAligned, timeframes } = trendData;
         const trendConsistency = trueAlignment?.score || 0;
         const adx = trendData.volatility?.adx || 0;
         const momentum = trendData.momentum;
+        // Derive higher timeframe data from correct paths
+        const htfTrend4h = timeframes?.['4h']?.trend || "neutral";
+        const htfTrend1h = timeframes?.['1h']?.trend || "neutral";
 
         // ============= IMPROVEMENT #2: Market Regime Filter =============
         const regime = detectMarketRegime(trendData);
@@ -1909,7 +1912,7 @@ serve(async (req) => {
                 macdDirectionAligned: momentum?.macdDirectionAligned
               },
               stochRsi: trendData.stochasticRsi?.aggregated,
-              trend1h: higherTimeframeFilter?.trend1h
+              trend1h: htfTrend1h
             },
             trendData,
             riskParams.ai_analysis_enabled !== false
@@ -1938,11 +1941,11 @@ serve(async (req) => {
         const STOCHRSI_OVERBOUGHT_THRESHOLD = 80; // Above 80 = overbought (bounce risk for longs)
         const STRONG_TREND_ADX_THRESHOLD = ADX_THRESHOLDS.VERY_STRONG;  // ADX >= 30 = strong trend
         
-        // Get trend data for both timeframes (for StochRSI filter)
-        const stochFilterTrend4h = trendData.higherTimeframeFilter?.trend4h || "neutral";
-        const stochFilterTrend1h = trendData.higherTimeframeFilter?.trend1h || "neutral";
-        const stochFilterConf4h = trendData.confidenceBreakdown?.["4h"]?.confidence || 50;
-        const stochFilterConf1h = trendData.confidenceBreakdown?.["1h"]?.confidence || 50;
+        // Get trend data for both timeframes (for StochRSI filter) - use correct paths
+        const stochFilterTrend4h = trendData.timeframes?.['4h']?.trend || "neutral";
+        const stochFilterTrend1h = trendData.timeframes?.['1h']?.trend || "neutral";
+        const stochFilterConf4h = trendData.timeframes?.['4h']?.confidence || 50;
+        const stochFilterConf1h = trendData.timeframes?.['1h']?.confidence || 50;
         
         // Get momentum and divergence info
         const hasBearishDivergence = trendData.momentum?.hasDivergence && trend === "bullish";
@@ -2274,7 +2277,7 @@ serve(async (req) => {
               stochRsi: trendData.stochasticRsi?.aggregated,
               volatility: {
                 atrPercent: trendData.volatility?.atrPercent?.toFixed(2),
-                isRanging: trendData.ranging?.isRanging
+                isRanging: trendData.volatility?.isRanging
               }
             },
             trendData,
@@ -2309,9 +2312,9 @@ serve(async (req) => {
               },
               stochRsi: trendData.stochasticRsi?.aggregated,
               htfFilter: {
-                aligned: higherTimeframeFilter?.aligned,
-                trend4h: higherTimeframeFilter?.trend4h,
-                trend1h: higherTimeframeFilter?.trend1h
+                aligned: isAligned,
+                trend4h: htfTrend4h,
+                trend1h: htfTrend1h
               }
             },
             trendData,
@@ -2321,7 +2324,7 @@ serve(async (req) => {
         }
         
         // GATE 3: Higher timeframe alignment required (or high confidence)
-        const htfAligned = higherTimeframeFilter?.aligned ?? false;
+        const htfAligned = isAligned ?? false;
         if (!htfAligned && confidence < 65) {
           rejectedByHardGates++;
           await logRejectionWithAI(
@@ -2353,7 +2356,7 @@ serve(async (req) => {
         // ============= GATE 5: STRATEGY SUPPORT FOR TREND DIRECTION =============
         // Check if any strategy can support the current trend direction BEFORE quality scoring
         // Strategies validate signals, not rescue weak ones
-        const tradeDirectionForGate = higherTimeframeFilter?.tradeDirection || trend;
+        const tradeDirectionForGate = trendData.primaryTrend || trend;
         
         // Count strategies that could generate a signal for this trend
         let strategiesWithDirectionalSupport = 0;
@@ -2403,14 +2406,14 @@ serve(async (req) => {
           adx >= ADX_THRESHOLDS.EXCEPTIONAL &&  // ADX ≥ 35 (very strong trend)
           momentum?.confirms === true &&         // Momentum confirmed
           momentum?.state === "confirmed" &&
-          (higherTimeframeFilter?.aligned || false); // HTF aligned
+          (isAligned || false); // HTF aligned
         
         if (strategiesWithConditionBasis === 0 && !hasStrongTrendException) {
           rejectedByHardGates++;
           strongTrendExceptionNotApplicable++;
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: No condition-based strategy for ${tradeDirectionForGate} (${strategiesWithDirectionalSupport} trend-followers only). Strong Trend Exception not met: ADX=${adx.toFixed(1)} (need ≥35), momentum=${momentum?.state}/${momentum?.confirms}, HTF=${higherTimeframeFilter?.aligned}`,
+            `HARD GATE: No condition-based strategy for ${tradeDirectionForGate} (${strategiesWithDirectionalSupport} trend-followers only). Strong Trend Exception not met: ADX=${adx.toFixed(1)} (need ≥35), momentum=${momentum?.state}/${momentum?.confirms}, HTF=${isAligned}`,
             { 
               tradeDirection: tradeDirectionForGate, 
               directionalSupport: strategiesWithDirectionalSupport, 
@@ -2421,7 +2424,7 @@ serve(async (req) => {
                 adxRequired: ADX_THRESHOLDS.EXCEPTIONAL,
                 momentumState: momentum?.state,
                 momentumConfirms: momentum?.confirms,
-                htfAligned: higherTimeframeFilter?.aligned,
+                htfAligned: isAligned,
                 exceptionApplied: false
               }
             },
@@ -2511,7 +2514,7 @@ serve(async (req) => {
         const qualityFactors: QualityFactors = {
           adxScore: getAdxScore(adx),
           momentumScore: getMomentumScore(momentum),
-          alignmentScore: getAlignmentScore(confidence, trendConsistency, higherTimeframeFilter?.aligned || false, trendData),
+          alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, trendData),
           technicalScore: getTechnicalScore(trendData, trend, symbol),
           entryTimingScore: entryTimingScore,
           volumeScore: volumeScore,                // NEW: Volume confirmation
@@ -2560,8 +2563,8 @@ serve(async (req) => {
         // blocking high-quality signals (e.g., 73/100 quality rejected for 61% confidence)
 
         // Store trend info for strategy-level filtering
-        const tradeDirection = higherTimeframeFilter?.tradeDirection || trend;
-        const trend1h = higherTimeframeFilter?.trend1h || trendData.multiTimeframe?.trend1h;
+        const tradeDirection = trendData.primaryTrend || trend;
+        const strategyTrend1h = timeframes?.['1h']?.trend || "neutral";
 
         // Get market data
         const marketData = marketDataMap.get(symbol);
@@ -2669,11 +2672,11 @@ serve(async (req) => {
               }
               
               // 1H TREND VALIDATION - prevent opening against immediate trend
-              if (strategySignalType === 'long' && trend1h === 'bearish') {
+              if (strategySignalType === 'long' && strategyTrend1h === 'bearish') {
                 console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - LONG signal but 1h is bearish`);
                 continue;
               }
-              if (strategySignalType === 'short' && trend1h === 'bullish') {
+              if (strategySignalType === 'short' && strategyTrend1h === 'bullish') {
                 console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - SHORT signal but 1h is bullish`);
                 continue;
               }
