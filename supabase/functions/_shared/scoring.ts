@@ -260,7 +260,7 @@ export const getTechnicalScore = (
   let bbScore = 0;
   
   const isStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG;
-  const rsi4h = trendData?.timeframes?.['4h']?.rsi ?? 50;
+  const rsi4h = trendData?.timeframes?.['4h']?.indicators?.rsi ?? 50;
   
   // StochRSI-RSI conflict resolution
   const isLong = effectiveTrend === "bullish";

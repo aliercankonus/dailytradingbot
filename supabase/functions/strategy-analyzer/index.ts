@@ -562,7 +562,7 @@ const getTechnicalScore = (trendData: any, effectiveTrend: string, symbol: strin
   const isStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG;
   
   // RSI for momentum zone validation
-  const rsi4h = trendData?.timeframes?.['4h']?.rsi ?? 50;
+  const rsi4h = trendData?.timeframes?.['4h']?.indicators?.rsi ?? 50;
   
   // ============= STOCHRSI-RSI CONFLICT RESOLUTION =============
   // Check if StochRSI is at extreme that would cause self-canceling signals
