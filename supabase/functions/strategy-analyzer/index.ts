@@ -1859,8 +1859,8 @@ serve(async (req) => {
         const adx = trendData.volatility?.adx || 0;
         const momentum = trendData.momentum;
         // Derive higher timeframe data from correct paths
-        const htfTrend4h = timeframes?.['4h']?.trend || "neutral";
-        const htfTrend1h = timeframes?.['1h']?.trend || "neutral";
+        const htfTrend4h = timeframes?.['4h']?.trend || timeframes?.['4h']?.indicators?.emaSignal || "neutral";
+        const htfTrend1h = timeframes?.['1h']?.trend || timeframes?.['1h']?.indicators?.emaSignal || "neutral";
 
         // ============= IMPROVEMENT #2: Market Regime Filter =============
         const regime = detectMarketRegime(trendData);
@@ -1941,9 +1941,9 @@ serve(async (req) => {
         const STOCHRSI_OVERBOUGHT_THRESHOLD = 80; // Above 80 = overbought (bounce risk for longs)
         const STRONG_TREND_ADX_THRESHOLD = ADX_THRESHOLDS.VERY_STRONG;  // ADX >= 30 = strong trend
         
-        // Get trend data for both timeframes (for StochRSI filter) - use correct paths
-        const stochFilterTrend4h = trendData.timeframes?.['4h']?.trend || "neutral";
-        const stochFilterTrend1h = trendData.timeframes?.['1h']?.trend || "neutral";
+        // Get trend data for both timeframes (for StochRSI filter) - use correct paths with emaSignal fallback
+        const stochFilterTrend4h = trendData.timeframes?.['4h']?.trend || trendData.timeframes?.['4h']?.indicators?.emaSignal || "neutral";
+        const stochFilterTrend1h = trendData.timeframes?.['1h']?.trend || trendData.timeframes?.['1h']?.indicators?.emaSignal || "neutral";
         const stochFilterConf4h = trendData.timeframes?.['4h']?.confidence || 50;
         const stochFilterConf1h = trendData.timeframes?.['1h']?.confidence || 50;
         
