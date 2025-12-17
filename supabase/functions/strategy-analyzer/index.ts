@@ -1101,11 +1101,27 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
   const adx = trendData?.volatility?.adx || 0;
   const momentum = trendData?.momentum || {};
   const percentB = bb1h.percentB || 50;
+  const timeframes = trendData?.timeframes || {};
   
   // Strong ADX = momentum continuation is valid strategy
   const isStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG;
+  const isMinTrend = adx >= ADX_THRESHOLDS.MINIMUM; // 20+
   const hasMacdExpanding = momentum.macdExpanding === true;
-  const isMomentumConfirmed = momentum.state === "confirmed" || momentum.state === "mixed";
+  const momentumState = momentum.state || "none";
+  const isMomentumConfirmed = momentumState === "confirmed" || momentumState === "mixed";
+  const isMomentumBuilding = momentumState === "building";
+  const isActiveMomentum = isMomentumConfirmed || isMomentumBuilding || momentum.confirms === true;
+  
+  // Strong Trend Continuation Check: 4h + 1h aligned + momentum active
+  const trend4h = timeframes['4h']?.trend || timeframes['4h']?.indicators?.emaSignal || "neutral";
+  const trend1h = timeframes['1h']?.trend || timeframes['1h']?.indicators?.emaSignal || "neutral";
+  const isBullishAligned = trend4h === "bullish" && trend1h === "bullish";
+  const isBearishAligned = trend4h === "bearish" && trend1h === "bearish";
+  
+  const hasStrongTrendContinuation = isMinTrend && isActiveMomentum && (
+    (trend === "bullish" && isBullishAligned) ||
+    (trend === "bearish" && isBearishAligned)
+  );
   
   // ============= STOCHRSI-RSI CONFLICT RESOLUTION =============
   // Check if StochRSI is at extreme that would reduce RSI signal reliability
@@ -1187,6 +1203,34 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     const rsiInMomentumZone = rsi > RSI_THRESHOLDS.NEUTRAL_LOW && rsi < RSI_THRESHOLDS.BULLISH_STRONG; // 45-65
     if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsiInMomentumZone) {
       const weighted = applyStochRsiWeight(8, `Momentum continuation: Strong ADX + MACD expansion (RSI=${rsi.toFixed(1)})`);
+      return {
+        isPullback: false,
+        hasBothConditions: false,
+        pullbackDepth: 0,
+        entryTimingScore: weighted.score,
+        reason: weighted.reason
+      };
+    }
+    
+    // STRONG TREND CONTINUATION: 4h+1h aligned + momentum active (even if RSI not in ideal zone)
+    // This gives partial credit when timeframes strongly agree even without perfect RSI setup
+    if (hasStrongTrendContinuation) {
+      let continuationScore = 10;
+      let continuationReason = `Trend continuation: 4h+1h bullish aligned + momentum ${momentumState}`;
+      
+      // Bonus for MACD expanding
+      if (hasMacdExpanding) {
+        continuationScore = 14;
+        continuationReason += " + MACD expanding";
+      }
+      
+      // Slight reduction if RSI is getting overbought (but not blocking)
+      if (rsi > RSI_THRESHOLDS.BULLISH_STRONG) {
+        continuationScore = Math.max(8, continuationScore - 4);
+        continuationReason += ` [RSI=${rsi.toFixed(1)} slightly extended]`;
+      }
+      
+      const weighted = applyStochRsiWeight(continuationScore, continuationReason);
       return {
         isPullback: false,
         hasBothConditions: false,
@@ -1285,6 +1329,34 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     const rsiInMomentumZone = rsi > RSI_THRESHOLDS.BEARISH_PULLBACK && rsi < RSI_THRESHOLDS.NEUTRAL_HIGH; // 35-55
     if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsiInMomentumZone) {
       const weighted = applyStochRsiWeight(8, `Momentum continuation: Strong ADX + MACD expansion (RSI=${rsi.toFixed(1)})`);
+      return {
+        isPullback: false,
+        hasBothConditions: false,
+        pullbackDepth: 0,
+        entryTimingScore: weighted.score,
+        reason: weighted.reason
+      };
+    }
+    
+    // STRONG TREND CONTINUATION: 4h+1h aligned + momentum active (even if RSI not in ideal zone)
+    // This gives partial credit when timeframes strongly agree even without perfect RSI setup
+    if (hasStrongTrendContinuation) {
+      let continuationScore = 10;
+      let continuationReason = `Trend continuation: 4h+1h bearish aligned + momentum ${momentumState}`;
+      
+      // Bonus for MACD expanding
+      if (hasMacdExpanding) {
+        continuationScore = 14;
+        continuationReason += " + MACD expanding";
+      }
+      
+      // Slight reduction if RSI is getting oversold (but not blocking)
+      if (rsi < RSI_THRESHOLDS.BEARISH_PULLBACK) {
+        continuationScore = Math.max(8, continuationScore - 4);
+        continuationReason += ` [RSI=${rsi.toFixed(1)} slightly extended]`;
+      }
+      
+      const weighted = applyStochRsiWeight(continuationScore, continuationReason);
       return {
         isPullback: false,
         hasBothConditions: false,
