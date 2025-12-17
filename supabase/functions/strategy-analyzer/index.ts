@@ -1018,7 +1018,7 @@ const detectMarketRegime = (trendData: any): { regime: MarketRegime; tradeable: 
   const adx = trendData.volatility?.adx || 0;
   const atrPercent = trendData.volatility?.atrPercent || 0;
   const confidence = trendData.confidence || 0;
-  const consistency = trendData.trendConsistency || 0;
+  const consistency = trendData.trueAlignment?.score || 0;
   
   // Check for ranging market (ADX low, mixed signals)
   if (adx < 15 && confidence < 50) {  // 15 is intentional (below VERY_WEAK for severe ranging detection)
@@ -1854,7 +1854,8 @@ serve(async (req) => {
       if (!trendData) continue;
 
       try {
-        const { trend, confidence, trendConsistency, higherTimeframeFilter } = trendData;
+        const { trend, confidence, trueAlignment, higherTimeframeFilter } = trendData;
+        const trendConsistency = trueAlignment?.score || 0;
         const adx = trendData.volatility?.adx || 0;
         const momentum = trendData.momentum;
 
@@ -2262,7 +2263,7 @@ serve(async (req) => {
               adxRequired: ADX_THRESHOLDS.MINIMUM,
               trend,
               confidence,
-              trendConsistency: trendData.trendConsistency?.toFixed(1),
+              trendConsistency: trendData.trueAlignment?.score?.toFixed(1),
               // Additional context for UI
               momentum: {
                 state: momentum?.state || "none",
