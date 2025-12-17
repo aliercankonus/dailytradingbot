@@ -947,7 +947,7 @@ serve(async (req) => {
           }
           
           // RSI pullback detection for conflict resolution
-          const rsi4h = trendData.timeframes?.['4h']?.rsi ?? 50;
+          const rsi4h = trendData.timeframes?.['4h']?.indicators?.rsi ?? 50;
           const momentumConfirms = momentum.confirms === true;
           
           // For SHORT positions: check for bullish reversal signals
