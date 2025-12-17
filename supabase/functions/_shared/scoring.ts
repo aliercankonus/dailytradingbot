@@ -203,13 +203,12 @@ export const getAlignmentScore = (
   if (aligned) {
     score += 8;
   } else {
-    // Partial alignment check
-    const htf = trendData?.higherTimeframeFilter;
-    const mtf = trendData?.multiTimeframe;
-    if (htf && mtf) {
-      const trend4h = htf.trend4h || mtf.trend4h;
-      const trend1h = htf.trend1h || mtf.trend1h;
-      const trend30m = mtf.trend30m;
+    // Partial alignment check - use correct field paths from calculate-trend
+    const tf = trendData?.timeframes;
+    if (tf) {
+      const trend4h = tf['4h']?.trend || "neutral";
+      const trend1h = tf['1h']?.trend || "neutral";
+      const trend30m = tf['30m']?.trend || "neutral";
       
       // 4h neutral with 1h+30m aligned = partial alignment
       if (trend4h === "neutral" && trend1h === trend30m && trend1h !== "neutral") {
@@ -433,17 +432,17 @@ export const calculateUnifiedReversalScore = (
   const momentum = trendData?.momentum || {};
   const stochRSI = trendData?.stochasticRsi || {};
   const aggregated = stochRSI.aggregated || {};
-  const htf = trendData?.higherTimeframeFilter || {};
-  const mtf = trendData?.multiTimeframe || {};
-  const tf1h = trendData?.timeframes?.['1h'] || {};
+  const tf = trendData?.timeframes || {};
+  const tf1h = tf['1h'] || {};
+  const tf4h = tf['4h'] || {};
   const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 20;
   const volatility = trendData?.volatility || {};
   const indicators = trendData?.indicators || {};
-  const rsi = indicators.rsi || 50;
+  const rsi = tf1h.indicators?.rsi || indicators.rsi || 50;
   
   const isLong = signalType === "bullish" || signalType === "long";
-  const trend1h = htf.trend1h || mtf.trend1h || tf1h.trend || "neutral";
-  const trend4h = htf.trend4h || "neutral";
+  const trend1h = tf1h.trend || "neutral";
+  const trend4h = tf4h.trend || "neutral";
   const stoch4h = stochRSI['4h'] || {};
   
   // RSI pullback + momentum check for StochRSI conflict resolution
@@ -692,7 +691,7 @@ export const calculateQualityScore = (
   const confidence = trendData?.confidence || 50;
   const consistency = trendData?.trueAlignment?.score || 50;
   const momentum = trendData?.momentum || {};
-  const aligned = trendData?.higherTimeframeFilter?.aligned ?? false;
+  const aligned = trendData?.isAligned ?? false;
   
   const volumeConfirms = momentum.volumeConfirms || false;
   const volumeSpike = momentum.volumeSpike || false;
