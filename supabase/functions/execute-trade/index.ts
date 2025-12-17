@@ -881,10 +881,10 @@ serve(async (req) => {
             trend: currentTrend,
             confidence: signal.confidence_score || 0,
             trendConsistency: trendConsistency,
-            adx: trendData?.adx || 0,
-            rsi: trendData?.rsi || 50,
-            macdHistogram: trendData?.macd?.histogram || 0,
-            stochRSI: trendData?.stochRSI?.['1h'] || { k: 50, d: 50, signal: 'neutral' },
+            adx: trendData?.volatility?.adx || 0,
+            rsi: trendData?.timeframes?.['1h']?.indicators?.rsi || 50,
+            macdHistogram: trendData?.timeframes?.['1h']?.indicators?.macdHistogram || 0,
+            stochRSI: trendData?.stochasticRsi?.['1h'] || { k: 50, d: 50, signal: 'neutral' },
             bollingerBands: {
               percentB: bb1h.percentB || 50,
               squeeze: bb1h.squeeze || false
