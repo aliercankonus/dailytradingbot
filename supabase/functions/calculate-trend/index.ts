@@ -693,10 +693,23 @@ serve(async (req) => {
     
     const volumeBoost = volumeConfirmsDirection ? 1.10 : 1.0;
 
-    const lastCloseAlignsWithTrend =
-      (effectiveTrendForMomentum === "bullish" && lastClose > prevClose) ||
-      (effectiveTrendForMomentum === "bearish" && lastClose < prevClose) ||
-      effectiveTrendForMomentum === "neutral";
+    // IMPROVED: Check last 3 candles instead of just last candle (2/3 majority rule)
+    // This allows occasional bounces in strong trends without failing momentum confirmation
+    const candleCount = Math.min(3, prices1h.length - 1);
+    let alignedCandles = 0;
+    for (let i = 0; i < candleCount; i++) {
+      const closeIdx = prices1h.length - 1 - i;
+      const prevIdx = closeIdx - 1;
+      if (prevIdx >= 0) {
+        const closePrice = prices1h[closeIdx];
+        const prevPrice = prices1h[prevIdx];
+        if (effectiveTrendForMomentum === "bullish" && closePrice > prevPrice) alignedCandles++;
+        else if (effectiveTrendForMomentum === "bearish" && closePrice < prevPrice) alignedCandles++;
+        else if (effectiveTrendForMomentum === "neutral") alignedCandles++;
+      }
+    }
+    // Require 2/3 majority (2 of 3 candles aligned) OR neutral trend
+    const lastCloseAlignsWithTrend = effectiveTrendForMomentum === "neutral" || alignedCandles >= Math.ceil(candleCount * 0.67);
 
     // Divergence detection
     let hasDivergence = false;
@@ -721,10 +734,25 @@ serve(async (req) => {
     const fakeBreakoutRisk = macdExpanding && !adxRising;
     const genuineMomentum = macdExpanding && adxRising;
 
-    const momentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= ADX_THRESHOLDS.MODERATE && adxRising;
-    let momentumState: "none" | "mixed" | "confirmed" = "none";
-    if (momentumConfirms) {
+    // RELAXED: Allow "confirmed" momentum with fewer conditions when trends are aligned
+    // Previously required ALL: macdExpanding, lastCloseAlignsWithTrend, !hasDivergence, ADX >= 22, adxRising
+    // Now: Strong aligned moves (4h+1h same direction) can pass with just MACD expanding + ADX >= 18
+    const is4h1hAligned = trend4h.trend !== "neutral" && trend4h.trend === trend1h.trend;
+    const strongAlignment = is4h1hAligned && trend4h.confidence >= 55 && trend1h.confidence >= 50;
+    
+    // Standard full confirmation
+    const fullMomentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= ADX_THRESHOLDS.MODERATE && adxRising;
+    
+    // Relaxed confirmation for strong alignment (allows single-candle bounces in strong trends)
+    const alignedMomentumConfirms = strongAlignment && macdExpanding && !hasDivergence && adx >= ADX_THRESHOLDS.WEAK;
+    
+    const momentumConfirms = fullMomentumConfirms || alignedMomentumConfirms;
+    let momentumState: "none" | "mixed" | "confirmed" | "building" = "none";
+    if (fullMomentumConfirms) {
       momentumState = "confirmed";
+    } else if (alignedMomentumConfirms) {
+      momentumState = "building"; // New state: aligned but not full confirmation
+      console.log(`${symbol}: BUILDING MOMENTUM - aligned trends (4h+1h ${trend4h.trend}) allow entry despite lastCloseAligns=${lastCloseAlignsWithTrend}`);
     } else if (macdExpanding && adxRising && (hasDivergence || !lastCloseAlignsWithTrend)) {
       momentumState = adx >= ADX_THRESHOLDS.WEAK ? "mixed" : "none";
     } else if (fakeBreakoutRisk && adx >= ADX_THRESHOLDS.MODERATE) {
