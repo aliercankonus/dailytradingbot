@@ -1428,7 +1428,7 @@ const StochRsiExtremeDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
   const stochRsiK = parseFloat(filtersStatus?.stochRsiK4h) || 0;
   const threshold = filtersStatus?.threshold || (stochRsiK < 50 ? 10 : 90);
   const intendedDirection = filtersStatus?.intendedDirection;
-  const trend = filtersStatus?.trend || filtersStatus?.primaryTrend || "unknown";
+  const trend = filtersStatus?.trend4h || filtersStatus?.trend || filtersStatus?.primaryTrend || "unknown";
   const reason = filtersStatus?.reason;
   
   const isOversold = stochRsiK < 50;
