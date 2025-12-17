@@ -6,7 +6,7 @@ interface MomentumData {
   momentum: {
     confirms: boolean;
     building: boolean;
-    state: "none" | "mixed" | "confirmed";
+    state: "none" | "mixed" | "confirmed" | "building";  // Added "building" state
     lastCloseAlignsWithTrend: boolean;
     hasDivergence: boolean;
     macdHistogram: number;
@@ -60,7 +60,8 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
         symbol,
         momentum: {
           confirms: data.momentum?.confirms ?? false,
-          building: data.momentum?.macdExpanding && !data.momentum?.confirms,
+          // "building" state from calculate-trend indicates aligned trends with partial confirmation
+          building: data.momentum?.state === "building",
           state: data.momentum?.state ?? 'none',
           lastCloseAlignsWithTrend: data.momentum?.lastCloseAlignsWithTrend ?? false,
           hasDivergence: data.momentum?.hasDivergence ?? false,
