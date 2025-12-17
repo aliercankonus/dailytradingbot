@@ -21,6 +21,10 @@ import {
   Bot,
   Loader2,
   AlertTriangle,
+  Ban,
+  DollarSign,
+  TrendingUp as VolumeIcon,
+  Scale,
 } from "lucide-react";
 import { useSignalRejections } from "@/hooks/useSignalRejections";
 import { useRiskParameters } from "@/hooks/useRiskParameters";
@@ -441,6 +445,66 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
           <Badge variant="outline" className="text-[10px] px-1 py-0 capitalize">
             {filtersStatus.regime}
           </Badge>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Execution Rejection Display - for signals rejected during trade execution
+const ExecutionRejectionDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
+  const filter = filtersStatus?.executionFilter || 'Unknown';
+  const signalType = filtersStatus?.signalType;
+  const strategyName = filtersStatus?.strategyName;
+  const qualityScore = filtersStatus?.qualityScore;
+  
+  return (
+    <div className="space-y-2 p-2 bg-orange-500/10 border border-orange-500/20 rounded-md">
+      <div className="flex items-center gap-2">
+        <Ban className="h-4 w-4 text-orange-500" />
+        <span className="text-xs font-medium text-orange-400">Execution Blocked</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-[10px]">
+        {signalType && (
+          <div>
+            <span className="text-muted-foreground">Signal: </span>
+            <Badge variant="outline" className={`text-[9px] px-1 py-0 ${signalType === 'long' ? 'text-green-400' : 'text-red-400'}`}>
+              {signalType.toUpperCase()}
+            </Badge>
+          </div>
+        )}
+        {strategyName && (
+          <div className="truncate">
+            <span className="text-muted-foreground">Strategy: </span>
+            <span className="font-medium">{strategyName}</span>
+          </div>
+        )}
+        {qualityScore !== undefined && (
+          <div>
+            <span className="text-muted-foreground">Quality: </span>
+            <span className={`font-mono ${qualityScore >= 50 ? 'text-green-400' : 'text-red-400'}`}>{qualityScore}</span>
+          </div>
+        )}
+      </div>
+      {/* Show specific filter data */}
+      {filtersStatus?.currentPrice && filtersStatus?.entryPrice && (
+        <div className="text-[10px] text-muted-foreground pt-1 border-t border-border/30">
+          Entry: ${filtersStatus.entryPrice.toFixed(2)} → Current: ${filtersStatus.currentPrice.toFixed(2)}
+        </div>
+      )}
+      {filtersStatus?.adx !== undefined && (
+        <div className="text-[10px] text-muted-foreground">
+          ADX: {filtersStatus.adx.toFixed?.(1) || filtersStatus.adx}
+        </div>
+      )}
+      {filtersStatus?.reversalScore !== undefined && (
+        <div className="text-[10px] text-muted-foreground">
+          Reversal Score: {filtersStatus.reversalScore}/100
+        </div>
+      )}
+      {filtersStatus?.riskRewardRatio !== undefined && (
+        <div className="text-[10px] text-muted-foreground">
+          R:R Ratio: {filtersStatus.riskRewardRatio.toFixed?.(2) || filtersStatus.riskRewardRatio}:1
         </div>
       )}
     </div>
@@ -1642,6 +1706,8 @@ export const SignalRejectionReasons = () => {
   const aiEnabled = riskParams?.ai_analysis_enabled ?? false;
 
   const getReasonIcon = (reason: string) => {
+    // Execution rejections - signals that were blocked during trade execution
+    if (reason.startsWith("EXECUTION:")) return <Ban className="h-4 w-4 text-orange-500" />;
     if (reason.includes("Max trades")) return <Layers className="h-4 w-4" />;
     if (reason.includes("Quality score")) return <BarChart3 className="h-4 w-4" />;
     if (reason.includes("active signal")) return <Zap className="h-4 w-4 text-green-500" />;
@@ -1656,6 +1722,7 @@ export const SignalRejectionReasons = () => {
   };
 
   const getReasonBadgeVariant = (reason: string): "default" | "secondary" | "destructive" | "outline" => {
+    if (reason.startsWith("EXECUTION:")) return "secondary"; // Orange-ish for execution blocks
     if (reason.includes("active signal")) return "default";
     if (reason.includes("Max trades")) return "secondary";
     if (reason.includes("Quality score")) return "destructive";
@@ -1668,6 +1735,11 @@ export const SignalRejectionReasons = () => {
   const renderFilterDetails = (rejection: SignalRejection) => {
     const fs = rejection.filters_status;
     const reason = rejection.rejection_reason || "";
+    
+    // Execution rejections - signals blocked during trade execution
+    if (reason.startsWith("EXECUTION:")) {
+      return <ExecutionRejectionDisplay filtersStatus={fs} />;
+    }
     
     // Already has active signal
     if (reason.includes("active signal")) {
