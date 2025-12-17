@@ -242,6 +242,8 @@ export const getTechnicalScore = (
   const stochRsi = trendData?.stochasticRsi;
   const bollinger = trendData?.bollingerBands;
   const adx = trendData?.volatility?.adx || 0;
+  const momentum = trendData?.momentum || {};
+  const timeframes = trendData?.timeframes || {};
   
   if (!stochRsi || !bollinger) {
     return 0;
@@ -261,6 +263,25 @@ export const getTechnicalScore = (
   
   const isStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG;
   const rsi4h = trendData?.timeframes?.['4h']?.indicators?.rsi ?? 50;
+  
+  // Strong Trend Continuation Exception Check
+  // When momentum is building/confirmed AND timeframes are aligned, allow partial credit at extremes
+  const momentumState = momentum.state || "none";
+  const momentumConfirmed = momentum.confirms === true;
+  const macdExpanding = momentum.macdExpanding === true;
+  const isActiveMomentum = momentumState === "building" || momentumState === "confirmed" || momentumConfirmed;
+  
+  const trend4h = timeframes['4h']?.trend || timeframes['4h']?.indicators?.emaSignal || "neutral";
+  const trend1h = timeframes['1h']?.trend || timeframes['1h']?.indicators?.emaSignal || "neutral";
+  
+  const isBullishAligned = trend4h === "bullish" && trend1h === "bullish";
+  const isBearishAligned = trend4h === "bearish" && trend1h === "bearish";
+  
+  // Strong trend continuation allows partial credit at StochRSI extremes
+  const hasStrongTrendContinuation = isActiveMomentum && (
+    (effectiveTrend === "bullish" && isBullishAligned) ||
+    (effectiveTrend === "bearish" && isBearishAligned)
+  );
   
   // StochRSI-RSI conflict resolution
   const isLong = effectiveTrend === "bullish";
@@ -287,16 +308,31 @@ export const getTechnicalScore = (
         stochScore = baseStochScore;
       }
     } else {
+      // Non-strong-trend bullish scoring with strong trend continuation exception
       if (primarySignal === "oversold" || primaryK < 20) stochScore = 8;
       else if (primaryK < 30) stochScore = 5;
       else if (primaryK < 40) stochScore = 2;
-      else if (primaryK > 80) stochScore = 0;
+      else if (primaryK > 80) {
+        // StochRSI overbought: normally 0 for LONG, but allow partial credit with strong trend continuation
+        if (hasStrongTrendContinuation && macdExpanding) {
+          stochScore = 5; // Strong trend can push further into overbought
+        } else if (hasStrongTrendContinuation) {
+          stochScore = 3; // Momentum aligned but MACD not expanding
+        } else {
+          stochScore = 0; // Risky entry at extreme without trend continuation
+        }
+      }
       else stochScore = 1;
     }
     
+    // Bollinger Bands scoring for bullish with trend continuation exception
     if (pricePosition === "lower_zone" || percentB < 30) bbScore = 4;
     else if (pricePosition === "middle" || (percentB >= 30 && percentB <= 70)) bbScore = 2;
     else if (isStrongTrend && percentB > 70) bbScore = 2;
+    else if (hasStrongTrendContinuation && (pricePosition === "upper_zone" || percentB > 70)) {
+      // Strong trend continuation: price at upper band can break further in strong bullish
+      bbScore = 3;
+    }
     else bbScore = 1;
     
   } else if (effectiveTrend === "bearish") {
@@ -314,16 +350,31 @@ export const getTechnicalScore = (
         stochScore = baseStochScore;
       }
     } else {
+      // Non-strong-trend bearish scoring with strong trend continuation exception
       if (primarySignal === "overbought" || primaryK > 80) stochScore = 8;
       else if (primaryK > 70) stochScore = 5;
       else if (primaryK > 60) stochScore = 2;
-      else if (primaryK < 20) stochScore = 0;
+      else if (primaryK < 20) {
+        // StochRSI oversold: normally 0 for SHORT, but allow partial credit with strong trend continuation
+        if (hasStrongTrendContinuation && macdExpanding) {
+          stochScore = 5; // Strong trend can push further into oversold
+        } else if (hasStrongTrendContinuation) {
+          stochScore = 3; // Momentum aligned but MACD not expanding
+        } else {
+          stochScore = 0; // Risky entry at extreme without trend continuation
+        }
+      }
       else stochScore = 1;
     }
     
+    // Bollinger Bands scoring for bearish with trend continuation exception
     if (pricePosition === "upper_zone" || percentB > 70) bbScore = 4;
     else if (pricePosition === "middle" || (percentB >= 30 && percentB <= 70)) bbScore = 2;
     else if (isStrongTrend && percentB < 30) bbScore = 2;
+    else if (hasStrongTrendContinuation && (pricePosition === "lower_zone" || percentB < 30)) {
+      // Strong trend continuation: price at lower band can break further in strong bearish
+      bbScore = 3;
+    }
     else bbScore = 1;
     
   } else {
