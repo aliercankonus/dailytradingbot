@@ -159,7 +159,8 @@ export const getMomentumScore = (momentum: any): number => {
   const state = momentum.state || "none";
   const confirms = momentum.confirms || false;
   const volumeConfirms = momentum.volumeConfirms || false;
-  const building = momentum.building || false;
+  // Fix: check both boolean and string state for "building"
+  const building = momentum.building || state === "building";
   const macdExpanding = momentum.macdExpanding || false;
   
   let score = 0;
