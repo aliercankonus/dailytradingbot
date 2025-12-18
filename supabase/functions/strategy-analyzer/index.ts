@@ -305,12 +305,12 @@ const BUILT_IN_TEMPLATES = [
 // NEW: Added confidence penalty, pullback bonus, volume score, and strategy performance bonus
 interface QualityFactors {
   adxScore: number;          // 0-25 points based on trend strength
-  momentumScore: number;     // 0-20 points based on momentum confirmation (REDUCED from 25)
-  alignmentScore: number;    // 0-20 points based on timeframe alignment
+  momentumScore: number;     // 0-20 points based on momentum confirmation
+  alignmentScore: number;    // 0-14 points based on timeframe alignment (FIX: was showing /20)
   technicalScore: number;    // 0-15 points based on StochRSI/Bollinger signals
-  entryTimingScore: number;  // 0-25 points based on pullback/entry timing (INCREASED from 20)
-  volumeScore: number;       // 0-10 points based on volume confirmation (NEW)
-  confidencePenalty: number; // 0 to -20 penalty for high confidence (inversion fix)
+  entryTimingScore: number;  // 0-25 points based on pullback/entry timing
+  volumeScore: number;       // 0-10 points based on volume confirmation
+  confidencePenalty: number; // 0 to -25 penalty for high confidence (inversion fix)
   directionBonus: number;    // +3 for SHORT signals (SELL outperforms BUY historically)
 }
 
@@ -328,8 +328,15 @@ const calculateQualityScore = (factors: QualityFactors): { score: number; breakd
   
   const penaltyStr = factors.confidencePenalty < 0 ? ` CONF_PEN:${factors.confidencePenalty}` : '';
   const bonusStr = factors.directionBonus > 0 ? ` DIR_BONUS:+${factors.directionBonus}` : '';
-  const volumeStr = factors.volumeScore > 0 ? ` VOL:${factors.volumeScore}/10` : '';
-  const breakdown = `ADX:${factors.adxScore}/25 MOM:${factors.momentumScore}/20 ALIGN:${factors.alignmentScore}/20 TECH:${factors.technicalScore}/15 ENTRY:${factors.entryTimingScore}/25${volumeStr}${penaltyStr}${bonusStr}`;
+  // FIX: Volume always shows even if 0 to make debugging easier
+  const volumeStr = ` VOL:${factors.volumeScore}/10`;
+  // FIX: Correct max values to match actual scoring functions:
+  // - ADX: 0-25 ✓
+  // - Momentum: 0-20 ✓
+  // - Alignment: 0-14 (was showing /20)
+  // - Technical: 0-15 ✓
+  // - Entry: 0-25 ✓
+  const breakdown = `ADX:${factors.adxScore}/25 MOM:${factors.momentumScore}/20 ALIGN:${factors.alignmentScore}/14 TECH:${factors.technicalScore}/15 ENTRY:${factors.entryTimingScore}/25${volumeStr}${penaltyStr}${bonusStr}`;
   
   return { score, breakdown };
 };
