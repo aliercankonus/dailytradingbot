@@ -391,12 +391,47 @@ serve(async (req) => {
       throw new Error('Market trend is bearish but signal is LONG - trade cancelled');
     }
 
-    // FILTER 2: Require trend consistency (configurable threshold)
-    const minTrendConsistency = riskParams.min_trend_consistency || 50;
-    if (trendConsistency < minTrendConsistency) {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Trend Consistency', signal, trendData, { trendConsistency, minRequired: minTrendConsistency });
-      throw new Error(`Trend not consistent enough (${trendConsistency.toFixed(0)}%) - minimum required: ${minTrendConsistency}%`);
+    // FILTER 2: Require trend consistency (dynamic threshold based on ADX and 1h confidence)
+    // Extract ADX early for dynamic consistency calculation
+    const adxValueForConsistency = typeof trendData?.volatility?.adx === 'number' 
+      ? trendData.volatility.adx 
+      : (typeof trendData?.volatility?.adx === 'object' ? trendData.volatility.adx?.value : 0);
+    
+    // Extract 1h confidence for dynamic threshold
+    const confidence1hForConsistency = trendData?.timeframes?.['1h']?.confidence || 
+                                       trendData?.higherTimeframeFilter?.confidence1h || 0;
+    
+    // Check if strategy is neutral (for lower threshold)
+    const isNeutralStrategyForConsistency = signal.strategy_name?.toLowerCase().includes('neutral') || false;
+    
+    // Dynamic consistency threshold (aligned with quality threshold logic)
+    let dynamicMinConsistency = riskParams.min_trend_consistency || 60;
+    
+    if (isNeutralStrategyForConsistency) {
+      // Neutral strategies rely on HTF direction, lower consistency requirement
+      dynamicMinConsistency = 40;
+      console.log(`📊 Neutral Strategy: Consistency threshold lowered to ${dynamicMinConsistency}%`);
+    } else if (confidence1hForConsistency >= CONFIDENCE_THRESHOLDS.HTF_EXCEPTION) {
+      // Strong 1h alignment allows lower consistency (1h is driving direction)
+      dynamicMinConsistency = 50;
+      console.log(`📊 Strong 1h alignment (${confidence1hForConsistency.toFixed(0)}%): Consistency threshold lowered to ${dynamicMinConsistency}%`);
+    } else if (adxValueForConsistency >= ADX_THRESHOLDS.STRONG) {
+      // Strong ADX means clear trend, can accept slightly lower consistency
+      dynamicMinConsistency = 55;
+      console.log(`📊 Strong ADX (${adxValueForConsistency.toFixed(1)}): Consistency threshold lowered to ${dynamicMinConsistency}%`);
     }
+    
+    if (trendConsistency < dynamicMinConsistency) {
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Trend Consistency', signal, trendData, { 
+        trendConsistency, 
+        minRequired: dynamicMinConsistency,
+        adx: adxValueForConsistency,
+        confidence1h: confidence1hForConsistency,
+        isNeutralStrategy: isNeutralStrategyForConsistency
+      });
+      throw new Error(`Trend not consistent enough (${trendConsistency.toFixed(0)}%) - minimum required: ${dynamicMinConsistency}%`);
+    }
+    console.log(`✓ Consistency check passed: ${trendConsistency.toFixed(0)}% >= ${dynamicMinConsistency}% threshold`);
 
     // FILTER 3: Skip ranging markets for BUY/SELL signals
     if (currentTrend === 'ranging') {
