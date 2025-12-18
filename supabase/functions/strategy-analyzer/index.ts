@@ -297,6 +297,19 @@ const BUILT_IN_TEMPLATES = [
     exit_conditions: [{ indicator: 'MACD', operator: 'below', value: '', compareToIndicator: true, targetIndicator: 'MACD_Signal' }],
     indicators: [{ type: 'MACD', name: 'MACD', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }, { type: 'MACD_Signal', name: 'MACD_Signal', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }],
     risk_settings: { stopLossPercent: 2, takeProfitPercent: 4, positionSizePercent: 1.5 }
+  },
+  // NEW: Neutral trend strategy - trades when 5m is neutral but HTF (1h) shows strong directional bias
+  {
+    id: 'builtin-htf-neutral-breakout',
+    name: 'HTF Neutral Breakout',
+    signal_direction: 'neutral',  // Supports neutral 5m trend when HTF is directional
+    entry_conditions: [
+      { indicator: 'RSI', operator: 'above', value: '40', compareToIndicator: false },
+      { indicator: 'RSI', operator: 'below', value: '60', compareToIndicator: false }
+    ],
+    exit_conditions: [{ indicator: 'RSI', operator: 'above', value: '70', compareToIndicator: false }],
+    indicators: [{ type: 'RSI', name: 'RSI', period: 14 }],
+    risk_settings: { stopLossPercent: 2, takeProfitPercent: 4, positionSizePercent: 1.5 }
   }
 ];
 
@@ -2336,6 +2349,9 @@ serve(async (req) => {
           } else if (strategyDirection === 'long' && tradeDirectionForGate === 'bullish') {
             canSupportTrend = true;
           } else if (strategyDirection === 'short' && tradeDirectionForGate === 'bearish') {
+            canSupportTrend = true;
+          } else if (strategyDirection === 'neutral' && tradeDirectionForGate === 'neutral') {
+            // NEW: Neutral strategies support neutral trends (rely on HTF for direction)
             canSupportTrend = true;
           }
           
