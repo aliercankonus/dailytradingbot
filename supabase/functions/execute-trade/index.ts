@@ -469,8 +469,11 @@ serve(async (req) => {
     const confidence1h = trendData?.timeframes?.['1h']?.confidence || 
                          trendData?.higherTimeframeFilter?.confidence1h || 0;
     
-    // Check if strategy is neutral (for lower threshold)
-    const isNeutralStrategy = signal.strategy_name?.toLowerCase().includes('neutral') || false;
+    // Check if this is a neutral trend scenario (for lower threshold)
+    // Neutral applies when: strategy name contains "neutral" OR current trend is neutral/ranging
+    const isNeutralStrategy = signal.strategy_name?.toLowerCase().includes('neutral') || 
+                              currentTrend === 'neutral' || 
+                              currentTrend === 'ranging';
     
     if (isInRecoveryMode) {
       dynamicQualityThreshold = 65; // Stricter in recovery mode
