@@ -644,10 +644,19 @@ const calculateUnifiedReversalScore = (
   // Mixed or unconfirmed momentum = directional uncertainty
   // (momentumState and momentumConfirms already defined above for RSI-StochRSI conflict resolution)
   
-  // NEW: "building" state now counts as acceptable momentum (from aligned trends)
+  // RELAXED: Allow "none" state with reduced penalty when ADX >= 30 (strong trend exception)
+  // This enables early entries when trend strength itself provides conviction
+  const isVeryStrongTrendForMomentum = adx >= ADX_THRESHOLDS.VERY_STRONG; // 30+
+  
   if (momentumState === "none") {
-    breakdown.momentumScore = 25;
-    signals.push(`No momentum (state: ${momentumState})`);
+    if (isVeryStrongTrendForMomentum) {
+      // Strong trend exception - reduced penalty for early entries
+      breakdown.momentumScore = 10;
+      signals.push(`No momentum but strong trend (ADX=${adx.toFixed(1)} >= 30)`);
+    } else {
+      breakdown.momentumScore = 25;
+      signals.push(`No momentum (state: ${momentumState})`);
+    }
   } else if (momentumState === "mixed") {
     // HARD GATE: Mixed momentum + weak ADX = block - Uses centralized ADX_THRESHOLDS
     if (adx < ADX_THRESHOLDS.VERY_STRONG) {
@@ -663,8 +672,13 @@ const calculateUnifiedReversalScore = (
     breakdown.momentumScore = 8;
     signals.push(`Momentum building (aligned trends, partial confirmation)`);
   } else if (!momentumConfirms) {
-    breakdown.momentumScore = 15;
-    signals.push(`Momentum state ${momentumState} but not confirmed`);
+    if (isVeryStrongTrendForMomentum) {
+      breakdown.momentumScore = 8;
+      signals.push(`Momentum unconfirmed but strong trend (ADX=${adx.toFixed(1)})`);
+    } else {
+      breakdown.momentumScore = 15;
+      signals.push(`Momentum state ${momentumState} but not confirmed`);
+    }
   }
   
   // ============= 4. MACD ALIGNMENT (0-15 points) =============
