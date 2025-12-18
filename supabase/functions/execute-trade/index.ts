@@ -424,25 +424,49 @@ serve(async (req) => {
 
     // ============================================================
     // DYNAMIC QUALITY THRESHOLD (aligned with strategy-analyzer)
-    // Adjust quality threshold based on ADX and recovery mode - Uses centralized ADX_THRESHOLDS
+    // Adjust quality threshold based on ADX, 1h confidence, and recovery mode
+    // Uses centralized ADX_THRESHOLDS
     // ============================================================
     const isInRecoveryMode = riskParams.consecutive_losses >= riskParams.consecutive_loss_threshold;
     let dynamicQualityThreshold = 55; // Base threshold
     
+    // Extract 1h confidence for strong alignment exception
+    const confidence1h = trendData?.timeframes?.['1h']?.confidence || 
+                         trendData?.higherTimeframeFilter?.confidence1h || 0;
+    
+    // Check if strategy is neutral (for lower threshold)
+    const isNeutralStrategy = signal.strategy_name?.toLowerCase().includes('neutral') || false;
+    
     if (isInRecoveryMode) {
       dynamicQualityThreshold = 65; // Stricter in recovery mode
       console.log(`🔒 Recovery Mode: Quality threshold raised to ${dynamicQualityThreshold}`);
+    } else if (isNeutralStrategy) {
+      // Neutral strategies rely on HTF direction rather than 5m quality
+      dynamicQualityThreshold = 35;
+      console.log(`📊 Neutral Strategy: Quality threshold lowered to ${dynamicQualityThreshold}`);
+    } else if (confidence1h >= CONFIDENCE_THRESHOLDS.HTF_EXCEPTION) {
+      // Strong 1h alignment exception (aligned with strategy-analyzer)
+      dynamicQualityThreshold = 45;
+      console.log(`📊 Strong 1h alignment (${confidence1h.toFixed(0)}%): Quality threshold lowered to ${dynamicQualityThreshold}`);
     } else if (adxValue >= ADX_THRESHOLDS.EXCEPTIONAL) {
       dynamicQualityThreshold = 50; // Relaxed in very strong trends
-      console.log(`📈 Strong trend (ADX ${adxValue.toFixed(1)}): Quality threshold lowered to ${dynamicQualityThreshold}`);
+      console.log(`📈 Exceptional ADX (${adxValue.toFixed(1)}): Quality threshold lowered to ${dynamicQualityThreshold}`);
     } else if (adxValue >= ADX_THRESHOLDS.STRONG) {
       dynamicQualityThreshold = 53;
+      console.log(`📈 Strong ADX (${adxValue.toFixed(1)}): Quality threshold lowered to ${dynamicQualityThreshold}`);
     }
     
     // Check signal quality score from indicators
     const signalQualityScore = signal.indicators?.qualityScore ?? 0;
     if (signalQualityScore > 0 && signalQualityScore < dynamicQualityThreshold) {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Quality Score Too Low', signal, trendData, { qualityScore: signalQualityScore, threshold: dynamicQualityThreshold, isRecoveryMode: isInRecoveryMode });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Quality Score Too Low', signal, trendData, { 
+        qualityScore: signalQualityScore, 
+        threshold: dynamicQualityThreshold, 
+        isRecoveryMode: isInRecoveryMode,
+        confidence1h,
+        isNeutralStrategy,
+        adx: adxValue
+      });
       throw new Error(`Signal quality score (${signalQualityScore}) below dynamic threshold (${dynamicQualityThreshold}) - trade cancelled`);
     }
     console.log(`✓ Quality check: ${signalQualityScore} >= ${dynamicQualityThreshold} threshold`);

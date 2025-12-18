@@ -410,7 +410,25 @@ serve(async (req) => {
           qualityScore = Math.round(qualityScore * 0.8); // Reduce quality for high reversal risk
         }
 
-        if (qualityScore < RISK_PARAMS.MIN_QUALITY_THRESHOLD) continue;
+        // ============= DYNAMIC QUALITY THRESHOLD (aligned with strategy-analyzer & execute-trade) =============
+        // Determines min quality score based on market conditions
+        const getMinQualityScore = (currentAdx: number, confidence1h?: number, isNeutralStrategy?: boolean): number => {
+          // Neutral strategies rely on HTF direction rather than 5m quality
+          if (isNeutralStrategy) return 35;
+          // Strong 1h alignment exception (confidence >= 65%)
+          if (confidence1h && confidence1h >= CONFIDENCE_THRESHOLDS.HTF_EXCEPTION) return 45;
+          // ADX-based thresholds
+          if (currentAdx >= ADX_THRESHOLDS.EXCEPTIONAL) return 50;
+          if (currentAdx >= ADX_THRESHOLDS.STRONG) return 53;
+          return 55; // Base threshold
+        };
+        
+        // Check if strategy is neutral type
+        const isNeutralStrategy = signalDirection === 'trend' && 
+          (trend4h.trend === 'neutral' || trend1h.trend === 'neutral');
+        
+        const dynamicMinQuality = getMinQualityScore(adx, trend1h.confidence, isNeutralStrategy);
+        if (qualityScore < dynamicMinQuality) continue;
 
         // Position sizing and levels
         const posSize = currentCapital * 0.95;

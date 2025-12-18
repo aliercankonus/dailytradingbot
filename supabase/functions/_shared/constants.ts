@@ -66,7 +66,14 @@ export const RISK_PARAMS = {
   TRAILING_STOP_ACTIVATION_PERCENT: 1.0,
   MIN_STOP_DISTANCE_PERCENT: 1.0,
   TRAILING_PROFIT_LOCK_PERCENT: 0.5,
-  MIN_QUALITY_THRESHOLD: 50,
+  // Base quality threshold - actual threshold is dynamically adjusted:
+  // - 45 for strong 1h confidence (>=65%)
+  // - 50 for exceptional ADX (>=35)
+  // - 53 for strong ADX (>=25)
+  // - 55 base threshold
+  // - 35 for neutral strategies
+  // - 65 in recovery mode
+  MIN_QUALITY_THRESHOLD: 55,
 } as const;
 
 // Slippage buffer constants for stop loss calculations
