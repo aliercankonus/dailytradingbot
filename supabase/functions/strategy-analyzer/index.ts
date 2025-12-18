@@ -644,22 +644,22 @@ const calculateUnifiedReversalScore = (
   // Mixed or unconfirmed momentum = directional uncertainty
   // (momentumState and momentumConfirms already defined above for RSI-StochRSI conflict resolution)
   
-  // RELAXED: Allow "none" state with reduced penalty when ADX >= 30 (strong trend exception)
+  // RELAXED: Allow "none" state with reduced penalty when ADX >= 28 (strong trend exception)
   // This enables early entries when trend strength itself provides conviction
-  const isVeryStrongTrendForMomentum = adx >= ADX_THRESHOLDS.VERY_STRONG; // 30+
+  const isStrongTrendForMomentum = adx >= ADX_THRESHOLDS.STRONG_TREND_EXCEPTION; // 28+ (relaxed from 30)
   
   if (momentumState === "none") {
-    if (isVeryStrongTrendForMomentum) {
+    if (isStrongTrendForMomentum) {
       // Strong trend exception - reduced penalty for early entries
       breakdown.momentumScore = 10;
-      signals.push(`No momentum but strong trend (ADX=${adx.toFixed(1)} >= 30)`);
+      signals.push(`No momentum but strong trend (ADX=${adx.toFixed(1)} >= 28)`);
     } else {
       breakdown.momentumScore = 25;
       signals.push(`No momentum (state: ${momentumState})`);
     }
   } else if (momentumState === "mixed") {
-    // HARD GATE: Mixed momentum + weak ADX = block - Uses centralized ADX_THRESHOLDS
-    if (adx < ADX_THRESHOLDS.VERY_STRONG) {
+    // HARD GATE: Mixed momentum + weak ADX = block
+    if (adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION) {
       breakdown.momentumScore = 30;  // Max score for mixed in weak trend
       signals.push(`Mixed momentum with weak trend (ADX=${adx.toFixed(1)})`);
     } else {
@@ -672,7 +672,7 @@ const calculateUnifiedReversalScore = (
     breakdown.momentumScore = 8;
     signals.push(`Momentum building (aligned trends, partial confirmation)`);
   } else if (!momentumConfirms) {
-    if (isVeryStrongTrendForMomentum) {
+    if (isStrongTrendForMomentum) {
       breakdown.momentumScore = 8;
       signals.push(`Momentum unconfirmed but strong trend (ADX=${adx.toFixed(1)})`);
     } else {
@@ -1676,9 +1676,13 @@ serve(async (req) => {
     const BASE_MIN_QUALITY_SCORE = 55;
     const DEFAULT_MIN_QUALITY = BASE_MIN_QUALITY_SCORE;
     
-    const getMinQualityScore = (adx: number, inRecovery: boolean): number => {
+    const getMinQualityScore = (adx: number, inRecovery: boolean, confidence1h?: number): number => {
       if (inRecovery) {
         return BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost; // 65 in recovery
+      }
+      // NEW: If 1h shows strong direction (≥70% confidence), allow lower threshold
+      if (confidence1h && confidence1h >= 70) {
+        return 45;  // Strong 1h signal: much lower threshold for early entries
       }
       // Dynamic based on ADX - strong trends = allow more signals
       if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) return 50;  // Strong trend: lower threshold
@@ -2180,29 +2184,28 @@ serve(async (req) => {
           continue;
         }
         
-        // GATE 2: Momentum must be confirmed (not "none" or unconfirmed)
-        // RELAXED: Allow entry when momentum.state is "none" IF ADX >= 30 (very strong trend)
+        // RELAXED: Allow entry when momentum.state is "none" IF ADX >= 28 (strong trend exception)
         // This enables early entries when trend strength itself provides conviction
         const momentumState = momentum?.state || "none";
         const momentumConfirms = momentum?.confirms ?? false;
-        const isVeryStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG; // 30+
+        const isStrongTrendException = adx >= ADX_THRESHOLDS.STRONG_TREND_EXCEPTION; // 28+ (relaxed from 30)
         
         // Momentum passes if:
         // 1. State is confirmed/building/mixed AND confirms is true, OR
-        // 2. State is "none" BUT ADX >= 30 (strong trend exception for early entries)
-        const momentumPasses = momentumConfirms || (momentumState !== "none") || isVeryStrongTrend;
+        // 2. State is "none" BUT ADX >= 28 (strong trend exception for early entries)
+        const momentumPasses = momentumConfirms || (momentumState !== "none") || isStrongTrendException;
         
         if (!momentumPasses) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: No momentum confirmation (state=${momentumState}, confirms=${momentumConfirms}, ADX=${adx.toFixed(1)} < 30)`,
+            `HARD GATE: No momentum confirmation (state=${momentumState}, confirms=${momentumConfirms}, ADX=${adx.toFixed(1)} < 28)`,
             { 
               gate: "NO_MOMENTUM_CONFIRMATION",
               momentumState,
               momentumConfirms,
               adx: adx.toFixed(1),
-              isVeryStrongTrend,
+              isStrongTrendException,
               trend,
               confidence,
               // Detailed momentum analysis
@@ -2228,31 +2231,42 @@ serve(async (req) => {
         }
         
         // Log when using strong trend exception for early entry
-        if (isVeryStrongTrend && momentumState === "none" && !momentumConfirms) {
-          console.log(`⚡ ${symbol}: EARLY ENTRY via strong trend exception (ADX=${adx.toFixed(1)} >= 30, momentum=${momentumState})`);
+        if (isStrongTrendException && momentumState === "none" && !momentumConfirms) {
+          console.log(`⚡ ${symbol}: EARLY ENTRY via strong trend exception (ADX=${adx.toFixed(1)} >= 28, momentum=${momentumState})`);
         }
         
-        // GATE 3: Higher timeframe alignment required (or high confidence)
+        // GATE 3: Higher timeframe alignment required (or high confidence or strong 1h)
+        // RELAXED: Allow if 1h trend is strong (≥70% confidence) even if 4h is neutral
         const htfAligned = isAligned ?? false;
-        if (!htfAligned && confidence < 65) {
+        const confidence1h = timeframes?.['1h']?.confidence || 0;
+        const trend1h = timeframes?.['1h']?.trend || "neutral";
+        const has1hStrongDirection = confidence1h >= 70 && (trend1h === "bullish" || trend1h === "bearish");
+        
+        if (!htfAligned && confidence < 65 && !has1hStrongDirection) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: HTF not aligned and confidence too low (aligned=${htfAligned}, confidence=${confidence}%)`,
-            { htfAligned, confidence, gate: "HTF_NOT_ALIGNED" },
+            `HARD GATE: HTF not aligned, confidence too low, and 1h not strong (aligned=${htfAligned}, 4h_conf=${confidence}%, 1h_conf=${confidence1h}%)`,
+            { htfAligned, confidence, confidence1h, trend1h, gate: "HTF_NOT_ALIGNED" },
             trendData,
             riskParams.ai_analysis_enabled !== false
           );
           continue;
         }
         
-        // GATE 4: Confidence Dead Zone Veto (60-69% is worst performing zone) - Uses centralized ADX_THRESHOLDS
+        // Log if using 1h strong direction exception
+        if (!htfAligned && confidence < 65 && has1hStrongDirection) {
+          console.log(`⚡ ${symbol}: HTF gate passed via strong 1h (1h=${trend1h} ${confidence1h}%)`);
+        }
+        
+        // GATE 4: Confidence Dead Zone Veto (60-69% is worst performing zone)
         // Data shows 60-69% confidence = 31.73% win rate vs 50-59% = 46.34%
-        if (confidence >= 60 && confidence < 70 && adx < ADX_THRESHOLDS.VERY_STRONG) {
+        // RELAXED: Allow if ADX >= 28 (strong trend exception) instead of 30
+        if (confidence >= 60 && confidence < 70 && adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: Confidence dead zone (${confidence}% in 60-69 range with ADX=${adx.toFixed(1)} < ${ADX_THRESHOLDS.VERY_STRONG})`,
+            `HARD GATE: Confidence dead zone (${confidence}% in 60-69 range with ADX=${adx.toFixed(1)} < ${ADX_THRESHOLDS.STRONG_TREND_EXCEPTION})`,
             { confidence, adx: adx.toFixed(1), gate: "CONFIDENCE_DEAD_ZONE" },
             trendData,
             riskParams.ai_analysis_enabled !== false
@@ -2444,8 +2458,8 @@ serve(async (req) => {
         console.log(`📊 ${symbol} Quality: ${qualityScore}/100 [${breakdown}] | Regime: ${regime.regime} | Entry: ${pullbackAnalysis.reason} | Pullback: ${pullbackAnalysis.hasBothConditions ? 'OPTIMAL' : pullbackAnalysis.isPullback ? 'YES' : 'NO'}`);
 
         // ============= DYNAMIC QUALITY THRESHOLD =============
-        // Calculate threshold based on ADX for this specific symbol
-        const MIN_QUALITY_SCORE = getMinQualityScore(adx, isInRecoveryMode);
+        // Calculate threshold based on ADX and 1h confidence for this specific symbol
+        const MIN_QUALITY_SCORE = getMinQualityScore(adx, isInRecoveryMode, confidence1h);
         
         // Check minimum quality threshold
         if (qualityScore < MIN_QUALITY_SCORE) {

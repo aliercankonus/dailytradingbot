@@ -342,9 +342,9 @@ serve(async (req) => {
         // Hard gates (same as strategy-analyzer)
         if (adx < ADX_THRESHOLDS.MINIMUM) continue;
         
-        // RELAXED momentum gate: Allow entry when momentum.state is "none" IF ADX >= 30 (very strong trend)
-        const isVeryStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG; // 30+
-        const momentumPasses = momentum.confirms || (momentum.state !== "none") || isVeryStrongTrend;
+        // RELAXED momentum gate: Allow entry when momentum.state is "none" IF ADX >= 28 (strong trend exception)
+        const isStrongTrendException = adx >= ADX_THRESHOLDS.STRONG_TREND_EXCEPTION; // 28+ (relaxed from 30)
+        const momentumPasses = momentum.confirms || (momentum.state !== "none") || isStrongTrendException;
         if (!momentumPasses) continue;
         
         if (!isAligned && trend4h.confidence < 65) continue;
