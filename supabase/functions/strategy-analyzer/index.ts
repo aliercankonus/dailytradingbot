@@ -2167,18 +2167,28 @@ serve(async (req) => {
         }
         
         // GATE 2: Momentum must be confirmed (not "none" or unconfirmed)
+        // RELAXED: Allow entry when momentum.state is "none" IF ADX >= 30 (very strong trend)
+        // This enables early entries when trend strength itself provides conviction
         const momentumState = momentum?.state || "none";
         const momentumConfirms = momentum?.confirms ?? false;
-        if (momentumState === "none" || !momentumConfirms) {
+        const isVeryStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG; // 30+
+        
+        // Momentum passes if:
+        // 1. State is confirmed/building/mixed AND confirms is true, OR
+        // 2. State is "none" BUT ADX >= 30 (strong trend exception for early entries)
+        const momentumPasses = momentumConfirms || (momentumState !== "none") || isVeryStrongTrend;
+        
+        if (!momentumPasses) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: No momentum confirmation (state=${momentumState}, confirms=${momentumConfirms})`,
+            `HARD GATE: No momentum confirmation (state=${momentumState}, confirms=${momentumConfirms}, ADX=${adx.toFixed(1)} < 30)`,
             { 
               gate: "NO_MOMENTUM_CONFIRMATION",
               momentumState,
               momentumConfirms,
               adx: adx.toFixed(1),
+              isVeryStrongTrend,
               trend,
               confidence,
               // Detailed momentum analysis
@@ -2201,6 +2211,11 @@ serve(async (req) => {
             riskParams.ai_analysis_enabled !== false
           );
           continue;
+        }
+        
+        // Log when using strong trend exception for early entry
+        if (isVeryStrongTrend && momentumState === "none" && !momentumConfirms) {
+          console.log(`⚡ ${symbol}: EARLY ENTRY via strong trend exception (ADX=${adx.toFixed(1)} >= 30, momentum=${momentumState})`);
         }
         
         // GATE 3: Higher timeframe alignment required (or high confidence)
