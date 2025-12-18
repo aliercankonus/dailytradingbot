@@ -1726,9 +1726,14 @@ serve(async (req) => {
     const BASE_MIN_QUALITY_SCORE = 55;
     const DEFAULT_MIN_QUALITY = BASE_MIN_QUALITY_SCORE;
     
-    const getMinQualityScore = (adx: number, inRecovery: boolean, confidence1h?: number): number => {
+    const getMinQualityScore = (adx: number, inRecovery: boolean, confidence1h?: number, isNeutralTrend?: boolean): number => {
       if (inRecovery) {
         return BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost; // 65 in recovery
+      }
+      // NEW: Neutral trends (with HTF direction) get lower threshold since quality scoring
+      // is optimized for directional 5m trends - neutral relies on 1h direction instead
+      if (isNeutralTrend) {
+        return 35; // Neutral strategy threshold - relies on HTF for direction
       }
       // RELAXED: If 1h shows strong direction (≥65% confidence), allow lower threshold
       // Changed from 70% to 65% to capture more early entries when 1h is directional
@@ -2512,8 +2517,9 @@ serve(async (req) => {
         console.log(`📊 ${symbol} Quality: ${qualityScore}/100 [${breakdown}] | Regime: ${regime.regime} | Entry: ${pullbackAnalysis.reason} | Pullback: ${pullbackAnalysis.hasBothConditions ? 'OPTIMAL' : pullbackAnalysis.isPullback ? 'YES' : 'NO'}`);
 
         // ============= DYNAMIC QUALITY THRESHOLD =============
-        // Calculate threshold based on ADX and 1h confidence for this specific symbol
-        const MIN_QUALITY_SCORE = getMinQualityScore(adx, isInRecoveryMode, confidence1h);
+        // Calculate threshold based on ADX, 1h confidence, and neutral trend for this specific symbol
+        const isNeutralTrend = tradeDirectionForGate === 'neutral';
+        const MIN_QUALITY_SCORE = getMinQualityScore(adx, isInRecoveryMode, confidence1h, isNeutralTrend);
         
         // Check minimum quality threshold
         if (qualityScore < MIN_QUALITY_SCORE) {
