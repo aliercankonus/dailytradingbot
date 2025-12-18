@@ -571,9 +571,26 @@ export const calculateUnifiedReversalScore = (
   }
   
   // 3. MOMENTUM STATE (0-30 points)
-  if (momentumState === "none" || !momentumConfirms) {
-    breakdown.momentumScore = 25;
-    reasons.push(`Momentum not confirmed (state: ${momentumState})`);
+  // RELAXED: Allow "none" state with reduced penalty when ADX >= 30 (strong trend exception)
+  const isVeryStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG; // 30+
+  
+  if (momentumState === "none") {
+    if (isVeryStrongTrend) {
+      // Strong trend exception - reduced penalty for early entries
+      breakdown.momentumScore = 10;
+      reasons.push(`No momentum but strong trend (ADX=${adx.toFixed(1)} >= 30)`);
+    } else {
+      breakdown.momentumScore = 25;
+      reasons.push(`Momentum not confirmed (state: ${momentumState})`);
+    }
+  } else if (!momentumConfirms && momentumState !== "building") {
+    if (isVeryStrongTrend) {
+      breakdown.momentumScore = 8;
+      reasons.push(`Momentum unconfirmed but strong trend (ADX=${adx.toFixed(1)})`);
+    } else {
+      breakdown.momentumScore = 20;
+      reasons.push(`Momentum state ${momentumState} not confirmed`);
+    }
   } else if (momentumState === "mixed") {
     if (adx < ADX_THRESHOLDS.VERY_STRONG) {
       breakdown.momentumScore = 30;
