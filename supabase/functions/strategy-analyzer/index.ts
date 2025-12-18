@@ -2274,11 +2274,11 @@ serve(async (req) => {
         }
         
         // GATE 3: Higher timeframe alignment required (or high confidence or strong 1h)
-        // RELAXED: Allow if 1h trend is strong (≥70% confidence) even if 4h is neutral
+        // RELAXED: Allow if 1h trend is strong (≥65% confidence) even if 4h is neutral
         const htfAligned = isAligned ?? false;
         const confidence1h = timeframes?.['1h']?.confidence || 0;
         const trend1h = timeframes?.['1h']?.trend || "neutral";
-        const has1hStrongDirection = confidence1h >= 70 && (trend1h === "bullish" || trend1h === "bearish");
+        const has1hStrongDirection = confidence1h >= 65 && (trend1h === "bullish" || trend1h === "bearish");
         
         if (!htfAligned && confidence < 65 && !has1hStrongDirection) {
           rejectedByHardGates++;
