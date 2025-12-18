@@ -401,8 +401,11 @@ serve(async (req) => {
     const confidence1hForConsistency = trendData?.timeframes?.['1h']?.confidence || 
                                        trendData?.higherTimeframeFilter?.confidence1h || 0;
     
-    // Check if strategy is neutral (for lower threshold)
-    const isNeutralStrategyForConsistency = signal.strategy_name?.toLowerCase().includes('neutral') || false;
+    // Check if this is a neutral trend scenario (for lower threshold)
+    // Aligned with quality threshold logic: neutral applies when strategy contains "neutral" OR trend is neutral/ranging
+    const isNeutralStrategyForConsistency = signal.strategy_name?.toLowerCase().includes('neutral') || 
+                                            currentTrend === 'neutral' || 
+                                            currentTrend === 'ranging';
     
     // Dynamic consistency threshold (aligned with quality threshold logic)
     let dynamicMinConsistency = riskParams.min_trend_consistency || 60;
