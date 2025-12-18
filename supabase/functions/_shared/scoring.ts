@@ -173,7 +173,9 @@ export const getMomentumScore = (momentum: any): number => {
   } else if (building && macdExpanding && confirms) {
     score = 10;
   } else if (state === "mixed" && macdExpanding && confirms) {
-    score = 6;
+    score = 8;  // IMPROVED: Was 6, now 8 for mixed + MACD expanding + confirms
+  } else if (state === "mixed" && macdExpanding) {
+    score = 6;  // NEW: Mixed + MACD expanding (without confirms) = 6 pts
   } else if (building && macdExpanding) {
     score = 4;
   } else if (state === "mixed") {
