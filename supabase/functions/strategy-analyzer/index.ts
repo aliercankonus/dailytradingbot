@@ -399,6 +399,12 @@ const getVolumeScore = (trendData: any, trend: string): number => {
     return 1;  // Reduced from 2
   }
   
+  // PARTIAL CREDIT: At least average volume (volumeRatio >= 1.0)
+  // This prevents zero volume score in normal market conditions
+  if (volumeRatio >= 1.0) {
+    return 1;  // NEW: Baseline credit for average volume
+  }
+  
   // Neutral trend - no volume penalty
   if (trend === "neutral") {
     return 1;
@@ -1045,6 +1051,18 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
       };
     }
     
+    // MOMENTUM CONTINUATION FALLBACK: ADX >= 25 with MACD expanding
+    // This catches entries where trend is strong but no clear pullback pattern
+    if (adx >= ADX_THRESHOLDS.STRONG && hasMacdExpanding && rsi > RSI_THRESHOLDS.BULLISH_PULLBACK && rsi < RSI_THRESHOLDS.OVERBOUGHT) {
+      return {
+        isPullback: false,
+        hasBothConditions: false,
+        pullbackDepth: 0,
+        entryTimingScore: 10,  // NEW: Momentum continuation credit
+        reason: `Momentum continuation: ADX=${adx.toFixed(1)} + MACD expanding (RSI=${rsi.toFixed(1)})`
+      };
+    }
+    
     // POOR ENTRY: RSI in neutral zone = not ideal timing
     if (rsi >= RSI_THRESHOLDS.BULLISH_PULLBACK && rsi <= RSI_THRESHOLDS.BULLISH_STRONG) {
       return {
@@ -1157,6 +1175,18 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
         pullbackDepth: 0,
         entryTimingScore: weighted.score,
         reason: weighted.reason
+      };
+    }
+    
+    // MOMENTUM CONTINUATION FALLBACK: ADX >= 25 with MACD expanding
+    // This catches entries where trend is strong but no clear pullback pattern
+    if (adx >= ADX_THRESHOLDS.STRONG && hasMacdExpanding && rsi < RSI_THRESHOLDS.BEARISH_RALLY && rsi > RSI_THRESHOLDS.OVERSOLD) {
+      return {
+        isPullback: false,
+        hasBothConditions: false,
+        pullbackDepth: 0,
+        entryTimingScore: 10,  // NEW: Momentum continuation credit
+        reason: `Momentum continuation: ADX=${adx.toFixed(1)} + MACD expanding (RSI=${rsi.toFixed(1)})`
       };
     }
     
@@ -1687,8 +1717,9 @@ serve(async (req) => {
       if (inRecovery) {
         return BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost; // 65 in recovery
       }
-      // NEW: If 1h shows strong direction (≥70% confidence), allow lower threshold
-      if (confidence1h && confidence1h >= 70) {
+      // RELAXED: If 1h shows strong direction (≥65% confidence), allow lower threshold
+      // Changed from 70% to 65% to capture more early entries when 1h is directional
+      if (confidence1h && confidence1h >= 65) {
         return 45;  // Strong 1h signal: much lower threshold for early entries
       }
       // Dynamic based on ADX - strong trends = allow more signals

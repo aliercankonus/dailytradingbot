@@ -9,7 +9,7 @@ export const ADX_THRESHOLDS = {
   MINIMUM: 20,
   MODERATE: 22,
   STRONG: 25,
-  STRONG_TREND_EXCEPTION: 28,  // NEW: Relaxed threshold for early entries
+  STRONG_TREND_EXCEPTION: 27,  // RELAXED: From 28 to 27 for better signal capture
   VERY_STRONG: 30,
   EXCEPTIONAL: 35,
   EXTREME: 40,
