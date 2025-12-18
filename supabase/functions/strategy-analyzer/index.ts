@@ -2747,7 +2747,7 @@ serve(async (req) => {
           symbol,
           signal_type: signalType,
           trend: dbTrend,
-          confidence_score: Math.min(confidence, 100),
+          confidence_score: Math.round(Math.min(confidence, 100)),  // Round to integer for DB
           entry_price: currentPrice,
           stop_loss: signalType === "long"
             ? currentPrice * (1 - stopLossPercent / 100)
