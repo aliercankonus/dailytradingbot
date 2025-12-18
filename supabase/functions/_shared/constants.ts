@@ -67,3 +67,11 @@ export const RISK_PARAMS = {
   TRAILING_PROFIT_LOCK_PERCENT: 0.5,
   MIN_QUALITY_THRESHOLD: 50,
 } as const;
+
+// Slippage buffer constants for stop loss calculations
+export const SLIPPAGE_PARAMS = {
+  // Buffer added to break-even stop to ensure small profit after execution slippage
+  BREAK_EVEN_BUFFER_PERCENT: 0.03,
+  // Round-trip slippage deducted from locked profit calculations
+  ROUND_TRIP_SLIPPAGE_PERCENT: 0.05,
+} as const;

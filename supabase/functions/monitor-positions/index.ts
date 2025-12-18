@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, SLIPPAGE_PARAMS } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 
 // ============= RSI MOMENTUM ZONE CONSTRAINTS =============
@@ -634,7 +634,9 @@ serve(async (req) => {
         if (position.side === "BUY") {
           // For LONG: Calculate LOCK STOP based on PEAK P&L (persisted, never decreases)
           // This ensures lock stop ratchets and never gives back profit
-          const peakProfitDistance = position.entry_price * (newPeakPnl / 100);
+          // Deduct round-trip slippage from peak P&L before calculating locked profit
+          const effectivePeakPnl = Math.max(0, newPeakPnl - SLIPPAGE_PARAMS.ROUND_TRIP_SLIPPAGE_PERCENT);
+          const peakProfitDistance = position.entry_price * (effectivePeakPnl / 100);
           const lockedProfit = peakProfitDistance * profitLockPercent;
           
           // Position-specific stop: entry + locked profit based on PEAK (LOCK STOP PRICE)
@@ -682,7 +684,9 @@ serve(async (req) => {
           }
         } else {
           // For SHORT: Calculate LOCK STOP based on PEAK P&L (persisted, never decreases)
-          const peakProfitDistance = position.entry_price * (newPeakPnl / 100);
+          // Deduct round-trip slippage from peak P&L before calculating locked profit
+          const effectivePeakPnl = Math.max(0, newPeakPnl - SLIPPAGE_PARAMS.ROUND_TRIP_SLIPPAGE_PERCENT);
+          const peakProfitDistance = position.entry_price * (effectivePeakPnl / 100);
           const lockedProfit = peakProfitDistance * profitLockPercent;
           
           // Position-specific stop: entry - locked profit based on PEAK (LOCK STOP PRICE)
@@ -831,12 +835,20 @@ serve(async (req) => {
         }
 
         if (shouldMoveToBreakEven) {
-          console.log(`🛡️ BREAK-EVEN: Moving stop to entry for ${position.symbol} (P&L: ${pnlPercent.toFixed(2)}%, Entry: ${entryPrice.toFixed(2)}, Min distance maintained)`);
+          // Calculate break-even stop WITH slippage buffer to ensure small profit after execution
+          // For BUY: set break-even ABOVE entry to cover exit slippage
+          // For SHORT: set break-even BELOW entry to cover exit slippage
+          const slippageBuffer = entryPrice * (SLIPPAGE_PARAMS.BREAK_EVEN_BUFFER_PERCENT / 100);
+          const breakEvenStop = position.side === "BUY" 
+            ? entryPrice + slippageBuffer  // BUY: stop above entry for small profit
+            : entryPrice - slippageBuffer; // SHORT: stop below entry for small profit
+          
+          console.log(`🛡️ BREAK-EVEN: Moving stop for ${position.symbol} (P&L: ${pnlPercent.toFixed(2)}%, Entry: ${entryPrice.toFixed(2)}, BE Stop: ${breakEvenStop.toFixed(2)}, Slippage Buffer: ${slippageBuffer.toFixed(4)})`);
           
           // Use optimistic locking
           const { data: updatedBEPos, error: beUpdateError } = await supabase
             .from("positions")
-            .update({ stop_loss: entryPrice })
+            .update({ stop_loss: breakEvenStop })
             .eq("id", position.id)
             .eq("status", "active")
             .select()
