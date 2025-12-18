@@ -93,6 +93,12 @@ export const getVolumeScore = (
     return 1;
   }
   
+  // PARTIAL CREDIT: At least average volume (volumeRatio >= 1.0)
+  // This prevents zero volume score in normal market conditions
+  if (volumeRatio >= 1.0) {
+    return 1;  // NEW: Baseline credit for average volume
+  }
+  
   // Neutral trend - no volume penalty
   if (trend === "neutral") {
     return 1;
