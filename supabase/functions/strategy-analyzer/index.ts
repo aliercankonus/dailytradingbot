@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS } from "../_shared/constants.ts";
 import { getTechnicalScore, getMomentumScore, getAlignmentScore, getConfidencePenalty as sharedGetConfidencePenalty, getAdxScore } from "../_shared/scoring.ts";
+import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -323,6 +324,7 @@ interface QualityFactors {
   technicalScore: number;    // 0-15 points based on StochRSI/Bollinger signals
   entryTimingScore: number;  // 0-25 points based on pullback/entry timing
   volumeScore: number;       // 0-10 points based on volume confirmation
+  orderFlowScore: number;    // -15 to +15 based on order flow analysis (NEW)
   confidencePenalty: number; // 0 to -25 penalty for high confidence (inversion fix)
   directionBonus: number;    // +3 for SHORT signals (SELL outperforms BUY historically)
 }
@@ -334,7 +336,8 @@ const calculateQualityScore = (factors: QualityFactors): { score: number; breakd
     factors.alignmentScore +
     factors.technicalScore +
     factors.entryTimingScore +
-    factors.volumeScore +        // NEW: Volume score
+    factors.volumeScore +        // Volume confirmation score
+    factors.orderFlowScore +     // NEW: Order flow analysis (-15 to +15)
     factors.confidencePenalty +  // Can be negative!
     factors.directionBonus       // +3 for SELL signals
   ));
@@ -343,13 +346,16 @@ const calculateQualityScore = (factors: QualityFactors): { score: number; breakd
   const bonusStr = factors.directionBonus > 0 ? ` DIR_BONUS:+${factors.directionBonus}` : '';
   // FIX: Volume always shows even if 0 to make debugging easier
   const volumeStr = ` VOL:${factors.volumeScore}/10`;
+  // NEW: Order flow score display
+  const orderFlowStr = factors.orderFlowScore !== 0 ? ` OF:${factors.orderFlowScore > 0 ? '+' : ''}${factors.orderFlowScore}` : '';
   // FIX: Correct max values to match actual scoring functions:
   // - ADX: 0-25 ✓
   // - Momentum: 0-20 ✓
   // - Alignment: 0-14 (was showing /20)
   // - Technical: 0-15 ✓
   // - Entry: 0-25 ✓
-  const breakdown = `ADX:${factors.adxScore}/25 MOM:${factors.momentumScore}/20 ALIGN:${factors.alignmentScore}/14 TECH:${factors.technicalScore}/15 ENTRY:${factors.entryTimingScore}/25${volumeStr}${penaltyStr}${bonusStr}`;
+  // - Order Flow: -15 to +15 (NEW)
+  const breakdown = `ADX:${factors.adxScore}/25 MOM:${factors.momentumScore}/20 ALIGN:${factors.alignmentScore}/14 TECH:${factors.technicalScore}/15 ENTRY:${factors.entryTimingScore}/25${volumeStr}${orderFlowStr}${penaltyStr}${bonusStr}`;
   
   return { score, breakdown };
 };
@@ -1647,7 +1653,7 @@ serve(async (req) => {
       }
     };
 
-    const fetchHistoricalKlines = async (symbol: string): Promise<{ prices: number[]; volumes: number[] }> => {
+    const fetchHistoricalKlines = async (symbol: string): Promise<{ prices: number[]; volumes: number[]; klines: any[] }> => {
       try {
         const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=15m&limit=50`);
         if (!response.ok) throw new Error(`Binance API error: ${response.status}`);
@@ -1655,10 +1661,11 @@ serve(async (req) => {
         return {
           prices: klines.map((k: any) => parseFloat(k[4])).filter(Number.isFinite),
           volumes: klines.map((k: any) => parseFloat(k[5])).filter(Number.isFinite),
+          klines: klines,  // Keep full kline data for order flow analysis
         };
       } catch (error) {
         console.error(`Failed to fetch klines for ${symbol}:`, error);
-        return { prices: [], volumes: [] };
+        return { prices: [], volumes: [], klines: [] };
       }
     };
 
@@ -1675,7 +1682,7 @@ serve(async (req) => {
     ]);
 
     const marketDataMap = new Map(marketDataResults.filter(Boolean).map((d) => [d.symbol, d]));
-    const historicalDataMap = new Map<string, { prices: number[]; volumes: number[] }>();
+    const historicalDataMap = new Map<string, { prices: number[]; volumes: number[]; klines: any[] }>();
     historicalResults.forEach(({ symbol, data }) => historicalDataMap.set(symbol, data));
 
     // Fetch trend data in PARALLEL for eligible symbols (already filtered by win rate)
@@ -2482,8 +2489,21 @@ serve(async (req) => {
         const confidencePenalty = getConfidencePenalty(confidence, adx, momentumConfirmed);
         // Direction bonus: +3 for SHORT/SELL signals (historically 38% vs 31% win rate)
         const directionBonus = trend === "bearish" ? 3 : 0;
-        // NEW: Volume score component
+        // Volume score component
         const volumeScore = getVolumeScore(trendData, trend);
+        
+        // ============= ORDER FLOW ANALYSIS (NEW) =============
+        // Analyze volume spikes, price rejections, and buying/selling pressure
+        const intendedDirection: "long" | "short" = trend === "bearish" ? "short" : "long";
+        const symbolHistoricalData = historicalDataMap.get(symbol);
+        const klines = symbolHistoricalData?.klines || [];
+        const orderFlowAnalysis = analyzeOrderFlow(klines, intendedDirection);
+        const orderFlowScore = getOrderFlowQualityBonus(orderFlowAnalysis, intendedDirection);
+        
+        // Log order flow analysis
+        if (orderFlowAnalysis.reasons.length > 0) {
+          console.log(`📈 ${symbol} Order Flow: score=${orderFlowAnalysis.score}/100 signal=${orderFlowAnalysis.signal} | ${orderFlowAnalysis.reasons.join(' | ')}`);
+        }
         
         // Cap pullback score when volume doesn't confirm - prevents "perfect pullback, no volume" trap
         let entryTimingScore = Math.max(0, pullbackAnalysis.entryTimingScore);
@@ -2499,7 +2519,8 @@ serve(async (req) => {
           alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, trendData),
           technicalScore: getTechnicalScore(trendData, trend, symbol),
           entryTimingScore: entryTimingScore,
-          volumeScore: volumeScore,                // NEW: Volume confirmation
+          volumeScore: volumeScore,                // Volume confirmation
+          orderFlowScore: orderFlowScore,          // NEW: Order flow analysis (-15 to +15)
           confidencePenalty: confidencePenalty,    // Penalize high confidence entries
           directionBonus: directionBonus,          // +3 for SHORT signals
         };
@@ -2513,6 +2534,10 @@ serve(async (req) => {
         // Log volume score
         if (volumeScore > 0) {
           console.log(`📊 ${symbol} Volume score: +${volumeScore}/10 pts`);
+        }
+        // Log order flow impact
+        if (orderFlowScore !== 0) {
+          console.log(`📈 ${symbol} Order Flow bonus: ${orderFlowScore > 0 ? '+' : ''}${orderFlowScore} pts (signal: ${orderFlowAnalysis.signal}, confidence: ${orderFlowAnalysis.confidence}%)`);
         }
         console.log(`📊 ${symbol} Quality: ${qualityScore}/100 [${breakdown}] | Regime: ${regime.regime} | Entry: ${pullbackAnalysis.reason} | Pullback: ${pullbackAnalysis.hasBothConditions ? 'OPTIMAL' : pullbackAnalysis.isPullback ? 'YES' : 'NO'}`);
 
