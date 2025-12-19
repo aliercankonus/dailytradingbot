@@ -125,7 +125,7 @@ serve(async (req) => {
     const userIds = [...new Set(positions.map((p) => p.user_id))];
     const { data: riskParamsList, error: riskError } = await supabase
       .from("risk_parameters")
-      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent, portfolio_value, portfolio_peak_value, drawdown_circuit_breaker_enabled, drawdown_circuit_breaker_percent, circuit_breaker_triggered, time_based_stop_enabled, time_based_stop_hours, dynamic_stop_tightening_enabled, dynamic_stop_tightening_hours, dynamic_stop_tightening_percent, partial_loss_taking_enabled, partial_loss_trigger_percent, partial_loss_close_percent, hedging_enabled, hedge_reversal_risk_min, hedge_reversal_risk_max, hedge_position_size_percent, min_hold_time_minutes")
+      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent, portfolio_value, portfolio_peak_value, drawdown_circuit_breaker_enabled, drawdown_circuit_breaker_percent, circuit_breaker_triggered, time_based_stop_enabled, time_based_stop_hours, dynamic_stop_tightening_enabled, dynamic_stop_tightening_hours, dynamic_stop_tightening_percent, partial_loss_taking_enabled, partial_loss_trigger_percent, partial_loss_close_percent, hedging_enabled, hedge_reversal_risk_min, hedge_reversal_risk_max, hedge_position_size_percent, min_hold_time_minutes, trailing_aggressiveness, progressive_lock_enabled, stale_peak_protection_enabled, decay_velocity_exit_enabled")
       .in("user_id", userIds);
     if (riskError) throw riskError;
     // Create a map of user settings
@@ -161,6 +161,11 @@ serve(async (req) => {
           hedgePositionSizePercent: rp.hedge_position_size_percent ?? 50,
           // Minimum Hold Time (prevents early exits)
           minHoldTimeMinutes: rp.min_hold_time_minutes ?? 20,
+          // Smart AITS Settings
+          trailingAggressiveness: rp.trailing_aggressiveness ?? 3,
+          progressiveLockEnabled: rp.progressive_lock_enabled ?? true,
+          stalePeakProtectionEnabled: rp.stale_peak_protection_enabled ?? true,
+          decayVelocityExitEnabled: rp.decay_velocity_exit_enabled ?? true,
         },
       ]) || [],
     );
@@ -579,6 +584,11 @@ serve(async (req) => {
         hedgePositionSizePercent: 50,
         // Minimum Hold Time defaults
         minHoldTimeMinutes: 20,
+        // Smart AITS defaults
+        trailingAggressiveness: 3,
+        progressiveLockEnabled: true,
+        stalePeakProtectionEnabled: true,
+        decayVelocityExitEnabled: true,
       };
       
       // 🆕 MINIMUM HOLD TIME CHECK - Prevents early exits on new positions
@@ -606,14 +616,20 @@ serve(async (req) => {
       // we have the peak value ready when trailing activates
       const currentPeakPnl = position.peak_pnl_percent || 0;
       const newPeakPnl = Math.max(currentPeakPnl, pnlPercent);
+      const peakReachedAt = position.peak_reached_at ? new Date(position.peak_reached_at) : new Date();
+      const now = new Date();
+      
+      // Calculate minutes since peak for stale peak detection
+      const minutesSincePeak = (now.getTime() - peakReachedAt.getTime()) / (1000 * 60);
+      
       if (newPeakPnl > currentPeakPnl && pnlPercent > 0) {
         peakPnlUpdated = true;
         console.log(`📈 Peak P&L updated for ${position.symbol} ${position.side}: ${currentPeakPnl.toFixed(2)}% → ${newPeakPnl.toFixed(2)}%`);
         
-        // Update peak_pnl_percent immediately in database (even before trailing activates)
+        // Update peak_pnl_percent and peak_reached_at immediately in database (even before trailing activates)
         const { error: peakUpdateError } = await supabase
           .from("positions")
-          .update({ peak_pnl_percent: newPeakPnl })
+          .update({ peak_pnl_percent: newPeakPnl, peak_reached_at: now.toISOString() })
           .eq("id", position.id)
           .eq("status", "active");
         
@@ -622,14 +638,136 @@ serve(async (req) => {
         }
       }
       
+      // ============= SMART AITS: DECAY VELOCITY DETECTION =============
+      // Check for rapid profit decay and trigger emergency exit if needed
+      if (userSettings.decayVelocityExitEnabled && newPeakPnl > userSettings.activationPercent && minutesSincePeak > 0) {
+        const decayPercent = newPeakPnl - pnlPercent;
+        const decayVelocity = decayPercent / minutesSincePeak; // % per minute
+        
+        // Emergency exit if decay > 3% per minute (rapid profit loss)
+        if (decayVelocity > 0.03 && pnlPercent > 0) {
+          console.log(`🚨 SMART AITS: Rapid decay detected for ${position.symbol} ${position.side} - velocity ${(decayVelocity * 100).toFixed(2)}%/min, triggering emergency exit`);
+          emergencyExits.push({
+            symbol: position.symbol,
+            side: position.side,
+            reason: `smart_aits_rapid_decay`,
+            peakPnl: newPeakPnl,
+            currentPnl: pnlPercent,
+            decayVelocity: decayVelocity * 100,
+            minutesSincePeak,
+          });
+          
+          // Close position immediately
+          const realizedPnl = position.side === "BUY"
+            ? (currentPrice - position.entry_price) * position.quantity
+            : (position.entry_price - currentPrice) * position.quantity;
+          
+          const { error: closeError } = await supabase
+            .from("positions")
+            .update({
+              status: "closed",
+              closed_at: new Date().toISOString(),
+              exit_price: currentPrice,
+              realized_pnl: realizedPnl,
+              realized_pnl_percent: pnlPercent,
+              close_reason: "smart_aits_rapid_decay",
+            })
+            .eq("id", position.id)
+            .eq("status", "active");
+          
+          if (closeError) {
+            console.error(`Error closing position ${position.id}:`, closeError);
+          } else {
+            closedPositions.push({
+              id: position.id,
+              symbol: position.symbol,
+              side: position.side,
+              reason: "smart_aits_rapid_decay",
+              pnlPercent,
+            });
+          }
+          continue; // Skip to next position
+        }
+      }
+      
+      // ============= SMART AITS: PROGRESSIVE LOCK TIERS =============
+      // Calculate dynamic profit lock based on peak P&L level
+      const getProgressiveLockPercent = (peakPnl: number, aggressiveness: number): number => {
+        // Base lock from aggressiveness (1=35%, 2=40%, 3=45%, 4=50%, 5=55%)
+        const baseLock = 0.30 + (aggressiveness * 0.05);
+        
+        // Progressive tier bonus based on peak P&L
+        let tierBonus = 0;
+        if (peakPnl >= 5) tierBonus = 0.30;       // 5%+ peak: +30% bonus (85% total at agg 5)
+        else if (peakPnl >= 3) tierBonus = 0.20;  // 3-5% peak: +20% bonus
+        else if (peakPnl >= 2) tierBonus = 0.15;  // 2-3% peak: +15% bonus
+        else if (peakPnl >= 1) tierBonus = 0.10;  // 1-2% peak: +10% bonus
+        else tierBonus = 0;                        // 0-1% peak: no bonus
+        
+        return Math.min(0.85, baseLock + tierBonus); // Cap at 85%
+      };
+      
+      // ============= SMART AITS: STALE PEAK BONUS =============
+      // Add tighter locks when peak hasn't been updated for a while
+      const getStalePeakBonus = (minutesSincePeak: number): number => {
+        if (!userSettings.stalePeakProtectionEnabled) return 0;
+        if (minutesSincePeak > 120) return 0.25;  // +25% after 2 hours
+        if (minutesSincePeak > 60) return 0.20;   // +20% after 1 hour  
+        if (minutesSincePeak > 30) return 0.10;   // +10% after 30 min
+        if (minutesSincePeak > 15) return 0.05;   // +5% after 15 min
+        return 0;
+      };
+      
       // Check if trailing stop is enabled and position is profitable enough
       if (userSettings.enabled && pnlPercent > userSettings.activationPercent) {
         // Calculate ATR-based minimum distance (for volatility buffer)
         const atrAbsolute = (currentPrice * atrPercent) / 100;
         const minTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * 0.015); // Min 1.5% of current price
         
-        // Use configurable profit lock percentage from user settings
-        const profitLockPercent = userSettings.profitLockPercent;
+        // ============= SMART AITS: Calculate adaptive profit lock =============
+        let profitLockPercent = userSettings.profitLockPercent;
+        let smartAitsApplied = false;
+        let lockTier = "base";
+        
+        if (userSettings.progressiveLockEnabled) {
+          // Progressive lock based on peak P&L tier
+          const progressiveLock = getProgressiveLockPercent(newPeakPnl, userSettings.trailingAggressiveness);
+          
+          // Stale peak bonus (adds to lock when peak hasn't updated)
+          const stalePeakBonus = getStalePeakBonus(minutesSincePeak);
+          
+          // Decay velocity override - if decay is fast but not emergency, force higher lock
+          let decayOverride = 0;
+          if (userSettings.decayVelocityExitEnabled && minutesSincePeak > 0) {
+            const decayPercent = newPeakPnl - pnlPercent;
+            const decayVelocity = decayPercent / minutesSincePeak;
+            if (decayVelocity > 0.02) {
+              decayOverride = 0.80; // Force 80% lock on fast decay
+              lockTier = "decay_override";
+            }
+          }
+          
+          // Use highest lock between progressive + stale bonus OR decay override
+          const adaptiveLock = Math.max(progressiveLock + stalePeakBonus, decayOverride);
+          
+          // Only use smart AITS if it's more protective than user setting
+          if (adaptiveLock > profitLockPercent) {
+            profitLockPercent = Math.min(0.85, adaptiveLock);
+            smartAitsApplied = true;
+            
+            // Determine tier for logging
+            if (lockTier !== "decay_override") {
+              if (stalePeakBonus > 0) lockTier = `stale_${Math.round(minutesSincePeak)}min`;
+              else if (newPeakPnl >= 5) lockTier = "tier5";
+              else if (newPeakPnl >= 3) lockTier = "tier4";
+              else if (newPeakPnl >= 2) lockTier = "tier3";
+              else if (newPeakPnl >= 1) lockTier = "tier2";
+              else lockTier = "tier1";
+            }
+            
+            console.log(`🧠 SMART AITS for ${position.symbol}: lock ${(profitLockPercent * 100).toFixed(0)}% (${lockTier}, peak: ${newPeakPnl.toFixed(2)}%, stale: ${minutesSincePeak.toFixed(0)}min)`);
+          }
+        }
         
         if (position.side === "BUY") {
           // For LONG: Calculate LOCK STOP based on PEAK P&L (persisted, never decreases)
