@@ -4,8 +4,57 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { Activity, TrendingUp, TrendingDown, Zap, AlertTriangle, BarChart3, Waves, ArrowUpDown } from 'lucide-react';
+import { Activity, TrendingUp, TrendingDown, Zap, AlertTriangle, BarChart3, Waves, ArrowUpDown, Grid3X3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+
+// Known crypto correlations
+const KNOWN_CORRELATIONS: Record<string, Record<string, number>> = {
+  'BTCUSDT': {
+    'ETHUSDT': 0.85, 'BNBUSDT': 0.78, 'SOLUSDT': 0.82, 'ADAUSDT': 0.75,
+    'XRPUSDT': 0.70, 'DOGEUSDT': 0.72, 'DOTUSDT': 0.80, 'MATICUSDT': 0.77, 'AVAXUSDT': 0.81,
+  },
+  'ETHUSDT': {
+    'BTCUSDT': 0.85, 'BNBUSDT': 0.75, 'SOLUSDT': 0.88, 'ADAUSDT': 0.72,
+    'XRPUSDT': 0.65, 'DOGEUSDT': 0.68, 'DOTUSDT': 0.83, 'MATICUSDT': 0.85, 'AVAXUSDT': 0.86,
+  },
+  'SOLUSDT': {
+    'BTCUSDT': 0.82, 'ETHUSDT': 0.88, 'AVAXUSDT': 0.90, 'MATICUSDT': 0.84, 'DOTUSDT': 0.82,
+  },
+  'AVAXUSDT': {
+    'BTCUSDT': 0.81, 'ETHUSDT': 0.86, 'SOLUSDT': 0.90, 'MATICUSDT': 0.85,
+  },
+  'BNBUSDT': {
+    'BTCUSDT': 0.78, 'ETHUSDT': 0.75, 'SOLUSDT': 0.72, 'AVAXUSDT': 0.70,
+  },
+};
+
+const getKnownCorrelation = (symbol1: string, symbol2: string): number => {
+  if (symbol1 === symbol2) return 1.0;
+  if (KNOWN_CORRELATIONS[symbol1]?.[symbol2] !== undefined) {
+    return KNOWN_CORRELATIONS[symbol1][symbol2];
+  }
+  if (KNOWN_CORRELATIONS[symbol2]?.[symbol1] !== undefined) {
+    return KNOWN_CORRELATIONS[symbol2][symbol1];
+  }
+  return 0.6; // Default moderate correlation for unknown pairs
+};
+
+const getCorrelationColor = (correlation: number): string => {
+  if (correlation >= 0.85) return 'bg-red-500/80 text-white';
+  if (correlation >= 0.75) return 'bg-orange-500/70 text-white';
+  if (correlation >= 0.60) return 'bg-yellow-500/60 text-black';
+  if (correlation >= 0.40) return 'bg-blue-500/40 text-white';
+  return 'bg-muted text-muted-foreground';
+};
+
+const getCorrelationLabel = (correlation: number): string => {
+  if (correlation >= 0.85) return 'Very High';
+  if (correlation >= 0.75) return 'High';
+  if (correlation >= 0.60) return 'Moderate';
+  if (correlation >= 0.40) return 'Low';
+  return 'Very Low';
+};
 
 interface OrderFlowData {
   symbol: string;
@@ -280,132 +329,262 @@ export const OrderFlowDashboard = () => {
             {isLoading ? 'Analyzing order flow...' : 'No data available. Click Refresh to load.'}
           </div>
         ) : (
-          <div className="space-y-4">
-            {orderFlowData.map((data) => (
-              <Card key={data.symbol} className="bg-background/50 border-border/50">
-                <CardContent className="p-4">
-                  {/* Header Row */}
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <span className="font-bold text-lg">{data.symbol}</span>
-                      <Badge className={getSignalColor(data.signal)}>
-                        {data.signal.replace('_', ' ').toUpperCase()}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <div className={`text-2xl font-bold ${getScoreColor(data.score)}`}>
-                          {data.score}/100
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {data.confidence}% confidence
+          <Tabs defaultValue="orderflow" className="w-full">
+            <TabsList className="mb-4">
+              <TabsTrigger value="orderflow">Order Flow</TabsTrigger>
+              <TabsTrigger value="correlation">
+                <Grid3X3 className="h-4 w-4 mr-2" />
+                Correlation Matrix
+              </TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="orderflow" className="space-y-4">
+              {orderFlowData.map((data) => (
+                <Card key={data.symbol} className="bg-background/50 border-border/50">
+                  <CardContent className="p-4">
+                    {/* Header Row */}
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <span className="font-bold text-lg">{data.symbol}</span>
+                        <Badge className={getSignalColor(data.signal)}>
+                          {data.signal.replace('_', ' ').toUpperCase()}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right">
+                          <div className={`text-2xl font-bold ${getScoreColor(data.score)}`}>
+                            {data.score}/100
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {data.confidence}% confidence
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* Metrics Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                    {/* Volume Spike */}
-                    <div className="p-3 rounded-lg bg-card border border-border">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Zap className={`h-4 w-4 ${data.volumeSpike.detected ? 'text-yellow-400' : 'text-muted-foreground'}`} />
-                        <span className="text-sm font-medium">Volume Spike</span>
+                    {/* Metrics Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                      {/* Volume Spike */}
+                      <div className="p-3 rounded-lg bg-card border border-border">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Zap className={`h-4 w-4 ${data.volumeSpike.detected ? 'text-yellow-400' : 'text-muted-foreground'}`} />
+                          <span className="text-sm font-medium">Volume Spike</span>
+                        </div>
+                        {data.volumeSpike.detected ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm text-muted-foreground">Magnitude</span>
+                              <span className="font-mono font-bold">{data.volumeSpike.magnitude}x</span>
+                            </div>
+                            <Badge variant="outline" className={
+                              data.volumeSpike.type === 'bullish' ? 'border-green-500/30 text-green-400' :
+                              data.volumeSpike.type === 'bearish' ? 'border-red-500/30 text-red-400' :
+                              'border-muted text-muted-foreground'
+                            }>
+                              {data.volumeSpike.type} • {data.volumeSpike.significance}
+                            </Badge>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">No spike detected</span>
+                        )}
                       </div>
-                      {data.volumeSpike.detected ? (
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">Magnitude</span>
-                            <span className="font-mono font-bold">{data.volumeSpike.magnitude}x</span>
+
+                      {/* Price Rejection */}
+                      <div className="p-3 rounded-lg bg-card border border-border">
+                        <div className="flex items-center gap-2 mb-2">
+                          <AlertTriangle className={`h-4 w-4 ${data.priceRejection.detected ? 'text-orange-400' : 'text-muted-foreground'}`} />
+                          <span className="text-sm font-medium">Price Rejection</span>
+                        </div>
+                        {data.priceRejection.detected ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm text-muted-foreground">Strength</span>
+                              <span className="font-mono font-bold">{data.priceRejection.strength}%</span>
+                            </div>
+                            <Badge variant="outline" className={
+                              data.priceRejection.type === 'bullish_rejection' ? 'border-green-500/30 text-green-400' :
+                              'border-red-500/30 text-red-400'
+                            }>
+                              {data.priceRejection.type.replace('_', ' ')} @ {data.priceRejection.level}
+                            </Badge>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">No rejection detected</span>
+                        )}
+                      </div>
+
+                      {/* Buy/Sell Pressure */}
+                      <div className="p-3 rounded-lg bg-card border border-border">
+                        <div className="flex items-center gap-2 mb-2">
+                          <ArrowUpDown className="h-4 w-4 text-primary" />
+                          <span className="text-sm font-medium">Pressure</span>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-red-400">Sell {data.pressure.sellingPressure}%</span>
+                            <span className="text-green-400">Buy {data.pressure.buyingPressure}%</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-gradient-to-r from-destructive via-muted to-emerald-500 relative overflow-hidden">
+                            <div 
+                              className="absolute inset-y-0 left-0 bg-destructive rounded-l-full transition-all"
+                              style={{ width: `${data.pressure.sellingPressure}%` }}
+                            />
+                            <div 
+                              className="absolute inset-y-0 right-0 bg-emerald-500 rounded-r-full transition-all"
+                              style={{ width: `${data.pressure.buyingPressure}%` }}
+                            />
                           </div>
                           <Badge variant="outline" className={
-                            data.volumeSpike.type === 'bullish' ? 'border-green-500/30 text-green-400' :
-                            data.volumeSpike.type === 'bearish' ? 'border-red-500/30 text-red-400' :
+                            data.pressure.trend === 'accumulation' ? 'border-green-500/30 text-green-400' :
+                            data.pressure.trend === 'distribution' ? 'border-red-500/30 text-red-400' :
                             'border-muted text-muted-foreground'
                           }>
-                            {data.volumeSpike.type} • {data.volumeSpike.significance}
+                            {data.pressure.trend} (Δ{data.pressure.delta > 0 ? '+' : ''}{data.pressure.delta})
                           </Badge>
                         </div>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">No spike detected</span>
-                      )}
+                      </div>
                     </div>
 
-                    {/* Price Rejection */}
-                    <div className="p-3 rounded-lg bg-card border border-border">
-                      <div className="flex items-center gap-2 mb-2">
-                        <AlertTriangle className={`h-4 w-4 ${data.priceRejection.detected ? 'text-orange-400' : 'text-muted-foreground'}`} />
-                        <span className="text-sm font-medium">Price Rejection</span>
-                      </div>
-                      {data.priceRejection.detected ? (
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">Strength</span>
-                            <span className="font-mono font-bold">{data.priceRejection.strength}%</span>
-                          </div>
-                          <Badge variant="outline" className={
-                            data.priceRejection.type === 'bullish_rejection' ? 'border-green-500/30 text-green-400' :
-                            'border-red-500/30 text-red-400'
-                          }>
-                            {data.priceRejection.type.replace('_', ' ')} @ {data.priceRejection.level}
+                    {/* Reasons */}
+                    {data.reasons.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {data.reasons.map((reason, idx) => (
+                          <Badge key={idx} variant="secondary" className="text-xs">
+                            {reason}
                           </Badge>
-                        </div>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">No rejection detected</span>
-                      )}
-                    </div>
+                        ))}
+                      </div>
+                    )}
 
-                    {/* Buy/Sell Pressure */}
-                    <div className="p-3 rounded-lg bg-card border border-border">
-                      <div className="flex items-center gap-2 mb-2">
-                        <ArrowUpDown className="h-4 w-4 text-primary" />
-                        <span className="text-sm font-medium">Pressure</span>
-                      </div>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-red-400">Sell {data.pressure.sellingPressure}%</span>
-                          <span className="text-green-400">Buy {data.pressure.buyingPressure}%</span>
-                        </div>
-                        <div className="h-2 rounded-full bg-gradient-to-r from-destructive via-muted to-emerald-500 relative overflow-hidden">
-                          <div 
-                            className="absolute inset-y-0 left-0 bg-destructive rounded-l-full transition-all"
-                            style={{ width: `${data.pressure.sellingPressure}%` }}
-                          />
-                          <div 
-                            className="absolute inset-y-0 right-0 bg-emerald-500 rounded-r-full transition-all"
-                            style={{ width: `${data.pressure.buyingPressure}%` }}
-                          />
-                        </div>
-                        <Badge variant="outline" className={
-                          data.pressure.trend === 'accumulation' ? 'border-green-500/30 text-green-400' :
-                          data.pressure.trend === 'distribution' ? 'border-red-500/30 text-red-400' :
-                          'border-muted text-muted-foreground'
-                        }>
-                          {data.pressure.trend} (Δ{data.pressure.delta > 0 ? '+' : ''}{data.pressure.delta})
-                        </Badge>
-                      </div>
+                    {/* Last Updated */}
+                    <div className="text-xs text-muted-foreground mt-3 text-right">
+                      Updated: {data.lastUpdated.toLocaleTimeString()}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </TabsContent>
+            
+            <TabsContent value="correlation">
+              <Card className="bg-background/50 border-border/50">
+                <CardContent className="p-4">
+                  <div className="mb-4">
+                    <h3 className="font-semibold text-lg mb-1">Symbol Correlation Matrix</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Higher correlation = more similar price movements. Avoid opening same-direction positions on highly correlated pairs.
+                    </p>
+                  </div>
+                  
+                  {/* Legend */}
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-4 h-4 rounded bg-red-500/80" />
+                      <span className="text-xs">Very High (≥85%)</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-4 h-4 rounded bg-orange-500/70" />
+                      <span className="text-xs">High (75-84%)</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-4 h-4 rounded bg-yellow-500/60" />
+                      <span className="text-xs">Moderate (60-74%)</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-4 h-4 rounded bg-blue-500/40" />
+                      <span className="text-xs">Low (40-59%)</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-4 h-4 rounded bg-muted" />
+                      <span className="text-xs">Very Low (&lt;40%)</span>
                     </div>
                   </div>
-
-                  {/* Reasons */}
-                  {data.reasons.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {data.reasons.map((reason, idx) => (
-                        <Badge key={idx} variant="secondary" className="text-xs">
-                          {reason}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Last Updated */}
-                  <div className="text-xs text-muted-foreground mt-3 text-right">
-                    Updated: {data.lastUpdated.toLocaleTimeString()}
+                  
+                  {/* Matrix */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr>
+                          <th className="p-2 text-left text-sm font-medium text-muted-foreground border-b border-border"></th>
+                          {orderFlowData.map(d => (
+                            <th key={d.symbol} className="p-2 text-center text-xs font-medium border-b border-border">
+                              {d.symbol.replace('USDT', '')}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {orderFlowData.map((row, rowIdx) => (
+                          <tr key={row.symbol}>
+                            <td className="p-2 text-sm font-medium border-r border-border">
+                              {row.symbol.replace('USDT', '')}
+                            </td>
+                            {orderFlowData.map((col, colIdx) => {
+                              const correlation = getKnownCorrelation(row.symbol, col.symbol);
+                              const correlationPct = Math.round(correlation * 100);
+                              const isDiagonal = rowIdx === colIdx;
+                              
+                              return (
+                                <td 
+                                  key={col.symbol} 
+                                  className={`p-1 text-center ${isDiagonal ? 'bg-primary/20' : ''}`}
+                                >
+                                  <div 
+                                    className={`rounded px-2 py-1.5 text-xs font-mono font-bold ${
+                                      isDiagonal ? 'bg-primary/30 text-primary' : getCorrelationColor(correlation)
+                                    }`}
+                                    title={`${row.symbol} ↔ ${col.symbol}: ${correlationPct}% (${getCorrelationLabel(correlation)})`}
+                                  >
+                                    {correlationPct}%
+                                  </div>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
+                  
+                  {/* Risk Pairs Warning */}
+                  {(() => {
+                    const highRiskPairs: Array<{ pair: string; correlation: number }> = [];
+                    for (let i = 0; i < orderFlowData.length; i++) {
+                      for (let j = i + 1; j < orderFlowData.length; j++) {
+                        const corr = getKnownCorrelation(orderFlowData[i].symbol, orderFlowData[j].symbol);
+                        if (corr >= 0.80) {
+                          highRiskPairs.push({
+                            pair: `${orderFlowData[i].symbol.replace('USDT', '')}/${orderFlowData[j].symbol.replace('USDT', '')}`,
+                            correlation: corr
+                          });
+                        }
+                      }
+                    }
+                    
+                    if (highRiskPairs.length === 0) return null;
+                    
+                    return (
+                      <div className="mt-4 p-3 rounded-lg bg-orange-500/10 border border-orange-500/30">
+                        <div className="flex items-center gap-2 mb-2">
+                          <AlertTriangle className="h-4 w-4 text-orange-400" />
+                          <span className="font-medium text-orange-400">High Correlation Risk</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground mb-2">
+                          These pairs move together closely. Opening same-direction positions increases portfolio risk:
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {highRiskPairs.map(({ pair, correlation }) => (
+                            <Badge key={pair} className="bg-orange-500/20 text-orange-400 border-orange-500/30">
+                              {pair}: {Math.round(correlation * 100)}%
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </CardContent>
               </Card>
-            ))}
-          </div>
+            </TabsContent>
+          </Tabs>
         )}
       </CardContent>
     </Card>
