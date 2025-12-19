@@ -125,7 +125,7 @@ serve(async (req) => {
     const userIds = [...new Set(positions.map((p) => p.user_id))];
     const { data: riskParamsList, error: riskError } = await supabase
       .from("risk_parameters")
-      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent, portfolio_value, portfolio_peak_value, drawdown_circuit_breaker_enabled, drawdown_circuit_breaker_percent, circuit_breaker_triggered, time_based_stop_enabled, time_based_stop_hours, dynamic_stop_tightening_enabled, dynamic_stop_tightening_hours, dynamic_stop_tightening_percent, partial_loss_taking_enabled, partial_loss_trigger_percent, partial_loss_close_percent, hedging_enabled, hedge_reversal_risk_min, hedge_reversal_risk_max, hedge_position_size_percent, min_hold_time_minutes, trailing_aggressiveness, progressive_lock_enabled, stale_peak_protection_enabled, decay_velocity_exit_enabled")
+      .select("user_id, trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent, portfolio_value, portfolio_peak_value, drawdown_circuit_breaker_enabled, drawdown_circuit_breaker_percent, circuit_breaker_triggered, time_based_stop_enabled, time_based_stop_hours, dynamic_stop_tightening_enabled, dynamic_stop_tightening_hours, dynamic_stop_tightening_percent, partial_loss_taking_enabled, partial_loss_trigger_percent, partial_loss_close_percent, hedging_enabled, hedge_reversal_risk_min, hedge_reversal_risk_max, hedge_position_size_percent, min_hold_time_minutes, trailing_aggressiveness, progressive_lock_enabled, stale_peak_protection_enabled, decay_velocity_exit_enabled, early_profit_lock_enabled, early_profit_lock_threshold, momentum_exit_guard_enabled")
       .in("user_id", userIds);
     if (riskError) throw riskError;
     // Create a map of user settings
@@ -166,6 +166,10 @@ serve(async (req) => {
           progressiveLockEnabled: rp.progressive_lock_enabled ?? true,
           stalePeakProtectionEnabled: rp.stale_peak_protection_enabled ?? true,
           decayVelocityExitEnabled: rp.decay_velocity_exit_enabled ?? true,
+          // Pre-Activation Protection settings
+          earlyProfitLockEnabled: rp.early_profit_lock_enabled ?? true,
+          earlyProfitLockThreshold: rp.early_profit_lock_threshold ?? 0.3,
+          momentumExitGuardEnabled: rp.momentum_exit_guard_enabled ?? true,
         },
       ]) || [],
     );
@@ -589,6 +593,10 @@ serve(async (req) => {
         progressiveLockEnabled: true,
         stalePeakProtectionEnabled: true,
         decayVelocityExitEnabled: true,
+        // Pre-Activation Protection defaults
+        earlyProfitLockEnabled: true,
+        earlyProfitLockThreshold: 0.3,
+        momentumExitGuardEnabled: true,
       };
       
       // 🆕 MINIMUM HOLD TIME CHECK - Prevents early exits on new positions
@@ -717,6 +725,47 @@ serve(async (req) => {
         if (minutesSincePeak > 15) return 0.05;   // +5% after 15 min
         return 0;
       };
+      
+      // ============= PRE-ACTIVATION PROTECTION: EARLY PROFIT LOCK =============
+      // For positions that haven't reached trailing activation but had some profit
+      // Move stop to break-even to prevent "almost winners" from becoming losers
+      let earlyProfitLockApplied = false;
+      if (userSettings.earlyProfitLockEnabled && 
+          pnlPercent < userSettings.activationPercent && 
+          newPeakPnl >= userSettings.earlyProfitLockThreshold &&
+          position.stop_loss !== null) {
+        
+        // Position reached threshold profit but hasn't hit activation
+        // Move stop to break-even (entry price)
+        const breakEvenStop = position.entry_price;
+        
+        if (position.side === "BUY" && breakEvenStop > position.stop_loss) {
+          // For LONG: move stop up to entry
+          newStopLoss = breakEvenStop;
+          earlyProfitLockApplied = true;
+          console.log(`🛡️ EARLY PROFIT LOCK for ${position.symbol} BUY: Moving stop to break-even ${breakEvenStop.toFixed(2)} (peak was ${newPeakPnl.toFixed(2)}%, current ${pnlPercent.toFixed(2)}%)`);
+        } else if (position.side === "SELL" && breakEvenStop < position.stop_loss) {
+          // For SHORT: move stop down to entry
+          newStopLoss = breakEvenStop;
+          earlyProfitLockApplied = true;
+          console.log(`🛡️ EARLY PROFIT LOCK for ${position.symbol} SHORT: Moving stop to break-even ${breakEvenStop.toFixed(2)} (peak was ${newPeakPnl.toFixed(2)}%, current ${pnlPercent.toFixed(2)}%)`);
+        }
+        
+        if (earlyProfitLockApplied) {
+          // Update stop loss in database
+          const { error: earlyLockError } = await supabase
+            .from("positions")
+            .update({ stop_loss: newStopLoss })
+            .eq("id", position.id)
+            .eq("status", "active");
+          
+          if (earlyLockError) {
+            console.error(`Error applying early profit lock for ${position.id}:`, earlyLockError);
+          } else {
+            updatedStopLossMap.set(position.id, newStopLoss);
+          }
+        }
+      }
       
       // Check if trailing stop is enabled and position is profitable enough
       if (userSettings.enabled && pnlPercent > userSettings.activationPercent) {

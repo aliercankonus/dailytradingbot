@@ -663,6 +663,8 @@ export type Database = {
           dynamic_stop_tightening_enabled: boolean | null
           dynamic_stop_tightening_hours: number | null
           dynamic_stop_tightening_percent: number | null
+          early_profit_lock_enabled: boolean | null
+          early_profit_lock_threshold: number | null
           early_reversal_position_size_percent: number | null
           email_notifications_enabled: boolean | null
           enable_early_reversal_signals: boolean | null
@@ -687,6 +689,7 @@ export type Database = {
           min_hold_time_minutes: number | null
           min_trades_for_kelly: number | null
           min_trend_consistency: number
+          momentum_exit_guard_enabled: boolean | null
           notification_email: string | null
           notification_phone: string | null
           paper_trading_mode: boolean | null
@@ -737,6 +740,8 @@ export type Database = {
           dynamic_stop_tightening_enabled?: boolean | null
           dynamic_stop_tightening_hours?: number | null
           dynamic_stop_tightening_percent?: number | null
+          early_profit_lock_enabled?: boolean | null
+          early_profit_lock_threshold?: number | null
           early_reversal_position_size_percent?: number | null
           email_notifications_enabled?: boolean | null
           enable_early_reversal_signals?: boolean | null
@@ -761,6 +766,7 @@ export type Database = {
           min_hold_time_minutes?: number | null
           min_trades_for_kelly?: number | null
           min_trend_consistency?: number
+          momentum_exit_guard_enabled?: boolean | null
           notification_email?: string | null
           notification_phone?: string | null
           paper_trading_mode?: boolean | null
@@ -811,6 +817,8 @@ export type Database = {
           dynamic_stop_tightening_enabled?: boolean | null
           dynamic_stop_tightening_hours?: number | null
           dynamic_stop_tightening_percent?: number | null
+          early_profit_lock_enabled?: boolean | null
+          early_profit_lock_threshold?: number | null
           early_reversal_position_size_percent?: number | null
           email_notifications_enabled?: boolean | null
           enable_early_reversal_signals?: boolean | null
@@ -835,6 +843,7 @@ export type Database = {
           min_hold_time_minutes?: number | null
           min_trades_for_kelly?: number | null
           min_trend_consistency?: number
+          momentum_exit_guard_enabled?: boolean | null
           notification_email?: string | null
           notification_phone?: string | null
           paper_trading_mode?: boolean | null

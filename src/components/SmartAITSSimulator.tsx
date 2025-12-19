@@ -19,6 +19,9 @@ export const SmartAITSSimulator = () => {
   const [progressiveLockEnabled, setProgressiveLockEnabled] = useState(true);
   const [stalePeakEnabled, setStalePeakEnabled] = useState(true);
   const [decayVelocityEnabled, setDecayVelocityEnabled] = useState(true);
+  const [earlyProfitLockEnabled, setEarlyProfitLockEnabled] = useState(true);
+  const [earlyLockThreshold] = useState(0.3);
+  const [activationThreshold] = useState(1.0);
 
   // Smart AITS: Progressive lock tiers
   const getProgressiveLockPercent = (peak: number, agg: number): number => {
@@ -120,6 +123,8 @@ export const SmartAITSSimulator = () => {
   // Scenario comparison table
   const scenarios = useMemo(() => {
     const testCases = [
+      { peak: 0.3, current: -0.5, mins: 25, desc: "Early lock scenario (0.3% peak → loss)" },
+      { peak: 0.5, current: -1.0, mins: 30, desc: "Almost winner → big loss (no early lock)" },
       { peak: 0.5, current: 0.3, mins: 10, desc: "Small profit, fresh" },
       { peak: 1.5, current: 1.2, mins: 20, desc: "Moderate profit, recent" },
       { peak: 2.5, current: 2.0, mins: 45, desc: "Good profit, stale peak" },
@@ -133,12 +138,19 @@ export const SmartAITSSimulator = () => {
       const decay = tc.peak - tc.current;
       const velocity = tc.mins > 0 ? decay / tc.mins : 0;
       
+      // Check for Early Profit Lock scenario
+      const isEarlyLockScenario = tc.peak >= earlyLockThreshold && tc.peak < activationThreshold;
+      const earlyLockApplies = earlyProfitLockEnabled && isEarlyLockScenario;
+      
       // Calculate Smart AITS lock
       const progressive = progressiveLockEnabled ? getProgressiveLockPercent(tc.peak, aggressiveness) : 0;
       const stale = getStalePeakBonus(tc.mins);
       let decayOverride = 0;
       let action = "";
-      if (decayVelocityEnabled && velocity > 0.03) {
+      
+      if (earlyLockApplies) {
+        action = "BREAK-EVEN";
+      } else if (decayVelocityEnabled && velocity > 0.03) {
         action = "EXIT";
         decayOverride = 1.0;
       } else if (decayVelocityEnabled && velocity > 0.02) {
@@ -149,23 +161,26 @@ export const SmartAITSSimulator = () => {
       const smartLock = Math.min(0.85, Math.max(progressive + stale, decayOverride, baseLockPercent / 100));
       const oldLock = 0.50;
       
-      const smartLocked = tc.peak * smartLock;
-      const oldLocked = tc.peak * oldLock;
-      const diff = smartLocked - oldLocked;
+      // For early lock scenarios, result is break-even (0) instead of whatever the current P&L is
+      const smartLocked = earlyLockApplies ? Math.max(0, tc.current) : tc.peak * smartLock;
+      const oldResult = tc.current < 0 ? tc.current : tc.peak * oldLock;
+      const diff = smartLocked - oldResult;
       
       return {
         ...tc,
         velocity: velocity * 100,
         action,
         smartLock: smartLock * 100,
+        smartLockDisplay: earlyLockApplies ? "BE" : `${(smartLock * 100).toFixed(0)}%`,
         oldLock: oldLock * 100,
         smartLocked,
-        oldLocked,
+        oldLocked: oldResult,
         diff,
         tier: getTierInfo(tc.peak).label.split(" ")[0] + " " + getTierInfo(tc.peak).label.split(" ")[1],
+        isEarlyLock: earlyLockApplies,
       };
     });
-  }, [aggressiveness, baseLockPercent, progressiveLockEnabled, stalePeakEnabled, decayVelocityEnabled]);
+  }, [aggressiveness, baseLockPercent, progressiveLockEnabled, stalePeakEnabled, decayVelocityEnabled, earlyProfitLockEnabled]);
 
   const aggressivenessLabels = ["Very Conservative", "Conservative", "Balanced", "Aggressive", "Very Aggressive"];
 
@@ -183,6 +198,10 @@ export const SmartAITSSimulator = () => {
       <CardContent className="space-y-6">
         {/* Feature Toggles */}
         <div className="flex flex-wrap gap-4 rounded-lg border p-3">
+          <div className="flex items-center gap-2">
+            <Switch checked={earlyProfitLockEnabled} onCheckedChange={setEarlyProfitLockEnabled} />
+            <Label className="text-sm">Early Profit Lock</Label>
+          </div>
           <div className="flex items-center gap-2">
             <Switch checked={progressiveLockEnabled} onCheckedChange={setProgressiveLockEnabled} />
             <Label className="text-sm">Progressive Tiers</Label>
@@ -342,8 +361,11 @@ export const SmartAITSSimulator = () => {
               </TableHeader>
               <TableBody>
                 {scenarios.map((s, i) => (
-                  <TableRow key={i} className={s.action === "EXIT" ? "bg-red-500/10" : ""}>
-                    <TableCell className="text-sm">{s.desc}</TableCell>
+                  <TableRow key={i} className={s.action === "EXIT" ? "bg-red-500/10" : s.isEarlyLock ? "bg-green-500/10" : ""}>
+                    <TableCell className="text-sm">
+                      {s.desc}
+                      {s.isEarlyLock && <Badge variant="secondary" className="ml-1 text-[10px] bg-green-500/20 text-green-600">Early Lock</Badge>}
+                    </TableCell>
                     <TableCell className="text-center font-mono">{s.peak.toFixed(1)}%</TableCell>
                     <TableCell className="text-center text-xs">{s.tier}</TableCell>
                     <TableCell className="text-center font-mono">{s.mins}m</TableCell>
@@ -351,12 +373,12 @@ export const SmartAITSSimulator = () => {
                       <span className={`font-mono ${s.velocity > 3 ? "text-red-500" : s.velocity > 2 ? "text-amber-500" : ""}`}>
                         {s.velocity.toFixed(1)}%/m
                       </span>
-                      {s.action && <Badge variant="outline" className="ml-1 text-[10px]">{s.action}</Badge>}
+                      {s.action && <Badge variant="outline" className={`ml-1 text-[10px] ${s.action === "BREAK-EVEN" ? "border-green-500/50 text-green-600" : ""}`}>{s.action}</Badge>}
                     </TableCell>
                     <TableCell className="text-center font-mono text-muted-foreground">{s.oldLock.toFixed(0)}%</TableCell>
-                    <TableCell className="text-center font-mono text-primary">{s.smartLock.toFixed(0)}%</TableCell>
+                    <TableCell className="text-center font-mono text-primary">{s.smartLockDisplay || `${s.smartLock.toFixed(0)}%`}</TableCell>
                     <TableCell className="text-center">
-                      <span className="font-mono text-green-500">{s.smartLocked.toFixed(2)}%</span>
+                      <span className={`font-mono ${s.smartLocked >= 0 ? "text-green-500" : "text-red-500"}`}>{s.smartLocked.toFixed(2)}%</span>
                       <span className="text-xs text-muted-foreground"> vs {s.oldLocked.toFixed(2)}%</span>
                     </TableCell>
                     <TableCell className="text-center">
