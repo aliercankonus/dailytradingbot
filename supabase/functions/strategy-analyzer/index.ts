@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS } from "../_shared/constants.ts";
 import { getTechnicalScore, getMomentumScore, getAlignmentScore, getConfidencePenalty as sharedGetConfidencePenalty, getAdxScore } from "../_shared/scoring.ts";
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
+import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1531,7 +1532,7 @@ serve(async (req) => {
 
     const { data: activePositions } = await supabase
       .from("positions")
-      .select("symbol")
+      .select("symbol, side, quantity, entry_price")
       .eq("user_id", userId)
       .eq("status", "active");
 
@@ -1539,6 +1540,9 @@ serve(async (req) => {
     activePositions?.forEach((p) => {
       openTradesPerSymbol.set(p.symbol, (openTradesPerSymbol.get(p.symbol) || 0) + 1);
     });
+    
+    // Log active positions for correlation analysis
+    console.log(`📊 Active positions for correlation check: ${activePositions?.length || 0} positions`);
 
     // Helper functions
     const calculateRSI = (prices: number[], period = 14): number => {
@@ -2775,8 +2779,50 @@ serve(async (req) => {
         
         const indicatorValues = best.indicatorValues;
 
+        // ============= CORRELATION CHECK =============
+        // Check if opening this position would increase correlated risk
+        const correlationCheck = checkPositionCorrelation(
+          symbol,
+          signalType,
+          activePositions || [],
+          0.75, // Max correlation threshold
+          2     // Max correlated positions in same direction
+        );
+        
+        if (!correlationCheck.canOpen) {
+          rejectedByHardGates++;
+          console.log(`🔗 ${symbol}: CORRELATION BLOCK - ${correlationCheck.reason}`);
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `Correlation risk: ${correlationCheck.reason}`,
+            filters_status: {
+              correlationRiskScore: correlationCheck.riskScore,
+              correlatedPositions: correlationCheck.correlatedPositions,
+              signalType,
+              gate: "CORRELATION_RISK",
+            },
+            trend_data: trendData,
+            checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
+        // Log correlation info if there are correlated positions
+        if (correlationCheck.correlatedPositions.length > 0) {
+          console.log(`🔗 ${symbol}: Correlation check PASSED (risk: ${correlationCheck.riskScore.toFixed(0)}%, correlated: ${correlationCheck.correlatedPositions.map(p => `${p.symbol}:${(p.correlation * 100).toFixed(0)}%`).join(', ')})`);
+        }
+
         // Calculate position size from quality score, apply recovery mode reduction
+        // Also apply correlation-based size adjustment
         let positionSizeMultiplier = getPositionSizeFromQuality(qualityScore);
+        
+        // Reduce position size based on correlation risk (0% risk = 100% size, 100% risk = 50% size)
+        if (correlationCheck.riskScore > 30) {
+          const correlationAdjustment = getCorrelationAdjustedSize(1.0, correlationCheck.riskScore);
+          positionSizeMultiplier *= correlationAdjustment;
+          console.log(`🔗 ${symbol}: Correlation adjustment - position size reduced to ${(correlationAdjustment * 100).toFixed(0)}% due to ${correlationCheck.riskScore.toFixed(0)}% correlation risk`);
+        }
+        
         if (isInRecoveryMode) {
           positionSizeMultiplier *= recoveryPositionSizeMultiplier;
           console.log(`🔄 ${symbol}: Recovery mode - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
