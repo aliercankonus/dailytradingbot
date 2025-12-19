@@ -14,6 +14,7 @@ import { ClosedPositionsDashboard } from "@/components/ClosedPositionsDashboard"
 import { EarlyWarningExitsDashboard } from "@/components/EarlyWarningExitsDashboard";
 import { CloseAllTradesButton } from "@/components/CloseAllTradesButton";
 import { WebSocketHealthDashboard } from "@/components/WebSocketHealthDashboard";
+import { OrderFlowDashboard } from "@/components/OrderFlowDashboard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
 import { TradeCounterSync } from "@/components/TradeCounterSync";
@@ -141,7 +142,8 @@ const Index = () => {
             <RiskManagementControls />
           </TabsContent>
 
-          <TabsContent value="monitor">
+          <TabsContent value="monitor" className="space-y-6">
+            <OrderFlowDashboard />
             <WebSocketHealthDashboard />
           </TabsContent>
         </Tabs>
