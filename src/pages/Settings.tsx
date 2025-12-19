@@ -13,6 +13,7 @@ import { PerformanceSettings } from '@/components/PerformanceSettings';
 import { PerformanceMonitoringDashboard } from '@/components/PerformanceMonitoringDashboard';
 import SmartRiskSettings from '@/components/SmartRiskSettings';
 import { HedgingSettings } from '@/components/HedgingSettings';
+import { SmartAITSSimulator } from '@/components/SmartAITSSimulator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function Settings() {
@@ -225,8 +226,9 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="general">General Settings</TabsTrigger>
+          <TabsTrigger value="aits">Smart AITS Simulator</TabsTrigger>
           <TabsTrigger value="performance">Performance Monitor</TabsTrigger>
         </TabsList>
 
@@ -405,6 +407,10 @@ export default function Settings() {
 
           {/* Risk Management */}
           <PerformanceSettings />
+        </TabsContent>
+
+        <TabsContent value="aits">
+          <SmartAITSSimulator />
         </TabsContent>
 
         <TabsContent value="performance">
