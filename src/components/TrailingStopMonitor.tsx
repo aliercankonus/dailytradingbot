@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TrendingUp, Shield } from "lucide-react";
+import { TrendingUp, Shield, Brain, Clock, Zap, AlertTriangle } from "lucide-react";
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
@@ -13,6 +13,10 @@ export const TrailingStopMonitor = () => {
     activationPercent: 1.0,
     distanceMultiplier: 1.5,
     profitLockPercent: 50,
+    trailingAggressiveness: 3,
+    progressiveLockEnabled: true,
+    stalePeakProtectionEnabled: true,
+    decayVelocityExitEnabled: true,
   });
   const { getPrice, priceVersion } = useRealtimePricesContext();
 
@@ -31,54 +35,53 @@ export const TrailingStopMonitor = () => {
     return side === "BUY" ? ((current - entry) / entry) * 100 : ((entry - current) / entry) * 100;
   };
 
-  const calculateTrailingStop = (position: any, currentPrice: number) => {
-    const { side, entry_price } = position;
-    const trailingPercent = settings.distanceMultiplier;
-    const trailingDistanceAbs = currentPrice * (trailingPercent / 100);
-    if (side === "BUY") {
-      const profitAbs = currentPrice - entry_price;
-      return entry_price + profitAbs - trailingDistanceAbs;
-    } else {
-      const profitAbs = entry_price - currentPrice;
-      return entry_price - profitAbs + trailingDistanceAbs;
-    }
+  // Smart AITS: Progressive lock tiers
+  const getProgressiveLockPercent = (peakPnl: number, aggressiveness: number): number => {
+    const baseLock = 0.30 + (aggressiveness * 0.05);
+    let tierBonus = 0;
+    if (peakPnl >= 5) tierBonus = 0.30;
+    else if (peakPnl >= 3) tierBonus = 0.20;
+    else if (peakPnl >= 2) tierBonus = 0.15;
+    else if (peakPnl >= 1) tierBonus = 0.10;
+    return Math.min(0.85, baseLock + tierBonus);
   };
 
-  // Calculate profit lock using PERSISTED peak_pnl_percent from database (ratcheting - never decreases)
-  const calculateProfitLock = (position: any, currentPnlPercent: number) => {
-    const { side, entry_price, peak_pnl_percent } = position;
-    const profitLockPercent = settings.profitLockPercent;
-    
-    // Use persisted peak P&L from database (set by monitor-positions)
-    // Fallback to current P&L if peak not yet persisted
-    const peakPnlPercent = Math.max(peak_pnl_percent || 0, currentPnlPercent);
-    
-    // Calculate locked profit based on peak P&L
-    const profitAbsolute = entry_price * (peakPnlPercent / 100);
-    const lockedProfitAbsolute = profitAbsolute * (profitLockPercent / 100);
-    const lockedProfitPercent = peakPnlPercent * (profitLockPercent / 100);
-    const lockedStopPrice = side === "BUY" ? entry_price + lockedProfitAbsolute : entry_price - lockedProfitAbsolute;
-    
-    return {
-      lockedProfitPercent,
-      lockedProfitAbsolute,
-      lockedStopPrice,
-      peakPnlPercent,
-    };
+  // Smart AITS: Stale peak bonus
+  const getStalePeakBonus = (minutesSincePeak: number): number => {
+    if (!settings.stalePeakProtectionEnabled) return 0;
+    if (minutesSincePeak > 120) return 0.25;
+    if (minutesSincePeak > 60) return 0.20;
+    if (minutesSincePeak > 30) return 0.10;
+    if (minutesSincePeak > 15) return 0.05;
+    return 0;
+  };
+
+  // Get tier label
+  const getTierLabel = (peakPnl: number): string => {
+    if (peakPnl >= 5) return "Tier 5";
+    if (peakPnl >= 3) return "Tier 4";
+    if (peakPnl >= 2) return "Tier 3";
+    if (peakPnl >= 1) return "Tier 2";
+    return "Tier 1";
+  };
+
+  // Get tier color
+  const getTierColor = (peakPnl: number): string => {
+    if (peakPnl >= 5) return "text-green-500";
+    if (peakPnl >= 3) return "text-emerald-500";
+    if (peakPnl >= 2) return "text-blue-500";
+    if (peakPnl >= 1) return "text-cyan-500";
+    return "text-slate-500";
   };
 
   // ----------- INITIAL FETCH -----------
   useEffect(() => {
     const fetchSettings = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       const { data } = await supabase
         .from("risk_parameters")
-        .select(
-          "trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, trailing_stop_profit_lock_percent",
-        )
+        .select("trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, trailing_stop_profit_lock_percent, trailing_aggressiveness, progressive_lock_enabled, stale_peak_protection_enabled, decay_velocity_exit_enabled")
         .eq("user_id", user.id)
         .single();
       if (data) {
@@ -87,6 +90,10 @@ export const TrailingStopMonitor = () => {
           activationPercent: data.trailing_stop_activation_percent ?? 1.0,
           distanceMultiplier: data.trailing_stop_distance_multiplier ?? 1.5,
           profitLockPercent: data.trailing_stop_profit_lock_percent ?? 50,
+          trailingAggressiveness: data.trailing_aggressiveness ?? 3,
+          progressiveLockEnabled: data.progressive_lock_enabled ?? true,
+          stalePeakProtectionEnabled: data.stale_peak_protection_enabled ?? true,
+          decayVelocityExitEnabled: data.decay_velocity_exit_enabled ?? true,
         });
       }
     };
@@ -101,18 +108,9 @@ export const TrailingStopMonitor = () => {
 
     const channel = supabase
       .channel("trailing-positions-updates")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "positions",
-          filter: "status=eq.active",
-        },
-        () => {
-          fetchPositions();
-        },
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "positions", filter: "status=eq.active" }, () => {
+        fetchPositions();
+      })
       .subscribe();
 
     return () => {
@@ -120,7 +118,7 @@ export const TrailingStopMonitor = () => {
     };
   }, []);
 
-  // Build price map exactly like ActivePositions - separate useMemo for price resolution
+  // Build price map
   const priceMap = useMemo(() => {
     const map = new Map<string, number>();
     positions.forEach((p) => {
@@ -131,44 +129,73 @@ export const TrailingStopMonitor = () => {
   }, [positions, getPrice, priceVersion]);
 
   const activeTrailingPositions = useMemo(() => {
+    const now = new Date();
+    
     return positions
       .map((p) => {
         const currentPrice = priceMap.get(p.symbol) ?? p.entry_price;
         const pnlPercent = calculatePnlPercent(p.side, p.entry_price, currentPrice);
-        return { position: p, currentPrice, pnlPercent };
+        const peakPnl = Math.max(p.peak_pnl_percent || 0, pnlPercent);
+        const peakReachedAt = p.peak_reached_at ? new Date(p.peak_reached_at) : now;
+        const minutesSincePeak = (now.getTime() - peakReachedAt.getTime()) / (1000 * 60);
+        
+        return { position: p, currentPrice, pnlPercent, peakPnl, minutesSincePeak };
       })
       .filter((item) => item.pnlPercent > settings.activationPercent)
-      .map(({ position, currentPrice, pnlPercent }) => {
-        // Use actual database stop_loss (set by monitor-positions with ratcheting)
-        const actualDbStopLoss = position.stop_loss;
-        const theoreticalStop = calculateTrailingStop(position, currentPrice);
-        const { lockedProfitPercent, lockedProfitAbsolute, lockedStopPrice, peakPnlPercent } = calculateProfitLock(
-          position,
-          pnlPercent,
-        );
+      .map(({ position, currentPrice, pnlPercent, peakPnl, minutesSincePeak }) => {
+        // Calculate Smart AITS lock
+        let effectiveLockPercent = settings.profitLockPercent / 100;
+        let smartAitsActive = false;
+        
+        if (settings.progressiveLockEnabled) {
+          const progressiveLock = getProgressiveLockPercent(peakPnl, settings.trailingAggressiveness);
+          const stalePeakBonus = getStalePeakBonus(minutesSincePeak);
+          const adaptiveLock = progressiveLock + stalePeakBonus;
+          
+          if (adaptiveLock > effectiveLockPercent) {
+            effectiveLockPercent = Math.min(0.85, adaptiveLock);
+            smartAitsActive = true;
+          }
+        }
+        
+        // Calculate locked profit
+        const lockedProfitPercent = peakPnl * effectiveLockPercent;
+        const lockedProfitAbsolute = position.entry_price * (lockedProfitPercent / 100);
+        const lockedStopPrice = position.side === "BUY" 
+          ? position.entry_price + lockedProfitAbsolute 
+          : position.entry_price - lockedProfitAbsolute;
+        
+        // Decay velocity
+        const decayPercent = peakPnl - pnlPercent;
+        const decayVelocity = minutesSincePeak > 0 ? decayPercent / minutesSincePeak : 0;
+        const isDecayWarning = decayVelocity > 0.02;
+        const isDecayCritical = decayVelocity > 0.03;
+
         return {
           ...position,
           currentPrice,
           pnlPercent,
-          peakPnlPercent,
-          // Use actual DB stop_loss (individual per position), fallback to theoretical
-          stop_loss: actualDbStopLoss ?? theoreticalStop,
-          theoreticalStop,
+          peakPnl,
+          minutesSincePeak,
+          effectiveLockPercent: effectiveLockPercent * 100,
           lockedProfitPercent,
-          lockedProfitAbsolute,
           lockedStopPrice,
-          profitLockPercent: settings.profitLockPercent,
+          smartAitsActive,
+          decayVelocity: decayVelocity * 100, // % per minute
+          isDecayWarning,
+          isDecayCritical,
+          tier: getTierLabel(peakPnl),
+          tierColor: getTierColor(peakPnl),
         };
       });
   }, [positions, priceMap, settings]);
 
-  // ----------- UI (DEĞİŞTİRİLMEDİ) -----------
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Shield className="h-5 w-5 text-primary" />
-          Trailing Stop Loss Monitor
+          Smart Trailing Stop Monitor
           {activeTrailingPositions.length > 0 && (
             <Badge variant="default" className="ml-auto">
               {activeTrailingPositions.length} Active
@@ -178,16 +205,14 @@ export const TrailingStopMonitor = () => {
       </CardHeader>
       <CardContent>
         {activeTrailingPositions.length > 0 && (
-          <div className="mb-4 rounded-lg border border-primary/20 bg-primary/10 p-3">
-            <div className="flex items-center gap-2 text-sm">
-              <TrendingUp className="h-4 w-4 text-primary" />
-              <span className="text-foreground">
-                {activeTrailingPositions.length} position
-                {activeTrailingPositions.length > 1 ? "s are" : " is"} profitable and protected by trailing stops
-              </span>
-            </div>
+          <div className="mb-4 flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/10 p-3 text-sm">
+            <Brain className="h-4 w-4 text-primary" />
+            <span className="text-foreground">
+              Smart AITS protecting {activeTrailingPositions.filter(p => p.smartAitsActive).length} of {activeTrailingPositions.length} positions with adaptive locks
+            </span>
           </div>
         )}
+        
         <div className="space-y-3">
           {activeTrailingPositions.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">
@@ -200,7 +225,8 @@ export const TrailingStopMonitor = () => {
               <div key={position.id} className="rounded-lg border bg-card p-3 transition-colors hover:bg-accent/50">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <div className="mb-1 flex items-center gap-2">
+                    {/* Header */}
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-foreground">{position.symbol}</span>
                       <Badge variant={position.side === "BUY" ? "default" : "secondary"} className="text-xs">
                         {position.side}
@@ -208,58 +234,88 @@ export const TrailingStopMonitor = () => {
                       <Badge variant="outline" className="text-xs text-primary">
                         {formatPercent(position.pnlPercent, 2, true)}
                       </Badge>
+                      {position.smartAitsActive && (
+                        <Badge variant="secondary" className="gap-1 text-xs">
+                          <Brain className="h-3 w-3" /> Smart AITS
+                        </Badge>
+                      )}
+                      <Badge variant="outline" className={`text-xs ${position.tierColor}`}>
+                        {position.tier}
+                      </Badge>
                     </div>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <span className="text-xs">Entry:</span>
-                      <span>{formatPrice(position.entry_price, 4, "$")}</span>
-                      <span className="text-xs">Current:</span>
-                      <span className="font-medium text-primary">{formatPrice(position.currentPrice, 4, "$")}</span>
-                      <span className="text-xs">Stop:</span>
-                      <span className="text-destructive">{formatPrice(position.stop_loss, 4, "$")}</span>
+                    
+                    {/* Prices */}
+                    <div className="mb-2 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                      <span>Entry: {formatPrice(position.entry_price, 4, "$")}</span>
+                      <span className="text-primary">Current: {formatPrice(position.currentPrice, 4, "$")}</span>
+                      <span className="text-destructive">Stop: {formatPrice(position.stop_loss, 4, "$")}</span>
                     </div>
-                    {/* Profit Lock */}
-                    <div className="mt-2 rounded bg-muted/50 p-2">
-                      <div className="mb-1 flex items-center gap-1 text-xs font-medium text-foreground">
+                    
+                    {/* Smart AITS Details */}
+                    <div className="grid gap-2 rounded bg-muted/50 p-2 text-xs">
+                      {/* Lock Breakdown */}
+                      <div className="flex items-center gap-2">
                         <TrendingUp className="h-3 w-3 text-green-500" />
-                        Profit Lock ({position.profitLockPercent}%)
+                        <span className="font-medium">Lock: {position.effectiveLockPercent.toFixed(0)}%</span>
+                        <span className="text-muted-foreground">
+                          → Locked {formatPercent(position.lockedProfitPercent)} at {formatPrice(position.lockedStopPrice, 4, "$")}
+                        </span>
                       </div>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                        <div>
-                          <span>Locked Profit:</span>
-                          <span className="ml-1 font-medium text-green-500">
-                            {formatPercent(position.lockedProfitPercent, 2, true)}
-                          </span>
-                        </div>
-                        <div>
-                          <span>Lock Stop:</span>
-                          <span className="ml-1 font-medium text-amber-500">
-                            {formatPrice(position.lockedStopPrice, 4, "$")}
-                          </span>
-                        </div>
-                        <div className="col-span-2 mt-1 text-[10px] italic">
-                          Peak: {formatPercent(position.peakPnlPercent)} × {position.profitLockPercent}% ={" "}
-                          {formatPercent(position.lockedProfitPercent)} locked
-                        </div>
+                      
+                      {/* Peak Info */}
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-3 w-3 text-amber-500" />
+                        <span>Peak: {formatPercent(position.peakPnl)}</span>
+                        <span className="text-muted-foreground">
+                          ({position.minutesSincePeak.toFixed(0)} min ago)
+                        </span>
+                        {position.minutesSincePeak > 30 && (
+                          <Badge variant="outline" className="text-[10px] text-amber-500">
+                            <Clock className="mr-0.5 h-2.5 w-2.5" />
+                            Stale Peak Bonus Active
+                          </Badge>
+                        )}
+                      </div>
+                      
+                      {/* Decay Velocity */}
+                      <div className="flex items-center gap-2">
+                        <Shield className={`h-3 w-3 ${position.isDecayCritical ? 'text-red-500' : position.isDecayWarning ? 'text-amber-500' : 'text-green-500'}`} />
+                        <span className={position.isDecayCritical ? 'text-red-500' : position.isDecayWarning ? 'text-amber-500' : ''}>
+                          Decay: {position.decayVelocity.toFixed(2)}%/min
+                        </span>
+                        {position.isDecayCritical && (
+                          <Badge variant="destructive" className="gap-1 text-[10px]">
+                            <AlertTriangle className="h-2.5 w-2.5" /> Emergency Exit Zone
+                          </Badge>
+                        )}
+                        {position.isDecayWarning && !position.isDecayCritical && (
+                          <Badge variant="outline" className="text-[10px] text-amber-500">
+                            High Decay - 80% Lock
+                          </Badge>
+                        )}
                       </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Shield className="h-4 w-4 text-primary" />
                   </div>
                 </div>
               </div>
             ))
           )}
         </div>
+        
+        {/* Current Settings Summary */}
         <div className="mt-4 rounded-lg bg-muted/50 p-3">
-          <h4 className="mb-2 text-sm font-medium text-foreground">Current Settings:</h4>
-          <ul className="space-y-1 text-xs text-muted-foreground">
-            <li>• Status: {settings.enabled ? "Enabled" : "Disabled"}</li>
-            <li>• Activates at: +{settings.activationPercent}% profit</li>
-            <li>• Trailing distance: {settings.distanceMultiplier}% of price</li>
-            <li>• Profit lock: {settings.profitLockPercent}% of gains protected</li>
-            <li>• Only moves in favorable direction</li>
-          </ul>
+          <h4 className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
+            <Brain className="h-4 w-4" />
+            Smart AITS Configuration:
+          </h4>
+          <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+            <div>• Aggressiveness: Level {settings.trailingAggressiveness}</div>
+            <div>• Progressive Lock: {settings.progressiveLockEnabled ? "On" : "Off"}</div>
+            <div>• Stale Peak Protection: {settings.stalePeakProtectionEnabled ? "On" : "Off"}</div>
+            <div>• Decay Velocity Exit: {settings.decayVelocityExitEnabled ? "On" : "Off"}</div>
+            <div>• Activation: +{settings.activationPercent}%</div>
+            <div>• Base Lock: {settings.profitLockPercent}%</div>
+          </div>
         </div>
       </CardContent>
     </Card>

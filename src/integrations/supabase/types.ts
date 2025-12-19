@@ -349,6 +349,7 @@ export type Database = {
           partial_loss_level: number | null
           partial_tp_level: number | null
           peak_pnl_percent: number | null
+          peak_reached_at: string | null
           quantity: number
           realized_pnl: number | null
           realized_pnl_percent: number | null
@@ -391,6 +392,7 @@ export type Database = {
           partial_loss_level?: number | null
           partial_tp_level?: number | null
           peak_pnl_percent?: number | null
+          peak_reached_at?: string | null
           quantity: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
@@ -433,6 +435,7 @@ export type Database = {
           partial_loss_level?: number | null
           partial_tp_level?: number | null
           peak_pnl_percent?: number | null
+          peak_reached_at?: string | null
           quantity?: number
           realized_pnl?: number | null
           realized_pnl_percent?: number | null
@@ -651,6 +654,7 @@ export type Database = {
           daily_loss_limit_percent: number
           daily_peak_pnl: number | null
           daily_realized_loss: number | null
+          decay_velocity_exit_enabled: boolean | null
           divergence_sl_multiplier: number | null
           divergence_tp_multiplier: number | null
           drawdown_circuit_breaker_enabled: boolean | null
@@ -692,12 +696,15 @@ export type Database = {
           portfolio_peak_value: number | null
           portfolio_value: number
           position_size_reduction_percent: number
+          progressive_lock_enabled: boolean | null
           pullback_position_size_percent: number | null
           rebalance_loss_threshold_percent: number | null
           sms_notifications_enabled: boolean | null
+          stale_peak_protection_enabled: boolean | null
           standard_tp_multiplier: number | null
           time_based_stop_enabled: boolean | null
           time_based_stop_hours: number | null
+          trailing_aggressiveness: number | null
           trailing_daily_limit_enabled: boolean | null
           trailing_stop_activation_percent: number | null
           trailing_stop_distance_multiplier: number | null
@@ -721,6 +728,7 @@ export type Database = {
           daily_loss_limit_percent?: number
           daily_peak_pnl?: number | null
           daily_realized_loss?: number | null
+          decay_velocity_exit_enabled?: boolean | null
           divergence_sl_multiplier?: number | null
           divergence_tp_multiplier?: number | null
           drawdown_circuit_breaker_enabled?: boolean | null
@@ -762,12 +770,15 @@ export type Database = {
           portfolio_peak_value?: number | null
           portfolio_value?: number
           position_size_reduction_percent?: number
+          progressive_lock_enabled?: boolean | null
           pullback_position_size_percent?: number | null
           rebalance_loss_threshold_percent?: number | null
           sms_notifications_enabled?: boolean | null
+          stale_peak_protection_enabled?: boolean | null
           standard_tp_multiplier?: number | null
           time_based_stop_enabled?: boolean | null
           time_based_stop_hours?: number | null
+          trailing_aggressiveness?: number | null
           trailing_daily_limit_enabled?: boolean | null
           trailing_stop_activation_percent?: number | null
           trailing_stop_distance_multiplier?: number | null
@@ -791,6 +802,7 @@ export type Database = {
           daily_loss_limit_percent?: number
           daily_peak_pnl?: number | null
           daily_realized_loss?: number | null
+          decay_velocity_exit_enabled?: boolean | null
           divergence_sl_multiplier?: number | null
           divergence_tp_multiplier?: number | null
           drawdown_circuit_breaker_enabled?: boolean | null
@@ -832,12 +844,15 @@ export type Database = {
           portfolio_peak_value?: number | null
           portfolio_value?: number
           position_size_reduction_percent?: number
+          progressive_lock_enabled?: boolean | null
           pullback_position_size_percent?: number | null
           rebalance_loss_threshold_percent?: number | null
           sms_notifications_enabled?: boolean | null
+          stale_peak_protection_enabled?: boolean | null
           standard_tp_multiplier?: number | null
           time_based_stop_enabled?: boolean | null
           time_based_stop_hours?: number | null
+          trailing_aggressiveness?: number | null
           trailing_daily_limit_enabled?: boolean | null
           trailing_stop_activation_percent?: number | null
           trailing_stop_distance_multiplier?: number | null

@@ -3,12 +3,14 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Shield, Info, Lock } from "lucide-react";
+import { Shield, Info, Lock, Brain, Zap, Clock } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
+import { Slider } from "@/components/ui/slider";
+import { Badge } from "@/components/ui/badge";
 
 export const TrailingStopSettings = () => {
   const { toast } = useToast();
@@ -19,6 +21,12 @@ export const TrailingStopSettings = () => {
   const [breakEvenEnabled, setBreakEvenEnabled] = useState(true);
   const [breakEvenActivationPercent, setBreakEvenActivationPercent] = useState("0.5");
   const [profitLockPercent, setProfitLockPercent] = useState("50");
+  
+  // Smart AITS Settings
+  const [trailingAggressiveness, setTrailingAggressiveness] = useState(3);
+  const [progressiveLockEnabled, setProgressiveLockEnabled] = useState(true);
+  const [stalePeakProtectionEnabled, setStalePeakProtectionEnabled] = useState(true);
+  const [decayVelocityExitEnabled, setDecayVelocityExitEnabled] = useState(true);
 
   useEffect(() => {
     fetchSettings();
@@ -31,7 +39,7 @@ export const TrailingStopSettings = () => {
 
       const { data, error } = await supabase
         .from('risk_parameters')
-        .select('trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent')
+        .select('trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent, trailing_aggressiveness, progressive_lock_enabled, stale_peak_protection_enabled, decay_velocity_exit_enabled')
         .eq('user_id', user.id)
         .single();
 
@@ -44,6 +52,11 @@ export const TrailingStopSettings = () => {
         setBreakEvenEnabled(data.break_even_enabled ?? true);
         setBreakEvenActivationPercent((data.break_even_activation_percent ?? 0.5).toString());
         setProfitLockPercent((data.trailing_stop_profit_lock_percent ?? 50).toString());
+        // Smart AITS
+        setTrailingAggressiveness(data.trailing_aggressiveness ?? 3);
+        setProgressiveLockEnabled(data.progressive_lock_enabled ?? true);
+        setStalePeakProtectionEnabled(data.stale_peak_protection_enabled ?? true);
+        setDecayVelocityExitEnabled(data.decay_velocity_exit_enabled ?? true);
       }
     } catch (error) {
       console.error('Error fetching trailing stop settings:', error);
@@ -87,6 +100,11 @@ export const TrailingStopSettings = () => {
           break_even_enabled: breakEvenEnabled,
           break_even_activation_percent: breakEvenValue,
           trailing_stop_profit_lock_percent: profitLockValue,
+          // Smart AITS
+          trailing_aggressiveness: trailingAggressiveness,
+          progressive_lock_enabled: progressiveLockEnabled,
+          stale_peak_protection_enabled: stalePeakProtectionEnabled,
+          decay_velocity_exit_enabled: decayVelocityExitEnabled,
         })
         .eq('user_id', user.id);
 
@@ -107,6 +125,16 @@ export const TrailingStopSettings = () => {
     }
   };
 
+  // Calculate effective lock for display based on aggressiveness
+  const getEffectiveLockDisplay = () => {
+    const baseLock = 30 + (trailingAggressiveness * 5);
+    return { baseLock, tier5Lock: Math.min(85, baseLock + 30) };
+  };
+  
+  const { baseLock, tier5Lock } = getEffectiveLockDisplay();
+
+  const aggressivenessLabels = ["Very Conservative", "Conservative", "Balanced", "Aggressive", "Very Aggressive"];
+
   return (
     <Card>
       <CardHeader>
@@ -115,10 +143,120 @@ export const TrailingStopSettings = () => {
           Stop Loss Protection Settings
         </CardTitle>
         <CardDescription>
-          Configure break-even and trailing stop protection
+          Configure break-even, trailing stop, and Smart AITS protection
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* Smart AITS Section */}
+        <div className="space-y-4 rounded-lg border border-primary/20 bg-primary/5 p-4">
+          <div className="flex items-center gap-2">
+            <Brain className="h-5 w-5 text-primary" />
+            <h4 className="font-semibold">Smart AITS (Adaptive Intelligent Trailing System)</h4>
+            <Badge variant="secondary" className="text-xs">New</Badge>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Automatically adapts profit lock based on peak P&L level, stale peaks, and decay velocity for maximum profit retention.
+          </p>
+
+          {/* Aggressiveness Slider */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Label>Trailing Aggressiveness</Label>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <Info className="h-4 w-4 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p className="w-64">
+                        Controls how aggressively profits are locked. Higher = locks more profit sooner but may exit earlier on normal pullbacks.
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <Badge variant="outline">{aggressivenessLabels[trailingAggressiveness - 1]}</Badge>
+            </div>
+            <Slider
+              value={[trailingAggressiveness]}
+              onValueChange={(v) => setTrailingAggressiveness(v[0])}
+              min={1}
+              max={5}
+              step={1}
+              className="w-full"
+            />
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>More room to run</span>
+              <span>Base: {baseLock}% → Tier 5: {tier5Lock}%</span>
+              <span>Tighter locks</span>
+            </div>
+          </div>
+
+          {/* Smart Features Toggles */}
+          <div className="grid gap-3">
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-amber-500" />
+                  <Label className="text-sm font-medium">Progressive Lock Tiers</Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Lock more profit as peak P&L increases (45% → 85%)
+                </p>
+              </div>
+              <Switch
+                checked={progressiveLockEnabled}
+                onCheckedChange={setProgressiveLockEnabled}
+              />
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-blue-500" />
+                  <Label className="text-sm font-medium">Stale Peak Protection</Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Tighten stops when peak hasn't updated (15/30/60/120 min)
+                </p>
+              </div>
+              <Switch
+                checked={stalePeakProtectionEnabled}
+                onCheckedChange={setStalePeakProtectionEnabled}
+              />
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-red-500" />
+                  <Label className="text-sm font-medium">Decay Velocity Exit</Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Emergency exit when profit decays too fast ({">"}3%/min)
+                </p>
+              </div>
+              <Switch
+                checked={decayVelocityExitEnabled}
+                onCheckedChange={setDecayVelocityExitEnabled}
+              />
+            </div>
+          </div>
+
+          {/* Smart AITS Summary */}
+          <div className="rounded-lg bg-muted/50 p-3 text-xs">
+            <h5 className="mb-1 font-medium">How Smart AITS Works:</h5>
+            <ul className="space-y-0.5 text-muted-foreground">
+              <li>• <strong>Progressive Tiers:</strong> 0-1%→{baseLock}%, 1-2%→{baseLock + 10}%, 2-3%→{baseLock + 15}%, 3-5%→{baseLock + 20}%, 5%+→{tier5Lock}%</li>
+              <li>• <strong>Stale Peak:</strong> +5% at 15min, +10% at 30min, +20% at 60min, +25% at 120min</li>
+              <li>• <strong>Decay Velocity:</strong> {">"}3%/min decay = immediate exit, {">"}2%/min = 80% lock</li>
+            </ul>
+          </div>
+        </div>
+
+        <Separator />
+
         {/* Break-Even Stop Section */}
         <div className="space-y-4">
           <div className="flex items-center gap-2">
@@ -144,9 +282,7 @@ export const TrailingStopSettings = () => {
 
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <Label htmlFor="break-even-percent">
-                Break-Even Activation
-              </Label>
+              <Label htmlFor="break-even-percent">Break-Even Activation</Label>
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger>
@@ -155,7 +291,6 @@ export const TrailingStopSettings = () => {
                   <TooltipContent>
                     <p className="w-64">
                       When position profit reaches this percentage, stop loss moves to entry price.
-                      This ensures no loss even if price reverses.
                     </p>
                   </TooltipContent>
                 </Tooltip>
@@ -175,9 +310,6 @@ export const TrailingStopSettings = () => {
               />
               <span className="text-sm text-muted-foreground">%</span>
             </div>
-            <p className="text-xs text-muted-foreground">
-              At +{breakEvenActivationPercent}% profit → stop moves to entry (zero loss guaranteed)
-            </p>
           </div>
         </div>
 
@@ -187,10 +319,9 @@ export const TrailingStopSettings = () => {
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <Shield className="h-4 w-4 text-blue-500" />
-            <h4 className="font-medium">Trailing Stop Loss</h4>
+            <h4 className="font-medium">Trailing Stop Loss (Base Settings)</h4>
           </div>
           
-          {/* Enable/Disable Toggle */}
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <Label htmlFor="trailing-enabled" className="text-base">
@@ -207,26 +338,8 @@ export const TrailingStopSettings = () => {
             />
           </div>
 
-          {/* Activation Threshold */}
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="activation-percent">
-                Activation Threshold
-              </Label>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger>
-                    <Info className="h-4 w-4 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p className="w-64">
-                      Trailing stop activates when position reaches this profit percentage.
-                      Lower = earlier protection, Higher = more room to grow.
-                    </p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
+            <Label htmlFor="activation-percent">Activation Threshold</Label>
             <div className="flex items-center gap-2">
               <Input
                 id="activation-percent"
@@ -241,31 +354,10 @@ export const TrailingStopSettings = () => {
               />
               <span className="text-sm text-muted-foreground">%</span>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Current: Trailing activates at +{activationPercent}% profit
-            </p>
           </div>
 
-          {/* Distance Multiplier */}
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="distance-multiplier">
-                Trailing Distance
-              </Label>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger>
-                    <Info className="h-4 w-4 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p className="w-64">
-                      Multiplier for ATR (Average True Range) to set stop loss distance.
-                      Lower = tighter stops (more risk of exit), Higher = looser stops (more room).
-                    </p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
+            <Label htmlFor="distance-multiplier">Trailing Distance (ATR Multiplier)</Label>
             <div className="flex items-center gap-2">
               <Input
                 id="distance-multiplier"
@@ -280,31 +372,10 @@ export const TrailingStopSettings = () => {
               />
               <span className="text-sm text-muted-foreground">x ATR</span>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Current: Stop loss trails at {distanceMultiplier}x ATR distance (typically {(parseFloat(distanceMultiplier) * 2).toFixed(1)}-{(parseFloat(distanceMultiplier) * 3).toFixed(1)}%)
-            </p>
           </div>
 
-          {/* Profit Lock Percentage */}
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="profit-lock-percent">
-                Profit Lock Percentage
-              </Label>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger>
-                    <Info className="h-4 w-4 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p className="w-64">
-                      Percentage of unrealized profit to lock in when trailing stop activates.
-                      Higher = more aggressive profit protection, Lower = more room for price movement.
-                    </p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
+            <Label htmlFor="profit-lock-percent">Base Profit Lock (overridden by Smart AITS)</Label>
             <div className="flex items-center gap-2">
               <Input
                 id="profit-lock-percent"
@@ -320,96 +391,47 @@ export const TrailingStopSettings = () => {
               <span className="text-sm text-muted-foreground">%</span>
             </div>
             <p className="text-xs text-muted-foreground">
-              At {profitLockPercent}% lock: If +10% profit, stop moves to entry +{(parseFloat(profitLockPercent) / 10).toFixed(1)}%
+              Smart AITS will use higher values when conditions warrant
             </p>
-            <div className="grid grid-cols-3 gap-2 mt-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setProfitLockPercent("40")}
-                disabled={!enabled}
-              >
-                Aggressive
-                <span className="text-xs text-muted-foreground ml-1">(40%)</span>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setProfitLockPercent("50")}
-                disabled={!enabled}
-              >
-                Balanced
-                <span className="text-xs text-muted-foreground ml-1">(50%)</span>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setProfitLockPercent("60")}
-                disabled={!enabled}
-              >
-                Conservative
-                <span className="text-xs text-muted-foreground ml-1">(60%)</span>
-              </Button>
-            </div>
           </div>
 
-          {/* Example Calculation */}
-          <div className="p-3 bg-muted/50 rounded-lg space-y-2">
-            <h4 className="text-sm font-medium">Example with Current Settings:</h4>
-            <ul className="text-xs text-muted-foreground space-y-1">
-              <li>• Position opens at $100</li>
-              <li>• Price rises to ${(100 * (1 + parseFloat(activationPercent) / 100)).toFixed(2)} (+{activationPercent}%) → Trailing activates</li>
-              <li>• Stop loss set {distanceMultiplier}x ATR below price (e.g., ${(100 * (1 + parseFloat(activationPercent) / 100) * (1 - parseFloat(distanceMultiplier) * 0.02)).toFixed(2)})</li>
-              <li>• As price rises, stop loss follows {distanceMultiplier}x ATR behind</li>
-              <li>• Locks in profits automatically</li>
-            </ul>
-          </div>
-
-          {/* Presets */}
-          <div className="space-y-2">
-            <Label>Quick Presets (Trailing Stop)</Label>
-            <div className="grid grid-cols-3 gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setActivationPercent("0.5");
-                  setDistanceMultiplier("1.0");
-                }}
-                disabled={!enabled}
-              >
-                Tight
-                <span className="text-xs text-muted-foreground ml-1">(0.5%, 1x)</span>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setActivationPercent("1.0");
-                  setDistanceMultiplier("1.5");
-                }}
-                disabled={!enabled}
-              >
-                Balanced
-                <span className="text-xs text-muted-foreground ml-1">(1%, 1.5x)</span>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setActivationPercent("2.0");
-                  setDistanceMultiplier("2.5");
-                }}
-                disabled={!enabled}
-              >
-                Loose
-                <span className="text-xs text-muted-foreground ml-1">(2%, 2.5x)</span>
-              </Button>
-            </div>
+          <div className="grid grid-cols-3 gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setActivationPercent("0.5");
+                setDistanceMultiplier("1.0");
+              }}
+              disabled={!enabled}
+            >
+              Tight
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setActivationPercent("1.0");
+                setDistanceMultiplier("1.5");
+              }}
+              disabled={!enabled}
+            >
+              Balanced
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setActivationPercent("2.0");
+                setDistanceMultiplier("2.5");
+              }}
+              disabled={!enabled}
+            >
+              Loose
+            </Button>
           </div>
         </div>
 
-        {/* Save Button */}
         <Button 
           onClick={handleSave} 
           disabled={loading}
