@@ -182,6 +182,103 @@ function calculateTradeDirection(
   return primaryTrend;
 }
 
+// ============= MICRO-TREND DETECTION =============
+// When 4h is neutral, look at 15m/30m for short-term trend direction
+// This allows signals when lower timeframes show consistent direction
+interface MicroTrendResult {
+  hasMicroTrend: boolean;
+  direction: "bullish" | "bearish" | "neutral";
+  confidence: number;
+  alignment: number;  // 0-100 score for how aligned 15m/30m are
+  reason: string;
+}
+
+function detectMicroTrend(
+  trend15m: { trend: string; confidence: number; indicators: any },
+  trend30m: { trend: string; confidence: number; indicators: any },
+  trend1h: { trend: string; confidence: number; indicators: any },
+  adx: number = 25
+): MicroTrendResult {
+  const t15m = trend15m.trend;
+  const t30m = trend30m.trend;
+  const t1h = trend1h.trend;
+  const conf15m = trend15m.confidence;
+  const conf30m = trend30m.confidence;
+  const conf1h = trend1h.confidence;
+  
+  // Get MACD histogram direction for each timeframe
+  const macd15m = trend15m.indicators?.macdHistogram || 0;
+  const macd30m = trend30m.indicators?.macdHistogram || 0;
+  const macd1h = trend1h.indicators?.macdHistogram || 0;
+  
+  // Check if 15m and 30m agree on direction
+  const bothBullish = t15m === "bullish" && t30m === "bullish";
+  const bothBearish = t15m === "bearish" && t30m === "bearish";
+  const lowerTFsAligned = bothBullish || bothBearish;
+  
+  // Check MACD agreement
+  const macdBullish = macd15m > 0 && macd30m > 0;
+  const macdBearish = macd15m < 0 && macd30m < 0;
+  const macdAligned = macdBullish || macdBearish;
+  
+  // Calculate alignment score
+  let alignmentScore = 0;
+  if (lowerTFsAligned) alignmentScore += 40;
+  if (macdAligned) alignmentScore += 30;
+  
+  // Bonus if 1h also agrees or is neutral
+  if (bothBullish && (t1h === "bullish" || t1h === "neutral")) alignmentScore += 20;
+  if (bothBearish && (t1h === "bearish" || t1h === "neutral")) alignmentScore += 20;
+  
+  // Confidence averaging
+  const avgConfidence = (conf15m + conf30m) / 2;
+  if (avgConfidence >= 55) alignmentScore += 10;
+  
+  // Determine micro-trend direction
+  let direction: "bullish" | "bearish" | "neutral" = "neutral";
+  let hasMicroTrend = false;
+  let reason = "";
+  
+  // MICRO-TREND DETECTED: Lower timeframes strongly aligned
+  if (lowerTFsAligned && alignmentScore >= 50) {
+    direction = bothBullish ? "bullish" : "bearish";
+    hasMicroTrend = true;
+    reason = `15m+30m aligned ${direction} (score=${alignmentScore}, conf=${avgConfidence.toFixed(0)}%)`;
+    
+    // Extra strong if 1h also agrees
+    if ((bothBullish && t1h === "bullish") || (bothBearish && t1h === "bearish")) {
+      alignmentScore = Math.min(100, alignmentScore + 15);
+      reason = `15m+30m+1h aligned ${direction} (score=${alignmentScore}, conf=${avgConfidence.toFixed(0)}%)`;
+    }
+  } 
+  // WEAK MICRO-TREND: One lower TF directional, other neutral
+  else if ((t15m !== "neutral" && t30m === "neutral") || (t15m === "neutral" && t30m !== "neutral")) {
+    const directionalTF = t15m !== "neutral" ? t15m : t30m;
+    const directionalConf = t15m !== "neutral" ? conf15m : conf30m;
+    
+    // Only accept if MACD confirms and confidence is good
+    if (macdAligned && directionalConf >= 55) {
+      direction = directionalTF as "bullish" | "bearish";
+      hasMicroTrend = true;
+      alignmentScore = Math.min(alignmentScore + 20, 60); // Cap at 60 for partial alignment
+      reason = `${t15m !== "neutral" ? "15m" : "30m"} ${direction} with MACD confirm (score=${alignmentScore})`;
+    }
+  }
+  
+  // ADX bonus: strong micro-trends get extra credit
+  if (hasMicroTrend && adx >= 22) {
+    alignmentScore = Math.min(100, alignmentScore + 10);
+  }
+  
+  return {
+    hasMicroTrend,
+    direction,
+    confidence: avgConfidence,
+    alignment: alignmentScore,
+    reason: reason || "No micro-trend detected (15m/30m not aligned)"
+  };
+}
+
 // ============= TRUE ALIGNMENT SCORE =============
 function calculateTrueAlignmentScore(
   trend4h: { trend: string; confidence: number; indicators: any },
@@ -591,6 +688,15 @@ serve(async (req) => {
       trend4h, trend1h, trend30m, trend15m, dominantTrend, adx, volumeConfirmsAny
     );
     
+    // ============= MICRO-TREND DETECTION =============
+    // When 4h is neutral, use 15m/30m/1h to determine short-term direction
+    const microTrend = detectMicroTrend(trend15m, trend30m, trend1h, adx);
+    
+    // Log micro-trend if detected and 4h is neutral
+    if (microTrend.hasMicroTrend && trend4h.trend === "neutral") {
+      console.log(`${symbol} MICRO-TREND: ${microTrend.direction} (alignment=${microTrend.alignment}, conf=${microTrend.confidence.toFixed(0)}%) - ${microTrend.reason}`);
+    }
+    
     // Divergence alignment validation
     const PULLBACK_ALIGNMENT_THRESHOLD = 55;
     const EARLY_REVERSAL_ALIGNMENT_THRESHOLD = 45;
@@ -847,6 +953,14 @@ serve(async (req) => {
         pullbackConditionsMet: inPullback && rsiInPullbackZone(trend1h.indicators.rsi, effectiveTrendForMomentum),
       },
       marketStructure,
+      // NEW: Micro-trend detection for when 4h is neutral
+      microTrend: {
+        hasMicroTrend: microTrend.hasMicroTrend,
+        direction: microTrend.direction,
+        confidence: microTrend.confidence,
+        alignment: microTrend.alignment,
+        reason: microTrend.reason,
+      },
     };
 
     return new Response(
