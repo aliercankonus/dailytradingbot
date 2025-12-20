@@ -2302,19 +2302,38 @@ serve(async (req) => {
           console.log(`⚡ ${symbol}: EARLY ENTRY via strong trend exception (ADX=${adx.toFixed(1)} >= 28, momentum=${momentumState})`);
         }
         
-        // GATE 3: Higher timeframe alignment required (or high confidence or strong 1h)
+        // GATE 3: Higher timeframe alignment required (or high confidence or strong 1h or micro-trend)
         // RELAXED: Allow if 1h trend is strong (≥65% confidence) even if 4h is neutral
+        // NEW: Also allow if micro-trend is detected (15m/30m aligned) when 4h is neutral
         const htfAligned = isAligned ?? false;
         const confidence1h = timeframes?.['1h']?.confidence || 0;
         const trend1h = timeframes?.['1h']?.trend || "neutral";
         const has1hStrongDirection = confidence1h >= 65 && (trend1h === "bullish" || trend1h === "bearish");
         
-        if (!htfAligned && confidence < 65 && !has1hStrongDirection) {
+        // NEW: Micro-trend check - allows signals when 4h is neutral but lower TFs are aligned
+        const microTrend = trendData.microTrend;
+        const hasMicroTrendBypass = microTrend?.hasMicroTrend === true && 
+          microTrend?.alignment >= 50 && 
+          (microTrend?.direction === "bullish" || microTrend?.direction === "bearish");
+        
+        // Log micro-trend bypass when used
+        if (hasMicroTrendBypass && !htfAligned && confidence < 65) {
+          console.log(`⚡ ${symbol}: HTF gate bypassed via MICRO-TREND (${microTrend.direction}, alignment=${microTrend.alignment}%, 15m/30m consistent)`);
+        }
+        
+        if (!htfAligned && confidence < 65 && !has1hStrongDirection && !hasMicroTrendBypass) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: HTF not aligned, confidence too low, and 1h not strong (aligned=${htfAligned}, 4h_conf=${confidence}%, 1h_conf=${confidence1h}%)`,
-            { htfAligned, confidence, confidence1h, trend1h, gate: "HTF_NOT_ALIGNED" },
+            `HARD GATE: HTF not aligned, confidence too low, 1h not strong, and no micro-trend (aligned=${htfAligned}, 4h_conf=${confidence}%, 1h_conf=${confidence1h}%, microTrend=${microTrend?.hasMicroTrend || false})`,
+            { 
+              htfAligned, 
+              confidence, 
+              confidence1h, 
+              trend1h, 
+              microTrend: microTrend || null,
+              gate: "HTF_NOT_ALIGNED" 
+            },
             trendData,
             riskParams.ai_analysis_enabled !== false
           );
@@ -2575,8 +2594,15 @@ serve(async (req) => {
         // blocking high-quality signals (e.g., 73/100 quality rejected for 61% confidence)
 
         // Store trend info for strategy-level filtering
-        const tradeDirection = trendData.primaryTrend || trend;
+        // NEW: Use micro-trend direction when 4h is neutral and micro-trend is detected
+        let tradeDirection = trendData.primaryTrend || trend;
         const strategyTrend1h = timeframes?.['1h']?.trend || "neutral";
+        
+        // If trade direction is neutral but we have a valid micro-trend, use it
+        if (tradeDirection === "neutral" && hasMicroTrendBypass && microTrend?.direction !== "neutral") {
+          tradeDirection = microTrend.direction;
+          console.log(`📊 ${symbol}: Using MICRO-TREND direction (${tradeDirection}) instead of neutral 4h`);
+        }
 
         // Get market data
         const marketData = marketDataMap.get(symbol);
