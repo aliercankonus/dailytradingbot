@@ -62,7 +62,7 @@ export const CONFIDENCE_THRESHOLDS = {
 } as const;
 
 export const RISK_PARAMS = {
-  BREAK_EVEN_ACTIVATION_PERCENT: 0.5,
+  BREAK_EVEN_ACTIVATION_PERCENT: 0.3,  // Lowered from 0.5% to 0.3% for earlier protection
   TRAILING_STOP_ACTIVATION_PERCENT: 1.0,
   MIN_STOP_DISTANCE_PERCENT: 1.0,
   TRAILING_PROFIT_LOCK_PERCENT: 0.5,
@@ -79,7 +79,8 @@ export const RISK_PARAMS = {
 // Slippage buffer constants for stop loss calculations
 export const SLIPPAGE_PARAMS = {
   // Buffer added to break-even stop to ensure small profit after execution slippage
-  BREAK_EVEN_BUFFER_PERCENT: 0.03,
+  // Set to 0.05% above entry to protect against slippage/gaps
+  BREAK_EVEN_BUFFER_PERCENT: 0.05,  // Increased from 0.03% to 0.05% for better protection
   // Round-trip slippage deducted from locked profit calculations
   ROUND_TRIP_SLIPPAGE_PERCENT: 0.05,
 } as const;
