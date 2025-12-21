@@ -2783,9 +2783,10 @@ serve(async (req) => {
               // Check if strategy's signal_direction is compatible with current trend
               const strategyDirection = strategy.signal_direction || 'trend';
               
-              // ============= NEW: MOMENTUM STRATEGIES REQUIRE DIRECTIONAL 4H =============
+              // ============= RELAXED: MOMENTUM STRATEGIES ALLOW ENTRY WHEN 1H IS DIRECTIONAL + MOMENTUM BUILDING =============
               // Volume Surge Momentum, EMA Golden Cross, and similar momentum strategies
-              // should NOT trade when 4h trend is neutral - they need clear trend direction
+              // CAN trade when 4h is neutral IF 1h is directional AND momentum is building
+              // This allows catching early momentum before 4h confirms
               const momentumStrategies = [
                 'Volume Surge Momentum',
                 'EMA Golden Cross', 
@@ -2798,8 +2799,28 @@ serve(async (req) => {
               const is4hDirectional = htfTrend4h === "bullish" || htfTrend4h === "bearish";
               
               if (isMomentumStrategy && !is4hDirectional) {
-                console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - momentum strategy requires directional 4h (currently ${htfTrend4h})`);
-                continue;
+                // 4h is neutral - check if we can allow via 1h directional + momentum building
+                const is1hDirectional = htfTrend1h === "bullish" || htfTrend1h === "bearish";
+                const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
+                const is1hConfident = conf1h >= 60;
+                const isMomentumBuilding = earlyMomentumScore >= 5;
+                const momentumState = momentum?.state || "unknown";
+                const isMomentumStateGood = momentumState === "confirmed" || momentumState === "building";
+                
+                // Allow if: 1h is directional with >= 60% confidence AND momentum score >= 5
+                const allowMomentumEntry = is1hDirectional && is1hConfident && isMomentumBuilding && isMomentumStateGood;
+                
+                if (allowMomentumEntry) {
+                  console.log(`✅ ${symbol} "${strategy.name}": MOMENTUM ALLOWED - 4h neutral but 1h ${htfTrend1h} (${conf1h}%), momentum ${momentumState} (score=${earlyMomentumScore})`);
+                  // Continue with strategy evaluation - don't skip
+                } else {
+                  const skipReason = !is1hDirectional ? `1h neutral` : 
+                    !is1hConfident ? `1h conf ${conf1h}% < 60%` :
+                    !isMomentumBuilding ? `momentum score ${earlyMomentumScore} < 5` :
+                    `momentum state ${momentumState}`;
+                  console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - momentum strategy, 4h ${htfTrend4h}, ${skipReason}`);
+                  continue;
+                }
               }
               
               // Determine what signal type this strategy would generate
