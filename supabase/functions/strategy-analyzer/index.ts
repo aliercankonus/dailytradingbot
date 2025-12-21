@@ -2302,6 +2302,106 @@ serve(async (req) => {
           console.log(`⚡ ${symbol}: EARLY ENTRY via strong trend exception (ADX=${adx.toFixed(1)} >= 28, momentum=${momentumState})`);
         }
         
+        // ============= NEW GATE: MOMENTUM SCORE >= 5 =============
+        // Data shows trades with momentumScore = 0 have extremely low win rates
+        // Require minimum momentum score of 5 to proceed
+        const earlyMomentumScore = getMomentumScore(momentum);
+        const MIN_MOMENTUM_SCORE = 5;
+        if (earlyMomentumScore < MIN_MOMENTUM_SCORE) {
+          rejectedByHardGates++;
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `HARD GATE: Momentum score too low (${earlyMomentumScore} < ${MIN_MOMENTUM_SCORE}) - insufficient momentum confirmation`,
+            { 
+              gate: "MOMENTUM_SCORE_TOO_LOW",
+              momentumScore: earlyMomentumScore,
+              momentumRequired: MIN_MOMENTUM_SCORE,
+              momentumState: momentum?.state || "none",
+              momentumConfirms: momentum?.confirms ?? false,
+              macdExpanding: momentum?.macdExpanding ?? false,
+              volumeConfirms: momentum?.volumeConfirms ?? false,
+              adx: adx.toFixed(1),
+              trend,
+              confidence
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false
+          );
+          continue;
+        }
+        console.log(`✅ ${symbol}: Momentum score gate passed (${earlyMomentumScore} >= ${MIN_MOMENTUM_SCORE})`);
+        
+        // ============= NEW GATE: NEUTRAL 4H TREND REQUIRES 70%+ CONFIDENCE =============
+        // When 4h trend is neutral, require higher confidence (70%+) OR directional 1h with 65%+
+        // This prevents low-quality entries in ranging/neutral conditions
+        const trend4hForNeutralGate = htfTrend4h;
+        const is4hNeutral = trend4hForNeutralGate === "neutral";
+        const conf4hForGate = timeframes?.['4h']?.confidence || confidence;
+        const conf1hForGate = timeframes?.['1h']?.confidence || 0;
+        const is1hDirectional = htfTrend1h === "bullish" || htfTrend1h === "bearish";
+        
+        if (is4hNeutral) {
+          const passesNeutralGate = conf4hForGate >= 70 || (is1hDirectional && conf1hForGate >= 65);
+          if (!passesNeutralGate) {
+            rejectedByHardGates++;
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `HARD GATE: Neutral 4h requires 70%+ confidence OR directional 1h with 65%+ (4h=${trend4hForNeutralGate} ${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`,
+              { 
+                gate: "NEUTRAL_4H_LOW_CONFIDENCE",
+                trend4h: trend4hForNeutralGate,
+                confidence4h: conf4hForGate,
+                trend1h: htfTrend1h,
+                confidence1h: conf1hForGate,
+                requiredConfidence: 70,
+                is1hDirectional,
+                adx: adx.toFixed(1)
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false
+            );
+            continue;
+          }
+          console.log(`✅ ${symbol}: Neutral 4h gate passed (4h=${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`);
+        }
+        
+        // ============= NEW GATE: MACD ALIGNMENT HARD GATE =============
+        // When MACD direction is misaligned with intended trade direction, block the signal
+        // This prevents entries where MACD contradicts the trade direction
+        const macdDirectionAligned = momentum?.macdDirectionAligned ?? true;
+        const hasMacdDivergence = momentum?.hasDivergence ?? false;
+        
+        if (!macdDirectionAligned || hasMacdDivergence) {
+          // Allow if ADX is very strong (>= 35) - strong trends can override MACD misalignment
+          const allowMacdOverride = adx >= ADX_THRESHOLDS.EXCEPTIONAL;
+          
+          if (!allowMacdOverride) {
+            rejectedByHardGates++;
+            const macdReason = hasMacdDivergence 
+              ? "MACD divergence detected" 
+              : "MACD direction misaligned with trade";
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `HARD GATE: ${macdReason} (ADX=${adx.toFixed(1)} < ${ADX_THRESHOLDS.EXCEPTIONAL} for override)`,
+              { 
+                gate: "MACD_MISALIGNED",
+                macdDirectionAligned,
+                hasMacdDivergence,
+                macdHistogram: momentum?.macdHistogram?.toFixed(4),
+                macdExpanding: momentum?.macdExpanding,
+                adx: adx.toFixed(1),
+                adxRequiredForOverride: ADX_THRESHOLDS.EXCEPTIONAL,
+                trend,
+                confidence
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false
+            );
+            continue;
+          }
+          console.log(`⚠️ ${symbol}: MACD misalignment overridden by strong trend (ADX=${adx.toFixed(1)} >= ${ADX_THRESHOLDS.EXCEPTIONAL})`);
+        }
+        
         // GATE 3: Higher timeframe alignment required (or high confidence or strong 1h or micro-trend)
         // RELAXED: Allow if 1h trend is strong (≥65% confidence) even if 4h is neutral
         // NEW: Also allow if micro-trend is detected (15m/30m aligned) when 4h is neutral
@@ -2682,6 +2782,25 @@ serve(async (req) => {
               // ============= SIGNAL DIRECTION FILTERING =============
               // Check if strategy's signal_direction is compatible with current trend
               const strategyDirection = strategy.signal_direction || 'trend';
+              
+              // ============= NEW: MOMENTUM STRATEGIES REQUIRE DIRECTIONAL 4H =============
+              // Volume Surge Momentum, EMA Golden Cross, and similar momentum strategies
+              // should NOT trade when 4h trend is neutral - they need clear trend direction
+              const momentumStrategies = [
+                'Volume Surge Momentum',
+                'EMA Golden Cross', 
+                'Momentum Breakout',
+                'Aggressive Momentum'
+              ];
+              const isMomentumStrategy = momentumStrategies.some(ms => 
+                strategy.name.toLowerCase().includes(ms.toLowerCase())
+              );
+              const is4hDirectional = htfTrend4h === "bullish" || htfTrend4h === "bearish";
+              
+              if (isMomentumStrategy && !is4hDirectional) {
+                console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - momentum strategy requires directional 4h (currently ${htfTrend4h})`);
+                continue;
+              }
               
               // Determine what signal type this strategy would generate
               let strategySignalType: "long" | "short" | null = null;
