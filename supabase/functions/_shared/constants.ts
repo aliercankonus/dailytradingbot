@@ -26,6 +26,12 @@ export const STOCHRSI_THRESHOLDS = {
   OVERBOUGHT: 80,
   DEEPLY_OVERBOUGHT: 85,
   EXTREME_OVERBOUGHT: 90,
+  // NEW: Absolute maximum thresholds - no exceptions allowed beyond these
+  ABSOLUTE_MAX_OVERBOUGHT: 98,  // Hard gate: K>=98 = BLOCK all LONG entries
+  ABSOLUTE_MAX_OVERSOLD: 2,     // Hard gate: K<=2 = BLOCK all SHORT entries
+  // High reversal risk threshold - used for increased penalty scoring
+  HIGH_REVERSAL_OVERBOUGHT: 95, // K>=95 = +35 reversal score for LONG
+  HIGH_REVERSAL_OVERSOLD: 5,    // K<=5 = +35 reversal score for SHORT
 } as const;
 
 export const RSI_THRESHOLDS = {
