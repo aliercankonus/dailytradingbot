@@ -186,6 +186,16 @@ function calculateTradeDirection(
   return primaryTrend;
 }
 
+// Helper for pullback RSI zone check
+function rsiInPullbackZone(rsi: number, trend: string): boolean {
+  if (trend === "bullish") {
+    return rsi < RSI_THRESHOLDS.NEUTRAL_HIGH && rsi > RSI_THRESHOLDS.OVERSOLD;
+  } else if (trend === "bearish") {
+    return rsi > RSI_THRESHOLDS.NEUTRAL_LOW && rsi < RSI_THRESHOLDS.OVERBOUGHT;
+  }
+  return false;
+}
+
 // ============= MICRO-TREND DETECTION =============
 // When 4h is neutral, look at 15m/30m for short-term trend direction
 // This allows signals when lower timeframes show consistent direction
@@ -506,8 +516,15 @@ serve(async (req) => {
     const prices1h = klines1h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
     const prices4h = klines4h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
 
-    if (prices1h.length === 0) {
-      throw new Error(`No valid 1h price data for ${symbol}`);
+    // Minimum candle requirements for accurate indicator calculations
+    const MIN_CANDLES_1H = 35; // Required for MACD (26 + 9 smoothing)
+    const MIN_CANDLES_4H = 20; // Required for ADX and trend analysis
+    
+    if (prices1h.length < MIN_CANDLES_1H) {
+      throw new Error(`Insufficient 1h data for ${symbol}: ${prices1h.length} candles (need ${MIN_CANDLES_1H}+)`);
+    }
+    if (prices4h.length < MIN_CANDLES_4H) {
+      throw new Error(`Insufficient 4h data for ${symbol}: ${prices4h.length} candles (need ${MIN_CANDLES_4H}+)`);
     }
 
     const currentPrice = prices1h[prices1h.length - 1];
@@ -962,13 +979,3 @@ serve(async (req) => {
     );
   }
 });
-
-// Helper for pullback RSI zone check
-function rsiInPullbackZone(rsi: number, trend: string): boolean {
-  if (trend === "bullish") {
-    return rsi < RSI_THRESHOLDS.NEUTRAL_HIGH && rsi > RSI_THRESHOLDS.OVERSOLD;
-  } else if (trend === "bearish") {
-    return rsi > RSI_THRESHOLDS.NEUTRAL_LOW && rsi < RSI_THRESHOLDS.OVERBOUGHT;
-  }
-  return false;
-}
