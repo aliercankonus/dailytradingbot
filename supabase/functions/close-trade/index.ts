@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 import { createLogger, logError } from "../_shared/logging.ts";
+import { getCurrentPrice } from "../_shared/binance.ts";
 
 // Create logger instance
 const logger = createLogger("close-trade");
@@ -181,30 +182,16 @@ async function closePosition(
   const posLogger = parentLogger.forSymbol(position.symbol);
   
   try {
-    // Fetch latest price from Binance for accurate P&L calculation
+    // Fetch latest price from Binance for accurate P&L calculation using shared utility
     let currentPrice = position.current_price || position.entry_price;
     
     try {
-      const binanceResponse = await fetch(
-        `https://api.binance.com/api/v3/ticker/price?symbol=${position.symbol}`
-      );
-      
-      if (binanceResponse.ok) {
-        const binanceData = await binanceResponse.json();
-        
-        if (binanceData.price) {
-          const parsedPrice = parseFloat(binanceData.price);
-          if (Number.isFinite(parsedPrice) && parsedPrice > 0) {
-            currentPrice = parsedPrice;
-            posLogger.info(`Fetched fresh price: ${currentPrice}`);
-          } else {
-            posLogger.warn(`Invalid price from Binance: ${binanceData.price}`);
-          }
-        } else {
-          posLogger.warn(`No price from Binance, using stored current_price`);
-        }
+      const freshPrice = await getCurrentPrice(position.symbol);
+      if (freshPrice !== null) {
+        currentPrice = freshPrice;
+        posLogger.info(`Fetched fresh price: ${currentPrice}`);
       } else {
-        posLogger.warn(`Binance API error: ${binanceResponse.status}`);
+        posLogger.warn(`No price from Binance, using stored current_price`);
       }
     } catch (error) {
       posLogger.error(`Failed to fetch Binance price: ${error}`);

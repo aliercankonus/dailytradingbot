@@ -10,6 +10,7 @@ import {
   type UnifiedReversalResult
 } from "../_shared/scoring.ts";
 import { createLogger, logError } from "../_shared/logging.ts";
+import { getCurrentPrice, getKlines, get24hrTicker } from "../_shared/binance.ts";
 
 // Create logger instance
 const logger = createLogger("monitor-positions");
@@ -168,22 +169,16 @@ serve(async (req) => {
   const symbols = [...new Set(positions.map((p) => p.symbol))];
   
   // Enhanced data fetching: prices, ATR, historical ATR (for volatility spike), and volume
+  // Using shared Binance utilities for consistency
   const symbolDataPromises = symbols.map(async (symbol) => {
     const symbolLogger = logger.forSymbol(symbol);
     try {
-      // Get current price
-      const priceResponse = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
-      if (!priceResponse.ok) throw new Error(`Price fetch failed for ${symbol}: ${priceResponse.status}`);
-      const priceData = await priceResponse.json();
-      if (!priceData.price) throw new Error(`No price data for ${symbol}`);
-      const price = parseFloat(priceData.price);
+      // Get current price using shared utility
+      const price = await getCurrentPrice(symbol);
+      if (price === null) throw new Error(`No price data for ${symbol}`);
 
-      // Get last 50 1-HOUR klines for ATR and volatility analysis
-      const klinesResponse = await fetch(
-        `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=50`,
-      );
-      if (!klinesResponse.ok) throw new Error(`Klines fetch failed for ${symbol}: ${klinesResponse.status}`);
-      const klines = await klinesResponse.json();
+      // Get last 50 1-HOUR klines for ATR and volatility analysis using shared utility
+      const klines = await getKlines(symbol, "1h", 50);
       if (!Array.isArray(klines) || klines.length < 16)
         throw new Error(`Invalid or insufficient klines data for ${symbol}`);
 
@@ -200,16 +195,19 @@ serve(async (req) => {
       const effectiveHistoricalAtr = histCount > 0 ? historicalAtr : currentAtr;
       const atrRatio = currentAtr / effectiveHistoricalAtr; // >1.5 = volatility spike
 
-      // Get 24h price change for flash crash detection
-      const ticker24hResponse = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
+      // Get 24h price change for flash crash detection using shared utility
       let priceChange24h = 0;
       let volume24h = 0;
       let avgVolume = 0;
-      if (ticker24hResponse.ok) {
-        const ticker24h = await ticker24hResponse.json();
-        priceChange24h = parseFloat(ticker24h.priceChangePercent || "0");
-        volume24h = parseFloat(ticker24h.volume || "0");
-        avgVolume = parseFloat(ticker24h.quoteVolume || "0") / 24; // Rough hourly average
+      try {
+        const ticker24h = await get24hrTicker(symbol);
+        if (ticker24h) {
+          priceChange24h = parseFloat(ticker24h.priceChangePercent || "0");
+          volume24h = parseFloat(ticker24h.volume || "0");
+          avgVolume = parseFloat(ticker24h.quoteVolume || "0") / 24; // Rough hourly average
+        }
+      } catch (tickerError) {
+        symbolLogger.warn(`Failed to fetch 24hr ticker: ${tickerError}`);
       }
 
       // Calculate recent price movement (last 2 candles) for flash crash

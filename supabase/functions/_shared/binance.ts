@@ -217,6 +217,23 @@ export async function getCurrentPrice(symbol: string): Promise<number | null> {
 }
 
 /**
+ * Fetch 24hr ticker data for a symbol
+ */
+export async function get24hrTicker(symbol: string): Promise<any | null> {
+  try {
+    const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
+    if (!response.ok) {
+      logger.warn(`Failed to fetch 24hr ticker for ${symbol}: ${response.status}`);
+      return null;
+    }
+    return await response.json();
+  } catch (error) {
+    logger.error(`Error fetching 24hr ticker for ${symbol}: ${error}`);
+    return null;
+  }
+}
+
+/**
  * Fetch order book depth for spread analysis
  */
 export async function getOrderBookSpread(symbol: string): Promise<{ bid: number; ask: number; spread: number } | null> {
@@ -239,6 +256,7 @@ export async function getOrderBookSpread(symbol: string): Promise<{ bid: number;
 
 /**
  * Fetch klines (candlestick data) from Binance
+ * @alias getKlines - Preferred name for consistency
  */
 export async function fetchKlines(
   symbol: string, 
@@ -275,6 +293,9 @@ export async function fetchKlines(
   
   throw lastError || new Error(`Failed to fetch klines for ${symbol}`);
 }
+
+// Alias for consistency with other naming conventions
+export const getKlines = fetchKlines;
 
 /**
  * Parse klines into price arrays
