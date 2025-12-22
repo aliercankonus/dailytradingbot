@@ -1,5 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
+import { 
+  buildStreamUrl, 
+  parseTickerMessage,
+  BinanceTickerData 
+} from "../_shared/binance.ts";
+import { createLogger } from "../_shared/logging.ts";
+
+const logger = createLogger("realtime-prices");
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,7 +25,7 @@ serve(async (req) => {
     return new Response("Expected WebSocket connection", { status: 400 });
   }
 
-  console.log("WebSocket upgrade request received");
+  logger.info("WebSocket upgrade request received");
   const { socket, response } = Deno.upgradeWebSocket(req);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -39,8 +47,8 @@ serve(async (req) => {
 
   let binanceSocket: WebSocket | null = null;
   let reconnectAttempts = 0;
-  const MAX_RECONNECT_ATTEMPTS = 10; // increased because of backoff
-  const BASE_RECONNECT_DELAY = 1000; // start with 1 second
+  const MAX_RECONNECT_ATTEMPTS = 10;
+  const BASE_RECONNECT_DELAY = 1000;
   let reconnectTimeout: number | null = null;
   let heartbeatInterval: number | null = null;
 
@@ -53,7 +61,7 @@ serve(async (req) => {
       const parsed = JSON.parse(decodeURIComponent(symbolsParam));
       if (Array.isArray(parsed) && parsed.length > 0) {
         symbols = parsed.map((s: string) => s.toLowerCase());
-        console.log("Using symbols from client:", symbols);
+        logger.info(`Using symbols from client: ${JSON.stringify(symbols)}`);
       }
     } else if (userId) {
       const { data: symbolsData } = await supabase
@@ -80,25 +88,25 @@ serve(async (req) => {
       if (allSymbols.length > 0) {
         // Normalize to lowercase and de-duplicate
         symbols = Array.from(new Set(allSymbols.map((s) => s.toLowerCase())));
-        console.log("Fetched symbols for stream (config + open positions):", symbols);
+        logger.info(`Fetched symbols for stream (config + open positions): ${JSON.stringify(symbols)}`);
       } else {
-        console.log("No active symbols found for user, using defaults");
+        logger.info("No active symbols found for user, using defaults");
       }
     }
   } catch (e) {
-    console.error("Error determining symbols:", e);
+    logger.error(`Error determining symbols: ${e}`);
   }
 
-  const streams = symbols.map((s) => `${s}@ticker`).join("/");
+  // Build stream URL using shared utility
+  const binanceUrl = buildStreamUrl(symbols, 'ticker');
 
   const connectToBinance = () => {
     try {
-      const binanceUrl = `wss://stream.binance.com/stream?streams=${streams}`;
-      console.log("Connecting to Binance:", binanceUrl);
+      logger.info(`Connecting to Binance: ${binanceUrl}`);
       binanceSocket = new WebSocket(binanceUrl);
 
       binanceSocket.onopen = () => {
-        console.log("Connected to Binance WebSocket");
+        logger.info("Connected to Binance WebSocket");
         reconnectAttempts = 0; // reset on successful connection
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(
@@ -113,44 +121,33 @@ serve(async (req) => {
       binanceSocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.stream && data.data) {
-            const ticker = data.data;
-            const formattedData = {
-              symbol: ticker.s,
-              price: ticker.c,
-              priceChange: ticker.p,
-              priceChangePercent: ticker.P,
-              high: ticker.h,
-              low: ticker.l,
-              volume: ticker.v,
-              timestamp: ticker.E,
-            };
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify(formattedData));
-            }
+          // Parse using shared utility
+          const formattedData = parseTickerMessage(data);
+          if (formattedData && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify(formattedData));
           }
         } catch (error) {
-          console.error("Error processing Binance message:", error);
+          logger.error(`Error processing Binance message: ${error}`);
         }
       };
 
       binanceSocket.onerror = (error) => {
-        console.error("Binance WebSocket error:", error);
+        logger.error(`Binance WebSocket error: ${error}`);
       };
 
       binanceSocket.onclose = (event) => {
-        console.log(`Binance WebSocket closed (code: ${event.code}, reason: ${event.reason || "none"})`);
+        logger.info(`Binance WebSocket closed (code: ${event.code}, reason: ${event.reason || "none"})`);
 
         if (socket.readyState !== WebSocket.OPEN) {
-          console.log("Client disconnected, skipping Binance reconnection");
+          logger.info("Client disconnected, skipping Binance reconnection");
           return;
         }
 
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttempts++;
-          // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 512s
+          // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s... up to 60s max
           const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1), 60000);
-          console.log(`Reconnection attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${delay / 1000}s`);
+          logger.info(`Reconnection attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${delay / 1000}s`);
 
           reconnectTimeout = setTimeout(() => {
             if (socket.readyState === WebSocket.OPEN) {
@@ -158,7 +155,7 @@ serve(async (req) => {
             }
           }, delay);
         } else {
-          console.error("Max reconnection attempts reached");
+          logger.error("Max reconnection attempts reached");
           if (socket.readyState === WebSocket.OPEN) {
             socket.send(
               JSON.stringify({
@@ -170,12 +167,12 @@ serve(async (req) => {
         }
       };
     } catch (error) {
-      console.error("Error connecting to Binance:", error);
+      logger.error(`Error connecting to Binance: ${error}`);
     }
   };
 
   socket.onopen = () => {
-    console.log("Client WebSocket connected");
+    logger.info("Client WebSocket connected");
     connectToBinance();
 
     heartbeatInterval = setInterval(() => {
@@ -192,12 +189,12 @@ serve(async (req) => {
         socket.send(JSON.stringify({ type: "pong" }));
       }
     } catch (error) {
-      console.error("Error processing client message:", error);
+      logger.error(`Error processing client message: ${error}`);
     }
   };
 
   socket.onclose = () => {
-    console.log("Client WebSocket disconnected - cleaning up resources");
+    logger.info("Client WebSocket disconnected - cleaning up resources");
     if (binanceSocket) {
       if (binanceSocket.readyState === WebSocket.OPEN || binanceSocket.readyState === WebSocket.CONNECTING) {
         binanceSocket.close();
@@ -215,7 +212,7 @@ serve(async (req) => {
   };
 
   socket.onerror = (error) => {
-    console.error("Client WebSocket error:", error);
+    logger.error(`Client WebSocket error: ${error}`);
     if (binanceSocket && binanceSocket.readyState === WebSocket.OPEN) {
       binanceSocket.close();
     }

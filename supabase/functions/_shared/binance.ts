@@ -344,3 +344,246 @@ export function isSlippageAcceptable(
 ): boolean {
   return calculateSlippage(expectedPrice, actualPrice) <= maxSlippagePercent;
 }
+
+// ============= WEBSOCKET UTILITIES =============
+
+export const BINANCE_WS_BASE_URL = 'wss://stream.binance.com/stream';
+
+export interface BinanceWebSocketConfig {
+  symbols: string[];
+  streamType?: 'ticker' | 'trade' | 'kline' | 'depth';
+  interval?: string; // For kline streams (e.g., '1m', '5m', '1h')
+  maxReconnectAttempts?: number;
+  baseReconnectDelay?: number;
+  onMessage?: (data: any) => void;
+  onOpen?: () => void;
+  onClose?: (code: number, reason: string) => void;
+  onError?: (error: Event) => void;
+  onReconnect?: (attempt: number) => void;
+}
+
+export interface BinanceTickerData {
+  symbol: string;
+  price: string;
+  priceChange: string;
+  priceChangePercent: string;
+  high: string;
+  low: string;
+  volume: string;
+  timestamp: number;
+}
+
+/**
+ * Build Binance WebSocket stream URL for multiple symbols
+ */
+export function buildStreamUrl(symbols: string[], streamType: string = 'ticker', interval?: string): string {
+  const streams = symbols.map(s => {
+    const symbol = s.toLowerCase();
+    switch (streamType) {
+      case 'trade':
+        return `${symbol}@trade`;
+      case 'kline':
+        return `${symbol}@kline_${interval || '1m'}`;
+      case 'depth':
+        return `${symbol}@depth@100ms`;
+      case 'ticker':
+      default:
+        return `${symbol}@ticker`;
+    }
+  }).join('/');
+  
+  return `${BINANCE_WS_BASE_URL}?streams=${streams}`;
+}
+
+/**
+ * Parse raw Binance ticker message into formatted data
+ */
+export function parseTickerMessage(data: any): BinanceTickerData | null {
+  if (!data.stream || !data.data) return null;
+  
+  const ticker = data.data;
+  return {
+    symbol: ticker.s,
+    price: ticker.c,
+    priceChange: ticker.p,
+    priceChangePercent: ticker.P,
+    high: ticker.h,
+    low: ticker.l,
+    volume: ticker.v,
+    timestamp: ticker.E,
+  };
+}
+
+/**
+ * Managed Binance WebSocket connection with reconnection logic
+ */
+export class BinanceWebSocketManager {
+  private socket: WebSocket | null = null;
+  private config: Required<BinanceWebSocketConfig>;
+  private reconnectAttempts = 0;
+  private reconnectTimeout: number | null = null;
+  private isIntentionallyClosed = false;
+  
+  constructor(config: BinanceWebSocketConfig) {
+    this.config = {
+      symbols: config.symbols,
+      streamType: config.streamType || 'ticker',
+      interval: config.interval || '1m',
+      maxReconnectAttempts: config.maxReconnectAttempts ?? 10,
+      baseReconnectDelay: config.baseReconnectDelay ?? 1000,
+      onMessage: config.onMessage || (() => {}),
+      onOpen: config.onOpen || (() => {}),
+      onClose: config.onClose || (() => {}),
+      onError: config.onError || (() => {}),
+      onReconnect: config.onReconnect || (() => {}),
+    };
+  }
+  
+  /**
+   * Connect to Binance WebSocket stream
+   */
+  connect(): void {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      logger.warn('WebSocket already connected');
+      return;
+    }
+    
+    this.isIntentionallyClosed = false;
+    const url = buildStreamUrl(this.config.symbols, this.config.streamType, this.config.interval);
+    logger.info(`Connecting to Binance WebSocket: ${url}`);
+    
+    try {
+      this.socket = new WebSocket(url);
+      this.setupEventHandlers();
+    } catch (error) {
+      logger.error(`Failed to create WebSocket: ${error}`);
+      this.scheduleReconnect();
+    }
+  }
+  
+  private setupEventHandlers(): void {
+    if (!this.socket) return;
+    
+    this.socket.onopen = () => {
+      logger.info('Binance WebSocket connected');
+      this.reconnectAttempts = 0;
+      this.config.onOpen();
+    };
+    
+    this.socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        this.config.onMessage(data);
+      } catch (error) {
+        logger.error(`Error parsing WebSocket message: ${error}`);
+      }
+    };
+    
+    this.socket.onerror = (error) => {
+      logger.error(`Binance WebSocket error: ${error}`);
+      this.config.onError(error);
+    };
+    
+    this.socket.onclose = (event) => {
+      logger.info(`Binance WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
+      this.config.onClose(event.code, event.reason);
+      
+      if (!this.isIntentionallyClosed) {
+        this.scheduleReconnect();
+      }
+    };
+  }
+  
+  private scheduleReconnect(): void {
+    if (this.reconnectAttempts >= this.config.maxReconnectAttempts) {
+      logger.error(`Max reconnection attempts (${this.config.maxReconnectAttempts}) reached`);
+      return;
+    }
+    
+    this.reconnectAttempts++;
+    // Exponential backoff: 1s, 2s, 4s, 8s... up to 60s max
+    const delay = Math.min(
+      this.config.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      60000
+    );
+    
+    logger.info(`Scheduling reconnection attempt ${this.reconnectAttempts}/${this.config.maxReconnectAttempts} in ${delay / 1000}s`);
+    this.config.onReconnect(this.reconnectAttempts);
+    
+    this.reconnectTimeout = setTimeout(() => {
+      this.connect();
+    }, delay);
+  }
+  
+  /**
+   * Update the symbols being streamed (requires reconnection)
+   */
+  updateSymbols(symbols: string[]): void {
+    this.config.symbols = symbols;
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.close();
+      // Will reconnect automatically with new symbols
+    }
+  }
+  
+  /**
+   * Send a message through the WebSocket
+   */
+  send(data: any): boolean {
+    if (this.socket?.readyState !== WebSocket.OPEN) {
+      logger.warn('Cannot send message: WebSocket not connected');
+      return false;
+    }
+    
+    try {
+      this.socket.send(typeof data === 'string' ? data : JSON.stringify(data));
+      return true;
+    } catch (error) {
+      logger.error(`Error sending WebSocket message: ${error}`);
+      return false;
+    }
+  }
+  
+  /**
+   * Close the WebSocket connection
+   */
+  close(): void {
+    this.isIntentionallyClosed = true;
+    
+    if (this.reconnectTimeout !== null) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    
+    if (this.socket) {
+      if (this.socket.readyState === WebSocket.OPEN || 
+          this.socket.readyState === WebSocket.CONNECTING) {
+        this.socket.close();
+      }
+      this.socket = null;
+    }
+    
+    logger.info('Binance WebSocket closed intentionally');
+  }
+  
+  /**
+   * Get current connection state
+   */
+  get readyState(): number {
+    return this.socket?.readyState ?? WebSocket.CLOSED;
+  }
+  
+  /**
+   * Check if connected
+   */
+  get isConnected(): boolean {
+    return this.socket?.readyState === WebSocket.OPEN;
+  }
+  
+  /**
+   * Get current reconnection attempt count
+   */
+  get currentReconnectAttempts(): number {
+    return this.reconnectAttempts;
+  }
+}
