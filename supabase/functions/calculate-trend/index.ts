@@ -1,10 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 // ============= SHARED MODULES - Single source of truth =============
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, TIME_IN_EXTREME_PARAMS } from "../_shared/constants.ts";
 import { 
   calculateEMA, calculateEMAArray, calculateRSI, calculateRSIArray, calculateMACD,
-  calculateStochasticRSI, calculateATR, calculateHistoricalATRAvg,
+  calculateStochasticRSI, calculateBarsAtExtreme, calculateATR, calculateHistoricalATRAvg,
   calculateADXWithDirection, calculateADX, calculateVolumeAnalysis, ADXResult
 } from "../_shared/indicators.ts";
 import { calculateTrend, enhanceConfidenceWithIndicators, TrendResult } from "../_shared/trend-core.ts";
@@ -519,9 +519,21 @@ serve(async (req) => {
     const stochRsi30m = calculateStochasticRSI(prices30m, 14, 14, 3, 3, trend30m.indicators.rsiArray);
     const stochRsi1h = calculateStochasticRSI(prices1h, 14, 14, 3, 3, trend1h.indicators.rsiArray);
     const stochRsi4h = calculateStochasticRSI(prices4h, 14, 14, 3, 3, trend4h.indicators.rsiArray);
+    
+    // PHASE 3: Calculate bars at extreme for each timeframe
+    const barsAtExtreme1h = calculateBarsAtExtreme(
+      stochRsi1h.kArray, 
+      TIME_IN_EXTREME_PARAMS.OVERBOUGHT_EXTREME, 
+      TIME_IN_EXTREME_PARAMS.OVERSOLD_EXTREME
+    );
+    const barsAtExtreme4h = calculateBarsAtExtreme(
+      stochRsi4h.kArray, 
+      TIME_IN_EXTREME_PARAMS.OVERBOUGHT_EXTREME, 
+      TIME_IN_EXTREME_PARAMS.OVERSOLD_EXTREME
+    );
 
     const symLog = logger.forSymbol(symbol);
-    symLog.info(`${LOG_CATEGORIES.STOCHRSI} 1h K=${stochRsi1h.k} D=${stochRsi1h.d} signal=${stochRsi1h.signal} | 4h K=${stochRsi4h.k} D=${stochRsi4h.d} signal=${stochRsi4h.signal}`);
+    symLog.info(`${LOG_CATEGORIES.STOCHRSI} 1h K=${stochRsi1h.k} D=${stochRsi1h.d} signal=${stochRsi1h.signal} barsOB=${barsAtExtreme1h.barsOverbought} barsOS=${barsAtExtreme1h.barsOversold} | 4h K=${stochRsi4h.k} D=${stochRsi4h.d} signal=${stochRsi4h.signal} barsOB=${barsAtExtreme4h.barsOverbought} barsOS=${barsAtExtreme4h.barsOversold}`);
 
     const dominantTrend = trend4h.trend;
     const dominantConfidence = trend4h.confidence;
@@ -884,10 +896,15 @@ serve(async (req) => {
         "4h": { trend: trend4h.trend, confidence: trend4h.confidence, enhancedConfidence: enhancedConfidence4h, indicators: trend4h.indicators },
       },
       stochasticRsi: {
-        "15m": stochRsi15m,
-        "30m": stochRsi30m,
-        "1h": stochRsi1h,
-        "4h": stochRsi4h,
+        "15m": { ...stochRsi15m, kArray: undefined },  // Don't include large arrays in response
+        "30m": { ...stochRsi30m, kArray: undefined },
+        "1h": { ...stochRsi1h, kArray: undefined, barsAtExtreme: barsAtExtreme1h },
+        "4h": { ...stochRsi4h, kArray: undefined, barsAtExtreme: barsAtExtreme4h },
+        // PHASE 3: Aggregated bars at extreme for quick access
+        barsAtExtreme: {
+          "1h": barsAtExtreme1h,
+          "4h": barsAtExtreme4h,
+        },
       },
       momentum: {
         state: momentumState,

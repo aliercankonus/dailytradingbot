@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, type AdxPhase } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, type AdxPhase } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -130,6 +130,75 @@ export const detectBreakoutMode = (trendData: any): BreakoutModeResult => {
   };
 };
 
+// ============= PHASE 3: TIME-IN-EXTREME PENALTY =============
+// Tracks how long StochRSI has been at extreme levels
+// K = 95 for 1 candle = early momentum, might continue
+// K = 95 for 12 candles = exhausted move, reversal likely
+
+export interface TimeInExtremePenalty {
+  penalty: number;
+  barsAtExtreme: number;
+  isExhausted: boolean;
+  reason: string;
+}
+
+export const calculateTimeInExtremePenalty = (
+  trendData: any,
+  signalType: string
+): TimeInExtremePenalty => {
+  const stochRsi = trendData?.stochasticRsi || {};
+  const barsAtExtreme = stochRsi.barsAtExtreme || {};
+  const barsAtExtreme1h = barsAtExtreme['1h'] || { barsOverbought: 0, barsOversold: 0 };
+  const barsAtExtreme4h = barsAtExtreme['4h'] || { barsOverbought: 0, barsOversold: 0 };
+  
+  const isLong = signalType === "bullish" || signalType === "long";
+  
+  // For LONG: overbought is bad (risky), oversold is good
+  // For SHORT: oversold is bad (risky), overbought is good
+  const riskyBars1h = isLong ? barsAtExtreme1h.barsOverbought : barsAtExtreme1h.barsOversold;
+  const riskyBars4h = isLong ? barsAtExtreme4h.barsOverbought : barsAtExtreme4h.barsOversold;
+  
+  // Use the higher of the two timeframes for penalty calculation
+  // 4h bars at extreme are more significant than 1h
+  const effectiveBars = Math.max(riskyBars4h * 1.5, riskyBars1h);
+  
+  let penalty = 0;
+  let isExhausted = false;
+  let reason = "";
+  
+  const P = TIME_IN_EXTREME_PARAMS;
+  
+  if (effectiveBars < P.MIN_BARS_FOR_PENALTY) {
+    // No penalty for fresh extremes (early momentum)
+    reason = effectiveBars > 0 
+      ? `Early extreme (${effectiveBars.toFixed(0)} bars) - no penalty yet` 
+      : "Not at extreme";
+  } else if (effectiveBars >= P.EXTREME_BARS) {
+    // 12+ bars at extreme = exhausted momentum
+    penalty = P.PENALTY_EXTREME;
+    isExhausted = true;
+    reason = `EXHAUSTED: ${effectiveBars.toFixed(0)} bars at extreme (>= ${P.EXTREME_BARS}) → +${penalty} reversal`;
+  } else if (effectiveBars >= P.HIGH_BARS) {
+    // 9+ bars at extreme = high exhaustion risk
+    penalty = P.PENALTY_HIGH;
+    reason = `HIGH exhaustion: ${effectiveBars.toFixed(0)} bars at extreme (>= ${P.HIGH_BARS}) → +${penalty} reversal`;
+  } else if (effectiveBars >= P.MODERATE_BARS) {
+    // 6+ bars at extreme = moderate exhaustion risk
+    penalty = P.PENALTY_MODERATE;
+    reason = `MODERATE exhaustion: ${effectiveBars.toFixed(0)} bars at extreme (>= ${P.MODERATE_BARS}) → +${penalty} reversal`;
+  } else {
+    // 3-5 bars = early warning, minimal penalty
+    penalty = 5;
+    reason = `EARLY WARNING: ${effectiveBars.toFixed(0)} bars at extreme → +5 reversal`;
+  }
+  
+  return {
+    penalty,
+    barsAtExtreme: effectiveBars,
+    isExhausted,
+    reason,
+  };
+};
 // ============= STOCHRSI-RSI CONFLICT RESOLUTION =============
 // When StochRSI is at extremes, RSI signals are weighted at 50% to prevent
 // self-canceling signals where RSI momentum continuation conflicts with StochRSI reversal risk
@@ -567,6 +636,7 @@ export interface UnifiedReversalResult {
     macdScore: number;
     timeframeScore: number;
     volumeScore: number;
+    timeInExtremeScore?: number;  // PHASE 3
   };
 }
 
@@ -842,7 +912,13 @@ export const calculateUnifiedReversalScore = (
     hasPartialAlignment,
   });
   
-  // Initialize breakdown
+  // PHASE 3: Calculate time-in-extreme penalty
+  const timeInExtremePenalty = calculateTimeInExtremePenalty(trendData, signalType);
+  if (timeInExtremePenalty.penalty > 0) {
+    reasons.push(`PHASE 3: ${timeInExtremePenalty.reason}`);
+  }
+  
+  // Initialize breakdown - PHASE 3: Add timeInExtremeScore
   const breakdown = {
     stochRsiScore: 0,
     stochRsiZoneScore: 0,
@@ -850,6 +926,7 @@ export const calculateUnifiedReversalScore = (
     macdScore: 0,
     timeframeScore: 0,
     volumeScore: 0,
+    timeInExtremeScore: timeInExtremePenalty.penalty,  // PHASE 3
   };
   
   // 1. StochRSI CROSS SIGNALS (0-50 points) - PHASE 2: Apply cap
@@ -1050,10 +1127,11 @@ export const calculateUnifiedReversalScore = (
   // PHASE 2: Calculate separated risk scores BEFORE final decision
   const separatedRisk = calculateSeparatedRisk(breakdown, trendData, signalType);
   
-  // Calculate total with ADX weight
+  // Calculate total with ADX weight - PHASE 3: Include time-in-extreme
   const rawScore = breakdown.stochRsiScore + breakdown.stochRsiZoneScore + 
                    breakdown.momentumScore + breakdown.macdScore + 
-                   breakdown.timeframeScore + breakdown.volumeScore;
+                   breakdown.timeframeScore + breakdown.volumeScore +
+                   breakdown.timeInExtremeScore;  // PHASE 3
   
   const adxWeight = getAdxWeight(adx);
   
