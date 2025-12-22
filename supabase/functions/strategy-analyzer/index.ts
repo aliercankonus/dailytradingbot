@@ -9,7 +9,10 @@ import {
   MOMENTUM_THRESHOLDS,
   CORRELATION_PARAMS,
   STRATEGY_PARAMS,
-  SYMBOL_PARAMS
+  SYMBOL_PARAMS,
+  isMomentumStrategy,
+  isNeutralStrategy,
+  detectStrategyType
 } from "../_shared/constants.ts";
 import { 
   getTechnicalScore, 
@@ -2306,42 +2309,34 @@ serve(async (req) => {
               // Check if strategy's signal_direction is compatible with current trend
               const strategyDirection = strategy.signal_direction || 'trend';
               
-              // ============= RELAXED: MOMENTUM STRATEGIES ALLOW ENTRY WHEN 1H IS DIRECTIONAL + MOMENTUM BUILDING =============
-              // Volume Surge Momentum, EMA Golden Cross, and similar momentum strategies
-              // CAN trade when 4h is neutral IF 1h is directional AND momentum is building
-              // This allows catching early momentum before 4h confirms
-              const momentumStrategies = [
-                'Volume Surge Momentum',
-                'EMA Golden Cross', 
-                'Momentum Breakout',
-                'Aggressive Momentum'
-              ];
-              const isMomentumStrategy = momentumStrategies.some(ms => 
-                strategy.name.toLowerCase().includes(ms.toLowerCase())
-              );
+              // ============= ROBUST STRATEGY TYPE DETECTION =============
+              // Uses centralized strategy type detection from _shared/constants.ts
+              // instead of fragile substring matching
+              const strategyType = detectStrategyType(strategy.id, strategy.name);
+              const isMomentumType = strategyType === 'MOMENTUM';
               const is4hDirectional = htfTrend4h === "bullish" || htfTrend4h === "bearish";
               
-              if (isMomentumStrategy && !is4hDirectional) {
+              if (isMomentumType && !is4hDirectional) {
                 // 4h is neutral - check if we can allow via 1h directional + momentum building
                 const is1hDirectional = htfTrend1h === "bullish" || htfTrend1h === "bearish";
                 const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
                 const is1hConfident = conf1h >= 60;
-                const isMomentumBuilding = earlyMomentumScore >= 5;
+                const isMomentumBuilding = earlyMomentumScore >= MOMENTUM_THRESHOLDS.MIN_SCORE;
                 const momentumState = momentum?.state || "unknown";
                 const isMomentumStateGood = momentumState === "confirmed" || momentumState === "building";
                 
-                // Allow if: 1h is directional with >= 60% confidence AND momentum score >= 5
+                // Allow if: 1h is directional with >= 60% confidence AND momentum score >= threshold
                 const allowMomentumEntry = is1hDirectional && is1hConfident && isMomentumBuilding && isMomentumStateGood;
                 
                 if (allowMomentumEntry) {
-                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": MOMENTUM ALLOWED - 4h neutral but 1h ${htfTrend1h} (${conf1h}%), momentum ${momentumState} (score=${earlyMomentumScore})`);
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}" [${strategyType}]: MOMENTUM ALLOWED - 4h neutral but 1h ${htfTrend1h} (${conf1h}%), momentum ${momentumState} (score=${earlyMomentumScore})`);
                   // Continue with strategy evaluation - don't skip
                 } else {
                   const skipReason = !is1hDirectional ? `1h neutral` : 
                     !is1hConfident ? `1h conf ${conf1h}% < 60%` :
-                    !isMomentumBuilding ? `momentum score ${earlyMomentumScore} < 5` :
+                    !isMomentumBuilding ? `momentum score ${earlyMomentumScore} < ${MOMENTUM_THRESHOLDS.MIN_SCORE}` :
                     `momentum state ${momentumState}`;
-                  logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - momentum strategy, 4h ${htfTrend4h}, ${skipReason}`);
+                  logger.forSymbol(symbol).warn(`"${strategy.name}" [${strategyType}]: SKIP - momentum strategy, 4h ${htfTrend4h}, ${skipReason}`);
                   continue;
                 }
               }
@@ -2501,21 +2496,35 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`🔗 Correlation check PASSED (risk: ${correlationCheck.riskScore.toFixed(0)}%, correlated: ${correlationCheck.correlatedPositions.map(p => `${p.symbol}:${(p.correlation * 100).toFixed(0)}%`).join(', ')})`);
         }
 
-        // Calculate position size from quality score, apply recovery mode reduction
-        // Also apply correlation-based size adjustment
-        let positionSizeMultiplier = getPositionSizeFromQuality(qualityScore);
+        // ============= POSITION SIZE CALCULATION WITH PROPER MULTIPLIER CHAINING =============
+        // All multipliers are applied in sequence to ensure proper size reduction
+        // Order: quality -> correlation -> recovery -> reversal
         
-        // Reduce position size based on correlation risk (0% risk = 100% size, 100% risk = 50% size)
+        // Step 1: Base size from quality score
+        let positionSizeMultiplier = getPositionSizeFromQuality(qualityScore);
+        logger.forSymbol(symbol).debug(`Position size: base=${(positionSizeMultiplier * 100).toFixed(0)}% (quality=${qualityScore})`);
+        
+        // Step 2: Reduce for correlation risk (0% risk = 100% size, 100% risk = 50% size)
         if (correlationCheck.riskScore > CORRELATION_PARAMS.SIZE_REDUCTION_THRESHOLD) {
           const correlationAdjustment = getCorrelationAdjustedSize(1.0, correlationCheck.riskScore);
           positionSizeMultiplier *= correlationAdjustment;
           logger.forSymbol(symbol).info(`🔗 Correlation adjustment - position size reduced to ${(correlationAdjustment * 100).toFixed(0)}% due to ${correlationCheck.riskScore.toFixed(0)}% correlation risk`);
         }
         
+        // Step 3: Apply recovery mode reduction
         if (isInRecoveryMode) {
           positionSizeMultiplier *= recoveryPositionSizeMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Recovery mode - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
+        
+        // Step 4: Apply reversal entry reduction (from StochRSI extreme handling)
+        // reversalPositionMultiplier is set earlier when detecting reversal entries
+        if (reversalPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= reversalPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Reversal entry - final position size: ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Final position size as percentage
         const strategyPositionSize = (strategy.risk_settings?.positionSizePercent || 100) * positionSizeMultiplier;
 
         const stopLossPercent = strategy.risk_settings?.stopLossPercent || riskParams.max_risk_per_trade_percent;
