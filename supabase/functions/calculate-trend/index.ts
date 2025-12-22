@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 // ============= SHARED MODULES - Single source of truth =============
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS } from "../_shared/constants.ts";
 import { 
   calculateEMA, calculateEMAArray, calculateRSI, calculateRSIArray, calculateMACD,
   calculateStochasticRSI, calculateATR, calculateHistoricalATRAvg,
