@@ -53,6 +53,9 @@ export const ClosedPositionsDashboard = () => {
         case 'divergence_volume_spike': return 'Emergency Exit';
         case 'flash_crash': return 'Emergency Exit';
         case 'volatility_spike': return 'Emergency Exit';
+        case 'momentum_divergence_exit': return 'Momentum Divergence';
+        case 'momentum_divergence_critical': return 'Momentum Divergence';
+        case 'volatility_divergence': return 'Volatility Divergence';
         // Hedge closes
         case 'parent_closed': return 'Hedge Closed';
         case 'hedge_take_profit': return 'Hedge TP';
@@ -264,6 +267,13 @@ export const ClosedPositionsDashboard = () => {
         <Badge variant="outline" className="gap-1 bg-red-500/10 text-red-500 border-red-500/20">
           <ShieldAlert className="h-3 w-3" />
           Emergency Exit
+        </Badge>
+      );
+    } else if (reason === 'Momentum Divergence' || reason === 'Volatility Divergence') {
+      return (
+        <Badge variant="outline" className="gap-1 bg-amber-500/10 text-amber-500 border-amber-500/20">
+          <ShieldAlert className="h-3 w-3" />
+          {reason}
         </Badge>
       );
     } else if (reason === 'Stop Loss') {
