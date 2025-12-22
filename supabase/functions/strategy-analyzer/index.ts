@@ -2075,6 +2075,56 @@ serve(async (req) => {
         }
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Momentum score gate passed (${earlyMomentumScore} >= ${MIN_MOMENTUM_SCORE})`);
         
+        // ============= PHASE 2 IMPROVEMENT: MOMENTUM DIRECTIONAL SYMMETRY =============
+        // Verify that momentum direction agrees with the derived trade direction
+        // This prevents entries where overall momentum is moving opposite to trade side
+        const momentumDirection = momentum?.direction || null;  // "bullish", "bearish", or null
+        const macdHistogramValue = momentum?.macdHistogram ?? 0;
+        
+        // Determine momentum direction from MACD histogram if not explicitly set
+        const effectiveMomentumDirection = momentumDirection || 
+          (macdHistogramValue > 0 ? "bullish" : macdHistogramValue < 0 ? "bearish" : null);
+        
+        // Check if momentum direction opposes trade direction
+        const momentumOpposesDirection = (
+          (derivedDirection === "long" && effectiveMomentumDirection === "bearish") ||
+          (derivedDirection === "short" && effectiveMomentumDirection === "bullish")
+        );
+        
+        if (momentumOpposesDirection && effectiveMomentumDirection !== null) {
+          // Allow if momentum is weak (close to zero) or ADX is very strong
+          const macdHistogramAbs = Math.abs(macdHistogramValue);
+          const isWeakMomentum = macdHistogramAbs < 0.0001;  // Very small MACD histogram
+          const allowMomentumOverride = isWeakMomentum || adx >= ADX_THRESHOLDS.EXCEPTIONAL;
+          
+          if (!allowMomentumOverride) {
+            rejectedByHardGates++;
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `HARD GATE: Momentum direction (${effectiveMomentumDirection}) opposes ${derivedDirection} trade`,
+              { 
+                gate: "MOMENTUM_DIRECTION_OPPOSING",
+                derivedDirection,
+                momentumDirection: effectiveMomentumDirection,
+                macdHistogram: macdHistogramValue.toFixed(6),
+                momentumState: momentum?.state,
+                adx: adx.toFixed(1),
+                adxRequiredForOverride: ADX_THRESHOLDS.EXCEPTIONAL,
+                trend,
+                confidence
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false
+            );
+            continue;
+          }
+          if (isWeakMomentum) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} Momentum direction opposes but weak (MACD histogram ${macdHistogramValue.toFixed(6)}) - allowing`);
+          } else {
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.MOMENTUM} Momentum direction opposes but ADX strong (${adx.toFixed(1)}) - allowing with caution`);
+          }
+        }
+        
         // ============= NEW GATE: NEUTRAL 4H TREND REQUIRES 70%+ CONFIDENCE =============
         // When 4h trend is neutral, require higher confidence (70%+) OR directional 1h with 65%+
         // This prevents low-quality entries in ranging/neutral conditions
@@ -2109,13 +2159,18 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Neutral 4h gate passed (4h=${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`);
         }
         
-        // ============= NEW GATE: MACD ALIGNMENT HARD GATE =============
+        // ============= PHASE 2 IMPROVEMENT: MACD ALIGNMENT HARD GATE =============
         // When MACD direction is misaligned with intended trade direction, block the signal
         // This prevents entries where MACD contradicts the trade direction
+        // EXCEPTION: Skip this gate if Unified Reversal Score >= 50 (already penalized in URS)
         const macdDirectionAligned = momentum?.macdDirectionAligned ?? true;
         const hasMacdDivergence = momentum?.hasDivergence ?? false;
         
-        if (!macdDirectionAligned || hasMacdDivergence) {
+        // PHASE 2: Reduce double-counting - if URS already penalized reversal risk heavily,
+        // don't apply MACD divergence hard gate again (orthogonal logic)
+        const ursAlreadyPenalizedMacd = unifiedReversal.score >= 50;
+        
+        if ((!macdDirectionAligned || hasMacdDivergence) && !ursAlreadyPenalizedMacd) {
           // Allow if ADX is very strong (>= 35) - strong trends can override MACD misalignment
           const allowMacdOverride = adx >= ADX_THRESHOLDS.EXCEPTIONAL;
           
@@ -2135,6 +2190,7 @@ serve(async (req) => {
                 macdExpanding: momentum?.macdExpanding,
                 adx: adx.toFixed(1),
                 adxRequiredForOverride: ADX_THRESHOLDS.EXCEPTIONAL,
+                ursScore: unifiedReversal.score,
                 trend,
                 confidence
               },
@@ -2144,6 +2200,9 @@ serve(async (req) => {
             continue;
           }
           logger.forSymbol(symbol).warn(`MACD misalignment overridden by strong trend (ADX=${adx.toFixed(1)} >= ${ADX_THRESHOLDS.EXCEPTIONAL})`);
+        } else if ((!macdDirectionAligned || hasMacdDivergence) && ursAlreadyPenalizedMacd) {
+          // Log that we're skipping the gate due to URS already handling it
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} MACD divergence gate skipped - already penalized in URS (score=${unifiedReversal.score})`);
         }
         
         // GATE 3: Higher timeframe alignment required (or high confidence or strong 1h or micro-trend)
