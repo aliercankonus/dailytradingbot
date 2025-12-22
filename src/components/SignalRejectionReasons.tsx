@@ -86,7 +86,7 @@ const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
   
   if (Object.keys(scores).length === 0) return null;
   
-  const subtotal = (scores.adx?.score || 0) + (scores.mom?.score || 0) + (scores.align?.score || 0) + (scores.tech?.score || 0) + (scores.entry?.score || 0) + (scores.vol?.score || 0) + (scores.of?.score || 0);
+  const subtotal = (scores.adx?.score ?? 0) + (scores.mom?.score ?? 0) + (scores.align?.score ?? 0) + (scores.tech?.score ?? 0) + (scores.entry?.score ?? 0) + (scores.vol?.score ?? 0) + (scores.of?.score ?? 0);
   
   return {
     adx: scores.adx || { score: 0, max: 25 },
