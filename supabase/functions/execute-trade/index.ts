@@ -23,6 +23,86 @@ const corsHeaders = {
 // Initialize logger for execute-trade function
 const logger = createLogger('execute-trade');
 
+// ============= BINANCE PRECISION HELPERS =============
+interface SymbolFilters {
+  tickSize: number;      // Price precision (e.g., 0.01 for BTCUSDT)
+  stepSize: number;      // Quantity precision (e.g., 0.00001 for BTCUSDT)
+  minQty: number;        // Minimum quantity
+  minNotional: number;   // Minimum order value in USDT
+}
+
+// Cache for exchange info to avoid repeated API calls
+const symbolFiltersCache = new Map<string, SymbolFilters>();
+
+async function getSymbolFilters(symbol: string): Promise<SymbolFilters> {
+  // Check cache first
+  if (symbolFiltersCache.has(symbol)) {
+    return symbolFiltersCache.get(symbol)!;
+  }
+
+  try {
+    const response = await fetch(`https://api.binance.com/api/v3/exchangeInfo?symbol=${symbol}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch exchange info: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const symbolInfo = data.symbols?.[0];
+    
+    if (!symbolInfo) {
+      throw new Error(`Symbol ${symbol} not found in exchange info`);
+    }
+
+    const filters: SymbolFilters = {
+      tickSize: 0.01,
+      stepSize: 0.001,
+      minQty: 0.001,
+      minNotional: 10,
+    };
+
+    for (const filter of symbolInfo.filters) {
+      if (filter.filterType === 'PRICE_FILTER') {
+        filters.tickSize = parseFloat(filter.tickSize);
+      } else if (filter.filterType === 'LOT_SIZE') {
+        filters.stepSize = parseFloat(filter.stepSize);
+        filters.minQty = parseFloat(filter.minQty);
+      } else if (filter.filterType === 'NOTIONAL' || filter.filterType === 'MIN_NOTIONAL') {
+        filters.minNotional = parseFloat(filter.minNotional || filter.notional || '10');
+      }
+    }
+
+    // Cache for future use
+    symbolFiltersCache.set(symbol, filters);
+    logger.info(`📐 Symbol filters for ${symbol}: tickSize=${filters.tickSize}, stepSize=${filters.stepSize}, minQty=${filters.minQty}, minNotional=${filters.minNotional}`);
+    
+    return filters;
+  } catch (error) {
+    logger.warn(`Failed to fetch symbol filters for ${symbol}, using defaults: ${error}`);
+    return {
+      tickSize: 0.01,
+      stepSize: 0.001,
+      minQty: 0.001,
+      minNotional: 10,
+    };
+  }
+}
+
+// Round value DOWN to the nearest step (for quantities)
+function roundToStepSize(value: number, stepSize: number): number {
+  if (stepSize <= 0) return value;
+  const precision = Math.max(0, Math.ceil(-Math.log10(stepSize)));
+  const factor = Math.pow(10, precision);
+  return Math.floor(value * factor) / factor;
+}
+
+// Round price to the nearest tick size
+function roundToTickSize(price: number, tickSize: number): number {
+  if (tickSize <= 0) return price;
+  const precision = Math.max(0, Math.ceil(-Math.log10(tickSize)));
+  const factor = Math.pow(10, precision);
+  return Math.round(price / tickSize) * tickSize;
+}
+
 // Helper function to log execution rejections to signal_rejection_log
 async function logExecutionRejection(
   supabase: any,
@@ -900,7 +980,7 @@ serve(async (req) => {
 
     // Use strategy's configured stop loss and take profit from signal
     let stopLoss = signal.stop_loss;
-    const takeProfit = signal.take_profit;
+    let takeProfit = signal.take_profit;
 
     // Validate SL/TP are present
     if (!stopLoss || !takeProfit) {
@@ -1287,14 +1367,33 @@ serve(async (req) => {
       logger.warn('Position size reduced due to consecutive losses');
     }
 
-    // Round quantity to appropriate decimal places
-    quantity = Math.floor(quantity * 1000) / 1000;
-
-    // Safety check: Ensure quantity is not zero or too small
-    const minQuantityValue = 0.001; // Minimum viable trade quantity
-    if (quantity < minQuantityValue) {
-      throw new Error(`Calculated quantity (${quantity}) is too small to execute. Minimum: ${minQuantityValue}`);
+    // ============================================================
+    // BINANCE PRECISION VALIDATION
+    // Fetch symbol filters and round quantity/prices to valid precision
+    // ============================================================
+    const symbolFilters = await getSymbolFilters(signal.symbol);
+    
+    // Round quantity to step size precision
+    quantity = roundToStepSize(quantity, symbolFilters.stepSize);
+    
+    // Validate minimum quantity
+    if (quantity < symbolFilters.minQty) {
+      throw new Error(`Calculated quantity (${quantity}) is below minimum (${symbolFilters.minQty}) for ${signal.symbol}`);
     }
+    
+    // Validate minimum notional (order value)
+    const orderNotional = quantity * currentPrice;
+    if (orderNotional < symbolFilters.minNotional) {
+      throw new Error(`Order value ($${orderNotional.toFixed(2)}) is below minimum ($${symbolFilters.minNotional}) for ${signal.symbol}`);
+    }
+    
+    // Round stop loss and take profit to tick size precision
+    stopLoss = roundToTickSize(stopLoss, symbolFilters.tickSize);
+    takeProfit = roundToTickSize(takeProfit, symbolFilters.tickSize);
+    
+    logger.info(`📐 Precision-adjusted: qty=${quantity} (step=${symbolFilters.stepSize}), SL=$${stopLoss} TP=$${takeProfit} (tick=${symbolFilters.tickSize})`);
+    logger.info(`📐 Order notional: $${orderNotional.toFixed(2)} (min=$${symbolFilters.minNotional})`);
+
 
     const side = signal.signal_type === 'long' ? 'BUY' : 'SELL';
     let orderData: any;
