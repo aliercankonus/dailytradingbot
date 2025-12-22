@@ -9,6 +9,10 @@ import {
   calculateUnifiedReversalScore,
   type UnifiedReversalResult
 } from "../_shared/scoring.ts";
+import { createLogger, logError } from "../_shared/logging.ts";
+
+// Create logger instance
+const logger = createLogger("monitor-positions");
 
 // ============= RSI MOMENTUM ZONE CONSTRAINTS =============
 // Momentum continuation entries require RSI in specific zones to prevent late entries
@@ -46,17 +50,17 @@ serve(async (req) => {
     const { socket, response } = Deno.upgradeWebSocket(req);
     socket.addEventListener("open", () => {
       clients.add(socket);
-      console.log("WebSocket connected");
+      logger.info("WebSocket connected");
     });
     socket.addEventListener("close", () => {
       clients.delete(socket);
-      console.log("WebSocket closed");
+      logger.info("WebSocket closed");
     });
     socket.addEventListener("message", (event) => {
-      console.log(`WS message: ${event.data}`);
+      logger.debug(`WS message: ${event.data}`);
       // Optionally handle client messages, e.g., for authentication or specific requests
     });
-    socket.addEventListener("error", (e) => console.error("WS error:", e));
+    socket.addEventListener("error", (e) => logger.error(`WS error: ${e}`));
     return response;
   }
   if (req.method === "OPTIONS") {
@@ -84,7 +88,7 @@ serve(async (req) => {
     !authHeader &&
     providedSecretHeader !== cronSecret
   ) {
-    console.error("Unauthorized: Invalid or missing cron secret");
+    logger.error("Unauthorized: Invalid or missing cron secret");
     return new Response(
       JSON.stringify({ success: false, error: "Unauthorized" }),
       { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -92,7 +96,7 @@ serve(async (req) => {
   }
   
   try {
-    console.log("Monitoring positions...");
+    logger.boot();
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
@@ -159,12 +163,13 @@ serve(async (req) => {
         },
       ]) || [],
     );
-    console.log(`Loaded trailing stop settings for ${userSettingsMap.size} users`);
+    logger.info(`Loaded trailing stop settings for ${userSettingsMap.size} users`);
   // Fetch current prices and ATR for all symbols
   const symbols = [...new Set(positions.map((p) => p.symbol))];
   
   // Enhanced data fetching: prices, ATR, historical ATR (for volatility spike), and volume
   const symbolDataPromises = symbols.map(async (symbol) => {
+    const symbolLogger = logger.forSymbol(symbol);
     try {
       // Get current price
       const priceResponse = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
@@ -249,7 +254,7 @@ serve(async (req) => {
         priceTrending,
       };
     } catch (error) {
-      console.error(`Error fetching data for ${symbol}:`, error);
+      symbolLogger.error(`Error fetching data: ${error}`);
       return { symbol, price: null, atr: null, atrPercent: null, atrRatio: 1, recentPriceChange: 0, volumeRatio: 1, hasDivergence: false };
     }
   });
@@ -290,7 +295,7 @@ serve(async (req) => {
         if (trendResponse.error) throw trendResponse.error;
         return { symbol, data: trendResponse.data };
       } catch (error) {
-        console.error(`Failed to fetch trend for ${symbol}:`, error);
+        logger.forSymbol(symbol).error(`Failed to fetch trend: ${error}`);
         return { symbol, data: null };
       }
     });
@@ -298,7 +303,7 @@ serve(async (req) => {
     trendResults.forEach(({ symbol, data }) => {
       if (data) {
         trendDataMap.set(symbol, data);
-        console.log(`Trend for ${symbol}: ${data.trend} (confidence: ${data.confidence}%)`);
+        logger.forSymbol(symbol).signal(`Trend: ${data.trend} (confidence: ${data.confidence}%)`);
       }
     });
     for (const position of positions) {
@@ -306,6 +311,7 @@ serve(async (req) => {
       if (currentPrice === undefined || currentPrice === null) continue;
       const atrData = atrMap.get(position.symbol);
       const atrPercent = atrData?.atrPercent || 1.5;
+      const positionLogger = logger.forSymbol(position.symbol);
 
       // Get user settings early for circuit breaker check
       const userSettingsEarly = userSettingsMap.get(position.user_id);
@@ -346,18 +352,18 @@ serve(async (req) => {
       // High confidence (trend exhaustion) = tighter exit threshold
       if (confidencePenalty < -10) {
         dynamicReversalThreshold -= 5; // Exit sooner when confidence indicates exhaustion
-        console.log(`📊 ${position.symbol}: Confidence penalty ${confidencePenalty} applied - threshold ${dynamicReversalThreshold}`);
+        positionLogger.info(`Confidence penalty ${confidencePenalty} applied - threshold ${dynamicReversalThreshold}`);
       }
       
       // Log dynamic threshold calculation
-      console.log(`📊 ${position.symbol}: Dynamic exit threshold=${dynamicReversalThreshold} (ADX=${positionAdx.toFixed(1)}, Vol=${positionVolumeScore}, Conf=${positionConfidence}%)`);
-      
+      positionLogger.debug(`Dynamic exit threshold=${dynamicReversalThreshold} (ADX=${positionAdx.toFixed(1)}, Vol=${positionVolumeScore}, Conf=${positionConfidence}%)`);
+
       
       // ============================================================
       // DRAWDOWN CIRCUIT BREAKER - Skip processing if triggered
       // ============================================================
       if (userSettingsEarly?.circuitBreakerTriggered) {
-        console.log(`🛑 CIRCUIT BREAKER ACTIVE for user ${position.user_id} - Skipping position monitoring`);
+        positionLogger.risk(`CIRCUIT BREAKER ACTIVE for user ${position.user_id} - Skipping position monitoring`);
         continue;
       }
 
@@ -368,7 +374,7 @@ serve(async (req) => {
         const drawdownPercent = ((peakValue - currentValue) / peakValue) * 100;
         
         if (drawdownPercent >= userSettingsEarly.drawdownCircuitBreakerPercent) {
-          console.log(`🚨 DRAWDOWN CIRCUIT BREAKER TRIGGERED: ${drawdownPercent.toFixed(2)}% drawdown exceeds ${userSettingsEarly.drawdownCircuitBreakerPercent}% threshold`);
+          positionLogger.risk(`DRAWDOWN CIRCUIT BREAKER TRIGGERED: ${drawdownPercent.toFixed(2)}% drawdown exceeds ${userSettingsEarly.drawdownCircuitBreakerPercent}% threshold`);
           
           // Trigger circuit breaker in database
           const { error: cbError } = await supabase
@@ -381,7 +387,7 @@ serve(async (req) => {
             .eq("user_id", position.user_id);
           
           if (cbError) {
-            console.error("Error triggering circuit breaker:", cbError);
+            positionLogger.error(`Error triggering circuit breaker: ${cbError}`);
           } else {
             // Send notification
             try {
@@ -403,7 +409,7 @@ serve(async (req) => {
                 });
               }
             } catch (notifError) {
-              console.error("Error sending circuit breaker notification:", notifError);
+              positionLogger.error(`Error sending circuit breaker notification: ${notifError}`);
             }
           }
           continue; // Skip further processing for this user
@@ -415,7 +421,7 @@ serve(async (req) => {
             .from("risk_parameters")
             .update({ portfolio_peak_value: currentValue })
             .eq("user_id", position.user_id);
-          console.log(`📈 Updated portfolio peak for user ${position.user_id}: $${currentValue.toFixed(2)}`);
+          positionLogger.trade(`Updated portfolio peak for user ${position.user_id}: $${currentValue.toFixed(2)}`);
         }
       }
 
@@ -433,10 +439,10 @@ serve(async (req) => {
       let isFlashCrash = false;
       if (position.side === "BUY" && recentPriceChange <= -FLASH_CRASH_THRESHOLD) {
         isFlashCrash = true;
-        console.log(`🚨 FLASH CRASH DETECTED for LONG ${position.symbol}: ${recentPriceChange.toFixed(2)}% drop in last hour!`);
+        positionLogger.risk(`FLASH CRASH DETECTED for LONG: ${recentPriceChange.toFixed(2)}% drop in last hour!`);
       } else if (position.side === "SELL" && recentPriceChange >= FLASH_CRASH_THRESHOLD) {
         isFlashCrash = true;
-        console.log(`🚨 FLASH CRASH DETECTED for SHORT ${position.symbol}: ${recentPriceChange.toFixed(2)}% surge in last hour!`);
+        positionLogger.risk(`FLASH CRASH DETECTED for SHORT: ${recentPriceChange.toFixed(2)}% surge in last hour!`);
       }
 
       // 2️⃣ VOLATILITY SPIKE DETECTION - ATR 2x normal = high risk
@@ -445,7 +451,7 @@ serve(async (req) => {
       const isVolatilitySpike = atrRatio >= VOLATILITY_SPIKE_THRESHOLD;
       
       if (isVolatilitySpike) {
-        console.log(`⚡ VOLATILITY SPIKE for ${position.symbol}: ATR ${atrRatio.toFixed(2)}x normal - high risk environment!`);
+        positionLogger.risk(`VOLATILITY SPIKE: ATR ${atrRatio.toFixed(2)}x normal - high risk environment!`);
         volatilityAlerts.push({
           symbol: position.symbol,
           atrRatio,
@@ -462,12 +468,12 @@ serve(async (req) => {
       // For LONG: Exit if price going up but MACD going down (bearish divergence)
       if (position.side === "BUY" && hasDivergence && priceTrending === "up" && macdTrending === "down") {
         divergenceExit = true;
-        console.log(`📉 BEARISH DIVERGENCE for LONG ${position.symbol}: Price up but MACD down - momentum weakening!`);
+        positionLogger.signal(`BEARISH DIVERGENCE for LONG: Price up but MACD down - momentum weakening!`);
       }
       // For SHORT: Exit if price going down but MACD going up (bullish divergence)
       else if (position.side === "SELL" && hasDivergence && priceTrending === "down" && macdTrending === "up") {
         divergenceExit = true;
-        console.log(`📈 BULLISH DIVERGENCE for SHORT ${position.symbol}: Price down but MACD up - momentum weakening!`);
+        positionLogger.signal(`BULLISH DIVERGENCE for SHORT: Price down but MACD up - momentum weakening!`);
       }
 
       // 4️⃣ VOLUME SPIKE ALERT - Unusual volume may signal reversal
@@ -476,7 +482,7 @@ serve(async (req) => {
       const isVolumeSpike = volumeRatio >= VOLUME_SPIKE_THRESHOLD;
       
       if (isVolumeSpike) {
-        console.log(`📊 VOLUME SPIKE for ${position.symbol}: ${volumeRatio.toFixed(1)}x average volume - potential reversal signal!`);
+        positionLogger.signal(`VOLUME SPIKE: ${volumeRatio.toFixed(1)}x average volume - potential reversal signal!`);
         volatilityAlerts.push({
           symbol: position.symbol,
           volumeRatio,
@@ -579,7 +585,7 @@ serve(async (req) => {
       const hasMetMinHoldTime = positionAgeMinutes >= userSettings.minHoldTimeMinutes;
       
       if (!hasMetMinHoldTime) {
-        console.log(`⏳ ${position.symbol}: Position age ${positionAgeMinutes.toFixed(1)}min < ${userSettings.minHoldTimeMinutes}min hold time - skipping reversal/hedge/early exit checks`);
+        positionLogger.info(`Position age ${positionAgeMinutes.toFixed(1)}min < ${userSettings.minHoldTimeMinutes}min hold time - skipping reversal/hedge/early exit checks`);
       }
       
       // TRAILING STOP LOSS LOGIC - Position-specific calculation based on EACH position's entry price
@@ -606,7 +612,7 @@ serve(async (req) => {
       
       if (newPeakPnl > currentPeakPnl && pnlPercent > 0) {
         peakPnlUpdated = true;
-        console.log(`📈 Peak P&L updated for ${position.symbol} ${position.side}: ${currentPeakPnl.toFixed(2)}% → ${newPeakPnl.toFixed(2)}%`);
+        positionLogger.trade(`Peak P&L updated ${position.side}: ${currentPeakPnl.toFixed(2)}% → ${newPeakPnl.toFixed(2)}%`);
         
         // Update peak_pnl_percent and peak_reached_at immediately in database (even before trailing activates)
         const { error: peakUpdateError } = await supabase
@@ -616,7 +622,7 @@ serve(async (req) => {
           .eq("status", "active");
         
         if (peakUpdateError) {
-          console.error(`Error updating peak P&L for ${position.id}:`, peakUpdateError);
+          positionLogger.error(`Error updating peak P&L for ${position.id}: ${peakUpdateError}`);
         }
       }
       
@@ -628,7 +634,7 @@ serve(async (req) => {
         
         // Emergency exit if decay > 3% per minute (rapid profit loss)
         if (decayVelocity > 0.03 && pnlPercent > 0) {
-          console.log(`🚨 SMART AITS: Rapid decay detected for ${position.symbol} ${position.side} - velocity ${(decayVelocity * 100).toFixed(2)}%/min, triggering emergency exit`);
+          positionLogger.risk(`SMART AITS: Rapid decay detected ${position.side} - velocity ${(decayVelocity * 100).toFixed(2)}%/min, triggering emergency exit`);
           emergencyExits.push({
             symbol: position.symbol,
             side: position.side,
@@ -658,7 +664,7 @@ serve(async (req) => {
             .eq("status", "active");
           
           if (closeError) {
-            console.error(`Error closing position ${position.id}:`, closeError);
+            positionLogger.error(`Error closing position ${position.id}: ${closeError}`);
           } else {
             closedPositions.push({
               id: position.id,
@@ -717,12 +723,12 @@ serve(async (req) => {
           // For LONG: move stop up to entry
           newStopLoss = breakEvenStop;
           earlyProfitLockApplied = true;
-          console.log(`🛡️ EARLY PROFIT LOCK for ${position.symbol} BUY: Moving stop to break-even ${breakEvenStop.toFixed(2)} (peak was ${newPeakPnl.toFixed(2)}%, current ${pnlPercent.toFixed(2)}%)`);
+          positionLogger.trade(`EARLY PROFIT LOCK for BUY: Moving stop to break-even ${breakEvenStop.toFixed(2)} (peak was ${newPeakPnl.toFixed(2)}%, current ${pnlPercent.toFixed(2)}%)`);
         } else if (position.side === "SELL" && breakEvenStop < position.stop_loss) {
           // For SHORT: move stop down to entry
           newStopLoss = breakEvenStop;
           earlyProfitLockApplied = true;
-          console.log(`🛡️ EARLY PROFIT LOCK for ${position.symbol} SHORT: Moving stop to break-even ${breakEvenStop.toFixed(2)} (peak was ${newPeakPnl.toFixed(2)}%, current ${pnlPercent.toFixed(2)}%)`);
+          positionLogger.trade(`EARLY PROFIT LOCK for SHORT: Moving stop to break-even ${breakEvenStop.toFixed(2)} (peak was ${newPeakPnl.toFixed(2)}%, current ${pnlPercent.toFixed(2)}%)`);
         }
         
         if (earlyProfitLockApplied) {
@@ -734,7 +740,7 @@ serve(async (req) => {
             .eq("status", "active");
           
           if (earlyLockError) {
-            console.error(`Error applying early profit lock for ${position.id}:`, earlyLockError);
+            positionLogger.error(`Error applying early profit lock for ${position.id}: ${earlyLockError}`);
           } else {
             updatedStopLossMap.set(position.id, newStopLoss);
           }
@@ -788,7 +794,7 @@ serve(async (req) => {
               else lockTier = "tier1";
             }
             
-            console.log(`🧠 SMART AITS for ${position.symbol}: lock ${(profitLockPercent * 100).toFixed(0)}% (${lockTier}, peak: ${newPeakPnl.toFixed(2)}%, stale: ${minutesSincePeak.toFixed(0)}min)`);
+            positionLogger.trade(`SMART AITS: lock ${(profitLockPercent * 100).toFixed(0)}% (${lockTier}, peak: ${newPeakPnl.toFixed(2)}%, stale: ${minutesSincePeak.toFixed(0)}min)`);
           }
         }
         
@@ -817,7 +823,7 @@ serve(async (req) => {
           
           if (isStopTooCloseBelowEntry) {
             // Don't set trailing stop if it's below entry but within 1% (losing position with tight stop)
-            console.log(`⚠️ Trailing SL skipped for ${position.symbol} BUY - calculated stop ${calculatedStopLoss.toFixed(2)} too close below entry ${position.entry_price.toFixed(2)} (must be <= ${minAllowedStop.toFixed(2)} if below entry)`);
+            positionLogger.warn(`Trailing SL skipped for BUY - calculated stop ${calculatedStopLoss.toFixed(2)} too close below entry ${position.entry_price.toFixed(2)} (must be <= ${minAllowedStop.toFixed(2)} if below entry)`);
           } else {
             // 🔒 LOCK STOP FLOOR: Stop must be at least at lock stop price (based on peak P&L)
             // This ensures we ALWAYS protect the locked profit percentage
@@ -825,21 +831,21 @@ serve(async (req) => {
               newStopLoss = lockStopPrice;
               trailingActivated = true;
               const distancePercent = ((newStopLoss - position.entry_price) / position.entry_price) * 100;
-              console.log(
-                `🔐 LOCK STOP SET for ${position.symbol} BUY (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${distancePercent.toFixed(2)}% from entry, peak P&L: ${newPeakPnl.toFixed(2)}%, lock: ${(profitLockPercent * 100).toFixed(0)}% of peak)`,
+              positionLogger.trade(
+                `LOCK STOP SET for BUY (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${distancePercent.toFixed(2)}% from entry, peak P&L: ${newPeakPnl.toFixed(2)}%, lock: ${(profitLockPercent * 100).toFixed(0)}% of peak)`,
               );
             } else if (calculatedStopLoss > position.stop_loss) {
               // ATR-based stop is higher - use it
               newStopLoss = calculatedStopLoss;
               trailingActivated = true;
               const distancePercent = ((newStopLoss - position.entry_price) / position.entry_price) * 100;
-              console.log(
-                `🔺 Trailing SL RAISED for ${position.symbol} BUY (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${distancePercent.toFixed(2)}% from entry, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
+              positionLogger.trade(
+                `Trailing SL RAISED for BUY (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${distancePercent.toFixed(2)}% from entry, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
               );
             } else {
               // Log when ratchet prevents regression
-              console.log(
-                `🔒 Trailing SL HELD at peak for ${position.symbol} BUY - lock stop ${lockStopPrice.toFixed(2)}, current SL ${position.stop_loss.toFixed(2)} (ratchet prevents regression)`,
+              positionLogger.info(
+                `Trailing SL HELD at peak for BUY - lock stop ${lockStopPrice.toFixed(2)}, current SL ${position.stop_loss.toFixed(2)} (ratchet prevents regression)`,
               );
             }
           }
@@ -867,7 +873,7 @@ serve(async (req) => {
           
           if (isStopTooCloseAboveEntry) {
             // Don't set trailing stop if it's above entry but within 1% (losing position with tight stop)
-            console.log(`⚠️ Trailing SL skipped for ${position.symbol} SHORT - calculated stop ${calculatedStopLoss.toFixed(2)} too close above entry ${position.entry_price.toFixed(2)} (must be >= ${maxAllowedStop.toFixed(2)} if above entry)`);
+            positionLogger.warn(`Trailing SL skipped for SHORT - calculated stop ${calculatedStopLoss.toFixed(2)} too close above entry ${position.entry_price.toFixed(2)} (must be >= ${maxAllowedStop.toFixed(2)} if above entry)`);
           } else {
             // 🔒 LOCK STOP FLOOR: Stop must be at least at lock stop price (based on peak P&L)
             // This ensures we ALWAYS protect the locked profit percentage
@@ -875,21 +881,21 @@ serve(async (req) => {
               newStopLoss = lockStopPrice;
               trailingActivated = true;
               const distancePercent = ((newStopLoss - position.entry_price) / position.entry_price) * 100;
-              console.log(
-                `🔐 LOCK STOP SET for ${position.symbol} SHORT (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, peak P&L: ${newPeakPnl.toFixed(2)}%, lock: ${(profitLockPercent * 100).toFixed(0)}% of peak)`,
+              positionLogger.trade(
+                `LOCK STOP SET for SHORT (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, peak P&L: ${newPeakPnl.toFixed(2)}%, lock: ${(profitLockPercent * 100).toFixed(0)}% of peak)`,
               );
             } else if (calculatedStopLoss < position.stop_loss) {
               // ATR-based stop is lower - use it
               newStopLoss = calculatedStopLoss;
               trailingActivated = true;
               const distancePercent = ((newStopLoss - position.entry_price) / position.entry_price) * 100;
-              console.log(
-                `🔻 Trailing SL LOWERED for ${position.symbol} SHORT (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
+              positionLogger.trade(
+                `Trailing SL LOWERED for SHORT (entry: ${position.entry_price.toFixed(2)}): ${position.stop_loss.toFixed(2)} → ${newStopLoss.toFixed(2)} (${Math.abs(distancePercent).toFixed(2)}% from entry, atr-based: ${atrBasedStop.toFixed(2)}, current: ${currentPrice.toFixed(2)}, P&L: ${pnlPercent.toFixed(2)}%)`,
               );
             } else {
               // Log when ratchet prevents regression
-              console.log(
-                `🔒 Trailing SL HELD at peak for ${position.symbol} SHORT - lock stop ${lockStopPrice.toFixed(2)}, current SL ${position.stop_loss.toFixed(2)} (ratchet prevents regression)`,
+              positionLogger.info(
+                `Trailing SL HELD at peak for SHORT - lock stop ${lockStopPrice.toFixed(2)}, current SL ${position.stop_loss.toFixed(2)} (ratchet prevents regression)`,
               );
             }
           }
@@ -907,7 +913,7 @@ serve(async (req) => {
             .maybeSingle();
           
           if (posUpdateError) {
-            console.error(`Error updating trailing stop for ${position.id}:`, posUpdateError);
+            positionLogger.error(`Error updating trailing stop for ${position.id}: ${posUpdateError}`);
             continue;
           }
           
@@ -950,10 +956,10 @@ serve(async (req) => {
                 },
               });
               if (notifyError) throw notifyError;
-              console.log(`Notification sent for trailing stop: ${position.symbol}`);
+              positionLogger.info(`Notification sent for trailing stop`);
             }
           } catch (notifError) {
-            console.error("Error sending trailing stop notification:", notifError);
+            positionLogger.error(`Error sending trailing stop notification: ${notifError}`);
             // Don't fail the monitoring if notification fails
           }
           } // Close if (updatedPos)
@@ -1004,7 +1010,7 @@ serve(async (req) => {
             ? entryPrice + slippageBuffer  // BUY: stop above entry for small profit
             : entryPrice - slippageBuffer; // SHORT: stop below entry for small profit
           
-          console.log(`🛡️ BREAK-EVEN: Moving stop for ${position.symbol} (P&L: ${pnlPercent.toFixed(2)}%, Entry: ${entryPrice.toFixed(2)}, BE Stop: ${breakEvenStop.toFixed(2)}, Slippage Buffer: ${slippageBuffer.toFixed(4)})`);
+          positionLogger.trade(`BREAK-EVEN: Moving stop (P&L: ${pnlPercent.toFixed(2)}%, Entry: ${entryPrice.toFixed(2)}, BE Stop: ${breakEvenStop.toFixed(2)}, Slippage Buffer: ${slippageBuffer.toFixed(4)})`);
           
           // Use optimistic locking
           const { data: updatedBEPos, error: beUpdateError } = await supabase
@@ -1016,7 +1022,7 @@ serve(async (req) => {
             .maybeSingle();
 
           if (beUpdateError) {
-            console.error(`Error updating break-even stop for ${position.id}:`, beUpdateError);
+            positionLogger.error(`Error updating break-even stop for ${position.id}: ${beUpdateError}`);
           } else if (updatedBEPos) {
             breakEvenUpdates.push({
               symbol: position.symbol,
@@ -1049,10 +1055,10 @@ serve(async (req) => {
                     email: riskParams.notification_email,
                   },
                 });
-                console.log(`📧 Break-even notification sent for ${position.symbol}`);
+                positionLogger.info(`Break-even notification sent`);
               }
             } catch (notifError) {
-              console.error("Error sending break-even notification:", notifError);
+              positionLogger.error(`Error sending break-even notification: ${notifError}`);
             }
           }
         }
@@ -1066,7 +1072,7 @@ serve(async (req) => {
       if (emergencyClose) {
         shouldClose = true;
         closeReason = emergencyReason;
-        console.log(`🚨 EMERGENCY EXIT: ${position.symbol} ${position.side} - Reason: ${emergencyReason}`);
+        positionLogger.risk(`EMERGENCY EXIT: ${position.side} - Reason: ${emergencyReason}`);
         trendExits.push({
           symbol: position.symbol,
           side: position.side,
@@ -1219,7 +1225,7 @@ serve(async (req) => {
             const hedgeQuantity = position.quantity * (userSettings.hedgePositionSizePercent / 100);
             const hedgeSide = "BUY"; // Opposite of SELL
             
-            console.log(`🛡️ HEDGE: Opening ${hedgeSide} hedge for SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}% | StochRSI 4h K=${stochRsiK4h.toFixed(1)}`);
+            positionLogger.trade(`HEDGE: Opening ${hedgeSide} hedge for SHORT - Risk ${reversalRisk.riskScore}% | StochRSI 4h K=${stochRsiK4h.toFixed(1)}`);
             
             // Calculate hedge TP based on parent position's loss (to cover the loss)
             // Parent is SHORT, so parent loss = (currentPrice - entryPrice) / entryPrice * 100
@@ -1232,7 +1238,7 @@ serve(async (req) => {
             const hedgeTpPrice = currentPrice * (1 + hedgeTpPercent / 100);
             const hedgeSlPrice = currentPrice * 0.985; // 1.5% stop for hedge (tighter for protection)
             
-            console.log(`🛡️ HEDGE CALC: Parent SHORT loss ${parentLossPercent.toFixed(2)}%, Hedge TP target ${hedgeTpPercent.toFixed(2)}% at $${hedgeTpPrice.toFixed(4)}`);
+            positionLogger.info(`HEDGE CALC: Parent SHORT loss ${parentLossPercent.toFixed(2)}%, Hedge TP target ${hedgeTpPercent.toFixed(2)}% at $${hedgeTpPrice.toFixed(4)}`);
             
             // Insert hedge position with dynamic TP to cover parent loss
             const { data: hedgePosition, error: hedgeError } = await supabase
@@ -1272,15 +1278,15 @@ serve(async (req) => {
                 parentPositionId: position.id,
                 hedgePositionId: hedgePosition.id,
               });
-              console.log(`✅ Hedge opened: ${hedgeSide} ${hedgeQuantity} ${position.symbol} at ${currentPrice}`);
+              positionLogger.success(`Hedge opened: ${hedgeSide} ${hedgeQuantity} at ${currentPrice}`);
             } else {
-              console.error(`❌ Failed to open hedge: ${hedgeError?.message}`);
+              positionLogger.error(`Failed to open hedge: ${hedgeError?.message}`);
             }
           }
           // Log when hedge was blocked by StochRSI filter
           else if (shouldBlockHedgeByStochRsi && hasMetMinHoldTime && userSettings.hedgingEnabled && 
                    reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin) {
-            console.log(`🚫 HEDGE BLOCKED: SHORT ${position.symbol} - StochRSI 4h K=${stochRsiK4h.toFixed(1)} > ${STOCHRSI_THRESHOLDS.OVERBOUGHT} (overbought, price likely to drop - helps SHORT)`);
+            positionLogger.info(`HEDGE BLOCKED: SHORT - StochRSI 4h K=${stochRsiK4h.toFixed(1)} > ${STOCHRSI_THRESHOLDS.OVERBOUGHT} (overbought, price likely to drop - helps SHORT)`);
           }
           // If risk is VERY HIGH (>= 85%), close position instead (ONLY if losing significantly)
           // Raised threshold to 85% to reduce premature exits - these had 0% win rate in analysis
@@ -1296,8 +1302,8 @@ serve(async (req) => {
               pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
             shouldClose = true;
             closeReason = "reversal_risk_high";
-            console.log(
-              `⚠️ REVERSAL RISK EXIT: Closing SHORT ${position.symbol} - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD} (dynamic), Age: ${positionAgeHours.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%`,
+            positionLogger.risk(
+              `REVERSAL RISK EXIT: Closing SHORT - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD} (dynamic), Age: ${positionAgeHours.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%`,
             );
           }
           
@@ -1315,14 +1321,14 @@ serve(async (req) => {
             if (trend1h === "bullish" && confidence4h < EARLY_WARNING_MIN_CONFIDENCE_4H && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT) {
               shouldClose = true;
               closeReason = "early_warning_1h_bullish";
-              console.log(
-                `⚠️ EARLY WARNING EXIT: Closing SHORT ${position.symbol} - 1h BULLISH + 4h very weak (4h conf: ${confidence4h}%, P&L: ${pnlPercent.toFixed(2)}%)`,
+              positionLogger.signal(
+                `EARLY WARNING EXIT: Closing SHORT - 1h BULLISH + 4h very weak (4h conf: ${confidence4h}%, P&L: ${pnlPercent.toFixed(2)}%)`,
               );
             } else if (currentTrend === "bullish" && trendConfidence >= 65) { // Raised from 50%
               shouldClose = true;
               closeReason = "trend_reversal_bullish";
-              console.log(
-                `🔄 TREND EXIT: Closing SHORT ${position.symbol} - Strong BULLISH trend (conf: ${trendConfidence}%)`,
+              positionLogger.signal(
+                `TREND EXIT: Closing SHORT - Strong BULLISH trend (conf: ${trendConfidence}%)`,
               );
             }
             // REMOVED: Ranging market exits - these were too aggressive and hurt win rate
@@ -1376,7 +1382,7 @@ serve(async (req) => {
             const hedgeQuantity = position.quantity * (userSettings.hedgePositionSizePercent / 100);
             const hedgeSide = "SELL"; // Opposite of BUY
             
-            console.log(`🛡️ HEDGE: Opening ${hedgeSide} hedge for LONG ${position.symbol} - Risk ${reversalRisk.riskScore}% | StochRSI 4h K=${stochRsiK4hLong.toFixed(1)}`);
+            positionLogger.trade(`HEDGE: Opening ${hedgeSide} hedge for LONG - Risk ${reversalRisk.riskScore}% | StochRSI 4h K=${stochRsiK4hLong.toFixed(1)}`);
             
             // Calculate hedge TP based on parent position's loss (to cover the loss)
             // Parent is BUY (LONG), so parent loss = (entryPrice - currentPrice) / entryPrice * 100
@@ -1389,7 +1395,7 @@ serve(async (req) => {
             const hedgeTpPrice = currentPrice * (1 - hedgeTpPercent / 100);
             const hedgeSlPrice = currentPrice * 1.015; // 1.5% stop for hedge (tighter for protection)
             
-            console.log(`🛡️ HEDGE CALC: Parent LONG loss ${parentLossPercent.toFixed(2)}%, Hedge TP target ${hedgeTpPercent.toFixed(2)}% at $${hedgeTpPrice.toFixed(4)}`);
+            positionLogger.info(`HEDGE CALC: Parent LONG loss ${parentLossPercent.toFixed(2)}%, Hedge TP target ${hedgeTpPercent.toFixed(2)}% at $${hedgeTpPrice.toFixed(4)}`);
             
             // Insert hedge position with dynamic TP to cover parent loss
             const { data: hedgePosition, error: hedgeError } = await supabase
@@ -1429,15 +1435,15 @@ serve(async (req) => {
                 parentPositionId: position.id,
                 hedgePositionId: hedgePosition.id,
               });
-              console.log(`✅ Hedge opened: ${hedgeSide} ${hedgeQuantity} ${position.symbol} at ${currentPrice}`);
+              positionLogger.success(`Hedge opened: ${hedgeSide} ${hedgeQuantity} at ${currentPrice}`);
             } else {
-              console.error(`❌ Failed to open hedge: ${hedgeError?.message}`);
+              positionLogger.error(`Failed to open hedge: ${hedgeError?.message}`);
             }
           }
           // Log when hedge was blocked by StochRSI filter
           else if (shouldBlockHedgeByStochRsiLong && hasMetMinHoldTime && userSettings.hedgingEnabled && 
                    reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin) {
-            console.log(`🚫 HEDGE BLOCKED: LONG ${position.symbol} - StochRSI 4h K=${stochRsiK4hLong.toFixed(1)} < ${STOCHRSI_THRESHOLDS.OVERSOLD} (oversold, price likely to bounce - helps LONG)`);
+            positionLogger.info(`HEDGE BLOCKED: LONG - StochRSI 4h K=${stochRsiK4hLong.toFixed(1)} < ${STOCHRSI_THRESHOLDS.OVERSOLD} (oversold, price likely to bounce - helps LONG)`);
           }
           // If risk is VERY HIGH (>= 85%), close position instead (ONLY if losing significantly)
           // Raised threshold to 85% to reduce premature exits - these had 0% win rate in analysis
@@ -1453,8 +1459,8 @@ serve(async (req) => {
               pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
             shouldClose = true;
             closeReason = "reversal_risk_high";
-            console.log(
-              `⚠️ REVERSAL RISK EXIT: Closing LONG ${position.symbol} - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD_LONG} (dynamic), Age: ${positionAgeHoursLong.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%`,
+            positionLogger.risk(
+              `REVERSAL RISK EXIT: Closing LONG - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD_LONG} (dynamic), Age: ${positionAgeHoursLong.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%`,
             );
           }
           
@@ -1472,14 +1478,14 @@ serve(async (req) => {
             if (trend1h === "bearish" && confidence4h < EARLY_WARNING_MIN_CONFIDENCE_4H_LONG && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT_LONG) {
               shouldClose = true;
               closeReason = "early_warning_1h_bearish";
-              console.log(
-                `⚠️ EARLY WARNING EXIT: Closing LONG ${position.symbol} - 1h BEARISH + 4h very weak (4h conf: ${confidence4h}%, P&L: ${pnlPercent.toFixed(2)}%)`,
+              positionLogger.signal(
+                `EARLY WARNING EXIT: Closing LONG - 1h BEARISH + 4h very weak (4h conf: ${confidence4h}%, P&L: ${pnlPercent.toFixed(2)}%)`,
               );
             } else if (currentTrend === "bearish" && trendConfidence >= 65) { // Raised from 50%
               shouldClose = true;
               closeReason = "trend_reversal_bearish";
-              console.log(
-                `🔄 TREND EXIT: Closing LONG ${position.symbol} - Strong BEARISH trend (conf: ${trendConfidence}%)`,
+              positionLogger.signal(
+                `TREND EXIT: Closing LONG - Strong BEARISH trend (conf: ${trendConfidence}%)`,
               );
             }
             // REMOVED: Ranging market exits - these were too aggressive and hurt win rate
@@ -1520,8 +1526,8 @@ serve(async (req) => {
           if (pnlPercent < MIN_LOSS_FOR_TIME_EXIT) {
             shouldClose = true;
             closeReason = "time_based_stop";
-            console.log(
-              `⏰ TIME EXIT: Closing losing ${position.symbol} ${position.side} - Open ${hoursOpen.toFixed(1)}h (>${effectiveTimeLimit.toFixed(1)}h), P&L: ${pnlPercent.toFixed(2)}%`
+            positionLogger.trade(
+              `TIME EXIT: Closing losing ${position.side} - Open ${hoursOpen.toFixed(1)}h (>${effectiveTimeLimit.toFixed(1)}h), P&L: ${pnlPercent.toFixed(2)}%`
             );
             
             trendExits.push({
@@ -1533,8 +1539,8 @@ serve(async (req) => {
               pnlPercent,
             });
           } else {
-            console.log(
-              `⏰ TIME EXIT SKIPPED: ${position.symbol} - Not losing enough (${pnlPercent.toFixed(2)}% > ${MIN_LOSS_FOR_TIME_EXIT}%) - letting it run`
+            positionLogger.info(
+              `TIME EXIT SKIPPED: Not losing enough (${pnlPercent.toFixed(2)}% > ${MIN_LOSS_FOR_TIME_EXIT}%) - letting it run`
             );
           }
         }
@@ -1571,7 +1577,7 @@ serve(async (req) => {
             // Only update if new stop is higher than current (tighter) AND respects minimum
             if (newTightenedStop > position.stop_loss) {
               const newDistancePercent = ((position.entry_price - newTightenedStop) / position.entry_price) * 100;
-              console.log(`🔧 DYNAMIC TIGHTENING: ${position.symbol} LONG - Stop ${position.stop_loss.toFixed(2)} → ${newTightenedStop.toFixed(2)} (${newDistancePercent.toFixed(2)}% from entry, min ${minStopDistancePercent}%)`);
+              positionLogger.trade(`DYNAMIC TIGHTENING: LONG - Stop ${position.stop_loss.toFixed(2)} → ${newTightenedStop.toFixed(2)} (${newDistancePercent.toFixed(2)}% from entry, min ${minStopDistancePercent}%)`);
               
               const { error: tightenError } = await supabase
                 .from("positions")
@@ -1580,7 +1586,7 @@ serve(async (req) => {
                 .eq("status", "active");
               
               if (tightenError) {
-                console.error(`Error tightening stop for ${position.id}:`, tightenError);
+                positionLogger.error(`Error tightening stop for ${position.id}: ${tightenError}`);
               }
             }
           } else {
@@ -1595,7 +1601,7 @@ serve(async (req) => {
             // Only update if new stop is lower than current (tighter) AND respects minimum
             if (newTightenedStop < position.stop_loss) {
               const newDistancePercent = ((newTightenedStop - position.entry_price) / position.entry_price) * 100;
-              console.log(`🔧 DYNAMIC TIGHTENING: ${position.symbol} SHORT - Stop ${position.stop_loss.toFixed(2)} → ${newTightenedStop.toFixed(2)} (${newDistancePercent.toFixed(2)}% from entry, min ${minStopDistancePercent}%)`);
+              positionLogger.trade(`DYNAMIC TIGHTENING: SHORT - Stop ${position.stop_loss.toFixed(2)} → ${newTightenedStop.toFixed(2)} (${newDistancePercent.toFixed(2)}% from entry, min ${minStopDistancePercent}%)`);
               
               const { error: tightenError } = await supabase
                 .from("positions")
@@ -1604,7 +1610,7 @@ serve(async (req) => {
                 .eq("status", "active");
               
               if (tightenError) {
-                console.error(`Error tightening stop for ${position.id}:`, tightenError);
+                positionLogger.error(`Error tightening stop for ${position.id}: ${tightenError}`);
               }
             }
           }
@@ -1639,7 +1645,7 @@ serve(async (req) => {
               ? (currentPrice - position.entry_price) * closeQuantity
               : (position.entry_price - currentPrice) * closeQuantity;
             
-            console.log(`✂️ PARTIAL LOSS: ${position.symbol} ${position.side} - Price ${lossProgressPercent.toFixed(1)}% toward stop, closing ${(closePercent * 100).toFixed(0)}%`);
+            positionLogger.trade(`PARTIAL LOSS: ${position.side} - Price ${lossProgressPercent.toFixed(1)}% toward stop, closing ${(closePercent * 100).toFixed(0)}%`);
             
             // Calculate P&L percent for closed portion
             const partialLossPercent = position.side === "BUY"
@@ -1659,7 +1665,7 @@ serve(async (req) => {
               .maybeSingle();
             
             if (partialLossError) {
-              console.error(`Error executing partial loss for ${position.id}:`, partialLossError);
+              positionLogger.error(`Error executing partial loss for ${position.id}: ${partialLossError}`);
             } else if (updatedPartialLossPos) {
               // Create a closed position record for the partial close (for history tracking)
               const { error: partialCloseRecordError } = await supabase
@@ -1685,10 +1691,10 @@ serve(async (req) => {
                 });
               
               if (partialCloseRecordError) {
-                console.error(`Error creating partial loss record for ${position.symbol}:`, partialCloseRecordError);
+                positionLogger.error(`Error creating partial loss record: ${partialCloseRecordError}`);
               }
               
-              console.log(`✅ Partial loss executed: ${position.symbol} closed ${closeQuantity.toFixed(4)} (${(closePercent * 100).toFixed(0)}%), remaining ${remainingQuantity.toFixed(4)}, Loss: $${partialLoss.toFixed(2)} (${partialLossPercent.toFixed(2)}%)`);
+              positionLogger.success(`Partial loss executed: closed ${closeQuantity.toFixed(4)} (${(closePercent * 100).toFixed(0)}%), remaining ${remainingQuantity.toFixed(4)}, Loss: $${partialLoss.toFixed(2)} (${partialLossPercent.toFixed(2)}%)`);
               
               // Send notification
               try {
@@ -1717,7 +1723,7 @@ serve(async (req) => {
                   });
                 }
               } catch (notifError) {
-                console.error("Error sending partial loss notification:", notifError);
+                positionLogger.error(`Error sending partial loss notification: ${notifError}`);
               }
             }
           }
@@ -1766,9 +1772,9 @@ serve(async (req) => {
           .eq("status", "active");
         
         if (tpUpdateError) {
-          console.error(`Failed to set partial TP levels for ${position.symbol}:`, tpUpdateError);
+          positionLogger.error(`Failed to set partial TP levels: ${tpUpdateError}`);
         } else {
-          console.log(`📊 Set partial TP levels for ${position.symbol}: TP1=$${tp1Price.toFixed(2)}, TP2=$${tp2Price.toFixed(2)}, TP3=$${tp3Price.toFixed(2)}`);
+          positionLogger.trade(`Set partial TP levels: TP1=$${tp1Price.toFixed(2)}, TP2=$${tp2Price.toFixed(2)}, TP3=$${tp3Price.toFixed(2)}`);
         }
       }
       
@@ -1785,13 +1791,13 @@ serve(async (req) => {
           partialClosePercent = 50; // Close 50%
           newTpLevel = 1;
           partialCloseReason = "partial_tp_1";
-          console.log(`🎯 TP1 HIT for LONG ${position.symbol}: Price $${currentPrice.toFixed(2)} >= TP1 $${tp1Price.toFixed(2)}`);
+          positionLogger.signal(`TP1 HIT for LONG: Price $${currentPrice.toFixed(2)} >= TP1 $${tp1Price.toFixed(2)}`);
         } else if (currentTpLevel < 2 && currentTpLevel >= 1 && currentPrice >= tp2Price) {
           partialTpTriggered = true;
           partialClosePercent = 60; // Close 60% of remaining (30% of original)
           newTpLevel = 2;
           partialCloseReason = "partial_tp_2";
-          console.log(`🎯 TP2 HIT for LONG ${position.symbol}: Price $${currentPrice.toFixed(2)} >= TP2 $${tp2Price.toFixed(2)}`);
+          positionLogger.signal(`TP2 HIT for LONG: Price $${currentPrice.toFixed(2)} >= TP2 $${tp2Price.toFixed(2)}`);
         }
       } else {
         // SHORT: TP when price goes DOWN
@@ -1800,13 +1806,13 @@ serve(async (req) => {
           partialClosePercent = 50;
           newTpLevel = 1;
           partialCloseReason = "partial_tp_1";
-          console.log(`🎯 TP1 HIT for SHORT ${position.symbol}: Price $${currentPrice.toFixed(2)} <= TP1 $${tp1Price.toFixed(2)}`);
+          positionLogger.signal(`TP1 HIT for SHORT: Price $${currentPrice.toFixed(2)} <= TP1 $${tp1Price.toFixed(2)}`);
         } else if (currentTpLevel < 2 && currentTpLevel >= 1 && currentPrice <= tp2Price) {
           partialTpTriggered = true;
           partialClosePercent = 60;
           newTpLevel = 2;
           partialCloseReason = "partial_tp_2";
-          console.log(`🎯 TP2 HIT for SHORT ${position.symbol}: Price $${currentPrice.toFixed(2)} <= TP2 $${tp2Price.toFixed(2)}`);
+          positionLogger.signal(`TP2 HIT for SHORT: Price $${currentPrice.toFixed(2)} <= TP2 $${tp2Price.toFixed(2)}`);
         }
       }
       
@@ -1850,7 +1856,7 @@ serve(async (req) => {
           .maybeSingle();
         
         if (partialUpdateError) {
-          console.error(`Error executing partial TP for ${position.id}:`, partialUpdateError);
+          positionLogger.error(`Error executing partial TP for ${position.id}: ${partialUpdateError}`);
         } else if (updatedPartialPos) {
           // Create a closed position record for the partial close (for history tracking)
           const { error: partialTpRecordError } = await supabase
@@ -1876,7 +1882,7 @@ serve(async (req) => {
             });
           
           if (partialTpRecordError) {
-            console.error(`Error creating partial TP record for ${position.symbol}:`, partialTpRecordError);
+            positionLogger.error(`Error creating partial TP record: ${partialTpRecordError}`);
           }
           
           partialTpTaken.push({
@@ -1891,16 +1897,16 @@ serve(async (req) => {
             reason: partialCloseReason,
           });
           
-          console.log(`✅ Partial TP${newTpLevel} executed: ${position.symbol} closed ${closeQuantity.toFixed(4)} (${partialClosePercent}%), remaining ${remainingQuantity.toFixed(4)}, P&L: $${partialPnl.toFixed(2)} (${partialPnlPercent.toFixed(2)}%)`);
+          positionLogger.success(`Partial TP${newTpLevel} executed: closed ${closeQuantity.toFixed(4)} (${partialClosePercent}%), remaining ${remainingQuantity.toFixed(4)}, P&L: $${partialPnl.toFixed(2)} (${partialPnlPercent.toFixed(2)}%)`);
           
           // Log stop loss status after TP1
           if (newTpLevel === 1) {
             if (newStopLossAfterTp > position.entry_price && position.side === "BUY") {
-              console.log(`🔒 Stop loss kept at trailing level ($${newStopLossAfterTp.toFixed(2)}) after TP1 (above break-even $${position.entry_price.toFixed(2)})`);
+              positionLogger.info(`Stop loss kept at trailing level ($${newStopLossAfterTp.toFixed(2)}) after TP1 (above break-even $${position.entry_price.toFixed(2)})`);
             } else if (newStopLossAfterTp < position.entry_price && position.side === "SELL") {
-              console.log(`🔒 Stop loss kept at trailing level ($${newStopLossAfterTp.toFixed(2)}) after TP1 (below break-even $${position.entry_price.toFixed(2)})`);
+              positionLogger.info(`Stop loss kept at trailing level ($${newStopLossAfterTp.toFixed(2)}) after TP1 (below break-even $${position.entry_price.toFixed(2)})`);
             } else {
-              console.log(`🔒 Stop loss moved to break-even ($${position.entry_price.toFixed(2)}) after TP1`);
+              positionLogger.info(`Stop loss moved to break-even ($${position.entry_price.toFixed(2)}) after TP1`);
             }
           }
           
@@ -1931,7 +1937,7 @@ serve(async (req) => {
               });
             }
           } catch (notifError) {
-            console.error("Error sending partial TP notification:", notifError);
+            positionLogger.error(`Error sending partial TP notification: ${notifError}`);
           }
         }
         
@@ -2010,7 +2016,7 @@ serve(async (req) => {
           .maybeSingle();
 
         if (closePosError) {
-          console.error(`Error closing position ${position.id}:`, closePosError);
+          positionLogger.error(`Error closing position ${position.id}: ${closePosError}`);
           continue; // Skip to next position instead of throwing
         }
 
@@ -2024,13 +2030,13 @@ serve(async (req) => {
             pnl,
             pnlPercent,
           });
-          console.log(
-            `Closed position ${position.id} - ${position.symbol} ${position.side} - ${closeReason} at ${currentPrice}`,
+          positionLogger.trade(
+            `Closed position ${position.id} - ${position.side} - ${closeReason} at ${currentPrice}`,
           );
           
           // 🆕 HEDGE CLEANUP: If parent position had a hedge, close the hedge too
           if (position.hedge_position_id) {
-            console.log(`🛡️ HEDGE CLEANUP: Closing hedge for parent ${position.symbol} ${position.side}`);
+            positionLogger.trade(`HEDGE CLEANUP: Closing hedge for parent ${position.side}`);
             
             // Get the hedge position to calculate its P&L
             const { data: hedgePos } = await supabase
@@ -2070,12 +2076,12 @@ serve(async (req) => {
                   hedgePositionId: position.hedge_position_id,
                   riskScore: 0,
                 });
-                console.log(`✅ Hedge closed with parent: ${hedgePos.side} ${hedgePos.symbol}, P&L: $${hedgePnl.toFixed(2)} (${hedgePnlPercent.toFixed(2)}%)`);
+                positionLogger.success(`Hedge closed with parent: ${hedgePos.side}, P&L: $${hedgePnl.toFixed(2)} (${hedgePnlPercent.toFixed(2)}%)`);
               }
             }
           }
         } else {
-          console.log(
+          positionLogger.info(
             `Position ${position.id} was already closed by another process - skipping`,
           );
         }
@@ -2108,11 +2114,12 @@ serve(async (req) => {
         client.send(message);
       }
     }
+    logger.summary(responseData.message);
     return new Response(message, {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error("Error monitoring positions:", error);
+    logError(logger, error, "monitoring positions");
     return new Response(
       JSON.stringify({
         success: false,
