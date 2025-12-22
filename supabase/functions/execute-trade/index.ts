@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS } from "../_shared/constants.ts";
 import { calculateATR, calculateHistoricalATRAvg } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore,
@@ -285,11 +285,8 @@ serve(async (req) => {
     // ============================================================
     // STRATEGY PERFORMANCE FILTER (aligned with strategy-analyzer)
     // Block underperforming strategies, boost high performers
+    // Uses centralized STRATEGY_PARAMS from _shared/constants.ts
     // ============================================================
-    const STRATEGY_WIN_RATE_THRESHOLD = 40;
-    const STRATEGY_MIN_TRADES_FOR_FILTER = 10;
-    const STRATEGY_HIGH_PERFORMER_THRESHOLD = 60;
-    
     let strategyPerformanceBonus = 0; // Quality score bonus for high performers
     
     const { data: strategyTrades } = await supabase
@@ -301,21 +298,21 @@ serve(async (req) => {
       .order('closed_at', { ascending: false })
       .limit(20);
     
-    if (strategyTrades && strategyTrades.length >= STRATEGY_MIN_TRADES_FOR_FILTER) {
+    if (strategyTrades && strategyTrades.length >= STRATEGY_PARAMS.MIN_TRADES_FOR_FILTER) {
       const wins = strategyTrades.filter(t => (t.realized_pnl || 0) > 0).length;
       const winRate = (wins / strategyTrades.length) * 100;
       
-      if (winRate < STRATEGY_WIN_RATE_THRESHOLD) {
-        logger.gate(`⛔ STRATEGY PERFORMANCE BLOCK: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% < ${STRATEGY_WIN_RATE_THRESHOLD}%`, false);
-        await logExecutionRejection(supabase, user.id, signal.symbol, 'Strategy Underperforming', signal, null, { strategyWinRate: winRate, threshold: STRATEGY_WIN_RATE_THRESHOLD });
+      if (winRate < STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD) {
+        logger.gate(`⛔ STRATEGY PERFORMANCE BLOCK: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% < ${STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD}%`, false);
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'Strategy Underperforming', signal, null, { strategyWinRate: winRate, threshold: STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD });
         throw new Error(`Strategy "${signal.strategy_name}" underperforming (${winRate.toFixed(0)}% win rate) - trade cancelled`);
       }
       
-      if (winRate >= STRATEGY_HIGH_PERFORMER_THRESHOLD) {
-        strategyPerformanceBonus = 5; // +5 quality bonus for high performers (aligned with strategy-analyzer)
+      if (winRate >= STRATEGY_PARAMS.WIN_RATE_HIGH_PERFORMER) {
+        strategyPerformanceBonus = STRATEGY_PARAMS.MAX_PERFORMANCE_BONUS; // +5 quality bonus for high performers (aligned with strategy-analyzer)
         logger.info(`⭐ Strategy high performer bonus: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% → +${strategyPerformanceBonus} quality`);
       } else {
-        logger.validation(`✓ Strategy performance check: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% >= ${STRATEGY_WIN_RATE_THRESHOLD}%`, true);
+        logger.validation(`✓ Strategy performance check: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% >= ${STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD}%`, true);
       }
     }
 
@@ -475,7 +472,7 @@ serve(async (req) => {
     // Uses centralized ADX_THRESHOLDS
     // ============================================================
     const isInRecoveryMode = riskParams.consecutive_losses >= riskParams.consecutive_loss_threshold;
-    let dynamicQualityThreshold = 55; // Base threshold
+    let dynamicQualityThreshold: number = QUALITY_THRESHOLDS.BASE_MIN; // Base threshold from shared constants
     
     // Extract 1h confidence for strong alignment exception
     const confidence1h = trendData?.timeframes?.['1h']?.confidence || 
@@ -488,21 +485,21 @@ serve(async (req) => {
                               currentTrend === 'ranging';
     
     if (isInRecoveryMode) {
-      dynamicQualityThreshold = 65; // Stricter in recovery mode
+      dynamicQualityThreshold = QUALITY_THRESHOLDS.BASE_MIN + QUALITY_THRESHOLDS.RECOVERY_BOOST; // Stricter in recovery mode
       logger.risk(`🔒 Recovery Mode: Quality threshold raised to ${dynamicQualityThreshold}`);
     } else if (isNeutralStrategy) {
       // Neutral strategies rely on HTF direction rather than 5m quality
-      dynamicQualityThreshold = 35;
+      dynamicQualityThreshold = QUALITY_THRESHOLDS.NEUTRAL_MIN;
       logger.info(`📊 Neutral Strategy: Quality threshold lowered to ${dynamicQualityThreshold}`);
     } else if (confidence1h >= CONFIDENCE_THRESHOLDS.HTF_EXCEPTION) {
       // Strong 1h alignment exception (aligned with strategy-analyzer)
-      dynamicQualityThreshold = 45;
+      dynamicQualityThreshold = QUALITY_THRESHOLDS.STRONG_1H_MIN;
       logger.info(`📊 Strong 1h alignment (${confidence1h.toFixed(0)}%): Quality threshold lowered to ${dynamicQualityThreshold}`);
     } else if (adxValue >= ADX_THRESHOLDS.EXCEPTIONAL) {
-      dynamicQualityThreshold = 50; // Relaxed in very strong trends
+      dynamicQualityThreshold = QUALITY_THRESHOLDS.EXCEPTIONAL_ADX_MIN; // Relaxed in very strong trends
       logger.info(`📈 Exceptional ADX (${adxValue.toFixed(1)}): Quality threshold lowered to ${dynamicQualityThreshold}`);
     } else if (adxValue >= ADX_THRESHOLDS.STRONG) {
-      dynamicQualityThreshold = 53;
+      dynamicQualityThreshold = QUALITY_THRESHOLDS.STRONG_ADX_MIN;
       logger.info(`📈 Strong ADX (${adxValue.toFixed(1)}): Quality threshold lowered to ${dynamicQualityThreshold}`);
     }
     
