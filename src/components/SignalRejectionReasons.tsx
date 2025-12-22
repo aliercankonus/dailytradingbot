@@ -54,6 +54,8 @@ interface ScoreBreakdown {
   alignment: { score: number; max: number };
   technical: { score: number; max: number };
   entry: { score: number; max: number };
+  volume: { score: number; max: number };
+  orderFlow: { score: number; max: number };
   confidencePenalty: number;
   directionBonus: number;
   subtotal: number;
@@ -84,7 +86,7 @@ const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
   
   if (Object.keys(scores).length === 0) return null;
   
-  const subtotal = (scores.adx?.score || 0) + (scores.mom?.score || 0) + (scores.align?.score || 0) + (scores.tech?.score || 0) + (scores.entry?.score || 0);
+  const subtotal = (scores.adx?.score || 0) + (scores.mom?.score || 0) + (scores.align?.score || 0) + (scores.tech?.score || 0) + (scores.entry?.score || 0) + (scores.vol?.score || 0) + (scores.of?.score || 0);
   
   return {
     adx: scores.adx || { score: 0, max: 25 },
@@ -92,6 +94,8 @@ const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
     alignment: scores.align || { score: 0, max: 20 },
     technical: scores.tech || { score: 0, max: 15 },
     entry: scores.entry || { score: 0, max: 25 },
+    volume: scores.vol || { score: 0, max: 10 },
+    orderFlow: scores.of || { score: 0, max: 10 },
     confidencePenalty,
     directionBonus,
     subtotal,
@@ -341,7 +345,7 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
                 <div className="space-y-1">
                   <p className="font-medium">Score Calculation:</p>
                   <p className="font-mono text-[10px]">
-                    {breakdown.adx.score} + {breakdown.momentum.score} + {breakdown.alignment.score} + {breakdown.technical.score} + {breakdown.entry.score}
+                    {breakdown.adx.score} + {breakdown.momentum.score} + {breakdown.alignment.score} + {breakdown.technical.score} + {breakdown.entry.score} + {breakdown.volume.score} + {breakdown.orderFlow.score}
                     {hasConfidencePenalty && ` ${breakdown.confidencePenalty >= 0 ? '+' : ''}${breakdown.confidencePenalty}`}
                     {hasDirectionBonus && ` +${breakdown.directionBonus}`}
                     {' = '}{totalScore}
@@ -402,6 +406,18 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
               score={breakdown.entry.score} 
               max={breakdown.entry.max} 
               icon={Timer}
+            />
+            <ScoreBar 
+              label="Volume" 
+              score={breakdown.volume.score} 
+              max={breakdown.volume.max} 
+              icon={VolumeIcon}
+            />
+            <ScoreBar 
+              label="Order Flow" 
+              score={breakdown.orderFlow.score} 
+              max={breakdown.orderFlow.max} 
+              icon={Scale}
             />
           </div>
           
