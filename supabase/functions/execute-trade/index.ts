@@ -4,8 +4,12 @@ import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHO
 import { calculateATR, calculateHistoricalATRAvg } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore,
+  getConfidencePenalty,
+  getAdxWeight,
   calculateUnifiedReversalScore,
-  type UnifiedReversalResult
+  detectMarketRegime,
+  type UnifiedReversalResult,
+  type MarketRegime
 } from "../_shared/scoring.ts";
 
 const corsHeaders = {
