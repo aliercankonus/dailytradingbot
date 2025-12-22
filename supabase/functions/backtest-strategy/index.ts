@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
 
 // Import shared modules - same code as calculate-trend uses
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RISK_PARAMS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RISK_PARAMS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR } from "../_shared/indicators.ts";
 import { analyzeMultiTimeframe, MultiTimeframeTrendData } from "../_shared/trend-core.ts";
 import { 
