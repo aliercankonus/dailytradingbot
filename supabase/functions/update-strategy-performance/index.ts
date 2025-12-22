@@ -1,24 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { RSI_THRESHOLDS } from "../_shared/constants.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-// ============= CENTRALIZED RSI THRESHOLDS =============
-// CRITICAL: Keep these aligned across all edge functions to prevent silent drift!
-const RSI_THRESHOLDS = {
-  OVERSOLD: 30,            // Classic oversold level
-  BEARISH_PULLBACK: 35,    // RSI showing bearish weakness / SHORT pullback
-  BULLISH_PULLBACK: 40,    // RSI showing bullish pullback opportunity
-  NEUTRAL_LOW: 45,         // Lower neutral/pullback zone for momentum continuation
-  NEUTRAL: 50,             // Neutral RSI
-  NEUTRAL_HIGH: 55,        // Upper neutral/rally zone for SHORT momentum continuation
-  BEARISH_RALLY: 60,       // RSI showing bearish rally (SHORT entry opportunity)
-  BULLISH_STRONG: 65,      // Strong bullish momentum / overbought warning
-  OVERBOUGHT: 70,          // Classic overbought level
-} as const;
 
 interface Trade {
   type: 'long' | 'short';
