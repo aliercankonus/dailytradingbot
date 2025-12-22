@@ -2052,8 +2052,11 @@ export const SignalRejectionReasons = () => {
       if (filtersStatus.requiredConfidence) {
         details.push(`Required: ${filtersStatus.requiredConfidence}%`);
       }
-      if (filtersStatus.adx) {
-        details.push(`ADX: ${filtersStatus.adx.toFixed(1)}`);
+      if (filtersStatus.adx !== undefined && filtersStatus.adx !== null) {
+        const adxValue = typeof filtersStatus.adx === 'number' ? filtersStatus.adx : parseFloat(filtersStatus.adx);
+        if (!isNaN(adxValue)) {
+          details.push(`ADX: ${adxValue.toFixed(1)}`);
+        }
       }
     }
     // Handle alignment issues
