@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
+import { detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -60,8 +61,8 @@ serve(async (req) => {
       }
 
       if (builtIn) {
-        const name = (builtIn.strategy_name || '').toLowerCase();
-        if (name.includes('mean reversion')) {
+        const strategyType = detectStrategyType(params.strategyId, builtIn.strategy_name || '');
+        if (strategyType === 'MEAN_REVERSION') {
           strategy = {
             name: builtIn.strategy_name,
             indicators: [
@@ -76,7 +77,7 @@ serve(async (req) => {
             exit_conditions: [],
             risk_settings: { stopLossPercent: 2, takeProfitPercent: 4 },
           };
-        } else if (name.includes('momentum')) {
+        } else if (strategyType === 'MOMENTUM' || strategyType === 'TREND_FOLLOWING') {
           strategy = {
             name: builtIn.strategy_name,
             indicators: [
@@ -89,7 +90,7 @@ serve(async (req) => {
             exit_conditions: [],
             risk_settings: { stopLossPercent: 3, takeProfitPercent: 6 },
           };
-        } else if (name.includes('grid')) {
+        } else if (strategyType === 'GRID_RANGE') {
           strategy = {
             name: builtIn.strategy_name,
             indicators: [

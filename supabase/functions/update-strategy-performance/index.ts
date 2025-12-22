@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { RSI_THRESHOLDS } from "../_shared/constants.ts";
+import { RSI_THRESHOLDS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -170,9 +170,9 @@ async function runBacktest(strategyName: string, config: any, symbol: string, su
         shouldExit = true;
       }
 
-      // Check strategy exit conditions
-      if (strategyName === 'Mean Reversion' && rsi > RSI_THRESHOLDS.OVERBOUGHT) shouldExit = true;
-      if (strategyName === 'Momentum' && ema20 < ema50) shouldExit = true;
+      // Check strategy exit conditions using shared strategy detection
+      if (isMeanReversionStrategy(undefined, strategyName) && rsi > RSI_THRESHOLDS.OVERBOUGHT) shouldExit = true;
+      if (isMomentumStrategy(undefined, strategyName) && ema20 < ema50) shouldExit = true;
 
       if (shouldExit) {
         const profit = position.type === 'long'
@@ -196,10 +196,11 @@ async function runBacktest(strategyName: string, config: any, symbol: string, su
       let shouldEnter = false;
       let entryType: 'long' | 'short' = 'long';
 
-      if (strategyName === 'Mean Reversion' && rsi < RSI_THRESHOLDS.OVERSOLD) {
+      // Entry logic using shared strategy detection
+      if (isMeanReversionStrategy(undefined, strategyName) && rsi < RSI_THRESHOLDS.OVERSOLD) {
         shouldEnter = true;
         entryType = 'long';
-      } else if (strategyName === 'Momentum' && ema20 > ema50) {
+      } else if (isMomentumStrategy(undefined, strategyName) && ema20 > ema50) {
         shouldEnter = true;
         entryType = 'long';
       } else if (strategyName === 'Grid') {
