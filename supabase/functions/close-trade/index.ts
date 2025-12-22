@@ -1,5 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
+import { createLogger, logError } from "../_shared/logging.ts";
+
+// Create logger instance
+const logger = createLogger("close-trade");
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -12,6 +16,8 @@ serve(async (req) => {
   }
 
   try {
+    logger.boot();
+    
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     
@@ -44,18 +50,20 @@ serve(async (req) => {
       const serviceKey = req.headers.get('apikey') || req.headers.get('Authorization')?.replace('Bearer ', '');
       if (serviceKey === supabaseServiceKey) {
         userId = bodyUserId;
-        console.log(`Service role call for user ${userId}`);
+        logger.info(`Service role call for user ${userId}`);
       }
     }
     
     if (!userId) {
+      logger.warn("Unauthorized - no valid user");
       return new Response(JSON.stringify({ success: false, error: 'Unauthorized - no valid user' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    console.log(`Close trade request by user ${userId}:`, { positionId, closeAll, manualClose, closedByRebalancer });
+    const userLogger = logger.forUser(userId);
+    userLogger.info(`Close trade request: positionId=${positionId || 'N/A'}, closeAll=${closeAll}, manualClose=${manualClose}, closedByRebalancer=${closedByRebalancer}`);
 
     let closedCount = 0;
 
@@ -70,6 +78,7 @@ serve(async (req) => {
       if (fetchError) throw fetchError;
 
       if (!positions || positions.length === 0) {
+        userLogger.info("No active positions to close");
         return new Response(
           JSON.stringify({
             success: true,
@@ -81,10 +90,11 @@ serve(async (req) => {
       }
 
       for (const position of positions) {
-        const result = await closePosition(supabase, position, manualClose, closedByRebalancer);
+        const result = await closePosition(supabase, position, manualClose, closedByRebalancer, userLogger);
         if (result.success) closedCount++;
       }
 
+      userLogger.summary(`Closed ${closedCount} positions`);
       return new Response(
         JSON.stringify({
           success: true,
@@ -96,6 +106,7 @@ serve(async (req) => {
     } else {
       // Close single position for this user
       if (!positionId) {
+        userLogger.warn("Position ID is required");
         return new Response(
           JSON.stringify({ success: false, error: 'Position ID is required' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -113,13 +124,14 @@ serve(async (req) => {
       if (fetchError) throw fetchError;
       
       if (!position) {
+        userLogger.warn(`Position ${positionId} not found or already closed`);
         return new Response(
           JSON.stringify({ success: false, error: 'Position not found or already closed' }),
           { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
-      const result = await closePosition(supabase, position, manualClose, closedByRebalancer);
+      const result = await closePosition(supabase, position, manualClose, closedByRebalancer, userLogger);
       
       if (!result.success) {
         return new Response(
@@ -128,6 +140,7 @@ serve(async (req) => {
         );
       }
 
+      userLogger.success(`Position closed for ${position.symbol}`);
       return new Response(
         JSON.stringify({
           success: true,
@@ -138,7 +151,7 @@ serve(async (req) => {
       );
     }
   } catch (error) {
-    console.error('Error closing trade:', error);
+    logError(logger, error, "closing trade");
     return new Response(
       JSON.stringify({
         success: false,
@@ -162,8 +175,11 @@ async function closePosition(
   supabase: any, 
   position: any, 
   manualClose: boolean = false, 
-  closedByRebalancer: boolean = false
+  closedByRebalancer: boolean = false,
+  parentLogger: any
 ): Promise<CloseResult> {
+  const posLogger = parentLogger.forSymbol(position.symbol);
+  
   try {
     // Fetch latest price from Binance for accurate P&L calculation
     let currentPrice = position.current_price || position.entry_price;
@@ -180,38 +196,38 @@ async function closePosition(
           const parsedPrice = parseFloat(binanceData.price);
           if (Number.isFinite(parsedPrice) && parsedPrice > 0) {
             currentPrice = parsedPrice;
-            console.log(`[ClosePosition] Fetched fresh price for ${position.symbol}: ${currentPrice}`);
+            posLogger.info(`Fetched fresh price: ${currentPrice}`);
           } else {
-            console.warn(`[ClosePosition] Invalid price from Binance for ${position.symbol}: ${binanceData.price}`);
+            posLogger.warn(`Invalid price from Binance: ${binanceData.price}`);
           }
         } else {
-          console.warn(`[ClosePosition] No price from Binance for ${position.symbol}, using stored current_price`);
+          posLogger.warn(`No price from Binance, using stored current_price`);
         }
       } else {
-        console.warn(`[ClosePosition] Binance API error for ${position.symbol}: ${binanceResponse.status}`);
+        posLogger.warn(`Binance API error: ${binanceResponse.status}`);
       }
     } catch (error) {
-      console.error(`[ClosePosition] Failed to fetch Binance price for ${position.symbol}:`, error);
-      console.log(`[ClosePosition] Falling back to stored current_price: ${currentPrice}`);
+      posLogger.error(`Failed to fetch Binance price: ${error}`);
+      posLogger.info(`Falling back to stored current_price: ${currentPrice}`);
     }
     
     // Final validation - must have valid price
     if (!currentPrice || !Number.isFinite(currentPrice) || currentPrice <= 0) {
       currentPrice = position.entry_price;
-      console.warn(`[ClosePosition] Using entry_price as fallback: ${currentPrice}`);
+      posLogger.warn(`Using entry_price as fallback: ${currentPrice}`);
     }
     
     // Validate entry price for P&L calculation
     const entryPrice = position.entry_price;
     if (!entryPrice || !Number.isFinite(entryPrice) || entryPrice <= 0) {
-      console.error(`[ClosePosition] Invalid entry price for position ${position.id}: ${entryPrice}`);
+      posLogger.error(`Invalid entry price for position ${position.id}: ${entryPrice}`);
       return { success: false, error: 'Invalid entry price' };
     }
     
     // Validate quantity
     const quantity = position.quantity;
     if (!quantity || !Number.isFinite(quantity) || quantity <= 0) {
-      console.error(`[ClosePosition] Invalid quantity for position ${position.id}: ${quantity}`);
+      posLogger.error(`Invalid quantity for position ${position.id}: ${quantity}`);
       return { success: false, error: 'Invalid quantity' };
     }
     
@@ -224,7 +240,7 @@ async function closePosition(
       ? ((currentPrice - entryPrice) / entryPrice) * 100
       : ((entryPrice - currentPrice) / entryPrice) * 100;
     
-    console.log(`[ClosePosition] ${position.symbol} P&L calculation: entry=${entryPrice}, exit=${currentPrice}, quantity=${quantity}, pnl=$${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)`);
+    posLogger.trade(`P&L calculation: entry=${entryPrice}, exit=${currentPrice}, qty=${quantity}, pnl=$${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)`);
 
     // Determine close reason
     const closeReason = manualClose ? 'manual_close' : (closedByRebalancer ? 'rebalancer' : 'system');
@@ -249,13 +265,13 @@ async function closePosition(
       .maybeSingle();
 
     if (updateError) {
-      console.error('Failed to update position:', updateError);
+      posLogger.error(`Failed to update position: ${updateError.message}`);
       return { success: false, error: updateError.message };
     }
 
     // Check if position was actually updated (might have been closed by another process)
     if (!updatedPosition) {
-      console.warn(`[ClosePosition] Position ${position.id} was already closed by another process`);
+      posLogger.warn(`Position ${position.id} was already closed by another process`);
       return { success: true, position: null }; // Still success, just already closed
     }
 
@@ -267,7 +283,7 @@ async function closePosition(
       .eq('status', 'active');
 
     if (countError) {
-      console.error('Failed to count active positions:', countError);
+      posLogger.error(`Failed to count active positions: ${countError.message}`);
     }
 
     // Get current risk parameters to update consecutive losses and peak P&L
@@ -278,7 +294,7 @@ async function closePosition(
       .maybeSingle();
 
     if (riskFetchError) {
-      console.error('Failed to fetch risk parameters:', riskFetchError);
+      posLogger.error(`Failed to fetch risk parameters: ${riskFetchError.message}`);
     }
 
     // Update consecutive losses based on trade outcome
@@ -295,16 +311,16 @@ async function closePosition(
       // Trade was a loss - increment consecutive losses and add to daily loss
       newConsecutiveLosses = (currentRiskParams?.consecutive_losses || 0) + 1;
       updatedDailyLoss += Math.abs(pnl); // Add absolute value of loss
-      console.log(`Trade loss - consecutive losses: ${newConsecutiveLosses}, daily loss: $${updatedDailyLoss.toFixed(2)}`);
+      posLogger.risk(`Trade loss - consecutive losses: ${newConsecutiveLosses}, daily loss: $${updatedDailyLoss.toFixed(2)}`);
     } else {
       // Trade was a win or breakeven - reset consecutive losses to 0
       newConsecutiveLosses = 0;
       // Update peak daily P&L if current is higher
       if (currentDailyPnl > updatedDailyPeakPnl) {
         updatedDailyPeakPnl = currentDailyPnl;
-        console.log(`📈 New daily peak P&L: $${updatedDailyPeakPnl.toFixed(2)}`);
+        posLogger.success(`New daily peak P&L: $${updatedDailyPeakPnl.toFixed(2)}`);
       }
-      console.log(`Trade win/breakeven - resetting consecutive losses to 0`);
+      posLogger.info(`Trade win/breakeven - resetting consecutive losses to 0`);
     }
 
     const { error: riskUpdateError } = await supabase
@@ -318,15 +334,15 @@ async function closePosition(
       .eq('user_id', position.user_id);
 
     if (riskUpdateError) {
-      console.error('Failed to update risk parameters:', riskUpdateError);
+      posLogger.error(`Failed to update risk parameters: ${riskUpdateError.message}`);
       // Don't fail the close operation for this
     }
 
-    console.log(`Closed position ${position.id} for ${position.symbol} with P&L: $${pnl.toFixed(2)}`);
+    posLogger.success(`Closed position ${position.id} with P&L: $${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)`);
     
     return { success: true, position: updatedPosition };
   } catch (error) {
-    console.error(`Error in closePosition for ${position.id}:`, error);
+    posLogger.error(`Error in closePosition for ${position.id}: ${error}`);
     return { 
       success: false, 
       error: error instanceof Error ? error.message : 'Unknown error' 
