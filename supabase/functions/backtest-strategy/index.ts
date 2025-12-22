@@ -13,6 +13,10 @@ import {
   getVolumeScore,
   calculateUnifiedReversalScore
 } from "../_shared/scoring.ts";
+import { createLogger, logError } from "../_shared/logging.ts";
+
+// Create logger instance
+const logger = createLogger("backtest-strategy");
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -60,8 +64,11 @@ serve(async (req) => {
   }
 
   try {
+    logger.boot();
+    
     const { strategyId, symbol, startDate, endDate, initialCapital } = await req.json();
-    console.log('Running ALIGNED backtest (shared modules):', { strategyId, symbol, startDate, endDate, initialCapital });
+    const symLogger = logger.forSymbol(symbol);
+    symLogger.info(`Running ALIGNED backtest: strategy=${strategyId}, period=${startDate} to ${endDate}, capital=$${initialCapital}`);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -103,7 +110,7 @@ serve(async (req) => {
     }
 
     if (!strategy) throw new Error(`Strategy with ID ${strategyId} not found.`);
-    console.log('Using strategy:', strategy.name, 'Direction:', signalDirection);
+    symLogger.info(`Using strategy: ${strategy.name}, Direction: ${signalDirection}`);
 
     // ============= FETCH HISTORICAL KLINES =============
     const startTime = new Date(startDate).getTime();
@@ -111,7 +118,7 @@ serve(async (req) => {
     const bufferMs = 100 * 60 * 60 * 1000; // 100 hours buffer for indicators
     const fetchStartTime = startTime - bufferMs;
 
-    console.log('Fetching historical klines...');
+    symLogger.info('Fetching historical klines...');
     
     async function fetchAllKlines(sym: string, interval: string, start: number, end: number): Promise<any[]> {
       const allKlines: any[] = [];
@@ -137,11 +144,11 @@ serve(async (req) => {
       fetchAllKlines(symbol, '4h', fetchStartTime, endTime),
     ]);
 
-    console.log(`Fetched klines: 1h=${allKlines1h.length}, 4h=${allKlines4h.length}`);
+    symLogger.info(`Fetched klines: 1h=${allKlines1h.length}, 4h=${allKlines4h.length}`);
 
     // Filter to simulation period
     const simulationKlines1h = allKlines1h.filter((k: any) => k[0] >= startTime);
-    console.log(`Simulating ${simulationKlines1h.length} candles`);
+    symLogger.info(`Simulating ${simulationKlines1h.length} candles`);
 
     // ============= BACKTEST SIMULATION =============
     const trades: Trade[] = [];
@@ -155,7 +162,7 @@ serve(async (req) => {
     const startIdx = allKlines1h.findIndex((k: any) => k[0] >= startTime);
     if (startIdx === -1) throw new Error('No klines found for simulation period');
 
-    console.log(`Starting simulation from index ${startIdx}...`);
+    symLogger.debug(`Starting simulation from index ${startIdx}...`);
 
     // Helper to get klines slice for a timestamp
     function getKlinesSlice(allKlines: any[], endTimestamp: number, count: number): any[] {
@@ -473,8 +480,8 @@ serve(async (req) => {
 
     const exitReasons = trades.reduce((acc, t) => { acc[t.exitReason] = (acc[t.exitReason] || 0) + 1; return acc; }, {} as Record<string, number>);
 
-    console.log(`ALIGNED backtest complete: ${trades.length} trades, Win Rate: ${winRate.toFixed(1)}%, Net: $${netProfit.toFixed(2)}`);
-    console.log('Exit reasons:', exitReasons);
+    symLogger.summary(`Backtest complete: ${trades.length} trades, Win Rate: ${winRate.toFixed(1)}%, Net: $${netProfit.toFixed(2)}`);
+    symLogger.info(`Exit reasons: ${JSON.stringify(exitReasons)}`);
 
     // Store results
     let backtestResult: any = {
@@ -499,7 +506,7 @@ serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error) {
-    console.error('Backtest error:', error);
+    logError(logger, error, "running backtest");
     return new Response(JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500,
     });
