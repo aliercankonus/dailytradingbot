@@ -2044,9 +2044,29 @@ export const SignalRejectionReasons = () => {
 
   const getFilterDetails = (filtersStatus: any) => {
     const details = [];
-    if (filtersStatus?.aligned === false) {
+    
+    // Handle NEUTRAL_4H_LOW_CONFIDENCE gate
+    if (filtersStatus?.gate === "NEUTRAL_4H_LOW_CONFIDENCE") {
+      details.push(`4h: ${filtersStatus.trend4h} @ ${filtersStatus.confidence4h}%`);
+      details.push(`1h: ${filtersStatus.trend1h} @ ${filtersStatus.confidence1h}%`);
+      if (filtersStatus.requiredConfidence) {
+        details.push(`Required: ${filtersStatus.requiredConfidence}%`);
+      }
+      if (filtersStatus.adx) {
+        details.push(`ADX: ${filtersStatus.adx.toFixed(1)}`);
+      }
+    }
+    // Handle alignment issues
+    else if (filtersStatus?.aligned === false) {
       details.push(`4h: ${filtersStatus.trend4h}, 1h: ${filtersStatus.trend1h}`);
     }
+    
+    // Handle confidence-related gates
+    if (filtersStatus?.confidence4h !== undefined && filtersStatus?.confidence1h !== undefined && details.length === 0) {
+      details.push(`4h: ${filtersStatus.confidence4h}%`);
+      details.push(`1h: ${filtersStatus.confidence1h}%`);
+    }
+    
     if (filtersStatus?.momentumConfirms === false) {
       details.push(
         `Last close alignment: ${filtersStatus.lastCloseAlignsWithTrend ? "Yes" : "No"}`,
@@ -2056,7 +2076,7 @@ export const SignalRejectionReasons = () => {
     if (filtersStatus?.inPullback === false && filtersStatus.pullbackPercent !== undefined) {
       details.push(`Pullback: ${filtersStatus.pullbackPercent.toFixed(1)}%`);
     }
-    return details.length > 0 ? details.join(" | ") : filtersStatus?.required || "Check filters";
+    return details.length > 0 ? details.join(" | ") : filtersStatus?.required || "No details available";
   };
 
   const getRejectionDetails = (rejection: SignalRejection) => {
