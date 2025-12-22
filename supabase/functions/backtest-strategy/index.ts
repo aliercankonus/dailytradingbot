@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
 
 // Import shared modules - same code as calculate-trend uses
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RISK_PARAMS, CONFIDENCE_THRESHOLDS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RISK_PARAMS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS } from "../_shared/constants.ts";
 import { calculateATR } from "../_shared/indicators.ts";
 import { analyzeMultiTimeframe, MultiTimeframeTrendData } from "../_shared/trend-core.ts";
 import { 
@@ -419,15 +419,16 @@ serve(async (req) => {
 
         // ============= DYNAMIC QUALITY THRESHOLD (aligned with strategy-analyzer & execute-trade) =============
         // Determines min quality score based on market conditions
+        // Uses centralized QUALITY_THRESHOLDS from _shared/constants.ts
         const getMinQualityScore = (currentAdx: number, confidence1h?: number, isNeutralStrategy?: boolean): number => {
           // Neutral strategies rely on HTF direction rather than 5m quality
-          if (isNeutralStrategy) return 35;
+          if (isNeutralStrategy) return QUALITY_THRESHOLDS.NEUTRAL_MIN;
           // Strong 1h alignment exception (confidence >= 65%)
-          if (confidence1h && confidence1h >= CONFIDENCE_THRESHOLDS.HTF_EXCEPTION) return 45;
+          if (confidence1h && confidence1h >= CONFIDENCE_THRESHOLDS.HTF_EXCEPTION) return QUALITY_THRESHOLDS.STRONG_1H_MIN;
           // ADX-based thresholds
-          if (currentAdx >= ADX_THRESHOLDS.EXCEPTIONAL) return 50;
-          if (currentAdx >= ADX_THRESHOLDS.STRONG) return 53;
-          return 55; // Base threshold
+          if (currentAdx >= ADX_THRESHOLDS.EXCEPTIONAL) return QUALITY_THRESHOLDS.EXCEPTIONAL_ADX_MIN;
+          if (currentAdx >= ADX_THRESHOLDS.STRONG) return QUALITY_THRESHOLDS.STRONG_ADX_MIN;
+          return QUALITY_THRESHOLDS.BASE_MIN; // Base threshold
         };
         
         // Check if strategy is neutral type
