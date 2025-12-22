@@ -1653,6 +1653,390 @@ const HardGateNeutral4hDisplay = ({ filtersStatus, trendData }: { filtersStatus:
   );
 };
 
+// HARD GATE: Bollinger Band Overextension
+const HardGateBollingerExtensionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const percentB = coerceNumeric(filtersStatus?.percentB, 50);
+  const stochRsiK = coerceNumeric(filtersStatus?.stochRsiK4h, 50);
+  const gate = filtersStatus?.gate || "";
+  const message = filtersStatus?.message || "";
+  
+  const isOverextended = gate === "BOLLINGER_OVEREXTENSION_GATE" || percentB > 100;
+  const isUnderextended = gate === "BOLLINGER_UNDEREXTENSION_GATE" || percentB < 0;
+  
+  const getPercentBColor = () => {
+    if (percentB > 110 || percentB < -10) return "text-red-500";
+    if (percentB > 100 || percentB < 0) return "text-orange-400";
+    return "text-yellow-400";
+  };
+  
+  return (
+    <div className={`space-y-3 p-3 rounded-md border ${isOverextended ? 'bg-red-500/10 border-red-500/30' : 'bg-blue-500/10 border-blue-500/30'}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <AlertTriangle className={`h-4 w-4 ${isOverextended ? 'text-red-500' : 'text-blue-500'}`} />
+          <span className={`text-xs font-semibold ${isOverextended ? 'text-red-400' : 'text-blue-400'}`}>
+            HARD GATE: Bollinger {isOverextended ? "Overextension" : "Underextension"}
+          </span>
+        </div>
+        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+          %B = {percentB.toFixed(0)}
+        </Badge>
+      </div>
+      
+      {/* Bollinger Band Visual */}
+      <div className="space-y-1">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Bollinger %B Position</span>
+          <span className={`font-mono font-bold ${getPercentBColor()}`}>
+            {percentB.toFixed(1)}%
+          </span>
+        </div>
+        <div className="relative h-3 bg-muted/50 rounded-full overflow-hidden">
+          {/* Normal zone (0-100) */}
+          <div className="absolute left-[15%] h-full w-[70%] bg-green-500/20" />
+          {/* Danger zones */}
+          <div className="absolute left-0 h-full w-[15%] bg-blue-500/30 rounded-l-full" />
+          <div className="absolute right-0 h-full w-[15%] bg-red-500/30 rounded-r-full" />
+          {/* Current %B marker - clamped to visible range */}
+          <div 
+            className={`absolute top-0 h-full w-1 rounded-full ${getPercentBColor().replace('text-', 'bg-')}`}
+            style={{ left: `${Math.max(0, Math.min(100, (percentB + 20) / 1.4))}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-[9px] text-muted-foreground">
+          <span className="text-blue-400">&lt;0 Oversold</span>
+          <span>Lower (0)</span>
+          <span>Upper (100)</span>
+          <span className="text-red-400">&gt;100 OB</span>
+        </div>
+      </div>
+      
+      {/* Context Grid */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className={`p-2 rounded border text-center ${Math.abs(percentB - 50) > 60 ? 'bg-red-500/20 border-red-500/30' : 'bg-muted/30 border-muted/50'}`}>
+          <div className="text-[10px] text-muted-foreground">%B Value</div>
+          <div className={`text-lg font-mono font-bold ${getPercentBColor()}`}>
+            {percentB.toFixed(1)}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {isOverextended ? ">110 extreme" : isUnderextended ? "<-10 extreme" : "Normal"}
+          </div>
+        </div>
+        <div className={`p-2 rounded border text-center ${stochRsiK > 90 || stochRsiK < 10 ? 'bg-orange-500/20 border-orange-500/30' : 'bg-muted/30 border-muted/50'}`}>
+          <div className="text-[10px] text-muted-foreground">4H StochRSI K</div>
+          <div className="text-lg font-mono font-bold text-muted-foreground">
+            {stochRsiK.toFixed(1)}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {stochRsiK >= 90 ? "Overbought" : stochRsiK <= 10 ? "Oversold" : "Normal"}
+          </div>
+        </div>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className={isOverextended ? "text-red-400" : "text-blue-400"}>⛔ Why blocked:</span> {message || (isOverextended 
+          ? "Price extremely above upper Bollinger Band with overbought StochRSI. LONG entries blocked to avoid chasing extended moves."
+          : "Price extremely below lower Bollinger Band with oversold StochRSI. SHORT entries blocked to avoid selling into exhausted move."
+        )}
+      </div>
+    </div>
+  );
+};
+
+// HARD GATE: StochRSI Direction Gate (Not Rising/Not Falling)
+const HardGateStochRsiDirectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const stochRsiK = coerceNumeric(filtersStatus?.stochRsiK4h, 50);
+  const stochRsiD = coerceNumeric(filtersStatus?.stochRsiD4h, 50);
+  const gate = filtersStatus?.gate || "";
+  
+  const isNotRising = gate === "STOCHRSI_NOT_RISING";
+  const isNotFalling = gate === "STOCHRSI_NOT_FALLING";
+  const direction = isNotRising ? "rising" : "falling";
+  const requiredDirection = isNotRising ? "K > D" : "K < D";
+  const currentDirection = stochRsiK > stochRsiD ? "K > D (rising)" : stochRsiK < stochRsiD ? "K < D (falling)" : "K = D (flat)";
+  
+  return (
+    <div className="space-y-3 p-3 bg-orange-500/10 rounded-md border border-orange-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Activity className="h-4 w-4 text-orange-500" />
+          <span className="text-xs font-semibold text-orange-400">
+            HARD GATE: StochRSI Not {isNotRising ? "Rising" : "Falling"}
+          </span>
+        </div>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-orange-400 border-orange-500/30">
+          {currentDirection}
+        </Badge>
+      </div>
+      
+      {/* K vs D Visual */}
+      <div className="space-y-2">
+        <div className="text-[10px] text-muted-foreground">
+          Required: {requiredDirection} (StochRSI {direction})
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="p-2 bg-muted/30 rounded border border-muted/50 text-center">
+            <div className="text-[10px] text-muted-foreground">%K (Fast)</div>
+            <div className="text-xl font-mono font-bold text-foreground">
+              {stochRsiK.toFixed(1)}
+            </div>
+          </div>
+          <div className="p-2 bg-muted/30 rounded border border-muted/50 text-center">
+            <div className="text-[10px] text-muted-foreground">%D (Slow)</div>
+            <div className="text-xl font-mono font-bold text-foreground">
+              {stochRsiD.toFixed(1)}
+            </div>
+          </div>
+        </div>
+        
+        {/* Direction indicator */}
+        <div className={`flex items-center justify-center gap-2 p-2 rounded ${
+          (isNotRising && stochRsiK <= stochRsiD) || (isNotFalling && stochRsiK >= stochRsiD) 
+            ? 'bg-red-500/20 border border-red-500/30' 
+            : 'bg-green-500/20 border border-green-500/30'
+        }`}>
+          {isNotRising ? (
+            <>
+              <TrendingDown className="h-4 w-4 text-red-400" />
+              <span className="text-xs text-red-400">StochRSI is falling or flat (K ≤ D)</span>
+            </>
+          ) : (
+            <>
+              <TrendingUp className="h-4 w-4 text-red-400" />
+              <span className="text-xs text-red-400">StochRSI is rising or flat (K ≥ D)</span>
+            </>
+          )}
+        </div>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-orange-400">⚠️ Why blocked:</span> At extreme StochRSI levels, momentum direction matters. 
+        {isNotRising 
+          ? " For LONG entries in overbought conditions, StochRSI must be rising (K > D) to confirm continuation."
+          : " For SHORT entries in oversold conditions, StochRSI must be falling (K < D) to confirm continuation."
+        }
+      </div>
+    </div>
+  );
+};
+
+// HARD GATE: Divergence at Extreme
+const HardGateDivergenceDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const stochRsiK = coerceNumeric(filtersStatus?.stochRsiK4h, 50);
+  const gate = filtersStatus?.gate || "";
+  
+  const isBearishDivergence = gate === "BEARISH_DIVERGENCE_AT_EXTREME" || filtersStatus?.hasBearishDivergence;
+  const isBullishDivergence = gate === "BULLISH_DIVERGENCE_AT_EXTREME" || filtersStatus?.hasBullishDivergence;
+  
+  return (
+    <div className={`space-y-3 p-3 rounded-md border ${isBearishDivergence ? 'bg-red-500/10 border-red-500/30' : 'bg-blue-500/10 border-blue-500/30'}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <AlertTriangle className={`h-4 w-4 ${isBearishDivergence ? 'text-red-500' : 'text-blue-500'}`} />
+          <span className={`text-xs font-semibold ${isBearishDivergence ? 'text-red-400' : 'text-blue-400'}`}>
+            HARD GATE: {isBearishDivergence ? "Bearish" : "Bullish"} Divergence at Extreme
+          </span>
+        </div>
+        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+          K = {stochRsiK.toFixed(1)}
+        </Badge>
+      </div>
+      
+      {/* Divergence Explanation */}
+      <div className={`p-3 rounded border ${isBearishDivergence ? 'bg-red-500/20 border-red-500/30' : 'bg-blue-500/20 border-blue-500/30'}`}>
+        <div className="flex items-center gap-2 mb-2">
+          {isBearishDivergence ? (
+            <>
+              <ArrowUpCircle className="h-4 w-4 text-green-400" />
+              <span className="text-[10px]">Price making higher highs</span>
+            </>
+          ) : (
+            <>
+              <ArrowDownCircle className="h-4 w-4 text-red-400" />
+              <span className="text-[10px]">Price making lower lows</span>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {isBearishDivergence ? (
+            <>
+              <ArrowDownCircle className="h-4 w-4 text-red-400" />
+              <span className="text-[10px]">StochRSI making lower highs</span>
+            </>
+          ) : (
+            <>
+              <ArrowUpCircle className="h-4 w-4 text-green-400" />
+              <span className="text-[10px]">StochRSI making higher lows</span>
+            </>
+          )}
+        </div>
+        <div className="mt-2 pt-2 border-t border-muted/30 text-center">
+          <span className={`text-xs font-medium ${isBearishDivergence ? 'text-red-400' : 'text-blue-400'}`}>
+            = {isBearishDivergence ? "Bearish" : "Bullish"} Divergence
+          </span>
+        </div>
+      </div>
+      
+      {/* StochRSI Context */}
+      <div className="flex items-center justify-between p-2 bg-muted/30 rounded text-[10px]">
+        <span className="text-muted-foreground">4H StochRSI K:</span>
+        <span className={`font-mono font-bold ${stochRsiK >= 90 ? 'text-red-400' : stochRsiK <= 10 ? 'text-blue-400' : 'text-foreground'}`}>
+          {stochRsiK.toFixed(1)} ({stochRsiK >= 80 ? "Overbought" : stochRsiK <= 20 ? "Oversold" : "Normal"})
+        </span>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className={isBearishDivergence ? "text-red-400" : "text-blue-400"}>⛔ Why blocked:</span> {isBearishDivergence 
+          ? "Bearish divergence at overbought levels is a strong reversal signal. LONG entries blocked as momentum is weakening despite higher prices."
+          : "Bullish divergence at oversold levels is a strong reversal signal. SHORT entries blocked as selling pressure is weakening despite lower prices."
+        }
+      </div>
+    </div>
+  );
+};
+
+// HARD GATE: Momentum Score Too Low
+const HardGateMomentumScoreDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const momentumScore = coerceNumeric(filtersStatus?.momentumScore, 0);
+  const momentumRequired = coerceNumeric(filtersStatus?.momentumRequired, 5);
+  const momentumState = filtersStatus?.momentumState || trendData?.momentum?.state || "unknown";
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  
+  const scorePercent = (momentumScore / 20) * 100; // Assuming max momentum score of 20
+  
+  return (
+    <div className="space-y-3 p-3 bg-orange-500/10 rounded-md border border-orange-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Zap className="h-4 w-4 text-orange-500" />
+          <span className="text-xs font-semibold text-orange-400">HARD GATE: Momentum Score Too Low</span>
+        </div>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-orange-400 border-orange-500/30">
+          Need +{Math.max(0, momentumRequired - momentumScore)}
+        </Badge>
+      </div>
+      
+      {/* Momentum Score Visual */}
+      <div className="space-y-1">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Momentum Score</span>
+          <span className="font-mono text-orange-400">{momentumScore} / {momentumRequired} required</span>
+        </div>
+        <div className="relative h-2 bg-muted/50 rounded-full overflow-hidden">
+          <div 
+            className={`h-full rounded-full transition-all ${momentumScore >= momentumRequired ? 'bg-green-500' : 'bg-orange-500'}`}
+            style={{ width: `${Math.min(scorePercent, 100)}%` }}
+          />
+          <div 
+            className="absolute top-0 h-full w-0.5 bg-yellow-400"
+            style={{ left: `${(momentumRequired / 20) * 100}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-[9px] text-muted-foreground">
+          <span>Low (0)</span>
+          <span>Required ({momentumRequired})</span>
+          <span>Strong (20)</span>
+        </div>
+      </div>
+      
+      {/* Context Grid */}
+      <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Score</div>
+          <div className={`font-bold ${momentumScore >= momentumRequired ? 'text-green-400' : 'text-orange-400'}`}>
+            {momentumScore}
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">State</div>
+          <div className="font-medium capitalize">{momentumState}</div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">ADX</div>
+          <div className="font-medium">{adx.toFixed(1)}</div>
+        </div>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-orange-400">⚠️ Why blocked:</span> Trades with momentum score below {momentumRequired} have 
+        extremely low win rates. Wait for stronger momentum confirmation before entry.
+      </div>
+    </div>
+  );
+};
+
+// HARD GATE: MACD Misaligned
+const HardGateMacdMisalignedDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const macdDirectionAligned = filtersStatus?.macdDirectionAligned ?? false;
+  const hasMacdDivergence = filtersStatus?.hasMacdDivergence ?? false;
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const trend = filtersStatus?.trend || trendData?.primaryTrend || "unknown";
+  const momentum = filtersStatus?.momentum || trendData?.momentum;
+  
+  const macdHistogram = momentum?.macdHistogram ?? trendData?.timeframes?.['1h']?.indicators?.macdHistogram;
+  const macdDisplay = typeof macdHistogram === 'number' ? macdHistogram.toFixed(4) : "N/A";
+  
+  return (
+    <div className="space-y-3 p-3 bg-yellow-500/10 rounded-md border border-yellow-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <BarChart3 className="h-4 w-4 text-yellow-500" />
+          <span className="text-xs font-semibold text-yellow-400">HARD GATE: MACD Misaligned</span>
+        </div>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-yellow-400 border-yellow-500/30">
+          ADX: {adx.toFixed(1)}
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        MACD must align with trade direction OR ADX ≥35 to override
+      </div>
+      
+      {/* MACD Checks */}
+      <div className="space-y-1.5">
+        <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${macdDirectionAligned ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+          {macdDirectionAligned ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+          <span>MACD Direction: {macdDirectionAligned ? "Aligned" : "Not Aligned"}</span>
+        </div>
+        <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${!hasMacdDivergence ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+          {!hasMacdDivergence ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+          <span>MACD Divergence: {hasMacdDivergence ? "Detected" : "None"}</span>
+        </div>
+        <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${adx >= 35 ? 'bg-green-500/10' : 'bg-muted/30'}`}>
+          {adx >= 35 ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-muted-foreground" />}
+          <span>ADX Override (≥35): {adx.toFixed(1)}</span>
+        </div>
+      </div>
+      
+      {/* Context */}
+      <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Trend</div>
+          <div className="font-medium capitalize">{trend}</div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">MACD Hist</div>
+          <div className={`font-mono ${Number(macdHistogram) > 0 ? 'text-green-400' : Number(macdHistogram) < 0 ? 'text-red-400' : ''}`}>
+            {macdDisplay}
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Momentum</div>
+          <div className="font-medium capitalize">{momentum?.state || "N/A"}</div>
+        </div>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-yellow-400">⚠️ Why blocked:</span> MACD histogram must confirm trade direction. 
+        {hasMacdDivergence 
+          ? " Divergence detected between price and MACD, indicating weakening momentum."
+          : " MACD direction does not match intended trade. Wait for MACD to align or for ADX to exceed 35 for override."
+        }
+      </div>
+    </div>
+  );
+};
+
 const ActiveSignalDisplay = () => {
   return (
     <div className="flex items-center gap-2 p-2 bg-green-500/10 rounded-md border border-green-500/20">
@@ -2117,6 +2501,39 @@ export const SignalRejectionReasons = () => {
     // HARD GATE: Neutral 4h requires 70%+ confidence OR directional 1h with 65%+
     if (reason.includes("Neutral 4h requires 70%") || reason.includes("NEUTRAL_4H") || fs?.gate === "NEUTRAL_4H_LOW_CONFIDENCE") {
       return <HardGateNeutral4hDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // HARD GATE: Bollinger Band Overextension/Underextension
+    if (fs?.gate === "BOLLINGER_OVEREXTENSION_GATE" || fs?.gate === "BOLLINGER_UNDEREXTENSION_GATE" || 
+        reason.includes("overextended") || reason.includes("underextended")) {
+      return <HardGateBollingerExtensionDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // HARD GATE: StochRSI Not Rising/Not Falling
+    if (fs?.gate === "STOCHRSI_NOT_RISING" || fs?.gate === "STOCHRSI_NOT_FALLING" ||
+        reason.includes("StochRSI NOT rising") || reason.includes("StochRSI NOT falling")) {
+      return <HardGateStochRsiDirectionDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // HARD GATE: Divergence at Extreme (Bearish/Bullish)
+    if (fs?.gate === "BEARISH_DIVERGENCE_AT_EXTREME" || fs?.gate === "BULLISH_DIVERGENCE_AT_EXTREME" ||
+        (reason.includes("divergence") && reason.includes("extreme"))) {
+      return <HardGateDivergenceDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // HARD GATE: Momentum Score Too Low
+    if (fs?.gate === "MOMENTUM_SCORE_TOO_LOW" || reason.includes("Momentum score too low")) {
+      return <HardGateMomentumScoreDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // HARD GATE: MACD Misaligned
+    if (fs?.gate === "MACD_MISALIGNED" || reason.includes("MACD") && (reason.includes("misaligned") || reason.includes("not aligned"))) {
+      return <HardGateMacdMisalignedDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // HARD BLOCK: Absolute min StochRSI (K <= 2)
+    if (fs?.gate === "ABSOLUTE_MIN_STOCHRSI_HARD_BLOCK") {
+      return <HardBlockStochRsiDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // Reversal risk rejection
