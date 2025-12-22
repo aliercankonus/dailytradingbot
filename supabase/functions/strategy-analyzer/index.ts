@@ -1499,6 +1499,96 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Reversal entry - position size reduced to ${(reversalPositionMultiplier * 100).toFixed(0)}%`);
         }
         
+        // ===== CRITICAL: ABSOLUTE MAXIMUM STOCHRSI HARD BLOCK GATES =====
+        // These gates have NO EXCEPTIONS - K>=98 for LONG or K<=2 for SHORT means BLOCK
+        // At these levels, there is physically no more room for the indicator to continue
+        const ABSOLUTE_MAX_OB = STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT ?? 98;
+        const ABSOLUTE_MAX_OS = STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD ?? 2;
+        
+        if (intendedTradeDirection === "long" && stochRsiK4h >= ABSOLUTE_MAX_OB) {
+          rejectedByStochRsiExtreme++;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute maximum (K=${stochRsiK4h.toFixed(1)} >= ${ABSOLUTE_MAX_OB}) - nowhere to rise, no exceptions allowed`);
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `HARD BLOCK: StochRSI K=${stochRsiK4h.toFixed(1)} at absolute maximum (>=${ABSOLUTE_MAX_OB}) - no LONG entries allowed`,
+            filters_status: { 
+              stochRsiK4h: stochRsiK4h.toFixed(1), 
+              gate: "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK",
+              threshold: ABSOLUTE_MAX_OB,
+              message: "StochRSI at ceiling - nowhere to rise - no exceptions"
+            },
+            trend_data: trendData, checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
+        if (intendedTradeDirection === "short" && stochRsiK4h <= ABSOLUTE_MAX_OS) {
+          rejectedByStochRsiExtreme++;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute minimum (K=${stochRsiK4h.toFixed(1)} <= ${ABSOLUTE_MAX_OS}) - nowhere to fall, no exceptions allowed`);
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `HARD BLOCK: StochRSI K=${stochRsiK4h.toFixed(1)} at absolute minimum (<=${ABSOLUTE_MAX_OS}) - no SHORT entries allowed`,
+            filters_status: { 
+              stochRsiK4h: stochRsiK4h.toFixed(1), 
+              gate: "ABSOLUTE_MIN_STOCHRSI_HARD_BLOCK",
+              threshold: ABSOLUTE_MAX_OS,
+              message: "StochRSI at floor - nowhere to fall - no exceptions"
+            },
+            trend_data: trendData, checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
+        // ===== NEW: BOLLINGER BAND OVEREXTENSION GATE =====
+        // Block LONG when price is extremely above upper Bollinger (percentB > 110) AND StochRSI >= 90
+        const isExtremelyOverextended = percentB > 110;
+        if (intendedTradeDirection === "long" && isExtremelyOverextended && stochRsiK4h >= STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT) {
+          rejectedByStochRsiExtreme++;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Price extremely overextended (%B=${percentB.toFixed(1)} > 110) with overbought StochRSI (K=${stochRsiK4h.toFixed(1)})`);
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `BLOCK: Price overextended (%B=${percentB.toFixed(1)} > 110) + StochRSI K=${stochRsiK4h.toFixed(1)} overbought`,
+            filters_status: { 
+              percentB: percentB.toFixed(1), 
+              stochRsiK4h: stochRsiK4h.toFixed(1),
+              gate: "BOLLINGER_OVEREXTENSION_GATE",
+              message: "Price extremely above upper Bollinger with overbought StochRSI"
+            },
+            trend_data: trendData, checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
+        // Block SHORT when price is extremely below lower Bollinger (percentB < -10) AND StochRSI <= 10
+        const isExtremelyUnderextended = percentB < -10;
+        if (intendedTradeDirection === "short" && isExtremelyUnderextended && stochRsiK4h <= STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD) {
+          rejectedByStochRsiExtreme++;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Price extremely underextended (%B=${percentB.toFixed(1)} < -10) with oversold StochRSI (K=${stochRsiK4h.toFixed(1)})`);
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `BLOCK: Price underextended (%B=${percentB.toFixed(1)} < -10) + StochRSI K=${stochRsiK4h.toFixed(1)} oversold`,
+            filters_status: { 
+              percentB: percentB.toFixed(1), 
+              stochRsiK4h: stochRsiK4h.toFixed(1),
+              gate: "BOLLINGER_UNDEREXTENSION_GATE",
+              message: "Price extremely below lower Bollinger with oversold StochRSI"
+            },
+            trend_data: trendData, checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
+        // ===== NEW: MACD ALIGNMENT AND VOLUME CHECKS FOR MOMENTUM STRATEGIES =====
+        // These will be applied per-strategy during strategy evaluation loop
+        // Store the thresholds for later use
+        const HIGH_REVERSAL_OB = STOCHRSI_THRESHOLDS.HIGH_REVERSAL_OVERBOUGHT ?? 95;
+        const HIGH_REVERSAL_OS = STOCHRSI_THRESHOLDS.HIGH_REVERSAL_OVERSOLD ?? 5;
+        const isAtHighReversalLong = stochRsiK4h >= HIGH_REVERSAL_OB && intendedTradeDirection === "long";
+        const isAtHighReversalShort = stochRsiK4h <= HIGH_REVERSAL_OS && intendedTradeDirection === "short";
+        
+        // Track if momentum strategy checks should reduce position size
+        let momentumVolumeReduction = 1.0;
+        
         // ===== SMART EXCEPTION FOR LONG AT OVERBOUGHT =====
         // Allow LONG when StochRSI > 90 IF:
         // 1. Strong uptrend on 4h (bullish + confidence >= 65%)
@@ -2465,6 +2555,71 @@ serve(async (req) => {
         const signalType = best.signalType;
         const isHighPerformer = isStrategyHighPerformerForRegime(strategy.name, currentRegimeType);
         logger.forSymbol(symbol).signal(`Selected "${strategy.name}"${isHighPerformer ? ' ⭐' : ''} [${currentRegimeType}] (${regimeFilteredCandidates.length}/${candidates.length} strategies after regime filter, best score: ${best.score}, direction: ${signalType})`);
+        
+        // ===== MOMENTUM STRATEGY GATE: MACD ALIGNMENT + VOLUME REQUIREMENT AT HIGH REVERSAL RISK =====
+        // For momentum strategies at K>=95 (overbought) or K<=5 (oversold), require MACD alignment
+        const isMomentumStrat = isMomentumStrategy(strategy.id, strategy.name);
+        const volumeConfirmsNow = momentum?.volumeConfirms === true;
+        
+        // High reversal thresholds (from constants)
+        const HIGH_REVERSAL_OVERBOUGHT = STOCHRSI_THRESHOLDS.HIGH_REVERSAL_OVERBOUGHT ?? 95;
+        const HIGH_REVERSAL_OVERSOLD = STOCHRSI_THRESHOLDS.HIGH_REVERSAL_OVERSOLD ?? 5;
+        
+        if (isMomentumStrat && signalType === "long" && stochRsiK4h >= HIGH_REVERSAL_OVERBOUGHT) {
+          const macdAlignedForLong = macdHistogram > 0;
+          
+          if (!macdAlignedForLong) {
+            rejectedByHardGates++;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Momentum strategy "${strategy.name}" LONG at K=${stochRsiK4h.toFixed(1)} without MACD alignment (histogram=${macdHistogram.toFixed(4)})`);
+            await supabase.from("signal_rejection_log").insert({
+              user_id: userId, symbol,
+              rejection_reason: `BLOCK: Momentum strategy "${strategy.name}" at K=${stochRsiK4h.toFixed(1)} requires MACD > 0 for LONG`,
+              filters_status: { 
+                strategyName: strategy.name, 
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                macdHistogram: macdHistogram.toFixed(4),
+                macdAligned: false,
+                gate: "MOMENTUM_MACD_ALIGNMENT_GATE"
+              },
+              trend_data: trendData, checked_at: new Date().toISOString(),
+            });
+            continue;
+          }
+          
+          // Volume requirement: reduce position size to 30% if no volume confirmation
+          if (!volumeConfirmsNow) {
+            reversalPositionMultiplier = Math.min(reversalPositionMultiplier, 0.3);
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.RISK} Momentum strategy "${strategy.name}" at K=${stochRsiK4h.toFixed(1)} without volume - position reduced to 30%`);
+          }
+        }
+        
+        if (isMomentumStrat && signalType === "short" && stochRsiK4h <= HIGH_REVERSAL_OVERSOLD) {
+          const macdAlignedForShort = macdHistogram < 0;
+          
+          if (!macdAlignedForShort) {
+            rejectedByHardGates++;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Momentum strategy "${strategy.name}" SHORT at K=${stochRsiK4h.toFixed(1)} without MACD alignment (histogram=${macdHistogram.toFixed(4)})`);
+            await supabase.from("signal_rejection_log").insert({
+              user_id: userId, symbol,
+              rejection_reason: `BLOCK: Momentum strategy "${strategy.name}" at K=${stochRsiK4h.toFixed(1)} requires MACD < 0 for SHORT`,
+              filters_status: { 
+                strategyName: strategy.name, 
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                macdHistogram: macdHistogram.toFixed(4),
+                macdAligned: false,
+                gate: "MOMENTUM_MACD_ALIGNMENT_GATE"
+              },
+              trend_data: trendData, checked_at: new Date().toISOString(),
+            });
+            continue;
+          }
+          
+          // Volume requirement: reduce position size to 30% if no volume confirmation
+          if (!volumeConfirmsNow) {
+            reversalPositionMultiplier = Math.min(reversalPositionMultiplier, 0.3);
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.RISK} Momentum strategy "${strategy.name}" at K=${stochRsiK4h.toFixed(1)} without volume - position reduced to 30%`);
+          }
+        }
         
         const indicatorValues = best.indicatorValues;
 

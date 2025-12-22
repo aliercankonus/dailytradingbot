@@ -540,11 +540,16 @@ export const calculateUnifiedReversalScore = (
     reasons.push(`Opposing StochRSI cross`);
   }
   
-  // 2. StochRSI EXTREME ZONES (0-25 points)
+  // 2. StochRSI EXTREME ZONES (0-50 points) - INCREASED from 0-25 for extreme readings
   const k4h = stoch4h.k ?? 50;
   let rawStochZoneScore = 0;
   
+  // NEW: Use high reversal thresholds from constants (default 95 for overbought, 5 for oversold)
+  const HIGH_REVERSAL_OB = STOCHRSI_THRESHOLDS.HIGH_REVERSAL_OVERBOUGHT ?? 95;
+  const HIGH_REVERSAL_OS = STOCHRSI_THRESHOLDS.HIGH_REVERSAL_OVERSOLD ?? 5;
+  
   if (isLong) {
+    // Check deeply oversold (favorable for LONG = reduces score)
     if (k4h < STOCHRSI_THRESHOLDS.DEEPLY_OVERSOLD) {
       rawStochZoneScore += 15;
       reasons.push(`4h StochRSI deeply oversold (K=${k4h.toFixed(1)})`);
@@ -552,11 +557,21 @@ export const calculateUnifiedReversalScore = (
       rawStochZoneScore += 8;
       reasons.push(`4h StochRSI oversold zone (K=${k4h.toFixed(1)})`);
     }
-    if (k4h > STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT) {
-      rawStochZoneScore += 10;
+    
+    // ENHANCED: Check extremely overbought (risky for LONG = increases score significantly)
+    // K >= 95: +35 points (was +10) - HIGH REVERSAL RISK
+    if (k4h >= HIGH_REVERSAL_OB) {
+      rawStochZoneScore += 35;
+      reasons.push(`4h StochRSI at high reversal risk (K=${k4h.toFixed(1)} >= ${HIGH_REVERSAL_OB}) - nowhere to rise`);
+    } else if (k4h > STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT) {
+      rawStochZoneScore += 18;
       reasons.push(`4h StochRSI extremely overbought (K=${k4h.toFixed(1)})`);
+    } else if (k4h > STOCHRSI_THRESHOLDS.OVERBOUGHT) {
+      rawStochZoneScore += 10;
+      reasons.push(`4h StochRSI overbought (K=${k4h.toFixed(1)})`);
     }
   } else {
+    // Check deeply overbought (favorable for SHORT = reduces score)
     if (k4h > STOCHRSI_THRESHOLDS.DEEPLY_OVERBOUGHT) {
       rawStochZoneScore += 15;
       reasons.push(`4h StochRSI deeply overbought (K=${k4h.toFixed(1)})`);
@@ -564,14 +579,25 @@ export const calculateUnifiedReversalScore = (
       rawStochZoneScore += 8;
       reasons.push(`4h StochRSI overbought zone (K=${k4h.toFixed(1)})`);
     }
-    if (k4h < STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD) {
-      rawStochZoneScore += 10;
+    
+    // ENHANCED: Check extremely oversold (risky for SHORT = increases score significantly)
+    // K <= 5: +35 points (was +10) - HIGH REVERSAL RISK
+    if (k4h <= HIGH_REVERSAL_OS) {
+      rawStochZoneScore += 35;
+      reasons.push(`4h StochRSI at high reversal risk (K=${k4h.toFixed(1)} <= ${HIGH_REVERSAL_OS}) - nowhere to fall`);
+    } else if (k4h < STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD) {
+      rawStochZoneScore += 18;
       reasons.push(`4h StochRSI extremely oversold (K=${k4h.toFixed(1)})`);
+    } else if (k4h < STOCHRSI_THRESHOLDS.OVERSOLD) {
+      rawStochZoneScore += 10;
+      reasons.push(`4h StochRSI oversold (K=${k4h.toFixed(1)})`);
     }
   }
   
-  // Apply RSI-StochRSI conflict resolution
-  if (reduceStochZonePenalty && rawStochZoneScore > 0) {
+  // Apply RSI-StochRSI conflict resolution (but NOT for high reversal risk levels)
+  // High reversal risk (K >= 95 or K <= 5) should not be reduced
+  const isAtHighReversalRisk = isLong ? k4h >= HIGH_REVERSAL_OB : k4h <= HIGH_REVERSAL_OS;
+  if (reduceStochZonePenalty && rawStochZoneScore > 0 && !isAtHighReversalRisk) {
     breakdown.stochRsiZoneScore = Math.round(rawStochZoneScore * 0.5);
     reasons.push(`StochRSI zone penalty reduced 50% (RSI pullback + momentum)`);
   } else {
