@@ -234,9 +234,22 @@ serve(async (req) => {
       const ema26_3ago = calculateEMA(closes3Ago, 26);
       const macdLine3Ago = ema12_3ago - ema26_3ago;
       
+      // Calculate movement magnitudes for divergence detection
+      const price3Ago = parseFloat(klines[klines.length - 4][4]);
+      const priceChange = lastClose - price3Ago;
+      const priceChangePercent = Math.abs(priceChange / price3Ago) * 100;
+      const macdChange = macdLine - macdLine3Ago;
+      const macdChangePercent = macdLine3Ago !== 0 ? Math.abs(macdChange / Math.abs(macdLine3Ago)) * 100 : 0;
+      
+      // Require minimum 0.3% price move AND 10% MACD change to declare significant divergence
+      const significantPriceMove = priceChangePercent >= 0.3;
+      const significantMacdMove = macdChangePercent >= 10;
+      
       const macdTrending = macdLine > macdLine3Ago ? "up" : "down";
-      const priceTrending = lastClose > parseFloat(klines[klines.length - 4][4]) ? "up" : "down";
-      const hasDivergence = macdTrending !== priceTrending;
+      const priceTrending = lastClose > price3Ago ? "up" : "down";
+      
+      // Only declare divergence if movements are significant AND directions oppose
+      const hasDivergence = significantPriceMove && significantMacdMove && macdTrending !== priceTrending;
 
       return { 
         symbol, 
@@ -598,11 +611,21 @@ serve(async (req) => {
           emergencyReason = "divergence_volume_spike";
         }
       }
-      // For momentum strategies: divergence alone is a strong exit signal
-      else if (divergenceExit && isMomentum && earlyPnlPercent < 0.5) {
-        emergencyClose = true;
-        emergencyReason = "momentum_divergence_exit";
-        positionLogger.risk(`STRATEGY-AWARE: Momentum strategy divergence detected - exiting to protect capital`);
+      // For momentum strategies: divergence alone is exit signal ONLY when in loss
+      // Don't exit profitable positions - let trailing stop handle those
+      else if (divergenceExit && isMomentum && earlyPnlPercent < 0) {
+        // Add grace period: don't exit within first 10 minutes of position opening
+        const positionAgeMinutes = position.opened_at 
+          ? (Date.now() - new Date(position.opened_at).getTime()) / (1000 * 60) 
+          : 999;
+        
+        if (positionAgeMinutes >= 10) {
+          emergencyClose = true;
+          emergencyReason = "momentum_divergence_exit";
+          positionLogger.risk(`STRATEGY-AWARE: Momentum divergence + loss (${earlyPnlPercent.toFixed(2)}%) after ${positionAgeMinutes.toFixed(0)}min - exiting`);
+        } else {
+          positionLogger.info(`STRATEGY-AWARE: Momentum divergence detected but position age ${positionAgeMinutes.toFixed(0)}min < 10min grace period - skipping`);
+        }
       }
       // Extreme volatility alone = exit
       else if (atrRatio >= EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD) {
