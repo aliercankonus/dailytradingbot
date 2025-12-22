@@ -628,9 +628,9 @@ serve(async (req) => {
         if (positionAgeMinutes >= 10) {
           emergencyClose = true;
           emergencyReason = "momentum_divergence_exit";
-          positionLogger.risk(`STRATEGY-AWARE: Momentum divergence + loss (${earlyPnlPercent.toFixed(2)}%) after ${positionAgeMinutes.toFixed(0)}min - exiting`);
+          positionLogger.risk(`STRATEGY-AWARE: Momentum divergence + loss (${earlyPnlPercent.toFixed(2)}%) after ${positionAgeMinutes.toFixed(0)}min - exiting | Price: ${priceTrending} ${priceChangePercent.toFixed(2)}% | MACD: ${macdTrending} ${macdChangePercent.toFixed(2)}%`);
         } else {
-          positionLogger.info(`STRATEGY-AWARE: Momentum divergence detected but position age ${positionAgeMinutes.toFixed(0)}min < 10min grace period - skipping`);
+          positionLogger.info(`STRATEGY-AWARE: Momentum divergence detected but position age ${positionAgeMinutes.toFixed(0)}min < 10min grace period - skipping | Price: ${priceTrending} ${priceChangePercent.toFixed(2)}% | MACD: ${macdTrending} ${macdChangePercent.toFixed(2)}%`);
         }
       }
       // Extreme volatility alone = exit
