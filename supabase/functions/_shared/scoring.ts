@@ -608,7 +608,16 @@ export const calculateUnifiedReversalScore = (
   // RELAXED: Allow "none" state with reduced penalty when ADX >= 28 (strong trend exception)
   const isStrongTrendException = adx >= ADX_THRESHOLDS.STRONG_TREND_EXCEPTION; // 28+ (relaxed from 30)
   
-  if (momentumState === "none") {
+  // Check "mixed" state FIRST (highest penalty) - prevents premature catch by other conditions
+  if (momentumState === "mixed") {
+    if (adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION) {
+      breakdown.momentumScore = 30;
+      reasons.push(`Mixed momentum with weak ADX`);
+    } else {
+      breakdown.momentumScore = 15;
+      reasons.push(`Mixed momentum (ADX allows)`);
+    }
+  } else if (momentumState === "none") {
     if (isStrongTrendException) {
       // Strong trend exception - reduced penalty for early entries
       breakdown.momentumScore = 10;
@@ -624,14 +633,6 @@ export const calculateUnifiedReversalScore = (
     } else {
       breakdown.momentumScore = 20;
       reasons.push(`Momentum state ${momentumState} not confirmed`);
-    }
-  } else if (momentumState === "mixed") {
-    if (adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION) {
-      breakdown.momentumScore = 30;
-      reasons.push(`Mixed momentum with weak ADX`);
-    } else {
-      breakdown.momentumScore = 15;
-      reasons.push(`Mixed momentum (ADX allows)`);
     }
   } else if (momentumState === "building" && !momentumConfirms) {
     breakdown.momentumScore = 10;
