@@ -2,6 +2,13 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
 import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, SLIPPAGE_PARAMS } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
+import { 
+  getStochRsiWeightedRsiScore, 
+  getConfidencePenalty, 
+  getAdxWeight,
+  calculateUnifiedReversalScore,
+  type UnifiedReversalResult
+} from "../_shared/scoring.ts";
 
 // ============= RSI MOMENTUM ZONE CONSTRAINTS =============
 // Momentum continuation entries require RSI in specific zones to prevent late entries
@@ -27,28 +34,7 @@ function calculateHistoricalATR(klines: any[], histStartIdx: number, histEndIdx:
 }
 
 // ============= StochRSI-RSI CONFLICT RESOLUTION =============
-// When StochRSI is at extremes, RSI signals are weighted at 50% to prevent
-// self-canceling signals where RSI momentum continuation conflicts with StochRSI reversal risk
-const getStochRsiWeightedRsiScore = (
-  rsiScore: number,
-  stochRsiK: number,
-  isLong: boolean
-): { score: number; wasReduced: boolean } => {
-  const extremeThreshold = isLong 
-    ? STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT  // 90
-    : STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD;   // 10
-    
-  const isExtreme = isLong 
-    ? stochRsiK > extremeThreshold
-    : stochRsiK < extremeThreshold;
-  
-  if (isExtreme) {
-    // StochRSI extreme = RSI signal weighted at 50%
-    return { score: Math.round(rsiScore * 0.5), wasReduced: true };
-  }
-  
-  return { score: rsiScore, wasReduced: false };
-};
+// Imported from "../_shared/scoring.ts" - getStochRsiWeightedRsiScore
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -334,21 +320,9 @@ serve(async (req) => {
       const positionConfidence = trendDataForPosition?.confidence ?? 50;
       
       // ============================================================
-      // CONFIDENCE PENALTY FUNCTION (aligned with strategy-analyzer)
-      // High confidence = trend exhaustion, penalize accordingly
+      // CONFIDENCE PENALTY (imported from shared scoring module)
       // ============================================================
-      // Uses CONFIDENCE_THRESHOLDS for consistency across codebase
-      const getConfidencePenalty = (confidence: number): number => {
-        if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_HEAVY) return -25;   // Heavy penalty for extreme confidence
-        if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_STRONG) return -18;  // Strong penalty
-        if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_MODERATE) return -12; // Moderate penalty
-        if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_LIGHT) return -8;    // Light penalty
-        if (confidence >= CONFIDENCE_THRESHOLDS.DEAD_ZONE_LOWER) return -12; // DEAD ZONE: 60-69 penalty
-        if (confidence >= CONFIDENCE_THRESHOLDS.OPTIMAL_LOWER) return 0;     // Optimal zone: 50-59
-        return -3;  // Too low confidence
-      };
-      
-      const confidencePenalty = getConfidencePenalty(positionConfidence);
+      const confidencePenalty = getConfidencePenalty(positionConfidence, positionAdx, false);
       
       // ADX-based reversal risk threshold adjustment - Uses centralized ADX_THRESHOLDS
       // Higher ADX = more lenient (allow higher reversal risk before exit)
