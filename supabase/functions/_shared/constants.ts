@@ -145,6 +145,15 @@ export const CORRELATION_PARAMS = {
   SIZE_REDUCTION_THRESHOLD: 30,
 } as const;
 
+// Trend validation parameters for execution
+export const TREND_VALIDATION_PARAMS = {
+  // Minimum confidence required to enforce strict trend-direction agreement
+  // Below this threshold, allow counter-trend entries (pullbacks/reversals) with warning
+  STRICT_CONFIDENCE_THRESHOLD: 70,
+  // Position size reduction for counter-trend entries allowed through
+  COUNTER_TREND_POSITION_MULTIPLIER: 0.6,
+} as const;
+
 // Strategy performance and selection parameters
 export const STRATEGY_PARAMS = {
   // Maximum bonus points for high-performing strategies

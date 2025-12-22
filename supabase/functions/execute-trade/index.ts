@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR, calculateHistoricalATRAvg } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore,
@@ -429,15 +429,49 @@ serve(async (req) => {
     logger.info(`Current market trend: ${currentTrend}, Consistency: ${trendConsistency}, ATR: ${atrPercent}%, Signal: ${signal.signal_type}`);
     logger.info(`📊 Bollinger Bands: 1h squeeze=${bb1h.squeeze}, %B=${bb1h.percentB?.toFixed(1)}% | 4h squeeze=${bb4h.squeeze}, %B=${bb4h.percentB?.toFixed(1)}%`);
 
-    // FILTER 1: Validate trend matches signal direction
+    // ============================================================
+    // PHASE 2 FIX #1: CONFIDENCE-WEIGHTED TREND VALIDATION
+    // Instead of binary trend mismatch rejection, use confidence-weighted logic:
+    // - High confidence (>=70%): Strict trend-direction agreement required
+    // - Low confidence (<70%): Allow counter-trend entries (pullbacks/reversals) with reduced size
+    // This preserves discipline while avoiding over-filtering valid setups
+    // ============================================================
     const signalDirection = signal.signal_type === 'long' ? 'BUY' : 'SELL';
-    if (currentTrend === 'bullish' && signalDirection === 'SELL') {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Trend Mismatch (Bullish vs SHORT)', signal, trendData, { currentTrend, signalDirection });
-      throw new Error('Market trend is bullish but signal is SHORT - trade cancelled');
-    }
-    if (currentTrend === 'bearish' && signalDirection === 'BUY') {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Trend Mismatch (Bearish vs LONG)', signal, trendData, { currentTrend, signalDirection });
-      throw new Error('Market trend is bearish but signal is LONG - trade cancelled');
+    const trendConfidence = trendData?.timeframes?.['4h']?.confidence || 
+                            trendData?.higherTimeframeFilter?.confidence4h || 50;
+    
+    // Track if this is a counter-trend entry for position sizing
+    let isCounterTrendEntry = false;
+    let counterTrendPositionMultiplier = 1.0;
+    
+    // Check for trend mismatch
+    const isTrendMismatch = (currentTrend === 'bullish' && signalDirection === 'SELL') ||
+                            (currentTrend === 'bearish' && signalDirection === 'BUY');
+    
+    if (isTrendMismatch) {
+      if (trendConfidence >= TREND_VALIDATION_PARAMS.STRICT_CONFIDENCE_THRESHOLD) {
+        // High confidence trend = strict enforcement
+        const mismatchReason = currentTrend === 'bullish' 
+          ? 'Trend Mismatch (Bullish vs SHORT) - High Confidence'
+          : 'Trend Mismatch (Bearish vs LONG) - High Confidence';
+        await logExecutionRejection(supabase, user.id, signal.symbol, mismatchReason, signal, trendData, { 
+          currentTrend, 
+          signalDirection, 
+          trendConfidence,
+          threshold: TREND_VALIDATION_PARAMS.STRICT_CONFIDENCE_THRESHOLD,
+          reason: 'High confidence trend requires strict direction agreement'
+        });
+        throw new Error(`Market trend is ${currentTrend} (${trendConfidence.toFixed(0)}% confidence) but signal is ${signalDirection} - trade cancelled`);
+      } else {
+        // Low confidence trend = allow counter-trend with warning and reduced size
+        isCounterTrendEntry = true;
+        counterTrendPositionMultiplier = TREND_VALIDATION_PARAMS.COUNTER_TREND_POSITION_MULTIPLIER;
+        logger.warn(`⚠️ COUNTER-TREND ENTRY: ${currentTrend} trend (${trendConfidence.toFixed(0)}% confidence) vs ${signalDirection} signal`);
+        logger.warn(`   → Allowed because confidence < ${TREND_VALIDATION_PARAMS.STRICT_CONFIDENCE_THRESHOLD}% (possible pullback/reversal setup)`);
+        logger.warn(`   → Position size will be reduced to ${(counterTrendPositionMultiplier * 100).toFixed(0)}%`);
+      }
+    } else {
+      logger.validation(`✓ Trend direction check passed: ${currentTrend} trend aligns with ${signalDirection} signal`, true);
     }
 
     // FILTER 2: Require trend consistency (dynamic threshold based on ADX and 1h confidence)
@@ -1297,10 +1331,30 @@ serve(async (req) => {
       logger.info(`🤖 AI position adjustment applied: ${aiPositionMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
-    // Apply Unified Reversal Score position multiplier (0.5 for REDUCE tier)
+    // ============================================================
+    // PHASE 2 FIX #2: SINGLE SOURCE OF TRUTH FOR REVERSAL SIZING
+    // Previously, reversal risk was double-counted:
+    // - Signal generation applied reversalPositionMultiplier to signal.positionSizePercent
+    // - Execution also applied reversalPositionMultiplier from calculateUnifiedReversalScore
+    // Now: Use ONLY execution-time data (more current market conditions)
+    // Log both values for transparency but apply only execution-time multiplier
+    // ============================================================
+    const signalReversalMultiplier = signal.indicators?.reversalPositionMultiplier || 1.0;
+    if (signalReversalMultiplier !== 1.0 && reversalPositionMultiplier !== 1.0) {
+      logger.warn(`⚠️ REVERSAL SIZING: Signal embedded ${signalReversalMultiplier.toFixed(2)}x, Execution-time ${reversalPositionMultiplier.toFixed(2)}x`);
+      logger.warn(`   → Using ONLY execution-time multiplier (${reversalPositionMultiplier.toFixed(2)}x) to avoid double-counting`);
+    }
+    
+    // Apply ONLY execution-time Unified Reversal Score position multiplier
     if (reversalPositionMultiplier !== 1.0) {
       quantity *= reversalPositionMultiplier;
       logger.warn(`⚠️ Reversal score adjustment applied: ${reversalPositionMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
+    }
+
+    // Apply counter-trend position multiplier (Phase 2 Fix #1)
+    if (isCounterTrendEntry && counterTrendPositionMultiplier !== 1.0) {
+      quantity *= counterTrendPositionMultiplier;
+      logger.warn(`⚠️ Counter-trend entry adjustment applied: ${counterTrendPositionMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
     // Apply confidence-based position size scaling (INVERTED: high confidence = REDUCE size)
