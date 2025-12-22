@@ -2432,6 +2432,91 @@ export const SignalRejectionReasons = () => {
   // Use global AI analysis toggle from risk parameters
   const aiEnabled = riskParams?.ai_analysis_enabled ?? false;
 
+  // Severity levels: critical (red), high (orange), medium (yellow), low (blue), info (gray)
+  type SeverityLevel = "critical" | "high" | "medium" | "low" | "info";
+  
+  const getSeverityLevel = (reason: string, filtersStatus: any): SeverityLevel => {
+    const gate = filtersStatus?.gate || "";
+    
+    // CRITICAL - Absolute blocks with no exceptions
+    if (gate === "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK" || gate === "ABSOLUTE_MIN_STOCHRSI_HARD_BLOCK") return "critical";
+    if (reason.includes("HARD BLOCK")) return "critical";
+    if (gate === "BEARISH_DIVERGENCE_AT_EXTREME" || gate === "BULLISH_DIVERGENCE_AT_EXTREME") return "critical";
+    if (reason.includes("Reversal risk") && filtersStatus?.reversalRiskScore >= 70) return "critical";
+    
+    // HIGH - Important gates that block trades
+    if (gate === "ADX_TOO_LOW") return "high";
+    if (gate === "NO_MOMENTUM_CONFIRMATION") return "high";
+    if (gate === "BOLLINGER_OVEREXTENSION_GATE" || gate === "BOLLINGER_UNDEREXTENSION_GATE") return "high";
+    if (gate === "STOCHRSI_NOT_RISING" || gate === "STOCHRSI_NOT_FALLING") return "high";
+    if (reason.includes("HARD GATE")) return "high";
+    if (reason.includes("StochRSI extreme")) return "high";
+    if (reason.includes("Reversal risk")) return "high";
+    
+    // MEDIUM - Softer gates that can be bypassed
+    if (gate === "NEUTRAL_4H_LOW_CONFIDENCE") return "medium";
+    if (gate === "CONFIDENCE_DEAD_ZONE") return "medium";
+    if (gate === "HTF_NOT_ALIGNED") return "medium";
+    if (gate === "MACD_MISALIGNED") return "medium";
+    if (gate === "MOMENTUM_SCORE_TOO_LOW") return "medium";
+    if (reason.includes("Quality score")) return "medium";
+    
+    // LOW - Informational blocks
+    if (reason.includes("Max trades")) return "low";
+    if (reason.startsWith("EXECUTION:")) return "low";
+    if (reason.includes("No strategy")) return "low";
+    
+    // INFO - Neutral states
+    if (reason.includes("active signal")) return "info";
+    
+    return "medium";
+  };
+  
+  const getSeverityStyles = (severity: SeverityLevel) => {
+    switch (severity) {
+      case "critical":
+        return {
+          border: "border-l-4 border-l-red-500",
+          bg: "bg-red-500/5",
+          badge: "bg-red-500/20 text-red-400 border-red-500/30",
+          icon: "text-red-500",
+          label: "CRITICAL",
+        };
+      case "high":
+        return {
+          border: "border-l-4 border-l-orange-500",
+          bg: "bg-orange-500/5",
+          badge: "bg-orange-500/20 text-orange-400 border-orange-500/30",
+          icon: "text-orange-500",
+          label: "HIGH",
+        };
+      case "medium":
+        return {
+          border: "border-l-4 border-l-yellow-500",
+          bg: "bg-yellow-500/5",
+          badge: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+          icon: "text-yellow-500",
+          label: "MEDIUM",
+        };
+      case "low":
+        return {
+          border: "border-l-4 border-l-blue-500",
+          bg: "bg-blue-500/5",
+          badge: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+          icon: "text-blue-500",
+          label: "LOW",
+        };
+      case "info":
+        return {
+          border: "border-l-4 border-l-muted-foreground",
+          bg: "bg-muted/30",
+          badge: "bg-muted text-muted-foreground border-muted-foreground/30",
+          icon: "text-muted-foreground",
+          label: "INFO",
+        };
+    }
+  };
+
   const getReasonIcon = (reason: string) => {
     // Execution rejections - signals that were blocked during trade execution
     if (reason.startsWith("EXECUTION:")) return <Ban className="h-4 w-4 text-orange-500" />;
@@ -2739,7 +2824,7 @@ export const SignalRejectionReasons = () => {
               <TableHead>Details</TableHead>
               {aiEnabled && (
                 <TableHead className="w-[180px]">
-                  <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1">
                     <Bot className="h-3.5 w-3.5" />
                     AI Analysis
                   </div>
@@ -2749,9 +2834,36 @@ export const SignalRejectionReasons = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rejections.map((rejection) => (
-              <TableRow key={rejection.id}>
-                <TableCell className="font-medium">{rejection.symbol}</TableCell>
+            {rejections.map((rejection) => {
+              const severity = getSeverityLevel(rejection.rejection_reason ?? "", rejection.filters_status);
+              const severityStyles = getSeverityStyles(severity);
+              
+              return (
+                <TableRow key={rejection.id} className={`${severityStyles.border} ${severityStyles.bg}`}>
+                  <TableCell className="font-medium">
+                    <div className="flex flex-col gap-1">
+                      <span>{rejection.symbol}</span>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Badge 
+                              variant="outline" 
+                              className={`text-[9px] px-1.5 py-0 w-fit ${severityStyles.badge}`}
+                            >
+                              {severityStyles.label}
+                            </Badge>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" className="text-xs max-w-[200px]">
+                            {severity === "critical" && "Absolute block with no exceptions. Trade is completely blocked."}
+                            {severity === "high" && "Important gate that blocks trades. Requires significant condition change."}
+                            {severity === "medium" && "Softer gate that may be bypassed with strong signals."}
+                            {severity === "low" && "Informational block due to limits or execution rules."}
+                            {severity === "info" && "Neutral state - not necessarily a problem."}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+                  </TableCell>
                 <TableCell className="align-top">
                   <div className="flex items-start gap-2">
                     {getReasonIcon(rejection.rejection_reason ?? "")}
@@ -2788,7 +2900,8 @@ export const SignalRejectionReasons = () => {
                   </Badge>
                 </TableCell>
               </TableRow>
-            ))}
+              );
+            })}
           </TableBody>
         </Table>
       </CardContent>
