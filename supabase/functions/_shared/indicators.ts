@@ -94,7 +94,7 @@ export function calculateStochasticRSI(
   kSmooth = 3, 
   dSmooth = 3,
   preCalculatedRsiArray?: number[]
-): { k: number; d: number; signal: string; strength: number } {
+): { k: number; d: number; signal: string; strength: number; kArray?: number[] } {
   if (prices.length < rsiPeriod + stochPeriod + Math.max(kSmooth, dSmooth)) {
     return { k: 50, d: 50, signal: "neutral", strength: 0 };
   }
@@ -163,7 +163,48 @@ export function calculateStochasticRSI(
     strength = Math.min((d - k) / 10, 1) * 80;
   }
 
-  return { k: Math.round(k * 10) / 10, d: Math.round(d * 10) / 10, signal, strength: Math.round(strength) };
+  return { 
+    k: Math.round(k * 10) / 10, 
+    d: Math.round(d * 10) / 10, 
+    signal, 
+    strength: Math.round(strength),
+    kArray: smoothedKValues,  // PHASE 3: Return K array for time-in-extreme tracking
+  };
+}
+
+// PHASE 3: Calculate bars at extreme for StochRSI
+export function calculateBarsAtExtreme(
+  kArray: number[] | undefined,
+  overboughtThreshold: number = 90,
+  oversoldThreshold: number = 10
+): { barsOverbought: number; barsOversold: number } {
+  if (!kArray || kArray.length === 0) {
+    return { barsOverbought: 0, barsOversold: 0 };
+  }
+
+  // Count consecutive bars at extreme from the most recent bar going backwards
+  let barsOverbought = 0;
+  let barsOversold = 0;
+
+  // Check for overbought extreme (K > 90)
+  for (let i = kArray.length - 1; i >= 0; i--) {
+    if (kArray[i] > overboughtThreshold) {
+      barsOverbought++;
+    } else {
+      break; // Stop counting when we hit a non-extreme bar
+    }
+  }
+
+  // Check for oversold extreme (K < 10)
+  for (let i = kArray.length - 1; i >= 0; i--) {
+    if (kArray[i] < oversoldThreshold) {
+      barsOversold++;
+    } else {
+      break; // Stop counting when we hit a non-extreme bar
+    }
+  }
+
+  return { barsOverbought, barsOversold };
 }
 
 // ============= MACD =============

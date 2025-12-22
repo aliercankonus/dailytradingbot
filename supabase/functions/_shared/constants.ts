@@ -51,6 +51,24 @@ export const STOCHRSI_THRESHOLDS = {
   HIGH_REVERSAL_OVERSOLD: 5,    // K<=5 = +35 reversal score for SHORT
 } as const;
 
+// ============= PHASE 3: TIME-IN-EXTREME THRESHOLDS =============
+// Tracks consecutive bars at StochRSI extremes for exhaustion detection
+export const TIME_IN_EXTREME_PARAMS = {
+  // Threshold for "extreme" zone (K > 90 or K < 10)
+  OVERBOUGHT_EXTREME: 90,
+  OVERSOLD_EXTREME: 10,
+  // Minimum bars at extreme before penalty kicks in
+  MIN_BARS_FOR_PENALTY: 3,
+  // Bars at extreme levels for increasing penalties
+  MODERATE_BARS: 6,   // 6+ bars = +15 reversal score
+  HIGH_BARS: 9,       // 9+ bars = +25 reversal score
+  EXTREME_BARS: 12,   // 12+ bars = +35 reversal score (exhausted momentum)
+  // Penalty scores for each level
+  PENALTY_MODERATE: 15,
+  PENALTY_HIGH: 25,
+  PENALTY_EXTREME: 35,
+} as const;
+
 export const RSI_THRESHOLDS = {
   OVERSOLD: 30,
   BEARISH_PULLBACK: 35,
