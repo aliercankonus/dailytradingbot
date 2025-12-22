@@ -263,6 +263,8 @@ serve(async (req) => {
         hasDivergence, // For momentum divergence
         macdTrending,
         priceTrending,
+        priceChangePercent, // For debugging divergence magnitude
+        macdChangePercent, // For debugging divergence magnitude
       };
     } catch (error) {
       symbolLogger.error(`Error fetching data: ${error}`);
@@ -282,6 +284,8 @@ serve(async (req) => {
         hasDivergence: d.hasDivergence,
         macdTrending: d.macdTrending,
         priceTrending: d.priceTrending,
+        priceChangePercent: d.priceChangePercent,
+        macdChangePercent: d.macdChangePercent,
       }]),
     );
     const updates = [];
@@ -540,6 +544,8 @@ serve(async (req) => {
       const hasDivergence = atrData?.hasDivergence || false;
       const macdTrending = atrData?.macdTrending || "neutral";
       const priceTrending = atrData?.priceTrending || "neutral";
+      const priceChangePercent = atrData?.priceChangePercent || 0;
+      const macdChangePercent = atrData?.macdChangePercent || 0;
       
       let divergenceExit = false;
       // For LONG: Exit if price going up but MACD going down (bearish divergence)
@@ -643,6 +649,10 @@ serve(async (req) => {
             atrRatio: atrRatio.toFixed(2) + "x",
             volumeRatio: volumeRatio.toFixed(1) + "x",
             hasDivergence,
+            priceChangePercent: priceChangePercent?.toFixed(2) + "%",
+            macdChangePercent: macdChangePercent?.toFixed(2) + "%",
+            priceTrending,
+            macdTrending,
           }
         });
       }
