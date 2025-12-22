@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 import { createLogger } from "../_shared/logging.ts";
+import { detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,6 +16,12 @@ interface UserProcessResult {
   rejected?: number;
   message?: string;
   error?: string;
+  strategyBreakdown?: {
+    momentum?: number;
+    meanReversion?: number;
+    trendFollowing?: number;
+    other?: number;
+  };
 }
 
 serve(async (req) => {
@@ -129,8 +136,34 @@ serve(async (req) => {
             const signalsGenerated = analyzerResult?.totalSignalsGenerated || 0;
             const signalsExecuted = analyzerResult?.executedSignals || 0;
             const rejected = analyzerResult?.rejectedByMultiTimeframeAnalysis || 0;
+            
+            // Extract strategy type breakdown from analyzer result if available
+            const signalDetails = analyzerResult?.signalDetails || [];
+            const strategyBreakdown = {
+              momentum: 0,
+              meanReversion: 0,
+              trendFollowing: 0,
+              other: 0,
+            };
+            
+            // Classify executed signals by strategy type
+            for (const detail of signalDetails) {
+              const strategyType = detectStrategyType(detail.strategyId || '', detail.strategyName || '');
+              if (strategyType === 'MOMENTUM') {
+                strategyBreakdown.momentum++;
+              } else if (strategyType === 'MEAN_REVERSION') {
+                strategyBreakdown.meanReversion++;
+              } else if (strategyType === 'TREND_FOLLOWING') {
+                strategyBreakdown.trendFollowing++;
+              } else {
+                strategyBreakdown.other++;
+              }
+            }
 
             userLogger.summary(`Generated ${signalsGenerated} signals, executed ${signalsExecuted}, rejected ${rejected}`);
+            if (signalsExecuted > 0) {
+              userLogger.info(`Strategy breakdown: Momentum=${strategyBreakdown.momentum}, MeanReversion=${strategyBreakdown.meanReversion}, TrendFollow=${strategyBreakdown.trendFollowing}, Other=${strategyBreakdown.other}`);
+            }
 
             return {
               userId: userParams.user_id,
@@ -139,6 +172,7 @@ serve(async (req) => {
               executed: signalsExecuted,
               rejected,
               message: analyzerResult?.message || 'Auto-trader processing completed',
+              strategyBreakdown: signalsExecuted > 0 ? strategyBreakdown : undefined,
             };
           } catch (userError) {
             const errorMessage = userError instanceof Error ? userError.message : "Unknown error";
@@ -160,10 +194,22 @@ serve(async (req) => {
     const totalRejected = results.reduce((sum, r) => sum + (r.rejected || 0), 0);
     const successfulUsers = results.filter(r => r.success).length;
     const failedUsers = results.filter(r => !r.success).length;
+    
+    // Aggregate strategy breakdown across all users
+    const aggregateStrategyBreakdown = {
+      momentum: results.reduce((sum, r) => sum + (r.strategyBreakdown?.momentum || 0), 0),
+      meanReversion: results.reduce((sum, r) => sum + (r.strategyBreakdown?.meanReversion || 0), 0),
+      trendFollowing: results.reduce((sum, r) => sum + (r.strategyBreakdown?.trendFollowing || 0), 0),
+      other: results.reduce((sum, r) => sum + (r.strategyBreakdown?.other || 0), 0),
+    };
 
     logger.summary(
       `Completed: ${activeUsers.length} users (${successfulUsers} success, ${failedUsers} failed), ${totalSignals} signals, ${totalExecuted} executed, ${totalRejected} rejected`
     );
+    
+    if (totalExecuted > 0) {
+      logger.info(`Strategy breakdown: Momentum=${aggregateStrategyBreakdown.momentum}, MeanReversion=${aggregateStrategyBreakdown.meanReversion}, TrendFollow=${aggregateStrategyBreakdown.trendFollowing}, Other=${aggregateStrategyBreakdown.other}`);
+    }
 
     return new Response(
       JSON.stringify({
@@ -174,6 +220,7 @@ serve(async (req) => {
         totalSignals,
         totalExecuted,
         totalRejected,
+        strategyBreakdown: totalExecuted > 0 ? aggregateStrategyBreakdown : undefined,
         results,
         timestamp: new Date().toISOString(),
       }),
