@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
+import { createLogger } from "../_shared/logging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,6 +18,8 @@ interface UserProcessResult {
 }
 
 serve(async (req) => {
+  const logger = createLogger("auto-trader");
+  
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -41,7 +44,7 @@ serve(async (req) => {
     !authHeader &&
     providedSecretHeader !== cronSecret
   ) {
-    console.error("Unauthorized: Invalid or missing cron secret");
+    logger.error("Unauthorized: Invalid or missing cron secret");
     return new Response(
       JSON.stringify({ success: false, error: "Unauthorized" }),
       { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -58,7 +61,7 @@ serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    console.log("Auto-trader started at", new Date().toISOString());
+    logger.boot();
 
     // Fetch all users with trading enabled
     const { data: activeUsers, error: usersError } = await supabase
@@ -67,12 +70,12 @@ serve(async (req) => {
       .eq("is_trading_enabled", true);
 
     if (usersError) {
-      console.error("Error fetching active users:", usersError);
+      logger.error(`Error fetching active users: ${usersError.message}`);
       throw usersError;
     }
 
     if (!activeUsers || activeUsers.length === 0) {
-      console.log("No users with trading enabled");
+      logger.info("No users with trading enabled");
       return new Response(
         JSON.stringify({
           success: true,
@@ -83,7 +86,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Processing ${activeUsers.length} users with trading enabled`);
+    logger.info(`Processing ${activeUsers.length} users with trading enabled`);
 
     // Process users in parallel with concurrency limit to avoid overwhelming the system
     const BATCH_SIZE = 3; // Process 3 users at a time
@@ -94,8 +97,10 @@ serve(async (req) => {
       
       const batchResults = await Promise.all(
         batch.map(async (userParams): Promise<UserProcessResult> => {
+          const userLogger = logger.forUser(userParams.user_id);
+          
           try {
-            console.log(`Processing user: ${userParams.user_id}`);
+            userLogger.info("Processing user");
             
             // Call strategy-analyzer with service role + user_id in body
             const { data: analyzerResult, error: analyzerError } = await supabase.functions.invoke("strategy-analyzer", {
@@ -111,7 +116,7 @@ serve(async (req) => {
               const errorMessage = typeof analyzerError === 'object' && analyzerError !== null
                 ? (analyzerError as any).message || JSON.stringify(analyzerError)
                 : String(analyzerError);
-              console.error(`Strategy analyzer error for user ${userParams.user_id}:`, errorMessage);
+              userLogger.error(`Strategy analyzer error: ${errorMessage}`);
               return {
                 userId: userParams.user_id,
                 success: false,
@@ -125,7 +130,7 @@ serve(async (req) => {
             const signalsExecuted = analyzerResult?.executedSignals || 0;
             const rejected = analyzerResult?.rejectedByMultiTimeframeAnalysis || 0;
 
-            console.log(`User ${userParams.user_id}: Generated ${signalsGenerated} signals, executed ${signalsExecuted}, rejected ${rejected}`);
+            userLogger.summary(`Generated ${signalsGenerated} signals, executed ${signalsExecuted}, rejected ${rejected}`);
 
             return {
               userId: userParams.user_id,
@@ -137,7 +142,7 @@ serve(async (req) => {
             };
           } catch (userError) {
             const errorMessage = userError instanceof Error ? userError.message : "Unknown error";
-            console.error(`Error processing user ${userParams.user_id}:`, errorMessage);
+            userLogger.error(`Error processing: ${errorMessage}`);
             return {
               userId: userParams.user_id,
               success: false,
@@ -156,8 +161,8 @@ serve(async (req) => {
     const successfulUsers = results.filter(r => r.success).length;
     const failedUsers = results.filter(r => !r.success).length;
 
-    console.log(
-      `Auto-trader completed: Processed ${activeUsers.length} users (${successfulUsers} success, ${failedUsers} failed), generated ${totalSignals} signals, executed ${totalExecuted} trades, rejected ${totalRejected}`
+    logger.summary(
+      `Completed: ${activeUsers.length} users (${successfulUsers} success, ${failedUsers} failed), ${totalSignals} signals, ${totalExecuted} executed, ${totalRejected} rejected`
     );
 
     return new Response(
@@ -175,7 +180,7 @@ serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("Auto-trader error:", error);
+    logger.error(`Auto-trader error: ${error instanceof Error ? error.message : "Unknown error"}`);
     return new Response(
       JSON.stringify({
         success: false,
