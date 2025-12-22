@@ -1425,9 +1425,11 @@ serve(async (req) => {
         const macdHistogram = trendData.momentum?.macdHistogram ?? 0;
         const macdExpanding = trendData.momentum?.macdExpanding ?? false;
         
-        // Get Bollinger Band info for breakout detection
-        const bollingerPosition = trendData.bollingerBands?.aggregated?.pricePosition || "middle";
-        const percentB = trendData.bollingerBands?.aggregated?.percentB ?? 50;
+        // Get Bollinger Band info for breakout detection (use 4h as primary, 1h as fallback)
+        const bollingerPosition = trendData.bollingerBands?.['4h']?.pricePosition ?? 
+                                  trendData.bollingerBands?.['1h']?.pricePosition ?? "middle";
+        const percentB = trendData.bollingerBands?.['4h']?.percentB ?? 
+                         trendData.bollingerBands?.['1h']?.percentB ?? 50;
         
         // Determine if StochRSI is rising or falling (K vs D comparison)
         const stochRsiRising = stochRsiK4h > stochRsiD4h;
