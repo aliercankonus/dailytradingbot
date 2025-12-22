@@ -1,4 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { get24hrTicker } from "../_shared/binance.ts";
+import { createLogger } from "../_shared/logging.ts";
+
+const logger = createLogger("market-data");
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,25 +16,25 @@ serve(async (req) => {
 
   try {
     const { symbols } = await req.json();
-    console.log("Fetching market data for symbols:", symbols);
+    logger.info(`Fetching market data for symbols: ${JSON.stringify(symbols)}`);
 
     // Default symbols if none provided
     const cryptoSymbols = symbols || ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"];
 
-    // Fetch ticker data from Binance public API
+    // Fetch ticker data using shared Binance utilities
     const tickerPromises = cryptoSymbols.map(async (symbol: string) => {
-      const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
-      if (!response.ok) {
-        console.error(`Failed to fetch data for ${symbol}:`, response.status);
+      try {
+        return await get24hrTicker(symbol);
+      } catch (error) {
+        logger.forSymbol(symbol).error(`Failed to fetch ticker: ${error}`);
         return null;
       }
-      return response.json();
     });
 
     const tickerData = await Promise.all(tickerPromises);
     const validTickers = tickerData.filter((ticker) => ticker !== null);
 
-    console.log(`Successfully fetched ${validTickers.length} tickers`);
+    logger.info(`Successfully fetched ${validTickers.length} tickers`);
 
     return new Response(
       JSON.stringify({
@@ -44,7 +48,7 @@ serve(async (req) => {
       },
     );
   } catch (error) {
-    console.error("Error in market-data function:", error);
+    logger.error(`Error in market-data function: ${error}`);
     return new Response(
       JSON.stringify({
         success: false,
