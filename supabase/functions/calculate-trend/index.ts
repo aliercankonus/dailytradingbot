@@ -8,6 +8,10 @@ import {
   calculateADXWithDirection, calculateADX, calculateVolumeAnalysis, ADXResult
 } from "../_shared/indicators.ts";
 import { calculateTrend, enhanceConfidenceWithIndicators, TrendResult } from "../_shared/trend-core.ts";
+import { createLogger, logMetrics, logError, LOG_CATEGORIES } from "../_shared/logging.ts";
+
+// Create logger for this function
+const logger = createLogger('calculate-trend');
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -116,7 +120,7 @@ async function fetchBinanceKlines(symbol: string, interval: string = "1h", limit
       return Array.isArray(klines) ? klines : [];
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      console.error(`Failed to fetch Binance klines for ${symbol} on ${interval} (attempt ${attempt + 1}/${retries + 1}):`, lastError.message);
+      logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.BINANCE} Failed to fetch klines on ${interval} (attempt ${attempt + 1}/${retries + 1}): ${lastError.message}`);
       
       if (attempt < retries) {
         await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)));
@@ -396,7 +400,7 @@ serve(async (req) => {
     
     // ============= BATCH MODE FOR BACKTESTING =============
     if (batchKlines && batchKlines.length > 0 && symbol) {
-      console.log(`BATCH MODE: Processing ${batchKlines.length} candles for ${symbol}`);
+      logger.forSymbol(symbol).info(`${LOG_CATEGORIES.START} BATCH MODE: Processing ${batchKlines.length} candles`);
       
       const results: Array<{ timestamp: number; data: any; error?: string }> = [];
       
@@ -464,7 +468,7 @@ serve(async (req) => {
         }
       }
       
-      console.log(`BATCH MODE: Completed ${results.filter(r => r.data).length}/${batchKlines.length} successful`);
+      logger.forSymbol(symbol).success(`BATCH MODE: Completed ${results.filter(r => r.data).length}/${batchKlines.length} successful`);
       
       return new Response(
         JSON.stringify({ batch: true, results }),
@@ -488,7 +492,7 @@ serve(async (req) => {
       klines1h = historicalKlines['1h'] || [];
       klines4h = historicalKlines['4h'] || [];
     } else {
-      console.log(`Multi-timeframe analysis for ${symbol}`);
+      logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} Multi-timeframe analysis starting`);
       [klines15m, klines30m, klines1h, klines4h] = await Promise.all([
         fetchBinanceKlines(symbol, "15m", 100),
         fetchBinanceKlines(symbol, "30m", 100),
@@ -520,9 +524,8 @@ serve(async (req) => {
     const stochRsi1h = calculateStochasticRSI(prices1h, 14, 14, 3, 3, trend1h.indicators.rsiArray);
     const stochRsi4h = calculateStochasticRSI(prices4h, 14, 14, 3, 3, trend4h.indicators.rsiArray);
 
-    console.log(
-      `${symbol} StochRSI: 1h K=${stochRsi1h.k} D=${stochRsi1h.d} signal=${stochRsi1h.signal} | 4h K=${stochRsi4h.k} D=${stochRsi4h.d} signal=${stochRsi4h.signal}`
-    );
+    const symLog = logger.forSymbol(symbol);
+    symLog.info(`${LOG_CATEGORIES.STOCHRSI} 1h K=${stochRsi1h.k} D=${stochRsi1h.d} signal=${stochRsi1h.signal} | 4h K=${stochRsi4h.k} D=${stochRsi4h.d} signal=${stochRsi4h.signal}`);
 
     const dominantTrend = trend4h.trend;
     const dominantConfidence = trend4h.confidence;
@@ -536,9 +539,7 @@ serve(async (req) => {
     const historicalATRAvg = calculateHistoricalATRAvg(klines1h, 14, 30, currentATR);
     const relativeATR = historicalATRAvg !== 0 ? currentATR / historicalATRAvg : 1.0;
 
-    console.log(
-      `${symbol} ADX: ${adx.toFixed(1)} (${adxRising ? 'rising' : 'falling'}) | ATR: ${currentATR.toFixed(4)} (${atrPercent.toFixed(2)}%) | Relative ATR: ${relativeATR.toFixed(2)}x`
-    );
+    symLog.info(`${LOG_CATEGORIES.ADX} ${adx.toFixed(1)} (${adxRising ? 'rising' : 'falling'}) | ATR: ${currentATR.toFixed(4)} (${atrPercent.toFixed(2)}%) | Relative ATR: ${relativeATR.toFixed(2)}x`);
 
     // Alignment checks
     const opposing1h = dominantTrend !== "neutral" && trend1h.trend !== "neutral" && trend1h.trend !== dominantTrend;
@@ -592,9 +593,7 @@ serve(async (req) => {
     }
 
     const standardAlignment = dominantTrend !== "neutral" && !opposing1h;
-    console.log(
-      `${symbol} ALIGNMENT: 4h=${dominantTrend} 1h=${trend1h.trend} 30m=${trend30m.trend} 15m=${trend15m.trend} | opposing: 1h=${opposing1h} 30m=${opposing30m} 15m=${opposing15m} | standardAlignment=${standardAlignment}`,
-    );
+    symLog.info(`ALIGNMENT: 4h=${dominantTrend} 1h=${trend1h.trend} 30m=${trend30m.trend} 15m=${trend15m.trend} | opposing: 1h=${opposing1h} 30m=${opposing30m} 15m=${opposing15m} | standardAlignment=${standardAlignment}`);
 
     let neutralAllowedWithStrongHigherTimeframe = false;
     if (!standardAlignment && dominantTrend !== "neutral" && trend1h.trend === "neutral") {
@@ -605,13 +604,9 @@ serve(async (req) => {
       const atrNotExtremelyCompressed = relativeATR >= 0.5;
       if (strong4h && macdAligned && (hasActivity || atrNotExtremelyCompressed)) {
         neutralAllowedWithStrongHigherTimeframe = true;
-        console.log(
-          `${symbol}: 1h=neutral ALLOWED with strong 4h=${dominantTrend}(${dominantConfidence}%) - MACD=${macd1h.toFixed(3)} ADX=${adx.toFixed(1)} relATR=${relativeATR.toFixed(2)}`,
-        );
+        symLog.info(`${LOG_CATEGORIES.SUCCESS} 1h=neutral ALLOWED with strong 4h=${dominantTrend}(${dominantConfidence}%) - MACD=${macd1h.toFixed(3)} ADX=${adx.toFixed(1)} relATR=${relativeATR.toFixed(2)}`);
       } else {
-        console.log(
-          `${symbol}: 1h=neutral BLOCKED - strong4h=${strong4h} macdAligned=${macdAligned} hasActivity=${hasActivity} atrOK=${atrNotExtremelyCompressed}`,
-        );
+        symLog.info(`${LOG_CATEGORIES.GATE} 1h=neutral BLOCKED - strong4h=${strong4h} macdAligned=${macdAligned} hasActivity=${hasActivity} atrOK=${atrNotExtremelyCompressed}`);
       }
     }
 
@@ -626,17 +621,17 @@ serve(async (req) => {
         divergenceType = "pullback";
         divergenceConfidence = Math.min(dominantConfidence * 0.7, CONFIDENCE_THRESHOLDS.HTF_EXCEPTION);
         allowDivergenceSignal = true;
-        console.log(`${dominantTrend.toUpperCase()} PULLBACK detected: 4h=${dominantConfidence}% vs 1h=${trend1h.trend}`);
+        symLog.info(`${LOG_CATEGORIES.SIGNAL} ${dominantTrend.toUpperCase()} PULLBACK detected: 4h=${dominantConfidence}% vs 1h=${trend1h.trend}`);
       } else if (trend1h.confidence >= CONFIDENCE_THRESHOLDS.STRONG_1H_REVERSAL && (dominantTrend === "neutral" || dominantConfidence < CONFIDENCE_THRESHOLDS.WEAK_4H) && adx >= ADX_THRESHOLDS.WEAK) {
         divergenceType = "early_reversal";
         divergenceConfidence = Math.min(trend1h.confidence * 0.65, CONFIDENCE_THRESHOLDS.DEAD_ZONE_LOWER);
         allowDivergenceSignal = true;
-        console.log(`EARLY REVERSAL detected: 1h=${trend1h.trend}(${trend1h.confidence}%) vs weak/neutral 4h=${dominantTrend}(${dominantConfidence}%) ADX=${adx.toFixed(1)}`);
+        symLog.info(`${LOG_CATEGORIES.REVERSAL} EARLY REVERSAL detected: 1h=${trend1h.trend}(${trend1h.confidence}%) vs weak/neutral 4h=${dominantTrend}(${dominantConfidence}%) ADX=${adx.toFixed(1)}`);
       } else {
         divergenceType = "ranging_conflict";
         divergenceConfidence = 0;
         allowDivergenceSignal = false;
-        console.log(`RANGING CONFLICT: Skipping - unclear divergence pattern`);
+        symLog.info(`${LOG_CATEGORIES.MARKET} RANGING CONFLICT: Skipping - unclear divergence pattern`);
       }
     }
     
@@ -657,9 +652,7 @@ serve(async (req) => {
     const bollingerSqueezeActive = bb1h.squeeze || bb4h.squeeze;
     const squeezeBreakoutPotential = bollingerSqueezeActive && bb1h.squeezeIntensity > 50;
     
-    console.log(
-      `${symbol} BOLLINGER: 1h squeeze=${bb1h.squeeze}(${bb1h.squeezeIntensity}%) 4h squeeze=${bb4h.squeeze}(${bb4h.squeezeIntensity}%) position=${bb1h.pricePosition} %B=${bb1h.percentB}`
-    );
+    symLog.info(`${LOG_CATEGORIES.BOLLINGER} 1h squeeze=${bb1h.squeeze}(${bb1h.squeezeIntensity}%) 4h squeeze=${bb4h.squeeze}(${bb4h.squeezeIntensity}%) position=${bb1h.pricePosition} %B=${bb1h.percentB}`);
 
     // ADX for each timeframe for enhanced confidence
     const adx15m = calculateADX(klines15m, 14);
@@ -694,7 +687,7 @@ serve(async (req) => {
     
     // Log micro-trend if detected and 4h is neutral
     if (microTrend.hasMicroTrend && trend4h.trend === "neutral") {
-      console.log(`${symbol} MICRO-TREND: ${microTrend.direction} (alignment=${microTrend.alignment}, conf=${microTrend.confidence.toFixed(0)}%) - ${microTrend.reason}`);
+      symLog.info(`${LOG_CATEGORIES.TREND} MICRO-TREND: ${microTrend.direction} (alignment=${microTrend.alignment}, conf=${microTrend.confidence.toFixed(0)}%) - ${microTrend.reason}`);
     }
     
     // Divergence alignment validation
@@ -702,21 +695,19 @@ serve(async (req) => {
     const EARLY_REVERSAL_ALIGNMENT_THRESHOLD = 45;
     
     if (divergenceType === "pullback" && trueAlignment.score < PULLBACK_ALIGNMENT_THRESHOLD) {
-      console.log(`${symbol}: PULLBACK REJECTED - alignment score ${trueAlignment.score} < ${PULLBACK_ALIGNMENT_THRESHOLD} threshold`);
+      symLog.info(`${LOG_CATEGORIES.REJECTION} PULLBACK REJECTED - alignment score ${trueAlignment.score} < ${PULLBACK_ALIGNMENT_THRESHOLD} threshold`);
       divergenceType = "ranging_conflict";
       divergenceConfidence = 0;
       allowDivergenceSignal = false;
     } else if (divergenceType === "early_reversal" && trueAlignment.score < EARLY_REVERSAL_ALIGNMENT_THRESHOLD) {
-      console.log(`${symbol}: EARLY REVERSAL REJECTED - alignment score ${trueAlignment.score} < ${EARLY_REVERSAL_ALIGNMENT_THRESHOLD} threshold`);
+      symLog.info(`${LOG_CATEGORIES.REJECTION} EARLY REVERSAL REJECTED - alignment score ${trueAlignment.score} < ${EARLY_REVERSAL_ALIGNMENT_THRESHOLD} threshold`);
       divergenceType = "ranging_conflict";
       divergenceConfidence = 0;
       allowDivergenceSignal = false;
     }
     
     const neutralCapLog = trueAlignment.neutralCapped ? ` [NEUTRAL CAPPED]` : '';
-    console.log(
-      `${symbol} ENHANCED CONFIDENCE: 4h=${trend4h.confidence}->${enhancedConfidence4h} 1h=${trend1h.confidence}->${enhancedConfidence1h} | ALIGNMENT: score=${trueAlignment.score} (dir=${trueAlignment.breakdown.directionScore} ind=${trueAlignment.breakdown.indicatorScore} pen=${trueAlignment.breakdown.penaltyScore})${neutralCapLog}`
-    );
+    symLog.info(`${LOG_CATEGORIES.QUALITY} ENHANCED CONFIDENCE: 4h=${trend4h.confidence}->${enhancedConfidence4h} 1h=${trend1h.confidence}->${enhancedConfidence1h} | ALIGNMENT: score=${trueAlignment.score} (dir=${trueAlignment.breakdown.directionScore} ind=${trueAlignment.breakdown.indicatorScore} pen=${trueAlignment.breakdown.penaltyScore})${neutralCapLog}`);
 
     // Ranging market detection
     const atrCompressed = relativeATR < 0.6;
@@ -726,9 +717,9 @@ serve(async (req) => {
     
     if (isRanging) {
       primaryTrend = "ranging";
-      console.log(`${symbol}: RANGING MARKET DETECTED - ATR: ${atrPercent.toFixed(2)}% (relative: ${relativeATR.toFixed(2)}x), ADX: ${adx.toFixed(1)} - skipping signals`);
+      symLog.info(`${LOG_CATEGORIES.MARKET} RANGING MARKET DETECTED - ATR: ${atrPercent.toFixed(2)}% (relative: ${relativeATR.toFixed(2)}x), ADX: ${adx.toFixed(1)} - skipping signals`);
     } else {
-      console.log(`${symbol}: TRENDING MARKET - ATR: ${atrPercent.toFixed(2)}% (relative: ${relativeATR.toFixed(2)}x), ADX: ${adx.toFixed(1)}`);
+      symLog.info(`${LOG_CATEGORIES.MARKET} TRENDING MARKET - ATR: ${atrPercent.toFixed(2)}% (relative: ${relativeATR.toFixed(2)}x), ADX: ${adx.toFixed(1)}`);
     }
 
     // Pullback detection
@@ -774,15 +765,15 @@ serve(async (req) => {
       if (hasMinimumActivity) {
         if (strongBullishAlignment && bullishVotes > bearishVotes) {
           effectiveTrendForMomentum = "bullish";
-          console.log(`${symbol}: Neutral 4h → derived BULLISH momentum (votes: ${bullishVotes}/${bearishVotes}, ADX=${adx.toFixed(1)}, 1h conf=${trend1h.confidence}%)`);
+          symLog.info(`${LOG_CATEGORIES.MOMENTUM} Neutral 4h → derived BULLISH momentum (votes: ${bullishVotes}/${bearishVotes}, ADX=${adx.toFixed(1)}, 1h conf=${trend1h.confidence}%)`);
         } else if (strongBearishAlignment && bearishVotes > bullishVotes) {
           effectiveTrendForMomentum = "bearish";
-          console.log(`${symbol}: Neutral 4h → derived BEARISH momentum (votes: ${bearishVotes}/${bullishVotes}, ADX=${adx.toFixed(1)}, 1h conf=${trend1h.confidence}%)`);
+          symLog.info(`${LOG_CATEGORIES.MOMENTUM} Neutral 4h → derived BEARISH momentum (votes: ${bearishVotes}/${bullishVotes}, ADX=${adx.toFixed(1)}, 1h conf=${trend1h.confidence}%)`);
         } else {
-          console.log(`${symbol}: Neutral 4h → NO momentum derived (alignment insufficient: bull=${bullishVotes} bear=${bearishVotes}, 1h conf=${trend1h.confidence}%)`);
+          symLog.info(`${LOG_CATEGORIES.MOMENTUM} Neutral 4h → NO momentum derived (alignment insufficient: bull=${bullishVotes} bear=${bearishVotes}, 1h conf=${trend1h.confidence}%)`);
         }
       } else {
-        console.log(`${symbol}: Neutral 4h → NO momentum derived (ADX too weak: ${adx.toFixed(1)} < ${ADX_THRESHOLDS.WEAK})`);
+        symLog.info(`${LOG_CATEGORIES.MOMENTUM} Neutral 4h → NO momentum derived (ADX too weak: ${adx.toFixed(1)} < ${ADX_THRESHOLDS.WEAK})`);
       }
     }
 
@@ -858,19 +849,15 @@ serve(async (req) => {
       momentumState = "confirmed";
     } else if (alignedMomentumConfirms) {
       momentumState = "building"; // New state: aligned but not full confirmation
-      console.log(`${symbol}: BUILDING MOMENTUM - aligned trends (4h+1h ${trend4h.trend}) allow entry despite lastCloseAligns=${lastCloseAlignsWithTrend}`);
+      symLog.info(`${LOG_CATEGORIES.MOMENTUM} BUILDING MOMENTUM - aligned trends (4h+1h ${trend4h.trend}) allow entry despite lastCloseAligns=${lastCloseAlignsWithTrend}`);
     } else if (macdExpanding && adxRising && (hasDivergence || !lastCloseAlignsWithTrend)) {
       momentumState = adx >= ADX_THRESHOLDS.WEAK ? "mixed" : "none";
     } else if (fakeBreakoutRisk && adx >= ADX_THRESHOLDS.MODERATE) {
       momentumState = "mixed";
-      console.log(`${symbol}: FAKE BREAKOUT WARNING - MACD expanding but ADX falling (${adxResult.prevAdx.toFixed(1)} → ${adx.toFixed(1)})`);
+      symLog.warn(`FAKE BREAKOUT WARNING - MACD expanding but ADX falling (${adxResult.prevAdx.toFixed(1)} → ${adx.toFixed(1)})`);
     }
 
-    console.log(
-      `${symbol} MOMENTUM: state=${momentumState} macdExpanding=${macdExpanding} lastCloseAligns=${lastCloseAlignsWithTrend} ` +
-      `divergence=${hasDivergence} volumeConfirms=${volumeConfirmsDirection} ADX=${adx.toFixed(1)} adxRising=${adxRising} ` +
-      `fakeBreakoutRisk=${fakeBreakoutRisk} genuineMomentum=${genuineMomentum}`
-    );
+    symLog.info(`${LOG_CATEGORIES.MOMENTUM} state=${momentumState} macdExpanding=${macdExpanding} lastCloseAligns=${lastCloseAlignsWithTrend} divergence=${hasDivergence} volumeConfirms=${volumeConfirmsDirection} ADX=${adx.toFixed(1)} adxRising=${adxRising} fakeBreakoutRisk=${fakeBreakoutRisk} genuineMomentum=${genuineMomentum}`);
 
     // Market structure validation
     const marketStructure = validateMarketStructure(klines1h, dominantTrend);
@@ -968,7 +955,7 @@ serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("Error in calculate-trend:", error);
+    logError(logger, error, 'calculate-trend error');
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
