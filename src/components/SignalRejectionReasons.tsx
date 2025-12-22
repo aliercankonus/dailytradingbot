@@ -981,17 +981,30 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
 
 const HardBlockStochRsiDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const stochRsiK = coerceNumeric(filtersStatus?.stochRsiK4h, 0);
+  const stochRsiD = coerceNumeric(filtersStatus?.stochRsiD4h, 0);
   const threshold = coerceNumeric(filtersStatus?.threshold, 98);
   const message = filtersStatus?.message || "StochRSI at ceiling - nowhere to rise";
   const gate = filtersStatus?.gate || "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK";
   
   const isOverbought = gate.includes("OVERBOUGHT") || gate === "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK";
-  const isOversold = gate.includes("OVERSOLD");
+  const isOversold = gate.includes("OVERSOLD") || gate === "ABSOLUTE_MIN_STOCHRSI_HARD_BLOCK";
   
-  // Get 4h stochRSI data from trend_data
+  // Get 4h stochRSI data - prefer filters_status then trend_data
   const stoch4h = trendData?.stochasticRsi?.['4h'] || {};
-  const stochK = stoch4h?.k ?? stochRsiK;
-  const stochD = stoch4h?.d ?? 0;
+  const stochK = stochRsiK || stoch4h?.k || 0;
+  const stochD = stochRsiD || stoch4h?.d || 0;
+  
+  // Get reversal score breakdown from filters_status
+  const reversalScore = coerceNumeric(filtersStatus?.reversal_score, 0);
+  const reversalDecision = filtersStatus?.reversal_decision || "";
+  const reversalBreakdown = filtersStatus?.reversal_breakdown || {};
+  const reversalReasons = filtersStatus?.reversal_reasons || [];
+  
+  // Additional context
+  const trend = filtersStatus?.trend || trendData?.primaryTrend || "unknown";
+  const adx = coerceNumeric(filtersStatus?.adx, 0);
+  const momentumState = filtersStatus?.momentum_state || trendData?.momentum?.state || "unknown";
+  const percentB = coerceNumeric(filtersStatus?.percentB, 50);
   
   const getStochRsiColor = (k: number) => {
     if (k >= 95) return "text-red-500";
@@ -1001,15 +1014,23 @@ const HardBlockStochRsiDisplay = ({ filtersStatus, trendData }: { filtersStatus:
     return "text-yellow-400";
   };
   
+  const getReversalColor = (score: number) => {
+    if (score >= 60) return "text-red-500";
+    if (score >= 40) return "text-orange-400";
+    return "text-green-400";
+  };
+  
   return (
     <div className="space-y-3 p-3 bg-red-500/10 rounded-md border border-red-500/30">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <Ban className="h-4 w-4 text-red-500" />
-          <span className="text-xs font-semibold text-red-400">HARD BLOCK: StochRSI at Ceiling</span>
+          <span className="text-xs font-semibold text-red-400">
+            HARD BLOCK: StochRSI at {isOversold ? "Floor" : "Ceiling"}
+          </span>
         </div>
         <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-          K ≥ {threshold}
+          K {isOversold ? "≤" : "≥"} {threshold}
         </Badge>
       </div>
       
@@ -1025,50 +1046,119 @@ const HardBlockStochRsiDisplay = ({ filtersStatus, trendData }: { filtersStatus:
           {/* Overbought zone background */}
           <div 
             className="absolute right-0 top-0 h-full bg-red-500/20"
-            style={{ width: `${100 - threshold}%` }}
+            style={{ width: `${100 - (isOversold ? 100 : threshold)}%` }}
           />
           {/* Oversold zone background */}
           <div 
             className="absolute left-0 top-0 h-full bg-blue-500/20"
-            style={{ width: `2%` }}
+            style={{ width: `${isOversold ? threshold : 2}%` }}
           />
           {/* Current K value */}
           <div 
-            className={`h-full rounded-full transition-all ${stochK >= 95 ? 'bg-red-500' : stochK >= 80 ? 'bg-orange-500' : 'bg-yellow-500'}`}
+            className={`h-full rounded-full transition-all ${
+              stochK >= 95 ? 'bg-red-500' : 
+              stochK >= 80 ? 'bg-orange-500' : 
+              stochK <= 5 ? 'bg-blue-500' :
+              stochK <= 20 ? 'bg-cyan-500' :
+              'bg-yellow-500'
+            }`}
             style={{ width: `${stochK}%` }}
           />
           {/* Threshold marker */}
           <div 
-            className="absolute top-0 h-full w-0.5 bg-red-400"
+            className={`absolute top-0 h-full w-0.5 ${isOversold ? 'bg-blue-400' : 'bg-red-400'}`}
             style={{ left: `${threshold}%` }}
           />
         </div>
         <div className="flex justify-between text-[9px] text-muted-foreground">
-          <span>Oversold (0-20)</span>
-          <span className="text-red-400">Block Zone ({threshold}+)</span>
-          <span>Max (100)</span>
+          <span className={isOversold ? "text-blue-400" : ""}>
+            {isOversold ? `Block Zone (≤${threshold})` : "Oversold (0-20)"}
+          </span>
+          <span className={!isOversold ? "text-red-400" : ""}>
+            {!isOversold ? `Block Zone (${threshold}+)` : "Max (100)"}
+          </span>
         </div>
       </div>
       
-      {/* K/D Values */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="p-2 bg-muted/30 rounded text-center">
-          <div className="text-[9px] text-muted-foreground">K Value</div>
-          <div className={`text-sm font-mono font-bold ${getStochRsiColor(stochK)}`}>
+      {/* K/D Values + Context */}
+      <div className="grid grid-cols-4 gap-1.5">
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-[9px] text-muted-foreground">K</div>
+          <div className={`text-xs font-mono font-bold ${getStochRsiColor(stochK)}`}>
             {stochK.toFixed(1)}
           </div>
         </div>
-        <div className="p-2 bg-muted/30 rounded text-center">
-          <div className="text-[9px] text-muted-foreground">D Value</div>
-          <div className={`text-sm font-mono font-bold ${getStochRsiColor(stochD)}`}>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-[9px] text-muted-foreground">D</div>
+          <div className={`text-xs font-mono font-bold ${getStochRsiColor(stochD)}`}>
             {stochD.toFixed(1)}
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-[9px] text-muted-foreground">ADX</div>
+          <div className="text-xs font-mono font-bold text-muted-foreground">
+            {adx.toFixed(1)}
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-[9px] text-muted-foreground">%B</div>
+          <div className="text-xs font-mono font-bold text-muted-foreground">
+            {percentB.toFixed(0)}
           </div>
         </div>
       </div>
       
+      {/* Reversal Score Breakdown - only show if available */}
+      {reversalScore > 0 && (
+        <div className="space-y-2 border-t border-muted/30 pt-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-muted-foreground">Reversal Risk Score</span>
+            <div className="flex items-center gap-1.5">
+              <span className={`text-xs font-mono font-bold ${getReversalColor(reversalScore)}`}>
+                {reversalScore}/100
+              </span>
+              {reversalDecision && (
+                <Badge 
+                  variant={reversalDecision === "BLOCK" ? "destructive" : reversalDecision === "REDUCE" ? "secondary" : "outline"}
+                  className="text-[9px] px-1 py-0"
+                >
+                  {reversalDecision}
+                </Badge>
+              )}
+            </div>
+          </div>
+          
+          {/* Score Breakdown */}
+          {Object.keys(reversalBreakdown).length > 0 && (
+            <div className="grid grid-cols-2 gap-1 text-[9px]">
+              {Object.entries(reversalBreakdown).map(([key, value]) => (
+                <div key={key} className="flex justify-between px-1.5 py-0.5 bg-muted/20 rounded">
+                  <span className="text-muted-foreground capitalize">{key.replace(/_/g, ' ')}</span>
+                  <span className={`font-mono ${Number(value) > 0 ? 'text-orange-400' : 'text-muted-foreground'}`}>
+                    +{Number(value)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* Reversal Reasons */}
+          {reversalReasons.length > 0 && (
+            <div className="space-y-0.5">
+              {reversalReasons.slice(0, 3).map((reason: string, idx: number) => (
+                <div key={idx} className="flex items-start gap-1 text-[9px]">
+                  <AlertTriangle className="h-3 w-3 text-orange-400 shrink-0 mt-0.5" />
+                  <span className="text-muted-foreground">{reason}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
         <span className="text-red-400">⛔ Why blocked:</span> {message}. At K={stochK.toFixed(0)}, there is no room 
-        for the oscillator to rise further. LONG entries are blocked until StochRSI pulls back below {threshold}.
+        for the oscillator to {isOversold ? "fall" : "rise"} further. {isOversold ? "SHORT" : "LONG"} entries are blocked until StochRSI {isOversold ? "rises above" : "pulls back below"} {threshold}.
       </div>
     </div>
   );
