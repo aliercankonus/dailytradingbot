@@ -84,3 +84,63 @@ export const SLIPPAGE_PARAMS = {
   // Round-trip slippage deducted from locked profit calculations
   ROUND_TRIP_SLIPPAGE_PERCENT: 0.05,
 } as const;
+
+// Quality score thresholds for signal generation
+export const QUALITY_THRESHOLDS = {
+  // Base minimum quality score (standard conditions)
+  BASE_MIN: 55,
+  // Neutral trend threshold (relies on HTF for direction)
+  NEUTRAL_MIN: 35,
+  // Strong 1h signal threshold (1h confidence >= 65%)
+  STRONG_1H_MIN: 45,
+  // Exceptional ADX threshold (ADX >= 35)
+  EXCEPTIONAL_ADX_MIN: 50,
+  // Strong ADX threshold (ADX >= 25)
+  STRONG_ADX_MIN: 53,
+  // Recovery mode boost added to base threshold
+  RECOVERY_BOOST: 10,
+} as const;
+
+// Momentum validation thresholds
+export const MOMENTUM_THRESHOLDS = {
+  // Minimum momentum score required for signal generation
+  MIN_SCORE: 5,
+  // Minimum momentum score for pullback entries
+  PULLBACK_MIN_SCORE: 3,
+} as const;
+
+// Correlation risk parameters
+export const CORRELATION_PARAMS = {
+  // Maximum correlation threshold between positions (0-1)
+  MAX_THRESHOLD: 0.75,
+  // Maximum correlated positions allowed in same direction
+  MAX_SAME_DIRECTION: 2,
+  // Correlation risk score threshold for position size reduction
+  SIZE_REDUCTION_THRESHOLD: 30,
+} as const;
+
+// Strategy performance and selection parameters
+export const STRATEGY_PARAMS = {
+  // Maximum bonus points for high-performing strategies
+  MAX_PERFORMANCE_BONUS: 5,
+  // Minimum quality score difference for bonus to apply
+  MIN_QUALITY_DIFF_FOR_OVERRIDE: 8,
+  // Win rate threshold for disabling strategies (%)
+  WIN_RATE_DISABLE_THRESHOLD: 35,
+  // Win rate threshold for high performer status (%)
+  WIN_RATE_HIGH_PERFORMER: 60,
+  // Minimum trades required for strategy filtering
+  MIN_TRADES_FOR_FILTER: 8,
+  // Minimum unique symbols for strategy stats validity
+  MIN_UNIQUE_SYMBOLS: 3,
+  // Minimum unique strategies for symbol stats validity  
+  MIN_UNIQUE_STRATEGIES: 2,
+} as const;
+
+// Symbol filtering parameters
+export const SYMBOL_PARAMS = {
+  // Win rate threshold for disabling symbols (%)
+  WIN_RATE_DISABLE_THRESHOLD: 30,
+  // Minimum trades required for symbol filtering
+  MIN_TRADES_FOR_FILTER: 10,
+} as const;

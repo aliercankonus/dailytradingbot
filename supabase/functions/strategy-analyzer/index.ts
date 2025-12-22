@@ -1,6 +1,16 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS } from "../_shared/constants.ts";
+import { 
+  ADX_THRESHOLDS, 
+  STOCHRSI_THRESHOLDS, 
+  RSI_THRESHOLDS, 
+  CONFIDENCE_THRESHOLDS,
+  QUALITY_THRESHOLDS,
+  MOMENTUM_THRESHOLDS,
+  CORRELATION_PARAMS,
+  STRATEGY_PARAMS,
+  SYMBOL_PARAMS
+} from "../_shared/constants.ts";
 import { 
   getTechnicalScore, 
   getMomentumScore, 
@@ -913,8 +923,8 @@ serve(async (req) => {
     // Segment stats to prevent cross-contamination:
     // - Strategy stats require minimum unique symbols (strategy-agnostic)
     // - Symbol stats require minimum unique strategies (symbol-agnostic)
-    const STRATEGY_MIN_UNIQUE_SYMBOLS = 3;  // Strategy must have trades across 3+ symbols to be disabled
-    const SYMBOL_MIN_UNIQUE_STRATEGIES = 2; // Symbol must have trades from 2+ strategies to be disabled
+    const STRATEGY_MIN_UNIQUE_SYMBOLS = STRATEGY_PARAMS.MIN_UNIQUE_SYMBOLS;
+    const SYMBOL_MIN_UNIQUE_STRATEGIES = STRATEGY_PARAMS.MIN_UNIQUE_STRATEGIES;
     
     // Calculate win rate per symbol with strategy diversity tracking
     const symbolWinRates = new Map<string, { wins: number; total: number; winRate: number; uniqueStrategies: Set<string> }>();
@@ -1251,27 +1261,27 @@ serve(async (req) => {
     // - Strong ADX (≥35): Allow lower quality (more signals in strong trends)
     // - Normal ADX (20-35): Standard threshold
     // - Recovery mode: Higher threshold (fewer, higher quality signals)
-    const BASE_MIN_QUALITY_SCORE = 55;
+    const BASE_MIN_QUALITY_SCORE = QUALITY_THRESHOLDS.BASE_MIN;
     const DEFAULT_MIN_QUALITY = BASE_MIN_QUALITY_SCORE;
     
     const getMinQualityScore = (adx: number, inRecovery: boolean, confidence1h?: number, isNeutralTrend?: boolean): number => {
       if (inRecovery) {
-        return BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost; // 65 in recovery
+        return BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost; // Uses configurable recovery boost
       }
-      // NEW: Neutral trends (with HTF direction) get lower threshold since quality scoring
+      // Neutral trends (with HTF direction) get lower threshold since quality scoring
       // is optimized for directional 5m trends - neutral relies on 1h direction instead
       if (isNeutralTrend) {
-        return 35; // Neutral strategy threshold - relies on HTF for direction
+        return QUALITY_THRESHOLDS.NEUTRAL_MIN;
       }
       // RELAXED: If 1h shows strong direction (≥65% confidence), allow lower threshold
       // Changed from 70% to 65% to capture more early entries when 1h is directional
       if (confidence1h && confidence1h >= 65) {
-        return 45;  // Strong 1h signal: much lower threshold for early entries
+        return QUALITY_THRESHOLDS.STRONG_1H_MIN;
       }
       // Dynamic based on ADX - strong trends = allow more signals
-      if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) return 50;  // Strong trend: lower threshold
-      if (adx >= ADX_THRESHOLDS.STRONG) return 53;       // Good trend: slightly lower
-      return BASE_MIN_QUALITY_SCORE;                      // Normal: 55
+      if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) return QUALITY_THRESHOLDS.EXCEPTIONAL_ADX_MIN;
+      if (adx >= ADX_THRESHOLDS.STRONG) return QUALITY_THRESHOLDS.STRONG_ADX_MIN;
+      return BASE_MIN_QUALITY_SCORE;
     };
     
     if (isInRecoveryMode) {
@@ -1817,9 +1827,9 @@ serve(async (req) => {
         
         // ============= NEW GATE: MOMENTUM SCORE >= 5 =============
         // Data shows trades with momentumScore = 0 have extremely low win rates
-        // Require minimum momentum score of 5 to proceed
+        // Require minimum momentum score to proceed (from shared constants)
         const earlyMomentumScore = getMomentumScore(momentum);
-        const MIN_MOMENTUM_SCORE = 5;
+        const MIN_MOMENTUM_SCORE = MOMENTUM_THRESHOLDS.MIN_SCORE;
         if (earlyMomentumScore < MIN_MOMENTUM_SCORE) {
           rejectedByHardGates++;
           await logRejectionWithAI(
@@ -2425,8 +2435,8 @@ serve(async (req) => {
         // Select BEST strategy (highest score)
         // Apply regime-aware strategy performance bonus for high performers
         // CAPPED to prevent bonus from overpowering technical quality differences
-        const MAX_STRATEGY_BONUS = 5;
-        const MIN_QUALITY_DIFF_FOR_OVERRIDE = 8; // Technical score must differ by at least this much for bonus to matter
+        const MAX_STRATEGY_BONUS = STRATEGY_PARAMS.MAX_PERFORMANCE_BONUS;
+        const MIN_QUALITY_DIFF_FOR_OVERRIDE = STRATEGY_PARAMS.MIN_QUALITY_DIFF_FOR_OVERRIDE;
         
         regimeFilteredCandidates.sort((a, b) => {
           const baseScoreA = a.score;
@@ -2464,8 +2474,8 @@ serve(async (req) => {
           symbol,
           signalType,
           activePositions || [],
-          0.75, // Max correlation threshold
-          2     // Max correlated positions in same direction
+          CORRELATION_PARAMS.MAX_THRESHOLD,
+          CORRELATION_PARAMS.MAX_SAME_DIRECTION
         );
         
         if (!correlationCheck.canOpen) {
@@ -2496,7 +2506,7 @@ serve(async (req) => {
         let positionSizeMultiplier = getPositionSizeFromQuality(qualityScore);
         
         // Reduce position size based on correlation risk (0% risk = 100% size, 100% risk = 50% size)
-        if (correlationCheck.riskScore > 30) {
+        if (correlationCheck.riskScore > CORRELATION_PARAMS.SIZE_REDUCTION_THRESHOLD) {
           const correlationAdjustment = getCorrelationAdjustedSize(1.0, correlationCheck.riskScore);
           positionSizeMultiplier *= correlationAdjustment;
           logger.forSymbol(symbol).info(`🔗 Correlation adjustment - position size reduced to ${(correlationAdjustment * 100).toFixed(0)}% due to ${correlationCheck.riskScore.toFixed(0)}% correlation risk`);
