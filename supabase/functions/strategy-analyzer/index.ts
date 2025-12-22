@@ -1,7 +1,19 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS } from "../_shared/constants.ts";
-import { getTechnicalScore, getMomentumScore, getAlignmentScore, getConfidencePenalty as sharedGetConfidencePenalty, getAdxScore } from "../_shared/scoring.ts";
+import { 
+  getTechnicalScore, 
+  getMomentumScore, 
+  getAlignmentScore, 
+  getConfidencePenalty, 
+  getAdxScore,
+  getVolumeScore as sharedGetVolumeScore,
+  getAdxWeight,
+  calculateUnifiedReversalScore,
+  detectMarketRegime,
+  type UnifiedReversalResult,
+  type MarketRegime
+} from "../_shared/scoring.ts";
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
 
@@ -361,9 +373,8 @@ const calculateQualityScore = (factors: QualityFactors): { score: number; breakd
   return { score, breakdown };
 };
 
-// ============= NEW: Volume Score Component (0-10 points) =============
-// Volume confirms trend direction and indicates conviction
-// CRITICAL: volumeSpike alone is NOT directional - requires rangeExpansion confirmation
+// ============= VOLUME SCORE WRAPPER =============
+// Wraps shared getVolumeScore with trendData extraction for local usage
 const getVolumeScore = (trendData: any, trend: string): number => {
   const momentum = trendData?.momentum || {};
   const volatility = trendData?.volatility || {};
@@ -372,451 +383,15 @@ const getVolumeScore = (trendData: any, trend: string): number => {
   const volumeSpike = volatility.volumeSpike ?? false;
   const volumeRatio = volatility.volumeRatio ?? 1.0;
   const relativeATR = volatility.relativeATR ?? 1.0;
-  const hasRangeExpansion = relativeATR > 1.0; // Confirms genuine breakout/momentum
+  const hasRangeExpansion = relativeATR > 1.0;
   
-  // Best case: Volume confirms AND spike with range expansion AND high ratio
-  if (volumeConfirms && volumeSpike && hasRangeExpansion && volumeRatio > 2.0) {
-    return 10;  // Strong volume surge with confirmed range expansion
-  }
-  
-  // Volume confirms with spike + range expansion
-  if (volumeConfirms && volumeSpike && hasRangeExpansion) {
-    return 8;
-  }
-  
-  // Volume confirms with spike but no range expansion (activity without direction)
-  if (volumeConfirms && volumeSpike) {
-    return 6;  // Reduced from 8 - spike without range expansion is less reliable
-  }
-  
-  // Volume confirms with above-average volume
-  if (volumeConfirms && volumeRatio > 1.5) {
-    return 7;
-  }
-  
-  // Volume confirms only
-  if (volumeConfirms) {
-    return 5;
-  }
-  
-  // Spike without confirmation needs range expansion to score
-  if (volumeSpike && hasRangeExpansion && volumeRatio > 1.5) {
-    return 4;
-  }
-  
-  // Above average volume with range expansion
-  if (volumeRatio > 1.5 && hasRangeExpansion) {
-    return 3;
-  }
-  
-  // Above average volume without range expansion (less reliable)
-  if (volumeRatio > 1.5) {
-    return 2;  // Reduced from 3
-  }
-  
-  // Slightly above average
-  if (volumeRatio > 1.2) {
-    return 1;  // Reduced from 2
-  }
-  
-  // PARTIAL CREDIT: At least average volume (volumeRatio >= 1.0)
-  // This prevents zero volume score in normal market conditions
-  if (volumeRatio >= 1.0) {
-    return 1;  // NEW: Baseline credit for average volume
-  }
-  
-  // Neutral trend - no volume penalty
-  if (trend === "neutral") {
-    return 1;
-  }
-  
-  // Low volume in directional trend - no bonus
-  return 0;
-};
-
-// ============= CONFIDENCE INVERSION FIX =============
-// High confidence = trend exhaustion, penalize entries
-// Optimal entry zone: 50-60% confidence (trend confirmed but not exhausted)
-// CRITICAL FIX: 60-69 zone has 17% win rate vs 50-59 at 46% - add penalty!
-// FIX: Reduce penalty when ADX ≥ 30 or momentum confirmed to avoid double punishment with hard gate
-const getConfidencePenalty = (confidence: number, adx: number = 0, momentumConfirmed: boolean = false): number => {
-  // Calculate base penalty - Uses CONFIDENCE_THRESHOLDS for consistency
-  let basePenalty = 0;
-  if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_HEAVY) basePenalty = -25;        // Heavy penalty for extreme confidence
-  else if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_STRONG) basePenalty = -18;   // Strong penalty
-  else if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_MODERATE) basePenalty = -12; // Moderate penalty
-  else if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_LIGHT) basePenalty = -8;     // Light penalty
-  else if (confidence >= CONFIDENCE_THRESHOLDS.DEAD_ZONE_LOWER) basePenalty = -12;  // DEAD ZONE: 60-69 penalty
-  else if (confidence >= CONFIDENCE_THRESHOLDS.OPTIMAL_LOWER) basePenalty = 0;      // Optimal zone: 50-59 (46% win rate)
-  else basePenalty = -3;                                                             // Too low confidence also not ideal
-  
-  // ============= PENALTY REDUCTION FOR FAVORABLE CONDITIONS =============
-  // If signal passed the hard gate (ADX ≥ 30 or momentum confirmed), reduce penalty severity
-  // This prevents double punishment: hard gate already filters weak signals
-  if (basePenalty < 0) {
-    let reductionFactor = 1.0; // No reduction by default
-    
-    // Strong trend (ADX ≥ 30) reduces penalty by 40%
-    if (adx >= ADX_THRESHOLDS.VERY_STRONG) {
-      reductionFactor -= 0.4;
-    }
-    // Confirmed momentum reduces penalty by 30%
-    if (momentumConfirmed) {
-      reductionFactor -= 0.3;
-    }
-    // Cap reduction at 60% (don't eliminate penalty entirely)
-    reductionFactor = Math.max(0.4, reductionFactor);
-    
-    return Math.round(basePenalty * reductionFactor);
-  }
-  
-  return basePenalty;
+  return sharedGetVolumeScore(volumeConfirms, volumeSpike, volumeRatio, hasRangeExpansion, trend);
 };
 
 // ============= SCORING FUNCTIONS IMPORTED FROM SHARED MODULE =============
-// getTechnicalScore, getMomentumScore, getAlignmentScore, getAdxScore
+// getConfidencePenalty, calculateUnifiedReversalScore, detectMarketRegime
+// UnifiedReversalResult, MarketRegime types
 // are now imported from "../_shared/scoring.ts" for centralized maintenance
-
-// ============= UNIFIED REVERSAL SCORE SYSTEM =============
-// Aggregates ALL reversal signals into a single comprehensive score
-// Replaces fragmented individual filters with unified decision system
-interface UnifiedReversalResult {
-  score: number;                 // 0-100, higher = more reversal risk
-  decision: "BLOCK" | "REDUCE" | "NORMAL";  // Three-tier decision
-  positionSizeMultiplier: number; // 1.0 for normal, 0.5 for reduce, 0 for block
-  signals: string[];             // Contributing factors
-  breakdown: {
-    stochRsiScore: number;       // 0-50 max
-    stochRsiZoneScore: number;   // 0-25 max
-    momentumScore: number;       // 0-30 max
-    macdScore: number;           // 0-15 max
-    timeframeScore: number;      // 0-20 max
-    volumeScore: number;         // 0-15 max (optional boost)
-  };
-  reason: string;
-  adxWeight: number;             // ADX-based weight applied to score
-}
-
-// Count StochRSI signals opposing the intended trade direction
-const countOpposingStochSignals = (trendData: any, intendedDirection: string): {
-  opposingCrossCount: number;
-  extremeCount: number;
-  crossTimeframes: string[];
-  extremeTimeframes: string[];
-} => {
-  const stochRsi = trendData?.stochasticRsi || {};
-  const aggregated = stochRsi.aggregated || {};
-  const timeframes = ['4h', '1h', '30m', '15m'];
-  
-  let opposingCrossCount = 0;
-  let extremeCount = 0;
-  const crossTimeframes: string[] = [];
-  const extremeTimeframes: string[] = [];
-  
-  const isLong = intendedDirection === "bullish" || intendedDirection === "long";
-  
-  // Check aggregated counts first (faster)
-  if (isLong) {
-    opposingCrossCount = aggregated.bearishCrossCount || 0;
-    extremeCount = aggregated.overboughtCount || 0;
-  } else {
-    opposingCrossCount = aggregated.bullishCrossCount || 0;
-    extremeCount = aggregated.oversoldCount || 0;
-  }
-  
-  // Check individual timeframes for detailed logging
-  for (const tf of timeframes) {
-    const tfData = stochRsi[tf];
-    if (!tfData) continue;
-    
-    const k = tfData.k ?? 50;
-    const signal = tfData.signal || "neutral";
-    
-    if (isLong) {
-      if (signal === "bearish_cross") crossTimeframes.push(tf);
-      if (k > 80) extremeTimeframes.push(tf);
-    } else {
-      if (signal === "bullish_cross") crossTimeframes.push(tf);
-      if (k < 20) extremeTimeframes.push(tf);
-    }
-  }
-  
-  return { opposingCrossCount, extremeCount, crossTimeframes, extremeTimeframes };
-};
-
-// Calculate Unified Reversal Score (0-100)
-const calculateUnifiedReversalScore = (
-  trendData: any, 
-  intendedDirection: string,
-  symbol: string
-): UnifiedReversalResult => {
-  const signals: string[] = [];
-  let totalScore = 0;
-  
-  const momentum = trendData?.momentum || {};
-  const stochRsi = trendData?.stochasticRsi || {};
-  const aggregated = stochRsi.aggregated || {};
-  const tf = trendData?.timeframes || {};
-  const tf1h = tf['1h'] || {};
-  const tf4h = tf['4h'] || {};
-  const adx = trendData?.volatility?.adx || trendData?.adx || 20;
-  const volatility = trendData?.volatility || {};
-  const indicators = trendData?.indicators || {};
-  const rsi = tf1h.indicators?.rsi || indicators.rsi || 50;
-  
-  const isLong = intendedDirection === "bullish" || intendedDirection === "long";
-  const trend1h = tf1h.trend || "neutral";
-  const trend4h = tf4h.trend || "neutral";
-  const stoch4h = stochRsi['4h'] || {};
-  const stoch1h = stochRsi['1h'] || {};
-  
-  // ============= RSI PULLBACK + MOMENTUM CHECK (for StochRSI conflict resolution) =============
-  // If RSI indicates a pullback entry AND momentum confirms, reduce StochRSI zone penalty by 50%
-  // This prevents RSI pullback signals from conflicting with StochRSI extreme reversal warnings
-  const momentumConfirms = momentum.confirms ?? false;
-  const momentumState = momentum.state || "none";
-  const isMomentumConfirmed = (momentumState === "confirmed" || momentumState === "building") && momentumConfirms;
-  
-  // Check if RSI indicates a valid pullback entry
-  const rsiIndicatesPullback = isLong 
-    ? rsi < RSI_THRESHOLDS.BULLISH_PULLBACK  // RSI < 40 for bullish pullback
-    : rsi > RSI_THRESHOLDS.BEARISH_RALLY;     // RSI > 60 for bearish rally
-  
-  // Combined condition: RSI pullback + momentum = reduce StochRSI zone penalty
-  const reduceStochZonePenalty = rsiIndicatesPullback && isMomentumConfirmed;
-  
-  // Initialize breakdown
-  const breakdown = {
-    stochRsiScore: 0,
-    stochRsiZoneScore: 0,
-    momentumScore: 0,
-    macdScore: 0,
-    timeframeScore: 0,
-    volumeScore: 0,
-  };
-  
-  // ============= 1. StochRSI CROSS SIGNALS (0-50 points) =============
-  // Most critical: opposing crosses indicate imminent reversal
-  const stochSignals = countOpposingStochSignals(trendData, intendedDirection);
-  
-  if (stochSignals.opposingCrossCount >= 3) {
-    breakdown.stochRsiScore = 50;  // Maximum - strong reversal signal
-    signals.push(`${stochSignals.opposingCrossCount} opposing StochRSI crosses`);
-  } else if (stochSignals.opposingCrossCount >= 2) {
-    breakdown.stochRsiScore = 40;
-    signals.push(`${stochSignals.opposingCrossCount} opposing StochRSI crosses (${stochSignals.crossTimeframes.join(', ')})`);
-  } else if (stochSignals.opposingCrossCount >= 1) {
-    breakdown.stochRsiScore = 30;
-    signals.push(`Opposing StochRSI cross on ${stochSignals.crossTimeframes.join(', ')}`);
-  }
-  
-  // ============= 2. StochRSI EXTREME ZONES (0-25 points) =============
-  // Being in extreme zone when entering = high bounce/reversal risk
-  //
-  // IMPORTANT DESIGN NOTE: These scores seem to contradict the "strong ADX allows 
-  // overbought/oversold continuation" rule from stochrsi-extreme-entry-exception-strong-trends.
-  // This is INTENTIONAL and CORRECT because:
-  // 1. The ADX-adaptive weight (calculated later) already reduces reversal score impact in strong trends
-  //    - ADX ≥35: weight = 0.5 (halves this score)
-  //    - ADX 20-35: weight = 0.7
-  //    - ADX <20: weight = 1.0
-  // 2. So a +10 extreme zone score becomes +5 in a strong trend after weighting
-  // 3. This provides a "soft caution" even in strong trends, not a hard block
-  // DO NOT "FIX" this by adding ADX checks here - the weighting already handles it!
-  //
-  // NEW: RSI-STOCHRSI CONFLICT RESOLUTION
-  // If RSI indicates pullback entry AND momentum confirms, reduce zone penalty by 50%
-  // This prevents self-canceling signals where RSI says "good entry" but StochRSI says "reversal risk"
-  const k4h = stoch4h.k ?? 50;
-  const k1h = stoch1h.k ?? 50;
-  
-  let rawStochZoneScore = 0;
-  
-  if (isLong) {
-    // SHORT entry blocked if 4h StochRSI is oversold (bounce risk)
-    if (k4h < STOCHRSI_THRESHOLDS.DEEPLY_OVERSOLD) {
-      rawStochZoneScore += 15;
-      signals.push(`4h StochRSI deeply oversold (K=${k4h.toFixed(1)})`);
-    } else if (k4h < STOCHRSI_THRESHOLDS.OVERSOLD_ZONE) {
-      rawStochZoneScore += 8;
-      signals.push(`4h StochRSI oversold zone (K=${k4h.toFixed(1)})`);
-    }
-    
-    // Overbought warning for LONG entry (reduced by ADX weight in strong trends)
-    if (k4h > STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT) {
-      rawStochZoneScore += 10;
-      signals.push(`4h StochRSI extremely overbought (K=${k4h.toFixed(1)})`);
-    }
-  } else {
-    // LONG entry blocked if 4h StochRSI is overbought (pullback risk)
-    if (k4h > STOCHRSI_THRESHOLDS.DEEPLY_OVERBOUGHT) {
-      rawStochZoneScore += 15;
-      signals.push(`4h StochRSI deeply overbought (K=${k4h.toFixed(1)})`);
-    } else if (k4h > STOCHRSI_THRESHOLDS.OVERBOUGHT_ZONE) {
-      rawStochZoneScore += 8;
-      signals.push(`4h StochRSI overbought zone (K=${k4h.toFixed(1)})`);
-    }
-    
-    // Oversold warning for SHORT entry (reduced by ADX weight in strong trends)
-    if (k4h < STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD) {
-      rawStochZoneScore += 10;
-      signals.push(`4h StochRSI extremely oversold (K=${k4h.toFixed(1)})`);
-    }
-  }
-  
-  // Apply RSI-StochRSI conflict resolution: reduce zone penalty by 50% if RSI pullback + momentum
-  if (reduceStochZonePenalty && rawStochZoneScore > 0) {
-    breakdown.stochRsiZoneScore = Math.round(rawStochZoneScore * 0.5);
-    signals.push(`StochRSI zone penalty reduced 50% (RSI pullback ${rsi.toFixed(1)} + momentum confirmed)`);
-    console.log(`📊 ${symbol} RSI-StochRSI conflict resolution: zone penalty ${rawStochZoneScore} -> ${breakdown.stochRsiZoneScore} (RSI=${rsi.toFixed(1)}, momentum=${momentumState})`);
-  } else {
-    breakdown.stochRsiZoneScore = rawStochZoneScore;
-  }
-  
-  // ============= 3. MOMENTUM STATE (0-30 points) =============
-  // Mixed or unconfirmed momentum = directional uncertainty
-  // (momentumState and momentumConfirms already defined above for RSI-StochRSI conflict resolution)
-  
-  // RELAXED: Allow "none" state with reduced penalty when ADX >= 28 (strong trend exception)
-  // This enables early entries when trend strength itself provides conviction
-  const isStrongTrendForMomentum = adx >= ADX_THRESHOLDS.STRONG_TREND_EXCEPTION; // 28+ (relaxed from 30)
-  
-  if (momentumState === "none") {
-    if (isStrongTrendForMomentum) {
-      // Strong trend exception - reduced penalty for early entries
-      breakdown.momentumScore = 10;
-      signals.push(`No momentum but strong trend (ADX=${adx.toFixed(1)} >= 28)`);
-    } else {
-      breakdown.momentumScore = 25;
-      signals.push(`No momentum (state: ${momentumState})`);
-    }
-  } else if (momentumState === "mixed") {
-    // HARD GATE: Mixed momentum + weak ADX = block
-    if (adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION) {
-      breakdown.momentumScore = 30;  // Max score for mixed in weak trend
-      signals.push(`Mixed momentum with weak trend (ADX=${adx.toFixed(1)})`);
-    } else {
-      breakdown.momentumScore = 15;  // Allow in strong trends
-      signals.push(`Mixed momentum (ADX=${adx.toFixed(1)} allows)`);
-    }
-  } else if (momentumState === "building") {
-    // "building" = aligned trends but not full confirmation (e.g., single candle bounce)
-    // Lower penalty than "mixed" since trend alignment is confirmed
-    breakdown.momentumScore = 8;
-    signals.push(`Momentum building (aligned trends, partial confirmation)`);
-  } else if (!momentumConfirms) {
-    if (isStrongTrendForMomentum) {
-      breakdown.momentumScore = 8;
-      signals.push(`Momentum unconfirmed but strong trend (ADX=${adx.toFixed(1)})`);
-    } else {
-      breakdown.momentumScore = 15;
-      signals.push(`Momentum state ${momentumState} but not confirmed`);
-    }
-  }
-  
-  // ============= 4. MACD ALIGNMENT (0-15 points) =============
-  // MACD divergence or misalignment = trend weakening
-  if (momentum.hasDivergence) {
-    breakdown.macdScore += 15;
-    signals.push("MACD divergence detected");
-  } else if (!momentum.macdDirectionAligned) {
-    breakdown.macdScore += 10;
-    signals.push("MACD direction misaligned");
-  } else if (!momentum.macdExpanding) {
-    breakdown.macdScore += 5;
-    signals.push("MACD not expanding");
-  }
-  
-  // ============= 5. TIMEFRAME CONFLICTS (0-20 points) =============
-  // 1h or 4h opposing intended direction = significant risk
-  if (isLong) {
-    if (trend1h === "bearish") {
-      breakdown.timeframeScore += 15;
-      signals.push("1h trend bearish (opposing LONG)");
-    }
-    if (trend4h === "bearish") {
-      breakdown.timeframeScore += 5;
-      signals.push("4h trend bearish");
-    }
-  } else {
-    if (trend1h === "bullish") {
-      breakdown.timeframeScore += 15;
-      signals.push("1h trend bullish (opposing SHORT)");
-    }
-    if (trend4h === "bullish") {
-      breakdown.timeframeScore += 5;
-      signals.push("4h trend bullish");
-    }
-  }
-  
-  // ============= 6. VOLUME CONFIRMATION (reduces score if confirming) =============
-  // Volume supporting move = reduce reversal risk
-  const volumeConfirms = momentum.volumeConfirms ?? false;
-  const volumeBoost = momentum.volumeBoost ?? 1.0;
-  
-  if (volumeConfirms && volumeBoost > 1.3) {
-    breakdown.volumeScore = -10;  // Negative = reduces total score
-    signals.push(`Volume confirms (boost ${volumeBoost.toFixed(2)}x) - risk reduced`);
-  } else if (!volumeConfirms && volatility.volumeRatio < 0.5) {
-    breakdown.volumeScore = 5;  // Low volume = less conviction
-    signals.push("Low volume - reduced conviction");
-  }
-  
-  // ============= CALCULATE TOTAL & APPLY ADX WEIGHT =============
-  const rawScore = breakdown.stochRsiScore + breakdown.stochRsiZoneScore + 
-                   breakdown.momentumScore + breakdown.macdScore + 
-                   breakdown.timeframeScore + breakdown.volumeScore;
-  
-  // ADX-based adaptive weight (strong trends reduce reversal impact) - Uses centralized ADX_THRESHOLDS
-  const getAdxWeight = (adxValue: number): number => {
-    if (adxValue >= ADX_THRESHOLDS.EXTREME) return 0.4;      // Extreme trend
-    if (adxValue >= ADX_THRESHOLDS.EXCEPTIONAL) return 0.5;  // Exceptional trend
-    if (adxValue >= ADX_THRESHOLDS.VERY_STRONG) return 0.6;  // Very strong trend
-    if (adxValue >= ADX_THRESHOLDS.STRONG) return 0.75;      // Strong trend
-    if (adxValue >= ADX_THRESHOLDS.MINIMUM) return 0.85;     // Moderate trend
-    return 1.0;  // Weak trend = full weight
-  };
-  
-  const adxWeight = getAdxWeight(adx);
-  totalScore = Math.min(100, Math.max(0, Math.round(rawScore * adxWeight)));
-  
-  // ============= THREE-TIER DECISION SYSTEM =============
-  // Score > 60: BLOCK - too risky
-  // Score 40-60: REDUCE - proceed with 50% position size
-  // Score < 40: NORMAL - full position size
-  let decision: "BLOCK" | "REDUCE" | "NORMAL";
-  let positionSizeMultiplier: number;
-  
-  if (totalScore >= 60) {
-    decision = "BLOCK";
-    positionSizeMultiplier = 0;
-  } else if (totalScore >= 40) {
-    decision = "REDUCE";
-    positionSizeMultiplier = 0.5;
-  } else {
-    decision = "NORMAL";
-    positionSizeMultiplier = 1.0;
-  }
-  
-  const reason = decision === "BLOCK"
-    ? `🛑 UNIFIED REVERSAL BLOCK (${totalScore}/100): ${signals.slice(0, 3).join(", ")}`
-    : decision === "REDUCE"
-    ? `⚠️ Unified reversal caution (${totalScore}/100, 50% size): ${signals.slice(0, 2).join(", ")}`
-    : `✓ Unified reversal check passed (${totalScore}/100)`;
-  
-  console.log(`📊 ${symbol} UNIFIED REVERSAL: score=${totalScore} (raw=${rawScore}, ADX=${adx.toFixed(1)}, weight=${adxWeight.toFixed(2)}) → ${decision}`);
-  console.log(`   Breakdown: StochCross=${breakdown.stochRsiScore} Zone=${breakdown.stochRsiZoneScore} Mom=${breakdown.momentumScore} MACD=${breakdown.macdScore} TF=${breakdown.timeframeScore} Vol=${breakdown.volumeScore}`);
-  
-  return { 
-    score: totalScore, 
-    decision, 
-    positionSizeMultiplier,
-    signals, 
-    breakdown, 
-    reason,
-    adxWeight,
-  };
-};
 
 // Legacy function for backward compatibility
 // Now uses the unified reversal score internally
@@ -833,70 +408,8 @@ const detectReversalRisk = (trendData: any, intendedDirection: string): Reversal
   return {
     isHighRisk: unifiedResult.decision === "BLOCK",
     riskScore: unifiedResult.score,
-    signals: unifiedResult.signals,
-    reason: unifiedResult.reason
-  };
-};
-
-// ============= IMPROVEMENT #2: Market Regime Detection =============
-type MarketRegime = "trending" | "ranging" | "choppy" | "volatile";
-
-const detectMarketRegime = (trendData: any): { regime: MarketRegime; tradeable: boolean; reason: string } => {
-  const adx = trendData.volatility?.adx || 0;
-  const atrPercent = trendData.volatility?.atrPercent || 0;
-  const confidence = trendData.confidence || 0;
-  const consistency = trendData.trueAlignment?.score || 0;
-  
-  // Check for ranging market (ADX low, mixed signals)
-  if (adx < 15 && confidence < 50) {  // 15 is intentional (below VERY_WEAK for severe ranging detection)
-    return { 
-      regime: "ranging", 
-      tradeable: false, 
-      reason: `Ranging market (ADX ${adx.toFixed(1)}, confidence ${confidence}%)` 
-    };
-  }
-  
-  // Check for choppy market (conflicting timeframes, inconsistent)
-  if (consistency < 40 && confidence < 55) {
-    return { 
-      regime: "choppy", 
-      tradeable: false, 
-      reason: `Choppy market (consistency ${consistency}%, confidence ${confidence}%)` 
-    };
-  }
-  
-  // Check for excessive volatility (may be news event)
-  if (atrPercent > 4.0 && adx < ADX_THRESHOLDS.STRONG) {
-    return { 
-      regime: "volatile", 
-      tradeable: false, 
-      reason: `Excessive volatility without trend (ATR ${atrPercent.toFixed(2)}%, ADX ${adx.toFixed(1)})` 
-    };
-  }
-  
-  // Trending market - tradeable (RELAXED: allow ADX >= MINIMUM 20)
-  // FIX: Previously required ADX >= 22 which rejected valid signals during 3-5% drops
-  if (adx >= ADX_THRESHOLDS.MINIMUM) {
-    return { 
-      regime: "trending", 
-      tradeable: true, 
-      reason: `Trending market (ADX ${adx.toFixed(1)}, confidence ${confidence}%)` 
-    };
-  }
-  
-  // Allow weaker trends if alignment is strong (ADX 18-20 with good confidence)
-  if (adx >= ADX_THRESHOLDS.WEAK && confidence >= 60 && consistency >= 50) {
-    return { 
-      regime: "trending", 
-      tradeable: true, 
-      reason: `Moderate trend with alignment (ADX ${adx.toFixed(1)}, confidence ${confidence}%, consistency ${consistency}%)` 
-    };
-  }
-  
-  return { 
-    regime: "ranging", 
-    tradeable: false, 
-    reason: `Insufficient trend conditions (ADX ${adx.toFixed(1)}, confidence ${confidence}%)` 
+    signals: unifiedResult.reasons,
+    reason: unifiedResult.reasons.slice(0, 3).join(", ")
   };
 };
 
@@ -1828,17 +1341,17 @@ serve(async (req) => {
         // BLOCK: High reversal risk - skip this signal entirely
         if (unifiedReversal.decision === "BLOCK") {
           rejectedByReversalRisk++;
-          console.log(`🛑 ${symbol}: ${unifiedReversal.reason}`);
+          console.log(`🛑 ${symbol}: Unified Reversal BLOCK (${unifiedReversal.score}/100) - ${unifiedReversal.reasons.slice(0, 3).join(", ")}`);
           await logRejectionWithAI(
             supabase,
             userId,
             symbol,
-            `Unified Reversal BLOCK: score=${unifiedReversal.score}/100 - ${unifiedReversal.signals.slice(0, 3).join(", ")}`,
+            `Unified Reversal BLOCK: score=${unifiedReversal.score}/100 - ${unifiedReversal.reasons.slice(0, 3).join(", ")}`,
             { 
               unifiedReversalScore: unifiedReversal.score,
               decision: unifiedReversal.decision,
               breakdown: unifiedReversal.breakdown,
-              reversalSignals: unifiedReversal.signals,
+              reversalSignals: unifiedReversal.reasons,
               trend,
               adx: adx.toFixed(1),
               momentum: {
@@ -1859,7 +1372,7 @@ serve(async (req) => {
         
         // REDUCE: Medium reversal risk - log warning, reduce position size
         if (unifiedReversal.decision === "REDUCE") {
-          console.log(`⚠️ ${symbol}: ${unifiedReversal.reason}`);
+          console.log(`⚠️ ${symbol}: Unified Reversal REDUCE (${unifiedReversal.score}/100) - ${unifiedReversal.reasons.slice(0, 2).join(", ")}`);
         } else {
           console.log(`✓ ${symbol}: Unified reversal check passed (${unifiedReversal.score}/100)`);
         }
@@ -3034,7 +2547,7 @@ serve(async (req) => {
             reversalScore: unifiedReversal.score,
             reversalDetails: {
               breakdown: unifiedReversal.breakdown,
-              signals: unifiedReversal.signals,
+              signals: unifiedReversal.reasons,
               adxWeight: unifiedReversal.adxWeight,
               positionSizeMultiplier: unifiedReversal.positionSizeMultiplier,
             },
