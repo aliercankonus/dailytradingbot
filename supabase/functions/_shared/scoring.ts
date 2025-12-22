@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, type AdxPhase } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, type AdxPhase } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -536,12 +536,30 @@ export const getTechnicalScore = (
 // Aggregates ALL reversal signals into a single comprehensive score
 // Three-tier decision: BLOCK (>=60), REDUCE (40-60), NORMAL (<40)
 
+// PHASE 2: Separated Risk Components
+export interface SeparatedRiskResult {
+  // Continuation Risk: Affects position size only (overbought/oversold, momentum exhaustion)
+  continuationRisk: {
+    score: number;        // 0-100
+    positionMultiplier: number;  // 1.0, 0.75, 0.5, or 0.4
+    reasons: string[];
+  };
+  // Reversal Probability: Can trigger hard blocks (divergence, HTF conflict, multiple opposing signals)
+  reversalProbability: {
+    score: number;        // 0-100
+    shouldBlock: boolean;
+    reasons: string[];
+  };
+}
+
 export interface UnifiedReversalResult {
   score: number;
   decision: "BLOCK" | "REDUCE" | "NORMAL";
   positionSizeMultiplier: number;
   reasons: string[];
   adxWeight: number;
+  // PHASE 2: Add separated risk components
+  separatedRisk?: SeparatedRiskResult;
   breakdown?: {
     stochRsiScore: number;
     stochRsiZoneScore: number;
@@ -551,6 +569,169 @@ export interface UnifiedReversalResult {
     volumeScore: number;
   };
 }
+
+// PHASE 2: Calculate component caps based on market context
+const getComponentCaps = (context: {
+  adx: number;
+  isBreakoutMode: boolean;
+  isMomentumActive: boolean;
+  macdExpanding: boolean;
+  hasPartialAlignment: boolean;
+}): {
+  stochRsiCap: number;
+  momentumCap: number;
+  macdCap: number;
+  timeframeCap: number;
+} => {
+  const { adx, isBreakoutMode, isMomentumActive, macdExpanding, hasPartialAlignment } = context;
+  
+  // StochRSI cap: reduced in strong trends, breakouts, or confirmed momentum
+  let stochRsiCap: number = COMPONENT_CAPS.STOCHRSI.DEFAULT;
+  if (adx >= ADX_THRESHOLDS.VERY_STRONG) {
+    stochRsiCap = Math.min(stochRsiCap, COMPONENT_CAPS.STOCHRSI.STRONG_TREND);
+  }
+  if (isBreakoutMode) {
+    stochRsiCap = Math.min(stochRsiCap, COMPONENT_CAPS.STOCHRSI.BREAKOUT_MODE);
+  }
+  if (isMomentumActive) {
+    stochRsiCap = Math.min(stochRsiCap, COMPONENT_CAPS.STOCHRSI.MOMENTUM_CONFIRMED);
+  }
+  
+  // Momentum cap: reduced when momentum is actually present (reduces own penalty)
+  let momentumCap: number = COMPONENT_CAPS.MOMENTUM.DEFAULT;
+  if (isMomentumActive) {
+    momentumCap = Math.min(momentumCap, COMPONENT_CAPS.MOMENTUM.ACTIVE_MOMENTUM);
+  }
+  if (adx >= ADX_THRESHOLDS.VERY_STRONG) {
+    momentumCap = Math.min(momentumCap, COMPONENT_CAPS.MOMENTUM.STRONG_TREND);
+  }
+  
+  // MACD cap: reduced when MACD is expanding (less relevant as risk)
+  let macdCap: number = COMPONENT_CAPS.MACD.DEFAULT;
+  if (macdExpanding) {
+    macdCap = Math.min(macdCap, COMPONENT_CAPS.MACD.EXPANDING);
+  }
+  
+  // Timeframe cap: reduced with partial alignment
+  let timeframeCap: number = COMPONENT_CAPS.TIMEFRAME.DEFAULT;
+  if (hasPartialAlignment) {
+    timeframeCap = Math.min(timeframeCap, COMPONENT_CAPS.TIMEFRAME.PARTIAL_ALIGNMENT);
+  }
+  
+  return { stochRsiCap, momentumCap, macdCap, timeframeCap };
+};
+
+// PHASE 2: Calculate separated continuation risk vs reversal probability
+const calculateSeparatedRisk = (
+  breakdown: {
+    stochRsiScore: number;
+    stochRsiZoneScore: number;
+    momentumScore: number;
+    macdScore: number;
+    timeframeScore: number;
+    volumeScore: number;
+  },
+  trendData: any,
+  signalType: string
+): SeparatedRiskResult => {
+  const continuationReasons: string[] = [];
+  const reversalReasons: string[] = [];
+  
+  // CONTINUATION RISK: Zone extremes, momentum exhaustion
+  // These indicate "trend may be tiring" but not necessarily "trend will reverse"
+  let continuationScore = 0;
+  
+  // StochRSI zone extremes are continuation risk (overbought continuation, oversold bounce)
+  continuationScore += breakdown.stochRsiZoneScore;
+  if (breakdown.stochRsiZoneScore > 0) {
+    continuationReasons.push(`StochRSI zone extreme: ${breakdown.stochRsiZoneScore} pts`);
+  }
+  
+  // Part of momentum score is continuation risk (momentum exhausting but not reversing)
+  if (breakdown.momentumScore > 0 && breakdown.momentumScore <= 15) {
+    continuationScore += breakdown.momentumScore;
+    continuationReasons.push(`Momentum weakening: ${breakdown.momentumScore} pts`);
+  }
+  
+  // Low volume is continuation risk (trend may stall, not reverse)
+  if (breakdown.volumeScore > 0) {
+    continuationScore += breakdown.volumeScore;
+    continuationReasons.push(`Low volume: ${breakdown.volumeScore} pts`);
+  }
+  
+  // Calculate position multiplier based on continuation risk thresholds
+  let positionMultiplier = 1.0;
+  const CR = RISK_SEPARATION_THRESHOLDS.CONTINUATION_RISK;
+  if (continuationScore >= CR.EXTREME) {
+    positionMultiplier = 0.4;  // 60% reduction
+    continuationReasons.push("EXTREME continuation risk → 60% position reduction");
+  } else if (continuationScore >= CR.HIGH) {
+    positionMultiplier = 0.5;  // 50% reduction
+    continuationReasons.push("HIGH continuation risk → 50% position reduction");
+  } else if (continuationScore >= CR.MEDIUM) {
+    positionMultiplier = 0.75;  // 25% reduction
+    continuationReasons.push("MEDIUM continuation risk → 25% position reduction");
+  }
+  
+  // REVERSAL PROBABILITY: Crosses, divergence, HTF conflicts
+  // These indicate actual directional change probability
+  let reversalScore = 0;
+  
+  // StochRSI crosses are true reversal signals (not just extremes)
+  reversalScore += breakdown.stochRsiScore;
+  if (breakdown.stochRsiScore > 0) {
+    reversalReasons.push(`StochRSI opposing crosses: ${breakdown.stochRsiScore} pts`);
+  }
+  
+  // MACD divergence/misalignment indicates reversal probability
+  reversalScore += breakdown.macdScore;
+  if (breakdown.macdScore > 0) {
+    reversalReasons.push(`MACD divergence/misalignment: ${breakdown.macdScore} pts`);
+  }
+  
+  // Timeframe conflicts (HTF opposing) is reversal probability
+  reversalScore += breakdown.timeframeScore;
+  if (breakdown.timeframeScore > 0) {
+    reversalReasons.push(`HTF conflict: ${breakdown.timeframeScore} pts`);
+  }
+  
+  // Strong momentum failure (score > 15) indicates reversal, not just exhaustion
+  if (breakdown.momentumScore > 15) {
+    reversalScore += breakdown.momentumScore - 15;  // Only the "reversal" portion
+    reversalReasons.push(`Momentum failure: ${breakdown.momentumScore - 15} pts`);
+  }
+  
+  // Volume confirmation reduces reversal probability
+  if (breakdown.volumeScore < 0) {
+    reversalScore += breakdown.volumeScore;  // Negative = reduces score
+    reversalReasons.push(`Volume confirms direction: ${-breakdown.volumeScore} pts reduction`);
+  }
+  
+  // Determine if we should block based on reversal probability thresholds
+  const RP = RISK_SEPARATION_THRESHOLDS.REVERSAL_PROBABILITY;
+  const shouldBlock = reversalScore >= RP.BLOCK;
+  
+  if (shouldBlock) {
+    reversalReasons.push(`REVERSAL PROBABILITY ${reversalScore} >= ${RP.BLOCK} → BLOCK`);
+  } else if (reversalScore >= RP.HIGH) {
+    reversalReasons.push(`HIGH reversal probability (${reversalScore}) → Consider blocking`);
+  } else if (reversalScore >= RP.MEDIUM) {
+    reversalReasons.push(`MEDIUM reversal probability (${reversalScore}) → Proceed with caution`);
+  }
+  
+  return {
+    continuationRisk: {
+      score: Math.min(100, Math.max(0, continuationScore)),
+      positionMultiplier,
+      reasons: continuationReasons,
+    },
+    reversalProbability: {
+      score: Math.min(100, Math.max(0, reversalScore)),
+      shouldBlock,
+      reasons: reversalReasons,
+    },
+  };
+};
 
 // Helper: Count StochRSI signals opposing the intended trade direction
 const countOpposingStochSignals = (trendData: any, intendedDirection: string): {
@@ -648,6 +829,19 @@ export const calculateUnifiedReversalScore = (
   
   const reduceStochZonePenalty = rsiIndicatesPullback && isMomentumConfirmed;
   
+  // PHASE 2: Get context for component caps
+  const trend30m = tf['30m']?.trend || "neutral";
+  const macdExpanding = momentum.macdExpanding ?? false;
+  const hasPartialAlignment = (trend1h === trend30m && trend1h !== "neutral");
+  
+  const componentCaps = getComponentCaps({
+    adx,
+    isBreakoutMode: breakoutMode.isActive,
+    isMomentumActive: isMomentumConfirmed || momentumState === "building",
+    macdExpanding,
+    hasPartialAlignment,
+  });
+  
   // Initialize breakdown
   const breakdown = {
     stochRsiScore: 0,
@@ -658,18 +852,25 @@ export const calculateUnifiedReversalScore = (
     volumeScore: 0,
   };
   
-  // 1. StochRSI CROSS SIGNALS (0-50 points)
+  // 1. StochRSI CROSS SIGNALS (0-50 points) - PHASE 2: Apply cap
   const stochSignals = countOpposingStochSignals(trendData, signalType);
+  let rawStochCrossScore = 0;
   
   if (stochSignals.opposingCrossCount >= 3) {
-    breakdown.stochRsiScore = 50;
+    rawStochCrossScore = 50;
     reasons.push(`${stochSignals.opposingCrossCount} opposing StochRSI crosses`);
   } else if (stochSignals.opposingCrossCount >= 2) {
-    breakdown.stochRsiScore = 40;
+    rawStochCrossScore = 40;
     reasons.push(`${stochSignals.opposingCrossCount} opposing StochRSI crosses`);
   } else if (stochSignals.opposingCrossCount >= 1) {
-    breakdown.stochRsiScore = 30;
+    rawStochCrossScore = 30;
     reasons.push(`Opposing StochRSI cross`);
+  }
+  
+  // PHASE 2: Apply StochRSI cap to crosses
+  breakdown.stochRsiScore = Math.min(rawStochCrossScore, componentCaps.stochRsiCap);
+  if (rawStochCrossScore > componentCaps.stochRsiCap) {
+    reasons.push(`StochRSI cross score capped: ${rawStochCrossScore} → ${componentCaps.stochRsiCap} (cap active)`);
   }
   
   // 2. StochRSI EXTREME ZONES (0-50 points) - INCREASED from 0-25 for extreme readings
@@ -745,72 +946,93 @@ export const calculateUnifiedReversalScore = (
   }
   breakdown.stochRsiZoneScore = Math.round(rawStochZoneScore * stochZonePenaltyMultiplier);
   
-  // 3. MOMENTUM STATE (0-30 points)
+  // 3. MOMENTUM STATE (0-30 points) - PHASE 2: Apply cap
   // RELAXED: Allow "none" state with reduced penalty when ADX >= 28 (strong trend exception)
   const isStrongTrendException = adx >= ADX_THRESHOLDS.STRONG_TREND_EXCEPTION; // 28+ (relaxed from 30)
+  let rawMomentumScore = 0;
   
   // Check "mixed" state FIRST (highest penalty) - prevents premature catch by other conditions
   if (momentumState === "mixed") {
     if (adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION) {
-      breakdown.momentumScore = 30;
+      rawMomentumScore = 30;
       reasons.push(`Mixed momentum with weak ADX`);
     } else {
-      breakdown.momentumScore = 15;
+      rawMomentumScore = 15;
       reasons.push(`Mixed momentum (ADX allows)`);
     }
   } else if (momentumState === "none") {
     if (isStrongTrendException) {
       // Strong trend exception - reduced penalty for early entries
-      breakdown.momentumScore = 10;
+      rawMomentumScore = 10;
       reasons.push(`No momentum but strong trend (ADX=${adx.toFixed(1)} >= 28)`);
     } else {
-      breakdown.momentumScore = 25;
+      rawMomentumScore = 25;
       reasons.push(`Momentum not confirmed (state: ${momentumState})`);
     }
   } else if (!momentumConfirms && momentumState !== "building") {
     if (isStrongTrendException) {
-      breakdown.momentumScore = 8;
+      rawMomentumScore = 8;
       reasons.push(`Momentum unconfirmed but strong trend (ADX=${adx.toFixed(1)})`);
     } else {
-      breakdown.momentumScore = 20;
+      rawMomentumScore = 20;
       reasons.push(`Momentum state ${momentumState} not confirmed`);
     }
   } else if (momentumState === "building" && !momentumConfirms) {
-    breakdown.momentumScore = 10;
+    rawMomentumScore = 10;
     reasons.push("Momentum building but not confirmed");
   }
   
-  // 4. MACD ALIGNMENT (0-15 points)
+  // PHASE 2: Apply momentum cap
+  breakdown.momentumScore = Math.min(rawMomentumScore, componentCaps.momentumCap);
+  if (rawMomentumScore > componentCaps.momentumCap) {
+    reasons.push(`Momentum score capped: ${rawMomentumScore} → ${componentCaps.momentumCap} (cap active)`);
+  }
+  
+  // 4. MACD ALIGNMENT (0-15 points) - PHASE 2: Apply cap
+  let rawMacdScore = 0;
   if (momentum.hasDivergence) {
-    breakdown.macdScore += 15;
+    rawMacdScore += 15;
     reasons.push("MACD divergence detected");
   } else if (!momentum.macdDirectionAligned) {
-    breakdown.macdScore += 10;
+    rawMacdScore += 10;
     reasons.push("MACD direction misaligned");
-  } else if (!momentum.macdExpanding) {
-    breakdown.macdScore += 5;
+  } else if (!macdExpanding) {
+    rawMacdScore += 5;
     reasons.push("MACD not expanding");
   }
   
-  // 5. TIMEFRAME CONFLICTS (0-20 points)
+  // PHASE 2: Apply MACD cap
+  breakdown.macdScore = Math.min(rawMacdScore, componentCaps.macdCap);
+  if (rawMacdScore > componentCaps.macdCap) {
+    reasons.push(`MACD score capped: ${rawMacdScore} → ${componentCaps.macdCap} (cap active)`);
+  }
+  
+  // 5. TIMEFRAME CONFLICTS (0-20 points) - PHASE 2: Apply cap
+  let rawTimeframeScore = 0;
   if (isLong) {
     if (trend1h === "bearish") {
-      breakdown.timeframeScore += 15;
+      rawTimeframeScore += 15;
       reasons.push("1h trend bearish (opposing LONG)");
     }
     if (trend4h === "bearish") {
-      breakdown.timeframeScore += 5;
+      rawTimeframeScore += 5;
       reasons.push("4h trend bearish");
     }
   } else {
     if (trend1h === "bullish") {
-      breakdown.timeframeScore += 15;
+      rawTimeframeScore += 15;
       reasons.push("1h trend bullish (opposing SHORT)");
     }
     if (trend4h === "bullish") {
-      breakdown.timeframeScore += 5;
+      rawTimeframeScore += 5;
       reasons.push("4h trend bullish");
     }
+  }
+  
+  // PHASE 2: Apply timeframe cap
+  breakdown.timeframeScore = Math.min(rawTimeframeScore, componentCaps.timeframeCap);
+  if (rawTimeframeScore > componentCaps.timeframeCap) {
+    reasons.push(`Timeframe score capped: ${rawTimeframeScore} → ${componentCaps.timeframeCap} (cap active)`);
   }
   
   // 6. VOLUME CONFIRMATION (reduces score if confirming)
@@ -824,6 +1046,9 @@ export const calculateUnifiedReversalScore = (
     breakdown.volumeScore = 5;
     reasons.push("Low volume - reduced conviction");
   }
+  
+  // PHASE 2: Calculate separated risk scores BEFORE final decision
+  const separatedRisk = calculateSeparatedRisk(breakdown, trendData, signalType);
   
   // Calculate total with ADX weight
   const rawScore = breakdown.stochRsiScore + breakdown.stochRsiZoneScore + 
@@ -841,16 +1066,28 @@ export const calculateUnifiedReversalScore = (
   
   totalScore = Math.min(100, Math.max(0, Math.round(rawScore * adxWeight * phaseMultiplier)));
   
-  // Three-tier decision
+  // PHASE 2: Use separated risk for decision making
+  // Reversal probability drives blocking, continuation risk drives position sizing
   let decision: "BLOCK" | "REDUCE" | "NORMAL";
   let positionSizeMultiplier: number;
   
-  if (totalScore >= 60) {
+  // Use reversal probability for blocking decision
+  if (separatedRisk.reversalProbability.shouldBlock) {
     decision = "BLOCK";
     positionSizeMultiplier = 0;
-  } else if (totalScore >= 40) {
+    reasons.push(`PHASE 2: BLOCK by reversal probability (${separatedRisk.reversalProbability.score})`);
+  } else if (totalScore >= 60) {
+    // Fallback to legacy scoring if reversal probability didn't block but total is high
+    decision = "BLOCK";
+    positionSizeMultiplier = 0;
+  } else if (totalScore >= 40 || separatedRisk.continuationRisk.positionMultiplier < 1.0) {
     decision = "REDUCE";
-    positionSizeMultiplier = 0.5;
+    // Use the more conservative of the two position multipliers
+    const legacyMultiplier = totalScore >= 40 ? 0.5 : 1.0;
+    positionSizeMultiplier = Math.min(legacyMultiplier, separatedRisk.continuationRisk.positionMultiplier);
+    if (separatedRisk.continuationRisk.positionMultiplier < legacyMultiplier) {
+      reasons.push(`PHASE 2: Position reduced by continuation risk → ${(separatedRisk.continuationRisk.positionMultiplier * 100).toFixed(0)}%`);
+    }
   } else {
     decision = "NORMAL";
     positionSizeMultiplier = 1.0;
@@ -861,12 +1098,23 @@ export const calculateUnifiedReversalScore = (
     reasons.push(`BREAKOUT MODE ACTIVE: ${breakoutMode.confidence}% confidence`);
   }
   
+  // Log component caps if any were active
+  const capsApplied = [];
+  if (componentCaps.stochRsiCap < COMPONENT_CAPS.STOCHRSI.DEFAULT) capsApplied.push(`StochRSI:${componentCaps.stochRsiCap}`);
+  if (componentCaps.momentumCap < COMPONENT_CAPS.MOMENTUM.DEFAULT) capsApplied.push(`Momentum:${componentCaps.momentumCap}`);
+  if (componentCaps.macdCap < COMPONENT_CAPS.MACD.DEFAULT) capsApplied.push(`MACD:${componentCaps.macdCap}`);
+  if (componentCaps.timeframeCap < COMPONENT_CAPS.TIMEFRAME.DEFAULT) capsApplied.push(`TF:${componentCaps.timeframeCap}`);
+  if (capsApplied.length > 0) {
+    reasons.push(`PHASE 2 CAPS: ${capsApplied.join(", ")}`);
+  }
+  
   return { 
     score: totalScore, 
     decision, 
     positionSizeMultiplier,
     reasons, 
     adxWeight,
+    separatedRisk,
     breakdown,
   };
 };

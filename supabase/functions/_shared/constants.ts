@@ -130,6 +130,55 @@ export const QUALITY_THRESHOLDS = {
   NEAR_MISS_THRESHOLD: 5,
 } as const;
 
+// ============= PHASE 2: RISK SEPARATION THRESHOLDS =============
+// Separates continuation risk (position size) from reversal probability (hard block)
+export const RISK_SEPARATION_THRESHOLDS = {
+  // Continuation Risk: Overbought/oversold zones, momentum exhaustion
+  // → Affects position size only, never blocks trades
+  CONTINUATION_RISK: {
+    LOW: 20,      // 0-20: No reduction
+    MEDIUM: 40,   // 20-40: 25% position reduction
+    HIGH: 60,     // 40-60: 50% position reduction
+    EXTREME: 80,  // 60+: 60% position reduction (max)
+  },
+  // Reversal Probability: Divergence, HTF conflict, multiple opposing signals
+  // → Can block trades when probability is high enough
+  REVERSAL_PROBABILITY: {
+    LOW: 30,      // 0-30: Normal execution
+    MEDIUM: 50,   // 30-50: Reduce position + log warning
+    HIGH: 65,     // 50-65: Strongly consider blocking
+    BLOCK: 75,    // 65+: Hard block - actual reversal likely
+  },
+} as const;
+
+// ============= PHASE 2: COMPONENT CAPS =============
+// Context-aware maximum contributions per indicator to prevent single-indicator domination
+export const COMPONENT_CAPS = {
+  // StochRSI maximum penalty contribution
+  STOCHRSI: {
+    DEFAULT: 35,
+    STRONG_TREND: 20,        // ADX >= 30 reduces StochRSI impact
+    BREAKOUT_MODE: 15,       // Breakout mode further reduces
+    MOMENTUM_CONFIRMED: 25,  // Active momentum reduces slightly
+  },
+  // Momentum maximum penalty contribution
+  MOMENTUM: {
+    DEFAULT: 30,
+    ACTIVE_MOMENTUM: 15,     // Building/confirmed momentum reduces own penalty cap
+    STRONG_TREND: 20,        // Strong trend reduces momentum penalty impact
+  },
+  // MACD maximum penalty contribution
+  MACD: {
+    DEFAULT: 15,
+    EXPANDING: 8,            // Expanding MACD reduces its own penalty cap
+  },
+  // Timeframe conflict maximum penalty contribution
+  TIMEFRAME: {
+    DEFAULT: 20,
+    PARTIAL_ALIGNMENT: 12,   // 1h+30m aligned reduces 4h conflict impact
+  },
+} as const;
+
 // ============= BREAKOUT MODE PARAMETERS =============
 // PHASE 1 IMPROVEMENT: Explicit breakout mode flag with reduced penalties
 export const BREAKOUT_MODE_PARAMS = {
