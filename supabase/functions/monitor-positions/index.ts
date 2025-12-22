@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, PARTIAL_TP_PARAMS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, PARTIAL_TP_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore, 
@@ -355,8 +355,76 @@ serve(async (req) => {
         positionLogger.info(`Confidence penalty ${confidencePenalty} applied - threshold ${dynamicReversalThreshold}`);
       }
       
+      // ============================================================
+      // STRATEGY-AWARE EXIT ADJUSTMENTS
+      // Different strategy types have different exit behaviors
+      // ============================================================
+      const strategyName = position.strategy_name || '';
+      const signalData = position.signal_id ? await supabase
+        .from("trading_signals")
+        .select("strategy_id")
+        .eq("id", position.signal_id)
+        .single()
+        .then(r => r.data) : null;
+      const strategyId = signalData?.strategy_id || '';
+      
+      const strategyType = detectStrategyType(strategyId, strategyName);
+      const isMomentum = isMomentumStrategy(strategyId, strategyName);
+      const isMeanReversion = isMeanReversionStrategy(strategyId, strategyName);
+      
+      // Strategy-specific exit threshold adjustments
+      let strategyExitAdjustment = 0;
+      let strategyExitNote = "";
+      
+      if (isMomentum) {
+        // MOMENTUM STRATEGIES: 
+        // - More aggressive trailing stops (lock profits faster)
+        // - Exit earlier on divergence (momentum loss is fatal)
+        // - More sensitive to trend changes
+        strategyExitAdjustment = -8; // Lower reversal threshold = exit sooner
+        strategyExitNote = "Momentum strategy: tighter exit sensitivity";
+        
+        // Additional exit pressure if momentum divergence detected
+        if (atrData?.hasDivergence) {
+          strategyExitAdjustment -= 5; // Even more sensitive to divergence
+          strategyExitNote += " + divergence penalty";
+        }
+      } else if (isMeanReversion) {
+        // MEAN REVERSION STRATEGIES:
+        // - More patient exits (expect price to oscillate)
+        // - Less sensitive to reversal risk (that's expected!)
+        // - Exit on trend continuation, not reversal
+        strategyExitAdjustment = +10; // Higher threshold = stay longer
+        strategyExitNote = "Mean reversion: patient exit threshold";
+        
+        // For mean reversion, we WANT price to reverse - don't exit on reversal signals
+        // But DO exit if trend continues against us (our thesis is wrong)
+        if (positionAdx >= ADX_THRESHOLDS.STRONG) {
+          strategyExitAdjustment -= 5; // Strong trend = our mean reversion thesis may be wrong
+          strategyExitNote += " (strong trend warning)";
+        }
+      } else if (strategyType === 'TREND_FOLLOWING') {
+        // TREND FOLLOWING: Very patient, only exit on clear trend breaks
+        strategyExitAdjustment = +5;
+        strategyExitNote = "Trend following: patient threshold";
+      } else if (strategyType === 'GRID_RANGE') {
+        // GRID/RANGE: Quick exits, optimized for small gains
+        strategyExitAdjustment = -5;
+        strategyExitNote = "Grid strategy: quick exit threshold";
+      }
+      
+      // Apply strategy adjustment to dynamic threshold
+      dynamicReversalThreshold += strategyExitAdjustment;
+      
+      // Clamp to reasonable bounds (50-85)
+      dynamicReversalThreshold = Math.max(50, Math.min(85, dynamicReversalThreshold));
+      
+      if (strategyExitAdjustment !== 0) {
+        positionLogger.info(`Strategy-aware exit: ${strategyType} | Adj: ${strategyExitAdjustment > 0 ? '+' : ''}${strategyExitAdjustment} | ${strategyExitNote}`);
+      }
+      
       // Log dynamic threshold calculation
-      positionLogger.debug(`Dynamic exit threshold=${dynamicReversalThreshold} (ADX=${positionAdx.toFixed(1)}, Vol=${positionVolumeScore}, Conf=${positionConfidence}%)`);
+      positionLogger.debug(`Dynamic exit threshold=${dynamicReversalThreshold} (ADX=${positionAdx.toFixed(1)}, Vol=${positionVolumeScore}, Conf=${positionConfidence}%, Strategy=${strategyType})`);
 
       
       // ============================================================
@@ -487,26 +555,56 @@ serve(async (req) => {
         });
       }
 
+      // Calculate P&L early for strategy-aware decisions
+      const earlyPnlPercent =
+        position.side === "BUY"
+          ? ((currentPrice - position.entry_price) / position.entry_price) * 100
+          : ((position.entry_price - currentPrice) / position.entry_price) * 100;
+
       // ============================================================
-      // EMERGENCY EXIT DECISION
+      // EMERGENCY EXIT DECISION (STRATEGY-AWARE)
+      // Momentum strategies are more sensitive to divergence
+      // Mean reversion strategies are more tolerant of reversals
       // ============================================================
       let emergencyClose = false;
       let emergencyReason = "";
       
-      // Flash crash = immediate exit (highest priority)
+      // Flash crash = immediate exit (highest priority) - applies to all strategies
       if (isFlashCrash) {
         emergencyClose = true;
         emergencyReason = "flash_crash";
       }
       // Volatility spike + divergence = exit (compound risk)
       else if (isVolatilitySpike && divergenceExit) {
-        emergencyClose = true;
-        emergencyReason = "volatility_divergence";
+        // Mean reversion strategies can tolerate this better
+        if (isMeanReversion && earlyPnlPercent > -1.0) {
+          positionLogger.info(`STRATEGY-AWARE: Mean reversion tolerating volatility+divergence (P&L: ${earlyPnlPercent.toFixed(2)}%)`);
+        } else {
+          emergencyClose = true;
+          emergencyReason = "volatility_divergence";
+        }
       }
-      // Strong divergence with volume spike = exit
+      // Strong divergence with volume spike = exit (but strategy-aware)
       else if (divergenceExit && isVolumeSpike) {
+        // Momentum strategies are VERY sensitive to divergence
+        if (isMomentum) {
+          emergencyClose = true;
+          emergencyReason = "momentum_divergence_critical";
+          positionLogger.risk(`STRATEGY-AWARE: Momentum strategy + divergence = immediate exit`);
+        }
+        // Mean reversion might want this reversal
+        else if (isMeanReversion) {
+          positionLogger.info(`STRATEGY-AWARE: Mean reversion expecting reversal - not exiting on divergence+volume`);
+        } else {
+          emergencyClose = true;
+          emergencyReason = "divergence_volume_spike";
+        }
+      }
+      // For momentum strategies: divergence alone is a strong exit signal
+      else if (divergenceExit && isMomentum && earlyPnlPercent < 0.5) {
         emergencyClose = true;
-        emergencyReason = "divergence_volume_spike";
+        emergencyReason = "momentum_divergence_exit";
+        positionLogger.risk(`STRATEGY-AWARE: Momentum strategy divergence detected - exiting to protect capital`);
       }
       // Extreme volatility alone = exit
       else if (atrRatio >= EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD) {
