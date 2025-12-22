@@ -9,6 +9,7 @@ import {
 } from "../_shared/indicators.ts";
 import { calculateTrend, enhanceConfidenceWithIndicators, TrendResult } from "../_shared/trend-core.ts";
 import { createLogger, logMetrics, logError, LOG_CATEGORIES } from "../_shared/logging.ts";
+import { getKlines, parseKlinePrices } from "../_shared/binance.ts";
 
 // Create logger for this function
 const logger = createLogger('calculate-trend');
@@ -99,36 +100,14 @@ function calculateBollingerBands(prices: number[], period = 20, stdDevMultiplier
   };
 }
 
-// ============= BINANCE API =============
+// ============= BINANCE API (using shared utilities) =============
 async function fetchBinanceKlines(symbol: string, interval: string = "1h", limit: number = 100, retries: number = 2): Promise<any[]> {
-  let lastError: Error | null = null;
-  
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const response = await fetch(
-        `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
-      );
-      
-      if (!response.ok) {
-        if (response.status >= 400 && response.status < 500) {
-          throw new Error(`Binance API error: ${response.status} - ${response.statusText}`);
-        }
-        throw new Error(`Binance API error: ${response.status}`);
-      }
-      
-      const klines = await response.json();
-      return Array.isArray(klines) ? klines : [];
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.BINANCE} Failed to fetch klines on ${interval} (attempt ${attempt + 1}/${retries + 1}): ${lastError.message}`);
-      
-      if (attempt < retries) {
-        await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)));
-      }
-    }
+  try {
+    return await getKlines(symbol, interval, limit, retries);
+  } catch (error) {
+    logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.BINANCE} Failed to fetch klines on ${interval}: ${error}`);
+    throw error;
   }
-  
-  throw lastError || new Error(`Failed to fetch klines for ${symbol}`);
 }
 
 // ============= MARKET STRUCTURE VALIDATION =============
