@@ -33,6 +33,7 @@ import {
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
 import { createLogger, logError, LOG_CATEGORIES } from "../_shared/logging.ts";
+import { getKlines, get24hrTicker, parseKlinePrices } from "../_shared/binance.ts";
 
 // Create logger for this function
 const logger = createLogger('strategy-analyzer');
@@ -1192,14 +1193,14 @@ serve(async (req) => {
       }
     };
 
+    // Fetch historical klines using shared Binance utilities
     const fetchHistoricalKlines = async (symbol: string): Promise<{ prices: number[]; volumes: number[]; klines: any[] }> => {
       try {
-        const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=15m&limit=50`);
-        if (!response.ok) throw new Error(`Binance API error: ${response.status}`);
-        const klines = await response.json();
+        const klines = await getKlines(symbol, "15m", 50);
+        const { closes, volumes } = parseKlinePrices(klines);
         return {
-          prices: klines.map((k: any) => parseFloat(k[4])).filter(Number.isFinite),
-          volumes: klines.map((k: any) => parseFloat(k[5])).filter(Number.isFinite),
+          prices: closes,
+          volumes: volumes,
           klines: klines,  // Keep full kline data for order flow analysis
         };
       } catch (error) {
@@ -1208,13 +1209,12 @@ serve(async (req) => {
       }
     };
 
-    // Fetch market data in parallel - use filtered activeSymbols
+    // Fetch market data in parallel using shared Binance utilities - use filtered activeSymbols
     const symbolsList = activeSymbols.map((s) => s.symbol);
     const [marketDataResults, historicalResults] = await Promise.all([
       Promise.all(symbolsList.map(async (symbol) => {
         try {
-          const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
-          return await response.json();
+          return await get24hrTicker(symbol);
         } catch { return null; }
       })),
       Promise.all(symbolsList.map(async (symbol) => ({ symbol, data: await fetchHistoricalKlines(symbol) })))
