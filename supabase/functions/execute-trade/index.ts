@@ -1076,6 +1076,94 @@ serve(async (req) => {
     }
 
     // ============================================================
+    // STRATEGY-AWARE POSITION SIZING
+    // Different strategy types have different optimal position sizes:
+    // - Momentum: Larger positions (ride the trend)
+    // - Mean Reversion: Smaller positions (counter-trend is risky)
+    // - Trend Following: Medium-large positions
+    // - Grid/Range: Smaller, more frequent trades
+    // ============================================================
+    const strategyType = detectStrategyType(signal.strategy_id || '', signal.strategy_name || '');
+    const isMomentum = isMomentumStrategy(signal.strategy_id || '', signal.strategy_name || '');
+    const isMeanReversion = isMeanReversionStrategy(signal.strategy_id || '', signal.strategy_name || '');
+    
+    let strategyPositionMultiplier = 1.0;
+    let strategyPositionNote = "";
+    
+    if (isMomentum) {
+      // MOMENTUM STRATEGIES: Larger positions when momentum is confirmed
+      // Momentum trades are high conviction when signals align
+      const adxValue = trendData?.volatility?.adx || 0;
+      const momentumConfirms = trendData?.momentum?.confirms === true;
+      
+      if (adxValue >= ADX_THRESHOLDS.STRONG && momentumConfirms) {
+        strategyPositionMultiplier = 1.25; // 25% boost for strong momentum + ADX
+        strategyPositionNote = `Momentum + strong ADX (${adxValue.toFixed(1)}) = +25% size`;
+      } else if (adxValue >= ADX_THRESHOLDS.MINIMUM && momentumConfirms) {
+        strategyPositionMultiplier = 1.15; // 15% boost for decent momentum
+        strategyPositionNote = `Momentum confirmed (ADX ${adxValue.toFixed(1)}) = +15% size`;
+      } else if (!momentumConfirms) {
+        strategyPositionMultiplier = 0.8; // 20% reduction when momentum not confirming
+        strategyPositionNote = `Momentum NOT confirmed = -20% size`;
+      } else {
+        strategyPositionNote = `Momentum strategy: standard size`;
+      }
+    } else if (isMeanReversion) {
+      // MEAN REVERSION STRATEGIES: Smaller positions (counter-trend is inherently risky)
+      // But boost when at extreme levels (where mean reversion works best)
+      const stochRsi1h = trendData?.stochasticRsi?.['1h'] || {};
+      const k1h = stochRsi1h.k ?? 50;
+      const isExtremeOversold = k1h < STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD;
+      const isExtremeOverbought = k1h > STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT;
+      const signalType = signal.signal_type;
+      
+      if ((signalType === 'long' && isExtremeOversold) || (signalType === 'short' && isExtremeOverbought)) {
+        strategyPositionMultiplier = 1.1; // 10% boost at extremes (optimal mean reversion entry)
+        strategyPositionNote = `Mean reversion at extreme (StochRSI K=${k1h.toFixed(1)}) = +10% size`;
+      } else {
+        strategyPositionMultiplier = 0.75; // 25% reduction for counter-trend trades
+        strategyPositionNote = `Mean reversion (counter-trend) = -25% size for safety`;
+      }
+    } else if (strategyType === 'TREND_FOLLOWING') {
+      // TREND FOLLOWING: Medium positions, boost when trend is strong
+      const adxValue = trendData?.volatility?.adx || 0;
+      
+      if (adxValue >= ADX_THRESHOLDS.VERY_STRONG) {
+        strategyPositionMultiplier = 1.2; // 20% boost for very strong trends
+        strategyPositionNote = `Trend following + strong trend (ADX ${adxValue.toFixed(1)}) = +20% size`;
+      } else if (adxValue < ADX_THRESHOLDS.MINIMUM) {
+        strategyPositionMultiplier = 0.7; // 30% reduction in weak trends
+        strategyPositionNote = `Trend following but weak trend (ADX ${adxValue.toFixed(1)}) = -30% size`;
+      } else {
+        strategyPositionNote = `Trend following: standard size`;
+      }
+    } else if (strategyType === 'GRID_RANGE') {
+      // GRID/RANGE: Smaller positions for frequent trades
+      strategyPositionMultiplier = 0.6; // 40% smaller positions (more trades)
+      strategyPositionNote = `Grid/range strategy = -40% size (more frequent trades)`;
+    } else if (strategyType === 'NEUTRAL_BREAKOUT') {
+      // NEUTRAL BREAKOUT: Medium positions, confirmation-dependent
+      const breakoutConfirmed = trendData?.momentum?.confirms === true;
+      
+      if (breakoutConfirmed) {
+        strategyPositionMultiplier = 1.1;
+        strategyPositionNote = `Neutral breakout confirmed = +10% size`;
+      } else {
+        strategyPositionMultiplier = 0.85;
+        strategyPositionNote = `Neutral breakout unconfirmed = -15% size`;
+      }
+    }
+    
+    // Apply strategy position multiplier to base position size
+    if (strategyPositionMultiplier !== 1.0) {
+      positionSizePercent *= strategyPositionMultiplier;
+      logger.info(`🎯 Strategy-aware sizing [${strategyType}]: ${strategyPositionNote}`);
+      logger.info(`   → Position size adjusted: ${(positionSizePercent / strategyPositionMultiplier).toFixed(2)}% × ${strategyPositionMultiplier.toFixed(2)} = ${positionSizePercent.toFixed(2)}%`);
+    } else {
+      logger.info(`🎯 Strategy-aware sizing [${strategyType}]: ${strategyPositionNote || 'standard sizing'}`);
+    }
+
+    // ============================================================
     // SMART RISK #2: KELLY CRITERION POSITION SIZING
     // Calculate optimal risk based on historical win rate and avg win/loss
     // ============================================================
