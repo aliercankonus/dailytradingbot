@@ -30,10 +30,14 @@ import {
   detectMarketRegime,
   isValidSqueezeBreakout,
   deriveTradeDirection,
+  getAdxPhase,
+  getAdxPhaseInfo,
+  detectBreakoutMode,
   type UnifiedReversalResult,
   type MarketRegime,
   type SqueezeBreakoutResult,
-  type DirectionResult
+  type DirectionResult,
+  type BreakoutModeResult
 } from "../_shared/scoring.ts";
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
@@ -2499,9 +2503,15 @@ serve(async (req) => {
         // Check minimum quality threshold
         if (qualityScore < MIN_QUALITY_SCORE) {
           rejectedByQuality++;
+          
+          // PHASE 1: Near Miss Logging - signals within 5 points of threshold
+          const isNearMiss = qualityScore >= (MIN_QUALITY_SCORE - QUALITY_THRESHOLDS.NEAR_MISS_THRESHOLD);
+          
           await supabase.from("signal_rejection_log").insert({
             user_id: userId, symbol,
-            rejection_reason: `Quality score too low: ${qualityScore}/100 (min: ${MIN_QUALITY_SCORE}, ADX=${adx.toFixed(1)})`,
+            rejection_reason: isNearMiss 
+              ? `NEAR MISS: Quality score ${qualityScore}/100 (threshold: ${MIN_QUALITY_SCORE}, missed by ${MIN_QUALITY_SCORE - qualityScore} pts)`
+              : `Quality score too low: ${qualityScore}/100 (min: ${MIN_QUALITY_SCORE}, ADX=${adx.toFixed(1)})`,
             filters_status: {
               qualityScore, breakdown, minRequired: MIN_QUALITY_SCORE,
               dynamicThreshold: true,
@@ -2509,10 +2519,17 @@ serve(async (req) => {
               factors: qualityFactors,
               regime: regime.regime,
               entryTiming: pullbackAnalysis.reason,
+              isNearMiss,  // Flag for later analysis
+              nearMissMargin: isNearMiss ? MIN_QUALITY_SCORE - qualityScore : null,
             },
             trend_data: trendData,
             checked_at: new Date().toISOString(),
           });
+          
+          // Log near misses at higher visibility for monitoring
+          if (isNearMiss) {
+            logger.forSymbol(symbol).warn(`[NEAR_MISS] Quality ${qualityScore}/${MIN_QUALITY_SCORE} - missed by ${MIN_QUALITY_SCORE - qualityScore} pts | ${breakdown}`);
+          }
           continue;
         }
 

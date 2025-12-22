@@ -2,7 +2,133 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, type AdxPhase } from "./constants.ts";
+
+// ============= ADX PHASE STATE MACHINE =============
+// PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
+// Instead of raw thresholds, each phase has specific trading rules
+
+export const getAdxPhase = (adx: number): AdxPhase => {
+  if (adx < ADX_PHASES.RANGE.max) return "RANGE";
+  if (adx < ADX_PHASES.TRANSITION.max) return "TRANSITION";
+  if (adx < ADX_PHASES.EARLY_TREND.max) return "EARLY_TREND";
+  if (adx < ADX_PHASES.STRONG_TREND.max) return "STRONG_TREND";
+  return "EXHAUSTION";
+};
+
+export const getAdxPhaseInfo = (adx: number): { 
+  phase: AdxPhase; 
+  tradeable: boolean; 
+  description: string;
+  exhaustionRisk: boolean;
+  reversalSensitivityMultiplier: number;
+} => {
+  const phase = getAdxPhase(adx);
+  const phaseConfig = ADX_PHASES[phase];
+  
+  // EXHAUSTION phase: increase reversal sensitivity by 50%
+  const exhaustionRisk = phase === "EXHAUSTION";
+  const reversalSensitivityMultiplier = exhaustionRisk ? 1.5 : 
+    phase === "STRONG_TREND" ? 0.75 :  // Strong trends reduce reversal sensitivity
+    1.0;
+  
+  return {
+    phase,
+    tradeable: phaseConfig.tradeable,
+    description: phaseConfig.description,
+    exhaustionRisk,
+    reversalSensitivityMultiplier,
+  };
+};
+
+// ============= BREAKOUT MODE DETECTION =============
+// PHASE 1 IMPROVEMENT: Consolidated breakout mode flag
+// When active: reduce StochRSI penalties, disable divergence hard gate (unless HTF confirms)
+
+export interface BreakoutModeResult {
+  isActive: boolean;
+  confidence: number;  // 0-100
+  reasons: string[];
+  stochRsiPenaltyMultiplier: number;  // 0.5 when breakout mode active
+  skipDivergenceGate: boolean;
+}
+
+export const detectBreakoutMode = (trendData: any): BreakoutModeResult => {
+  const reasons: string[] = [];
+  let confidence = 0;
+  
+  if (!trendData) {
+    return { isActive: false, confidence: 0, reasons: ["No trend data"], stochRsiPenaltyMultiplier: 1.0, skipDivergenceGate: false };
+  }
+  
+  const bollinger = trendData?.bollingerBands || {};
+  const squeeze4h = bollinger['4h']?.squeeze || false;
+  const squeezePercent4h = bollinger['4h']?.squeezePercent || 0;
+  const squeeze1h = bollinger['1h']?.squeeze || false;
+  
+  const momentum = trendData?.momentum || {};
+  const momentumState = momentum.state || "none";
+  const macdExpanding = momentum.macdExpanding || false;
+  const volumeConfirms = momentum.volumeConfirms || false;
+  const volumeRatio = trendData?.volatility?.volumeRatio || 1.0;
+  
+  const adx = trendData?.volatility?.adx || 0;
+  const adxRising = trendData?.volatility?.adxRising || false;
+  
+  // CORE BREAKOUT CONDITIONS:
+  // 1. Squeeze is active (either 4h or 1h)
+  const hasSqueezeActive = squeeze4h || squeeze1h;
+  if (hasSqueezeActive) {
+    confidence += 25;
+    reasons.push(`Squeeze active (4h: ${squeeze4h}, 1h: ${squeeze1h})`);
+  }
+  
+  // 2. Squeeze percent is significant (4h >= 50%)
+  const hasSignificantSqueeze = squeezePercent4h >= BREAKOUT_MODE_PARAMS.MIN_SQUEEZE_PERCENT;
+  if (hasSignificantSqueeze) {
+    confidence += 20;
+    reasons.push(`4h squeeze ${squeezePercent4h.toFixed(0)}% >= ${BREAKOUT_MODE_PARAMS.MIN_SQUEEZE_PERCENT}%`);
+  }
+  
+  // 3. Volume is expanding
+  const hasVolumeExpansion = volumeRatio >= BREAKOUT_MODE_PARAMS.MIN_VOLUME_RATIO;
+  if (hasVolumeExpansion) {
+    confidence += 20;
+    reasons.push(`Volume expansion ${volumeRatio.toFixed(2)}x >= ${BREAKOUT_MODE_PARAMS.MIN_VOLUME_RATIO}x`);
+  }
+  
+  // 4. Momentum is building
+  const hasMomentumBuilding = momentumState === "building" || momentumState === "confirmed" || macdExpanding;
+  if (hasMomentumBuilding) {
+    confidence += 20;
+    reasons.push(`Momentum ${momentumState}${macdExpanding ? " + MACD expanding" : ""}`);
+  }
+  
+  // 5. ADX rising (optional but adds confidence)
+  if (BREAKOUT_MODE_PARAMS.REQUIRE_ADX_RISING && adxRising) {
+    confidence += 15;
+    reasons.push(`ADX rising (${adx.toFixed(1)})`);
+  } else if (!BREAKOUT_MODE_PARAMS.REQUIRE_ADX_RISING) {
+    confidence += 10;  // Partial credit when not required
+  }
+  
+  // BREAKOUT MODE REQUIRES: Squeeze + (Volume OR Momentum)
+  const isActive = hasSqueezeActive && (hasVolumeExpansion || hasMomentumBuilding);
+  
+  // Breakout mode benefits:
+  // - StochRSI penalty reduced by 50%
+  // - Divergence gate can be skipped (unless HTF confirms divergence)
+  const stochRsiPenaltyMultiplier = isActive ? BREAKOUT_MODE_PARAMS.STOCHRSI_PENALTY_REDUCTION : 1.0;
+  const skipDivergenceGate = isActive && volumeConfirms;  // Only skip if volume confirms too
+  
+  return {
+    isActive,
+    confidence: Math.min(100, confidence),
+    reasons,
+    stochRsiPenaltyMultiplier,
+    skipDivergenceGate,
+  };
+};
 
 // ============= STOCHRSI-RSI CONFLICT RESOLUTION =============
 // When StochRSI is at extremes, RSI signals are weighted at 50% to prevent
@@ -489,13 +615,19 @@ export const calculateUnifiedReversalScore = (
     };
   }
   
+  // PHASE 1: Get ADX phase info for context-aware scoring
+  const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 20;
+  const adxPhaseInfo = getAdxPhaseInfo(adx);
+  
+  // PHASE 1: Detect breakout mode for StochRSI penalty reduction
+  const breakoutMode = detectBreakoutMode(trendData);
+  
   const momentum = trendData?.momentum || {};
   const stochRSI = trendData?.stochasticRsi || {};
   const aggregated = stochRSI.aggregated || {};
   const tf = trendData?.timeframes || {};
   const tf1h = tf['1h'] || {};
   const tf4h = tf['4h'] || {};
-  const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 20;
   const volatility = trendData?.volatility || {};
   const indicators = trendData?.indicators || {};
   const rsi = tf1h.indicators?.rsi || indicators.rsi || 50;
@@ -596,13 +728,22 @@ export const calculateUnifiedReversalScore = (
   
   // Apply RSI-StochRSI conflict resolution (but NOT for high reversal risk levels)
   // High reversal risk (K >= 95 or K <= 5) should not be reduced
+  // PHASE 1: Also apply breakout mode penalty reduction when active
   const isAtHighReversalRisk = isLong ? k4h >= HIGH_REVERSAL_OB : k4h <= HIGH_REVERSAL_OS;
-  if (reduceStochZonePenalty && rawStochZoneScore > 0 && !isAtHighReversalRisk) {
-    breakdown.stochRsiZoneScore = Math.round(rawStochZoneScore * 0.5);
-    reasons.push(`StochRSI zone penalty reduced 50% (RSI pullback + momentum)`);
-  } else {
-    breakdown.stochRsiZoneScore = rawStochZoneScore;
+  
+  // Calculate penalty reduction: RSI pullback + breakout mode can stack
+  let stochZonePenaltyMultiplier = 1.0;
+  if (!isAtHighReversalRisk) {
+    if (reduceStochZonePenalty) {
+      stochZonePenaltyMultiplier *= 0.5;
+      reasons.push(`StochRSI zone penalty reduced 50% (RSI pullback + momentum)`);
+    }
+    if (breakoutMode.isActive) {
+      stochZonePenaltyMultiplier *= breakoutMode.stochRsiPenaltyMultiplier;
+      reasons.push(`BREAKOUT MODE: StochRSI penalty reduced ${((1 - breakoutMode.stochRsiPenaltyMultiplier) * 100).toFixed(0)}%`);
+    }
   }
+  breakdown.stochRsiZoneScore = Math.round(rawStochZoneScore * stochZonePenaltyMultiplier);
   
   // 3. MOMENTUM STATE (0-30 points)
   // RELAXED: Allow "none" state with reduced penalty when ADX >= 28 (strong trend exception)
@@ -690,7 +831,15 @@ export const calculateUnifiedReversalScore = (
                    breakdown.timeframeScore + breakdown.volumeScore;
   
   const adxWeight = getAdxWeight(adx);
-  totalScore = Math.min(100, Math.max(0, Math.round(rawScore * adxWeight)));
+  
+  // PHASE 1: Apply ADX phase exhaustion risk - increases reversal score by 50%
+  let phaseMultiplier = 1.0;
+  if (adxPhaseInfo.exhaustionRisk) {
+    phaseMultiplier = adxPhaseInfo.reversalSensitivityMultiplier;  // 1.5 for exhaustion
+    reasons.push(`ADX EXHAUSTION RISK (${adx.toFixed(1)}): reversal sensitivity +50%`);
+  }
+  
+  totalScore = Math.min(100, Math.max(0, Math.round(rawScore * adxWeight * phaseMultiplier)));
   
   // Three-tier decision
   let decision: "BLOCK" | "REDUCE" | "NORMAL";
@@ -705,6 +854,11 @@ export const calculateUnifiedReversalScore = (
   } else {
     decision = "NORMAL";
     positionSizeMultiplier = 1.0;
+  }
+  
+  // Log breakout mode if active (for monitoring)
+  if (breakoutMode.isActive) {
+    reasons.push(`BREAKOUT MODE ACTIVE: ${breakoutMode.confidence}% confidence`);
   }
   
   return { 
