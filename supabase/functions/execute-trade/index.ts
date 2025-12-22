@@ -660,185 +660,184 @@ serve(async (req) => {
           throw new Error(`Current volume too low (${(volumeRatio * 100).toFixed(0)}% of average) - trade cancelled to avoid illiquid entry`);
         }
 
-      // Log volume spike detection (informational)
-      if (volumeRatio > 2.0) {
-        logger.info(`⚡ VOLUME SPIKE detected: ${volumeRatio.toFixed(2)}x average - high activity period`);
-      }
-
-      // ============================================================
-      // OBV (On-Balance Volume) INDICATOR - Confirm trend with volume
-      // ============================================================
-      let obv = 0;
-      const obvValues: number[] = [0];
-      
-      for (let i = 1; i < closes.length; i++) {
-        if (closes[i] > closes[i - 1]) {
-          obv += volumes[i]; // Price up = add volume
-        } else if (closes[i] < closes[i - 1]) {
-          obv -= volumes[i]; // Price down = subtract volume
+        // Log volume spike detection (informational)
+        if (volumeRatio > 2.0) {
+          logger.info(`⚡ VOLUME SPIKE detected: ${volumeRatio.toFixed(2)}x average - high activity period`);
         }
-        // If price unchanged, OBV stays the same
-        obvValues.push(obv);
-      }
 
-      // Calculate OBV trend (compare recent OBV to older OBV) with safety checks
-      const recentOBV = obvValues.slice(-10);
-      const olderOBV = obvValues.slice(-20, -10);
-      const avgRecentOBV = recentOBV.length > 0 ? recentOBV.reduce((a, b) => a + b, 0) / recentOBV.length : 0;
-      const avgOlderOBV = olderOBV.length > 0 ? olderOBV.reduce((a, b) => a + b, 0) / olderOBV.length : 0;
-      
-      const obvTrend = avgRecentOBV > avgOlderOBV ? 'rising' : avgRecentOBV < avgOlderOBV ? 'falling' : 'flat';
-      const obvChange = avgOlderOBV !== 0 ? ((avgRecentOBV - avgOlderOBV) / Math.abs(avgOlderOBV)) * 100 : 0;
-
-      // OBV slope (recent direction)
-      const obvSlope = obvValues.length >= 5 
-        ? (obvValues[obvValues.length - 1] - obvValues[obvValues.length - 5]) / 5 
-        : 0;
-      const obvDirection = obvSlope > 0 ? 'bullish' : obvSlope < 0 ? 'bearish' : 'neutral';
-
-      logger.info(`📈 OBV Analysis: Current=${obv.toFixed(0)}, Trend=${obvTrend}, Change=${obvChange.toFixed(2)}%, Direction=${obvDirection}`);
-
-      // FILTER 10: OBV trend confirmation
-      // For LONG signals, OBV should be rising (bullish volume accumulation)
-      // For SHORT signals, OBV should be falling (bearish volume distribution)
-      const signalSide = signal.signal_type === 'long' ? 'BUY' : 'SELL';
-      
-      // FILTER 10: OBV trend confirmation - BLOCK on strong divergence
-      if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -15) {
-        await logExecutionRejection(supabase, user.id, signal.symbol, 'OBV Divergence (LONG vs Bearish)', signal, trendData, { obvDirection, obvChange, signalSide });
-        throw new Error(`OBV divergence: LONG signal but volume strongly bearish (${obvChange.toFixed(1)}% decline) - trade cancelled`);
-      }
-      
-      if (signalSide === 'SELL' && obvDirection === 'bullish' && obvChange > 15) {
-        await logExecutionRejection(supabase, user.id, signal.symbol, 'OBV Divergence (SHORT vs Bullish)', signal, trendData, { obvDirection, obvChange, signalSide });
-        throw new Error(`OBV divergence: SHORT signal but volume strongly bullish (${obvChange.toFixed(1)}% rise) - trade cancelled`);
-      }
-      
-      // Warn on moderate divergence (don't block)
-      if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -10) {
-        logger.warn(`⚠️ OBV DIVERGENCE: LONG signal but OBV is bearish (${obvChange.toFixed(2)}% decline)`);
-      }
-      if (signalSide === 'SELL' && obvDirection === 'bullish' && obvChange > 10) {
-        logger.warn(`⚠️ OBV DIVERGENCE: SHORT signal but OBV is bullish (${obvChange.toFixed(2)}% rise)`);
-      }
-
-      // Calculate volume boost multiplier based on OBV confirmation
-      let obvBoostMultiplier = 1.0;
-      
-      if (signalSide === 'BUY' && obvDirection === 'bullish' && obvChange > 5) {
-        obvBoostMultiplier = 1.15; // 15% boost for strong OBV confirmation
-        logger.info(`✅ OBV confirms LONG: Volume accumulation detected, boost=${obvBoostMultiplier}x`);
-      } else if (signalSide === 'SELL' && obvDirection === 'bearish' && obvChange < -5) {
-        obvBoostMultiplier = 1.15; // 15% boost for strong OBV confirmation
-        logger.info(`✅ OBV confirms SHORT: Volume distribution detected, boost=${obvBoostMultiplier}x`);
-      } else if ((signalSide === 'BUY' && obvDirection === 'bearish') || 
-                 (signalSide === 'SELL' && obvDirection === 'bullish')) {
-        obvBoostMultiplier = 0.85; // 15% reduction for OBV divergence
-        logger.info(`⚠️ OBV divergence detected, reducing position size by 15%`);
-      }
-      }
-
-      // Store OBV boost for later use in position sizing
-      (signal as any).obvBoostMultiplier = obvBoostMultiplier;
-
-      // ============================================================
-      // VWAP (Volume Weighted Average Price) - Entry Point Optimization
-      // ============================================================
-      const highs = klines.map((k: any[]) => parseFloat(k[2])); // High at index 2
-      const lows = klines.map((k: any[]) => parseFloat(k[3])); // Low at index 3
-      
-      // Calculate VWAP: Sum(Typical Price * Volume) / Sum(Volume)
-      let cumulativeTPV = 0; // Cumulative Typical Price * Volume
-      let cumulativeVolume = 0;
-      const vwapValues: number[] = [];
-      
-      for (let i = 0; i < closes.length; i++) {
-        const typicalPrice = (highs[i] + lows[i] + closes[i]) / 3;
-        cumulativeTPV += typicalPrice * volumes[i];
-        cumulativeVolume += volumes[i];
-        vwapValues.push(cumulativeTPV / cumulativeVolume);
-      }
-      
-      const currentVWAP = vwapValues[vwapValues.length - 1] || currentPrice;
-      const vwapDeviation = currentVWAP > 0 ? ((currentPrice - currentVWAP) / currentVWAP) * 100 : 0;
-      
-      // Calculate VWAP bands (standard deviation from VWAP) with safety check
-      const vwapDiffs = closes.map((c: number, i: number) => Math.pow(c - (vwapValues[i] || currentPrice), 2));
-      const vwapStdDev = vwapDiffs.length > 0 
-        ? Math.sqrt(vwapDiffs.reduce((a: number, b: number) => a + b, 0) / vwapDiffs.length)
-        : 0;
-      const vwapUpperBand = currentVWAP + (vwapStdDev * 2);
-      const vwapLowerBand = currentVWAP - (vwapStdDev * 2);
-      
-      logger.info(`📈 VWAP Analysis: VWAP=$${currentVWAP.toFixed(2)}, Current=$${currentPrice.toFixed(2)}, Deviation=${vwapDeviation.toFixed(2)}%`);
-      logger.info(`📈 VWAP Bands: Lower=$${vwapLowerBand.toFixed(2)}, Upper=$${vwapUpperBand.toFixed(2)}`);
-      
-      // VWAP position analysis for entry optimization
-      let vwapBoostMultiplier = 1.0;
-      const vwapSignalSide = signal.signal_type === 'long' ? 'BUY' : 'SELL';
-      
-      if (vwapSignalSide === 'BUY') {
-        if (currentPrice < currentVWAP) {
-          const discountPercent = Math.abs(vwapDeviation);
-          if (discountPercent > 1) {
-            vwapBoostMultiplier = 1.2;
-            logger.info(`✅ VWAP confirms LONG: Price ${discountPercent.toFixed(2)}% below VWAP - excellent entry`);
-          } else {
-            vwapBoostMultiplier = 1.1;
-            logger.info(`✅ VWAP supports LONG: Price slightly below VWAP - good entry`);
+        // ============================================================
+        // OBV (On-Balance Volume) INDICATOR - Confirm trend with volume
+        // ============================================================
+        let obv = 0;
+        const obvValues: number[] = [0];
+        
+        for (let i = 1; i < closes.length; i++) {
+          if (closes[i] > closes[i - 1]) {
+            obv += volumes[i]; // Price up = add volume
+          } else if (closes[i] < closes[i - 1]) {
+            obv -= volumes[i]; // Price down = subtract volume
           }
-        } else if (currentPrice > vwapUpperBand) {
-          const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
-          const ADX_EXCEPTION_THRESHOLD = 30;
-          
-          if (adxValue >= ADX_EXCEPTION_THRESHOLD) {
-            vwapBoostMultiplier = 0.8;
-            logger.warn(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band but ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} - allowing LONG with reduced size`);
-          } else {
-            logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} above upper VWAP band $${vwapUpperBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD})`);
-            await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (LONG)', signal, trendData, { currentPrice, vwapUpperBand, adx: adxValue, vwapDeviation });
-            throw new Error(`Price above upper VWAP band - overextended LONG entry blocked (ADX too weak)`);
-          }
-        } else if (vwapDeviation > 1.0) {
-          vwapBoostMultiplier = 0.75;
-          logger.info(`📊 VWAP: Price ${vwapDeviation.toFixed(2)}% above VWAP - reducing position`);
-        } else if (vwapDeviation > 0.5) {
-          vwapBoostMultiplier = 0.9;
-          logger.info(`📊 VWAP neutral: Price ${vwapDeviation.toFixed(2)}% above VWAP`);
+          // If price unchanged, OBV stays the same
+          obvValues.push(obv);
         }
-      } else if (vwapSignalSide === 'SELL') {
-        if (currentPrice > currentVWAP) {
-          const premiumPercent = vwapDeviation;
-          if (premiumPercent > 1) {
-            vwapBoostMultiplier = 1.2;
-            logger.info(`✅ VWAP confirms SHORT: Price ${premiumPercent.toFixed(2)}% above VWAP - excellent entry`);
-          } else {
-            vwapBoostMultiplier = 1.1;
-            logger.info(`✅ VWAP supports SHORT: Price slightly above VWAP - good entry`);
-          }
-        } else if (currentPrice < vwapLowerBand) {
-          const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
-          const ADX_EXCEPTION_THRESHOLD = 30;
-          
-          if (adxValue >= ADX_EXCEPTION_THRESHOLD) {
-            vwapBoostMultiplier = 0.8;
-            logger.warn(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band but ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} - allowing SHORT with reduced size`);
-          } else {
-            logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD})`);
-            await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (SHORT)', signal, trendData, { currentPrice, vwapLowerBand, adx: adxValue, vwapDeviation });
-            throw new Error(`Price below lower VWAP band - oversold SHORT entry blocked (ADX too weak)`);
-          }
-        } else if (vwapDeviation < -1.0) {
-          vwapBoostMultiplier = 0.75;
-          logger.info(`📊 VWAP: Price ${Math.abs(vwapDeviation).toFixed(2)}% below VWAP - reducing position`);
-        } else if (vwapDeviation < -0.5) {
-          vwapBoostMultiplier = 0.9;
-          logger.info(`📊 VWAP neutral: Price ${Math.abs(vwapDeviation).toFixed(2)}% below VWAP`);
+
+        // Calculate OBV trend (compare recent OBV to older OBV) with safety checks
+        const recentOBV = obvValues.slice(-10);
+        const olderOBV = obvValues.slice(-20, -10);
+        const avgRecentOBV = recentOBV.length > 0 ? recentOBV.reduce((a, b) => a + b, 0) / recentOBV.length : 0;
+        const avgOlderOBV = olderOBV.length > 0 ? olderOBV.reduce((a, b) => a + b, 0) / olderOBV.length : 0;
+        
+        const obvTrend = avgRecentOBV > avgOlderOBV ? 'rising' : avgRecentOBV < avgOlderOBV ? 'falling' : 'flat';
+        const obvChange = avgOlderOBV !== 0 ? ((avgRecentOBV - avgOlderOBV) / Math.abs(avgOlderOBV)) * 100 : 0;
+
+        // OBV slope (recent direction)
+        const obvSlope = obvValues.length >= 5 
+          ? (obvValues[obvValues.length - 1] - obvValues[obvValues.length - 5]) / 5 
+          : 0;
+        const obvDirection = obvSlope > 0 ? 'bullish' : obvSlope < 0 ? 'bearish' : 'neutral';
+
+        logger.info(`📈 OBV Analysis: Current=${obv.toFixed(0)}, Trend=${obvTrend}, Change=${obvChange.toFixed(2)}%, Direction=${obvDirection}`);
+
+        // FILTER 10: OBV trend confirmation
+        // For LONG signals, OBV should be rising (bullish volume accumulation)
+        // For SHORT signals, OBV should be falling (bearish volume distribution)
+        const signalSide = signal.signal_type === 'long' ? 'BUY' : 'SELL';
+        
+        // FILTER 10: OBV trend confirmation - BLOCK on strong divergence
+        if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -15) {
+          await logExecutionRejection(supabase, user.id, signal.symbol, 'OBV Divergence (LONG vs Bearish)', signal, trendData, { obvDirection, obvChange, signalSide });
+          throw new Error(`OBV divergence: LONG signal but volume strongly bearish (${obvChange.toFixed(1)}% decline) - trade cancelled`);
         }
-      }
-      
-      (signal as any).vwapBoostMultiplier = vwapBoostMultiplier;
-      logger.info(`📈 Final VWAP Boost Multiplier: ${vwapBoostMultiplier.toFixed(2)}x`);
+        
+        if (signalSide === 'SELL' && obvDirection === 'bullish' && obvChange > 15) {
+          await logExecutionRejection(supabase, user.id, signal.symbol, 'OBV Divergence (SHORT vs Bullish)', signal, trendData, { obvDirection, obvChange, signalSide });
+          throw new Error(`OBV divergence: SHORT signal but volume strongly bullish (${obvChange.toFixed(1)}% rise) - trade cancelled`);
+        }
+        
+        // Warn on moderate divergence (don't block)
+        if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -10) {
+          logger.warn(`⚠️ OBV DIVERGENCE: LONG signal but OBV is bearish (${obvChange.toFixed(2)}% decline)`);
+        }
+        if (signalSide === 'SELL' && obvDirection === 'bullish' && obvChange > 10) {
+          logger.warn(`⚠️ OBV DIVERGENCE: SHORT signal but OBV is bullish (${obvChange.toFixed(2)}% rise)`);
+        }
+
+        // Calculate volume boost multiplier based on OBV confirmation
+        let obvBoostMultiplier = 1.0;
+        
+        if (signalSide === 'BUY' && obvDirection === 'bullish' && obvChange > 5) {
+          obvBoostMultiplier = 1.15; // 15% boost for strong OBV confirmation
+          logger.info(`✅ OBV confirms LONG: Volume accumulation detected, boost=${obvBoostMultiplier}x`);
+        } else if (signalSide === 'SELL' && obvDirection === 'bearish' && obvChange < -5) {
+          obvBoostMultiplier = 1.15; // 15% boost for strong OBV confirmation
+          logger.info(`✅ OBV confirms SHORT: Volume distribution detected, boost=${obvBoostMultiplier}x`);
+        } else if ((signalSide === 'BUY' && obvDirection === 'bearish') || 
+                   (signalSide === 'SELL' && obvDirection === 'bullish')) {
+          obvBoostMultiplier = 0.85; // 15% reduction for OBV divergence
+          logger.info(`⚠️ OBV divergence detected, reducing position size by 15%`);
+        }
+
+        // Store OBV boost for later use in position sizing
+        (signal as any).obvBoostMultiplier = obvBoostMultiplier;
+
+        // ============================================================
+        // VWAP (Volume Weighted Average Price) - Entry Point Optimization
+        // ============================================================
+        const highs = klines.map((k: any[]) => parseFloat(k[2])); // High at index 2
+        const lows = klines.map((k: any[]) => parseFloat(k[3])); // Low at index 3
+        
+        // Calculate VWAP: Sum(Typical Price * Volume) / Sum(Volume)
+        let cumulativeTPV = 0; // Cumulative Typical Price * Volume
+        let cumulativeVolume = 0;
+        const vwapValues: number[] = [];
+        
+        for (let i = 0; i < closes.length; i++) {
+          const typicalPrice = (highs[i] + lows[i] + closes[i]) / 3;
+          cumulativeTPV += typicalPrice * volumes[i];
+          cumulativeVolume += volumes[i];
+          vwapValues.push(cumulativeTPV / cumulativeVolume);
+        }
+        
+        const currentVWAP = vwapValues[vwapValues.length - 1] || currentPrice;
+        const vwapDeviation = currentVWAP > 0 ? ((currentPrice - currentVWAP) / currentVWAP) * 100 : 0;
+        
+        // Calculate VWAP bands (standard deviation from VWAP) with safety check
+        const vwapDiffs = closes.map((c: number, i: number) => Math.pow(c - (vwapValues[i] || currentPrice), 2));
+        const vwapStdDev = vwapDiffs.length > 0 
+          ? Math.sqrt(vwapDiffs.reduce((a: number, b: number) => a + b, 0) / vwapDiffs.length)
+          : 0;
+        const vwapUpperBand = currentVWAP + (vwapStdDev * 2);
+        const vwapLowerBand = currentVWAP - (vwapStdDev * 2);
+        
+        logger.info(`📈 VWAP Analysis: VWAP=$${currentVWAP.toFixed(2)}, Current=$${currentPrice.toFixed(2)}, Deviation=${vwapDeviation.toFixed(2)}%`);
+        logger.info(`📈 VWAP Bands: Lower=$${vwapLowerBand.toFixed(2)}, Upper=$${vwapUpperBand.toFixed(2)}`);
+        
+        // VWAP position analysis for entry optimization
+        let vwapBoostMultiplier = 1.0;
+        const vwapSignalSide = signal.signal_type === 'long' ? 'BUY' : 'SELL';
+        
+        if (vwapSignalSide === 'BUY') {
+          if (currentPrice < currentVWAP) {
+            const discountPercent = Math.abs(vwapDeviation);
+            if (discountPercent > 1) {
+              vwapBoostMultiplier = 1.2;
+              logger.info(`✅ VWAP confirms LONG: Price ${discountPercent.toFixed(2)}% below VWAP - excellent entry`);
+            } else {
+              vwapBoostMultiplier = 1.1;
+              logger.info(`✅ VWAP supports LONG: Price slightly below VWAP - good entry`);
+            }
+          } else if (currentPrice > vwapUpperBand) {
+            const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
+            const ADX_EXCEPTION_THRESHOLD = 30;
+            
+            if (adxValue >= ADX_EXCEPTION_THRESHOLD) {
+              vwapBoostMultiplier = 0.8;
+              logger.warn(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band but ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} - allowing LONG with reduced size`);
+            } else {
+              logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} above upper VWAP band $${vwapUpperBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD})`);
+              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (LONG)', signal, trendData, { currentPrice, vwapUpperBand, adx: adxValue, vwapDeviation });
+              throw new Error(`Price above upper VWAP band - overextended LONG entry blocked (ADX too weak)`);
+            }
+          } else if (vwapDeviation > 1.0) {
+            vwapBoostMultiplier = 0.75;
+            logger.info(`📊 VWAP: Price ${vwapDeviation.toFixed(2)}% above VWAP - reducing position`);
+          } else if (vwapDeviation > 0.5) {
+            vwapBoostMultiplier = 0.9;
+            logger.info(`📊 VWAP neutral: Price ${vwapDeviation.toFixed(2)}% above VWAP`);
+          }
+        } else if (vwapSignalSide === 'SELL') {
+          if (currentPrice > currentVWAP) {
+            const premiumPercent = vwapDeviation;
+            if (premiumPercent > 1) {
+              vwapBoostMultiplier = 1.2;
+              logger.info(`✅ VWAP confirms SHORT: Price ${premiumPercent.toFixed(2)}% above VWAP - excellent entry`);
+            } else {
+              vwapBoostMultiplier = 1.1;
+              logger.info(`✅ VWAP supports SHORT: Price slightly above VWAP - good entry`);
+            }
+          } else if (currentPrice < vwapLowerBand) {
+            const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
+            const ADX_EXCEPTION_THRESHOLD = 30;
+            
+            if (adxValue >= ADX_EXCEPTION_THRESHOLD) {
+              vwapBoostMultiplier = 0.8;
+              logger.warn(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band but ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} - allowing SHORT with reduced size`);
+            } else {
+              logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD})`);
+              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (SHORT)', signal, trendData, { currentPrice, vwapLowerBand, adx: adxValue, vwapDeviation });
+              throw new Error(`Price below lower VWAP band - oversold SHORT entry blocked (ADX too weak)`);
+            }
+          } else if (vwapDeviation < -1.0) {
+            vwapBoostMultiplier = 0.75;
+            logger.info(`📊 VWAP: Price ${Math.abs(vwapDeviation).toFixed(2)}% below VWAP - reducing position`);
+          } else if (vwapDeviation < -0.5) {
+            vwapBoostMultiplier = 0.9;
+            logger.info(`📊 VWAP neutral: Price ${Math.abs(vwapDeviation).toFixed(2)}% below VWAP`);
+          }
+        }
+        
+        (signal as any).vwapBoostMultiplier = vwapBoostMultiplier;
+        logger.info(`📈 Final VWAP Boost Multiplier: ${vwapBoostMultiplier.toFixed(2)}x`);
       } // Close inner else block (klines valid)
     } // Close outer else block (klineResponse ok)
 
@@ -849,14 +848,14 @@ serve(async (req) => {
     const signalEntryPrice = signal.entry_price || currentPrice;
     const priceDeviation = Math.abs((currentPrice - signalEntryPrice) / signalEntryPrice) * 100;
 
-    console.log(`💱 Slippage Check: Signal Entry=$${signalEntryPrice.toFixed(2)}, Current=$${currentPrice.toFixed(2)}, Deviation=${priceDeviation.toFixed(3)}%`);
+    logger.info(`💱 Slippage Check: Signal Entry=$${signalEntryPrice.toFixed(2)}, Current=$${currentPrice.toFixed(2)}, Deviation=${priceDeviation.toFixed(3)}%`);
 
     // FILTER 8: Pre-execution slippage check
     if (priceDeviation > maxSlippagePercent) {
       await logExecutionRejection(supabase, user.id, signal.symbol, 'Price Slippage', signal, trendData, { priceDeviation, maxAllowed: maxSlippagePercent, signalEntryPrice, currentPrice });
       throw new Error(`Price moved ${priceDeviation.toFixed(2)}% since signal (max ${maxSlippagePercent}%) - trade cancelled to avoid slippage`);
     }
-    console.log(`✓ Pre-trade slippage check passed: ${priceDeviation.toFixed(3)}% < ${maxSlippagePercent}% max`);
+    logger.validation(`✓ Pre-trade slippage check passed: ${priceDeviation.toFixed(3)}% < ${maxSlippagePercent}% max`, true);
 
     // Fetch order book depth for additional slippage analysis
     const depthResponse = await fetch(`https://api.binance.com/api/v3/depth?symbol=${signal.symbol}&limit=10`);
@@ -992,67 +991,67 @@ serve(async (req) => {
     if (aiAnalysisEnabled) {
       try {
         const { data: aiAnalysis, error: aiError } = await supabase.functions.invoke('ai-signal-analyzer', {
-        body: {
-          symbol: signal.symbol,
-          signalType: signal.signal_type,
-          userId: user.id,
-          trendData: {
-            trend: currentTrend,
-            confidence: signal.confidence_score || 0,
-            trendConsistency: trendConsistency,
-            adx: trendData?.volatility?.adx || 0,
-            rsi: trendData?.timeframes?.['1h']?.indicators?.rsi || 50,
-            macdHistogram: trendData?.timeframes?.['1h']?.indicators?.macdHistogram || 0,
-            stochRSI: trendData?.stochasticRsi?.['1h'] || { k: 50, d: 50, signal: 'neutral' },
-            bollingerBands: {
-              percentB: bb1h.percentB || 50,
-              squeeze: bb1h.squeeze || false
+          body: {
+            symbol: signal.symbol,
+            signalType: signal.signal_type,
+            userId: user.id,
+            trendData: {
+              trend: currentTrend,
+              confidence: signal.confidence_score || 0,
+              trendConsistency: trendConsistency,
+              adx: trendData?.volatility?.adx || 0,
+              rsi: trendData?.timeframes?.['1h']?.indicators?.rsi || 50,
+              macdHistogram: trendData?.timeframes?.['1h']?.indicators?.macdHistogram || 0,
+              stochRSI: trendData?.stochasticRsi?.['1h'] || { k: 50, d: 50, signal: 'neutral' },
+              bollingerBands: {
+                percentB: bb1h.percentB || 50,
+                squeeze: bb1h.squeeze || false
+              },
+              momentum: trendData?.momentum || { confirms: false, divergence: false },
+              volumeConfirms: trendData?.volumeConfirms || false
             },
-            momentum: trendData?.momentum || { confirms: false, divergence: false },
-            volumeConfirms: trendData?.volumeConfirms || false
-          },
-          strategyName: signal.strategy_name || 'Unknown',
-          entryPrice: currentPrice,
-          stopLoss: stopLoss,
-          takeProfit: takeProfit
-        }
-      });
+            strategyName: signal.strategy_name || 'Unknown',
+            entryPrice: currentPrice,
+            stopLoss: stopLoss,
+            takeProfit: takeProfit
+          }
+        });
 
-      if (!aiError && aiAnalysis?.success && aiAnalysis?.analysis) {
-        const analysis = aiAnalysis.analysis;
-        aiPositionMultiplier = analysis.positionSizeMultiplier || 1.0;
-        aiConfidenceAdjustment = analysis.confidenceAdjustment || 0;
-        
-        console.log(`🤖 AI Analysis: ${analysis.recommendation.toUpperCase()}`);
-        console.log(`   Risk Level: ${analysis.riskLevel} | Conf Adj: ${aiConfidenceAdjustment > 0 ? '+' : ''}${aiConfidenceAdjustment} | Size: ${aiPositionMultiplier}x`);
-        console.log(`   Factors: ${analysis.keyFactors?.slice(0, 3).join(' | ')}`);
-        
-        // AI can BLOCK a trade if it recommends "avoid" OR risk level is "high"
-        if (analysis.recommendation === 'avoid') {
-          await logExecutionRejection(supabase, user.id, signal.symbol, 'AI Recommends AVOID', signal, trendData, { aiRecommendation: analysis.recommendation, aiReasoning: analysis.reasoning, aiKeyFactors: analysis.keyFactors });
-          throw new Error(`AI recommends AVOID: ${analysis.reasoning?.slice(0, 100)}`);
+        if (!aiError && aiAnalysis?.success && aiAnalysis?.analysis) {
+          const analysis = aiAnalysis.analysis;
+          aiPositionMultiplier = analysis.positionSizeMultiplier || 1.0;
+          aiConfidenceAdjustment = analysis.confidenceAdjustment || 0;
+          
+          logger.info(`🤖 AI Analysis: ${analysis.recommendation.toUpperCase()}`);
+          logger.info(`   Risk Level: ${analysis.riskLevel} | Conf Adj: ${aiConfidenceAdjustment > 0 ? '+' : ''}${aiConfidenceAdjustment} | Size: ${aiPositionMultiplier}x`);
+          logger.info(`   Factors: ${analysis.keyFactors?.slice(0, 3).join(' | ')}`);
+          
+          // AI can BLOCK a trade if it recommends "avoid" OR risk level is "high"
+          if (analysis.recommendation === 'avoid') {
+            await logExecutionRejection(supabase, user.id, signal.symbol, 'AI Recommends AVOID', signal, trendData, { aiRecommendation: analysis.recommendation, aiReasoning: analysis.reasoning, aiKeyFactors: analysis.keyFactors });
+            throw new Error(`AI recommends AVOID: ${analysis.reasoning?.slice(0, 100)}`);
+          }
+          if (analysis.riskLevel === 'high') {
+            await logExecutionRejection(supabase, user.id, signal.symbol, 'AI Risk Level HIGH', signal, trendData, { aiRiskLevel: analysis.riskLevel, aiKeyFactors: analysis.keyFactors });
+            throw new Error(`AI risk level HIGH: ${analysis.keyFactors?.slice(0, 2).join(', ')}`);
+          }
+          // Medium risk: reduce position size by 50%
+          if (analysis.riskLevel === 'medium') {
+            aiPositionMultiplier *= 0.5;
+            logger.warn(`⚠️ AI medium risk detected - position size reduced by 50% (multiplier: ${aiPositionMultiplier}x)`);
+          }
+        } else if (aiError) {
+          logger.warn(`AI analysis unavailable, proceeding with standard filters: ${aiError.message || aiError}`);
         }
-        if (analysis.riskLevel === 'high') {
-          await logExecutionRejection(supabase, user.id, signal.symbol, 'AI Risk Level HIGH', signal, trendData, { aiRiskLevel: analysis.riskLevel, aiKeyFactors: analysis.keyFactors });
-          throw new Error(`AI risk level HIGH: ${analysis.keyFactors?.slice(0, 2).join(', ')}`);
-        }
-        // Medium risk: reduce position size by 50%
-        if (analysis.riskLevel === 'medium') {
-          aiPositionMultiplier *= 0.5;
-          console.log(`⚠️ AI medium risk detected - position size reduced by 50% (multiplier: ${aiPositionMultiplier}x)`);
-        }
-      } else if (aiError) {
-        console.warn('AI analysis unavailable, proceeding with standard filters:', aiError);
-      }
       } catch (aiException) {
         // Don't block trades if AI service fails (unless it explicitly recommends avoid or high risk)
         if (aiException instanceof Error && (aiException.message.includes('AI recommends AVOID') || aiException.message.includes('AI risk level HIGH'))) {
           throw aiException;
         }
-        console.warn('AI analysis skipped:', aiException instanceof Error ? aiException.message : 'Unknown error');
+        logger.warn(`AI analysis skipped: ${aiException instanceof Error ? aiException.message : 'Unknown error'}`);
       }
     } else {
-      console.log('🤖 AI analysis disabled by user setting');
+      logger.info('🤖 AI analysis disabled by user setting');
     }
 
     // Fetch strategy's risk settings to get positionSizePercent
