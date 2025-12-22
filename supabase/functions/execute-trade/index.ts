@@ -432,7 +432,6 @@ serve(async (req) => {
       dynamicMinConsistency = 55;
       logger.info(`📊 Strong ADX (${adxValueForConsistency.toFixed(1)}): Consistency threshold lowered to ${dynamicMinConsistency}%`);
     }
-    }
     
     if (trendConsistency < dynamicMinConsistency) {
       await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Trend Consistency', signal, trendData, { 
