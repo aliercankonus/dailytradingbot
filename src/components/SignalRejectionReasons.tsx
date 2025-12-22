@@ -2197,12 +2197,12 @@ export const SignalRejectionReasons = () => {
             {rejections.map((rejection) => (
               <TableRow key={rejection.id}>
                 <TableCell className="font-medium">{rejection.symbol}</TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-2">
+                <TableCell className="align-top">
+                  <div className="flex items-start gap-2">
                     {getReasonIcon(rejection.rejection_reason ?? "")}
                     <Badge 
                       variant={getReasonBadgeVariant(rejection.rejection_reason ?? "")}
-                      className="text-[10px] font-normal max-w-[160px] truncate"
+                      className="text-[10px] font-normal whitespace-normal text-left leading-tight py-1"
                     >
                       {rejection.rejection_reason?.replace(/\s*\([^)]*\)/g, '')}
                     </Badge>
