@@ -15,7 +15,22 @@ export const ADX_THRESHOLDS = {
   VERY_STRONG: 30,
   EXCEPTIONAL: 35,
   EXTREME: 40,
+  // PHASE 1: ADX Phase State Machine thresholds
+  EXHAUSTION: 45,  // ADX > 45 = exhaustion risk, increase reversal sensitivity
 } as const;
+
+// ============= ADX PHASE STATE MACHINE =============
+// PHASE 1 IMPROVEMENT: Replace raw thresholds with phase classification
+// Each phase has different behavior for signal generation
+export const ADX_PHASES = {
+  RANGE: { min: 0, max: 18, tradeable: false, description: "No trend - reject" },
+  TRANSITION: { min: 18, max: 22, tradeable: true, description: "Emerging trend - allow squeeze/momentum only" },
+  EARLY_TREND: { min: 22, max: 30, tradeable: true, description: "Early trend - normal logic" },
+  STRONG_TREND: { min: 30, max: 45, tradeable: true, description: "Strong trend - reduced reversal weight" },
+  EXHAUSTION: { min: 45, max: 100, tradeable: true, description: "Exhaustion risk - increase reversal sensitivity" },
+} as const;
+
+export type AdxPhase = keyof typeof ADX_PHASES;
 
 export const STOCHRSI_THRESHOLDS = {
   EXTREME_OVERSOLD: 10,
@@ -111,6 +126,23 @@ export const QUALITY_THRESHOLDS = {
   STRONG_ADX_MIN: 53,
   // Recovery mode boost added to base threshold
   RECOVERY_BOOST: 10,
+  // PHASE 1: Near miss threshold - signals within this many points of threshold are logged for analysis
+  NEAR_MISS_THRESHOLD: 5,
+} as const;
+
+// ============= BREAKOUT MODE PARAMETERS =============
+// PHASE 1 IMPROVEMENT: Explicit breakout mode flag with reduced penalties
+export const BREAKOUT_MODE_PARAMS = {
+  // StochRSI penalty reduction when in breakout mode (50% = half penalty)
+  STOCHRSI_PENALTY_REDUCTION: 0.5,
+  // Minimum volume ratio required to confirm breakout
+  MIN_VOLUME_RATIO: 1.3,
+  // Minimum squeeze percent (4h) to qualify as breakout setup
+  MIN_SQUEEZE_PERCENT: 50,
+  // ADX must be rising for valid breakout
+  REQUIRE_ADX_RISING: true,
+  // Momentum must be building/confirmed for breakout
+  REQUIRE_MOMENTUM_BUILDING: true,
 } as const;
 
 // Entry timing score configuration
