@@ -68,8 +68,12 @@ export const CONFIDENCE_THRESHOLDS = {
 } as const;
 
 export const RISK_PARAMS = {
-  BREAK_EVEN_ACTIVATION_PERCENT: 0.3,  // Lowered from 0.5% to 0.3% for earlier protection
-  TRAILING_STOP_ACTIVATION_PERCENT: 1.0,
+  // ADJUSTED: Increased from 0.3% to 0.5% to give positions more room to develop
+  // BTC positions were hitting break-even too early, preventing +1% profit targets
+  BREAK_EVEN_ACTIVATION_PERCENT: 0.5,
+  // ADJUSTED: Lowered from 1.0% to 0.7% so more positions benefit from trailing protection
+  // Analysis showed positions peaked at 0.6-0.9% then fell back - this captures those gains
+  TRAILING_STOP_ACTIVATION_PERCENT: 0.7,
   MIN_STOP_DISTANCE_PERCENT: 1.0,
   TRAILING_PROFIT_LOCK_PERCENT: 0.5,
   // Base quality threshold - actual threshold is dynamically adjusted:

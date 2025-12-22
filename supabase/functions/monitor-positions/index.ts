@@ -617,9 +617,11 @@ serve(async (req) => {
           emergencyReason = "divergence_volume_spike";
         }
       }
-      // For momentum strategies: divergence alone is exit signal ONLY when in loss
-      // Don't exit profitable positions - let trailing stop handle those
-      else if (divergenceExit && isMomentum && earlyPnlPercent < 0) {
+      // For momentum strategies: divergence alone is exit signal ONLY when significantly in loss
+      // ADJUSTED: Changed from earlyPnlPercent < 0 to < -0.3% to prevent cutting winners short
+      // Analysis showed momentum exit was triggering at +0.26% and -0.13%, killing potential profits
+      // If position is above -0.3%, let trailing stop or break-even handle it instead
+      else if (divergenceExit && isMomentum && earlyPnlPercent < -0.3) {
         // Add grace period: don't exit within first 10 minutes of position opening
         const positionAgeMinutes = position.opened_at 
           ? (Date.now() - new Date(position.opened_at).getTime()) / (1000 * 60) 
@@ -628,10 +630,14 @@ serve(async (req) => {
         if (positionAgeMinutes >= 10) {
           emergencyClose = true;
           emergencyReason = "momentum_divergence_exit";
-          positionLogger.risk(`STRATEGY-AWARE: Momentum divergence + loss (${earlyPnlPercent.toFixed(2)}%) after ${positionAgeMinutes.toFixed(0)}min - exiting | Price: ${priceTrending} ${priceChangePercent.toFixed(2)}% | MACD: ${macdTrending} ${macdChangePercent.toFixed(2)}%`);
+          positionLogger.risk(`STRATEGY-AWARE: Momentum divergence + significant loss (${earlyPnlPercent.toFixed(2)}% < -0.3%) after ${positionAgeMinutes.toFixed(0)}min - exiting | Price: ${priceTrending} ${priceChangePercent.toFixed(2)}% | MACD: ${macdTrending} ${macdChangePercent.toFixed(2)}%`);
         } else {
           positionLogger.info(`STRATEGY-AWARE: Momentum divergence detected but position age ${positionAgeMinutes.toFixed(0)}min < 10min grace period - skipping | Price: ${priceTrending} ${priceChangePercent.toFixed(2)}% | MACD: ${macdTrending} ${macdChangePercent.toFixed(2)}%`);
         }
+      }
+      // Log when momentum divergence is detected but P&L is above threshold (letting other guards handle it)
+      else if (divergenceExit && isMomentum && earlyPnlPercent >= -0.3 && earlyPnlPercent < 0) {
+        positionLogger.info(`STRATEGY-AWARE: Momentum divergence detected but P&L ${earlyPnlPercent.toFixed(2)}% >= -0.3% threshold - letting trailing/break-even guards handle`);
       }
       // Extreme volatility alone = exit
       else if (atrRatio >= EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD) {
