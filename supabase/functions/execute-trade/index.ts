@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR, calculateHistoricalATRAvg } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore,
@@ -448,9 +448,9 @@ serve(async (req) => {
       throw new Error('Market is ranging - trade cancelled to avoid choppy conditions');
     }
 
-    // FILTER 4: Avoid high volatility (ATR > 3%)
-    if (atrPercent > 3) {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'High Volatility', signal, trendData, { atrPercent, maxAllowed: 3 });
+    // FILTER 4: Avoid high volatility (ATR > extreme threshold) - uses centralized EMERGENCY_EXIT_PARAMS
+    if (atrPercent > EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD) {
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'High Volatility', signal, trendData, { atrPercent, maxAllowed: EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD });
       throw new Error(`Market volatility too high (ATR: ${atrPercent.toFixed(2)}%) - trade cancelled`);
     }
 
@@ -909,32 +909,32 @@ serve(async (req) => {
 
     // ============================================================
     // MINIMUM STOP LOSS DISTANCE - Prevent premature exits from volatility
-    // Enforce minimum 1% distance from entry to prevent tight stops
+    // Enforce minimum distance from entry to prevent tight stops
+    // Uses centralized RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT
     // ============================================================
-    const MIN_STOP_DISTANCE_PERCENT = 1.0; // 1% minimum stop loss distance
     const signalSide = signal.signal_type === 'long' ? 'BUY' : 'SELL';
     
     if (signalSide === 'BUY') {
-      // For LONG: Stop loss must be at least 1% below entry
-      const minStopLoss = currentPrice * (1 - MIN_STOP_DISTANCE_PERCENT / 100);
+      // For LONG: Stop loss must be at least MIN_STOP_DISTANCE_PERCENT below entry
+      const minStopLoss = currentPrice * (1 - RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT / 100);
       if (stopLoss > minStopLoss) {
         const originalDistance = ((currentPrice - stopLoss) / currentPrice) * 100;
         logger.warn(`⚠️ STOP LOSS TOO TIGHT: Original SL ${stopLoss.toFixed(2)} is only ${originalDistance.toFixed(2)}% from entry`);
         stopLoss = minStopLoss;
-        logger.info(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
+        logger.info(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
       }
     } else {
-      // For SHORT: Stop loss must be at least 1% above entry
-      const minStopLoss = currentPrice * (1 + MIN_STOP_DISTANCE_PERCENT / 100);
+      // For SHORT: Stop loss must be at least MIN_STOP_DISTANCE_PERCENT above entry
+      const minStopLoss = currentPrice * (1 + RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT / 100);
       if (stopLoss < minStopLoss) {
         const originalDistance = ((stopLoss - currentPrice) / currentPrice) * 100;
         logger.warn(`⚠️ STOP LOSS TOO TIGHT: Original SL ${stopLoss.toFixed(2)} is only ${originalDistance.toFixed(2)}% from entry`);
         stopLoss = minStopLoss;
-        logger.info(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
+        logger.info(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
       }
     }
 
-    logger.info(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)} (minimum ${MIN_STOP_DISTANCE_PERCENT}% distance enforced)`);
+    logger.info(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)} (minimum ${RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT}% distance enforced)`);
 
     // ============================================================
     // FILTER 11: RISK/REWARD RATIO VALIDATION

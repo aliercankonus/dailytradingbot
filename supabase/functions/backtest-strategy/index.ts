@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
 
 // Import shared modules - same code as calculate-trend uses
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RISK_PARAMS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RISK_PARAMS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR } from "../_shared/indicators.ts";
 import { analyzeMultiTimeframe, MultiTimeframeTrendData } from "../_shared/trend-core.ts";
 import { 
@@ -191,8 +191,8 @@ serve(async (req) => {
       // Volume ratio (current vs average)
       const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1.0;
       
-      // Volume spike detection (>2x average)
-      const volumeSpike = volumeRatio > 2.0;
+      // Volume spike detection (>2x average) - uses centralized threshold
+      const volumeSpike = volumeRatio > EMERGENCY_EXIT_PARAMS.VOLATILITY_SPIKE_THRESHOLD;
       
       // Volume confirms trend direction
       // For bullish: volume should increase on up candles
@@ -280,12 +280,13 @@ serve(async (req) => {
           }
         }
 
-        // Trend reversal exit
+        // Trend reversal exit - uses centralized threshold (slightly lower than EXIT_THRESHOLDS.TREND_CONFIDENCE_EXIT for backtest)
         if (!exitPrice) {
-          if (position.type === 'long' && trend4h.trend === 'bearish' && trend4h.confidence >= 60) {
+          const trendReversalConfidence = EXIT_THRESHOLDS.TREND_CONFIDENCE_EXIT - 5; // 60% for backtest (softer than live 65%)
+          if (position.type === 'long' && trend4h.trend === 'bearish' && trend4h.confidence >= trendReversalConfidence) {
             exitPrice = currentPrice;
             exitReason = 'trend_reversal';
-          } else if (position.type === 'short' && trend4h.trend === 'bullish' && trend4h.confidence >= 60) {
+          } else if (position.type === 'short' && trend4h.trend === 'bullish' && trend4h.confidence >= trendReversalConfidence) {
             exitPrice = currentPrice;
             exitReason = 'trend_reversal';
           }
