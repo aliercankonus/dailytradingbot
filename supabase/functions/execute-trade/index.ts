@@ -11,6 +11,7 @@ import {
   type UnifiedReversalResult,
   type MarketRegime
 } from "../_shared/scoring.ts";
+import { createLogger, logError } from "../_shared/logging.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -18,6 +19,9 @@ const corsHeaders = {
 };
 
 // RSI momentum zone constraints documented in shared scoring module
+
+// Initialize logger for execute-trade function
+const logger = createLogger('execute-trade');
 
 // Helper function to log execution rejections to signal_rejection_log
 async function logExecutionRejection(
@@ -29,6 +33,7 @@ async function logExecutionRejection(
   trendData: any,
   additionalData?: any
 ) {
+  const symbolLogger = logger.forSymbol(symbol);
   try {
     await supabase.from('signal_rejection_log').insert({
       user_id: userId,
@@ -49,9 +54,9 @@ async function logExecutionRejection(
       trend_data: trendData,
       checked_at: new Date().toISOString()
     });
-    console.log(`📝 Logged execution rejection: ${reason}`);
+    symbolLogger.info(`📝 Logged execution rejection: ${reason}`);
   } catch (err) {
-    console.error('Failed to log execution rejection:', err);
+    logError(symbolLogger, err, 'Failed to log execution rejection');
   }
 }
 
@@ -104,7 +109,7 @@ serve(async (req) => {
       }
       
       user = userData.user;
-      console.log(`Execute trade called by auto-trader for user: ${user.id}`);
+      logger.info(`Execute trade called by auto-trader for user: ${user.id}`);
     } else {
       // Regular authenticated call from frontend
       const authHeader = req.headers.get('Authorization');
@@ -119,15 +124,15 @@ serve(async (req) => {
       }
       
       user = authenticatedUser;
-      console.log(`Execute trade called by user: ${user.id}`);
+      logger.info(`Execute trade called by user: ${user.id}`);
     }
 
     const { signalId, action } = body;
-    console.log('Execute trade request:', { signalId, action, userId: user.id });
+    logger.info(`Execute trade request: signalId=${signalId}, action=${action}, userId=${user.id}`);
     
     // Check if this is a manual execution (from UI button click)
     const isManualExecution = req.headers.get('x-manual-execution') === 'true';
-    console.log('Is manual execution:', isManualExecution);
+    logger.info(`Is manual execution: ${isManualExecution}`);
 
     // Get Binance credentials - first try user-specific from vault, fallback to env
     let binanceApiKey = Deno.env.get('BINANCE_API_KEY');
@@ -142,7 +147,7 @@ serve(async (req) => {
         vaultCredentials[0].api_key && vaultCredentials[0].api_secret) {
       binanceApiKey = vaultCredentials[0].api_key;
       binanceApiSecret = vaultCredentials[0].api_secret;
-      console.log('Using user-specific encrypted Binance credentials from vault');
+      logger.info('Using user-specific encrypted Binance credentials from vault');
     }
 
     // Get risk parameters for the user
@@ -153,7 +158,7 @@ serve(async (req) => {
       .maybeSingle();
 
     if (riskParamsError) {
-      console.error('Error fetching risk parameters:', riskParamsError);
+      logger.error(`Error fetching risk parameters: ${riskParamsError.message}`);
       throw new Error('Failed to fetch risk parameters');
     }
 
@@ -168,7 +173,7 @@ serve(async (req) => {
     }
 
     const isPaperTrading = riskParams.paper_trading_mode ?? true;
-    console.log('Paper trading mode:', isPaperTrading);
+    logger.info(`Paper trading mode: ${isPaperTrading}`);
 
     if (!isPaperTrading && (!binanceApiKey || !binanceApiSecret)) {
       throw new Error('Binance API credentials not configured for live trading. Please add your API keys in Settings.');
@@ -196,12 +201,12 @@ serve(async (req) => {
       // Adjust based on recent performance
       if (recentWinRate >= 70 && recentTrades && recentTrades.length >= 5) {
         effectiveMaxTrades = Math.min(riskParams.max_open_trades + 2, 10); // Bonus for good performance
-        console.log(`📈 Dynamic Max Trades: +2 bonus for ${recentWinRate.toFixed(0)}% win rate → ${effectiveMaxTrades}`);
+        logger.risk(`📈 Dynamic Max Trades: +2 bonus for ${recentWinRate.toFixed(0)}% win rate → ${effectiveMaxTrades}`);
       } else if (recentWinRate < 40 && recentTrades && recentTrades.length >= 5) {
         effectiveMaxTrades = Math.max(Math.floor(riskParams.max_open_trades * 0.5), 1); // Reduce for poor performance
-        console.log(`📉 Dynamic Max Trades: Reduced for ${recentWinRate.toFixed(0)}% win rate → ${effectiveMaxTrades}`);
+        logger.risk(`📉 Dynamic Max Trades: Reduced for ${recentWinRate.toFixed(0)}% win rate → ${effectiveMaxTrades}`);
       } else {
-        console.log(`📊 Dynamic Max Trades: Standard (${recentWinRate.toFixed(0)}% win rate) → ${effectiveMaxTrades}`);
+        logger.info(`📊 Dynamic Max Trades: Standard (${recentWinRate.toFixed(0)}% win rate) → ${effectiveMaxTrades}`);
       }
     }
     
@@ -218,7 +223,7 @@ serve(async (req) => {
 
     // Reset daily loss counter and peak P&L if it's a new day
     if (!lastResetDate || lastResetDate !== today) {
-      console.log(`Resetting daily counters (last reset: ${lastResetDate}, today: ${today})`);
+      logger.info(`Resetting daily counters (last reset: ${lastResetDate}, today: ${today})`);
       await supabase
         .from('risk_parameters')
         .update({
@@ -247,7 +252,7 @@ serve(async (req) => {
         riskParams.daily_loss_limit_percent - lockedProfitPercent,
         1.0 // Minimum 1% limit
       );
-      console.log(`🔒 Trailing Daily Limit: Peak P&L $${dailyPeakPnl.toFixed(2)} → Locking 50% → Effective limit: ${effectiveDailyLossLimit.toFixed(2)}% (was ${riskParams.daily_loss_limit_percent}%)`);
+      logger.risk(`🔒 Trailing Daily Limit: Peak P&L $${dailyPeakPnl.toFixed(2)} → Locking 50% → Effective limit: ${effectiveDailyLossLimit.toFixed(2)}% (was ${riskParams.daily_loss_limit_percent}%)`);
     }
     
     // Check circuit breaker: Stop trading if daily loss limit exceeded
@@ -255,7 +260,7 @@ serve(async (req) => {
       ? (currentDailyLoss / riskParams.portfolio_value) * 100 
       : 0;
     if (dailyLossPercent >= effectiveDailyLossLimit) {
-      console.error(`❌ CIRCUIT BREAKER TRIGGERED: Daily loss ${dailyLossPercent.toFixed(2)}% >= limit ${effectiveDailyLossLimit.toFixed(2)}%`);
+      logger.error(`❌ CIRCUIT BREAKER TRIGGERED: Daily loss ${dailyLossPercent.toFixed(2)}% >= limit ${effectiveDailyLossLimit.toFixed(2)}%`);
       throw new Error(`Daily loss limit reached (${dailyLossPercent.toFixed(2)}% of ${effectiveDailyLossLimit.toFixed(2)}%). Trading halted for today.`);
     }
 
@@ -267,7 +272,7 @@ serve(async (req) => {
       .maybeSingle();
 
     if (signalError) {
-      console.error('Error fetching signal:', signalError);
+      logger.error(`Error fetching signal: ${signalError.message}`);
       throw new Error('Failed to fetch signal');
     }
 
@@ -275,7 +280,7 @@ serve(async (req) => {
       throw new Error('Signal not found');
     }
 
-    console.log(`Executing trade for signal from strategy: ${signal.strategy_name || 'Unknown'}`);
+    logger.signal(`Executing trade for signal from strategy: ${signal.strategy_name || 'Unknown'}`);
 
     // ============================================================
     // STRATEGY PERFORMANCE FILTER (aligned with strategy-analyzer)
@@ -301,16 +306,16 @@ serve(async (req) => {
       const winRate = (wins / strategyTrades.length) * 100;
       
       if (winRate < STRATEGY_WIN_RATE_THRESHOLD) {
-        console.log(`⛔ STRATEGY PERFORMANCE BLOCK: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% < ${STRATEGY_WIN_RATE_THRESHOLD}%`);
+        logger.gate(`⛔ STRATEGY PERFORMANCE BLOCK: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% < ${STRATEGY_WIN_RATE_THRESHOLD}%`, false);
         await logExecutionRejection(supabase, user.id, signal.symbol, 'Strategy Underperforming', signal, null, { strategyWinRate: winRate, threshold: STRATEGY_WIN_RATE_THRESHOLD });
         throw new Error(`Strategy "${signal.strategy_name}" underperforming (${winRate.toFixed(0)}% win rate) - trade cancelled`);
       }
       
       if (winRate >= STRATEGY_HIGH_PERFORMER_THRESHOLD) {
         strategyPerformanceBonus = 5; // +5 quality bonus for high performers (aligned with strategy-analyzer)
-        console.log(`⭐ Strategy high performer bonus: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% → +${strategyPerformanceBonus} quality`);
+        logger.info(`⭐ Strategy high performer bonus: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% → +${strategyPerformanceBonus} quality`);
       } else {
-        console.log(`✓ Strategy performance check: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% >= ${STRATEGY_WIN_RATE_THRESHOLD}%`);
+        logger.validation(`✓ Strategy performance check: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% >= ${STRATEGY_WIN_RATE_THRESHOLD}%`, true);
       }
     }
 
@@ -325,7 +330,7 @@ serve(async (req) => {
       .eq('status', 'active');
 
     if (positionsError) {
-      console.error('Error checking existing positions:', positionsError);
+      logger.error(`Error checking existing positions: ${positionsError.message}`);
       throw new Error('Failed to check existing positions');
     }
 
@@ -333,11 +338,11 @@ serve(async (req) => {
     const maxPerSymbol = riskParams.max_trades_per_symbol || 1;
 
     if (openPositionsForSymbol >= maxPerSymbol) {
-      console.error(`❌ SYMBOL LIMIT: ${signal.symbol} already has ${openPositionsForSymbol} open position(s), max is ${maxPerSymbol}`);
+      logger.gate(`❌ SYMBOL LIMIT: ${signal.symbol} already has ${openPositionsForSymbol} open position(s), max is ${maxPerSymbol}`, false);
       throw new Error(`Maximum ${maxPerSymbol} position(s) per symbol. ${signal.symbol} already has ${openPositionsForSymbol} open.`);
     }
 
-    console.log(`✓ Symbol check passed: ${signal.symbol} has ${openPositionsForSymbol}/${maxPerSymbol} positions`);
+    logger.validation(`✓ Symbol check passed: ${signal.symbol} has ${openPositionsForSymbol}/${maxPerSymbol} positions`, true);
 
     // ============================================================
     // EARLY DUPLICATE CHECK - Prevent race condition by checking BEFORE order execution
@@ -349,7 +354,7 @@ serve(async (req) => {
       .maybeSingle();
 
     if (existingPosition) {
-      console.log(`Signal ${signalId} already executed as position ${existingPosition.id}`);
+      logger.info(`Signal ${signalId} already executed as position ${existingPosition.id}`);
       return new Response(
         JSON.stringify({
           success: false,
@@ -368,7 +373,7 @@ serve(async (req) => {
     });
 
     if (trendError) {
-      console.warn('Failed to get current trend, using signal trend:', trendError);
+      logger.warn(`Failed to get current trend, using signal trend: ${trendError.message}`);
     }
 
     const currentTrend = trendData?.primaryTrend || signal.trend;
@@ -381,8 +386,8 @@ serve(async (req) => {
     const bb1h = bollingerData['1h'] || {};
     const bb4h = bollingerData['4h'] || {};
     
-    console.log(`Current market trend: ${currentTrend}, Consistency: ${trendConsistency}, ATR: ${atrPercent}%, Signal: ${signal.signal_type}`);
-    console.log(`📊 Bollinger Bands: 1h squeeze=${bb1h.squeeze}, %B=${bb1h.percentB?.toFixed(1)}% | 4h squeeze=${bb4h.squeeze}, %B=${bb4h.percentB?.toFixed(1)}%`);
+    logger.info(`Current market trend: ${currentTrend}, Consistency: ${trendConsistency}, ATR: ${atrPercent}%, Signal: ${signal.signal_type}`);
+    logger.info(`📊 Bollinger Bands: 1h squeeze=${bb1h.squeeze}, %B=${bb1h.percentB?.toFixed(1)}% | 4h squeeze=${bb4h.squeeze}, %B=${bb4h.percentB?.toFixed(1)}%`);
 
     // FILTER 1: Validate trend matches signal direction
     const signalDirection = signal.signal_type === 'long' ? 'BUY' : 'SELL';
@@ -417,15 +422,16 @@ serve(async (req) => {
     if (isNeutralStrategyForConsistency) {
       // Neutral strategies rely on HTF direction, lower consistency requirement
       dynamicMinConsistency = 40;
-      console.log(`📊 Neutral Strategy: Consistency threshold lowered to ${dynamicMinConsistency}%`);
+      logger.info(`📊 Neutral Strategy: Consistency threshold lowered to ${dynamicMinConsistency}%`);
     } else if (confidence1hForConsistency >= CONFIDENCE_THRESHOLDS.HTF_EXCEPTION) {
       // Strong 1h alignment allows lower consistency (1h is driving direction)
       dynamicMinConsistency = 50;
-      console.log(`📊 Strong 1h alignment (${confidence1hForConsistency.toFixed(0)}%): Consistency threshold lowered to ${dynamicMinConsistency}%`);
+      logger.info(`📊 Strong 1h alignment (${confidence1hForConsistency.toFixed(0)}%): Consistency threshold lowered to ${dynamicMinConsistency}%`);
     } else if (adxValueForConsistency >= ADX_THRESHOLDS.STRONG) {
       // Strong ADX means clear trend, can accept slightly lower consistency
       dynamicMinConsistency = 55;
-      console.log(`📊 Strong ADX (${adxValueForConsistency.toFixed(1)}): Consistency threshold lowered to ${dynamicMinConsistency}%`);
+      logger.info(`📊 Strong ADX (${adxValueForConsistency.toFixed(1)}): Consistency threshold lowered to ${dynamicMinConsistency}%`);
+    }
     }
     
     if (trendConsistency < dynamicMinConsistency) {
@@ -438,7 +444,7 @@ serve(async (req) => {
       });
       throw new Error(`Trend not consistent enough (${trendConsistency.toFixed(0)}%) - minimum required: ${dynamicMinConsistency}%`);
     }
-    console.log(`✓ Consistency check passed: ${trendConsistency.toFixed(0)}% >= ${dynamicMinConsistency}% threshold`);
+    logger.validation(`✓ Consistency check passed: ${trendConsistency.toFixed(0)}% >= ${dynamicMinConsistency}% threshold`, true);
 
     // FILTER 3: Skip ranging markets for BUY/SELL signals
     if (currentTrend === 'ranging') {
@@ -458,11 +464,11 @@ serve(async (req) => {
       : (typeof trendData?.volatility?.adx === 'object' ? trendData.volatility.adx?.value : 0);
     
     if (adxValue < ADX_THRESHOLDS.MINIMUM) {
-      console.log(`❌ ADX HARD GATE: ADX ${adxValue?.toFixed(1) || 0} < ${ADX_THRESHOLDS.MINIMUM} - trade cancelled`);
+      logger.gate(`❌ ADX HARD GATE: ADX ${adxValue?.toFixed(1) || 0} < ${ADX_THRESHOLDS.MINIMUM} - trade cancelled`, false);
       await logExecutionRejection(supabase, user.id, signal.symbol, 'ADX Too Low', signal, trendData, { adx: adxValue, minRequired: ADX_THRESHOLDS.MINIMUM });
       throw new Error(`Trend strength too weak (ADX: ${adxValue?.toFixed(1) || 0}) - minimum required: ${ADX_THRESHOLDS.MINIMUM}`);
     }
-    console.log(`✓ ADX hard gate passed: ${adxValue?.toFixed(1)} >= ${ADX_THRESHOLDS.MINIMUM}`);
+    logger.gate(`✓ ADX hard gate passed: ${adxValue?.toFixed(1)} >= ${ADX_THRESHOLDS.MINIMUM}`, true);
 
     // ============================================================
     // DYNAMIC QUALITY THRESHOLD (aligned with strategy-analyzer)
@@ -484,21 +490,21 @@ serve(async (req) => {
     
     if (isInRecoveryMode) {
       dynamicQualityThreshold = 65; // Stricter in recovery mode
-      console.log(`🔒 Recovery Mode: Quality threshold raised to ${dynamicQualityThreshold}`);
+      logger.risk(`🔒 Recovery Mode: Quality threshold raised to ${dynamicQualityThreshold}`);
     } else if (isNeutralStrategy) {
       // Neutral strategies rely on HTF direction rather than 5m quality
       dynamicQualityThreshold = 35;
-      console.log(`📊 Neutral Strategy: Quality threshold lowered to ${dynamicQualityThreshold}`);
+      logger.info(`📊 Neutral Strategy: Quality threshold lowered to ${dynamicQualityThreshold}`);
     } else if (confidence1h >= CONFIDENCE_THRESHOLDS.HTF_EXCEPTION) {
       // Strong 1h alignment exception (aligned with strategy-analyzer)
       dynamicQualityThreshold = 45;
-      console.log(`📊 Strong 1h alignment (${confidence1h.toFixed(0)}%): Quality threshold lowered to ${dynamicQualityThreshold}`);
+      logger.info(`📊 Strong 1h alignment (${confidence1h.toFixed(0)}%): Quality threshold lowered to ${dynamicQualityThreshold}`);
     } else if (adxValue >= ADX_THRESHOLDS.EXCEPTIONAL) {
       dynamicQualityThreshold = 50; // Relaxed in very strong trends
-      console.log(`📈 Exceptional ADX (${adxValue.toFixed(1)}): Quality threshold lowered to ${dynamicQualityThreshold}`);
+      logger.info(`📈 Exceptional ADX (${adxValue.toFixed(1)}): Quality threshold lowered to ${dynamicQualityThreshold}`);
     } else if (adxValue >= ADX_THRESHOLDS.STRONG) {
       dynamicQualityThreshold = 53;
-      console.log(`📈 Strong ADX (${adxValue.toFixed(1)}): Quality threshold lowered to ${dynamicQualityThreshold}`);
+      logger.info(`📈 Strong ADX (${adxValue.toFixed(1)}): Quality threshold lowered to ${dynamicQualityThreshold}`);
     }
     
     // Check signal quality score from indicators
@@ -514,7 +520,7 @@ serve(async (req) => {
       });
       throw new Error(`Signal quality score (${signalQualityScore}) below dynamic threshold (${dynamicQualityThreshold}) - trade cancelled`);
     }
-    console.log(`✓ Quality check: ${signalQualityScore} >= ${dynamicQualityThreshold} threshold`);
+    logger.validation(`✓ Quality check: ${signalQualityScore} >= ${dynamicQualityThreshold} threshold`, true);
 
     // ============================================================
     // VOLUME SCORE VALIDATION (aligned with strategy-analyzer)
@@ -525,16 +531,16 @@ serve(async (req) => {
     
     // Warn on low volume but don't block unless extremely low
     if (volumeScore === 0 && !volumeConfirms) {
-      console.warn(`⚠️ Low volume score (${volumeScore}) - trade may have higher risk`);
+      logger.warn(`⚠️ Low volume score (${volumeScore}) - trade may have higher risk`);
     } else if (volumeScore >= 5) {
-      console.log(`✅ Volume confirms trend: score=${volumeScore}/10`);
+      logger.info(`✅ Volume confirms trend: score=${volumeScore}/10`);
     }
 
     // NOTE: Confidence filter removed - quality score calculation already incorporates
     // confidence penalties. Signal quality score (stored in indicators.qualityScore) is the
     // primary filter. Having a separate confidence gate was causing double-filtering and
     // blocking signals that passed quality threshold but had lower raw confidence scores.
-    console.log(`📊 Signal confidence: ${signal.confidence_score}% (no separate gate - quality score is primary filter)`);
+    logger.info(`📊 Signal confidence: ${signal.confidence_score}% (no separate gate - quality score is primary filter)`);
 
     // ============================================================
     // BOLLINGER BANDS FILTER - Squeeze/Breakout Detection
@@ -550,10 +556,10 @@ serve(async (req) => {
     
     if (is1hSqueeze && is4hSqueeze) {
       // Double squeeze = volatility contraction, breakout imminent
-      console.log(`🔥 DOUBLE SQUEEZE detected: Both 1h and 4h bands contracted - breakout imminent`);
+      logger.info(`🔥 DOUBLE SQUEEZE detected: Both 1h and 4h bands contracted - breakout imminent`);
       bollingerBoostMultiplier = 1.2; // 20% boost for squeeze breakout setup
     } else if (is1hSqueeze || is4hSqueeze) {
-      console.log(`📊 Single timeframe squeeze detected: 1h=${is1hSqueeze}, 4h=${is4hSqueeze}`);
+      logger.info(`📊 Single timeframe squeeze detected: 1h=${is1hSqueeze}, 4h=${is4hSqueeze}`);
       bollingerBoostMultiplier = 1.1; // 10% boost for single squeeze
     }
     
@@ -564,21 +570,21 @@ serve(async (req) => {
     if (signalSideForBB === 'BUY') {
       if (percentB1h > 100) {
         // Price above upper band - potential overextension
-        console.warn(`⚠️ BB Warning: Price above upper band (%B=${percentB1h.toFixed(1)}%) - potential overbought`);
+        logger.warn(`⚠️ BB Warning: Price above upper band (%B=${percentB1h.toFixed(1)}%) - potential overbought`);
         bollingerBoostMultiplier *= 0.85; // 15% reduction for overbought entry
       } else if (percentB1h < 20 && percentB4h < 30) {
         // Price near lower band in both timeframes - good entry for LONG
-        console.log(`✅ BB confirms LONG: Price near lower band, good entry (%B 1h=${percentB1h.toFixed(1)}%, 4h=${percentB4h.toFixed(1)}%)`);
+        logger.info(`✅ BB confirms LONG: Price near lower band, good entry (%B 1h=${percentB1h.toFixed(1)}%, 4h=${percentB4h.toFixed(1)}%)`);
         bollingerBoostMultiplier *= 1.15; // 15% boost for mean reversion entry
       }
     } else if (signalSideForBB === 'SELL') {
       if (percentB1h < 0) {
         // Price below lower band - potential oversold
-        console.warn(`⚠️ BB Warning: Price below lower band (%B=${percentB1h.toFixed(1)}%) - potential oversold`);
+        logger.warn(`⚠️ BB Warning: Price below lower band (%B=${percentB1h.toFixed(1)}%) - potential oversold`);
         bollingerBoostMultiplier *= 0.85; // 15% reduction for oversold entry
       } else if (percentB1h > 80 && percentB4h > 70) {
         // Price near upper band in both timeframes - good entry for SHORT
-        console.log(`✅ BB confirms SHORT: Price near upper band, good entry (%B 1h=${percentB1h.toFixed(1)}%, 4h=${percentB4h.toFixed(1)}%)`);
+        logger.info(`✅ BB confirms SHORT: Price near upper band, good entry (%B 1h=${percentB1h.toFixed(1)}%, 4h=${percentB4h.toFixed(1)}%)`);
         bollingerBoostMultiplier *= 1.15; // 15% boost for mean reversion entry
       }
     }
@@ -587,13 +593,13 @@ serve(async (req) => {
     // Fix: Use correct field from calculate-trend response
     const breakoutPotential = trendData?.bollingerBands?.breakoutPotential || false;
     if (breakoutPotential) {
-      console.log(`🚀 HIGH BREAKOUT POTENTIAL detected - bands expanding after squeeze`);
+      logger.info(`🚀 HIGH BREAKOUT POTENTIAL detected - bands expanding after squeeze`);
       bollingerBoostMultiplier *= 1.1; // Additional 10% for breakout momentum
     }
     
     // Store Bollinger boost for position sizing
     (signal as any).bollingerBoostMultiplier = bollingerBoostMultiplier;
-    console.log(`📊 Final Bollinger Boost Multiplier: ${bollingerBoostMultiplier.toFixed(2)}x`);
+    logger.info(`📊 Final Bollinger Boost Multiplier: ${bollingerBoostMultiplier.toFixed(2)}x`);
 
     // ============================================================
     // VOLUME PROFILE FILTER - Fetch 24hr ticker data for volume analysis
@@ -601,7 +607,7 @@ serve(async (req) => {
     const ticker24hResponse = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${signal.symbol}`);
     if (!ticker24hResponse.ok) {
       const errorText = await ticker24hResponse.text();
-      console.error('Binance 24hr ticker API error:', errorText);
+      logger.error(`Binance 24hr ticker API error: ${errorText}`);
       throw new Error(`Failed to fetch 24hr ticker for ${signal.symbol}: ${ticker24hResponse.status}`);
     }
     const ticker24h = await ticker24hResponse.json();
@@ -610,7 +616,7 @@ serve(async (req) => {
     const quoteVolume24h = parseFloat(ticker24h.quoteVolume); // USDT volume
     const priceChangePercent = parseFloat(ticker24h.priceChangePercent);
 
-    console.log(`📊 Volume Profile: 24h Volume=${volume24h.toFixed(2)}, Quote Volume=$${quoteVolume24h.toFixed(2)}, Price Change=${priceChangePercent.toFixed(2)}%`);
+    logger.info(`📊 Volume Profile: 24h Volume=${volume24h.toFixed(2)}, Quote Volume=$${quoteVolume24h.toFixed(2)}, Price Change=${priceChangePercent.toFixed(2)}%`);
 
     // FILTER 6: Minimum volume requirement (avoid illiquid periods)
     // Require at least $10M USDT volume in last 24h for major pairs, $1M for others
@@ -621,18 +627,18 @@ serve(async (req) => {
       await logExecutionRejection(supabase, user.id, signal.symbol, 'Insufficient 24h Volume', signal, trendData, { quoteVolume: quoteVolume24h, minRequired: minQuoteVolume, isMainPair });
       throw new Error(`Insufficient 24h volume ($${(quoteVolume24h/1_000_000).toFixed(2)}M < $${minQuoteVolume/1_000_000}M required) - trade cancelled to avoid illiquid market`);
     }
-    console.log(`✓ Volume check passed: $${(quoteVolume24h/1_000_000).toFixed(2)}M >= $${minQuoteVolume/1_000_000}M minimum`);
+    logger.validation(`✓ Volume check passed: $${(quoteVolume24h/1_000_000).toFixed(2)}M >= $${minQuoteVolume/1_000_000}M minimum`, true);
 
     // Fetch recent klines to analyze volume profile (last 50 periods of 15m for OBV calculation)
     const klineResponse = await fetch(`https://api.binance.com/api/v3/klines?symbol=${signal.symbol}&interval=15m&limit=50`);
     if (!klineResponse.ok) {
-      console.warn('Failed to fetch klines for volume profile analysis, proceeding with basic checks');
+      logger.warn('Failed to fetch klines for volume profile analysis, proceeding with basic checks');
     } else {
       const klines = await klineResponse.json();
       
       // Safety check for empty or invalid klines data
       if (!Array.isArray(klines) || klines.length < 20) {
-        console.warn('Insufficient kline data for volume analysis, skipping advanced filters');
+        logger.warn('Insufficient kline data for volume analysis, skipping advanced filters');
       } else {
         const volumes = klines.map((k: any[]) => parseFloat(k[5])); // Volume is at index 5
         const closes = klines.map((k: any[]) => parseFloat(k[4])); // Close price at index 4
@@ -645,7 +651,7 @@ serve(async (req) => {
         const currentVolume = volumes[volumes.length - 1] || 0;
         const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
 
-        console.log(`📊 Current 15m Volume: ${currentVolume.toFixed(2)}, Avg: ${avgVolume.toFixed(2)}, Ratio: ${volumeRatio.toFixed(2)}x`);
+        logger.info(`📊 Current 15m Volume: ${currentVolume.toFixed(2)}, Avg: ${avgVolume.toFixed(2)}, Ratio: ${volumeRatio.toFixed(2)}x`);
 
         // FILTER 7: Avoid extremely low volume periods (< 20% of average)
         // Stricter than before (was 10%) to avoid illiquid entries
@@ -656,7 +662,7 @@ serve(async (req) => {
 
       // Log volume spike detection (informational)
       if (volumeRatio > 2.0) {
-        console.log(`⚡ VOLUME SPIKE detected: ${volumeRatio.toFixed(2)}x average - high activity period`);
+        logger.info(`⚡ VOLUME SPIKE detected: ${volumeRatio.toFixed(2)}x average - high activity period`);
       }
 
       // ============================================================
@@ -690,7 +696,7 @@ serve(async (req) => {
         : 0;
       const obvDirection = obvSlope > 0 ? 'bullish' : obvSlope < 0 ? 'bearish' : 'neutral';
 
-      console.log(`📈 OBV Analysis: Current=${obv.toFixed(0)}, Trend=${obvTrend}, Change=${obvChange.toFixed(2)}%, Direction=${obvDirection}`);
+      logger.info(`📈 OBV Analysis: Current=${obv.toFixed(0)}, Trend=${obvTrend}, Change=${obvChange.toFixed(2)}%, Direction=${obvDirection}`);
 
       // FILTER 10: OBV trend confirmation
       // For LONG signals, OBV should be rising (bullish volume accumulation)
@@ -710,10 +716,10 @@ serve(async (req) => {
       
       // Warn on moderate divergence (don't block)
       if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -10) {
-        console.warn(`⚠️ OBV DIVERGENCE: LONG signal but OBV is bearish (${obvChange.toFixed(2)}% decline)`);
+        logger.warn(`⚠️ OBV DIVERGENCE: LONG signal but OBV is bearish (${obvChange.toFixed(2)}% decline)`);
       }
       if (signalSide === 'SELL' && obvDirection === 'bullish' && obvChange > 10) {
-        console.warn(`⚠️ OBV DIVERGENCE: SHORT signal but OBV is bullish (${obvChange.toFixed(2)}% rise)`);
+        logger.warn(`⚠️ OBV DIVERGENCE: SHORT signal but OBV is bullish (${obvChange.toFixed(2)}% rise)`);
       }
 
       // Calculate volume boost multiplier based on OBV confirmation
@@ -721,14 +727,15 @@ serve(async (req) => {
       
       if (signalSide === 'BUY' && obvDirection === 'bullish' && obvChange > 5) {
         obvBoostMultiplier = 1.15; // 15% boost for strong OBV confirmation
-        console.log(`✅ OBV confirms LONG: Volume accumulation detected, boost=${obvBoostMultiplier}x`);
+        logger.info(`✅ OBV confirms LONG: Volume accumulation detected, boost=${obvBoostMultiplier}x`);
       } else if (signalSide === 'SELL' && obvDirection === 'bearish' && obvChange < -5) {
         obvBoostMultiplier = 1.15; // 15% boost for strong OBV confirmation
-        console.log(`✅ OBV confirms SHORT: Volume distribution detected, boost=${obvBoostMultiplier}x`);
+        logger.info(`✅ OBV confirms SHORT: Volume distribution detected, boost=${obvBoostMultiplier}x`);
       } else if ((signalSide === 'BUY' && obvDirection === 'bearish') || 
                  (signalSide === 'SELL' && obvDirection === 'bullish')) {
         obvBoostMultiplier = 0.85; // 15% reduction for OBV divergence
-        console.log(`⚠️ OBV divergence detected, reducing position size by 15%`);
+        logger.info(`⚠️ OBV divergence detected, reducing position size by 15%`);
+      }
       }
 
       // Store OBV boost for later use in position sizing
@@ -763,8 +770,8 @@ serve(async (req) => {
       const vwapUpperBand = currentVWAP + (vwapStdDev * 2);
       const vwapLowerBand = currentVWAP - (vwapStdDev * 2);
       
-      console.log(`📈 VWAP Analysis: VWAP=$${currentVWAP.toFixed(2)}, Current=$${currentPrice.toFixed(2)}, Deviation=${vwapDeviation.toFixed(2)}%`);
-      console.log(`📈 VWAP Bands: Lower=$${vwapLowerBand.toFixed(2)}, Upper=$${vwapUpperBand.toFixed(2)}`);
+      logger.info(`📈 VWAP Analysis: VWAP=$${currentVWAP.toFixed(2)}, Current=$${currentPrice.toFixed(2)}, Deviation=${vwapDeviation.toFixed(2)}%`);
+      logger.info(`📈 VWAP Bands: Lower=$${vwapLowerBand.toFixed(2)}, Upper=$${vwapUpperBand.toFixed(2)}`);
       
       // VWAP position analysis for entry optimization
       let vwapBoostMultiplier = 1.0;
@@ -772,77 +779,66 @@ serve(async (req) => {
       
       if (vwapSignalSide === 'BUY') {
         if (currentPrice < currentVWAP) {
-          // Buying below VWAP = good entry (institutional buyers accumulate below VWAP)
           const discountPercent = Math.abs(vwapDeviation);
           if (discountPercent > 1) {
-            vwapBoostMultiplier = 1.2; // 20% boost for significant discount
-            console.log(`✅ VWAP confirms LONG: Price ${discountPercent.toFixed(2)}% below VWAP - excellent entry`);
+            vwapBoostMultiplier = 1.2;
+            logger.info(`✅ VWAP confirms LONG: Price ${discountPercent.toFixed(2)}% below VWAP - excellent entry`);
           } else {
-            vwapBoostMultiplier = 1.1; // 10% boost for minor discount
-            console.log(`✅ VWAP supports LONG: Price slightly below VWAP - good entry`);
+            vwapBoostMultiplier = 1.1;
+            logger.info(`✅ VWAP supports LONG: Price slightly below VWAP - good entry`);
           }
         } else if (currentPrice > vwapUpperBand) {
-          // Buying above upper VWAP band = overextended - BLOCK trade UNLESS ADX is strong
           const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
-          const ADX_EXCEPTION_THRESHOLD = 30; // Allow if trend is strong
+          const ADX_EXCEPTION_THRESHOLD = 30;
           
           if (adxValue >= ADX_EXCEPTION_THRESHOLD) {
-            // Strong trend exception - allow LONG even at overbought levels
-            vwapBoostMultiplier = 0.8; // 20% reduction for caution
-            console.log(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band but ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} - allowing LONG with reduced size`);
+            vwapBoostMultiplier = 0.8;
+            logger.warn(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band but ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} - allowing LONG with reduced size`);
           } else {
-            console.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} above upper VWAP band $${vwapUpperBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD})`);
+            logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} above upper VWAP band $${vwapUpperBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD})`);
             await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (LONG)', signal, trendData, { currentPrice, vwapUpperBand, adx: adxValue, vwapDeviation });
             throw new Error(`Price above upper VWAP band - overextended LONG entry blocked (ADX too weak)`);
           }
         } else if (vwapDeviation > 1.0) {
-          // Buying significantly above VWAP - reduce position
-          vwapBoostMultiplier = 0.75; // 25% reduction for above-VWAP entry
-          console.log(`📊 VWAP: Price ${vwapDeviation.toFixed(2)}% above VWAP - reducing position`);
+          vwapBoostMultiplier = 0.75;
+          logger.info(`📊 VWAP: Price ${vwapDeviation.toFixed(2)}% above VWAP - reducing position`);
         } else if (vwapDeviation > 0.5) {
-          // Buying above VWAP but within bands
-          vwapBoostMultiplier = 0.9; // 10% reduction
-          console.log(`📊 VWAP neutral: Price ${vwapDeviation.toFixed(2)}% above VWAP`);
+          vwapBoostMultiplier = 0.9;
+          logger.info(`📊 VWAP neutral: Price ${vwapDeviation.toFixed(2)}% above VWAP`);
         }
       } else if (vwapSignalSide === 'SELL') {
         if (currentPrice > currentVWAP) {
-          // Selling above VWAP = good entry (institutional sellers distribute above VWAP)
           const premiumPercent = vwapDeviation;
           if (premiumPercent > 1) {
-            vwapBoostMultiplier = 1.2; // 20% boost for significant premium
-            console.log(`✅ VWAP confirms SHORT: Price ${premiumPercent.toFixed(2)}% above VWAP - excellent entry`);
+            vwapBoostMultiplier = 1.2;
+            logger.info(`✅ VWAP confirms SHORT: Price ${premiumPercent.toFixed(2)}% above VWAP - excellent entry`);
           } else {
-            vwapBoostMultiplier = 1.1; // 10% boost for minor premium
-            console.log(`✅ VWAP supports SHORT: Price slightly above VWAP - good entry`);
+            vwapBoostMultiplier = 1.1;
+            logger.info(`✅ VWAP supports SHORT: Price slightly above VWAP - good entry`);
           }
         } else if (currentPrice < vwapLowerBand) {
-          // Selling below lower VWAP band = oversold - BLOCK trade UNLESS ADX is strong
           const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
-          const ADX_EXCEPTION_THRESHOLD = 30; // Allow if trend is strong
+          const ADX_EXCEPTION_THRESHOLD = 30;
           
           if (adxValue >= ADX_EXCEPTION_THRESHOLD) {
-            // Strong trend exception - allow SHORT even at oversold levels
-            vwapBoostMultiplier = 0.8; // 20% reduction for caution
-            console.log(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band but ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} - allowing SHORT with reduced size`);
+            vwapBoostMultiplier = 0.8;
+            logger.warn(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band but ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} - allowing SHORT with reduced size`);
           } else {
-            console.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD})`);
+            logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD})`);
             await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (SHORT)', signal, trendData, { currentPrice, vwapLowerBand, adx: adxValue, vwapDeviation });
             throw new Error(`Price below lower VWAP band - oversold SHORT entry blocked (ADX too weak)`);
           }
         } else if (vwapDeviation < -1.0) {
-          // Selling significantly below VWAP - reduce position
-          vwapBoostMultiplier = 0.75; // 25% reduction
-          console.log(`📊 VWAP: Price ${Math.abs(vwapDeviation).toFixed(2)}% below VWAP - reducing position`);
+          vwapBoostMultiplier = 0.75;
+          logger.info(`📊 VWAP: Price ${Math.abs(vwapDeviation).toFixed(2)}% below VWAP - reducing position`);
         } else if (vwapDeviation < -0.5) {
-          // Selling below VWAP but within bands
-          vwapBoostMultiplier = 0.9; // 10% reduction
-          console.log(`📊 VWAP neutral: Price ${Math.abs(vwapDeviation).toFixed(2)}% below VWAP`);
+          vwapBoostMultiplier = 0.9;
+          logger.info(`📊 VWAP neutral: Price ${Math.abs(vwapDeviation).toFixed(2)}% below VWAP`);
         }
       }
       
-      // Store VWAP boost for position sizing
       (signal as any).vwapBoostMultiplier = vwapBoostMultiplier;
-      console.log(`📈 Final VWAP Boost Multiplier: ${vwapBoostMultiplier.toFixed(2)}x`);
+      logger.info(`📈 Final VWAP Boost Multiplier: ${vwapBoostMultiplier.toFixed(2)}x`);
       } // Close inner else block (klines valid)
     } // Close outer else block (klineResponse ok)
 
@@ -1426,7 +1422,7 @@ serve(async (req) => {
         },
       });
     } catch (notificationError) {
-      console.error('Failed to send notification:', notificationError);
+      logError(logger, notificationError, 'Failed to send notification');
     }
 
     return new Response(
@@ -1440,7 +1436,7 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Error executing trade:', error);
+    logError(logger, error, 'Error executing trade');
     return new Response(
       JSON.stringify({
         success: false,
