@@ -1904,6 +1904,9 @@ serve(async (req) => {
       }
       
       // Check if take profit or stop loss is hit (use updated stop loss)
+      // Calculate break-even tolerance: must account for slippage buffer (0.05% of entry)
+      const breakEvenTolerance = position.entry_price * (SLIPPAGE_PARAMS.BREAK_EVEN_BUFFER_PERCENT / 100) * 1.5;
+      
       if (!shouldClose && position.side === "BUY") {
         // LONG: TP when price goes UP, SL when price goes DOWN
         if (position.take_profit && currentPrice >= position.take_profit) {
@@ -1912,14 +1915,15 @@ serve(async (req) => {
         } else if (newStopLoss && currentPrice <= newStopLoss) {
           shouldClose = true;
           // Determine close reason based on stop loss state:
-          // 1. Break-even: stop_loss equals entry_price (protection at entry)
-          // 2. Trailing stop: stop_loss is above entry_price (profit locked in)
+          // 1. Break-even: stop_loss is within tolerance of entry_price (includes slippage buffer)
+          // 2. Trailing stop: stop_loss is significantly above entry_price (profit locked in)
           // 3. Regular stop loss: stop_loss is below entry_price (loss taken)
-          if (Math.abs(newStopLoss - position.entry_price) < 0.0001) {
-            // Stop loss is at entry price = break-even stop
+          const distanceFromEntry = newStopLoss - position.entry_price;
+          if (Math.abs(distanceFromEntry) <= breakEvenTolerance) {
+            // Stop loss is at or near entry price (within slippage buffer) = break-even stop
             closeReason = "break_even";
-          } else if (userSettings.enabled && newStopLoss > position.entry_price) {
-            // Stop was moved above entry = trailing stop locked profit
+          } else if (userSettings.enabled && distanceFromEntry > breakEvenTolerance) {
+            // Stop was moved significantly above entry = trailing stop locked profit
             closeReason = "trailing_stop_loss";
           } else {
             // Regular stop loss
@@ -1934,14 +1938,15 @@ serve(async (req) => {
         } else if (newStopLoss && currentPrice >= newStopLoss) {
           shouldClose = true;
           // Determine close reason based on stop loss state:
-          // 1. Break-even: stop_loss equals entry_price (protection at entry)
-          // 2. Trailing stop: stop_loss is below entry_price (profit locked in)
+          // 1. Break-even: stop_loss is within tolerance of entry_price (includes slippage buffer)
+          // 2. Trailing stop: stop_loss is significantly below entry_price (profit locked in)
           // 3. Regular stop loss: stop_loss is above entry_price (loss taken)
-          if (Math.abs(newStopLoss - position.entry_price) < 0.0001) {
-            // Stop loss is at entry price = break-even stop
+          const distanceFromEntry = position.entry_price - newStopLoss;
+          if (Math.abs(distanceFromEntry) <= breakEvenTolerance) {
+            // Stop loss is at or near entry price (within slippage buffer) = break-even stop
             closeReason = "break_even";
-          } else if (userSettings.enabled && newStopLoss < position.entry_price) {
-            // Stop was moved below entry = trailing stop locked profit
+          } else if (userSettings.enabled && distanceFromEntry > breakEvenTolerance) {
+            // Stop was moved significantly below entry = trailing stop locked profit
             closeReason = "trailing_stop_loss";
           } else {
             // Regular stop loss
@@ -1950,6 +1955,21 @@ serve(async (req) => {
         }
       }
       if (shouldClose) {
+        // For break-even closes, ensure P&L is at least 0 by using entry price
+        // This prevents slippage from causing false losses on break-even exits
+        let finalExitPrice = currentPrice;
+        let finalPnl = pnl;
+        let finalPnlPercent = pnlPercent;
+        
+        if (closeReason === "break_even") {
+          // Use entry price to guarantee 0 P&L for break-even stops
+          // Break-even is meant to protect capital, not generate losses
+          finalExitPrice = position.entry_price;
+          finalPnl = 0;
+          finalPnlPercent = 0;
+          positionLogger.trade(`BREAK-EVEN: Using entry price ${finalExitPrice} for P&L (current: ${currentPrice})`);
+        }
+        
         // Close the position with optimistic locking to prevent race conditions
         // Only update if status is still 'active' - prevents double-closing
         const { data: updatedPosition, error: closePosError } = await supabase
@@ -1957,9 +1977,9 @@ serve(async (req) => {
           .update({
             status: "closed",
             current_price: currentPrice,
-            exit_price: currentPrice,
-            realized_pnl: pnl,
-            realized_pnl_percent: pnlPercent,
+            exit_price: finalExitPrice,
+            realized_pnl: finalPnl,
+            realized_pnl_percent: finalPnlPercent,
             closed_at: new Date().toISOString(),
             close_reason: closeReason,
           })
@@ -1979,12 +1999,12 @@ serve(async (req) => {
             symbol: position.symbol,
             side: position.side,
             reason: closeReason,
-            exitPrice: currentPrice,
-            pnl,
-            pnlPercent,
+            exitPrice: finalExitPrice,
+            pnl: finalPnl,
+            pnlPercent: finalPnlPercent,
           });
           positionLogger.trade(
-            `Closed position ${position.id} - ${position.side} - ${closeReason} at ${currentPrice}`,
+            `Closed position ${position.id} - ${position.side} - ${closeReason} at ${finalExitPrice} (P&L: $${finalPnl.toFixed(2)})`,
           );
           
           // 🆕 HEDGE CLEANUP: If parent position had a hedge, close the hedge too
