@@ -979,6 +979,101 @@ const MarketRegimeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any;
 
 // ============= HARD GATE DISPLAY COMPONENTS =============
 
+const HardBlockStochRsiDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const stochRsiK = coerceNumeric(filtersStatus?.stochRsiK4h, 0);
+  const threshold = coerceNumeric(filtersStatus?.threshold, 98);
+  const message = filtersStatus?.message || "StochRSI at ceiling - nowhere to rise";
+  const gate = filtersStatus?.gate || "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK";
+  
+  const isOverbought = gate.includes("OVERBOUGHT") || gate === "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK";
+  const isOversold = gate.includes("OVERSOLD");
+  
+  // Get 4h stochRSI data from trend_data
+  const stoch4h = trendData?.stochasticRsi?.['4h'] || {};
+  const stochK = stoch4h?.k ?? stochRsiK;
+  const stochD = stoch4h?.d ?? 0;
+  
+  const getStochRsiColor = (k: number) => {
+    if (k >= 95) return "text-red-500";
+    if (k >= 80) return "text-orange-400";
+    if (k <= 5) return "text-blue-500";
+    if (k <= 20) return "text-cyan-400";
+    return "text-yellow-400";
+  };
+  
+  return (
+    <div className="space-y-3 p-3 bg-red-500/10 rounded-md border border-red-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Ban className="h-4 w-4 text-red-500" />
+          <span className="text-xs font-semibold text-red-400">HARD BLOCK: StochRSI at Ceiling</span>
+        </div>
+        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+          K ≥ {threshold}
+        </Badge>
+      </div>
+      
+      {/* StochRSI Visual */}
+      <div className="space-y-1">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">4h StochRSI K</span>
+          <span className={`font-mono font-bold ${getStochRsiColor(stochK)}`}>
+            {stochK.toFixed(1)} / 100
+          </span>
+        </div>
+        <div className="relative h-3 bg-muted/50 rounded-full overflow-hidden">
+          {/* Overbought zone background */}
+          <div 
+            className="absolute right-0 top-0 h-full bg-red-500/20"
+            style={{ width: `${100 - threshold}%` }}
+          />
+          {/* Oversold zone background */}
+          <div 
+            className="absolute left-0 top-0 h-full bg-blue-500/20"
+            style={{ width: `2%` }}
+          />
+          {/* Current K value */}
+          <div 
+            className={`h-full rounded-full transition-all ${stochK >= 95 ? 'bg-red-500' : stochK >= 80 ? 'bg-orange-500' : 'bg-yellow-500'}`}
+            style={{ width: `${stochK}%` }}
+          />
+          {/* Threshold marker */}
+          <div 
+            className="absolute top-0 h-full w-0.5 bg-red-400"
+            style={{ left: `${threshold}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-[9px] text-muted-foreground">
+          <span>Oversold (0-20)</span>
+          <span className="text-red-400">Block Zone ({threshold}+)</span>
+          <span>Max (100)</span>
+        </div>
+      </div>
+      
+      {/* K/D Values */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="p-2 bg-muted/30 rounded text-center">
+          <div className="text-[9px] text-muted-foreground">K Value</div>
+          <div className={`text-sm font-mono font-bold ${getStochRsiColor(stochK)}`}>
+            {stochK.toFixed(1)}
+          </div>
+        </div>
+        <div className="p-2 bg-muted/30 rounded text-center">
+          <div className="text-[9px] text-muted-foreground">D Value</div>
+          <div className={`text-sm font-mono font-bold ${getStochRsiColor(stochD)}`}>
+            {stochD.toFixed(1)}
+          </div>
+        </div>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-red-400">⛔ Why blocked:</span> {message}. At K={stochK.toFixed(0)}, there is no room 
+        for the oscillator to rise further. LONG entries are blocked until StochRSI pulls back below {threshold}.
+      </div>
+    </div>
+  );
+};
+
 const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const adx = coerceNumeric(filtersStatus?.adx, 0);
   const adxRequired = coerceNumeric(filtersStatus?.adxRequired, 20);
@@ -1776,6 +1871,11 @@ export const SignalRejectionReasons = () => {
     // Already has active signal
     if (reason.includes("active signal")) {
       return <ActiveSignalDisplay />;
+    }
+    
+    // HARD BLOCK: Absolute max StochRSI (K >= 98)
+    if (reason.includes("HARD BLOCK") || fs?.gate === "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK") {
+      return <HardBlockStochRsiDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // HARD GATE: ADX too low
