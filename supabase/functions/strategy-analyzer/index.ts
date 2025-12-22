@@ -13,6 +13,7 @@ import {
   RISK_PARAMS,
   EMERGENCY_EXIT_PARAMS,
   EXIT_THRESHOLDS,
+  ENTRY_TIMING_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   detectStrategyType
@@ -2437,6 +2438,29 @@ serve(async (req) => {
         if (!volumeConfirms && entryTimingScore > 15) {
           logger.forSymbol(symbol).warn(`Capping pullback score ${entryTimingScore}→15 (volume not confirming)`);
           entryTimingScore = 15;
+        }
+        
+        // ============= PHASE 3: ENHANCED ENTRY TIMING WEIGHTING =============
+        // When ADX is below threshold, entry timing becomes MORE important
+        // This replaces a hard gate with dynamic weighting - poor timing penalized more, good timing rewarded more
+        const isLowAdxEnvironment = adx < ENTRY_TIMING_PARAMS.ENHANCE_BELOW_ADX; // ADX < 30
+        
+        if (isLowAdxEnvironment) {
+          // Scale entry timing from 0-25 to 0-30 (20% boost to max) in low ADX environments
+          // This makes entry timing matter more when trend strength is weaker
+          const scaleFactor = ENTRY_TIMING_PARAMS.ENHANCED_MAX / ENTRY_TIMING_PARAMS.BASE_MAX; // 30/25 = 1.2
+          const originalScore = entryTimingScore;
+          entryTimingScore = Math.round(entryTimingScore * scaleFactor);
+          
+          if (originalScore !== entryTimingScore) {
+            logger.forSymbol(symbol).info(`[ENTRY_TIMING] Enhanced weighting: ADX=${adx.toFixed(1)} < ${ENTRY_TIMING_PARAMS.ENHANCE_BELOW_ADX} → score ${originalScore}→${entryTimingScore} (×${scaleFactor.toFixed(2)})`);
+          }
+        }
+        
+        // Log warning when entry timing is poor (for monitoring)
+        if (entryTimingScore < ENTRY_TIMING_PARAMS.WARNING_THRESHOLD) {
+          const severity = entryTimingScore < ENTRY_TIMING_PARAMS.CRITICAL_THRESHOLD ? "CRITICAL" : "WARNING";
+          logger.forSymbol(symbol).warn(`[ENTRY_TIMING] ${severity}: entryTimingScore=${entryTimingScore} < ${ENTRY_TIMING_PARAMS.WARNING_THRESHOLD} | reason: ${pullbackAnalysis.reason}`);
         }
         
         const qualityFactors: QualityFactors = {

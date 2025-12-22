@@ -113,6 +113,20 @@ export const QUALITY_THRESHOLDS = {
   RECOVERY_BOOST: 10,
 } as const;
 
+// Entry timing score configuration
+export const ENTRY_TIMING_PARAMS = {
+  // Base maximum entry timing score
+  BASE_MAX: 25,
+  // Enhanced maximum when ADX is below threshold (more weight on timing)
+  ENHANCED_MAX: 30,
+  // ADX threshold below which entry timing weight is enhanced
+  ENHANCE_BELOW_ADX: 30,
+  // Warning threshold - log when entry timing score is below this
+  WARNING_THRESHOLD: 8,
+  // Critical threshold - strongly discouraged entries
+  CRITICAL_THRESHOLD: 4,
+} as const;
+
 // Momentum validation thresholds
 export const MOMENTUM_THRESHOLDS = {
   // Minimum momentum score required for signal generation
