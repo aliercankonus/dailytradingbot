@@ -1512,10 +1512,23 @@ serve(async (req) => {
             user_id: userId, symbol,
             rejection_reason: `HARD BLOCK: StochRSI K=${stochRsiK4h.toFixed(1)} at absolute maximum (>=${ABSOLUTE_MAX_OB}) - no LONG entries allowed`,
             filters_status: { 
-              stochRsiK4h: stochRsiK4h.toFixed(1), 
+              stochRsiK4h: stochRsiK4h.toFixed(1),
+              stochRsiD4h: stochRsiD4h.toFixed(1),
               gate: "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK",
               threshold: ABSOLUTE_MAX_OB,
-              message: "StochRSI at ceiling - nowhere to rise - no exceptions"
+              message: "StochRSI at ceiling - nowhere to rise - no exceptions",
+              // Include reversal score breakdown for debugging
+              reversal_score: unifiedReversal.score,
+              reversal_decision: unifiedReversal.decision,
+              reversal_breakdown: unifiedReversal.breakdown,
+              reversal_reasons: unifiedReversal.reasons,
+              // Additional context
+              trend,
+              adx: adx.toFixed(1),
+              momentum_state: momentum?.state,
+              momentum_confirms: momentum?.confirms,
+              percentB: percentB.toFixed(1),
+              bollingerPosition
             },
             trend_data: trendData, checked_at: new Date().toISOString(),
           });
@@ -1529,10 +1542,23 @@ serve(async (req) => {
             user_id: userId, symbol,
             rejection_reason: `HARD BLOCK: StochRSI K=${stochRsiK4h.toFixed(1)} at absolute minimum (<=${ABSOLUTE_MAX_OS}) - no SHORT entries allowed`,
             filters_status: { 
-              stochRsiK4h: stochRsiK4h.toFixed(1), 
+              stochRsiK4h: stochRsiK4h.toFixed(1),
+              stochRsiD4h: stochRsiD4h.toFixed(1),
               gate: "ABSOLUTE_MIN_STOCHRSI_HARD_BLOCK",
               threshold: ABSOLUTE_MAX_OS,
-              message: "StochRSI at floor - nowhere to fall - no exceptions"
+              message: "StochRSI at floor - nowhere to fall - no exceptions",
+              // Include reversal score breakdown for debugging
+              reversal_score: unifiedReversal.score,
+              reversal_decision: unifiedReversal.decision,
+              reversal_breakdown: unifiedReversal.breakdown,
+              reversal_reasons: unifiedReversal.reasons,
+              // Additional context
+              trend,
+              adx: adx.toFixed(1),
+              momentum_state: momentum?.state,
+              momentum_confirms: momentum?.confirms,
+              percentB: percentB.toFixed(1),
+              bollingerPosition
             },
             trend_data: trendData, checked_at: new Date().toISOString(),
           });
