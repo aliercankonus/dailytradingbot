@@ -865,7 +865,7 @@ serve(async (req) => {
       const bestAsk = parseFloat(depth.asks[0][0]);
       const spread = ((bestAsk - bestBid) / bestBid) * 100;
       
-      console.log(`📖 Order Book: Bid=$${bestBid.toFixed(2)}, Ask=$${bestAsk.toFixed(2)}, Spread=${spread.toFixed(4)}%`);
+      logger.info(`📖 Order Book: Bid=$${bestBid.toFixed(2)}, Ask=$${bestAsk.toFixed(2)}, Spread=${spread.toFixed(4)}%`);
 
       // FILTER 9: Wide spread protection (avoid illiquid order books)
       const maxSpreadPercent = 0.1; // Max 0.1% spread
@@ -873,7 +873,7 @@ serve(async (req) => {
         await logExecutionRejection(supabase, user.id, signal.symbol, 'Wide Spread', signal, trendData, { spread, maxAllowed: maxSpreadPercent, bestBid, bestAsk });
         throw new Error(`Order book spread too wide (${spread.toFixed(3)}% > ${maxSpreadPercent}%) - trade cancelled to avoid slippage`);
       }
-      console.log(`✓ Spread check passed: ${spread.toFixed(4)}% < ${maxSpreadPercent}% max`);
+      logger.validation(`✓ Spread check passed: ${spread.toFixed(4)}% < ${maxSpreadPercent}% max`, true);
     }
 
     // ============================================================
@@ -883,9 +883,9 @@ serve(async (req) => {
     // NORMAL (<40): Full position size
     // ============================================================
     const unifiedReversalResult = calculateUnifiedReversalScore(trendData, signal.signal_type);
-    console.log(`🔄 Unified Reversal: ${unifiedReversalResult.score}/100 (ADX weight: ${unifiedReversalResult.adxWeight}) → ${unifiedReversalResult.decision}`);
+    logger.info(`🔄 Unified Reversal: ${unifiedReversalResult.score}/100 (ADX weight: ${unifiedReversalResult.adxWeight}) → ${unifiedReversalResult.decision}`);
     if (unifiedReversalResult.reasons.length > 0) {
-      console.log(`   Factors: ${unifiedReversalResult.reasons.slice(0, 3).join(', ')}`);
+      logger.info(`   Factors: ${unifiedReversalResult.reasons.slice(0, 3).join(', ')}`);
     }
     
     // Store reversal position multiplier for position sizing
@@ -897,9 +897,9 @@ serve(async (req) => {
     }
     
     if (unifiedReversalResult.decision === "REDUCE") {
-      console.log(`⚠️ Unified Reversal REDUCE: 50% position size due to score ${unifiedReversalResult.score}/100`);
+      logger.warn(`⚠️ Unified Reversal REDUCE: 50% position size due to score ${unifiedReversalResult.score}/100`);
     } else {
-      console.log(`✓ Unified reversal check passed: ${unifiedReversalResult.score}/100 < 40 threshold`);
+      logger.validation(`✓ Unified reversal check passed: ${unifiedReversalResult.score}/100 < 40 threshold`, true);
     }
 
     // Use strategy's configured stop loss and take profit from signal
@@ -923,22 +923,22 @@ serve(async (req) => {
       const minStopLoss = currentPrice * (1 - MIN_STOP_DISTANCE_PERCENT / 100);
       if (stopLoss > minStopLoss) {
         const originalDistance = ((currentPrice - stopLoss) / currentPrice) * 100;
-        console.log(`⚠️ STOP LOSS TOO TIGHT: Original SL ${stopLoss.toFixed(2)} is only ${originalDistance.toFixed(2)}% from entry`);
+        logger.warn(`⚠️ STOP LOSS TOO TIGHT: Original SL ${stopLoss.toFixed(2)} is only ${originalDistance.toFixed(2)}% from entry`);
         stopLoss = minStopLoss;
-        console.log(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
+        logger.info(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
       }
     } else {
       // For SHORT: Stop loss must be at least 1% above entry
       const minStopLoss = currentPrice * (1 + MIN_STOP_DISTANCE_PERCENT / 100);
       if (stopLoss < minStopLoss) {
         const originalDistance = ((stopLoss - currentPrice) / currentPrice) * 100;
-        console.log(`⚠️ STOP LOSS TOO TIGHT: Original SL ${stopLoss.toFixed(2)} is only ${originalDistance.toFixed(2)}% from entry`);
+        logger.warn(`⚠️ STOP LOSS TOO TIGHT: Original SL ${stopLoss.toFixed(2)} is only ${originalDistance.toFixed(2)}% from entry`);
         stopLoss = minStopLoss;
-        console.log(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
+        logger.info(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
       }
     }
 
-    console.log(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)} (minimum ${MIN_STOP_DISTANCE_PERCENT}% distance enforced)`);
+    logger.info(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)} (minimum ${MIN_STOP_DISTANCE_PERCENT}% distance enforced)`);
 
     // ============================================================
     // FILTER 11: RISK/REWARD RATIO VALIDATION
@@ -970,13 +970,13 @@ serve(async (req) => {
     const riskRewardRatio = rewardAmount / riskAmount;
     const minRiskReward = 1.5; // Optimal for high win rate - closer TPs are more likely to hit
     
-    console.log(`📊 Risk/Reward Analysis: Risk=$${riskAmount.toFixed(2)} (${((riskAmount/currentPrice)*100).toFixed(2)}%), Reward=$${rewardAmount.toFixed(2)} (${((rewardAmount/currentPrice)*100).toFixed(2)}%), R:R=${riskRewardRatio.toFixed(2)}:1`);
+    logger.info(`📊 Risk/Reward Analysis: Risk=$${riskAmount.toFixed(2)} (${((riskAmount/currentPrice)*100).toFixed(2)}%), Reward=$${rewardAmount.toFixed(2)} (${((rewardAmount/currentPrice)*100).toFixed(2)}%), R:R=${riskRewardRatio.toFixed(2)}:1`);
     
     if (riskRewardRatio < minRiskReward) {
       await logExecutionRejection(supabase, user.id, signal.symbol, 'R/R Ratio Too Low', signal, trendData, { riskRewardRatio, minRequired: minRiskReward, riskAmount, rewardAmount, currentPrice, stopLoss, takeProfit });
       throw new Error(`Risk/Reward ratio too low (${riskRewardRatio.toFixed(2)}:1 < ${minRiskReward}:1 required) - trade cancelled`);
     }
-    console.log(`✓ R:R check passed: ${riskRewardRatio.toFixed(2)}:1 >= ${minRiskReward}:1 minimum`);
+    logger.validation(`✓ R:R check passed: ${riskRewardRatio.toFixed(2)}:1 >= ${minRiskReward}:1 minimum`, true);
 
     // ============================================================
     // AI-POWERED SIGNAL ENHANCEMENT (Optional)
@@ -1060,7 +1060,7 @@ serve(async (req) => {
     // First check if signal has positionSizePercent in indicators (for rebalancer signals)
     if (signal.indicators && typeof signal.indicators === 'object' && 'positionSizePercent' in signal.indicators) {
       positionSizePercent = signal.indicators.positionSizePercent as number;
-      console.log(`Using signal's positionSizePercent from indicators: ${positionSizePercent}%`);
+      logger.info(`Using signal's positionSizePercent from indicators: ${positionSizePercent}%`);
     } else if (signal.strategy_id) {
       // Fetch from strategy for regular strategy signals
       const { data: strategy } = await supabase
@@ -1071,12 +1071,12 @@ serve(async (req) => {
       
       if (strategy?.risk_settings && typeof strategy.risk_settings === 'object' && 'positionSizePercent' in strategy.risk_settings) {
         positionSizePercent = strategy.risk_settings.positionSizePercent as number;
-        console.log(`Using strategy's positionSizePercent: ${positionSizePercent}%`);
+        logger.info(`Using strategy's positionSizePercent: ${positionSizePercent}%`);
       } else {
-        console.warn('Strategy risk_settings missing positionSizePercent, using default 1%');
+        logger.warn('Strategy risk_settings missing positionSizePercent, using default 1%');
       }
     } else {
-      console.warn('Signal has no strategy_id or indicators.positionSizePercent, using default 1%');
+      logger.warn('Signal has no strategy_id or indicators.positionSizePercent, using default 1%');
     }
 
     // ============================================================
@@ -1123,14 +1123,14 @@ serve(async (req) => {
         
         if (cappedKelly > 0) {
           kellyAdjustedPositionSize = cappedKelly;
-          console.log(`🎯 Kelly Criterion: WinRate=${(winRate*100).toFixed(1)}%, AvgWin=$${avgWin.toFixed(2)}, AvgLoss=$${avgLoss.toFixed(2)}`);
-          console.log(`   → Full Kelly=${kellyPercent.toFixed(2)}%, Half Kelly=${halfKelly.toFixed(2)}%, Capped=${cappedKelly.toFixed(2)}%`);
+          logger.info(`🎯 Kelly Criterion: WinRate=${(winRate*100).toFixed(1)}%, AvgWin=$${avgWin.toFixed(2)}, AvgLoss=$${avgLoss.toFixed(2)}`);
+          logger.info(`   → Full Kelly=${kellyPercent.toFixed(2)}%, Half Kelly=${halfKelly.toFixed(2)}%, Capped=${cappedKelly.toFixed(2)}%`);
         } else {
-          console.log(`⚠️ Kelly suggests no bet (negative edge). Using strategy default: ${positionSizePercent}%`);
+          logger.warn(`⚠️ Kelly suggests no bet (negative edge). Using strategy default: ${positionSizePercent}%`);
           kellyAdjustedPositionSize = positionSizePercent * 0.5; // Reduce by 50% when Kelly is negative
         }
       } else {
-        console.log(`📊 Kelly: Insufficient data (${historicalTrades?.length || 0}/${minTradesForKelly} trades). Using strategy: ${positionSizePercent}%`);
+        logger.info(`📊 Kelly: Insufficient data (${historicalTrades?.length || 0}/${minTradesForKelly} trades). Using strategy: ${positionSizePercent}%`);
       }
     }
     
@@ -1141,39 +1141,39 @@ serve(async (req) => {
     const positionValue = (riskParams.portfolio_value * effectivePositionSize) / 100;
     let quantity = positionValue / currentPrice;
     
-    console.log(`Position sizing: ${effectivePositionSize.toFixed(2)}% of $${riskParams.portfolio_value} = $${positionValue.toFixed(2)} / $${currentPrice.toFixed(2)} = ${quantity.toFixed(4)} ${signal.symbol.replace('USDT', '')}`);
+    logger.info(`Position sizing: ${effectivePositionSize.toFixed(2)}% of $${riskParams.portfolio_value} = $${positionValue.toFixed(2)} / $${currentPrice.toFixed(2)} = ${quantity.toFixed(4)} ${signal.symbol.replace('USDT', '')}`);
 
     // Apply OBV boost multiplier if available
     const obvBoostMultiplier = (signal as any).obvBoostMultiplier || 1.0;
     if (obvBoostMultiplier !== 1.0) {
       quantity *= obvBoostMultiplier;
-      console.log(`OBV adjustment applied: ${obvBoostMultiplier}x -> new quantity: ${quantity.toFixed(4)}`);
+      logger.info(`OBV adjustment applied: ${obvBoostMultiplier}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
     // Apply Bollinger Bands boost multiplier if available
     const bbBoostMultiplier = (signal as any).bollingerBoostMultiplier || 1.0;
     if (bbBoostMultiplier !== 1.0) {
       quantity *= bbBoostMultiplier;
-      console.log(`Bollinger Bands adjustment applied: ${bbBoostMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
+      logger.info(`Bollinger Bands adjustment applied: ${bbBoostMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
     // Apply VWAP boost multiplier if available
     const vwapBoostMultiplier = (signal as any).vwapBoostMultiplier || 1.0;
     if (vwapBoostMultiplier !== 1.0) {
       quantity *= vwapBoostMultiplier;
-      console.log(`VWAP adjustment applied: ${vwapBoostMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
+      logger.info(`VWAP adjustment applied: ${vwapBoostMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
     // Apply AI-powered position size adjustment
     if (aiPositionMultiplier !== 1.0) {
       quantity *= aiPositionMultiplier;
-      console.log(`🤖 AI position adjustment applied: ${aiPositionMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
+      logger.info(`🤖 AI position adjustment applied: ${aiPositionMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
     // Apply Unified Reversal Score position multiplier (0.5 for REDUCE tier)
     if (reversalPositionMultiplier !== 1.0) {
       quantity *= reversalPositionMultiplier;
-      console.log(`⚠️ Reversal score adjustment applied: ${reversalPositionMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
+      logger.warn(`⚠️ Reversal score adjustment applied: ${reversalPositionMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
     // Apply confidence-based position size scaling (INVERTED: high confidence = REDUCE size)
@@ -1185,22 +1185,22 @@ serve(async (req) => {
     // Uses CONFIDENCE_THRESHOLDS for consistency across codebase
     if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_STRONG) {
       quantity *= 0.6; // 40% reduction for very high confidence (likely exhaustion)
-      console.log(`⚠️ Position size REDUCED by 40% due to high confidence (${confidence}% >= ${CONFIDENCE_THRESHOLDS.PENALTY_STRONG}%) - trend may be exhausted`);
+      logger.warn(`⚠️ Position size REDUCED by 40% due to high confidence (${confidence}% >= ${CONFIDENCE_THRESHOLDS.PENALTY_STRONG}%) - trend may be exhausted`);
     } else if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_LIGHT) {
       quantity *= 0.8; // 20% reduction for high confidence
-      console.log(`⚠️ Position size REDUCED by 20% due to elevated confidence (${confidence}% >= ${CONFIDENCE_THRESHOLDS.PENALTY_LIGHT}%)`);
+      logger.warn(`⚠️ Position size REDUCED by 20% due to elevated confidence (${confidence}% >= ${CONFIDENCE_THRESHOLDS.PENALTY_LIGHT}%)`);
     } else if (confidence < CONFIDENCE_THRESHOLDS.LOW) {
       quantity *= 0.7; // 30% reduction for low confidence (weak signal)
-      console.log(`Position size reduced by 30% due to low confidence (${confidence}% < ${CONFIDENCE_THRESHOLDS.LOW}%)`);
+      logger.info(`Position size reduced by 30% due to low confidence (${confidence}% < ${CONFIDENCE_THRESHOLDS.LOW}%)`);
     } else {
       // Sweet spot: 50-70% confidence - no adjustment
-      console.log(`✓ Position size normal for optimal confidence zone (${confidence}%)`);
+      logger.info(`✓ Position size normal for optimal confidence zone (${confidence}%)`);
     }
 
     // Apply position size reduction if consecutive losses
     if (riskParams.consecutive_losses >= riskParams.consecutive_loss_threshold) {
       quantity *= (1 - riskParams.position_size_reduction_percent / 100);
-      console.log('Position size reduced due to consecutive losses');
+      logger.warn('Position size reduced due to consecutive losses');
     }
 
     // Round quantity to appropriate decimal places
@@ -1218,7 +1218,7 @@ serve(async (req) => {
 
     if (isPaperTrading) {
       // Simulate paper trading
-      console.log('Simulating trade execution (Paper Trading Mode)');
+      logger.trade('Simulating trade execution (Paper Trading Mode)');
       orderData = {
         orderId: `PAPER_${Date.now()}`,
         status: 'FILLED',
@@ -1256,23 +1256,23 @@ serve(async (req) => {
 
       if (!orderResponse.ok) {
         const errorText = await orderResponse.text();
-        console.error('Binance API error:', errorText);
+        logger.error(`Binance API error: ${errorText}`);
         throw new Error(`Failed to place order: ${errorText}`);
       }
 
       orderData = await orderResponse.json();
-      console.log('Order executed:', orderData);
+      logger.trade('Order executed: ' + JSON.stringify(orderData));
       executedPrice = parseFloat(orderData.fills?.[0]?.price || currentPrice);
 
       // ============================================================
       // POST-EXECUTION SLIPPAGE VALIDATION
       // ============================================================
       const postExecutionSlippage = Math.abs((executedPrice - currentPrice) / currentPrice) * 100;
-      console.log(`💱 Post-execution slippage: Expected=$${currentPrice.toFixed(2)}, Got=$${executedPrice.toFixed(2)}, Slippage=${postExecutionSlippage.toFixed(3)}%`);
+      logger.info(`💱 Post-execution slippage: Expected=$${currentPrice.toFixed(2)}, Got=$${executedPrice.toFixed(2)}, Slippage=${postExecutionSlippage.toFixed(3)}%`);
       
       // Warn on high slippage (> 0.3%) but don't reject since order is already filled
       if (postExecutionSlippage > 0.3) {
-        console.warn(`⚠️ HIGH SLIPPAGE WARNING: ${postExecutionSlippage.toFixed(2)}% slippage on execution`);
+        logger.warn(`⚠️ HIGH SLIPPAGE WARNING: ${postExecutionSlippage.toFixed(2)}% slippage on execution`);
       }
     }
 
@@ -1318,8 +1318,8 @@ serve(async (req) => {
       .single();
 
     if (positionError || !position) {
-      console.error('Failed to create position record:', positionError);
-      throw new Error(`Failed to create position record: ${positionError?.message || 'Unknown error'}`);
+      logger.error('Failed to create position record: ' + (positionError?.message || 'Unknown error'));
+      throw new Error('Failed to create position record: ' + (positionError?.message || 'Unknown error'));
     }
 
     if (!isPaperTrading) {
@@ -1352,10 +1352,10 @@ serve(async (req) => {
 
       if (!slResponse.ok) {
         const slErrorText = await slResponse.text();
-        console.error(`⚠️ Failed to place stop-loss order for position ${position.id}:`, slErrorText);
+        logger.error(`⚠️ Failed to place stop-loss order for position ${position.id}: ${slErrorText}`);
         // Don't throw - position is already created, just log the warning
       } else {
-        console.log(`✓ Stop-loss order placed for position ${position.id}`);
+        logger.info(`✓ Stop-loss order placed for position ${position.id}`);
       }
 
       // Place take-profit order
@@ -1376,10 +1376,10 @@ serve(async (req) => {
 
       if (!tpResponse.ok) {
         const tpErrorText = await tpResponse.text();
-        console.error(`⚠️ Failed to place take-profit order for position ${position.id}:`, tpErrorText);
+        logger.error(`⚠️ Failed to place take-profit order for position ${position.id}: ${tpErrorText}`);
         // Don't throw - position is already created, just log the warning
       } else {
-        console.log(`✓ Take-profit order placed for position ${position.id}`);
+        logger.info(`✓ Take-profit order placed for position ${position.id}`);
       }
     }
 
@@ -1390,7 +1390,7 @@ serve(async (req) => {
       .eq('id', signalId);
     
     if (deleteSignalError) {
-      console.warn(`Failed to delete signal ${signalId} after execution:`, deleteSignalError);
+      logger.warn('Failed to delete signal ' + signalId + ' after execution: ' + deleteSignalError.message);
     }
 
     // Update risk parameters - sync with actual active positions count
@@ -1428,7 +1428,7 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         position,
-        message: `${side} order executed successfully${isPaperTrading ? ' (Paper Trading)' : ''}`,
+        message: side + ' order executed successfully' + (isPaperTrading ? ' (Paper Trading)' : ''),
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
