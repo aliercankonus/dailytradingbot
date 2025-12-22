@@ -281,7 +281,7 @@ serve(async (req) => {
     const partialTpTaken = [];
     const emergencyExits = []; // NEW: Track emergency exits
     const volatilityAlerts = []; // NEW: Track volatility alerts
-    const hedgesOpened = []; // NEW: Track hedges opened for reversal risk
+    const hedgesOpened: { symbol: string; parentSide: string; hedgeSide: string; hedgeQuantity: number; reversalRisk: number; parentPositionId: string; hedgePositionId: string }[] = []; // Track hedges opened for reversal risk
     const hedgesClosed: { symbol: string; parentSide: string; hedgePositionId: string; riskScore: number }[] = []; // NEW: Track hedges closed when risk drops
     const updatedStopLossMap = new Map<string, number>(); // Track updated stop losses by position ID
     
@@ -1185,57 +1185,73 @@ serve(async (req) => {
           return { riskScore: adjustedRiskScore, signals, adxWeight };
         };
 
-        // For SHORT positions: Exit if trend turns bullish OR ranging (market indecision) with lower threshold
-        // Also exit if there's higher timeframe conflict (4h bearish vs 1h bullish = dangerous for shorts)
-        if (position.side === "SELL") {
-          const htfConflict = trend4h === "bearish" && trend1h === "bullish"; // Higher timeframe conflict
+        // ============================================================
+        // UNIFIED HEDGE AND REVERSAL EXIT HANDLER
+        // Handles both BUY and SELL positions with side-specific logic
+        // ============================================================
+        const handleHedgeAndReversalExit = async (
+          positionSide: "BUY" | "SELL"
+        ): Promise<{ shouldClose: boolean; closeReason: string }> => {
+          let result = { shouldClose: false, closeReason: "" };
           
-          // Get 4h confidence from timeframes data (early warning threshold)
+          // Side-specific configuration
+          const isLong = positionSide === "BUY";
+          const oppositeDirection = isLong ? "bearish" : "bullish";
+          const earlyWarningTrend = isLong ? "bearish" : "bullish";
+          const hedgeSide = isLong ? "SELL" : "BUY";
+          
+          // Get 4h confidence from timeframes data
           const confidence4h = trendData.timeframes?.['4h']?.confidence || trendConfidence;
-
-          // 🆕 REVERSAL RISK HANDLING: Hedge or Exit based on risk level
-          const reversalRisk = detectReversalRiskForExit("SELL");
+          
+          // Calculate reversal risk for this side
+          const reversalRisk = detectReversalRiskForExit(positionSide);
           const MIN_LOSS_FOR_REVERSAL_EXIT = EXIT_THRESHOLDS.MIN_LOSS_FOR_REVERSAL_EXIT_PERCENT;
           
-          // Check if position already has a hedge or is a hedge
+          // Check hedge status
           const hasHedge = position.hedge_position_id !== null;
           const isHedge = position.is_hedge === true;
           
-          // 🆕 StochRSI filter for hedge opening - prevent hedges at extreme levels
-          // For SHORT positions: Don't hedge when StochRSI K > OVERBOUGHT (overbought - price likely to drop, helping SHORT)
+          // StochRSI filter for hedge opening - prevent hedges at extreme levels
+          // For LONG: Don't hedge when K < OVERSOLD (price likely to bounce up)
+          // For SHORT: Don't hedge when K > OVERBOUGHT (price likely to drop)
           const stochRsi4h = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi?.aggregated || {};
           const stochRsiK4h = stochRsi4h?.k ?? 50;
-          const shouldBlockHedgeByStochRsi = stochRsiK4h > STOCHRSI_THRESHOLDS.OVERBOUGHT;
+          const shouldBlockHedgeByStochRsi = isLong 
+            ? stochRsiK4h < STOCHRSI_THRESHOLDS.OVERSOLD
+            : stochRsiK4h > STOCHRSI_THRESHOLDS.OVERBOUGHT;
           
-          // Apply hedging logic if enabled and risk is in hedge range (50-70%)
+          // Apply hedging logic if enabled and risk is in hedge range
           // Only apply if position has met minimum hold time AND StochRSI allows
-          if (hasMetMinHoldTime && userSettings.hedgingEnabled && 
-              !isHedge && // Don't hedge a hedge
-              !hasHedge && // Don't open duplicate hedge
-              !shouldBlockHedgeByStochRsi && // StochRSI filter
+          const hedgeCondition = isLong ? !result.shouldClose : true; // BUY has extra !shouldClose check
+          if (hedgeCondition && hasMetMinHoldTime && userSettings.hedgingEnabled && 
+              !isHedge && !hasHedge && !shouldBlockHedgeByStochRsi &&
               reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin && 
               reversalRisk.riskScore < userSettings.hedgeReversalRiskMax &&
               pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
-            // Open a hedge position (opposite direction)
+            
             const hedgeQuantity = position.quantity * (userSettings.hedgePositionSizePercent / 100);
-            const hedgeSide = "BUY"; // Opposite of SELL
+            positionLogger.trade(`HEDGE: Opening ${hedgeSide} hedge for ${positionSide} - Risk ${reversalRisk.riskScore}% | StochRSI 4h K=${stochRsiK4h.toFixed(1)}`);
             
-            positionLogger.trade(`HEDGE: Opening ${hedgeSide} hedge for SHORT - Risk ${reversalRisk.riskScore}% | StochRSI 4h K=${stochRsiK4h.toFixed(1)}`);
-            
-            // Calculate hedge TP based on parent position's loss (to cover the loss)
-            // Parent is SHORT, so parent loss = (currentPrice - entryPrice) / entryPrice * 100
-            const parentLossPercent = ((currentPrice - position.entry_price) / position.entry_price) * 100;
+            // Calculate parent loss percent (formula differs by side)
+            const parentLossPercent = isLong
+              ? ((position.entry_price - currentPrice) / position.entry_price) * 100
+              : ((currentPrice - position.entry_price) / position.entry_price) * 100;
             const parentLossAmount = Math.abs(parentLossPercent);
             
             // Hedge TP should cover the parent's loss + some profit (1.5x coverage)
-            // BUY hedge profits when price goes UP
-            const hedgeTpPercent = Math.max(parentLossAmount * 1.5, 1.0); // At least 1% TP
-            const hedgeTpPrice = currentPrice * (1 + hedgeTpPercent / 100);
-            const hedgeSlPrice = currentPrice * 0.985; // 1.5% stop for hedge (tighter for protection)
+            const hedgeTpPercent = Math.max(parentLossAmount * 1.5, 1.0);
+            // For SELL hedge: TP when price goes DOWN, SL when goes UP
+            // For BUY hedge: TP when price goes UP, SL when goes DOWN
+            const hedgeTpPrice = isLong
+              ? currentPrice * (1 - hedgeTpPercent / 100)
+              : currentPrice * (1 + hedgeTpPercent / 100);
+            const hedgeSlPrice = isLong
+              ? currentPrice * 1.015  // 1.5% stop above for SELL hedge
+              : currentPrice * 0.985; // 1.5% stop below for BUY hedge
             
-            positionLogger.info(`HEDGE CALC: Parent SHORT loss ${parentLossPercent.toFixed(2)}%, Hedge TP target ${hedgeTpPercent.toFixed(2)}% at $${hedgeTpPrice.toFixed(4)}`);
+            positionLogger.info(`HEDGE CALC: Parent ${positionSide} loss ${parentLossPercent.toFixed(2)}%, Hedge TP target ${hedgeTpPercent.toFixed(2)}% at $${hedgeTpPrice.toFixed(4)}`);
             
-            // Insert hedge position with dynamic TP to cover parent loss
+            // Insert hedge position
             const { data: hedgePosition, error: hedgeError } = await supabase
               .from("positions")
               .insert({
@@ -1250,7 +1266,7 @@ serve(async (req) => {
                 status: "active",
                 is_hedge: true,
                 parent_position_id: position.id,
-                strategy_name: null, // Hedge positions have NULL strategy to prevent strategy stat pollution
+                strategy_name: null, // Prevent strategy stat pollution
                 trend: currentTrend,
                 confidence_score: reversalRisk.riskScore,
               })
@@ -1258,7 +1274,6 @@ serve(async (req) => {
               .single();
             
             if (!hedgeError && hedgePosition) {
-              // Link hedge to parent position
               await supabase
                 .from("positions")
                 .update({ hedge_position_id: hedgePosition.id })
@@ -1281,213 +1296,60 @@ serve(async (req) => {
           // Log when hedge was blocked by StochRSI filter
           else if (shouldBlockHedgeByStochRsi && hasMetMinHoldTime && userSettings.hedgingEnabled && 
                    reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin) {
-            positionLogger.info(`HEDGE BLOCKED: SHORT - StochRSI 4h K=${stochRsiK4h.toFixed(1)} > ${STOCHRSI_THRESHOLDS.OVERBOUGHT} (overbought, price likely to drop - helps SHORT)`);
+            const blockReason = isLong
+              ? `StochRSI 4h K=${stochRsiK4h.toFixed(1)} < ${STOCHRSI_THRESHOLDS.OVERSOLD} (oversold, price likely to bounce - helps LONG)`
+              : `StochRSI 4h K=${stochRsiK4h.toFixed(1)} > ${STOCHRSI_THRESHOLDS.OVERBOUGHT} (overbought, price likely to drop - helps SHORT)`;
+            positionLogger.info(`HEDGE BLOCKED: ${positionSide} - ${blockReason}`);
           }
-          // If risk is VERY HIGH (>= 85%), close position instead (ONLY if losing significantly)
-          // Raised threshold to 85% to reduce premature exits - these had 0% win rate in analysis
-          // Only apply if position has met minimum hold time AND position age > 1 hour
+          
+          // Check for high reversal risk exit
           const positionAgeHours = positionAgeMinutes / 60;
           const MIN_AGE_FOR_REVERSAL_EXIT_HOURS = EXIT_THRESHOLDS.MIN_AGE_FOR_REVERSAL_EXIT_HOURS;
-          // Use dynamic threshold from earlier calculation (aligned with strategy-analyzer)
           const REVERSAL_RISK_EXIT_THRESHOLD = dynamicReversalThreshold;
           
-          if (hasMetMinHoldTime && 
+          const reversalExitCondition = isLong ? !result.shouldClose : true; // BUY has extra check
+          if (reversalExitCondition && hasMetMinHoldTime && 
               positionAgeHours >= MIN_AGE_FOR_REVERSAL_EXIT_HOURS &&
               reversalRisk.riskScore >= REVERSAL_RISK_EXIT_THRESHOLD && 
               pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
-            shouldClose = true;
-            closeReason = "reversal_risk_high";
+            result.shouldClose = true;
+            result.closeReason = "reversal_risk_high";
             positionLogger.risk(
-              `REVERSAL RISK EXIT: Closing SHORT - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD} (dynamic), Age: ${positionAgeHours.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%`,
+              `REVERSAL RISK EXIT: Closing ${positionSide} - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD} (dynamic), Age: ${positionAgeHours.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%`,
             );
           }
           
-          // 🆕 HEDGE MANAGEMENT: Let hedge run with trailing stop - DON'T close just because risk dropped
-          // Hedge should aim to cover the parent's loss, not close prematurely
-          // The hedge will be closed by: its own TP, trailing stop, or when parent closes
-          
-          // Original early warning logic (kept as fallback) - TIGHTENED THRESHOLDS
-          // Only apply if position has met minimum hold time AND losing more than 1%
-          // These exits were causing 0% win rate - making much more conservative
-          if (!shouldClose && hasMetMinHoldTime && positionAgeHours >= EXIT_THRESHOLDS.MIN_AGE_FOR_REVERSAL_EXIT_HOURS) {
+          // Early warning logic - TIGHTENED THRESHOLDS
+          if (!result.shouldClose && hasMetMinHoldTime && positionAgeHours >= EXIT_THRESHOLDS.MIN_AGE_FOR_REVERSAL_EXIT_HOURS) {
             const EARLY_WARNING_MIN_LOSS_PERCENT = EXIT_THRESHOLDS.EARLY_WARNING_MIN_LOSS_PERCENT;
             const EARLY_WARNING_MIN_CONFIDENCE_4H = EXIT_THRESHOLDS.EARLY_WARNING_MIN_CONFIDENCE_4H;
             
-            if (trend1h === "bullish" && confidence4h < EARLY_WARNING_MIN_CONFIDENCE_4H && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT) {
-              shouldClose = true;
-              closeReason = "early_warning_1h_bullish";
+            if (trend1h === earlyWarningTrend && confidence4h < EARLY_WARNING_MIN_CONFIDENCE_4H && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT) {
+              result.shouldClose = true;
+              result.closeReason = `early_warning_1h_${earlyWarningTrend}`;
               positionLogger.signal(
-                `EARLY WARNING EXIT: Closing SHORT - 1h BULLISH + 4h very weak (4h conf: ${confidence4h}%, P&L: ${pnlPercent.toFixed(2)}%)`,
+                `EARLY WARNING EXIT: Closing ${positionSide} - 1h ${earlyWarningTrend.toUpperCase()} + 4h very weak (4h conf: ${confidence4h}%, P&L: ${pnlPercent.toFixed(2)}%)`,
               );
-            } else if (currentTrend === "bullish" && trendConfidence >= EXIT_THRESHOLDS.TREND_CONFIDENCE_EXIT) {
-              shouldClose = true;
-              closeReason = "trend_reversal_bullish";
+            } else if (currentTrend === oppositeDirection && trendConfidence >= EXIT_THRESHOLDS.TREND_CONFIDENCE_EXIT) {
+              result.shouldClose = true;
+              result.closeReason = `trend_reversal_${oppositeDirection}`;
               positionLogger.signal(
-                `TREND EXIT: Closing SHORT - Strong BULLISH trend (conf: ${trendConfidence}%)`,
+                `TREND EXIT: Closing ${positionSide} - Strong ${oppositeDirection.toUpperCase()} trend (conf: ${trendConfidence}%)`,
               );
             }
-            // REMOVED: Ranging market exits - these were too aggressive and hurt win rate
-            // Let positions ride through ranging periods as long as they're not hitting stops
           }
+          
+          return result;
+        };
 
-          if (shouldClose) {
-            trendExits.push({
-              symbol: position.symbol,
-              side: position.side,
-              reason: `Trend: ${currentTrend} (${trendConfidence}%), 4h: ${trend4h} (${confidence4h}%), 1h: ${trend1h}`,
-              trend: currentTrend,
-              confidence: trendConfidence,
-              pnlPercent,
-            });
-          }
-        }
-
-        // For LONG positions: Exit if trend turns bearish OR ranging with lower threshold
-        // Also exit if there's higher timeframe conflict (4h bullish vs 1h bearish)
-        if (position.side === "BUY") {
-          const htfConflict = trend4h === "bullish" && trend1h === "bearish";
-          
-          // Get 4h confidence from timeframes data (early warning threshold)
-          const confidence4h = trendData.timeframes?.['4h']?.confidence || trendConfidence;
-
-          // 🆕 REVERSAL RISK HANDLING: Hedge or Exit based on risk level
-          const reversalRisk = detectReversalRiskForExit("BUY");
-          const MIN_LOSS_FOR_REVERSAL_EXIT = EXIT_THRESHOLDS.MIN_LOSS_FOR_REVERSAL_EXIT_PERCENT;
-          
-          // Check if position already has a hedge or is a hedge
-          const hasHedge = position.hedge_position_id !== null;
-          const isHedge = position.is_hedge === true;
-          
-          // 🆕 StochRSI filter for hedge opening - prevent hedges at extreme levels
-          // For LONG positions: Don't hedge when StochRSI K < OVERSOLD (oversold - price likely to bounce up, helping LONG)
-          const stochRsi4hLong = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi?.aggregated || {};
-          const stochRsiK4hLong = stochRsi4hLong?.k ?? 50;
-          const shouldBlockHedgeByStochRsiLong = stochRsiK4hLong < STOCHRSI_THRESHOLDS.OVERSOLD;
-          
-          // Apply hedging logic if enabled and risk is in hedge range (50-70%)
-          // Only apply if position has met minimum hold time AND StochRSI allows
-          if (!shouldClose && hasMetMinHoldTime && userSettings.hedgingEnabled && 
-              !isHedge && // Don't hedge a hedge
-              !hasHedge && // Don't open duplicate hedge
-              !shouldBlockHedgeByStochRsiLong && // StochRSI filter
-              reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin && 
-              reversalRisk.riskScore < userSettings.hedgeReversalRiskMax &&
-              pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
-            // Open a hedge position (opposite direction)
-            const hedgeQuantity = position.quantity * (userSettings.hedgePositionSizePercent / 100);
-            const hedgeSide = "SELL"; // Opposite of BUY
-            
-            positionLogger.trade(`HEDGE: Opening ${hedgeSide} hedge for LONG - Risk ${reversalRisk.riskScore}% | StochRSI 4h K=${stochRsiK4hLong.toFixed(1)}`);
-            
-            // Calculate hedge TP based on parent position's loss (to cover the loss)
-            // Parent is BUY (LONG), so parent loss = (entryPrice - currentPrice) / entryPrice * 100
-            const parentLossPercent = ((position.entry_price - currentPrice) / position.entry_price) * 100;
-            const parentLossAmount = Math.abs(parentLossPercent);
-            
-            // Hedge TP should cover the parent's loss + some profit (1.5x coverage)
-            // SELL hedge profits when price goes DOWN
-            const hedgeTpPercent = Math.max(parentLossAmount * 1.5, 1.0); // At least 1% TP
-            const hedgeTpPrice = currentPrice * (1 - hedgeTpPercent / 100);
-            const hedgeSlPrice = currentPrice * 1.015; // 1.5% stop for hedge (tighter for protection)
-            
-            positionLogger.info(`HEDGE CALC: Parent LONG loss ${parentLossPercent.toFixed(2)}%, Hedge TP target ${hedgeTpPercent.toFixed(2)}% at $${hedgeTpPrice.toFixed(4)}`);
-            
-            // Insert hedge position with dynamic TP to cover parent loss
-            const { data: hedgePosition, error: hedgeError } = await supabase
-              .from("positions")
-              .insert({
-                user_id: position.user_id,
-                symbol: position.symbol,
-                side: hedgeSide,
-                quantity: hedgeQuantity,
-                entry_price: currentPrice,
-                current_price: currentPrice,
-                stop_loss: hedgeSlPrice,
-                take_profit: hedgeTpPrice,
-                status: "active",
-                is_hedge: true,
-                parent_position_id: position.id,
-                strategy_name: null, // Hedge positions have NULL strategy to prevent strategy stat pollution
-                trend: currentTrend,
-                confidence_score: reversalRisk.riskScore,
-              })
-              .select()
-              .single();
-            
-            if (!hedgeError && hedgePosition) {
-              // Link hedge to parent position
-              await supabase
-                .from("positions")
-                .update({ hedge_position_id: hedgePosition.id })
-                .eq("id", position.id);
-              
-              hedgesOpened.push({
-                symbol: position.symbol,
-                parentSide: position.side,
-                hedgeSide,
-                hedgeQuantity,
-                reversalRisk: reversalRisk.riskScore,
-                parentPositionId: position.id,
-                hedgePositionId: hedgePosition.id,
-              });
-              positionLogger.success(`Hedge opened: ${hedgeSide} ${hedgeQuantity} at ${currentPrice}`);
-            } else {
-              positionLogger.error(`Failed to open hedge: ${hedgeError?.message}`);
-            }
-          }
-          // Log when hedge was blocked by StochRSI filter
-          else if (shouldBlockHedgeByStochRsiLong && hasMetMinHoldTime && userSettings.hedgingEnabled && 
-                   reversalRisk.riskScore >= userSettings.hedgeReversalRiskMin) {
-            positionLogger.info(`HEDGE BLOCKED: LONG - StochRSI 4h K=${stochRsiK4hLong.toFixed(1)} < ${STOCHRSI_THRESHOLDS.OVERSOLD} (oversold, price likely to bounce - helps LONG)`);
-          }
-          // If risk is VERY HIGH (>= 85%), close position instead (ONLY if losing significantly)
-          // Raised threshold to 85% to reduce premature exits - these had 0% win rate in analysis
-          // Only apply if position has met minimum hold time AND position age > 1 hour
-          const positionAgeHoursLong = positionAgeMinutes / 60;
-          const MIN_AGE_FOR_REVERSAL_EXIT_HOURS_LONG = EXIT_THRESHOLDS.MIN_AGE_FOR_REVERSAL_EXIT_HOURS;
-          // Use dynamic threshold from earlier calculation (aligned with strategy-analyzer)
-          const REVERSAL_RISK_EXIT_THRESHOLD_LONG = dynamicReversalThreshold;
-          
-          if (!shouldClose && hasMetMinHoldTime && 
-              positionAgeHoursLong >= MIN_AGE_FOR_REVERSAL_EXIT_HOURS_LONG &&
-              reversalRisk.riskScore >= REVERSAL_RISK_EXIT_THRESHOLD_LONG && 
-              pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
+        // Process position based on side
+        if (position.side === "SELL" || position.side === "BUY") {
+          const exitResult = await handleHedgeAndReversalExit(position.side as "BUY" | "SELL");
+          if (exitResult.shouldClose) {
             shouldClose = true;
-            closeReason = "reversal_risk_high";
-            positionLogger.risk(
-              `REVERSAL RISK EXIT: Closing LONG - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD_LONG} (dynamic), Age: ${positionAgeHoursLong.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%`,
-            );
-          }
-          
-          // 🆕 HEDGE MANAGEMENT: Let hedge run with trailing stop - DON'T close just because risk dropped
-          // Hedge should aim to cover the parent's loss, not close prematurely
-          // The hedge will be closed by: its own TP, trailing stop, or when parent closes
-          
-          // Original early warning logic (kept as fallback) - TIGHTENED THRESHOLDS
-          // Only apply if position has met minimum hold time AND losing more than 1%
-          // These exits were causing 0% win rate - making much more conservative
-          if (!shouldClose && hasMetMinHoldTime && positionAgeHoursLong >= EXIT_THRESHOLDS.MIN_AGE_FOR_REVERSAL_EXIT_HOURS) {
-            const EARLY_WARNING_MIN_LOSS_PERCENT_LONG = EXIT_THRESHOLDS.EARLY_WARNING_MIN_LOSS_PERCENT;
-            const EARLY_WARNING_MIN_CONFIDENCE_4H_LONG = EXIT_THRESHOLDS.EARLY_WARNING_MIN_CONFIDENCE_4H;
+            closeReason = exitResult.closeReason;
             
-            if (trend1h === "bearish" && confidence4h < EARLY_WARNING_MIN_CONFIDENCE_4H_LONG && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT_LONG) {
-              shouldClose = true;
-              closeReason = "early_warning_1h_bearish";
-              positionLogger.signal(
-                `EARLY WARNING EXIT: Closing LONG - 1h BEARISH + 4h very weak (4h conf: ${confidence4h}%, P&L: ${pnlPercent.toFixed(2)}%)`,
-              );
-            } else if (currentTrend === "bearish" && trendConfidence >= EXIT_THRESHOLDS.TREND_CONFIDENCE_EXIT) {
-              shouldClose = true;
-              closeReason = "trend_reversal_bearish";
-              positionLogger.signal(
-                `TREND EXIT: Closing LONG - Strong BEARISH trend (conf: ${trendConfidence}%)`,
-              );
-            }
-            // REMOVED: Ranging market exits - these were too aggressive and hurt win rate
-            // Let positions ride through ranging periods as long as they're not hitting stops
-          }
-
-          if (shouldClose) {
+            const confidence4h = trendData.timeframes?.['4h']?.confidence || trendConfidence;
             trendExits.push({
               symbol: position.symbol,
               side: position.side,
