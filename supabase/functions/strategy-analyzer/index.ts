@@ -848,14 +848,14 @@ serve(async (req) => {
     
     if (requestBody?.user_id && token === supabaseServiceKey) {
       userId = requestBody.user_id;
-      console.log(`Service role call for user ${userId}`);
+      logger.forUser(userId).info(`Service role call`);
     } else {
       const { data: { user }, error: userError } = await supabase.auth.getUser(token);
       if (userError || !user) throw new Error("Unauthorized");
       userId = user.id;
     }
     
-    console.log(`🔍 Analyzing signals for user ${userId}`);
+    logger.forUser(userId).info(`${LOG_CATEGORIES.START} Analyzing signals`);
 
     // Fetch risk parameters
     const { data: riskParams, error: riskError } = await supabase
@@ -1275,9 +1275,9 @@ serve(async (req) => {
     };
     
     if (isInRecoveryMode) {
-      console.log(`🔄 LOSS RECOVERY MODE ACTIVE: ${riskParams.consecutive_losses} consecutive losses`);
-      console.log(`   → Quality threshold: ${BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost} (base ${BASE_MIN_QUALITY_SCORE} + ${recoveryConfidenceBoost})`);
-      console.log(`   → Position size multiplier: ${recoveryPositionSizeMultiplier * 100}%`);
+      logger.info(`${LOG_CATEGORIES.REVERSAL} LOSS RECOVERY MODE ACTIVE: ${riskParams.consecutive_losses} consecutive losses`);
+      logger.info(`   → Quality threshold: ${BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost} (base ${BASE_MIN_QUALITY_SCORE} + ${recoveryConfidenceBoost})`);
+      logger.info(`   → Position size multiplier: ${recoveryPositionSizeMultiplier * 100}%`);
     }
 
     // Analyze each symbol (using filtered activeSymbols that passed win rate check)
@@ -1345,7 +1345,7 @@ serve(async (req) => {
         // BLOCK: High reversal risk - skip this signal entirely
         if (unifiedReversal.decision === "BLOCK") {
           rejectedByReversalRisk++;
-          console.log(`🛑 ${symbol}: Unified Reversal BLOCK (${unifiedReversal.score}/100) - ${unifiedReversal.reasons.slice(0, 3).join(", ")}`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REJECTION} Unified Reversal BLOCK (${unifiedReversal.score}/100) - ${unifiedReversal.reasons.slice(0, 3).join(", ")}`);
           await logRejectionWithAI(
             supabase,
             userId,
@@ -1376,9 +1376,9 @@ serve(async (req) => {
         
         // REDUCE: Medium reversal risk - log warning, reduce position size
         if (unifiedReversal.decision === "REDUCE") {
-          console.log(`⚠️ ${symbol}: Unified Reversal REDUCE (${unifiedReversal.score}/100) - ${unifiedReversal.reasons.slice(0, 2).join(", ")}`);
+          logger.forSymbol(symbol).warn(`Unified Reversal REDUCE (${unifiedReversal.score}/100) - ${unifiedReversal.reasons.slice(0, 2).join(", ")}`);
         } else {
-          console.log(`✓ ${symbol}: Unified reversal check passed (${unifiedReversal.score}/100)`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Unified reversal check passed (${unifiedReversal.score}/100)`);
         }
 
         // ============= STOCHRSI EXTREME FILTER WITH SMART EXCEPTIONS =============
@@ -1709,23 +1709,23 @@ serve(async (req) => {
             const reversalSizePercent = (riskParams.early_reversal_position_size_percent || 40) / 100;
             reversalPositionMultiplier = Math.min(reversalPositionMultiplier, reversalSizePercent);
             
-            console.log(`🔄 ${symbol}: BULLISH REVERSAL LONG ALLOWED at oversold K=${stochRsiK4h.toFixed(1)}`);
-            console.log(`   StochRSI rising: K=${stochRsiK4h.toFixed(1)} > D=${stochRsiD4h.toFixed(1)}`);
-            console.log(`   1h bullish turn: ${has1hBullishTurn}, Bullish divergence: ${hasBullishDivergence}`);
-            console.log(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)})`);
-            console.log(`   Position size reduced to ${(reversalSizePercent * 100).toFixed(0)}% for reversal entry`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} BULLISH REVERSAL LONG ALLOWED at oversold K=${stochRsiK4h.toFixed(1)}`);
+            logger.forSymbol(symbol).info(`   StochRSI rising: K=${stochRsiK4h.toFixed(1)} > D=${stochRsiD4h.toFixed(1)}`);
+            logger.forSymbol(symbol).info(`   1h bullish turn: ${has1hBullishTurn}, Bullish divergence: ${hasBullishDivergence}`);
+            logger.forSymbol(symbol).info(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)})`);
+            logger.forSymbol(symbol).info(`   Position size reduced to ${(reversalSizePercent * 100).toFixed(0)}% for reversal entry`);
           } else if (!stochRsiTurningUp) {
             // Log why reversal was not allowed - StochRSI not rising
-            console.log(`📊 ${symbol}: Oversold LONG blocked - StochRSI not rising (K=${stochRsiK4h.toFixed(1)} <= D=${stochRsiD4h.toFixed(1)})`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} Oversold LONG blocked - StochRSI not rising (K=${stochRsiK4h.toFixed(1)} <= D=${stochRsiD4h.toFixed(1)})`);
           } else {
             // Log other missing conditions
-            console.log(`📊 ${symbol}: Oversold LONG blocked - missing reversal confirmation (1h bullish: ${has1hBullishTurn}, divergence: ${hasBullishDivergence}, BB lower: ${bollingerAtLower})`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} Oversold LONG blocked - missing reversal confirmation (1h bullish: ${has1hBullishTurn}, divergence: ${hasBullishDivergence}, BB lower: ${bollingerAtLower})`);
           }
         }
         
         // Log StochRSI status for monitoring
         if (stochRsiK4h < STOCHRSI_THRESHOLDS.OVERSOLD || stochRsiK4h > STOCHRSI_THRESHOLDS.OVERBOUGHT) {
-          console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} (proceeding with ${intendedTradeDirection || "neutral"} direction)`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} (proceeding with ${intendedTradeDirection || "neutral"} direction)`);
         }
 
         // ================= HARD ENTRY GATES =================
@@ -1812,7 +1812,7 @@ serve(async (req) => {
         
         // Log when using strong trend exception for early entry
         if (isStrongTrendException && momentumState === "none" && !momentumConfirms) {
-          console.log(`⚡ ${symbol}: EARLY ENTRY via strong trend exception (ADX=${adx.toFixed(1)} >= 28, momentum=${momentumState})`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} EARLY ENTRY via strong trend exception (ADX=${adx.toFixed(1)} >= 28, momentum=${momentumState})`);
         }
         
         // ============= NEW GATE: MOMENTUM SCORE >= 5 =============
@@ -1842,7 +1842,7 @@ serve(async (req) => {
           );
           continue;
         }
-        console.log(`✅ ${symbol}: Momentum score gate passed (${earlyMomentumScore} >= ${MIN_MOMENTUM_SCORE})`);
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Momentum score gate passed (${earlyMomentumScore} >= ${MIN_MOMENTUM_SCORE})`);
         
         // ============= NEW GATE: NEUTRAL 4H TREND REQUIRES 70%+ CONFIDENCE =============
         // When 4h trend is neutral, require higher confidence (70%+) OR directional 1h with 65%+
@@ -1875,7 +1875,7 @@ serve(async (req) => {
             );
             continue;
           }
-          console.log(`✅ ${symbol}: Neutral 4h gate passed (4h=${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Neutral 4h gate passed (4h=${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`);
         }
         
         // ============= NEW GATE: MACD ALIGNMENT HARD GATE =============
@@ -1912,7 +1912,7 @@ serve(async (req) => {
             );
             continue;
           }
-          console.log(`⚠️ ${symbol}: MACD misalignment overridden by strong trend (ADX=${adx.toFixed(1)} >= ${ADX_THRESHOLDS.EXCEPTIONAL})`);
+          logger.forSymbol(symbol).warn(`MACD misalignment overridden by strong trend (ADX=${adx.toFixed(1)} >= ${ADX_THRESHOLDS.EXCEPTIONAL})`);
         }
         
         // GATE 3: Higher timeframe alignment required (or high confidence or strong 1h or micro-trend)
@@ -1931,7 +1931,7 @@ serve(async (req) => {
         
         // Log micro-trend bypass when used
         if (hasMicroTrendBypass && !htfAligned && confidence < 65) {
-          console.log(`⚡ ${symbol}: HTF gate bypassed via MICRO-TREND (${microTrend.direction}, alignment=${microTrend.alignment}%, 15m/30m consistent)`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate bypassed via MICRO-TREND (${microTrend.direction}, alignment=${microTrend.alignment}%, 15m/30m consistent)`);
         }
         
         if (!htfAligned && confidence < 65 && !has1hStrongDirection && !hasMicroTrendBypass) {
@@ -1955,7 +1955,7 @@ serve(async (req) => {
         
         // Log if using 1h strong direction exception
         if (!htfAligned && confidence < 65 && has1hStrongDirection) {
-          console.log(`⚡ ${symbol}: HTF gate passed via strong 1h (1h=${trend1h} ${confidence1h}%)`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate passed via strong 1h (1h=${trend1h} ${confidence1h}%)`);
         }
         
         // GATE 4: Confidence Dead Zone Veto (60-69% is worst performing zone)
@@ -1973,7 +1973,7 @@ serve(async (req) => {
           continue;
         }
         
-        console.log(`✅ ${symbol}: Passed all hard gates (ADX=${adx.toFixed(1)}, momentum=${momentumState}/${momentumConfirms}, HTF=${htfAligned || `conf=${confidence}%`}, conf=${confidence}%)`);
+        logger.forSymbol(symbol).gate(`Passed all hard gates (ADX=${adx.toFixed(1)}, momentum=${momentumState}/${momentumConfirms}, HTF=${htfAligned || `conf=${confidence}%`}, conf=${confidence}%)`, true);
 
         // ============= GATE 5: STRATEGY SUPPORT FOR TREND DIRECTION =============
         // Check if any strategy can support the current trend direction BEFORE quality scoring
@@ -2061,9 +2061,9 @@ serve(async (req) => {
         
         if (strategiesWithConditionBasis === 0 && hasStrongTrendException) {
           strongTrendExceptionUsed++;
-          console.log(`✅ ${symbol}: STRONG TREND EXCEPTION USED - No condition-based strategies, but ADX=${adx.toFixed(1)} ≥ 35, momentum confirmed, HTF aligned`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} STRONG TREND EXCEPTION USED - No condition-based strategies, but ADX=${adx.toFixed(1)} ≥ 35, momentum confirmed, HTF aligned`);
         } else {
-          console.log(`📋 ${symbol}: ${strategiesWithConditionBasis}/${allStrategies.length} strategies support ${tradeDirectionForGate} with conditions`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} ${strategiesWithConditionBasis}/${allStrategies.length} strategies support ${tradeDirectionForGate} with conditions`);
         }
 
         // ============= Technical Indicators =============
@@ -2116,7 +2116,7 @@ serve(async (req) => {
             continue;
           }
           
-          console.log(`🔄 ${symbol}: Passed RECOVERY STRICT MODE checks (ADX=${adx.toFixed(1)}, pullback=BOTH, conf=${confidence}%)`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Passed RECOVERY STRICT MODE checks (ADX=${adx.toFixed(1)}, pullback=BOTH, conf=${confidence}%)`);
         }
 
         // ============= IMPROVEMENT #1: Quality Score System with CONFIDENCE INVERSION =============
@@ -2138,14 +2138,14 @@ serve(async (req) => {
         
         // Log order flow analysis
         if (orderFlowAnalysis.reasons.length > 0) {
-          console.log(`📈 ${symbol} Order Flow: score=${orderFlowAnalysis.score}/100 signal=${orderFlowAnalysis.signal} | ${orderFlowAnalysis.reasons.join(' | ')}`);
+          logger.forSymbol(symbol).trade(`Order Flow: score=${orderFlowAnalysis.score}/100 signal=${orderFlowAnalysis.signal} | ${orderFlowAnalysis.reasons.join(' | ')}`);
         }
         
         // Cap pullback score when volume doesn't confirm - prevents "perfect pullback, no volume" trap
         let entryTimingScore = Math.max(0, pullbackAnalysis.entryTimingScore);
         const volumeConfirms = momentum?.volumeConfirms ?? false;
         if (!volumeConfirms && entryTimingScore > 15) {
-          console.log(`⚠️ ${symbol}: Capping pullback score ${entryTimingScore}→15 (volume not confirming)`);
+          logger.forSymbol(symbol).warn(`Capping pullback score ${entryTimingScore}→15 (volume not confirming)`);
           entryTimingScore = 15;
         }
         
@@ -2165,17 +2165,17 @@ serve(async (req) => {
 
         // Log confidence inversion impact
         if (confidencePenalty < 0) {
-          console.log(`⚠️ ${symbol} Confidence penalty: ${confidencePenalty} (confidence=${confidence}% is above optimal 50-70% zone)`);
+          logger.forSymbol(symbol).warn(`Confidence penalty: ${confidencePenalty} (confidence=${confidence}% is above optimal 50-70% zone)`);
         }
         // Log volume score
         if (volumeScore > 0) {
-          console.log(`📊 ${symbol} Volume score: +${volumeScore}/10 pts`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Volume score: +${volumeScore}/10 pts`);
         }
         // Log order flow impact
         if (orderFlowScore !== 0) {
-          console.log(`📈 ${symbol} Order Flow bonus: ${orderFlowScore > 0 ? '+' : ''}${orderFlowScore} pts (signal: ${orderFlowAnalysis.signal}, confidence: ${orderFlowAnalysis.confidence}%)`);
+          logger.forSymbol(symbol).trade(`Order Flow bonus: ${orderFlowScore > 0 ? '+' : ''}${orderFlowScore} pts (signal: ${orderFlowAnalysis.signal}, confidence: ${orderFlowAnalysis.confidence}%)`);
         }
-        console.log(`📊 ${symbol} Quality: ${qualityScore}/100 [${breakdown}] | Regime: ${regime.regime} | Entry: ${pullbackAnalysis.reason} | Pullback: ${pullbackAnalysis.hasBothConditions ? 'OPTIMAL' : pullbackAnalysis.isPullback ? 'YES' : 'NO'}`);
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Quality: ${qualityScore}/100 [${breakdown}] | Regime: ${regime.regime} | Entry: ${pullbackAnalysis.reason} | Pullback: ${pullbackAnalysis.hasBothConditions ? 'OPTIMAL' : pullbackAnalysis.isPullback ? 'YES' : 'NO'}`);
 
         // ============= DYNAMIC QUALITY THRESHOLD =============
         // Calculate threshold based on ADX, 1h confidence, and neutral trend for this specific symbol
@@ -2214,25 +2214,25 @@ serve(async (req) => {
         // If trade direction is neutral but we have a valid micro-trend, use it
         if (tradeDirection === "neutral" && hasMicroTrendBypass && microTrend?.direction !== "neutral") {
           tradeDirection = microTrend.direction;
-          console.log(`📊 ${symbol}: Using MICRO-TREND direction (${tradeDirection}) instead of neutral 4h`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} Using MICRO-TREND direction (${tradeDirection}) instead of neutral 4h`);
         }
 
         // Get market data
         const marketData = marketDataMap.get(symbol);
         if (!marketData) {
-          console.log(`⚠️ ${symbol}: Missing market data`);
+          logger.forSymbol(symbol).warn(`Missing market data`);
           continue;
         }
         const currentPrice = parseFloat(marketData.lastPrice);
         if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
-          console.log(`⚠️ ${symbol}: Invalid price: ${marketData.lastPrice}`);
+          logger.forSymbol(symbol).warn(`Invalid price: ${marketData.lastPrice}`);
           continue;
         }
         const currentVolume = parseFloat(marketData.volume) || 0;
 
         const historicalData = historicalDataMap.get(symbol);
         if (!historicalData || historicalData.prices.length < 26) {
-          console.log(`⚠️ ${symbol}: Missing or insufficient historical data (${historicalData?.prices?.length || 0} candles)`);
+          logger.forSymbol(symbol).warn(`Missing or insufficient historical data (${historicalData?.prices?.length || 0} candles)`);
           continue;
         }
         const { prices: historicalPrices, volumes: historicalVolumes } = historicalData;
@@ -2246,13 +2246,13 @@ serve(async (req) => {
         }
         const candidates: StrategyCandidate[] = [];
 
-        console.log(`📋 ${symbol}: Evaluating ${allStrategies.length} strategies`);
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Evaluating ${allStrategies.length} strategies`);
         
         for (const strategy of allStrategies) {
           const indicators = strategy.indicators || [];
           const entryConditions = strategy.entry_conditions || [];
           if (!indicators.length || !entryConditions.length) {
-            console.log(`⚠️ ${symbol}: Strategy "${strategy.name}" skipped - no indicators/conditions`);
+            logger.forSymbol(symbol).warn(`Strategy "${strategy.name}" skipped - no indicators/conditions`);
             continue;
           }
 
@@ -2289,7 +2289,7 @@ serve(async (req) => {
             });
             
             const conditionsMet = conditionResults.every((r: { result: boolean }) => r.result);
-            console.log(`📊 ${symbol} "${strategy.name}": ${conditionsMet ? '✅ PASS' : '❌ FAIL'} - ${JSON.stringify(conditionResults)}`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} "${strategy.name}": ${conditionsMet ? '✅ PASS' : '❌ FAIL'} - ${JSON.stringify(conditionResults)}`);
             
             if (conditionsMet) {
               // ============= SIGNAL DIRECTION FILTERING =============
@@ -2324,14 +2324,14 @@ serve(async (req) => {
                 const allowMomentumEntry = is1hDirectional && is1hConfident && isMomentumBuilding && isMomentumStateGood;
                 
                 if (allowMomentumEntry) {
-                  console.log(`✅ ${symbol} "${strategy.name}": MOMENTUM ALLOWED - 4h neutral but 1h ${htfTrend1h} (${conf1h}%), momentum ${momentumState} (score=${earlyMomentumScore})`);
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": MOMENTUM ALLOWED - 4h neutral but 1h ${htfTrend1h} (${conf1h}%), momentum ${momentumState} (score=${earlyMomentumScore})`);
                   // Continue with strategy evaluation - don't skip
                 } else {
                   const skipReason = !is1hDirectional ? `1h neutral` : 
                     !is1hConfident ? `1h conf ${conf1h}% < 60%` :
                     !isMomentumBuilding ? `momentum score ${earlyMomentumScore} < 5` :
                     `momentum state ${momentumState}`;
-                  console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - momentum strategy, 4h ${htfTrend4h}, ${skipReason}`);
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - momentum strategy, 4h ${htfTrend4h}, ${skipReason}`);
                   continue;
                 }
               }
@@ -2341,14 +2341,14 @@ serve(async (req) => {
               if (strategyDirection === 'long') {
                 // Strategy only generates LONG signals - only valid in bullish/neutral trends
                 if (tradeDirection === 'bearish') {
-                  console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - long-only strategy in bearish trend`);
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - long-only strategy in bearish trend`);
                   continue;
                 }
                 strategySignalType = 'long';
               } else if (strategyDirection === 'short') {
                 // Strategy only generates SHORT signals - only valid in bearish/neutral trends  
                 if (tradeDirection === 'bullish') {
-                  console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - short-only strategy in bullish trend`);
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - short-only strategy in bullish trend`);
                   continue;
                 }
                 strategySignalType = 'short';
@@ -2357,18 +2357,18 @@ serve(async (req) => {
                 if (tradeDirection === 'bullish') strategySignalType = 'long';
                 else if (tradeDirection === 'bearish') strategySignalType = 'short';
                 else {
-                  console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - neutral trend, no clear direction`);
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - neutral trend, no clear direction`);
                   continue;
                 }
               }
               
               // 1H TREND VALIDATION - prevent opening against immediate trend
               if (strategySignalType === 'long' && strategyTrend1h === 'bearish') {
-                console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - LONG signal but 1h is bearish`);
+                logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - LONG signal but 1h is bearish`);
                 continue;
               }
               if (strategySignalType === 'short' && strategyTrend1h === 'bullish') {
-                console.log(`⚠️ ${symbol} "${strategy.name}": SKIP - SHORT signal but 1h is bullish`);
+                logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - SHORT signal but 1h is bullish`);
                 continue;
               }
               
@@ -2382,7 +2382,7 @@ serve(async (req) => {
               });
             }
           } catch (err) {
-            console.log(`❌ ${symbol}: Strategy "${strategy.name}" error: ${err}`);
+            logger.forSymbol(symbol).error(`Strategy "${strategy.name}" error: ${err}`);
             continue;
           }
         }
@@ -2414,7 +2414,7 @@ serve(async (req) => {
         
         if (regimeFilteredCandidates.length === 0) {
           rejectedByStrategy++;
-          console.log(`📊 ${symbol}: All ${candidates.length} strategies disabled for ${currentRegimeType} regime`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} All ${candidates.length} strategies disabled for ${currentRegimeType} regime`);
           await logRejectionWithAI(supabase, userId, symbol, 
             `All matching strategies disabled for ${currentRegimeType} regime`, 
             { regime: currentRegimeType, strategiesFiltered: candidates.map(c => c.strategy.name) },
@@ -2454,7 +2454,7 @@ serve(async (req) => {
         const strategy = best.strategy;
         const signalType = best.signalType;
         const isHighPerformer = isStrategyHighPerformerForRegime(strategy.name, currentRegimeType);
-        console.log(`🎯 ${symbol}: Selected "${strategy.name}"${isHighPerformer ? ' ⭐' : ''} [${currentRegimeType}] (${regimeFilteredCandidates.length}/${candidates.length} strategies after regime filter, best score: ${best.score}, direction: ${signalType})`);
+        logger.forSymbol(symbol).signal(`Selected "${strategy.name}"${isHighPerformer ? ' ⭐' : ''} [${currentRegimeType}] (${regimeFilteredCandidates.length}/${candidates.length} strategies after regime filter, best score: ${best.score}, direction: ${signalType})`);
         
         const indicatorValues = best.indicatorValues;
 
@@ -2470,7 +2470,7 @@ serve(async (req) => {
         
         if (!correlationCheck.canOpen) {
           rejectedByHardGates++;
-          console.log(`🔗 ${symbol}: CORRELATION BLOCK - ${correlationCheck.reason}`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} CORRELATION BLOCK - ${correlationCheck.reason}`);
           await supabase.from("signal_rejection_log").insert({
             user_id: userId, symbol,
             rejection_reason: `Correlation risk: ${correlationCheck.reason}`,
