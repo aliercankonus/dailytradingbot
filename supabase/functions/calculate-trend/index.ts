@@ -270,7 +270,7 @@ function detectMicroTrend(
   }
   
   // ADX bonus: strong micro-trends get extra credit
-  if (hasMicroTrend && adx >= 22) {
+  if (hasMicroTrend && adx >= ADX_THRESHOLDS.MODERATE) {
     alignmentScore = Math.min(100, alignmentScore + 10);
   }
   
@@ -354,7 +354,7 @@ function calculateTrueAlignmentScore(
   let normalizedScore = Math.min(Math.max(Math.round(rawScore * 1.18), 0), 100);
   
   let neutralCapped = false;
-  if (dominantTrend === "neutral" && adx < 20) {
+  if (dominantTrend === "neutral" && adx < ADX_THRESHOLDS.MINIMUM) {
     const maxNeutralScore = volumeConfirms ? 70 : 60;
     if (normalizedScore > maxNeutralScore) {
       normalizedScore = maxNeutralScore;
@@ -824,8 +824,8 @@ serve(async (req) => {
       (effectiveTrendForMomentum === "bearish" && macdHistogram < 0) ||
       effectiveTrendForMomentum === "neutral";
 
-    const macdExpanding = Math.abs(macdHistogram) > 0.05 && macdDirectionAligned && adx >= 15;
-    const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned && adx >= 15;
+    const macdExpanding = Math.abs(macdHistogram) > 0.05 && macdDirectionAligned && adx >= ADX_THRESHOLDS.SEVERE_PENALTY;
+    const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned && adx >= ADX_THRESHOLDS.SEVERE_PENALTY;
 
     // Fake breakout detection
     const fakeBreakoutRisk = macdExpanding && !adxRising;
