@@ -10,6 +10,9 @@ import {
   CORRELATION_PARAMS,
   STRATEGY_PARAMS,
   SYMBOL_PARAMS,
+  RISK_PARAMS,
+  EMERGENCY_EXIT_PARAMS,
+  EXIT_THRESHOLDS,
   isMomentumStrategy,
   isNeutralStrategy,
   detectStrategyType
@@ -903,15 +906,17 @@ serve(async (req) => {
     }
 
     // ============= SYMBOL PERFORMANCE FILTER =============
-    // Disable symbols with win rate below 35% (based on last 20 trades)
-    const SYMBOL_WIN_RATE_THRESHOLD = 35;
-    const SYMBOL_MIN_TRADES_FOR_FILTER = 10;
+    // Disable symbols with win rate below threshold (based on last 20 trades)
+    // Uses centralized SYMBOL_PARAMS from _shared/constants.ts
+    const SYMBOL_WIN_RATE_THRESHOLD = SYMBOL_PARAMS.WIN_RATE_DISABLE_THRESHOLD;
+    const SYMBOL_MIN_TRADES_FOR_FILTER = SYMBOL_PARAMS.MIN_TRADES_FOR_FILTER;
     
     // ============= NEW: STRATEGY PERFORMANCE FILTER (REGIME-AWARE) =============
-    // Disable strategies with win rate below 40% (based on last 20 trades per strategy PER REGIME)
-    const STRATEGY_WIN_RATE_THRESHOLD = 40;
-    const STRATEGY_MIN_TRADES_FOR_FILTER = 10;
-    const STRATEGY_HIGH_PERFORMER_THRESHOLD = 60; // Strategies above 60% get bonus
+    // Disable strategies with win rate below threshold (based on last 20 trades per strategy PER REGIME)
+    // Uses centralized STRATEGY_PARAMS from _shared/constants.ts
+    const STRATEGY_WIN_RATE_THRESHOLD = STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD;
+    const STRATEGY_MIN_TRADES_FOR_FILTER = STRATEGY_PARAMS.MIN_TRADES_FOR_FILTER;
+    const STRATEGY_HIGH_PERFORMER_THRESHOLD = STRATEGY_PARAMS.WIN_RATE_HIGH_PERFORMER;
     
     // Fetch positions with trend to determine regime at time of trade
     const { data: recentPositions } = await supabase
