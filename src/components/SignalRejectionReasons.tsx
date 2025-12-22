@@ -8,6 +8,7 @@ import {
   TrendingUp,
   Activity,
   Minimize2,
+  Minus,
   BarChart3,
   Target,
   Zap,
@@ -1543,6 +1544,115 @@ const HardGateConfidenceDeadZoneDisplay = ({ filtersStatus, trendData }: { filte
   );
 };
 
+const HardGateNeutral4hDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const trend4h = filtersStatus?.trend4h || trendData?.multiTimeframe?.trend4h || "neutral";
+  const trend1h = filtersStatus?.trend1h || trendData?.multiTimeframe?.trend1h || "neutral";
+  const conf4h = coerceNumeric(filtersStatus?.confidence4h ?? trendData?.multiTimeframe?.confidence4h, 50);
+  const conf1h = coerceNumeric(filtersStatus?.confidence1h ?? trendData?.multiTimeframe?.confidence1h, 50);
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  
+  const is4hNeutral = trend4h?.toLowerCase() === "neutral" || trend4h?.toLowerCase() === "ranging";
+  const is1hDirectional = trend1h?.toLowerCase() !== "neutral" && trend1h?.toLowerCase() !== "ranging";
+  
+  // Requirements
+  const requiredForNeutral4h = 70;
+  const requiredFor1hDirectional = 65;
+  
+  const passes4hRequirement = conf4h >= requiredForNeutral4h;
+  const passes1hRequirement = is1hDirectional && conf1h >= requiredFor1hDirectional;
+  
+  const getTrendIcon = (trend: string) => {
+    if (trend?.toLowerCase() === "bullish") return <TrendingUp className="h-3 w-3 text-green-500" />;
+    if (trend?.toLowerCase() === "bearish") return <TrendingDown className="h-3 w-3 text-red-500" />;
+    return <Minus className="h-3 w-3 text-yellow-500" />;
+  };
+  
+  const getTrendColor = (trend: string) => {
+    if (trend?.toLowerCase() === "bullish") return "text-green-400";
+    if (trend?.toLowerCase() === "bearish") return "text-red-400";
+    return "text-yellow-400";
+  };
+
+  return (
+    <div className="space-y-3 p-3 bg-orange-500/10 rounded-md border border-orange-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <AlertTriangle className="h-4 w-4 text-orange-500" />
+          <span className="text-xs font-semibold text-orange-400">Neutral 4H - Low Confidence</span>
+        </div>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-orange-400 border-orange-500/30">
+          Gate Failed
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        When 4H is neutral, need 70%+ confidence OR directional 1H with 65%+
+      </div>
+      
+      {/* Timeframe Cards */}
+      <div className="grid grid-cols-2 gap-2">
+        {/* 4H Timeframe */}
+        <div className={`p-2 rounded border text-center ${passes4hRequirement ? 'bg-green-500/20 border-green-500/30' : 'bg-red-500/20 border-red-500/30'}`}>
+          <div className="text-[10px] text-muted-foreground mb-1">4H Timeframe</div>
+          <div className="flex items-center justify-center gap-1">
+            {getTrendIcon(trend4h)}
+            <span className={`text-xs font-medium capitalize ${getTrendColor(trend4h)}`}>{trend4h}</span>
+          </div>
+          <div className={`text-lg font-bold ${passes4hRequirement ? 'text-green-400' : 'text-red-400'}`}>
+            {conf4h}%
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {is4hNeutral ? (passes4hRequirement ? "✓ Meets 70%" : `Need ≥70%`) : "Directional"}
+          </div>
+          {/* Mini progress bar */}
+          <div className="mt-1 h-1 bg-muted/30 rounded-full overflow-hidden">
+            <div 
+              className={`h-full rounded-full ${passes4hRequirement ? 'bg-green-500' : 'bg-red-500'}`}
+              style={{ width: `${Math.min(conf4h, 100)}%` }}
+            />
+          </div>
+        </div>
+        
+        {/* 1H Timeframe */}
+        <div className={`p-2 rounded border text-center ${passes1hRequirement ? 'bg-green-500/20 border-green-500/30' : 'bg-muted/30 border-muted/50'}`}>
+          <div className="text-[10px] text-muted-foreground mb-1">1H Timeframe</div>
+          <div className="flex items-center justify-center gap-1">
+            {getTrendIcon(trend1h)}
+            <span className={`text-xs font-medium capitalize ${getTrendColor(trend1h)}`}>{trend1h}</span>
+          </div>
+          <div className={`text-lg font-bold ${passes1hRequirement ? 'text-green-400' : 'text-muted-foreground'}`}>
+            {conf1h}%
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {is1hDirectional ? (conf1h >= requiredFor1hDirectional ? "✓ Directional 65%+" : "Need ≥65%") : "Not directional"}
+          </div>
+          {/* Mini progress bar */}
+          <div className="mt-1 h-1 bg-muted/30 rounded-full overflow-hidden">
+            <div 
+              className={`h-full rounded-full ${passes1hRequirement ? 'bg-green-500' : 'bg-muted'}`}
+              style={{ width: `${Math.min(conf1h, 100)}%` }}
+            />
+          </div>
+        </div>
+      </div>
+      
+      {/* ADX Info */}
+      {adx > 0 && (
+        <div className="flex items-center justify-between p-1.5 bg-muted/20 rounded text-[10px]">
+          <span className="text-muted-foreground">ADX Strength:</span>
+          <span className={adx >= 25 ? 'text-green-400' : 'text-yellow-400'}>{adx.toFixed(1)}</span>
+        </div>
+      )}
+      
+      {/* Why Blocked */}
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-orange-400">⚠️ Why blocked:</span> Neutral 4H trends with low confidence have poor win rates. 
+        Wait for: 4H confidence to rise above 70%, or 1H to become directional ({">"}65%).
+      </div>
+    </div>
+  );
+};
+
 const ActiveSignalDisplay = () => {
   return (
     <div className="flex items-center gap-2 p-2 bg-green-500/10 rounded-md border border-green-500/20">
@@ -2002,6 +2112,11 @@ export const SignalRejectionReasons = () => {
     // HARD GATE: Confidence dead zone
     if (reason.includes("HARD GATE: Confidence dead zone") || fs?.gate === "CONFIDENCE_DEAD_ZONE") {
       return <HardGateConfidenceDeadZoneDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // HARD GATE: Neutral 4h requires 70%+ confidence OR directional 1h with 65%+
+    if (reason.includes("Neutral 4h requires 70%") || reason.includes("NEUTRAL_4H") || fs?.gate === "NEUTRAL_4H_LOW_CONFIDENCE") {
+      return <HardGateNeutral4hDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // Reversal risk rejection
