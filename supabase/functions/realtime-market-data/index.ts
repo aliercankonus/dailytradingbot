@@ -1,9 +1,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { buildStreamUrl, parseTickerMessage } from "../_shared/binance.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+const MAX_RECONNECT_ATTEMPTS = 10;
+const BASE_RECONNECT_DELAY = 1000;
+const HEARTBEAT_INTERVAL = 30000;
 
 serve(async (req) => {
   // Handle CORS preflight
@@ -18,31 +23,28 @@ serve(async (req) => {
     return new Response("Expected WebSocket connection", { status: 400 });
   }
 
-  console.log('WebSocket upgrade request received');
+  console.log('[MarketData-Edge] WebSocket upgrade request received');
 
   const { socket, response } = Deno.upgradeWebSocket(req);
   
   let binanceSocket: WebSocket | null = null;
   let reconnectAttempts = 0;
-  const MAX_RECONNECT_ATTEMPTS = 10;
-  const BASE_RECONNECT_DELAY = 1000;
   let reconnectTimeout: number | null = null;
   let heartbeatInterval: number | null = null;
 
   // Parse symbols from query params or use defaults
   const url = new URL(req.url);
   const symbolsParam = url.searchParams.get('symbols');
-  const symbols = symbolsParam ? JSON.parse(symbolsParam) : ['BTCUSDT', 'ETHUSDT'];
+  const symbols: string[] = symbolsParam ? JSON.parse(symbolsParam) : ['BTCUSDT', 'ETHUSDT'];
   
-  console.log('Subscribing to symbols:', symbols);
+  console.log('[MarketData-Edge] Subscribing to symbols:', symbols);
 
   const connectToBinance = () => {
     try {
-      // Create streams parameter for multiple symbols
-      const streams = symbols.map((s: string) => `${s.toLowerCase()}@ticker`).join('/');
-      const binanceUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
+      // Use shared utility to build stream URL
+      const binanceUrl = buildStreamUrl(symbols);
       
-      console.log('Connecting to Binance:', binanceUrl);
+      console.log('[MarketData-Edge] Connecting to Binance:', binanceUrl);
       
       binanceSocket = new WebSocket(binanceUrl);
       
@@ -64,33 +66,36 @@ serve(async (req) => {
         try {
           const data = JSON.parse(event.data);
           
-          // Binance sends data in a specific format
+          // Binance sends data in a specific format for combined streams
           if (data.data) {
-            const tickerData = data.data;
+            // Use shared utility to parse ticker message (pass full object with stream/data)
+            const tickerData = parseTickerMessage(data);
             
-            // Transform to our format
-            const transformed = {
-              type: 'price_update',
-              data: {
-                symbol: tickerData.s,
-                lastPrice: tickerData.c,
-                priceChange: tickerData.p,
-                priceChangePercent: tickerData.P,
-                highPrice: tickerData.h,
-                lowPrice: tickerData.l,
-                volume: tickerData.v,
-                quoteVolume: tickerData.q,
-                timestamp: new Date(tickerData.E).toISOString()
+            if (tickerData) {
+              // Transform to our format
+              const transformed = {
+                type: 'price_update',
+                data: {
+                  symbol: tickerData.symbol,
+                  lastPrice: tickerData.price,
+                  priceChange: tickerData.priceChange,
+                  priceChangePercent: tickerData.priceChangePercent,
+                  highPrice: tickerData.high,
+                  lowPrice: tickerData.low,
+                  volume: tickerData.volume,
+                  quoteVolume: data.data.q, // Quote volume from raw data
+                  timestamp: new Date(tickerData.timestamp).toISOString()
+                }
+              };
+              
+              // Forward to client
+              if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(transformed));
               }
-            };
-            
-            // Forward to client
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify(transformed));
             }
           }
         } catch (error) {
-          console.error('Error processing Binance message:', error);
+          console.error('[MarketData-Edge] Error processing Binance message:', error);
         }
       };
 
@@ -154,14 +159,14 @@ serve(async (req) => {
       if (socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: 'heartbeat' }));
       }
-    }, 30000);
+    }, HEARTBEAT_INTERVAL);
   };
 
   socket.onmessage = (event) => {
     try {
       const message = JSON.parse(event.data);
       
-      // Handle client messages if needed (e.g., subscribe to new symbols)
+      // Handle client messages (e.g., ping/pong)
       if (message.type === 'ping') {
         socket.send(JSON.stringify({ type: 'pong' }));
       }
