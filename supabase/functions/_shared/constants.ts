@@ -6,6 +6,8 @@ export const ADX_THRESHOLDS = {
   VERY_WEAK: 12,
   SEVERE_PENALTY: 15,
   WEAK: 18,
+  // SQUEEZE_MINIMUM: Allows squeeze breakout entries when ADX is 18-20
+  SQUEEZE_MINIMUM: 18,
   MINIMUM: 20,
   MODERATE: 22,
   STRONG: 25,

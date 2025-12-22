@@ -27,8 +27,12 @@ import {
   getAdxWeight,
   calculateUnifiedReversalScore,
   detectMarketRegime,
+  isValidSqueezeBreakout,
+  deriveTradeDirection,
   type UnifiedReversalResult,
-  type MarketRegime
+  type MarketRegime,
+  type SqueezeBreakoutResult,
+  type DirectionResult
 } from "../_shared/scoring.ts";
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
@@ -1334,6 +1338,39 @@ serve(async (req) => {
         const htfTrend4h = timeframes?.['4h']?.trend || timeframes?.['4h']?.indicators?.emaSignal || "neutral";
         const htfTrend1h = timeframes?.['1h']?.trend || timeframes?.['1h']?.indicators?.emaSignal || "neutral";
 
+        // ============= PHASE 1 IMPROVEMENT: EXPLICIT DIRECTION DERIVATION =============
+        // Derive trade direction early in the pipeline to prevent inconsistent direction evaluation
+        // This ensures all downstream gates use the same direction logic
+        const directionResult = deriveTradeDirection(trendData, trend);
+        
+        // REJECT EARLY: If no clear trade direction can be determined
+        if (!directionResult.direction) {
+          rejectedByHardGates++;
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `No clear trade direction: ${directionResult.reasons.join(", ")}`,
+            { 
+              gate: "NO_CLEAR_DIRECTION",
+              source: directionResult.source,
+              reasons: directionResult.reasons,
+              trend4h: htfTrend4h,
+              trend1h: htfTrend1h,
+              primaryTrend: trend,
+              confidence: directionResult.confidence
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false
+          );
+          continue;
+        }
+        
+        // Use derived direction consistently throughout signal generation
+        const derivedDirection = directionResult.direction;
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} Direction derived: ${derivedDirection} from ${directionResult.source} (${directionResult.confidence.toFixed(0)}% conf)`);
+        if (directionResult.reasons.some(r => r.includes("Warning"))) {
+          logger.forSymbol(symbol).warn(`   ${directionResult.reasons.filter(r => r.includes("Warning")).join(", ")}`);
+        }
+
         // ============= IMPROVEMENT #2: Market Regime Filter =============
         const regime = detectMarketRegime(trendData);
         if (!regime.tradeable) {
@@ -1869,37 +1906,95 @@ serve(async (req) => {
         // Quality score should RANK good trades, not RESCUE weak ones
         
         // GATE 1: ADX must be >= MINIMUM for any trade (trend strength required)
+        // EXCEPTION: Squeeze breakout allows ADX 18-20 if strict conditions are met
+        let squeezeBreakoutActive = false;
+        let squeezePositionMultiplier = 1.0;
+        
         if (adx < ADX_THRESHOLDS.MINIMUM) {
-          rejectedByHardGates++;
-          await logRejectionWithAI(
-            supabase, userId, symbol,
-            `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.MINIMUM}) - no trend strength`,
-            { 
-              gate: "ADX_TOO_LOW",
-              adx: adx.toFixed(1),
-              adxRequired: ADX_THRESHOLDS.MINIMUM,
-              trend,
-              confidence,
-              trendConsistency: trendData.trueAlignment?.score?.toFixed(1),
-              // Additional context for UI
-              momentum: {
-                state: momentum?.state || "none",
-                confirms: momentum?.confirms ?? false,
-                macdHistogram: momentum?.macdHistogram?.toFixed(4),
-                lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend
+          // Check for squeeze breakout exception (only if ADX >= 18)
+          if (adx >= ADX_THRESHOLDS.SQUEEZE_MINIMUM) {
+            const squeezeResult = isValidSqueezeBreakout(trendData, derivedDirection);
+            
+            if (squeezeResult.isValid) {
+              // SQUEEZE BREAKOUT EXCEPTION - allow entry with reduced position size
+              squeezeBreakoutActive = true;
+              squeezePositionMultiplier = squeezeResult.positionSizeMultiplier;
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} SQUEEZE BREAKOUT EXCEPTION - ADX ${adx.toFixed(1)} allowed (${squeezeResult.confidence}% confidence)`);
+              logger.forSymbol(symbol).debug(`   Squeeze reasons: ${squeezeResult.reasons.join(", ")}`);
+              logger.forSymbol(symbol).debug(`   Position size reduced to ${(squeezePositionMultiplier * 100).toFixed(0)}%`);
+            } else {
+              // Squeeze conditions not met - reject with ADX reason + squeeze failure reasons
+              rejectedByHardGates++;
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.MINIMUM}) - squeeze breakout not valid: ${squeezeResult.reasons.join(", ")}`,
+                { 
+                  gate: "ADX_TOO_LOW_NO_SQUEEZE",
+                  adx: adx.toFixed(1),
+                  adxRequired: ADX_THRESHOLDS.MINIMUM,
+                  squeezeMinimum: ADX_THRESHOLDS.SQUEEZE_MINIMUM,
+                  squeezeValid: false,
+                  squeezeReasons: squeezeResult.reasons,
+                  trend,
+                  confidence,
+                  derivedDirection,
+                  trendConsistency: trendData.trueAlignment?.score?.toFixed(1),
+                  momentum: {
+                    state: momentum?.state || "none",
+                    confirms: momentum?.confirms ?? false,
+                    macdExpanding: momentum?.macdExpanding ?? false
+                  },
+                  bollinger: {
+                    squeeze4h: trendData.bollingerBands?.['4h']?.squeeze,
+                    squeeze1h: trendData.bollingerBands?.['1h']?.squeeze,
+                    percentB4h: trendData.bollingerBands?.['4h']?.percentB,
+                    percentB1h: trendData.bollingerBands?.['1h']?.percentB
+                  }
+                },
+                trendData,
+                riskParams.ai_analysis_enabled !== false
+              );
+              continue;
+            }
+          } else {
+            // ADX < 18: No squeeze exception possible
+            rejectedByHardGates++;
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.SQUEEZE_MINIMUM}) - no trend strength, below squeeze minimum`,
+              { 
+                gate: "ADX_TOO_LOW",
+                adx: adx.toFixed(1),
+                adxRequired: ADX_THRESHOLDS.MINIMUM,
+                squeezeMinimum: ADX_THRESHOLDS.SQUEEZE_MINIMUM,
+                trend,
+                confidence,
+                trendConsistency: trendData.trueAlignment?.score?.toFixed(1),
+                momentum: {
+                  state: momentum?.state || "none",
+                  confirms: momentum?.confirms ?? false,
+                  macdHistogram: momentum?.macdHistogram?.toFixed(4),
+                  lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend
+                },
+                stochRsi: trendData.stochasticRsi?.aggregated,
+                volatility: {
+                  atrPercent: trendData.volatility?.atrPercent?.toFixed(2),
+                  isRanging: trendData.volatility?.isRanging
+                }
               },
-              stochRsi: trendData.stochasticRsi?.aggregated,
-              volatility: {
-                atrPercent: trendData.volatility?.atrPercent?.toFixed(2),
-                isRanging: trendData.volatility?.isRanging
-              }
-            },
-            trendData,
-            riskParams.ai_analysis_enabled !== false
-          );
-          continue;
+              trendData,
+              riskParams.ai_analysis_enabled !== false
+            );
+            continue;
+          }
         }
         
+        // Apply squeeze breakout position size reduction if active
+        if (squeezeBreakoutActive && squeezePositionMultiplier < 1.0) {
+          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, squeezePositionMultiplier);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Squeeze breakout - position size capped at ${(squeezePositionMultiplier * 100).toFixed(0)}%`);
+        }
+
         // RELAXED: Allow entry when momentum.state is "none" IF ADX >= 28 (strong trend exception)
         // This enables early entries when trend strength itself provides conviction
         const momentumState = momentum?.state || "none";

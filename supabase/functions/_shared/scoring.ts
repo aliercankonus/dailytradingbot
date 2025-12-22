@@ -774,6 +774,218 @@ export const detectMarketRegime = (trendData: any): {
   };
 };
 
+// ============= SQUEEZE BREAKOUT VALIDATION =============
+// Validates if a potential squeeze breakout setup is present
+// Allows ADX gate bypass when conditions are met (ADX 18-20 range)
+export interface SqueezeBreakoutResult {
+  isValid: boolean;
+  confidence: number;  // 0-100
+  direction: "long" | "short" | null;
+  positionSizeMultiplier: number;  // Reduced size for squeeze entries
+  reasons: string[];
+}
+
+export const isValidSqueezeBreakout = (
+  trendData: any,
+  intendedDirection: "long" | "short" | null
+): SqueezeBreakoutResult => {
+  const reasons: string[] = [];
+  let confidence = 0;
+  
+  if (!trendData || !intendedDirection) {
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["No trend data or direction"] };
+  }
+  
+  const adx = trendData?.volatility?.adx || 0;
+  const bollinger = trendData?.bollingerBands || {};
+  const momentum = trendData?.momentum || {};
+  const stochRsi = trendData?.stochasticRsi || {};
+  const timeframes = trendData?.timeframes || {};
+  
+  // Get 4H data for HTF confirmation
+  const bb4h = bollinger['4h'] || bollinger;
+  const squeeze4h = bb4h.squeeze || bb4h.squeezeActive || false;
+  const percentB4h = bb4h.percentB ?? 50;
+  const bandwidth4h = bb4h.bandwidth || 0;
+  
+  // Get 1H data
+  const bb1h = bollinger['1h'] || {};
+  const squeeze1h = bb1h.squeeze || bb1h.squeezeActive || false;
+  const percentB1h = bb1h.percentB ?? 50;
+  
+  // Condition 1: HTF squeeze active (4h preferred, 1h acceptable)
+  const hasHTFSqueeze = squeeze4h || squeeze1h;
+  if (!hasHTFSqueeze) {
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["No HTF squeeze detected"] };
+  }
+  
+  if (squeeze4h) {
+    confidence += 30;
+    reasons.push("4h Bollinger squeeze active");
+  } else if (squeeze1h) {
+    confidence += 20;
+    reasons.push("1h Bollinger squeeze active");
+  }
+  
+  // Condition 2: Price at band edge (confirming breakout direction)
+  const isLong = intendedDirection === "long";
+  const priceAtCorrectEdge = isLong 
+    ? (percentB4h > 70 || percentB1h > 70)  // Breaking upward
+    : (percentB4h < 30 || percentB1h < 30);  // Breaking downward
+  
+  if (!priceAtCorrectEdge) {
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["Price not at band edge for breakout direction"] };
+  }
+  confidence += 25;
+  reasons.push(`Price at ${isLong ? "upper" : "lower"} band edge (%B4h=${percentB4h.toFixed(0)}, %B1h=${percentB1h.toFixed(0)})`);
+  
+  // Condition 3: Momentum building (MACD expanding or StochRSI crossing)
+  const macdExpanding = momentum.macdExpanding ?? false;
+  const momentumBuilding = momentum.state === "building" || momentum.state === "confirmed";
+  const stoch4h = stochRsi['4h'] || {};
+  const stoch1h = stochRsi['1h'] || {};
+  const stochK4h = stoch4h.k ?? 50;
+  const stochK1h = stoch1h.k ?? 50;
+  
+  // StochRSI should be moving in trade direction
+  const stochDirectionOk = isLong 
+    ? (stochK1h > 30 && stochK1h < 80)  // Not oversold, not extreme overbought
+    : (stochK1h < 70 && stochK1h > 20);  // Not overbought, not extreme oversold
+  
+  if (!macdExpanding && !momentumBuilding && !stochDirectionOk) {
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["No momentum building for squeeze breakout"] };
+  }
+  
+  if (macdExpanding) {
+    confidence += 20;
+    reasons.push("MACD expanding");
+  }
+  if (momentumBuilding) {
+    confidence += 15;
+    reasons.push(`Momentum ${momentum.state}`);
+  }
+  
+  // Condition 4: No reversal divergence (critical for squeeze entries)
+  const hasDivergence = momentum.hasDivergence ?? false;
+  if (hasDivergence) {
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["Divergence detected - not safe for squeeze entry"] };
+  }
+  confidence += 10;
+  reasons.push("No reversal divergence");
+  
+  // Condition 5: HTF trend not opposing (4h neutral is OK, 4h opposite is NOT)
+  const trend4h = timeframes['4h']?.trend || "neutral";
+  const trend1h = timeframes['1h']?.trend || "neutral";
+  
+  const htfOpposing = isLong 
+    ? trend4h === "bearish"
+    : trend4h === "bullish";
+  
+  if (htfOpposing) {
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: [`4h trend (${trend4h}) opposes ${intendedDirection} direction`] };
+  }
+  
+  // Bonus: 1h trend aligned
+  const htf1hAligned = isLong ? trend1h === "bullish" : trend1h === "bearish";
+  if (htf1hAligned) {
+    confidence += 10;
+    reasons.push(`1h trend aligned (${trend1h})`);
+  }
+  
+  // Final validation: confidence must be >= 60 for squeeze breakout
+  const isValid = confidence >= 60;
+  
+  // Squeeze breakout entries get 60-70% position size (reduced risk for ADX < 20 entries)
+  const positionSizeMultiplier = isValid ? 0.65 : 1.0;
+  
+  if (isValid) {
+    reasons.push(`Squeeze breakout confidence: ${confidence}%`);
+  }
+  
+  return {
+    isValid,
+    confidence,
+    direction: isValid ? intendedDirection : null,
+    positionSizeMultiplier,
+    reasons
+  };
+};
+
+// ============= DERIVE TRADE DIRECTION =============
+// Explicitly derives trade direction from multi-timeframe trend data
+// Returns null if no clear direction can be determined
+export type TradeDirection = "long" | "short";
+
+export interface DirectionResult {
+  direction: TradeDirection | null;
+  confidence: number;
+  source: string;  // Which timeframe/signal determined direction
+  reasons: string[];
+}
+
+export const deriveTradeDirection = (
+  trendData: any,
+  primaryTrend: string
+): DirectionResult => {
+  const reasons: string[] = [];
+  
+  if (!trendData) {
+    return { direction: null, confidence: 0, source: "none", reasons: ["No trend data"] };
+  }
+  
+  const timeframes = trendData.timeframes || {};
+  const trend4h = timeframes['4h']?.trend || "neutral";
+  const trend1h = timeframes['1h']?.trend || "neutral";
+  const trend30m = timeframes['30m']?.trend || "neutral";
+  
+  const conf4h = timeframes['4h']?.confidence || 0;
+  const conf1h = timeframes['1h']?.confidence || 0;
+  const conf30m = timeframes['30m']?.confidence || 0;
+  
+  // Priority 1: Use 4h trend if directional with decent confidence
+  if (trend4h !== "neutral" && conf4h >= 55) {
+    const direction: TradeDirection = trend4h === "bullish" ? "long" : "short";
+    reasons.push(`4h trend ${trend4h} (${conf4h.toFixed(0)}% confidence)`);
+    return { direction, confidence: conf4h, source: "4h", reasons };
+  }
+  
+  // Priority 2: Use 1h trend if strong and directional
+  if (trend1h !== "neutral" && conf1h >= 60) {
+    const direction: TradeDirection = trend1h === "bullish" ? "long" : "short";
+    reasons.push(`1h trend ${trend1h} (${conf1h.toFixed(0)}% confidence)`);
+    
+    // Warn if 4h is opposing
+    if (trend4h !== "neutral" && trend4h !== trend1h) {
+      reasons.push(`Warning: 4h trend ${trend4h} opposes 1h`);
+    }
+    
+    return { direction, confidence: conf1h, source: "1h", reasons };
+  }
+  
+  // Priority 3: 4h neutral but 1h+30m aligned
+  if (trend4h === "neutral" && trend1h === trend30m && trend1h !== "neutral") {
+    const direction: TradeDirection = trend1h === "bullish" ? "long" : "short";
+    const avgConf = (conf1h + conf30m) / 2;
+    reasons.push(`1h+30m aligned ${trend1h} (avg ${avgConf.toFixed(0)}% confidence)`);
+    reasons.push("4h neutral - lower timeframes determining direction");
+    return { direction, confidence: avgConf, source: "1h+30m", reasons };
+  }
+  
+  // Priority 4: Fall back to primary trend from 5m if directional
+  if (primaryTrend === "bullish" || primaryTrend === "bearish") {
+    const direction: TradeDirection = primaryTrend === "bullish" ? "long" : "short";
+    const primaryConf = trendData.confidence || 50;
+    reasons.push(`Primary trend ${primaryTrend} (${primaryConf.toFixed(0)}% confidence)`);
+    reasons.push("Warning: Using primary trend as fallback - lower conviction");
+    return { direction, confidence: primaryConf * 0.8, source: "primary", reasons };
+  }
+  
+  // No clear direction
+  reasons.push("All timeframes neutral or conflicting");
+  reasons.push(`4h: ${trend4h} (${conf4h}%), 1h: ${trend1h} (${conf1h}%), 30m: ${trend30m} (${conf30m}%)`);
+  return { direction: null, confidence: 0, source: "none", reasons };
+};
+
 // ============= CALCULATE QUALITY SCORE =============
 // Unified quality score calculation
 export const calculateQualityScore = (
