@@ -144,3 +144,117 @@ export const SYMBOL_PARAMS = {
   // Minimum trades required for symbol filtering
   MIN_TRADES_FOR_FILTER: 10,
 } as const;
+
+// ============= STRATEGY TYPE DETECTION =============
+// Robust strategy type classification for consistent behavior across edge functions
+// Uses strategy ID prefixes and name patterns for reliable detection
+
+export const STRATEGY_TYPES = {
+  // Momentum strategies - can enter when 4h is neutral if 1h is directional + momentum building
+  MOMENTUM: {
+    ids: [
+      'builtin-momentum-breakout',
+      'builtin-aggressive-momentum',
+      'builtin-ema-golden',
+      'builtin-macd-crossover',
+      'builtin-macd-signal-cross',
+    ],
+    // Fallback name patterns (case-insensitive) for custom strategies
+    namePatterns: [
+      'momentum',
+      'breakout',
+      'surge',
+      'ema.*cross',
+      'golden.*cross',
+      'death.*cross',
+    ],
+  },
+  // Mean reversion strategies - trade counter-trend at extremes
+  MEAN_REVERSION: {
+    ids: [
+      'builtin-rsi-oversold',
+      'builtin-rsi-overbought',
+      'builtin-mean-reversion',
+      'builtin-bollinger-reversal',
+    ],
+    namePatterns: [
+      'mean.*reversion',
+      'reversal',
+      'oversold',
+      'overbought',
+      'bollinger.*reversal',
+    ],
+  },
+  // Trend following strategies - require aligned HTF
+  TREND_FOLLOWING: {
+    ids: [
+      'builtin-ema-death',
+      'builtin-conservative-swing',
+    ],
+    namePatterns: [
+      'trend.*follow',
+      'swing',
+      'conservative',
+    ],
+  },
+  // Grid/range strategies - work in ranging conditions
+  GRID_RANGE: {
+    ids: [
+      'builtin-grid-trading',
+      'builtin-bollinger-breakout',
+    ],
+    namePatterns: [
+      'grid',
+      'range',
+      'scalp',
+    ],
+  },
+  // Neutral strategies - trade when 5m neutral but HTF directional
+  NEUTRAL_BREAKOUT: {
+    ids: [
+      'builtin-htf-neutral-breakout',
+    ],
+    namePatterns: [
+      'neutral.*breakout',
+      'htf.*neutral',
+    ],
+  },
+} as const;
+
+// Strategy type detection function
+export function detectStrategyType(strategyId: string | undefined, strategyName: string): keyof typeof STRATEGY_TYPES | 'UNKNOWN' {
+  const normalizedName = (strategyName || '').toLowerCase();
+  const normalizedId = (strategyId || '').toLowerCase();
+  
+  for (const [type, config] of Object.entries(STRATEGY_TYPES)) {
+    // Check by ID first (most reliable)
+    if (config.ids.some(id => normalizedId === id || normalizedId.includes(id))) {
+      return type as keyof typeof STRATEGY_TYPES;
+    }
+    
+    // Fall back to name pattern matching
+    for (const pattern of config.namePatterns) {
+      const regex = new RegExp(pattern, 'i');
+      if (regex.test(normalizedName)) {
+        return type as keyof typeof STRATEGY_TYPES;
+      }
+    }
+  }
+  
+  return 'UNKNOWN';
+}
+
+// Check if strategy is a momentum-type strategy
+export function isMomentumStrategy(strategyId: string | undefined, strategyName: string): boolean {
+  return detectStrategyType(strategyId, strategyName) === 'MOMENTUM';
+}
+
+// Check if strategy is a mean-reversion type
+export function isMeanReversionStrategy(strategyId: string | undefined, strategyName: string): boolean {
+  return detectStrategyType(strategyId, strategyName) === 'MEAN_REVERSION';
+}
+
+// Check if strategy is neutral-breakout type
+export function isNeutralStrategy(strategyId: string | undefined, strategyName: string): boolean {
+  return detectStrategyType(strategyId, strategyName) === 'NEUTRAL_BREAKOUT';
+}
