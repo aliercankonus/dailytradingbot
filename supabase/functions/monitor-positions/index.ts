@@ -1510,23 +1510,31 @@ serve(async (req) => {
           // ONLY close if position is losing significantly
           // Let break-even or profitable positions continue running
           if (pnlPercent < MIN_LOSS_FOR_TIME_EXIT) {
+            // Calculate distance from stop loss for context
+            const stopLoss = position.stop_loss || position.entry_price * (position.side === 'buy' ? 0.98 : 1.02);
+            const distanceToStopPercent = position.side === 'buy' 
+              ? ((currentPrice - stopLoss) / stopLoss) * 100 
+              : ((stopLoss - currentPrice) / currentPrice) * 100;
+            
             shouldClose = true;
             closeReason = "time_based_stop";
             positionLogger.trade(
-              `TIME EXIT: Closing losing ${position.side} - Open ${hoursOpen.toFixed(1)}h (>${effectiveTimeLimit.toFixed(1)}h), P&L: ${pnlPercent.toFixed(2)}%`
+              `TIME EXIT: Closing losing ${position.side} - Open ${hoursOpen.toFixed(1)}h (limit: ${effectiveTimeLimit.toFixed(1)}h), ` +
+              `P&L: ${pnlPercent.toFixed(2)}% (threshold: ${MIN_LOSS_FOR_TIME_EXIT}%), ` +
+              `Distance to SL: ${distanceToStopPercent.toFixed(2)}%, ATR: ${atrPercent.toFixed(2)}%`
             );
             
             trendExits.push({
               symbol: position.symbol,
               side: position.side,
-              reason: `Time-based: ${hoursOpen.toFixed(1)}h open, ${pnlPercent.toFixed(2)}% P&L (losing)`,
+              reason: `Time-based: ${hoursOpen.toFixed(1)}h open, ${pnlPercent.toFixed(2)}% P&L, ${distanceToStopPercent.toFixed(1)}% from SL`,
               trend: "stale",
               confidence: 0,
               pnlPercent,
             });
           } else {
             positionLogger.info(
-              `TIME EXIT SKIPPED: Not losing enough (${pnlPercent.toFixed(2)}% > ${MIN_LOSS_FOR_TIME_EXIT}%) - letting it run`
+              `TIME EXIT SKIPPED: P&L ${pnlPercent.toFixed(2)}% above threshold ${MIN_LOSS_FOR_TIME_EXIT}% - position continues`
             );
           }
         }

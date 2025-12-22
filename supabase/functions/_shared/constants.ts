@@ -182,7 +182,9 @@ export const EXIT_THRESHOLDS = {
   // Break-even: minimum distance % from current price for BE stop
   BREAK_EVEN_MIN_DISTANCE_PERCENT: 0.5,
   // Time-based exit: minimum P&L % for stale losing position exit
-  TIME_BASED_MIN_PNL_PERCENT: -0.5,
+  // ADJUSTED: From -0.5% to -0.8% to give consolidating positions more room to recover
+  // Prevents premature exits on positions still well above their stop loss
+  TIME_BASED_MIN_PNL_PERCENT: -0.8,
 } as const;
 
 // ============= PARTIAL TAKE PROFIT PARAMETERS =============
