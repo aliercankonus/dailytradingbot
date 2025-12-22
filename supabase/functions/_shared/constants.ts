@@ -143,6 +143,23 @@ export const CORRELATION_PARAMS = {
   MAX_SAME_DIRECTION: 2,
   // Correlation risk score threshold for position size reduction
   SIZE_REDUCTION_THRESHOLD: 30,
+  // PHASE 3: Maximum total correlated exposure as percentage of portfolio
+  // Prevents accumulation of "small" correlated positions that add up
+  MAX_CORRELATED_EXPOSURE_PERCENT: 5.0,
+  // Position size floor when correlation adjustment is applied (minimum 50% of intended size)
+  MIN_POSITION_SIZE_FLOOR: 0.5,
+} as const;
+
+// Order execution parameters
+export const ORDER_EXECUTION_PARAMS = {
+  // Maximum number of retries for transient order failures
+  MAX_RETRIES: 2,
+  // Delay between retries in milliseconds
+  RETRY_DELAY_MS: 500,
+  // Transient error codes that warrant a retry
+  TRANSIENT_ERROR_CODES: [-1001, -1003, -1015, -1021], // Timeout, too many requests, rate limit, timestamp
+  // Minimum fill ratio to accept (below this, cancel remaining and adjust position)
+  MIN_FILL_RATIO: 0.8,
 } as const;
 
 // Trend validation parameters for execution

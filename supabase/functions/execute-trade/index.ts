@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { checkPositionCorrelation, getKnownCorrelation } from "../_shared/correlation.ts";
 import { calculateATR, calculateHistoricalATRAvg } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore,
@@ -383,6 +384,86 @@ serve(async (req) => {
     }
 
     logger.validation(`✓ Symbol check passed: ${signal.symbol} has ${openPositionsForSymbol}/${maxPerSymbol} positions`, true);
+
+    // ============================================================
+    // PHASE 3 FIX #1: ABSOLUTE CORRELATION CAP
+    // Prevents accumulation of correlated positions that add up to excessive risk
+    // ============================================================
+    
+    // Get ALL active positions for correlation check (not just same symbol)
+    const { data: allActivePositions, error: allPositionsError } = await supabase
+      .from('positions')
+      .select('id, symbol, side, quantity, entry_price')
+      .eq('user_id', user.id)
+      .eq('status', 'active');
+    
+    if (allPositionsError) {
+      logger.warn(`Failed to fetch all positions for correlation check: ${allPositionsError.message}`);
+    }
+    
+    if (allActivePositions && allActivePositions.length > 0) {
+      const signalSide = signal.signal_type === 'long' ? 'long' : 'short';
+      
+      // Check position correlation using shared module
+      const correlationCheck = checkPositionCorrelation(
+        signal.symbol,
+        signalSide,
+        allActivePositions.map(p => ({
+          symbol: p.symbol,
+          side: p.side,
+          quantity: p.quantity,
+          entry_price: p.entry_price
+        })),
+        CORRELATION_PARAMS.MAX_THRESHOLD,
+        CORRELATION_PARAMS.MAX_SAME_DIRECTION
+      );
+      
+      if (!correlationCheck.canOpen) {
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'CORRELATION_BLOCK', signal, null, {
+          reason: correlationCheck.reason,
+          riskScore: correlationCheck.riskScore,
+          correlatedPositions: correlationCheck.correlatedPositions
+        });
+        throw new Error(`Correlation risk too high: ${correlationCheck.reason}`);
+      }
+      
+      // Calculate total correlated exposure as percentage of portfolio
+      let totalCorrelatedExposure = 0;
+      for (const position of allActivePositions) {
+        const correlation = getKnownCorrelation(signal.symbol, position.symbol);
+        const positionValue = position.quantity * position.entry_price;
+        const positionSide = position.side === 'buy' ? 'long' : 'short';
+        
+        // Only count same-direction correlated positions
+        if (positionSide === signalSide && correlation >= 0.5) {
+          totalCorrelatedExposure += (positionValue * correlation);
+        }
+      }
+      
+      const correlatedExposurePercent = riskParams.portfolio_value > 0 
+        ? (totalCorrelatedExposure / riskParams.portfolio_value) * 100 
+        : 0;
+      
+      logger.info(`📊 Correlation Analysis: Risk score ${correlationCheck.riskScore.toFixed(0)}/100, Correlated exposure: ${correlatedExposurePercent.toFixed(2)}%`);
+      
+      // Check absolute correlation cap
+      if (correlatedExposurePercent >= CORRELATION_PARAMS.MAX_CORRELATED_EXPOSURE_PERCENT) {
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'CORRELATED_EXPOSURE_CAP', signal, null, {
+          correlatedExposurePercent,
+          maxAllowed: CORRELATION_PARAMS.MAX_CORRELATED_EXPOSURE_PERCENT,
+          correlatedPositions: correlationCheck.correlatedPositions
+        });
+        throw new Error(`Correlated portfolio exposure (${correlatedExposurePercent.toFixed(2)}%) exceeds maximum (${CORRELATION_PARAMS.MAX_CORRELATED_EXPOSURE_PERCENT}%)`);
+      }
+      
+      // Log correlation check result
+      if (correlationCheck.correlatedPositions.length > 0) {
+        logger.info(`   Correlated with: ${correlationCheck.correlatedPositions.map(p => `${p.symbol} (${(p.correlation * 100).toFixed(0)}%)`).join(', ')}`);
+      }
+      logger.validation(`✓ Correlation check passed: Risk ${correlationCheck.riskScore.toFixed(0)}/100, Exposure ${correlatedExposurePercent.toFixed(2)}%`, true);
+    } else {
+      logger.info(`📊 Correlation check skipped: No existing positions`);
+    }
 
     // ============================================================
     // EARLY DUPLICATE CHECK - Prevent race condition by checking BEFORE order execution
@@ -1425,30 +1506,148 @@ serve(async (req) => {
         fills: [{ price: currentPrice.toString() }],
       };
     } else {
-      // Execute real trade on Binance
-      const timestamp = Date.now();
-      const queryString = `symbol=${signal.symbol}&side=${side}&type=MARKET&quantity=${quantity}&timestamp=${timestamp}`;
-      const signatureHex = await createBinanceSignature(queryString, binanceApiSecret!);
+      // ============================================================
+      // PHASE 3 FIX #2: ORDER EXECUTION WITH RETRY LOGIC & PARTIAL FILL HANDLING
+      // - Bounded retry for transient errors (max 2 retries)
+      // - Partial fill reconciliation (adjust quantity to actual executed)
+      // - Explicit status checking
+      // ============================================================
+      let retryCount = 0;
+      let lastError: Error | null = null;
+      
+      while (retryCount <= ORDER_EXECUTION_PARAMS.MAX_RETRIES) {
+        try {
+          const timestamp = Date.now();
+          const queryString = `symbol=${signal.symbol}&side=${side}&type=MARKET&quantity=${quantity}&timestamp=${timestamp}`;
+          const signatureHex = await createBinanceSignature(queryString, binanceApiSecret!);
 
-      const orderResponse = await fetch(
-        `https://api.binance.com/api/v3/order?${queryString}&signature=${signatureHex}`,
-        {
-          method: 'POST',
-          headers: {
-            'X-MBX-APIKEY': binanceApiKey!,
-          },
+          const orderResponse = await fetch(
+            `https://api.binance.com/api/v3/order?${queryString}&signature=${signatureHex}`,
+            {
+              method: 'POST',
+              headers: {
+                'X-MBX-APIKEY': binanceApiKey!,
+              },
+            }
+          );
+
+          if (!orderResponse.ok) {
+            const errorText = await orderResponse.text();
+            let errorData: any = {};
+            try {
+              errorData = JSON.parse(errorText);
+            } catch {
+              errorData = { msg: errorText, code: -1 };
+            }
+            
+            // Check if this is a transient error that warrants retry
+            const isTransientError = ORDER_EXECUTION_PARAMS.TRANSIENT_ERROR_CODES.includes(errorData.code);
+            
+            if (isTransientError && retryCount < ORDER_EXECUTION_PARAMS.MAX_RETRIES) {
+              retryCount++;
+              logger.warn(`⚠️ Transient error (code ${errorData.code}), retrying ${retryCount}/${ORDER_EXECUTION_PARAMS.MAX_RETRIES}...`);
+              await new Promise(resolve => setTimeout(resolve, ORDER_EXECUTION_PARAMS.RETRY_DELAY_MS));
+              continue;
+            }
+            
+            logger.error(`Binance API error: ${errorText}`);
+            throw new Error(`Failed to place order: ${errorData.msg || errorText}`);
+          }
+
+          orderData = await orderResponse.json();
+          
+          // ============================================================
+          // EXPLICIT STATUS CHECK - Handle all possible order statuses
+          // ============================================================
+          const orderStatus = orderData.status;
+          logger.trade(`Order response: status=${orderStatus}, orderId=${orderData.orderId}`);
+          
+          if (orderStatus === 'REJECTED') {
+            throw new Error(`Order rejected by exchange: ${JSON.stringify(orderData)}`);
+          }
+          
+          if (orderStatus === 'EXPIRED') {
+            throw new Error(`Order expired before fill: ${JSON.stringify(orderData)}`);
+          }
+          
+          if (orderStatus === 'CANCELED') {
+            throw new Error(`Order was canceled: ${JSON.stringify(orderData)}`);
+          }
+          
+          // Handle partial fills
+          if (orderStatus === 'PARTIALLY_FILLED') {
+            const executedQty = parseFloat(orderData.executedQty || '0');
+            const origQty = parseFloat(orderData.origQty || quantity.toString());
+            const fillRatio = origQty > 0 ? executedQty / origQty : 0;
+            
+            logger.warn(`⚠️ PARTIAL FILL: ${executedQty}/${origQty} (${(fillRatio * 100).toFixed(1)}% filled)`);
+            
+            if (fillRatio < ORDER_EXECUTION_PARAMS.MIN_FILL_RATIO) {
+              // Fill ratio too low - cancel remaining and abort
+              logger.error(`❌ Partial fill ratio ${(fillRatio * 100).toFixed(1)}% below minimum ${ORDER_EXECUTION_PARAMS.MIN_FILL_RATIO * 100}%`);
+              
+              // Try to cancel remaining order
+              try {
+                const cancelTimestamp = Date.now();
+                const cancelQueryString = `symbol=${signal.symbol}&orderId=${orderData.orderId}&timestamp=${cancelTimestamp}`;
+                const cancelSignature = await createBinanceSignature(cancelQueryString, binanceApiSecret!);
+                
+                await fetch(
+                  `https://api.binance.com/api/v3/order?${cancelQueryString}&signature=${cancelSignature}`,
+                  {
+                    method: 'DELETE',
+                    headers: { 'X-MBX-APIKEY': binanceApiKey! },
+                  }
+                );
+                logger.info(`Canceled remaining order ${orderData.orderId}`);
+              } catch (cancelError) {
+                logger.warn(`Failed to cancel remaining order: ${cancelError}`);
+              }
+              
+              throw new Error(`Partial fill ratio too low (${(fillRatio * 100).toFixed(1)}%) - order canceled`);
+            }
+            
+            // Accept partial fill but adjust quantity
+            quantity = roundToStepSize(executedQty, symbolFilters.stepSize);
+            logger.warn(`✓ Accepting partial fill - adjusted quantity to ${quantity}`);
+          } else if (orderStatus !== 'FILLED') {
+            // Unexpected status
+            logger.warn(`⚠️ Unexpected order status: ${orderStatus}`);
+          }
+          
+          logger.trade('Order executed: ' + JSON.stringify(orderData));
+          
+          // Calculate executed price from fills
+          if (orderData.fills && orderData.fills.length > 0) {
+            // Weight average price by quantity for multi-fill orders
+            let totalValue = 0;
+            let totalQty = 0;
+            for (const fill of orderData.fills) {
+              const fillPrice = parseFloat(fill.price);
+              const fillQty = parseFloat(fill.qty);
+              totalValue += fillPrice * fillQty;
+              totalQty += fillQty;
+            }
+            executedPrice = totalQty > 0 ? totalValue / totalQty : currentPrice;
+          } else {
+            executedPrice = currentPrice;
+          }
+          
+          // Break out of retry loop on success
+          break;
+          
+        } catch (execError) {
+          lastError = execError instanceof Error ? execError : new Error(String(execError));
+          
+          // If this was a retryable error, it's already handled above
+          // This catch is for non-retryable errors
+          if (retryCount >= ORDER_EXECUTION_PARAMS.MAX_RETRIES) {
+            throw lastError;
+          }
+          
+          throw lastError;
         }
-      );
-
-      if (!orderResponse.ok) {
-        const errorText = await orderResponse.text();
-        logger.error(`Binance API error: ${errorText}`);
-        throw new Error(`Failed to place order: ${errorText}`);
       }
-
-      orderData = await orderResponse.json();
-      logger.trade('Order executed: ' + JSON.stringify(orderData));
-      executedPrice = parseFloat(orderData.fills?.[0]?.price || currentPrice);
 
       // ============================================================
       // POST-EXECUTION SLIPPAGE VALIDATION
