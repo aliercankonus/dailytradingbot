@@ -287,6 +287,42 @@ serve(async (req) => {
       throw new Error('Signal not found');
     }
 
+    // ============================================================
+    // PHASE 1 FIX #1: SIGNAL EXPIRY ENFORCEMENT
+    // Check BEFORE any heavy computation - expired signals are stale
+    // ============================================================
+    if (signal.expires_at) {
+      const expiryTime = new Date(signal.expires_at).getTime();
+      const now = Date.now();
+      if (now > expiryTime) {
+        const expiredAgo = Math.round((now - expiryTime) / 1000 / 60); // minutes ago
+        logger.gate(`⛔ SIGNAL EXPIRED: Signal expired ${expiredAgo} minutes ago`, false);
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'SIGNAL_EXPIRED', signal, null, { 
+          expiresAt: signal.expires_at, 
+          expiredAgoMinutes: expiredAgo,
+          reason: 'Signal expired - market conditions may have changed'
+        });
+        throw new Error(`Signal expired ${expiredAgo} minutes ago - market conditions may have changed`);
+      }
+      logger.validation(`✓ Signal expiry check passed: expires in ${Math.round((expiryTime - now) / 1000 / 60)} minutes`, true);
+    }
+
+    // ============================================================
+    // PHASE 1 FIX #2: SIGNAL OWNERSHIP VALIDATION
+    // Prevent cross-user execution - security critical
+    // Service role bypasses RLS, so we must verify ownership here
+    // ============================================================
+    if (signal.user_id !== user.id) {
+      logger.error(`⛔ SECURITY: User ${user.id} attempted to execute signal owned by ${signal.user_id}`);
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'UNAUTHORIZED_SIGNAL', signal, null, {
+        attemptedBy: user.id,
+        signalOwner: signal.user_id,
+        reason: 'Signal ownership mismatch - security violation'
+      });
+      throw new Error('Unauthorized: Signal does not belong to this user');
+    }
+    logger.validation(`✓ Signal ownership validated: signal belongs to requesting user`, true);
+
     logger.signal(`Executing trade for signal from strategy: ${signal.strategy_name || 'Unknown'}`);
 
     // ============================================================
