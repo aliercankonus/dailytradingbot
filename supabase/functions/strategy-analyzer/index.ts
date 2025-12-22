@@ -16,6 +16,10 @@ import {
 } from "../_shared/scoring.ts";
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
+import { createLogger, logError, LOG_CATEGORIES } from "../_shared/logging.ts";
+
+// Create logger for this function
+const logger = createLogger('strategy-analyzer');
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -31,7 +35,7 @@ const analyzeRejectionWithAI = async (
 ) => {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) {
-    console.log(`🤖 AI analysis skipped for ${rejection.symbol}: API key not configured`);
+    logger.forSymbol(rejection.symbol).debug(`🤖 AI analysis skipped: API key not configured`);
     return;
   }
 
@@ -88,14 +92,14 @@ Trend Data: ${JSON.stringify(rejection.trend_data, null, 2)}`;
     });
 
     if (!response.ok) {
-      console.warn(`🤖 AI analysis failed for ${rejection.symbol}: HTTP ${response.status}`);
+      logger.forSymbol(rejection.symbol).warn(`🤖 AI analysis failed: HTTP ${response.status}`);
       return;
     }
 
     const data = await response.json();
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
     if (!toolCall) {
-      console.warn(`🤖 AI analysis: No tool call in response for ${rejection.symbol}`);
+      logger.forSymbol(rejection.symbol).warn(`🤖 AI analysis: No tool call in response`);
       return;
     }
 
@@ -108,12 +112,12 @@ Trend Data: ${JSON.stringify(rejection.trend_data, null, 2)}`;
       .eq("id", rejectionId);
 
     if (error) {
-      console.error(`🤖 Failed to store AI analysis for ${rejection.symbol}:`, error);
+      logger.forSymbol(rejection.symbol).error(`🤖 Failed to store AI analysis: ${error.message}`);
     } else {
-      console.log(`🤖 AI analysis stored for ${rejection.symbol}: isValid=${aiResult.isValid}, confidence=${aiResult.confidence}`);
+      logger.forSymbol(rejection.symbol).info(`🤖 AI analysis stored: isValid=${aiResult.isValid}, confidence=${aiResult.confidence}`);
     }
   } catch (error) {
-    console.error(`🤖 AI analysis error for ${rejection.symbol}:`, error);
+    logger.forSymbol(rejection.symbol).error(`🤖 AI analysis error: ${error}`);
   }
 };
 
@@ -141,7 +145,7 @@ const logRejectionWithAI = async (
     .single();
 
   if (error) {
-    console.error(`Failed to log rejection for ${symbol}:`, error);
+    logger.forSymbol(symbol).error(`Failed to log rejection: ${error.message}`);
     return;
   }
 
@@ -153,7 +157,7 @@ const logRejectionWithAI = async (
       rejection_reason: rejectionReason,
       filters_status: filtersStatus,
       trend_data: trendData,
-    }).catch(err => console.error(`AI analysis failed for ${symbol}:`, err));
+    }).catch(err => logger.forSymbol(symbol).error(`AI analysis failed: ${err}`));
   }
 };
 
@@ -970,9 +974,9 @@ serve(async (req) => {
         
         if (hasEnoughTrades && hasEnoughDiversity && isBelowThreshold) {
           disabledSymbols.add(symbol);
-          console.log(`⛔ SYMBOL FILTER: ${symbol} disabled - win rate ${stats.winRate.toFixed(1)}% < ${SYMBOL_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades across ${stats.uniqueStrategies.size} strategies)`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REJECTION} SYMBOL FILTER: disabled - win rate ${stats.winRate.toFixed(1)}% < ${SYMBOL_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades across ${stats.uniqueStrategies.size} strategies)`);
         } else if (hasEnoughTrades && !hasEnoughDiversity && isBelowThreshold) {
-          console.log(`⚠️ SYMBOL SKIP: ${symbol} low win rate ${stats.winRate.toFixed(1)}% but only ${stats.uniqueStrategies.size} strategy(s) - need ${SYMBOL_MIN_UNIQUE_STRATEGIES}+ for filter`);
+          logger.forSymbol(symbol).warn(`SYMBOL SKIP: low win rate ${stats.winRate.toFixed(1)}% but only ${stats.uniqueStrategies.size} strategy(s) - need ${SYMBOL_MIN_UNIQUE_STRATEGIES}+ for filter`);
         }
       }
       
@@ -985,13 +989,13 @@ serve(async (req) => {
           if (hasEnoughTrades && hasEnoughDiversity) {
             if (stats.winRate < STRATEGY_WIN_RATE_THRESHOLD) {
               disabledStrategiesByRegime.get(regime)!.add(strategy);
-              console.log(`⛔ STRATEGY FILTER [${regime.toUpperCase()}]: "${strategy}" disabled - win rate ${stats.winRate.toFixed(1)}% < ${STRATEGY_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades across ${stats.uniqueSymbols.size} symbols)`);
+              logger.info(`${LOG_CATEGORIES.REJECTION} STRATEGY FILTER [${regime.toUpperCase()}]: "${strategy}" disabled - win rate ${stats.winRate.toFixed(1)}% < ${STRATEGY_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades across ${stats.uniqueSymbols.size} symbols)`);
             } else if (stats.winRate >= STRATEGY_HIGH_PERFORMER_THRESHOLD) {
               highPerformingStrategiesByRegime.get(regime)!.add(strategy);
-              console.log(`⭐ STRATEGY BOOST [${regime.toUpperCase()}]: "${strategy}" is high performer - win rate ${stats.winRate.toFixed(1)}% (${stats.wins}/${stats.total} trades across ${stats.uniqueSymbols.size} symbols)`);
+              logger.info(`${LOG_CATEGORIES.QUALITY} STRATEGY BOOST [${regime.toUpperCase()}]: "${strategy}" is high performer - win rate ${stats.winRate.toFixed(1)}% (${stats.wins}/${stats.total} trades across ${stats.uniqueSymbols.size} symbols)`);
             }
           } else if (hasEnoughTrades && !hasEnoughDiversity && stats.winRate < STRATEGY_WIN_RATE_THRESHOLD) {
-            console.log(`⚠️ STRATEGY SKIP [${regime.toUpperCase()}]: "${strategy}" low win rate ${stats.winRate.toFixed(1)}% but only ${stats.uniqueSymbols.size} symbol(s) - need ${STRATEGY_MIN_UNIQUE_SYMBOLS}+ for filter`);
+            logger.warn(`STRATEGY SKIP [${regime.toUpperCase()}]: "${strategy}" low win rate ${stats.winRate.toFixed(1)}% but only ${stats.uniqueSymbols.size} symbol(s) - need ${STRATEGY_MIN_UNIQUE_SYMBOLS}+ for filter`);
           }
         }
       }
@@ -999,8 +1003,8 @@ serve(async (req) => {
     
     // Filter out disabled symbols
     const activeSymbols = symbols.filter(s => !disabledSymbols.has(s.symbol));
-    console.log(`📊 Symbol filter: ${symbols.length} total → ${activeSymbols.length} active (${disabledSymbols.size} disabled)`);
-    console.log(`📊 Strategy filter by regime: trending=${disabledStrategiesByRegime.get("trending")!.size} disabled/${highPerformingStrategiesByRegime.get("trending")!.size} high, ranging=${disabledStrategiesByRegime.get("ranging")!.size} disabled/${highPerformingStrategiesByRegime.get("ranging")!.size} high`);
+    logger.info(`${LOG_CATEGORIES.SUMMARY} Symbol filter: ${symbols.length} total → ${activeSymbols.length} active (${disabledSymbols.size} disabled)`);
+    logger.info(`${LOG_CATEGORIES.SUMMARY} Strategy filter by regime: trending=${disabledStrategiesByRegime.get("trending")!.size} disabled/${highPerformingStrategiesByRegime.get("trending")!.size} high, ranging=${disabledStrategiesByRegime.get("ranging")!.size} disabled/${highPerformingStrategiesByRegime.get("ranging")!.size} high`);
 
     // Fetch custom strategies (REQUIRED)
     const { data: customStrategies, error: strategiesError } = await supabase
@@ -1032,7 +1036,7 @@ serve(async (req) => {
       return highPerformingStrategiesByRegime.get(regime)?.has(strategyName) || false;
     };
     
-    console.log(`📊 ${activeSymbols.length} symbols | ${userStrategies.length} user strategies + ${builtInToInclude.length} built-in templates = ${allStrategies.length} total (regime-aware filtering applied per symbol)`);
+    logger.info(`${LOG_CATEGORIES.SUMMARY} ${activeSymbols.length} symbols | ${userStrategies.length} user strategies + ${builtInToInclude.length} built-in templates = ${allStrategies.length} total (regime-aware filtering applied per symbol)`);
 
     // Fetch recent signals and active positions
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
@@ -1055,7 +1059,7 @@ serve(async (req) => {
     });
     
     // Log active positions for correlation analysis
-    console.log(`📊 Active positions for correlation check: ${activePositions?.length || 0} positions`);
+    logger.info(`${LOG_CATEGORIES.SUMMARY} Active positions for correlation check: ${activePositions?.length || 0} positions`);
 
     // Helper functions
     const calculateRSI = (prices: number[], period = 14): number => {
@@ -1181,7 +1185,7 @@ serve(async (req) => {
           klines: klines,  // Keep full kline data for order flow analysis
         };
       } catch (error) {
-        console.error(`Failed to fetch klines for ${symbol}:`, error);
+        logger.forSymbol(symbol).error(`Failed to fetch klines: ${error}`);
         return { prices: [], volumes: [], klines: [] };
       }
     };
@@ -1208,7 +1212,7 @@ serve(async (req) => {
       return !existingSignalsSet.has(symbol) && count < riskParams.max_trades_per_symbol;
     });
 
-    console.log(`🚀 Fetching trend data for ${eligibleSymbols.length} eligible symbols (after win rate filter)`);
+    logger.info(`${LOG_CATEGORIES.SIGNAL} Fetching trend data for ${eligibleSymbols.length} eligible symbols (after win rate filter)`);
 
     const trendResults = await Promise.all(eligibleSymbols.map(async (symbol) => {
       try {
@@ -1222,7 +1226,7 @@ serve(async (req) => {
       if (trendData) trendDataMap.set(symbol, trendData);
     });
 
-    console.log(`✅ Got trend data for ${trendDataMap.size} symbols`);
+    logger.success(`Got trend data for ${trendDataMap.size} symbols`);
 
     // Track statistics
     const signals: SignalData[] = [];
@@ -1457,25 +1461,24 @@ serve(async (req) => {
           intendedTradeDirection = "long";
           isReversalEntry = true;
           reversalPositionSizeOverride = (riskParams.early_reversal_position_size_percent || 40) / 100;
-          console.log(`🔄 ${symbol}: BULLISH REVERSAL OVERRIDE - Switching from SHORT to LONG at oversold K=${stochRsiK4h.toFixed(1)}`);
-          console.log(`   StochRSI rising: K=${stochRsiK4h.toFixed(1)} > D=${stochRsiD4h.toFixed(1)}, 1h bullish: ${has1hBullishTurnCheck}, divergence: ${has1hBullishDivergenceCheck}`);
-          console.log(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)}), Position size: ${(reversalPositionSizeOverride * 100).toFixed(0)}%`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} BULLISH REVERSAL OVERRIDE - Switching from SHORT to LONG at oversold K=${stochRsiK4h.toFixed(1)}`);
+          logger.forSymbol(symbol).debug(`   StochRSI rising: K=${stochRsiK4h.toFixed(1)} > D=${stochRsiD4h.toFixed(1)}, 1h bullish: ${has1hBullishTurnCheck}, divergence: ${has1hBullishDivergenceCheck}`);
+          logger.forSymbol(symbol).debug(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)}), Position size: ${(reversalPositionSizeOverride * 100).toFixed(0)}%`);
         } else if (overrideToShortReversal && trend === "bullish") {
           intendedTradeDirection = "short";
           isReversalEntry = true;
           reversalPositionSizeOverride = (riskParams.early_reversal_position_size_percent || 40) / 100;
-          console.log(`🔄 ${symbol}: BEARISH REVERSAL OVERRIDE - Switching from LONG to SHORT at overbought K=${stochRsiK4h.toFixed(1)}`);
-          console.log(`   StochRSI falling: K=${stochRsiK4h.toFixed(1)} < D=${stochRsiD4h.toFixed(1)}, 1h bearish: ${has1hBearishTurnCheck}, divergence: ${hasBearishDivergence}`);
-          console.log(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)}), Position size: ${(reversalPositionSizeOverride * 100).toFixed(0)}%`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} BEARISH REVERSAL OVERRIDE - Switching from LONG to SHORT at overbought K=${stochRsiK4h.toFixed(1)}`);
+          logger.forSymbol(symbol).debug(`   StochRSI falling: K=${stochRsiK4h.toFixed(1)} < D=${stochRsiD4h.toFixed(1)}, 1h bearish: ${has1hBearishTurnCheck}, divergence: ${hasBearishDivergence}`);
+          logger.forSymbol(symbol).debug(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)}), Position size: ${(reversalPositionSizeOverride * 100).toFixed(0)}%`);
         } else if (isOversoldReversalCandidate && trend === "bearish" && !overrideToLongReversal) {
-          // Log why reversal override was NOT triggered
-          console.log(`📊 ${symbol}: Oversold but NO reversal override - K=${stochRsiK4h.toFixed(1)} rising:${stochRsiTurningUpCheck} 1hBullish:${has1hBullishTurnCheck} divergence:${has1hBullishDivergenceCheck} BBLower:${bollingerAtLowerCheck}`);
+          logger.forSymbol(symbol).debug(`Oversold but NO reversal override - K=${stochRsiK4h.toFixed(1)} rising:${stochRsiTurningUpCheck} 1hBullish:${has1hBullishTurnCheck} divergence:${has1hBullishDivergenceCheck} BBLower:${bollingerAtLowerCheck}`);
         }
         
         // Apply reversal position size override if direction was overridden
         if (isReversalEntry && reversalPositionSizeOverride < 1.0) {
           reversalPositionMultiplier = Math.min(reversalPositionMultiplier, reversalPositionSizeOverride);
-          console.log(`📉 ${symbol}: Reversal entry - position size reduced to ${(reversalPositionMultiplier * 100).toFixed(0)}%`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Reversal entry - position size reduced to ${(reversalPositionMultiplier * 100).toFixed(0)}%`);
         }
         
         // ===== SMART EXCEPTION FOR LONG AT OVERBOUGHT =====
@@ -1489,7 +1492,7 @@ serve(async (req) => {
           // MANDATORY: StochRSI must be rising (K > D) for any extreme overbought entry
           if (!stochRsiRising) {
             rejectedByStochRsiExtreme++;
-            console.log(`⛔ ${symbol}: Blocking LONG - StochRSI not rising at overbought (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - StochRSI not rising at overbought (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
             await supabase.from("signal_rejection_log").insert({
               user_id: userId, symbol,
               rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought, StochRSI NOT rising (K <= D)`,
@@ -1502,7 +1505,7 @@ serve(async (req) => {
           // MANDATORY: No bearish divergence allowed at extreme overbought
           if (hasBearishDivergence) {
             rejectedByStochRsiExtreme++;
-            console.log(`⛔ ${symbol}: Blocking LONG - Bearish divergence at overbought (K=${stochRsiK4h.toFixed(1)})`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - Bearish divergence at overbought (K=${stochRsiK4h.toFixed(1)})`);
             await supabase.from("signal_rejection_log").insert({
               user_id: userId, symbol,
               rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought with bearish divergence`,
@@ -1531,17 +1534,16 @@ serve(async (req) => {
             stochRsiRising;
           
           if (allowExtremeOverbought) {
-            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG (strong uptrend both TFs, breakout, StochRSI rising, momentum ${momentum?.state})`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG (strong uptrend both TFs, breakout, StochRSI rising, momentum ${momentum?.state})`);
           } else if (alignedTrendOverride) {
-            // Allow with reduced position size (50%)
             reversalPositionMultiplier = Math.min(reversalPositionMultiplier, 0.5);
-            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG with 50% position (aligned 4h+1h bullish, ADX=${adx.toFixed(1)}, StochRSI rising)`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG with 50% position (aligned 4h+1h bullish, ADX=${adx.toFixed(1)}, StochRSI rising)`);
           } else {
             rejectedByStochRsiExtreme++;
             const blockReason = !momentumAcceptable 
               ? `momentum not acceptable (confirms=${momentum?.confirms}, state=${momentum?.state})` 
               : "failed smart exception conditions";
-            console.log(`⛔ ${symbol}: Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} overbought | ${blockReason}`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} overbought | ${blockReason}`);
             await supabase.from("signal_rejection_log").insert({
               user_id: userId, symbol,
               rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought, ${blockReason}`,
@@ -1582,15 +1584,14 @@ serve(async (req) => {
             bollingerAtUpper;
           
           if (allowBearishReversal) {
-            // Reversal entries get reduced position size (configurable, default 40%)
             const reversalSizePercent = (riskParams.early_reversal_position_size_percent || 40) / 100;
             reversalPositionMultiplier = Math.min(reversalPositionMultiplier, reversalSizePercent);
             
-            console.log(`🔄 ${symbol}: BEARISH REVERSAL SHORT ALLOWED at overbought K=${stochRsiK4h.toFixed(1)}`);
-            console.log(`   StochRSI falling: K=${stochRsiK4h.toFixed(1)} < D=${stochRsiD4h.toFixed(1)}`);
-            console.log(`   1h bearish turn: ${has1hBearishTurn}, Bearish divergence: ${hasBearishDivergence}`);
-            console.log(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)})`);
-            console.log(`   Position size reduced to ${(reversalSizePercent * 100).toFixed(0)}% for reversal entry`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} BEARISH REVERSAL SHORT ALLOWED at overbought K=${stochRsiK4h.toFixed(1)}`);
+            logger.forSymbol(symbol).debug(`   StochRSI falling: K=${stochRsiK4h.toFixed(1)} < D=${stochRsiD4h.toFixed(1)}`);
+            logger.forSymbol(symbol).debug(`   1h bearish turn: ${has1hBearishTurn}, Bearish divergence: ${hasBearishDivergence}`);
+            logger.forSymbol(symbol).debug(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)})`);
+            logger.forSymbol(symbol).debug(`   Position size reduced to ${(reversalSizePercent * 100).toFixed(0)}% for reversal entry`);
           }
         }
 
@@ -1605,7 +1606,7 @@ serve(async (req) => {
           // MANDATORY: StochRSI must be falling (K < D) for any extreme oversold entry
           if (!stochRsiFalling) {
             rejectedByStochRsiExtreme++;
-            console.log(`⛔ ${symbol}: Blocking SHORT - StochRSI not falling at oversold (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking SHORT - StochRSI not falling at oversold (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
             await supabase.from("signal_rejection_log").insert({
               user_id: userId, symbol,
               rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold, StochRSI NOT falling (K >= D)`,
@@ -1618,7 +1619,7 @@ serve(async (req) => {
           // MANDATORY: No bullish divergence allowed at extreme oversold
           if (hasBullishDivergence) {
             rejectedByStochRsiExtreme++;
-            console.log(`⛔ ${symbol}: Blocking SHORT - Bullish divergence at oversold (K=${stochRsiK4h.toFixed(1)})`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking SHORT - Bullish divergence at oversold (K=${stochRsiK4h.toFixed(1)})`);
             await supabase.from("signal_rejection_log").insert({
               user_id: userId, symbol,
               rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold with bullish divergence`,
@@ -1649,17 +1650,16 @@ serve(async (req) => {
             stochRsiFalling;
           
           if (allowExtremeOversold) {
-            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme oversold - ALLOWING SHORT (strong downtrend both TFs, breakdown, StochRSI falling, momentum ${momentum?.state})`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme oversold - ALLOWING SHORT (strong downtrend both TFs, breakdown, StochRSI falling, momentum ${momentum?.state})`);
           } else if (alignedTrendOverride) {
-            // Allow with reduced position size (50%)
             reversalPositionMultiplier = Math.min(reversalPositionMultiplier, 0.5);
-            console.log(`📊 ${symbol}: 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme oversold - ALLOWING SHORT with 50% position (aligned 4h+1h bearish, ADX=${adx.toFixed(1)}, StochRSI falling)`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme oversold - ALLOWING SHORT with 50% position (aligned 4h+1h bearish, ADX=${adx.toFixed(1)}, StochRSI falling)`);
           } else {
             rejectedByStochRsiExtreme++;
             const blockReason = !momentumAcceptable 
               ? `momentum not acceptable (confirms=${momentum?.confirms}, state=${momentum?.state})` 
               : "failed smart exception conditions";
-            console.log(`⛔ ${symbol}: Blocking SHORT - 4h StochRSI K=${stochRsiK4h.toFixed(1)} oversold | ${blockReason}`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking SHORT - 4h StochRSI K=${stochRsiK4h.toFixed(1)} oversold | ${blockReason}`);
             await supabase.from("signal_rejection_log").insert({
               user_id: userId, symbol,
               rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold, ${blockReason}`,
@@ -2488,7 +2488,7 @@ serve(async (req) => {
         
         // Log correlation info if there are correlated positions
         if (correlationCheck.correlatedPositions.length > 0) {
-          console.log(`🔗 ${symbol}: Correlation check PASSED (risk: ${correlationCheck.riskScore.toFixed(0)}%, correlated: ${correlationCheck.correlatedPositions.map(p => `${p.symbol}:${(p.correlation * 100).toFixed(0)}%`).join(', ')})`);
+          logger.forSymbol(symbol).info(`🔗 Correlation check PASSED (risk: ${correlationCheck.riskScore.toFixed(0)}%, correlated: ${correlationCheck.correlatedPositions.map(p => `${p.symbol}:${(p.correlation * 100).toFixed(0)}%`).join(', ')})`);
         }
 
         // Calculate position size from quality score, apply recovery mode reduction
@@ -2499,12 +2499,12 @@ serve(async (req) => {
         if (correlationCheck.riskScore > 30) {
           const correlationAdjustment = getCorrelationAdjustedSize(1.0, correlationCheck.riskScore);
           positionSizeMultiplier *= correlationAdjustment;
-          console.log(`🔗 ${symbol}: Correlation adjustment - position size reduced to ${(correlationAdjustment * 100).toFixed(0)}% due to ${correlationCheck.riskScore.toFixed(0)}% correlation risk`);
+          logger.forSymbol(symbol).info(`🔗 Correlation adjustment - position size reduced to ${(correlationAdjustment * 100).toFixed(0)}% due to ${correlationCheck.riskScore.toFixed(0)}% correlation risk`);
         }
         
         if (isInRecoveryMode) {
           positionSizeMultiplier *= recoveryPositionSizeMultiplier;
-          console.log(`🔄 ${symbol}: Recovery mode - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Recovery mode - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         const strategyPositionSize = (strategy.risk_settings?.positionSizePercent || 100) * positionSizeMultiplier;
 
@@ -2563,17 +2563,17 @@ serve(async (req) => {
           .single();
 
         if (insertError) {
-          console.log(`❌ ${symbol}: Signal insert error: ${insertError.message}`);
+          logger.forSymbol(symbol).error(`Signal insert error: ${insertError.message}`);
         }
 
         if (!insertError && insertedSignal) {
           signals.push({ ...signal, id: insertedSignal.id });
           totalSignalsGenerated++;
           existingSignalsSet.add(symbol);
-          console.log(`✅ ${signalType.toUpperCase()} ${symbol} via "${strategy.name}" | Quality: ${qualityScore} | Entry: ${pullbackAnalysis.isPullback ? "PULLBACK" : "STANDARD"}`);
+          logger.forSymbol(symbol).success(`${signalType.toUpperCase()} via "${strategy.name}" | Quality: ${qualityScore} | Entry: ${pullbackAnalysis.isPullback ? "PULLBACK" : "STANDARD"}`);
         }
       } catch (error) {
-        console.error(`Error analyzing ${symbol}:`, error);
+        logger.forSymbol(symbol).error(`Error analyzing: ${error}`);
       }
     }
 
@@ -2591,15 +2591,15 @@ serve(async (req) => {
           });
           if (!executeError) {
             executedSignals++;
-            console.log(`✓ Executed ${signal.symbol} (quality: ${signal.qualityScore})`);
+            logger.forSymbol(signal.symbol).success(`Executed (quality: ${signal.qualityScore})`);
           }
         } catch (error) {
-          console.error("Error executing signal:", error);
+          logger.error(`Error executing signal: ${error}`);
         }
       }
     }
 
-    console.log(`📈 Summary: ${totalSignalsGenerated} signals | Rejected: hardGates=${rejectedByHardGates} regime=${rejectedByRegime} reversal=${rejectedByReversalRisk} stochRsiExtreme=${rejectedByStochRsiExtreme} quality=${rejectedByQuality} strategy=${rejectedByStrategy} | StrongTrendException: used=${strongTrendExceptionUsed} notApplicable=${strongTrendExceptionNotApplicable}`);
+    logger.summary(`${totalSignalsGenerated} signals | Rejected: hardGates=${rejectedByHardGates} regime=${rejectedByRegime} reversal=${rejectedByReversalRisk} stochRsiExtreme=${rejectedByStochRsiExtreme} quality=${rejectedByQuality} strategy=${rejectedByStrategy} | StrongTrendException: used=${strongTrendExceptionUsed} notApplicable=${strongTrendExceptionNotApplicable}`);
 
     return new Response(JSON.stringify({
       signals,
@@ -2637,7 +2637,7 @@ serve(async (req) => {
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (error) {
-    console.error("Error in strategy analyzer:", error);
+    logError(logger, error, 'strategy-analyzer error');
     return new Response(JSON.stringify({
       error: error instanceof Error ? error.message : "Failed to analyze strategies",
       signals: [],
