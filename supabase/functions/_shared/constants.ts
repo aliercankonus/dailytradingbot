@@ -145,6 +145,53 @@ export const SYMBOL_PARAMS = {
   MIN_TRADES_FOR_FILTER: 10,
 } as const;
 
+// ============= EMERGENCY EXIT PARAMETERS =============
+// Thresholds for emergency exit conditions in position monitoring
+export const EMERGENCY_EXIT_PARAMS = {
+  // Flash crash: sudden adverse price move requiring immediate exit
+  FLASH_CRASH_THRESHOLD_PERCENT: 5.0,
+  // Volatility spike: ATR ratio above normal requiring caution
+  VOLATILITY_SPIKE_THRESHOLD: 2.0,
+  // Extreme volatility: ATR ratio requiring immediate exit
+  EXTREME_VOLATILITY_THRESHOLD: 3.0,
+  // Volume spike: unusual volume indicating potential reversal
+  VOLUME_SPIKE_THRESHOLD: 3.0,
+  // Decay velocity: rapid profit loss per minute triggering exit
+  DECAY_VELOCITY_EXIT_PER_MINUTE: 0.03,
+} as const;
+
+// ============= EXIT THRESHOLDS =============
+// Thresholds for various exit conditions in position monitoring
+export const EXIT_THRESHOLDS = {
+  // Minimum loss % before reversal risk exits apply
+  MIN_LOSS_FOR_REVERSAL_EXIT_PERCENT: -0.5,
+  // Minimum position age (hours) before reversal exits apply
+  MIN_AGE_FOR_REVERSAL_EXIT_HOURS: 1.0,
+  // Early warning exit: minimum loss % before early warning applies
+  EARLY_WARNING_MIN_LOSS_PERCENT: -1.0,
+  // Early warning exit: 4h confidence must be below this
+  EARLY_WARNING_MIN_CONFIDENCE_4H: 50,
+  // Trend exit: confidence must be at or above this for trend-based exit
+  TREND_CONFIDENCE_EXIT: 65,
+  // Break-even: minimum distance % from current price for BE stop
+  BREAK_EVEN_MIN_DISTANCE_PERCENT: 0.5,
+  // Time-based exit: minimum P&L % for stale losing position exit
+  TIME_BASED_MIN_PNL_PERCENT: -0.5,
+} as const;
+
+// ============= PARTIAL TAKE PROFIT PARAMETERS =============
+// Professional ladder exit system for partial position closes
+export const PARTIAL_TP_PARAMS = {
+  // TP1: Close at 33% of distance to full TP
+  TP1_DISTANCE_PERCENT: 33,
+  // TP1: Close this percentage of position
+  TP1_CLOSE_PERCENT: 50,
+  // TP2: Close at 66% of distance to full TP
+  TP2_DISTANCE_PERCENT: 66,
+  // TP2: Close this percentage of remaining position
+  TP2_CLOSE_PERCENT: 60,
+} as const;
+
 // ============= STRATEGY TYPE DETECTION =============
 // Robust strategy type classification for consistent behavior across edge functions
 // Uses strategy ID prefixes and name patterns for reliable detection

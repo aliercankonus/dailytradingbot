@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, SLIPPAGE_PARAMS, CORRELATION_PARAMS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, PARTIAL_TP_PARAMS } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore, 
@@ -432,23 +432,21 @@ serve(async (req) => {
       // 🚨 EMERGENCY PROTECTION SYSTEMS
       // ============================================================
 
-      // 1️⃣ FLASH CRASH PROTECTION - Immediate exit on sudden 5%+ adverse move
-      const FLASH_CRASH_THRESHOLD = 5.0; // 5% sudden move
+      // 1️⃣ FLASH CRASH PROTECTION - Immediate exit on sudden adverse move
       const recentPriceChange = atrData?.recentPriceChange || 0;
       
       let isFlashCrash = false;
-      if (position.side === "BUY" && recentPriceChange <= -FLASH_CRASH_THRESHOLD) {
+      if (position.side === "BUY" && recentPriceChange <= -EMERGENCY_EXIT_PARAMS.FLASH_CRASH_THRESHOLD_PERCENT) {
         isFlashCrash = true;
         positionLogger.risk(`FLASH CRASH DETECTED for LONG: ${recentPriceChange.toFixed(2)}% drop in last hour!`);
-      } else if (position.side === "SELL" && recentPriceChange >= FLASH_CRASH_THRESHOLD) {
+      } else if (position.side === "SELL" && recentPriceChange >= EMERGENCY_EXIT_PARAMS.FLASH_CRASH_THRESHOLD_PERCENT) {
         isFlashCrash = true;
         positionLogger.risk(`FLASH CRASH DETECTED for SHORT: ${recentPriceChange.toFixed(2)}% surge in last hour!`);
       }
 
-      // 2️⃣ VOLATILITY SPIKE DETECTION - ATR 2x normal = high risk
-      const VOLATILITY_SPIKE_THRESHOLD = 2.0; // ATR 2x higher than normal
+      // 2️⃣ VOLATILITY SPIKE DETECTION - ATR above normal = high risk
       const atrRatio = atrData?.atrRatio || 1.0;
-      const isVolatilitySpike = atrRatio >= VOLATILITY_SPIKE_THRESHOLD;
+      const isVolatilitySpike = atrRatio >= EMERGENCY_EXIT_PARAMS.VOLATILITY_SPIKE_THRESHOLD;
       
       if (isVolatilitySpike) {
         positionLogger.risk(`VOLATILITY SPIKE: ATR ${atrRatio.toFixed(2)}x normal - high risk environment!`);
@@ -477,9 +475,8 @@ serve(async (req) => {
       }
 
       // 4️⃣ VOLUME SPIKE ALERT - Unusual volume may signal reversal
-      const VOLUME_SPIKE_THRESHOLD = 3.0; // 3x average volume
       const volumeRatio = atrData?.volumeRatio || 1.0;
-      const isVolumeSpike = volumeRatio >= VOLUME_SPIKE_THRESHOLD;
+      const isVolumeSpike = volumeRatio >= EMERGENCY_EXIT_PARAMS.VOLUME_SPIKE_THRESHOLD;
       
       if (isVolumeSpike) {
         positionLogger.signal(`VOLUME SPIKE: ${volumeRatio.toFixed(1)}x average volume - potential reversal signal!`);
@@ -511,8 +508,8 @@ serve(async (req) => {
         emergencyClose = true;
         emergencyReason = "divergence_volume_spike";
       }
-      // Extreme volatility (3x) alone = exit
-      else if (atrRatio >= 3.0) {
+      // Extreme volatility alone = exit
+      else if (atrRatio >= EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD) {
         emergencyClose = true;
         emergencyReason = "extreme_volatility";
       }
@@ -595,9 +592,8 @@ serve(async (req) => {
       let trailingActivated = false;
       let peakPnlUpdated = false;
       
-      // Minimum stop loss distance (1% from entry) - prevents premature exits
-      const MIN_TRAILING_STOP_DISTANCE_PERCENT = 1.0;
-      const minDistanceFromEntry = position.entry_price * (MIN_TRAILING_STOP_DISTANCE_PERCENT / 100);
+      // Minimum stop loss distance from entry - prevents premature exits
+      const minDistanceFromEntry = position.entry_price * (RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT / 100);
       
       // Get persisted peak P&L and update if current is higher (ratcheting)
       // IMPORTANT: Track peak P&L ALWAYS, not just when trailing is enabled - this ensures
@@ -632,8 +628,8 @@ serve(async (req) => {
         const decayPercent = newPeakPnl - pnlPercent;
         const decayVelocity = decayPercent / minutesSincePeak; // % per minute
         
-        // Emergency exit if decay > 3% per minute (rapid profit loss)
-        if (decayVelocity > 0.03 && pnlPercent > 0) {
+        // Emergency exit if decay exceeds threshold (rapid profit loss)
+        if (decayVelocity > EMERGENCY_EXIT_PARAMS.DECAY_VELOCITY_EXIT_PER_MINUTE && pnlPercent > 0) {
           positionLogger.risk(`SMART AITS: Rapid decay detected ${position.side} - velocity ${(decayVelocity * 100).toFixed(2)}%/min, triggering emergency exit`);
           emergencyExits.push({
             symbol: position.symbol,
@@ -983,9 +979,8 @@ serve(async (req) => {
         const entryPrice = position.entry_price;
         let shouldMoveToBreakEven = false;
         
-        // Calculate minimum stop distance from current price (0.5% for break-even to allow earlier protection)
-        const BREAK_EVEN_MIN_DISTANCE_PERCENT = 0.5;
-        const minDistanceFromCurrent = currentPrice * (BREAK_EVEN_MIN_DISTANCE_PERCENT / 100);
+        // Calculate minimum stop distance from current price for break-even to allow earlier protection
+        const minDistanceFromCurrent = currentPrice * (EXIT_THRESHOLDS.BREAK_EVEN_MIN_DISTANCE_PERCENT / 100);
 
         if (position.side === "BUY") {
           // For LONG: Only move stop to entry if it maintains minimum distance from current price
@@ -1200,7 +1195,7 @@ serve(async (req) => {
 
           // 🆕 REVERSAL RISK HANDLING: Hedge or Exit based on risk level
           const reversalRisk = detectReversalRiskForExit("SELL");
-          const MIN_LOSS_FOR_REVERSAL_EXIT = -0.5; // Only act if losing at least 0.5% (was -0.1%)
+          const MIN_LOSS_FOR_REVERSAL_EXIT = EXIT_THRESHOLDS.MIN_LOSS_FOR_REVERSAL_EXIT_PERCENT;
           
           // Check if position already has a hedge or is a hedge
           const hasHedge = position.hedge_position_id !== null;
@@ -1292,7 +1287,7 @@ serve(async (req) => {
           // Raised threshold to 85% to reduce premature exits - these had 0% win rate in analysis
           // Only apply if position has met minimum hold time AND position age > 1 hour
           const positionAgeHours = positionAgeMinutes / 60;
-          const MIN_AGE_FOR_REVERSAL_EXIT_HOURS = 1.0; // Don't exit on reversal risk in first hour
+          const MIN_AGE_FOR_REVERSAL_EXIT_HOURS = EXIT_THRESHOLDS.MIN_AGE_FOR_REVERSAL_EXIT_HOURS;
           // Use dynamic threshold from earlier calculation (aligned with strategy-analyzer)
           const REVERSAL_RISK_EXIT_THRESHOLD = dynamicReversalThreshold;
           
@@ -1314,9 +1309,9 @@ serve(async (req) => {
           // Original early warning logic (kept as fallback) - TIGHTENED THRESHOLDS
           // Only apply if position has met minimum hold time AND losing more than 1%
           // These exits were causing 0% win rate - making much more conservative
-          if (!shouldClose && hasMetMinHoldTime && positionAgeHours >= 1.0) {
-            const EARLY_WARNING_MIN_LOSS_PERCENT = -1.0; // Increased from -0.2% to -1%
-            const EARLY_WARNING_MIN_CONFIDENCE_4H = 50; // Reduced from 70% (4h must be very weak)
+          if (!shouldClose && hasMetMinHoldTime && positionAgeHours >= EXIT_THRESHOLDS.MIN_AGE_FOR_REVERSAL_EXIT_HOURS) {
+            const EARLY_WARNING_MIN_LOSS_PERCENT = EXIT_THRESHOLDS.EARLY_WARNING_MIN_LOSS_PERCENT;
+            const EARLY_WARNING_MIN_CONFIDENCE_4H = EXIT_THRESHOLDS.EARLY_WARNING_MIN_CONFIDENCE_4H;
             
             if (trend1h === "bullish" && confidence4h < EARLY_WARNING_MIN_CONFIDENCE_4H && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT) {
               shouldClose = true;
@@ -1324,7 +1319,7 @@ serve(async (req) => {
               positionLogger.signal(
                 `EARLY WARNING EXIT: Closing SHORT - 1h BULLISH + 4h very weak (4h conf: ${confidence4h}%, P&L: ${pnlPercent.toFixed(2)}%)`,
               );
-            } else if (currentTrend === "bullish" && trendConfidence >= 65) { // Raised from 50%
+            } else if (currentTrend === "bullish" && trendConfidence >= EXIT_THRESHOLDS.TREND_CONFIDENCE_EXIT) {
               shouldClose = true;
               closeReason = "trend_reversal_bullish";
               positionLogger.signal(
@@ -1357,7 +1352,7 @@ serve(async (req) => {
 
           // 🆕 REVERSAL RISK HANDLING: Hedge or Exit based on risk level
           const reversalRisk = detectReversalRiskForExit("BUY");
-          const MIN_LOSS_FOR_REVERSAL_EXIT = -0.5; // Only act if losing at least 0.5% (was -0.1%)
+          const MIN_LOSS_FOR_REVERSAL_EXIT = EXIT_THRESHOLDS.MIN_LOSS_FOR_REVERSAL_EXIT_PERCENT;
           
           // Check if position already has a hedge or is a hedge
           const hasHedge = position.hedge_position_id !== null;
@@ -1449,7 +1444,7 @@ serve(async (req) => {
           // Raised threshold to 85% to reduce premature exits - these had 0% win rate in analysis
           // Only apply if position has met minimum hold time AND position age > 1 hour
           const positionAgeHoursLong = positionAgeMinutes / 60;
-          const MIN_AGE_FOR_REVERSAL_EXIT_HOURS_LONG = 1.0;
+          const MIN_AGE_FOR_REVERSAL_EXIT_HOURS_LONG = EXIT_THRESHOLDS.MIN_AGE_FOR_REVERSAL_EXIT_HOURS;
           // Use dynamic threshold from earlier calculation (aligned with strategy-analyzer)
           const REVERSAL_RISK_EXIT_THRESHOLD_LONG = dynamicReversalThreshold;
           
@@ -1471,9 +1466,9 @@ serve(async (req) => {
           // Original early warning logic (kept as fallback) - TIGHTENED THRESHOLDS
           // Only apply if position has met minimum hold time AND losing more than 1%
           // These exits were causing 0% win rate - making much more conservative
-          if (!shouldClose && hasMetMinHoldTime && positionAgeHoursLong >= 1.0) {
-            const EARLY_WARNING_MIN_LOSS_PERCENT_LONG = -1.0; // Increased from -0.2% to -1%
-            const EARLY_WARNING_MIN_CONFIDENCE_4H_LONG = 50; // Reduced from 70% (4h must be very weak)
+          if (!shouldClose && hasMetMinHoldTime && positionAgeHoursLong >= EXIT_THRESHOLDS.MIN_AGE_FOR_REVERSAL_EXIT_HOURS) {
+            const EARLY_WARNING_MIN_LOSS_PERCENT_LONG = EXIT_THRESHOLDS.EARLY_WARNING_MIN_LOSS_PERCENT;
+            const EARLY_WARNING_MIN_CONFIDENCE_4H_LONG = EXIT_THRESHOLDS.EARLY_WARNING_MIN_CONFIDENCE_4H;
             
             if (trend1h === "bearish" && confidence4h < EARLY_WARNING_MIN_CONFIDENCE_4H_LONG && pnlPercent < EARLY_WARNING_MIN_LOSS_PERCENT_LONG) {
               shouldClose = true;
@@ -1481,7 +1476,7 @@ serve(async (req) => {
               positionLogger.signal(
                 `EARLY WARNING EXIT: Closing LONG - 1h BEARISH + 4h very weak (4h conf: ${confidence4h}%, P&L: ${pnlPercent.toFixed(2)}%)`,
               );
-            } else if (currentTrend === "bearish" && trendConfidence >= 65) { // Raised from 50%
+            } else if (currentTrend === "bearish" && trendConfidence >= EXIT_THRESHOLDS.TREND_CONFIDENCE_EXIT) {
               shouldClose = true;
               closeReason = "trend_reversal_bearish";
               positionLogger.signal(
@@ -1518,7 +1513,7 @@ serve(async (req) => {
         // Give 50% more time than configured before considering time-based exit
         const TIME_STOP_MULTIPLIER = 1.5;
         const effectiveTimeLimit = userSettings.timeBasedStopHours * TIME_STOP_MULTIPLIER;
-        const MIN_LOSS_FOR_TIME_EXIT = -0.5; // Only close if losing more than 0.5%
+        const MIN_LOSS_FOR_TIME_EXIT = EXIT_THRESHOLDS.TIME_BASED_MIN_PNL_PERCENT;
         
         if (hoursOpen >= effectiveTimeLimit) {
           // ONLY close if position is losing significantly
@@ -1561,8 +1556,8 @@ serve(async (req) => {
           const hoursOverThreshold = hoursOpen - userSettings.dynamicStopTighteningHours;
           const tighteningFactor = Math.min(hoursOverThreshold * (userSettings.dynamicStopTighteningPercent / 100), 0.9); // Max 90% tightening
           
-          // Calculate minimum stop distance (1% of entry price)
-          const minStopDistancePercent = 1.0;
+          // Calculate minimum stop distance using centralized constant
+          const minStopDistancePercent = RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT;
           const minStopDistance = position.entry_price * (minStopDistancePercent / 100);
           
           if (position.side === "BUY") {
