@@ -489,6 +489,87 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
   );
 };
 
+// Order Flow Display - shows volume spikes, price rejection, and pressure analysis
+const OrderFlowDisplay = ({ orderFlow }: { orderFlow: any }) => {
+  if (!orderFlow) return null;
+  
+  const getScoreColor = (score: number) => {
+    if (score >= 60) return "text-green-500";
+    if (score >= 40) return "text-yellow-500";
+    return "text-red-500";
+  };
+  
+  const getSignalBadge = (signal: string) => {
+    switch (signal) {
+      case "strong_bullish": return "bg-green-500/20 text-green-400 border-green-500/30";
+      case "bullish": return "bg-green-500/10 text-green-400 border-green-500/20";
+      case "strong_bearish": return "bg-red-500/20 text-red-400 border-red-500/30";
+      case "bearish": return "bg-red-500/10 text-red-400 border-red-500/20";
+      default: return "bg-muted text-muted-foreground";
+    }
+  };
+  
+  return (
+    <div className="mt-2 p-2 bg-muted/30 rounded-md space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Scale className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium">Order Flow</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className={`text-xs font-mono font-medium ${getScoreColor(orderFlow.score || 0)}`}>
+            {orderFlow.score || 0}/100
+          </span>
+          <Badge variant="outline" className={`text-[9px] px-1 py-0 ${getSignalBadge(orderFlow.signal)}`}>
+            {orderFlow.signal || "neutral"}
+          </Badge>
+        </div>
+      </div>
+      
+      <div className="grid grid-cols-3 gap-2 text-[10px]">
+        {/* Volume Spike */}
+        <div className="text-center">
+          <div className="text-muted-foreground">Volume</div>
+          {orderFlow.volumeSpike?.detected ? (
+            <Badge variant="outline" className={`text-[9px] px-1 py-0 ${orderFlow.volumeSpike.type === 'bullish' ? 'text-green-400' : 'text-red-400'}`}>
+              {orderFlow.volumeSpike.magnitude?.toFixed(1)}x {orderFlow.volumeSpike.type}
+            </Badge>
+          ) : (
+            <span className="text-muted-foreground">Normal</span>
+          )}
+        </div>
+        
+        {/* Price Rejection */}
+        <div className="text-center">
+          <div className="text-muted-foreground">Rejection</div>
+          {orderFlow.priceRejection?.detected ? (
+            <Badge variant="outline" className={`text-[9px] px-1 py-0 ${orderFlow.priceRejection.type?.includes('bullish') ? 'text-green-400' : 'text-red-400'}`}>
+              {orderFlow.priceRejection.strength || "weak"}
+            </Badge>
+          ) : (
+            <span className="text-muted-foreground">None</span>
+          )}
+        </div>
+        
+        {/* Pressure */}
+        <div className="text-center">
+          <div className="text-muted-foreground">Pressure</div>
+          <span className={orderFlow.pressure?.delta > 0 ? "text-green-400" : orderFlow.pressure?.delta < 0 ? "text-red-400" : "text-muted-foreground"}>
+            {orderFlow.pressure?.trend || "neutral"}
+          </span>
+        </div>
+      </div>
+      
+      {/* Reasons */}
+      {orderFlow.reasons?.length > 0 && (
+        <div className="text-[10px] text-muted-foreground pt-1 border-t border-border/30 truncate">
+          {orderFlow.reasons.slice(0, 2).join(' | ')}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // Execution Rejection Display - for signals rejected during trade execution
 const ExecutionRejectionDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
   const filter = filtersStatus?.executionFilter || 'Unknown';
@@ -3193,7 +3274,7 @@ export const SignalRejectionReasons = () => {
       return <MarketRegimeDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
-    // Default filter details - also show alignment breakdown if available
+    // Default filter details - also show alignment breakdown and Order Flow if available
     return (
       <div className="space-y-2">
         <div className="text-xs text-muted-foreground">
@@ -3202,6 +3283,7 @@ export const SignalRejectionReasons = () => {
         {rejection.trend_data?.alignmentBreakdown && (
           <MarketRegimeDisplay filtersStatus={fs} trendData={rejection.trend_data} />
         )}
+        {fs?.order_flow && <OrderFlowDisplay orderFlow={fs.order_flow} />}
       </div>
     );
   };
