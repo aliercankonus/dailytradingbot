@@ -154,6 +154,73 @@ const extractTimeframeTrend = (trendData: any, timeframe: string): string => {
   return "unknown";
 };
 
+// Helper to get a user-friendly trend label that explains why no direction was derived
+const getTrendDisplayLabel = (
+  trend: string, 
+  trendData?: any, 
+  trend4h?: string, 
+  trend1h?: string
+): { label: string; tooltip: string; variant: 'neutral' | 'conflicting' | 'unknown' } => {
+  const normalizedTrend = trend?.toLowerCase();
+  
+  // Check for explicit directional trends
+  if (normalizedTrend === 'bullish') return { label: 'Bullish', tooltip: 'Clear upward trend', variant: 'neutral' };
+  if (normalizedTrend === 'bearish') return { label: 'Bearish', tooltip: 'Clear downward trend', variant: 'neutral' };
+  
+  // Check for neutral/ranging trends
+  if (normalizedTrend === 'neutral' || normalizedTrend === 'ranging') {
+    return { label: 'Neutral', tooltip: 'Market is ranging without clear direction', variant: 'neutral' };
+  }
+  
+  // For "unknown" - determine WHY it's unknown
+  const t4h = trend4h?.toLowerCase() || trendData?.primaryTrend?.toLowerCase() || trendData?.timeframes?.['4h']?.trend?.toLowerCase();
+  const t1h = trend1h?.toLowerCase() || trendData?.timeframes?.['1h']?.trend?.toLowerCase();
+  
+  // Check if timeframes are conflicting (one bullish, one bearish)
+  const is4hBullish = t4h === 'bullish';
+  const is4hBearish = t4h === 'bearish';
+  const is1hBullish = t1h === 'bullish';
+  const is1hBearish = t1h === 'bearish';
+  
+  if ((is4hBullish && is1hBearish) || (is4hBearish && is1hBullish)) {
+    return { 
+      label: 'Conflicting', 
+      tooltip: `Timeframes disagree: 4H is ${t4h || 'unclear'}, 1H is ${t1h || 'unclear'}`, 
+      variant: 'conflicting' 
+    };
+  }
+  
+  // Check if both are neutral/ranging
+  const is4hNeutral = t4h === 'neutral' || t4h === 'ranging';
+  const is1hNeutral = t1h === 'neutral' || t1h === 'ranging';
+  
+  if (is4hNeutral && is1hNeutral) {
+    return { label: 'Neutral', tooltip: 'Both timeframes are ranging', variant: 'neutral' };
+  }
+  
+  if (is4hNeutral || is1hNeutral) {
+    const directional = is4hNeutral ? '1H' : '4H';
+    const neutral = is4hNeutral ? '4H' : '1H';
+    return { 
+      label: 'Mixed', 
+      tooltip: `${neutral} is neutral while ${directional} shows direction`, 
+      variant: 'conflicting' 
+    };
+  }
+  
+  // Truly unknown - no data available
+  return { label: 'Unclear', tooltip: 'Insufficient data to determine trend', variant: 'unknown' };
+};
+
+// Helper to get trend label color based on variant
+const getTrendLabelStyles = (variant: 'neutral' | 'conflicting' | 'unknown'): string => {
+  switch (variant) {
+    case 'neutral': return 'text-yellow-400 border-yellow-500/30';
+    case 'conflicting': return 'text-orange-400 border-orange-500/30';
+    case 'unknown': return 'text-muted-foreground border-muted/50';
+  }
+};
+
 // Helper to extract confidence from various data structures
 const extractConfidence = (filtersStatus: any, trendData: any): number | undefined => {
   // Direct numeric values
@@ -1099,7 +1166,9 @@ const HardBlockStochRsiDisplay = ({ filtersStatus, trendData }: { filtersStatus:
   const reversalReasons = filtersStatus?.reversal_reasons || [];
   
   // Additional context
-  const trend = filtersStatus?.trend || trendData?.primaryTrend || "unknown";
+  const trendRaw = filtersStatus?.trend || trendData?.primaryTrend || "unknown";
+  const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend;
+  const trendInfo = getTrendDisplayLabel(trendRaw, trendData, trendRaw, trend1h);
   const adx = coerceNumeric(filtersStatus?.adx, 0);
   const momentumState = filtersStatus?.momentum_state || trendData?.momentum?.state || "unknown";
   const percentB = coerceNumeric(filtersStatus?.percentB, 50);
@@ -1265,12 +1334,14 @@ const HardBlockStochRsiDisplay = ({ filtersStatus, trendData }: { filtersStatus:
 const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const adx = coerceNumeric(filtersStatus?.adx, 0);
   const adxRequired = coerceNumeric(filtersStatus?.adxRequired, 20);
-  const trend =
+  const trendRaw =
     filtersStatus?.trend ||
     trendData?.primaryTrend ||
     trendData?.dominantTrend ||
     trendData?.trend ||
     "unknown";
+  const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend;
+  const trendInfo = getTrendDisplayLabel(trendRaw, trendData, trendRaw, trend1h);
   const confidence = extractConfidence(filtersStatus, trendData);
   const trendConsistency = coerceNumeric(
     filtersStatus?.trendConsistency ??
@@ -1335,10 +1406,27 @@ const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
       
       {/* Context Grid */}
       <div className="grid grid-cols-4 gap-1.5 text-[10px]">
-        <div className="p-1.5 bg-muted/30 rounded text-center">
-          <div className="text-muted-foreground">Trend</div>
-          <div className="font-medium capitalize">{trend}</div>
-        </div>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="p-1.5 bg-muted/30 rounded text-center cursor-help">
+                <div className="text-muted-foreground">Trend</div>
+                <div className={`font-medium ${
+                  trendRaw === "bullish" ? "text-green-400" : 
+                  trendRaw === "bearish" ? "text-red-400" : 
+                  getTrendLabelStyles(trendInfo.variant)
+                }`}>
+                  {trendRaw === "bullish" || trendRaw === "bearish" 
+                    ? trendRaw.charAt(0).toUpperCase() + trendRaw.slice(1)
+                    : trendInfo.label}
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px] max-w-[180px]">
+              <p>{trendInfo.tooltip}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <div className="p-1.5 bg-muted/30 rounded text-center">
           <div className="text-muted-foreground">Confidence</div>
           <div className="font-medium">{confidence}%</div>
@@ -2051,7 +2139,9 @@ const HardGateMacdMisalignedDisplay = ({ filtersStatus, trendData }: { filtersSt
   const macdDirectionAligned = filtersStatus?.macdDirectionAligned ?? false;
   const hasMacdDivergence = filtersStatus?.hasMacdDivergence ?? false;
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
-  const trend = filtersStatus?.trend || trendData?.primaryTrend || "unknown";
+  const trendRaw = filtersStatus?.trend || trendData?.primaryTrend || "unknown";
+  const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend;
+  const trendInfo = getTrendDisplayLabel(trendRaw, trendData, trendRaw, trend1h);
   const momentum = filtersStatus?.momentum || trendData?.momentum;
   
   const macdHistogram = momentum?.macdHistogram ?? trendData?.timeframes?.['1h']?.indicators?.macdHistogram;
@@ -2091,10 +2181,27 @@ const HardGateMacdMisalignedDisplay = ({ filtersStatus, trendData }: { filtersSt
       
       {/* Context */}
       <div className="grid grid-cols-3 gap-1.5 text-[10px]">
-        <div className="p-1.5 bg-muted/30 rounded text-center">
-          <div className="text-muted-foreground">Trend</div>
-          <div className="font-medium capitalize">{trend}</div>
-        </div>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="p-1.5 bg-muted/30 rounded text-center cursor-help">
+                <div className="text-muted-foreground">Trend</div>
+                <div className={`font-medium ${
+                  trendRaw === "bullish" ? "text-green-400" : 
+                  trendRaw === "bearish" ? "text-red-400" : 
+                  getTrendLabelStyles(trendInfo.variant)
+                }`}>
+                  {trendRaw === "bullish" || trendRaw === "bearish" 
+                    ? trendRaw.charAt(0).toUpperCase() + trendRaw.slice(1)
+                    : trendInfo.label}
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px] max-w-[180px]">
+              <p>{trendInfo.tooltip}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <div className="p-1.5 bg-muted/30 rounded text-center">
           <div className="text-muted-foreground">MACD Hist</div>
           <div className={`font-mono ${Number(macdHistogram) > 0 ? 'text-green-400' : Number(macdHistogram) < 0 ? 'text-red-400' : ''}`}>
@@ -2371,8 +2478,12 @@ const UnifiedReversalDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
   const reasons = filtersStatus?.reasons || filtersStatus?.reversalReasons || [];
   const momentumState = filtersStatus?.momentumState || trendData?.momentum?.state || "unknown";
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
-  const trend4h = filtersStatus?.trend4h || trendData?.primaryTrend || "unknown";
-  const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend || "unknown";
+  const trend4hRaw = filtersStatus?.trend4h || trendData?.primaryTrend || "unknown";
+  const trend1hRaw = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend || "unknown";
+  
+  // Get smart trend labels
+  const trend4hInfo = getTrendDisplayLabel(trend4hRaw, trendData, trend4hRaw, trend1hRaw);
+  const trend1hInfo = getTrendDisplayLabel(trend1hRaw, trendData, trend4hRaw, trend1hRaw);
   
   const isBlock = decision === "BLOCK";
   const isReduce = decision === "REDUCE";
@@ -2468,14 +2579,48 @@ const UnifiedReversalDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
       
       {/* Context Grid */}
       <div className="grid grid-cols-4 gap-1.5 text-[10px]">
-        <div className="p-1.5 bg-muted/30 rounded text-center">
-          <div className="text-muted-foreground">4H Trend</div>
-          <div className="font-medium capitalize">{trend4h}</div>
-        </div>
-        <div className="p-1.5 bg-muted/30 rounded text-center">
-          <div className="text-muted-foreground">1H Trend</div>
-          <div className="font-medium capitalize">{trend1h}</div>
-        </div>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="p-1.5 bg-muted/30 rounded text-center cursor-help">
+                <div className="text-muted-foreground">4H Trend</div>
+                <div className={`font-medium ${
+                  trend4hRaw === "bullish" ? "text-green-400" : 
+                  trend4hRaw === "bearish" ? "text-red-400" : 
+                  getTrendLabelStyles(trend4hInfo.variant)
+                }`}>
+                  {trend4hRaw === "bullish" || trend4hRaw === "bearish" 
+                    ? trend4hRaw.charAt(0).toUpperCase() + trend4hRaw.slice(1)
+                    : trend4hInfo.label}
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px] max-w-[180px]">
+              <p>{trend4hInfo.tooltip}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="p-1.5 bg-muted/30 rounded text-center cursor-help">
+                <div className="text-muted-foreground">1H Trend</div>
+                <div className={`font-medium ${
+                  trend1hRaw === "bullish" ? "text-green-400" : 
+                  trend1hRaw === "bearish" ? "text-red-400" : 
+                  getTrendLabelStyles(trend1hInfo.variant)
+                }`}>
+                  {trend1hRaw === "bullish" || trend1hRaw === "bearish" 
+                    ? trend1hRaw.charAt(0).toUpperCase() + trend1hRaw.slice(1)
+                    : trend1hInfo.label}
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[10px] max-w-[180px]">
+              <p>{trend1hInfo.tooltip}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <div className="p-1.5 bg-muted/30 rounded text-center">
           <div className="text-muted-foreground">ADX</div>
           <div className="font-medium">{adx.toFixed(1)}</div>
@@ -2518,7 +2663,10 @@ const NoDirectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
   const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend || "unknown";
   const confidence4h = coerceNumeric(filtersStatus?.confidence4h ?? trendData?.timeframes?.['4h']?.confidence, 0);
   const confidence1h = coerceNumeric(filtersStatus?.confidence1h ?? trendData?.timeframes?.['1h']?.confidence, 0);
-  const primaryTrend = filtersStatus?.primaryTrend || trendData?.primaryTrend || "unknown";
+  const primaryTrendRaw = filtersStatus?.primaryTrend || trendData?.primaryTrend || "unknown";
+  
+  // Use smart trend labeling for primary trend
+  const primaryTrendInfo = getTrendDisplayLabel(primaryTrendRaw, trendData, trend4h, trend1h);
   const source = filtersStatus?.source || "direction_check";
   const reason = filtersStatus?.reason || "Could not determine clear trade direction from available signals";
   
@@ -2586,13 +2734,24 @@ const NoDirectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
       {/* Primary Trend Status */}
       <div className="flex items-center justify-between p-2 bg-muted/30 rounded text-[10px]">
         <span className="text-muted-foreground">Primary Trend:</span>
-        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 capitalize ${
-          primaryTrend === "bullish" ? 'text-green-400 border-green-500/30' :
-          primaryTrend === "bearish" ? 'text-red-400 border-red-500/30' :
-          'text-yellow-400 border-yellow-500/30'
-        }`}>
-          {primaryTrend}
-        </Badge>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
+                primaryTrendRaw === "bullish" ? 'text-green-400 border-green-500/30' :
+                primaryTrendRaw === "bearish" ? 'text-red-400 border-red-500/30' :
+                getTrendLabelStyles(primaryTrendInfo.variant)
+              }`}>
+                {primaryTrendRaw === "bullish" || primaryTrendRaw === "bearish" 
+                  ? primaryTrendRaw.charAt(0).toUpperCase() + primaryTrendRaw.slice(1)
+                  : primaryTrendInfo.label}
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-[10px] max-w-[200px]">
+              <p>{primaryTrendInfo.tooltip}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
       
       {/* Source Info */}
@@ -2703,12 +2862,14 @@ const StochRsiExtremeDisplay = ({
   const stochRsiK = parseFloat(filtersStatus?.stochRsiK4h) || 0;
   const threshold = filtersStatus?.threshold || (stochRsiK < 50 ? 10 : 90);
   const intendedDirection = filtersStatus?.intendedDirection;
-  const trend =
+  const trendRaw =
     filtersStatus?.trend4h ||
     filtersStatus?.trend ||
     filtersStatus?.primaryTrend ||
     extractTimeframeTrend(trendData, "4h") ||
     "unknown";
+  const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend;
+  const trendInfo = getTrendDisplayLabel(trendRaw, trendData, trendRaw, trend1h);
   const reason = filtersStatus?.reason;
 
   const isOversold = stochRsiK < 50;
@@ -2845,17 +3006,20 @@ const StochRsiExtremeDisplay = ({
             <TooltipTrigger asChild>
               <div className="text-center p-1.5 rounded border bg-muted/30 border-border/50">
                 <div className="text-[9px] text-muted-foreground mb-0.5">4H Trend</div>
-                <div className={`text-xs font-medium capitalize ${
-                  trend === "bullish" ? "text-green-400" : 
-                  trend === "bearish" ? "text-red-400" : "text-muted-foreground"
+                <div className={`text-xs font-medium ${
+                  trendRaw === "bullish" ? "text-green-400" : 
+                  trendRaw === "bearish" ? "text-red-400" : 
+                  getTrendLabelStyles(trendInfo.variant)
                 }`}>
-                  {trend || "—"}
+                  {trendRaw === "bullish" || trendRaw === "bearish" 
+                    ? trendRaw.charAt(0).toUpperCase() + trendRaw.slice(1)
+                    : trendInfo.label}
                 </div>
                 <div className="text-[8px] text-muted-foreground">current</div>
               </div>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-[10px]">
-              <p>Dominant trend direction from 4H analysis</p>
+            <TooltipContent side="bottom" className="text-[10px] max-w-[180px]">
+              <p>{trendInfo.tooltip}</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
