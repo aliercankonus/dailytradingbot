@@ -2016,10 +2016,10 @@ serve(async (req) => {
         if (intendedTradeDirection === "short" && isHTFOversold) {
           rejectedByHardGates++;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking SHORT at 4h oversold (StochRSI K=${stochRsiK4h.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK}, %B=${percentB.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK})`);
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `IMPROVEMENT 1 - HTF EXTREME GATE: SHORT blocked at 4h oversold (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
-            filters_status: { 
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `IMPROVEMENT 1 - HTF EXTREME GATE: SHORT blocked at 4h oversold (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
+            { 
               gate: "HTF_EXTREME_OVERSOLD_BLOCK",
               stochRsiK4h: stochRsiK4h.toFixed(1),
               percentB: percentB.toFixed(1),
@@ -2029,8 +2029,10 @@ serve(async (req) => {
               },
               message: "Bounce statistically likely at 4h oversold - blocking SHORT continuation"
             },
-            trend_data: trendData, checked_at: new Date().toISOString(),
-          });
+            trendData,
+            false,
+            earlyOrderFlowAnalysis
+          );
           continue;
         }
         
@@ -2038,10 +2040,10 @@ serve(async (req) => {
         if (intendedTradeDirection === "long" && isHTFOverbought) {
           rejectedByHardGates++;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking LONG at 4h overbought (StochRSI K=${stochRsiK4h.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK}, %B=${percentB.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK})`);
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `IMPROVEMENT 1 - HTF EXTREME GATE: LONG blocked at 4h overbought (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
-            filters_status: { 
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `IMPROVEMENT 1 - HTF EXTREME GATE: LONG blocked at 4h overbought (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
+            { 
               gate: "HTF_EXTREME_OVERBOUGHT_BLOCK",
               stochRsiK4h: stochRsiK4h.toFixed(1),
               percentB: percentB.toFixed(1),
@@ -2051,8 +2053,10 @@ serve(async (req) => {
               },
               message: "Reversal statistically likely at 4h overbought - blocking LONG continuation"
             },
-            trend_data: trendData, checked_at: new Date().toISOString(),
-          });
+            trendData,
+            false,
+            earlyOrderFlowAnalysis
+          );
           continue;
         }
         
