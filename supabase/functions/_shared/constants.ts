@@ -436,6 +436,27 @@ export const EXIT_THRESHOLDS = {
   // SCENARIO 5 FIX: ADX threshold for reversal exit block - skip reversal exits in strong trends
   // Reversal exits should never fight strong trends (ADX >= 30)
   REVERSAL_EXIT_BLOCK_ADX: 30,
+  // SCENARIO 5 PHASE 2: Trend reversal persistence requirement
+  // Require N consecutive bars of reversal before triggering exit (reduces whipsaws)
+  TREND_REVERSAL_PERSISTENCE_BARS: 2,
+  // Minimum confidence for persistent reversal to trigger exit
+  TREND_REVERSAL_MIN_CONFIDENCE: 65,
+} as const;
+
+// ============= EXIT HIERARCHY =============
+// SCENARIO 5 PHASE 2: Explicit priority order for exit conditions
+// Higher number = higher priority (processed first with early return)
+export const EXIT_PRIORITY = {
+  CIRCUIT_BREAKER: 100,        // Portfolio-level emergency - always first
+  FLASH_CRASH: 90,             // Market emergency - immediate
+  EXTREME_VOLATILITY: 85,      // Extreme ATR - urgent
+  STOP_LOSS_HIT: 80,           // Hard stop triggered
+  TAKE_PROFIT_HIT: 75,         // TP triggered
+  SMART_AITS_DECAY: 70,        // Rapid profit decay
+  REVERSAL_RISK_HIGH: 60,      // High reversal score
+  TREND_REVERSAL: 55,          // Trend flipped with persistence
+  EARLY_WARNING: 50,           // 1h flip + weak 4h
+  TIME_BASED: 40,              // Stale losing position
 } as const;
 
 // ============= PARTIAL TAKE PROFIT PARAMETERS =============
