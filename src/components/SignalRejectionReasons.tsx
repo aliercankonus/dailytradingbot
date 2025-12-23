@@ -2037,6 +2037,254 @@ const HardGateMacdMisalignedDisplay = ({ filtersStatus, trendData }: { filtersSt
   );
 };
 
+// Unified Reversal Display - for BLOCK/REDUCE decisions from unified reversal scoring
+const UnifiedReversalDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const score = coerceNumeric(filtersStatus?.score ?? filtersStatus?.unifiedScore ?? filtersStatus?.reversalScore, 0);
+  const decision = filtersStatus?.decision || "UNKNOWN";
+  const breakdown = filtersStatus?.breakdown || filtersStatus?.scoreBreakdown || {};
+  const reasons = filtersStatus?.reasons || filtersStatus?.reversalReasons || [];
+  const momentumState = filtersStatus?.momentumState || trendData?.momentum?.state || "unknown";
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const trend4h = filtersStatus?.trend4h || trendData?.primaryTrend || "unknown";
+  const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend || "unknown";
+  
+  const isBlock = decision === "BLOCK";
+  const isReduce = decision === "REDUCE";
+  
+  const getDecisionColor = () => {
+    if (isBlock) return { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', badge: 'bg-red-500' };
+    if (isReduce) return { bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-400', badge: 'bg-orange-500' };
+    return { bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', text: 'text-yellow-400', badge: 'bg-yellow-500' };
+  };
+  
+  const colors = getDecisionColor();
+  
+  // Score breakdown labels
+  const breakdownLabels: Record<string, string> = {
+    macd: 'MACD',
+    momentum: 'Momentum',
+    stochRsi: 'StochRSI',
+    stochRsiZone: 'StochRSI Zone',
+    timeInExtreme: 'Time in Extreme',
+    timeframe: 'Timeframe',
+    volume: 'Volume',
+    macdScore: 'MACD',
+    momentumScore: 'Momentum',
+    stochRsiScore: 'StochRSI',
+    stochRsiZoneScore: 'StochRSI Zone',
+    timeInExtremeScore: 'Time in Extreme',
+    timeframeScore: 'Timeframe',
+    volumeScore: 'Volume',
+  };
+  
+  return (
+    <div className={`space-y-3 p-3 rounded-md border ${colors.bg} ${colors.border}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          {isBlock ? (
+            <Ban className={`h-4 w-4 ${colors.text}`} />
+          ) : (
+            <AlertTriangle className={`h-4 w-4 ${colors.text}`} />
+          )}
+          <span className={`text-xs font-semibold ${colors.text}`}>
+            Unified Reversal: {decision}
+          </span>
+        </div>
+        <Badge className={`text-[10px] px-1.5 py-0 ${colors.badge} text-white`}>
+          Score: {score}/100
+        </Badge>
+      </div>
+      
+      {/* Score Progress Bar */}
+      <div className="space-y-1">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Reversal Risk Score</span>
+          <span className={`font-mono ${colors.text}`}>{score}/100</span>
+        </div>
+        <div className="relative h-2 bg-muted/50 rounded-full overflow-hidden">
+          <div 
+            className={`h-full rounded-full transition-all ${
+              score >= 60 ? 'bg-red-500' : score >= 40 ? 'bg-orange-500' : 'bg-yellow-500'
+            }`}
+            style={{ width: `${score}%` }}
+          />
+          {/* Thresholds */}
+          <div className="absolute top-0 h-full w-0.5 bg-orange-400/50" style={{ left: '40%' }} />
+          <div className="absolute top-0 h-full w-0.5 bg-red-400/50" style={{ left: '60%' }} />
+        </div>
+        <div className="flex justify-between text-[9px] text-muted-foreground">
+          <span>Normal (0-39)</span>
+          <span className="text-orange-400">Reduce (40-59)</span>
+          <span className="text-red-400">Block (60+)</span>
+        </div>
+      </div>
+      
+      {/* Score Breakdown */}
+      {Object.keys(breakdown).length > 0 && (
+        <div className="space-y-1.5 pt-2 border-t border-muted/30">
+          <div className="text-[10px] text-muted-foreground">Score Breakdown:</div>
+          <div className="grid grid-cols-2 gap-1">
+            {Object.entries(breakdown).map(([key, value]) => {
+              const label = breakdownLabels[key] || key.replace(/([A-Z])/g, ' $1').trim();
+              const numValue = Number(value) || 0;
+              return (
+                <div key={key} className="flex justify-between px-2 py-1 bg-muted/20 rounded text-[10px]">
+                  <span className="text-muted-foreground">{label}</span>
+                  <span className={`font-mono ${numValue > 0 ? colors.text : 'text-muted-foreground'}`}>
+                    {numValue > 0 ? `+${numValue}` : numValue}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      
+      {/* Context Grid */}
+      <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">4H Trend</div>
+          <div className="font-medium capitalize">{trend4h}</div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">1H Trend</div>
+          <div className="font-medium capitalize">{trend1h}</div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">ADX</div>
+          <div className="font-medium">{adx.toFixed(1)}</div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Momentum</div>
+          <div className="font-medium capitalize">{momentumState}</div>
+        </div>
+      </div>
+      
+      {/* Reversal Reasons */}
+      {reasons.length > 0 && (
+        <div className="space-y-1 pt-2 border-t border-muted/30">
+          <div className="text-[10px] text-muted-foreground">Reversal Signals:</div>
+          {reasons.slice(0, 4).map((reason: string, idx: number) => (
+            <div key={idx} className="flex items-start gap-1.5 text-[10px]">
+              <AlertTriangle className={`h-3 w-3 shrink-0 mt-0.5 ${colors.text}`} />
+              <span className="text-muted-foreground">{reason}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className={colors.text}>
+          {isBlock ? "⛔ Why blocked:" : "⚠️ Why reduced:"}
+        </span>{" "}
+        {isBlock 
+          ? `Unified reversal score of ${score} exceeds block threshold (60). Multiple reversal indicators suggest high probability of trend reversal.`
+          : `Unified reversal score of ${score} is in reduction zone (40-59). Position size reduced due to elevated reversal risk.`
+        }
+      </div>
+    </div>
+  );
+};
+
+// No Direction Display - for NO_CLEAR_DIRECTION rejections
+const NoDirectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const trend4h = filtersStatus?.trend4h || trendData?.primaryTrend || "unknown";
+  const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend || "unknown";
+  const confidence4h = coerceNumeric(filtersStatus?.confidence4h ?? trendData?.timeframes?.['4h']?.confidence, 0);
+  const confidence1h = coerceNumeric(filtersStatus?.confidence1h ?? trendData?.timeframes?.['1h']?.confidence, 0);
+  const primaryTrend = filtersStatus?.primaryTrend || trendData?.primaryTrend || "unknown";
+  const source = filtersStatus?.source || "direction_check";
+  const reason = filtersStatus?.reason || "Could not determine clear trade direction from available signals";
+  
+  const is4hNeutral = trend4h === "neutral" || trend4h === "ranging";
+  const is1hNeutral = trend1h === "neutral" || trend1h === "ranging";
+  const bothNeutral = is4hNeutral && is1hNeutral;
+  
+  return (
+    <div className="space-y-3 p-3 bg-yellow-500/10 rounded-md border border-yellow-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Minus className="h-4 w-4 text-yellow-500" />
+          <span className="text-xs font-semibold text-yellow-400">No Clear Trade Direction</span>
+        </div>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-yellow-400 border-yellow-500/30">
+          {bothNeutral ? "Both Neutral" : is4hNeutral ? "4H Neutral" : is1hNeutral ? "1H Neutral" : "Conflicting"}
+        </Badge>
+      </div>
+      
+      {/* Trend Overview */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className={`p-2 rounded border ${is4hNeutral ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-muted/30 border-border/50'}`}>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] text-muted-foreground">4H Trend</span>
+            {is4hNeutral ? (
+              <Minus className="h-3 w-3 text-yellow-400" />
+            ) : trend4h === "bullish" ? (
+              <TrendingUp className="h-3 w-3 text-green-400" />
+            ) : (
+              <TrendingDown className="h-3 w-3 text-red-400" />
+            )}
+          </div>
+          <div className={`text-sm font-medium capitalize ${
+            is4hNeutral ? 'text-yellow-400' : trend4h === "bullish" ? 'text-green-400' : 'text-red-400'
+          }`}>
+            {trend4h}
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">
+            Confidence: {confidence4h}%
+          </div>
+        </div>
+        
+        <div className={`p-2 rounded border ${is1hNeutral ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-muted/30 border-border/50'}`}>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] text-muted-foreground">1H Trend</span>
+            {is1hNeutral ? (
+              <Minus className="h-3 w-3 text-yellow-400" />
+            ) : trend1h === "bullish" ? (
+              <TrendingUp className="h-3 w-3 text-green-400" />
+            ) : (
+              <TrendingDown className="h-3 w-3 text-red-400" />
+            )}
+          </div>
+          <div className={`text-sm font-medium capitalize ${
+            is1hNeutral ? 'text-yellow-400' : trend1h === "bullish" ? 'text-green-400' : 'text-red-400'
+          }`}>
+            {trend1h}
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">
+            Confidence: {confidence1h}%
+          </div>
+        </div>
+      </div>
+      
+      {/* Primary Trend Status */}
+      <div className="flex items-center justify-between p-2 bg-muted/30 rounded text-[10px]">
+        <span className="text-muted-foreground">Primary Trend:</span>
+        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 capitalize ${
+          primaryTrend === "bullish" ? 'text-green-400 border-green-500/30' :
+          primaryTrend === "bearish" ? 'text-red-400 border-red-500/30' :
+          'text-yellow-400 border-yellow-500/30'
+        }`}>
+          {primaryTrend}
+        </Badge>
+      </div>
+      
+      {/* Source Info */}
+      {source && source !== "direction_check" && (
+        <div className="text-[10px] text-muted-foreground">
+          Source: <span className="font-mono">{source}</span>
+        </div>
+      )}
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-yellow-400">⚠️ Why blocked:</span> {reason || 
+          "Cannot determine a clear LONG or SHORT direction. Both timeframes must agree on direction, or a strong single-timeframe signal with sufficient confidence is required."
+        }
+      </div>
+    </div>
+  );
+};
+
 const ActiveSignalDisplay = () => {
   return (
     <div className="flex items-center gap-2 p-2 bg-green-500/10 rounded-md border border-green-500/20">
@@ -2437,21 +2685,26 @@ export const SignalRejectionReasons = () => {
   
   const getSeverityLevel = (reason: string, filtersStatus: any): SeverityLevel => {
     const gate = filtersStatus?.gate || "";
+    const decision = filtersStatus?.decision;
     
     // CRITICAL - Absolute blocks with no exceptions
     if (gate === "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK" || gate === "ABSOLUTE_MIN_STOCHRSI_HARD_BLOCK") return "critical";
     if (reason.includes("HARD BLOCK")) return "critical";
     if (gate === "BEARISH_DIVERGENCE_AT_EXTREME" || gate === "BULLISH_DIVERGENCE_AT_EXTREME") return "critical";
     if (reason.includes("Reversal risk") && filtersStatus?.reversalRiskScore >= 70) return "critical";
+    if (decision === "BLOCK" || reason.includes("Unified Reversal BLOCK")) return "critical";
     
     // HIGH - Important gates that block trades
     if (gate === "ADX_TOO_LOW") return "high";
     if (gate === "NO_MOMENTUM_CONFIRMATION") return "high";
     if (gate === "BOLLINGER_OVEREXTENSION_GATE" || gate === "BOLLINGER_UNDEREXTENSION_GATE") return "high";
     if (gate === "STOCHRSI_NOT_RISING" || gate === "STOCHRSI_NOT_FALLING") return "high";
+    if (gate === "NO_CLEAR_DIRECTION") return "high";
     if (reason.includes("HARD GATE")) return "high";
     if (reason.includes("StochRSI extreme")) return "high";
     if (reason.includes("Reversal risk")) return "high";
+    if (reason.includes("No clear trade direction")) return "high";
+    if (decision === "REDUCE" || reason.includes("Unified Reversal REDUCE")) return "high";
     
     // MEDIUM - Softer gates that can be bypassed
     if (gate === "NEUTRAL_4H_LOW_CONFIDENCE") return "medium";
@@ -2520,6 +2773,9 @@ export const SignalRejectionReasons = () => {
   const getReasonIcon = (reason: string) => {
     // Execution rejections - signals that were blocked during trade execution
     if (reason.startsWith("EXECUTION:")) return <Ban className="h-4 w-4 text-orange-500" />;
+    if (reason.includes("Unified Reversal BLOCK")) return <Ban className="h-4 w-4 text-red-500" />;
+    if (reason.includes("Unified Reversal")) return <AlertTriangle className="h-4 w-4 text-orange-500" />;
+    if (reason.includes("No clear trade direction")) return <Minus className="h-4 w-4 text-yellow-500" />;
     if (reason.includes("Max trades")) return <Layers className="h-4 w-4" />;
     if (reason.includes("Quality score")) return <BarChart3 className="h-4 w-4" />;
     if (reason.includes("active signal")) return <Zap className="h-4 w-4 text-green-500" />;
@@ -2535,6 +2791,9 @@ export const SignalRejectionReasons = () => {
 
   const getReasonBadgeVariant = (reason: string): "default" | "secondary" | "destructive" | "outline" => {
     if (reason.startsWith("EXECUTION:")) return "secondary"; // Orange-ish for execution blocks
+    if (reason.includes("Unified Reversal BLOCK")) return "destructive";
+    if (reason.includes("Unified Reversal")) return "secondary";
+    if (reason.includes("No clear trade direction")) return "secondary";
     if (reason.includes("active signal")) return "default";
     if (reason.includes("Max trades")) return "secondary";
     if (reason.includes("Quality score")) return "destructive";
@@ -2556,6 +2815,16 @@ export const SignalRejectionReasons = () => {
     // Already has active signal
     if (reason.includes("active signal")) {
       return <ActiveSignalDisplay />;
+    }
+    
+    // Unified Reversal BLOCK/REDUCE
+    if (reason.includes("Unified Reversal") || fs?.decision === "BLOCK" || fs?.decision === "REDUCE") {
+      return <UnifiedReversalDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // No clear trade direction
+    if (reason.includes("No clear trade direction") || fs?.gate === "NO_CLEAR_DIRECTION") {
+      return <NoDirectionDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // HARD BLOCK: Absolute max StochRSI (K >= 98)
