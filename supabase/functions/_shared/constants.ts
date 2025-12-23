@@ -111,6 +111,9 @@ export const RISK_PARAMS = {
   // ADJUSTED: Increased from 0.3% to 0.5% to give positions more room to develop
   // BTC positions were hitting break-even too early, preventing +1% profit targets
   BREAK_EVEN_ACTIVATION_PERCENT: 0.5,
+  // SCENARIO 5 FIX: Context-aware break-even - use 1.0% for strong trends (ADX >= 30)
+  // Strong trends often retest 0.3–0.6%, so tighter break-even converts winners into scratches
+  BREAK_EVEN_STRONG_TREND_ACTIVATION_PERCENT: 1.0,
   // ADJUSTED: Lowered from 1.0% to 0.7% so more positions benefit from trailing protection
   // Analysis showed positions peaked at 0.6-0.9% then fell back - this captures those gains
   TRAILING_STOP_ACTIVATION_PERCENT: 0.7,
@@ -427,6 +430,12 @@ export const EXIT_THRESHOLDS = {
   // ADJUSTED: From -0.5% to -0.8% to give consolidating positions more room to recover
   // Prevents premature exits on positions still well above their stop loss
   TIME_BASED_MIN_PNL_PERCENT: -0.8,
+  // SCENARIO 5 FIX: ADX threshold for time-based exit - only exit in stagnation (ADX < 20)
+  // Time exits should punish stagnation, not volatility
+  TIME_BASED_MAX_ADX: 20,
+  // SCENARIO 5 FIX: ADX threshold for reversal exit block - skip reversal exits in strong trends
+  // Reversal exits should never fight strong trends (ADX >= 30)
+  REVERSAL_EXIT_BLOCK_ADX: 30,
 } as const;
 
 // ============= PARTIAL TAKE PROFIT PARAMETERS =============
