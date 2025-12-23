@@ -686,14 +686,17 @@ export type Database = {
           kelly_max_risk_cap: number | null
           last_loss_reset_date: string | null
           last_recovery_trade_loss: boolean | null
+          last_trade_quality: number | null
           loss_recovery_confidence_boost: number | null
           loss_recovery_mode_enabled: boolean | null
           loss_recovery_position_size_percent: number | null
+          low_quality_cooldown_until: string | null
           max_open_trades: number
           max_positions_to_close_per_cycle: number | null
           max_recovery_trades_per_day: number | null
           max_risk_per_trade_percent: number
           max_trades_per_symbol: number
+          median_trade_quality: number | null
           min_confidence_threshold: number
           min_hold_time_minutes: number | null
           min_trades_for_kelly: number | null
@@ -769,14 +772,17 @@ export type Database = {
           kelly_max_risk_cap?: number | null
           last_loss_reset_date?: string | null
           last_recovery_trade_loss?: boolean | null
+          last_trade_quality?: number | null
           loss_recovery_confidence_boost?: number | null
           loss_recovery_mode_enabled?: boolean | null
           loss_recovery_position_size_percent?: number | null
+          low_quality_cooldown_until?: string | null
           max_open_trades?: number
           max_positions_to_close_per_cycle?: number | null
           max_recovery_trades_per_day?: number | null
           max_risk_per_trade_percent?: number
           max_trades_per_symbol?: number
+          median_trade_quality?: number | null
           min_confidence_threshold?: number
           min_hold_time_minutes?: number | null
           min_trades_for_kelly?: number | null
@@ -852,14 +858,17 @@ export type Database = {
           kelly_max_risk_cap?: number | null
           last_loss_reset_date?: string | null
           last_recovery_trade_loss?: boolean | null
+          last_trade_quality?: number | null
           loss_recovery_confidence_boost?: number | null
           loss_recovery_mode_enabled?: boolean | null
           loss_recovery_position_size_percent?: number | null
+          low_quality_cooldown_until?: string | null
           max_open_trades?: number
           max_positions_to_close_per_cycle?: number | null
           max_recovery_trades_per_day?: number | null
           max_risk_per_trade_percent?: number
           max_trades_per_symbol?: number
+          median_trade_quality?: number | null
           min_confidence_threshold?: number
           min_hold_time_minutes?: number | null
           min_trades_for_kelly?: number | null

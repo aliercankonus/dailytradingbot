@@ -2,9 +2,43 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 import { createLogger, logError } from "../_shared/logging.ts";
 import { getCurrentPrice } from "../_shared/binance.ts";
+import { LOSS_CLUSTERING_PARAMS } from "../_shared/constants.ts";
 
 // Create logger instance
 const logger = createLogger("close-trade");
+
+// ===== PHASE 6: TRADE QUALITY ESTIMATION =====
+// Estimates quality score (0-100) from available position data
+function estimateTradeQuality(position: any, pnl: number, pnlPercent: number): number {
+  let quality = 50; // Baseline
+  
+  // Confidence score contribution (0-20 points)
+  const confidence = position.confidence_score || 50;
+  quality += Math.min(20, (confidence - 50) / 2.5);
+  
+  // Trend consistency contribution (0-15 points)
+  const trendConsistency = position.trend_consistency || 50;
+  quality += Math.min(15, (trendConsistency - 50) / 3.33);
+  
+  // P&L impact on quality (-20 to +15 points)
+  if (pnlPercent > 1.5) quality += 15;
+  else if (pnlPercent > 0.5) quality += 10;
+  else if (pnlPercent > 0) quality += 5;
+  else if (pnlPercent > -1) quality -= 5;
+  else if (pnlPercent > -2) quality -= 10;
+  else quality -= 20;
+  
+  // Hold time contribution - longer holds generally mean more deliberate trades
+  const holdTimeMs = position.closed_at && position.opened_at 
+    ? new Date(position.closed_at).getTime() - new Date(position.opened_at).getTime()
+    : 0;
+  const holdTimeMinutes = holdTimeMs / (1000 * 60);
+  
+  if (holdTimeMinutes > 60) quality += 5; // Held longer than 1 hour
+  else if (holdTimeMinutes < 5) quality -= 5; // Closed too quickly (likely stop hit)
+  
+  return Math.max(0, Math.min(100, Math.round(quality)));
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -276,7 +310,7 @@ async function closePosition(
     // Get current risk parameters to update consecutive losses and peak P&L
     const { data: currentRiskParams, error: riskFetchError } = await supabase
       .from('risk_parameters')
-      .select('consecutive_losses, daily_realized_loss, last_loss_reset_date, daily_peak_pnl, portfolio_value')
+      .select('consecutive_losses, daily_realized_loss, last_loss_reset_date, daily_peak_pnl, portfolio_value, median_trade_quality')
       .eq('user_id', position.user_id)
       .maybeSingle();
 
@@ -294,6 +328,23 @@ async function closePosition(
       ? (updatedDailyPeakPnl + pnl) // Add profit
       : (updatedDailyPeakPnl - Math.abs(pnl)); // Subtract loss
 
+    // ===== PHASE 6: LOSS-CLUSTERING PROTECTION (Finding 7) =====
+    // Estimate trade quality from available position data
+    const tradeQuality = estimateTradeQuality(position, pnl, pnlPercent);
+    const medianQuality = currentRiskParams?.median_trade_quality || 55;
+    const qualityThreshold = medianQuality * (LOSS_CLUSTERING_PARAMS.QUALITY_THRESHOLD_PERCENT / 100);
+    const isLowQualityTrade = tradeQuality < qualityThreshold;
+    
+    // Calculate cooldown if this is a low-quality loss
+    let cooldownUntil: string | null = null;
+    if (pnl < 0 && isLowQualityTrade) {
+      // Set cooldown based on COOLDOWN_MINUTES (or COOLDOWN_CANDLES * 5min)
+      const cooldownMinutes = LOSS_CLUSTERING_PARAMS.COOLDOWN_MINUTES || 
+        (LOSS_CLUSTERING_PARAMS.COOLDOWN_CANDLES * 5);
+      cooldownUntil = new Date(Date.now() + cooldownMinutes * 60 * 1000).toISOString();
+      posLogger.risk(`LOW-QUALITY LOSS: Setting cooldown until ${cooldownUntil} (quality=${tradeQuality} < threshold=${qualityThreshold.toFixed(0)})`);
+    }
+
     if (pnl < 0) {
       // Trade was a loss - increment consecutive losses and add to daily loss
       newConsecutiveLosses = (currentRiskParams?.consecutive_losses || 0) + 1;
@@ -310,14 +361,26 @@ async function closePosition(
       posLogger.info(`Trade win/breakeven - resetting consecutive losses to 0`);
     }
 
+    // Build update object with loss-clustering fields
+    const riskUpdate: Record<string, any> = {
+      current_open_trades: activeCount ?? 0,
+      consecutive_losses: newConsecutiveLosses,
+      daily_realized_loss: updatedDailyLoss,
+      daily_peak_pnl: updatedDailyPeakPnl,
+      last_trade_quality: tradeQuality,
+    };
+    
+    // Only set cooldown if applicable
+    if (cooldownUntil) {
+      riskUpdate.low_quality_cooldown_until = cooldownUntil;
+    } else if (pnl >= 0) {
+      // Clear cooldown on winning trades
+      riskUpdate.low_quality_cooldown_until = null;
+    }
+
     const { error: riskUpdateError } = await supabase
       .from('risk_parameters')
-      .update({
-        current_open_trades: activeCount ?? 0,
-        consecutive_losses: newConsecutiveLosses,
-        daily_realized_loss: updatedDailyLoss,
-        daily_peak_pnl: updatedDailyPeakPnl
-      })
+      .update(riskUpdate)
       .eq('user_id', position.user_id);
 
     if (riskUpdateError) {

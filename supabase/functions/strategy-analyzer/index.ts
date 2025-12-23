@@ -22,6 +22,7 @@ import {
   RECOVERY_MODE_PARAMS,
   PRE_RECOVERY_PARAMS,
   REGIME_SCORE_PARAMS,
+  LOSS_CLUSTERING_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   detectStrategyType,
@@ -1317,6 +1318,17 @@ serve(async (req) => {
       logger.info(`   → Requires: deep pullback OR squeeze breakout for entry`);
     }
     
+    // ============= PHASE 6 (9 FINDINGS): LOSS-CLUSTERING PROTECTION (Finding 7) =====
+    // Check if we're in cooldown after a low-quality loss
+    const cooldownUntil = riskParams.low_quality_cooldown_until;
+    const isInLossCooldown = cooldownUntil && new Date(cooldownUntil) > new Date();
+    
+    if (isInLossCooldown) {
+      const remainingMs = new Date(cooldownUntil).getTime() - Date.now();
+      const remainingMins = Math.ceil(remainingMs / (1000 * 60));
+      logger.warn(`${LOG_CATEGORIES.REVERSAL} LOSS-CLUSTERING COOLDOWN: ${remainingMins}min remaining after low-quality loss`);
+    }
+    
     // ============= DYNAMIC QUALITY THRESHOLD =============
     // Adjust threshold based on market conditions:
     // - Strong ADX (≥35): Allow lower quality (more signals in strong trends)
@@ -1374,6 +1386,27 @@ serve(async (req) => {
           filters_status: { currentTradeCount, maxTradesPerSymbol: riskParams.max_trades_per_symbol },
           checked_at: new Date().toISOString(),
         });
+        continue;
+      }
+
+      // ============= PHASE 6 (9 FINDINGS): LOSS-CLUSTERING COOLDOWN CHECK =====
+      // Block new entries during cooldown after low-quality loss (Finding 7)
+      if (isInLossCooldown) {
+        const remainingMs = new Date(cooldownUntil!).getTime() - Date.now();
+        const remainingMins = Math.ceil(remainingMs / (1000 * 60));
+        await logRejectionWithAI(
+          supabase, userId, symbol,
+          `LOSS-CLUSTERING COOLDOWN: ${remainingMins}min remaining - blocking new entries after low-quality loss`,
+          { 
+            gate: "LOSS_CLUSTERING_COOLDOWN",
+            cooldownUntil,
+            remainingMinutes: remainingMins,
+            lastTradeQuality: riskParams.last_trade_quality,
+            medianQuality: riskParams.median_trade_quality
+          },
+          null,
+          false
+        );
         continue;
       }
 
@@ -2747,44 +2780,59 @@ serve(async (req) => {
             continue;
           }
           
+          // ===== PHASE 5: RECOVERY SQUEEZE EXCEPTION (Finding 6) =====
+          // Allow recovery trade if squeeze breakout + HTF aligned, skip pullback score check
+          const squeezeBreakoutRecovery = isValidSqueezeBreakout(trendData, derivedDirection);
+          const hasRecoverySqueezeException = squeezeBreakoutRecovery.isValid && htfAlignedForRecovery;
+          
+          if (hasRecoverySqueezeException) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} RECOVERY SQUEEZE EXCEPTION: Squeeze breakout (conf=${squeezeBreakoutRecovery.confidence}%) + HTF aligned - skipping pullback check`);
+          }
+          
           // ===== FINDING 4: PULLBACK DEPTH SCORING =====
           // Replace binary check with weighted scoring (0-3 points)
+          // SKIP if squeeze exception applies
           let pullbackScore = 0;
           
-          // Point 1: RSI in pullback zone (40-55 for longs, inverted for shorts)
-          const rsiInPullbackZone = trend === "bullish" 
-            ? (recoveryRsi >= RECOVERY_MODE_PARAMS.RSI_PULLBACK_MIN && recoveryRsi <= RECOVERY_MODE_PARAMS.RSI_PULLBACK_MAX)
-            : (recoveryRsi >= (100 - RECOVERY_MODE_PARAMS.RSI_PULLBACK_MAX) && recoveryRsi <= (100 - RECOVERY_MODE_PARAMS.RSI_PULLBACK_MIN));
-          if (rsiInPullbackZone) pullbackScore++;
-          
-          // Point 2: Price near mid/outer Bollinger Band
-          const nearBBZone = bollingerPosition === "lower_zone" || bollingerPosition === "upper_zone" || 
-            bollingerPosition === "middle_zone" || percentB < 30 || percentB > 70;
-          if (nearBBZone) pullbackScore++;
-          
-          // Point 3: Retrace percentage in Fibonacci zone (38-61%)
-          // Use pullback depth as proxy for retrace
-          const inRetraceZone = pullbackAnalysis.pullbackDepth >= RECOVERY_MODE_PARAMS.RETRACE_MIN_PERCENT && 
-            pullbackAnalysis.pullbackDepth <= RECOVERY_MODE_PARAMS.RETRACE_MAX_PERCENT;
-          if (inRetraceZone) pullbackScore++;
-          
-          if (pullbackScore < RECOVERY_MODE_PARAMS.MIN_PULLBACK_SCORE) {
-            rejectedByHardGates++;
-            await logRejectionWithAI(
-              supabase, userId, symbol,
-              `RECOVERY: Pullback too shallow (score=${pullbackScore}/${RECOVERY_MODE_PARAMS.MIN_PULLBACK_SCORE} required)`,
-              { 
-                gate: "RECOVERY_PULLBACK_SHALLOW", 
-                pullbackScore,
-                minRequired: RECOVERY_MODE_PARAMS.MIN_PULLBACK_SCORE,
-                rsiInPullbackZone, nearBBZone, inRetraceZone,
-                rsi: recoveryRsi.toFixed(1), percentB: percentB.toFixed(1),
-                pullbackDepth: pullbackAnalysis.pullbackDepth
-              },
-              trendData,
-              riskParams.ai_analysis_enabled !== false
-            );
-            continue;
+          if (!hasRecoverySqueezeException) {
+            // Point 1: RSI in pullback zone (40-55 for longs, inverted for shorts)
+            const rsiInPullbackZone = trend === "bullish" 
+              ? (recoveryRsi >= RECOVERY_MODE_PARAMS.RSI_PULLBACK_MIN && recoveryRsi <= RECOVERY_MODE_PARAMS.RSI_PULLBACK_MAX)
+              : (recoveryRsi >= (100 - RECOVERY_MODE_PARAMS.RSI_PULLBACK_MAX) && recoveryRsi <= (100 - RECOVERY_MODE_PARAMS.RSI_PULLBACK_MIN));
+            if (rsiInPullbackZone) pullbackScore++;
+            
+            // Point 2: Price near mid/outer Bollinger Band
+            const nearBBZone = bollingerPosition === "lower_zone" || bollingerPosition === "upper_zone" || 
+              bollingerPosition === "middle_zone" || percentB < 30 || percentB > 70;
+            if (nearBBZone) pullbackScore++;
+            
+            // Point 3: Retrace percentage in Fibonacci zone (38-61%)
+            // Use pullback depth as proxy for retrace
+            const inRetraceZone = pullbackAnalysis.pullbackDepth >= RECOVERY_MODE_PARAMS.RETRACE_MIN_PERCENT && 
+              pullbackAnalysis.pullbackDepth <= RECOVERY_MODE_PARAMS.RETRACE_MAX_PERCENT;
+            if (inRetraceZone) pullbackScore++;
+            
+            if (pullbackScore < RECOVERY_MODE_PARAMS.MIN_PULLBACK_SCORE) {
+              rejectedByHardGates++;
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `RECOVERY: Pullback too shallow (score=${pullbackScore}/${RECOVERY_MODE_PARAMS.MIN_PULLBACK_SCORE} required)`,
+                { 
+                  gate: "RECOVERY_PULLBACK_SHALLOW", 
+                  pullbackScore,
+                  minRequired: RECOVERY_MODE_PARAMS.MIN_PULLBACK_SCORE,
+                  rsiInPullbackZone, nearBBZone, inRetraceZone,
+                  rsi: recoveryRsi.toFixed(1), percentB: percentB.toFixed(1),
+                  pullbackDepth: pullbackAnalysis.pullbackDepth
+                },
+                trendData,
+                riskParams.ai_analysis_enabled !== false
+              );
+              continue;
+            }
+          } else {
+            // Squeeze exception grants max pullback score for quality calculation
+            pullbackScore = 3;
           }
           
           // ===== FINDING 6: NO FIRST CANDLE RULE =====
