@@ -656,6 +656,7 @@ export type Database = {
           circuit_breaker_triggered_at: string | null
           consecutive_loss_threshold: number
           consecutive_losses: number | null
+          consecutive_wins: number | null
           current_open_trades: number | null
           daily_loss_limit_percent: number
           daily_peak_pnl: number | null
@@ -684,11 +685,13 @@ export type Database = {
           kelly_criterion_enabled: boolean | null
           kelly_max_risk_cap: number | null
           last_loss_reset_date: string | null
+          last_recovery_trade_loss: boolean | null
           loss_recovery_confidence_boost: number | null
           loss_recovery_mode_enabled: boolean | null
           loss_recovery_position_size_percent: number | null
           max_open_trades: number
           max_positions_to_close_per_cycle: number | null
+          max_recovery_trades_per_day: number | null
           max_risk_per_trade_percent: number
           max_trades_per_symbol: number
           min_confidence_threshold: number
@@ -708,6 +711,9 @@ export type Database = {
           progressive_lock_enabled: boolean | null
           pullback_position_size_percent: number | null
           rebalance_loss_threshold_percent: number | null
+          recovery_cooldown_until: string | null
+          recovery_exit_drawdown_percent: number | null
+          recovery_trades_today: number | null
           sms_notifications_enabled: boolean | null
           stale_peak_protection_enabled: boolean | null
           standard_tp_multiplier: number | null
@@ -733,6 +739,7 @@ export type Database = {
           circuit_breaker_triggered_at?: string | null
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
+          consecutive_wins?: number | null
           current_open_trades?: number | null
           daily_loss_limit_percent?: number
           daily_peak_pnl?: number | null
@@ -761,11 +768,13 @@ export type Database = {
           kelly_criterion_enabled?: boolean | null
           kelly_max_risk_cap?: number | null
           last_loss_reset_date?: string | null
+          last_recovery_trade_loss?: boolean | null
           loss_recovery_confidence_boost?: number | null
           loss_recovery_mode_enabled?: boolean | null
           loss_recovery_position_size_percent?: number | null
           max_open_trades?: number
           max_positions_to_close_per_cycle?: number | null
+          max_recovery_trades_per_day?: number | null
           max_risk_per_trade_percent?: number
           max_trades_per_symbol?: number
           min_confidence_threshold?: number
@@ -785,6 +794,9 @@ export type Database = {
           progressive_lock_enabled?: boolean | null
           pullback_position_size_percent?: number | null
           rebalance_loss_threshold_percent?: number | null
+          recovery_cooldown_until?: string | null
+          recovery_exit_drawdown_percent?: number | null
+          recovery_trades_today?: number | null
           sms_notifications_enabled?: boolean | null
           stale_peak_protection_enabled?: boolean | null
           standard_tp_multiplier?: number | null
@@ -810,6 +822,7 @@ export type Database = {
           circuit_breaker_triggered_at?: string | null
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
+          consecutive_wins?: number | null
           current_open_trades?: number | null
           daily_loss_limit_percent?: number
           daily_peak_pnl?: number | null
@@ -838,11 +851,13 @@ export type Database = {
           kelly_criterion_enabled?: boolean | null
           kelly_max_risk_cap?: number | null
           last_loss_reset_date?: string | null
+          last_recovery_trade_loss?: boolean | null
           loss_recovery_confidence_boost?: number | null
           loss_recovery_mode_enabled?: boolean | null
           loss_recovery_position_size_percent?: number | null
           max_open_trades?: number
           max_positions_to_close_per_cycle?: number | null
+          max_recovery_trades_per_day?: number | null
           max_risk_per_trade_percent?: number
           max_trades_per_symbol?: number
           min_confidence_threshold?: number
@@ -862,6 +877,9 @@ export type Database = {
           progressive_lock_enabled?: boolean | null
           pullback_position_size_percent?: number | null
           rebalance_loss_threshold_percent?: number | null
+          recovery_cooldown_until?: string | null
+          recovery_exit_drawdown_percent?: number | null
+          recovery_trades_today?: number | null
           sms_notifications_enabled?: boolean | null
           stale_peak_protection_enabled?: boolean | null
           standard_tp_multiplier?: number | null

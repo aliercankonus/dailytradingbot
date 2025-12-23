@@ -168,6 +168,63 @@ export const QUALITY_THRESHOLDS = {
   RECOVERY_BOOST: 10,
   // PHASE 1: Near miss threshold - signals within this many points of threshold are logged for analysis
   NEAR_MISS_THRESHOLD: 5,
+  // SCENARIO 6 FIX: Maximum recovery quality threshold (caps escalation - Finding 9)
+  MAX_RECOVERY_QUALITY: 70,
+} as const;
+
+// ============= SCENARIO 6: RECOVERY MODE PARAMETERS =============
+// Comprehensive recovery mode improvements for state-aware exits and strict entry
+export const RECOVERY_MODE_PARAMS = {
+  // Finding 1: Recovery Exit Logic
+  // Exit recovery when consecutive_wins >= this value
+  CONSECUTIVE_WINS_EXIT: 2,
+  // Exit recovery when drawdown drops below this (default from DB: 2%)
+  DEFAULT_EXIT_DRAWDOWN_PERCENT: 2.0,
+  
+  // Finding 2: Conditional Confidence Cap
+  // Hard reject above this if no deep pullback
+  CONFIDENCE_HARD_CAP: 80,
+  // Soft penalty range: 70-80 gets -10 quality score
+  CONFIDENCE_SOFT_PENALTY_MIN: 70,
+  CONFIDENCE_SOFT_PENALTY_MAX: 80,
+  CONFIDENCE_SOFT_PENALTY_AMOUNT: 10,
+  
+  // Finding 4: Pullback Depth Scoring
+  // Minimum pullback score required (0-3 points)
+  MIN_PULLBACK_SCORE: 2,
+  // RSI zone for pullback (40-55 for longs, inverted for shorts)
+  RSI_PULLBACK_MIN: 40,
+  RSI_PULLBACK_MAX: 55,
+  // Fibonacci retrace range
+  RETRACE_MIN_PERCENT: 38,
+  RETRACE_MAX_PERCENT: 61,
+  
+  // Finding 5: Adaptive ADX Rule
+  // Hard reject below this ADX
+  ADX_HARD_MINIMUM: 23,
+  // Soft zone: 23-25, allow if HTF strong (4h confidence >= 70)
+  ADX_SOFT_ZONE_MIN: 23,
+  ADX_SOFT_ZONE_MAX: 25,
+  HTF_CONFIDENCE_FOR_SOFT_ADX: 70,
+  
+  // Finding 6: No First Candle Rule
+  // Block entry on first continuation candle after pullback
+  BLOCK_FIRST_CANDLE: true,
+  
+  // Finding 7: Dynamic Position Size
+  // Base recovery size (from DB setting, typically 50%)
+  // Position size = baseRecoverySize * clamp(qualityScore / MAX_QUALITY_FOR_SIZING, 0.5, 1.0)
+  MAX_QUALITY_FOR_SIZING: 80,
+  MIN_SIZE_MULTIPLIER: 0.5,
+  MAX_SIZE_MULTIPLIER: 1.0,
+  
+  // Finding 8: Cooldown After Recovery Loss
+  // Cooldown duration in minutes after a recovery loss
+  COOLDOWN_MINUTES: 10,  // 2 candles @ 5min
+  
+  // Finding 10: Recovery Trade Counter
+  // Default max recovery trades per day (can be overridden in DB)
+  DEFAULT_MAX_RECOVERY_TRADES: 3,
 } as const;
 
 // ============= PHASE 2: RISK SEPARATION THRESHOLDS =============
