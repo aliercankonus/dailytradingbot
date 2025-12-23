@@ -23,6 +23,8 @@ import {
   PRE_RECOVERY_PARAMS,
   REGIME_SCORE_PARAMS,
   LOSS_CLUSTERING_PARAMS,
+  GRADUATED_QUALITY_PARAMS,
+  RECOVERY_EXIT_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   detectStrategyType,
@@ -856,15 +858,77 @@ const evaluateBollingerBands = (bollingerBands: any, trend: string): { boost: nu
   return { boost: 0, signal: "neutral" };
 };
 
-// Calculate position size based on quality score
-// Must align with MIN_QUALITY_SCORE threshold (55)
-const getPositionSizeFromQuality = (qualityScore: number): number => {
-  if (qualityScore >= 85) return 1.0;      // Full size for excellent signals
-  if (qualityScore >= 75) return 0.85;     // Near full
-  if (qualityScore >= 65) return 0.7;      // Moderate
-  if (qualityScore >= 60) return 0.55;     // Good (adjusted for new threshold)
-  if (qualityScore >= 55) return 0.45;     // Minimum acceptable (matches MIN_QUALITY_SCORE)
-  return 0;                                 // Don't trade
+// ============= PHASE 7: GRADUATED QUALITY POSITION SIZING =============
+// Calculate position size based on quality score with graduated penalties
+// Uses GRADUATED_QUALITY_PARAMS for tier-based position sizing
+const getPositionSizeFromQuality = (
+  qualityScore: number, 
+  isPreRecovery: boolean = false, 
+  isRecoveryMode: boolean = false
+): { multiplier: number; tier: string } => {
+  let multiplier = 0;
+  let tier = "BELOW_THRESHOLD";
+  
+  if (qualityScore >= GRADUATED_QUALITY_PARAMS.EXCELLENT_MIN) {
+    multiplier = GRADUATED_QUALITY_PARAMS.EXCELLENT_MULTIPLIER;
+    tier = "EXCELLENT";
+  } else if (qualityScore >= GRADUATED_QUALITY_PARAMS.GOOD_MIN) {
+    multiplier = GRADUATED_QUALITY_PARAMS.GOOD_MULTIPLIER;
+    tier = "GOOD";
+  } else if (qualityScore >= GRADUATED_QUALITY_PARAMS.ACCEPTABLE_MIN) {
+    multiplier = GRADUATED_QUALITY_PARAMS.ACCEPTABLE_MULTIPLIER;
+    tier = "ACCEPTABLE";
+  } else if (qualityScore >= GRADUATED_QUALITY_PARAMS.MARGINAL_MIN) {
+    multiplier = GRADUATED_QUALITY_PARAMS.MARGINAL_MULTIPLIER;
+    tier = "MARGINAL";
+  }
+  
+  // Apply additional penalties for pre-recovery and recovery modes
+  if (isRecoveryMode && multiplier > 0) {
+    multiplier = multiplier * (1 - GRADUATED_QUALITY_PARAMS.RECOVERY_MODE_PENALTY);
+    tier += "_RECOVERY";
+  } else if (isPreRecovery && multiplier > 0) {
+    multiplier = multiplier * (1 - GRADUATED_QUALITY_PARAMS.PRE_RECOVERY_PENALTY);
+    tier += "_PRE_RECOVERY";
+  }
+  
+  return { multiplier, tier };
+};
+
+// ============= PHASE 8: RECOVERY EXIT LOGIC =============
+// Check if recovery mode should be exited based on consecutive wins or drawdown recovery
+const shouldExitRecoveryMode = (
+  consecutiveWins: number,
+  consecutiveLosses: number,
+  portfolioValue: number,
+  portfolioPeakValue: number,
+  recoveryTradesCount: number
+): { shouldExit: boolean; reason: string } => {
+  // Don't exit if minimum trades not met
+  if (recoveryTradesCount < RECOVERY_EXIT_PARAMS.MIN_TRADES_BEFORE_EXIT) {
+    return { shouldExit: false, reason: "MIN_TRADES_NOT_MET" };
+  }
+  
+  // Exit on consecutive wins
+  if (consecutiveWins >= RECOVERY_EXIT_PARAMS.CONSECUTIVE_WINS_FOR_EXIT) {
+    return { 
+      shouldExit: true, 
+      reason: `CONSECUTIVE_WINS: ${consecutiveWins} >= ${RECOVERY_EXIT_PARAMS.CONSECUTIVE_WINS_FOR_EXIT}` 
+    };
+  }
+  
+  // Exit on drawdown recovery
+  if (portfolioPeakValue > 0) {
+    const currentDrawdownPercent = ((portfolioPeakValue - portfolioValue) / portfolioPeakValue) * 100;
+    if (currentDrawdownPercent <= RECOVERY_EXIT_PARAMS.DRAWDOWN_RECOVERY_PERCENT) {
+      return { 
+        shouldExit: true, 
+        reason: `DRAWDOWN_RECOVERED: ${currentDrawdownPercent.toFixed(2)}% <= ${RECOVERY_EXIT_PARAMS.DRAWDOWN_RECOVERY_PERCENT}%` 
+      };
+    }
+  }
+  
+  return { shouldExit: false, reason: "CONDITIONS_NOT_MET" };
 };
 
 serve(async (req) => {
@@ -1288,11 +1352,53 @@ serve(async (req) => {
     
     // Loss Recovery Mode - increase quality threshold after consecutive losses
     const consecutiveLosses = riskParams.consecutive_losses || 0;
+    const consecutiveWins = riskParams.consecutive_wins || 0;
     const lossThreshold = riskParams.consecutive_loss_threshold || 3;
-    const isInRecoveryMode = riskParams.loss_recovery_mode_enabled && 
+    let isInRecoveryMode = riskParams.loss_recovery_mode_enabled && 
       consecutiveLosses >= lossThreshold;
     const recoveryConfidenceBoost = riskParams.loss_recovery_confidence_boost || 10;
     const recoveryPositionSizeMultiplier = (riskParams.loss_recovery_position_size_percent || 50) / 100;
+    
+    // ============= PHASE 8: RECOVERY EXIT LOGIC (Finding 8) =============
+    // Check if recovery mode should be exited based on consecutive wins or drawdown recovery
+    const portfolioValue = riskParams.portfolio_value || 10000;
+    const portfolioPeakValue = riskParams.portfolio_peak_value || portfolioValue;
+    const recoveryTradesCount = riskParams.recovery_trades_today || 0;
+    
+    if (isInRecoveryMode) {
+      const recoveryExitCheck = shouldExitRecoveryMode(
+        consecutiveWins,
+        consecutiveLosses,
+        portfolioValue,
+        portfolioPeakValue,
+        recoveryTradesCount
+      );
+      
+      if (recoveryExitCheck.shouldExit) {
+        logger.info(`${LOG_CATEGORIES.SUCCESS} RECOVERY EXIT: ${recoveryExitCheck.reason}`);
+        logger.info(`   → Exiting recovery mode, resetting to normal trading`);
+        
+        // Reset recovery mode in database
+        const { error: resetError } = await supabase
+          .from("risk_parameters")
+          .update({
+            consecutive_losses: 0,
+            recovery_trades_today: 0,
+            recovery_cooldown_until: null,
+            low_quality_cooldown_until: null,
+          })
+          .eq("user_id", userId);
+        
+        if (resetError) {
+          logger.error(`Failed to reset recovery mode: ${resetError.message}`);
+        } else {
+          logger.success(`Recovery mode reset - normal trading resumed`);
+          isInRecoveryMode = false; // Update local state
+        }
+      } else {
+        logger.info(`${LOG_CATEGORIES.REVERSAL} RECOVERY EXIT CHECK: ${recoveryExitCheck.reason} (wins=${consecutiveWins}, losses=${consecutiveLosses})`);
+      }
+    }
     
     // ============= PHASE 4 (9 FINDINGS): PRE-RECOVERY STATE (Finding 1) =============
     // Activate pre-recovery at (threshold - 1) losses to prevent "last bad trade"
@@ -3404,9 +3510,10 @@ serve(async (req) => {
         // All multipliers are applied in sequence to ensure proper size reduction
         // Order: quality -> correlation -> recovery -> exception hierarchy
         
-        // Step 1: Base size from quality score
-        let positionSizeMultiplier = getPositionSizeFromQuality(qualityScore);
-        logger.forSymbol(symbol).debug(`Position size: base=${(positionSizeMultiplier * 100).toFixed(0)}% (quality=${qualityScore})`);
+        // Step 1: Base size from quality score (using graduated quality penalties)
+        const qualityPositionResult = getPositionSizeFromQuality(qualityScore, isPreRecovery, isInRecoveryMode);
+        let positionSizeMultiplier = qualityPositionResult.multiplier;
+        logger.forSymbol(symbol).debug(`Position size: base=${(positionSizeMultiplier * 100).toFixed(0)}% (quality=${qualityScore}, tier=${qualityPositionResult.tier})`);
         
         // Step 2: Reduce for correlation risk (0% risk = 100% size, 100% risk = 50% size)
         if (correlationCheck.riskScore > CORRELATION_PARAMS.SIZE_REDUCTION_THRESHOLD) {

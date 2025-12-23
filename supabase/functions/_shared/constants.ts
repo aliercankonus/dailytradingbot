@@ -297,6 +297,45 @@ export const LOSS_CLUSTERING_PARAMS = {
   COOLDOWN_MINUTES: 10,
 } as const;
 
+// ============= PHASE 7 (9 FINDINGS): GRADUATED QUALITY PENALTIES =============
+// Finding 7: Apply graduated penalties based on quality score tiers
+// Lower quality trades get progressively reduced position sizes
+export const GRADUATED_QUALITY_PARAMS = {
+  // Quality score tiers for graduated penalties
+  EXCELLENT_MIN: 85,      // 85+: Full position size
+  GOOD_MIN: 75,           // 75-84: 90% position size
+  ACCEPTABLE_MIN: 65,     // 65-74: 75% position size
+  MARGINAL_MIN: 55,       // 55-64: 60% position size (minimum threshold)
+  
+  // Position size multipliers for each tier
+  EXCELLENT_MULTIPLIER: 1.0,   // Full size
+  GOOD_MULTIPLIER: 0.90,       // 90%
+  ACCEPTABLE_MULTIPLIER: 0.75, // 75%
+  MARGINAL_MULTIPLIER: 0.60,   // 60%
+  
+  // Recovery mode penalty - additional reduction for recovery trades
+  RECOVERY_MODE_PENALTY: 0.10, // Extra 10% reduction in recovery mode
+  
+  // Pre-recovery mode penalty - slight reduction before full recovery
+  PRE_RECOVERY_PENALTY: 0.05, // Extra 5% reduction in pre-recovery
+} as const;
+
+// ============= PHASE 8 (9 FINDINGS): RECOVERY EXIT PARAMETERS =============
+// Finding 8: Recovery Exit Logic - Exit recovery mode on consecutive wins or drawdown recovery
+export const RECOVERY_EXIT_PARAMS = {
+  // Exit recovery after N consecutive wins (2 wins = trend is regained)
+  CONSECUTIVE_WINS_FOR_EXIT: 2,
+  // Exit recovery when equity drawdown recovers to this % from peak
+  DRAWDOWN_RECOVERY_PERCENT: 1.5,
+  // Minimum trades in recovery before allowing exit (prevent premature exit)
+  MIN_TRADES_BEFORE_EXIT: 1,
+  // Track win rate in recovery - if >= this, consider exiting early
+  MIN_RECOVERY_WIN_RATE: 60,
+  // Alternative exit: 3 out of last 4 trades are wins
+  WINS_IN_LAST_N_FOR_EXIT: 3,
+  LAST_N_TRADES_WINDOW: 4,
+} as const;
+
 // ============= PHASE 2: RISK SEPARATION THRESHOLDS =============
 // Separates continuation risk (position size) from reversal probability (hard block)
 export const RISK_SEPARATION_THRESHOLDS = {
