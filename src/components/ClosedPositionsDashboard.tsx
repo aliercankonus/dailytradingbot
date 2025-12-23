@@ -56,6 +56,10 @@ export const ClosedPositionsDashboard = () => {
         case 'momentum_divergence_exit': return 'Momentum Divergence';
         case 'momentum_divergence_critical': return 'Momentum Divergence';
         case 'volatility_divergence': return 'Volatility Divergence';
+        // Smart AITS exits
+        case 'smart_aits_rapid_decay': return 'Smart AITS Decay';
+        case 'smart_aits_profit_lock': return 'Smart AITS Lock';
+        case 'decay_velocity_exit': return 'Decay Velocity Exit';
         // Hedge closes
         case 'parent_closed': return 'Hedge Closed';
         case 'hedge_take_profit': return 'Hedge TP';
