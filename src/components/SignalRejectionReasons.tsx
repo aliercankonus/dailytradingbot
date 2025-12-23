@@ -2037,6 +2037,251 @@ const HardGateMacdMisalignedDisplay = ({ filtersStatus, trendData }: { filtersSt
   );
 };
 
+// HTF Extreme Gate Display - for 4h oversold/overbought blocking
+const HTFExtremeGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const stochRsiK4h = coerceNumeric(filtersStatus?.stochRsiK4h ?? trendData?.stochasticRsi?.['4h']?.k, 50);
+  const percentB = coerceNumeric(filtersStatus?.percentB ?? trendData?.bollingerBands?.['4h']?.percentB, 50);
+  const direction = filtersStatus?.direction || filtersStatus?.derivedDirection || "unknown";
+  const isOversold = stochRsiK4h <= 20 && percentB <= 20;
+  const isOverbought = stochRsiK4h >= 80 && percentB >= 80;
+  
+  return (
+    <div className={`space-y-3 p-3 rounded-md border ${isOversold ? 'bg-blue-500/10 border-blue-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Ban className={`h-4 w-4 ${isOversold ? 'text-blue-500' : 'text-red-500'}`} />
+          <span className={`text-xs font-semibold ${isOversold ? 'text-blue-400' : 'text-red-400'}`}>
+            HTF EXTREME GATE: 4H {isOversold ? "Oversold" : "Overbought"}
+          </span>
+        </div>
+        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+          {direction.toUpperCase()} Blocked
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        {isOversold 
+          ? "SHORT blocked: 4H is oversold - high probability of bounce/reversal"
+          : "LONG blocked: 4H is overbought - high probability of pullback/reversal"
+        }
+      </div>
+      
+      {/* Indicators Grid */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className={`p-2 rounded border text-center ${stochRsiK4h <= 20 || stochRsiK4h >= 80 ? 'bg-red-500/20 border-red-500/30' : 'bg-muted/30 border-muted/50'}`}>
+          <div className="text-[10px] text-muted-foreground">4H StochRSI K</div>
+          <div className={`text-lg font-bold ${stochRsiK4h <= 20 ? 'text-blue-400' : stochRsiK4h >= 80 ? 'text-red-400' : ''}`}>
+            {stochRsiK4h.toFixed(1)}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {stochRsiK4h <= 20 ? "≤20 Oversold" : stochRsiK4h >= 80 ? "≥80 Overbought" : "Normal"}
+          </div>
+        </div>
+        <div className={`p-2 rounded border text-center ${percentB <= 20 || percentB >= 80 ? 'bg-red-500/20 border-red-500/30' : 'bg-muted/30 border-muted/50'}`}>
+          <div className="text-[10px] text-muted-foreground">4H Bollinger %B</div>
+          <div className={`text-lg font-bold ${percentB <= 20 ? 'text-blue-400' : percentB >= 80 ? 'text-red-400' : ''}`}>
+            {percentB.toFixed(1)}%
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {percentB <= 20 ? "≤20 Lower zone" : percentB >= 80 ? "≥80 Upper zone" : "Normal"}
+          </div>
+        </div>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className={isOversold ? "text-blue-400" : "text-red-400"}>⚠️ Why blocked:</span>{" "}
+        {isOversold 
+          ? "When both StochRSI K ≤20 AND %B ≤20 on 4H, shorting against a potential reversal is statistically poor. Wait for bounce confirmation."
+          : "When both StochRSI K ≥80 AND %B ≥80 on 4H, going long at extreme overbought is high risk. Wait for pullback."
+        }
+      </div>
+    </div>
+  );
+};
+
+// Bollinger Short Gate Display - for shorts below lower BB
+const BollingerShortGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const percentB = coerceNumeric(filtersStatus?.percentB ?? trendData?.bollingerBands?.['4h']?.percentB, 50);
+  const required = coerceNumeric(filtersStatus?.requiredPercentB, 40);
+  const isInSqueeze = filtersStatus?.isInSqueeze || false;
+  
+  return (
+    <div className="space-y-3 p-3 rounded-md border bg-orange-500/10 border-orange-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Ban className="h-4 w-4 text-orange-500" />
+          <span className="text-xs font-semibold text-orange-400">
+            BOLLINGER SHORT GATE
+          </span>
+        </div>
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-orange-500/20 text-orange-400">
+          %B Below Min
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        Shorts require %B ≥{required} to avoid shorting in bounce zones
+        {isInSqueeze && " (stricter threshold during squeeze)"}
+      </div>
+      
+      {/* Visual %B position */}
+      <div className="space-y-1.5">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Current %B</span>
+          <span className="font-mono text-orange-400">{percentB.toFixed(1)}% (need ≥{required}%)</span>
+        </div>
+        <div className="relative h-3 bg-muted/30 rounded-full overflow-hidden">
+          <div className="absolute left-0 h-full bg-red-500/30" style={{ width: `${required}%` }} />
+          <div className="absolute h-full bg-green-500/30" style={{ left: `${required}%`, right: 0 }} />
+          <div 
+            className="absolute h-full w-1 bg-orange-500 rounded-full"
+            style={{ left: `${Math.min(Math.max(percentB, 0), 100)}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-[9px] text-muted-foreground">
+          <span className="text-red-400">Blocked zone</span>
+          <span className="text-green-400">Allowed zone</span>
+        </div>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-orange-400">⚠️ Why blocked:</span> Shorting below lower Bollinger Band (%B &lt; {required}) has poor statistics - price is likely to revert to mean. Wait for %B to rise above {required}%.
+      </div>
+    </div>
+  );
+};
+
+// Squeeze Context Gate Display - for mean-reversion regime blocking
+const SqueezeContextGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const marketContext = filtersStatus?.marketContext || "MEAN_REVERSION";
+  const stochRsiK4h = coerceNumeric(filtersStatus?.stochRsiK4h ?? trendData?.stochasticRsi?.['4h']?.k, 50);
+  const squeezePercent = coerceNumeric(trendData?.bollingerBands?.['4h']?.squeezeIntensity ?? trendData?.bb?.['4h']?.squeezePercent, 0);
+  const direction = filtersStatus?.direction || filtersStatus?.derivedDirection || "short";
+  const isOversold = stochRsiK4h <= 20;
+  
+  return (
+    <div className="space-y-3 p-3 rounded-md border bg-purple-500/10 border-purple-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Layers className="h-4 w-4 text-purple-500" />
+          <span className="text-xs font-semibold text-purple-400">
+            SQUEEZE CONTEXT GATE
+          </span>
+        </div>
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-purple-500/20 text-purple-400">
+          {marketContext}
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        4H squeeze active with extreme StochRSI → trend-continuation {direction}s blocked
+      </div>
+      
+      {/* Context Indicators */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="p-2 rounded border bg-purple-500/20 border-purple-500/30 text-center">
+          <div className="text-[10px] text-muted-foreground">4H Squeeze</div>
+          <div className="text-lg font-bold text-purple-400">{squeezePercent.toFixed(0)}%</div>
+          <div className="text-[9px] text-muted-foreground">Intensity</div>
+        </div>
+        <div className={`p-2 rounded border text-center ${isOversold ? 'bg-blue-500/20 border-blue-500/30' : 'bg-red-500/20 border-red-500/30'}`}>
+          <div className="text-[10px] text-muted-foreground">4H StochRSI K</div>
+          <div className={`text-lg font-bold ${isOversold ? 'text-blue-400' : 'text-red-400'}`}>
+            {stochRsiK4h.toFixed(1)}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {isOversold ? "Oversold zone" : "Overbought zone"}
+          </div>
+        </div>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-purple-400">⚠️ Why blocked:</span> Squeeze + extreme StochRSI = mean-reversion context. 
+        {isOversold 
+          ? " Trend-continuation shorts are blocked. Only long pullbacks or squeeze breakouts UP are valid."
+          : " Trend-continuation longs are blocked. Only short pullbacks or squeeze breakouts DOWN are valid."
+        }
+      </div>
+    </div>
+  );
+};
+
+// Strategy Constraint Gate Display - for strategy-specific validation failures
+const StrategyConstraintGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const strategyName = filtersStatus?.strategyName || "Unknown Strategy";
+  const reason = filtersStatus?.constraintReason || filtersStatus?.reason || "Constraint failed";
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const stochRsiK4h = coerceNumeric(filtersStatus?.stochRsiK4h ?? trendData?.stochasticRsi?.['4h']?.k, 50);
+  const percentB = coerceNumeric(filtersStatus?.percentB ?? trendData?.bollingerBands?.['4h']?.percentB, 50);
+  const fakeBreakoutRisk = filtersStatus?.fakeBreakoutRisk || trendData?.momentum?.fakeBreakoutRisk || false;
+  
+  const isEMADeathCross = strategyName.toLowerCase().includes("death cross");
+  const isEMAGoldenCross = strategyName.toLowerCase().includes("golden cross");
+  
+  return (
+    <div className="space-y-3 p-3 rounded-md border bg-amber-500/10 border-amber-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Target className="h-4 w-4 text-amber-500" />
+          <span className="text-xs font-semibold text-amber-400">
+            STRATEGY CONSTRAINT
+          </span>
+        </div>
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-400">
+          {strategyName}
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        Strategy-specific validation failed: {reason}
+      </div>
+      
+      {/* Constraint Checklist */}
+      {(isEMADeathCross || isEMAGoldenCross) && (
+        <div className="space-y-1.5">
+          <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${adx >= 25 ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+            {adx >= 25 ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+            <span>ADX ≥25: {adx.toFixed(1)}</span>
+          </div>
+          {isEMADeathCross && (
+            <>
+              <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${stochRsiK4h > 30 ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+                {stochRsiK4h > 30 ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+                <span>StochRSI K {">"} 30: {stochRsiK4h.toFixed(1)}</span>
+              </div>
+              <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${percentB >= 40 ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+                {percentB >= 40 ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+                <span>%B ≥40: {percentB.toFixed(1)}%</span>
+              </div>
+            </>
+          )}
+          {isEMAGoldenCross && (
+            <>
+              <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${stochRsiK4h < 70 ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+                {stochRsiK4h < 70 ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+                <span>StochRSI K {"<"} 70: {stochRsiK4h.toFixed(1)}</span>
+              </div>
+              <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${percentB <= 60 ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+                {percentB <= 60 ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+                <span>%B ≤60: {percentB.toFixed(1)}%</span>
+              </div>
+            </>
+          )}
+          <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${!fakeBreakoutRisk ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+            {!fakeBreakoutRisk ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+            <span>No Fake Breakout Risk: {fakeBreakoutRisk ? "Risk detected" : "Clear"}</span>
+          </div>
+        </div>
+      )}
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-amber-400">⚠️ Why blocked:</span> {strategyName} has specific conditions that must be met. 
+        This strategy works poorly when conditions aren't optimal. Wait for better setup.
+      </div>
+    </div>
+  );
+};
+
 // Unified Reversal Display - for BLOCK/REDUCE decisions from unified reversal scoring
 const UnifiedReversalDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const score = coerceNumeric(filtersStatus?.score ?? filtersStatus?.unifiedScore ?? filtersStatus?.reversalScore, 0);
@@ -2698,6 +2943,10 @@ export const SignalRejectionReasons = () => {
     if (gate === "ADX_TOO_LOW") return "high";
     if (gate === "NO_MOMENTUM_CONFIRMATION") return "high";
     if (gate === "BOLLINGER_OVEREXTENSION_GATE" || gate === "BOLLINGER_UNDEREXTENSION_GATE") return "high";
+    if (gate === "HTF_EXTREME_OVERSOLD_BLOCK" || gate === "HTF_EXTREME_OVERBOUGHT_BLOCK") return "critical";
+    if (gate === "BOLLINGER_POSITION_FILTER_SHORT") return "high";
+    if (gate === "SQUEEZE_CONTEXT_MEAN_REVERSION") return "high";
+    if (gate === "STRATEGY_CONSTRAINT") return "medium";
     if (gate === "STOCHRSI_NOT_RISING" || gate === "STOCHRSI_NOT_FALLING") return "high";
     if (gate === "NO_CLEAR_DIRECTION") return "high";
     if (reason.includes("HARD GATE")) return "high";
@@ -2775,6 +3024,11 @@ export const SignalRejectionReasons = () => {
     if (reason.startsWith("EXECUTION:")) return <Ban className="h-4 w-4 text-orange-500" />;
     if (reason.includes("Unified Reversal BLOCK")) return <Ban className="h-4 w-4 text-red-500" />;
     if (reason.includes("Unified Reversal")) return <AlertTriangle className="h-4 w-4 text-orange-500" />;
+    // NEW: IMPROVEMENT gate icons
+    if (reason.includes("HTF EXTREME GATE")) return <Ban className="h-4 w-4 text-red-500" />;
+    if (reason.includes("BOLLINGER GATE") || reason.includes("BOLLINGER POSITION FILTER")) return <Ban className="h-4 w-4 text-orange-500" />;
+    if (reason.includes("CONTEXT GATE") || reason.includes("MEAN_REVERSION")) return <Layers className="h-4 w-4 text-purple-500" />;
+    if (reason.includes("IMPROVEMENT 4")) return <Target className="h-4 w-4 text-amber-500" />;
     if (reason.includes("No clear trade direction")) return <Minus className="h-4 w-4 text-yellow-500" />;
     if (reason.includes("Max trades")) return <Layers className="h-4 w-4" />;
     if (reason.includes("Quality score")) return <BarChart3 className="h-4 w-4" />;
@@ -2888,6 +3142,30 @@ export const SignalRejectionReasons = () => {
     // HARD BLOCK: Absolute min StochRSI (K <= 2)
     if (fs?.gate === "ABSOLUTE_MIN_STOCHRSI_HARD_BLOCK") {
       return <HardBlockStochRsiDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // NEW: HTF Extreme Gate (4h oversold/overbought)
+    if (fs?.gate === "HTF_EXTREME_OVERSOLD_BLOCK" || fs?.gate === "HTF_EXTREME_OVERBOUGHT_BLOCK" || 
+        fs?.gate === "HTF_EXTREME_GATE" || reason.includes("HTF EXTREME GATE")) {
+      return <HTFExtremeGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // NEW: Bollinger Short Gate (Bollinger Position Filter)
+    if (fs?.gate === "BOLLINGER_POSITION_FILTER_SHORT" || fs?.gate === "BOLLINGER_SHORT_GATE" || 
+        reason.includes("BOLLINGER GATE") || reason.includes("BOLLINGER POSITION FILTER")) {
+      return <BollingerShortGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // NEW: Squeeze Context Gate (Mean-Reversion regime)
+    if (fs?.gate === "SQUEEZE_CONTEXT_MEAN_REVERSION" || fs?.gate === "SQUEEZE_CONTEXT_GATE" || 
+        reason.includes("CONTEXT GATE") || reason.includes("MEAN_REVERSION")) {
+      return <SqueezeContextGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // NEW: Strategy Constraint Gate (EMA Death/Golden Cross specific constraints)
+    if (fs?.gate === "STRATEGY_CONSTRAINT" || reason.includes("STRATEGY CONSTRAINT") || 
+        reason.includes("IMPROVEMENT 4")) {
+      return <StrategyConstraintGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // Reversal risk rejection
