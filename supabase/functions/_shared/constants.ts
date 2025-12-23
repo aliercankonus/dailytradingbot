@@ -190,8 +190,8 @@ export const RECOVERY_MODE_PARAMS = {
   CONFIDENCE_SOFT_PENALTY_AMOUNT: 10,
   
   // Finding 4: Pullback Depth Scoring
-  // Minimum pullback score required (0-3 points)
-  MIN_PULLBACK_SCORE: 2,
+  // Minimum pullback score required (0-3 points) - relaxed from 2 to 1 for trending markets
+  MIN_PULLBACK_SCORE: 1,
   // RSI zone for pullback (40-55 for longs, inverted for shorts)
   RSI_PULLBACK_MIN: 40,
   RSI_PULLBACK_MAX: 55,
@@ -223,8 +223,8 @@ export const RECOVERY_MODE_PARAMS = {
   COOLDOWN_MINUTES: 10,  // 2 candles @ 5min
   
   // Finding 10: Recovery Trade Counter
-  // Default max recovery trades per day (can be overridden in DB)
-  DEFAULT_MAX_RECOVERY_TRADES: 3,
+  // Default max recovery trades per day (can be overridden in DB) - increased from 3 to 5
+  DEFAULT_MAX_RECOVERY_TRADES: 5,
 } as const;
 
 // ============= PHASE 2: RISK SEPARATION THRESHOLDS =============
