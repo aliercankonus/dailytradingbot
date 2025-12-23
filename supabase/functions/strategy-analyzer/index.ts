@@ -25,10 +25,17 @@ import {
   LOSS_CLUSTERING_PARAMS,
   GRADUATED_QUALITY_PARAMS,
   RECOVERY_EXIT_PARAMS,
+  // IMPROVEMENT 1-4: New system-level improvement imports
+  HTF_EXTREME_HARD_GATES,
+  BOLLINGER_ENTRY_GATES,
+  SQUEEZE_CONTEXT_PARAMS,
+  STRATEGY_SPECIFIC_CONSTRAINTS,
   isMomentumStrategy,
   isNeutralStrategy,
+  isTrendFollowingStrategy,
   detectStrategyType,
-  type ExceptionType
+  type ExceptionType,
+  type MarketContext
 } from "../_shared/constants.ts";
 import { 
   getTechnicalScore, 
@@ -1965,6 +1972,151 @@ serve(async (req) => {
           continue;
         }
         
+        // ============= IMPROVEMENT 1: HTF OVERSOLD/OVERBOUGHT HARD GATE =============
+        // Global rule for ALL strategies: Block counter-trend continuation at 4h extremes
+        // This is market structure, not indicator noise - prevents trading against probability asymmetry
+        const isHTFOversold = stochRsiK4h <= HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK && 
+                              percentB <= HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK;
+        const isHTFOverbought = stochRsiK4h >= HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK && 
+                                percentB >= HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK;
+        
+        // Block SHORT continuation at 4h oversold (bounce is statistically likely)
+        if (intendedTradeDirection === "short" && isHTFOversold) {
+          rejectedByHardGates++;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking SHORT at 4h oversold (StochRSI K=${stochRsiK4h.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK}, %B=${percentB.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK})`);
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `IMPROVEMENT 1 - HTF EXTREME GATE: SHORT blocked at 4h oversold (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
+            filters_status: { 
+              gate: "HTF_EXTREME_OVERSOLD_BLOCK",
+              stochRsiK4h: stochRsiK4h.toFixed(1),
+              percentB: percentB.toFixed(1),
+              thresholds: {
+                stochRsiK_threshold: HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK,
+                percentB_threshold: HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK
+              },
+              message: "Bounce statistically likely at 4h oversold - blocking SHORT continuation"
+            },
+            trend_data: trendData, checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
+        // Block LONG continuation at 4h overbought (reversal is statistically likely)
+        if (intendedTradeDirection === "long" && isHTFOverbought) {
+          rejectedByHardGates++;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking LONG at 4h overbought (StochRSI K=${stochRsiK4h.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK}, %B=${percentB.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK})`);
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `IMPROVEMENT 1 - HTF EXTREME GATE: LONG blocked at 4h overbought (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
+            filters_status: { 
+              gate: "HTF_EXTREME_OVERBOUGHT_BLOCK",
+              stochRsiK4h: stochRsiK4h.toFixed(1),
+              percentB: percentB.toFixed(1),
+              thresholds: {
+                stochRsiK_threshold: HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK,
+                percentB_threshold: HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK
+              },
+              message: "Reversal statistically likely at 4h overbought - blocking LONG continuation"
+            },
+            trend_data: trendData, checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
+        // ============= IMPROVEMENT 2: BOLLINGER POSITION FILTER FOR SHORTS =============
+        // Shorts below lower Bollinger are statistically poor entries
+        // Especially during volatility compression (squeeze)
+        const isInSqueeze4h = trendData.bollingerBands?.['4h']?.squeeze || 
+                              (trendData.bb?.['4h']?.squeezePercent ?? 0) > SQUEEZE_CONTEXT_PARAMS.MIN_SQUEEZE_PERCENT_4H;
+        const shortMinPercentB = isInSqueeze4h 
+          ? BOLLINGER_ENTRY_GATES.SHORT_SQUEEZE_MIN_PERCENT_B 
+          : BOLLINGER_ENTRY_GATES.SHORT_MIN_PERCENT_B;
+        
+        if (intendedTradeDirection === "short" && percentB < shortMinPercentB) {
+          rejectedByHardGates++;
+          const squeezeContext = isInSqueeze4h ? " (stricter during squeeze)" : "";
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER POSITION FILTER - Blocking SHORT at low %B=${percentB.toFixed(1)} < ${shortMinPercentB}${squeezeContext}`);
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `IMPROVEMENT 2 - BOLLINGER GATE: SHORT blocked at low %B=${percentB.toFixed(1)} < ${shortMinPercentB}${squeezeContext}`,
+            filters_status: { 
+              gate: "BOLLINGER_POSITION_FILTER_SHORT",
+              percentB: percentB.toFixed(1),
+              requiredPercentB: shortMinPercentB,
+              isInSqueeze4h,
+              message: "Shorts below lower Bollinger are statistically poor entries"
+            },
+            trend_data: trendData, checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
+        // ============= IMPROVEMENT 3: SQUEEZE CONTEXT ARBITRATION =============
+        // Squeeze defines regime, not entry - regime must constrain strategy choice
+        // When 4h squeeze active + StochRSI extreme, context becomes MEAN_REVERSION
+        const determineMarketContext = (): MarketContext => {
+          const squeezeActive4h = (trendData.bb?.['4h']?.squeezePercent ?? 0) >= SQUEEZE_CONTEXT_PARAMS.MIN_SQUEEZE_PERCENT_4H ||
+                                  trendData.bollingerBands?.['4h']?.squeeze === true;
+          
+          if (squeezeActive4h && stochRsiK4h <= SQUEEZE_CONTEXT_PARAMS.STOCHRSI_OVERSOLD_FOR_MEAN_REVERSION) {
+            return 'MEAN_REVERSION'; // Bullish reversal context - favor longs
+          }
+          if (squeezeActive4h && stochRsiK4h >= SQUEEZE_CONTEXT_PARAMS.STOCHRSI_OVERBOUGHT_FOR_MEAN_REVERSION) {
+            return 'MEAN_REVERSION'; // Bearish reversal context - favor shorts
+          }
+          return 'TREND_CONTINUATION';
+        };
+        
+        const marketContext = determineMarketContext();
+        
+        // Block trend-continuation shorts in MEAN_REVERSION (oversold) context
+        if (marketContext === 'MEAN_REVERSION' && 
+            stochRsiK4h <= SQUEEZE_CONTEXT_PARAMS.STOCHRSI_OVERSOLD_FOR_MEAN_REVERSION && 
+            intendedTradeDirection === "short") {
+          rejectedByHardGates++;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} CONTEXT GATE - Blocking SHORT in MEAN_REVERSION context (4h squeeze + oversold K=${stochRsiK4h.toFixed(1)})`);
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `IMPROVEMENT 3 - CONTEXT GATE: SHORT blocked in MEAN_REVERSION context (squeeze + oversold K=${stochRsiK4h.toFixed(1)})`,
+            filters_status: { 
+              gate: "SQUEEZE_CONTEXT_MEAN_REVERSION",
+              marketContext,
+              stochRsiK4h: stochRsiK4h.toFixed(1),
+              isInSqueeze4h,
+              message: "4h squeeze + oversold StochRSI = MEAN_REVERSION context, blocking trend-continuation shorts"
+            },
+            trend_data: trendData, checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
+        // Block trend-continuation longs in MEAN_REVERSION (overbought) context
+        if (marketContext === 'MEAN_REVERSION' && 
+            stochRsiK4h >= SQUEEZE_CONTEXT_PARAMS.STOCHRSI_OVERBOUGHT_FOR_MEAN_REVERSION && 
+            intendedTradeDirection === "long") {
+          rejectedByHardGates++;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} CONTEXT GATE - Blocking LONG in MEAN_REVERSION context (4h squeeze + overbought K=${stochRsiK4h.toFixed(1)})`);
+          await supabase.from("signal_rejection_log").insert({
+            user_id: userId, symbol,
+            rejection_reason: `IMPROVEMENT 3 - CONTEXT GATE: LONG blocked in MEAN_REVERSION context (squeeze + overbought K=${stochRsiK4h.toFixed(1)})`,
+            filters_status: { 
+              gate: "SQUEEZE_CONTEXT_MEAN_REVERSION",
+              marketContext,
+              stochRsiK4h: stochRsiK4h.toFixed(1),
+              isInSqueeze4h,
+              message: "4h squeeze + overbought StochRSI = MEAN_REVERSION context, blocking trend-continuation longs"
+            },
+            trend_data: trendData, checked_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        
+        // Log market context for debugging
+        if (marketContext === 'MEAN_REVERSION') {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Market context: MEAN_REVERSION (squeeze + extreme StochRSI) - ${intendedTradeDirection} allowed`);
+        }
+        
         // ===== NEW: MACD ALIGNMENT AND VOLUME CHECKS FOR MOMENTUM STRATEGIES =====
         // These will be applied per-strategy during strategy evaluation loop
         // Store the thresholds for later use
@@ -3211,7 +3363,82 @@ serve(async (req) => {
               // instead of fragile substring matching
               const strategyType = detectStrategyType(strategy.id, strategy.name);
               const isMomentumType = strategyType === 'MOMENTUM';
+              const isTrendFollowingType = strategyType === 'TREND_FOLLOWING';
               const is4hDirectional = htfTrend4h === "bullish" || htfTrend4h === "bearish";
+              
+              // ============= IMPROVEMENT 4: STRATEGY-SPECIFIC CONSTRAINTS =============
+              // EMA Death Cross needs context-awareness to prevent signals in inappropriate conditions
+              const fakeBreakoutRisk = trendData.momentum?.fakeBreakoutRisk ?? false;
+              
+              // EMA Death Cross validation (SHORT signals)
+              if (strategy.name === 'EMA Death Cross' || strategy.id === 'builtin-ema-death') {
+                const constraints = STRATEGY_SPECIFIC_CONSTRAINTS.EMA_DEATH_CROSS;
+                
+                // Hard invalidation: StochRSI K < 20 (oversold - bounce risk)
+                if (stochRsiK4h < constraints.MIN_STOCHRSI_K) {
+                  rejectedByStrategy++;
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - StochRSI K=${stochRsiK4h.toFixed(1)} < ${constraints.MIN_STOCHRSI_K} (oversold)`);
+                  continue;
+                }
+                
+                // ADX requirement: >= 25 for strong trend confirmation
+                if (adx < constraints.MIN_ADX) {
+                  rejectedByStrategy++;
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - ADX ${adx.toFixed(1)} < ${constraints.MIN_ADX}`);
+                  continue;
+                }
+                
+                // %B requirement: >= 40 (not at lower band)
+                if (percentB < constraints.MIN_PERCENT_B) {
+                  rejectedByStrategy++;
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - %B ${percentB.toFixed(1)} < ${constraints.MIN_PERCENT_B}`);
+                  continue;
+                }
+                
+                // Fake breakout risk block
+                if (constraints.BLOCK_ON_FAKE_BREAKOUT && fakeBreakoutRisk) {
+                  rejectedByStrategy++;
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - fakeBreakoutRisk=true`);
+                  continue;
+                }
+                
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, fakeBreakout=${fakeBreakoutRisk})`);
+              }
+              
+              // EMA Golden Cross validation (LONG signals)
+              if (strategy.name === 'EMA Golden Cross' || strategy.id === 'builtin-ema-golden') {
+                const constraints = STRATEGY_SPECIFIC_CONSTRAINTS.EMA_GOLDEN_CROSS;
+                
+                // Hard invalidation: StochRSI K > 70 (overbought - reversal risk)
+                if (stochRsiK4h > constraints.MAX_STOCHRSI_K) {
+                  rejectedByStrategy++;
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - StochRSI K=${stochRsiK4h.toFixed(1)} > ${constraints.MAX_STOCHRSI_K} (overbought)`);
+                  continue;
+                }
+                
+                // ADX requirement: >= 25 for strong trend confirmation
+                if (adx < constraints.MIN_ADX) {
+                  rejectedByStrategy++;
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - ADX ${adx.toFixed(1)} < ${constraints.MIN_ADX}`);
+                  continue;
+                }
+                
+                // %B requirement: <= 60 (not at upper band)
+                if (percentB > constraints.MAX_PERCENT_B) {
+                  rejectedByStrategy++;
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - %B ${percentB.toFixed(1)} > ${constraints.MAX_PERCENT_B}`);
+                  continue;
+                }
+                
+                // Fake breakout risk block
+                if (constraints.BLOCK_ON_FAKE_BREAKOUT && fakeBreakoutRisk) {
+                  rejectedByStrategy++;
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - fakeBreakoutRisk=true`);
+                  continue;
+                }
+                
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, fakeBreakout=${fakeBreakoutRisk})`);
+              }
               
               if (isMomentumType && !is4hDirectional) {
                 // 4h is neutral - check if we can allow via 1h directional + momentum building
