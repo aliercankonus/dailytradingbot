@@ -114,8 +114,8 @@ export const RISK_PARAMS = {
   // SCENARIO 5 FIX: Context-aware break-even - use 1.0% for strong trends (ADX >= 30)
   // Strong trends often retest 0.3–0.6%, so tighter break-even converts winners into scratches
   BREAK_EVEN_STRONG_TREND_ACTIVATION_PERCENT: 1.0,
-  // ADJUSTED: Lowered from 1.0% to 0.7% so more positions benefit from trailing protection
-  // Analysis showed positions peaked at 0.6-0.9% then fell back - this captures those gains
+  // PHASE 3: TRAILING_STOP_ACTIVATION_PERCENT is now a FALLBACK for positions without valid stop loss
+  // Primary activation is R-multiple based (see R_MULTIPLE_TRAILING_PARAMS below)
   TRAILING_STOP_ACTIVATION_PERCENT: 0.7,
   MIN_STOP_DISTANCE_PERCENT: 1.0,
   TRAILING_PROFIT_LOCK_PERCENT: 0.5,
@@ -127,6 +127,20 @@ export const RISK_PARAMS = {
   // - 35 for neutral strategies
   // - 65 in recovery mode
   MIN_QUALITY_THRESHOLD: 55,
+} as const;
+
+// ============= PHASE 3: R-MULTIPLE TRAILING PARAMETERS =============
+// Ties trailing activation to R-multiple instead of fixed percentage
+// R = (currentPrice - entry) / (entry - stopLoss) for longs, inverted for shorts
+export const R_MULTIPLE_TRAILING_PARAMS = {
+  // Activate trailing at 1.2R (120% of risk captured as profit)
+  ACTIVATION_R_MULTIPLE: 1.2,
+  // Maximum tightening speed per hour (prevents death by a thousand cuts)
+  MAX_TIGHTENING_R_PER_HOUR: 0.3,
+  // Minimum time between stop tightening updates (minutes)
+  MIN_TIGHTENING_INTERVAL_MINUTES: 10,
+  // Fallback to percent-based activation if stop_loss is null or invalid
+  FALLBACK_TO_PERCENT: true,
 } as const;
 
 // Slippage buffer constants for stop loss calculations
@@ -401,6 +415,9 @@ export const SYMBOL_PARAMS = {
 export const EMERGENCY_EXIT_PARAMS = {
   // Flash crash: sudden adverse price move requiring immediate exit
   FLASH_CRASH_THRESHOLD_PERCENT: 5.0,
+  // PHASE 3: Flash crash must occur within N candles to be considered sudden
+  // Slow trends over 24h should not trigger flash crash exit
+  FLASH_CRASH_MAX_CANDLES: 2,
   // Volatility spike: ATR ratio above normal requiring caution
   VOLATILITY_SPIKE_THRESHOLD: 2.0,
   // Extreme volatility: ATR ratio requiring immediate exit

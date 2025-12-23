@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore, 
@@ -210,12 +210,19 @@ serve(async (req) => {
         symbolLogger.warn(`Failed to fetch 24hr ticker: ${tickerError}`);
       }
 
-      // Calculate recent price movement (last 2 candles) for flash crash
+      // PHASE 3: Calculate recent price movement within FLASH_CRASH_MAX_CANDLES (2 candles by default)
+      // This ensures flash crash detection is based on sudden moves, not slow trends
+      const candlesToCheck = Math.min(EMERGENCY_EXIT_PARAMS.FLASH_CRASH_MAX_CANDLES, klines.length - 1);
       const lastCandle = klines[klines.length - 1];
+      const referenceCandle = klines[klines.length - 1 - candlesToCheck];
       const prevCandle = klines[klines.length - 2];
       const lastClose = parseFloat(lastCandle[4]);
       const prevClose = parseFloat(prevCandle[4]);
-      const recentPriceChange = ((lastClose - prevClose) / prevClose) * 100;
+      const referenceClose = parseFloat(referenceCandle[4]);
+      // Use the reference candle (N candles ago) for flash crash check
+      const recentPriceChange = ((lastClose - referenceClose) / referenceClose) * 100;
+      // Also track single candle change for logging
+      const singleCandleChange = ((lastClose - prevClose) / prevClose) * 100;
 
       // Volume analysis (current vs average)
       const currentVolume = parseFloat(lastCandle[5]);
@@ -257,7 +264,8 @@ serve(async (req) => {
         atr: currentAtr, 
         atrPercent,
         atrRatio, // For volatility spike
-        recentPriceChange, // For flash crash
+        recentPriceChange, // For flash crash (now uses FLASH_CRASH_MAX_CANDLES)
+        singleCandleChange, // For logging
         priceChange24h,
         volumeRatio, // For volume spike
         hasDivergence, // For momentum divergence
@@ -265,10 +273,11 @@ serve(async (req) => {
         priceTrending,
         priceChangePercent, // For debugging divergence magnitude
         macdChangePercent, // For debugging divergence magnitude
+        flashCrashCandles: candlesToCheck, // Track how many candles used
       };
     } catch (error) {
       symbolLogger.error(`Error fetching data: ${error}`);
-      return { symbol, price: null, atr: null, atrPercent: null, atrRatio: 1, recentPriceChange: 0, volumeRatio: 1, hasDivergence: false };
+      return { symbol, price: null, atr: null, atrPercent: null, atrRatio: 1, recentPriceChange: 0, singleCandleChange: 0, volumeRatio: 1, hasDivergence: false, flashCrashCandles: 0 };
     }
   });
 
@@ -280,12 +289,14 @@ serve(async (req) => {
         atrPercent: d.atrPercent,
         atrRatio: d.atrRatio,
         recentPriceChange: d.recentPriceChange,
+        singleCandleChange: d.singleCandleChange,
         volumeRatio: d.volumeRatio,
         hasDivergence: d.hasDivergence,
         macdTrending: d.macdTrending,
         priceTrending: d.priceTrending,
         priceChangePercent: d.priceChangePercent,
         macdChangePercent: d.macdChangePercent,
+        flashCrashCandles: d.flashCrashCandles,
       }]),
     );
     const updates = [];
@@ -516,15 +527,17 @@ serve(async (req) => {
       // ============================================================
 
       // 1️⃣ FLASH CRASH PROTECTION - Immediate exit on sudden adverse move
+      // PHASE 3: Now uses FLASH_CRASH_MAX_CANDLES (2 by default) to ensure move is sudden
       const recentPriceChange = atrData?.recentPriceChange || 0;
+      const flashCrashCandles = atrData?.flashCrashCandles || EMERGENCY_EXIT_PARAMS.FLASH_CRASH_MAX_CANDLES;
       
       let isFlashCrash = false;
       if (position.side === "BUY" && recentPriceChange <= -EMERGENCY_EXIT_PARAMS.FLASH_CRASH_THRESHOLD_PERCENT) {
         isFlashCrash = true;
-        positionLogger.risk(`FLASH CRASH DETECTED for LONG: ${recentPriceChange.toFixed(2)}% drop in last hour!`);
+        positionLogger.risk(`FLASH CRASH DETECTED for LONG: ${recentPriceChange.toFixed(2)}% drop within ${flashCrashCandles} candles (1h timeframe)!`);
       } else if (position.side === "SELL" && recentPriceChange >= EMERGENCY_EXIT_PARAMS.FLASH_CRASH_THRESHOLD_PERCENT) {
         isFlashCrash = true;
-        positionLogger.risk(`FLASH CRASH DETECTED for SHORT: ${recentPriceChange.toFixed(2)}% surge in last hour!`);
+        positionLogger.risk(`FLASH CRASH DETECTED for SHORT: ${recentPriceChange.toFixed(2)}% surge within ${flashCrashCandles} candles (1h timeframe)!`);
       }
 
       // 2️⃣ VOLATILITY SPIKE DETECTION - ATR above normal = high risk
@@ -888,11 +901,60 @@ serve(async (req) => {
         }
       }
       
-      // Check if trailing stop is enabled and position is profitable enough
-      if (userSettings.enabled && pnlPercent > userSettings.activationPercent) {
+      // ============= PHASE 3: R-MULTIPLE BASED TRAILING ACTIVATION =============
+      // Activate trailing at 1.2R instead of fixed percentage
+      // R = profit / risk = pnlPercent / (entry - stop) expressed as percent
+      const hasValidStopLoss = position.stop_loss !== null && position.stop_loss > 0;
+      let currentRMultiple = 0;
+      let useRMultipleActivation = false;
+      
+      if (hasValidStopLoss) {
+        const riskPercent = position.side === "BUY" 
+          ? ((position.entry_price - position.stop_loss) / position.entry_price) * 100
+          : ((position.stop_loss - position.entry_price) / position.entry_price) * 100;
+        
+        if (riskPercent > 0) {
+          currentRMultiple = pnlPercent / riskPercent;
+          useRMultipleActivation = true;
+        }
+      }
+      
+      // Determine if trailing should activate
+      // Priority 1: R-multiple based (if valid stop loss exists)
+      // Priority 2: Fall back to percent-based (user setting or default)
+      const rMultipleActivated = useRMultipleActivation && currentRMultiple >= R_MULTIPLE_TRAILING_PARAMS.ACTIVATION_R_MULTIPLE;
+      const percentActivated = pnlPercent > userSettings.activationPercent;
+      const shouldActivateTrailing = rMultipleActivated || (R_MULTIPLE_TRAILING_PARAMS.FALLBACK_TO_PERCENT && percentActivated);
+      
+      // Log activation method
+      if (shouldActivateTrailing && useRMultipleActivation && rMultipleActivated) {
+        positionLogger.trade(`TRAILING R-MULTIPLE: ${currentRMultiple.toFixed(2)}R >= ${R_MULTIPLE_TRAILING_PARAMS.ACTIVATION_R_MULTIPLE}R activation (P&L: ${pnlPercent.toFixed(2)}%)`);
+      } else if (shouldActivateTrailing && !rMultipleActivated) {
+        positionLogger.trade(`TRAILING FALLBACK: P&L ${pnlPercent.toFixed(2)}% > ${userSettings.activationPercent}% (R-multiple: ${useRMultipleActivation ? currentRMultiple.toFixed(2) + "R" : "N/A - no valid stop"})`);
+      }
+      
+      // Check if trailing stop is enabled and activation criteria met
+      if (userSettings.enabled && shouldActivateTrailing) {
         // Calculate ATR-based minimum distance (for volatility buffer)
         const atrAbsolute = (currentPrice * atrPercent) / 100;
         const minTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * 0.015); // Min 1.5% of current price
+        
+        // ============= PHASE 3: TIGHTENING SPEED CAP =============
+        // Prevent death by a thousand cuts by limiting how fast stop can tighten
+        const lastStopUpdate = position.updated_at ? new Date(position.updated_at) : new Date();
+        const minutesSinceLastUpdate = (Date.now() - lastStopUpdate.getTime()) / (1000 * 60);
+        const hoursSinceLastUpdate = minutesSinceLastUpdate / 60;
+        
+        // Calculate max allowed tightening based on time elapsed
+        let maxAllowedTighteningR = R_MULTIPLE_TRAILING_PARAMS.MAX_TIGHTENING_R_PER_HOUR * hoursSinceLastUpdate;
+        let tighteningCapped = false;
+        
+        // Only apply speed cap if we have valid R-multiple calculation
+        if (useRMultipleActivation && minutesSinceLastUpdate < R_MULTIPLE_TRAILING_PARAMS.MIN_TIGHTENING_INTERVAL_MINUTES) {
+          // Too soon since last update - skip tightening
+          positionLogger.info(`TIGHTENING SKIPPED: Only ${minutesSinceLastUpdate.toFixed(1)}min since last update (min: ${R_MULTIPLE_TRAILING_PARAMS.MIN_TIGHTENING_INTERVAL_MINUTES}min)`);
+          tighteningCapped = true;
+        }
         
         // ============= SMART AITS: Calculate adaptive profit lock =============
         let profitLockPercent = userSettings.profitLockPercent;
