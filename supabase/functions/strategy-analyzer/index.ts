@@ -175,7 +175,7 @@ Trend Data: ${JSON.stringify(rejection.trend_data, null, 2)}`;
   }
 };
 
-// Helper function to log rejection with optional AI analysis
+// Helper function to log rejection with optional AI analysis and Order Flow data
 const logRejectionWithAI = async (
   supabase: any,
   userId: string,
@@ -183,15 +183,30 @@ const logRejectionWithAI = async (
   rejectionReason: string,
   filtersStatus: any,
   trendData: any,
-  enableAI: boolean = false  // Default to false, controlled by ai_analysis_enabled
+  enableAI: boolean = false,  // Default to false, controlled by ai_analysis_enabled
+  orderFlow?: OrderFlowAnalysis | null  // Optional Order Flow data
 ) => {
+  // Merge Order Flow data into filters_status if provided
+  const enrichedFiltersStatus = orderFlow ? {
+    ...filtersStatus,
+    order_flow: {
+      score: orderFlow.score,
+      signal: orderFlow.signal,
+      confidence: orderFlow.confidence,
+      volumeSpike: orderFlow.volumeSpike,
+      priceRejection: orderFlow.priceRejection,
+      pressure: orderFlow.pressure,
+      reasons: orderFlow.reasons
+    }
+  } : filtersStatus;
+
   const { data, error } = await supabase
     .from("signal_rejection_log")
     .insert({
       user_id: userId,
       symbol,
       rejection_reason: rejectionReason,
-      filters_status: filtersStatus,
+      filters_status: enrichedFiltersStatus,
       trend_data: trendData,
       checked_at: new Date().toISOString(),
     })
@@ -209,7 +224,7 @@ const logRejectionWithAI = async (
     analyzeRejectionWithAI(supabase, data.id, {
       symbol,
       rejection_reason: rejectionReason,
-      filters_status: filtersStatus,
+      filters_status: enrichedFiltersStatus,
       trend_data: trendData,
     }).catch(err => logger.forSymbol(symbol).error(`AI analysis failed: ${err}`));
   }
@@ -1535,6 +1550,18 @@ serve(async (req) => {
         const htfTrend4h = timeframes?.['4h']?.trend || timeframes?.['4h']?.indicators?.emaSignal || "neutral";
         const htfTrend1h = timeframes?.['1h']?.trend || timeframes?.['1h']?.indicators?.emaSignal || "neutral";
 
+        // ============= EARLY ORDER FLOW ANALYSIS =============
+        // Calculate Order Flow data BEFORE rejection gates so it's available for rejection logs
+        // This provides volume spike, price rejection, and pressure analysis for debugging
+        const earlyIntendedDirection: "long" | "short" = trend === "bearish" ? "short" : "long";
+        const symbolHistoricalData = historicalDataMap.get(symbol);
+        const klines = symbolHistoricalData?.klines || [];
+        const earlyOrderFlowAnalysis = klines.length > 0 ? analyzeOrderFlow(klines, earlyIntendedDirection) : null;
+        
+        if (earlyOrderFlowAnalysis && earlyOrderFlowAnalysis.reasons.length > 0) {
+          logger.forSymbol(symbol).debug(`[EARLY_ORDER_FLOW] score=${earlyOrderFlowAnalysis.score}/100 signal=${earlyOrderFlowAnalysis.signal} | ${earlyOrderFlowAnalysis.reasons.slice(0, 2).join(' | ')}`);
+        }
+
         // ============= PHASE 1 IMPROVEMENT: EXPLICIT DIRECTION DERIVATION =============
         // Derive trade direction early in the pipeline to prevent inconsistent direction evaluation
         // This ensures all downstream gates use the same direction logic
@@ -1556,7 +1583,8 @@ serve(async (req) => {
               confidence: directionResult.confidence
             },
             trendData,
-            riskParams.ai_analysis_enabled !== false
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
           );
           continue;
         }
@@ -1589,7 +1617,8 @@ serve(async (req) => {
               adx, confidence, trendConsistency 
             },
             trendData,
-            riskParams.ai_analysis_enabled !== false
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
           );
           continue;
         }
@@ -1629,7 +1658,8 @@ serve(async (req) => {
                 derivedDirection
               },
               trendData,
-              riskParams.ai_analysis_enabled !== false
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
             );
             continue;
           }
@@ -1660,7 +1690,8 @@ serve(async (req) => {
               penalties: regimeEnhanced.penalties
             },
             trendData,
-            riskParams.ai_analysis_enabled !== false
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
           );
           continue;
         }
@@ -1702,7 +1733,8 @@ serve(async (req) => {
               trend1h: htfTrend1h
             },
             trendData,
-            riskParams.ai_analysis_enabled !== false
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
           );
           continue;
         }
@@ -2487,7 +2519,8 @@ serve(async (req) => {
                   }
                 },
                 trendData,
-                riskParams.ai_analysis_enabled !== false
+                riskParams.ai_analysis_enabled !== false,
+                earlyOrderFlowAnalysis
               );
               continue;
             }
@@ -2518,7 +2551,8 @@ serve(async (req) => {
                 }
               },
               trendData,
-              riskParams.ai_analysis_enabled !== false
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
             );
             continue;
           }
@@ -2571,7 +2605,8 @@ serve(async (req) => {
               }
             },
             trendData,
-            riskParams.ai_analysis_enabled !== false
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
           );
           continue;
         }
@@ -2604,7 +2639,8 @@ serve(async (req) => {
               confidence
             },
             trendData,
-            riskParams.ai_analysis_enabled !== false
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
           );
           continue;
         }
@@ -3139,15 +3175,13 @@ serve(async (req) => {
         // Volume score component
         const volumeScore = getVolumeScore(trendData, trend);
         
-        // ============= ORDER FLOW ANALYSIS (NEW) =============
-        // Analyze volume spikes, price rejections, and buying/selling pressure
-        const intendedDirection: "long" | "short" = trend === "bearish" ? "short" : "long";
-        const symbolHistoricalData = historicalDataMap.get(symbol);
-        const klines = symbolHistoricalData?.klines || [];
-        const orderFlowAnalysis = analyzeOrderFlow(klines, intendedDirection);
-        const orderFlowScore = getOrderFlowQualityBonus(orderFlowAnalysis, intendedDirection);
+        // ============= ORDER FLOW ANALYSIS =============
+        // Use the early Order Flow analysis calculated before rejection gates
+        // This ensures consistency and the same data is available in rejection logs
+        const orderFlowAnalysis = earlyOrderFlowAnalysis || analyzeOrderFlow([], earlyIntendedDirection);
+        const orderFlowScore = getOrderFlowQualityBonus(orderFlowAnalysis, earlyIntendedDirection);
         
-        // Log order flow analysis
+        // Log order flow analysis (detailed logging for signals that passed all gates)
         if (orderFlowAnalysis.reasons.length > 0) {
           logger.forSymbol(symbol).trade(`Order Flow: score=${orderFlowAnalysis.score}/100 signal=${orderFlowAnalysis.signal} | ${orderFlowAnalysis.reasons.join(' | ')}`);
         }
