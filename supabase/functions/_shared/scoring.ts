@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, type AdxPhase, type ExceptionType } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, type AdxPhase, type ExceptionType } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -1477,6 +1477,180 @@ export const detectMarketRegime = (trendData: any): {
     regime: "ranging", 
     tradeable: false, 
     reason: `Weak trend (ADX=${adx.toFixed(1)})` 
+  };
+};
+
+// ============= PHASE 4 (9 FINDINGS): ENHANCED MARKET REGIME DETECTION =============
+// Finding 2 & 5: Returns quantified regimeScore (0-100) instead of binary gates
+// Enables graduated filtering and soft penalties
+export type SetupType = 'continuation' | 'pullback' | 'squeeze';
+
+export interface MarketRegimeEnhancedResult {
+  regime: MarketRegime;
+  regimeScore: number;  // 0-100, quantified regime strength
+  tradeable: boolean;
+  allowedSetups: SetupType[];  // What setup types are allowed at this regime score
+  reason: string;
+  penalties: {
+    adxTransitionZone: number;
+    htfFlattening: number;
+    volatility: number;
+  };
+}
+
+export const detectMarketRegimeEnhanced = (trendData: any): MarketRegimeEnhancedResult => {
+  const P = REGIME_SCORE_PARAMS;
+  
+  // Extract data with safe defaults
+  const adx = trendData?.volatility?.adx || 0;
+  const atrPercent = trendData?.volatility?.atrPercent || 0;
+  const confidence = trendData?.confidence || 0;
+  const consistency = trendData?.trueAlignment?.score || 0;
+  const volumeRatio = trendData?.volatility?.volumeRatio || 1.0;
+  const momentum = trendData?.momentum || {};
+  const timeframes = trendData?.timeframes || {};
+  
+  // HTF slope for flattening detection
+  const htf4hSlope = timeframes?.['4h']?.indicators?.emaSlope || 0;
+  const htf1hSlope = timeframes?.['1h']?.indicators?.emaSlope || 0;
+  
+  let regimeScore = 50;  // Start at neutral baseline
+  
+  // ============= ADX CONTRIBUTION (0-30 points) =============
+  if (adx >= 35) {
+    regimeScore += 30;  // Exceptional trend
+  } else if (adx >= 30) {
+    regimeScore += 25;  // Very strong trend
+  } else if (adx >= 25) {
+    regimeScore += 20;  // Strong trend
+  } else if (adx >= 22) {
+    regimeScore += 15;  // Moderate trend
+  } else if (adx >= 18) {
+    regimeScore += 5;   // Transition zone (minimal credit)
+  } else {
+    regimeScore -= 15;  // Below 18 = ranging penalty
+  }
+  
+  // ============= CONFIDENCE CONTRIBUTION (0-20 points) =============
+  const confidencePoints = Math.min(20, confidence / 5);  // 100% conf = 20 points
+  regimeScore += confidencePoints;
+  
+  // ============= CONSISTENCY CONTRIBUTION (0-15 points) =============
+  const consistencyPoints = Math.min(15, consistency / 7);  // 100% consistency = ~14 points
+  regimeScore += consistencyPoints;
+  
+  // ============= HTF ALIGNMENT CONTRIBUTION (0-15 points) =============
+  const htf4hTrend = timeframes?.['4h']?.trend || "neutral";
+  const htf1hTrend = timeframes?.['1h']?.trend || "neutral";
+  const primaryTrend = trendData?.primaryTrend || "neutral";
+  
+  let htfAlignmentPoints = 0;
+  if (htf4hTrend !== "neutral" && htf4hTrend === primaryTrend) {
+    htfAlignmentPoints += 8;  // 4h aligned
+  }
+  if (htf1hTrend !== "neutral" && htf1hTrend === primaryTrend) {
+    htfAlignmentPoints += 7;  // 1h aligned
+  }
+  regimeScore += htfAlignmentPoints;
+  
+  // ============= MOMENTUM CONTRIBUTION (0-10 points) =============
+  let momentumPoints = 0;
+  if (momentum?.state === "confirmed") {
+    momentumPoints = 10;
+  } else if (momentum?.state === "building") {
+    momentumPoints = 7;
+  } else if (momentum?.confirms) {
+    momentumPoints = 5;
+  }
+  regimeScore += momentumPoints;
+  
+  // ============= VOLUME CONTRIBUTION (0-10 points) =============
+  let volumePoints = 0;
+  if (volumeRatio >= 2.0) {
+    volumePoints = 10;
+  } else if (volumeRatio >= 1.5) {
+    volumePoints = 7;
+  } else if (volumeRatio >= 1.2) {
+    volumePoints = 4;
+  }
+  regimeScore += volumePoints;
+  
+  // ============= PENALTIES (Finding 5: Graduated Penalties) =============
+  let adxTransitionPenalty = 0;
+  let htfFlatteningPenalty = 0;
+  let volatilityPenalty = 0;
+  
+  // ADX transition zone penalty (18-22)
+  if (adx >= P.ADX_TRANSITION_ZONE_MIN && adx < P.ADX_TRANSITION_ZONE_MAX) {
+    adxTransitionPenalty = P.ADX_TRANSITION_ZONE_PENALTY;
+    regimeScore -= adxTransitionPenalty;
+  }
+  
+  // HTF slope flattening penalty
+  const avgHtfSlope = (Math.abs(htf4hSlope) + Math.abs(htf1hSlope)) / 2;
+  if (avgHtfSlope < P.HTF_FLATTENING_SLOPE_THRESHOLD) {
+    htfFlatteningPenalty = P.HTF_FLATTENING_PENALTY;
+    regimeScore -= htfFlatteningPenalty;
+  }
+  
+  // Volatility penalty
+  if (atrPercent > P.EXTREME_ATR_PERCENT) {
+    volatilityPenalty = P.EXTREME_ATR_PENALTY;
+    regimeScore -= volatilityPenalty;
+  } else if (atrPercent > P.HIGH_ATR_PERCENT) {
+    volatilityPenalty = P.HIGH_ATR_PENALTY;
+    regimeScore -= volatilityPenalty;
+  }
+  
+  // ============= CLAMP SCORE TO 0-100 =============
+  regimeScore = Math.max(0, Math.min(100, regimeScore));
+  
+  // ============= DETERMINE ALLOWED SETUPS =============
+  const allowedSetups: SetupType[] = [];
+  
+  // Finding 2: Regime Confidence Gate
+  if (regimeScore >= P.BLOCK_CONTINUATION_BELOW) {
+    allowedSetups.push('continuation', 'pullback', 'squeeze');
+  } else if (regimeScore >= P.ONLY_PULLBACK_SQUEEZE_BELOW) {
+    allowedSetups.push('pullback', 'squeeze');  // No continuation entries
+  } else if (regimeScore >= 30) {
+    allowedSetups.push('squeeze');  // Only squeeze setups in weak regimes
+  }
+  // Below 30: nothing allowed
+  
+  // ============= DETERMINE REGIME AND TRADEABILITY =============
+  let regime: MarketRegime = "ranging";
+  let tradeable = false;
+  
+  if (regimeScore >= 60) {
+    regime = "trending";
+    tradeable = true;
+  } else if (regimeScore >= 45) {
+    regime = "volatile";  // Mixed signals but might be tradeable
+    tradeable = allowedSetups.length > 0;
+  } else if (regimeScore >= 30) {
+    regime = "choppy";
+    tradeable = allowedSetups.includes('squeeze');  // Only squeeze in choppy
+  } else {
+    regime = "ranging";
+    tradeable = false;
+  }
+  
+  const reason = `Regime score ${regimeScore.toFixed(0)}/100 (ADX=${adx.toFixed(1)}, conf=${confidence.toFixed(0)}%, consistency=${consistency.toFixed(0)}%, ` +
+    `htfAlign=${htfAlignmentPoints}, momentum=${momentumPoints}, volume=${volumePoints}) ` +
+    `Penalties: ADX transition=${adxTransitionPenalty}, HTF flat=${htfFlatteningPenalty}, volatility=${volatilityPenalty}`;
+  
+  return {
+    regime,
+    regimeScore,
+    tradeable,
+    allowedSetups,
+    reason,
+    penalties: {
+      adxTransitionZone: adxTransitionPenalty,
+      htfFlattening: htfFlatteningPenalty,
+      volatility: volatilityPenalty,
+    },
   };
 };
 

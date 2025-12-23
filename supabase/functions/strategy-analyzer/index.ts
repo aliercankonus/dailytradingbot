@@ -20,6 +20,8 @@ import {
   TREND_STRENGTH_PARAMS,
   EXCEPTION_BUDGET,
   RECOVERY_MODE_PARAMS,
+  PRE_RECOVERY_PARAMS,
+  REGIME_SCORE_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   detectStrategyType,
@@ -35,6 +37,7 @@ import {
   getAdxWeight,
   calculateUnifiedReversalScore,
   detectMarketRegime,
+  detectMarketRegimeEnhanced,
   isValidSqueezeBreakout,
   deriveTradeDirection,
   getAdxPhase,
@@ -45,12 +48,14 @@ import {
   checkExceptionBudget,
   type UnifiedReversalResult,
   type MarketRegime,
+  type MarketRegimeEnhancedResult,
   type SqueezeBreakoutResult,
   type DirectionResult,
   type BreakoutModeResult,
   type TrendStrengthResult,
   type ExceptionResult,
-  type ExceptionBudgetResult
+  type ExceptionBudgetResult,
+  type SetupType
 } from "../_shared/scoring.ts";
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
@@ -1281,10 +1286,36 @@ serve(async (req) => {
     let strongTrendExceptionNotApplicable = 0;  // Track when exception didn't apply (conditions not met)
     
     // Loss Recovery Mode - increase quality threshold after consecutive losses
+    const consecutiveLosses = riskParams.consecutive_losses || 0;
+    const lossThreshold = riskParams.consecutive_loss_threshold || 3;
     const isInRecoveryMode = riskParams.loss_recovery_mode_enabled && 
-      (riskParams.consecutive_losses || 0) >= (riskParams.consecutive_loss_threshold || 3);
+      consecutiveLosses >= lossThreshold;
     const recoveryConfidenceBoost = riskParams.loss_recovery_confidence_boost || 10;
     const recoveryPositionSizeMultiplier = (riskParams.loss_recovery_position_size_percent || 50) / 100;
+    
+    // ============= PHASE 4 (9 FINDINGS): PRE-RECOVERY STATE (Finding 1) =============
+    // Activate pre-recovery at (threshold - 1) losses to prevent "last bad trade"
+    const isPreRecovery = !isInRecoveryMode && 
+      consecutiveLosses === (lossThreshold - PRE_RECOVERY_PARAMS.ACTIVATION_THRESHOLD_OFFSET);
+    
+    // ============= PHASE 4 (9 FINDINGS): DRAWDOWN-BASED RISK SCALING (Finding 4) =============
+    // Graduated position size reduction before hitting recovery threshold
+    let drawdownPositionMultiplier = 1.0;
+    if (consecutiveLosses >= 3) {
+      drawdownPositionMultiplier = 1 - PRE_RECOVERY_PARAMS.CONSECUTIVE_LOSSES_3_REDUCTION;
+      logger.info(`${LOG_CATEGORIES.REVERSAL} DRAWDOWN SCALING: ${consecutiveLosses} losses → ${(drawdownPositionMultiplier * 100).toFixed(0)}% position size`);
+    } else if (consecutiveLosses >= 2) {
+      drawdownPositionMultiplier = 1 - PRE_RECOVERY_PARAMS.CONSECUTIVE_LOSSES_2_REDUCTION;
+      logger.info(`${LOG_CATEGORIES.REVERSAL} DRAWDOWN SCALING: ${consecutiveLosses} losses → ${(drawdownPositionMultiplier * 100).toFixed(0)}% position size`);
+    }
+    
+    // Pre-recovery applies additional reduction on top of drawdown scaling
+    if (isPreRecovery) {
+      drawdownPositionMultiplier *= (1 - PRE_RECOVERY_PARAMS.POSITION_SIZE_REDUCTION);
+      logger.info(`${LOG_CATEGORIES.REVERSAL} PRE-RECOVERY STATE ACTIVE: ${consecutiveLosses}/${lossThreshold} losses`);
+      logger.info(`   → Combined position multiplier: ${(drawdownPositionMultiplier * 100).toFixed(0)}%`);
+      logger.info(`   → Requires: deep pullback OR squeeze breakout for entry`);
+    }
     
     // ============= DYNAMIC QUALITY THRESHOLD =============
     // Adjust threshold based on market conditions:
@@ -1317,7 +1348,7 @@ serve(async (req) => {
     };
     
     if (isInRecoveryMode) {
-      logger.info(`${LOG_CATEGORIES.REVERSAL} LOSS RECOVERY MODE ACTIVE: ${riskParams.consecutive_losses} consecutive losses`);
+      logger.info(`${LOG_CATEGORIES.REVERSAL} LOSS RECOVERY MODE ACTIVE: ${consecutiveLosses} consecutive losses`);
       logger.info(`   → Quality threshold: ${BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost} (base ${BASE_MIN_QUALITY_SCORE} + ${recoveryConfidenceBoost})`);
       logger.info(`   → Position size multiplier: ${recoveryPositionSizeMultiplier * 100}%`);
     }
@@ -1391,16 +1422,97 @@ serve(async (req) => {
           logger.forSymbol(symbol).warn(`   ${directionResult.reasons.filter(r => r.includes("Warning")).join(", ")}`);
         }
 
-        // ============= IMPROVEMENT #2: Market Regime Filter =============
-        const regime = detectMarketRegime(trendData);
-        if (!regime.tradeable) {
+        // ============= PHASE 4 (9 FINDINGS): ENHANCED MARKET REGIME DETECTION =============
+        // Finding 2 & 5: Use quantified regime score with graduated penalties
+        const regimeEnhanced = detectMarketRegimeEnhanced(trendData);
+        const regime = detectMarketRegime(trendData);  // Keep legacy for compatibility
+        
+        if (!regimeEnhanced.tradeable) {
           rejectedByRegime++;
           await logRejectionWithAI(
             supabase,
             userId,
             symbol,
-            `Market regime not tradeable: ${regime.reason}`,
-            { regime: regime.regime, reason: regime.reason, adx, confidence, trendConsistency },
+            `Market regime not tradeable: ${regimeEnhanced.reason}`,
+            { 
+              regime: regimeEnhanced.regime, 
+              regimeScore: regimeEnhanced.regimeScore,
+              allowedSetups: regimeEnhanced.allowedSetups,
+              penalties: regimeEnhanced.penalties,
+              reason: regimeEnhanced.reason, 
+              adx, confidence, trendConsistency 
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false
+          );
+          continue;
+        }
+        
+        // ============= PHASE 4 (9 FINDINGS): PRE-RECOVERY HARD GATES =============
+        // Finding 1: In pre-recovery state, require deep pullback OR squeeze breakout
+        // Get pullback analysis early for pre-recovery gate check
+        const rsi = trendData.rsi?.value ?? 50;
+        const squeezeBreakoutForPreRecovery = isValidSqueezeBreakout(trendData, derivedDirection);
+        
+        // Check for deep pullback conditions (RSI + structure)
+        const isDeepPullbackLong = derivedDirection === "long" && 
+          rsi < PRE_RECOVERY_PARAMS.DEEP_PULLBACK_RSI_LONG;
+        const isDeepPullbackShort = derivedDirection === "short" && 
+          rsi > PRE_RECOVERY_PARAMS.DEEP_PULLBACK_RSI_SHORT;
+        const hasDeepPullback = isDeepPullbackLong || isDeepPullbackShort;
+        
+        if (isPreRecovery && PRE_RECOVERY_PARAMS.BLOCK_CONTINUATION_WITHOUT_STRUCTURE) {
+          // Pre-recovery requires either deep pullback OR valid squeeze breakout
+          if (!hasDeepPullback && !squeezeBreakoutForPreRecovery.isValid) {
+            rejectedByHardGates++;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} PRE-RECOVERY GATE: Blocking entry - requires deep pullback OR squeeze breakout`);
+            logger.forSymbol(symbol).debug(`   RSI=${rsi.toFixed(1)}, deepPullback=${hasDeepPullback}, squeeze=${squeezeBreakoutForPreRecovery.isValid}`);
+            await logRejectionWithAI(
+              supabase,
+              userId,
+              symbol,
+              `PRE-RECOVERY GATE: Requires deep pullback (RSI) OR squeeze breakout`,
+              {
+                gate: "PRE_RECOVERY_STRUCTURE",
+                consecutiveLosses,
+                lossThreshold,
+                rsi: rsi.toFixed(1),
+                hasDeepPullback,
+                squeezeValid: squeezeBreakoutForPreRecovery.isValid,
+                squeezeReasons: squeezeBreakoutForPreRecovery.reasons,
+                derivedDirection
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false
+            );
+            continue;
+          }
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} PRE-RECOVERY: Entry allowed via ${hasDeepPullback ? 'deep pullback' : 'squeeze breakout'}`);
+        }
+        
+        // ============= PHASE 4 (9 FINDINGS): REGIME CONFIDENCE GATE =============
+        // Finding 2: Block continuation entries when regimeScore < 45
+        // Determine setup type for this signal
+        const isPullbackSetup = hasDeepPullback || (rsi > 40 && rsi < 60);  // Basic pullback detection
+        const isSqueezeSetup = squeezeBreakoutForPreRecovery.isValid;
+        const isContinuationSetup = !isPullbackSetup && !isSqueezeSetup;
+        
+        if (isContinuationSetup && !regimeEnhanced.allowedSetups.includes('continuation')) {
+          rejectedByHardGates++;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} REGIME GATE: Continuation blocked (regimeScore=${regimeEnhanced.regimeScore} < ${REGIME_SCORE_PARAMS.BLOCK_CONTINUATION_BELOW})`);
+          await logRejectionWithAI(
+            supabase,
+            userId,
+            symbol,
+            `REGIME GATE: Continuation entries blocked at regimeScore=${regimeEnhanced.regimeScore}`,
+            {
+              gate: "REGIME_CONTINUATION_BLOCK",
+              regimeScore: regimeEnhanced.regimeScore,
+              allowedSetups: regimeEnhanced.allowedSetups,
+              setupType: 'continuation',
+              threshold: REGIME_SCORE_PARAMS.BLOCK_CONTINUATION_BELOW,
+              penalties: regimeEnhanced.penalties
+            },
             trendData,
             riskParams.ai_analysis_enabled !== false
           );
@@ -3255,7 +3367,13 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`🔗 Correlation adjustment - position size reduced to ${(correlationAdjustment * 100).toFixed(0)}% due to ${correlationCheck.riskScore.toFixed(0)}% correlation risk`);
         }
         
-        // Step 3: Apply recovery mode reduction
+        // Step 3: Apply drawdown-based risk scaling (Finding 4) - applies before recovery
+        if (drawdownPositionMultiplier < 1.0 && !isInRecoveryMode) {
+          positionSizeMultiplier *= drawdownPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Drawdown scaling (${consecutiveLosses} losses) - position size: ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 4: Apply recovery mode reduction
         if (isInRecoveryMode) {
           positionSizeMultiplier *= recoveryPositionSizeMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Recovery mode - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
