@@ -19,6 +19,7 @@ import {
   MICRO_TREND_PARAMS,
   TREND_STRENGTH_PARAMS,
   EXCEPTION_BUDGET,
+  RECOVERY_MODE_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   detectStrategyType,
@@ -1295,7 +1296,9 @@ serve(async (req) => {
     
     const getMinQualityScore = (adx: number, inRecovery: boolean, confidence1h?: number, isNeutralTrend?: boolean): number => {
       if (inRecovery) {
-        return BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost; // Uses configurable recovery boost
+        // SCENARIO 6 FIX (Finding 9): Cap recovery quality escalation to prevent system paralysis
+        const recoveryQuality = BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost;
+        return Math.min(recoveryQuality, QUALITY_THRESHOLDS.MAX_RECOVERY_QUALITY);
       }
       // Neutral trends (with HTF direction) get lower threshold since quality scoring
       // is optimized for directional 5m trends - neutral relies on 1h direction instead
@@ -2514,56 +2517,205 @@ serve(async (req) => {
         // ============= IMPROVEMENT #3: Pullback Entry Detection =============
         const pullbackAnalysis = analyzePullbackEntry(trendData, trend);
 
-        // ============= RECOVERY MODE = STRICT MODE =============
-        // Recovery mode reduces frequency, not gambles smaller
-        // Must meet ALL strict conditions to trade during recovery
+        // ============= SCENARIO 6: ENHANCED RECOVERY MODE =============
+        // Recovery mode = precision trading only, not punishment loop
+        // Implements Findings 1-10 from Scenario 6 analysis
         if (isInRecoveryMode) {
-          // STRICT 1: ADX must be >= STRONG (stronger trend required during recovery)
-          if (adx < ADX_THRESHOLDS.STRONG) {
+          const htfTrend4hForRecovery = timeframes?.['4h']?.trend || "neutral";
+          const htfConf4hForRecovery = timeframes?.['4h']?.confidence || 0;
+          const htfTrend1hForRecovery = timeframes?.['1h']?.trend || "neutral";
+          
+          // Extract RSI for recovery mode checks
+          const recoveryRsi = trendData?.indicators?.rsi || 50;
+          
+          // ===== FINDING 8: COOLDOWN AFTER RECOVERY LOSS =====
+          // Check if we're in cooldown period after a recovery loss
+          const recoveryCooldownUntil = riskParams.recovery_cooldown_until 
+            ? new Date(riskParams.recovery_cooldown_until) 
+            : null;
+          const now = new Date();
+          
+          if (recoveryCooldownUntil && now < recoveryCooldownUntil) {
             rejectedByHardGates++;
+            const cooldownRemaining = Math.ceil((recoveryCooldownUntil.getTime() - now.getTime()) / 60000);
             await logRejectionWithAI(
               supabase, userId, symbol,
-              `RECOVERY MODE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.STRONG}) - only strong trends during recovery`,
-              { adx: adx.toFixed(1), gate: "RECOVERY_ADX_STRICT", consecutiveLosses: riskParams.consecutive_losses },
+              `RECOVERY COOLDOWN: ${cooldownRemaining}min remaining after recovery loss`,
+              { gate: "RECOVERY_COOLDOWN", cooldownRemaining, cooldownUntil: recoveryCooldownUntil.toISOString() },
               trendData,
               riskParams.ai_analysis_enabled !== false
             );
             continue;
           }
           
-          // STRICT 2: Must have BOTH pullback conditions (RSI + Bollinger)
-          if (!pullbackAnalysis.hasBothConditions) {
+          // ===== FINDING 10: RECOVERY TRADE COUNTER =====
+          const maxRecoveryTrades = riskParams.max_recovery_trades_per_day ?? RECOVERY_MODE_PARAMS.DEFAULT_MAX_RECOVERY_TRADES;
+          const recoveryTradesToday = riskParams.recovery_trades_today ?? 0;
+          
+          if (recoveryTradesToday >= maxRecoveryTrades) {
             rejectedByHardGates++;
             await logRejectionWithAI(
               supabase, userId, symbol,
-              `RECOVERY MODE: No optimal pullback entry (need RSI + BB conditions)`,
-              { pullbackReason: pullbackAnalysis.reason, hasBoth: false, gate: "RECOVERY_PULLBACK_STRICT", consecutiveLosses: riskParams.consecutive_losses },
+              `RECOVERY: Max recovery trades reached (${recoveryTradesToday}/${maxRecoveryTrades})`,
+              { gate: "RECOVERY_MAX_TRADES", recoveryTradesToday, maxRecoveryTrades },
               trendData,
               riskParams.ai_analysis_enabled !== false
             );
             continue;
           }
           
-          // STRICT 3: Confidence must be in optimal zone (50-70%) - NOT dead zone
-          if (confidence >= 70) {
+          // ===== FINDING 3: HTF ALIGNMENT AS HARD GATE =====
+          // Recovery mode is trend continuation ONLY - no counter-trend trades
+          const htfAlignedForRecovery = (
+            (htfTrend4hForRecovery === "bullish" && derivedDirection === "long") ||
+            (htfTrend4hForRecovery === "bearish" && derivedDirection === "short") ||
+            (htfTrend4hForRecovery === "neutral" && htfTrend1hForRecovery !== "neutral" &&
+              ((htfTrend1hForRecovery === "bullish" && derivedDirection === "long") ||
+               (htfTrend1hForRecovery === "bearish" && derivedDirection === "short")))
+          );
+          
+          if (!htfAlignedForRecovery) {
             rejectedByHardGates++;
             await logRejectionWithAI(
               supabase, userId, symbol,
-              `RECOVERY MODE: Confidence too high (${confidence}% >= 70) - late entries during recovery`,
-              { confidence, gate: "RECOVERY_CONFIDENCE_STRICT", consecutiveLosses: riskParams.consecutive_losses },
+              `RECOVERY: HTF misalignment - trend continuation only (4h=${htfTrend4hForRecovery}, 1h=${htfTrend1hForRecovery}, direction=${derivedDirection})`,
+              { gate: "RECOVERY_HTF_MISALIGN", htfTrend4h: htfTrend4hForRecovery, htfTrend1h: htfTrend1hForRecovery, derivedDirection },
               trendData,
               riskParams.ai_analysis_enabled !== false
             );
             continue;
           }
           
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Passed RECOVERY STRICT MODE checks (ADX=${adx.toFixed(1)}, pullback=BOTH, conf=${confidence}%)`);
+          // ===== FINDING 5: ADAPTIVE ADX RULE =====
+          // Hard reject below 23, allow 23-25 if HTF is strong (4h conf >= 70)
+          if (adx < RECOVERY_MODE_PARAMS.ADX_HARD_MINIMUM) {
+            rejectedByHardGates++;
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `RECOVERY: ADX too low (${adx.toFixed(1)} < ${RECOVERY_MODE_PARAMS.ADX_HARD_MINIMUM}) - hard minimum`,
+              { adx: adx.toFixed(1), gate: "RECOVERY_ADX_HARD_MIN", adxRequired: RECOVERY_MODE_PARAMS.ADX_HARD_MINIMUM },
+              trendData,
+              riskParams.ai_analysis_enabled !== false
+            );
+            continue;
+          }
+          
+          // Soft zone 23-25: Allow only if HTF is strong
+          if (adx < RECOVERY_MODE_PARAMS.ADX_SOFT_ZONE_MAX && adx >= RECOVERY_MODE_PARAMS.ADX_SOFT_ZONE_MIN) {
+            const htfStrong = htfConf4hForRecovery >= RECOVERY_MODE_PARAMS.HTF_CONFIDENCE_FOR_SOFT_ADX;
+            if (!htfStrong) {
+              rejectedByHardGates++;
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `RECOVERY: ADX in soft zone (${adx.toFixed(1)}) but HTF not strong (4h conf=${htfConf4hForRecovery}% < ${RECOVERY_MODE_PARAMS.HTF_CONFIDENCE_FOR_SOFT_ADX}%)`,
+                { adx: adx.toFixed(1), gate: "RECOVERY_ADX_SOFT_ZONE", htfConf4h: htfConf4hForRecovery },
+                trendData,
+                riskParams.ai_analysis_enabled !== false
+              );
+              continue;
+            }
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Recovery ADX soft zone (${adx.toFixed(1)}) allowed - HTF strong (4h conf=${htfConf4hForRecovery}%)`);
+          }
+          
+          // ===== FINDING 2: CONDITIONAL CONFIDENCE CAP =====
+          // Hard reject >=80 without deep pullback, soft penalty 70-80
+          const isDeepPullback = pullbackAnalysis.pullbackDepth >= 50 || 
+            (trend === "bullish" && recoveryRsi < 35) || 
+            (trend === "bearish" && recoveryRsi > 65);
+          
+          if (confidence >= RECOVERY_MODE_PARAMS.CONFIDENCE_HARD_CAP && !isDeepPullback) {
+            rejectedByHardGates++;
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `RECOVERY: Euphoric entry (conf=${confidence}% >= ${RECOVERY_MODE_PARAMS.CONFIDENCE_HARD_CAP}%) without deep pullback`,
+              { confidence, gate: "RECOVERY_EUPHORIC_ENTRY", isDeepPullback, pullbackDepth: pullbackAnalysis.pullbackDepth },
+              trendData,
+              riskParams.ai_analysis_enabled !== false
+            );
+            continue;
+          }
+          
+          // ===== FINDING 4: PULLBACK DEPTH SCORING =====
+          // Replace binary check with weighted scoring (0-3 points)
+          let pullbackScore = 0;
+          
+          // Point 1: RSI in pullback zone (40-55 for longs, inverted for shorts)
+          const rsiInPullbackZone = trend === "bullish" 
+            ? (recoveryRsi >= RECOVERY_MODE_PARAMS.RSI_PULLBACK_MIN && recoveryRsi <= RECOVERY_MODE_PARAMS.RSI_PULLBACK_MAX)
+            : (recoveryRsi >= (100 - RECOVERY_MODE_PARAMS.RSI_PULLBACK_MAX) && recoveryRsi <= (100 - RECOVERY_MODE_PARAMS.RSI_PULLBACK_MIN));
+          if (rsiInPullbackZone) pullbackScore++;
+          
+          // Point 2: Price near mid/outer Bollinger Band
+          const nearBBZone = bollingerPosition === "lower_zone" || bollingerPosition === "upper_zone" || 
+            bollingerPosition === "middle_zone" || percentB < 30 || percentB > 70;
+          if (nearBBZone) pullbackScore++;
+          
+          // Point 3: Retrace percentage in Fibonacci zone (38-61%)
+          // Use pullback depth as proxy for retrace
+          const inRetraceZone = pullbackAnalysis.pullbackDepth >= RECOVERY_MODE_PARAMS.RETRACE_MIN_PERCENT && 
+            pullbackAnalysis.pullbackDepth <= RECOVERY_MODE_PARAMS.RETRACE_MAX_PERCENT;
+          if (inRetraceZone) pullbackScore++;
+          
+          if (pullbackScore < RECOVERY_MODE_PARAMS.MIN_PULLBACK_SCORE) {
+            rejectedByHardGates++;
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `RECOVERY: Pullback too shallow (score=${pullbackScore}/${RECOVERY_MODE_PARAMS.MIN_PULLBACK_SCORE} required)`,
+              { 
+                gate: "RECOVERY_PULLBACK_SHALLOW", 
+                pullbackScore,
+                minRequired: RECOVERY_MODE_PARAMS.MIN_PULLBACK_SCORE,
+                rsiInPullbackZone, nearBBZone, inRetraceZone,
+                rsi: recoveryRsi.toFixed(1), percentB: percentB.toFixed(1),
+                pullbackDepth: pullbackAnalysis.pullbackDepth
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false
+            );
+            continue;
+          }
+          
+          // ===== FINDING 6: NO FIRST CANDLE RULE =====
+          // Block entry on first continuation candle after pullback (stop-hunt protection)
+          // Detect via pullback analysis - if isPullback but entryTimingScore is very high, it's first candle
+          const isFirstContinuationCandle = pullbackAnalysis.isPullback && 
+            pullbackAnalysis.entryTimingScore >= 20 && 
+            !pullbackAnalysis.hasBothConditions;
+          
+          if (RECOVERY_MODE_PARAMS.BLOCK_FIRST_CANDLE && isFirstContinuationCandle) {
+            rejectedByHardGates++;
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `RECOVERY: First candle continuation blocked (stop-hunt protection)`,
+              { 
+                gate: "RECOVERY_FIRST_CANDLE", 
+                isPullback: pullbackAnalysis.isPullback,
+                entryTimingScore: pullbackAnalysis.entryTimingScore,
+                hasBothConditions: pullbackAnalysis.hasBothConditions
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false
+            );
+            continue;
+          }
+          
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Passed ENHANCED RECOVERY checks (ADX=${adx.toFixed(1)}, pullbackScore=${pullbackScore}/3, HTF=${htfTrend4hForRecovery}, conf=${confidence}%)`);
         }
 
         // ============= IMPROVEMENT #1: Quality Score System with CONFIDENCE INVERSION =============
         // Pass ADX and momentum state to reduce penalty for favorable conditions (avoids double punishment with hard gate)
         const momentumConfirmed = momentum?.confirms === true && momentum?.state === "confirmed";
-        const confidencePenalty = getConfidencePenalty(confidence, adx, momentumConfirmed);
+        let confidencePenalty = getConfidencePenalty(confidence, adx, momentumConfirmed);
+        
+        // ===== SCENARIO 6 FINDING 2: RECOVERY SOFT PENALTY =====
+        // Apply additional -10 penalty for confidence 70-80 during recovery
+        if (isInRecoveryMode && 
+            confidence >= RECOVERY_MODE_PARAMS.CONFIDENCE_SOFT_PENALTY_MIN && 
+            confidence < RECOVERY_MODE_PARAMS.CONFIDENCE_SOFT_PENALTY_MAX) {
+          confidencePenalty -= RECOVERY_MODE_PARAMS.CONFIDENCE_SOFT_PENALTY_AMOUNT;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Recovery soft penalty: -${RECOVERY_MODE_PARAMS.CONFIDENCE_SOFT_PENALTY_AMOUNT} for conf=${confidence}% in 70-80 zone`);
+        }
+        
         // Direction bonus: +3 for SHORT/SELL signals (historically 38% vs 31% win rate)
         const directionBonus = trend === "bearish" ? 3 : 0;
         // Volume score component
@@ -2626,6 +2778,21 @@ serve(async (req) => {
         };
 
         const { score: qualityScore, breakdown } = calculateQualityScore(qualityFactors);
+        
+        // ===== SCENARIO 6 FINDING 7: DYNAMIC POSITION SIZE =====
+        // In recovery mode, size position based on quality score instead of flat reduction
+        let recoveryDynamicSizeMultiplier = 1.0;
+        if (isInRecoveryMode) {
+          // Calculate quality-based multiplier: clamp(qualityScore / MAX_QUALITY, 0.5, 1.0)
+          const rawMultiplier = qualityScore / RECOVERY_MODE_PARAMS.MAX_QUALITY_FOR_SIZING;
+          recoveryDynamicSizeMultiplier = Math.max(
+            RECOVERY_MODE_PARAMS.MIN_SIZE_MULTIPLIER,
+            Math.min(RECOVERY_MODE_PARAMS.MAX_SIZE_MULTIPLIER, rawMultiplier)
+          );
+          // Apply on top of the base recovery position size
+          const finalRecoverySize = recoveryPositionSizeMultiplier * recoveryDynamicSizeMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Recovery dynamic sizing: quality=${qualityScore} → multiplier=${recoveryDynamicSizeMultiplier.toFixed(2)} → final=${(finalRecoverySize * 100).toFixed(0)}%`);
+        }
 
         // Log confidence inversion impact
         if (confidencePenalty < 0) {
