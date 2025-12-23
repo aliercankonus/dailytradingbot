@@ -11,12 +11,17 @@ export const ADX_THRESHOLDS = {
   MINIMUM: 20,
   MODERATE: 22,
   STRONG: 25,
-  STRONG_TREND_EXCEPTION: 27,  // RELAXED: From 28 to 27 for better signal capture
+  // PHASE 1 FIX: Separated strong trend exception thresholds
+  STRONG_TREND_EXCEPTION: 27,  // For dead zone bypass only
+  STRONG_TREND_EXCEPTION_PARTIAL: 25,  // Partial exception: 25% position reduction
+  STRONG_TREND_EXCEPTION_FULL: 30,     // Full exception: no position reduction
   VERY_STRONG: 30,
   EXCEPTIONAL: 35,
   EXTREME: 40,
   // PHASE 1: ADX Phase State Machine thresholds
   EXHAUSTION: 45,  // ADX > 45 = exhaustion risk, increase reversal sensitivity
+  // PHASE 1 FIX: Reversal override block threshold
+  REVERSAL_BLOCK: 30,  // No reversals allowed when ADX >= 30 (strong trend)
 } as const;
 
 // ============= ADX PHASE STATE MACHINE =============
@@ -167,6 +172,34 @@ export const RISK_SEPARATION_THRESHOLDS = {
     HIGH: 65,     // 50-65: Strongly consider blocking
     BLOCK: 75,    // 65+: Hard block - actual reversal likely
   },
+} as const;
+
+// ============= PHASE 1 FIX: REVERSAL OVERRIDE SAFETY THRESHOLDS =============
+// Mandatory safety gates for reversal override feature
+export const REVERSAL_OVERRIDE_SAFETY = {
+  // ADX must be BELOW this to allow reversal override (no reversals in strong trends)
+  MAX_ADX_FOR_REVERSAL: 30,
+  // Minimum unified reversal score required to allow reversal override
+  MIN_REVERSAL_SCORE: 65,
+  // Maximum 4h HTF confidence in original direction before blocking reversal
+  MAX_HTF_CONFIDENCE_AGAINST: 65,
+  // Position size cap for reversal entries
+  MAX_POSITION_SIZE_PERCENT: 40,
+  // Minimum required R:R for reversal entries
+  MIN_REQUIRED_RR: 2.2,
+} as const;
+
+// ============= PHASE 1 FIX: BREAKOUT DEFINITION THRESHOLDS =============
+// Tighter breakout definition to prevent late entries
+export const BREAKOUT_THRESHOLDS = {
+  // Minimum %B for valid breakout (was 70, now 80)
+  MIN_PERCENT_B: 80,
+  // Minimum volume ratio for breakout confirmation
+  MIN_VOLUME_RATIO: 1.5,
+  // Minimum bandwidth expansion factor (current vs recent avg)
+  MIN_BANDWIDTH_EXPANSION: 1.1,
+  // For short breakouts, max %B
+  MAX_PERCENT_B_SHORT: 20,
 } as const;
 
 // ============= PHASE 2: COMPONENT CAPS =============

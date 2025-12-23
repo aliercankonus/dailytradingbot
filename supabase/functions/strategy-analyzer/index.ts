@@ -14,6 +14,8 @@ import {
   EMERGENCY_EXIT_PARAMS,
   EXIT_THRESHOLDS,
   ENTRY_TIMING_PARAMS,
+  REVERSAL_OVERRIDE_SAFETY,
+  BREAKOUT_THRESHOLDS,
   isMomentumStrategy,
   isNeutralStrategy,
   detectStrategyType
@@ -1519,20 +1521,71 @@ serve(async (req) => {
         let isReversalEntry = false;
         let reversalPositionSizeOverride = 1.0;
         
+        // ===== PHASE 1 FIX: REVERSAL OVERRIDE SAFETY GATES =====
+        // Block reversal overrides in strong trends or when HTF is strongly aligned against
+        const isSafeForReversal = (() => {
+          // SAFETY GATE 1: No reversals in strong trends (ADX >= 30)
+          if (adx >= REVERSAL_OVERRIDE_SAFETY.MAX_ADX_FOR_REVERSAL) {
+            logger.forSymbol(symbol).debug(`[REVERSAL_SAFETY] Blocked: ADX=${adx.toFixed(1)} >= ${REVERSAL_OVERRIDE_SAFETY.MAX_ADX_FOR_REVERSAL} (strong trend)`);
+            return false;
+          }
+          
+          // SAFETY GATE 2: Check unified reversal score (must be high enough to justify reversal)
+          if (unifiedReversal.score < REVERSAL_OVERRIDE_SAFETY.MIN_REVERSAL_SCORE) {
+            logger.forSymbol(symbol).debug(`[REVERSAL_SAFETY] Blocked: Reversal score ${unifiedReversal.score} < ${REVERSAL_OVERRIDE_SAFETY.MIN_REVERSAL_SCORE}`);
+            return false;
+          }
+          
+          // SAFETY GATE 3: Check if HTF is strongly aligned in original direction
+          // For bullish->short reversal: check if 4h bullish confidence is too high
+          // For bearish->long reversal: check if 4h bearish confidence is too high
+          const htf4hTrend = stochFilterTrend4h;
+          const htf4hConf = stochFilterConf4h;
+          
+          if (trend === "bearish" && htf4hTrend === "bearish" && htf4hConf >= REVERSAL_OVERRIDE_SAFETY.MAX_HTF_CONFIDENCE_AGAINST) {
+            logger.forSymbol(symbol).debug(`[REVERSAL_SAFETY] Blocked: 4h strongly bearish (${htf4hConf}% >= ${REVERSAL_OVERRIDE_SAFETY.MAX_HTF_CONFIDENCE_AGAINST}%)`);
+            return false;
+          }
+          if (trend === "bullish" && htf4hTrend === "bullish" && htf4hConf >= REVERSAL_OVERRIDE_SAFETY.MAX_HTF_CONFIDENCE_AGAINST) {
+            logger.forSymbol(symbol).debug(`[REVERSAL_SAFETY] Blocked: 4h strongly bullish (${htf4hConf}% >= ${REVERSAL_OVERRIDE_SAFETY.MAX_HTF_CONFIDENCE_AGAINST}%)`);
+            return false;
+          }
+          
+          return true;
+        })();
+        
         if (overrideToLongReversal && trend === "bearish") {
-          intendedTradeDirection = "long";
-          isReversalEntry = true;
-          reversalPositionSizeOverride = (riskParams.early_reversal_position_size_percent || 40) / 100;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} BULLISH REVERSAL OVERRIDE - Switching from SHORT to LONG at oversold K=${stochRsiK4h.toFixed(1)}`);
-          logger.forSymbol(symbol).debug(`   StochRSI rising: K=${stochRsiK4h.toFixed(1)} > D=${stochRsiD4h.toFixed(1)}, 1h bullish: ${has1hBullishTurnCheck}, divergence: ${has1hBullishDivergenceCheck}`);
-          logger.forSymbol(symbol).debug(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)}), Position size: ${(reversalPositionSizeOverride * 100).toFixed(0)}%`);
+          if (isSafeForReversal) {
+            intendedTradeDirection = "long";
+            isReversalEntry = true;
+            // PHASE 1 FIX: Cap reversal position size
+            reversalPositionSizeOverride = Math.min(
+              (riskParams.early_reversal_position_size_percent || 40) / 100,
+              REVERSAL_OVERRIDE_SAFETY.MAX_POSITION_SIZE_PERCENT / 100
+            );
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} BULLISH REVERSAL OVERRIDE - Switching from SHORT to LONG at oversold K=${stochRsiK4h.toFixed(1)}`);
+            logger.forSymbol(symbol).debug(`   StochRSI rising: K=${stochRsiK4h.toFixed(1)} > D=${stochRsiD4h.toFixed(1)}, 1h bullish: ${has1hBullishTurnCheck}, divergence: ${has1hBullishDivergenceCheck}`);
+            logger.forSymbol(symbol).debug(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)}), Position size: ${(reversalPositionSizeOverride * 100).toFixed(0)}%`);
+            logger.forSymbol(symbol).debug(`   Safety checks passed: ADX=${adx.toFixed(1)}, reversalScore=${unifiedReversal.score}, 4hConf=${stochFilterConf4h}%`);
+          } else {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} BULLISH REVERSAL BLOCKED by safety gates - ADX=${adx.toFixed(1)}, reversalScore=${unifiedReversal.score}, 4h=${stochFilterTrend4h} ${stochFilterConf4h}%`);
+          }
         } else if (overrideToShortReversal && trend === "bullish") {
-          intendedTradeDirection = "short";
-          isReversalEntry = true;
-          reversalPositionSizeOverride = (riskParams.early_reversal_position_size_percent || 40) / 100;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} BEARISH REVERSAL OVERRIDE - Switching from LONG to SHORT at overbought K=${stochRsiK4h.toFixed(1)}`);
-          logger.forSymbol(symbol).debug(`   StochRSI falling: K=${stochRsiK4h.toFixed(1)} < D=${stochRsiD4h.toFixed(1)}, 1h bearish: ${has1hBearishTurnCheck}, divergence: ${hasBearishDivergence}`);
-          logger.forSymbol(symbol).debug(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)}), Position size: ${(reversalPositionSizeOverride * 100).toFixed(0)}%`);
+          if (isSafeForReversal) {
+            intendedTradeDirection = "short";
+            isReversalEntry = true;
+            // PHASE 1 FIX: Cap reversal position size
+            reversalPositionSizeOverride = Math.min(
+              (riskParams.early_reversal_position_size_percent || 40) / 100,
+              REVERSAL_OVERRIDE_SAFETY.MAX_POSITION_SIZE_PERCENT / 100
+            );
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} BEARISH REVERSAL OVERRIDE - Switching from LONG to SHORT at overbought K=${stochRsiK4h.toFixed(1)}`);
+            logger.forSymbol(symbol).debug(`   StochRSI falling: K=${stochRsiK4h.toFixed(1)} < D=${stochRsiD4h.toFixed(1)}, 1h bearish: ${has1hBearishTurnCheck}, divergence: ${hasBearishDivergence}`);
+            logger.forSymbol(symbol).debug(`   Bollinger: ${bollingerPosition} (%B=${percentB.toFixed(1)}), Position size: ${(reversalPositionSizeOverride * 100).toFixed(0)}%`);
+            logger.forSymbol(symbol).debug(`   Safety checks passed: ADX=${adx.toFixed(1)}, reversalScore=${unifiedReversal.score}, 4hConf=${stochFilterConf4h}%`);
+          } else {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} BEARISH REVERSAL BLOCKED by safety gates - ADX=${adx.toFixed(1)}, reversalScore=${unifiedReversal.score}, 4h=${stochFilterTrend4h} ${stochFilterConf4h}%`);
+          }
         } else if (isOversoldReversalCandidate && trend === "bearish" && !overrideToLongReversal) {
           logger.forSymbol(symbol).debug(`Oversold but NO reversal override - K=${stochRsiK4h.toFixed(1)} rising:${stochRsiTurningUpCheck} 1hBullish:${has1hBullishTurnCheck} divergence:${has1hBullishDivergenceCheck} BBLower:${bollingerAtLowerCheck}`);
         }
@@ -1697,30 +1750,72 @@ serve(async (req) => {
           // FIX: Previously required momentum.confirms=true AND 75%+ confidence which rejected valid signals
           const strongUptrend4h = stochFilterTrend4h === "bullish" && stochFilterConf4h >= 60;
           const strongUptrend1h = stochFilterTrend1h === "bullish" && stochFilterConf1h >= 55;
-          const breakoutOrHigherLow = bollingerPosition === "above_upper" || bollingerPosition === "upper_zone" || percentB > 70;
+          
+          // ===== PHASE 1 FIX: TIGHTER BREAKOUT DEFINITION =====
+          // OLD: percentB > 70 (too loose, allows late entries inside bands)
+          // NEW: Require expansion confirmation, not just location
+          const volatility = trendData.volatility || {};
+          const volumeRatio = volatility.volumeRatio ?? 1.0;
+          const bollingerBand = trendData.bollingerBand || {};
+          const bbData4h = trendData.bb?.["4h"] || trendData.bollingerBand || {};
+          const currentBandwidth = bbData4h.bandwidth || bollingerBand.bandwidth || 0;
+          
+          // True breakout requires:
+          // 1. %B > 80 (strong upper zone, not just > 70)
+          // 2. AND (bandwidth expanding OR volume spike)
+          const isAboveBreakoutThreshold = percentB > BREAKOUT_THRESHOLDS.MIN_PERCENT_B;
+          const hasVolumeConfirmation = volumeRatio >= BREAKOUT_THRESHOLDS.MIN_VOLUME_RATIO;
+          const isBandwidthExpanding = currentBandwidth > 0 && !bbData4h.squeeze; // Not in squeeze = expanding
+          
+          const isValidBreakout = isAboveBreakoutThreshold && (hasVolumeConfirmation || isBandwidthExpanding);
+          
+          // Legacy fallback for position-based check (less strict)
+          const breakoutOrHigherLowLegacy = bollingerPosition === "above_upper" || bollingerPosition === "upper_zone";
+          
+          // Use stricter breakout for primary path, legacy for aligned trend override
+          const breakoutOrHigherLow = isValidBreakout;
+          
           const stochMomentumUp = stochRsiRising && macdHistogram > 0;
           // RELAXED: Accept "building" OR "confirmed" momentum state
           const momentumAcceptable = (momentum?.confirms === true || momentum?.state === "building") && momentum?.state !== "none";
           
-          // PRIMARY: Full smart exception conditions
+          // PRIMARY: Full smart exception conditions (now with stricter breakout)
           const allowExtremeOverbought = strongUptrend4h && strongUptrend1h && breakoutOrHigherLow && stochMomentumUp && momentumAcceptable;
           
-          // SECONDARY: Strong aligned trends override (allows entry with reduced position size)
-          const alignedTrendOverride = stochFilterTrend4h === "bullish" && stochFilterTrend1h === "bullish" && 
-            adx >= ADX_THRESHOLDS.MINIMUM && // ADX >= 20
+          // ===== PHASE 1 FIX: TIERED STRONG TREND EXCEPTION =====
+          // FULL exception (ADX >= 30): no position reduction
+          // PARTIAL exception (ADX >= 25): 50% position reduction
+          // Below 25: reject unless other conditions met
+          const alignedTrendOverrideFull = stochFilterTrend4h === "bullish" && stochFilterTrend1h === "bullish" && 
+            adx >= ADX_THRESHOLDS.STRONG_TREND_EXCEPTION_FULL && // ADX >= 30
             !hasBearishDivergence && 
             stochRsiRising;
           
+          const alignedTrendOverridePartial = stochFilterTrend4h === "bullish" && stochFilterTrend1h === "bullish" && 
+            adx >= ADX_THRESHOLDS.STRONG_TREND_EXCEPTION_PARTIAL && // ADX >= 25
+            adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION_FULL && // ADX < 30
+            !hasBearishDivergence && 
+            stochRsiRising &&
+            (breakoutOrHigherLowLegacy || isValidBreakout); // Must have some breakout indication
+          
           if (allowExtremeOverbought) {
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG (strong uptrend both TFs, breakout, StochRSI rising, momentum ${momentum?.state})`);
-          } else if (alignedTrendOverride) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG (strong uptrend both TFs, valid breakout %B=${percentB.toFixed(1)}, StochRSI rising, momentum ${momentum?.state})`);
+          } else if (alignedTrendOverrideFull) {
+            // FULL exception: no position reduction
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - FULL STRONG TREND EXCEPTION (aligned 4h+1h bullish, ADX=${adx.toFixed(1)} >= 30, StochRSI rising)`);
+          } else if (alignedTrendOverridePartial) {
+            // PARTIAL exception: 50% position reduction
             reversalPositionMultiplier = Math.min(reversalPositionMultiplier, 0.5);
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG with 50% position (aligned 4h+1h bullish, ADX=${adx.toFixed(1)}, StochRSI rising)`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - PARTIAL STRONG TREND EXCEPTION with 50% position (aligned 4h+1h bullish, ADX=${adx.toFixed(1)} >= 25, StochRSI rising)`);
           } else {
             rejectedByStochRsiExtreme++;
             const blockReason = !momentumAcceptable 
               ? `momentum not acceptable (confirms=${momentum?.confirms}, state=${momentum?.state})` 
-              : "failed smart exception conditions";
+              : adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION_PARTIAL
+                ? `ADX too weak (${adx.toFixed(1)} < ${ADX_THRESHOLDS.STRONG_TREND_EXCEPTION_PARTIAL} for partial exception)`
+                : !isValidBreakout && !breakoutOrHigherLowLegacy
+                  ? `no valid breakout (%B=${percentB.toFixed(1)}, volumeRatio=${volumeRatio.toFixed(2)})`
+                  : "failed smart exception conditions";
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} overbought | ${blockReason}`);
             await supabase.from("signal_rejection_log").insert({
               user_id: userId, symbol,
@@ -1731,7 +1826,14 @@ serve(async (req) => {
                 trend1h: stochFilterTrend1h, confidence1h: stochFilterConf1h,
                 bollingerPosition, percentB, macdHistogram, adx: adx.toFixed(1),
                 momentumConfirms: momentum?.confirms, momentumState: momentum?.state,
-                alignedTrendOverride,
+                // PHASE 1 FIX: Enhanced rejection logging
+                isValidBreakout,
+                breakoutThreshold: BREAKOUT_THRESHOLDS.MIN_PERCENT_B,
+                volumeRatio: volumeRatio.toFixed(2),
+                hasVolumeConfirmation,
+                isBandwidthExpanding,
+                alignedTrendOverrideFull,
+                alignedTrendOverridePartial,
                 reason: blockReason
               },
               trend_data: trendData, checked_at: new Date().toISOString(),
