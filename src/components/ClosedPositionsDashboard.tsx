@@ -280,6 +280,20 @@ export const ClosedPositionsDashboard = () => {
           {reason}
         </Badge>
       );
+    } else if (reason === 'Smart AITS Lock') {
+      return (
+        <Badge variant="outline" className="gap-1 bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
+          <TrendingUp className="h-3 w-3" />
+          Smart AITS Lock
+        </Badge>
+      );
+    } else if (reason === 'Smart AITS Decay' || reason === 'Decay Velocity Exit') {
+      return (
+        <Badge variant="outline" className="gap-1 bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
+          <TrendingDown className="h-3 w-3" />
+          {reason}
+        </Badge>
+      );
     } else if (reason === 'Stop Loss') {
       return (
         <Badge variant="destructive" className="gap-1">
