@@ -17,9 +17,12 @@ import {
   REVERSAL_OVERRIDE_SAFETY,
   BREAKOUT_THRESHOLDS,
   MICRO_TREND_PARAMS,
+  TREND_STRENGTH_PARAMS,
+  EXCEPTION_BUDGET,
   isMomentumStrategy,
   isNeutralStrategy,
-  detectStrategyType
+  detectStrategyType,
+  type ExceptionType
 } from "../_shared/constants.ts";
 import { 
   getTechnicalScore, 
@@ -36,11 +39,17 @@ import {
   getAdxPhase,
   getAdxPhaseInfo,
   detectBreakoutMode,
+  calculateTrendStrength,
+  determineExceptionPriority,
+  checkExceptionBudget,
   type UnifiedReversalResult,
   type MarketRegime,
   type SqueezeBreakoutResult,
   type DirectionResult,
-  type BreakoutModeResult
+  type BreakoutModeResult,
+  type TrendStrengthResult,
+  type ExceptionResult,
+  type ExceptionBudgetResult
 } from "../_shared/scoring.ts";
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
@@ -1783,40 +1792,51 @@ serve(async (req) => {
           // PRIMARY: Full smart exception conditions (now with stricter breakout)
           const allowExtremeOverbought = strongUptrend4h && strongUptrend1h && breakoutOrHigherLow && stochMomentumUp && momentumAcceptable;
           
-          // ===== PHASE 1 FIX: TIERED STRONG TREND EXCEPTION =====
-          // FULL exception (ADX >= 30): no position reduction
-          // PARTIAL exception (ADX >= 25): 50% position reduction
-          // Below 25: reject unless other conditions met
-          const alignedTrendOverrideFull = stochFilterTrend4h === "bullish" && stochFilterTrend1h === "bullish" && 
-            adx >= ADX_THRESHOLDS.STRONG_TREND_EXCEPTION_FULL && // ADX >= 30
+          // ===== PHASE 3: TREND STRENGTH SCORING =====
+          // Replace boolean checks with quantified trend strength score
+          const isMomentumActiveForStrength = momentum?.confirms === true || 
+            momentum?.state === "building" || 
+            momentum?.state === "confirmed";
+          
+          const trendStrengthResult = calculateTrendStrength(
+            stochFilterConf4h,
+            stochFilterConf1h,
+            adx,
+            isMomentumActiveForStrength
+          );
+          
+          // Additional safety conditions that MUST pass regardless of score
+          const baseSafetyConditions = stochFilterTrend4h === "bullish" && 
+            stochFilterTrend1h === "bullish" && 
             !hasBearishDivergence && 
             stochRsiRising;
           
-          const alignedTrendOverridePartial = stochFilterTrend4h === "bullish" && stochFilterTrend1h === "bullish" && 
-            adx >= ADX_THRESHOLDS.STRONG_TREND_EXCEPTION_PARTIAL && // ADX >= 25
-            adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION_FULL && // ADX < 30
-            !hasBearishDivergence && 
-            stochRsiRising &&
-            (breakoutOrHigherLowLegacy || isValidBreakout); // Must have some breakout indication
+          // Use trend strength for decision instead of separate FULL/PARTIAL checks
+          let strongTrendExceptionApplied = false;
+          let strongTrendPositionMultiplier = 1.0;
           
           if (allowExtremeOverbought) {
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - ALLOWING LONG (strong uptrend both TFs, valid breakout %B=${percentB.toFixed(1)}, StochRSI rising, momentum ${momentum?.state})`);
-          } else if (alignedTrendOverrideFull) {
+            strongTrendExceptionApplied = true;
+          } else if (baseSafetyConditions && trendStrengthResult.decision === 'FULL') {
             // FULL exception: no position reduction
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - FULL STRONG TREND EXCEPTION (aligned 4h+1h bullish, ADX=${adx.toFixed(1)} >= 30, StochRSI rising)`);
-          } else if (alignedTrendOverridePartial) {
+            strongTrendExceptionApplied = true;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - FULL STRONG TREND EXCEPTION via trend strength score ${trendStrengthResult.score}/6`);
+            logger.forSymbol(symbol).debug(`   Trend strength breakdown: 4hConf=${trendStrengthResult.components.confidence4hPoints}, 1hConf=${trendStrengthResult.components.confidence1hPoints}, ADX=${trendStrengthResult.components.adxPoints}, momentum=${trendStrengthResult.components.momentumPoints}`);
+          } else if (baseSafetyConditions && trendStrengthResult.decision === 'PARTIAL' && (breakoutOrHigherLowLegacy || isValidBreakout)) {
             // PARTIAL exception: 50% position reduction
+            strongTrendExceptionApplied = true;
+            strongTrendPositionMultiplier = 0.5;
             reversalPositionMultiplier = Math.min(reversalPositionMultiplier, 0.5);
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - PARTIAL STRONG TREND EXCEPTION with 50% position (aligned 4h+1h bullish, ADX=${adx.toFixed(1)} >= 25, StochRSI rising)`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} extreme overbought - PARTIAL STRONG TREND EXCEPTION via trend strength score ${trendStrengthResult.score}/6 with 50% position`);
+            logger.forSymbol(symbol).debug(`   Trend strength breakdown: 4hConf=${trendStrengthResult.components.confidence4hPoints}, 1hConf=${trendStrengthResult.components.confidence1hPoints}, ADX=${trendStrengthResult.components.adxPoints}, momentum=${trendStrengthResult.components.momentumPoints}`);
           } else {
             rejectedByStochRsiExtreme++;
-            const blockReason = !momentumAcceptable 
-              ? `momentum not acceptable (confirms=${momentum?.confirms}, state=${momentum?.state})` 
-              : adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION_PARTIAL
-                ? `ADX too weak (${adx.toFixed(1)} < ${ADX_THRESHOLDS.STRONG_TREND_EXCEPTION_PARTIAL} for partial exception)`
-                : !isValidBreakout && !breakoutOrHigherLowLegacy
-                  ? `no valid breakout (%B=${percentB.toFixed(1)}, volumeRatio=${volumeRatio.toFixed(2)})`
-                  : "failed smart exception conditions";
+            const blockReason = !baseSafetyConditions
+              ? `base safety conditions failed (4h=${stochFilterTrend4h}, 1h=${stochFilterTrend1h}, divergence=${hasBearishDivergence}, rising=${stochRsiRising})`
+              : trendStrengthResult.decision === 'REJECT'
+                ? `trend strength too low: ${trendStrengthResult.reason}`
+                : `no valid breakout (%B=${percentB.toFixed(1)}, volumeRatio=${volumeRatio.toFixed(2)})`;
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} overbought | ${blockReason}`);
             await supabase.from("signal_rejection_log").insert({
               user_id: userId, symbol,
@@ -1827,14 +1847,15 @@ serve(async (req) => {
                 trend1h: stochFilterTrend1h, confidence1h: stochFilterConf1h,
                 bollingerPosition, percentB, macdHistogram, adx: adx.toFixed(1),
                 momentumConfirms: momentum?.confirms, momentumState: momentum?.state,
-                // PHASE 1 FIX: Enhanced rejection logging
+                // PHASE 3: Enhanced with trend strength scoring
+                trendStrengthScore: trendStrengthResult.score,
+                trendStrengthDecision: trendStrengthResult.decision,
+                trendStrengthComponents: trendStrengthResult.components,
                 isValidBreakout,
                 breakoutThreshold: BREAKOUT_THRESHOLDS.MIN_PERCENT_B,
                 volumeRatio: volumeRatio.toFixed(2),
                 hasVolumeConfirmation,
                 isBandwidthExpanding,
-                alignedTrendOverrideFull,
-                alignedTrendOverridePartial,
                 reason: blockReason
               },
               trend_data: trendData, checked_at: new Date().toISOString(),
@@ -3004,9 +3025,57 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`🔗 Correlation check PASSED (risk: ${correlationCheck.riskScore.toFixed(0)}%, correlated: ${correlationCheck.correlatedPositions.map(p => `${p.symbol}:${(p.correlation * 100).toFixed(0)}%`).join(', ')})`);
         }
 
+        // ============= PHASE 3: EXCEPTION HIERARCHY & BUDGET =============
+        // Determine which exception type applies using global priority order
+        // Priority: REVERSAL_OVERRIDE > STRONG_TREND > MICRO_TREND
+        
+        // Determine exception eligibility for hierarchy
+        const reversalOverrideEligible = isReversalEntry && reversalPositionSizeOverride < 1.0;
+        const strongTrendEligible = intendedTradeDirection === "long" && 
+          stochRsiK4h > STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT && 
+          stochFilterTrend4h === "bullish" && 
+          stochFilterTrend1h === "bullish";
+        
+        // Calculate trend strength for strong trend exception
+        const isMomentumActiveForHierarchy = momentum?.confirms === true || 
+          momentum?.state === "building" || 
+          momentum?.state === "confirmed";
+        const trendStrengthForHierarchy = calculateTrendStrength(
+          stochFilterConf4h,
+          stochFilterConf1h,
+          adx,
+          isMomentumActiveForHierarchy
+        );
+        
+        // Determine exception using hierarchy
+        const exceptionResult = determineExceptionPriority(
+          {
+            eligible: reversalOverrideEligible,
+            score: unifiedReversal.score,
+            positionMultiplier: reversalPositionSizeOverride,
+          },
+          {
+            eligible: strongTrendEligible && (trendStrengthForHierarchy.decision === 'FULL' || trendStrengthForHierarchy.decision === 'PARTIAL'),
+            trendStrength: trendStrengthForHierarchy,
+            positionMultiplier: trendStrengthForHierarchy.decision === 'FULL' ? 1.0 : 0.5,
+          },
+          {
+            eligible: hasMicroTrendBypass,
+            positionMultiplier: microTrendPositionMultiplier,
+          }
+        );
+        
+        // Log exception hierarchy decision
+        if (exceptionResult.exceptionType !== 'NONE') {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} EXCEPTION HIERARCHY: ${exceptionResult.exceptionType} applied (priority ${exceptionResult.priority}) - ${exceptionResult.reason}`);
+        }
+        
+        // Track current exception type for the signal
+        const appliedExceptionType: ExceptionType = exceptionResult.exceptionType;
+        
         // ============= POSITION SIZE CALCULATION WITH PROPER MULTIPLIER CHAINING =============
         // All multipliers are applied in sequence to ensure proper size reduction
-        // Order: quality -> correlation -> recovery -> reversal
+        // Order: quality -> correlation -> recovery -> exception hierarchy
         
         // Step 1: Base size from quality score
         let positionSizeMultiplier = getPositionSizeFromQuality(qualityScore);
@@ -3025,16 +3094,22 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Recovery mode - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
-        // Step 4: Apply reversal entry reduction (from StochRSI extreme handling)
-        // reversalPositionMultiplier is set earlier when detecting reversal entries
-        if (reversalPositionMultiplier < 1.0) {
-          positionSizeMultiplier *= reversalPositionMultiplier;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Reversal entry - final position size: ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        // Step 4: Apply exception hierarchy position multiplier (PHASE 3)
+        // Uses the unified exception result instead of separate multipliers
+        if (exceptionResult.positionMultiplier < 1.0) {
+          positionSizeMultiplier *= exceptionResult.positionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Exception ${exceptionResult.exceptionType} - position size: ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
-        // Step 5: Apply micro-trend entry reduction (PHASE 2)
-        // microTrendPositionMultiplier is set when micro-trend bypass is used
-        if (hasMicroTrendBypass && microTrendPositionMultiplier < 1.0) {
+        // Step 5: Apply any remaining reversal reduction not captured by hierarchy
+        // (This handles edge cases where reversal entry is detected but not as primary exception)
+        if (reversalPositionMultiplier < 1.0 && !reversalOverrideEligible) {
+          positionSizeMultiplier *= reversalPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Additional reversal entry reduction - final position size: ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 6: Apply micro-trend reduction if not already applied via hierarchy
+        if (hasMicroTrendBypass && exceptionResult.exceptionType !== 'MICRO_TREND' && microTrendPositionMultiplier < 1.0) {
           positionSizeMultiplier *= microTrendPositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Micro-trend entry - position size capped at ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
@@ -3084,6 +3159,19 @@ serve(async (req) => {
               signals: unifiedReversal.reasons,
               adxWeight: unifiedReversal.adxWeight,
               positionSizeMultiplier: unifiedReversal.positionSizeMultiplier,
+            },
+            // PHASE 3: Exception hierarchy tracking for analytics
+            exceptionType: appliedExceptionType,
+            exceptionDetails: {
+              type: exceptionResult.exceptionType,
+              priority: exceptionResult.priority,
+              positionMultiplier: exceptionResult.positionMultiplier,
+              reason: exceptionResult.reason,
+              trendStrength: exceptionResult.details.trendStrength ? {
+                score: exceptionResult.details.trendStrength.score,
+                decision: exceptionResult.details.trendStrength.decision,
+                components: exceptionResult.details.trendStrength.components,
+              } : null,
             },
           },
           expires_at: new Date(Date.now() + 60000).toISOString(),

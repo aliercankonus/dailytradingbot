@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, type AdxPhase } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, type AdxPhase, type ExceptionType } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -197,6 +197,232 @@ export const calculateTimeInExtremePenalty = (
     barsAtExtreme: effectiveBars,
     isExhausted,
     reason,
+  };
+};
+
+// ============= PHASE 3: TREND STRENGTH SCORING =============
+// Replaces brittle boolean checks with quantified trend strength score
+// Score >= 5 = full exception, score == 4 = partial exception, < 4 = reject
+
+export interface TrendStrengthResult {
+  score: number;
+  decision: 'FULL' | 'PARTIAL' | 'REJECT';
+  components: {
+    confidence4hPoints: number;
+    confidence1hPoints: number;
+    adxPoints: number;
+    momentumPoints: number;
+  };
+  reason: string;
+}
+
+export const calculateTrendStrength = (
+  confidence4h: number,
+  confidence1h: number,
+  adx: number,
+  momentumActive: boolean
+): TrendStrengthResult => {
+  const P = TREND_STRENGTH_PARAMS;
+  
+  // Calculate points from each component
+  const confidence4hPoints = confidence4h >= P.CONFIDENCE_4H_THRESHOLD ? P.CONFIDENCE_4H_POINTS : 0;
+  const confidence1hPoints = confidence1h >= P.CONFIDENCE_1H_THRESHOLD ? P.CONFIDENCE_1H_POINTS : 0;
+  
+  let adxPoints = 0;
+  if (adx >= P.ADX_STRONG_THRESHOLD) {
+    adxPoints = P.ADX_STRONG_POINTS;
+  } else if (adx >= P.ADX_MODERATE_THRESHOLD) {
+    adxPoints = P.ADX_MODERATE_POINTS;
+  }
+  
+  const momentumPoints = momentumActive ? P.MOMENTUM_ACTIVE_POINTS : 0;
+  
+  const score = confidence4hPoints + confidence1hPoints + adxPoints + momentumPoints;
+  
+  let decision: 'FULL' | 'PARTIAL' | 'REJECT';
+  let reason: string;
+  
+  if (score >= P.FULL_EXCEPTION_THRESHOLD) {
+    decision = 'FULL';
+    reason = `Trend strength ${score}/6 >= ${P.FULL_EXCEPTION_THRESHOLD} → FULL exception (no position reduction)`;
+  } else if (score >= P.PARTIAL_EXCEPTION_THRESHOLD) {
+    decision = 'PARTIAL';
+    reason = `Trend strength ${score}/6 >= ${P.PARTIAL_EXCEPTION_THRESHOLD} → PARTIAL exception (50% position reduction)`;
+  } else {
+    decision = 'REJECT';
+    reason = `Trend strength ${score}/6 < ${P.PARTIAL_EXCEPTION_THRESHOLD} → REJECT (insufficient trend support)`;
+  }
+  
+  return {
+    score,
+    decision,
+    components: {
+      confidence4hPoints,
+      confidence1hPoints,
+      adxPoints,
+      momentumPoints,
+    },
+    reason,
+  };
+};
+
+// ============= PHASE 3: EXCEPTION HIERARCHY =============
+// Determines which exception type should be applied based on priority order
+// Prevents non-deterministic behavior when multiple exceptions could apply
+
+export interface ExceptionResult {
+  exceptionType: ExceptionType;
+  priority: number;
+  positionMultiplier: number;
+  reason: string;
+  details: {
+    reversalOverrideEligible: boolean;
+    strongTrendEligible: boolean;
+    microTrendEligible: boolean;
+    trendStrength?: TrendStrengthResult;
+  };
+}
+
+export const determineExceptionPriority = (
+  reversalOverrideConditions: {
+    eligible: boolean;
+    score: number;
+    positionMultiplier: number;
+  },
+  strongTrendConditions: {
+    eligible: boolean;
+    trendStrength: TrendStrengthResult;
+    positionMultiplier: number;
+  },
+  microTrendConditions: {
+    eligible: boolean;
+    positionMultiplier: number;
+  }
+): ExceptionResult => {
+  // Priority 1: Reversal Override (highest priority, rare)
+  if (reversalOverrideConditions.eligible) {
+    return {
+      exceptionType: 'REVERSAL_OVERRIDE',
+      priority: EXCEPTION_HIERARCHY.REVERSAL_OVERRIDE,
+      positionMultiplier: reversalOverrideConditions.positionMultiplier,
+      reason: `REVERSAL_OVERRIDE applied (score=${reversalOverrideConditions.score}) - ignoring other exceptions`,
+      details: {
+        reversalOverrideEligible: true,
+        strongTrendEligible: strongTrendConditions.eligible,
+        microTrendEligible: microTrendConditions.eligible,
+      },
+    };
+  }
+  
+  // Priority 2: Strong Trend Exception
+  if (strongTrendConditions.eligible) {
+    return {
+      exceptionType: 'STRONG_TREND',
+      priority: EXCEPTION_HIERARCHY.STRONG_TREND,
+      positionMultiplier: strongTrendConditions.positionMultiplier,
+      reason: `STRONG_TREND exception (${strongTrendConditions.trendStrength.decision}) - ${strongTrendConditions.trendStrength.reason}`,
+      details: {
+        reversalOverrideEligible: false,
+        strongTrendEligible: true,
+        microTrendEligible: microTrendConditions.eligible,
+        trendStrength: strongTrendConditions.trendStrength,
+      },
+    };
+  }
+  
+  // Priority 3: Micro-Trend Bypass (lowest priority)
+  if (microTrendConditions.eligible) {
+    return {
+      exceptionType: 'MICRO_TREND',
+      priority: EXCEPTION_HIERARCHY.MICRO_TREND,
+      positionMultiplier: microTrendConditions.positionMultiplier,
+      reason: `MICRO_TREND bypass applied - lower TF alignment when 4h neutral`,
+      details: {
+        reversalOverrideEligible: false,
+        strongTrendEligible: false,
+        microTrendEligible: true,
+      },
+    };
+  }
+  
+  // No exception applies
+  return {
+    exceptionType: 'NONE',
+    priority: 99,
+    positionMultiplier: 1.0,
+    reason: 'No exception applied - standard signal processing',
+    details: {
+      reversalOverrideEligible: false,
+      strongTrendEligible: false,
+      microTrendEligible: false,
+    },
+  };
+};
+
+// ============= PHASE 3: EXCEPTION BUDGET TRACKING =============
+// Prevents exception abuse by tracking usage and applying penalties
+
+export interface ExceptionBudgetResult {
+  withinBudget: boolean;
+  exceptionsUsed: number;
+  lookbackWindow: number;
+  positionReduction: number;
+  shouldDisableExceptions: boolean;
+  reason: string;
+}
+
+export const checkExceptionBudget = (
+  recentExceptions: ExceptionType[],  // Array of exception types from recent trades
+  currentExceptionType: ExceptionType
+): ExceptionBudgetResult => {
+  const B = EXCEPTION_BUDGET;
+  
+  // Count non-NONE exceptions in the lookback window
+  const recentNonNone = recentExceptions
+    .slice(-B.LOOKBACK_TRADES)
+    .filter(e => e !== 'NONE');
+  
+  const exceptionsUsed = recentNonNone.length;
+  
+  // Check for consecutive exceptions (worst case)
+  let consecutiveCount = 0;
+  for (let i = recentExceptions.length - 1; i >= 0 && recentExceptions[i] !== 'NONE'; i--) {
+    consecutiveCount++;
+  }
+  
+  // If adding current exception, would we exceed budget?
+  const wouldExceed = exceptionsUsed >= B.MAX_EXCEPTIONS && currentExceptionType !== 'NONE';
+  const shouldDisable = consecutiveCount >= B.DISABLE_THRESHOLD;
+  
+  if (shouldDisable) {
+    return {
+      withinBudget: false,
+      exceptionsUsed,
+      lookbackWindow: B.LOOKBACK_TRADES,
+      positionReduction: 0, // Force reject
+      shouldDisableExceptions: true,
+      reason: `EXCEPTION BUDGET EXCEEDED: ${consecutiveCount} consecutive exceptions (>= ${B.DISABLE_THRESHOLD}) - exceptions temporarily disabled`,
+    };
+  }
+  
+  if (wouldExceed) {
+    return {
+      withinBudget: false,
+      exceptionsUsed,
+      lookbackWindow: B.LOOKBACK_TRADES,
+      positionReduction: B.OVER_BUDGET_POSITION_REDUCTION,
+      shouldDisableExceptions: false,
+      reason: `EXCEPTION BUDGET WARNING: ${exceptionsUsed}/${B.MAX_EXCEPTIONS} exceptions in last ${B.LOOKBACK_TRADES} trades - position reduced by ${(1 - B.OVER_BUDGET_POSITION_REDUCTION) * 100}%`,
+    };
+  }
+  
+  return {
+    withinBudget: true,
+    exceptionsUsed,
+    lookbackWindow: B.LOOKBACK_TRADES,
+    positionReduction: 1.0,
+    shouldDisableExceptions: false,
+    reason: `Exception budget OK: ${exceptionsUsed}/${B.MAX_EXCEPTIONS} in last ${B.LOOKBACK_TRADES} trades`,
   };
 };
 // ============= STOCHRSI-RSI CONFLICT RESOLUTION =============
