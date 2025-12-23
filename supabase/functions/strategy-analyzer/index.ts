@@ -1908,21 +1908,19 @@ serve(async (req) => {
         if (intendedTradeDirection === "long" && stochRsiK4h >= ABSOLUTE_MAX_OB) {
           rejectedByStochRsiExtreme++;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute maximum (K=${stochRsiK4h.toFixed(1)} >= ${ABSOLUTE_MAX_OB}) - nowhere to rise, no exceptions allowed`);
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `HARD BLOCK: StochRSI K=${stochRsiK4h.toFixed(1)} at absolute maximum (>=${ABSOLUTE_MAX_OB}) - no LONG entries allowed`,
-            filters_status: { 
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `HARD BLOCK: StochRSI K=${stochRsiK4h.toFixed(1)} at absolute maximum (>=${ABSOLUTE_MAX_OB}) - no LONG entries allowed`,
+            { 
               stochRsiK4h: stochRsiK4h.toFixed(1),
               stochRsiD4h: stochRsiD4h.toFixed(1),
               gate: "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK",
               threshold: ABSOLUTE_MAX_OB,
               message: "StochRSI at ceiling - nowhere to rise - no exceptions",
-              // Include reversal score breakdown for debugging
               reversal_score: unifiedReversal.score,
               reversal_decision: unifiedReversal.decision,
               reversal_breakdown: unifiedReversal.breakdown,
               reversal_reasons: unifiedReversal.reasons,
-              // Additional context
               trend,
               adx: adx.toFixed(1),
               momentum_state: momentum?.state,
@@ -1930,29 +1928,29 @@ serve(async (req) => {
               percentB: percentB.toFixed(1),
               bollingerPosition
             },
-            trend_data: trendData, checked_at: new Date().toISOString(),
-          });
+            trendData,
+            false,
+            earlyOrderFlowAnalysis
+          );
           continue;
         }
         
         if (intendedTradeDirection === "short" && stochRsiK4h <= ABSOLUTE_MAX_OS) {
           rejectedByStochRsiExtreme++;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute minimum (K=${stochRsiK4h.toFixed(1)} <= ${ABSOLUTE_MAX_OS}) - nowhere to fall, no exceptions allowed`);
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `HARD BLOCK: StochRSI K=${stochRsiK4h.toFixed(1)} at absolute minimum (<=${ABSOLUTE_MAX_OS}) - no SHORT entries allowed`,
-            filters_status: { 
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `HARD BLOCK: StochRSI K=${stochRsiK4h.toFixed(1)} at absolute minimum (<=${ABSOLUTE_MAX_OS}) - no SHORT entries allowed`,
+            { 
               stochRsiK4h: stochRsiK4h.toFixed(1),
               stochRsiD4h: stochRsiD4h.toFixed(1),
               gate: "ABSOLUTE_MIN_STOCHRSI_HARD_BLOCK",
               threshold: ABSOLUTE_MAX_OS,
               message: "StochRSI at floor - nowhere to fall - no exceptions",
-              // Include reversal score breakdown for debugging
               reversal_score: unifiedReversal.score,
               reversal_decision: unifiedReversal.decision,
               reversal_breakdown: unifiedReversal.breakdown,
               reversal_reasons: unifiedReversal.reasons,
-              // Additional context
               trend,
               adx: adx.toFixed(1),
               momentum_state: momentum?.state,
@@ -1960,8 +1958,10 @@ serve(async (req) => {
               percentB: percentB.toFixed(1),
               bollingerPosition
             },
-            trend_data: trendData, checked_at: new Date().toISOString(),
-          });
+            trendData,
+            false,
+            earlyOrderFlowAnalysis
+          );
           continue;
         }
         
@@ -1971,17 +1971,19 @@ serve(async (req) => {
         if (intendedTradeDirection === "long" && isExtremelyOverextended && stochRsiK4h >= STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT) {
           rejectedByStochRsiExtreme++;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Price extremely overextended (%B=${percentB.toFixed(1)} > 110) with overbought StochRSI (K=${stochRsiK4h.toFixed(1)})`);
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `BLOCK: Price overextended (%B=${percentB.toFixed(1)} > 110) + StochRSI K=${stochRsiK4h.toFixed(1)} overbought`,
-            filters_status: { 
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `BLOCK: Price overextended (%B=${percentB.toFixed(1)} > 110) + StochRSI K=${stochRsiK4h.toFixed(1)} overbought`,
+            { 
               percentB: percentB.toFixed(1), 
               stochRsiK4h: stochRsiK4h.toFixed(1),
               gate: "BOLLINGER_OVEREXTENSION_GATE",
               message: "Price extremely above upper Bollinger with overbought StochRSI"
             },
-            trend_data: trendData, checked_at: new Date().toISOString(),
-          });
+            trendData,
+            false,
+            earlyOrderFlowAnalysis
+          );
           continue;
         }
         
@@ -1990,17 +1992,19 @@ serve(async (req) => {
         if (intendedTradeDirection === "short" && isExtremelyUnderextended && stochRsiK4h <= STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD) {
           rejectedByStochRsiExtreme++;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Price extremely underextended (%B=${percentB.toFixed(1)} < -10) with oversold StochRSI (K=${stochRsiK4h.toFixed(1)})`);
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `BLOCK: Price underextended (%B=${percentB.toFixed(1)} < -10) + StochRSI K=${stochRsiK4h.toFixed(1)} oversold`,
-            filters_status: { 
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `BLOCK: Price underextended (%B=${percentB.toFixed(1)} < -10) + StochRSI K=${stochRsiK4h.toFixed(1)} oversold`,
+            { 
               percentB: percentB.toFixed(1), 
               stochRsiK4h: stochRsiK4h.toFixed(1),
               gate: "BOLLINGER_UNDEREXTENSION_GATE",
               message: "Price extremely below lower Bollinger with oversold StochRSI"
             },
-            trend_data: trendData, checked_at: new Date().toISOString(),
-          });
+            trendData,
+            false,
+            earlyOrderFlowAnalysis
+          );
           continue;
         }
         
@@ -2073,18 +2077,20 @@ serve(async (req) => {
           rejectedByHardGates++;
           const squeezeContext = isInSqueeze4h ? " (stricter during squeeze)" : "";
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER POSITION FILTER - Blocking SHORT at low %B=${percentB.toFixed(1)} < ${shortMinPercentB}${squeezeContext}`);
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `IMPROVEMENT 2 - BOLLINGER GATE: SHORT blocked at low %B=${percentB.toFixed(1)} < ${shortMinPercentB}${squeezeContext}`,
-            filters_status: { 
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `IMPROVEMENT 2 - BOLLINGER GATE: SHORT blocked at low %B=${percentB.toFixed(1)} < ${shortMinPercentB}${squeezeContext}`,
+            { 
               gate: "BOLLINGER_POSITION_FILTER_SHORT",
               percentB: percentB.toFixed(1),
               requiredPercentB: shortMinPercentB,
               isInSqueeze4h,
               message: "Shorts below lower Bollinger are statistically poor entries"
             },
-            trend_data: trendData, checked_at: new Date().toISOString(),
-          });
+            trendData,
+            false,
+            earlyOrderFlowAnalysis
+          );
           continue;
         }
         
@@ -2112,18 +2118,20 @@ serve(async (req) => {
             intendedTradeDirection === "short") {
           rejectedByHardGates++;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} CONTEXT GATE - Blocking SHORT in MEAN_REVERSION context (4h squeeze + oversold K=${stochRsiK4h.toFixed(1)})`);
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `IMPROVEMENT 3 - CONTEXT GATE: SHORT blocked in MEAN_REVERSION context (squeeze + oversold K=${stochRsiK4h.toFixed(1)})`,
-            filters_status: { 
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `IMPROVEMENT 3 - CONTEXT GATE: SHORT blocked in MEAN_REVERSION context (squeeze + oversold K=${stochRsiK4h.toFixed(1)})`,
+            { 
               gate: "SQUEEZE_CONTEXT_MEAN_REVERSION",
               marketContext,
               stochRsiK4h: stochRsiK4h.toFixed(1),
               isInSqueeze4h,
               message: "4h squeeze + oversold StochRSI = MEAN_REVERSION context, blocking trend-continuation shorts"
             },
-            trend_data: trendData, checked_at: new Date().toISOString(),
-          });
+            trendData,
+            false,
+            earlyOrderFlowAnalysis
+          );
           continue;
         }
         
@@ -2133,18 +2141,20 @@ serve(async (req) => {
             intendedTradeDirection === "long") {
           rejectedByHardGates++;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} CONTEXT GATE - Blocking LONG in MEAN_REVERSION context (4h squeeze + overbought K=${stochRsiK4h.toFixed(1)})`);
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `IMPROVEMENT 3 - CONTEXT GATE: LONG blocked in MEAN_REVERSION context (squeeze + overbought K=${stochRsiK4h.toFixed(1)})`,
-            filters_status: { 
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `IMPROVEMENT 3 - CONTEXT GATE: LONG blocked in MEAN_REVERSION context (squeeze + overbought K=${stochRsiK4h.toFixed(1)})`,
+            { 
               gate: "SQUEEZE_CONTEXT_MEAN_REVERSION",
               marketContext,
               stochRsiK4h: stochRsiK4h.toFixed(1),
               isInSqueeze4h,
               message: "4h squeeze + overbought StochRSI = MEAN_REVERSION context, blocking trend-continuation longs"
             },
-            trend_data: trendData, checked_at: new Date().toISOString(),
-          });
+            trendData,
+            false,
+            earlyOrderFlowAnalysis
+          );
           continue;
         }
         
@@ -2176,12 +2186,14 @@ serve(async (req) => {
           if (!stochRsiRising) {
             rejectedByStochRsiExtreme++;
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - StochRSI not rising at overbought (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
-            await supabase.from("signal_rejection_log").insert({
-              user_id: userId, symbol,
-              rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought, StochRSI NOT rising (K <= D)`,
-              filters_status: { stochRsiK4h, stochRsiD4h, stochRsiRising, gate: "STOCHRSI_NOT_RISING" },
-              trend_data: trendData, checked_at: new Date().toISOString(),
-            });
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought, StochRSI NOT rising (K <= D)`,
+              { stochRsiK4h, stochRsiD4h, stochRsiRising, gate: "STOCHRSI_NOT_RISING" },
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
             continue;
           }
           
@@ -2189,12 +2201,14 @@ serve(async (req) => {
           if (hasBearishDivergence) {
             rejectedByStochRsiExtreme++;
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - Bearish divergence at overbought (K=${stochRsiK4h.toFixed(1)})`);
-            await supabase.from("signal_rejection_log").insert({
-              user_id: userId, symbol,
-              rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought with bearish divergence`,
-              filters_status: { stochRsiK4h, hasBearishDivergence: true, gate: "BEARISH_DIVERGENCE_AT_EXTREME" },
-              trend_data: trendData, checked_at: new Date().toISOString(),
-            });
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought with bearish divergence`,
+              { stochRsiK4h, hasBearishDivergence: true, gate: "BEARISH_DIVERGENCE_AT_EXTREME" },
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
             continue;
           }
           
@@ -2280,16 +2294,15 @@ serve(async (req) => {
                 ? `trend strength too low: ${trendStrengthResult.reason}`
                 : `no valid breakout (%B=${percentB.toFixed(1)}, volumeRatio=${volumeRatio.toFixed(2)})`;
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} overbought | ${blockReason}`);
-            await supabase.from("signal_rejection_log").insert({
-              user_id: userId, symbol,
-              rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought, ${blockReason}`,
-              filters_status: { 
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought, ${blockReason}`,
+              { 
                 stochRsiK4h: stochRsiK4h.toFixed(1), stochRsiD4h: stochRsiD4h.toFixed(1), stochRsiRising,
                 trend4h: stochFilterTrend4h, confidence4h: stochFilterConf4h,
                 trend1h: stochFilterTrend1h, confidence1h: stochFilterConf1h,
                 bollingerPosition, percentB, macdHistogram, adx: adx.toFixed(1),
                 momentumConfirms: momentum?.confirms, momentumState: momentum?.state,
-                // PHASE 3: Enhanced with trend strength scoring
                 trendStrengthScore: trendStrengthResult.score,
                 trendStrengthDecision: trendStrengthResult.decision,
                 trendStrengthComponents: trendStrengthResult.components,
@@ -2298,10 +2311,13 @@ serve(async (req) => {
                 volumeRatio: volumeRatio.toFixed(2),
                 hasVolumeConfirmation,
                 isBandwidthExpanding,
-                reason: blockReason
+                reason: blockReason,
+                gate: "STOCHRSI_OVERBOUGHT_BLOCK"
               },
-              trend_data: trendData, checked_at: new Date().toISOString(),
-            });
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
             continue;
           }
         }
@@ -2351,12 +2367,14 @@ serve(async (req) => {
           if (!stochRsiFalling) {
             rejectedByStochRsiExtreme++;
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking SHORT - StochRSI not falling at oversold (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
-            await supabase.from("signal_rejection_log").insert({
-              user_id: userId, symbol,
-              rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold, StochRSI NOT falling (K >= D)`,
-              filters_status: { stochRsiK4h, stochRsiD4h, stochRsiFalling, gate: "STOCHRSI_NOT_FALLING" },
-              trend_data: trendData, checked_at: new Date().toISOString(),
-            });
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold, StochRSI NOT falling (K >= D)`,
+              { stochRsiK4h, stochRsiD4h, stochRsiFalling, gate: "STOCHRSI_NOT_FALLING" },
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
             continue;
           }
           
@@ -2364,12 +2382,14 @@ serve(async (req) => {
           if (hasBullishDivergence) {
             rejectedByStochRsiExtreme++;
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking SHORT - Bullish divergence at oversold (K=${stochRsiK4h.toFixed(1)})`);
-            await supabase.from("signal_rejection_log").insert({
-              user_id: userId, symbol,
-              rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold with bullish divergence`,
-              filters_status: { stochRsiK4h, hasBullishDivergence: true, gate: "BULLISH_DIVERGENCE_AT_EXTREME" },
-              trend_data: trendData, checked_at: new Date().toISOString(),
-            });
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold with bullish divergence`,
+              { stochRsiK4h, hasBullishDivergence: true, gate: "BULLISH_DIVERGENCE_AT_EXTREME" },
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
             continue;
           }
           
@@ -2404,20 +2424,23 @@ serve(async (req) => {
               ? `momentum not acceptable (confirms=${momentum?.confirms}, state=${momentum?.state})` 
               : "failed smart exception conditions";
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking SHORT - 4h StochRSI K=${stochRsiK4h.toFixed(1)} oversold | ${blockReason}`);
-            await supabase.from("signal_rejection_log").insert({
-              user_id: userId, symbol,
-              rejection_reason: `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold, ${blockReason}`,
-              filters_status: { 
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold, ${blockReason}`,
+              { 
                 stochRsiK4h: stochRsiK4h.toFixed(1), stochRsiD4h: stochRsiD4h.toFixed(1), stochRsiFalling,
                 trend4h: stochFilterTrend4h, confidence4h: stochFilterConf4h,
                 trend1h: stochFilterTrend1h, confidence1h: stochFilterConf1h,
                 bollingerPosition, percentB, macdHistogram, adx: adx.toFixed(1),
                 momentumConfirms: momentum?.confirms, momentumState: momentum?.state,
                 alignedTrendOverride,
-                reason: blockReason
+                reason: blockReason,
+                gate: "STOCHRSI_OVERSOLD_BLOCK"
               },
-              trend_data: trendData, checked_at: new Date().toISOString(),
-            });
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
             continue;
           }
         }
@@ -3276,24 +3299,26 @@ serve(async (req) => {
           // PHASE 1: Near Miss Logging - signals within 5 points of threshold
           const isNearMiss = qualityScore >= (MIN_QUALITY_SCORE - QUALITY_THRESHOLDS.NEAR_MISS_THRESHOLD);
           
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: isNearMiss 
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            isNearMiss 
               ? `NEAR MISS: Quality score ${qualityScore}/100 (threshold: ${MIN_QUALITY_SCORE}, missed by ${MIN_QUALITY_SCORE - qualityScore} pts)`
               : `Quality score too low: ${qualityScore}/100 (min: ${MIN_QUALITY_SCORE}, ADX=${adx.toFixed(1)})`,
-            filters_status: {
+            {
+              gate: "QUALITY_THRESHOLD",
               qualityScore, breakdown, minRequired: MIN_QUALITY_SCORE,
               dynamicThreshold: true,
               adx: adx.toFixed(1),
               factors: qualityFactors,
               regime: regime.regime,
               entryTiming: pullbackAnalysis.reason,
-              isNearMiss,  // Flag for later analysis
+              isNearMiss,
               nearMissMargin: isNearMiss ? MIN_QUALITY_SCORE - qualityScore : null,
             },
-            trend_data: trendData,
-            checked_at: new Date().toISOString(),
-          });
+            trendData,
+            false,
+            earlyOrderFlowAnalysis
+          );
           
           // Log near misses at higher visibility for monitoring
           if (isNearMiss) {
@@ -3556,17 +3581,19 @@ serve(async (req) => {
 
         if (candidates.length === 0) {
           rejectedByStrategy++;
-          await supabase.from("signal_rejection_log").insert({
-            user_id: userId, symbol,
-            rejection_reason: `No strategy conditions met (quality passed: ${qualityScore}/100)`,
-            filters_status: {
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `No strategy conditions met (quality passed: ${qualityScore}/100)`,
+            {
+              gate: "NO_STRATEGY_MATCH",
               qualityScore, breakdown,
               strategiesEvaluated: allStrategies.length,
               regime: regime.regime,
             },
-            trend_data: trendData,
-            checked_at: new Date().toISOString(),
-          });
+            trendData,
+            false,
+            earlyOrderFlowAnalysis
+          );
           continue;
         }
 
@@ -3638,18 +3665,20 @@ serve(async (req) => {
           if (!macdAlignedForLong) {
             rejectedByHardGates++;
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Momentum strategy "${strategy.name}" LONG at K=${stochRsiK4h.toFixed(1)} without MACD alignment (histogram=${macdHistogram.toFixed(4)})`);
-            await supabase.from("signal_rejection_log").insert({
-              user_id: userId, symbol,
-              rejection_reason: `BLOCK: Momentum strategy "${strategy.name}" at K=${stochRsiK4h.toFixed(1)} requires MACD > 0 for LONG`,
-              filters_status: { 
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `BLOCK: Momentum strategy "${strategy.name}" at K=${stochRsiK4h.toFixed(1)} requires MACD > 0 for LONG`,
+              { 
                 strategyName: strategy.name, 
                 stochRsiK4h: stochRsiK4h.toFixed(1),
                 macdHistogram: macdHistogram.toFixed(4),
                 macdAligned: false,
                 gate: "MOMENTUM_MACD_ALIGNMENT_GATE"
               },
-              trend_data: trendData, checked_at: new Date().toISOString(),
-            });
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
             continue;
           }
           
@@ -3666,18 +3695,20 @@ serve(async (req) => {
           if (!macdAlignedForShort) {
             rejectedByHardGates++;
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Momentum strategy "${strategy.name}" SHORT at K=${stochRsiK4h.toFixed(1)} without MACD alignment (histogram=${macdHistogram.toFixed(4)})`);
-            await supabase.from("signal_rejection_log").insert({
-              user_id: userId, symbol,
-              rejection_reason: `BLOCK: Momentum strategy "${strategy.name}" at K=${stochRsiK4h.toFixed(1)} requires MACD < 0 for SHORT`,
-              filters_status: { 
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `BLOCK: Momentum strategy "${strategy.name}" at K=${stochRsiK4h.toFixed(1)} requires MACD < 0 for SHORT`,
+              { 
                 strategyName: strategy.name, 
                 stochRsiK4h: stochRsiK4h.toFixed(1),
                 macdHistogram: macdHistogram.toFixed(4),
                 macdAligned: false,
                 gate: "MOMENTUM_MACD_ALIGNMENT_GATE"
               },
-              trend_data: trendData, checked_at: new Date().toISOString(),
-            });
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
             continue;
           }
           
