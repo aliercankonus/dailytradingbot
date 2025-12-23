@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, PARTIAL_TP_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore, 
@@ -1212,19 +1212,34 @@ serve(async (req) => {
         }
       }
 
-      // TREND-AWARE EXIT CHECK - Close position if trend has flipped against us
+      // ============================================================
+      // SCENARIO 5 PHASE 2: EXPLICIT EXIT HIERARCHY
+      // Priority order (highest to lowest - early return pattern):
+      // 1. CIRCUIT_BREAKER (100) - Portfolio-level emergency (handled earlier)
+      // 2. FLASH_CRASH (90) - Market emergency
+      // 3. EXTREME_VOLATILITY (85) - Extreme ATR
+      // 4. STOP_LOSS_HIT (80) - Hard stop triggered (handled by exchange)
+      // 5. TAKE_PROFIT_HIT (75) - TP triggered (handled by exchange)
+      // 6. SMART_AITS_DECAY (70) - Rapid profit decay (handled earlier)
+      // 7. REVERSAL_RISK_HIGH (60) - High reversal score
+      // 8. TREND_REVERSAL (55) - Trend flipped with persistence
+      // 9. EARLY_WARNING (50) - 1h flip + weak 4h
+      // 10. TIME_BASED (40) - Stale losing position
+      // ============================================================
       let shouldClose = false;
       let closeReason = "";
+      let exitPriority = 0;
 
-      // 🚨 EMERGENCY EXITS HAVE HIGHEST PRIORITY
+      // 🚨 PRIORITY 1-3: EMERGENCY EXITS (highest priority - early return)
       if (emergencyClose) {
         shouldClose = true;
         closeReason = emergencyReason;
-        positionLogger.risk(`EMERGENCY EXIT: ${position.side} - Reason: ${emergencyReason}`);
+        exitPriority = emergencyReason === "flash_crash" ? EXIT_PRIORITY.FLASH_CRASH : EXIT_PRIORITY.EXTREME_VOLATILITY;
+        positionLogger.risk(`EXIT HIERARCHY [P${exitPriority}]: EMERGENCY - ${position.side} - Reason: ${emergencyReason}`);
         trendExits.push({
           symbol: position.symbol,
           side: position.side,
-          reason: `EMERGENCY: ${emergencyReason}`,
+          reason: `EMERGENCY [P${exitPriority}]: ${emergencyReason}`,
           trend: "emergency",
           confidence: 100,
           pnlPercent,
@@ -1497,30 +1512,70 @@ serve(async (req) => {
               positionLogger.signal(
                 `EARLY WARNING EXIT: Closing ${positionSide} - 1h ${earlyWarningTrend.toUpperCase()} + 4h very weak (4h conf: ${confidence4h}%, P&L: ${pnlPercent.toFixed(2)}%)`,
               );
-            } else if (currentTrend === oppositeDirection && trendConfidence >= EXIT_THRESHOLDS.TREND_CONFIDENCE_EXIT) {
-              result.shouldClose = true;
-              result.closeReason = `trend_reversal_${oppositeDirection}`;
-              positionLogger.signal(
-                `TREND EXIT: Closing ${positionSide} - Strong ${oppositeDirection.toUpperCase()} trend (conf: ${trendConfidence}%)`,
-              );
+            } else if (currentTrend === oppositeDirection && trendConfidence >= EXIT_THRESHOLDS.TREND_REVERSAL_MIN_CONFIDENCE) {
+              // SCENARIO 5 PHASE 2: Trend reversal persistence check
+              // Track consecutive bars of reversal - only exit when persisted >= threshold
+              const currentPersistedBars = position.reversal_persisted_bars || 0;
+              const PERSISTENCE_REQUIRED = EXIT_THRESHOLDS.TREND_REVERSAL_PERSISTENCE_BARS;
+              
+              if (currentPersistedBars + 1 >= PERSISTENCE_REQUIRED) {
+                // Persistence requirement met - trigger exit
+                result.shouldClose = true;
+                result.closeReason = `trend_reversal_${oppositeDirection}`;
+                positionLogger.signal(
+                  `TREND EXIT: Closing ${positionSide} - Strong ${oppositeDirection.toUpperCase()} trend PERSISTED ${currentPersistedBars + 1} bars (conf: ${trendConfidence}%)`,
+                );
+                // Reset persistence counter on exit
+                await supabase
+                  .from("positions")
+                  .update({ reversal_persisted_bars: 0 })
+                  .eq("id", position.id);
+              } else {
+                // Increment persistence counter - not enough bars yet
+                const newPersistedBars = currentPersistedBars + 1;
+                positionLogger.info(
+                  `TREND REVERSAL DETECTED but not persisted: ${oppositeDirection.toUpperCase()} trend for ${newPersistedBars}/${PERSISTENCE_REQUIRED} bars (conf: ${trendConfidence}%) - waiting for confirmation`,
+                );
+                await supabase
+                  .from("positions")
+                  .update({ reversal_persisted_bars: newPersistedBars })
+                  .eq("id", position.id);
+              }
+            } else if (position.reversal_persisted_bars && position.reversal_persisted_bars > 0) {
+              // Trend reversal no longer detected - reset persistence counter
+              positionLogger.info(`TREND REVERSAL CLEARED: Resetting persistence counter (was ${position.reversal_persisted_bars} bars)`);
+              await supabase
+                .from("positions")
+                .update({ reversal_persisted_bars: 0 })
+                .eq("id", position.id);
             }
           }
           
           return result;
         };
 
-        // Process position based on side
+        // PRIORITY 7-9: Process position-specific exits (reversal risk, trend reversal, early warning)
         if (position.side === "SELL" || position.side === "BUY") {
           const exitResult = await handleHedgeAndReversalExit(position.side as "BUY" | "SELL");
           if (exitResult.shouldClose) {
             shouldClose = true;
             closeReason = exitResult.closeReason;
             
+            // Determine exit priority based on reason
+            if (exitResult.closeReason === "reversal_risk_high") {
+              exitPriority = EXIT_PRIORITY.REVERSAL_RISK_HIGH;
+            } else if (exitResult.closeReason.startsWith("trend_reversal")) {
+              exitPriority = EXIT_PRIORITY.TREND_REVERSAL;
+            } else if (exitResult.closeReason.startsWith("early_warning")) {
+              exitPriority = EXIT_PRIORITY.EARLY_WARNING;
+            }
+            
             const confidence4h = trendData.timeframes?.['4h']?.confidence || trendConfidence;
+            positionLogger.signal(`EXIT HIERARCHY [P${exitPriority}]: ${exitResult.closeReason.toUpperCase()}`);
             trendExits.push({
               symbol: position.symbol,
               side: position.side,
-              reason: `Trend: ${currentTrend} (${trendConfidence}%), 4h: ${trend4h} (${confidence4h}%), 1h: ${trend1h}`,
+              reason: `[P${exitPriority}] Trend: ${currentTrend} (${trendConfidence}%), 4h: ${trend4h} (${confidence4h}%), 1h: ${trend1h}`,
               trend: currentTrend,
               confidence: trendConfidence,
               pnlPercent,
@@ -1565,8 +1620,9 @@ serve(async (req) => {
               
               shouldClose = true;
               closeReason = "time_based_stop";
+              exitPriority = EXIT_PRIORITY.TIME_BASED;
               positionLogger.trade(
-                `TIME EXIT: Closing stagnant ${position.side} - Open ${hoursOpen.toFixed(1)}h (limit: ${effectiveTimeLimit.toFixed(1)}h), ` +
+                `EXIT HIERARCHY [P${exitPriority}]: TIME_BASED - Closing stagnant ${position.side} - Open ${hoursOpen.toFixed(1)}h (limit: ${effectiveTimeLimit.toFixed(1)}h), ` +
                 `P&L: ${pnlPercent.toFixed(2)}% (threshold: ${MIN_LOSS_FOR_TIME_EXIT}%), ` +
                 `ADX: ${positionAdx.toFixed(1)} < ${TIME_BASED_MAX_ADX} (stagnation), ` +
                 `Distance to SL: ${distanceToStopPercent.toFixed(2)}%, ATR: ${atrPercent.toFixed(2)}%`
@@ -1575,7 +1631,7 @@ serve(async (req) => {
               trendExits.push({
                 symbol: position.symbol,
                 side: position.side,
-                reason: `Time-based: ${hoursOpen.toFixed(1)}h open, ${pnlPercent.toFixed(2)}% P&L, ADX ${positionAdx.toFixed(1)} (stagnant)`,
+                reason: `[P${exitPriority}] Time-based: ${hoursOpen.toFixed(1)}h open, ${pnlPercent.toFixed(2)}% P&L, ADX ${positionAdx.toFixed(1)} (stagnant)`,
                 trend: "stale",
                 confidence: 0,
                 pnlPercent,
