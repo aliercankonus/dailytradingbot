@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 // ============= SHARED MODULES - Single source of truth =============
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, TIME_IN_EXTREME_PARAMS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, TIME_IN_EXTREME_PARAMS, MICRO_TREND_PARAMS } from "../_shared/constants.ts";
 import { 
   calculateEMA, calculateEMAArray, calculateRSI, calculateRSIArray, calculateMACD,
   calculateStochasticRSI, calculateBarsAtExtreme, calculateATR, calculateHistoricalATRAvg,
@@ -178,19 +178,32 @@ function rsiInPullbackZone(rsi: number, trend: string): boolean {
 // ============= MICRO-TREND DETECTION =============
 // When 4h is neutral, look at 15m/30m for short-term trend direction
 // This allows signals when lower timeframes show consistent direction
+// PHASE 2: Added persistence, volume, ADX requirements
 interface MicroTrendResult {
   hasMicroTrend: boolean;
   direction: "bullish" | "bearish" | "neutral";
   confidence: number;
   alignment: number;  // 0-100 score for how aligned 15m/30m are
   reason: string;
+  // PHASE 2: New fields for hardening
+  persistence: number;       // How many bars the micro-trend has persisted
+  volumeConfirmed: boolean;  // Whether volume confirms the micro-trend
+  validForCandles: number;   // Expiry in candles
+  adxSufficient: boolean;    // Whether ADX meets minimum requirement
+  blocked: boolean;          // True if micro-trend is detected but fails safety checks
+  blockReason: string;       // Reason for blocking if applicable
 }
 
 function detectMicroTrend(
   trend15m: { trend: string; confidence: number; indicators: any },
   trend30m: { trend: string; confidence: number; indicators: any },
   trend1h: { trend: string; confidence: number; indicators: any },
-  adx: number = 25
+  adx: number = 25,
+  // PHASE 2: New parameters for hardening
+  volumeRatio: number = 1.0,
+  volumeAboveMA: boolean = false,
+  barsAligned15m: number = 0,  // Number of consecutive bars 15m has been in same direction
+  barsAligned30m: number = 0   // Number of consecutive bars 30m has been in same direction
 ): MicroTrendResult {
   const t15m = trend15m.trend;
   const t30m = trend30m.trend;
@@ -263,12 +276,59 @@ function detectMicroTrend(
     alignmentScore = Math.min(100, alignmentScore + 10);
   }
   
+  // ===== PHASE 2: MICRO-TREND HARDENING CHECKS =====
+  // Calculate persistence (minimum of both timeframes' alignment duration)
+  const persistence = Math.min(barsAligned15m, barsAligned30m);
+  
+  // Check volume confirmation
+  const volumeConfirmed = MICRO_TREND_PARAMS.REQUIRE_VOLUME_CONFIRMATION 
+    ? (volumeAboveMA || volumeRatio >= MICRO_TREND_PARAMS.MIN_VOLUME_RATIO)
+    : true;
+  
+  // Check ADX requirement
+  const adxSufficient = adx >= MICRO_TREND_PARAMS.MIN_ADX;
+  
+  // Determine if micro-trend is blocked by safety checks
+  let blocked = false;
+  let blockReason = "";
+  
+  if (hasMicroTrend) {
+    // Check all safety gates
+    if (!adxSufficient) {
+      blocked = true;
+      blockReason = `ADX ${adx.toFixed(1)} < ${MICRO_TREND_PARAMS.MIN_ADX} required`;
+    } else if (persistence < MICRO_TREND_PARAMS.MIN_PERSISTENCE_BARS) {
+      blocked = true;
+      blockReason = `Persistence ${persistence} bars < ${MICRO_TREND_PARAMS.MIN_PERSISTENCE_BARS} required`;
+    } else if (!volumeConfirmed) {
+      blocked = true;
+      blockReason = `Volume not confirmed (ratio=${volumeRatio.toFixed(2)}, aboveMA=${volumeAboveMA})`;
+    } else if (alignmentScore < MICRO_TREND_PARAMS.MIN_ALIGNMENT_SCORE) {
+      blocked = true;
+      blockReason = `Alignment ${alignmentScore} < ${MICRO_TREND_PARAMS.MIN_ALIGNMENT_SCORE} required`;
+    } else if (avgConfidence < MICRO_TREND_PARAMS.MIN_AVG_CONFIDENCE) {
+      blocked = true;
+      blockReason = `Avg confidence ${avgConfidence.toFixed(0)}% < ${MICRO_TREND_PARAMS.MIN_AVG_CONFIDENCE}% required`;
+    }
+    
+    if (blocked) {
+      reason = `${reason} [BLOCKED: ${blockReason}]`;
+    }
+  }
+  
   return {
-    hasMicroTrend,
+    hasMicroTrend: hasMicroTrend && !blocked, // Only true if passes all checks
     direction,
     confidence: avgConfidence,
     alignment: alignmentScore,
-    reason: reason || "No micro-trend detected (15m/30m not aligned)"
+    reason: reason || "No micro-trend detected (15m/30m not aligned)",
+    // PHASE 2: New fields
+    persistence,
+    volumeConfirmed,
+    validForCandles: MICRO_TREND_PARAMS.VALID_FOR_CANDLES,
+    adxSufficient,
+    blocked,
+    blockReason
   };
 }
 
@@ -691,11 +751,32 @@ serve(async (req) => {
     
     // ============= MICRO-TREND DETECTION =============
     // When 4h is neutral, use 15m/30m/1h to determine short-term direction
-    const microTrend = detectMicroTrend(trend15m, trend30m, trend1h, adx);
+    // PHASE 2: Added volume confirmation and persistence tracking
+    const volumeRatio1h = volume1h.volumeRatio ?? 1.0;
+    const volumeAboveMA = volume1h.volumeTrend === "increasing" || volume1h.volumeSpike === true;
+    
+    // For persistence tracking, we use a simplified approach:
+    // Count how many of the last N bars have been in the same direction
+    // This is approximated by checking if MACD histogram has been consistent
+    const macd15mHist = trend15m.indicators?.macdHistogram || 0;
+    const macd30mHist = trend30m.indicators?.macdHistogram || 0;
+    // Approximate persistence by checking MACD direction consistency
+    // If MACD is strongly positive/negative, assume persistence of at least 3 bars
+    const barsAligned15m = Math.abs(macd15mHist) > 0.001 ? (Math.abs(macd15mHist) > 0.005 ? 5 : 3) : 0;
+    const barsAligned30m = Math.abs(macd30mHist) > 0.001 ? (Math.abs(macd30mHist) > 0.005 ? 5 : 3) : 0;
+    
+    const microTrend = detectMicroTrend(
+      trend15m, trend30m, trend1h, adx,
+      volumeRatio1h, volumeAboveMA, barsAligned15m, barsAligned30m
+    );
     
     // Log micro-trend if detected and 4h is neutral
-    if (microTrend.hasMicroTrend && trend4h.trend === "neutral") {
-      symLog.info(`${LOG_CATEGORIES.TREND} MICRO-TREND: ${microTrend.direction} (alignment=${microTrend.alignment}, conf=${microTrend.confidence.toFixed(0)}%) - ${microTrend.reason}`);
+    if (trend4h.trend === "neutral") {
+      if (microTrend.hasMicroTrend) {
+        symLog.info(`${LOG_CATEGORIES.TREND} MICRO-TREND: ${microTrend.direction} (alignment=${microTrend.alignment}, conf=${microTrend.confidence.toFixed(0)}%, persist=${microTrend.persistence}, volOK=${microTrend.volumeConfirmed}) - ${microTrend.reason}`);
+      } else if (microTrend.blocked) {
+        symLog.info(`${LOG_CATEGORIES.TREND} MICRO-TREND BLOCKED: ${microTrend.blockReason}`);
+      }
     }
     
     // Divergence alignment validation
@@ -954,12 +1035,20 @@ serve(async (req) => {
       },
       marketStructure,
       // NEW: Micro-trend detection for when 4h is neutral
+      // PHASE 2: Added persistence, volume confirmation, and expiry fields
       microTrend: {
         hasMicroTrend: microTrend.hasMicroTrend,
         direction: microTrend.direction,
         confidence: microTrend.confidence,
         alignment: microTrend.alignment,
         reason: microTrend.reason,
+        // PHASE 2: New hardening fields
+        persistence: microTrend.persistence,
+        volumeConfirmed: microTrend.volumeConfirmed,
+        validForCandles: microTrend.validForCandles,
+        adxSufficient: microTrend.adxSufficient,
+        blocked: microTrend.blocked,
+        blockReason: microTrend.blockReason,
       },
     };
 
