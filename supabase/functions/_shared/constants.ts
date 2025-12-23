@@ -245,7 +245,26 @@ export const BREAKOUT_MODE_PARAMS = {
   REQUIRE_MOMENTUM_BUILDING: true,
 } as const;
 
-// Entry timing score configuration
+// ============= PHASE 2: MICRO-TREND HARDENING PARAMETERS =============
+// Stricter requirements for micro-trend bypass when 4h is neutral
+export const MICRO_TREND_PARAMS = {
+  // MANDATORY: Minimum ADX required for micro-trend bypass (was no requirement)
+  MIN_ADX: 25,
+  // MANDATORY: Minimum consecutive bars the micro-trend must persist
+  MIN_PERSISTENCE_BARS: 3,
+  // MANDATORY: Volume must be above 20-period MA
+  REQUIRE_VOLUME_CONFIRMATION: true,
+  // Minimum volume ratio above average for confirmation
+  MIN_VOLUME_RATIO: 1.0,
+  // Time-bound expiry: micro-trend signals valid for N candles only
+  VALID_FOR_CANDLES: 2,
+  // Minimum alignment score required (now stricter)
+  MIN_ALIGNMENT_SCORE: 60,  // Was 50
+  // Minimum average confidence for lower TFs
+  MIN_AVG_CONFIDENCE: 55,
+  // Position size cap for micro-trend entries
+  MAX_POSITION_SIZE_PERCENT: 60,
+} as const;
 export const ENTRY_TIMING_PARAMS = {
   // Base maximum entry timing score
   BASE_MAX: 25,

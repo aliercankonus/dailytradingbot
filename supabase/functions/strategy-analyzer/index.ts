@@ -16,6 +16,7 @@ import {
   ENTRY_TIMING_PARAMS,
   REVERSAL_OVERRIDE_SAFETY,
   BREAKOUT_THRESHOLDS,
+  MICRO_TREND_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   detectStrategyType
@@ -2320,28 +2321,50 @@ serve(async (req) => {
         const trend1h = timeframes?.['1h']?.trend || "neutral";
         const has1hStrongDirection = confidence1h >= 65 && (trend1h === "bullish" || trend1h === "bearish");
         
-        // NEW: Micro-trend check - allows signals when 4h is neutral but lower TFs are aligned
+        // ===== PHASE 2: HARDENED MICRO-TREND CHECK =====
+        // Allows signals when 4h is neutral but lower TFs are aligned
+        // Now requires: ADX >= 25, persistence >= 3 bars, volume confirmation
         const microTrend = trendData.microTrend;
+        
+        // PHASE 2: Stricter micro-trend validation
         const hasMicroTrendBypass = microTrend?.hasMicroTrend === true && 
-          microTrend?.alignment >= 50 && 
+          !microTrend?.blocked &&  // Must not be blocked by safety checks
+          microTrend?.alignment >= MICRO_TREND_PARAMS.MIN_ALIGNMENT_SCORE && 
+          microTrend?.adxSufficient === true &&  // ADX >= 25 required
+          microTrend?.volumeConfirmed === true &&  // Volume confirmation required
+          microTrend?.persistence >= MICRO_TREND_PARAMS.MIN_PERSISTENCE_BARS &&  // 3+ bars persistence
           (microTrend?.direction === "bullish" || microTrend?.direction === "bearish");
+        
+        // Position size reduction for micro-trend entries
+        let microTrendPositionMultiplier = 1.0;
+        if (hasMicroTrendBypass) {
+          microTrendPositionMultiplier = MICRO_TREND_PARAMS.MAX_POSITION_SIZE_PERCENT / 100; // 60% max
+        }
         
         // Log micro-trend bypass when used
         if (hasMicroTrendBypass && !htfAligned && confidence < 65) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate bypassed via MICRO-TREND (${microTrend.direction}, alignment=${microTrend.alignment}%, 15m/30m consistent)`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate bypassed via MICRO-TREND (${microTrend.direction}, alignment=${microTrend.alignment}%, persist=${microTrend.persistence}, volOK=${microTrend.volumeConfirmed}, ADX=${adx.toFixed(1)})`);
+        } else if (microTrend?.blocked && !htfAligned && confidence < 65) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} MICRO-TREND detected but BLOCKED: ${microTrend.blockReason}`);
         }
         
         if (!htfAligned && confidence < 65 && !has1hStrongDirection && !hasMicroTrendBypass) {
           rejectedByHardGates++;
+          const microTrendInfo = microTrend?.blocked 
+            ? `blocked (${microTrend.blockReason})`
+            : microTrend?.hasMicroTrend === false 
+              ? "not detected"
+              : `insufficient (align=${microTrend?.alignment}, persist=${microTrend?.persistence}, volOK=${microTrend?.volumeConfirmed})`;
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: HTF not aligned, confidence too low, 1h not strong, and no micro-trend (aligned=${htfAligned}, 4h_conf=${confidence}%, 1h_conf=${confidence1h}%, microTrend=${microTrend?.hasMicroTrend || false})`,
+            `HARD GATE: HTF not aligned, confidence too low, 1h not strong, and micro-trend ${microTrendInfo}`,
             { 
               htfAligned, 
               confidence, 
               confidence1h, 
               trend1h, 
               microTrend: microTrend || null,
+              microTrendInfo,
               gate: "HTF_NOT_ALIGNED" 
             },
             trendData,
@@ -3007,6 +3030,13 @@ serve(async (req) => {
         if (reversalPositionMultiplier < 1.0) {
           positionSizeMultiplier *= reversalPositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Reversal entry - final position size: ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 5: Apply micro-trend entry reduction (PHASE 2)
+        // microTrendPositionMultiplier is set when micro-trend bypass is used
+        if (hasMicroTrendBypass && microTrendPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= microTrendPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Micro-trend entry - position size capped at ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
         // Final position size as percentage
