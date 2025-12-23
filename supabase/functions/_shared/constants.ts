@@ -227,6 +227,76 @@ export const RECOVERY_MODE_PARAMS = {
   DEFAULT_MAX_RECOVERY_TRADES: 5,
 } as const;
 
+// ============= PHASE 4 (9 FINDINGS): PRE-RECOVERY STATE PARAMETERS =============
+// Finding 1: Soft Pre-Recovery State & Finding 4: Drawdown-Based Risk Scaling
+// Prevents "last bad trade" by activating conservative rules BEFORE full recovery mode
+export const PRE_RECOVERY_PARAMS = {
+  // Finding 1: Pre-Recovery Soft State
+  // Activate pre-recovery at (threshold - 1) consecutive losses
+  ACTIVATION_THRESHOLD_OFFSET: 1,
+  // Position size reduction in pre-recovery state (35% reduction)
+  POSITION_SIZE_REDUCTION: 0.35,
+  // Pre-recovery requires either deep pullback OR squeeze breakout
+  REQUIRE_DEEP_PULLBACK: true,
+  REQUIRE_SQUEEZE_BREAKOUT: true,
+  // Block continuation entries without structure in pre-recovery
+  BLOCK_CONTINUATION_WITHOUT_STRUCTURE: true,
+  // Deep pullback thresholds (RSI + BB conditions)
+  DEEP_PULLBACK_RSI_LONG: 35,   // RSI must be below this for LONG pullback
+  DEEP_PULLBACK_RSI_SHORT: 65,  // RSI must be above this for SHORT pullback
+  DEEP_PULLBACK_DEPTH_MIN: 50,  // Minimum pullback depth percentage
+  
+  // Finding 4: Drawdown-Based Risk Scaling (graduated position reduction)
+  // Applied in NORMAL mode, before recovery threshold
+  CONSECUTIVE_LOSSES_2_REDUCTION: 0.20,  // 20% position reduction at 2 losses
+  CONSECUTIVE_LOSSES_3_REDUCTION: 0.35,  // 35% position reduction at 3 losses
+} as const;
+
+// ============= PHASE 4 (9 FINDINGS): REGIME SCORE PARAMETERS =============
+// Finding 2 & 5: Market Regime Confidence Gate + Graduated Penalties
+export const REGIME_SCORE_PARAMS = {
+  // Finding 2: Market Regime Confidence Gate
+  // Block continuation entries when regimeScore < this threshold
+  BLOCK_CONTINUATION_BELOW: 45,
+  // Only allow pullback/squeeze setups when regimeScore < this threshold
+  ONLY_PULLBACK_SQUEEZE_BELOW: 40,
+  
+  // Finding 5: Graduated Penalties (soft suppression)
+  // ADX 18-22 transition zone penalty (instead of binary gate)
+  ADX_TRANSITION_ZONE_MIN: 18,
+  ADX_TRANSITION_ZONE_MAX: 22,
+  ADX_TRANSITION_ZONE_PENALTY: 10,
+  
+  // HTF slope flattening penalty (when 4h EMA slope is near zero)
+  HTF_FLATTENING_SLOPE_THRESHOLD: 0.1,
+  HTF_FLATTENING_PENALTY: 10,
+  
+  // Regime score component weights
+  WEIGHT_ADX: 30,           // Max 30 points from ADX
+  WEIGHT_CONFIDENCE: 20,    // Max 20 points from confidence
+  WEIGHT_CONSISTENCY: 15,   // Max 15 points from consistency
+  WEIGHT_HTF_ALIGNMENT: 15, // Max 15 points from HTF alignment
+  WEIGHT_MOMENTUM: 10,      // Max 10 points from momentum
+  WEIGHT_VOLUME: 10,        // Max 10 points from volume
+  
+  // ATR volatility penalties
+  HIGH_ATR_PERCENT: 2.5,
+  EXTREME_ATR_PERCENT: 3.0,
+  HIGH_ATR_PENALTY: 10,
+  EXTREME_ATR_PENALTY: 20,
+} as const;
+
+// ============= PHASE 4 (9 FINDINGS): LOSS CLUSTERING PARAMETERS =============
+// Finding 7: Loss-Clustering Protection - Cooldown after low-quality losses
+export const LOSS_CLUSTERING_PARAMS = {
+  // Cooldown duration in candles after a low-quality loss
+  COOLDOWN_CANDLES: 2,
+  // Quality threshold for triggering cooldown (below median quality)
+  QUALITY_THRESHOLD_PERCENT: 50,
+  // Cooldown duration in minutes (for 5-min candles: 2 candles = 10 min)
+  COOLDOWN_MINUTES: 10,
+} as const;
+
 // ============= PHASE 2: RISK SEPARATION THRESHOLDS =============
 // Separates continuation risk (position size) from reversal probability (hard block)
 export const RISK_SEPARATION_THRESHOLDS = {
