@@ -827,6 +827,340 @@ GROUP BY rejection_reason;
 | 3.1 | Exec | Correlation cap | Limits portfolio correlation |
 | 3.2 | Exec | Partial fill handling | Resilient order execution |
 
-**Total improvements:** 17 fixes across 2 systems (6 rejection improvements added)  
+---
+
+# Part 4: Smart Exception Safety Improvements
+
+These improvements address the need for safer exception handling in the trading system, ensuring that bypass mechanisms don't create excessive risk.
+
+## Phase 1: Core Safety Gates
+
+**Files Modified:**
+- `supabase/functions/_shared/constants.ts`
+- `supabase/functions/strategy-analyzer/index.ts`
+
+### 4.1.1 Tiered ADX Requirements for Strong Trend Exception
+
+Added tiered thresholds for strong trend exceptions:
+
+```typescript
+// constants.ts
+ADX_THRESHOLDS: {
+  STRONG_TREND_EXCEPTION_PARTIAL: 25,  // Partial exception (50% position)
+  STRONG_TREND_EXCEPTION_FULL: 30,     // Full exception (no reduction)
+}
+```
+
+**Behavior:**
+- **ADX >= 30**: Full position size allowed (aligned with strong trend)
+- **ADX 25-29**: Partial position (50% reduction) as a safety measure
+- **ADX < 25**: No strong trend exception applies
+
+### 4.1.2 Reversal Override Safety Gates
+
+Prevents dangerous reversal overrides in unsuitable conditions:
+
+```typescript
+// constants.ts
+REVERSAL_OVERRIDE_SAFETY: {
+  MAX_ADX_FOR_REVERSAL: 30,        // Block reversals in strong trends
+  MIN_REVERSAL_SCORE: 65,          // Require high reversal confidence
+  MAX_HTF_CONFIDENCE_AGAINST: 65,  // Block if 4h strongly opposes
+  MAX_POSITION_SIZE_PERCENT: 60,   // Cap reversal position sizes
+  MIN_REQUIRED_RR: 2.0,            // Require 2:1 reward-to-risk
+}
+```
+
+**Gates Applied:**
+1. Block reversal if ADX >= 30 (trend too strong)
+2. Block if reversal score < 65 (not confident enough)
+3. Block if 4h timeframe strongly aligned against reversal (>= 65% confidence)
+4. Cap position size to 60% for all reversal overrides
+
+### 4.1.3 Tighter Breakout Definition
+
+Stricter breakout criteria to prevent false breakout signals:
+
+```typescript
+// constants.ts
+BREAKOUT_THRESHOLDS: {
+  MIN_PERCENT_B: 80,              // Require strong %B
+  MIN_VOLUME_RATIO: 1.5,          // Require volume confirmation
+  MIN_BANDWIDTH_EXPANSION: true,  // Require expanding bandwidth
+  MAX_PERCENT_B_SHORT: 20,        // For short breakouts
+}
+```
+
+**New Breakout Logic:**
+- Requires `%B > 80` AND (`volumeRatio >= 1.5` OR `bandwidthExpanding`)
+- For shorts: `%B < 20` with volume/bandwidth confirmation
+
+---
+
+## Phase 2: Micro-Trend Hardening
+
+**Files Modified:**
+- `supabase/functions/_shared/constants.ts`
+- `supabase/functions/calculate-trend/index.ts`
+- `supabase/functions/strategy-analyzer/index.ts`
+
+### 4.2.1 Stricter Micro-Trend Requirements
+
+```typescript
+// constants.ts
+MICRO_TREND_PARAMS: {
+  MIN_ADX: 25,                      // Require meaningful trend strength
+  MIN_PERSISTENCE_BARS: 3,          // Require 3+ aligned candles
+  REQUIRE_VOLUME_CONFIRMATION: true, // Must have volume support
+  MIN_VOLUME_RATIO: 1.0,            // Minimum volume vs MA
+  VALID_FOR_CANDLES: 2,             // Time-bound validity
+  MIN_ALIGNMENT_SCORE: 60,          // Require decent alignment
+  MAX_POSITION_SIZE_PERCENT: 60,    // Cap position sizes
+}
+```
+
+### 4.2.2 Enhanced `detectMicroTrend` Function
+
+The micro-trend detection now validates:
+
+1. **ADX Sufficient**: ADX >= 25 required
+2. **Persistence Check**: 3+ consecutive aligned candles (approximated from MACD histogram)
+3. **Volume Confirmation**: Volume above MA or ratio >= 1.0
+4. **Blocking Logic**: Returns `blocked: true` with `blockReason` if any check fails
+
+```typescript
+// calculate-trend/index.ts - MicroTrendResult interface
+interface MicroTrendResult {
+  detected: boolean;
+  direction: 'bullish' | 'bearish' | 'neutral';
+  strength: number;
+  confidence: number;
+  persistence: number;           // Number of aligned bars
+  volumeConfirmed: boolean;      // Volume validation passed
+  validForCandles: number;       // Time-bound expiry
+  adxSufficient: boolean;        // ADX check passed
+  blocked: boolean;              // Final blocking decision
+  blockReason: string | null;    // Why it was blocked
+}
+```
+
+### 4.2.3 Position Size Reduction
+
+When micro-trend bypass is used, position size is capped to 60%:
+
+```typescript
+// strategy-analyzer/index.ts
+if (hasMicroTrendBypass) {
+  microTrendPositionMultiplier = MICRO_TREND_PARAMS.MAX_POSITION_SIZE_PERCENT / 100;
+}
+```
+
+---
+
+## Phase 3: Exception Hierarchy & Budget Tracking
+
+**Files Modified:**
+- `supabase/functions/_shared/constants.ts`
+- `supabase/functions/_shared/scoring.ts`
+- `supabase/functions/strategy-analyzer/index.ts`
+
+### 4.3.1 Trend Strength Scoring
+
+New function to quantify trend strength with configurable parameters:
+
+```typescript
+// constants.ts
+TREND_STRENGTH_PARAMS: {
+  CONFIDENCE_4H_WEIGHT: 1,       // Points per 20% 4h confidence
+  CONFIDENCE_1H_WEIGHT: 0.5,     // Points per 20% 1h confidence
+  ADX_THRESHOLDS: [20, 25, 30],  // ADX scoring tiers
+  ADX_POINTS: [1, 2, 3],         // Points for each tier
+  MOMENTUM_ALIGNMENT_BONUS: 1,   // Extra point for aligned momentum
+  FULL_THRESHOLD: 4,             // Score for FULL exception
+  PARTIAL_THRESHOLD: 2,          // Score for PARTIAL exception
+}
+```
+
+```typescript
+// scoring.ts
+function calculateTrendStrength(params: {
+  adx: number;
+  conf4h: number;
+  conf1h: number;
+  trendDirection: string;
+  momentumDirection: string;
+}): { score: number; decision: 'FULL' | 'PARTIAL' | 'REJECT' }
+```
+
+**Scoring Logic:**
+- +1 point per 20% of 4h confidence (max 5 points)
+- +0.5 points per 20% of 1h confidence (max 2.5 points)
+- +1/2/3 points based on ADX tier (20/25/30)
+- +1 bonus if momentum aligns with trend
+- **FULL** if score >= 4, **PARTIAL** if score >= 2, else **REJECT**
+
+### 4.3.2 Global Exception Hierarchy
+
+Establishes clear priority when multiple exceptions could apply:
+
+```typescript
+// constants.ts
+EXCEPTION_HIERARCHY: {
+  REVERSAL_OVERRIDE: 1,   // Highest priority
+  STRONG_TREND: 2,        // Second priority
+  MICRO_TREND: 3,         // Lowest priority
+}
+
+type ExceptionType = 'REVERSAL_OVERRIDE' | 'STRONG_TREND' | 'MICRO_TREND' | 'NONE';
+```
+
+```typescript
+// scoring.ts
+function determineExceptionPriority(params: {
+  reversalEligible: boolean;
+  strongTrendEligible: boolean;
+  microTrendEligible: boolean;
+  reversalScore: number;
+  trendStrength: number;
+  adx: number;
+}): {
+  selectedType: ExceptionType;
+  positionMultiplier: number;
+  reason: string;
+}
+```
+
+**Priority Rules:**
+1. **REVERSAL_OVERRIDE** (priority 1): Takes precedence if eligible, caps position at 60%
+2. **STRONG_TREND** (priority 2): Full or partial based on trend strength score
+3. **MICRO_TREND** (priority 3): Caps position at 60%
+4. **NONE**: No exception applies, normal flow
+
+### 4.3.3 Exception Budget Tracking
+
+Prevents overuse of exceptions that bypass normal filters:
+
+```typescript
+// constants.ts
+EXCEPTION_BUDGET: {
+  MAX_EXCEPTIONS_PER_WINDOW: 3,         // Max 3 exceptions per window
+  LOOKBACK_WINDOW_HOURS: 4,             // 4-hour lookback window
+  POSITION_REDUCTION_WHEN_EXCEEDED: 0.5, // 50% reduction when over budget
+  DISABLE_AFTER_CONSECUTIVE: 5,         // Disable after 5 consecutive
+}
+```
+
+```typescript
+// scoring.ts
+function checkExceptionBudget(params: {
+  recentExceptions: ExceptionType[];
+  proposedType: ExceptionType;
+}): {
+  allowed: boolean;
+  positionMultiplier: number;
+  reason: string;
+  exceptionsUsed: number;
+  budgetRemaining: number;
+}
+```
+
+**Budget Logic:**
+1. Track exceptions in 4-hour rolling window
+2. If budget exceeded (>3 exceptions), reduce position by 50%
+3. If 5+ consecutive exceptions, temporarily disable exception bypasses
+4. Budget resets as older exceptions fall outside the window
+
+### 4.3.4 Signal Indicators Enhancement
+
+Exception details are now included in signal indicators for analytics:
+
+```typescript
+// strategy-analyzer/index.ts - signal indicators
+indicators: {
+  // ... existing indicators
+  exceptionType: exceptionDecision.selectedType,
+  exceptionDetails: {
+    positionMultiplier: exceptionDecision.positionMultiplier,
+    reason: exceptionDecision.reason,
+    budgetStatus: budgetCheck,
+  }
+}
+```
+
+---
+
+## Smart Exception Safety Summary
+
+| Feature | Before | After |
+|---------|--------|-------|
+| **Strong Trend ADX** | Single threshold | Tiered (25/30) with position scaling |
+| **Reversal Overrides** | Could override in any condition | Blocked if ADX>30, score<65, or 4h opposes |
+| **Breakout Definition** | Loose %B check | Requires %B>80 + volume OR bandwidth |
+| **Micro-Trend Bypass** | Basic detection | ADX≥25 + 3 bars + volume + time expiry |
+| **Exception Priority** | Unclear when multiple apply | Clear hierarchy (Reversal > Trend > Micro) |
+| **Exception Budget** | Unlimited | Max 3/4h window, position reduction |
+| **Position Caps** | None for exceptions | 60% cap for reversals and micro-trends |
+
+### New Constants Added
+
+| Constant | Location | Purpose |
+|----------|----------|---------|
+| `ADX_THRESHOLDS.STRONG_TREND_EXCEPTION_PARTIAL` | constants.ts | 25 - Partial exception threshold |
+| `ADX_THRESHOLDS.STRONG_TREND_EXCEPTION_FULL` | constants.ts | 30 - Full exception threshold |
+| `REVERSAL_OVERRIDE_SAFETY` | constants.ts | Safety gates for reversal overrides |
+| `BREAKOUT_THRESHOLDS` | constants.ts | Stricter breakout detection criteria |
+| `MICRO_TREND_PARAMS` | constants.ts | Micro-trend hardening parameters |
+| `TREND_STRENGTH_PARAMS` | constants.ts | Trend strength scoring configuration |
+| `EXCEPTION_HIERARCHY` | constants.ts | Exception type priorities |
+| `EXCEPTION_BUDGET` | constants.ts | Exception usage limits |
+
+### New Functions Added
+
+| Function | Location | Purpose |
+|----------|----------|---------|
+| `calculateTrendStrength()` | scoring.ts | Quantifies trend strength for exception decisions |
+| `determineExceptionPriority()` | scoring.ts | Selects highest-priority applicable exception |
+| `checkExceptionBudget()` | scoring.ts | Tracks and limits exception usage |
+
+### Edge Function Logs to Monitor
+
+- `[EXCEPTION_HIERARCHY]` - Exception priority decisions
+- `[TREND_STRENGTH]` - Trend strength scoring results
+- `[EXCEPTION_BUDGET]` - Budget tracking and warnings
+- `[MICRO_TREND_BYPASS]` - Micro-trend bypass allowed/blocked
+- `[REVERSAL_OVERRIDE]` - Reversal override gate results
+
+---
+
+## Impact Summary (Updated)
+
+| Phase | System | Fix | Risk Reduction |
+|-------|--------|-----|----------------|
+| 1.1 | Signal | Explicit direction | Eliminates ambiguous signals |
+| 1.2 | Signal | Squeeze exception | Captures high-EV breakouts |
+| 2.1 | Signal | URS/divergence dedup | Reduces over-filtering |
+| 2.2 | Signal | Momentum symmetry | Prevents counter-momentum entries |
+| 3.1 | Signal | Entry timing weight | Improves weak-trend entries |
+| Rej-1.1 | Signal | ADX state machine | Nuanced phase handling |
+| Rej-1.2 | Signal | Breakout mode flag | Proper breakout filtering |
+| Rej-1.3 | Signal | Near miss logging | Enables threshold tuning |
+| Rej-2.1 | Signal | Separated risk scores | Clearer risk categorization |
+| Rej-2.2 | Signal | Component caps | Prevents indicator domination |
+| Rej-3.1 | Signal | Time-in-extreme filter | Detects momentum exhaustion |
+| **Exc-1.1** | Signal | Tiered ADX exception | Safer strong trend bypasses |
+| **Exc-1.2** | Signal | Reversal safety gates | Prevents dangerous reversals |
+| **Exc-1.3** | Signal | Tighter breakout def | Reduces false breakouts |
+| **Exc-2.1** | Signal | Micro-trend hardening | Stricter micro-trend bypass |
+| **Exc-3.1** | Signal | Trend strength scoring | Quantified exception decisions |
+| **Exc-3.2** | Signal | Exception hierarchy | Clear priority when multiple apply |
+| **Exc-3.3** | Signal | Exception budget | Limits exception overuse |
+| 1.1 | Exec | Signal expiry | Prevents stale executions |
+| 1.2 | Exec | Ownership validation | Security - prevents cross-user |
+| 2.1 | Exec | Confidence-weighted trend | Allows valid pullbacks |
+| 2.2 | Exec | Reversal sizing fix | Prevents double-counting |
+| 3.1 | Exec | Correlation cap | Limits portfolio correlation |
+| 3.2 | Exec | Partial fill handling | Resilient order execution |
+
+**Total improvements:** 24 fixes across 2 systems (7 smart exception safety improvements added)  
 **Edge functions redeployed:** `strategy-analyzer`, `execute-trade`, `calculate-trend`  
 **Breaking changes:** None (additive improvements)
