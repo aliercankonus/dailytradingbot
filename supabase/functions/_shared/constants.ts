@@ -768,3 +768,71 @@ export function isMeanReversionStrategy(strategyId: string | undefined, strategy
 export function isNeutralStrategy(strategyId: string | undefined, strategyName: string): boolean {
   return detectStrategyType(strategyId, strategyName) === 'NEUTRAL_BREAKOUT';
 }
+
+// Check if strategy is trend-following type (includes EMA Death Cross)
+export function isTrendFollowingStrategy(strategyId: string | undefined, strategyName: string): boolean {
+  return detectStrategyType(strategyId, strategyName) === 'TREND_FOLLOWING';
+}
+
+// ============= IMPROVEMENT 1: HTF OVERSOLD/OVERBOUGHT HARD GATES =============
+// Global rule for ALL strategies: Block counter-trend continuation at extremes
+// When 4h StochRSI <= 20 AND %B <= 20, bounce is statistically likely - block SHORTS
+// When 4h StochRSI >= 80 AND %B >= 80, reversal is likely - block LONGS
+export const HTF_EXTREME_HARD_GATES = {
+  // StochRSI thresholds for hard gate
+  STOCHRSI_OVERSOLD_BLOCK: 20,   // K <= 20 for shorts
+  STOCHRSI_OVERBOUGHT_BLOCK: 80, // K >= 80 for longs
+  // Bollinger %B thresholds for hard gate
+  PERCENT_B_OVERSOLD_BLOCK: 20,  // %B <= 20 for shorts
+  PERCENT_B_OVERBOUGHT_BLOCK: 80, // %B >= 80 for longs
+} as const;
+
+// ============= IMPROVEMENT 2: BOLLINGER POSITION FILTER FOR SHORTS =============
+// Shorts below lower Bollinger are statistically poor entries
+// Require %B >= 40 for short entries, >= 50 during squeeze
+export const BOLLINGER_ENTRY_GATES = {
+  SHORT_MIN_PERCENT_B: 40,        // Shorts require %B >= 40
+  SHORT_SQUEEZE_MIN_PERCENT_B: 50, // During squeeze, require %B >= 50
+  LONG_MAX_PERCENT_B: 60,         // Longs require %B <= 60 (symmetric)
+  LONG_SQUEEZE_MAX_PERCENT_B: 50, // During squeeze, require %B <= 50
+} as const;
+
+// ============= IMPROVEMENT 3: SQUEEZE CONTEXT ARBITRATION =============
+// Squeeze defines regime, not entry - regime must constrain strategy choice
+// When 4h squeeze active AND StochRSI extreme, switch to MEAN_REVERSION context
+export const SQUEEZE_CONTEXT_PARAMS = {
+  // Thresholds for mean-reversion context
+  STOCHRSI_OVERSOLD_FOR_MEAN_REVERSION: 20,  // K <= 20 = bullish mean-reversion context
+  STOCHRSI_OVERBOUGHT_FOR_MEAN_REVERSION: 80, // K >= 80 = bearish mean-reversion context
+  // Minimum squeeze intensity to trigger context arbitration
+  MIN_SQUEEZE_PERCENT_4H: 30,
+} as const;
+
+// Market context types for regime-aware strategy filtering
+export type MarketContext = 'TREND_CONTINUATION' | 'MEAN_REVERSION' | 'NEUTRAL';
+
+// ============= IMPROVEMENT 4: STRATEGY-SPECIFIC CONSTRAINTS =============
+// Lagging strategies like EMA Death Cross need context-awareness
+// Prevents signals in inappropriate conditions
+export const STRATEGY_SPECIFIC_CONSTRAINTS = {
+  EMA_DEATH_CROSS: {
+    // Minimum ADX required (strong trend validation)
+    MIN_ADX: 25,
+    // StochRSI must be above this (not oversold - bounce risk)
+    MIN_STOCHRSI_K: 30,
+    // %B must be above this (not at lower band)
+    MIN_PERCENT_B: 40,
+    // Hard block on fake breakout risk
+    BLOCK_ON_FAKE_BREAKOUT: true,
+  },
+  EMA_GOLDEN_CROSS: {
+    // Minimum ADX required
+    MIN_ADX: 25,
+    // StochRSI must be below this (not overbought - reversal risk)
+    MAX_STOCHRSI_K: 70,
+    // %B must be below this (not at upper band)
+    MAX_PERCENT_B: 60,
+    // Hard block on fake breakout risk
+    BLOCK_ON_FAKE_BREAKOUT: true,
+  },
+} as const;
