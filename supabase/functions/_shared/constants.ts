@@ -265,6 +265,51 @@ export const MICRO_TREND_PARAMS = {
   // Position size cap for micro-trend entries
   MAX_POSITION_SIZE_PERCENT: 60,
 } as const;
+
+// ============= PHASE 3: TREND STRENGTH SCORING =============
+// Replaces boolean checks with quantified trend strength score
+// Score >= 5 = full exception, score == 4 = partial exception, < 4 = reject
+export const TREND_STRENGTH_PARAMS = {
+  // Points for 4h confidence >= 60%
+  CONFIDENCE_4H_POINTS: 2,
+  CONFIDENCE_4H_THRESHOLD: 60,
+  // Points for 1h confidence >= 55%
+  CONFIDENCE_1H_POINTS: 1,
+  CONFIDENCE_1H_THRESHOLD: 55,
+  // Points for ADX levels
+  ADX_STRONG_POINTS: 2,
+  ADX_STRONG_THRESHOLD: 30,
+  ADX_MODERATE_POINTS: 1,
+  ADX_MODERATE_THRESHOLD: 25,
+  // Points for active momentum
+  MOMENTUM_ACTIVE_POINTS: 1,
+  // Score thresholds for exception decisions
+  FULL_EXCEPTION_THRESHOLD: 5,
+  PARTIAL_EXCEPTION_THRESHOLD: 4,
+} as const;
+
+// ============= PHASE 3: EXCEPTION HIERARCHY & BUDGET =============
+// Global priority order for exception types to prevent non-deterministic behavior
+export const EXCEPTION_HIERARCHY = {
+  // Priority order (1 = highest, processed first)
+  REVERSAL_OVERRIDE: 1,
+  STRONG_TREND: 2,
+  MICRO_TREND: 3,
+} as const;
+
+export const EXCEPTION_BUDGET = {
+  // Maximum exceptions allowed in last N trades
+  MAX_EXCEPTIONS: 2,
+  // Lookback window for exception counting
+  LOOKBACK_TRADES: 10,
+  // Position size reduction when budget exceeded
+  OVER_BUDGET_POSITION_REDUCTION: 0.5,
+  // Disable exceptions entirely when this many consecutive exceptions used
+  DISABLE_THRESHOLD: 4,
+} as const;
+
+// Exception types for logging and tracking
+export type ExceptionType = 'REVERSAL_OVERRIDE' | 'STRONG_TREND' | 'MICRO_TREND' | 'NONE';
 export const ENTRY_TIMING_PARAMS = {
   // Base maximum entry timing score
   BASE_MAX: 25,
