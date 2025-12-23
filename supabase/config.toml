@@ -55,3 +55,6 @@ verify_jwt = true
 
 [functions.backtest-recovery-comparison]
 verify_jwt = false
+
+[functions.backtest-phase-comparison]
+verify_jwt = false
