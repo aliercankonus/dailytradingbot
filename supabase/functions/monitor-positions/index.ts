@@ -639,10 +639,20 @@ serve(async (req) => {
       else if (divergenceExit && isMomentum && earlyPnlPercent >= -0.3 && earlyPnlPercent < 0) {
         positionLogger.info(`STRATEGY-AWARE: Momentum divergence detected but P&L ${earlyPnlPercent.toFixed(2)}% >= -0.3% threshold - letting trailing/break-even guards handle`);
       }
-      // Extreme volatility alone = exit
+      // SCENARIO 5 FIX: Conditional volatility exit - extreme volatility alone = conditional exit
+      // If P&L > 0 AND trendConfidence >= 55: reduce 50% instead of full exit
+      // If P&L < 0 OR confidence < 55: full exit
       else if (atrRatio >= EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD) {
-        emergencyClose = true;
-        emergencyReason = "extreme_volatility";
+        if (earlyPnlPercent > 0 && positionConfidence >= 55) {
+          // SCENARIO 5: Conditional - profitable position in confident trend should reduce, not exit
+          positionLogger.info(`CONDITIONAL VOLATILITY: ATR ${atrRatio.toFixed(2)}x extreme but P&L ${earlyPnlPercent.toFixed(2)}% > 0 and confidence ${positionConfidence}% >= 55 - would reduce 50% (logging only, full reduction requires position management)`);
+          // Note: Full position reduction requires execute-trade integration, for now we log and skip exit
+          // A future improvement could implement partial close here
+        } else {
+          emergencyClose = true;
+          emergencyReason = "extreme_volatility";
+          positionLogger.risk(`EXTREME VOLATILITY EXIT: ATR ${atrRatio.toFixed(2)}x with P&L ${earlyPnlPercent.toFixed(2)}% or confidence ${positionConfidence}% < 55 - full exit triggered`);
+        }
       }
 
       if (emergencyClose) {
@@ -1103,11 +1113,19 @@ serve(async (req) => {
       // IMPORTANT: Only activate break-even if profit exceeds minimum stop distance (1%)
       // to prevent premature exits from normal market volatility
       // ============================================================
-      // Break-even activation uses USER's configured threshold (not hardcoded 1%)
+      // SCENARIO 5 FIX: Context-aware break-even activation
+      // Strong trends (ADX >= 30) use higher threshold (1.0%) because they often retest 0.3-0.6%
+      // Weak trends use standard threshold (0.5%)
+      const isStrongTrend = positionAdx >= ADX_THRESHOLDS.VERY_STRONG;
+      const effectiveBreakEvenActivation = isStrongTrend 
+        ? Math.max(userSettings.breakEvenActivationPercent, RISK_PARAMS.BREAK_EVEN_STRONG_TREND_ACTIVATION_PERCENT)
+        : userSettings.breakEvenActivationPercent;
+      
+      // Break-even activation uses context-aware threshold
       // The 1% minimum distance is only checked when placing the stop, not for eligibility
       // This allows break-even to activate at 0.5% profit as configured, protecting profits earlier
       const isBreakEvenEligible = userSettings.breakEvenEnabled && 
-                                  pnlPercent >= userSettings.breakEvenActivationPercent &&
+                                  pnlPercent >= effectiveBreakEvenActivation &&
                                   !trailingActivated; // Don't apply if trailing stop already moved
 
       if (isBreakEvenEligible) {
@@ -1140,7 +1158,7 @@ serve(async (req) => {
             ? entryPrice + slippageBuffer  // BUY: stop above entry for small profit
             : entryPrice - slippageBuffer; // SHORT: stop below entry for small profit
           
-          positionLogger.trade(`BREAK-EVEN: Moving stop (P&L: ${pnlPercent.toFixed(2)}%, Entry: ${entryPrice.toFixed(2)}, BE Stop: ${breakEvenStop.toFixed(2)}, Slippage Buffer: ${slippageBuffer.toFixed(4)})`);
+          positionLogger.trade(`BREAK-EVEN: Moving stop (P&L: ${pnlPercent.toFixed(2)}%, Entry: ${entryPrice.toFixed(2)}, BE Stop: ${breakEvenStop.toFixed(2)}, Activation: ${effectiveBreakEvenActivation.toFixed(2)}%${isStrongTrend ? ' [STRONG TREND]' : ''}, Slippage Buffer: ${slippageBuffer.toFixed(4)})`);
           
           // Use optimistic locking
           const { data: updatedBEPos, error: beUpdateError } = await supabase
@@ -1438,20 +1456,34 @@ serve(async (req) => {
           }
           
           // Check for high reversal risk exit
+          // SCENARIO 5 FIX: ADX block for reversal exits - never fight strong trends
+          // Skip reversal exit entirely if ADX >= 30 (strong trend in progress)
           const positionAgeHours = positionAgeMinutes / 60;
           const MIN_AGE_FOR_REVERSAL_EXIT_HOURS = EXIT_THRESHOLDS.MIN_AGE_FOR_REVERSAL_EXIT_HOURS;
           const REVERSAL_RISK_EXIT_THRESHOLD = dynamicReversalThreshold;
+          const REVERSAL_EXIT_BLOCK_ADX = EXIT_THRESHOLDS.REVERSAL_EXIT_BLOCK_ADX;
+          
+          // Block reversal exits when ADX >= 30 (strong trend)
+          const isStrongTrendBlock = positionAdx >= REVERSAL_EXIT_BLOCK_ADX;
           
           const reversalExitCondition = isLong ? !result.shouldClose : true; // BUY has extra check
           if (reversalExitCondition && hasMetMinHoldTime && 
               positionAgeHours >= MIN_AGE_FOR_REVERSAL_EXIT_HOURS &&
               reversalRisk.riskScore >= REVERSAL_RISK_EXIT_THRESHOLD && 
               pnlPercent < MIN_LOSS_FOR_REVERSAL_EXIT) {
-            result.shouldClose = true;
-            result.closeReason = "reversal_risk_high";
-            positionLogger.risk(
-              `REVERSAL RISK EXIT: Closing ${positionSide} - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD} (dynamic), Age: ${positionAgeHours.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%`,
-            );
+            
+            // SCENARIO 5 FIX: Skip reversal exit if ADX indicates strong trend
+            if (isStrongTrendBlock) {
+              positionLogger.info(
+                `REVERSAL EXIT BLOCKED: ADX ${positionAdx.toFixed(1)} >= ${REVERSAL_EXIT_BLOCK_ADX} (strong trend) - reversal exits should never fight strong trends. Risk ${reversalRisk.riskScore}/100`,
+              );
+            } else {
+              result.shouldClose = true;
+              result.closeReason = "reversal_risk_high";
+              positionLogger.risk(
+                `REVERSAL RISK EXIT: Closing ${positionSide} - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD} (dynamic), Age: ${positionAgeHours.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%`,
+              );
+            }
           }
           
           // Early warning logic - TIGHTENED THRESHOLDS
@@ -1511,33 +1543,44 @@ serve(async (req) => {
         const TIME_STOP_MULTIPLIER = 1.5;
         const effectiveTimeLimit = userSettings.timeBasedStopHours * TIME_STOP_MULTIPLIER;
         const MIN_LOSS_FOR_TIME_EXIT = EXIT_THRESHOLDS.TIME_BASED_MIN_PNL_PERCENT;
+        const TIME_BASED_MAX_ADX = EXIT_THRESHOLDS.TIME_BASED_MAX_ADX;
         
         if (hoursOpen >= effectiveTimeLimit) {
           // ONLY close if position is losing significantly
           // Let break-even or profitable positions continue running
           if (pnlPercent < MIN_LOSS_FOR_TIME_EXIT) {
-            // Calculate distance from stop loss for context
-            const stopLoss = position.stop_loss || position.entry_price * (position.side === 'buy' ? 0.98 : 1.02);
-            const distanceToStopPercent = position.side === 'buy' 
-              ? ((currentPrice - stopLoss) / stopLoss) * 100 
-              : ((stopLoss - currentPrice) / currentPrice) * 100;
-            
-            shouldClose = true;
-            closeReason = "time_based_stop";
-            positionLogger.trade(
-              `TIME EXIT: Closing losing ${position.side} - Open ${hoursOpen.toFixed(1)}h (limit: ${effectiveTimeLimit.toFixed(1)}h), ` +
-              `P&L: ${pnlPercent.toFixed(2)}% (threshold: ${MIN_LOSS_FOR_TIME_EXIT}%), ` +
-              `Distance to SL: ${distanceToStopPercent.toFixed(2)}%, ATR: ${atrPercent.toFixed(2)}%`
-            );
-            
-            trendExits.push({
-              symbol: position.symbol,
-              side: position.side,
-              reason: `Time-based: ${hoursOpen.toFixed(1)}h open, ${pnlPercent.toFixed(2)}% P&L, ${distanceToStopPercent.toFixed(1)}% from SL`,
-              trend: "stale",
-              confidence: 0,
-              pnlPercent,
-            });
+            // SCENARIO 5 FIX: ADX filter for time-based exit - only exit in stagnation
+            // Time exits should punish stagnation (low ADX), not volatility (high ADX)
+            if (positionAdx >= TIME_BASED_MAX_ADX) {
+              positionLogger.info(
+                `TIME EXIT BLOCKED: ADX ${positionAdx.toFixed(1)} >= ${TIME_BASED_MAX_ADX} (volatile market) - time exits should punish stagnation, not volatility. ` +
+                `P&L: ${pnlPercent.toFixed(2)}%, Open: ${hoursOpen.toFixed(1)}h`
+              );
+            } else {
+              // Calculate distance from stop loss for context
+              const stopLoss = position.stop_loss || position.entry_price * (position.side === 'buy' ? 0.98 : 1.02);
+              const distanceToStopPercent = position.side === 'buy' 
+                ? ((currentPrice - stopLoss) / stopLoss) * 100 
+                : ((stopLoss - currentPrice) / currentPrice) * 100;
+              
+              shouldClose = true;
+              closeReason = "time_based_stop";
+              positionLogger.trade(
+                `TIME EXIT: Closing stagnant ${position.side} - Open ${hoursOpen.toFixed(1)}h (limit: ${effectiveTimeLimit.toFixed(1)}h), ` +
+                `P&L: ${pnlPercent.toFixed(2)}% (threshold: ${MIN_LOSS_FOR_TIME_EXIT}%), ` +
+                `ADX: ${positionAdx.toFixed(1)} < ${TIME_BASED_MAX_ADX} (stagnation), ` +
+                `Distance to SL: ${distanceToStopPercent.toFixed(2)}%, ATR: ${atrPercent.toFixed(2)}%`
+              );
+              
+              trendExits.push({
+                symbol: position.symbol,
+                side: position.side,
+                reason: `Time-based: ${hoursOpen.toFixed(1)}h open, ${pnlPercent.toFixed(2)}% P&L, ADX ${positionAdx.toFixed(1)} (stagnant)`,
+                trend: "stale",
+                confidence: 0,
+                pnlPercent,
+              });
+            }
           } else {
             positionLogger.info(
               `TIME EXIT SKIPPED: P&L ${pnlPercent.toFixed(2)}% above threshold ${MIN_LOSS_FOR_TIME_EXIT}% - position continues`
