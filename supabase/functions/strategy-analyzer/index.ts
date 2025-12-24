@@ -2031,6 +2031,7 @@ serve(async (req) => {
             `IMPROVEMENT 1 - HTF EXTREME GATE: SHORT blocked at 4h oversold (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
             { 
               gate: "HTF_EXTREME_OVERSOLD_BLOCK",
+              direction: "short",
               stochRsiK4h: stochRsiK4h.toFixed(1),
               percentB: percentB.toFixed(1),
               thresholds: {
@@ -2055,6 +2056,7 @@ serve(async (req) => {
             `IMPROVEMENT 1 - HTF EXTREME GATE: LONG blocked at 4h overbought (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
             { 
               gate: "HTF_EXTREME_OVERBOUGHT_BLOCK",
+              direction: "long",
               stochRsiK4h: stochRsiK4h.toFixed(1),
               percentB: percentB.toFixed(1),
               thresholds: {
