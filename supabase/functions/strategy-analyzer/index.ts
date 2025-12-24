@@ -1720,6 +1720,7 @@ serve(async (req) => {
               unifiedReversalRawScore: Object.values(unifiedReversal.breakdown || {}).reduce((sum: number, val) => sum + (Number(val) || 0), 0),
               unifiedReversalAdxWeight: unifiedReversal.adxWeight,
               decision: unifiedReversal.decision,
+              direction: trend === "bullish" ? "long" : trend === "bearish" ? "short" : "unknown",
               breakdown: unifiedReversal.breakdown,
               reversalSignals: unifiedReversal.reasons,
               trend,
@@ -1917,6 +1918,7 @@ serve(async (req) => {
               stochRsiK4h: stochRsiK4h.toFixed(1),
               stochRsiD4h: stochRsiD4h.toFixed(1),
               gate: "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK",
+              direction: "long",
               threshold: ABSOLUTE_MAX_OB,
               message: "StochRSI at ceiling - nowhere to rise - no exceptions",
               reversal_score: unifiedReversal.score,
@@ -1949,6 +1951,7 @@ serve(async (req) => {
               stochRsiK4h: stochRsiK4h.toFixed(1),
               stochRsiD4h: stochRsiD4h.toFixed(1),
               gate: "ABSOLUTE_MIN_STOCHRSI_HARD_BLOCK",
+              direction: "short",
               threshold: ABSOLUTE_MAX_OS,
               message: "StochRSI at floor - nowhere to fall - no exceptions",
               reversal_score: unifiedReversal.score,
@@ -1984,6 +1987,7 @@ serve(async (req) => {
               percentB: percentB.toFixed(1), 
               stochRsiK4h: stochRsiK4h.toFixed(1),
               gate: "BOLLINGER_OVEREXTENSION_GATE",
+              direction: "long",
               message: "Price extremely above upper Bollinger with overbought StochRSI"
             },
             trendData,
@@ -2005,6 +2009,7 @@ serve(async (req) => {
               percentB: percentB.toFixed(1), 
               stochRsiK4h: stochRsiK4h.toFixed(1),
               gate: "BOLLINGER_UNDEREXTENSION_GATE",
+              direction: "short",
               message: "Price extremely below lower Bollinger with oversold StochRSI"
             },
             trendData,
@@ -2090,6 +2095,7 @@ serve(async (req) => {
             `IMPROVEMENT 2 - BOLLINGER GATE: SHORT blocked at low %B=${percentB.toFixed(1)} < ${shortMinPercentB}${squeezeContext}`,
             { 
               gate: "BOLLINGER_POSITION_FILTER_SHORT",
+              direction: "short",
               percentB: percentB.toFixed(1),
               requiredPercentB: shortMinPercentB,
               isInSqueeze4h,
@@ -2131,6 +2137,7 @@ serve(async (req) => {
             `IMPROVEMENT 3 - CONTEXT GATE: SHORT blocked in MEAN_REVERSION context (squeeze + oversold K=${stochRsiK4h.toFixed(1)})`,
             { 
               gate: "SQUEEZE_CONTEXT_MEAN_REVERSION",
+              direction: "short",
               marketContext,
               stochRsiK4h: stochRsiK4h.toFixed(1),
               isInSqueeze4h,
@@ -2154,6 +2161,7 @@ serve(async (req) => {
             `IMPROVEMENT 3 - CONTEXT GATE: LONG blocked in MEAN_REVERSION context (squeeze + overbought K=${stochRsiK4h.toFixed(1)})`,
             { 
               gate: "SQUEEZE_CONTEXT_MEAN_REVERSION",
+              direction: "long",
               marketContext,
               stochRsiK4h: stochRsiK4h.toFixed(1),
               isInSqueeze4h,
@@ -2197,7 +2205,7 @@ serve(async (req) => {
             await logRejectionWithAI(
               supabase, userId, symbol,
               `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought, StochRSI NOT rising (K <= D)`,
-              { stochRsiK4h, stochRsiD4h, stochRsiRising, gate: "STOCHRSI_NOT_RISING" },
+              { stochRsiK4h, stochRsiD4h, stochRsiRising, gate: "STOCHRSI_NOT_RISING", direction: "long" },
               trendData,
               false,
               earlyOrderFlowAnalysis
@@ -2212,7 +2220,7 @@ serve(async (req) => {
             await logRejectionWithAI(
               supabase, userId, symbol,
               `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought with bearish divergence`,
-              { stochRsiK4h, hasBearishDivergence: true, gate: "BEARISH_DIVERGENCE_AT_EXTREME" },
+              { stochRsiK4h, hasBearishDivergence: true, gate: "BEARISH_DIVERGENCE_AT_EXTREME", direction: "long" },
               trendData,
               false,
               earlyOrderFlowAnalysis
