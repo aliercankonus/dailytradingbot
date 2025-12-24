@@ -52,14 +52,19 @@ export const useStrategyData = () => {
           performanceMap.set(strategyName, current);
         });
 
-        // Fetch custom strategies
-        const { data: customData, error: customError } = await supabase
+        // Fetch ALL custom strategies (not just active) to check their status
+        const { data: allCustomData, error: allCustomError } = await supabase
           .from('custom_strategies')
           .select('*')
-          .eq('user_id', user.id)
-          .eq('is_active', true);
+          .eq('user_id', user.id);
 
-        if (customError) throw customError;
+        if (allCustomError) throw allCustomError;
+
+        // Create a map of custom strategy name -> is_active status
+        const customStrategyStatusMap = new Map<string, boolean>();
+        (allCustomData || []).forEach(cs => {
+          customStrategyStatusMap.set(cs.name, cs.is_active);
+        });
 
         // Fetch built-in strategies (from strategy_performance or fallback)
         const { data: builtInData, error: builtInError } = await supabase
@@ -83,8 +88,9 @@ export const useStrategyData = () => {
           };
         });
 
-        // Transform custom strategies and add performance data
-        const customStrategies: Strategy[] = (customData || []).map(cs => {
+        // Transform ONLY active custom strategies for display
+        const activeCustomData = (allCustomData || []).filter(cs => cs.is_active);
+        const customStrategies: Strategy[] = activeCustomData.map(cs => {
           const performance = performanceMap.get(cs.name);
           return {
             id: cs.id,
@@ -97,6 +103,7 @@ export const useStrategyData = () => {
         });
 
         // Add strategies that have trades but aren't in builtInStrategies OR customStrategies
+        // BUT respect the is_active status from custom_strategies if it exists
         const allStrategyNames = new Set([
           ...builtInStrategies.map(s => s.strategy_name),
           ...customStrategies.map(s => s.strategy_name)
@@ -104,14 +111,21 @@ export const useStrategyData = () => {
         
         performanceMap.forEach((perf, strategyName) => {
           if (!allStrategyNames.has(strategyName)) {
-            builtInStrategies.push({
-              id: `generated-${strategyName}`,
-              strategy_name: strategyName,
-              status: 'active',
-              total_trades: perf.total_trades,
-              winning_trades: perf.winning_trades,
-              total_profit: perf.total_profit
-            });
+            // Check if this is a custom strategy that's been deactivated
+            const isCustomStrategy = customStrategyStatusMap.has(strategyName);
+            const isActive = customStrategyStatusMap.get(strategyName) ?? true; // Default to active for unknown strategies
+            
+            // Only add if it's active (or not a custom strategy)
+            if (!isCustomStrategy || isActive) {
+              builtInStrategies.push({
+                id: `generated-${strategyName}`,
+                strategy_name: strategyName,
+                status: 'active',
+                total_trades: perf.total_trades,
+                winning_trades: perf.winning_trades,
+                total_profit: perf.total_profit
+              });
+            }
           }
         });
 
