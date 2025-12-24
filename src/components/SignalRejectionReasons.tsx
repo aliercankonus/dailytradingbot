@@ -2324,7 +2324,9 @@ const HTFExtremeGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
 const BollingerShortGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const percentB = coerceNumeric(filtersStatus?.percentB ?? trendData?.bollingerBands?.['4h']?.percentB, 50);
   const required = coerceNumeric(filtersStatus?.requiredPercentB, 40);
-  const isInSqueeze = filtersStatus?.isInSqueeze || false;
+  const isInSqueeze = filtersStatus?.isInSqueeze4h ?? filtersStatus?.isInSqueeze ?? false;
+  const direction = filtersStatus?.direction || "short";
+  const deficit = required - percentB;
   
   return (
     <div className="space-y-3 p-3 rounded-md border bg-orange-500/10 border-orange-500/30">
@@ -2332,24 +2334,24 @@ const BollingerShortGateDisplay = ({ filtersStatus, trendData }: { filtersStatus
         <div className="flex items-center gap-1.5">
           <Ban className="h-4 w-4 text-orange-500" />
           <span className="text-xs font-semibold text-orange-400">
-            BOLLINGER SHORT GATE
+            BOLLINGER {direction.toUpperCase()} GATE
           </span>
         </div>
-        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-orange-500/20 text-orange-400">
-          %B Below Min
+        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+          %B = {percentB.toFixed(1)} (need +{deficit.toFixed(1)})
         </Badge>
       </div>
       
       <div className="text-[10px] text-muted-foreground">
-        Shorts require %B ≥{required} to avoid shorting in bounce zones
+        {direction === "short" ? "Shorts" : "Longs"} require %B ≥{required} to avoid {direction === "short" ? "shorting in bounce zones" : "entering at resistance"}
         {isInSqueeze && " (stricter threshold during squeeze)"}
       </div>
       
       {/* Visual %B position */}
       <div className="space-y-1.5">
         <div className="flex justify-between text-[10px]">
-          <span className="text-muted-foreground">Current %B</span>
-          <span className="font-mono text-orange-400">{percentB.toFixed(1)}% (need ≥{required}%)</span>
+          <span className="text-muted-foreground">Bollinger %B Position</span>
+          <span className="font-mono text-orange-400">{percentB.toFixed(1)}% / {required}% required</span>
         </div>
         <div className="relative h-3 bg-muted/30 rounded-full overflow-hidden">
           <div className="absolute left-0 h-full bg-red-500/30" style={{ width: `${required}%` }} />
@@ -2358,15 +2360,31 @@ const BollingerShortGateDisplay = ({ filtersStatus, trendData }: { filtersStatus
             className="absolute h-full w-1 bg-orange-500 rounded-full"
             style={{ left: `${Math.min(Math.max(percentB, 0), 100)}%` }}
           />
+          {/* Threshold marker */}
+          <div 
+            className="absolute top-0 h-full w-0.5 bg-yellow-400"
+            style={{ left: `${required}%` }}
+          />
         </div>
         <div className="flex justify-between text-[9px] text-muted-foreground">
-          <span className="text-red-400">Blocked zone</span>
-          <span className="text-green-400">Allowed zone</span>
+          <span className="text-red-400">Blocked (&lt;{required}%)</span>
+          <span className="text-green-400">Allowed (≥{required}%)</span>
         </div>
       </div>
       
+      {/* Squeeze indicator */}
+      {isInSqueeze && (
+        <div className="flex items-center gap-1.5 p-1.5 bg-purple-500/20 rounded text-[10px] text-purple-400">
+          <Layers className="h-3 w-3" />
+          <span>Squeeze active - using stricter threshold</span>
+        </div>
+      )}
+      
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
-        <span className="text-orange-400">⚠️ Why blocked:</span> Shorting below lower Bollinger Band (%B &lt; {required}) has poor statistics - price is likely to revert to mean. Wait for %B to rise above {required}%.
+        <span className="text-orange-400">⚠️ Why blocked:</span> {direction === "short" 
+          ? `Shorting below lower Bollinger Band (%B < ${required}) has poor statistics - price is likely to revert to mean. Wait for %B to rise above ${required}%.`
+          : `Buying above upper Bollinger Band has poor risk/reward. Wait for pullback.`
+        }
       </div>
     </div>
   );
@@ -2376,8 +2394,9 @@ const BollingerShortGateDisplay = ({ filtersStatus, trendData }: { filtersStatus
 const SqueezeContextGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const marketContext = filtersStatus?.marketContext || "MEAN_REVERSION";
   const stochRsiK4h = coerceNumeric(filtersStatus?.stochRsiK4h ?? trendData?.stochasticRsi?.['4h']?.k, 50);
-  const squeezePercent = coerceNumeric(trendData?.bollingerBands?.['4h']?.squeezeIntensity ?? trendData?.bb?.['4h']?.squeezePercent, 0);
+  const squeezePercent = coerceNumeric(filtersStatus?.squeezePercent ?? trendData?.bollingerBands?.['4h']?.squeezeIntensity ?? trendData?.bb?.['4h']?.squeezePercent, 0);
   const direction = filtersStatus?.direction || filtersStatus?.derivedDirection || "short";
+  const isInSqueeze = filtersStatus?.isInSqueeze4h ?? filtersStatus?.isInSqueeze ?? true;
   const isOversold = stochRsiK4h <= 20;
   
   return (
@@ -2389,21 +2408,25 @@ const SqueezeContextGateDisplay = ({ filtersStatus, trendData }: { filtersStatus
             SQUEEZE CONTEXT GATE
           </span>
         </div>
-        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-purple-500/20 text-purple-400">
-          {marketContext}
+        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+          {direction.toUpperCase()} Blocked
         </Badge>
       </div>
       
       <div className="text-[10px] text-muted-foreground">
-        4H squeeze active with extreme StochRSI → trend-continuation {direction}s blocked
+        4H squeeze active + extreme StochRSI → {marketContext} context → trend-continuation {direction}s blocked
       </div>
       
       {/* Context Indicators */}
       <div className="grid grid-cols-2 gap-2">
-        <div className="p-2 rounded border bg-purple-500/20 border-purple-500/30 text-center">
+        <div className={`p-2 rounded border text-center ${isInSqueeze ? 'bg-purple-500/20 border-purple-500/30' : 'bg-muted/30 border-muted/50'}`}>
           <div className="text-[10px] text-muted-foreground">4H Squeeze</div>
-          <div className="text-lg font-bold text-purple-400">{squeezePercent.toFixed(0)}%</div>
-          <div className="text-[9px] text-muted-foreground">Intensity</div>
+          <div className={`text-lg font-bold ${isInSqueeze ? 'text-purple-400' : 'text-muted-foreground'}`}>
+            {squeezePercent > 0 ? `${squeezePercent.toFixed(0)}%` : 'Active'}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {isInSqueeze ? "Volatility compression" : "Normal"}
+          </div>
         </div>
         <div className={`p-2 rounded border text-center ${isOversold ? 'bg-blue-500/20 border-blue-500/30' : 'bg-red-500/20 border-red-500/30'}`}>
           <div className="text-[10px] text-muted-foreground">4H StochRSI K</div>
@@ -2416,11 +2439,17 @@ const SqueezeContextGateDisplay = ({ filtersStatus, trendData }: { filtersStatus
         </div>
       </div>
       
+      {/* Context explanation */}
+      <div className="flex items-center gap-1.5 p-1.5 bg-purple-500/20 rounded text-[10px] text-purple-400">
+        <Target className="h-3 w-3" />
+        <span>Context: {marketContext} - favor reversions, not continuation</span>
+      </div>
+      
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
         <span className="text-purple-400">⚠️ Why blocked:</span> Squeeze + extreme StochRSI = mean-reversion context. 
         {isOversold 
-          ? " Trend-continuation shorts are blocked. Only long pullbacks or squeeze breakouts UP are valid."
-          : " Trend-continuation longs are blocked. Only short pullbacks or squeeze breakouts DOWN are valid."
+          ? ` Trend-continuation ${direction}s are blocked. Only pullbacks or squeeze breakouts in the opposite direction are valid.`
+          : ` Trend-continuation ${direction}s are blocked. Wait for squeeze resolution or extreme to normalize.`
         }
       </div>
     </div>
