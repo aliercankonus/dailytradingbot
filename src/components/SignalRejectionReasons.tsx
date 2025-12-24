@@ -1161,6 +1161,8 @@ const HardBlockStochRsiDisplay = ({ filtersStatus, trendData }: { filtersStatus:
   
   // Get reversal score breakdown from filters_status
   const reversalScore = coerceNumeric(filtersStatus?.reversal_score, 0);
+  const reversalRawScore = coerceNumeric(filtersStatus?.reversal_raw_score, 0);
+  const reversalAdxWeight = coerceNumeric(filtersStatus?.reversal_adx_weight, 1.0);
   const reversalDecision = filtersStatus?.reversal_decision || "";
   const reversalBreakdown = filtersStatus?.reversal_breakdown || {};
   const reversalReasons = filtersStatus?.reversal_reasons || [];
@@ -1276,7 +1278,7 @@ const HardBlockStochRsiDisplay = ({ filtersStatus, trendData }: { filtersStatus:
       </div>
       
       {/* Reversal Score Breakdown - only show if available */}
-      {reversalScore > 0 && (
+      {(reversalScore > 0 || reversalRawScore > 0) && (
         <div className="space-y-2 border-t border-muted/30 pt-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-muted-foreground">Reversal Risk Score</span>
@@ -1295,17 +1297,48 @@ const HardBlockStochRsiDisplay = ({ filtersStatus, trendData }: { filtersStatus:
             </div>
           </div>
           
+          {/* Score Calculation Breakdown - shows how raw score becomes final score */}
+          {reversalRawScore > 0 && reversalAdxWeight !== 1.0 && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center justify-between px-2 py-1 bg-muted/30 rounded text-[9px] cursor-help">
+                    <span className="text-muted-foreground">Calculation:</span>
+                    <span className="font-mono">
+                      <span className="text-orange-400">{reversalRawScore}</span>
+                      <span className="text-muted-foreground"> × </span>
+                      <span className="text-cyan-400">{reversalAdxWeight.toFixed(2)}</span>
+                      <span className="text-muted-foreground"> = </span>
+                      <span className={getReversalColor(reversalScore)}>{reversalScore}</span>
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-[10px] max-w-[200px]">
+                  <p>Raw component sum ({reversalRawScore}) × ADX weight ({reversalAdxWeight.toFixed(2)}) = Final score ({reversalScore})</p>
+                  <p className="text-muted-foreground mt-1">Lower ADX = lower weight, reducing final score</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          
           {/* Score Breakdown */}
           {Object.keys(reversalBreakdown).length > 0 && (
             <div className="grid grid-cols-2 gap-1 text-[9px]">
               {Object.entries(reversalBreakdown).map(([key, value]) => (
                 <div key={key} className="flex justify-between px-1.5 py-0.5 bg-muted/20 rounded">
-                  <span className="text-muted-foreground capitalize">{key.replace(/_/g, ' ')}</span>
-                  <span className={`font-mono ${Number(value) > 0 ? 'text-orange-400' : 'text-muted-foreground'}`}>
-                    +{Number(value)}
+                  <span className="text-muted-foreground capitalize">{key.replace(/_/g, ' ').replace('Score', '')}</span>
+                  <span className={`font-mono ${Number(value) > 0 ? 'text-orange-400' : Number(value) < 0 ? 'text-green-400' : 'text-muted-foreground'}`}>
+                    {Number(value) > 0 ? '+' : ''}{Number(value)}
                   </span>
                 </div>
               ))}
+              {/* Show raw sum */}
+              {reversalRawScore > 0 && (
+                <div className="flex justify-between px-1.5 py-0.5 bg-muted/40 rounded col-span-2 border-t border-muted/50 mt-0.5">
+                  <span className="text-muted-foreground font-medium">Raw Sum</span>
+                  <span className="font-mono text-orange-400 font-medium">{reversalRawScore}</span>
+                </div>
+              )}
             </div>
           )}
           
@@ -2473,10 +2506,12 @@ const StrategyConstraintGateDisplay = ({ filtersStatus, trendData }: { filtersSt
 // Unified Reversal Display - for BLOCK/REDUCE decisions from unified reversal scoring
 const UnifiedReversalDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const score = coerceNumeric(filtersStatus?.unifiedReversalScore ?? filtersStatus?.score ?? filtersStatus?.unifiedScore ?? filtersStatus?.reversalScore, 0);
+  const rawScore = coerceNumeric(filtersStatus?.unifiedReversalRawScore ?? filtersStatus?.rawScore, 0);
+  const adxWeight = coerceNumeric(filtersStatus?.unifiedReversalAdxWeight ?? filtersStatus?.adxWeight, 1.0);
   const decision = filtersStatus?.decision || "UNKNOWN";
   const breakdown = filtersStatus?.breakdown || filtersStatus?.scoreBreakdown || {};
-  const reasons = filtersStatus?.reasons || filtersStatus?.reversalReasons || [];
-  const momentumState = filtersStatus?.momentumState || trendData?.momentum?.state || "unknown";
+  const reasons = filtersStatus?.reasons || filtersStatus?.reversalReasons || filtersStatus?.reversalSignals || [];
+  const momentumState = filtersStatus?.momentumState || filtersStatus?.momentum?.state || trendData?.momentum?.state || "unknown";
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   const trend4hRaw = filtersStatus?.trend4h || trendData?.primaryTrend || "unknown";
   const trend1hRaw = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend || "unknown";
@@ -2562,18 +2597,50 @@ const UnifiedReversalDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
           <div className="text-[10px] text-muted-foreground">Score Breakdown:</div>
           <div className="grid grid-cols-2 gap-1">
             {Object.entries(breakdown).map(([key, value]) => {
-              const label = breakdownLabels[key] || key.replace(/([A-Z])/g, ' $1').trim();
+              const label = breakdownLabels[key] || key.replace(/([A-Z])/g, ' $1').replace('Score', '').trim();
               const numValue = Number(value) || 0;
               return (
                 <div key={key} className="flex justify-between px-2 py-1 bg-muted/20 rounded text-[10px]">
                   <span className="text-muted-foreground">{label}</span>
-                  <span className={`font-mono ${numValue > 0 ? colors.text : 'text-muted-foreground'}`}>
+                  <span className={`font-mono ${numValue > 0 ? colors.text : numValue < 0 ? 'text-green-400' : 'text-muted-foreground'}`}>
                     {numValue > 0 ? `+${numValue}` : numValue}
                   </span>
                 </div>
               );
             })}
           </div>
+          
+          {/* Score Calculation - shows how raw score becomes final score */}
+          {rawScore > 0 && adxWeight !== 1.0 && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center justify-between px-2 py-1.5 bg-muted/40 rounded text-[10px] cursor-help border-t border-muted/50 mt-1">
+                    <span className="text-muted-foreground font-medium">Calculation:</span>
+                    <span className="font-mono">
+                      <span className="text-orange-400">{rawScore}</span>
+                      <span className="text-muted-foreground"> × </span>
+                      <span className="text-cyan-400">{adxWeight.toFixed(2)}</span>
+                      <span className="text-muted-foreground"> = </span>
+                      <span className={colors.text}>{score}</span>
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-[10px] max-w-[220px]">
+                  <p>Raw component sum ({rawScore}) × ADX weight ({adxWeight.toFixed(2)}) = Final score ({score})</p>
+                  <p className="text-muted-foreground mt-1">ADX weight adjusts score based on trend strength. Lower ADX = less reliable reversal signals.</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          
+          {/* Show raw sum when different from display */}
+          {rawScore > 0 && rawScore !== score && adxWeight === 1.0 && (
+            <div className="flex justify-between px-2 py-1 bg-muted/40 rounded text-[10px] border-t border-muted/50 mt-1">
+              <span className="text-muted-foreground font-medium">Raw Sum</span>
+              <span className="font-mono text-orange-400 font-medium">{rawScore}</span>
+            </div>
+          )}
         </div>
       )}
       
