@@ -2472,7 +2472,7 @@ const StrategyConstraintGateDisplay = ({ filtersStatus, trendData }: { filtersSt
 
 // Unified Reversal Display - for BLOCK/REDUCE decisions from unified reversal scoring
 const UnifiedReversalDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
-  const score = coerceNumeric(filtersStatus?.score ?? filtersStatus?.unifiedScore ?? filtersStatus?.reversalScore, 0);
+  const score = coerceNumeric(filtersStatus?.unifiedReversalScore ?? filtersStatus?.score ?? filtersStatus?.unifiedScore ?? filtersStatus?.reversalScore, 0);
   const decision = filtersStatus?.decision || "UNKNOWN";
   const breakdown = filtersStatus?.breakdown || filtersStatus?.scoreBreakdown || {};
   const reasons = filtersStatus?.reasons || filtersStatus?.reversalReasons || [];
