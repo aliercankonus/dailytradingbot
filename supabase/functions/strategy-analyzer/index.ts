@@ -3313,8 +3313,9 @@ serve(async (req) => {
         // ============= LOW VOLUME DETECTION =============
         // Detect holiday/low-activity periods and adjust quality threshold
         // This is INFORMATIONAL - logs why signals are scarce, not a hard rejection
-        const volatilityData = trendData.volatility || {};
-        const volumeRatio = volatilityData.volumeRatio ?? 1.0;
+        // volumeRatio is in the volume object per timeframe, use 1h as primary reference
+        const volume1hData = trendData.volume?.["1h"] || {};
+        const volumeRatio = volume1hData.volumeRatio ?? 1.0;
         let lowVolumeBoost = 0;
         
         if (volumeRatio < LOW_VOLUME_DETECTION_PARAMS.VERY_LOW_VOLUME_RATIO) {
