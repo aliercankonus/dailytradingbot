@@ -30,6 +30,7 @@ import {
   BOLLINGER_ENTRY_GATES,
   SQUEEZE_CONTEXT_PARAMS,
   STRATEGY_SPECIFIC_CONSTRAINTS,
+  LOW_VOLUME_DETECTION_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -1462,29 +1463,35 @@ serve(async (req) => {
     // - Strong ADX (≥35): Allow lower quality (more signals in strong trends)
     // - Normal ADX (20-35): Standard threshold
     // - Recovery mode: Higher threshold (fewer, higher quality signals)
+    // - Low volume: Higher threshold (informational, not rejection)
     const BASE_MIN_QUALITY_SCORE = QUALITY_THRESHOLDS.BASE_MIN;
     const DEFAULT_MIN_QUALITY = BASE_MIN_QUALITY_SCORE;
     
-    const getMinQualityScore = (adx: number, inRecovery: boolean, confidence1h?: number, isNeutralTrend?: boolean): number => {
+    const getMinQualityScore = (adx: number, inRecovery: boolean, confidence1h?: number, isNeutralTrend?: boolean, lowVolumeBoost: number = 0): number => {
+      let baseThreshold: number;
+      
       if (inRecovery) {
         // SCENARIO 6 FIX (Finding 9): Cap recovery quality escalation to prevent system paralysis
         const recoveryQuality = BASE_MIN_QUALITY_SCORE + recoveryConfidenceBoost;
-        return Math.min(recoveryQuality, QUALITY_THRESHOLDS.MAX_RECOVERY_QUALITY);
+        baseThreshold = Math.min(recoveryQuality, QUALITY_THRESHOLDS.MAX_RECOVERY_QUALITY);
+      } else if (isNeutralTrend) {
+        // Neutral trends (with HTF direction) get lower threshold since quality scoring
+        // is optimized for directional 5m trends - neutral relies on 1h direction instead
+        baseThreshold = QUALITY_THRESHOLDS.NEUTRAL_MIN;
+      } else if (confidence1h && confidence1h >= 65) {
+        // RELAXED: If 1h shows strong direction (≥65% confidence), allow lower threshold
+        baseThreshold = QUALITY_THRESHOLDS.STRONG_1H_MIN;
+      } else if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) {
+        // Very strong trends = allow more signals
+        baseThreshold = QUALITY_THRESHOLDS.EXCEPTIONAL_ADX_MIN;
+      } else if (adx >= ADX_THRESHOLDS.STRONG) {
+        baseThreshold = QUALITY_THRESHOLDS.STRONG_ADX_MIN;
+      } else {
+        baseThreshold = BASE_MIN_QUALITY_SCORE;
       }
-      // Neutral trends (with HTF direction) get lower threshold since quality scoring
-      // is optimized for directional 5m trends - neutral relies on 1h direction instead
-      if (isNeutralTrend) {
-        return QUALITY_THRESHOLDS.NEUTRAL_MIN;
-      }
-      // RELAXED: If 1h shows strong direction (≥65% confidence), allow lower threshold
-      // Changed from 70% to 65% to capture more early entries when 1h is directional
-      if (confidence1h && confidence1h >= 65) {
-        return QUALITY_THRESHOLDS.STRONG_1H_MIN;
-      }
-      // Dynamic based on ADX - strong trends = allow more signals
-      if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) return QUALITY_THRESHOLDS.EXCEPTIONAL_ADX_MIN;
-      if (adx >= ADX_THRESHOLDS.STRONG) return QUALITY_THRESHOLDS.STRONG_ADX_MIN;
-      return BASE_MIN_QUALITY_SCORE;
+      
+      // Apply low-volume boost (informational tightening during low-activity periods)
+      return baseThreshold + lowVolumeBoost;
     };
     
     if (isInRecoveryMode) {
@@ -3303,10 +3310,29 @@ serve(async (req) => {
         }
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Quality: ${qualityScore}/100 [${breakdown}] | Regime: ${regime.regime} | Entry: ${pullbackAnalysis.reason} | Pullback: ${pullbackAnalysis.hasBothConditions ? 'OPTIMAL' : pullbackAnalysis.isPullback ? 'YES' : 'NO'}`);
 
+        // ============= LOW VOLUME DETECTION =============
+        // Detect holiday/low-activity periods and adjust quality threshold
+        // This is INFORMATIONAL - logs why signals are scarce, not a hard rejection
+        const volatilityData = trendData.volatility || {};
+        const volumeRatio = volatilityData.volumeRatio ?? 1.0;
+        let lowVolumeBoost = 0;
+        
+        if (volumeRatio < LOW_VOLUME_DETECTION_PARAMS.VERY_LOW_VOLUME_RATIO) {
+          // Very low volume (holiday-like conditions)
+          lowVolumeBoost = LOW_VOLUME_DETECTION_PARAMS.QUALITY_THRESHOLD_BOOST;
+          logger.forSymbol(symbol).info(`📉 LOW VOLUME DETECTED: volumeRatio=${(volumeRatio * 100).toFixed(0)}% (<${LOW_VOLUME_DETECTION_PARAMS.VERY_LOW_VOLUME_RATIO * 100}% avg) - HOLIDAY-LIKE CONDITIONS`);
+          logger.forSymbol(symbol).info(`   → Quality threshold boosted by +${lowVolumeBoost} points (informational tightening)`);
+        } else if (volumeRatio < LOW_VOLUME_DETECTION_PARAMS.VOLUME_RATIO_THRESHOLD) {
+          // Low volume (below 50% average)
+          lowVolumeBoost = LOW_VOLUME_DETECTION_PARAMS.QUALITY_THRESHOLD_BOOST;
+          logger.forSymbol(symbol).info(`📉 LOW VOLUME: volumeRatio=${(volumeRatio * 100).toFixed(0)}% (<${LOW_VOLUME_DETECTION_PARAMS.VOLUME_RATIO_THRESHOLD * 100}% avg)`);
+          logger.forSymbol(symbol).info(`   → Quality threshold boosted by +${lowVolumeBoost} points`);
+        }
+
         // ============= DYNAMIC QUALITY THRESHOLD =============
-        // Calculate threshold based on ADX, 1h confidence, and neutral trend for this specific symbol
+        // Calculate threshold based on ADX, 1h confidence, neutral trend, and low volume for this specific symbol
         const isNeutralTrend = tradeDirectionForGate === 'neutral';
-        const MIN_QUALITY_SCORE = getMinQualityScore(adx, isInRecoveryMode, confidence1h, isNeutralTrend);
+        const MIN_QUALITY_SCORE = getMinQualityScore(adx, isInRecoveryMode, confidence1h, isNeutralTrend, lowVolumeBoost);
         
         // Check minimum quality threshold
         if (qualityScore < MIN_QUALITY_SCORE) {
@@ -3319,7 +3345,9 @@ serve(async (req) => {
             supabase, userId, symbol,
             isNearMiss 
               ? `NEAR MISS: Quality score ${qualityScore}/100 (threshold: ${MIN_QUALITY_SCORE}, missed by ${MIN_QUALITY_SCORE - qualityScore} pts)`
-              : `Quality score too low: ${qualityScore}/100 (min: ${MIN_QUALITY_SCORE}, ADX=${adx.toFixed(1)})`,
+              : lowVolumeBoost > 0
+                ? `Quality score too low: ${qualityScore}/100 (min: ${MIN_QUALITY_SCORE} incl. +${lowVolumeBoost} low-volume boost, ADX=${adx.toFixed(1)})`
+                : `Quality score too low: ${qualityScore}/100 (min: ${MIN_QUALITY_SCORE}, ADX=${adx.toFixed(1)})`,
             {
               gate: "QUALITY_THRESHOLD",
               qualityScore, breakdown, minRequired: MIN_QUALITY_SCORE,
@@ -3330,6 +3358,9 @@ serve(async (req) => {
               entryTiming: pullbackAnalysis.reason,
               isNearMiss,
               nearMissMargin: isNearMiss ? MIN_QUALITY_SCORE - qualityScore : null,
+              lowVolumeBoost: lowVolumeBoost > 0 ? lowVolumeBoost : undefined,
+              volumeRatio: volumeRatio.toFixed(2),
+              isLowVolume: volumeRatio < LOW_VOLUME_DETECTION_PARAMS.VOLUME_RATIO_THRESHOLD,
             },
             trendData,
             false,

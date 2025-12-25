@@ -789,12 +789,24 @@ export const HTF_EXTREME_HARD_GATES = {
 
 // ============= IMPROVEMENT 2: BOLLINGER POSITION FILTER FOR SHORTS =============
 // Shorts below lower Bollinger are statistically poor entries
-// Require %B >= 40 for short entries, >= 50 during squeeze
+// Require %B >= 35 for short entries, >= 50 during squeeze
 export const BOLLINGER_ENTRY_GATES = {
-  SHORT_MIN_PERCENT_B: 40,        // Shorts require %B >= 40
+  SHORT_MIN_PERCENT_B: 35,        // Shorts require %B >= 35 (relaxed from 40 to allow more signals)
   SHORT_SQUEEZE_MIN_PERCENT_B: 50, // During squeeze, require %B >= 50
-  LONG_MAX_PERCENT_B: 60,         // Longs require %B <= 60 (symmetric)
+  LONG_MAX_PERCENT_B: 65,         // Longs require %B <= 65 (symmetric with shorts)
   LONG_SQUEEZE_MAX_PERCENT_B: 50, // During squeeze, require %B <= 50
+} as const;
+
+// ============= LOW VOLUME DETECTION PARAMETERS =============
+// Detect holiday/low-activity periods and adjust thresholds
+// When volume is significantly below average, log informational message and tighten quality
+export const LOW_VOLUME_DETECTION_PARAMS = {
+  // Volume ratio threshold - below this is considered "low volume"
+  VOLUME_RATIO_THRESHOLD: 0.5,  // <50% of 20-day average = low volume
+  // Quality threshold boost when low volume detected
+  QUALITY_THRESHOLD_BOOST: 5,   // Add +5 to minimum quality threshold
+  // Minimum volume ratio to log as "very low" (holiday-like conditions)
+  VERY_LOW_VOLUME_RATIO: 0.3,   // <30% = very low volume (log as holiday-like)
 } as const;
 
 // ============= IMPROVEMENT 3: SQUEEZE CONTEXT ARBITRATION =============
