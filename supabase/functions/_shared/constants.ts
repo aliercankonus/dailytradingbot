@@ -143,6 +143,25 @@ export const R_MULTIPLE_TRAILING_PARAMS = {
   FALLBACK_TO_PERCENT: true,
 } as const;
 
+// ============= PROGRESSIVE PROFIT LOCK PARAMETERS =============
+// Bridge the gap between break-even (0.5%) and trailing activation (0.7%)
+// Positions that peak between these levels should lock partial profits, not just break-even
+export const PROGRESSIVE_PROFIT_LOCK_PARAMS = {
+  // Enable progressive profit locking (works between break-even and trailing activation)
+  ENABLED: true,
+  // Define profit lock tiers: when peak P&L reaches threshold, lock to target
+  // These tiers fill the gap between break-even (0.5%) and trailing (0.7%)
+  TIERS: [
+    { peakThreshold: 0.5, lockTarget: 0.0 },   // Break-even tier (existing behavior)
+    { peakThreshold: 0.55, lockTarget: 0.10 }, // Lock +0.10% at +0.55% peak
+    { peakThreshold: 0.60, lockTarget: 0.15 }, // Lock +0.15% at +0.60% peak
+    { peakThreshold: 0.65, lockTarget: 0.20 }, // Lock +0.20% at +0.65% peak
+    { peakThreshold: 0.70, lockTarget: 0.25 }, // Lock +0.25% at +0.70% peak (before trailing takes over)
+  ],
+  // Once trailing stop activates, it takes full control (no more progressive locks)
+  DEFER_TO_TRAILING_AT: 0.7,
+} as const;
+
 // Slippage buffer constants for stop loss calculations
 export const SLIPPAGE_PARAMS = {
   // Buffer added to break-even stop to ensure small profit after execution slippage
