@@ -808,12 +808,29 @@ export const HTF_EXTREME_HARD_GATES = {
 
 // ============= IMPROVEMENT 2: BOLLINGER POSITION FILTER FOR SHORTS =============
 // Shorts below lower Bollinger are statistically poor entries
-// Require %B >= 35 for short entries, >= 50 during squeeze
+// Require %B >= 35 for short entries, >= 50 during squeeze (relaxed to 40 during ranging)
 export const BOLLINGER_ENTRY_GATES = {
   SHORT_MIN_PERCENT_B: 35,        // Shorts require %B >= 35 (relaxed from 40 to allow more signals)
   SHORT_SQUEEZE_MIN_PERCENT_B: 50, // During squeeze, require %B >= 50
+  SHORT_SQUEEZE_RANGING_MIN_PERCENT_B: 40, // During squeeze + ranging (ADX < 23), relax to %B >= 40
   LONG_MAX_PERCENT_B: 65,         // Longs require %B <= 65 (symmetric with shorts)
   LONG_SQUEEZE_MAX_PERCENT_B: 50, // During squeeze, require %B <= 50
+  LONG_SQUEEZE_RANGING_MAX_PERCENT_B: 60, // During squeeze + ranging (ADX < 23), relax to %B <= 60
+  // ADX threshold for "ranging market" - below this, apply relaxed squeeze rules
+  RANGING_ADX_THRESHOLD: 23,
+} as const;
+
+// ============= RANGING MARKET DETECTION PARAMETERS =============
+// Detect when all timeframes are neutral and market is truly ranging
+export const RANGING_MARKET_DETECTION_PARAMS = {
+  // ADX threshold for ranging detection
+  ADX_THRESHOLD: 23,
+  // Minimum neutral confidence across timeframes to consider "all neutral"
+  NEUTRAL_CONFIDENCE_THRESHOLD: 50,
+  // Volume ratio threshold - below this confirms low activity
+  VOLUME_RATIO_THRESHOLD: 0.7,
+  // Enable informational logging for ranging markets
+  ENABLE_LOGGING: true,
 } as const;
 
 // ============= LOW VOLUME DETECTION PARAMETERS =============

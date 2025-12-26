@@ -31,6 +31,7 @@ import {
   SQUEEZE_CONTEXT_PARAMS,
   STRATEGY_SPECIFIC_CONSTRAINTS,
   LOW_VOLUME_DETECTION_PARAMS,
+  RANGING_MARKET_DETECTION_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -1569,6 +1570,30 @@ serve(async (req) => {
           logger.forSymbol(symbol).debug(`[EARLY_ORDER_FLOW] score=${earlyOrderFlowAnalysis.score}/100 signal=${earlyOrderFlowAnalysis.signal} | ${earlyOrderFlowAnalysis.reasons.slice(0, 2).join(' | ')}`);
         }
 
+        // ============= RANGING MARKET DETECTION =============
+        // Log informational message when market is genuinely ranging (all timeframes neutral, low ADX, low volume)
+        if (RANGING_MARKET_DETECTION_PARAMS.ENABLE_LOGGING) {
+          const tf4h = timeframes?.['4h'];
+          const tf1h = timeframes?.['1h'];
+          const tf30m = timeframes?.['30m'];
+          
+          // Check if all timeframes are neutral (confidence below threshold for any direction)
+          const is4hNeutral = !tf4h?.trend || tf4h.trend === "neutral" || (tf4h.confidence ?? 0) < RANGING_MARKET_DETECTION_PARAMS.NEUTRAL_CONFIDENCE_THRESHOLD;
+          const is1hNeutral = !tf1h?.trend || tf1h.trend === "neutral" || (tf1h.confidence ?? 0) < RANGING_MARKET_DETECTION_PARAMS.NEUTRAL_CONFIDENCE_THRESHOLD;
+          const is30mNeutral = !tf30m?.trend || tf30m.trend === "neutral" || (tf30m.confidence ?? 0) < RANGING_MARKET_DETECTION_PARAMS.NEUTRAL_CONFIDENCE_THRESHOLD;
+          
+          const allTimeframesNeutral = is4hNeutral && is1hNeutral && is30mNeutral;
+          const isLowAdx = adx < RANGING_MARKET_DETECTION_PARAMS.ADX_THRESHOLD;
+          const volumeRatio = trendData.volume?.ratio ?? 1.0;
+          const isLowVolume = volumeRatio < RANGING_MARKET_DETECTION_PARAMS.VOLUME_RATIO_THRESHOLD;
+          
+          if (allTimeframesNeutral && isLowAdx && isLowVolume) {
+            logger.forSymbol(symbol).info(`📊 RANGING MARKET DETECTED: All timeframes neutral, ADX=${adx.toFixed(1)}, Volume=${(volumeRatio * 100).toFixed(0)}% of avg. Trend strategies paused.`);
+          } else if (allTimeframesNeutral && isLowAdx) {
+            logger.forSymbol(symbol).debug(`📊 [RANGING] Low ADX=${adx.toFixed(1)} + neutral timeframes, but volume OK (${(volumeRatio * 100).toFixed(0)}%)`);
+          }
+        }
+
         // ============= PHASE 1 IMPROVEMENT: EXPLICIT DIRECTION DERIVATION =============
         // Derive trade direction early in the pipeline to prevent inconsistent direction evaluation
         // This ensures all downstream gates use the same direction logic
@@ -2087,15 +2112,29 @@ serve(async (req) => {
         // ============= IMPROVEMENT 2: BOLLINGER POSITION FILTER FOR SHORTS =============
         // Shorts below lower Bollinger are statistically poor entries
         // Especially during volatility compression (squeeze)
+        // RANGING MARKET ADAPTATION: Relax squeeze strictness when ADX < 23 (genuine range, not trend exhaustion)
         const isInSqueeze4h = trendData.bollingerBands?.['4h']?.squeeze || 
                               (trendData.bb?.['4h']?.squeezePercent ?? 0) > SQUEEZE_CONTEXT_PARAMS.MIN_SQUEEZE_PERCENT_4H;
-        const shortMinPercentB = isInSqueeze4h 
-          ? BOLLINGER_ENTRY_GATES.SHORT_SQUEEZE_MIN_PERCENT_B 
-          : BOLLINGER_ENTRY_GATES.SHORT_MIN_PERCENT_B;
+        const isRangingMarket = adx < BOLLINGER_ENTRY_GATES.RANGING_ADX_THRESHOLD;
+        
+        // Determine appropriate %B threshold based on squeeze and ranging status
+        let shortMinPercentB: number;
+        if (isInSqueeze4h && isRangingMarket) {
+          // Squeeze + ranging = use relaxed threshold (genuine range, not trend exhaustion)
+          shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_SQUEEZE_RANGING_MIN_PERCENT_B;
+        } else if (isInSqueeze4h) {
+          // Squeeze without ranging = use strict threshold (possible trend continuation)
+          shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_SQUEEZE_MIN_PERCENT_B;
+        } else {
+          // No squeeze = use base threshold
+          shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_MIN_PERCENT_B;
+        }
         
         if (intendedTradeDirection === "short" && percentB < shortMinPercentB) {
           rejectedByHardGates++;
-          const squeezeContext = isInSqueeze4h ? " (stricter during squeeze)" : "";
+          const squeezeContext = isInSqueeze4h 
+            ? (isRangingMarket ? " (relaxed during ranging squeeze)" : " (stricter during squeeze)") 
+            : "";
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER POSITION FILTER - Blocking SHORT at low %B=${percentB.toFixed(1)} < ${shortMinPercentB}${squeezeContext}`);
           await logRejectionWithAI(
             supabase, userId, symbol,
@@ -2106,6 +2145,8 @@ serve(async (req) => {
               percentB: percentB.toFixed(1),
               requiredPercentB: shortMinPercentB,
               isInSqueeze4h,
+              isRangingMarket,
+              adx: adx.toFixed(1),
               message: "Shorts below lower Bollinger are statistically poor entries"
             },
             trendData,
