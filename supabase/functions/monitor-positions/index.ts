@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore, 
@@ -1275,7 +1275,69 @@ serve(async (req) => {
       }
 
       // ============================================================
-      // SCENARIO 5 PHASE 2: EXPLICIT EXIT HIERARCHY
+      // PROGRESSIVE PROFIT LOCK - Bridge gap between break-even and trailing
+      // When peak P&L exceeds a tier threshold, lock in that tier's profit target
+      // This ensures positions that peaked at +0.6% exit at +0.15%, not 0%
+      // Only applies when trailing stop hasn't activated yet
+      // ============================================================
+      if (PROGRESSIVE_PROFIT_LOCK_PARAMS.ENABLED && 
+          !trailingActivated && 
+          position.stop_loss !== null &&
+          newPeakPnl < PROGRESSIVE_PROFIT_LOCK_PARAMS.DEFER_TO_TRAILING_AT) {
+        
+        // Find the highest tier the peak P&L qualifies for
+        let applicableTier = null;
+        for (const tier of PROGRESSIVE_PROFIT_LOCK_PARAMS.TIERS) {
+          if (newPeakPnl >= tier.peakThreshold) {
+            applicableTier = tier;
+          }
+        }
+        
+        if (applicableTier && applicableTier.lockTarget > 0) {
+          // Calculate the lock stop price to achieve the target profit
+          const entryPrice = position.entry_price;
+          const lockProfitAmount = entryPrice * (applicableTier.lockTarget / 100);
+          
+          // Add slippage buffer to ensure we actually get the locked profit
+          const slippageBuffer = entryPrice * (SLIPPAGE_PARAMS.BREAK_EVEN_BUFFER_PERCENT / 100);
+          
+          let progressiveLockStop: number;
+          let shouldApplyLock = false;
+          
+          if (position.side === "BUY") {
+            // For LONG: stop = entry + lockProfit + slippageBuffer
+            progressiveLockStop = entryPrice + lockProfitAmount + slippageBuffer;
+            // Only move stop UP (more protective)
+            if (progressiveLockStop > position.stop_loss) {
+              shouldApplyLock = true;
+            }
+          } else {
+            // For SHORT: stop = entry - lockProfit - slippageBuffer
+            progressiveLockStop = entryPrice - lockProfitAmount - slippageBuffer;
+            // Only move stop DOWN (more protective)
+            if (progressiveLockStop < position.stop_loss) {
+              shouldApplyLock = true;
+            }
+          }
+          
+          if (shouldApplyLock) {
+            positionLogger.trade(`PROGRESSIVE LOCK: Peak ${newPeakPnl.toFixed(2)}% >= ${applicableTier.peakThreshold}% tier → Locking +${applicableTier.lockTarget.toFixed(2)}% profit (Stop: ${position.stop_loss.toFixed(2)} → ${progressiveLockStop.toFixed(2)})`);
+            
+            const { error: lockError } = await supabase
+              .from("positions")
+              .update({ stop_loss: progressiveLockStop })
+              .eq("id", position.id)
+              .eq("status", "active");
+            
+            if (lockError) {
+              positionLogger.error(`Error applying progressive lock: ${lockError.message}`);
+            } else {
+              updatedStopLossMap.set(position.id, progressiveLockStop);
+            }
+          }
+        }
+      }
+
       // Priority order (highest to lowest - early return pattern):
       // 1. CIRCUIT_BREAKER (100) - Portfolio-level emergency (handled earlier)
       // 2. FLASH_CRASH (90) - Market emergency
