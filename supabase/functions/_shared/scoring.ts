@@ -1380,8 +1380,9 @@ export const calculateUnifiedReversalScore = (
     decision = "BLOCK";
     positionSizeMultiplier = 0;
     reasons.push(`PHASE 2: BLOCK by reversal probability (${separatedRisk.reversalProbability.score})`);
-  } else if (totalScore >= 60) {
-    // Fallback to legacy scoring if reversal probability didn't block but total is high
+  } else if (totalScore >= 75) {
+    // Fallback to legacy scoring if reversal probability didn't block but total is very high
+    // Raised from 60 to 75 to allow more signals through during transitional markets
     decision = "BLOCK";
     positionSizeMultiplier = 0;
   } else if (totalScore >= 40 || separatedRisk.continuationRisk.positionMultiplier < 1.0) {
@@ -1851,7 +1852,49 @@ export const deriveTradeDirection = (
     return { direction, confidence: avgConf, source: "1h+30m", reasons };
   }
   
-  // Priority 4: Fall back to primary trend from 5m if directional
+  // Priority 4 (NEW): 2 out of 3 timeframes agree WITH 4h included
+  // This relaxes the requirement when 4h is directional but 1h or 30m are neutral
+  const directionalTimeframes = [
+    { tf: '4h', trend: trend4h, conf: conf4h },
+    { tf: '1h', trend: trend1h, conf: conf1h },
+    { tf: '30m', trend: trend30m, conf: conf30m },
+  ].filter(t => t.trend !== "neutral");
+  
+  if (directionalTimeframes.length >= 2) {
+    // Count bullish vs bearish timeframes
+    const bullishTfs = directionalTimeframes.filter(t => t.trend === "bullish");
+    const bearishTfs = directionalTimeframes.filter(t => t.trend === "bearish");
+    
+    // Check if 4h is one of the directional timeframes and majority agrees
+    const has4h = directionalTimeframes.some(t => t.tf === '4h');
+    
+    if (has4h && bullishTfs.length >= 2) {
+      const avgConf = bullishTfs.reduce((sum, t) => sum + t.conf, 0) / bullishTfs.length;
+      reasons.push(`2+ of 3 TFs bullish (${bullishTfs.map(t => t.tf).join('+')}) with 4h included`);
+      reasons.push(`Avg confidence: ${avgConf.toFixed(0)}%`);
+      return { direction: "long", confidence: avgConf * 0.9, source: "2-of-3", reasons };
+    }
+    
+    if (has4h && bearishTfs.length >= 2) {
+      const avgConf = bearishTfs.reduce((sum, t) => sum + t.conf, 0) / bearishTfs.length;
+      reasons.push(`2+ of 3 TFs bearish (${bearishTfs.map(t => t.tf).join('+')}) with 4h included`);
+      reasons.push(`Avg confidence: ${avgConf.toFixed(0)}%`);
+      return { direction: "short", confidence: avgConf * 0.9, source: "2-of-3", reasons };
+    }
+    
+    // 4h directional with only 1 other TF agreeing (4h + 1h or 4h + 30m)
+    if (trend4h !== "neutral" && conf4h >= 50) {
+      const agreeing = directionalTimeframes.filter(t => t.trend === trend4h);
+      if (agreeing.length >= 2) {
+        const direction: TradeDirection = trend4h === "bullish" ? "long" : "short";
+        const avgConf = agreeing.reduce((sum, t) => sum + t.conf, 0) / agreeing.length;
+        reasons.push(`4h ${trend4h} with ${agreeing.length - 1} supporting TFs`);
+        return { direction, confidence: avgConf * 0.85, source: "4h+support", reasons };
+      }
+    }
+  }
+  
+  // Priority 5: Fall back to primary trend from 5m if directional
   if (primaryTrend === "bullish" || primaryTrend === "bearish") {
     const direction: TradeDirection = primaryTrend === "bullish" ? "long" : "short";
     const primaryConf = trendData.confidence || 50;

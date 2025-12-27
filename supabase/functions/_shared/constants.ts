@@ -6,8 +6,9 @@ export const ADX_THRESHOLDS = {
   VERY_WEAK: 12,
   SEVERE_PENALTY: 15,
   WEAK: 18,
-  // SQUEEZE_MINIMUM: Allows squeeze breakout entries when ADX is 18-20
-  SQUEEZE_MINIMUM: 18,
+  // SQUEEZE_MINIMUM: Allows squeeze breakout entries when ADX is 15-20 (relaxed from 18)
+  // This enables more signals during transitional/ranging markets when squeeze breakouts occur
+  SQUEEZE_MINIMUM: 15,
   MINIMUM: 20,
   MODERATE: 22,
   STRONG: 25,
