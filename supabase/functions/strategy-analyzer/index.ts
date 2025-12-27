@@ -1587,10 +1587,14 @@ serve(async (req) => {
           const volumeRatio = trendData.volume?.ratio ?? 1.0;
           const isLowVolume = volumeRatio < RANGING_MARKET_DETECTION_PARAMS.VOLUME_RATIO_THRESHOLD;
           
-          if (allTimeframesNeutral && isLowAdx && isLowVolume) {
+        if (allTimeframesNeutral && isLowAdx && isLowVolume) {
             logger.forSymbol(symbol).info(`📊 RANGING MARKET DETECTED: All timeframes neutral, ADX=${adx.toFixed(1)}, Volume=${(volumeRatio * 100).toFixed(0)}% of avg. Trend strategies paused.`);
           } else if (allTimeframesNeutral && isLowAdx) {
-            logger.forSymbol(symbol).debug(`📊 [RANGING] Low ADX=${adx.toFixed(1)} + neutral timeframes, but volume OK (${(volumeRatio * 100).toFixed(0)}%)`);
+            // Volume is OK but still ranging - log at info level for visibility
+            logger.forSymbol(symbol).info(`📊 RANGING (ADX only): ADX=${adx.toFixed(1)}, neutral TFs, Volume=${(volumeRatio * 100).toFixed(0)}% of avg`);
+          } else if (isLowAdx) {
+            // Low ADX but not all timeframes neutral
+            logger.forSymbol(symbol).debug(`📊 [RANGING_CHECK] ADX=${adx.toFixed(1)} low, but TFs not all neutral: 4h=${is4hNeutral} 1h=${is1hNeutral} 30m=${is30mNeutral}, Vol=${(volumeRatio * 100).toFixed(0)}%`);
           }
         }
 
