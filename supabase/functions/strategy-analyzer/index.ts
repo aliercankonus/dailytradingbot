@@ -32,6 +32,8 @@ import {
   STRATEGY_SPECIFIC_CONSTRAINTS,
   LOW_VOLUME_DETECTION_PARAMS,
   RANGING_MARKET_DETECTION_PARAMS,
+  EARLY_MOMENTUM_ENTRY_PARAMS,
+  STRONG_TREND_OVEREXTENSION_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -1631,6 +1633,14 @@ serve(async (req) => {
         if (directionResult.reasons.some(r => r.includes("Warning"))) {
           logger.forSymbol(symbol).warn(`   ${directionResult.reasons.filter(r => r.includes("Warning")).join(", ")}`);
         }
+        
+        // ============= EARLY MOMENTUM ENTRY POSITION SIZING =============
+        // Apply 50% position size reduction for early momentum entries (30m+1h without 4h)
+        let earlyMomentumPositionMultiplier = 1.0;
+        if (directionResult.source === "early-momentum-30m+1h" && EARLY_MOMENTUM_ENTRY_PARAMS.ENABLED) {
+          earlyMomentumPositionMultiplier = EARLY_MOMENTUM_ENTRY_PARAMS.POSITION_SIZE_MULTIPLIER;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} EARLY MOMENTUM ENTRY: Position size reduced to ${(earlyMomentumPositionMultiplier * 100).toFixed(0)}%`);
+        }
 
         // ============= PHASE 4 (9 FINDINGS): ENHANCED MARKET REGIME DETECTION =============
         // Finding 2 & 5: Use quantified regime score with graduated penalties
@@ -2012,18 +2022,44 @@ serve(async (req) => {
         
         // ===== NEW: BOLLINGER BAND OVEREXTENSION GATE =====
         // Block LONG when price is extremely above upper Bollinger (percentB > 110) AND StochRSI >= 90
-        const isExtremelyOverextended = percentB > 110;
+        // RELAXATION: For strong trends (ADX > 30, rising, HTF aligned), raise threshold to 120
+        const adxRising = trendData.momentum?.adxRising === true || 
+          (trendData.volatility?.adxSlope && trendData.volatility.adxSlope > 0);
+        const htf4hAligned = htfTrend4h === (derivedDirection === "long" ? "bullish" : "bearish");
+        const htf1hAligned = htfTrend1h === (derivedDirection === "long" ? "bullish" : "bearish");
+        const isStrongTrendMode = STRONG_TREND_OVEREXTENSION_PARAMS.ENABLED &&
+          adx >= STRONG_TREND_OVEREXTENSION_PARAMS.MIN_ADX &&
+          (!STRONG_TREND_OVEREXTENSION_PARAMS.REQUIRE_ADX_RISING || adxRising) &&
+          (!STRONG_TREND_OVEREXTENSION_PARAMS.REQUIRE_HTF_ALIGNMENT || (htf4hAligned && htf1hAligned));
+        
+        // Determine overextension threshold based on trend strength
+        const overextensionThresholdLong = isStrongTrendMode 
+          ? STRONG_TREND_OVEREXTENSION_PARAMS.PERCENT_B_THRESHOLD_LONG  // 120
+          : 110;  // Default
+        const overextensionThresholdShort = isStrongTrendMode 
+          ? STRONG_TREND_OVEREXTENSION_PARAMS.PERCENT_B_THRESHOLD_SHORT  // -20
+          : -10;  // Default
+        
+        let strongTrendOverextensionApplied = false;
+        
+        const isExtremelyOverextended = percentB > overextensionThresholdLong;
         if (intendedTradeDirection === "long" && isExtremelyOverextended && stochRsiK4h >= STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT) {
           rejectedByStochRsiExtreme++;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Price extremely overextended (%B=${percentB.toFixed(1)} > 110) with overbought StochRSI (K=${stochRsiK4h.toFixed(1)})`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Price extremely overextended (%B=${percentB.toFixed(1)} > ${overextensionThresholdLong}) with overbought StochRSI (K=${stochRsiK4h.toFixed(1)})`);
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `BLOCK: Price overextended (%B=${percentB.toFixed(1)} > 110) + StochRSI K=${stochRsiK4h.toFixed(1)} overbought`,
+            `BLOCK: Price overextended (%B=${percentB.toFixed(1)} > ${overextensionThresholdLong}) + StochRSI K=${stochRsiK4h.toFixed(1)} overbought`,
             { 
               percentB: percentB.toFixed(1), 
               stochRsiK4h: stochRsiK4h.toFixed(1),
               gate: "BOLLINGER_OVEREXTENSION_GATE",
               direction: "long",
+              threshold: overextensionThresholdLong,
+              isStrongTrendMode,
+              adx: adx.toFixed(1),
+              adxRising,
+              htf4hAligned,
+              htf1hAligned,
               message: "Price extremely above upper Bollinger with overbought StochRSI"
             },
             trendData,
@@ -2033,19 +2069,29 @@ serve(async (req) => {
           continue;
         }
         
-        // Block SHORT when price is extremely below lower Bollinger (percentB < -10) AND StochRSI <= 10
-        const isExtremelyUnderextended = percentB < -10;
+        // Log if strong trend relaxation allowed entry that would have been blocked
+        if (intendedTradeDirection === "long" && percentB > 110 && percentB <= overextensionThresholdLong && isStrongTrendMode) {
+          strongTrendOverextensionApplied = true;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} STRONG TREND RELAXATION: Allowing LONG at %B=${percentB.toFixed(1)} (threshold raised to ${overextensionThresholdLong} due to ADX=${adx.toFixed(1)} rising=${adxRising})`);
+        }
+        
+        // Block SHORT when price is extremely below lower Bollinger (percentB < threshold) AND StochRSI <= 10
+        const isExtremelyUnderextended = percentB < overextensionThresholdShort;
         if (intendedTradeDirection === "short" && isExtremelyUnderextended && stochRsiK4h <= STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD) {
           rejectedByStochRsiExtreme++;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Price extremely underextended (%B=${percentB.toFixed(1)} < -10) with oversold StochRSI (K=${stochRsiK4h.toFixed(1)})`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Price extremely underextended (%B=${percentB.toFixed(1)} < ${overextensionThresholdShort}) with oversold StochRSI (K=${stochRsiK4h.toFixed(1)})`);
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `BLOCK: Price underextended (%B=${percentB.toFixed(1)} < -10) + StochRSI K=${stochRsiK4h.toFixed(1)} oversold`,
+            `BLOCK: Price underextended (%B=${percentB.toFixed(1)} < ${overextensionThresholdShort}) + StochRSI K=${stochRsiK4h.toFixed(1)} oversold`,
             { 
               percentB: percentB.toFixed(1), 
               stochRsiK4h: stochRsiK4h.toFixed(1),
               gate: "BOLLINGER_UNDEREXTENSION_GATE",
               direction: "short",
+              threshold: overextensionThresholdShort,
+              isStrongTrendMode,
+              adx: adx.toFixed(1),
+              adxRising,
               message: "Price extremely below lower Bollinger with oversold StochRSI"
             },
             trendData,
@@ -2053,6 +2099,12 @@ serve(async (req) => {
             earlyOrderFlowAnalysis
           );
           continue;
+        }
+        
+        // Log if strong trend relaxation allowed short entry
+        if (intendedTradeDirection === "short" && percentB < -10 && percentB >= overextensionThresholdShort && isStrongTrendMode) {
+          strongTrendOverextensionApplied = true;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} STRONG TREND RELAXATION: Allowing SHORT at %B=${percentB.toFixed(1)} (threshold lowered to ${overextensionThresholdShort} due to ADX=${adx.toFixed(1)} rising=${adxRising})`);
         }
         
         // ============= IMPROVEMENT 1: HTF OVERSOLD/OVERBOUGHT HARD GATE =============

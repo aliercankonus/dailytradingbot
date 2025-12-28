@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { checkPositionCorrelation, getKnownCorrelation } from "../_shared/correlation.ts";
 import { calculateATR, calculateHistoricalATRAvg } from "../_shared/indicators.ts";
 import { 
@@ -808,10 +808,47 @@ serve(async (req) => {
         logger.info(`📊 Current 15m Volume: ${currentVolume.toFixed(2)}, Avg: ${avgVolume.toFixed(2)}, Ratio: ${volumeRatio.toFixed(2)}x`);
 
         // FILTER 7: Avoid extremely low volume periods (< 20% of average)
-        // Stricter than before (was 10%) to avoid illiquid entries
-        if (volumeRatio < 0.2) {
-          await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Current Volume', signal, trendData, { volumeRatio: volumeRatio * 100, threshold: 20 });
-          throw new Error(`Current volume too low (${(volumeRatio * 100).toFixed(0)}% of average) - trade cancelled to avoid illiquid entry`);
+        // RELAXATION: Allow 10% of average if ADX is rising AND 30m+1h agree (trend forming)
+        const adx = trendData?.volatility?.adx || 0;
+        const adxRising = trendData?.momentum?.adxRising === true || 
+          (trendData?.volatility?.adxSlope && trendData.volatility.adxSlope > 0);
+        const trend30m = trendData?.timeframes?.['30m']?.trend || "neutral";
+        const trend1h = trendData?.timeframes?.['1h']?.trend || "neutral";
+        const conf30m = trendData?.timeframes?.['30m']?.confidence || 0;
+        const conf1h = trendData?.timeframes?.['1h']?.confidence || 0;
+        
+        // Check for trend formation conditions
+        const isTrendForming = VOLUME_RELAXATION_PARAMS.ENABLED &&
+          adx >= VOLUME_RELAXATION_PARAMS.MIN_ADX &&
+          (!VOLUME_RELAXATION_PARAMS.REQUIRE_ADX_RISING || adxRising) &&
+          trend30m !== "neutral" && trend1h !== "neutral" &&
+          trend30m === trend1h &&  // 30m and 1h agree on direction
+          conf30m >= 55 && conf1h >= 50;  // Reasonable confidence in both
+        
+        // Determine minimum volume ratio based on conditions
+        const minVolumeRatio = isTrendForming 
+          ? VOLUME_RELAXATION_PARAMS.MIN_VOLUME_RATIO_WITH_TREND  // 10%
+          : 0.2;  // Default 20%
+        
+        if (volumeRatio < minVolumeRatio) {
+          await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Current Volume', signal, trendData, { 
+            volumeRatio: volumeRatio * 100, 
+            threshold: minVolumeRatio * 100,
+            isTrendForming,
+            adx: adx.toFixed(1),
+            adxRising,
+            trend30m,
+            trend1h 
+          });
+          throw new Error(`Current volume too low (${(volumeRatio * 100).toFixed(0)}% of average < ${(minVolumeRatio * 100).toFixed(0)}% threshold) - trade cancelled to avoid illiquid entry`);
+        }
+        
+        // Log if trend formation relaxation was applied
+        if (isTrendForming && volumeRatio < 0.2) {
+          logger.info(`📊 VOLUME RELAXATION: Allowing entry at ${(volumeRatio * 100).toFixed(0)}% volume due to trend formation (ADX=${adx.toFixed(1)} rising=${adxRising}, 30m=${trend30m}, 1h=${trend1h})`);
+          // Apply position size reduction for relaxed volume entries
+          (signal as any).volumeRelaxationApplied = true;
+          (signal as any).volumeRelaxationMultiplier = VOLUME_RELAXATION_PARAMS.POSITION_SIZE_MULTIPLIER;
         }
 
         // Log volume spike detection (informational)
