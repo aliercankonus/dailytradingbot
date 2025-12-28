@@ -885,3 +885,62 @@ export const STRATEGY_SPECIFIC_CONSTRAINTS = {
     BLOCK_ON_FAKE_BREAKOUT: true,
   },
 } as const;
+
+// ============= EARLY MOMENTUM ENTRY PARAMETERS =============
+// Allow entries based on 30m+1h alignment when 4h is still neutral
+// This catches trending moves earlier before they become overextended
+export const EARLY_MOMENTUM_ENTRY_PARAMS = {
+  // Enable early momentum entry mode
+  ENABLED: true,
+  // 30m must be strongly directional (confidence >= this threshold)
+  TIMEFRAME_30M_MIN_CONFIDENCE: 65,
+  // 1h can be less strong but must lean same direction (confidence >= this threshold)
+  TIMEFRAME_1H_MIN_CONFIDENCE: 55,
+  // Minimum ADX required for early momentum entry (prevents ranging false signals)
+  MIN_ADX: 20,
+  // ADX must be rising for early momentum entry
+  REQUIRE_ADX_RISING: true,
+  // Position size reduction for early momentum entries (50% = half size)
+  POSITION_SIZE_MULTIPLIER: 0.50,
+  // Confidence reduction applied to derived direction (safety margin)
+  CONFIDENCE_REDUCTION: 0.85,
+  // Stop loss multiplier (tighter stops for early entries)
+  STOP_LOSS_MULTIPLIER: 1.2,  // 1.2x ATR instead of 2x
+} as const;
+
+// ============= VOLUME RELAXATION PARAMETERS =============
+// Relax volume requirements during trend formation when indicators align
+export const VOLUME_RELAXATION_PARAMS = {
+  // Enable volume gate relaxation during trend formation
+  ENABLED: true,
+  // Minimum volume ratio when ADX is rising AND 30m+1h agree (default is 0.2 = 20%)
+  MIN_VOLUME_RATIO_WITH_TREND: 0.10, // 10% of average (relaxed from 20%)
+  // Minimum ADX for volume relaxation
+  MIN_ADX: 18,
+  // ADX must be rising to relax volume requirement
+  REQUIRE_ADX_RISING: true,
+  // 30m and 1h must both be directional and agree
+  REQUIRE_TIMEFRAME_AGREEMENT: true,
+  // Position size reduction when entering on relaxed volume (70% = 30% reduction)
+  POSITION_SIZE_MULTIPLIER: 0.70,
+} as const;
+
+// ============= STRONG TREND OVEREXTENSION RELAXATION =============
+// Raise overextension thresholds during confirmed strong trends
+// Allows riding momentum in genuinely strong trends without premature blocking
+export const STRONG_TREND_OVEREXTENSION_PARAMS = {
+  // Enable overextension threshold relaxation for strong trends
+  ENABLED: true,
+  // Minimum ADX required for strong trend mode
+  MIN_ADX: 30,
+  // ADX must be rising for strong trend mode
+  REQUIRE_ADX_RISING: true,
+  // 4h and 1h must be aligned in same direction
+  REQUIRE_HTF_ALIGNMENT: true,
+  // Relaxed overextension threshold for LONG (default is 110, strong trend allows 120)
+  PERCENT_B_THRESHOLD_LONG: 120,
+  // Relaxed underextension threshold for SHORT (default is -10, strong trend allows -20)
+  PERCENT_B_THRESHOLD_SHORT: -20,
+  // Position size reduction when entering at relaxed threshold (60% = 40% reduction)
+  POSITION_SIZE_MULTIPLIER: 0.60,
+} as const;

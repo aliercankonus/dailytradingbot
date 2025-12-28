@@ -1894,7 +1894,49 @@ export const deriveTradeDirection = (
     }
   }
   
-  // Priority 5: Fall back to primary trend from 5m if directional
+  // Priority 5 (NEW): EARLY MOMENTUM ENTRY MODE
+  // Allow 30m+1h alignment when 4h is still neutral
+  // This catches trending moves earlier before they become overextended
+  // Requires: 30m strongly directional (>=65%), 1h leaning same direction (>=55%)
+  if (trend4h === "neutral" && trend30m !== "neutral" && conf30m >= 65) {
+    // Check if 1h is neutral but leaning in same direction as 30m
+    // OR 1h is directional but weaker (50-65% confidence)
+    const is1hLeaningSameDirection = 
+      (trend1h === trend30m) || // 1h matches 30m direction
+      (trend1h === "neutral" && conf1h >= 50 && conf1h <= 65); // 1h neutral but decent confidence
+    
+    // For neutral 1h, infer direction from price/indicators if available
+    const inferred1hDirection = trend1h !== "neutral" ? trend1h : 
+      (trendData.momentum?.confirms && trendData.momentum?.state !== "none" ? 
+        (trend30m === "bullish" ? "bullish" : "bearish") : null);
+    
+    const is1hNotConflicting = 
+      trend1h === "neutral" || 
+      trend1h === trend30m ||
+      (inferred1hDirection === trend30m);
+    
+    if (is1hLeaningSameDirection || (is1hNotConflicting && conf1h >= 55)) {
+      const direction: TradeDirection = trend30m === "bullish" ? "long" : "short";
+      
+      // Calculate confidence with reduction for early entry
+      const avgConf = (conf30m + Math.max(conf1h, 50)) / 2;
+      const reducedConf = avgConf * 0.85; // 15% confidence reduction for safety
+      
+      reasons.push(`EARLY MOMENTUM ENTRY: 30m strongly ${trend30m} (${conf30m.toFixed(0)}%)`);
+      reasons.push(`1h ${trend1h} (${conf1h.toFixed(0)}%) - ${is1hLeaningSameDirection ? 'aligned' : 'not conflicting'}`);
+      reasons.push(`4h neutral - catching trend early (50% position size, 0.85x confidence)`);
+      
+      // Store metadata about early momentum entry for position sizing in strategy-analyzer
+      return { 
+        direction, 
+        confidence: reducedConf, 
+        source: "early-momentum-30m+1h", 
+        reasons 
+      };
+    }
+  }
+  
+  // Priority 6: Fall back to primary trend from 5m if directional
   if (primaryTrend === "bullish" || primaryTrend === "bearish") {
     const direction: TradeDirection = primaryTrend === "bullish" ? "long" : "short";
     const primaryConf = trendData.confidence || 50;
