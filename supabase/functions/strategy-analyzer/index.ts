@@ -840,7 +840,44 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     }
   }
   
-  // Default - neutral timing (not ideal)
+  // ============= TREND CONTINUATION CREDIT =============
+  // In strong confirmed trends, not having a pullback is acceptable for continuation entries
+  // ADX confirms trend strength, so we give partial credit instead of heavy penalty
+  
+  // Very strong trend (ADX >= 28): Continuation is a valid strategy
+  if (adx >= ADX_THRESHOLDS.VERY_STRONG && hasStrongTrendContinuation) {
+    return {
+      isPullback: false,
+      hasBothConditions: false,
+      pullbackDepth: 0,
+      entryTimingScore: 15,  // Good credit for strong trend continuation
+      reason: `Strong trend continuation: ADX=${adx.toFixed(1)} with aligned timeframes`
+    };
+  }
+  
+  // Moderate trend (ADX >= 22): Some credit for trend following
+  if (adx >= ADX_THRESHOLDS.MODERATE && isActiveMomentum) {
+    return {
+      isPullback: false,
+      hasBothConditions: false,
+      pullbackDepth: 0,
+      entryTimingScore: 10,  // Moderate credit for confirmed momentum
+      reason: `Trend continuation: ADX=${adx.toFixed(1)} with active momentum`
+    };
+  }
+  
+  // Minimum trend (ADX >= 20): Small credit
+  if (adx >= ADX_THRESHOLDS.MINIMUM && isActiveMomentum) {
+    return {
+      isPullback: false,
+      hasBothConditions: false,
+      pullbackDepth: 0,
+      entryTimingScore: 6,  // Small credit for minimum trend
+      reason: `Weak trend continuation: ADX=${adx.toFixed(1)}`
+    };
+  }
+  
+  // Default - no trend confirmation, poor timing
   return {
     isPullback: false,
     hasBothConditions: false,
