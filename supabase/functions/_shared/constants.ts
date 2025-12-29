@@ -13,9 +13,9 @@ export const ADX_THRESHOLDS = {
   MODERATE: 22,
   STRONG: 25,
   // PHASE 1 FIX: Separated strong trend exception thresholds
-  STRONG_TREND_EXCEPTION: 27,  // For dead zone bypass only
-  STRONG_TREND_EXCEPTION_PARTIAL: 25,  // Partial exception: 25% position reduction
-  STRONG_TREND_EXCEPTION_FULL: 30,     // Full exception: no position reduction
+  STRONG_TREND_EXCEPTION: 25,  // For dead zone bypass only (relaxed from 27)
+  STRONG_TREND_EXCEPTION_PARTIAL: 23,  // Partial exception: 25% position reduction (relaxed from 25)
+  STRONG_TREND_EXCEPTION_FULL: 28,     // Full exception: no position reduction (relaxed from 30)
   VERY_STRONG: 30,
   EXCEPTIONAL: 35,
   EXTREME: 40,
