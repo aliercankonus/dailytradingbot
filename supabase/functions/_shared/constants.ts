@@ -912,20 +912,36 @@ export const STRATEGY_SPECIFIC_CONSTRAINTS = {
   EMA_DEATH_CROSS: {
     // Minimum ADX required (strong trend validation)
     MIN_ADX: 25,
-    // StochRSI must be above this (not oversold - bounce risk)
+    // StochRSI must be above this (not oversold - bounce risk) - NORMAL mode
     MIN_STOCHRSI_K: 30,
+    // STRONG TREND EXCEPTION: When ADX >= this, allow lower StochRSI
+    STRONG_TREND_ADX_THRESHOLD: 35,
+    // Minimum StochRSI allowed even in strong trend mode (absolute floor)
+    STRONG_TREND_MIN_STOCHRSI_K: 10,
+    // Require StochRSI falling (K < D) for strong trend exception
+    STRONG_TREND_REQUIRE_FALLING: true,
     // %B must be above this (not at lower band)
     MIN_PERCENT_B: 40,
+    // In strong trend mode, allow lower %B
+    STRONG_TREND_MIN_PERCENT_B: 20,
     // Hard block on fake breakout risk
     BLOCK_ON_FAKE_BREAKOUT: true,
   },
   EMA_GOLDEN_CROSS: {
     // Minimum ADX required
     MIN_ADX: 25,
-    // StochRSI must be below this (not overbought - reversal risk)
+    // StochRSI must be below this (not overbought - reversal risk) - NORMAL mode
     MAX_STOCHRSI_K: 70,
+    // STRONG TREND EXCEPTION: When ADX >= this, allow higher StochRSI
+    STRONG_TREND_ADX_THRESHOLD: 35,
+    // Maximum StochRSI allowed even in strong trend mode (absolute ceiling)
+    STRONG_TREND_MAX_STOCHRSI_K: 90,
+    // Require StochRSI rising (K > D) for strong trend exception
+    STRONG_TREND_REQUIRE_RISING: true,
     // %B must be below this (not at upper band)
     MAX_PERCENT_B: 60,
+    // In strong trend mode, allow higher %B
+    STRONG_TREND_MAX_PERCENT_B: 80,
     // Hard block on fake breakout risk
     BLOCK_ON_FAKE_BREAKOUT: true,
   },
