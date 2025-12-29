@@ -85,9 +85,16 @@ const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
   const dirBonusMatch = breakdown.match(/DIR_BONUS:\+?(-?\d+)/);
   const directionBonus = dirBonusMatch ? parseInt(dirBonusMatch[1]) : 0;
   
-  if (Object.keys(scores).length === 0) return null;
+  // Parse OF:-1 or OF:+5 format (can be with or without max value)
+  // This handles cases where Order Flow is logged as "OF:-1" instead of "OF:-1/15"
+  const ofMatch = breakdown.match(/OF:([+-]?\d+)(?:\/(\d+))?/);
+  const orderFlowScore = ofMatch ? parseInt(ofMatch[1]) : 0;
+  const orderFlowMax = ofMatch && ofMatch[2] ? parseInt(ofMatch[2]) : 15;
   
-  const subtotal = (scores.adx?.score ?? 0) + (scores.mom?.score ?? 0) + (scores.align?.score ?? 0) + (scores.tech?.score ?? 0) + (scores.entry?.score ?? 0) + (scores.vol?.score ?? 0) + (scores.of?.score ?? 0);
+  if (Object.keys(scores).length === 0 && !ofMatch) return null;
+  
+  // Use directly parsed orderFlowScore instead of scores.of which may not be parsed
+  const subtotal = (scores.adx?.score ?? 0) + (scores.mom?.score ?? 0) + (scores.align?.score ?? 0) + (scores.tech?.score ?? 0) + (scores.entry?.score ?? 0) + (scores.vol?.score ?? 0) + orderFlowScore;
   
   return {
     adx: scores.adx || { score: 0, max: 25 },
@@ -96,7 +103,7 @@ const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
     technical: scores.tech || { score: 0, max: 15 },
     entry: scores.entry || { score: 0, max: 25 },
     volume: scores.vol || { score: 0, max: 10 },
-    orderFlow: scores.of || { score: 0, max: 10 },
+    orderFlow: scores.of || { score: orderFlowScore, max: orderFlowMax },
     confidencePenalty,
     directionBonus,
     subtotal,
