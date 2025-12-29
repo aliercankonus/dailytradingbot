@@ -3948,11 +3948,24 @@ serve(async (req) => {
               // EMA Death Cross validation (SHORT signals)
               if (strategy.name === 'EMA Death Cross' || strategy.id === 'builtin-ema-death') {
                 const constraints = STRATEGY_SPECIFIC_CONSTRAINTS.EMA_DEATH_CROSS;
+                const stochRsiFalling = stochRsiK4h < stochRsiD4h;
+                const isStrongTrendMode = adx >= constraints.STRONG_TREND_ADX_THRESHOLD;
                 
-                // Hard invalidation: StochRSI K < 20 (oversold - bounce risk)
-                if (stochRsiK4h < constraints.MIN_STOCHRSI_K) {
+                // Determine effective thresholds based on trend strength
+                const effectiveMinStochRsi = isStrongTrendMode ? constraints.STRONG_TREND_MIN_STOCHRSI_K : constraints.MIN_STOCHRSI_K;
+                const effectiveMinPercentB = isStrongTrendMode ? constraints.STRONG_TREND_MIN_PERCENT_B : constraints.MIN_PERCENT_B;
+                
+                // StochRSI validation with strong trend exception
+                if (stochRsiK4h < effectiveMinStochRsi) {
                   rejectedByStrategy++;
-                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - StochRSI K=${stochRsiK4h.toFixed(1)} < ${constraints.MIN_STOCHRSI_K} (oversold)`);
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - StochRSI K=${stochRsiK4h.toFixed(1)} < ${effectiveMinStochRsi} (oversold${isStrongTrendMode ? ', strong trend mode' : ''})`);
+                  continue;
+                }
+                
+                // In strong trend mode with low StochRSI, require it to be falling
+                if (isStrongTrendMode && stochRsiK4h < constraints.MIN_STOCHRSI_K && constraints.STRONG_TREND_REQUIRE_FALLING && !stochRsiFalling) {
+                  rejectedByStrategy++;
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - StochRSI K=${stochRsiK4h.toFixed(1)} oversold but NOT falling (K >= D) - bounce risk`);
                   continue;
                 }
                 
@@ -3963,10 +3976,10 @@ serve(async (req) => {
                   continue;
                 }
                 
-                // %B requirement: >= 40 (not at lower band)
-                if (percentB < constraints.MIN_PERCENT_B) {
+                // %B requirement with strong trend exception
+                if (percentB < effectiveMinPercentB) {
                   rejectedByStrategy++;
-                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - %B ${percentB.toFixed(1)} < ${constraints.MIN_PERCENT_B}`);
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - %B ${percentB.toFixed(1)} < ${effectiveMinPercentB}${isStrongTrendMode ? ' (strong trend mode)' : ''}`);
                   continue;
                 }
                 
@@ -3977,17 +3990,31 @@ serve(async (req) => {
                   continue;
                 }
                 
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, fakeBreakout=${fakeBreakoutRisk})`);
+                const modeLabel = isStrongTrendMode ? ' [STRONG TREND MODE]' : '';
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed${modeLabel} (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, falling=${stochRsiFalling})`);
               }
               
               // EMA Golden Cross validation (LONG signals)
               if (strategy.name === 'EMA Golden Cross' || strategy.id === 'builtin-ema-golden') {
                 const constraints = STRATEGY_SPECIFIC_CONSTRAINTS.EMA_GOLDEN_CROSS;
+                const stochRsiRising = stochRsiK4h > stochRsiD4h;
+                const isStrongTrendMode = adx >= constraints.STRONG_TREND_ADX_THRESHOLD;
                 
-                // Hard invalidation: StochRSI K > 70 (overbought - reversal risk)
-                if (stochRsiK4h > constraints.MAX_STOCHRSI_K) {
+                // Determine effective thresholds based on trend strength
+                const effectiveMaxStochRsi = isStrongTrendMode ? constraints.STRONG_TREND_MAX_STOCHRSI_K : constraints.MAX_STOCHRSI_K;
+                const effectiveMaxPercentB = isStrongTrendMode ? constraints.STRONG_TREND_MAX_PERCENT_B : constraints.MAX_PERCENT_B;
+                
+                // StochRSI validation with strong trend exception
+                if (stochRsiK4h > effectiveMaxStochRsi) {
                   rejectedByStrategy++;
-                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - StochRSI K=${stochRsiK4h.toFixed(1)} > ${constraints.MAX_STOCHRSI_K} (overbought)`);
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - StochRSI K=${stochRsiK4h.toFixed(1)} > ${effectiveMaxStochRsi} (overbought${isStrongTrendMode ? ', strong trend mode' : ''})`);
+                  continue;
+                }
+                
+                // In strong trend mode with high StochRSI, require it to be rising
+                if (isStrongTrendMode && stochRsiK4h > constraints.MAX_STOCHRSI_K && constraints.STRONG_TREND_REQUIRE_RISING && !stochRsiRising) {
+                  rejectedByStrategy++;
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - StochRSI K=${stochRsiK4h.toFixed(1)} overbought but NOT rising (K <= D) - reversal risk`);
                   continue;
                 }
                 
@@ -3998,10 +4025,10 @@ serve(async (req) => {
                   continue;
                 }
                 
-                // %B requirement: <= 60 (not at upper band)
-                if (percentB > constraints.MAX_PERCENT_B) {
+                // %B requirement with strong trend exception
+                if (percentB > effectiveMaxPercentB) {
                   rejectedByStrategy++;
-                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - %B ${percentB.toFixed(1)} > ${constraints.MAX_PERCENT_B}`);
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - %B ${percentB.toFixed(1)} > ${effectiveMaxPercentB}${isStrongTrendMode ? ' (strong trend mode)' : ''}`);
                   continue;
                 }
                 
@@ -4012,7 +4039,8 @@ serve(async (req) => {
                   continue;
                 }
                 
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, fakeBreakout=${fakeBreakoutRisk})`);
+                const modeLabel = isStrongTrendMode ? ' [STRONG TREND MODE]' : '';
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed${modeLabel} (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, rising=${stochRsiRising})`);
               }
               
               if (isMomentumType && !is4hDirectional) {
