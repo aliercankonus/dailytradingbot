@@ -38,6 +38,8 @@ import {
   STRONG_TREND_HTF_BYPASS_PARAMS,
   TREND_EXHAUSTION_PARAMS,
   TREND_CONTINUATION_TIGHT_STOPS,
+  // Pullback entry detection
+  PULLBACK_DETECTION_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -1807,6 +1809,7 @@ serve(async (req) => {
         const stochRsiK4h = stochRsi4h?.k ?? 50;
         const stochRsiD4h = stochRsi4h?.d ?? 50;
         const stochRsiK1h = stochRsi1h?.k ?? 50;
+        const stochRsiD1h = stochRsi1h?.d ?? 50;  // Added for pullback K/D turn detection
         // CRITICAL FIX: Using shared thresholds for consistency across all edge functions
         // Smart exception still allows legitimate continuation in strong trends
         const STOCHRSI_OVERSOLD_THRESHOLD = STOCHRSI_THRESHOLDS.OVERSOLD;  // 20 - bounce risk for shorts
@@ -2856,24 +2859,85 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} EARLY ENTRY via strong trend exception (ADX=${adx.toFixed(1)} >= 28, momentum=${momentumState})`);
         }
         
-        // ============= NEW GATE: MOMENTUM SCORE >= 5 =============
-        // Data shows trades with momentumScore = 0 have extremely low win rates
-        // Require minimum momentum score to proceed (from shared constants)
+        // ============= CONTEXT-AWARE MOMENTUM GATE FOR PULLBACK ENTRIES =============
+        // Pullbacks by definition lack strong momentum - that's the opportunity!
+        // Detect pullback setups and use reduced momentum threshold (3 vs 5)
         const earlyMomentumScore = getMomentumScore(momentum);
-        const MIN_MOMENTUM_SCORE = MOMENTUM_THRESHOLDS.MIN_SCORE;
-        if (earlyMomentumScore < MIN_MOMENTUM_SCORE) {
+        
+        // ===== PULLBACK SETUP DETECTION =====
+        // LONG pullback: 4h bullish + 1h oversold (buying the dip in an uptrend)
+        // SHORT pullback: 4h bearish + 1h overbought (selling the rally in a downtrend)
+        const isPullbackSetupDetected = (() => {
+          // LONG pullback conditions
+          if (derivedDirection === "long" && 
+              stochFilterTrend4h === "bullish" && 
+              stochFilterConf4h >= PULLBACK_DETECTION_PARAMS.MIN_4H_CONFIDENCE && 
+              stochRsiK1h <= PULLBACK_DETECTION_PARAMS.STOCHRSI_OVERSOLD_THRESHOLD) {
+            return true;
+          }
+          // SHORT pullback conditions
+          if (derivedDirection === "short" && 
+              stochFilterTrend4h === "bearish" && 
+              stochFilterConf4h >= PULLBACK_DETECTION_PARAMS.MIN_4H_CONFIDENCE && 
+              stochRsiK1h >= PULLBACK_DETECTION_PARAMS.STOCHRSI_OVERBOUGHT_THRESHOLD) {
+            return true;
+          }
+          return false;
+        })();
+        
+        // ===== PULLBACK VALIDATION =====
+        // For pullbacks, check reversal signs instead of momentum confirmation
+        let isPullbackValid = false;
+        let pullbackPositionMultiplier = 1.0;
+        
+        if (isPullbackSetupDetected) {
+          // Check if StochRSI is starting to turn (K approaching or crossing D)
+          const kTurningUp = stochRsiK1h >= stochRsiD1h * PULLBACK_DETECTION_PARAMS.KD_TURN_TOLERANCE;
+          const kTurningDown = stochRsiK1h <= stochRsiD1h * (2 - PULLBACK_DETECTION_PARAMS.KD_TURN_TOLERANCE);
+          
+          isPullbackValid = (
+            // StochRSI starting to turn in trade direction
+            (derivedDirection === "long" && kTurningUp) ||
+            (derivedDirection === "short" && kTurningDown)
+          ) && (
+            // ADX still strong enough (trend intact, just pulled back)
+            adx >= PULLBACK_DETECTION_PARAMS.MIN_ADX
+          );
+          
+          if (isPullbackValid) {
+            // Apply pullback position size reduction (50% default)
+            pullbackPositionMultiplier = (riskParams.pullback_position_size_percent ?? PULLBACK_DETECTION_PARAMS.DEFAULT_POSITION_SIZE_PERCENT) / 100;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} PULLBACK SETUP DETECTED & VALID: 4h ${stochFilterTrend4h} (${stochFilterConf4h}%), 1h K=${stochRsiK1h.toFixed(1)} D=${stochRsiD1h.toFixed(1)}, ADX=${adx.toFixed(1)} - using reduced momentum threshold (${MOMENTUM_THRESHOLDS.PULLBACK_MIN_SCORE})`);
+          } else {
+            logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.MOMENTUM} Pullback detected but not valid: K_turn=${derivedDirection === "long" ? kTurningUp : kTurningDown}, ADX=${adx.toFixed(1)} >= ${PULLBACK_DETECTION_PARAMS.MIN_ADX}`);
+          }
+        }
+        
+        // ===== CONTEXT-AWARE MOMENTUM THRESHOLD =====
+        // Use reduced threshold for valid pullback setups (they lack momentum by definition)
+        const effectiveMomentumThreshold = isPullbackValid 
+          ? MOMENTUM_THRESHOLDS.PULLBACK_MIN_SCORE  // 3 for pullbacks
+          : MOMENTUM_THRESHOLDS.MIN_SCORE;          // 5 for normal entries
+        
+        if (earlyMomentumScore < effectiveMomentumThreshold) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: Momentum score too low (${earlyMomentumScore} < ${MIN_MOMENTUM_SCORE}) - insufficient momentum confirmation`,
+            `HARD GATE: Momentum score too low (${earlyMomentumScore} < ${effectiveMomentumThreshold}${isPullbackSetupDetected ? ' [pullback threshold]' : ''}) - insufficient momentum confirmation`,
             { 
               gate: "MOMENTUM_SCORE_TOO_LOW",
               momentumScore: earlyMomentumScore,
-              momentumRequired: MIN_MOMENTUM_SCORE,
+              momentumRequired: effectiveMomentumThreshold,
+              isPullbackSetup: isPullbackSetupDetected,
+              isPullbackValid,
               momentumState: momentum?.state || "none",
               momentumConfirms: momentum?.confirms ?? false,
               macdExpanding: momentum?.macdExpanding ?? false,
               volumeConfirms: momentum?.volumeConfirms ?? false,
+              stochRsiK1h: stochRsiK1h.toFixed(1),
+              stochRsiD1h: stochRsiD1h.toFixed(1),
+              stochFilterTrend4h,
+              stochFilterConf4h,
               adx: adx.toFixed(1),
               trend,
               confidence
@@ -2884,7 +2948,13 @@ serve(async (req) => {
           );
           continue;
         }
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Momentum score gate passed (${earlyMomentumScore} >= ${MIN_MOMENTUM_SCORE})`);
+        
+        // Log success with context
+        if (isPullbackValid) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} PULLBACK ENTRY: Momentum gate passed with reduced threshold (${earlyMomentumScore} >= ${effectiveMomentumThreshold}) - position size ${(pullbackPositionMultiplier * 100).toFixed(0)}%`);
+        } else {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Momentum score gate passed (${earlyMomentumScore} >= ${effectiveMomentumThreshold})`);
+        }
         
         // ============= PHASE 2 IMPROVEMENT: MOMENTUM DIRECTIONAL SYMMETRY =============
         // Verify that momentum direction agrees with the derived trade direction
@@ -4094,6 +4164,12 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Strong trend HTF bypass - position size capped at ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
+        // Step 8: Apply pullback entry position reduction (50% default)
+        if (isPullbackValid && pullbackPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= pullbackPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Pullback entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
         // Final position size as percentage
         const strategyPositionSize = (strategy.risk_settings?.positionSizePercent || 100) * positionSizeMultiplier;
 
@@ -4161,6 +4237,17 @@ serve(async (req) => {
               breakEvenActivationPercent: STRONG_TREND_HTF_BYPASS_PARAMS.BREAK_EVEN_ACTIVATION_PERCENT,
               trailingActivationPercent: STRONG_TREND_HTF_BYPASS_PARAMS.TRAILING_ACTIVATION_PERCENT,
               positionSizeMultiplier: trendContinuationPositionMultiplier,
+            } : null,
+            // NEW: Track pullback momentum bypass for analytics
+            isPullbackMomentumBypass: isPullbackValid,
+            pullbackEntryDetails: isPullbackValid ? {
+              stochFilterTrend4h,
+              stochFilterConf4h,
+              stochRsiK1h: stochRsiK1h.toFixed(1),
+              stochRsiD1h: stochRsiD1h.toFixed(1),
+              adx: adx.toFixed(1),
+              momentumThresholdUsed: MOMENTUM_THRESHOLDS.PULLBACK_MIN_SCORE,
+              positionSizePercent: (pullbackPositionMultiplier * 100).toFixed(0),
             } : null,
           },
           expires_at: new Date(Date.now() + 60000).toISOString(),
