@@ -944,3 +944,66 @@ export const STRONG_TREND_OVEREXTENSION_PARAMS = {
   // Position size reduction when entering at relaxed threshold (60% = 40% reduction)
   POSITION_SIZE_MULTIPLIER: 0.60,
 } as const;
+
+// ============= STRONG TREND HTF BYPASS PARAMETERS =============
+// Allow HTF Extreme Gate bypass when trend is very strong and no exhaustion signals
+// This prevents missing strong trend continuation moves blocked by overbought/oversold readings
+export const STRONG_TREND_HTF_BYPASS_PARAMS = {
+  // Enable HTF gate bypass for very strong trends
+  ENABLED: true,
+  // Minimum ADX required for bypass (very strong trend)
+  MIN_ADX: 35,
+  // ADX must be rising (momentum still building)
+  REQUIRE_ADX_RISING: true,
+  // Maximum reversal score to allow bypass (no reversal signals)
+  MAX_REVERSAL_SCORE: 40,
+  // Require all timeframes aligned in same direction
+  REQUIRE_ALL_TF_ALIGNED: true,
+  // Position size reduction for trend continuation at extreme (50% = half size)
+  POSITION_SIZE_MULTIPLIER: 0.50,
+  // Tighter stop loss multiplier for these entries (0.8x ATR instead of normal)
+  STOP_LOSS_MULTIPLIER: 0.8,
+  // Earlier break-even activation for protection
+  BREAK_EVEN_ACTIVATION_PERCENT: 0.3,
+  // Earlier trailing stop activation
+  TRAILING_ACTIVATION_PERCENT: 0.5,
+} as const;
+
+// ============= TREND EXHAUSTION DETECTION PARAMETERS =============
+// Detect actual trend exhaustion vs normal overbought in strong trend
+// Only block when genuine exhaustion signals are present
+export const TREND_EXHAUSTION_PARAMS = {
+  // Enable trend exhaustion detection
+  ENABLED: true,
+  // ADX must be declining from peak (was above this, now below)
+  ADX_DECLINE_FROM_PEAK: 40,
+  // ADX decline percentage threshold (e.g., dropped 15% from peak)
+  ADX_DECLINE_PERCENT: 15,
+  // Volume must be declining for consecutive candles
+  VOLUME_DECLINE_CANDLES: 3,
+  // Volume decline ratio (current vs average of previous candles)
+  VOLUME_DECLINE_RATIO: 0.7,
+  // MACD histogram showing divergence (price up, MACD down)
+  REQUIRE_MACD_DIVERGENCE: false,  // Optional - can be too strict
+  // StochRSI K must be decreasing (turning over)
+  STOCHRSI_K_DECREASING: true,
+  // Extreme StochRSI that triggers exhaustion check (K > 95)
+  STOCHRSI_EXTREME_THRESHOLD: 95,
+  // Points to add to reversal score when exhaustion detected
+  EXHAUSTION_REVERSAL_BONUS: 25,
+} as const;
+
+// ============= TREND CONTINUATION TIGHT STOPS PARAMETERS =============
+// Tighter risk management for entries at extreme overbought/oversold levels
+export const TREND_CONTINUATION_TIGHT_STOPS = {
+  // Enable tighter stops for trend continuation at extremes
+  ENABLED: true,
+  // Trailing stop distance multiplier (tighter than normal 1.5x)
+  TRAILING_DISTANCE_MULTIPLIER: 0.8,
+  // Trailing stop activation at lower profit threshold
+  TRAILING_ACTIVATION_PERCENT: 0.5,
+  // Break-even activation at lower profit threshold
+  BREAK_EVEN_ACTIVATION_PERCENT: 0.3,
+  // Mark entry as "trend_continuation_at_extreme" for special handling
+  ENTRY_TAG: "trend_continuation_at_extreme",
+} as const;

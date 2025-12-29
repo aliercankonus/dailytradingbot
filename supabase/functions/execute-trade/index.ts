@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, STRONG_TREND_HTF_BYPASS_PARAMS, TREND_CONTINUATION_TIGHT_STOPS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { checkPositionCorrelation, getKnownCorrelation } from "../_shared/correlation.ts";
 import { calculateATR, calculateHistoricalATRAvg } from "../_shared/indicators.ts";
 import { 
@@ -1702,12 +1702,27 @@ serve(async (req) => {
     const signalIndicators = signal.indicators || {};
     const reversalDecision = signalIndicators.reversalDecision || unifiedReversalResult.decision || 'NORMAL';
     const reversalScore = signalIndicators.reversalScore ?? unifiedReversalResult.score ?? 0;
-    const reversalDetails = signalIndicators.reversalDetails || {
-      breakdown: {},
-      signals: unifiedReversalResult.reasons,
-      adxWeight: unifiedReversalResult.adxWeight,
-      positionSizeMultiplier: unifiedReversalResult.positionSizeMultiplier,
+    
+    // NEW: Extract trend continuation at extreme flag
+    const isTrendContinuationAtExtreme = signalIndicators.trendContinuationAtExtreme === true || signalIndicators.strongTrendHTFBypass === true;
+    const trendContinuationParams = signalIndicators.trendContinuationParams || null;
+    
+    const reversalDetails = {
+      ...(signalIndicators.reversalDetails || {
+        breakdown: {},
+        signals: unifiedReversalResult.reasons,
+        adxWeight: unifiedReversalResult.adxWeight,
+        positionSizeMultiplier: unifiedReversalResult.positionSizeMultiplier,
+      }),
+      // NEW: Add trend continuation at extreme tracking for monitor-positions
+      trendContinuationAtExtreme: isTrendContinuationAtExtreme,
+      trendContinuationParams: trendContinuationParams,
     };
+    
+    // Log if trend continuation at extreme
+    if (isTrendContinuationAtExtreme) {
+      logger.info(`🔥 TREND CONTINUATION AT EXTREME: Applying tighter stops - BE=${trendContinuationParams?.breakEvenActivationPercent || STRONG_TREND_HTF_BYPASS_PARAMS.BREAK_EVEN_ACTIVATION_PERCENT}%, Trail=${trendContinuationParams?.trailingActivationPercent || STRONG_TREND_HTF_BYPASS_PARAMS.TRAILING_ACTIVATION_PERCENT}%`);
+    }
 
     // Create position record with all trade data including reversal tracking
     const { data: position, error: positionError } = await supabase
