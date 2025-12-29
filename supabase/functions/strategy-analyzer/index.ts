@@ -3831,7 +3831,7 @@ serve(async (req) => {
               if (!c) return { condition: null, result: false };
               const result = evaluateCondition(c, indicatorValues, prevIndicatorValues);
               return { 
-                condition: `${c.indicator} ${c.comparison} ${c.value}`, 
+                condition: `${c.indicator} ${c.operator} ${c.value}`, 
                 result,
                 currentValue: indicatorValues.get(c.indicator)
               };
