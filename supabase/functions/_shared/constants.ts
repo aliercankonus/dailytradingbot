@@ -836,16 +836,32 @@ export const HTF_EXTREME_HARD_GATES = {
   PERCENT_B_OVERBOUGHT_BLOCK: 80, // %B >= 80 for longs
 } as const;
 
-// ============= IMPROVEMENT 2: BOLLINGER POSITION FILTER FOR SHORTS =============
-// Shorts below lower Bollinger are statistically poor entries
-// Require %B >= 35 for short entries, >= 50 during squeeze (relaxed to 40 during ranging)
+// ============= IMPROVEMENT 2: BOLLINGER POSITION FILTER (CONTEXT-AWARE) =============
+// Base rule: Shorts below lower Bollinger are risky (mean reversion bounce risk)
+// Exception: In confirmed bearish trends, low %B indicates trend continuation - shorts are VALID
+// Same logic applies symmetrically for longs at high %B
 export const BOLLINGER_ENTRY_GATES = {
+  // BASE THRESHOLDS (applied in neutral/unclear trend)
   SHORT_MIN_PERCENT_B: 35,        // Shorts require %B >= 35 (relaxed from 40 to allow more signals)
   SHORT_SQUEEZE_MIN_PERCENT_B: 50, // During squeeze, require %B >= 50
   SHORT_SQUEEZE_RANGING_MIN_PERCENT_B: 40, // During squeeze + ranging (ADX < 23), relax to %B >= 40
   LONG_MAX_PERCENT_B: 65,         // Longs require %B <= 65 (symmetric with shorts)
   LONG_SQUEEZE_MAX_PERCENT_B: 50, // During squeeze, require %B <= 50
   LONG_SQUEEZE_RANGING_MAX_PERCENT_B: 60, // During squeeze + ranging (ADX < 23), relax to %B <= 60
+  
+  // TREND-CONTEXT RELAXATION FOR SHORTS (allow continuation in bearish trends)
+  // If 4h is bearish with 60%+ confidence, shorts are continuation - allow lower %B
+  SHORT_BEARISH_TREND_MIN_PERCENT_B: 15,      // Bearish 4h trend: allow shorts down to %B >= 15
+  SHORT_STRONG_BEARISH_MIN_PERCENT_B: 5,      // Strong bearish (ADX >= 22): allow down to %B >= 5
+  
+  // TREND-CONTEXT RELAXATION FOR LONGS (allow continuation in bullish trends)
+  // If 4h is bullish with 60%+ confidence, longs are continuation - allow higher %B
+  LONG_BULLISH_TREND_MAX_PERCENT_B: 85,       // Bullish 4h trend: allow longs up to %B <= 85
+  LONG_STRONG_BULLISH_MAX_PERCENT_B: 95,      // Strong bullish (ADX >= 22): allow up to %B <= 95
+  
+  // Minimum confidence required for trend-context relaxation
+  TREND_CONFIDENCE_THRESHOLD: 60,
+  
   // ADX threshold for "ranging market" - below this, apply relaxed squeeze rules
   RANGING_ADX_THRESHOLD: 23,
 } as const;
