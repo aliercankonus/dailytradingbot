@@ -1452,6 +1452,7 @@ serve(async (req) => {
       | 'NO_CONDITION_STRATEGY'
       | 'QUALITY_TOO_LOW'
       | 'NO_STRATEGY_MATCH'
+      | 'STRATEGY_CONSTRAINT_BLOCK'
       | 'SIGNAL_GENERATED';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
@@ -2047,6 +2048,7 @@ serve(async (req) => {
         
         if (intendedTradeDirection === "long" && stochRsiK4h >= ABSOLUTE_MAX_OB) {
           rejectedByStochRsiExtreme++;
+          perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} absolute max` });
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute maximum (K=${stochRsiK4h.toFixed(1)} >= ${ABSOLUTE_MAX_OB}) - nowhere to rise, no exceptions allowed`);
           await logRejectionWithAI(
             supabase, userId, symbol,
@@ -2080,6 +2082,7 @@ serve(async (req) => {
         
         if (intendedTradeDirection === "short" && stochRsiK4h <= ABSOLUTE_MAX_OS) {
           rejectedByStochRsiExtreme++;
+          perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} absolute min` });
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute minimum (K=${stochRsiK4h.toFixed(1)} <= ${ABSOLUTE_MAX_OS}) - nowhere to fall, no exceptions allowed`);
           await logRejectionWithAI(
             supabase, userId, symbol,
@@ -2136,6 +2139,7 @@ serve(async (req) => {
         const isExtremelyOverextended = percentB > overextensionThresholdLong;
         if (intendedTradeDirection === "long" && isExtremelyOverextended && stochRsiK4h >= STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT) {
           rejectedByStochRsiExtreme++;
+          perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)} overext` });
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Price extremely overextended (%B=${percentB.toFixed(1)} > ${overextensionThresholdLong}) with overbought StochRSI (K=${stochRsiK4h.toFixed(1)})`);
           await logRejectionWithAI(
             supabase, userId, symbol,
@@ -2170,6 +2174,7 @@ serve(async (req) => {
         const isExtremelyUnderextended = percentB < overextensionThresholdShort;
         if (intendedTradeDirection === "short" && isExtremelyUnderextended && stochRsiK4h <= STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD) {
           rejectedByStochRsiExtreme++;
+          perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)} underext` });
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BLOCK - Price extremely underextended (%B=${percentB.toFixed(1)} < ${overextensionThresholdShort}) with oversold StochRSI (K=${stochRsiK4h.toFixed(1)})`);
           await logRejectionWithAI(
             supabase, userId, symbol,
@@ -2568,6 +2573,7 @@ serve(async (req) => {
           // MANDATORY: StochRSI must be rising (K > D) for any extreme overbought entry
           if (!stochRsiRising) {
             rejectedByStochRsiExtreme++;
+            perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} not rising` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - StochRSI not rising at overbought (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
             await logRejectionWithAI(
               supabase, userId, symbol,
@@ -2583,6 +2589,7 @@ serve(async (req) => {
           // MANDATORY: No bearish divergence allowed at extreme overbought
           if (hasBearishDivergence) {
             rejectedByStochRsiExtreme++;
+            perSymbolGateAttribution.set(symbol, { gate: 'BEARISH_DIVERGENCE_AT_EXTREME', details: `K=${stochRsiK4h.toFixed(1)}` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - Bearish divergence at overbought (K=${stochRsiK4h.toFixed(1)})`);
             await logRejectionWithAI(
               supabase, userId, symbol,
@@ -2676,6 +2683,7 @@ serve(async (req) => {
               : trendStrengthResult.decision === 'REJECT'
                 ? `trend strength too low: ${trendStrengthResult.reason}`
                 : `no valid breakout (%B=${percentB.toFixed(1)}, volumeRatio=${volumeRatio.toFixed(2)})`;
+            perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)}, ${blockReason.slice(0, 30)}` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - 4h StochRSI K=${stochRsiK4h.toFixed(1)} overbought | ${blockReason}`);
             await logRejectionWithAI(
               supabase, userId, symbol,
@@ -2749,6 +2757,7 @@ serve(async (req) => {
           // MANDATORY: StochRSI must be falling (K < D) for any extreme oversold entry
           if (!stochRsiFalling) {
             rejectedByStochRsiExtreme++;
+            perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} not falling` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking SHORT - StochRSI not falling at oversold (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
             await logRejectionWithAI(
               supabase, userId, symbol,
@@ -2764,6 +2773,7 @@ serve(async (req) => {
           // MANDATORY: No bullish divergence allowed at extreme oversold
           if (hasBullishDivergence) {
             rejectedByStochRsiExtreme++;
+            perSymbolGateAttribution.set(symbol, { gate: 'BULLISH_DIVERGENCE_AT_EXTREME', details: `K=${stochRsiK4h.toFixed(1)}` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking SHORT - Bullish divergence at oversold (K=${stochRsiK4h.toFixed(1)})`);
             await logRejectionWithAI(
               supabase, userId, symbol,
@@ -2806,6 +2816,7 @@ serve(async (req) => {
             const blockReason = !momentumAcceptable 
               ? `momentum not acceptable (confirms=${momentum?.confirms}, state=${momentum?.state})` 
               : "failed smart exception conditions";
+            perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)}, ${blockReason.slice(0, 30)}` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking SHORT - 4h StochRSI K=${stochRsiK4h.toFixed(1)} oversold | ${blockReason}`);
             await logRejectionWithAI(
               supabase, userId, symbol,
@@ -3790,6 +3801,7 @@ serve(async (req) => {
         // Check minimum quality threshold
         if (qualityScore < MIN_QUALITY_SCORE) {
           rejectedByQuality++;
+          perSymbolGateAttribution.set(symbol, { gate: 'QUALITY_TOO_LOW', details: `${qualityScore}/${MIN_QUALITY_SCORE}` });
           
           // PHASE 1: Near Miss Logging - signals within 5 points of threshold
           const isNearMiss = qualityScore >= (MIN_QUALITY_SCORE - QUALITY_THRESHOLDS.NEAR_MISS_THRESHOLD);
@@ -4081,6 +4093,7 @@ serve(async (req) => {
 
         if (candidates.length === 0) {
           rejectedByStrategy++;
+          perSymbolGateAttribution.set(symbol, { gate: 'NO_STRATEGY_MATCH', details: `0/${allStrategies.length} conditions met` });
           await logRejectionWithAI(
             supabase, userId, symbol,
             `No strategy conditions met (quality passed: ${qualityScore}/100)`,
@@ -4108,9 +4121,10 @@ serve(async (req) => {
         
         if (regimeFilteredCandidates.length === 0) {
           rejectedByStrategy++;
+          perSymbolGateAttribution.set(symbol, { gate: 'NO_STRATEGY_MATCH', details: `${candidates.length} disabled for ${currentRegimeType}` });
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} All ${candidates.length} strategies disabled for ${currentRegimeType} regime`);
           await logRejectionWithAI(supabase, userId, symbol, 
-            `All matching strategies disabled for ${currentRegimeType} regime`, 
+            `All matching strategies disabled for ${currentRegimeType} regime`,
             { regime: currentRegimeType, strategiesFiltered: candidates.map(c => c.strategy.name) },
             trendData, riskParams.ai_analysis_enabled !== false);
           continue;
