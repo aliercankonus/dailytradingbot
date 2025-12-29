@@ -529,43 +529,28 @@ export const getVolumeScore = (
   return 0;
 };
 
-// ============= CONFIDENCE PENALTY =============
-// High confidence = trend exhaustion, penalize entries
-// Optimal entry zone: 50-60% confidence (trend confirmed but not exhausted)
+// ============= CONFIDENCE PENALTY - REMOVED =============
+// RATIONALE: High confidence indicates STRONG multi-timeframe alignment,
+// which is a POSITIVE signal in professional trading systems.
+// The original penalty was counterproductive:
+// - Penalized 85%+ confidence by -25 points when this indicates all timeframes agree
+// - This duplicated logic already handled by ADX, StochRSI, and HTF gates
+// - Professional systems REWARD high confidence as it indicates institutional alignment
+// 
+// Compensation: MIN_QUALITY_THRESHOLD raised from 55 to 65 to maintain selectivity
 export const getConfidencePenalty = (
   confidence: number, 
   adx: number = 0, 
   momentumConfirmed: boolean = false
 ): number => {
-  // Calculate base penalty
-  let basePenalty = 0;
-  if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_HEAVY) basePenalty = -25;
-  else if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_STRONG) basePenalty = -18;
-  else if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_MODERATE) basePenalty = -12;
-  else if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_LIGHT) basePenalty = -8;
-  else if (confidence >= CONFIDENCE_THRESHOLDS.DEAD_ZONE_LOWER) basePenalty = -12;  // DEAD ZONE: 60-69
-  else if (confidence >= CONFIDENCE_THRESHOLDS.OPTIMAL_LOWER) basePenalty = 0;       // Optimal: 50-59
-  else basePenalty = -3;  // Too low confidence
-  
-  // Reduce penalty for favorable conditions (prevents double punishment)
-  if (basePenalty < 0) {
-    let reductionFactor = 1.0;
-    
-    // Strong trend (ADX ≥ 30) reduces penalty by 40%
-    if (adx >= ADX_THRESHOLDS.VERY_STRONG) {
-      reductionFactor -= 0.4;
-    }
-    // Confirmed momentum reduces penalty by 30%
-    if (momentumConfirmed) {
-      reductionFactor -= 0.3;
-    }
-    // Cap reduction at 60%
-    reductionFactor = Math.max(0.4, reductionFactor);
-    
-    return Math.round(basePenalty * reductionFactor);
-  }
-  
-  return basePenalty;
+  // REMOVED: High confidence is a positive signal, not a negative one
+  // Quality filtering is now handled by:
+  // 1. ADX phase state machine (trend strength)
+  // 2. StochRSI extreme gates (overextension)
+  // 3. Time-in-extreme penalty (exhaustion detection)
+  // 4. Unified reversal score (actual reversal signals)
+  // 5. Raised quality threshold (65 instead of 55)
+  return 0;
 };
 
 // ============= ADX SCORE (0-25 points) =============

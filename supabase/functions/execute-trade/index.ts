@@ -1480,20 +1480,15 @@ serve(async (req) => {
     const adjustedConfidence = Math.max(0, Math.min(100, (signal.confidence_score || 0) + aiConfidenceAdjustment));
     const confidence = adjustedConfidence;
     
-    // CONFIDENCE INVERSION FIX: High confidence = reduce position (trend exhaustion)
-    // Uses CONFIDENCE_THRESHOLDS for consistency across codebase
-    if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_STRONG) {
-      quantity *= 0.6; // 40% reduction for very high confidence (likely exhaustion)
-      logger.warn(`⚠️ Position size REDUCED by 40% due to high confidence (${confidence}% >= ${CONFIDENCE_THRESHOLDS.PENALTY_STRONG}%) - trend may be exhausted`);
-    } else if (confidence >= CONFIDENCE_THRESHOLDS.PENALTY_LIGHT) {
-      quantity *= 0.8; // 20% reduction for high confidence
-      logger.warn(`⚠️ Position size REDUCED by 20% due to elevated confidence (${confidence}% >= ${CONFIDENCE_THRESHOLDS.PENALTY_LIGHT}%)`);
-    } else if (confidence < CONFIDENCE_THRESHOLDS.LOW) {
+    // CONFIDENCE PENALTY REMOVED: High confidence now means STRONG multi-timeframe alignment
+    // This is a POSITIVE signal in professional trading systems, not exhaustion
+    // Only penalize genuinely low confidence signals
+    if (confidence < CONFIDENCE_THRESHOLDS.LOW) {
       quantity *= 0.7; // 30% reduction for low confidence (weak signal)
       logger.info(`Position size reduced by 30% due to low confidence (${confidence}% < ${CONFIDENCE_THRESHOLDS.LOW}%)`);
     } else {
-      // Sweet spot: 50-70% confidence - no adjustment
-      logger.info(`✓ Position size normal for optimal confidence zone (${confidence}%)`);
+      // All other confidence levels: no penalty - high confidence is now rewarded
+      logger.info(`✓ Position size normal for confidence ${confidence}%`);
     }
 
     // Apply position size reduction if consecutive losses

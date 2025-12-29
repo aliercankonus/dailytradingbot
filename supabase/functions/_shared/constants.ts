@@ -100,10 +100,12 @@ export const CONFIDENCE_THRESHOLDS = {
   PULLBACK_4H_MIN: 70,
   RECOVERY_MAX: 70,
   STRONG_1H_REVERSAL: 75,
-  PENALTY_LIGHT: 70,
-  PENALTY_MODERATE: 75,
-  PENALTY_STRONG: 80,
-  PENALTY_HEAVY: 85,
+  // REMOVED: Confidence penalty thresholds - high confidence is now REWARDED not penalized
+  // See scoring.ts getConfidencePenalty() for rationale
+  // PENALTY_LIGHT: 70,      // REMOVED
+  // PENALTY_MODERATE: 75,   // REMOVED
+  // PENALTY_STRONG: 80,     // REMOVED
+  // PENALTY_HEAVY: 85,      // REMOVED
   WEAK_4H: 58,
   STRONG_ALIGNMENT_1H: 58,
 } as const;
@@ -120,14 +122,17 @@ export const RISK_PARAMS = {
   TRAILING_STOP_ACTIVATION_PERCENT: 0.7,
   MIN_STOP_DISTANCE_PERCENT: 1.0,
   TRAILING_PROFIT_LOCK_PERCENT: 0.5,
-  // Base quality threshold - actual threshold is dynamically adjusted:
-  // - 45 for strong 1h confidence (>=65%)
-  // - 50 for exceptional ADX (>=35)
-  // - 53 for strong ADX (>=25)
-  // - 55 base threshold
-  // - 35 for neutral strategies
-  // - 65 in recovery mode
-  MIN_QUALITY_THRESHOLD: 55,
+  // Base quality threshold - RAISED from 55 to 65 to compensate for removing confidence penalty
+  // Confidence penalty was applying -25 to -8 points for high confidence (which is wrong)
+  // Now that it's removed, scores will be ~10-20 points higher, so threshold raised accordingly
+  // Dynamic adjustments still apply:
+  // - 55 for strong 1h confidence (>=65%) - raised from 45
+  // - 60 for exceptional ADX (>=35) - raised from 50
+  // - 63 for strong ADX (>=25) - raised from 53
+  // - 65 base threshold - raised from 55
+  // - 45 for neutral strategies - raised from 35
+  // - 75 in recovery mode - raised from 65
+  MIN_QUALITY_THRESHOLD: 65,
 } as const;
 
 // ============= PHASE 3: R-MULTIPLE TRAILING PARAMETERS =============
@@ -173,23 +178,26 @@ export const SLIPPAGE_PARAMS = {
 } as const;
 
 // Quality score thresholds for signal generation
+// ADJUSTED: All thresholds raised by ~10 points to compensate for removing confidence penalty
+// Confidence penalty was incorrectly penalizing high multi-timeframe alignment by -25 to -8 points
+// Now removed, so scores will naturally be higher - thresholds adjusted accordingly
 export const QUALITY_THRESHOLDS = {
-  // Base minimum quality score (standard conditions)
-  BASE_MIN: 55,
-  // Neutral trend threshold (relies on HTF for direction)
-  NEUTRAL_MIN: 35,
-  // Strong 1h signal threshold (1h confidence >= 65%)
-  STRONG_1H_MIN: 45,
-  // Exceptional ADX threshold (ADX >= 35)
-  EXCEPTIONAL_ADX_MIN: 50,
-  // Strong ADX threshold (ADX >= 25)
-  STRONG_ADX_MIN: 53,
+  // Base minimum quality score (standard conditions) - raised from 55 to 65
+  BASE_MIN: 65,
+  // Neutral trend threshold (relies on HTF for direction) - raised from 35 to 45
+  NEUTRAL_MIN: 45,
+  // Strong 1h signal threshold (1h confidence >= 65%) - raised from 45 to 55
+  STRONG_1H_MIN: 55,
+  // Exceptional ADX threshold (ADX >= 35) - raised from 50 to 60
+  EXCEPTIONAL_ADX_MIN: 60,
+  // Strong ADX threshold (ADX >= 25) - raised from 53 to 63
+  STRONG_ADX_MIN: 63,
   // Recovery mode boost added to base threshold
   RECOVERY_BOOST: 10,
   // PHASE 1: Near miss threshold - signals within this many points of threshold are logged for analysis
   NEAR_MISS_THRESHOLD: 5,
-  // SCENARIO 6 FIX: Maximum recovery quality threshold (caps escalation - Finding 9)
-  MAX_RECOVERY_QUALITY: 70,
+  // SCENARIO 6 FIX: Maximum recovery quality threshold (caps escalation - Finding 9) - raised from 70 to 80
+  MAX_RECOVERY_QUALITY: 80,
 } as const;
 
 // ============= SCENARIO 6: RECOVERY MODE PARAMETERS =============
