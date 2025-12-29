@@ -611,7 +611,7 @@ export const getMomentumScore = (momentum: any): number => {
 };
 
 // ============= ALIGNMENT SCORE (0-14 points) =============
-// Directional consistency only - confidence logic is in getConfidencePenalty
+// Directional consistency with strong 1h trend credit
 export const getAlignmentScore = (
   confidence: number, 
   consistency: number, 
@@ -620,32 +620,49 @@ export const getAlignmentScore = (
 ): number => {
   let score = 0;
   
+  const tf = trendData?.timeframes;
+  const trend4h = tf?.['4h']?.trend || "neutral";
+  const trend1h = tf?.['1h']?.trend || "neutral";
+  const trend30m = tf?.['30m']?.trend || "neutral";
+  const conf1h = tf?.['1h']?.confidence || 50;
+  const conf4h = tf?.['4h']?.confidence || 50;
+  
   // Full alignment bonus (0-8)
   if (aligned) {
     score += 8;
-  } else {
-    // Partial alignment check - use correct field paths from calculate-trend
-    const tf = trendData?.timeframes;
-    if (tf) {
-      const trend4h = tf['4h']?.trend || "neutral";
-      const trend1h = tf['1h']?.trend || "neutral";
-      const trend30m = tf['30m']?.trend || "neutral";
-      
-      // 4h neutral with 1h+30m aligned = partial alignment
-      if (trend4h === "neutral" && trend1h === trend30m && trend1h !== "neutral") {
-        score += 5;
-      }
-      // 1h and 30m agree but different from 4h
-      else if (trend1h === trend30m && trend1h !== "neutral") {
-        score += 3;
-      }
+  } else if (tf) {
+    // ============= STRONG 1H TREND CREDIT (NEW) =============
+    // When 4h is neutral but 1h has strong directional confirmation
+    // This is a valid setup for shorter-term entries
+    if (trend4h === "neutral" && trend1h !== "neutral" && conf1h >= 65) {
+      score += 6;  // Strong 1h with neutral 4h = good setup
+    }
+    // 4h neutral with 1h+30m aligned = partial alignment
+    else if (trend4h === "neutral" && trend1h === trend30m && trend1h !== "neutral") {
+      score += 5;
+    }
+    // 1h and 30m agree but different from 4h
+    else if (trend1h === trend30m && trend1h !== "neutral") {
+      score += 3;
+    }
+    // Strong 1h alone (without 30m confirmation) still gets some credit
+    else if (trend1h !== "neutral" && conf1h >= 60) {
+      score += 3;
     }
   }
   
-  // Consistency component (0-6)
-  if (consistency >= 75) score += 6;
-  else if (consistency >= 65) score += 5;
-  else if (consistency >= 55) score += 3;
+  // ============= 1H CONFIDENCE BONUS (NEW) =============
+  // Extra credit for very strong 1h directional confidence
+  if (conf1h >= 70) {
+    score += 2;  // Very strong 1h direction
+  } else if (conf1h >= 65) {
+    score += 1;  // Strong 1h direction
+  }
+  
+  // Consistency component (0-4, reduced from 0-6 to balance 1h credit)
+  if (consistency >= 75) score += 4;
+  else if (consistency >= 65) score += 3;
+  else if (consistency >= 55) score += 2;
   else if (consistency >= 45) score += 1;
   
   return Math.min(14, score);
