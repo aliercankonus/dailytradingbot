@@ -34,6 +34,10 @@ import {
   RANGING_MARKET_DETECTION_PARAMS,
   EARLY_MOMENTUM_ENTRY_PARAMS,
   STRONG_TREND_OVEREXTENSION_PARAMS,
+  // NEW: Strong trend HTF bypass and exhaustion detection
+  STRONG_TREND_HTF_BYPASS_PARAMS,
+  TREND_EXHAUSTION_PARAMS,
+  TREND_CONTINUATION_TIGHT_STOPS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -2115,54 +2119,143 @@ serve(async (req) => {
         const isHTFOverbought = stochRsiK4h >= HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK && 
                                 percentB >= HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK;
         
+        // ============= NEW: STRONG TREND HTF BYPASS CHECK =============
+        // Allow bypass when trend is very strong and no exhaustion signals
+        const adxRisingForBypass = trendData.volatility?.adxRising ?? false;
+        const tf30m = trendData.timeframes?.['30m'];
+        const allTimeframesAligned = (() => {
+          // Check if 4h, 1h, and 30m are all aligned in same direction
+          const tf4hDir = stochFilterTrend4h;
+          const tf1hDir = stochFilterTrend1h;
+          const tf30mDir = tf30m?.trend || tf30m?.indicators?.emaSignal || "neutral";
+          
+          if (intendedTradeDirection === "long") {
+            return tf4hDir === "bullish" && tf1hDir === "bullish" && tf30mDir === "bullish";
+          } else if (intendedTradeDirection === "short") {
+            return tf4hDir === "bearish" && tf1hDir === "bearish" && tf30mDir === "bearish";
+          }
+          return false;
+        })();
+        
+        // Detect trend exhaustion (actual reversal likely vs just overbought in strong trend)
+        const isExhausted = (() => {
+          if (!TREND_EXHAUSTION_PARAMS.ENABLED) return false;
+          
+          // Check if StochRSI K is at extreme AND decreasing
+          const isAtExtreme = intendedTradeDirection === "long" 
+            ? stochRsiK4h >= TREND_EXHAUSTION_PARAMS.STOCHRSI_EXTREME_THRESHOLD
+            : stochRsiK4h <= (100 - TREND_EXHAUSTION_PARAMS.STOCHRSI_EXTREME_THRESHOLD);
+          
+          const stochRsiDecreasing = TREND_EXHAUSTION_PARAMS.STOCHRSI_K_DECREASING 
+            ? (intendedTradeDirection === "long" ? stochRsiK4h < stochRsiD4h : stochRsiK4h > stochRsiD4h)
+            : false;
+          
+          // ADX declining from peak indicates momentum waning
+          const adxDeclining = !adxRisingForBypass && adx < TREND_EXHAUSTION_PARAMS.ADX_DECLINE_FROM_PEAK;
+          
+          // Exhaustion = extreme + decreasing + (optional: ADX declining)
+          return isAtExtreme && stochRsiDecreasing && adxDeclining;
+        })();
+        
+        // Determine if strong trend bypass should apply
+        let strongTrendHTFBypassApplied = false;
+        let trendContinuationPositionMultiplier = 1.0;
+        
+        const canBypassHTFGate = STRONG_TREND_HTF_BYPASS_PARAMS.ENABLED &&
+          adx >= STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX &&
+          (!STRONG_TREND_HTF_BYPASS_PARAMS.REQUIRE_ADX_RISING || adxRisingForBypass) &&
+          unifiedReversal.score < STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE &&
+          (!STRONG_TREND_HTF_BYPASS_PARAMS.REQUIRE_ALL_TF_ALIGNED || allTimeframesAligned) &&
+          !isExhausted;
+        
         // Block SHORT continuation at 4h oversold (bounce is statistically likely)
         if (intendedTradeDirection === "short" && isHTFOversold) {
-          rejectedByHardGates++;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking SHORT at 4h oversold (StochRSI K=${stochRsiK4h.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK}, %B=${percentB.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK})`);
-          await logRejectionWithAI(
-            supabase, userId, symbol,
-            `IMPROVEMENT 1 - HTF EXTREME GATE: SHORT blocked at 4h oversold (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
-            { 
-              gate: "HTF_EXTREME_OVERSOLD_BLOCK",
-              direction: "short",
-              stochRsiK4h: stochRsiK4h.toFixed(1),
-              percentB: percentB.toFixed(1),
-              thresholds: {
-                stochRsiK_threshold: HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK,
-                percentB_threshold: HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK
+          if (canBypassHTFGate) {
+            // Allow with reduced position size
+            strongTrendHTFBypassApplied = true;
+            trendContinuationPositionMultiplier = STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} STRONG TREND HTF BYPASS: Allowing SHORT at 4h oversold`);
+            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} rising=${adxRisingForBypass}, reversal=${unifiedReversal.score}, allTFsAligned=${allTimeframesAligned}, exhausted=${isExhausted}`);
+            logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
+          } else {
+            rejectedByHardGates++;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking SHORT at 4h oversold (StochRSI K=${stochRsiK4h.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK}, %B=${percentB.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK})`);
+            if (!canBypassHTFGate) {
+              logger.forSymbol(symbol).debug(`   Bypass check failed: ADX=${adx.toFixed(1)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX}? rising=${adxRisingForBypass}, reversal=${unifiedReversal.score}<${STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE}?, TFsAligned=${allTimeframesAligned}, exhausted=${isExhausted}`);
+            }
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `IMPROVEMENT 1 - HTF EXTREME GATE: SHORT blocked at 4h oversold (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
+              { 
+                gate: "HTF_EXTREME_OVERSOLD_BLOCK",
+                direction: "short",
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                percentB: percentB.toFixed(1),
+                thresholds: {
+                  stochRsiK_threshold: HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK,
+                  percentB_threshold: HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK
+                },
+                bypassCheck: {
+                  adx: adx.toFixed(1),
+                  adxRising: adxRisingForBypass,
+                  reversalScore: unifiedReversal.score,
+                  allTimeframesAligned,
+                  isExhausted,
+                  canBypass: false
+                },
+                message: "Bounce statistically likely at 4h oversold - blocking SHORT continuation"
               },
-              message: "Bounce statistically likely at 4h oversold - blocking SHORT continuation"
-            },
-            trendData,
-            false,
-            earlyOrderFlowAnalysis
-          );
-          continue;
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
         }
         
         // Block LONG continuation at 4h overbought (reversal is statistically likely)
         if (intendedTradeDirection === "long" && isHTFOverbought) {
-          rejectedByHardGates++;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking LONG at 4h overbought (StochRSI K=${stochRsiK4h.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK}, %B=${percentB.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK})`);
-          await logRejectionWithAI(
-            supabase, userId, symbol,
-            `IMPROVEMENT 1 - HTF EXTREME GATE: LONG blocked at 4h overbought (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
-            { 
-              gate: "HTF_EXTREME_OVERBOUGHT_BLOCK",
-              direction: "long",
-              stochRsiK4h: stochRsiK4h.toFixed(1),
-              percentB: percentB.toFixed(1),
-              thresholds: {
-                stochRsiK_threshold: HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK,
-                percentB_threshold: HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK
+          if (canBypassHTFGate) {
+            // Allow with reduced position size
+            strongTrendHTFBypassApplied = true;
+            trendContinuationPositionMultiplier = STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} STRONG TREND HTF BYPASS: Allowing LONG at 4h overbought`);
+            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} rising=${adxRisingForBypass}, reversal=${unifiedReversal.score}, allTFsAligned=${allTimeframesAligned}, exhausted=${isExhausted}`);
+            logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
+          } else {
+            rejectedByHardGates++;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking LONG at 4h overbought (StochRSI K=${stochRsiK4h.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK}, %B=${percentB.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK})`);
+            if (!canBypassHTFGate) {
+              logger.forSymbol(symbol).debug(`   Bypass check failed: ADX=${adx.toFixed(1)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX}? rising=${adxRisingForBypass}, reversal=${unifiedReversal.score}<${STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE}?, TFsAligned=${allTimeframesAligned}, exhausted=${isExhausted}`);
+            }
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `IMPROVEMENT 1 - HTF EXTREME GATE: LONG blocked at 4h overbought (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
+              { 
+                gate: "HTF_EXTREME_OVERBOUGHT_BLOCK",
+                direction: "long",
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                percentB: percentB.toFixed(1),
+                thresholds: {
+                  stochRsiK_threshold: HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK,
+                  percentB_threshold: HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK
+                },
+                bypassCheck: {
+                  adx: adx.toFixed(1),
+                  adxRising: adxRisingForBypass,
+                  reversalScore: unifiedReversal.score,
+                  allTimeframesAligned,
+                  isExhausted,
+                  canBypass: false
+                },
+                message: "Reversal statistically likely at 4h overbought - blocking LONG continuation"
               },
-              message: "Reversal statistically likely at 4h overbought - blocking LONG continuation"
-            },
-            trendData,
-            false,
-            earlyOrderFlowAnalysis
-          );
-          continue;
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
         }
         
         // ============= IMPROVEMENT 2: BOLLINGER POSITION FILTER FOR SHORTS =============
@@ -3995,6 +4088,12 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Micro-trend entry - position size capped at ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
+        // Step 7: Apply strong trend HTF bypass reduction
+        if (strongTrendHTFBypassApplied && trendContinuationPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= trendContinuationPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Strong trend HTF bypass - position size capped at ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
         // Final position size as percentage
         const strategyPositionSize = (strategy.risk_settings?.positionSizePercent || 100) * positionSizeMultiplier;
 
@@ -4054,6 +4153,15 @@ serve(async (req) => {
                 components: exceptionResult.details.trendStrength.components,
               } : null,
             },
+            // NEW: Track strong trend HTF bypass for execute-trade risk management
+            strongTrendHTFBypass: strongTrendHTFBypassApplied,
+            trendContinuationAtExtreme: strongTrendHTFBypassApplied,
+            trendContinuationParams: strongTrendHTFBypassApplied ? {
+              stopLossMultiplier: STRONG_TREND_HTF_BYPASS_PARAMS.STOP_LOSS_MULTIPLIER,
+              breakEvenActivationPercent: STRONG_TREND_HTF_BYPASS_PARAMS.BREAK_EVEN_ACTIVATION_PERCENT,
+              trailingActivationPercent: STRONG_TREND_HTF_BYPASS_PARAMS.TRAILING_ACTIVATION_PERCENT,
+              positionSizeMultiplier: trendContinuationPositionMultiplier,
+            } : null,
           },
           expires_at: new Date(Date.now() + 60000).toISOString(),
           created_by_rebalancer: false,
