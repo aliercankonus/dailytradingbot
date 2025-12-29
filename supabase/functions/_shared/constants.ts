@@ -542,6 +542,27 @@ export const MOMENTUM_THRESHOLDS = {
   PULLBACK_MIN_SCORE: 3,
 } as const;
 
+// ============= PULLBACK ENTRY DETECTION PARAMETERS =============
+// Context-aware momentum gate for pullback entries
+// Pullbacks by definition lack strong momentum (that's the opportunity!)
+// Uses reduced momentum threshold with pullback-specific validation
+export const PULLBACK_DETECTION_PARAMS = {
+  // Minimum 4h confidence required for pullback setup (strong HTF bias)
+  MIN_4H_CONFIDENCE: 60,
+  // StochRSI threshold for oversold (long pullback)
+  STOCHRSI_OVERSOLD_THRESHOLD: 20,
+  // StochRSI threshold for overbought (short pullback)
+  STOCHRSI_OVERBOUGHT_THRESHOLD: 80,
+  // Minimum ADX for valid pullback (trend must still be intact)
+  MIN_ADX: 22,
+  // K/D ratio tolerance for detecting StochRSI turn
+  // For longs: K >= D * 0.9 (starting to turn up)
+  // For shorts: K <= D * 1.1 (starting to turn down)
+  KD_TURN_TOLERANCE: 0.9,
+  // Position size multiplier for pullback entries (default 50%)
+  DEFAULT_POSITION_SIZE_PERCENT: 50,
+} as const;
+
 // Correlation risk parameters
 export const CORRELATION_PARAMS = {
   // Maximum correlation threshold between positions (0-1)
