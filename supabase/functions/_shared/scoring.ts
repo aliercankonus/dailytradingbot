@@ -514,18 +514,24 @@ export const getVolumeScore = (
     return 1;
   }
   
+  // CRITICAL: Very low volume (< 10%) = holiday/weekend conditions = 0 points
+  // This prevents false signals in illiquid markets
+  if (volumeRatio < 0.1) {
+    return 0;
+  }
+  
   // PARTIAL CREDIT: At least average volume (volumeRatio >= 1.0)
   // This prevents zero volume score in normal market conditions
   if (volumeRatio >= 1.0) {
-    return 1;  // NEW: Baseline credit for average volume
+    return 1;  // Baseline credit for average volume
   }
   
-  // Neutral trend - no volume penalty
-  if (trend === "neutral") {
+  // Low but not critical volume (10-100% of average) - minimal credit
+  if (volumeRatio >= 0.3) {
     return 1;
   }
   
-  // Low volume in directional trend - no bonus
+  // Very low volume (10-30%) in any condition - no bonus
   return 0;
 };
 
