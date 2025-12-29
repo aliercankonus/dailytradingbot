@@ -2261,36 +2261,48 @@ serve(async (req) => {
           }
         }
         
-        // ============= IMPROVEMENT 2: BOLLINGER POSITION FILTER FOR SHORTS =============
-        // Shorts below lower Bollinger are statistically poor entries
-        // Especially during volatility compression (squeeze)
-        // RANGING MARKET ADAPTATION: Relax squeeze strictness when ADX < 23 (genuine range, not trend exhaustion)
+        // ============= IMPROVEMENT 2: BOLLINGER POSITION FILTER (CONTEXT-AWARE) =============
+        // Base rule: Shorts below lower Bollinger are risky (mean reversion bounce)
+        // Exception: In confirmed bearish trends, low %B indicates trend continuation - shorts are VALID
+        // Same logic applies symmetrically for longs at high %B
         const isInSqueeze4h = trendData.bollingerBands?.['4h']?.squeeze || 
                               (trendData.bb?.['4h']?.squeezePercent ?? 0) > SQUEEZE_CONTEXT_PARAMS.MIN_SQUEEZE_PERCENT_4H;
         const isRangingMarket = adx < BOLLINGER_ENTRY_GATES.RANGING_ADX_THRESHOLD;
         
-        // Determine appropriate %B threshold based on squeeze and ranging status
+        // Determine if we have trend confirmation for context-aware thresholds
+        const isBearishTrendConfirmed = stochFilterTrend4h === "bearish" && stochFilterConf4h >= BOLLINGER_ENTRY_GATES.TREND_CONFIDENCE_THRESHOLD;
+        const isStrongBearishTrend = isBearishTrendConfirmed && adx >= ADX_THRESHOLDS.MODERATE; // ADX >= 22
+        const isBullishTrendConfirmed = stochFilterTrend4h === "bullish" && stochFilterConf4h >= BOLLINGER_ENTRY_GATES.TREND_CONFIDENCE_THRESHOLD;
+        const isStrongBullishTrend = isBullishTrendConfirmed && adx >= ADX_THRESHOLDS.MODERATE;
+        
+        // SHORT gate: Determine appropriate %B threshold based on trend, squeeze, and ranging
         let shortMinPercentB: number;
-        if (isInSqueeze4h && isRangingMarket) {
+        if (isStrongBearishTrend) {
+          // Strong bearish trend: allow shorts much lower (trend continuation)
+          shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_STRONG_BEARISH_MIN_PERCENT_B; // 5
+        } else if (isBearishTrendConfirmed) {
+          // Confirmed bearish: allow shorts lower (trend continuation)
+          shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_BEARISH_TREND_MIN_PERCENT_B; // 15
+        } else if (isInSqueeze4h && isRangingMarket) {
           // Squeeze + ranging = use relaxed threshold (genuine range, not trend exhaustion)
-          shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_SQUEEZE_RANGING_MIN_PERCENT_B;
+          shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_SQUEEZE_RANGING_MIN_PERCENT_B; // 40
         } else if (isInSqueeze4h) {
           // Squeeze without ranging = use strict threshold (possible trend continuation)
-          shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_SQUEEZE_MIN_PERCENT_B;
+          shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_SQUEEZE_MIN_PERCENT_B; // 50
         } else {
-          // No squeeze = use base threshold
-          shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_MIN_PERCENT_B;
+          // No squeeze, no confirmed trend = use base threshold
+          shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_MIN_PERCENT_B; // 35
         }
         
         if (intendedTradeDirection === "short" && percentB < shortMinPercentB) {
           rejectedByHardGates++;
-          const squeezeContext = isInSqueeze4h 
-            ? (isRangingMarket ? " (relaxed during ranging squeeze)" : " (stricter during squeeze)") 
-            : "";
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER POSITION FILTER - Blocking SHORT at low %B=${percentB.toFixed(1)} < ${shortMinPercentB}${squeezeContext}`);
+          const trendContext = isStrongBearishTrend ? " (strong bearish trend)" : 
+                               isBearishTrendConfirmed ? " (bearish trend)" :
+                               isInSqueeze4h ? (isRangingMarket ? " (ranging squeeze)" : " (squeeze)") : "";
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER POSITION FILTER - Blocking SHORT at %B=${percentB.toFixed(1)} < ${shortMinPercentB}${trendContext}`);
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `IMPROVEMENT 2 - BOLLINGER GATE: SHORT blocked at low %B=${percentB.toFixed(1)} < ${shortMinPercentB}${squeezeContext}`,
+            `IMPROVEMENT 2 - BOLLINGER GATE: SHORT blocked at %B=${percentB.toFixed(1)} < ${shortMinPercentB}${trendContext}`,
             { 
               gate: "BOLLINGER_POSITION_FILTER_SHORT",
               direction: "short",
@@ -2298,14 +2310,81 @@ serve(async (req) => {
               requiredPercentB: shortMinPercentB,
               isInSqueeze4h,
               isRangingMarket,
+              isBearishTrendConfirmed,
+              isStrongBearishTrend,
+              stochFilterTrend4h,
+              stochFilterConf4h: stochFilterConf4h.toFixed(1),
               adx: adx.toFixed(1),
-              message: "Shorts below lower Bollinger are statistically poor entries"
+              message: "Shorts at low %B blocked - no bearish trend confirmation"
             },
             trendData,
             false,
             earlyOrderFlowAnalysis
           );
           continue;
+        }
+        
+        // Log if trend context allowed a SHORT that would otherwise be blocked
+        if (intendedTradeDirection === "short" && 
+            percentB < BOLLINGER_ENTRY_GATES.SHORT_MIN_PERCENT_B && 
+            (isBearishTrendConfirmed || isStrongBearishTrend)) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} TREND CONTEXT RELAXATION: Allowing SHORT at %B=${percentB.toFixed(1)} (4h bearish ${stochFilterConf4h.toFixed(0)}%, ADX=${adx.toFixed(1)})`);
+        }
+        
+        // LONG gate: Determine appropriate %B threshold based on trend, squeeze, and ranging
+        let longMaxPercentB: number;
+        if (isStrongBullishTrend) {
+          // Strong bullish trend: allow longs much higher (trend continuation)
+          longMaxPercentB = BOLLINGER_ENTRY_GATES.LONG_STRONG_BULLISH_MAX_PERCENT_B; // 95
+        } else if (isBullishTrendConfirmed) {
+          // Confirmed bullish: allow longs higher (trend continuation)
+          longMaxPercentB = BOLLINGER_ENTRY_GATES.LONG_BULLISH_TREND_MAX_PERCENT_B; // 85
+        } else if (isInSqueeze4h && isRangingMarket) {
+          // Squeeze + ranging = use relaxed threshold
+          longMaxPercentB = BOLLINGER_ENTRY_GATES.LONG_SQUEEZE_RANGING_MAX_PERCENT_B; // 60
+        } else if (isInSqueeze4h) {
+          // Squeeze without ranging = use strict threshold
+          longMaxPercentB = BOLLINGER_ENTRY_GATES.LONG_SQUEEZE_MAX_PERCENT_B; // 50
+        } else {
+          // No squeeze, no confirmed trend = use base threshold
+          longMaxPercentB = BOLLINGER_ENTRY_GATES.LONG_MAX_PERCENT_B; // 65
+        }
+        
+        if (intendedTradeDirection === "long" && percentB > longMaxPercentB) {
+          rejectedByHardGates++;
+          const trendContext = isStrongBullishTrend ? " (strong bullish trend)" : 
+                               isBullishTrendConfirmed ? " (bullish trend)" :
+                               isInSqueeze4h ? (isRangingMarket ? " (ranging squeeze)" : " (squeeze)") : "";
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER POSITION FILTER - Blocking LONG at %B=${percentB.toFixed(1)} > ${longMaxPercentB}${trendContext}`);
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `IMPROVEMENT 2 - BOLLINGER GATE: LONG blocked at %B=${percentB.toFixed(1)} > ${longMaxPercentB}${trendContext}`,
+            { 
+              gate: "BOLLINGER_POSITION_FILTER_LONG",
+              direction: "long",
+              percentB: percentB.toFixed(1),
+              requiredPercentB: longMaxPercentB,
+              isInSqueeze4h,
+              isRangingMarket,
+              isBullishTrendConfirmed,
+              isStrongBullishTrend,
+              stochFilterTrend4h,
+              stochFilterConf4h: stochFilterConf4h.toFixed(1),
+              adx: adx.toFixed(1),
+              message: "Longs at high %B blocked - no bullish trend confirmation"
+            },
+            trendData,
+            false,
+            earlyOrderFlowAnalysis
+          );
+          continue;
+        }
+        
+        // Log if trend context allowed a LONG that would otherwise be blocked
+        if (intendedTradeDirection === "long" && 
+            percentB > BOLLINGER_ENTRY_GATES.LONG_MAX_PERCENT_B && 
+            (isBullishTrendConfirmed || isStrongBullishTrend)) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} TREND CONTEXT RELAXATION: Allowing LONG at %B=${percentB.toFixed(1)} (4h bullish ${stochFilterConf4h.toFixed(0)}%, ADX=${adx.toFixed(1)})`);
         }
         
         // ============= IMPROVEMENT 3: SQUEEZE CONTEXT ARBITRATION =============
