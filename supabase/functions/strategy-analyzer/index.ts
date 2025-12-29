@@ -2980,10 +2980,26 @@ serve(async (req) => {
         // Detect pullback setups and use reduced momentum threshold (3 vs 5)
         const earlyMomentumScore = getMomentumScore(momentum);
         
+        // ===== STOCHRSI DATA VALIDATION =====
+        // Validate StochRSI values before pullback detection to prevent false signals
+        const isStochRsiDataValid = (
+          stochRsiK1h > 0 && stochRsiK1h <= 100 &&
+          stochRsiD1h > 0 && stochRsiD1h <= 100
+        );
+        
+        if (!isStochRsiDataValid) {
+          logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.MOMENTUM} StochRSI data invalid (K=${stochRsiK1h.toFixed(1)}, D=${stochRsiD1h.toFixed(1)}) - skipping pullback detection`);
+        }
+        
         // ===== PULLBACK SETUP DETECTION =====
         // LONG pullback: 4h bullish + 1h oversold (buying the dip in an uptrend)
         // SHORT pullback: 4h bearish + 1h overbought (selling the rally in a downtrend)
         const isPullbackSetupDetected = (() => {
+          // Skip if StochRSI data is invalid (K=0, D=0 indicates no data)
+          if (!isStochRsiDataValid) {
+            return false;
+          }
+          
           // LONG pullback conditions
           if (derivedDirection === "long" && 
               stochFilterTrend4h === "bullish" && 
