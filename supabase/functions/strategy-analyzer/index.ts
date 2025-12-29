@@ -1419,6 +1419,43 @@ serve(async (req) => {
     let strongTrendExceptionUsed = 0;  // Track when strong trend exception allows signal
     let strongTrendExceptionNotApplicable = 0;  // Track when exception didn't apply (conditions not met)
     
+    // ===== PER-SYMBOL GATE ATTRIBUTION TRACKING =====
+    // Track which specific gate rejected each symbol for debugging
+    type GateType = 
+      | 'EXISTING_SIGNAL' 
+      | 'MAX_TRADES_PER_SYMBOL' 
+      | 'LOSS_CLUSTERING_COOLDOWN'
+      | 'NO_TREND_DATA'
+      | 'REGIME_TRENDING_BLOCK'
+      | 'REGIME_RANGING_BLOCK'
+      | 'REGIME_CONTINUATION_BLOCK'
+      | 'UNIFIED_REVERSAL_BLOCK'
+      | 'HTF_EXTREME_OVERSOLD_BLOCK'
+      | 'HTF_EXTREME_OVERBOUGHT_BLOCK'
+      | 'BOLLINGER_PERCENTB_SHORT'
+      | 'BOLLINGER_PERCENTB_LONG'
+      | 'SQUEEZE_CONTEXT_MEAN_REVERSION'
+      | 'STOCHRSI_NOT_RISING'
+      | 'STOCHRSI_NOT_FALLING'
+      | 'BEARISH_DIVERGENCE_AT_EXTREME'
+      | 'BULLISH_DIVERGENCE_AT_EXTREME'
+      | 'STOCHRSI_OVERBOUGHT_BLOCK'
+      | 'STOCHRSI_OVERSOLD_BLOCK'
+      | 'ADX_TOO_LOW'
+      | 'ADX_TOO_LOW_NO_SQUEEZE'
+      | 'MOMENTUM_DIRECTION_OPPOSING'
+      | 'NEUTRAL_4H_LOW_CONFIDENCE'
+      | 'MACD_MISALIGNED'
+      | 'HTF_NOT_ALIGNED'
+      | 'CONFIDENCE_DEAD_ZONE'
+      | 'NO_STRATEGY_SUPPORT'
+      | 'NO_CONDITION_STRATEGY'
+      | 'QUALITY_TOO_LOW'
+      | 'NO_STRATEGY_MATCH'
+      | 'SIGNAL_GENERATED';
+    
+    const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
+    
     // Loss Recovery Mode - increase quality threshold after consecutive losses
     const consecutiveLosses = riskParams.consecutive_losses || 0;
     const consecutiveWins = riskParams.consecutive_wins || 0;
@@ -1551,6 +1588,7 @@ serve(async (req) => {
       const currentTradeCount = openTradesPerSymbol.get(symbol) || 0;
 
       if (existingSignalsSet.has(symbol)) {
+        perSymbolGateAttribution.set(symbol, { gate: 'EXISTING_SIGNAL', details: 'Active signal from last minute' });
         await supabase.from("signal_rejection_log").insert({
           user_id: userId, symbol,
           rejection_reason: "Already has active signal from last minute",
@@ -1561,6 +1599,7 @@ serve(async (req) => {
       }
 
       if (currentTradeCount >= riskParams.max_trades_per_symbol) {
+        perSymbolGateAttribution.set(symbol, { gate: 'MAX_TRADES_PER_SYMBOL', details: `${currentTradeCount}/${riskParams.max_trades_per_symbol} active` });
         await supabase.from("signal_rejection_log").insert({
           user_id: userId, symbol,
           rejection_reason: `Max trades per symbol reached: ${currentTradeCount}/${riskParams.max_trades_per_symbol} trades active`,
@@ -1575,6 +1614,7 @@ serve(async (req) => {
       if (isInLossCooldown) {
         const remainingMs = new Date(cooldownUntil!).getTime() - Date.now();
         const remainingMins = Math.ceil(remainingMs / (1000 * 60));
+        perSymbolGateAttribution.set(symbol, { gate: 'LOSS_CLUSTERING_COOLDOWN', details: `${remainingMins}min remaining` });
         await logRejectionWithAI(
           supabase, userId, symbol,
           `LOSS-CLUSTERING COOLDOWN: ${remainingMins}min remaining - blocking new entries after low-quality loss`,
@@ -1592,7 +1632,10 @@ serve(async (req) => {
       }
 
       const trendData = trendDataMap.get(symbol);
-      if (!trendData) continue;
+      if (!trendData) {
+        perSymbolGateAttribution.set(symbol, { gate: 'NO_TREND_DATA', details: 'calculate-trend returned null' });
+        continue;
+      }
 
       try {
         const { primaryTrend: trend, confidence, trueAlignment, isAligned, timeframes } = trendData;
@@ -1692,6 +1735,8 @@ serve(async (req) => {
         
         if (!regimeEnhanced.tradeable) {
           rejectedByRegime++;
+          const gateType: GateType = regimeEnhanced.regime === 'trending' ? 'REGIME_TRENDING_BLOCK' : 'REGIME_RANGING_BLOCK';
+          perSymbolGateAttribution.set(symbol, { gate: gateType, details: regimeEnhanced.reason });
           await logRejectionWithAI(
             supabase,
             userId,
@@ -1764,6 +1809,7 @@ serve(async (req) => {
         
         if (isContinuationSetup && !regimeEnhanced.allowedSetups.includes('continuation')) {
           rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { gate: 'REGIME_CONTINUATION_BLOCK', details: `regimeScore=${regimeEnhanced.regimeScore}` });
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} REGIME GATE: Continuation blocked (regimeScore=${regimeEnhanced.regimeScore} < ${REGIME_SCORE_PARAMS.BLOCK_CONTINUATION_BELOW})`);
           await logRejectionWithAI(
             supabase,
@@ -1798,6 +1844,7 @@ serve(async (req) => {
         // BLOCK: High reversal risk - skip this signal entirely
         if (unifiedReversal.decision === "BLOCK") {
           rejectedByReversalRisk++;
+          perSymbolGateAttribution.set(symbol, { gate: 'UNIFIED_REVERSAL_BLOCK', details: `score=${unifiedReversal.score}/100` });
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REJECTION} Unified Reversal BLOCK (${unifiedReversal.score}/100) - ${unifiedReversal.reasons.slice(0, 3).join(", ")}`);
           await logRejectionWithAI(
             supabase,
@@ -2219,7 +2266,9 @@ serve(async (req) => {
             logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
           } else {
             rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { gate: 'HTF_EXTREME_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking SHORT at 4h oversold (StochRSI K=${stochRsiK4h.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK}, %B=${percentB.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK})`);
+
             if (!canBypassHTFGate) {
               logger.forSymbol(symbol).debug(`   Bypass check failed: ADX=${adx.toFixed(1)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX}? rising=${adxRisingForBypass}, reversal=${unifiedReversal.score}<${STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE}?, TFsAligned=${allTimeframesAligned}, exhausted=${isExhausted}`);
             }
@@ -2264,7 +2313,9 @@ serve(async (req) => {
             logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
           } else {
             rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { gate: 'HTF_EXTREME_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking LONG at 4h overbought (StochRSI K=${stochRsiK4h.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK}, %B=${percentB.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK})`);
+
             if (!canBypassHTFGate) {
               logger.forSymbol(symbol).debug(`   Bypass check failed: ADX=${adx.toFixed(1)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX}? rising=${adxRisingForBypass}, reversal=${unifiedReversal.score}<${STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE}?, TFsAligned=${allTimeframesAligned}, exhausted=${isExhausted}`);
             }
@@ -2851,6 +2902,7 @@ serve(async (req) => {
             } else {
               // Squeeze conditions not met - reject with ADX reason + squeeze failure reasons
               rejectedByHardGates++;
+              perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW_NO_SQUEEZE', details: `ADX=${adx.toFixed(1)}, squeeze failed` });
               await logRejectionWithAI(
                 supabase, userId, symbol,
                 `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.MINIMUM}) - squeeze breakout not valid: ${squeezeResult.reasons.join(", ")}`,
@@ -2886,6 +2938,7 @@ serve(async (req) => {
           } else {
             // ADX < 18: No squeeze exception possible
             rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW', details: `ADX=${adx.toFixed(1)}<18` });
             await logRejectionWithAI(
               supabase, userId, symbol,
               `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.SQUEEZE_MINIMUM}) - no trend strength, below squeeze minimum`,
@@ -2936,6 +2989,7 @@ serve(async (req) => {
         
         if (!momentumPasses) {
           rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW', details: `Momentum=${momentumState}, ADX=${adx.toFixed(1)}<28` });
           await logRejectionWithAI(
             supabase, userId, symbol,
             `HARD GATE: No momentum confirmation (state=${momentumState}, confirms=${momentumConfirms}, ADX=${adx.toFixed(1)} < 28)`,
@@ -3151,6 +3205,7 @@ serve(async (req) => {
           const passesNeutralGate = conf4hForGate >= 70 || (is1hDirectional && conf1hForGate >= 65);
           if (!passesNeutralGate) {
             rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { gate: 'NEUTRAL_4H_LOW_CONFIDENCE', details: `4h=${conf4hForGate.toFixed(0)}%, 1h=${conf1hForGate.toFixed(0)}%` });
             await logRejectionWithAI(
               supabase, userId, symbol,
               `HARD GATE: Neutral 4h requires 70%+ confidence OR directional 1h with 65%+ (4h=${trend4hForNeutralGate} ${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`,
@@ -3192,6 +3247,7 @@ serve(async (req) => {
             const macdReason = hasMacdDivergence 
               ? "MACD divergence detected" 
               : "MACD direction misaligned with trade";
+            perSymbolGateAttribution.set(symbol, { gate: 'MACD_MISALIGNED', details: macdReason });
             await logRejectionWithAI(
               supabase, userId, symbol,
               `HARD GATE: ${macdReason} (ADX=${adx.toFixed(1)} < ${ADX_THRESHOLDS.EXCEPTIONAL} for override)`,
@@ -3260,6 +3316,7 @@ serve(async (req) => {
             : microTrend?.hasMicroTrend === false 
               ? "not detected"
               : `insufficient (align=${microTrend?.alignment}, persist=${microTrend?.persistence}, volOK=${microTrend?.volumeConfirmed})`;
+          perSymbolGateAttribution.set(symbol, { gate: 'HTF_NOT_ALIGNED', details: `conf=${confidence}%, 1h=${confidence1h}%` });
           await logRejectionWithAI(
             supabase, userId, symbol,
             `HARD GATE: HTF not aligned, confidence too low, 1h not strong, and micro-trend ${microTrendInfo}`,
@@ -3288,6 +3345,7 @@ serve(async (req) => {
         // RELAXED: Allow if ADX >= 28 (strong trend exception) instead of 30
         if (confidence >= 60 && confidence < 70 && adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION) {
           rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { gate: 'CONFIDENCE_DEAD_ZONE', details: `conf=${confidence}%, ADX=${adx.toFixed(1)}` });
           await logRejectionWithAI(
             supabase, userId, symbol,
             `HARD GATE: Confidence dead zone (${confidence}% in 60-69 range with ADX=${adx.toFixed(1)} < ${ADX_THRESHOLDS.STRONG_TREND_EXCEPTION})`,
@@ -3340,6 +3398,7 @@ serve(async (req) => {
         // GATE: Must have at least 1 strategy with directional support
         if (strategiesWithDirectionalSupport === 0) {
           rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { gate: 'NO_STRATEGY_SUPPORT', details: `${tradeDirectionForGate} trend` });
           await logRejectionWithAI(
             supabase, userId, symbol,
             `HARD GATE: No strategy supports ${tradeDirectionForGate} trend direction`,
@@ -3361,6 +3420,7 @@ serve(async (req) => {
         if (strategiesWithConditionBasis === 0 && !hasStrongTrendException) {
           rejectedByHardGates++;
           strongTrendExceptionNotApplicable++;
+          perSymbolGateAttribution.set(symbol, { gate: 'NO_CONDITION_STRATEGY', details: `${strategiesWithDirectionalSupport} trend-followers, ADX=${adx.toFixed(1)}` });
           await logRejectionWithAI(
             supabase, userId, symbol,
             `HARD GATE: No condition-based strategy for ${tradeDirectionForGate} (${strategiesWithDirectionalSupport} trend-followers only). Strong Trend Exception not met: ADX=${adx.toFixed(1)} (need ≥35), momentum=${momentum?.state}/${momentum?.confirms}, HTF=${isAligned}`,
@@ -4430,6 +4490,25 @@ serve(async (req) => {
     }
 
     logger.summary(`${totalSignalsGenerated} signals | Rejected: hardGates=${rejectedByHardGates} regime=${rejectedByRegime} reversal=${rejectedByReversalRisk} stochRsiExtreme=${rejectedByStochRsiExtreme} quality=${rejectedByQuality} strategy=${rejectedByStrategy} | StrongTrendException: used=${strongTrendExceptionUsed} notApplicable=${strongTrendExceptionNotApplicable}`);
+    
+    // ===== PER-SYMBOL GATE ATTRIBUTION LOG =====
+    // Log which specific gate blocked each symbol for easy debugging
+    if (perSymbolGateAttribution.size > 0) {
+      // Group symbols by gate type for a concise summary
+      const gateGroups = new Map<GateType, string[]>();
+      perSymbolGateAttribution.forEach((value, symbol) => {
+        const existing = gateGroups.get(value.gate) || [];
+        existing.push(`${symbol}(${value.details})`);
+        gateGroups.set(value.gate, existing);
+      });
+      
+      // Log each gate type with its symbols
+      logger.info(`${LOG_CATEGORIES.GATE} === PER-SYMBOL GATE ATTRIBUTION ===`);
+      gateGroups.forEach((symbols, gate) => {
+        logger.info(`${LOG_CATEGORIES.GATE} ${gate}: ${symbols.join(', ')}`);
+      });
+      logger.info(`${LOG_CATEGORIES.GATE} ===================================`);
+    }
 
     return new Response(JSON.stringify({
       signals,
@@ -4443,7 +4522,12 @@ serve(async (req) => {
         byStochRsiExtreme: rejectedByStochRsiExtreme,
         byQuality: rejectedByQuality,
         byStrategy: rejectedByStrategy,
+        byHardGates: rejectedByHardGates,
       },
+      // Per-symbol attribution for API response
+      perSymbolAttribution: Object.fromEntries(
+        Array.from(perSymbolGateAttribution.entries()).map(([sym, val]) => [sym, val])
+      ),
       strongTrendException: {
         used: strongTrendExceptionUsed,
         notApplicable: strongTrendExceptionNotApplicable,
