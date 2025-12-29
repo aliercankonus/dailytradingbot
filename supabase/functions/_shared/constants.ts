@@ -915,7 +915,7 @@ export const STRATEGY_SPECIFIC_CONSTRAINTS = {
     // StochRSI must be above this (not oversold - bounce risk) - NORMAL mode
     MIN_STOCHRSI_K: 30,
     // STRONG TREND EXCEPTION: When ADX >= this, allow lower StochRSI
-    STRONG_TREND_ADX_THRESHOLD: 35,
+    STRONG_TREND_ADX_THRESHOLD: 30,
     // Minimum StochRSI allowed even in strong trend mode (absolute floor)
     STRONG_TREND_MIN_STOCHRSI_K: 10,
     // Require StochRSI falling (K < D) for strong trend exception
@@ -933,7 +933,7 @@ export const STRATEGY_SPECIFIC_CONSTRAINTS = {
     // StochRSI must be below this (not overbought - reversal risk) - NORMAL mode
     MAX_STOCHRSI_K: 70,
     // STRONG TREND EXCEPTION: When ADX >= this, allow higher StochRSI
-    STRONG_TREND_ADX_THRESHOLD: 35,
+    STRONG_TREND_ADX_THRESHOLD: 30,
     // Maximum StochRSI allowed even in strong trend mode (absolute ceiling)
     STRONG_TREND_MAX_STOCHRSI_K: 90,
     // Require StochRSI rising (K > D) for strong trend exception
