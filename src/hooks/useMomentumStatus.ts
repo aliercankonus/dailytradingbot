@@ -107,9 +107,10 @@ export const useMomentumStatus = () => {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: MOMENTUM_STATUS_QUERY_KEY,
     queryFn: fetchMomentumForSymbols,
-    staleTime: 60000, // Cache data for 60 seconds
+    staleTime: 30000, // Cache data for 30 seconds
     gcTime: 300000, // Keep in cache for 5 minutes
     refetchOnWindowFocus: false,
+    refetchInterval: 60000, // Auto-refresh every 60 seconds (aligned with signal rejections)
   });
 
   return { 
