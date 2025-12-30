@@ -59,6 +59,8 @@ interface ScoreBreakdown {
   orderFlow: { score: number; max: number };
   confidencePenalty: number;
   directionBonus: number;
+  fakeBreakoutPenalty: number;
+  genuineMomentumBonus: number;
   subtotal: number;
   total: number;
   minRequired: number;
@@ -67,7 +69,7 @@ interface ScoreBreakdown {
 const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
   if (!breakdown) return null;
   
-  // Parse format like "ADX:22/25 MOM:0/20 ALIGN:12/20 TECH:10/15 ENTRY:12/25 CONF_PEN:-4 DIR_BONUS:+3"
+  // Parse format like "ADX:22/25 MOM:0/20 ALIGN:12/20 TECH:10/15 ENTRY:12/25 CONF_PEN:-4 DIR_BONUS:+3 FAKE:-8 GMOM:+5"
   const pattern = /(\w+):(-?\d+)\/(\d+)/g;
   const scores: Record<string, { score: number; max: number }> = {};
   let match;
@@ -91,9 +93,17 @@ const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
   const orderFlowScore = ofMatch ? parseInt(ofMatch[1]) : 0;
   const orderFlowMax = ofMatch && ofMatch[2] ? parseInt(ofMatch[2]) : 15;
   
+  // Parse FAKE:-8 format (fake breakout penalty)
+  const fakeMatch = breakdown.match(/FAKE:(-?\d+)/);
+  const fakeBreakoutPenalty = fakeMatch ? parseInt(fakeMatch[1]) : 0;
+  
+  // Parse GMOM:+5 format (genuine momentum bonus)
+  const gmomMatch = breakdown.match(/GMOM:\+?(-?\d+)/);
+  const genuineMomentumBonus = gmomMatch ? parseInt(gmomMatch[1]) : 0;
+  
   if (Object.keys(scores).length === 0 && !ofMatch) return null;
   
-  // Use directly parsed orderFlowScore instead of scores.of which may not be parsed
+  // Calculate subtotal from base components
   const subtotal = (scores.adx?.score ?? 0) + (scores.mom?.score ?? 0) + (scores.align?.score ?? 0) + (scores.tech?.score ?? 0) + (scores.entry?.score ?? 0) + (scores.vol?.score ?? 0) + orderFlowScore;
   
   return {
@@ -106,8 +116,10 @@ const parseBreakdown = (breakdown: string): ScoreBreakdown | null => {
     orderFlow: scores.of || { score: orderFlowScore, max: orderFlowMax },
     confidencePenalty,
     directionBonus,
+    fakeBreakoutPenalty,
+    genuineMomentumBonus,
     subtotal,
-    total: subtotal + confidencePenalty + directionBonus,
+    total: subtotal + confidencePenalty + directionBonus + fakeBreakoutPenalty + genuineMomentumBonus,
     minRequired: 50,
   };
 };
@@ -396,7 +408,9 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
   const isPassing = totalScore >= minRequired;
   const hasConfidencePenalty = breakdown && breakdown.confidencePenalty !== 0;
   const hasDirectionBonus = breakdown && breakdown.directionBonus > 0;
-  
+  const hasFakeBreakoutPenalty = breakdown && breakdown.fakeBreakoutPenalty !== 0;
+  const hasGenuineMomentumBonus = breakdown && breakdown.genuineMomentumBonus > 0;
+  const hasAnyAdjustments = hasConfidencePenalty || hasDirectionBonus || hasFakeBreakoutPenalty || hasGenuineMomentumBonus;
   return (
     <div className="space-y-2 p-2 bg-muted/30 rounded-md">
       {/* Total Score Header */}
@@ -423,6 +437,8 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
                     {breakdown.adx.score} + {breakdown.momentum.score} + {breakdown.alignment.score} + {breakdown.technical.score} + {breakdown.entry.score} + {breakdown.volume.score} + {breakdown.orderFlow.score}
                     {hasConfidencePenalty && ` ${breakdown.confidencePenalty >= 0 ? '+' : ''}${breakdown.confidencePenalty}`}
                     {hasDirectionBonus && ` +${breakdown.directionBonus}`}
+                    {hasFakeBreakoutPenalty && ` ${breakdown.fakeBreakoutPenalty}`}
+                    {hasGenuineMomentumBonus && ` +${breakdown.genuineMomentumBonus}`}
                     {' = '}{totalScore}
                   </p>
                 </div>
@@ -497,7 +513,7 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
           </div>
           
           {/* Subtotal, Bonus/Penalty section */}
-          {(hasConfidencePenalty || hasDirectionBonus) && (
+          {hasAnyAdjustments && (
             <div className="pt-1 mt-1 border-t border-border/30 space-y-0.5">
               <div className="flex items-center justify-between text-[10px]">
                 <span className="text-muted-foreground">Subtotal:</span>
@@ -537,6 +553,42 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
                     </Tooltip>
                   </TooltipProvider>
                   <span className="font-mono text-red-400">{breakdown.confidencePenalty}</span>
+                </div>
+              )}
+              {hasFakeBreakoutPenalty && (
+                <div className="flex items-center justify-between text-[10px]">
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-red-400 cursor-help flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3" />
+                          Fake Breakout:
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs max-w-[180px]">
+                        <p>-8 penalty when MACD is expanding but ADX is falling, indicating potential fake breakout risk.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <span className="font-mono text-red-400">{breakdown.fakeBreakoutPenalty}</span>
+                </div>
+              )}
+              {hasGenuineMomentumBonus && (
+                <div className="flex items-center justify-between text-[10px]">
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-green-400 cursor-help flex items-center gap-1">
+                          <Zap className="h-3 w-3" />
+                          Genuine Momentum:
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs max-w-[180px]">
+                        <p>+5 bonus when both MACD is expanding AND ADX is rising, indicating genuine momentum buildup.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <span className="font-mono text-green-400">+{breakdown.genuineMomentumBonus}</span>
                 </div>
               )}
               <div className="flex items-center justify-between text-[10px] font-medium pt-0.5">

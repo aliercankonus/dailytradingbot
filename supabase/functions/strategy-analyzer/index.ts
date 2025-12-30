@@ -3884,17 +3884,23 @@ serve(async (req) => {
           directionBonus: directionBonus,          // +3 for SHORT signals
         };
 
-        const { score: rawQualityScore, breakdown } = calculateQualityScore(qualityFactors);
+        const { score: rawQualityScore, breakdown: rawBreakdown } = calculateQualityScore(qualityFactors);
         
         // ============= PHASE 4: Apply Fake Breakout Penalty and Genuine Momentum Bonus =============
         const qualityScore = Math.max(0, Math.min(100, rawQualityScore + fakeBreakoutPenalty + genuineMomentumBonus));
         
+        // Build final breakdown string including adjustments
+        let breakdown = rawBreakdown;
+        if (fakeBreakoutPenalty !== 0) {
+          breakdown += ` FAKE:${fakeBreakoutPenalty}`;
+        }
+        if (genuineMomentumBonus !== 0) {
+          breakdown += ` GMOM:+${genuineMomentumBonus}`;
+        }
+        
         // Log if adjustments were applied
         if (fakeBreakoutPenalty !== 0 || genuineMomentumBonus !== 0) {
-          const adjustments = [];
-          if (fakeBreakoutPenalty !== 0) adjustments.push(`fakeBreakout:${fakeBreakoutPenalty}`);
-          if (genuineMomentumBonus !== 0) adjustments.push(`genuineMomentum:+${genuineMomentumBonus}`);
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Quality adjusted: ${rawQualityScore}→${qualityScore} (${adjustments.join(', ')})`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Quality adjusted: ${rawQualityScore}→${qualityScore} (FAKE:${fakeBreakoutPenalty}, GMOM:+${genuineMomentumBonus})`);
         }
         
         // ===== SCENARIO 6 FINDING 7: DYNAMIC POSITION SIZE =====
