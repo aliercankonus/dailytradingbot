@@ -410,6 +410,25 @@ const BUILT_IN_TEMPLATES = [
     exit_conditions: [{ indicator: 'RSI', operator: 'above', value: '70', compareToIndicator: false }],
     indicators: [{ type: 'RSI', name: 'RSI', period: 14 }],
     risk_settings: { stopLossPercent: 2, takeProfitPercent: 4, positionSizePercent: 1.5 }
+  },
+  // NEW: Strong 1h Trend Follower - captures trending moves when 1h is directional but 4h is neutral
+  // Uses relaxed momentum state requirements and reduced ADX threshold when 1h confidence is high
+  {
+    id: 'builtin-strong-1h-trend',
+    name: 'Strong 1h Trend Follower',
+    signal_direction: 'trend',  // Follow 1h trend direction
+    entry_conditions: [
+      { indicator: 'RSI', operator: 'above', value: '45', compareToIndicator: false },
+      { indicator: 'RSI', operator: 'below', value: '55', compareToIndicator: false }
+    ],
+    exit_conditions: [{ indicator: 'RSI', operator: 'above', value: '65', compareToIndicator: false }],
+    indicators: [{ type: 'RSI', name: 'RSI', period: 14 }],
+    risk_settings: { 
+      stopLossPercent: 2, 
+      takeProfitPercent: 3.5, 
+      positionSizePercent: 1,  // Smaller position for these "in-between" setups
+      priority: 4  // Lower priority than confirmed trend strategies
+    }
   }
 ];
 
@@ -4039,8 +4058,14 @@ serve(async (req) => {
           score: number;
           indicatorValues: Map<string, number>;
           signalType: "long" | "short";
+          positionSizeMultiplier?: number;  // Added for convergence entries
+          convergenceEntry?: boolean;       // Flag for logging
         }
         const candidates: StrategyCandidate[] = [];
+        
+        // IMPROVEMENT 4: Track strategies that pass conditions but fail secondary filters
+        // Used for multi-strategy convergence fallback
+        const passedConditionsButFiltered: { name: string; reason: string; direction: "long" | "short" }[] = [];
 
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Evaluating ${allStrategies.length} strategies`);
         
@@ -4100,6 +4125,17 @@ serve(async (req) => {
               const isTrendFollowingType = strategyType === 'TREND_FOLLOWING';
               const is4hDirectional = htfTrend4h === "bullish" || htfTrend4h === "bearish";
               
+              // Pre-calculate intended signal type for convergence tracking
+              let intendedSignalType: "long" | "short" | null = null;
+              if (strategyDirection === 'long') {
+                if (tradeDirection !== 'bearish') intendedSignalType = 'long';
+              } else if (strategyDirection === 'short') {
+                if (tradeDirection !== 'bullish') intendedSignalType = 'short';
+              } else {
+                if (tradeDirection === 'bullish') intendedSignalType = 'long';
+                else if (tradeDirection === 'bearish') intendedSignalType = 'short';
+              }
+              
               // ============= IMPROVEMENT 4: STRATEGY-SPECIFIC CONSTRAINTS =============
               // EMA Death Cross needs context-awareness to prevent signals in inappropriate conditions
               const fakeBreakoutRisk = trendData.momentum?.fakeBreakoutRisk ?? false;
@@ -4109,6 +4145,15 @@ serve(async (req) => {
                 const constraints = STRATEGY_SPECIFIC_CONSTRAINTS.EMA_DEATH_CROSS;
                 const stochRsiFalling = stochRsiK4h < stochRsiD4h;
                 const isStrongTrendMode = adx >= constraints.STRONG_TREND_ADX_THRESHOLD;
+                
+                // IMPROVEMENT 2: Get 1h confidence for ADX relaxation
+                const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
+                const is1hVeryConfident = conf1h >= 70;
+                const is1hBearish = htfTrend1h === "bearish";
+                
+                // Allow reduced ADX (22 vs 25) when 1h is very confident AND aligned with SHORT
+                const useReducedAdx = is1hVeryConfident && is1hBearish;
+                const effectiveMinAdx = useReducedAdx ? 22 : constraints.MIN_ADX;
                 
                 // Determine effective thresholds based on trend strength
                 const effectiveMinStochRsi = isStrongTrendMode ? constraints.STRONG_TREND_MIN_STOCHRSI_K : constraints.MIN_STOCHRSI_K;
@@ -4128,10 +4173,11 @@ serve(async (req) => {
                   continue;
                 }
                 
-                // ADX requirement: >= 25 for strong trend confirmation
-                if (adx < constraints.MIN_ADX) {
+                // ADX requirement with 1h confidence override
+                if (adx < effectiveMinAdx) {
                   rejectedByStrategy++;
-                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - ADX ${adx.toFixed(1)} < ${constraints.MIN_ADX}`);
+                  const overrideNote = useReducedAdx ? ` (relaxed from ${constraints.MIN_ADX} due to 1h conf ${conf1h}%)` : '';
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - ADX ${adx.toFixed(1)} < ${effectiveMinAdx}${overrideNote}`);
                   continue;
                 }
                 
@@ -4150,7 +4196,8 @@ serve(async (req) => {
                 }
                 
                 const modeLabel = isStrongTrendMode ? ' [STRONG TREND MODE]' : '';
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed${modeLabel} (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, falling=${stochRsiFalling})`);
+                const adxRelaxLabel = useReducedAdx ? ' [ADX RELAXED - 1h conf]' : '';
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed${modeLabel}${adxRelaxLabel} (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, falling=${stochRsiFalling})`);
               }
               
               // EMA Golden Cross validation (LONG signals)
@@ -4158,6 +4205,15 @@ serve(async (req) => {
                 const constraints = STRATEGY_SPECIFIC_CONSTRAINTS.EMA_GOLDEN_CROSS;
                 const stochRsiRising = stochRsiK4h > stochRsiD4h;
                 const isStrongTrendMode = adx >= constraints.STRONG_TREND_ADX_THRESHOLD;
+                
+                // IMPROVEMENT 2: Get 1h confidence for ADX relaxation
+                const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
+                const is1hVeryConfident = conf1h >= 70;
+                const is1hBullish = htfTrend1h === "bullish";
+                
+                // Allow reduced ADX (22 vs 25) when 1h is very confident AND aligned with LONG
+                const useReducedAdx = is1hVeryConfident && is1hBullish;
+                const effectiveMinAdx = useReducedAdx ? 22 : constraints.MIN_ADX;
                 
                 // Determine effective thresholds based on trend strength
                 const effectiveMaxStochRsi = isStrongTrendMode ? constraints.STRONG_TREND_MAX_STOCHRSI_K : constraints.MAX_STOCHRSI_K;
@@ -4177,10 +4233,11 @@ serve(async (req) => {
                   continue;
                 }
                 
-                // ADX requirement: >= 25 for strong trend confirmation
-                if (adx < constraints.MIN_ADX) {
+                // ADX requirement with 1h confidence override
+                if (adx < effectiveMinAdx) {
                   rejectedByStrategy++;
-                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - ADX ${adx.toFixed(1)} < ${constraints.MIN_ADX}`);
+                  const overrideNote = useReducedAdx ? ` (relaxed from ${constraints.MIN_ADX} due to 1h conf ${conf1h}%)` : '';
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - ADX ${adx.toFixed(1)} < ${effectiveMinAdx}${overrideNote}`);
                   continue;
                 }
                 
@@ -4199,7 +4256,8 @@ serve(async (req) => {
                 }
                 
                 const modeLabel = isStrongTrendMode ? ' [STRONG TREND MODE]' : '';
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed${modeLabel} (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, rising=${stochRsiRising})`);
+                const adxRelaxLabel = useReducedAdx ? ' [ADX RELAXED - 1h conf]' : '';
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed${modeLabel}${adxRelaxLabel} (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, rising=${stochRsiRising})`);
               }
               
               if (isMomentumType && !is4hDirectional) {
@@ -4207,22 +4265,33 @@ serve(async (req) => {
                 const is1hDirectional = htfTrend1h === "bullish" || htfTrend1h === "bearish";
                 const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
                 const is1hConfident = conf1h >= 60;
+                const is1hVeryConfident = conf1h >= 70;  // IMPROVEMENT: Very high 1h confidence
                 const isMomentumBuilding = earlyMomentumScore >= MOMENTUM_THRESHOLDS.MIN_SCORE;
                 const momentumState = momentum?.state || "unknown";
-                const isMomentumStateGood = momentumState === "confirmed" || momentumState === "building";
+                
+                // IMPROVEMENT 1: Allow "mixed" momentum state when 1h confidence is very high (>=70%)
+                // The strong 1h trend itself is the signal - we don't need momentum state confirmation
+                const isMomentumStateGood = momentumState === "confirmed" || momentumState === "building" || 
+                  (momentumState === "mixed" && is1hVeryConfident);
                 
                 // Allow if: 1h is directional with >= 60% confidence AND momentum score >= threshold
                 const allowMomentumEntry = is1hDirectional && is1hConfident && isMomentumBuilding && isMomentumStateGood;
                 
                 if (allowMomentumEntry) {
-                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}" [${strategyType}]: MOMENTUM ALLOWED - 4h neutral but 1h ${htfTrend1h} (${conf1h}%), momentum ${momentumState} (score=${earlyMomentumScore})`);
+                  const mixedOverride = momentumState === "mixed" ? " [MIXED STATE OVERRIDE - 1h conf >= 70%]" : "";
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}" [${strategyType}]: MOMENTUM ALLOWED - 4h neutral but 1h ${htfTrend1h} (${conf1h}%), momentum ${momentumState} (score=${earlyMomentumScore})${mixedOverride}`);
                   // Continue with strategy evaluation - don't skip
                 } else {
                   const skipReason = !is1hDirectional ? `1h neutral` : 
                     !is1hConfident ? `1h conf ${conf1h}% < 60%` :
                     !isMomentumBuilding ? `momentum score ${earlyMomentumScore} < ${MOMENTUM_THRESHOLDS.MIN_SCORE}` :
-                    `momentum state ${momentumState}`;
+                    `momentum state ${momentumState} (need confirmed/building, or mixed with 1h conf >= 70%)`;
                   logger.forSymbol(symbol).warn(`"${strategy.name}" [${strategyType}]: SKIP - momentum strategy, 4h ${htfTrend4h}, ${skipReason}`);
+                  
+                  // Track for convergence fallback - strategy passed conditions but failed momentum filter
+                  if (intendedSignalType) {
+                    passedConditionsButFiltered.push({ name: strategy.name, reason: `momentum: ${skipReason}`, direction: intendedSignalType });
+                  }
                   continue;
                 }
               }
@@ -4278,17 +4347,83 @@ serve(async (req) => {
           }
         }
 
+        // ============= IMPROVEMENT 4: MULTI-STRATEGY CONVERGENCE FALLBACK =============
+        // When no single strategy passes all filters, but multiple agree on conditions
+        // This captures setups that pass hard gates and quality checks but fail strategy-specific filters
+        const CONVERGENCE_MIN_STRATEGIES = 2;
+        const CONVERGENCE_MIN_QUALITY = 60;
+        const CONVERGENCE_MIN_1H_CONF = 65;
+        const CONVERGENCE_MAX_REVERSAL = 45;
+        const CONVERGENCE_POSITION_MULT = 0.50;
+        
+        if (candidates.length === 0 && passedConditionsButFiltered.length >= CONVERGENCE_MIN_STRATEGIES) {
+          // Check if convergence conditions are met
+          const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
+          const reversalResult = calculateUnifiedReversalScore(trendData, tradeDirection === 'bullish' ? 'long' : 'short', 'unknown');
+          
+          // All filtered strategies must agree on direction
+          const uniqueDirections = new Set(passedConditionsButFiltered.map(s => s.direction));
+          const isDirectionConsensus = uniqueDirections.size === 1;
+          const consensusDirection = passedConditionsButFiltered[0].direction;
+          
+          const canUseConvergence = 
+            qualityScore >= CONVERGENCE_MIN_QUALITY &&
+            conf1h >= CONVERGENCE_MIN_1H_CONF &&
+            reversalResult.score < CONVERGENCE_MAX_REVERSAL &&
+            isDirectionConsensus;
+          
+          if (canUseConvergence) {
+            // Create a convergence candidate
+            const convergenceStrategy = {
+              id: 'convergence-entry',
+              name: `Multi-Strategy Convergence (${passedConditionsButFiltered.map(s => s.name).join(' + ')})`,
+              risk_settings: {
+                stopLossPercent: 2.5,
+                takeProfitPercent: 4,
+                positionSizePercent: 1,  // Will be multiplied by CONVERGENCE_POSITION_MULT
+                priority: 3
+              }
+            };
+            
+            // Get indicator values from the first filtered strategy's evaluation
+            // (We don't have them stored, so use empty map - signal generation will recalculate)
+            const convergenceIndicators = new Map<string, number>();
+            convergenceIndicators.set("Price", parseFloat(marketDataMap.get(symbol)?.lastPrice || "0"));
+            
+            candidates.push({
+              strategy: convergenceStrategy,
+              score: qualityScore,
+              indicatorValues: convergenceIndicators,
+              signalType: consensusDirection,
+              positionSizeMultiplier: CONVERGENCE_POSITION_MULT,
+              convergenceEntry: true
+            });
+            
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} CONVERGENCE ENTRY: ${passedConditionsButFiltered.length} strategies agreed (${passedConditionsButFiltered.map(s => s.name).join(', ')}), direction=${consensusDirection}, quality=${qualityScore}, 1h conf=${conf1h}%`);
+          } else {
+            const blockReason = qualityScore < CONVERGENCE_MIN_QUALITY ? `quality ${qualityScore} < ${CONVERGENCE_MIN_QUALITY}` :
+              conf1h < CONVERGENCE_MIN_1H_CONF ? `1h conf ${conf1h}% < ${CONVERGENCE_MIN_1H_CONF}%` :
+              reversalResult.score >= CONVERGENCE_MAX_REVERSAL ? `reversal ${reversalResult.score} >= ${CONVERGENCE_MAX_REVERSAL}` :
+              `no direction consensus`;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} CONVERGENCE blocked: ${passedConditionsButFiltered.length} strategies agreed but ${blockReason}`);
+          }
+        }
+
         if (candidates.length === 0) {
           rejectedByStrategy++;
-          perSymbolGateAttribution.set(symbol, { gate: 'NO_STRATEGY_MATCH', details: `0/${allStrategies.length} conditions met` });
+          const convergenceNote = passedConditionsButFiltered.length >= CONVERGENCE_MIN_STRATEGIES 
+            ? ` (${passedConditionsButFiltered.length} passed conditions but failed convergence check)` 
+            : '';
+          perSymbolGateAttribution.set(symbol, { gate: 'NO_STRATEGY_MATCH', details: `0/${allStrategies.length} conditions met${convergenceNote}` });
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `No strategy conditions met (quality passed: ${qualityScore}/100)`,
+            `No strategy conditions met (quality passed: ${qualityScore}/100)${convergenceNote}`,
             {
               gate: "NO_STRATEGY_MATCH",
               qualityScore, breakdown,
               strategiesEvaluated: allStrategies.length,
               regime: regime.regime,
+              passedConditionsButFiltered: passedConditionsButFiltered.length > 0 ? passedConditionsButFiltered : undefined
             },
             trendData,
             false,
