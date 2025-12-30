@@ -1731,6 +1731,15 @@ serve(async (req) => {
           earlyMomentumPositionMultiplier = EARLY_MOMENTUM_ENTRY_PARAMS.POSITION_SIZE_MULTIPLIER;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} EARLY MOMENTUM ENTRY: Position size reduced to ${(earlyMomentumPositionMultiplier * 100).toFixed(0)}%`);
         }
+        
+        // ============= PRICE ACTION MOMENTUM POSITION SIZING =============
+        // Apply 75% position size reduction for price action momentum entries (neutral TFs but strong price move)
+        let priceActionMomentumPositionMultiplier = 1.0;
+        if (directionResult.source === "price-action-momentum") {
+          priceActionMomentumPositionMultiplier = MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER;
+          const priceMove = trendData.priceActionMomentum?.movePercent || 0;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} PRICE ACTION MOMENTUM: ${priceMove.toFixed(2)}% move detected - position size ${(priceActionMomentumPositionMultiplier * 100).toFixed(0)}%`);
+        }
 
         // ============= PHASE 4 (9 FINDINGS): ENHANCED MARKET REGIME DETECTION =============
         // Finding 2 & 5: Use quantified regime score with graduated penalties
@@ -4498,6 +4507,18 @@ serve(async (req) => {
         if (isPullbackValid && pullbackPositionMultiplier < 1.0) {
           positionSizeMultiplier *= pullbackPositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Pullback entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 9: Apply early momentum position reduction (50%)
+        if (earlyMomentumPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= earlyMomentumPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Early momentum entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 10: Apply price action momentum position reduction (75%)
+        if (priceActionMomentumPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= priceActionMomentumPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Price action momentum entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
         // Final position size as percentage
