@@ -87,7 +87,7 @@ export const MOMENTUM_CONTINUATION_PARAMS = {
   // ===== STOCHRSI "NOT FALLING" GATE RELAXATION =====
   // Standard rule: Block SHORT if K < 10 and K >= D (not falling)
   // Exception: Allow if ADX >= this threshold and price action confirms
-  MIN_ADX_FOR_OVERRIDE: 25,
+  MIN_ADX_FOR_OVERRIDE: 22,  // Lowered from 25 to allow momentum in slightly weaker trends
   // Minimum 4h confidence for continuation override
   MIN_4H_CONFIDENCE: 60,
   // Position size multiplier when using this exception (reduced for safety)
