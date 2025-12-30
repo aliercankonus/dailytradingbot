@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 // ============= SHARED MODULES - Single source of truth =============
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, TIME_IN_EXTREME_PARAMS, MICRO_TREND_PARAMS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, TIME_IN_EXTREME_PARAMS, MICRO_TREND_PARAMS, MOMENTUM_CONTINUATION_PARAMS } from "../_shared/constants.ts";
 import { 
   calculateEMA, calculateEMAArray, calculateRSI, calculateRSIArray, calculateMACD,
   calculateStochasticRSI, calculateBarsAtExtreme, calculateATR, calculateHistoricalATRAvg,
@@ -811,6 +811,57 @@ serve(async (req) => {
       symLog.info(`${LOG_CATEGORIES.MARKET} TRENDING MARKET - ATR: ${atrPercent.toFixed(2)}% (relative: ${relativeATR.toFixed(2)}x), ADX: ${adx.toFixed(1)}`);
     }
 
+    // ============= PRICE ACTION MOMENTUM DETECTION =============
+    // Detect strong recent price movement that indicates trend continuation
+    // This helps identify opportunities even when lagging indicators show extremes
+    const lookbackCandles = Math.min(MOMENTUM_CONTINUATION_PARAMS.PRICE_MOVE_LOOKBACK_HOURS, prices1h.length - 1);
+    let priceActionMomentum: {
+      hasStrongMove: boolean;
+      direction: "bullish" | "bearish" | "neutral";
+      movePercent: number;
+      isStrongMove: boolean;
+      canOverrideNeutralAlignment: boolean;
+    } = {
+      hasStrongMove: false,
+      direction: "neutral",
+      movePercent: 0,
+      isStrongMove: false,
+      canOverrideNeutralAlignment: false,
+    };
+    
+    if (prices1h.length >= lookbackCandles + 1 && MOMENTUM_CONTINUATION_PARAMS.ENABLED) {
+      const currentClose = prices1h[prices1h.length - 1];
+      const lookbackClose = prices1h[prices1h.length - 1 - lookbackCandles];
+      const priceChange = currentClose - lookbackClose;
+      const priceChangePercent = (priceChange / lookbackClose) * 100;
+      const absMovePercent = Math.abs(priceChangePercent);
+      
+      // Check if move meets threshold
+      const meetsThreshold = absMovePercent >= MOMENTUM_CONTINUATION_PARAMS.PRICE_MOVE_THRESHOLD_PERCENT;
+      const meetsStrongThreshold = absMovePercent >= MOMENTUM_CONTINUATION_PARAMS.STRONG_MOVE_THRESHOLD_PERCENT;
+      
+      // Determine direction
+      const priceDirection = priceChange > 0 ? "bullish" : priceChange < 0 ? "bearish" : "neutral";
+      
+      // Check if can override neutral alignment (for momentum continuation at extremes)
+      const canOverride = MOMENTUM_CONTINUATION_PARAMS.OVERRIDE_NEUTRAL_ALIGNMENT &&
+        meetsThreshold &&
+        adx >= MOMENTUM_CONTINUATION_PARAMS.MIN_ADX_FOR_PRICE_ACTION;
+      
+      priceActionMomentum = {
+        hasStrongMove: meetsThreshold,
+        direction: priceDirection,
+        movePercent: Math.round(priceChangePercent * 100) / 100,
+        isStrongMove: meetsStrongThreshold,
+        canOverrideNeutralAlignment: canOverride,
+      };
+      
+      if (meetsThreshold) {
+        const moveType = meetsStrongThreshold ? "STRONG" : "MODERATE";
+        symLog.info(`${LOG_CATEGORIES.MOMENTUM} PRICE ACTION MOMENTUM: ${moveType} ${priceDirection.toUpperCase()} move of ${priceChangePercent.toFixed(2)}% in ${lookbackCandles}h (ADX=${adx.toFixed(1)}, canOverride=${canOverride})`);
+      }
+    }
+
     // Pullback detection
     let inPullback = false;
     let pullbackPercent = 0;
@@ -1049,6 +1100,14 @@ serve(async (req) => {
         adxSufficient: microTrend.adxSufficient,
         blocked: microTrend.blocked,
         blockReason: microTrend.blockReason,
+      },
+      // NEW: Price action momentum for catching continuation moves
+      priceActionMomentum: {
+        hasStrongMove: priceActionMomentum.hasStrongMove,
+        direction: priceActionMomentum.direction,
+        movePercent: priceActionMomentum.movePercent,
+        isStrongMove: priceActionMomentum.isStrongMove,
+        canOverrideNeutralAlignment: priceActionMomentum.canOverrideNeutralAlignment,
       },
     };
 

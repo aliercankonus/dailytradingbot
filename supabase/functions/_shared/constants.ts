@@ -59,20 +59,67 @@ export const STOCHRSI_THRESHOLDS = {
 
 // ============= PHASE 3: TIME-IN-EXTREME THRESHOLDS =============
 // Tracks consecutive bars at StochRSI extremes for exhaustion detection
+// UPDATED: Raised thresholds to allow more room for trend continuation
 export const TIME_IN_EXTREME_PARAMS = {
   // Threshold for "extreme" zone (K > 90 or K < 10)
   OVERBOUGHT_EXTREME: 90,
   OVERSOLD_EXTREME: 10,
-  // Minimum bars at extreme before penalty kicks in
-  MIN_BARS_FOR_PENALTY: 3,
-  // Bars at extreme levels for increasing penalties
-  MODERATE_BARS: 6,   // 6+ bars = +15 reversal score
-  HIGH_BARS: 9,       // 9+ bars = +25 reversal score
-  EXTREME_BARS: 12,   // 12+ bars = +35 reversal score (exhausted momentum)
+  // Minimum bars at extreme before penalty kicks in (RAISED from 3 to 5)
+  // Strong trends can stay at extremes longer without exhausting
+  MIN_BARS_FOR_PENALTY: 5,
+  // Bars at extreme levels for increasing penalties (RAISED from 6/9/12 to 8/12/16)
+  MODERATE_BARS: 8,   // 8+ bars = +15 reversal score (was 6)
+  HIGH_BARS: 12,      // 12+ bars = +25 reversal score (was 9)
+  EXTREME_BARS: 16,   // 16+ bars = +35 reversal score (exhausted momentum) (was 12)
   // Penalty scores for each level
   PENALTY_MODERATE: 15,
   PENALTY_HIGH: 25,
   PENALTY_EXTREME: 35,
+} as const;
+
+// ============= MOMENTUM CONTINUATION PARAMETERS =============
+// Allows catching trend continuation during strong moves even when StochRSI is at extremes
+// This addresses the issue of missing 3%+ price moves because StochRSI was already oversold/overbought
+export const MOMENTUM_CONTINUATION_PARAMS = {
+  // Enable momentum continuation exception
+  ENABLED: true,
+  
+  // ===== STOCHRSI "NOT FALLING" GATE RELAXATION =====
+  // Standard rule: Block SHORT if K < 10 and K >= D (not falling)
+  // Exception: Allow if ADX >= this threshold and price action confirms
+  MIN_ADX_FOR_OVERRIDE: 25,
+  // Minimum 4h confidence for continuation override
+  MIN_4H_CONFIDENCE: 60,
+  // Position size multiplier when using this exception (reduced for safety)
+  POSITION_SIZE_MULTIPLIER: 0.75,  // 75% of normal position
+  
+  // ===== PRICE ACTION MOMENTUM DETECTION =====
+  // If price dropped/rose this much in recent hours, consider trend continuation likely
+  PRICE_MOVE_THRESHOLD_PERCENT: 2.0,  // 2% move
+  PRICE_MOVE_LOOKBACK_HOURS: 6,       // Look back 6 hours (6 1h candles)
+  // Override neutral alignment when price action confirms direction
+  OVERRIDE_NEUTRAL_ALIGNMENT: true,
+  // ADX requirement for price action override
+  MIN_ADX_FOR_PRICE_ACTION: 22,
+  
+  // ===== EXHAUSTION SENSITIVITY (LOWERED) =====
+  // Require MORE bars at extreme before blocking (was 4, now 8)
+  MIN_BARS_AT_EXTREME_FOR_BLOCK: 8,
+  // Also require price divergence (price moving opposite to indicator) before blocking
+  REQUIRE_PRICE_DIVERGENCE_FOR_BLOCK: true,
+  
+  // ===== STRONG MOVE CONTINUATION =====
+  // For catching continuation during very strong moves
+  STRONG_MOVE_THRESHOLD_PERCENT: 2.5,  // 2.5% move in lookback period
+  STRONG_MOVE_MIN_ADX: 23,             // Minimum ADX for strong move exception
+  // Ignore StochRSI extremes if MACD histogram is expanding in trend direction
+  ALLOW_WITH_MACD_EXPANSION: true,
+  
+  // ===== SAFETY LIMITS =====
+  // Maximum continuation trades per symbol per day (prevents overexposure)
+  MAX_CONTINUATION_TRADES_PER_DAY: 1,
+  // Tighter stop loss multiplier for continuation entries at extremes
+  STOP_LOSS_MULTIPLIER: 1.5,  // 1.5x ATR instead of 2x
 } as const;
 
 export const RSI_THRESHOLDS = {

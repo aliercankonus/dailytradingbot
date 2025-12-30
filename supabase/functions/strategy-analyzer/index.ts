@@ -40,6 +40,9 @@ import {
   TREND_CONTINUATION_TIGHT_STOPS,
   // Pullback entry detection
   PULLBACK_DETECTION_PARAMS,
+  // NEW: Momentum continuation for catching strong moves
+  MOMENTUM_CONTINUATION_PARAMS,
+  TIME_IN_EXTREME_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -2570,20 +2573,67 @@ serve(async (req) => {
         // 4. Breakout or higher low pattern (price at/above upper BB or %B > 70)
         // 5. StochRSI is rising (K > D) - momentum still building
         if (intendedTradeDirection === "long" && isExtremeOverbought4h) {
+          // ============= MOMENTUM CONTINUATION EXCEPTION =============
+          // Allow LONG entries even when StochRSI is not rising if:
+          // 1. Price action shows strong recent upward movement (2%+ in 6h)
+          // 2. ADX confirms trend strength (>= 25)
+          // 3. 4h confidence is bullish (>= 60%)
+          // 4. No bearish divergence (price still making higher highs)
+          // This prevents missing continuation opportunities just because K <= D
+          const priceActionMomentumLong = trendData.priceActionMomentum;
+          const hasPriceActionMomentumUp = priceActionMomentumLong?.hasStrongMove && 
+            priceActionMomentumLong?.direction === "bullish" &&
+            Math.abs(priceActionMomentumLong?.movePercent || 0) >= MOMENTUM_CONTINUATION_PARAMS.PRICE_MOVE_THRESHOLD_PERCENT;
+          
+          const barsAtExtreme4hLong = trendData.stochasticRsi?.barsAtExtreme?.["4h"] || 0;
+          const notTrueExhaustionLong = barsAtExtreme4hLong < MOMENTUM_CONTINUATION_PARAMS.MIN_BARS_AT_EXTREME_FOR_BLOCK;
+          
+          const momentumContinuationAllowedLong = MOMENTUM_CONTINUATION_PARAMS.ENABLED &&
+            hasPriceActionMomentumUp &&
+            adx >= MOMENTUM_CONTINUATION_PARAMS.MIN_ADX_FOR_OVERRIDE &&
+            stochFilterTrend4h === "bullish" &&
+            stochFilterConf4h >= MOMENTUM_CONTINUATION_PARAMS.MIN_4H_CONFIDENCE &&
+            !hasBearishDivergence &&
+            notTrueExhaustionLong;
+          
           // MANDATORY: StochRSI must be rising (K > D) for any extreme overbought entry
-          if (!stochRsiRising) {
+          // EXCEPTION: Allow if momentum continuation conditions are met
+          if (!stochRsiRising && !momentumContinuationAllowedLong) {
             rejectedByStochRsiExtreme++;
             perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} not rising` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - StochRSI not rising at overbought (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
             await logRejectionWithAI(
               supabase, userId, symbol,
               `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought, StochRSI NOT rising (K <= D)`,
-              { stochRsiK4h, stochRsiD4h, stochRsiRising, gate: "STOCHRSI_NOT_RISING", direction: "long" },
+              { 
+                stochRsiK4h, stochRsiD4h, stochRsiRising, 
+                gate: "STOCHRSI_NOT_RISING", 
+                direction: "long",
+                priceActionMomentum: priceActionMomentumLong || null,
+                barsAtExtreme4h: barsAtExtreme4hLong,
+                momentumContinuationCheck: {
+                  enabled: MOMENTUM_CONTINUATION_PARAMS.ENABLED,
+                  hasPriceActionMomentumUp,
+                  adxSufficient: adx >= MOMENTUM_CONTINUATION_PARAMS.MIN_ADX_FOR_OVERRIDE,
+                  confidenceSufficient: stochFilterConf4h >= MOMENTUM_CONTINUATION_PARAMS.MIN_4H_CONFIDENCE,
+                  noDivergence: !hasBearishDivergence,
+                  notExhausted: notTrueExhaustionLong,
+                  result: momentumContinuationAllowedLong
+                }
+              },
               trendData,
               false,
               earlyOrderFlowAnalysis
             );
             continue;
+          }
+          
+          // If momentum continuation allowed, apply position size reduction and log
+          if (momentumContinuationAllowedLong && !stochRsiRising) {
+            reversalPositionMultiplier = Math.min(reversalPositionMultiplier, MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} MOMENTUM CONTINUATION: Allowing LONG at overbought (K=${stochRsiK4h.toFixed(1)}, K<=D) due to strong price action`);
+            logger.forSymbol(symbol).info(`   Price moved ${priceActionMomentumLong?.movePercent?.toFixed(2)}% ${priceActionMomentumLong?.direction}, ADX=${adx.toFixed(1)}, bars@extreme=${barsAtExtreme4hLong}`);
+            logger.forSymbol(symbol).info(`   Position size reduced to ${(MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER * 100).toFixed(0)}%`);
           }
           
           // MANDATORY: No bearish divergence allowed at extreme overbought
@@ -2754,20 +2804,66 @@ serve(async (req) => {
         // 4. Breakdown or lower high pattern (price at/below lower BB or %B < 30)
         // 5. StochRSI is falling (K < D) - not curling up
         if (intendedTradeDirection === "short" && isExtremeOversold4h) {
+          // ============= MOMENTUM CONTINUATION EXCEPTION =============
+          // Allow SHORT entries even when StochRSI is not falling if:
+          // 1. Price action shows strong recent downward movement (2%+ in 6h)
+          // 2. ADX confirms trend strength (>= 25)
+          // 3. 4h confidence is bearish (>= 60%)
+          // 4. No bullish divergence (price still making lower lows)
+          // This prevents missing continuation opportunities just because K >= D
+          const priceActionMomentum = trendData.priceActionMomentum;
+          const hasPriceActionMomentumDown = priceActionMomentum?.hasStrongMove && 
+            priceActionMomentum?.direction === "bearish" &&
+            Math.abs(priceActionMomentum?.movePercent || 0) >= MOMENTUM_CONTINUATION_PARAMS.PRICE_MOVE_THRESHOLD_PERCENT;
+          
+          const barsAtExtreme4h = trendData.stochasticRsi?.barsAtExtreme?.["4h"] || 0;
+          const notTrueExhaustion = barsAtExtreme4h < MOMENTUM_CONTINUATION_PARAMS.MIN_BARS_AT_EXTREME_FOR_BLOCK;
+          
+          const momentumContinuationAllowed = MOMENTUM_CONTINUATION_PARAMS.ENABLED &&
+            hasPriceActionMomentumDown &&
+            adx >= MOMENTUM_CONTINUATION_PARAMS.MIN_ADX_FOR_OVERRIDE &&
+            stochFilterTrend4h === "bearish" &&
+            stochFilterConf4h >= MOMENTUM_CONTINUATION_PARAMS.MIN_4H_CONFIDENCE &&
+            !hasBullishDivergence &&
+            notTrueExhaustion;
+          
           // MANDATORY: StochRSI must be falling (K < D) for any extreme oversold entry
-          if (!stochRsiFalling) {
+          // EXCEPTION: Allow if momentum continuation conditions are met
+          if (!stochRsiFalling && !momentumContinuationAllowed) {
             rejectedByStochRsiExtreme++;
             perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} not falling` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking SHORT - StochRSI not falling at oversold (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
             await logRejectionWithAI(
               supabase, userId, symbol,
               `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold, StochRSI NOT falling (K >= D)`,
-              { stochRsiK4h, stochRsiD4h, stochRsiFalling, gate: "STOCHRSI_NOT_FALLING" },
+              { 
+                stochRsiK4h, stochRsiD4h, stochRsiFalling, 
+                gate: "STOCHRSI_NOT_FALLING",
+                priceActionMomentum: priceActionMomentum || null,
+                barsAtExtreme4h,
+                momentumContinuationCheck: {
+                  enabled: MOMENTUM_CONTINUATION_PARAMS.ENABLED,
+                  hasPriceActionMomentumDown,
+                  adxSufficient: adx >= MOMENTUM_CONTINUATION_PARAMS.MIN_ADX_FOR_OVERRIDE,
+                  confidenceSufficient: stochFilterConf4h >= MOMENTUM_CONTINUATION_PARAMS.MIN_4H_CONFIDENCE,
+                  noDivergence: !hasBullishDivergence,
+                  notExhausted: notTrueExhaustion,
+                  result: momentumContinuationAllowed
+                }
+              },
               trendData,
               false,
               earlyOrderFlowAnalysis
             );
             continue;
+          }
+          
+          // If momentum continuation allowed, apply position size reduction and log
+          if (momentumContinuationAllowed && !stochRsiFalling) {
+            reversalPositionMultiplier = Math.min(reversalPositionMultiplier, MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} MOMENTUM CONTINUATION: Allowing SHORT at oversold (K=${stochRsiK4h.toFixed(1)}, K>=D) due to strong price action`);
+            logger.forSymbol(symbol).info(`   Price moved ${priceActionMomentum?.movePercent?.toFixed(2)}% ${priceActionMomentum?.direction}, ADX=${adx.toFixed(1)}, bars@extreme=${barsAtExtreme4h}`);
+            logger.forSymbol(symbol).info(`   Position size reduced to ${(MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER * 100).toFixed(0)}%`);
           }
           
           // MANDATORY: No bullish divergence allowed at extreme oversold
