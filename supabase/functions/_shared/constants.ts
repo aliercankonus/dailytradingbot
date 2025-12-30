@@ -553,11 +553,20 @@ export const TREND_STRENGTH_PARAMS = {
 
 // ============= PHASE 3: EXCEPTION HIERARCHY & BUDGET =============
 // Global priority order for exception types to prevent non-deterministic behavior
+// EXCEPTION TYPES EXPLAINED:
+// - REVERSAL_OVERRIDE: Entry against current trend based on reversal signals (highest risk, lowest priority for bypass)
+// - STRONG_TREND: Entry during strong ADX trend that bypasses StochRSI extremes (medium risk)
+// - MOMENTUM_CONTINUATION: Entry at StochRSI extremes when price action confirms trend continuation (medium risk)
+// - MICRO_TREND: Entry during short-term micro-trend within neutral HTF (lowest risk exception)
+// These exceptions allow entries that would normally be blocked, each with specific validation requirements
 export const EXCEPTION_HIERARCHY = {
-  // Priority order (1 = highest, processed first)
-  REVERSAL_OVERRIDE: 1,
-  STRONG_TREND: 2,
-  MICRO_TREND: 3,
+  // Priority order (1 = highest priority, processed first)
+  // Lower number = more lenient (easier to grant exception)
+  // Higher number = stricter (harder to grant exception, used as last resort)
+  REVERSAL_OVERRIDE: 4,    // Last resort - going against trend is dangerous
+  MOMENTUM_CONTINUATION: 3, // Medium priority - catching continuation at extremes
+  STRONG_TREND: 2,          // Higher priority - strong ADX validates entry
+  MICRO_TREND: 1,           // Highest priority - safest exception type
 } as const;
 
 export const EXCEPTION_BUDGET = {
@@ -572,7 +581,14 @@ export const EXCEPTION_BUDGET = {
 } as const;
 
 // Exception types for logging and tracking
-export type ExceptionType = 'REVERSAL_OVERRIDE' | 'STRONG_TREND' | 'MICRO_TREND' | 'NONE';
+// IMPORTANT: All edge functions (strategy-analyzer, execute-trade, monitor-positions) must handle all these types
+// - REVERSAL_OVERRIDE: Trading against trend, requires early exit on trend resumption
+// - STRONG_TREND: StochRSI bypass during strong ADX, use tighter stops
+// - MOMENTUM_CONTINUATION: Entered at StochRSI extreme due to price action, extra divergence sensitivity
+// - MICRO_TREND: Short-term trend within neutral HTF, time-bound expiry applies
+// - NONE: Normal entry without exceptions
+export type ExceptionType = 'REVERSAL_OVERRIDE' | 'STRONG_TREND' | 'MOMENTUM_CONTINUATION' | 'MICRO_TREND' | 'NONE';
+
 export const ENTRY_TIMING_PARAMS = {
   // Base maximum entry timing score
   BASE_MAX: 25,
