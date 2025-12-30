@@ -1831,6 +1831,40 @@ export const deriveTradeDirection = (
   const conf1h = timeframes['1h']?.confidence || 0;
   const conf30m = timeframes['30m']?.confidence || 0;
   
+  // Get ADX for price action override check
+  const adx = trendData.volatility?.adx || trendData.momentum?.adx || 0;
+  
+  // ============= PRIORITY 0: PRICE ACTION MOMENTUM OVERRIDE =============
+  // If price has moved strongly (2%+) in a clear direction, use that direction
+  // even when all timeframes show neutral. This catches continuation moves.
+  const priceActionMomentum = trendData.priceActionMomentum;
+  if (priceActionMomentum?.canOverrideNeutralAlignment && priceActionMomentum?.hasStrongMove) {
+    const priceDirection = priceActionMomentum.direction;
+    const movePercent = Math.abs(priceActionMomentum.movePercent || 0);
+    
+    // Only override if direction is clear (not neutral)
+    if (priceDirection === "bullish" || priceDirection === "bearish") {
+      const direction: TradeDirection = priceDirection === "bullish" ? "long" : "short";
+      const isStrongMove = priceActionMomentum.isStrongMove;
+      
+      // Calculate confidence based on move strength and ADX
+      const moveConf = isStrongMove ? 70 : 60;
+      const adxBonus = Math.min(15, (adx - 20) * 1.5);  // Up to +15% for ADX > 30
+      const finalConf = Math.min(85, moveConf + Math.max(0, adxBonus)) * 0.9;  // 10% reduction for safety
+      
+      reasons.push(`PRICE ACTION OVERRIDE: ${movePercent.toFixed(2)}% ${priceDirection} move`);
+      reasons.push(`ADX=${adx.toFixed(1)} confirms trend strength`);
+      reasons.push("All timeframes neutral but price action clear - 75% position size");
+      
+      return { 
+        direction, 
+        confidence: finalConf, 
+        source: "price-action-momentum", 
+        reasons 
+      };
+    }
+  }
+  
   // Priority 1: Use 4h trend if directional with decent confidence
   if (trend4h !== "neutral" && conf4h >= 55) {
     const direction: TradeDirection = trend4h === "bullish" ? "long" : "short";
@@ -1860,8 +1894,7 @@ export const deriveTradeDirection = (
     return { direction, confidence: avgConf, source: "1h+30m", reasons };
   }
   
-  // Priority 4 (NEW): 2 out of 3 timeframes agree WITH 4h included
-  // This relaxes the requirement when 4h is directional but 1h or 30m are neutral
+  // Priority 4: 2 out of 3 timeframes agree WITH 4h included
   const directionalTimeframes = [
     { tf: '4h', trend: trend4h, conf: conf4h },
     { tf: '1h', trend: trend1h, conf: conf1h },
@@ -1869,11 +1902,8 @@ export const deriveTradeDirection = (
   ].filter(t => t.trend !== "neutral");
   
   if (directionalTimeframes.length >= 2) {
-    // Count bullish vs bearish timeframes
     const bullishTfs = directionalTimeframes.filter(t => t.trend === "bullish");
     const bearishTfs = directionalTimeframes.filter(t => t.trend === "bearish");
-    
-    // Check if 4h is one of the directional timeframes and majority agrees
     const has4h = directionalTimeframes.some(t => t.tf === '4h');
     
     if (has4h && bullishTfs.length >= 2) {
@@ -1890,7 +1920,7 @@ export const deriveTradeDirection = (
       return { direction: "short", confidence: avgConf * 0.9, source: "2-of-3", reasons };
     }
     
-    // 4h directional with only 1 other TF agreeing (4h + 1h or 4h + 30m)
+    // 4h directional with only 1 other TF agreeing
     if (trend4h !== "neutral" && conf4h >= 50) {
       const agreeing = directionalTimeframes.filter(t => t.trend === trend4h);
       if (agreeing.length >= 2) {
@@ -1902,18 +1932,12 @@ export const deriveTradeDirection = (
     }
   }
   
-  // Priority 5 (NEW): EARLY MOMENTUM ENTRY MODE
-  // Allow 30m+1h alignment when 4h is still neutral
-  // This catches trending moves earlier before they become overextended
-  // Requires: 30m strongly directional (>=65%), 1h leaning same direction (>=55%)
+  // Priority 5: EARLY MOMENTUM ENTRY MODE
   if (trend4h === "neutral" && trend30m !== "neutral" && conf30m >= 65) {
-    // Check if 1h is neutral but leaning in same direction as 30m
-    // OR 1h is directional but weaker (50-65% confidence)
     const is1hLeaningSameDirection = 
-      (trend1h === trend30m) || // 1h matches 30m direction
-      (trend1h === "neutral" && conf1h >= 50 && conf1h <= 65); // 1h neutral but decent confidence
+      (trend1h === trend30m) ||
+      (trend1h === "neutral" && conf1h >= 50 && conf1h <= 65);
     
-    // For neutral 1h, infer direction from price/indicators if available
     const inferred1hDirection = trend1h !== "neutral" ? trend1h : 
       (trendData.momentum?.confirms && trendData.momentum?.state !== "none" ? 
         (trend30m === "bullish" ? "bullish" : "bearish") : null);
@@ -1925,16 +1949,13 @@ export const deriveTradeDirection = (
     
     if (is1hLeaningSameDirection || (is1hNotConflicting && conf1h >= 55)) {
       const direction: TradeDirection = trend30m === "bullish" ? "long" : "short";
-      
-      // Calculate confidence with reduction for early entry
       const avgConf = (conf30m + Math.max(conf1h, 50)) / 2;
-      const reducedConf = avgConf * 0.85; // 15% confidence reduction for safety
+      const reducedConf = avgConf * 0.85;
       
       reasons.push(`EARLY MOMENTUM ENTRY: 30m strongly ${trend30m} (${conf30m.toFixed(0)}%)`);
       reasons.push(`1h ${trend1h} (${conf1h.toFixed(0)}%) - ${is1hLeaningSameDirection ? 'aligned' : 'not conflicting'}`);
       reasons.push(`4h neutral - catching trend early (50% position size, 0.85x confidence)`);
       
-      // Store metadata about early momentum entry for position sizing in strategy-analyzer
       return { 
         direction, 
         confidence: reducedConf, 
