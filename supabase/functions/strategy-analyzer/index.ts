@@ -2638,11 +2638,25 @@ serve(async (req) => {
           }
           
           // If momentum continuation allowed, apply position size reduction and log
+          // NEW: RSI momentum zone validation for MOMENTUM_CONTINUATION entries
+          // LONG momentum zone: 45-65 (neutral-to-bullish bias)
+          // SHORT momentum zone: 35-55 (bearish-to-neutral bias)
+          // Entries outside these zones get 25% additional position reduction
           if (momentumContinuationAllowedLong && !stochRsiRising) {
-            reversalPositionMultiplier = Math.min(reversalPositionMultiplier, MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER);
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} MOMENTUM CONTINUATION: Allowing LONG at overbought (K=${stochRsiK4h.toFixed(1)}, K<=D) due to strong price action`);
+            const rsi4h = trendData.timeframes?.['4h']?.indicators?.rsi ?? 50;
+            const rsiInMomentumZone = rsi4h >= 45 && rsi4h <= 65; // LONG zone
+            
+            if (rsiInMomentumZone) {
+              reversalPositionMultiplier = Math.min(reversalPositionMultiplier, MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER);
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} MOMENTUM CONTINUATION: Allowing LONG at overbought (K=${stochRsiK4h.toFixed(1)}, K<=D) with RSI ${rsi4h.toFixed(1)} in zone [45-65]`);
+            } else {
+              // RSI outside optimal zone - apply 25% additional reduction
+              const outsideZoneMultiplier = MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER * 0.75;
+              reversalPositionMultiplier = Math.min(reversalPositionMultiplier, outsideZoneMultiplier);
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.SUCCESS} MOMENTUM CONTINUATION: Allowing LONG at overbought with RSI ${rsi4h.toFixed(1)} OUTSIDE zone [45-65] - extra 25% reduction`);
+            }
             logger.forSymbol(symbol).info(`   Price moved ${priceActionMomentumLong?.movePercent?.toFixed(2)}% ${priceActionMomentumLong?.direction}, ADX=${adx.toFixed(1)}, bars@extreme=${barsAtExtreme4hLong}`);
-            logger.forSymbol(symbol).info(`   Position size reduced to ${(MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER * 100).toFixed(0)}%`);
+            logger.forSymbol(symbol).info(`   Position size reduced to ${(reversalPositionMultiplier * 100).toFixed(0)}%`);
           }
           
           // MANDATORY: No bearish divergence allowed at extreme overbought
@@ -2868,11 +2882,25 @@ serve(async (req) => {
           }
           
           // If momentum continuation allowed, apply position size reduction and log
+          // NEW: RSI momentum zone validation for MOMENTUM_CONTINUATION entries
+          // LONG momentum zone: 45-65 (neutral-to-bullish bias)
+          // SHORT momentum zone: 35-55 (bearish-to-neutral bias)
+          // Entries outside these zones get 25% additional position reduction
           if (momentumContinuationAllowed && !stochRsiFalling) {
-            reversalPositionMultiplier = Math.min(reversalPositionMultiplier, MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER);
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} MOMENTUM CONTINUATION: Allowing SHORT at oversold (K=${stochRsiK4h.toFixed(1)}, K>=D) due to strong price action`);
+            const rsi4h = trendData.timeframes?.['4h']?.indicators?.rsi ?? 50;
+            const rsiInMomentumZone = rsi4h >= 35 && rsi4h <= 55; // SHORT zone
+            
+            if (rsiInMomentumZone) {
+              reversalPositionMultiplier = Math.min(reversalPositionMultiplier, MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER);
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} MOMENTUM CONTINUATION: Allowing SHORT at oversold (K=${stochRsiK4h.toFixed(1)}, K>=D) with RSI ${rsi4h.toFixed(1)} in zone [35-55]`);
+            } else {
+              // RSI outside optimal zone - apply 25% additional reduction
+              const outsideZoneMultiplier = MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER * 0.75;
+              reversalPositionMultiplier = Math.min(reversalPositionMultiplier, outsideZoneMultiplier);
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.SUCCESS} MOMENTUM CONTINUATION: Allowing SHORT at oversold with RSI ${rsi4h.toFixed(1)} OUTSIDE zone [35-55] - extra 25% reduction`);
+            }
             logger.forSymbol(symbol).info(`   Price moved ${priceActionMomentum?.movePercent?.toFixed(2)}% ${priceActionMomentum?.direction}, ADX=${adx.toFixed(1)}, bars@extreme=${barsAtExtreme4h}`);
-            logger.forSymbol(symbol).info(`   Position size reduced to ${(MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER * 100).toFixed(0)}%`);
+            logger.forSymbol(symbol).info(`   Position size reduced to ${(reversalPositionMultiplier * 100).toFixed(0)}%`);
           }
           
           // MANDATORY: No bullish divergence allowed at extreme oversold

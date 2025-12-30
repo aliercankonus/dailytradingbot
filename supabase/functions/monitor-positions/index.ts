@@ -15,12 +15,6 @@ import { getCurrentPrice, getKlines, get24hrTicker } from "../_shared/binance.ts
 // Create logger instance
 const logger = createLogger("monitor-positions");
 
-// ============= RSI MOMENTUM ZONE CONSTRAINTS =============
-// Momentum continuation entries require RSI in specific zones to prevent late entries
-// LONG momentum zone: 45-65 (NEUTRAL_LOW to BULLISH_STRONG)
-// SHORT momentum zone: 35-55 (BEARISH_PULLBACK to NEUTRAL_HIGH)
-// Entries outside these zones get 50% score reduction in strategy-analyzer
-
 // Helper function to calculate historical ATR for volatility comparison
 function calculateHistoricalATR(klines: any[], histStartIdx: number, histEndIdx: number): { atr: number; count: number } {
   const calculateTrueRange = (high: number, low: number, prevClose: number) => 
@@ -1607,6 +1601,12 @@ serve(async (req) => {
           // Block reversal exits when ADX >= 30 (strong trend)
           const isStrongTrendBlock = positionAdx >= REVERSAL_EXIT_BLOCK_ADX;
           
+          // NEW: Entry-type-aware reversal exit logic
+          // If position was entered via REVERSAL_OVERRIDE, skip reversal risk exit for first 30 minutes
+          // This gives reversal trades time to play out without being prematurely closed
+          const entryExceptionType = position.entry_exception_type;
+          const isReversalEntryWithGracePeriod = entryExceptionType === 'REVERSAL_OVERRIDE' && positionAgeMinutes < 30;
+          
           const reversalExitCondition = isLong ? !result.shouldClose : true; // BUY has extra check
           if (reversalExitCondition && hasMetMinHoldTime && 
               positionAgeHours >= MIN_AGE_FOR_REVERSAL_EXIT_HOURS &&
@@ -1618,11 +1618,17 @@ serve(async (req) => {
               positionLogger.info(
                 `REVERSAL EXIT BLOCKED: ADX ${positionAdx.toFixed(1)} >= ${REVERSAL_EXIT_BLOCK_ADX} (strong trend) - reversal exits should never fight strong trends. Risk ${reversalRisk.riskScore}/100`,
               );
+            } 
+            // NEW: Skip reversal exit for REVERSAL_OVERRIDE entries within grace period
+            else if (isReversalEntryWithGracePeriod) {
+              positionLogger.info(
+                `REVERSAL EXIT SKIPPED: Entry was REVERSAL_OVERRIDE, age ${positionAgeMinutes.toFixed(0)}min < 30min grace - giving reversal trade time to play out. Risk ${reversalRisk.riskScore}/100`,
+              );
             } else {
               result.shouldClose = true;
               result.closeReason = "reversal_risk_high";
               positionLogger.risk(
-                `REVERSAL RISK EXIT: Closing ${positionSide} - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD} (dynamic), Age: ${positionAgeHours.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%`,
+                `REVERSAL RISK EXIT: Closing ${positionSide} - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD} (dynamic), Age: ${positionAgeHours.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%${entryExceptionType ? `, EntryType: ${entryExceptionType}` : ''}`,
               );
             }
           } else if (!result.shouldClose && hasMetMinHoldTime && 
@@ -1632,7 +1638,7 @@ serve(async (req) => {
             // NEAR MISS LOGGING: Reversal risk is within 5 points of threshold
             // This helps understand exit sensitivity for threshold optimization
             positionLogger.info(
-              `NEAR MISS: Reversal risk ${reversalRisk.riskScore}/100 is within 5 of threshold ${REVERSAL_RISK_EXIT_THRESHOLD} - position continues | ADX: ${positionAdx.toFixed(1)}, P&L: ${pnlPercent.toFixed(2)}%`,
+              `NEAR MISS: Reversal risk ${reversalRisk.riskScore}/100 is within 5 of threshold ${REVERSAL_RISK_EXIT_THRESHOLD} - position continues | ADX: ${positionAdx.toFixed(1)}, P&L: ${pnlPercent.toFixed(2)}%${entryExceptionType ? `, EntryType: ${entryExceptionType}` : ''}`,
             );
           }
           
