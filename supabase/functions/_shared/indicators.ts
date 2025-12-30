@@ -87,6 +87,21 @@ export function calculateRSIArray(prices: number[], period = 14): number[] {
 }
 
 // ============= STOCHASTIC RSI =============
+// PHASE 3: Enhanced StochRSI result with direction tracking
+export interface StochRSIResult {
+  k: number;
+  d: number;
+  signal: string;
+  strength: number;
+  kArray?: number[];
+  // PHASE 3: Direction tracking for easier consumption downstream
+  prevK: number;
+  prevD: number;
+  kRising: boolean;
+  kCrossedAboveD: boolean;
+  kCrossedBelowD: boolean;
+}
+
 export function calculateStochasticRSI(
   prices: number[], 
   rsiPeriod = 14, 
@@ -94,13 +109,13 @@ export function calculateStochasticRSI(
   kSmooth = 3, 
   dSmooth = 3,
   preCalculatedRsiArray?: number[]
-): { k: number; d: number; signal: string; strength: number; kArray?: number[] } {
+): StochRSIResult {
   if (prices.length < rsiPeriod + stochPeriod + Math.max(kSmooth, dSmooth)) {
-    return { k: 50, d: 50, signal: "neutral", strength: 0 };
+    return { k: 50, d: 50, signal: "neutral", strength: 0, prevK: 50, prevD: 50, kRising: false, kCrossedAboveD: false, kCrossedBelowD: false };
   }
 
   const rsiValues = preCalculatedRsiArray ?? calculateRSIArray(prices, rsiPeriod);
-  if (rsiValues.length < stochPeriod) return { k: 50, d: 50, signal: "neutral", strength: 0 };
+  if (rsiValues.length < stochPeriod) return { k: 50, d: 50, signal: "neutral", strength: 0, prevK: 50, prevD: 50, kRising: false, kCrossedAboveD: false, kCrossedBelowD: false };
 
   // Calculate raw Stochastic K using sliding window
   const rawKValues: number[] = [];
@@ -121,7 +136,7 @@ export function calculateStochasticRSI(
     }
   }
 
-  if (rawKValues.length < kSmooth) return { k: 50, d: 50, signal: "neutral", strength: 0 };
+  if (rawKValues.length < kSmooth) return { k: 50, d: 50, signal: "neutral", strength: 0, prevK: 50, prevD: 50, kRising: false, kCrossedAboveD: false, kCrossedBelowD: false };
 
   // Smooth K
   const smoothedKValues: number[] = [];
@@ -132,7 +147,7 @@ export function calculateStochasticRSI(
     if (i >= kSmooth - 1) smoothedKValues.push(kRollingSum / kSmooth);
   }
 
-  if (smoothedKValues.length < dSmooth) return { k: 50, d: 50, signal: "neutral", strength: 0 };
+  if (smoothedKValues.length < dSmooth) return { k: 50, d: 50, signal: "neutral", strength: 0, prevK: 50, prevD: 50, kRising: false, kCrossedAboveD: false, kCrossedBelowD: false };
 
   // Calculate D
   const dValues: number[] = [];
@@ -163,12 +178,23 @@ export function calculateStochasticRSI(
     strength = Math.min((d - k) / 10, 1) * 80;
   }
 
+  // PHASE 3: Direction tracking for easier downstream consumption
+  const kRising = k > prevK;
+  const kCrossedAboveD = k > d && prevK <= prevD;
+  const kCrossedBelowD = k < d && prevK >= prevD;
+
   return { 
     k: Math.round(k * 10) / 10, 
     d: Math.round(d * 10) / 10, 
     signal, 
     strength: Math.round(strength),
     kArray: smoothedKValues,  // PHASE 3: Return K array for time-in-extreme tracking
+    // PHASE 3: Direction tracking
+    prevK: Math.round(prevK * 10) / 10,
+    prevD: Math.round(prevD * 10) / 10,
+    kRising,
+    kCrossedAboveD,
+    kCrossedBelowD,
   };
 }
 

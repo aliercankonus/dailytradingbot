@@ -697,6 +697,43 @@ serve(async (req) => {
     logger.info(`📊 Signal confidence: ${signal.confidence_score}% (no separate gate - quality score is primary filter)`);
 
     // ============================================================
+    // PHASE 5: MOMENTUM STATE & FAKE BREAKOUT RISK CHECK
+    // Adjust position size based on momentum quality from calculate-trend
+    // ============================================================
+    const momentumState = trendData?.momentum?.state || 'none';
+    const fakeBreakoutRisk = trendData?.momentum?.fakeBreakoutRisk === true;
+    const genuineMomentum = trendData?.momentum?.genuineMomentum === true;
+    
+    // Start with 1.0 multiplier for momentum adjustments
+    let momentumPositionMultiplier = 1.0;
+    
+    // Weak momentum: 10% position size reduction
+    if (momentumState === 'none' && !isCounterTrendEntry) {
+      momentumPositionMultiplier *= 0.90;
+      logger.warn(`⚠️ WEAK MOMENTUM: state=${momentumState} → position size reduced to 90%`);
+    } else if (momentumState === 'mixed') {
+      momentumPositionMultiplier *= 0.95;
+      logger.warn(`⚠️ MIXED MOMENTUM: state=${momentumState} → position size reduced to 95%`);
+    }
+    
+    // Fake breakout risk: Additional 15% position size reduction
+    if (fakeBreakoutRisk) {
+      momentumPositionMultiplier *= 0.85;
+      logger.warn(`⚠️ FAKE BREAKOUT RISK: MACD expanding but ADX falling → additional position size reduction to ${(momentumPositionMultiplier * 100).toFixed(0)}%`);
+    }
+    
+    // Genuine momentum: 5% position size boost (cap at 1.0 to not exceed base)
+    if (genuineMomentum && momentumState === 'confirmed') {
+      momentumPositionMultiplier = Math.min(1.05, momentumPositionMultiplier * 1.05);
+      logger.info(`✅ GENUINE MOMENTUM: MACD expanding + ADX rising → position size boost to ${(momentumPositionMultiplier * 100).toFixed(0)}%`);
+    }
+    
+    // Log final momentum impact
+    if (momentumPositionMultiplier !== 1.0) {
+      logger.info(`📊 Momentum position adjustment: ${(momentumPositionMultiplier * 100).toFixed(0)}% (state=${momentumState}, fakeBreakout=${fakeBreakoutRisk}, genuine=${genuineMomentum})`);
+    }
+
+    // ============================================================
     // BOLLINGER BANDS FILTER - Squeeze/Breakout Detection
     // ============================================================
     let bollingerBoostMultiplier = 1.0;
@@ -1498,6 +1535,15 @@ serve(async (req) => {
       logger.warn(`⚠️ Counter-trend entry adjustment applied: ${counterTrendPositionMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
+    // ============================================================
+    // PHASE 5: Apply Momentum Position Multiplier
+    // Reduce position size for weak/fake momentum, boost for genuine momentum
+    // ============================================================
+    if (momentumPositionMultiplier !== 1.0) {
+      const prevQuantity = quantity;
+      quantity *= momentumPositionMultiplier;
+      logger.info(`📊 Momentum adjustment: ${prevQuantity.toFixed(4)} × ${momentumPositionMultiplier.toFixed(2)} = ${quantity.toFixed(4)}`);
+    }
     // Apply confidence-based position size scaling (INVERTED: high confidence = REDUCE size)
     // High confidence indicates trend exhaustion, not strength
     const adjustedConfidence = Math.max(0, Math.min(100, (signal.confidence_score || 0) + aiConfidenceAdjustment));

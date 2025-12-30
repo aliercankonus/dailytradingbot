@@ -175,6 +175,29 @@ function rsiInPullbackZone(rsi: number, trend: string): boolean {
   return false;
 }
 
+// ============= PHASE 1: COUNT CONSECUTIVE BARS IN DIRECTION =============
+// Accurately counts how many consecutive bars the MACD histogram has been positive or negative
+// This replaces the heuristic estimation for micro-trend persistence validation
+function countConsecutiveBarsInDirection(histogramArray: number[] | undefined): number {
+  if (!histogramArray || histogramArray.length < 2) return 0;
+  
+  const lastVal = histogramArray[histogramArray.length - 1];
+  if (Math.abs(lastVal) < 0.0001) return 0; // Effectively zero
+  
+  const isPositive = lastVal > 0;
+  let count = 0;
+  
+  for (let i = histogramArray.length - 1; i >= 0; i--) {
+    const val = histogramArray[i];
+    if ((isPositive && val > 0) || (!isPositive && val < 0)) {
+      count++;
+    } else {
+      break;
+    }
+  }
+  return count;
+}
+
 // ============= MICRO-TREND DETECTION =============
 // When 4h is neutral, look at 15m/30m for short-term trend direction
 // This allows signals when lower timeframes show consistent direction
@@ -490,13 +513,29 @@ serve(async (req) => {
           
           const bVolume1h = calculateVolumeAnalysis(bKlines1h);
           
+          // PHASE 2: Aligned batch mode with single mode - include adxRising, barsAtExtreme, bollingerBands
+          const bAdxRising = bAdxResult.adxRising;
           const bMacdExpanding = Math.abs(bTrend1h.indicators.macdHistogram) > 
             Math.abs(bTrend1h.indicators.macdHistogramArray?.[bTrend1h.indicators.macdHistogramArray.length - 2] || 0);
           const bLastClose = bPrices1h[bPrices1h.length - 1] || 0;
           const bPrevClose = bPrices1h[bPrices1h.length - 2] || bLastClose;
           const bLastCloseAligns = bTrend4h.trend === "bullish" ? bLastClose > bPrevClose : 
             bTrend4h.trend === "bearish" ? bLastClose < bPrevClose : true;
-          const bMomentumConfirms = bMacdExpanding && bLastCloseAligns && bAdx >= ADX_THRESHOLDS.MINIMUM;
+          const bMomentumConfirms = bMacdExpanding && bLastCloseAligns && bAdx >= ADX_THRESHOLDS.MINIMUM && bAdxRising;
+          
+          // Calculate barsAtExtreme for StochRSI (aligned with single mode)
+          const bBarsAtExtreme1h = calculateBarsAtExtreme(
+            bStochRsi1h.kArray,
+            TIME_IN_EXTREME_PARAMS.OVERBOUGHT_EXTREME,
+            TIME_IN_EXTREME_PARAMS.OVERSOLD_EXTREME
+          );
+          
+          // Calculate Bollinger Bands for batch mode (aligned with single mode)
+          const bBollingerBands = calculateBollingerBands(bPrices1h, 20, 2);
+          
+          // Fake breakout detection (aligned with single mode)
+          const bFakeBreakoutRisk = bMacdExpanding && !bAdxRising;
+          const bGenuineMomentum = bMacdExpanding && bAdxRising;
           
           results.push({
             timestamp: batch.timestamp,
@@ -504,9 +543,21 @@ serve(async (req) => {
               trend4h: { trend: bTrend4h.trend, confidence: bTrend4h.confidence },
               trend1h: { trend: bTrend1h.trend, confidence: bTrend1h.confidence },
               stochRsi4h: { k: bStochRsi4h.k, d: bStochRsi4h.d, signal: bStochRsi4h.signal },
-              stochRsi1h: { k: bStochRsi1h.k, d: bStochRsi1h.d, signal: bStochRsi1h.signal },
-              volatility: { adx: bAdx, atrPercent: bAtrPercent },
-              momentum: { confirms: bMomentumConfirms, state: bMomentumConfirms ? 'confirmed' : 'mixed' },
+              stochRsi1h: { k: bStochRsi1h.k, d: bStochRsi1h.d, signal: bStochRsi1h.signal, barsAtExtreme: bBarsAtExtreme1h },
+              volatility: { adx: bAdx, atrPercent: bAtrPercent, adxRising: bAdxRising },
+              momentum: { 
+                confirms: bMomentumConfirms, 
+                state: bMomentumConfirms ? 'confirmed' : 'mixed',
+                fakeBreakoutRisk: bFakeBreakoutRisk,
+                genuineMomentum: bGenuineMomentum,
+                adxRising: bAdxRising
+              },
+              bollingerBands: {
+                squeeze: bBollingerBands.squeeze,
+                squeezeIntensity: bBollingerBands.squeezeIntensity,
+                percentB: bBollingerBands.percentB,
+                pricePosition: bBollingerBands.pricePosition
+              },
               isAligned: bIsAligned,
               volumeConfirms: bVolume1h.volumeTrend === 'increasing' || bVolume1h.volumeSpike,
               currentPrice: bCurrentPrice,
@@ -758,12 +809,12 @@ serve(async (req) => {
     // For persistence tracking, we use a simplified approach:
     // Count how many of the last N bars have been in the same direction
     // This is approximated by checking if MACD histogram has been consistent
-    const macd15mHist = trend15m.indicators?.macdHistogram || 0;
-    const macd30mHist = trend30m.indicators?.macdHistogram || 0;
-    // Approximate persistence by checking MACD direction consistency
-    // If MACD is strongly positive/negative, assume persistence of at least 3 bars
-    const barsAligned15m = Math.abs(macd15mHist) > 0.001 ? (Math.abs(macd15mHist) > 0.005 ? 5 : 3) : 0;
-    const barsAligned30m = Math.abs(macd30mHist) > 0.001 ? (Math.abs(macd30mHist) > 0.005 ? 5 : 3) : 0;
+    // PHASE 1: Use actual consecutive bar counting from MACD histogram array
+    // This replaces the rough heuristic estimation for accurate persistence validation
+    const barsAligned15m = countConsecutiveBarsInDirection(trend15m.indicators?.macdHistogramArray);
+    const barsAligned30m = countConsecutiveBarsInDirection(trend30m.indicators?.macdHistogramArray);
+    
+    symLog.info(`${LOG_CATEGORIES.TREND} PERSISTENCE: 15m=${barsAligned15m} bars, 30m=${barsAligned30m} bars (from MACD histogram arrays)`);
     
     const microTrend = detectMicroTrend(
       trend15m, trend30m, trend1h, adx,
