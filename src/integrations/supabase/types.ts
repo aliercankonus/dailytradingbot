@@ -338,9 +338,11 @@ export type Database = {
           entry_exception_type: string | null
           entry_price: number
           executed_at: string | null
+          execution_slippage_percent: number | null
           exit_price: number | null
           hedge_position_id: string | null
           id: string
+          initial_risk_amount: number | null
           is_hedge: boolean | null
           opened_at: string | null
           opened_by_rebalancer: boolean | null
@@ -372,6 +374,7 @@ export type Database = {
           trend_consistency: number | null
           updated_at: string | null
           user_id: string
+          volume_relaxation_applied: boolean | null
         }
         Insert: {
           binance_order_id?: string | null
@@ -383,9 +386,11 @@ export type Database = {
           entry_exception_type?: string | null
           entry_price: number
           executed_at?: string | null
+          execution_slippage_percent?: number | null
           exit_price?: number | null
           hedge_position_id?: string | null
           id?: string
+          initial_risk_amount?: number | null
           is_hedge?: boolean | null
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
@@ -417,6 +422,7 @@ export type Database = {
           trend_consistency?: number | null
           updated_at?: string | null
           user_id: string
+          volume_relaxation_applied?: boolean | null
         }
         Update: {
           binance_order_id?: string | null
@@ -428,9 +434,11 @@ export type Database = {
           entry_exception_type?: string | null
           entry_price?: number
           executed_at?: string | null
+          execution_slippage_percent?: number | null
           exit_price?: number | null
           hedge_position_id?: string | null
           id?: string
+          initial_risk_amount?: number | null
           is_hedge?: boolean | null
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
@@ -462,6 +470,7 @@ export type Database = {
           trend_consistency?: number | null
           updated_at?: string | null
           user_id?: string
+          volume_relaxation_applied?: boolean | null
         }
         Relationships: [
           {
@@ -499,8 +508,10 @@ export type Database = {
           entry_exception_type: string | null
           entry_price: number
           executed_at: string | null
+          execution_slippage_percent: number | null
           exit_price: number | null
           id: string
+          initial_risk_amount: number | null
           opened_at: string | null
           opened_by_rebalancer: boolean | null
           order_type: string | null
@@ -529,6 +540,7 @@ export type Database = {
           trend_consistency: number | null
           updated_at: string | null
           user_id: string
+          volume_relaxation_applied: boolean | null
         }
         Insert: {
           archived_at?: string | null
@@ -541,8 +553,10 @@ export type Database = {
           entry_exception_type?: string | null
           entry_price: number
           executed_at?: string | null
+          execution_slippage_percent?: number | null
           exit_price?: number | null
           id: string
+          initial_risk_amount?: number | null
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
@@ -571,6 +585,7 @@ export type Database = {
           trend_consistency?: number | null
           updated_at?: string | null
           user_id: string
+          volume_relaxation_applied?: boolean | null
         }
         Update: {
           archived_at?: string | null
@@ -583,8 +598,10 @@ export type Database = {
           entry_exception_type?: string | null
           entry_price?: number
           executed_at?: string | null
+          execution_slippage_percent?: number | null
           exit_price?: number | null
           id?: string
+          initial_risk_amount?: number | null
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
@@ -613,6 +630,7 @@ export type Database = {
           trend_consistency?: number | null
           updated_at?: string | null
           user_id?: string
+          volume_relaxation_applied?: boolean | null
         }
         Relationships: [
           {
