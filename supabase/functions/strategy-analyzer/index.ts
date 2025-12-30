@@ -3816,6 +3816,23 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REVERSAL} Recovery soft penalty: -${RECOVERY_MODE_PARAMS.CONFIDENCE_SOFT_PENALTY_AMOUNT} for conf=${confidence}% in 70-80 zone`);
         }
         
+        // ============= PHASE 4: FAKE BREAKOUT RISK & GENUINE MOMENTUM ADJUSTMENT =============
+        // Use fakeBreakoutRisk and genuineMomentum from calculate-trend for quality adjustment
+        const fakeBreakoutRisk = momentum?.fakeBreakoutRisk === true;
+        const genuineMomentum = momentum?.genuineMomentum === true;
+        let fakeBreakoutPenalty = 0;
+        let genuineMomentumBonus = 0;
+        
+        if (fakeBreakoutRisk) {
+          fakeBreakoutPenalty = -8; // -8 quality points for MACD expanding but ADX falling
+          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.MOMENTUM} FAKE BREAKOUT RISK: MACD expanding but ADX falling → quality penalty ${fakeBreakoutPenalty}`);
+        }
+        
+        if (genuineMomentum) {
+          genuineMomentumBonus = 5; // +5 quality points for MACD expanding + ADX rising
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} GENUINE MOMENTUM: MACD expanding + ADX rising → quality bonus +${genuineMomentumBonus}`);
+        }
+        
         // Direction bonus: +3 for SHORT/SELL signals (historically 38% vs 31% win rate)
         const directionBonus = trend === "bearish" ? 3 : 0;
         // Volume score component
@@ -3875,7 +3892,18 @@ serve(async (req) => {
           directionBonus: directionBonus,          // +3 for SHORT signals
         };
 
-        const { score: qualityScore, breakdown } = calculateQualityScore(qualityFactors);
+        const { score: rawQualityScore, breakdown } = calculateQualityScore(qualityFactors);
+        
+        // ============= PHASE 4: Apply Fake Breakout Penalty and Genuine Momentum Bonus =============
+        const qualityScore = Math.max(0, Math.min(100, rawQualityScore + fakeBreakoutPenalty + genuineMomentumBonus));
+        
+        // Log if adjustments were applied
+        if (fakeBreakoutPenalty !== 0 || genuineMomentumBonus !== 0) {
+          const adjustments = [];
+          if (fakeBreakoutPenalty !== 0) adjustments.push(`fakeBreakout:${fakeBreakoutPenalty}`);
+          if (genuineMomentumBonus !== 0) adjustments.push(`genuineMomentum:+${genuineMomentumBonus}`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Quality adjusted: ${rawQualityScore}→${qualityScore} (${adjustments.join(', ')})`);
+        }
         
         // ===== SCENARIO 6 FINDING 7: DYNAMIC POSITION SIZE =====
         // In recovery mode, size position based on quality score instead of flat reduction
