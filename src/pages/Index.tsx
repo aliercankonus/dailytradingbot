@@ -22,6 +22,7 @@ import { TrailingStopMonitor } from "@/components/TrailingStopMonitor";
 import { SignalTimingMonitor } from "@/components/SignalTimingMonitor";
 import { PositionsSummary } from "@/components/PositionsSummary";
 import { AIAnalysisDashboard } from "@/components/AIAnalysisDashboard";
+import { LossAttributionDashboard } from "@/components/LossAttributionDashboard";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -134,8 +135,9 @@ const Index = () => {
             <ClosedPositionsDashboard />
           </TabsContent>
 
-          <TabsContent value="analytics">
+          <TabsContent value="analytics" className="space-y-6">
             <PerformanceAnalytics />
+            <LossAttributionDashboard />
           </TabsContent>
 
           <TabsContent value="risk">

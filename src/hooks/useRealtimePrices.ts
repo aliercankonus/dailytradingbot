@@ -46,10 +46,14 @@ export const useRealtimePrices = (symbols?: string[]) => {
   // Batch price updates for performance
   const flushPendingUpdates = useCallback(() => {
     if (pendingUpdatesRef.current.size > 0) {
-      console.log('[RealtimePrices] Flushing', pendingUpdatesRef.current.size, 'pending price updates');
+      // CRITICAL FIX: Snapshot pending updates BEFORE clearing to prevent race condition
+      const updates = new Map(pendingUpdatesRef.current);
+      pendingUpdatesRef.current.clear(); // Clear immediately before async state update
+      
+      console.log('[RealtimePrices] Flushing', updates.size, 'pending price updates');
       setPrices((prev) => {
         const newPrices = new Map(prev);
-        pendingUpdatesRef.current.forEach((price, symbol) => {
+        updates.forEach((price, symbol) => {
           newPrices.set(symbol, price);
           (newPrices as any)[symbol] = price; // allow prices[symbol] access
         });
@@ -57,7 +61,6 @@ export const useRealtimePrices = (symbols?: string[]) => {
         return newPrices;
       });
       setPriceVersion(v => v + 1); // Force re-render
-      pendingUpdatesRef.current.clear();
     }
     updateTimerRef.current = null;
   }, []);
