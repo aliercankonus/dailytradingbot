@@ -20,6 +20,9 @@ export interface ClosedPosition {
   close_reason?: string | null;
   is_hedge?: boolean;
   parent_position_id?: string | null;
+  confidence_score?: number | null;
+  trend_consistency?: number | null;
+  peak_pnl_percent?: number | null;
 }
 
 export const useClosedPositions = (includeArchived: boolean = false) => {

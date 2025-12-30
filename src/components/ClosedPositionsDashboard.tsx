@@ -25,6 +25,7 @@ export const ClosedPositionsDashboard = () => {
   const [sideFilter, setSideFilter] = useState<string>('all');
   const [strategyFilter, setStrategyFilter] = useState<string>('all');
   const [closeReasonFilter, setCloseReasonFilter] = useState<string>('all');
+  const [hidePartialCloses, setHidePartialCloses] = useState(true); // NEW: Hide partial closes by default
 
   const getCloseReason = (position: any): string => {
     // Use stored close_reason if available
@@ -159,6 +160,15 @@ export const ClosedPositionsDashboard = () => {
     
     let filtered = positions;
     
+    // Hide partial closes filter (applied first)
+    if (hidePartialCloses) {
+      filtered = filtered.filter(p => {
+        const reason = p.close_reason;
+        return reason !== 'partial_loss' && reason !== 'partial_tp_close' && 
+               reason !== 'partial_tp_1' && reason !== 'partial_tp_2' && reason !== 'partial_tp_3';
+      });
+    }
+    
     // Tab filter
     switch (activeTab) {
       case 'profitable':
@@ -190,7 +200,30 @@ export const ClosedPositionsDashboard = () => {
     }
     
     return filtered;
-  }, [positions, activeTab, symbolFilter, sideFilter, strategyFilter, closeReasonFilter]);
+  }, [positions, activeTab, symbolFilter, sideFilter, strategyFilter, closeReasonFilter, hidePartialCloses]);
+
+  // Calculate stats for full closes only (more accurate win rate)
+  const fullCloseStats = useMemo(() => {
+    if (!positions) return { total: 0, profitable: 0, losses: 0, winRate: 0, totalPnL: 0 };
+    
+    const fullCloses = positions.filter(p => {
+      const reason = p.close_reason;
+      return reason !== 'partial_loss' && reason !== 'partial_tp_close' && 
+             reason !== 'partial_tp_1' && reason !== 'partial_tp_2' && reason !== 'partial_tp_3';
+    });
+    
+    const profitable = fullCloses.filter(p => (p.realized_pnl || 0) > 0).length;
+    const losses = fullCloses.filter(p => (p.realized_pnl || 0) <= 0).length;
+    const totalPnL = fullCloses.reduce((sum, p) => sum + (p.realized_pnl || 0), 0);
+    
+    return {
+      total: fullCloses.length,
+      profitable,
+      losses,
+      winRate: fullCloses.length > 0 ? (profitable / fullCloses.length) * 100 : 0,
+      totalPnL,
+    };
+  }, [positions]);
 
   // Check if any filter is active
   const hasActiveFilters = symbolFilter !== 'all' || sideFilter !== 'all' || strategyFilter !== 'all' || closeReasonFilter !== 'all';
@@ -212,7 +245,7 @@ export const ClosedPositionsDashboard = () => {
   // Reset to page 1 when tab or filters change
   useMemo(() => {
     setCurrentPage(1);
-  }, [activeTab, symbolFilter, sideFilter, strategyFilter, closeReasonFilter]);
+  }, [activeTab, symbolFilter, sideFilter, strategyFilter, closeReasonFilter, hidePartialCloses]);
 
   const getCloseReasonBadge = (position: any) => {
     const reason = getCloseReason(position);
@@ -400,18 +433,35 @@ export const ClosedPositionsDashboard = () => {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle>Closed Positions History</CardTitle>
-              <CardDescription>All closed trading positions with outcomes</CardDescription>
+              <CardDescription>
+                {hidePartialCloses 
+                  ? `Full closes only: ${fullCloseStats.total} trades, ${fullCloseStats.winRate.toFixed(1)}% win rate`
+                  : 'All closed trading positions with outcomes'
+                }
+              </CardDescription>
             </div>
-            <div className="flex items-center space-x-2">
-              <Archive className="h-4 w-4 text-muted-foreground" />
-              <Switch
-                id="include-archived"
-                checked={includeArchived}
-                onCheckedChange={setIncludeArchived}
-              />
-              <Label htmlFor="include-archived" className="text-sm cursor-pointer">
-                Show Archived
-              </Label>
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="hide-partial-closes"
+                  checked={hidePartialCloses}
+                  onCheckedChange={setHidePartialCloses}
+                />
+                <Label htmlFor="hide-partial-closes" className="text-sm cursor-pointer">
+                  Hide Partials
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Archive className="h-4 w-4 text-muted-foreground" />
+                <Switch
+                  id="include-archived"
+                  checked={includeArchived}
+                  onCheckedChange={setIncludeArchived}
+                />
+                <Label htmlFor="include-archived" className="text-sm cursor-pointer">
+                  Show Archived
+                </Label>
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -419,9 +469,9 @@ export const ClosedPositionsDashboard = () => {
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'all' | 'profitable' | 'losses')}>
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
               <TabsList>
-                <TabsTrigger value="all">All ({stats.total})</TabsTrigger>
-                <TabsTrigger value="profitable">Profitable ({stats.profitable})</TabsTrigger>
-                <TabsTrigger value="losses">Losses ({stats.losses})</TabsTrigger>
+                <TabsTrigger value="all">All ({hidePartialCloses ? fullCloseStats.total : stats.total})</TabsTrigger>
+                <TabsTrigger value="profitable">Profitable ({hidePartialCloses ? fullCloseStats.profitable : stats.profitable})</TabsTrigger>
+                <TabsTrigger value="losses">Losses ({hidePartialCloses ? fullCloseStats.losses : stats.losses})</TabsTrigger>
               </TabsList>
               
               {/* Filters */}
