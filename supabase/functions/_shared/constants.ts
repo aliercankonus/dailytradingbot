@@ -240,6 +240,8 @@ export const QUALITY_THRESHOLDS = {
   NEUTRAL_MIN: 45,
   // Strong 1h signal threshold (1h confidence >= 65%) - raised from 45 to 55
   STRONG_1H_MIN: 55,
+  // Very strong 1h signal threshold (1h confidence >= 75%) - allows lower quality with high 1h conviction
+  VERY_STRONG_1H_MIN: 50,
   // Exceptional ADX threshold (ADX >= 35) - raised from 50 to 60
   EXCEPTIONAL_ADX_MIN: 60,
   // Strong ADX threshold (ADX >= 25) - raised from 53 to 63
