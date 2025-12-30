@@ -3484,21 +3484,10 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate passed via strong 1h (1h=${trend1h} ${confidence1h}%)`);
         }
         
-        // GATE 4: Confidence Dead Zone Veto (60-69% is worst performing zone)
-        // Data shows 60-69% confidence = 31.73% win rate vs 50-59% = 46.34%
-        // RELAXED: Allow if ADX >= 28 (strong trend exception) instead of 30
-        if (confidence >= 60 && confidence < 70 && adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION) {
-          rejectedByHardGates++;
-          perSymbolGateAttribution.set(symbol, { gate: 'CONFIDENCE_DEAD_ZONE', details: `conf=${confidence}%, ADX=${adx.toFixed(1)}` });
-          await logRejectionWithAI(
-            supabase, userId, symbol,
-            `HARD GATE: Confidence dead zone (${confidence}% in 60-69 range with ADX=${adx.toFixed(1)} < ${ADX_THRESHOLDS.STRONG_TREND_EXCEPTION})`,
-            { confidence, adx: adx.toFixed(1), gate: "CONFIDENCE_DEAD_ZONE" },
-            trendData,
-            riskParams.ai_analysis_enabled !== false
-          );
-          continue;
-        }
+        // GATE 4: Confidence Dead Zone - REMOVED
+        // Original claim: 60-69% confidence = 31.73% win rate
+        // Actual data analysis (Dec 2024): 60-69% confidence = 86.67% win rate (15 trades, $21.25 profit)
+        // Gate removed as it was blocking highly profitable signals based on outdated/incorrect statistics
         
         logger.forSymbol(symbol).gate(`Passed all hard gates (ADX=${adx.toFixed(1)}, momentum=${momentumState}/${momentumConfirms}, HTF=${htfAligned || `conf=${confidence}%`}, conf=${confidence}%)`, true);
 
