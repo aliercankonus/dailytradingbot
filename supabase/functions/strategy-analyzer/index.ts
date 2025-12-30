@@ -413,15 +413,16 @@ const BUILT_IN_TEMPLATES = [
   },
   // NEW: Strong 1h Trend Follower - captures trending moves when 1h is directional but 4h is neutral
   // Uses relaxed momentum state requirements and reduced ADX threshold when 1h confidence is high
+  // FIX: RSI 45-55 was too narrow and never matched - widened to RSI 40-70 to capture healthy trends
   {
     id: 'builtin-strong-1h-trend',
     name: 'Strong 1h Trend Follower',
     signal_direction: 'trend',  // Follow 1h trend direction
     entry_conditions: [
-      { indicator: 'RSI', operator: 'above', value: '45', compareToIndicator: false },
-      { indicator: 'RSI', operator: 'below', value: '55', compareToIndicator: false }
+      { indicator: 'RSI', operator: 'above', value: '40', compareToIndicator: false },  // Healthy uptrend (not oversold)
+      { indicator: 'RSI', operator: 'below', value: '70', compareToIndicator: false }   // Not overbought
     ],
-    exit_conditions: [{ indicator: 'RSI', operator: 'above', value: '65', compareToIndicator: false }],
+    exit_conditions: [{ indicator: 'RSI', operator: 'above', value: '75', compareToIndicator: false }],
     indicators: [{ type: 'RSI', name: 'RSI', period: 14 }],
     risk_settings: { 
       stopLossPercent: 2, 
@@ -2394,9 +2395,17 @@ serve(async (req) => {
         const isRangingMarket = adx < BOLLINGER_ENTRY_GATES.RANGING_ADX_THRESHOLD;
         
         // Determine if we have trend confirmation for context-aware thresholds
-        const isBearishTrendConfirmed = stochFilterTrend4h === "bearish" && stochFilterConf4h >= BOLLINGER_ENTRY_GATES.TREND_CONFIDENCE_THRESHOLD;
+        // FIX: Add 1h trend override - when 4h is neutral but 1h is very strong (75%+), use 1h for confirmation
+        // Note: stochFilterTrend1h and stochFilterConf1h already declared above
+        const is1hVeryStrongBullish = stochFilterTrend1h === "bullish" && stochFilterConf1h >= 75;
+        const is1hVeryStrongBearish = stochFilterTrend1h === "bearish" && stochFilterConf1h >= 75;
+        
+        // Allow 4h OR very strong 1h to satisfy trend confirmation
+        const isBearishTrendConfirmed = (stochFilterTrend4h === "bearish" && stochFilterConf4h >= BOLLINGER_ENTRY_GATES.TREND_CONFIDENCE_THRESHOLD) ||
+                                        (stochFilterTrend4h === "neutral" && is1hVeryStrongBearish);
         const isStrongBearishTrend = isBearishTrendConfirmed && adx >= ADX_THRESHOLDS.MODERATE; // ADX >= 22
-        const isBullishTrendConfirmed = stochFilterTrend4h === "bullish" && stochFilterConf4h >= BOLLINGER_ENTRY_GATES.TREND_CONFIDENCE_THRESHOLD;
+        const isBullishTrendConfirmed = (stochFilterTrend4h === "bullish" && stochFilterConf4h >= BOLLINGER_ENTRY_GATES.TREND_CONFIDENCE_THRESHOLD) ||
+                                        (stochFilterTrend4h === "neutral" && is1hVeryStrongBullish);
         const isStrongBullishTrend = isBullishTrendConfirmed && adx >= ADX_THRESHOLDS.MODERATE;
         
         // SHORT gate: Determine appropriate %B threshold based on trend, squeeze, and ranging
@@ -4738,7 +4747,7 @@ serve(async (req) => {
           take_profit: signalType === "long"
             ? currentPrice * (1 + takeProfitPercent / 100)
             : currentPrice * (1 - takeProfitPercent / 100),
-          strategy_id: strategy.id,
+          strategy_id: strategy.id?.startsWith('builtin-') ? null : strategy.id,  // Built-in strategies use string IDs, DB expects UUID
           strategy_name: strategy.name,
           reason: `${strategy.name} | Quality: ${qualityScore}/100 | ${pullbackAnalysis.reason}`,
           indicators: {
