@@ -95,7 +95,7 @@ export const MOMENTUM_CONTINUATION_PARAMS = {
   
   // ===== PRICE ACTION MOMENTUM DETECTION =====
   // If price dropped/rose this much in recent hours, consider trend continuation likely
-  PRICE_MOVE_THRESHOLD_PERCENT: 2.0,  // 2% move
+  PRICE_MOVE_THRESHOLD_PERCENT: 1.5,  // 1.5% move - lowered to catch smaller but significant moves earlier
   PRICE_MOVE_LOOKBACK_HOURS: 6,       // Look back 6 hours (6 1h candles)
   // Override neutral alignment when price action confirms direction
   OVERRIDE_NEUTRAL_ALIGNMENT: true,
