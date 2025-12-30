@@ -19,7 +19,7 @@ import { useMomentumStatus } from "@/hooks/useMomentumStatus";
 import { useState } from "react";
 
 export const MomentumStatusDetails = () => {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(true);
   const { momentumData, loading } = useMomentumStatus();
 
   return (
