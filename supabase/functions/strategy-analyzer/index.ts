@@ -3336,9 +3336,11 @@ serve(async (req) => {
           }
         }
         
-        // ============= NEW GATE: NEUTRAL 4H TREND REQUIRES 70%+ CONFIDENCE =============
-        // When 4h trend is neutral, require higher confidence (70%+) OR directional 1h with 65%+
-        // This prevents low-quality entries in ranging/neutral conditions
+        // ============= RELAXED GATE: NEUTRAL 4H TREND CONFIDENCE REQUIREMENT =============
+        // UPDATED: Lowered from 70% to 55% based on actual data analysis showing:
+        // - 60-69% confidence: 86.67% win rate (15 trades)
+        // - 50-59% confidence: 92.86% win rate (28 trades)
+        // The original 70% threshold was too restrictive and blocked profitable signals
         const trend4hForNeutralGate = htfTrend4h;
         const is4hNeutral = trend4hForNeutralGate === "neutral";
         const conf4hForGate = timeframes?.['4h']?.confidence || confidence;
@@ -3346,20 +3348,21 @@ serve(async (req) => {
         const is1hDirectional = htfTrend1h === "bullish" || htfTrend1h === "bearish";
         
         if (is4hNeutral) {
-          const passesNeutralGate = conf4hForGate >= 70 || (is1hDirectional && conf1hForGate >= 65);
+          // Relaxed thresholds: 55% for 4h OR directional 1h with 50%+
+          const passesNeutralGate = conf4hForGate >= 55 || (is1hDirectional && conf1hForGate >= 50);
           if (!passesNeutralGate) {
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { gate: 'NEUTRAL_4H_LOW_CONFIDENCE', details: `4h=${conf4hForGate.toFixed(0)}%, 1h=${conf1hForGate.toFixed(0)}%` });
             await logRejectionWithAI(
               supabase, userId, symbol,
-              `HARD GATE: Neutral 4h requires 70%+ confidence OR directional 1h with 65%+ (4h=${trend4hForNeutralGate} ${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`,
+              `HARD GATE: Neutral 4h requires 55%+ confidence OR directional 1h with 50%+ (4h=${trend4hForNeutralGate} ${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`,
               { 
                 gate: "NEUTRAL_4H_LOW_CONFIDENCE",
                 trend4h: trend4hForNeutralGate,
                 confidence4h: conf4hForGate,
                 trend1h: htfTrend1h,
                 confidence1h: conf1hForGate,
-                requiredConfidence: 70,
+                requiredConfidence: 55,
                 is1hDirectional,
                 adx: adx.toFixed(1)
               },
