@@ -1136,3 +1136,27 @@ export const TREND_CONTINUATION_TIGHT_STOPS = {
   // Mark entry as "trend_continuation_at_extreme" for special handling
   ENTRY_TAG: "trend_continuation_at_extreme",
 } as const;
+
+// ============= VOLUME RELAXATION EXIT PARAMETERS =============
+// Exit logic for entries made during low-volume conditions (higher false breakout risk)
+export const VOLUME_RELAXATION_EXIT_PARAMS = {
+  // Maximum hold time for low-volume entries (minutes)
+  MAX_AGE_MINUTES: 90,
+  // Minimum profit required to continue holding after max age
+  MIN_PROFIT_PERCENT: 0.4,
+  // Extra trailing stop tightness for volume relaxation entries
+  TRAILING_TIGHTNESS_MULTIPLIER: 0.85,
+} as const;
+
+// ============= R-MULTIPLE PROFIT LOCK PARAMETERS =============
+// Use initial_risk_amount for consistent risk-based profit locking
+export const R_MULTIPLE_LOCK_PARAMS = {
+  // Start R-locking at this profit level
+  ACTIVATION_R: 2.0,
+  // Only lock if peak reached this R-multiple
+  PEAK_REQUIRED_R: 2.5,
+  // Lock at minimum this R-multiple when conditions met
+  MIN_LOCK_R: 1.5,
+  // Log R-multiple status for trades with initial_risk_amount
+  ENABLE_LOGGING: true,
+} as const;

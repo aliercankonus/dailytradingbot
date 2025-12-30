@@ -4475,7 +4475,13 @@ serve(async (req) => {
         }
         
         // Track current exception type for the signal
-        const appliedExceptionType: ExceptionType = exceptionResult.exceptionType;
+        // If pullback momentum bypass was applied but no exception type set, use MOMENTUM_CONTINUATION
+        // This ensures all pullback momentum entries are consistently tracked for exit logic
+        let appliedExceptionType: ExceptionType = exceptionResult.exceptionType;
+        if (isPullbackValid && appliedExceptionType === 'NONE') {
+          appliedExceptionType = 'MOMENTUM_CONTINUATION';
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} EXCEPTION OVERRIDE: isPullbackValid=true with no hierarchy exception → setting exceptionType to MOMENTUM_CONTINUATION`);
+        }
         
         // ============= POSITION SIZE CALCULATION WITH PROPER MULTIPLIER CHAINING =============
         // All multipliers are applied in sequence to ensure proper size reduction
