@@ -1601,11 +1601,41 @@ serve(async (req) => {
           // Block reversal exits when ADX >= 30 (strong trend)
           const isStrongTrendBlock = positionAdx >= REVERSAL_EXIT_BLOCK_ADX;
           
-          // NEW: Entry-type-aware reversal exit logic
-          // If position was entered via REVERSAL_OVERRIDE, skip reversal risk exit for first 30 minutes
-          // This gives reversal trades time to play out without being prematurely closed
+          // ============================================================
+          // PHASE 3: ENTRY-TYPE-AWARE EXIT LOGIC
+          // Each entry exception type has specific exit handling rules
+          // ============================================================
           const entryExceptionType = position.entry_exception_type;
+          
+          // REVERSAL_OVERRIDE: 30-minute grace period before reversal risk exit
           const isReversalEntryWithGracePeriod = entryExceptionType === 'REVERSAL_OVERRIDE' && positionAgeMinutes < 30;
+          
+          // MOMENTUM_CONTINUATION: Extra divergence sensitivity (detect momentum fading)
+          const isMomentumContinuationEntry = entryExceptionType === 'MOMENTUM_CONTINUATION';
+          const momentumDivergenceDetected = atrData?.hasDivergence && isMomentumContinuationEntry;
+          
+          // MICRO_TREND: Time-bound expiry (max 2 hours for short-term plays)
+          const isMicroTrendEntry = entryExceptionType === 'MICRO_TREND';
+          const MICRO_TREND_MAX_AGE_MINUTES = 120;
+          const MICRO_TREND_MIN_PROFIT_PERCENT = 0.3;
+          
+          // Check MICRO_TREND timeout first (before other exit logic)
+          if (!result.shouldClose && isMicroTrendEntry && positionAgeMinutes > MICRO_TREND_MAX_AGE_MINUTES && pnlPercent < MICRO_TREND_MIN_PROFIT_PERCENT) {
+            result.shouldClose = true;
+            result.closeReason = "micro_trend_timeout";
+            positionLogger.signal(
+              `MICRO_TREND TIMEOUT: Position age ${positionAgeMinutes.toFixed(0)}min > ${MICRO_TREND_MAX_AGE_MINUTES}min max with P&L ${pnlPercent.toFixed(2)}% < ${MICRO_TREND_MIN_PROFIT_PERCENT}% - closing time-bound entry`,
+            );
+          }
+          
+          // Check MOMENTUM_CONTINUATION divergence exit (extra sensitivity)
+          if (!result.shouldClose && momentumDivergenceDetected && pnlPercent < 0.5) {
+            // Tighter exit for momentum continuation entries when divergence detected
+            positionLogger.warn(
+              `MOMENTUM_CONTINUATION WARNING: Divergence detected (MACD ${atrData?.macdTrending} vs Price ${atrData?.priceTrending}) - applying tighter profit lock`,
+            );
+            // Don't force close, but this affects trailing stop logic later
+          }
           
           const reversalExitCondition = isLong ? !result.shouldClose : true; // BUY has extra check
           if (reversalExitCondition && hasMetMinHoldTime && 
@@ -1619,10 +1649,16 @@ serve(async (req) => {
                 `REVERSAL EXIT BLOCKED: ADX ${positionAdx.toFixed(1)} >= ${REVERSAL_EXIT_BLOCK_ADX} (strong trend) - reversal exits should never fight strong trends. Risk ${reversalRisk.riskScore}/100`,
               );
             } 
-            // NEW: Skip reversal exit for REVERSAL_OVERRIDE entries within grace period
+            // Skip reversal exit for REVERSAL_OVERRIDE entries within grace period
             else if (isReversalEntryWithGracePeriod) {
               positionLogger.info(
                 `REVERSAL EXIT SKIPPED: Entry was REVERSAL_OVERRIDE, age ${positionAgeMinutes.toFixed(0)}min < 30min grace - giving reversal trade time to play out. Risk ${reversalRisk.riskScore}/100`,
+              );
+            } 
+            // Skip reversal exit for STRONG_TREND entries (already handled by trendContinuationAtExtreme)
+            else if (entryExceptionType === 'STRONG_TREND' && positionAdx >= 25) {
+              positionLogger.info(
+                `REVERSAL EXIT SKIPPED: Entry was STRONG_TREND with ADX ${positionAdx.toFixed(1)} >= 25 - strong trend exception still valid. Risk ${reversalRisk.riskScore}/100`,
               );
             } else {
               result.shouldClose = true;

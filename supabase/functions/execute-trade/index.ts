@@ -1359,6 +1359,17 @@ serve(async (req) => {
     }
 
     // ============================================================
+    // PHASE 1 FIX: APPLY STRATEGY PERFORMANCE BONUS
+    // High-performing strategies get a position size boost
+    // Aligned with strategy-analyzer STRATEGY_PARAMS.MAX_PERFORMANCE_BONUS
+    // ============================================================
+    if (strategyPerformanceBonus > 0) {
+      const performanceBoostMultiplier = 1 + (strategyPerformanceBonus / 100); // +5 bonus = 1.05x
+      positionSizePercent *= performanceBoostMultiplier;
+      logger.info(`⭐ Strategy performance bonus applied: +${strategyPerformanceBonus}% → ${performanceBoostMultiplier.toFixed(2)}x position size`);
+    }
+
+    // ============================================================
     // SMART RISK #2: KELLY CRITERION POSITION SIZING
     // Calculate optimal risk based on historical win rate and avg win/loss
     // ============================================================
@@ -1441,6 +1452,18 @@ serve(async (req) => {
     if (vwapBoostMultiplier !== 1.0) {
       quantity *= vwapBoostMultiplier;
       logger.info(`VWAP adjustment applied: ${vwapBoostMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
+    }
+
+    // ============================================================
+    // PHASE 1 FIX: APPLY VOLUME RELAXATION MULTIPLIER
+    // For trend-forming entries with low volume, reduce position size
+    // Aligned with VOLUME_RELAXATION_PARAMS.POSITION_SIZE_MULTIPLIER
+    // ============================================================
+    const volumeRelaxationApplied = (signal as any).volumeRelaxationApplied || false;
+    const volumeRelaxationMultiplier = (signal as any).volumeRelaxationMultiplier || 1.0;
+    if (volumeRelaxationApplied && volumeRelaxationMultiplier !== 1.0) {
+      quantity *= volumeRelaxationMultiplier;
+      logger.info(`📉 Volume relaxation adjustment applied: ${volumeRelaxationMultiplier.toFixed(2)}x → new quantity: ${quantity.toFixed(4)}`);
     }
 
     // Apply AI-powered position size adjustment
@@ -1528,6 +1551,7 @@ serve(async (req) => {
     const side = signal.signal_type === 'long' ? 'BUY' : 'SELL';
     let orderData: any;
     let executedPrice = currentPrice; // Use current price instead of signal entry price
+    let postExecutionSlippage = 0; // Declare outside block for position insert access
 
     if (isPaperTrading) {
       // Simulate paper trading
@@ -1537,6 +1561,8 @@ serve(async (req) => {
         status: 'FILLED',
         fills: [{ price: currentPrice.toString() }],
       };
+      // Paper trading has no slippage
+      postExecutionSlippage = 0;
     } else {
       // ============================================================
       // PHASE 3 FIX #2: ORDER EXECUTION WITH RETRY LOGIC & PARTIAL FILL HANDLING
@@ -1684,7 +1710,7 @@ serve(async (req) => {
       // ============================================================
       // POST-EXECUTION SLIPPAGE VALIDATION
       // ============================================================
-      const postExecutionSlippage = Math.abs((executedPrice - currentPrice) / currentPrice) * 100;
+      postExecutionSlippage = Math.abs((executedPrice - currentPrice) / currentPrice) * 100;
       logger.info(`💱 Post-execution slippage: Expected=$${currentPrice.toFixed(2)}, Got=$${executedPrice.toFixed(2)}, Slippage=${postExecutionSlippage.toFixed(3)}%`);
       
       // Warn on high slippage (> 0.3%) but don't reject since order is already filled
@@ -1735,7 +1761,18 @@ serve(async (req) => {
     } else if (signalIndicators.isPullbackMomentumBypass) {
       entryExceptionType = 'MOMENTUM_CONTINUATION';
       logger.info(`📌 Entry exception type: ${entryExceptionType} (from pullback momentum bypass)`);
+    } else if (signalIndicators.isMicroTrendEntry || signalIndicators.microTrendActive) {
+      entryExceptionType = 'MICRO_TREND';
+      logger.info(`📌 Entry exception type: ${entryExceptionType} (from micro trend flag)`);
     }
+
+    // ============================================================
+    // PHASE 2 FIX: CALCULATE INITIAL RISK FOR R-MULTIPLE TRACKING
+    // Store the initial risk amount at entry for accurate R-multiple calculations
+    // R-multiple = Current P&L / Initial Risk Amount
+    // ============================================================
+    const initialRiskAmount = Math.abs(executedPrice - stopLoss) * quantity;
+    logger.info(`📊 Initial risk calculated: $${initialRiskAmount.toFixed(2)} (entry: $${executedPrice.toFixed(2)}, SL: $${stopLoss.toFixed(2)}, qty: ${quantity.toFixed(4)})`);
 
     // Create position record with all trade data including reversal tracking
     const { data: position, error: positionError } = await supabase
@@ -1765,6 +1802,10 @@ serve(async (req) => {
         reversal_details: reversalDetails,
         // NEW: Entry exception type for monitor-positions alignment
         entry_exception_type: entryExceptionType,
+        // PHASE 2/4: Enhanced tracking fields
+        initial_risk_amount: initialRiskAmount,
+        execution_slippage_percent: postExecutionSlippage,
+        volume_relaxation_applied: volumeRelaxationApplied,
       })
       .select()
       .single();
