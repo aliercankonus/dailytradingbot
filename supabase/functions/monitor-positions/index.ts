@@ -635,17 +635,19 @@ serve(async (req) => {
       // Analysis showed momentum exit was triggering at +0.26% and -0.13%, killing potential profits
       // If position is above -0.3%, let trailing stop or break-even handle it instead
       else if (divergenceExit && isMomentum && earlyPnlPercent < -0.3) {
-        // Add grace period: don't exit within first 10 minutes of position opening
+        // Grace period: use user's minHoldTimeMinutes instead of hardcoded 10 minutes
+        // This ensures consistency with other position management logic
         const positionAgeMinutes = position.opened_at 
           ? (Date.now() - new Date(position.opened_at).getTime()) / (1000 * 60) 
           : 999;
+        const gracePeriodMinutes = userSettingsEarly?.minHoldTimeMinutes ?? 10;
         
-        if (positionAgeMinutes >= 10) {
+        if (positionAgeMinutes >= gracePeriodMinutes) {
           emergencyClose = true;
           emergencyReason = "momentum_divergence_exit";
           positionLogger.risk(`STRATEGY-AWARE: Momentum divergence + significant loss (${earlyPnlPercent.toFixed(2)}% < -0.3%) after ${positionAgeMinutes.toFixed(0)}min - exiting | Price: ${priceTrending} ${priceChangePercent.toFixed(2)}% | MACD: ${macdTrending} ${macdChangePercent.toFixed(2)}%`);
         } else {
-          positionLogger.info(`STRATEGY-AWARE: Momentum divergence detected but position age ${positionAgeMinutes.toFixed(0)}min < 10min grace period - skipping | Price: ${priceTrending} ${priceChangePercent.toFixed(2)}% | MACD: ${macdTrending} ${macdChangePercent.toFixed(2)}%`);
+          positionLogger.info(`STRATEGY-AWARE: Momentum divergence detected but position age ${positionAgeMinutes.toFixed(0)}min < ${gracePeriodMinutes}min grace period - skipping | Price: ${priceTrending} ${priceChangePercent.toFixed(2)}% | MACD: ${macdTrending} ${macdChangePercent.toFixed(2)}%`);
         }
       }
       // Log when momentum divergence is detected but P&L is above threshold (letting other guards handle it)
@@ -1623,6 +1625,15 @@ serve(async (req) => {
                 `REVERSAL RISK EXIT: Closing ${positionSide} - Risk ${reversalRisk.riskScore}/100 (ADX weight: ${reversalRisk.adxWeight}) >= ${REVERSAL_RISK_EXIT_THRESHOLD} (dynamic), Age: ${positionAgeHours.toFixed(1)}h, ADX: ${positionAdx.toFixed(1)}, VolScore: ${positionVolumeScore}, Conf: ${positionConfidence}%`,
               );
             }
+          } else if (!result.shouldClose && hasMetMinHoldTime && 
+              positionAgeHours >= MIN_AGE_FOR_REVERSAL_EXIT_HOURS &&
+              reversalRisk.riskScore >= (REVERSAL_RISK_EXIT_THRESHOLD - 5) && 
+              reversalRisk.riskScore < REVERSAL_RISK_EXIT_THRESHOLD) {
+            // NEAR MISS LOGGING: Reversal risk is within 5 points of threshold
+            // This helps understand exit sensitivity for threshold optimization
+            positionLogger.info(
+              `NEAR MISS: Reversal risk ${reversalRisk.riskScore}/100 is within 5 of threshold ${REVERSAL_RISK_EXIT_THRESHOLD} - position continues | ADX: ${positionAdx.toFixed(1)}, P&L: ${pnlPercent.toFixed(2)}%`,
+            );
           }
           
           // Early warning logic - TIGHTENED THRESHOLDS
@@ -2265,6 +2276,23 @@ serve(async (req) => {
 
         // Only count as closed if we actually updated a row (wasn't already closed by another process)
         if (updatedPosition) {
+          // Calculate R-multiple for analytics (risk-adjusted P&L metric)
+          const riskPerPosition = position.stop_loss 
+            ? Math.abs(position.entry_price - position.stop_loss) 
+            : position.entry_price * 0.015; // Fallback to 1.5% risk
+          const currentRMultiple = finalPnl / (riskPerPosition * position.quantity);
+          
+          // Categorize exit reason for analytics aggregation
+          const getExitCategory = (reason: string): string => {
+            if (["stop_loss", "trailing_stop_loss", "break_even"].includes(reason)) return "PROTECTIVE";
+            if (["take_profit", "partial_tp", "smart_aits_rapid_decay"].includes(reason)) return "PROFIT";
+            if (["flash_crash", "extreme_volatility", "divergence_volume_spike", "momentum_divergence_exit", "momentum_divergence_critical"].includes(reason)) return "EMERGENCY";
+            if (["time_based_stop"].includes(reason)) return "TIMEOUT";
+            if (["reversal_risk_high", "trend_reversal_bullish", "trend_reversal_bearish", "early_warning_1h_bullish", "early_warning_1h_bearish"].includes(reason)) return "TECHNICAL";
+            return "OTHER";
+          };
+          const exitCategory = getExitCategory(closeReason);
+          
           closedPositions.push({
             symbol: position.symbol,
             side: position.side,
@@ -2272,9 +2300,11 @@ serve(async (req) => {
             exitPrice: finalExitPrice,
             pnl: finalPnl,
             pnlPercent: finalPnlPercent,
+            rMultiple: parseFloat(currentRMultiple.toFixed(2)),
+            exitCategory,
           });
           positionLogger.trade(
-            `Closed position ${position.id} - ${position.side} - ${closeReason} at ${finalExitPrice} (P&L: $${finalPnl.toFixed(2)})`,
+            `Closed position ${position.id} - ${position.side} - ${closeReason} [${exitCategory}] at ${finalExitPrice} (P&L: $${finalPnl.toFixed(2)} / ${currentRMultiple.toFixed(2)}R)`,
           );
           
           // 🆕 HEDGE CLEANUP: If parent position had a hedge, close the hedge too
@@ -2282,6 +2312,7 @@ serve(async (req) => {
             positionLogger.trade(`HEDGE CLEANUP: Closing hedge for parent ${position.side}`);
             
             // Get the hedge position to calculate its P&L
+            // RACE CONDITION FIX: Query with status='active' to check if already closed
             const { data: hedgePos } = await supabase
               .from("positions")
               .select("*")
@@ -2290,15 +2321,20 @@ serve(async (req) => {
               .maybeSingle();
             
             if (hedgePos) {
-              // Calculate hedge P&L
+              // Calculate hedge P&L and R-multiple
               const hedgePnl = hedgePos.side === "BUY"
                 ? (currentPrice - hedgePos.entry_price) * hedgePos.quantity
                 : (hedgePos.entry_price - currentPrice) * hedgePos.quantity;
               const hedgePnlPercent = hedgePos.side === "BUY"
                 ? ((currentPrice - hedgePos.entry_price) / hedgePos.entry_price) * 100
                 : ((hedgePos.entry_price - currentPrice) / hedgePos.entry_price) * 100;
+              const hedgeRiskPerUnit = hedgePos.stop_loss 
+                ? Math.abs(hedgePos.entry_price - hedgePos.stop_loss) 
+                : hedgePos.entry_price * 0.015;
+              const hedgeRMultiple = hedgePnl / (hedgeRiskPerUnit * hedgePos.quantity);
               
-              const { error: closeHedgeError } = await supabase
+              // Use optimistic locking with status='active' to prevent double-closing
+              const { data: closedHedge, error: closeHedgeError } = await supabase
                 .from("positions")
                 .update({
                   status: "closed",
@@ -2310,17 +2346,25 @@ serve(async (req) => {
                   close_reason: "parent_closed",
                 })
                 .eq("id", position.hedge_position_id)
-                .eq("status", "active");
+                .eq("status", "active")
+                .select()
+                .maybeSingle();
               
-              if (!closeHedgeError) {
+              if (!closeHedgeError && closedHedge) {
                 hedgesClosed.push({
                   symbol: position.symbol,
                   parentSide: position.side,
                   hedgePositionId: position.hedge_position_id,
                   riskScore: 0,
                 });
-                positionLogger.success(`Hedge closed with parent: ${hedgePos.side}, P&L: $${hedgePnl.toFixed(2)} (${hedgePnlPercent.toFixed(2)}%)`);
+                positionLogger.success(`Hedge closed with parent: ${hedgePos.side}, P&L: $${hedgePnl.toFixed(2)} (${hedgePnlPercent.toFixed(2)}% / ${hedgeRMultiple.toFixed(2)}R)`);
+              } else if (!closeHedgeError && !closedHedge) {
+                // Hedge was already closed by its own SL/TP before parent cleanup
+                positionLogger.info(`Hedge ${position.hedge_position_id} was already closed by its own SL/TP - no cleanup needed`);
               }
+            } else {
+              // Hedge not found as active - it was already closed
+              positionLogger.info(`Hedge ${position.hedge_position_id} was already closed by its own exit logic - skipping cleanup`);
             }
           }
         } else {

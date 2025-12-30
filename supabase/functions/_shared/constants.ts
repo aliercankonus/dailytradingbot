@@ -203,16 +203,21 @@ export const PROGRESSIVE_PROFIT_LOCK_PARAMS = {
   // Enable progressive profit locking (works between break-even and trailing activation)
   ENABLED: true,
   // Define profit lock tiers: when peak P&L reaches threshold, lock to target
-  // These tiers fill the gap between break-even (0.5%) and trailing (0.7%)
+  // These tiers fill the gap between break-even (0.5%) and trailing activation (0.8%)
+  // Extended tiers provide better profit protection in 0.70-0.80% peak range
   TIERS: [
     { peakThreshold: 0.5, lockTarget: 0.0 },   // Break-even tier (existing behavior)
     { peakThreshold: 0.55, lockTarget: 0.10 }, // Lock +0.10% at +0.55% peak
     { peakThreshold: 0.60, lockTarget: 0.15 }, // Lock +0.15% at +0.60% peak
     { peakThreshold: 0.65, lockTarget: 0.20 }, // Lock +0.20% at +0.65% peak
-    { peakThreshold: 0.70, lockTarget: 0.25 }, // Lock +0.25% at +0.70% peak (before trailing takes over)
+    { peakThreshold: 0.70, lockTarget: 0.25 }, // Lock +0.25% at +0.70% peak
+    { peakThreshold: 0.72, lockTarget: 0.30 }, // Lock +0.30% at +0.72% peak (NEW)
+    { peakThreshold: 0.75, lockTarget: 0.35 }, // Lock +0.35% at +0.75% peak (NEW)
+    { peakThreshold: 0.78, lockTarget: 0.40 }, // Lock +0.40% at +0.78% peak (NEW)
   ],
   // Once trailing stop activates, it takes full control (no more progressive locks)
-  DEFER_TO_TRAILING_AT: 0.7,
+  // Raised from 0.7 to 0.8 to allow extended progressive lock coverage
+  DEFER_TO_TRAILING_AT: 0.8,
 } as const;
 
 // Slippage buffer constants for stop loss calculations
