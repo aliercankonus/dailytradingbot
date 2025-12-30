@@ -1161,3 +1161,37 @@ export const R_MULTIPLE_LOCK_PARAMS = {
   // Log R-multiple status for trades with initial_risk_amount
   ENABLE_LOGGING: true,
 } as const;
+
+// ============= MULTI-STRATEGY CONVERGENCE PARAMETERS =============
+// Fallback when no single strategy passes all filters, but multiple agree on conditions
+// This captures setups that pass hard gates and quality checks but fail strategy-specific filters
+export const CONVERGENCE_PARAMS = {
+  // Enable multi-strategy convergence fallback
+  ENABLED: true,
+  // Minimum strategies that must pass conditions (before secondary filters)
+  MIN_STRATEGIES_AGREEING: 2,
+  // Minimum quality score required for convergence entry
+  MIN_QUALITY_SCORE: 60,
+  // Position size multiplier for convergence entries (50% = half size for safety)
+  POSITION_SIZE_MULTIPLIER: 0.50,
+  // Minimum 1h confidence for convergence to be allowed
+  MIN_1H_CONFIDENCE: 65,
+  // Maximum reversal score allowed for convergence entries
+  MAX_REVERSAL_SCORE: 45,
+} as const;
+
+// ============= STRONG 1H TREND ENTRY PARAMETERS =============
+// Allow entries when 1h trend is very strong even when 4h is neutral/mixed
+// This captures trending moves that haven't propagated to higher timeframes yet
+export const STRONG_1H_TREND_PARAMS = {
+  // Enable strong 1h trend entries
+  ENABLED: true,
+  // Minimum 1h confidence required
+  MIN_1H_CONFIDENCE: 70,
+  // Allow "mixed" momentum state when 1h is very strong
+  ALLOW_MIXED_MOMENTUM_STATE: true,
+  // ADX relaxation for EMA strategies when 1h is strong
+  EMA_REDUCED_ADX: 22,  // Reduced from 25
+  // Position size multiplier for strong 1h entries with neutral 4h
+  POSITION_SIZE_MULTIPLIER: 0.75,
+} as const;
