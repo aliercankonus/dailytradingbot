@@ -2327,6 +2327,89 @@ const HTFExtremeGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
   );
 };
 
+// Bollinger Long Gate Display - for longs above upper BB
+const BollingerLongGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const percentB = coerceNumeric(filtersStatus?.percentB ?? trendData?.bollingerBands?.['4h']?.percentB, 50);
+  const isStrongBullishTrend = filtersStatus?.isStrongBullishTrend ?? false;
+  const isBullishTrendConfirmed = filtersStatus?.isBullishTrendConfirmed ?? false;
+  const isInSqueeze = filtersStatus?.isInSqueeze4h ?? filtersStatus?.isInSqueeze ?? false;
+  
+  // Dynamic threshold based on trend
+  const required = isStrongBullishTrend ? 95 : isBullishTrendConfirmed ? 85 : 65;
+  const excess = percentB - required;
+  
+  return (
+    <div className="space-y-3 p-3 rounded-md border bg-orange-500/10 border-orange-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Ban className="h-4 w-4 text-orange-500" />
+          <span className="text-xs font-semibold text-orange-400">
+            BOLLINGER LONG GATE
+          </span>
+        </div>
+        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+          %B = {percentB.toFixed(1)} (need -{excess.toFixed(1)})
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        Longs require %B ≤{required} to avoid buying at resistance
+        {isStrongBullishTrend && " (relaxed: strong bullish trend)"}
+        {!isStrongBullishTrend && isBullishTrendConfirmed && " (relaxed: bullish trend confirmed)"}
+      </div>
+      
+      {/* Visual %B position - inverted from SHORT */}
+      <div className="space-y-1.5">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Bollinger %B Position</span>
+          <span className="font-mono text-orange-400">{percentB.toFixed(1)}% / ≤{required}% required</span>
+        </div>
+        <div className="relative h-3 bg-muted/30 rounded-full overflow-hidden">
+          {/* Green zone on LEFT (low %B allowed) */}
+          <div className="absolute left-0 h-full bg-green-500/30" style={{ width: `${required}%` }} />
+          {/* Red zone on RIGHT (high %B blocked) */}
+          <div className="absolute h-full bg-red-500/30" style={{ left: `${required}%`, right: 0 }} />
+          {/* Current position marker */}
+          <div 
+            className="absolute h-full w-1 bg-orange-500 rounded-full"
+            style={{ left: `${Math.min(Math.max(percentB, 0), 100)}%` }}
+          />
+          {/* Threshold marker */}
+          <div 
+            className="absolute top-0 h-full w-0.5 bg-yellow-400"
+            style={{ left: `${required}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-[9px] text-muted-foreground">
+          <span className="text-green-400">Allowed (≤{required}%)</span>
+          <span className="text-red-400">Blocked (&gt;{required}%)</span>
+        </div>
+      </div>
+      
+      {/* Trend context */}
+      {(isStrongBullishTrend || isBullishTrendConfirmed) && (
+        <div className="flex items-center gap-1.5 p-1.5 bg-green-500/20 rounded text-[10px] text-green-400">
+          <TrendingUp className="h-3 w-3" />
+          <span>
+            {isStrongBullishTrend ? "Strong bullish trend - threshold relaxed to 95%" : "Bullish trend confirmed - threshold relaxed to 85%"}
+          </span>
+        </div>
+      )}
+      
+      {isInSqueeze && (
+        <div className="flex items-center gap-1.5 p-1.5 bg-purple-500/20 rounded text-[10px] text-purple-400">
+          <Layers className="h-3 w-3" />
+          <span>Squeeze active - volatility compression detected</span>
+        </div>
+      )}
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-orange-400">⚠️ Why blocked:</span> Buying above upper Bollinger Band (%B &gt; {required}) has poor risk/reward - price is extended. Wait for pullback to %B ≤{required}%.
+      </div>
+    </div>
+  );
+};
+
 // Bollinger Short Gate Display - for shorts below lower BB
 const BollingerShortGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const percentB = coerceNumeric(filtersStatus?.percentB ?? trendData?.bollingerBands?.['4h']?.percentB, 50);
@@ -3498,7 +3581,13 @@ export const SignalRejectionReasons = () => {
       return <HTFExtremeGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
-    // NEW: Bollinger Short Gate (Bollinger Position Filter)
+    // NEW: Bollinger LONG Gate (for longs above upper BB)
+    if (fs?.gate === "BOLLINGER_POSITION_FILTER_LONG" || fs?.gate === "BOLLINGER_LONG_GATE" || 
+        (fs?.direction === "long" && (reason.includes("BOLLINGER GATE") || reason.includes("BOLLINGER POSITION FILTER")))) {
+      return <BollingerLongGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // NEW: Bollinger SHORT Gate (for shorts below lower BB)
     if (fs?.gate === "BOLLINGER_POSITION_FILTER_SHORT" || fs?.gate === "BOLLINGER_SHORT_GATE" || 
         reason.includes("BOLLINGER GATE") || reason.includes("BOLLINGER POSITION FILTER")) {
       return <BollingerShortGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
