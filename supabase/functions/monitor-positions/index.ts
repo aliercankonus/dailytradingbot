@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore, 
@@ -1635,6 +1635,49 @@ serve(async (req) => {
               `MOMENTUM_CONTINUATION WARNING: Divergence detected (MACD ${atrData?.macdTrending} vs Price ${atrData?.priceTrending}) - applying tighter profit lock`,
             );
             // Don't force close, but this affects trailing stop logic later
+          }
+          
+          // ============================================================
+          // VOLUME_RELAXATION ENTRY: Tighter time-based exit
+          // Low volume entries have higher false breakout risk
+          // ============================================================
+          const isVolumeRelaxationEntry = position.volume_relaxation_applied === true;
+          
+          if (!result.shouldClose && isVolumeRelaxationEntry && 
+              positionAgeMinutes > VOLUME_RELAXATION_EXIT_PARAMS.MAX_AGE_MINUTES && 
+              pnlPercent < VOLUME_RELAXATION_EXIT_PARAMS.MIN_PROFIT_PERCENT) {
+            result.shouldClose = true;
+            result.closeReason = "volume_relaxation_timeout";
+            positionLogger.signal(
+              `VOLUME RELAXATION TIMEOUT: Low volume entry age ${positionAgeMinutes.toFixed(0)}min > ${VOLUME_RELAXATION_EXIT_PARAMS.MAX_AGE_MINUTES}min with P&L ${pnlPercent.toFixed(2)}% < ${VOLUME_RELAXATION_EXIT_PARAMS.MIN_PROFIT_PERCENT}% - closing stale entry`,
+            );
+          }
+          
+          // ============================================================
+          // R-MULTIPLE PROFIT LOCK: Use initial_risk_amount for consistent locking
+          // ============================================================
+          const initialRiskAmount = position.initial_risk_amount;
+          if (!result.shouldClose && initialRiskAmount && initialRiskAmount > 0 && pnl > 0) {
+            const currentRMultipleLock = pnl / initialRiskAmount;
+            const peakPnlValue = (position.peak_pnl_percent || 0) * position.entry_price * position.quantity / 100;
+            const peakRMultiple = peakPnlValue > 0 ? peakPnlValue / initialRiskAmount : 0;
+            
+            // Lock profits at key R-multiples
+            if (currentRMultipleLock >= R_MULTIPLE_LOCK_PARAMS.ACTIVATION_R && peakRMultiple >= R_MULTIPLE_LOCK_PARAMS.PEAK_REQUIRED_R) {
+              const minLockPnl = R_MULTIPLE_LOCK_PARAMS.MIN_LOCK_R * initialRiskAmount;
+              if (pnl < minLockPnl) {
+                result.shouldClose = true;
+                result.closeReason = "r_multiple_lock";
+                positionLogger.signal(
+                  `R-MULTIPLE LOCK: Current ${currentRMultipleLock.toFixed(1)}R dropped below ${R_MULTIPLE_LOCK_PARAMS.MIN_LOCK_R}R lock (peak was ${peakRMultiple.toFixed(1)}R) - protecting profits`,
+                );
+              }
+            }
+            
+            // Log R-multiple status for debugging
+            if (R_MULTIPLE_LOCK_PARAMS.ENABLE_LOGGING && Math.floor(positionAgeMinutes) % 15 === 0) {
+              positionLogger.info(`R-Multiple: ${currentRMultipleLock.toFixed(2)}R | P&L: $${pnl.toFixed(2)} | Risk: $${initialRiskAmount.toFixed(2)} | Peak: ${peakRMultiple.toFixed(2)}R`);
+            }
           }
           
           const reversalExitCondition = isLong ? !result.shouldClose : true; // BUY has extra check
