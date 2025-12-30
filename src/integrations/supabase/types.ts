@@ -335,6 +335,7 @@ export type Database = {
           closed_by_rebalancer: boolean | null
           confidence_score: number | null
           current_price: number | null
+          entry_exception_type: string | null
           entry_price: number
           executed_at: string | null
           exit_price: number | null
@@ -379,6 +380,7 @@ export type Database = {
           closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
+          entry_exception_type?: string | null
           entry_price: number
           executed_at?: string | null
           exit_price?: number | null
@@ -423,6 +425,7 @@ export type Database = {
           closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
+          entry_exception_type?: string | null
           entry_price?: number
           executed_at?: string | null
           exit_price?: number | null
@@ -493,6 +496,7 @@ export type Database = {
           closed_by_rebalancer: boolean | null
           confidence_score: number | null
           current_price: number | null
+          entry_exception_type: string | null
           entry_price: number
           executed_at: string | null
           exit_price: number | null
@@ -534,6 +538,7 @@ export type Database = {
           closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
+          entry_exception_type?: string | null
           entry_price: number
           executed_at?: string | null
           exit_price?: number | null
@@ -575,6 +580,7 @@ export type Database = {
           closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
+          entry_exception_type?: string | null
           entry_price?: number
           executed_at?: string | null
           exit_price?: number | null

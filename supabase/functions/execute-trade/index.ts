@@ -1719,6 +1719,24 @@ serve(async (req) => {
       logger.info(`🔥 TREND CONTINUATION AT EXTREME: Applying tighter stops - BE=${trendContinuationParams?.breakEvenActivationPercent || STRONG_TREND_HTF_BYPASS_PARAMS.BREAK_EVEN_ACTIVATION_PERCENT}%, Trail=${trendContinuationParams?.trailingActivationPercent || STRONG_TREND_HTF_BYPASS_PARAMS.TRAILING_ACTIVATION_PERCENT}%`);
     }
 
+    // Extract entry exception type from signal indicators for monitor-positions alignment
+    // This allows exit logic to apply strategy-aware rules based on how the position was entered
+    const signalExceptionType = signalIndicators.exceptionType || null;
+    const signalExceptionDetails = signalIndicators.exceptionDetails || null;
+    
+    // Determine the entry exception type string for the position
+    let entryExceptionType: string | null = null;
+    if (signalExceptionType && signalExceptionType !== 'NONE') {
+      entryExceptionType = signalExceptionType;
+      logger.info(`📌 Entry exception type: ${entryExceptionType} (from signal indicators)`);
+    } else if (signalIndicators.strongTrendHTFBypass || signalIndicators.trendContinuationAtExtreme) {
+      entryExceptionType = 'STRONG_TREND';
+      logger.info(`📌 Entry exception type: ${entryExceptionType} (from HTF bypass flag)`);
+    } else if (signalIndicators.isPullbackMomentumBypass) {
+      entryExceptionType = 'MOMENTUM_CONTINUATION';
+      logger.info(`📌 Entry exception type: ${entryExceptionType} (from pullback momentum bypass)`);
+    }
+
     // Create position record with all trade data including reversal tracking
     const { data: position, error: positionError } = await supabase
       .from('positions')
@@ -1745,6 +1763,8 @@ serve(async (req) => {
         reversal_decision: reversalDecision,
         reversal_score: reversalScore,
         reversal_details: reversalDetails,
+        // NEW: Entry exception type for monitor-positions alignment
+        entry_exception_type: entryExceptionType,
       })
       .select()
       .single();
