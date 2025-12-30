@@ -908,14 +908,15 @@ export const HTF_EXTREME_HARD_GATES = {
 // Base rule: Shorts below lower Bollinger are risky (mean reversion bounce risk)
 // Exception: In confirmed bearish trends, low %B indicates trend continuation - shorts are VALID
 // Same logic applies symmetrically for longs at high %B
+// UPDATED: Relaxed LONG thresholds based on actual performance data showing LONGs performing well
 export const BOLLINGER_ENTRY_GATES = {
   // BASE THRESHOLDS (applied in neutral/unclear trend)
   SHORT_MIN_PERCENT_B: 35,        // Shorts require %B >= 35 (relaxed from 40 to allow more signals)
   SHORT_SQUEEZE_MIN_PERCENT_B: 50, // During squeeze, require %B >= 50
   SHORT_SQUEEZE_RANGING_MIN_PERCENT_B: 40, // During squeeze + ranging (ADX < 23), relax to %B >= 40
-  LONG_MAX_PERCENT_B: 65,         // Longs require %B <= 65 (symmetric with shorts)
-  LONG_SQUEEZE_MAX_PERCENT_B: 50, // During squeeze, require %B <= 50
-  LONG_SQUEEZE_RANGING_MAX_PERCENT_B: 60, // During squeeze + ranging (ADX < 23), relax to %B <= 60
+  LONG_MAX_PERCENT_B: 75,         // Longs require %B <= 75 (relaxed from 65 based on actual win rate data)
+  LONG_SQUEEZE_MAX_PERCENT_B: 60, // During squeeze, require %B <= 60 (relaxed from 50)
+  LONG_SQUEEZE_RANGING_MAX_PERCENT_B: 70, // During squeeze + ranging (ADX < 23), relax to %B <= 70
   
   // TREND-CONTEXT RELAXATION FOR SHORTS (allow continuation in bearish trends)
   // If 4h is bearish with 60%+ confidence, shorts are continuation - allow lower %B
