@@ -426,23 +426,53 @@ function calculateOrderFlowScore(
 
 /**
  * Get order flow bonus/penalty for quality score
- * Returns points to add to quality score (-15 to +15)
+ * Returns points to add to quality score (-10 to +12)
+ * 
+ * TUNED THRESHOLDS (Dec 2024):
+ * - Max penalty reduced from -15 to -10 (was too harsh)
+ * - Penalties only apply when confidence >= 25 (avoid noise)
+ * - Bonuses scale with confidence for high-conviction entries
+ * - "Sell" signals get smaller penalty (-5 max) vs "strong_sell" (-10)
  */
 export function getOrderFlowQualityBonus(
   orderFlow: OrderFlowAnalysis,
   intendedDirection: "long" | "short"
 ): number {
-  // Scale the order flow score to a -15 to +15 range
-  // 50 = neutral (0 bonus)
-  // 100 = max bonus (+15)
-  // 0 = max penalty (-15)
-  const normalized = (orderFlow.score - 50) / 50;  // -1 to +1
-  const bonus = Math.round(normalized * 15);
+  const score = orderFlow.score;
+  const confidence = orderFlow.confidence;
   
-  // Only apply significant bonus if we have confidence in the reading
-  if (orderFlow.confidence < 20) {
-    return Math.round(bonus * 0.3);  // Reduce impact if low confidence
+  // ============= STRONG SIGNALS (high confidence) =============
+  // These have clear order flow patterns that are likely meaningful
+  
+  if (confidence >= 25) {
+    if (score >= 75) {
+      // Strong buy: +8 to +12 based on confidence
+      return Math.round(8 + (confidence - 25) * 0.08);
+    } else if (score >= 60) {
+      // Buy: +3 to +7 based on confidence
+      return Math.round(3 + (score - 60) * 0.2 + (confidence - 25) * 0.04);
+    } else if (score <= 25) {
+      // Strong sell: -8 to -10 (reduced from -15)
+      // This is a significant contrary signal
+      return Math.max(-10, Math.round(-8 - (25 - score) * 0.08));
+    } else if (score <= 40) {
+      // Sell: -3 to -5 (reduced from -7.5)
+      // Modest penalty for modest contrary signal
+      return Math.round(-3 - (40 - score) * 0.13);
+    }
   }
   
-  return bonus;
+  // ============= WEAK SIGNALS (low confidence) =============
+  // Low confidence = reduce impact to avoid noise-driven rejections
+  
+  if (score >= 70) {
+    // Weak positive: +2 to +4
+    return Math.round((score - 50) * 0.1);
+  } else if (score <= 30) {
+    // Weak negative: -1 to -3 (very reduced)
+    return Math.round((score - 50) * 0.08);
+  }
+  
+  // Neutral zone (40-60): no adjustment
+  return 0;
 }
