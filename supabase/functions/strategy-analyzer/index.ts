@@ -50,6 +50,20 @@ import {
   type ExceptionType,
   type MarketContext
 } from "../_shared/constants.ts";
+// NEW: Smart Momentum Module for enhanced trend detection and entry quality
+import { 
+  calculateMomentumScore, 
+  detectPullback, 
+  calculateEntryQuality,
+  classifyMarketRegime as classifySmartRegime,
+  detectBollingerSqueeze,
+  findSwingPoints,
+  type MomentumScoreResult,
+  type PullbackResult,
+  type EntryQualityResult,
+  type MarketRegimeResult as SmartRegimeResult
+} from "../_shared/smart-momentum.ts";
+import { calculateRSIArray, calculateATR } from "../_shared/indicators.ts";
 import { 
   getTechnicalScore, 
   getMomentumScore, 
@@ -1476,7 +1490,11 @@ serve(async (req) => {
       | 'QUALITY_TOO_LOW'
       | 'NO_STRATEGY_MATCH'
       | 'STRATEGY_CONSTRAINT_BLOCK'
-      | 'SIGNAL_GENERATED';
+      | 'SIGNAL_GENERATED'
+      // NEW: Smart momentum gates
+      | 'MOMENTUM_EXHAUSTED'
+      | 'MOMENTUM_WEAKENING'
+      | 'REGIME_EXHAUSTED';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -1790,7 +1808,182 @@ serve(async (req) => {
           continue;
         }
         
-        // ============= PHASE 4 (9 FINDINGS): PRE-RECOVERY HARD GATES =============
+        // ============= NEW: SMART MOMENTUM ANALYSIS =============
+        // Phase 1 & 2: Calculate momentum score, pullback detection, and entry quality
+        const symbolHistData = historicalDataMap.get(symbol);
+        const klineData = symbolHistData?.klines || [];
+        const priceData = symbolHistData?.prices || [];
+        const smartAdxRising = trendData.volatility?.adxRising ?? false;
+        const currentATR = calculateATR(klineData, 14);
+        
+        // Calculate momentum score (-100 to +100)
+        const smartMomentum = calculateMomentumScore(klineData, priceData, adx, smartAdxRising, currentATR);
+        
+        // Find swing points for pullback detection
+        const swingPoints = findSwingPoints(klineData, 20);
+        
+        // Calculate RSI array for pullback detection
+        const rsiArrayForPullback = calculateRSIArray(priceData, 14);
+        const currentRsi = rsiArrayForPullback.length > 0 ? rsiArrayForPullback[rsiArrayForPullback.length - 1] : 50;
+        
+        // Detect pullback
+        const smartPullback = detectPullback(
+          priceData, 
+          derivedDirection, 
+          currentRsi, 
+          rsiArrayForPullback,
+          swingPoints.swingHigh,
+          swingPoints.swingLow
+        );
+        
+        // Detect Bollinger Squeeze
+        const bbSqueeze = detectBollingerSqueeze(priceData, 20, 2);
+        
+        // Classify market regime using smart module
+        const volume1hDataForRegime = trendData.volume?.["1h"] || {};
+        const volumeRatioForRegime = volume1hDataForRegime.volumeRatio ?? 1.0;
+        const smartRegime = classifySmartRegime(
+          adx,
+          smartAdxRising,
+          smartMomentum,
+          bbSqueeze.bbWidth,
+          bbSqueeze.isSqueeze,
+          volumeRatioForRegime
+        );
+        
+        // Log smart momentum analysis
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} SMART MOMENTUM: score=${smartMomentum.score} dir=${smartMomentum.direction} accel=${smartMomentum.isAccelerating} weak=${smartMomentum.isWeakening} exhaust=${smartMomentum.isExhausted}`);
+        if (smartMomentum.reasons.length > 0) {
+          logger.forSymbol(symbol).debug(`   Components: ${smartMomentum.reasons.slice(0, 3).join(' | ')}`);
+        }
+        if (smartPullback.isPullback) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.ENTRY} PULLBACK: type=${smartPullback.pullbackType} depth=${smartPullback.pullbackDepth.toFixed(1)}% valid=${smartPullback.isValidPullback} recovering=${smartPullback.isRecovering}`);
+        }
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} SMART REGIME: ${smartRegime.regime} (score=${smartRegime.regimeScore}) tradeable=${smartRegime.tradeable} threshold=${smartRegime.qualityThreshold}`);
+        
+        // ============= SMART MOMENTUM GATES =============
+        // Gate 1: Block entries when momentum is EXHAUSTED (unless squeeze breakout)
+        const regimeAwareEnabled = riskParams.regime_aware_trading !== false;
+        const minMomentumScore = riskParams.min_momentum_score ?? 30;
+        const exhaustionBlockEnabled = riskParams.exhaustion_block_enabled !== false;
+        
+        if (exhaustionBlockEnabled && smartMomentum.isExhausted && !bbSqueeze.isBreakingOut) {
+          rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { gate: 'MOMENTUM_EXHAUSTED', details: `score=${smartMomentum.score}, overext=${smartMomentum.overextensionATR}ATR` });
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} SMART MOMENTUM GATE: Trend EXHAUSTED - blocking entry`);
+          logger.forSymbol(symbol).debug(`   Score=${smartMomentum.score}, OverextATR=${smartMomentum.overextensionATR}, ADX=${adx.toFixed(1)}, rising=${smartAdxRising}`);
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `SMART MOMENTUM: Trend exhausted (score=${smartMomentum.score}, ${smartMomentum.overextensionATR.toFixed(1)} ATR from EMA)`,
+            {
+              gate: "MOMENTUM_EXHAUSTED",
+              momentumScore: smartMomentum.score,
+              direction: smartMomentum.direction,
+              overextensionATR: smartMomentum.overextensionATR,
+              adx: adx.toFixed(1),
+              adxRising: smartAdxRising,
+              components: smartMomentum.components,
+              reasons: smartMomentum.reasons
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
+          );
+          continue;
+        }
+        
+        // Gate 2: Block entries when momentum is WEAKENING against trade direction
+        const momentumAligned = (derivedDirection === "long" && smartMomentum.score > 0) ||
+                                (derivedDirection === "short" && smartMomentum.score < 0);
+        const isMomentumWeakeningAgainstTrade = smartMomentum.isWeakening && !momentumAligned;
+        
+        if (regimeAwareEnabled && isMomentumWeakeningAgainstTrade && Math.abs(smartMomentum.score) < minMomentumScore) {
+          rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { gate: 'MOMENTUM_WEAKENING', details: `score=${smartMomentum.score}, need=${minMomentumScore}` });
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} SMART MOMENTUM GATE: Momentum weakening against ${derivedDirection} (score=${smartMomentum.score})`);
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `SMART MOMENTUM: Weakening momentum (${smartMomentum.score}) against ${derivedDirection} direction`,
+            {
+              gate: "MOMENTUM_WEAKENING",
+              momentumScore: smartMomentum.score,
+              derivedDirection,
+              isWeakening: smartMomentum.isWeakening,
+              minRequired: minMomentumScore,
+              components: smartMomentum.components
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
+          );
+          continue;
+        }
+        
+        // Gate 3: Block entries in EXHAUSTED regime (smart regime classification)
+        if (regimeAwareEnabled && smartRegime.regime === "EXHAUSTED") {
+          rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { gate: 'REGIME_EXHAUSTED', details: smartRegime.reason });
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} SMART REGIME GATE: Market regime EXHAUSTED - blocking new entries`);
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `SMART REGIME: ${smartRegime.reason}`,
+            {
+              gate: "REGIME_EXHAUSTED",
+              regime: smartRegime.regime,
+              regimeScore: smartRegime.regimeScore,
+              momentumScore: smartMomentum.score,
+              adx: adx.toFixed(1),
+              bbSqueeze: bbSqueeze.isSqueeze
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
+          );
+          continue;
+        }
+        
+        // Store momentum analysis in database (async, don't block)
+        supabase
+          .from("momentum_analysis")
+          .insert({
+            user_id: userId,
+            symbol,
+            momentum_score: smartMomentum.score,
+            trend_direction: smartMomentum.direction,
+            ema_spread_roc: smartMomentum.components.emaSpreadRoC,
+            rsi_momentum: smartMomentum.components.rsiMomentum,
+            macd_slope: smartMomentum.components.macdSlope,
+            is_accelerating: smartMomentum.isAccelerating,
+            is_exhausted: smartMomentum.isExhausted,
+            overextension_atr: smartMomentum.overextensionATR,
+            pullback_depth: smartPullback.pullbackDepth,
+            timeframe_alignment: { 
+              pullbackType: smartPullback.pullbackType,
+              isValidPullback: smartPullback.isValidPullback,
+              rsiInZone: smartPullback.rsiInZone 
+            }
+          })
+          .then(({ error }) => {
+            if (error) logger.forSymbol(symbol).debug(`Failed to store momentum analysis: ${error.message}`);
+          });
+        
+        // Store market regime history (async, don't block)
+        supabase
+          .from("market_regime_history")
+          .insert({
+            user_id: userId,
+            symbol,
+            regime: smartRegime.regime,
+            adx: adx,
+            adx_slope: smartAdxRising ? 1 : -1,
+            trend_strength: smartRegime.regimeScore,
+            trend_direction: smartMomentum.direction,
+            bb_squeeze: bbSqueeze.isSqueeze,
+            bb_width: bbSqueeze.bbWidth
+          })
+          .then(({ error }) => {
+            if (error) logger.forSymbol(symbol).debug(`Failed to store regime history: ${error.message}`);
+          });
         // Finding 1: In pre-recovery state, require deep pullback OR squeeze breakout
         // Get pullback analysis early for pre-recovery gate check
         const rsi = trendData.rsi?.value ?? 50;
@@ -3959,6 +4152,58 @@ serve(async (req) => {
           logger.forSymbol(symbol).trade(`Order Flow bonus: ${orderFlowScore > 0 ? '+' : ''}${orderFlowScore} pts (signal: ${orderFlowAnalysis.signal}, confidence: ${orderFlowAnalysis.confidence}%)`);
         }
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Quality: ${qualityScore}/100 [${breakdown}] | Regime: ${regime.regime} | Entry: ${pullbackAnalysis.reason} | Pullback: ${pullbackAnalysis.hasBothConditions ? 'OPTIMAL' : pullbackAnalysis.isPullback ? 'YES' : 'NO'}`);
+
+        // ============= NEW: SMART ENTRY QUALITY SCORING =============
+        // Calculate entry quality using smart momentum module for additional validation
+        const stochRsiData = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi || {};
+        const stochRsiK = stochRsiData.k ?? 50;
+        const stochRsiSignal = stochRsiData.signal ?? "neutral";
+        const macdHistExpanding = trendData.macd?.isExpanding ?? false;
+        const timeframeAlignmentScoreForEntry = trendConsistency || 50;
+        
+        const smartEntryQuality = calculateEntryQuality(
+          smartMomentum,
+          smartPullback,
+          volumeConfirms,
+          volumeRatioForRegime, // Use the volume ratio already calculated earlier
+          timeframeAlignmentScoreForEntry,
+          stochRsiK,
+          stochRsiSignal,
+          macdHistExpanding,
+          derivedDirection
+        );
+        
+        // Log smart entry quality assessment
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.ENTRY} SMART ENTRY QUALITY: ${smartEntryQuality.score}/100 Grade=${smartEntryQuality.grade} Recommended=${smartEntryQuality.isRecommended}`);
+        if (smartEntryQuality.warnings.length > 0) {
+          logger.forSymbol(symbol).debug(`   Warnings: ${smartEntryQuality.warnings.slice(0, 3).join(' | ')}`);
+        }
+        
+        // Apply smart entry quality gate (only when regime-aware trading is enabled)
+        const minEntryQuality = riskParams.min_entry_quality_score ?? 60;
+        if (regimeAwareEnabled && !smartEntryQuality.isRecommended && smartEntryQuality.score < minEntryQuality) {
+          // Log but don't hard reject - use as quality adjustment instead
+          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.QUALITY} Smart entry quality below threshold: ${smartEntryQuality.score}/${minEntryQuality}`);
+        }
+        
+        // Store entry quality in database (async, don't block) - will be linked to position later if signal executes
+        const entryQualityLog = {
+          user_id: userId,
+          symbol,
+          entry_score: smartEntryQuality.score,
+          momentum_score: smartMomentum.score,
+          pullback_depth: smartPullback.pullbackDepth,
+          volume_confirmation: volumeConfirms,
+          timeframe_alignment_score: timeframeAlignmentScoreForEntry,
+          stochrsi_position: stochRsiK < 30 ? "oversold" : stochRsiK > 70 ? "overbought" : "neutral",
+          macd_expanding: macdHistExpanding,
+          regime: smartRegime.regime,
+          entry_factors: {
+            ...smartEntryQuality.factors,
+            grade: smartEntryQuality.grade,
+            warnings: smartEntryQuality.warnings
+          }
+        };
 
         // ============= LOW VOLUME DETECTION =============
         // Detect holiday/low-activity periods and adjust quality threshold
