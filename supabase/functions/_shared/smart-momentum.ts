@@ -171,13 +171,18 @@ export function calculateMomentumScore(
 }
 
 // ============= PULLBACK DETECTION =============
+// Phase 2: Enhanced with wait-for-bounce logic and confirmation candle
 export interface PullbackResult {
   isPullback: boolean;
   pullbackDepth: number;           // 0-100 (Fibonacci retracement %)
   isValidPullback: boolean;        // Meets criteria for entry
   pullbackType: "shallow" | "moderate" | "deep" | "none";
   rsiInZone: boolean;
+  rsiDipped: boolean;              // RSI dipped below/above threshold before current
+  rsiRecovering: boolean;          // RSI is now rising/falling in correct direction
   isRecovering: boolean;           // Price starting to bounce
+  hasBounceConfirmation: boolean;  // Price closes above prev high (long) or below prev low (short)
+  confirmationCandles: number;     // Number of confirmation candles after bounce
   reasons: string[];
 }
 
@@ -195,7 +200,11 @@ export function detectPullback(
     isValidPullback: false,
     pullbackType: "none",
     rsiInZone: false,
+    rsiDipped: false,
+    rsiRecovering: false,
     isRecovering: false,
+    hasBounceConfirmation: false,
+    confirmationCandles: 0,
     reasons: []
   };
 
@@ -203,6 +212,7 @@ export function detectPullback(
 
   const currentPrice = prices[prices.length - 1];
   const prevPrice = prices[prices.length - 2];
+  const prevPrice2 = prices.length >= 3 ? prices[prices.length - 3] : prevPrice;
   const reasons: string[] = [];
 
   // Calculate Fibonacci retracement depth
@@ -210,38 +220,74 @@ export function detectPullback(
   if (swingRange <= 0) return defaultResult;
 
   let pullbackDepth = 0;
+  let rsiInZone = false;
+  let rsiDipped = false;
+  let rsiRecovering = false;
+  let isRecovering = false;
+  let hasBounceConfirmation = false;
+  let confirmationCandles = 0;
   
   if (direction === "long") {
     // For long: pullback is from high towards low
     const retracement = swingHigh - currentPrice;
     pullbackDepth = (retracement / swingRange) * 100;
     
-    // Check RSI zone for longs (dipped below 45 and now rising)
-    const rsiInZone = rsi < 45;
-    const rsiRising = rsiArray.length >= 2 && rsiArray[rsiArray.length - 1] > rsiArray[rsiArray.length - 2];
-    const isRecovering = currentPrice > prevPrice && rsiRising;
+    // Phase 2: Check RSI dipped below 45 at some point in last 5 bars
+    const RSI_DIP_THRESHOLD = 45;
+    rsiDipped = rsiArray.slice(-5).some(r => r < RSI_DIP_THRESHOLD);
     
-    defaultResult.rsiInZone = rsiInZone;
-    defaultResult.isRecovering = isRecovering;
+    // Check RSI zone for longs (currently below 50, ideal below 45)
+    rsiInZone = rsi < 50;
     
-    if (rsiInZone) reasons.push(`RSI in pullback zone: ${rsi.toFixed(1)}`);
-    if (isRecovering) reasons.push("Price bouncing from pullback");
+    // RSI recovering = current RSI > previous RSI
+    rsiRecovering = rsiArray.length >= 2 && rsiArray[rsiArray.length - 1] > rsiArray[rsiArray.length - 2];
+    
+    // Phase 2: Wait-for-Bounce Logic
+    // Price must close above previous candle high to confirm bounce
+    isRecovering = currentPrice > prevPrice;
+    hasBounceConfirmation = currentPrice > Math.max(prevPrice, prevPrice2) && rsiRecovering;
+    
+    // Count confirmation candles (consecutive higher closes)
+    for (let i = prices.length - 1; i >= Math.max(0, prices.length - 5); i--) {
+      if (prices[i] > prices[i - 1]) confirmationCandles++;
+      else break;
+    }
+    
+    if (rsiDipped) reasons.push(`RSI dipped below ${RSI_DIP_THRESHOLD}`);
+    if (rsiRecovering) reasons.push(`RSI rising: ${rsi.toFixed(1)}`);
+    if (hasBounceConfirmation) reasons.push(`✅ Bounce confirmed (${confirmationCandles} candles)`);
+    else if (isRecovering) reasons.push("Price bouncing - waiting for confirmation");
     
   } else {
     // For short: pullback is from low towards high
     const retracement = currentPrice - swingLow;
     pullbackDepth = (retracement / swingRange) * 100;
     
-    // Check RSI zone for shorts (spiked above 55 and now falling)
-    const rsiInZone = rsi > 55;
-    const rsiFalling = rsiArray.length >= 2 && rsiArray[rsiArray.length - 1] < rsiArray[rsiArray.length - 2];
-    const isRecovering = currentPrice < prevPrice && rsiFalling;
+    // Phase 2: Check RSI spiked above 55 at some point in last 5 bars
+    const RSI_SPIKE_THRESHOLD = 55;
+    rsiDipped = rsiArray.slice(-5).some(r => r > RSI_SPIKE_THRESHOLD);
     
-    defaultResult.rsiInZone = rsiInZone;
-    defaultResult.isRecovering = isRecovering;
+    // Check RSI zone for shorts (currently above 50, ideal above 55)
+    rsiInZone = rsi > 50;
     
-    if (rsiInZone) reasons.push(`RSI in pullback zone: ${rsi.toFixed(1)}`);
-    if (isRecovering) reasons.push("Price rejecting from pullback");
+    // RSI recovering = current RSI < previous RSI (falling for shorts)
+    rsiRecovering = rsiArray.length >= 2 && rsiArray[rsiArray.length - 1] < rsiArray[rsiArray.length - 2];
+    
+    // Phase 2: Wait-for-Bounce Logic
+    // Price must close below previous candle low to confirm rejection
+    isRecovering = currentPrice < prevPrice;
+    hasBounceConfirmation = currentPrice < Math.min(prevPrice, prevPrice2) && rsiRecovering;
+    
+    // Count confirmation candles (consecutive lower closes)
+    for (let i = prices.length - 1; i >= Math.max(0, prices.length - 5); i--) {
+      if (prices[i] < prices[i - 1]) confirmationCandles++;
+      else break;
+    }
+    
+    if (rsiDipped) reasons.push(`RSI spiked above ${RSI_SPIKE_THRESHOLD}`);
+    if (rsiRecovering) reasons.push(`RSI falling: ${rsi.toFixed(1)}`);
+    if (hasBounceConfirmation) reasons.push(`✅ Rejection confirmed (${confirmationCandles} candles)`);
+    else if (isRecovering) reasons.push("Price rejecting - waiting for confirmation");
   }
 
   // Classify pullback type
@@ -252,43 +298,163 @@ export function detectPullback(
 
   const isPullback = pullbackDepth >= 23.6;
   
-  // Valid pullback requires:
-  // 1. At least 38% retracement
-  // 2. RSI in the right zone
-  // 3. Signs of recovery/bounce
+  // Phase 2: Valid pullback requires ALL of:
+  // 1. At least 38% retracement (Fibonacci)
+  // 2. RSI dipped into pullback zone and is now recovering
+  // 3. Bounce confirmation (price closes above prev high for long)
+  // 4. At least 1 confirmation candle
   const isValidPullback = 
     pullbackDepth >= 38.2 && 
     pullbackDepth <= 78.6 && 
-    defaultResult.rsiInZone && 
-    defaultResult.isRecovering;
+    rsiDipped && 
+    rsiRecovering &&
+    hasBounceConfirmation &&
+    confirmationCandles >= 1;
 
   if (isPullback) reasons.push(`${pullbackType} pullback: ${pullbackDepth.toFixed(1)}% retracement`);
-  if (isValidPullback) reasons.push("✅ Valid entry pullback");
+  if (isValidPullback) reasons.push("✅ VALID entry pullback - all confirmations met");
 
   return {
     isPullback,
     pullbackDepth: Math.round(pullbackDepth * 10) / 10,
     isValidPullback,
     pullbackType,
-    rsiInZone: defaultResult.rsiInZone,
-    isRecovering: defaultResult.isRecovering,
+    rsiInZone,
+    rsiDipped,
+    rsiRecovering,
+    isRecovering,
+    hasBounceConfirmation,
+    confirmationCandles,
+    reasons
+  };
+}
+
+// ============= ENTRY CONFIRMATION FILTER =============
+// Phase 2: All entry confirmation checks in one place
+export interface EntryConfirmationResult {
+  allConfirmed: boolean;
+  confirmationCount: number;
+  maxConfirmations: number;
+  details: {
+    confirmationCandle: boolean;    // At least 1 confirmation candle after pullback
+    volumeIncreasing: boolean;      // Volume increasing on entry candle
+    stochRsiCrossing: boolean;      // StochRSI K/D crossing, not at extreme
+    macdExpanding: boolean;         // MACD histogram expanding in trade direction
+    rsiRecovering: boolean;         // RSI recovering from pullback zone
+  };
+  reasons: string[];
+}
+
+export function checkEntryConfirmation(
+  pullbackResult: PullbackResult | null,
+  volumeRatio: number,
+  stochRsiK: number,
+  stochRsiD: number,
+  macdHistogramExpanding: boolean,
+  direction: "long" | "short"
+): EntryConfirmationResult {
+  const details = {
+    confirmationCandle: false,
+    volumeIncreasing: false,
+    stochRsiCrossing: false,
+    macdExpanding: false,
+    rsiRecovering: false
+  };
+  const reasons: string[] = [];
+
+  // 1. Confirmation Candle - at least 1 candle after bounce
+  details.confirmationCandle = pullbackResult ? pullbackResult.confirmationCandles >= 1 : false;
+  if (details.confirmationCandle) {
+    reasons.push(`✓ ${pullbackResult?.confirmationCandles} confirmation candle(s)`);
+  } else {
+    reasons.push("✗ No confirmation candle yet");
+  }
+
+  // 2. Volume Increasing - volume above average on entry
+  details.volumeIncreasing = volumeRatio >= 1.0;
+  if (volumeRatio >= 1.5) {
+    reasons.push(`✓ Strong volume (${(volumeRatio * 100).toFixed(0)}%)`);
+  } else if (details.volumeIncreasing) {
+    reasons.push(`✓ Volume OK (${(volumeRatio * 100).toFixed(0)}%)`);
+  } else {
+    reasons.push(`✗ Weak volume (${(volumeRatio * 100).toFixed(0)}%)`);
+  }
+
+  // 3. StochRSI Crossing - K crossing D, not at extreme
+  // For long: K > D and K not > 80 (not overbought)
+  // For short: K < D and K not < 20 (not oversold)
+  if (direction === "long") {
+    const isCrossing = stochRsiK > stochRsiD;
+    const notExtreme = stochRsiK < 80;
+    details.stochRsiCrossing = isCrossing && notExtreme;
+    if (details.stochRsiCrossing) {
+      reasons.push(`✓ StochRSI bullish cross (K=${stochRsiK.toFixed(0)} > D=${stochRsiD.toFixed(0)})`);
+    } else if (!isCrossing) {
+      reasons.push(`✗ StochRSI not crossing up (K=${stochRsiK.toFixed(0)} <= D=${stochRsiD.toFixed(0)})`);
+    } else {
+      reasons.push(`✗ StochRSI overbought (K=${stochRsiK.toFixed(0)})`);
+    }
+  } else {
+    const isCrossing = stochRsiK < stochRsiD;
+    const notExtreme = stochRsiK > 20;
+    details.stochRsiCrossing = isCrossing && notExtreme;
+    if (details.stochRsiCrossing) {
+      reasons.push(`✓ StochRSI bearish cross (K=${stochRsiK.toFixed(0)} < D=${stochRsiD.toFixed(0)})`);
+    } else if (!isCrossing) {
+      reasons.push(`✗ StochRSI not crossing down (K=${stochRsiK.toFixed(0)} >= D=${stochRsiD.toFixed(0)})`);
+    } else {
+      reasons.push(`✗ StochRSI oversold (K=${stochRsiK.toFixed(0)})`);
+    }
+  }
+
+  // 4. MACD Expanding
+  details.macdExpanding = macdHistogramExpanding;
+  if (details.macdExpanding) {
+    reasons.push("✓ MACD histogram expanding");
+  } else {
+    reasons.push("✗ MACD histogram not expanding");
+  }
+
+  // 5. RSI Recovering
+  details.rsiRecovering = pullbackResult ? pullbackResult.rsiRecovering : false;
+  if (details.rsiRecovering) {
+    reasons.push("✓ RSI recovering from pullback");
+  } else {
+    reasons.push("✗ RSI not recovering");
+  }
+
+  // Count confirmations
+  const confirmationCount = Object.values(details).filter(Boolean).length;
+  const maxConfirmations = 5;
+  
+  // All confirmed if we have at least 4 out of 5 (allow 1 missing)
+  const allConfirmed = confirmationCount >= 4;
+
+  return {
+    allConfirmed,
+    confirmationCount,
+    maxConfirmations,
+    details,
     reasons
   };
 }
 
 // ============= ENTRY QUALITY SCORING =============
+// Phase 2: Enhanced with entry confirmation integration
 export interface EntryQualityResult {
   score: number;                    // 0-100
   grade: "A" | "B" | "C" | "D" | "F";
   factors: {
     momentumAlignment: number;      // 0-25
-    pullbackQuality: number;        // 0-20
+    pullbackQuality: number;        // 0-25 (increased from 20)
     volumeConfirmation: number;     // 0-15
-    timeframeAlignment: number;     // 0-20
+    timeframeAlignment: number;     // 0-15 (decreased from 20)
     stochRsiPosition: number;       // 0-10
     macdExpanding: number;          // 0-10
+    entryConfirmation: number;      // 0-10 (NEW)
   };
   isRecommended: boolean;
+  entryType: "pullback" | "breakout" | "continuation";
   warnings: string[];
 }
 
@@ -301,7 +467,8 @@ export function calculateEntryQuality(
   stochRsiK: number,
   stochRsiSignal: string,
   macdHistogramExpanding: boolean,
-  direction: "long" | "short"
+  direction: "long" | "short",
+  stochRsiD?: number  // Optional for confirmation check
 ): EntryQualityResult {
   const factors = {
     momentumAlignment: 0,
@@ -309,9 +476,18 @@ export function calculateEntryQuality(
     volumeConfirmation: 0,
     timeframeAlignment: 0,
     stochRsiPosition: 0,
-    macdExpanding: 0
+    macdExpanding: 0,
+    entryConfirmation: 0
   };
   const warnings: string[] = [];
+
+  // Determine entry type
+  let entryType: "pullback" | "breakout" | "continuation" = "continuation";
+  if (pullbackResult && pullbackResult.isValidPullback) {
+    entryType = "pullback";
+  } else if (momentumScore.isAccelerating && volumeRatio >= 1.5) {
+    entryType = "breakout";
+  }
 
   // 1. Momentum Alignment (0-25 points)
   const momentumAligned = 
@@ -335,17 +511,27 @@ export function calculateEntryQuality(
     warnings.push("🛑 Trend exhausted - avoid entry");
   }
 
-  // 2. Pullback Quality (0-20 points)
+  // 2. Pullback Quality (0-25 points) - ENHANCED for Phase 2
   if (pullbackResult && pullbackResult.isValidPullback) {
+    // Perfect pullback with all confirmations
+    factors.pullbackQuality = 25;
+  } else if (pullbackResult && pullbackResult.isPullback && pullbackResult.hasBounceConfirmation) {
+    // Has bounce confirmation but not all criteria
     factors.pullbackQuality = 20;
+  } else if (pullbackResult && pullbackResult.isPullback && pullbackResult.isRecovering) {
+    // Pullback with price recovering, waiting for confirmation
+    factors.pullbackQuality = 12;
+    warnings.push("Wait for bounce confirmation before entry");
   } else if (pullbackResult && pullbackResult.isPullback) {
-    factors.pullbackQuality = pullbackResult.pullbackType === "moderate" ? 15 : 8;
-    if (!pullbackResult.isRecovering) {
-      warnings.push("Pullback not yet bouncing - wait for confirmation");
-    }
+    // Just a pullback, no recovery yet
+    factors.pullbackQuality = 5;
+    warnings.push("Pullback in progress - no bounce signal yet");
   } else {
     factors.pullbackQuality = 0;
-    // Not having a pullback is OK for trend continuation, but note it
+    // Not having a pullback is OK for breakout/continuation
+    if (entryType === "continuation") {
+      warnings.push("No pullback detected - consider waiting");
+    }
   }
 
   // 3. Volume Confirmation (0-15 points)
@@ -360,24 +546,38 @@ export function calculateEntryQuality(
     warnings.push("Low volume - weak conviction");
   }
 
-  // 4. Timeframe Alignment (0-20 points)
-  factors.timeframeAlignment = Math.min(20, timeframeAlignmentScore * 0.2);
+  // 4. Timeframe Alignment (0-15 points)
+  factors.timeframeAlignment = Math.min(15, timeframeAlignmentScore * 0.15);
 
   // 5. StochRSI Position (0-10 points)
-  // Best entries: oversold for longs (K < 30), overbought for shorts (K > 70)
+  // Phase 2: Best entries when StochRSI is crossing, not at extremes
+  const stochRsiDValue = stochRsiD ?? stochRsiK; // Fallback if D not provided
+  
   if (direction === "long") {
-    if (stochRsiK < 30) factors.stochRsiPosition = 10;
-    else if (stochRsiK < 50) factors.stochRsiPosition = 6;
-    else if (stochRsiK < 70) factors.stochRsiPosition = 3;
-    else {
+    // Best: K < 50 and K > D (crossing up)
+    if (stochRsiK < 50 && stochRsiK > stochRsiDValue) {
+      factors.stochRsiPosition = 10;
+    } else if (stochRsiK < 30) {
+      factors.stochRsiPosition = 8; // Oversold is good for longs
+    } else if (stochRsiK < 50) {
+      factors.stochRsiPosition = 6;
+    } else if (stochRsiK < 70) {
+      factors.stochRsiPosition = 3;
+    } else {
       factors.stochRsiPosition = 0;
       warnings.push("StochRSI overbought for long entry");
     }
   } else {
-    if (stochRsiK > 70) factors.stochRsiPosition = 10;
-    else if (stochRsiK > 50) factors.stochRsiPosition = 6;
-    else if (stochRsiK > 30) factors.stochRsiPosition = 3;
-    else {
+    // Best: K > 50 and K < D (crossing down)
+    if (stochRsiK > 50 && stochRsiK < stochRsiDValue) {
+      factors.stochRsiPosition = 10;
+    } else if (stochRsiK > 70) {
+      factors.stochRsiPosition = 8; // Overbought is good for shorts
+    } else if (stochRsiK > 50) {
+      factors.stochRsiPosition = 6;
+    } else if (stochRsiK > 30) {
+      factors.stochRsiPosition = 3;
+    } else {
       factors.stochRsiPosition = 0;
       warnings.push("StochRSI oversold for short entry");
     }
@@ -391,6 +591,19 @@ export function calculateEntryQuality(
     warnings.push("MACD histogram not expanding");
   }
 
+  // 7. Entry Confirmation Score (0-10 points) - NEW for Phase 2
+  if (pullbackResult) {
+    // Confirmation based on candle confirmation + RSI recovery
+    if (pullbackResult.hasBounceConfirmation && pullbackResult.rsiRecovering) {
+      factors.entryConfirmation = 10;
+    } else if (pullbackResult.hasBounceConfirmation || pullbackResult.rsiRecovering) {
+      factors.entryConfirmation = 5;
+    }
+  } else if (entryType === "breakout" && volumeRatio >= 1.5 && macdHistogramExpanding) {
+    // Breakout with volume and MACD confirmation
+    factors.entryConfirmation = 8;
+  }
+
   // Calculate total score
   const totalScore = 
     factors.momentumAlignment +
@@ -398,20 +611,26 @@ export function calculateEntryQuality(
     factors.volumeConfirmation +
     factors.timeframeAlignment +
     factors.stochRsiPosition +
-    factors.macdExpanding;
+    factors.macdExpanding +
+    factors.entryConfirmation;
 
   // Determine grade
   let grade: "A" | "B" | "C" | "D" | "F" = "F";
-  if (totalScore >= 85) grade = "A";
-  else if (totalScore >= 70) grade = "B";
-  else if (totalScore >= 55) grade = "C";
-  else if (totalScore >= 40) grade = "D";
+  if (totalScore >= 90) grade = "A";
+  else if (totalScore >= 75) grade = "B";
+  else if (totalScore >= 60) grade = "C";
+  else if (totalScore >= 45) grade = "D";
+
+  // Phase 2: isRecommended requires entry confirmation for pullbacks
+  const hasConfirmation = pullbackResult ? pullbackResult.hasBounceConfirmation : true;
+  const isRecommended = totalScore >= 60 && !momentumScore.isExhausted && hasConfirmation;
 
   return {
     score: Math.round(totalScore),
     grade,
     factors,
-    isRecommended: totalScore >= 60 && !momentumScore.isExhausted,
+    isRecommended,
+    entryType,
     warnings
   };
 }

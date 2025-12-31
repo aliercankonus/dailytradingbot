@@ -633,6 +633,48 @@ export const PULLBACK_DETECTION_PARAMS = {
   DEFAULT_POSITION_SIZE_PERCENT: 50,
 } as const;
 
+// ============= PHASE 2: SMARTER ENTRY TIMING PARAMETERS =============
+// True pullback detection, entry confirmation, and wait-for-bounce logic
+export const ENTRY_TIMING_PHASE2_PARAMS = {
+  // RSI thresholds for pullback detection
+  RSI_DIP_THRESHOLD_LONG: 45,      // RSI must dip below this for long pullback
+  RSI_SPIKE_THRESHOLD_SHORT: 55,   // RSI must spike above this for short pullback
+  
+  // Minimum bars to look back for RSI dip/spike
+  RSI_LOOKBACK_BARS: 5,
+  
+  // Minimum confirmation candles after bounce
+  MIN_CONFIRMATION_CANDLES: 1,
+  OPTIMAL_CONFIRMATION_CANDLES: 2,
+  
+  // Entry confirmation requirements (minimum confirmations to proceed)
+  MIN_CONFIRMATIONS_REQUIRED: 4,    // Out of 5 total confirmations
+  
+  // Pullback depth requirements (Fibonacci levels)
+  MIN_PULLBACK_DEPTH: 38.2,        // Minimum retracement for valid pullback
+  MAX_PULLBACK_DEPTH: 78.6,        // Maximum before considered failed trend
+  IDEAL_PULLBACK_MIN: 50.0,        // Ideal pullback zone start
+  IDEAL_PULLBACK_MAX: 61.8,        // Ideal pullback zone end (golden ratio)
+  
+  // Volume confirmation
+  MIN_VOLUME_RATIO: 1.0,           // Minimum volume for entry
+  STRONG_VOLUME_RATIO: 1.5,        // Strong volume confirmation
+  
+  // Wait-for-bounce logic
+  WAIT_FOR_BOUNCE_ENABLED: true,   // Require price to close above prev high (long)
+  BOUNCE_CONFIRMATION_BARS: 2,     // Bars to check for bounce confirmation
+  
+  // Position size adjustments for entry quality
+  QUALITY_GRADE_A_MULTIPLIER: 1.0,  // Full size for A grade
+  QUALITY_GRADE_B_MULTIPLIER: 0.9,  // 90% for B grade
+  QUALITY_GRADE_C_MULTIPLIER: 0.75, // 75% for C grade
+  QUALITY_GRADE_D_MULTIPLIER: 0.5,  // 50% for D grade (borderline)
+  
+  // Block entries without confirmation in these scenarios
+  BLOCK_NO_CONFIRMATION_IN_RECOVERY: true,
+  BLOCK_NO_CONFIRMATION_AT_EXTREMES: true,  // StochRSI > 80 or < 20
+} as const;
+
 // Correlation risk parameters
 export const CORRELATION_PARAMS = {
   // Maximum correlation threshold between positions (0-1)

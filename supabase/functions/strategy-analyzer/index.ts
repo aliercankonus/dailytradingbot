@@ -40,6 +40,8 @@ import {
   TREND_CONTINUATION_TIGHT_STOPS,
   // Pullback entry detection
   PULLBACK_DETECTION_PARAMS,
+  // Phase 2: Smarter Entry Timing
+  ENTRY_TIMING_PHASE2_PARAMS,
   // NEW: Momentum continuation for catching strong moves
   MOMENTUM_CONTINUATION_PARAMS,
   TIME_IN_EXTREME_PARAMS,
@@ -55,12 +57,14 @@ import {
   calculateMomentumScore, 
   detectPullback, 
   calculateEntryQuality,
+  checkEntryConfirmation,
   classifyMarketRegime as classifySmartRegime,
   detectBollingerSqueeze,
   findSwingPoints,
   type MomentumScoreResult,
   type PullbackResult,
   type EntryQualityResult,
+  type EntryConfirmationResult,
   type MarketRegimeResult as SmartRegimeResult
 } from "../_shared/smart-momentum.ts";
 import { calculateRSIArray, calculateATR } from "../_shared/indicators.ts";
@@ -4157,6 +4161,7 @@ serve(async (req) => {
         // Calculate entry quality using smart momentum module for additional validation
         const stochRsiData = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi || {};
         const stochRsiK = stochRsiData.k ?? 50;
+        const stochRsiD = stochRsiData.d ?? stochRsiK;
         const stochRsiSignal = stochRsiData.signal ?? "neutral";
         const macdHistExpanding = trendData.macd?.isExpanding ?? false;
         const timeframeAlignmentScoreForEntry = trendConsistency || 50;
@@ -4170,13 +4175,90 @@ serve(async (req) => {
           stochRsiK,
           stochRsiSignal,
           macdHistExpanding,
+          derivedDirection,
+          stochRsiD  // Pass D for crossing detection
+        );
+        
+        // ============= PHASE 2: ENTRY CONFIRMATION CHECK =============
+        // Check all entry confirmation filters for smarter entry timing
+        const entryConfirmation = checkEntryConfirmation(
+          smartPullback,
+          volumeRatioForRegime,
+          stochRsiK,
+          stochRsiD,
+          macdHistExpanding,
           derivedDirection
         );
         
         // Log smart entry quality assessment
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.ENTRY} SMART ENTRY QUALITY: ${smartEntryQuality.score}/100 Grade=${smartEntryQuality.grade} Recommended=${smartEntryQuality.isRecommended}`);
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.ENTRY} SMART ENTRY QUALITY: ${smartEntryQuality.score}/100 Grade=${smartEntryQuality.grade} Type=${smartEntryQuality.entryType} Recommended=${smartEntryQuality.isRecommended}`);
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.ENTRY} ENTRY CONFIRMATION: ${entryConfirmation.confirmationCount}/${entryConfirmation.maxConfirmations} filters passed`);
         if (smartEntryQuality.warnings.length > 0) {
           logger.forSymbol(symbol).debug(`   Warnings: ${smartEntryQuality.warnings.slice(0, 3).join(' | ')}`);
+        }
+        if (!entryConfirmation.allConfirmed) {
+          const failedFilters = entryConfirmation.reasons.filter(r => r.startsWith("✗"));
+          logger.forSymbol(symbol).debug(`   Missing confirmations: ${failedFilters.join(' | ')}`);
+        }
+        
+        // ============= PHASE 2: WAIT-FOR-BOUNCE GATE =============
+        // For pullback entries, require bounce confirmation before entry
+        const isPullbackEntry = smartPullback.isPullback && smartEntryQuality.entryType === "pullback";
+        const waitForBounceEnabled = ENTRY_TIMING_PHASE2_PARAMS.WAIT_FOR_BOUNCE_ENABLED;
+        const isAtStochRsiExtreme = stochRsiK > 80 || stochRsiK < 20;
+        
+        if (waitForBounceEnabled && isPullbackEntry && !smartPullback.hasBounceConfirmation) {
+          // Block pullback entries without bounce confirmation
+          if (ENTRY_TIMING_PHASE2_PARAMS.BLOCK_NO_CONFIRMATION_AT_EXTREMES && isAtStochRsiExtreme) {
+            rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { gate: 'PHASE2_NO_BOUNCE_CONFIRMATION', details: `StochRSI at extreme (${stochRsiK.toFixed(0)})` });
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} PHASE 2 GATE: Pullback entry blocked - waiting for bounce confirmation at StochRSI extreme`);
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `PHASE 2: Pullback entry without bounce confirmation at StochRSI extreme (K=${stochRsiK.toFixed(0)})`,
+              {
+                gate: "PHASE2_WAIT_FOR_BOUNCE",
+                stochRsiK: stochRsiK.toFixed(1),
+                pullbackDepth: smartPullback.pullbackDepth,
+                hasBounceConfirmation: smartPullback.hasBounceConfirmation,
+                rsiRecovering: smartPullback.rsiRecovering,
+                confirmationCandles: smartPullback.confirmationCandles,
+                entryConfirmation: entryConfirmation.confirmationCount,
+                reasons: smartPullback.reasons
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          } else {
+            // Log warning but allow entry with reduced position size
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.ENTRY} Pullback without bounce confirmation - position size will be reduced`);
+          }
+        }
+        
+        // ============= PHASE 2: RECOVERY MODE CONFIRMATION GATE =============
+        // In recovery mode, require full entry confirmation
+        if (isInRecoveryMode && ENTRY_TIMING_PHASE2_PARAMS.BLOCK_NO_CONFIRMATION_IN_RECOVERY && !entryConfirmation.allConfirmed) {
+          rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { gate: 'PHASE2_RECOVERY_NO_CONFIRMATION', details: `${entryConfirmation.confirmationCount}/${ENTRY_TIMING_PHASE2_PARAMS.MIN_CONFIRMATIONS_REQUIRED}` });
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} PHASE 2 GATE: Recovery mode requires full entry confirmation`);
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `PHASE 2 RECOVERY: Entry blocked - only ${entryConfirmation.confirmationCount}/${ENTRY_TIMING_PHASE2_PARAMS.MIN_CONFIRMATIONS_REQUIRED} confirmations`,
+            {
+              gate: "PHASE2_RECOVERY_CONFIRMATION",
+              confirmationCount: entryConfirmation.confirmationCount,
+              minRequired: ENTRY_TIMING_PHASE2_PARAMS.MIN_CONFIRMATIONS_REQUIRED,
+              confirmationDetails: entryConfirmation.details,
+              pullbackValid: smartPullback.isValidPullback,
+              reasons: entryConfirmation.reasons
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
+          );
+          continue;
         }
         
         // Apply smart entry quality gate (only when regime-aware trading is enabled)
@@ -4184,6 +4266,32 @@ serve(async (req) => {
         if (regimeAwareEnabled && !smartEntryQuality.isRecommended && smartEntryQuality.score < minEntryQuality) {
           // Log but don't hard reject - use as quality adjustment instead
           logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.QUALITY} Smart entry quality below threshold: ${smartEntryQuality.score}/${minEntryQuality}`);
+        }
+        
+        // ============= PHASE 2: POSITION SIZE ADJUSTMENT BY ENTRY QUALITY =============
+        // Higher quality entries get full position, lower quality gets reduced
+        let phase2PositionMultiplier = 1.0;
+        switch (smartEntryQuality.grade) {
+          case "A":
+            phase2PositionMultiplier = ENTRY_TIMING_PHASE2_PARAMS.QUALITY_GRADE_A_MULTIPLIER;
+            break;
+          case "B":
+            phase2PositionMultiplier = ENTRY_TIMING_PHASE2_PARAMS.QUALITY_GRADE_B_MULTIPLIER;
+            break;
+          case "C":
+            phase2PositionMultiplier = ENTRY_TIMING_PHASE2_PARAMS.QUALITY_GRADE_C_MULTIPLIER;
+            break;
+          case "D":
+            phase2PositionMultiplier = ENTRY_TIMING_PHASE2_PARAMS.QUALITY_GRADE_D_MULTIPLIER;
+            break;
+          default:
+            phase2PositionMultiplier = 0.4; // F grade gets minimal position
+        }
+        
+        // Additional reduction if pullback lacks bounce confirmation
+        if (isPullbackEntry && !smartPullback.hasBounceConfirmation) {
+          phase2PositionMultiplier *= 0.7; // 30% reduction for unconfirmed bounces
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} PHASE 2: Position reduced to ${(phase2PositionMultiplier * 100).toFixed(0)}% (no bounce confirmation)`);
         }
         
         // Store entry quality in database (async, don't block) - will be linked to position later if signal executes
@@ -4201,7 +4309,15 @@ serve(async (req) => {
           entry_factors: {
             ...smartEntryQuality.factors,
             grade: smartEntryQuality.grade,
-            warnings: smartEntryQuality.warnings
+            entryType: smartEntryQuality.entryType,
+            warnings: smartEntryQuality.warnings,
+            // Phase 2 additions
+            entryConfirmation: entryConfirmation.confirmationCount,
+            hasBounceConfirmation: smartPullback.hasBounceConfirmation,
+            confirmationCandles: smartPullback.confirmationCandles,
+            rsiDipped: smartPullback.rsiDipped,
+            rsiRecovering: smartPullback.rsiRecovering,
+            phase2PositionMultiplier
           }
         };
 
