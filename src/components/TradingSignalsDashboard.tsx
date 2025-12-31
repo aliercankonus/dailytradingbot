@@ -213,31 +213,31 @@ export const TradingSignalsDashboard = () => {
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                   {Object.entries(signal.indicators).map(([key, value]) => {
-                    // Format value based on type
-                    let displayValue: string;
-                    if (typeof value === 'number') {
-                      displayValue = value.toFixed(2);
-                    } else if (typeof value === 'boolean') {
-                      displayValue = value ? 'Yes' : 'No';
-                    } else if (value === null || value === undefined) {
-                      displayValue = '-';
-                    } else if (typeof value === 'object') {
-                      // For objects, show a formatted summary
-                      try {
-                        const entries = Object.entries(value as Record<string, unknown>);
-                        if (entries.length === 0) {
-                          displayValue = '-';
-                        } else if (entries.length <= 2) {
-                          displayValue = entries.map(([k, v]) => `${k}: ${v}`).join(', ');
-                        } else {
-                          displayValue = entries.slice(0, 2).map(([k, v]) => `${k}: ${v}`).join(', ') + ` (+${entries.length - 2})`;
+                    // Helper to format any value (handles nested objects)
+                    const formatValue = (val: unknown): string => {
+                      if (typeof val === 'number') {
+                        return val.toFixed(2);
+                      } else if (typeof val === 'boolean') {
+                        return val ? 'Yes' : 'No';
+                      } else if (val === null || val === undefined) {
+                        return '-';
+                      } else if (typeof val === 'object') {
+                        // Recursively format object values
+                        try {
+                          const entries = Object.entries(val as Record<string, unknown>);
+                          if (entries.length === 0) return '-';
+                          return entries
+                            .slice(0, 3)
+                            .map(([k, v]) => `${k}: ${formatValue(v)}`)
+                            .join(', ') + (entries.length > 3 ? ` (+${entries.length - 3})` : '');
+                        } catch {
+                          return '-';
                         }
-                      } catch {
-                        displayValue = JSON.stringify(value);
                       }
-                    } else {
-                      displayValue = String(value);
-                    }
+                      return String(val);
+                    };
+
+                    const displayValue = formatValue(value);
                     
                     return (
                       <div key={key} className="p-2 bg-background/60 rounded border border-border/50">
