@@ -212,14 +212,42 @@ export const TradingSignalsDashboard = () => {
                   Indicator Values
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {Object.entries(signal.indicators).map(([key, value]) => (
-                    <div key={key} className="p-2 bg-background/60 rounded border border-border/50">
-                      <div className="text-xs text-muted-foreground font-medium">{key}</div>
-                      <div className="text-sm font-bold mt-1">
-                        {typeof value === 'number' ? value.toFixed(2) : String(value)}
+                  {Object.entries(signal.indicators).map(([key, value]) => {
+                    // Format value based on type
+                    let displayValue: string;
+                    if (typeof value === 'number') {
+                      displayValue = value.toFixed(2);
+                    } else if (typeof value === 'boolean') {
+                      displayValue = value ? 'Yes' : 'No';
+                    } else if (value === null || value === undefined) {
+                      displayValue = '-';
+                    } else if (typeof value === 'object') {
+                      // For objects, show a formatted summary
+                      try {
+                        const entries = Object.entries(value as Record<string, unknown>);
+                        if (entries.length === 0) {
+                          displayValue = '-';
+                        } else if (entries.length <= 2) {
+                          displayValue = entries.map(([k, v]) => `${k}: ${v}`).join(', ');
+                        } else {
+                          displayValue = entries.slice(0, 2).map(([k, v]) => `${k}: ${v}`).join(', ') + ` (+${entries.length - 2})`;
+                        }
+                      } catch {
+                        displayValue = JSON.stringify(value);
+                      }
+                    } else {
+                      displayValue = String(value);
+                    }
+                    
+                    return (
+                      <div key={key} className="p-2 bg-background/60 rounded border border-border/50">
+                        <div className="text-xs text-muted-foreground font-medium">{key}</div>
+                        <div className="text-sm font-bold mt-1 break-words">
+                          {displayValue}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
