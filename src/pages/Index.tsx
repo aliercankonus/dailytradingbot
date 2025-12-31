@@ -24,6 +24,7 @@ import { PositionsSummary } from "@/components/PositionsSummary";
 import { AIAnalysisDashboard } from "@/components/AIAnalysisDashboard";
 import { LossAttributionDashboard } from "@/components/LossAttributionDashboard";
 import { MomentumStatusDashboard } from "@/components/MomentumStatusDashboard";
+import { ExitManagementDashboard } from "@/components/ExitManagementDashboard";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -115,13 +116,17 @@ const Index = () => {
           <TabsContent value="positions" className="space-y-6">
             <PositionsSummary />
             <Tabs defaultValue="active" className="w-full">
-              <TabsList className="grid w-full grid-cols-3">
+              <TabsList className="grid w-full grid-cols-4">
                 <TabsTrigger value="active">Active</TabsTrigger>
+                <TabsTrigger value="exit-mgmt">Exit Mgmt</TabsTrigger>
                 <TabsTrigger value="trailing">Trailing Stops</TabsTrigger>
                 <TabsTrigger value="early-exits">Early Exits</TabsTrigger>
               </TabsList>
               <TabsContent value="active" className="mt-4">
                 <ActivePositions />
+              </TabsContent>
+              <TabsContent value="exit-mgmt" className="mt-4">
+                <ExitManagementDashboard />
               </TabsContent>
               <TabsContent value="trailing" className="mt-4">
                 <TrailingStopMonitor />
