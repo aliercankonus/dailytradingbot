@@ -511,7 +511,7 @@ export const getVolumeScore = (
   
   // Slightly above average
   if (volumeRatio > 1.2) {
-    return 1;
+    return 2;  // IMPROVED: Was 1, now 2 (120%+ volume = decent confirmation)
   }
   
   // CRITICAL: Very low volume (< 10%) = holiday/weekend conditions = 0 points
@@ -523,12 +523,18 @@ export const getVolumeScore = (
   // PARTIAL CREDIT: At least average volume (volumeRatio >= 1.0)
   // This prevents zero volume score in normal market conditions
   if (volumeRatio >= 1.0) {
-    return 1;  // Baseline credit for average volume
+    return 2;  // IMPROVED: Was 1, now 2 (average volume = baseline credit)
   }
   
-  // Low but not critical volume (10-100% of average) - minimal credit
+  // IMPROVED: 50-100% volume = still reasonable for momentum trades
+  // Strong moves can happen on slightly below average volume
+  if (volumeRatio >= 0.5) {
+    return 2;  // Was 1 at 0.3+, now 2 at 0.5+ (better scoring for near-average volume)
+  }
+  
+  // Low but not critical volume (30-50% of average) - minimal credit
   if (volumeRatio >= 0.3) {
-    return 1;
+    return 1;  // Kept as 1 for genuinely low volume
   }
   
   // Very low volume (10-30%) in any condition - no bonus
@@ -571,7 +577,8 @@ export const getAdxScore = (adx: number): number => {
 };
 
 // ============= MOMENTUM SCORE (0-20 points) =============
-export const getMomentumScore = (momentum: any): number => {
+// IMPROVED: Better scoring for momentum continuation during strong moves
+export const getMomentumScore = (momentum: any, adx: number = 0, adxRising: boolean = false): number => {
   if (!momentum) return 0;
   
   const state = momentum.state || "none";
@@ -591,15 +598,24 @@ export const getMomentumScore = (momentum: any): number => {
   } else if (building && macdExpanding && confirms) {
     score = 10;
   } else if (state === "mixed" && macdExpanding && confirms) {
-    score = 8;  // IMPROVED: Was 6, now 8 for mixed + MACD expanding + confirms
+    score = 8;
   } else if (state === "mixed" && macdExpanding) {
-    score = 6;  // NEW: Mixed + MACD expanding (without confirms) = 6 pts
+    // IMPROVED: "mixed" + MACD expanding + ADX rising = ACTIVE MOMENTUM CONTINUATION
+    // This is a valid entry during strong trends, not a reject scenario
+    if (adx >= 25 && adxRising) {
+      score = 10;  // Was 6, now 10 for active momentum continuation
+    } else if (adx >= 22) {
+      score = 8;   // Decent ADX + MACD expanding = 8 pts
+    } else {
+      score = 6;   // Original score for weaker trends
+    }
   } else if (building && macdExpanding) {
     score = 4;
   } else if (state === "mixed") {
     score = 2;
   } else if (macdExpanding) {
-    score = 2;
+    // MACD expanding alone should get more credit when ADX is strong
+    score = adx >= 25 ? 4 : 2;
   } else {
     score = 0;
   }
@@ -2009,7 +2025,8 @@ export const calculateQualityScore = (
   const hasRangeExpansion = (trendData?.volatility?.relativeATR || 1) > 1.0;
   
   const adxScore = getAdxScore(adx);
-  const momentumScore = getMomentumScore(momentum);
+  const adxRising = trendData?.volatility?.adxRising ?? false;
+  const momentumScore = getMomentumScore(momentum, adx, adxRising);
   const alignmentScore = getAlignmentScore(confidence, consistency, aligned, trendData);
   const technicalScore = getTechnicalScore(trendData, effectiveTrend, symbol);
   const volumeScoreVal = getVolumeScore(volumeConfirms, volumeSpike, volumeRatio, hasRangeExpansion, effectiveTrend);

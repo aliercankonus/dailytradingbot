@@ -3404,7 +3404,7 @@ serve(async (req) => {
         // ============= CONTEXT-AWARE MOMENTUM GATE FOR PULLBACK ENTRIES =============
         // Pullbacks by definition lack strong momentum - that's the opportunity!
         // Detect pullback setups and use reduced momentum threshold (3 vs 5)
-        const earlyMomentumScore = getMomentumScore(momentum);
+        const earlyMomentumScore = getMomentumScore(momentum, adx, trendData.volatility?.adxRising ?? false);
         
         // ===== STOCHRSI DATA VALIDATION =====
         // Validate StochRSI values before pullback detection to prevent false signals
@@ -4040,8 +4040,11 @@ serve(async (req) => {
         // Use fakeBreakoutRisk and genuineMomentum from calculate-trend for quality adjustment
         const fakeBreakoutRisk = momentum?.fakeBreakoutRisk === true;
         const genuineMomentum = momentum?.genuineMomentum === true;
+        const localMacdExpanding = momentum?.macdExpanding === true;
+        const localAdxRising = trendData.volatility?.adxRising ?? false;
         let fakeBreakoutPenalty = 0;
         let genuineMomentumBonus = 0;
+        let momentumContinuationBonus = 0;
         
         if (fakeBreakoutRisk) {
           fakeBreakoutPenalty = -8; // -8 quality points for MACD expanding but ADX falling
@@ -4051,6 +4054,22 @@ serve(async (req) => {
         if (genuineMomentum) {
           genuineMomentumBonus = 5; // +5 quality points for MACD expanding + ADX rising
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} GENUINE MOMENTUM: MACD expanding + ADX rising → quality bonus +${genuineMomentumBonus}`);
+        }
+        
+        // ============= NEW: MOMENTUM CONTINUATION BONUS =============
+        // When ADX >= 25, MACD expanding, and 4h trend confidence >= 60%
+        // This catches strong momentum moves that might miss due to "mixed" state
+        const conf4hForBonus = timeframes?.['4h']?.confidence || 50;
+        if (adx >= 25 && localMacdExpanding && conf4hForBonus >= 60 && !fakeBreakoutRisk) {
+          // Active momentum continuation - add +3 quality bonus
+          momentumContinuationBonus = 3;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} MOMENTUM CONTINUATION: ADX=${adx.toFixed(1)} ≥25, MACD expanding, 4h conf=${conf4hForBonus}% ≥60% → +${momentumContinuationBonus} quality`);
+          
+          // Extra bonus if ADX is rising (truly accelerating)
+          if (localAdxRising) {
+            momentumContinuationBonus += 2;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM}   → ADX rising: total continuation bonus +${momentumContinuationBonus}`);
+          }
         }
         
         // Direction bonus: +3 for SHORT/SELL signals (historically 38% vs 31% win rate)
@@ -4102,7 +4121,7 @@ serve(async (req) => {
         
         const qualityFactors: QualityFactors = {
           adxScore: getAdxScore(adx),
-          momentumScore: getMomentumScore(momentum),
+          momentumScore: getMomentumScore(momentum, adx, trendData.volatility?.adxRising ?? false),
           alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, trendData),
           technicalScore: getTechnicalScore(trendData, trend, symbol),
           entryTimingScore: entryTimingScore,
@@ -4114,8 +4133,8 @@ serve(async (req) => {
 
         const { score: rawQualityScore, breakdown: rawBreakdown } = calculateQualityScore(qualityFactors);
         
-        // ============= PHASE 4: Apply Fake Breakout Penalty and Genuine Momentum Bonus =============
-        const qualityScore = Math.max(0, Math.min(100, rawQualityScore + fakeBreakoutPenalty + genuineMomentumBonus));
+        // ============= PHASE 4: Apply Fake Breakout Penalty, Genuine Momentum Bonus, and Continuation Bonus =============
+        const qualityScore = Math.max(0, Math.min(100, rawQualityScore + fakeBreakoutPenalty + genuineMomentumBonus + momentumContinuationBonus));
         
         // Build final breakdown string including adjustments
         let breakdown = rawBreakdown;
@@ -4125,10 +4144,13 @@ serve(async (req) => {
         if (genuineMomentumBonus !== 0) {
           breakdown += ` GMOM:+${genuineMomentumBonus}`;
         }
+        if (momentumContinuationBonus !== 0) {
+          breakdown += ` MCONT:+${momentumContinuationBonus}`;
+        }
         
         // Log if adjustments were applied
-        if (fakeBreakoutPenalty !== 0 || genuineMomentumBonus !== 0) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Quality adjusted: ${rawQualityScore}→${qualityScore} (FAKE:${fakeBreakoutPenalty}, GMOM:+${genuineMomentumBonus})`);
+        if (fakeBreakoutPenalty !== 0 || genuineMomentumBonus !== 0 || momentumContinuationBonus !== 0) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Quality adjusted: ${rawQualityScore}→${qualityScore} (FAKE:${fakeBreakoutPenalty}, GMOM:+${genuineMomentumBonus}, MCONT:+${momentumContinuationBonus})`);
         }
         
         // ===== SCENARIO 6 FINDING 7: DYNAMIC POSITION SIZE =====

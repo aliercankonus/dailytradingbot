@@ -457,7 +457,7 @@ serve(async (req) => {
           
           // Calculate quality score
           const adxScore = getAdxScore(adx);
-          const momentumScore = getMomentumScore(momentum);
+          const momentumScore = getMomentumScore(momentum, adx, false);
           const confidencePenalty = getConfidencePenalty(trend4h.confidence, adx, momentum.confirms);
           const trendsAgree = trend4h.trend === trend1h.trend;
           const consistency = trendsAgree ? 75 : (isAligned ? 60 : 40);
