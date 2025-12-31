@@ -1234,15 +1234,33 @@ serve(async (req) => {
       .eq("user_id", userId)
       .eq("is_active", true);
 
+    // Fetch manually paused strategies from strategy_performance table
+    const { data: pausedStrategiesData } = await supabase
+      .from("strategy_performance")
+      .select("strategy_name")
+      .eq("user_id", userId)
+      .eq("status", "paused");
+    
+    const pausedStrategyNames = new Set(
+      (pausedStrategiesData || []).map(s => s.strategy_name.toLowerCase())
+    );
+    
+    if (pausedStrategyNames.size > 0) {
+      logger.info(`${LOG_CATEGORIES.SUMMARY} Manually paused strategies: ${Array.from(pausedStrategyNames).join(', ')}`);
+    }
+
     // Combine user's custom strategies with built-in templates
     // User strategies are evaluated first (they take priority), then built-ins fill gaps
     // NOTE: Strategy filtering is now DEFERRED to per-symbol evaluation based on regime
-    const userStrategies = customStrategies || [];
+    const userStrategies = (customStrategies || []).filter(s => 
+      !pausedStrategyNames.has(s.name.toLowerCase())
+    );
     const userStrategyNames = new Set(userStrategies.map(s => s.name.toLowerCase()));
     
-    // Add built-in templates that don't duplicate user strategies
+    // Add built-in templates that don't duplicate user strategies AND are not paused
     const builtInToInclude = BUILT_IN_TEMPLATES.filter(t => 
-      !userStrategyNames.has(t.name.toLowerCase())
+      !userStrategyNames.has(t.name.toLowerCase()) && 
+      !pausedStrategyNames.has(t.name.toLowerCase())
     );
     
     const allStrategies = [...userStrategies, ...builtInToInclude];
