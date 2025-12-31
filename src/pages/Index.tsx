@@ -25,6 +25,7 @@ import { AIAnalysisDashboard } from "@/components/AIAnalysisDashboard";
 import { LossAttributionDashboard } from "@/components/LossAttributionDashboard";
 import { MomentumStatusDashboard } from "@/components/MomentumStatusDashboard";
 import { ExitManagementDashboard } from "@/components/ExitManagementDashboard";
+import { MarketConditionsDashboard } from "@/components/MarketConditionsDashboard";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -108,6 +109,7 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="signals" className="space-y-6">
+            <MarketConditionsDashboard />
             <SignalTimingMonitor />
             <TradingSignalsDashboard />
             <AIAnalysisDashboard />
