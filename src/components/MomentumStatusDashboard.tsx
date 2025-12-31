@@ -13,8 +13,10 @@ import {
   Target,
   Zap,
   RefreshCw,
+  Radio,
 } from "lucide-react";
 import { useMomentumStatus } from "@/hooks/useMomentumStatus";
+import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
 import { Button } from "@/components/ui/button";
 import {
   ChartContainer,
@@ -62,21 +64,34 @@ const getRegimeLabel = (adx: number) => {
 
 export const MomentumStatusDashboard = () => {
   const { momentumData, loading, refetch } = useMomentumStatus();
+  const { prices, priceVersion, connected: wsConnected, getPrice } = useRealtimePricesContext();
+
+  // Enhance momentum data with live prices
+  const enhancedMomentumData = momentumData.map(data => {
+    const livePrice = getPrice(data.symbol);
+    const priceNum = parseFloat(livePrice.price) || 0;
+    const priceChangeNum = parseFloat(livePrice.priceChangePercent) || 0;
+    return {
+      ...data,
+      livePrice: priceNum,
+      priceChange24h: priceChangeNum,
+    };
+  });
 
   const summaryStats = {
-    confirmed: momentumData.filter(d => d.momentum?.state === "confirmed").length,
-    building: momentumData.filter(d => d.momentum?.state === "building").length,
-    mixed: momentumData.filter(d => d.momentum?.state === "mixed").length,
-    none: momentumData.filter(d => d.momentum?.state === "none" || !d.momentum?.state).length,
-    bullish: momentumData.filter(d => d.trend === "bullish").length,
-    bearish: momentumData.filter(d => d.trend === "bearish").length,
+    confirmed: enhancedMomentumData.filter(d => d.momentum?.state === "confirmed").length,
+    building: enhancedMomentumData.filter(d => d.momentum?.state === "building").length,
+    mixed: enhancedMomentumData.filter(d => d.momentum?.state === "mixed").length,
+    none: enhancedMomentumData.filter(d => d.momentum?.state === "none" || !d.momentum?.state).length,
+    bullish: enhancedMomentumData.filter(d => d.trend === "bullish").length,
+    bearish: enhancedMomentumData.filter(d => d.trend === "bearish").length,
   };
 
-  const avgADX = momentumData.length > 0
-    ? momentumData.reduce((sum, d) => sum + (d.momentum?.adx ?? 0), 0) / momentumData.length
+  const avgADX = enhancedMomentumData.length > 0
+    ? enhancedMomentumData.reduce((sum, d) => sum + (d.momentum?.adx ?? 0), 0) / enhancedMomentumData.length
     : 0;
 
-  const readyForEntry = momentumData.filter(
+  const readyForEntry = enhancedMomentumData.filter(
     d => d.momentum?.state === "confirmed" || d.momentum?.state === "building"
   );
 
@@ -87,6 +102,12 @@ export const MomentumStatusDashboard = () => {
           <CardTitle className="flex items-center gap-2">
             <Gauge className="h-5 w-5 text-primary" />
             Momentum Status Dashboard
+            {wsConnected && (
+              <Badge variant="outline" className="ml-2 text-green-600 border-green-600">
+                <Radio className="h-3 w-3 mr-1 animate-pulse" />
+                Live
+              </Badge>
+            )}
           </CardTitle>
           <CardDescription>
             Real-time momentum scores, entry quality, and market regime for active symbols
@@ -102,7 +123,7 @@ export const MomentumStatusDashboard = () => {
           <div className="flex items-center justify-center py-8">
             <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
-        ) : momentumData.length === 0 ? (
+        ) : enhancedMomentumData.length === 0 ? (
           <p className="text-muted-foreground text-center py-8">No active symbols configured</p>
         ) : (
           <Tabs defaultValue="overview" className="space-y-4">
@@ -179,7 +200,7 @@ export const MomentumStatusDashboard = () => {
                           </span>
                           <span className="text-xs font-medium">{summaryStats.bullish}</span>
                         </div>
-                        <Progress value={(summaryStats.bullish / momentumData.length) * 100} className="h-2 bg-muted" />
+                        <Progress value={(summaryStats.bullish / enhancedMomentumData.length) * 100} className="h-2 bg-muted" />
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center justify-between mb-1">
@@ -188,7 +209,7 @@ export const MomentumStatusDashboard = () => {
                           </span>
                           <span className="text-xs font-medium">{summaryStats.bearish}</span>
                         </div>
-                        <Progress value={(summaryStats.bearish / momentumData.length) * 100} className="h-2 bg-muted [&>div]:bg-red-500" />
+                        <Progress value={(summaryStats.bearish / enhancedMomentumData.length) * 100} className="h-2 bg-muted [&>div]:bg-red-500" />
                       </div>
                     </div>
                   </CardContent>
@@ -250,7 +271,7 @@ export const MomentumStatusDashboard = () => {
             </TabsContent>
 
             <TabsContent value="details" className="space-y-3">
-              {momentumData.map((data) => {
+              {enhancedMomentumData.map((data) => {
                 if (data.error) {
                   return (
                     <Card key={data.symbol} className="border-destructive/50">
@@ -264,7 +285,7 @@ export const MomentumStatusDashboard = () => {
                   );
                 }
 
-                const { momentum, higherTimeframeFilter, trend } = data;
+                const { momentum, higherTimeframeFilter, trend, livePrice, priceChange24h } = data;
                 const adxValue = momentum?.adx ?? 0;
                 const macdHistogram = momentum?.macdHistogram ?? 0;
 
@@ -290,8 +311,18 @@ export const MomentumStatusDashboard = () => {
                     <CardContent className="pt-4">
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-3">
+                          <div className="flex items-center gap-2 mb-3 flex-wrap">
                             <span className="font-bold text-lg">{data.symbol}</span>
+                            {livePrice > 0 && (
+                              <span className="text-sm font-mono">
+                                ${livePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
+                                {priceChange24h !== 0 && (
+                                  <span className={`ml-1 text-xs ${priceChange24h >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    ({priceChange24h >= 0 ? '+' : ''}{priceChange24h.toFixed(2)}%)
+                                  </span>
+                                )}
+                              </span>
+                            )}
                             <Badge
                               style={{ backgroundColor: getMomentumColor(momentum?.state ?? "none") }}
                               className="text-white"
@@ -408,7 +439,7 @@ export const MomentumStatusDashboard = () => {
                   <ChartContainer config={chartConfig} className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        data={momentumData.map(d => ({
+                        data={enhancedMomentumData.map(d => ({
                           symbol: d.symbol.replace('USDT', ''),
                           adx: d.momentum?.adx ?? 0,
                           fill: getRegimeColor(d.momentum?.adx ?? 0)
@@ -425,7 +456,7 @@ export const MomentumStatusDashboard = () => {
                         <YAxis domain={[0, 50]} tick={{ fontSize: 12 }} />
                         <ChartTooltip content={<ChartTooltipContent />} />
                         <Bar dataKey="adx" radius={[4, 4, 0, 0]}>
-                          {momentumData.map((entry, index) => (
+                          {enhancedMomentumData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={getRegimeColor(entry.momentum?.adx ?? 0)} />
                           ))}
                         </Bar>
@@ -444,7 +475,7 @@ export const MomentumStatusDashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="flex flex-wrap gap-1">
-                      {momentumData
+                      {enhancedMomentumData
                         .filter(d => (d.momentum?.adx ?? 0) >= 25)
                         .map(d => (
                           <Badge key={d.symbol} variant="outline" className="border-green-600 text-green-700 dark:text-green-300">
@@ -452,7 +483,7 @@ export const MomentumStatusDashboard = () => {
                           </Badge>
                         ))
                       }
-                      {momentumData.filter(d => (d.momentum?.adx ?? 0) >= 25).length === 0 && (
+                      {enhancedMomentumData.filter(d => (d.momentum?.adx ?? 0) >= 25).length === 0 && (
                         <span className="text-xs text-muted-foreground">None</span>
                       )}
                     </div>
@@ -467,7 +498,7 @@ export const MomentumStatusDashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="flex flex-wrap gap-1">
-                      {momentumData
+                      {enhancedMomentumData
                         .filter(d => {
                           const adx = d.momentum?.adx ?? 0;
                           return adx >= 20 && adx < 25;
@@ -478,7 +509,7 @@ export const MomentumStatusDashboard = () => {
                           </Badge>
                         ))
                       }
-                      {momentumData.filter(d => {
+                      {enhancedMomentumData.filter(d => {
                         const adx = d.momentum?.adx ?? 0;
                         return adx >= 20 && adx < 25;
                       }).length === 0 && (
@@ -496,7 +527,7 @@ export const MomentumStatusDashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="flex flex-wrap gap-1">
-                      {momentumData
+                      {enhancedMomentumData
                         .filter(d => (d.momentum?.adx ?? 0) < 20)
                         .map(d => (
                           <Badge key={d.symbol} variant="outline" className="border-red-600 text-red-700 dark:text-red-300">
@@ -504,7 +535,7 @@ export const MomentumStatusDashboard = () => {
                           </Badge>
                         ))
                       }
-                      {momentumData.filter(d => (d.momentum?.adx ?? 0) < 20).length === 0 && (
+                      {enhancedMomentumData.filter(d => (d.momentum?.adx ?? 0) < 20).length === 0 && (
                         <span className="text-xs text-muted-foreground">None</span>
                       )}
                     </div>
