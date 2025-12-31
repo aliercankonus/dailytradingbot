@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -19,6 +19,8 @@ import {
   ArrowDown,
   Clock,
   Zap,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { usePositions } from "@/hooks/usePositions";
 import { supabase } from "@/integrations/supabase/client";
@@ -30,6 +32,7 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, LineChart, Line } from "recharts";
+import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
 
 interface ExitData {
   positionId: string;
@@ -100,14 +103,16 @@ const getLockTier = (r: number) => {
   return { tier: "-", lock: 0, color: "bg-gray-400" };
 };
 
-// Fetch exit management data for positions
-const fetchExitData = async (positions: any[]): Promise<ExitData[]> => {
+// Calculate exit data for positions with real-time prices
+const calculateExitData = (positions: any[], pricesMap: Map<string, { price: string }>): ExitData[] => {
   if (!positions || positions.length === 0) return [];
 
-  // Calculate exit data for each position
   return positions.map((pos) => {
     const entryPrice = pos.entry_price || 0;
-    const currentPrice = pos.current_price || entryPrice;
+    // Use real-time price if available, otherwise fall back to position's current_price
+    const realtimePriceStr = pricesMap.get(pos.symbol)?.price;
+    const realtimePrice = realtimePriceStr ? parseFloat(realtimePriceStr) : null;
+    const currentPrice = realtimePrice || pos.current_price || entryPrice;
     const stopLoss = pos.stop_loss || 0;
     const takeProfit = pos.take_profit || 0;
     const side = pos.side?.toLowerCase() || "buy";
@@ -132,7 +137,7 @@ const fetchExitData = async (positions: any[]): Promise<ExitData[]> => {
     const lockTier = getLockTier(Math.max(rMultiple, peakR));
     
     // Determine trailing activation (simplified - based on R thresholds)
-    const activationR = 1.0; // Default strong trend activation
+    const activationR = 1.0;
     const trailDistanceR = 0.5;
     const trailingActivated = rMultiple >= activationR;
 
@@ -140,8 +145,7 @@ const fetchExitData = async (positions: any[]): Promise<ExitData[]> => {
     const openedAt = new Date(pos.opened_at);
     const hoursOpen = (Date.now() - openedAt.getTime()) / (1000 * 60 * 60);
 
-    // Simulate exit scoring (in production this comes from monitor-positions)
-    let exitScore = 0;
+    // Exit scoring
     const exitComponents = {
       momentumExhaustion: 0,
       swingViolation: 0,
@@ -160,15 +164,14 @@ const fetchExitData = async (positions: any[]): Promise<ExitData[]> => {
       exitComponents.reversalSignal = Math.min(25, (peakR - rMultiple) * 10);
     }
 
-    exitScore = Object.values(exitComponents).reduce((a, b) => a + b, 0);
+    const exitScore = Object.values(exitComponents).reduce((a, b) => a + b, 0);
 
     // Stop type based on distance
     const distancePercent = side === "buy"
       ? ((entryPrice - stopLoss) / entryPrice) * 100
       : ((stopLoss - entryPrice) / entryPrice) * 100;
     
-    // Estimate ATR distance (simplified)
-    const distanceATR = distancePercent / 0.5; // Assuming ~0.5% per ATR
+    const distanceATR = distancePercent / 0.5;
 
     return {
       positionId: pos.id,
@@ -200,20 +203,18 @@ const fetchExitData = async (positions: any[]): Promise<ExitData[]> => {
 
 export const ExitManagementDashboard = () => {
   const { positions, loading: positionsLoading, refetch: refetchPositions } = usePositions();
+  const { prices, priceVersion, connected } = useRealtimePricesContext();
   
-  const { data: exitData, isLoading, refetch } = useQuery({
-    queryKey: ['exit-management', positions.map(p => p.id).join(',')],
-    queryFn: () => fetchExitData(positions),
-    enabled: positions.length > 0,
-    staleTime: 30000,
-    refetchInterval: 30000,
-  });
+  // Calculate exit data reactively based on real-time prices
+  const exitData = useMemo(() => {
+    if (!positions || positions.length === 0) return [];
+    return calculateExitData(positions, prices);
+  }, [positions, prices, priceVersion]);
 
-  const loading = positionsLoading || isLoading;
+  const loading = positionsLoading;
 
   const handleRefresh = () => {
     refetchPositions();
-    refetch();
   };
 
   // Summary stats
@@ -235,6 +236,17 @@ export const ExitManagementDashboard = () => {
           <CardTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5 text-primary" />
             Exit Management Dashboard
+            {connected ? (
+              <Badge variant="outline" className="ml-2 text-green-600 border-green-300">
+                <Wifi className="h-3 w-3 mr-1" />
+                Live
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="ml-2 text-yellow-600 border-yellow-300">
+                <WifiOff className="h-3 w-3 mr-1" />
+                Offline
+              </Badge>
+            )}
           </CardTitle>
           <CardDescription>
             Phase 3: Trailing status, R-multiple levels, and exit signal scores
