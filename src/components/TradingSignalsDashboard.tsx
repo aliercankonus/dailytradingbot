@@ -3,10 +3,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useSignals } from '@/hooks/useSignals';
 import { useSignalGenerator } from '@/hooks/useSignalGenerator';
 import { supabase } from '@/integrations/supabase/client';
-import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity, AlertCircle, Clock } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity, AlertCircle, Clock, Info } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { getSignalPriorityTier, getSignalPriorityVariant } from '@/lib/utils';
@@ -238,14 +239,46 @@ export const TradingSignalsDashboard = () => {
                     };
 
                     const displayValue = formatValue(value);
+                    const isComplexValue = typeof value === 'object' && value !== null;
                     
-                    return (
-                      <div key={key} className="p-2 bg-background/60 rounded border border-border/50">
-                        <div className="text-xs text-muted-foreground font-medium">{key}</div>
+                    // Format JSON for tooltip display
+                    const getFullJson = (val: unknown): string => {
+                      try {
+                        return JSON.stringify(val, null, 2);
+                      } catch {
+                        return String(val);
+                      }
+                    };
+
+                    const cardContent = (
+                      <div className={`p-2 bg-background/60 rounded border border-border/50 ${isComplexValue ? 'cursor-help' : ''}`}>
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs text-muted-foreground font-medium">{key}</div>
+                          {isComplexValue && (
+                            <Info className="h-3 w-3 text-muted-foreground" />
+                          )}
+                        </div>
                         <div className="text-sm font-bold mt-1 break-words">
                           {displayValue}
                         </div>
                       </div>
+                    );
+                    
+                    return isComplexValue ? (
+                      <TooltipProvider key={key}>
+                        <Tooltip delayDuration={200}>
+                          <TooltipTrigger asChild>
+                            {cardContent}
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" className="max-w-[400px] max-h-[300px] overflow-auto">
+                            <pre className="text-xs font-mono whitespace-pre-wrap">
+                              {getFullJson(value)}
+                            </pre>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : (
+                      <div key={key}>{cardContent}</div>
                     );
                   })}
                 </div>
