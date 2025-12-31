@@ -826,11 +826,23 @@ export function detectBollingerSqueeze(
 }
 
 // ============= SWING HIGH/LOW DETECTION =============
+export interface SwingPointResult {
+  swingHigh: number;
+  swingLow: number;
+  swingHighIndex: number;
+  swingLowIndex: number;
+  swingHighAge: number;      // Bars since swing high
+  swingLowAge: number;       // Bars since swing low
+  isNearSwingHigh: boolean;  // Price within 0.5% of swing high
+  isNearSwingLow: boolean;   // Price within 0.5% of swing low
+}
+
 export function findSwingPoints(
   klines: any[],
   lookback: number = 20
-): { swingHigh: number; swingLow: number; swingHighIndex: number; swingLowIndex: number } {
+): SwingPointResult {
   const recentKlines = klines.slice(-lookback);
+  const currentPrice = parseFloat(klines[klines.length - 1][4]);
   
   let swingHigh = -Infinity;
   let swingLow = Infinity;
@@ -851,5 +863,429 @@ export function findSwingPoints(
     }
   }
 
-  return { swingHigh, swingLow, swingHighIndex, swingLowIndex };
+  const swingHighAge = recentKlines.length - 1 - swingHighIndex;
+  const swingLowAge = recentKlines.length - 1 - swingLowIndex;
+  const nearThreshold = 0.005; // 0.5%
+  
+  return { 
+    swingHigh, 
+    swingLow, 
+    swingHighIndex, 
+    swingLowIndex,
+    swingHighAge,
+    swingLowAge,
+    isNearSwingHigh: Math.abs(currentPrice - swingHigh) / swingHigh < nearThreshold,
+    isNearSwingLow: Math.abs(currentPrice - swingLow) / swingLow < nearThreshold
+  };
+}
+
+// ============= PHASE 3: CONTEXT-AWARE STOP LOSS CALCULATION =============
+export interface ContextAwareStopResult {
+  stopLoss: number;
+  stopType: "atr_based" | "swing_based" | "hybrid";
+  atrMultiplier: number;
+  swingLevel: number | null;
+  distancePercent: number;
+  distanceATR: number;
+  reason: string;
+}
+
+export function calculateContextAwareStop(
+  entryPrice: number,
+  side: "BUY" | "SELL",
+  currentATR: number,
+  adx: number,
+  klines: any[],
+  atrRatio: number = 1.0 // Current ATR / historical ATR
+): ContextAwareStopResult {
+  // Import constants inline to avoid circular dependencies
+  const STRONG_TREND_ADX = 30;
+  const MEDIUM_TREND_ADX_MIN = 22;
+  const WEAK_TREND_ADX = 22;
+  const STRONG_TREND_ATR_MULT = 1.2;
+  const MEDIUM_TREND_ATR_MULT = 1.5;
+  const WEAK_TREND_ATR_MULT = 2.0;
+  const HIGH_VOL_RATIO = 1.5;
+  const HIGH_VOL_EXPANSION = 1.3;
+  const LOW_VOL_RATIO = 0.7;
+  const LOW_VOL_CONTRACTION = 0.85;
+  const SWING_BUFFER_ATR = 0.3;
+  const MAX_SWING_DISTANCE_ATR = 3.0;
+  const MIN_SWING_DISTANCE_ATR = 0.8;
+
+  // 1. Determine base ATR multiplier from ADX
+  let atrMultiplier: number;
+  let adxReason: string;
+  
+  if (adx >= STRONG_TREND_ADX) {
+    atrMultiplier = STRONG_TREND_ATR_MULT;
+    adxReason = `Strong trend (ADX=${adx.toFixed(1)}) → ${atrMultiplier}x ATR`;
+  } else if (adx >= MEDIUM_TREND_ADX_MIN) {
+    atrMultiplier = MEDIUM_TREND_ATR_MULT;
+    adxReason = `Medium trend (ADX=${adx.toFixed(1)}) → ${atrMultiplier}x ATR`;
+  } else {
+    atrMultiplier = WEAK_TREND_ATR_MULT;
+    adxReason = `Weak trend (ADX=${adx.toFixed(1)}) → ${atrMultiplier}x ATR`;
+  }
+
+  // 2. Apply volatility adjustment
+  let volatilityAdjustment = 1.0;
+  let volReason = "";
+  
+  if (atrRatio > HIGH_VOL_RATIO) {
+    volatilityAdjustment = HIGH_VOL_EXPANSION;
+    volReason = ` | High volatility (${atrRatio.toFixed(2)}x) → +30% width`;
+  } else if (atrRatio < LOW_VOL_RATIO) {
+    volatilityAdjustment = LOW_VOL_CONTRACTION;
+    volReason = ` | Low volatility (${atrRatio.toFixed(2)}x) → -15% width`;
+  }
+  
+  const adjustedMultiplier = atrMultiplier * volatilityAdjustment;
+
+  // 3. Calculate ATR-based stop
+  const atrDistance = currentATR * adjustedMultiplier;
+  let atrBasedStop: number;
+  
+  if (side === "BUY") {
+    atrBasedStop = entryPrice - atrDistance;
+  } else {
+    atrBasedStop = entryPrice + atrDistance;
+  }
+
+  // 4. Find swing points for structure-based stop
+  const swingPoints = findSwingPoints(klines, 20);
+  let swingBasedStop: number | null = null;
+  let swingLevel: number | null = null;
+  let swingReason = "";
+  
+  if (klines.length >= 20) {
+    if (side === "BUY") {
+      // For LONG: Stop below recent swing low
+      const swingBuffer = currentATR * SWING_BUFFER_ATR;
+      const potentialStop = swingPoints.swingLow - swingBuffer;
+      const distanceFromEntry = entryPrice - potentialStop;
+      const distanceInATR = distanceFromEntry / currentATR;
+      
+      // Check if swing stop is within acceptable range
+      if (distanceInATR >= MIN_SWING_DISTANCE_ATR && distanceInATR <= MAX_SWING_DISTANCE_ATR) {
+        swingBasedStop = potentialStop;
+        swingLevel = swingPoints.swingLow;
+        swingReason = ` | Swing low at ${swingLevel.toFixed(2)} (${swingPoints.swingLowAge} bars ago)`;
+      }
+    } else {
+      // For SHORT: Stop above recent swing high
+      const swingBuffer = currentATR * SWING_BUFFER_ATR;
+      const potentialStop = swingPoints.swingHigh + swingBuffer;
+      const distanceFromEntry = potentialStop - entryPrice;
+      const distanceInATR = distanceFromEntry / currentATR;
+      
+      if (distanceInATR >= MIN_SWING_DISTANCE_ATR && distanceInATR <= MAX_SWING_DISTANCE_ATR) {
+        swingBasedStop = potentialStop;
+        swingLevel = swingPoints.swingHigh;
+        swingReason = ` | Swing high at ${swingLevel.toFixed(2)} (${swingPoints.swingHighAge} bars ago)`;
+      }
+    }
+  }
+
+  // 5. Choose final stop (prefer swing-based when available and reasonable)
+  let finalStop: number;
+  let stopType: "atr_based" | "swing_based" | "hybrid";
+  
+  if (swingBasedStop !== null) {
+    if (side === "BUY") {
+      // For LONG: Use the HIGHER (more protective) of the two
+      finalStop = Math.max(atrBasedStop, swingBasedStop);
+      stopType = finalStop === swingBasedStop ? "swing_based" : 
+                 Math.abs(finalStop - swingBasedStop) < currentATR * 0.2 ? "hybrid" : "atr_based";
+    } else {
+      // For SHORT: Use the LOWER (more protective) of the two
+      finalStop = Math.min(atrBasedStop, swingBasedStop);
+      stopType = finalStop === swingBasedStop ? "swing_based" :
+                 Math.abs(finalStop - swingBasedStop) < currentATR * 0.2 ? "hybrid" : "atr_based";
+    }
+  } else {
+    finalStop = atrBasedStop;
+    stopType = "atr_based";
+  }
+
+  // Calculate final distance metrics
+  const distancePercent = side === "BUY" 
+    ? ((entryPrice - finalStop) / entryPrice) * 100
+    : ((finalStop - entryPrice) / entryPrice) * 100;
+  const distanceATR = side === "BUY"
+    ? (entryPrice - finalStop) / currentATR
+    : (finalStop - entryPrice) / currentATR;
+
+  return {
+    stopLoss: finalStop,
+    stopType,
+    atrMultiplier: adjustedMultiplier,
+    swingLevel,
+    distancePercent,
+    distanceATR,
+    reason: `${adxReason}${volReason}${swingReason}`
+  };
+}
+
+// ============= PHASE 3: DYNAMIC R-MULTIPLE TRAILING =============
+export interface DynamicTrailingResult {
+  activationR: number;
+  trailDistanceR: number;
+  lockR: number;
+  isActivated: boolean;
+  currentR: number;
+  newStopPrice: number | null;
+  reason: string;
+}
+
+export function calculateDynamicTrailing(
+  entryPrice: number,
+  currentPrice: number,
+  originalStopLoss: number,
+  side: "BUY" | "SELL",
+  adx: number,
+  momentumScore: MomentumScoreResult,
+  peakRMultiple: number = 0
+): DynamicTrailingResult {
+  // Constants for R-multiple trailing
+  const STRONG_TREND_ADX = 30;
+  const MEDIUM_TREND_ADX_MIN = 22;
+  
+  const STRONG_ACTIVATION_R = 1.0;
+  const MEDIUM_ACTIVATION_R = 1.2;
+  const WEAK_ACTIVATION_R = 1.5;
+  
+  const STRONG_TRAIL_R = 0.5;
+  const MEDIUM_TRAIL_R = 0.75;
+  const WEAK_TRAIL_R = 1.0;
+  
+  const ACCELERATION_MULTIPLIER = 0.7;
+  const EXHAUSTION_BONUS_R = 0.5;
+  
+  const LOCK_TIERS = [
+    { rMultiple: 1.0, lockR: 0.25 },
+    { rMultiple: 1.5, lockR: 0.5 },
+    { rMultiple: 2.0, lockR: 0.75 },
+    { rMultiple: 2.5, lockR: 1.0 },
+    { rMultiple: 3.0, lockR: 1.5 },
+    { rMultiple: 4.0, lockR: 2.0 },
+    { rMultiple: 5.0, lockR: 3.0 },
+  ];
+
+  // Calculate risk (R) in price terms
+  const riskPrice = side === "BUY" 
+    ? entryPrice - originalStopLoss
+    : originalStopLoss - entryPrice;
+  
+  if (riskPrice <= 0) {
+    return {
+      activationR: 0,
+      trailDistanceR: 0,
+      lockR: 0,
+      isActivated: false,
+      currentR: 0,
+      newStopPrice: null,
+      reason: "Invalid stop loss (risk <= 0)"
+    };
+  }
+
+  // Calculate current R-multiple
+  const pnlPrice = side === "BUY"
+    ? currentPrice - entryPrice
+    : entryPrice - currentPrice;
+  const currentR = pnlPrice / riskPrice;
+
+  // Determine activation threshold based on ADX
+  let activationR: number;
+  let trailDistanceR: number;
+  let adxReason: string;
+  
+  if (adx >= STRONG_TREND_ADX) {
+    activationR = STRONG_ACTIVATION_R;
+    trailDistanceR = STRONG_TRAIL_R;
+    adxReason = `Strong trend → activate at ${activationR}R, trail ${trailDistanceR}R`;
+  } else if (adx >= MEDIUM_TREND_ADX_MIN) {
+    activationR = MEDIUM_ACTIVATION_R;
+    trailDistanceR = MEDIUM_TRAIL_R;
+    adxReason = `Medium trend → activate at ${activationR}R, trail ${trailDistanceR}R`;
+  } else {
+    activationR = WEAK_ACTIVATION_R;
+    trailDistanceR = WEAK_TRAIL_R;
+    adxReason = `Weak trend → activate at ${activationR}R, trail ${trailDistanceR}R`;
+  }
+
+  // Apply momentum adjustments
+  let momentumReason = "";
+  if (momentumScore.isAccelerating) {
+    trailDistanceR *= ACCELERATION_MULTIPLIER;
+    momentumReason = " | Accelerating → tighter trail";
+  }
+
+  // Determine lock level from tiers
+  const effectiveR = Math.max(currentR, peakRMultiple);
+  let lockR = 0;
+  
+  for (const tier of LOCK_TIERS) {
+    if (effectiveR >= tier.rMultiple) {
+      lockR = tier.lockR;
+    }
+  }
+  
+  // Apply exhaustion bonus
+  if (momentumScore.isExhausted && lockR > 0) {
+    lockR += EXHAUSTION_BONUS_R;
+    momentumReason += " | Exhausted → +0.5R lock";
+  }
+
+  // Check if trailing is activated
+  const isActivated = currentR >= activationR;
+  
+  // Calculate new stop price if activated
+  let newStopPrice: number | null = null;
+  
+  if (isActivated) {
+    // Calculate stop based on lock level (higher of lock or trail from current)
+    const lockStopFromEntry = side === "BUY"
+      ? entryPrice + (lockR * riskPrice)
+      : entryPrice - (lockR * riskPrice);
+    
+    const trailStopFromCurrent = side === "BUY"
+      ? currentPrice - (trailDistanceR * riskPrice)
+      : currentPrice + (trailDistanceR * riskPrice);
+    
+    // Use the more protective stop
+    if (side === "BUY") {
+      newStopPrice = Math.max(lockStopFromEntry, trailStopFromCurrent, originalStopLoss);
+    } else {
+      // For SHORT, lower price is more protective for stop
+      newStopPrice = Math.min(
+        Math.max(lockStopFromEntry, 0), 
+        trailStopFromCurrent,
+        originalStopLoss
+      );
+      // Actually for short, we want the stop above entry, so higher is more protective
+      newStopPrice = Math.min(lockStopFromEntry, trailStopFromCurrent);
+      if (newStopPrice < originalStopLoss) {
+        newStopPrice = originalStopLoss;
+      }
+    }
+  }
+
+  return {
+    activationR,
+    trailDistanceR,
+    lockR,
+    isActivated,
+    currentR,
+    newStopPrice,
+    reason: `${adxReason}${momentumReason} | Current: ${currentR.toFixed(2)}R, Lock: ${lockR.toFixed(2)}R`
+  };
+}
+
+// ============= PHASE 3: EXIT SIGNAL SCORING =============
+export interface ExitSignalResult {
+  shouldExit: boolean;
+  exitScore: number;           // 0-100
+  isEmergency: boolean;
+  components: {
+    momentumExhaustion: number;
+    swingViolation: number;
+    reversalSignal: number;
+    timeDecay: number;
+    volatilitySpike: number;
+  };
+  reason: string;
+}
+
+export function calculateExitSignal(
+  position: {
+    side: string;
+    entryPrice: number;
+    stopLoss: number;
+    openedAt: Date;
+    peakPnlPercent: number;
+  },
+  currentPrice: number,
+  momentumScore: MomentumScoreResult,
+  swingPoints: SwingPointResult,
+  reversalScore: number,
+  atrRatio: number,
+  currentPnlPercent: number
+): ExitSignalResult {
+  const components = {
+    momentumExhaustion: 0,
+    swingViolation: 0,
+    reversalSignal: 0,
+    timeDecay: 0,
+    volatilitySpike: 0
+  };
+  const reasons: string[] = [];
+
+  // 1. Momentum Exhaustion (max 30 points)
+  if (momentumScore.isExhausted) {
+    components.momentumExhaustion = 30;
+    reasons.push("Momentum exhausted");
+  } else if (momentumScore.isWeakening) {
+    // Check if weakening against position direction
+    const isAgainstPosition = 
+      (position.side === "BUY" && momentumScore.direction === "bearish") ||
+      (position.side === "SELL" && momentumScore.direction === "bullish");
+    
+    if (isAgainstPosition) {
+      components.momentumExhaustion = 20;
+      reasons.push("Momentum weakening against position");
+    }
+  }
+
+  // 2. Swing Violation (max 25 points)
+  if (position.side === "BUY" && swingPoints.isNearSwingLow) {
+    components.swingViolation = 25;
+    reasons.push("Price near swing low");
+  } else if (position.side === "SELL" && swingPoints.isNearSwingHigh) {
+    components.swingViolation = 25;
+    reasons.push("Price near swing high");
+  }
+
+  // 3. Reversal Signal (max 20 points)
+  if (reversalScore >= 70) {
+    components.reversalSignal = 20;
+    reasons.push(`High reversal score: ${reversalScore}`);
+  } else if (reversalScore >= 50) {
+    components.reversalSignal = 10;
+    reasons.push(`Moderate reversal score: ${reversalScore}`);
+  }
+
+  // 4. Time Decay (max 15 points)
+  const positionAgeHours = (Date.now() - position.openedAt.getTime()) / (1000 * 60 * 60);
+  const profitDecay = position.peakPnlPercent - currentPnlPercent;
+  
+  if (positionAgeHours > 4 && profitDecay > 0.5) {
+    components.timeDecay = 15;
+    reasons.push(`Stale position (${positionAgeHours.toFixed(1)}h) with profit decay`);
+  } else if (positionAgeHours > 2 && profitDecay > 0.3) {
+    components.timeDecay = 8;
+    reasons.push(`Position aging with minor decay`);
+  }
+
+  // 5. Volatility Spike (max 10 points)
+  if (atrRatio > 2.0) {
+    components.volatilitySpike = 10;
+    reasons.push(`Extreme volatility (${atrRatio.toFixed(2)}x ATR)`);
+  } else if (atrRatio > 1.5) {
+    components.volatilitySpike = 5;
+    reasons.push(`High volatility (${atrRatio.toFixed(2)}x ATR)`);
+  }
+
+  // Calculate total score
+  const exitScore = Object.values(components).reduce((a, b) => a + b, 0);
+  const shouldExit = exitScore >= 50;
+  const isEmergency = exitScore >= 80;
+
+  return {
+    shouldExit,
+    exitScore,
+    isEmergency,
+    components,
+    reason: reasons.join(" | ") || "No exit signals"
+  };
 }
