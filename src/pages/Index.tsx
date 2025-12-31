@@ -23,6 +23,7 @@ import { SignalTimingMonitor } from "@/components/SignalTimingMonitor";
 import { PositionsSummary } from "@/components/PositionsSummary";
 import { AIAnalysisDashboard } from "@/components/AIAnalysisDashboard";
 import { LossAttributionDashboard } from "@/components/LossAttributionDashboard";
+import { MomentumStatusDashboard } from "@/components/MomentumStatusDashboard";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -145,6 +146,7 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="monitor" className="space-y-6">
+            <MomentumStatusDashboard />
             <OrderFlowDashboard />
             <WebSocketHealthDashboard />
           </TabsContent>
