@@ -1498,7 +1498,10 @@ serve(async (req) => {
       // NEW: Smart momentum gates
       | 'MOMENTUM_EXHAUSTED'
       | 'MOMENTUM_WEAKENING'
-      | 'REGIME_EXHAUSTED';
+      | 'REGIME_EXHAUSTED'
+      // Phase 2: Smarter Entry Timing gates
+      | 'PHASE2_NO_BOUNCE_CONFIRMATION'
+      | 'PHASE2_RECOVERY_NO_CONFIRMATION';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
