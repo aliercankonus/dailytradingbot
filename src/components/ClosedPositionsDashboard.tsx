@@ -337,6 +337,13 @@ export const ClosedPositionsDashboard = () => {
           Stop Loss
         </Badge>
       );
+    } else if (reason === 'Micro-Trend Timeout' || reason === 'Low Volume Timeout') {
+      return (
+        <Badge variant="outline" className="gap-1 bg-slate-500/10 text-slate-500 border-slate-500/20">
+          <ShieldAlert className="h-3 w-3" />
+          {reason}
+        </Badge>
+      );
     }
     return <Badge variant="secondary">{reason}</Badge>;
   };
