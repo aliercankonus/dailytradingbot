@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore, 
@@ -9,6 +9,17 @@ import {
   calculateUnifiedReversalScore,
   type UnifiedReversalResult
 } from "../_shared/scoring.ts";
+// Phase 3: Smart Momentum for context-aware exit management
+import {
+  calculateMomentumScore,
+  calculateDynamicTrailing,
+  calculateExitSignal,
+  findSwingPoints,
+  type MomentumScoreResult,
+  type DynamicTrailingResult,
+  type ExitSignalResult,
+  type SwingPointResult
+} from "../_shared/smart-momentum.ts";
 import { createLogger, logError } from "../_shared/logging.ts";
 import { getCurrentPrice, getKlines, get24hrTicker } from "../_shared/binance.ts";
 
@@ -253,6 +264,14 @@ serve(async (req) => {
       // Only declare divergence if movements are significant AND directions oppose
       const hasDivergence = significantPriceMove && significantMacdMove && macdTrending !== priceTrending;
 
+      // PHASE 3: Calculate smart momentum for context-aware exits
+      const adxForMomentum = 20; // Will be overridden by trend data
+      const adxRisingForMomentum = false;
+      const momentumResult = calculateMomentumScore(klines, closes, adxForMomentum, adxRisingForMomentum, currentAtr);
+      
+      // PHASE 3: Find swing points for structure-based stops
+      const swingPointsResult = findSwingPoints(klines, 20);
+
       return { 
         symbol, 
         price, 
@@ -269,10 +288,14 @@ serve(async (req) => {
         priceChangePercent, // For debugging divergence magnitude
         macdChangePercent, // For debugging divergence magnitude
         flashCrashCandles: candlesToCheck, // Track how many candles used
+        // PHASE 3: Smart momentum data
+        momentumScore: momentumResult,
+        swingPoints: swingPointsResult,
+        klines, // Include for dynamic trailing calculations
       };
     } catch (error) {
       symbolLogger.error(`Error fetching data: ${error}`);
-      return { symbol, price: null, atr: null, atrPercent: null, atrRatio: 1, recentPriceChange: 0, singleCandleChange: 0, volumeRatio: 1, hasDivergence: false, flashCrashCandles: 0 };
+      return { symbol, price: null, atr: null, atrPercent: null, atrRatio: 1, recentPriceChange: 0, singleCandleChange: 0, volumeRatio: 1, hasDivergence: false, flashCrashCandles: 0, momentumScore: null, swingPoints: null, klines: null };
     }
   });
 
@@ -292,6 +315,10 @@ serve(async (req) => {
         priceChangePercent: d.priceChangePercent,
         macdChangePercent: d.macdChangePercent,
         flashCrashCandles: d.flashCrashCandles,
+        // PHASE 3: Smart momentum data
+        momentumScore: d.momentumScore,
+        swingPoints: d.swingPoints,
+        klines: d.klines,
       }]),
     );
     const updates = [];
@@ -923,10 +950,97 @@ serve(async (req) => {
       const percentActivated = pnlPercent > userSettings.activationPercent;
       const shouldActivateTrailing = rMultipleActivated || (R_MULTIPLE_TRAILING_PARAMS.FALLBACK_TO_PERCENT && percentActivated);
       
+      // ============= PHASE 3: DYNAMIC R-MULTIPLE TRAILING =============
+      // Use ADX-aware activation and momentum-based trailing distance
+      const momentumData = atrData?.momentumScore as MomentumScoreResult | null;
+      const swingData = atrData?.swingPoints as SwingPointResult | null;
+      let phase3TrailingApplied = false;
+      let dynamicTrailingResult: DynamicTrailingResult | null = null;
+      
+      if (PHASE3_R_MULTIPLE_PARAMS.ENABLED && hasValidStopLoss && momentumData) {
+        // Calculate dynamic trailing with ADX and momentum awareness
+        dynamicTrailingResult = calculateDynamicTrailing(
+          position.entry_price,
+          currentPrice,
+          position.stop_loss,
+          position.side as "BUY" | "SELL",
+          positionAdx,
+          momentumData,
+          currentRMultiple > newPeakPnl / (position.side === "BUY" 
+            ? ((position.entry_price - position.stop_loss) / position.entry_price) * 100
+            : ((position.stop_loss - position.entry_price) / position.entry_price) * 100) 
+            ? currentRMultiple : 0
+        );
+        
+        if (dynamicTrailingResult.isActivated) {
+          phase3TrailingApplied = true;
+          positionLogger.trade(`PHASE3 DYNAMIC TRAILING: ${dynamicTrailingResult.reason}`);
+          
+          // Check if dynamic trailing suggests a new stop
+          if (dynamicTrailingResult.newStopPrice !== null) {
+            const dynamicStop = dynamicTrailingResult.newStopPrice;
+            
+            // Only update if new stop is more protective
+            if (position.side === "BUY" && dynamicStop > (newStopLoss || position.stop_loss)) {
+              newStopLoss = dynamicStop;
+              positionLogger.trade(`PHASE3 STOP UPDATE BUY: Lock ${dynamicTrailingResult.lockR.toFixed(2)}R → stop ${dynamicStop.toFixed(2)}`);
+            } else if (position.side === "SELL" && dynamicStop < (newStopLoss || position.stop_loss)) {
+              newStopLoss = dynamicStop;
+              positionLogger.trade(`PHASE3 STOP UPDATE SELL: Lock ${dynamicTrailingResult.lockR.toFixed(2)}R → stop ${dynamicStop.toFixed(2)}`);
+            }
+          }
+        }
+      }
+      
+      // ============= PHASE 3: EXIT SIGNAL SCORING =============
+      // Calculate comprehensive exit signal based on multiple factors
+      if (momentumData && swingData && position.opened_at) {
+        const reversalScoreForExit = trendDataForPosition?.reversalScore || 0;
+        
+        const exitSignal = calculateExitSignal(
+          {
+            side: position.side,
+            entryPrice: position.entry_price,
+            stopLoss: position.stop_loss || 0,
+            openedAt: new Date(position.opened_at),
+            peakPnlPercent: newPeakPnl
+          },
+          currentPrice,
+          momentumData,
+          swingData,
+          reversalScoreForExit,
+          atrData?.atrRatio || 1,
+          pnlPercent
+        );
+        
+        if (exitSignal.shouldExit && !emergencyClose) {
+          positionLogger.risk(`PHASE3 EXIT SIGNAL: Score ${exitSignal.exitScore}/100 | ${exitSignal.reason}`);
+          
+          if (exitSignal.isEmergency) {
+            emergencyClose = true;
+            emergencyReason = `phase3_emergency_exit_${exitSignal.exitScore}`;
+            positionLogger.risk(`PHASE3 EMERGENCY EXIT TRIGGERED: ${exitSignal.reason}`);
+          } else if (hasMetMinHoldTime && pnlPercent > 0) {
+            // For non-emergency profitable positions, tighten stop aggressively
+            const aggressiveStop = position.side === "BUY"
+              ? currentPrice * 0.995 // 0.5% below current
+              : currentPrice * 1.005; // 0.5% above current
+            
+            if (position.side === "BUY" && aggressiveStop > (newStopLoss || position.stop_loss)) {
+              newStopLoss = aggressiveStop;
+              positionLogger.trade(`PHASE3 AGGRESSIVE STOP BUY: Exit signal (${exitSignal.exitScore}) → stop ${aggressiveStop.toFixed(2)}`);
+            } else if (position.side === "SELL" && aggressiveStop < (newStopLoss || position.stop_loss)) {
+              newStopLoss = aggressiveStop;
+              positionLogger.trade(`PHASE3 AGGRESSIVE STOP SELL: Exit signal (${exitSignal.exitScore}) → stop ${aggressiveStop.toFixed(2)}`);
+            }
+          }
+        }
+      }
+      
       // Log activation method
-      if (shouldActivateTrailing && useRMultipleActivation && rMultipleActivated) {
+      if (shouldActivateTrailing && useRMultipleActivation && rMultipleActivated && !phase3TrailingApplied) {
         positionLogger.trade(`TRAILING R-MULTIPLE: ${currentRMultiple.toFixed(2)}R >= ${R_MULTIPLE_TRAILING_PARAMS.ACTIVATION_R_MULTIPLE}R activation (P&L: ${pnlPercent.toFixed(2)}%)`);
-      } else if (shouldActivateTrailing && !rMultipleActivated) {
+      } else if (shouldActivateTrailing && !rMultipleActivated && !phase3TrailingApplied) {
         positionLogger.trade(`TRAILING FALLBACK: P&L ${pnlPercent.toFixed(2)}% > ${userSettings.activationPercent}% (R-multiple: ${useRMultipleActivation ? currentRMultiple.toFixed(2) + "R" : "N/A - no valid stop"})`);
       }
       

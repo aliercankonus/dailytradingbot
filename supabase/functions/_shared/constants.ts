@@ -1239,3 +1239,105 @@ export const STRONG_1H_TREND_PARAMS = {
   // Position size multiplier for strong 1h entries with neutral 4h
   POSITION_SIZE_MULTIPLIER: 0.75,
 } as const;
+
+// ============= PHASE 3: CONTEXT-AWARE EXIT MANAGEMENT =============
+// Smart stop loss and trailing activation based on market context
+
+// ADX-based stop loss width adjustment
+export const CONTEXT_AWARE_STOP_PARAMS = {
+  // Enable context-aware stop placement
+  ENABLED: true,
+  
+  // === ADX-BASED STOP WIDTH ===
+  // Strong trend (ADX > 30): Use tighter stops (trend is directional)
+  STRONG_TREND_ADX: 30,
+  STRONG_TREND_ATR_MULTIPLIER: 1.2,  // 1.2x ATR stop
+  
+  // Medium trend (ADX 22-30): Use normal stops
+  MEDIUM_TREND_ADX_MIN: 22,
+  MEDIUM_TREND_ADX_MAX: 30,
+  MEDIUM_TREND_ATR_MULTIPLIER: 1.5,  // 1.5x ATR stop
+  
+  // Weak trend (ADX < 22): Use wider stops (choppy market needs room)
+  WEAK_TREND_ADX: 22,
+  WEAK_TREND_ATR_MULTIPLIER: 2.0,    // 2.0x ATR stop
+  
+  // === SWING-BASED STOP PLACEMENT ===
+  // Use recent swing high/low for stop placement when available
+  SWING_STOP_ENABLED: true,
+  // Lookback period for finding swing points (candles)
+  SWING_LOOKBACK: 20,
+  // Buffer beyond swing point (ATR multiplier)
+  SWING_BUFFER_ATR: 0.3,
+  // Maximum distance from entry for swing stop (ATR multiplier)
+  MAX_SWING_DISTANCE_ATR: 3.0,
+  // Minimum distance from entry for swing stop (ATR multiplier)
+  MIN_SWING_DISTANCE_ATR: 0.8,
+  
+  // === VOLATILITY ADJUSTMENT ===
+  // Expand stops in high volatility conditions
+  HIGH_VOLATILITY_ATR_RATIO: 1.5,    // Current ATR / historical ATR > 1.5
+  HIGH_VOLATILITY_EXPANSION: 1.3,    // 30% wider stops in high volatility
+  
+  // Contract stops in low volatility conditions
+  LOW_VOLATILITY_ATR_RATIO: 0.7,     // Current ATR / historical ATR < 0.7
+  LOW_VOLATILITY_CONTRACTION: 0.85,  // 15% tighter stops in low volatility
+} as const;
+
+// Enhanced R-multiple trailing with dynamic activation
+export const PHASE3_R_MULTIPLE_PARAMS = {
+  // Enable dynamic R-multiple trailing
+  ENABLED: true,
+  
+  // === DYNAMIC ACTIVATION BASED ON ADX ===
+  // Strong trend: Activate earlier (more directional = can trail sooner)
+  STRONG_TREND_ACTIVATION_R: 1.0,    // Activate at 1R in strong trends
+  // Medium trend: Standard activation
+  MEDIUM_TREND_ACTIVATION_R: 1.2,    // Activate at 1.2R (default)
+  // Weak trend: Activate later (need more buffer for chop)
+  WEAK_TREND_ACTIVATION_R: 1.5,      // Activate at 1.5R in weak trends
+  
+  // === TRAILING DISTANCE BASED ON ADX ===
+  // Strong trend: Trail tighter
+  STRONG_TREND_TRAIL_R: 0.5,         // Trail 0.5R behind
+  // Medium trend: Standard trailing
+  MEDIUM_TREND_TRAIL_R: 0.75,        // Trail 0.75R behind
+  // Weak trend: Trail looser
+  WEAK_TREND_TRAIL_R: 1.0,           // Trail 1R behind (more room)
+  
+  // === PROFIT LOCK TIERS (R-multiple based) ===
+  // Lock profits at increasingly protective levels as R increases
+  LOCK_TIERS: [
+    { rMultiple: 1.0, lockR: 0.25 },   // At 1R profit, lock 0.25R
+    { rMultiple: 1.5, lockR: 0.5 },    // At 1.5R profit, lock 0.5R
+    { rMultiple: 2.0, lockR: 0.75 },   // At 2R profit, lock 0.75R
+    { rMultiple: 2.5, lockR: 1.0 },    // At 2.5R profit, lock 1R (break-even on risk)
+    { rMultiple: 3.0, lockR: 1.5 },    // At 3R profit, lock 1.5R
+    { rMultiple: 4.0, lockR: 2.0 },    // At 4R profit, lock 2R
+    { rMultiple: 5.0, lockR: 3.0 },    // At 5R profit, lock 3R
+  ],
+  
+  // === ACCELERATION ZONE ===
+  // When momentum is accelerating, use tighter trails
+  ACCELERATION_TRAIL_MULTIPLIER: 0.7, // 30% tighter trailing when accelerating
+  
+  // === EXHAUSTION PROTECTION ===
+  // When momentum shows exhaustion signs, lock more aggressively
+  EXHAUSTION_LOCK_BONUS_R: 0.5,       // Add 0.5R to lock level when exhausted
+} as const;
+
+// Exit priority scoring
+export const EXIT_MANAGEMENT_PRIORITY = {
+  // Priority weights for exit decisions
+  MOMENTUM_EXHAUSTION_WEIGHT: 30,
+  SWING_VIOLATION_WEIGHT: 25,
+  REVERSAL_SIGNAL_WEIGHT: 20,
+  TIME_DECAY_WEIGHT: 15,
+  VOLATILITY_SPIKE_WEIGHT: 10,
+  
+  // Minimum combined score to trigger exit
+  MIN_EXIT_SCORE: 50,
+  
+  // Emergency exit threshold (skip normal checks)
+  EMERGENCY_THRESHOLD: 80,
+} as const;
