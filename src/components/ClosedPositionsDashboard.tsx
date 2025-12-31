@@ -66,6 +66,9 @@ export const ClosedPositionsDashboard = () => {
         case 'hedge_take_profit': return 'Hedge TP';
         case 'hedge_stop_loss': return 'Hedge SL';
         case 'hedge_risk_dropped': return 'Hedge Exit';
+        // Entry exception timeouts
+        case 'micro_trend_timeout': return 'Micro-Trend Timeout';
+        case 'volume_relaxation_timeout': return 'Low Volume Timeout';
         // Manual and system closes
         case 'manual': return 'Manual Close';
         case 'manual_close': return 'Manual Close';
