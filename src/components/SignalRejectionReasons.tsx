@@ -2,6 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   AlertCircle,
   TrendingDown,
@@ -26,11 +27,113 @@ import {
   DollarSign,
   TrendingUp as VolumeIcon,
   Scale,
+  Info,
+  ChevronDown,
+  Code,
 } from "lucide-react";
 import { useSignalRejections } from "@/hooks/useSignalRejections";
 import { useRiskParameters } from "@/hooks/useRiskParameters";
 import { formatDistanceToNow } from "date-fns";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useState } from "react";
+
+// Helper component to display complex JSON values with tooltip
+const JsonValueTooltip = ({ label, value, maxPreviewLength = 50 }: { label: string; value: unknown; maxPreviewLength?: number }) => {
+  if (value === null || value === undefined) return null;
+  
+  const isComplex = typeof value === 'object';
+  
+  const formatPreview = (val: unknown): string => {
+    if (typeof val === 'number') return val.toFixed(2);
+    if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+    if (val === null || val === undefined) return '-';
+    if (typeof val === 'object') {
+      try {
+        const entries = Object.entries(val as Record<string, unknown>);
+        if (entries.length === 0) return '-';
+        const preview = entries.slice(0, 2).map(([k, v]) => `${k}: ${formatPreview(v)}`).join(', ');
+        return entries.length > 2 ? `${preview} (+${entries.length - 2})` : preview;
+      } catch {
+        return '-';
+      }
+    }
+    const str = String(val);
+    return str.length > maxPreviewLength ? str.slice(0, maxPreviewLength) + '...' : str;
+  };
+
+  const getFullJson = (val: unknown): string => {
+    try {
+      return JSON.stringify(val, null, 2);
+    } catch {
+      return String(val);
+    }
+  };
+
+  if (!isComplex) {
+    return (
+      <div className="text-[10px]">
+        <span className="text-muted-foreground">{label}: </span>
+        <span className="font-medium">{formatPreview(value)}</span>
+      </div>
+    );
+  }
+
+  return (
+    <TooltipProvider>
+      <Tooltip delayDuration={200}>
+        <TooltipTrigger asChild>
+          <div className="text-[10px] cursor-help inline-flex items-center gap-1">
+            <span className="text-muted-foreground">{label}: </span>
+            <span className="font-medium">{formatPreview(value)}</span>
+            <Info className="h-3 w-3 text-muted-foreground" />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-[400px] max-h-[300px] overflow-auto">
+          <pre className="text-xs font-mono whitespace-pre-wrap">
+            {getFullJson(value)}
+          </pre>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
+
+// Collapsible raw data viewer for debugging
+const RawDataViewer = ({ filtersStatus, trendData }: { filtersStatus: unknown; trendData: unknown }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  
+  if (!filtersStatus && !trendData) return null;
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="mt-2">
+      <CollapsibleTrigger className="flex items-center gap-1 text-[9px] text-muted-foreground hover:text-foreground transition-colors">
+        <Code className="h-3 w-3" />
+        <span>Raw Data</span>
+        <ChevronDown className={`h-3 w-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-2">
+        <div className="space-y-2 p-2 bg-muted/30 rounded border border-border/50 max-h-[200px] overflow-auto">
+          {filtersStatus && (
+            <div>
+              <div className="text-[9px] font-medium text-muted-foreground mb-1">filters_status:</div>
+              <pre className="text-[9px] font-mono whitespace-pre-wrap break-all">
+                {JSON.stringify(filtersStatus, null, 2)}
+              </pre>
+            </div>
+          )}
+          {trendData && (
+            <div className="pt-2 border-t border-border/30">
+              <div className="text-[9px] font-medium text-muted-foreground mb-1">trend_data:</div>
+              <pre className="text-[9px] font-mono whitespace-pre-wrap break-all">
+                {JSON.stringify(trendData, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+};
 
 interface AIValidationResult {
   isValid: boolean;
@@ -3692,6 +3795,24 @@ export const SignalRejectionReasons = () => {
           <MarketRegimeDisplay filtersStatus={fs} trendData={rejection.trend_data} />
         )}
         {fs?.order_flow && <OrderFlowDisplay orderFlow={fs.order_flow} />}
+        
+        {/* Show any complex values with tooltips */}
+        {fs && Object.entries(fs).filter(([key, val]) => 
+          typeof val === 'object' && val !== null && !['order_flow'].includes(key)
+        ).length > 0 && (
+          <div className="flex flex-wrap gap-2 pt-1">
+            {Object.entries(fs)
+              .filter(([key, val]) => typeof val === 'object' && val !== null && !['order_flow'].includes(key))
+              .slice(0, 3)
+              .map(([key, val]) => (
+                <JsonValueTooltip key={key} label={key} value={val} />
+              ))
+            }
+          </div>
+        )}
+        
+        {/* Collapsible raw data viewer */}
+        <RawDataViewer filtersStatus={fs} trendData={rejection.trend_data} />
       </div>
     );
   };
