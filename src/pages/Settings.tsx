@@ -14,6 +14,7 @@ import { PerformanceMonitoringDashboard } from '@/components/PerformanceMonitori
 import SmartRiskSettings from '@/components/SmartRiskSettings';
 import { HedgingSettings } from '@/components/HedgingSettings';
 import { SmartAITSSimulator } from '@/components/SmartAITSSimulator';
+import { SmartTradingSettings } from '@/components/SmartTradingSettings';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function Settings() {
@@ -226,11 +227,16 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="general">General Settings</TabsTrigger>
+          <TabsTrigger value="smart">Smart Trading</TabsTrigger>
           <TabsTrigger value="aits">Smart AITS Simulator</TabsTrigger>
           <TabsTrigger value="performance">Performance Monitor</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="smart" className="space-y-6">
+          <SmartTradingSettings />
+        </TabsContent>
 
         <TabsContent value="general" className="space-y-6">
           {/* Trading Mode */}
