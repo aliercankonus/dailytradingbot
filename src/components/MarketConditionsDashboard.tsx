@@ -198,7 +198,7 @@ export const MarketConditionsDashboard = () => {
                     <div className="text-xs">
                       <p>Base: 65</p>
                       {conditions.averageVolumeRatio < 0.5 && (
-                        <p>Low Volume Boost: +5</p>
+                        <p>Low Volume Boost: +3</p>
                       )}
                       <p className="font-medium">Effective: {conditions.effectiveThreshold}</p>
                     </div>

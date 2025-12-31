@@ -5,7 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 const LOW_VOLUME_THRESHOLD = 0.5; // 50% of average
 const HOLIDAY_MODE_THRESHOLD = 0.3; // 30% of average
 const BASE_QUALITY_THRESHOLD = 65;
-const LOW_VOLUME_QUALITY_BOOST = 5;
+const LOW_VOLUME_QUALITY_BOOST = 3; // Reduced from 5 to 3 for better momentum catching
 
 interface GateStatus {
   htfExtreme: number;

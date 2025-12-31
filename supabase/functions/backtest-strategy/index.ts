@@ -375,7 +375,7 @@ serve(async (req) => {
 
         // Quality score using SHARED scoring module (aligned with live system)
         const adxScore = getAdxScore(adx);
-        const momentumScore = getMomentumScore(momentum);
+        const momentumScore = getMomentumScore(momentum, adx, false);
         const confidencePenalty = getConfidencePenalty(trend4h.confidence, adx, momentum.confirms);
         
         // Calculate consistency from trend agreement

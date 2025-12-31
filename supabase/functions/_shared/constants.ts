@@ -999,7 +999,9 @@ export const LOW_VOLUME_DETECTION_PARAMS = {
   // Volume ratio threshold - below this is considered "low volume"
   VOLUME_RATIO_THRESHOLD: 0.5,  // <50% of 20-day average = low volume
   // Quality threshold boost when low volume detected
-  QUALITY_THRESHOLD_BOOST: 5,   // Add +5 to minimum quality threshold
+  // REDUCED from +5 to +3 to allow more signals during normal low-volume periods
+  // +5 was too aggressive - caused valid momentum signals to miss by 2-3 points
+  QUALITY_THRESHOLD_BOOST: 3,   // Add +3 to minimum quality threshold (was +5)
   // Minimum volume ratio to log as "very low" (holiday-like conditions)
   VERY_LOW_VOLUME_RATIO: 0.3,   // <30% = very low volume (log as holiday-like)
 } as const;
