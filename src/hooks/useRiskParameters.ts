@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
-interface RiskParameters {
+export interface RiskParameters {
   id: string;
   max_risk_per_trade_percent: number;
   max_open_trades: number;
@@ -54,6 +54,16 @@ interface RiskParameters {
   // AI Analysis Toggle
   ai_analysis_enabled: boolean;
   updated_at: string;
+  // Smart Trading Settings (Phase 1-7)
+  regime_aware_trading: boolean;
+  min_momentum_score: number;
+  max_overextension_atr: number;
+  min_pullback_depth: number;
+  require_volume_confirmation: boolean;
+  exhaustion_block_enabled: boolean;
+  min_entry_quality_score: number;
+  trending_regime_min_adx: number;
+  ranging_regime_max_adx: number;
 }
 
 export const useRiskParameters = () => {

@@ -205,6 +205,164 @@ export type Database = {
         }
         Relationships: []
       }
+      entry_quality_log: {
+        Row: {
+          created_at: string | null
+          entry_factors: Json | null
+          entry_score: number
+          id: string
+          macd_expanding: boolean | null
+          momentum_score: number | null
+          outcome: string | null
+          pnl_percent: number | null
+          position_id: string | null
+          pullback_depth: number | null
+          regime: string | null
+          stochrsi_position: string | null
+          symbol: string
+          timeframe_alignment_score: number | null
+          user_id: string
+          volume_confirmation: boolean | null
+        }
+        Insert: {
+          created_at?: string | null
+          entry_factors?: Json | null
+          entry_score: number
+          id?: string
+          macd_expanding?: boolean | null
+          momentum_score?: number | null
+          outcome?: string | null
+          pnl_percent?: number | null
+          position_id?: string | null
+          pullback_depth?: number | null
+          regime?: string | null
+          stochrsi_position?: string | null
+          symbol: string
+          timeframe_alignment_score?: number | null
+          user_id: string
+          volume_confirmation?: boolean | null
+        }
+        Update: {
+          created_at?: string | null
+          entry_factors?: Json | null
+          entry_score?: number
+          id?: string
+          macd_expanding?: boolean | null
+          momentum_score?: number | null
+          outcome?: string | null
+          pnl_percent?: number | null
+          position_id?: string | null
+          pullback_depth?: number | null
+          regime?: string | null
+          stochrsi_position?: string | null
+          symbol?: string
+          timeframe_alignment_score?: number | null
+          user_id?: string
+          volume_confirmation?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entry_quality_log_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      market_regime_history: {
+        Row: {
+          adx: number | null
+          adx_slope: number | null
+          bb_squeeze: boolean | null
+          bb_width: number | null
+          id: string
+          recorded_at: string | null
+          regime: string
+          symbol: string
+          trend_direction: string | null
+          trend_strength: number | null
+          user_id: string
+        }
+        Insert: {
+          adx?: number | null
+          adx_slope?: number | null
+          bb_squeeze?: boolean | null
+          bb_width?: number | null
+          id?: string
+          recorded_at?: string | null
+          regime: string
+          symbol: string
+          trend_direction?: string | null
+          trend_strength?: number | null
+          user_id: string
+        }
+        Update: {
+          adx?: number | null
+          adx_slope?: number | null
+          bb_squeeze?: boolean | null
+          bb_width?: number | null
+          id?: string
+          recorded_at?: string | null
+          regime?: string
+          symbol?: string
+          trend_direction?: string | null
+          trend_strength?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      momentum_analysis: {
+        Row: {
+          ema_spread_roc: number | null
+          id: string
+          is_accelerating: boolean | null
+          is_exhausted: boolean | null
+          macd_slope: number | null
+          momentum_score: number
+          overextension_atr: number | null
+          pullback_depth: number | null
+          recorded_at: string | null
+          rsi_momentum: number | null
+          symbol: string
+          timeframe_alignment: Json | null
+          trend_direction: string
+          user_id: string
+        }
+        Insert: {
+          ema_spread_roc?: number | null
+          id?: string
+          is_accelerating?: boolean | null
+          is_exhausted?: boolean | null
+          macd_slope?: number | null
+          momentum_score: number
+          overextension_atr?: number | null
+          pullback_depth?: number | null
+          recorded_at?: string | null
+          rsi_momentum?: number | null
+          symbol: string
+          timeframe_alignment?: Json | null
+          trend_direction: string
+          user_id: string
+        }
+        Update: {
+          ema_spread_roc?: number | null
+          id?: string
+          is_accelerating?: boolean | null
+          is_exhausted?: boolean | null
+          macd_slope?: number | null
+          momentum_score?: number
+          overextension_atr?: number | null
+          pullback_depth?: number | null
+          recorded_at?: string | null
+          rsi_momentum?: number | null
+          symbol?: string
+          timeframe_alignment?: Json | null
+          trend_direction?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       notifications: {
         Row: {
           id: string
@@ -700,6 +858,7 @@ export type Database = {
           email_notifications_enabled: boolean | null
           enable_early_reversal_signals: boolean | null
           enable_pullback_signals: boolean | null
+          exhaustion_block_enabled: boolean | null
           hedge_position_size_percent: number | null
           hedge_reversal_risk_max: number | null
           hedge_reversal_risk_min: number | null
@@ -716,13 +875,17 @@ export type Database = {
           loss_recovery_position_size_percent: number | null
           low_quality_cooldown_until: string | null
           max_open_trades: number
+          max_overextension_atr: number | null
           max_positions_to_close_per_cycle: number | null
           max_recovery_trades_per_day: number | null
           max_risk_per_trade_percent: number
           max_trades_per_symbol: number
           median_trade_quality: number | null
           min_confidence_threshold: number
+          min_entry_quality_score: number | null
           min_hold_time_minutes: number | null
+          min_momentum_score: number | null
+          min_pullback_depth: number | null
           min_trades_for_kelly: number | null
           min_trend_consistency: number
           momentum_exit_guard_enabled: boolean | null
@@ -737,10 +900,13 @@ export type Database = {
           position_size_reduction_percent: number
           progressive_lock_enabled: boolean | null
           pullback_position_size_percent: number | null
+          ranging_regime_max_adx: number | null
           rebalance_loss_threshold_percent: number | null
           recovery_cooldown_until: string | null
           recovery_exit_drawdown_percent: number | null
           recovery_trades_today: number | null
+          regime_aware_trading: boolean | null
+          require_volume_confirmation: boolean | null
           sms_notifications_enabled: boolean | null
           stale_peak_protection_enabled: boolean | null
           standard_tp_multiplier: number | null
@@ -752,6 +918,7 @@ export type Database = {
           trailing_stop_distance_multiplier: number | null
           trailing_stop_enabled: boolean | null
           trailing_stop_profit_lock_percent: number | null
+          trending_regime_min_adx: number | null
           updated_at: string | null
           user_id: string
           volatility_max_trades_reduction: number | null
@@ -786,6 +953,7 @@ export type Database = {
           email_notifications_enabled?: boolean | null
           enable_early_reversal_signals?: boolean | null
           enable_pullback_signals?: boolean | null
+          exhaustion_block_enabled?: boolean | null
           hedge_position_size_percent?: number | null
           hedge_reversal_risk_max?: number | null
           hedge_reversal_risk_min?: number | null
@@ -802,13 +970,17 @@ export type Database = {
           loss_recovery_position_size_percent?: number | null
           low_quality_cooldown_until?: string | null
           max_open_trades?: number
+          max_overextension_atr?: number | null
           max_positions_to_close_per_cycle?: number | null
           max_recovery_trades_per_day?: number | null
           max_risk_per_trade_percent?: number
           max_trades_per_symbol?: number
           median_trade_quality?: number | null
           min_confidence_threshold?: number
+          min_entry_quality_score?: number | null
           min_hold_time_minutes?: number | null
+          min_momentum_score?: number | null
+          min_pullback_depth?: number | null
           min_trades_for_kelly?: number | null
           min_trend_consistency?: number
           momentum_exit_guard_enabled?: boolean | null
@@ -823,10 +995,13 @@ export type Database = {
           position_size_reduction_percent?: number
           progressive_lock_enabled?: boolean | null
           pullback_position_size_percent?: number | null
+          ranging_regime_max_adx?: number | null
           rebalance_loss_threshold_percent?: number | null
           recovery_cooldown_until?: string | null
           recovery_exit_drawdown_percent?: number | null
           recovery_trades_today?: number | null
+          regime_aware_trading?: boolean | null
+          require_volume_confirmation?: boolean | null
           sms_notifications_enabled?: boolean | null
           stale_peak_protection_enabled?: boolean | null
           standard_tp_multiplier?: number | null
@@ -838,6 +1013,7 @@ export type Database = {
           trailing_stop_distance_multiplier?: number | null
           trailing_stop_enabled?: boolean | null
           trailing_stop_profit_lock_percent?: number | null
+          trending_regime_min_adx?: number | null
           updated_at?: string | null
           user_id: string
           volatility_max_trades_reduction?: number | null
@@ -872,6 +1048,7 @@ export type Database = {
           email_notifications_enabled?: boolean | null
           enable_early_reversal_signals?: boolean | null
           enable_pullback_signals?: boolean | null
+          exhaustion_block_enabled?: boolean | null
           hedge_position_size_percent?: number | null
           hedge_reversal_risk_max?: number | null
           hedge_reversal_risk_min?: number | null
@@ -888,13 +1065,17 @@ export type Database = {
           loss_recovery_position_size_percent?: number | null
           low_quality_cooldown_until?: string | null
           max_open_trades?: number
+          max_overextension_atr?: number | null
           max_positions_to_close_per_cycle?: number | null
           max_recovery_trades_per_day?: number | null
           max_risk_per_trade_percent?: number
           max_trades_per_symbol?: number
           median_trade_quality?: number | null
           min_confidence_threshold?: number
+          min_entry_quality_score?: number | null
           min_hold_time_minutes?: number | null
+          min_momentum_score?: number | null
+          min_pullback_depth?: number | null
           min_trades_for_kelly?: number | null
           min_trend_consistency?: number
           momentum_exit_guard_enabled?: boolean | null
@@ -909,10 +1090,13 @@ export type Database = {
           position_size_reduction_percent?: number
           progressive_lock_enabled?: boolean | null
           pullback_position_size_percent?: number | null
+          ranging_regime_max_adx?: number | null
           rebalance_loss_threshold_percent?: number | null
           recovery_cooldown_until?: string | null
           recovery_exit_drawdown_percent?: number | null
           recovery_trades_today?: number | null
+          regime_aware_trading?: boolean | null
+          require_volume_confirmation?: boolean | null
           sms_notifications_enabled?: boolean | null
           stale_peak_protection_enabled?: boolean | null
           standard_tp_multiplier?: number | null
@@ -924,6 +1108,7 @@ export type Database = {
           trailing_stop_distance_multiplier?: number | null
           trailing_stop_enabled?: boolean | null
           trailing_stop_profit_lock_percent?: number | null
+          trending_regime_min_adx?: number | null
           updated_at?: string | null
           user_id?: string
           volatility_max_trades_reduction?: number | null
