@@ -14,6 +14,7 @@ import { getSignalPriorityTier, getSignalPriorityVariant } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { SignalRejectionReasons } from './SignalRejectionReasons';
 import { MomentumStatusDetails } from './MomentumStatusDetails';
+import { TrendAccelerationIndicator } from './TrendAccelerationIndicator';
 
 export const TradingSignalsDashboard = () => {
   const { signals, loading } = useSignals();
@@ -316,6 +317,7 @@ export const TradingSignalsDashboard = () => {
         )}
       </div>
 
+      <TrendAccelerationIndicator />
       <SignalRejectionReasons />
       <MomentumStatusDetails />
     </div>
