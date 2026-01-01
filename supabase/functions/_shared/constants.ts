@@ -122,6 +122,62 @@ export const MOMENTUM_CONTINUATION_PARAMS = {
   STOP_LOSS_MULTIPLIER: 1.5,  // 1.5x ATR instead of 2x
 } as const;
 
+// ============= TREND ACCELERATION PARAMETERS =============
+// Allows catching strong price moves (3%+) that would otherwise be blocked by:
+// - NO_MOMENTUM_CONFIRMATION (ADX < 28)
+// - BOLLINGER_POSITION_FILTER (price above upper/below lower band)
+// These gates are designed for normal conditions but miss accelerating trends
+export const TREND_ACCELERATION_PARAMS = {
+  // Enable trend acceleration exception
+  ENABLED: true,
+  
+  // ===== PRICE ACTION DETECTION =====
+  // Minimum price move to qualify as "acceleration" (strong move)
+  MIN_PRICE_MOVE_PERCENT: 2.5,
+  // Lookback period for price move detection (hours)
+  LOOKBACK_HOURS: 6,
+  // Strong price move that gets higher priority
+  STRONG_PRICE_MOVE_PERCENT: 3.5,
+  
+  // ===== ADX REQUIREMENTS FOR OVERRIDE =====
+  // Minimum ADX to allow momentum gate bypass (lower than normal 28 threshold)
+  MIN_ADX_FOR_MOMENTUM_BYPASS: 20,
+  // ADX must be rising for the override to apply
+  REQUIRE_ADX_RISING: true,
+  // ADX crossing this threshold opens "building trend window"
+  ADX_BUILDING_THRESHOLD: 23,
+  
+  // ===== STOCHRSI SAFETY LIMITS =====
+  // Maximum StochRSI K for LONG acceleration entries (not at extreme)
+  MAX_STOCHRSI_K_FOR_LONG: 88,
+  // Minimum StochRSI K for SHORT acceleration entries
+  MIN_STOCHRSI_K_FOR_SHORT: 12,
+  
+  // ===== BOLLINGER OVERRIDE =====
+  // Allow longs above upper band if:
+  // - ADX rising + price move >= threshold + StochRSI < 90
+  BOLLINGER_OVERRIDE_MAX_PERCENT_B_LONG: 130,
+  // Allow shorts below lower band if:
+  // - ADX rising + price move >= threshold + StochRSI > 10
+  BOLLINGER_OVERRIDE_MIN_PERCENT_B_SHORT: -30,
+  
+  // ===== POSITION SIZE ADJUSTMENTS =====
+  // Position size multiplier for acceleration entries (reduced for safety)
+  POSITION_SIZE_MULTIPLIER: 0.70,
+  // Extra reduction when price is very extended (overextended entry)
+  OVEREXTENDED_POSITION_MULTIPLIER: 0.50,
+  // Overextended threshold (price move > this gets extra reduction)
+  OVEREXTENDED_MOVE_PERCENT: 5.0,
+  
+  // ===== 4H REQUIREMENTS =====
+  // Minimum 4h confidence for acceleration override
+  MIN_4H_CONFIDENCE: 55,
+  // If 4h trend is directional and matches, boost allowance
+  HTF_MATCH_RELAXES_STOCHRSI: true,
+  // With HTF match, relax StochRSI limits by this much
+  HTF_MATCH_STOCHRSI_RELAXATION: 5,
+} as const;
+
 export const RSI_THRESHOLDS = {
   OVERSOLD: 30,
   BEARISH_PULLBACK: 35,
