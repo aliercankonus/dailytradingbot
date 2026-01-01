@@ -5664,6 +5664,25 @@ serve(async (req) => {
               momentumThresholdUsed: MOMENTUM_THRESHOLDS.PULLBACK_MIN_SCORE,
               positionSizePercent: (pullbackPositionMultiplier * 100).toFixed(0),
             } : null,
+            // NEW: Trend acceleration tracking for dashboard indicator
+            trendAcceleration: {
+              detected: qualifiesForTrendAcceleration,
+              movePercent: Math.abs(priceMove),
+              adxRising: adxRisingForAcceleration,
+              adx: adx,
+              stochRsiK4h: stochRsiK4h,
+              bypassType: qualifiesForTrendAcceleration ? 
+                (momentumState === "none" && !momentumConfirms && !isStrongTrendException ? "MOMENTUM_BYPASS" : "TREND_ACCELERATION") : null,
+              positionSizeMultiplier: qualifiesForTrendAcceleration ? trendAccelerationPositionMultiplier : 1.0,
+              gatesBypassed: qualifiesForTrendAcceleration ? 
+                [momentumState === "none" ? "NO_MOMENTUM_CONFIRMATION" : null].filter(Boolean) : [],
+            },
+            // Price action momentum for dashboard
+            priceActionMomentum: {
+              hasStrongMove: hasStrongMove,
+              movePercent: Math.abs(priceMove),
+              direction: priceDirection,
+            },
           },
           expires_at: new Date(Date.now() + 60000).toISOString(),
           created_by_rebalancer: false,
