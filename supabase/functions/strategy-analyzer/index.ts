@@ -45,6 +45,8 @@ import {
   // NEW: Momentum continuation for catching strong moves
   MOMENTUM_CONTINUATION_PARAMS,
   TIME_IN_EXTREME_PARAMS,
+  // NEW: Trend acceleration exception for catching strong price moves
+  TREND_ACCELERATION_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -1547,7 +1549,11 @@ serve(async (req) => {
       | 'REGIME_EXHAUSTED'
       // Phase 2: Smarter Entry Timing gates
       | 'PHASE2_NO_BOUNCE_CONFIRMATION'
-      | 'PHASE2_RECOVERY_NO_CONFIRMATION';
+      | 'PHASE2_RECOVERY_NO_CONFIRMATION'
+      // NEW: Trend acceleration gates
+      | 'TREND_ACCELERATION_ALLOWED'
+      | 'TREND_ACCELERATION_BOLLINGER_BYPASS'
+      | 'TREND_ACCELERATION_MOMENTUM_BYPASS';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -2700,10 +2706,74 @@ serve(async (req) => {
           }
         }
         
+        // ============= NEW: TREND ACCELERATION DETECTION =============
+        // Detect strong price moves (2.5%+) that should bypass momentum/Bollinger gates
+        // This addresses the AVAXUSDT miss - 9% move blocked because ADX was 21-23 during acceleration
+        const priceActionMomentum = trendData.priceActionMomentum;
+        const priceMove = priceActionMomentum?.movePercent || 0;
+        const priceDirection = priceActionMomentum?.direction || "none";
+        const hasStrongMove = priceActionMomentum?.hasStrongMove || false;
+        
+        // Calculate trend acceleration eligibility
+        const isTrendAccelerationEnabled = TREND_ACCELERATION_PARAMS.ENABLED;
+        const meetsMinPriceMove = Math.abs(priceMove) >= TREND_ACCELERATION_PARAMS.MIN_PRICE_MOVE_PERCENT;
+        const isStrongPriceMove = Math.abs(priceMove) >= TREND_ACCELERATION_PARAMS.STRONG_PRICE_MOVE_PERCENT;
+        const adxRisingForAcceleration = smartAdxRising || (trendData.volatility?.adxRising ?? false);
+        const meetsMinAdxForAcceleration = adx >= TREND_ACCELERATION_PARAMS.MIN_ADX_FOR_MOMENTUM_BYPASS;
+        const adxCrossingBuildingThreshold = adx >= TREND_ACCELERATION_PARAMS.ADX_BUILDING_THRESHOLD;
+        
+        // Direction must match derived direction
+        const priceDirectionMatchesTrade = (
+          (derivedDirection === "long" && priceDirection === "bullish") ||
+          (derivedDirection === "short" && priceDirection === "bearish")
+        );
+        
+        // StochRSI safety checks for acceleration entries
+        const stochRsiSafeForLongAcceleration = stochRsiK4h < TREND_ACCELERATION_PARAMS.MAX_STOCHRSI_K_FOR_LONG;
+        const stochRsiSafeForShortAcceleration = stochRsiK4h > TREND_ACCELERATION_PARAMS.MIN_STOCHRSI_K_FOR_SHORT;
+        const stochRsiSafeForAcceleration = derivedDirection === "long" 
+          ? stochRsiSafeForLongAcceleration 
+          : stochRsiSafeForShortAcceleration;
+        
+        // 4h confidence check
+        const meets4hConfForAcceleration = stochFilterConf4h >= TREND_ACCELERATION_PARAMS.MIN_4H_CONFIDENCE;
+        
+        // HTF alignment bonus - if 4h trend matches, we can relax StochRSI limits
+        const htfMatchesDirection = (
+          (derivedDirection === "long" && stochFilterTrend4h === "bullish") ||
+          (derivedDirection === "short" && stochFilterTrend4h === "bearish")
+        );
+        const relaxedStochRsiForHTFMatch = htfMatchesDirection && TREND_ACCELERATION_PARAMS.HTF_MATCH_RELAXES_STOCHRSI;
+        
+        // Final acceleration eligibility
+        const qualifiesForTrendAcceleration = isTrendAccelerationEnabled &&
+          meetsMinPriceMove &&
+          priceDirectionMatchesTrade &&
+          (adxRisingForAcceleration || adxCrossingBuildingThreshold) &&
+          meetsMinAdxForAcceleration &&
+          (stochRsiSafeForAcceleration || relaxedStochRsiForHTFMatch) &&
+          meets4hConfForAcceleration;
+        
+        // Position size multiplier for acceleration entries
+        let trendAccelerationPositionMultiplier = 1.0;
+        if (qualifiesForTrendAcceleration) {
+          trendAccelerationPositionMultiplier = TREND_ACCELERATION_PARAMS.POSITION_SIZE_MULTIPLIER;
+          
+          // Extra reduction for very overextended moves
+          if (Math.abs(priceMove) >= TREND_ACCELERATION_PARAMS.OVEREXTENDED_MOVE_PERCENT) {
+            trendAccelerationPositionMultiplier = TREND_ACCELERATION_PARAMS.OVEREXTENDED_POSITION_MULTIPLIER;
+          }
+          
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🚀 TREND ACCELERATION DETECTED: ${priceMove.toFixed(1)}% ${priceDirection} move`);
+          logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)} rising=${adxRisingForAcceleration}, StochRSI K=${stochRsiK4h.toFixed(1)}, 4h=${stochFilterTrend4h} ${stochFilterConf4h.toFixed(0)}%`);
+          logger.forSymbol(symbol).info(`   → Position size: ${(trendAccelerationPositionMultiplier * 100).toFixed(0)}% (acceleration entry)`);
+        }
+        
         // ============= IMPROVEMENT 2: BOLLINGER POSITION FILTER (CONTEXT-AWARE) =============
         // Base rule: Shorts below lower Bollinger are risky (mean reversion bounce)
         // Exception: In confirmed bearish trends, low %B indicates trend continuation - shorts are VALID
         // Same logic applies symmetrically for longs at high %B
+        // NEW: Trend acceleration can bypass Bollinger gates
         const isInSqueeze4h = trendData.bollingerBands?.['4h']?.squeeze || 
                               (trendData.bb?.['4h']?.squeezePercent ?? 0) > SQUEEZE_CONTEXT_PARAMS.MIN_SQUEEZE_PERCENT_4H;
         const isRangingMarket = adx < BOLLINGER_ENTRY_GATES.RANGING_ADX_THRESHOLD;
@@ -2715,11 +2785,14 @@ serve(async (req) => {
         const is1hVeryStrongBearish = stochFilterTrend1h === "bearish" && stochFilterConf1h >= 75;
         
         // Allow 4h OR very strong 1h to satisfy trend confirmation
+        // NEW: Trend acceleration also satisfies trend confirmation
         const isBearishTrendConfirmed = (stochFilterTrend4h === "bearish" && stochFilterConf4h >= BOLLINGER_ENTRY_GATES.TREND_CONFIDENCE_THRESHOLD) ||
-                                        (stochFilterTrend4h === "neutral" && is1hVeryStrongBearish);
+                                        (stochFilterTrend4h === "neutral" && is1hVeryStrongBearish) ||
+                                        (qualifiesForTrendAcceleration && derivedDirection === "short");
         const isStrongBearishTrend = isBearishTrendConfirmed && adx >= ADX_THRESHOLDS.MODERATE; // ADX >= 22
         const isBullishTrendConfirmed = (stochFilterTrend4h === "bullish" && stochFilterConf4h >= BOLLINGER_ENTRY_GATES.TREND_CONFIDENCE_THRESHOLD) ||
-                                        (stochFilterTrend4h === "neutral" && is1hVeryStrongBullish);
+                                        (stochFilterTrend4h === "neutral" && is1hVeryStrongBullish) ||
+                                        (qualifiesForTrendAcceleration && derivedDirection === "long");
         const isStrongBullishTrend = isBullishTrendConfirmed && adx >= ADX_THRESHOLDS.MODERATE;
         
         // SHORT gate: Determine appropriate %B threshold based on trend, squeeze, and ranging
@@ -3464,21 +3537,23 @@ serve(async (req) => {
 
         // RELAXED: Allow entry when momentum.state is "none" IF ADX >= 28 (strong trend exception)
         // This enables early entries when trend strength itself provides conviction
+        // NEW: Also allow if trend acceleration detected (strong price move with ADX rising)
         const momentumState = momentum?.state || "none";
         const momentumConfirms = momentum?.confirms ?? false;
         const isStrongTrendException = adx >= ADX_THRESHOLDS.STRONG_TREND_EXCEPTION; // 28+ (relaxed from 30)
         
         // Momentum passes if:
         // 1. State is confirmed/building/mixed AND confirms is true, OR
-        // 2. State is "none" BUT ADX >= 28 (strong trend exception for early entries)
-        const momentumPasses = momentumConfirms || (momentumState !== "none") || isStrongTrendException;
+        // 2. State is "none" BUT ADX >= 28 (strong trend exception for early entries), OR
+        // 3. Trend acceleration detected (2.5%+ price move with ADX >= 20 and rising)
+        const momentumPasses = momentumConfirms || (momentumState !== "none") || isStrongTrendException || qualifiesForTrendAcceleration;
         
         if (!momentumPasses) {
           rejectedByHardGates++;
-          perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW', details: `Momentum=${momentumState}, ADX=${adx.toFixed(1)}<28` });
+          perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW', details: `Momentum=${momentumState}, ADX=${adx.toFixed(1)}<28, PriceMove=${priceMove.toFixed(1)}%` });
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: No momentum confirmation (state=${momentumState}, confirms=${momentumConfirms}, ADX=${adx.toFixed(1)} < 28)`,
+            `HARD GATE: No momentum confirmation (state=${momentumState}, confirms=${momentumConfirms}, ADX=${adx.toFixed(1)} < 28, priceMove=${priceMove.toFixed(1)}%)`,
             { 
               gate: "NO_MOMENTUM_CONFIRMATION",
               momentumState,
@@ -3487,6 +3562,17 @@ serve(async (req) => {
               isStrongTrendException,
               trend,
               confidence,
+              // NEW: Trend acceleration diagnostics
+              trendAcceleration: {
+                priceMove: priceMove.toFixed(1),
+                priceDirection,
+                hasStrongMove,
+                qualifiesForBypass: qualifiesForTrendAcceleration,
+                adxRising: adxRisingForAcceleration,
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                stochRsiSafe: stochRsiSafeForAcceleration,
+                htfMatches: htfMatchesDirection
+              },
               // Detailed momentum analysis
               momentum: {
                 state: momentumState,
@@ -3513,6 +3599,11 @@ serve(async (req) => {
         // Log when using strong trend exception for early entry
         if (isStrongTrendException && momentumState === "none" && !momentumConfirms) {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} EARLY ENTRY via strong trend exception (ADX=${adx.toFixed(1)} >= 28, momentum=${momentumState})`);
+        }
+        
+        // Log when using trend acceleration exception
+        if (qualifiesForTrendAcceleration && momentumState === "none" && !momentumConfirms && !isStrongTrendException) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🚀 TREND ACCELERATION BYPASS: Allowing entry despite no momentum confirmation (${priceMove.toFixed(1)}% move, ADX=${adx.toFixed(1)} rising=${adxRisingForAcceleration})`);
         }
         
         // ============= CONTEXT-AWARE MOMENTUM GATE FOR PULLBACK ENTRIES =============
@@ -5486,6 +5577,12 @@ serve(async (req) => {
         if (priceActionMomentumPositionMultiplier < 1.0) {
           positionSizeMultiplier *= priceActionMomentumPositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Price action momentum entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 11: Apply trend acceleration position reduction (70% or 50% if overextended)
+        if (trendAccelerationPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= trendAccelerationPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🚀 Trend acceleration entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
         // Final position size as percentage
