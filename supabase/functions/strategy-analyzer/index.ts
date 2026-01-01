@@ -4479,6 +4479,17 @@ serve(async (req) => {
         // IMPROVEMENT 4: Track strategies that pass conditions but fail secondary filters
         // Used for multi-strategy convergence fallback
         const passedConditionsButFiltered: { name: string; reason: string; direction: "long" | "short" }[] = [];
+        
+        // ============= NEAR-MISS DIAGNOSTICS =============
+        // Track top N closest strategies for "why no signal" debugging
+        interface StrategyNearMiss {
+          name: string;
+          passedCount: number;
+          totalConditions: number;
+          failedConditions: { condition: string; currentValue: number | undefined; targetValue: string }[];
+          skipReason?: string;
+        }
+        const strategyNearMisses: StrategyNearMiss[] = [];
 
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Evaluating ${allStrategies.length} strategies`);
         
@@ -4511,18 +4522,49 @@ serve(async (req) => {
           prevIndicatorValues.set("Price", prevPrice);
           prevIndicatorValues.set("Volume", prevVolume);
 
+          // ============= NEAR-MISS DIAGNOSTICS TRACKING =============
+          // Track strategy evaluation results for "closest match" diagnostics
+          interface ConditionEvalResult {
+            condition: string;
+            result: boolean;
+            currentValue: number | undefined;
+            targetValue: string;
+          }
+          
           try {
-            const conditionResults = entryConditions.map((c: any) => {
-              if (!c) return { condition: null, result: false };
+            const conditionResults: ConditionEvalResult[] = entryConditions.map((c: any) => {
+              if (!c) return { condition: '', result: false, currentValue: undefined, targetValue: '' };
               const result = evaluateCondition(c, indicatorValues, prevIndicatorValues);
               return { 
                 condition: `${c.indicator} ${c.operator} ${c.value}`, 
                 result,
-                currentValue: indicatorValues.get(c.indicator)
+                currentValue: indicatorValues.get(c.indicator),
+                targetValue: c.value || c.targetIndicator || ''
               };
             });
             
             const conditionsMet = conditionResults.every((r: { result: boolean }) => r.result);
+            const passedCount = conditionResults.filter((r: { result: boolean }) => r.result).length;
+            
+            // ============= TRACK NEAR-MISS FOR DIAGNOSTICS =============
+            // Store strategies that came close to matching for debugging
+            if (!conditionsMet && passedCount > 0) {
+              const failedConditions = conditionResults
+                .filter((r: ConditionEvalResult) => !r.result)
+                .map((r: ConditionEvalResult) => ({
+                  condition: r.condition,
+                  currentValue: r.currentValue,
+                  targetValue: r.targetValue
+                }));
+              
+              strategyNearMisses.push({
+                name: strategy.name,
+                passedCount,
+                totalConditions: entryConditions.length,
+                failedConditions
+              });
+            }
+            
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} "${strategy.name}": ${conditionsMet ? '✅ PASS' : '❌ FAIL'} - ${JSON.stringify(conditionResults)}`);
             
             if (conditionsMet) {
@@ -4715,6 +4757,7 @@ serve(async (req) => {
                 // Strategy only generates LONG signals - only valid in bullish/neutral trends
                 if (tradeDirection === 'bearish') {
                   logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - long-only strategy in bearish trend`);
+                  strategyNearMisses.push({ name: strategy.name, passedCount: entryConditions.length, totalConditions: entryConditions.length, failedConditions: [], skipReason: 'long-only in bearish trend' });
                   continue;
                 }
                 strategySignalType = 'long';
@@ -4722,16 +4765,67 @@ serve(async (req) => {
                 // Strategy only generates SHORT signals - only valid in bearish/neutral trends  
                 if (tradeDirection === 'bullish') {
                   logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - short-only strategy in bullish trend`);
+                  strategyNearMisses.push({ name: strategy.name, passedCount: entryConditions.length, totalConditions: entryConditions.length, failedConditions: [], skipReason: 'short-only in bullish trend' });
                   continue;
                 }
                 strategySignalType = 'short';
+              } else if (strategyDirection === 'neutral') {
+                // ============= NEW: NEUTRAL STRATEGY DIRECTION DERIVATION =============
+                // Neutral strategies work when 5m/15m trend is neutral but HTF shows direction
+                // Derive direction from 4h first, then 1h if 4h is neutral
+                const htf4hTrend = htfTrend4h;
+                const htf4hConf = stochFilterConf4h || 0;
+                const htf1hTrend = htfTrend1h;
+                const htf1hConf = stochFilterConf1h || 0;
+                
+                if (htf4hTrend === 'bullish' && htf4hConf >= 55) {
+                  strategySignalType = 'long';
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} "${strategy.name}" (neutral): Using 4h direction → LONG (4h ${htf4hConf.toFixed(0)}% bullish)`);
+                } else if (htf4hTrend === 'bearish' && htf4hConf >= 55) {
+                  strategySignalType = 'short';
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} "${strategy.name}" (neutral): Using 4h direction → SHORT (4h ${htf4hConf.toFixed(0)}% bearish)`);
+                } else if (htf1hTrend === 'bullish' && htf1hConf >= 65) {
+                  // 1h needs higher confidence since it's shorter timeframe
+                  strategySignalType = 'long';
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} "${strategy.name}" (neutral): Using 1h direction → LONG (4h neutral, 1h ${htf1hConf.toFixed(0)}% bullish)`);
+                } else if (htf1hTrend === 'bearish' && htf1hConf >= 65) {
+                  strategySignalType = 'short';
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} "${strategy.name}" (neutral): Using 1h direction → SHORT (4h neutral, 1h ${htf1hConf.toFixed(0)}% bearish)`);
+                } else {
+                  // No clear HTF direction - skip neutral strategy
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - neutral strategy but no clear HTF direction (4h=${htf4hTrend} ${htf4hConf.toFixed(0)}%, 1h=${htf1hTrend} ${htf1hConf.toFixed(0)}%)`);
+                  strategyNearMisses.push({ name: strategy.name, passedCount: entryConditions.length, totalConditions: entryConditions.length, failedConditions: [], skipReason: `no HTF direction (4h=${htf4hTrend} ${htf4hConf.toFixed(0)}%, 1h=${htf1hTrend} ${htf1hConf.toFixed(0)}%)` });
+                  continue;
+                }
               } else {
                 // 'trend' mode - follow the current trend direction
                 if (tradeDirection === 'bullish') strategySignalType = 'long';
                 else if (tradeDirection === 'bearish') strategySignalType = 'short';
                 else {
-                  logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - neutral trend, no clear direction`);
-                  continue;
+                  // ============= NEW: DERIVE DIRECTION FROM HTF FOR TREND STRATEGIES TOO =============
+                  // When tradeDirection is neutral, try to derive from HTF instead of skipping
+                  const htf4hTrend = htfTrend4h;
+                  const htf4hConf = stochFilterConf4h || 0;
+                  const htf1hTrend = htfTrend1h;
+                  const htf1hConf = stochFilterConf1h || 0;
+                  
+                  if (htf4hTrend === 'bullish' && htf4hConf >= 60) {
+                    strategySignalType = 'long';
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} "${strategy.name}" (trend): Neutral 5m → using 4h direction LONG (${htf4hConf.toFixed(0)}% bullish)`);
+                  } else if (htf4hTrend === 'bearish' && htf4hConf >= 60) {
+                    strategySignalType = 'short';
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} "${strategy.name}" (trend): Neutral 5m → using 4h direction SHORT (${htf4hConf.toFixed(0)}% bearish)`);
+                  } else if (htf1hTrend === 'bullish' && htf1hConf >= 70) {
+                    strategySignalType = 'long';
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} "${strategy.name}" (trend): Neutral 5m → using 1h direction LONG (${htf1hConf.toFixed(0)}% bullish)`);
+                  } else if (htf1hTrend === 'bearish' && htf1hConf >= 70) {
+                    strategySignalType = 'short';
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} "${strategy.name}" (trend): Neutral 5m → using 1h direction SHORT (${htf1hConf.toFixed(0)}% bearish)`);
+                  } else {
+                    logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - neutral trend and no strong HTF direction`);
+                    strategyNearMisses.push({ name: strategy.name, passedCount: entryConditions.length, totalConditions: entryConditions.length, failedConditions: [], skipReason: `neutral trend, HTF not strong (4h=${htf4hTrend} ${htf4hConf.toFixed(0)}%, 1h=${htf1hTrend} ${htf1hConf.toFixed(0)}%)` });
+                    continue;
+                  }
                 }
               }
               
@@ -4821,6 +4915,70 @@ serve(async (req) => {
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} CONVERGENCE blocked: ${passedConditionsButFiltered.length} strategies agreed but ${blockReason}`);
           }
         }
+        
+        // ============= HIGH-QUALITY FALLBACK ENTRY =============
+        // When quality is high, momentum is confirmed, but no strategy matched
+        // Create a controlled fallback entry with reduced position size
+        const FALLBACK_MIN_QUALITY = 70;
+        const FALLBACK_MIN_HTF_CONF = 60;
+        const FALLBACK_MAX_REVERSAL = 40;
+        const FALLBACK_POSITION_MULT = 0.40;
+        
+        if (candidates.length === 0) {
+          const conf4h = stochFilterConf4h || 0;
+          const conf1h = stochFilterConf1h || 0;
+          const htf4hDir = htfTrend4h;
+          const htf1hDir = htfTrend1h;
+          const momentumConfirmed = momentum?.state === 'confirmed' || momentum?.state === 'building';
+          const reversalScore = unifiedReversal.score;
+          
+          // Determine fallback direction from HTF
+          let fallbackDirection: "long" | "short" | null = null;
+          if (htf4hDir === 'bullish' && conf4h >= FALLBACK_MIN_HTF_CONF) {
+            fallbackDirection = 'long';
+          } else if (htf4hDir === 'bearish' && conf4h >= FALLBACK_MIN_HTF_CONF) {
+            fallbackDirection = 'short';
+          } else if (htf1hDir === 'bullish' && conf1h >= 70) {
+            fallbackDirection = 'long';
+          } else if (htf1hDir === 'bearish' && conf1h >= 70) {
+            fallbackDirection = 'short';
+          }
+          
+          const canUseFallback = 
+            qualityScore >= FALLBACK_MIN_QUALITY &&
+            fallbackDirection !== null &&
+            (momentumConfirmed || adx >= ADX_THRESHOLDS.STRONG) &&
+            reversalScore < FALLBACK_MAX_REVERSAL;
+          
+          if (canUseFallback && fallbackDirection) {
+            // Create fallback candidate
+            const fallbackStrategy = {
+              id: 'quality-fallback',
+              name: `Quality+Momentum Fallback (Q=${qualityScore}, HTF=${fallbackDirection === 'long' ? htf4hDir : htf4hDir})`,
+              risk_settings: {
+                stopLossPercent: 2.0,  // Tighter stops for fallback
+                takeProfitPercent: 3.5,
+                positionSizePercent: 1,
+                priority: 2
+              }
+            };
+            
+            const fallbackIndicators = new Map<string, number>();
+            fallbackIndicators.set("Price", currentPrice);
+            
+            candidates.push({
+              strategy: fallbackStrategy,
+              score: qualityScore,
+              indicatorValues: fallbackIndicators,
+              signalType: fallbackDirection,
+              positionSizeMultiplier: FALLBACK_POSITION_MULT,
+              convergenceEntry: false
+            });
+            
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} HIGH-QUALITY FALLBACK ENTRY: quality=${qualityScore}, direction=${fallbackDirection}, momentum=${momentum?.state}, reversal=${reversalScore}`);
+            logger.forSymbol(symbol).info(`   → Position size reduced to ${FALLBACK_POSITION_MULT * 100}% for fallback entry`);
+          }
+        }
 
         if (candidates.length === 0) {
           rejectedByStrategy++;
@@ -4828,6 +4986,17 @@ serve(async (req) => {
             ? ` (${passedConditionsButFiltered.length} passed conditions but failed convergence check)` 
             : '';
           perSymbolGateAttribution.set(symbol, { gate: 'NO_STRATEGY_MATCH', details: `0/${allStrategies.length} conditions met${convergenceNote}` });
+          
+          // Sort near-misses by how close they were (most conditions passed first)
+          strategyNearMisses.sort((a, b) => {
+            const aRatio = a.passedCount / a.totalConditions;
+            const bRatio = b.passedCount / b.totalConditions;
+            return bRatio - aRatio;
+          });
+          
+          // Take top 5 closest strategies
+          const topNearMisses = strategyNearMisses.slice(0, 5);
+          
           await logRejectionWithAI(
             supabase, userId, symbol,
             `No strategy conditions met (quality passed: ${qualityScore}/100)${convergenceNote}`,
@@ -4836,7 +5005,19 @@ serve(async (req) => {
               qualityScore, breakdown,
               strategiesEvaluated: allStrategies.length,
               regime: regime.regime,
-              passedConditionsButFiltered: passedConditionsButFiltered.length > 0 ? passedConditionsButFiltered : undefined
+              passedConditionsButFiltered: passedConditionsButFiltered.length > 0 ? passedConditionsButFiltered : undefined,
+              // NEW: Near-miss diagnostics for debugging
+              strategyNearMisses: topNearMisses.length > 0 ? topNearMisses : undefined,
+              // Fallback check info
+              fallbackCheck: {
+                qualityScore,
+                minRequired: FALLBACK_MIN_QUALITY,
+                htf4h: `${htfTrend4h} ${stochFilterConf4h?.toFixed(0) ?? 0}%`,
+                htf1h: `${htfTrend1h} ${stochFilterConf1h?.toFixed(0) ?? 0}%`,
+                momentumState: momentum?.state,
+                reversalScore: unifiedReversal.score,
+                eligible: qualityScore >= FALLBACK_MIN_QUALITY ? 'yes' : 'quality too low'
+              }
             },
             trendData,
             false,

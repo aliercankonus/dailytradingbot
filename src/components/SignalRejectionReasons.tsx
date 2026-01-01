@@ -714,6 +714,114 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
           </Badge>
         </div>
       )}
+      {/* Strategy Near-Misses (for NO_STRATEGY_MATCH) */}
+      {filtersStatus?.strategyNearMisses && filtersStatus.strategyNearMisses.length > 0 && (
+        <StrategyNearMissesDisplay nearMisses={filtersStatus.strategyNearMisses} />
+      )}
+      
+      {/* Fallback Check Info (for NO_STRATEGY_MATCH) */}
+      {filtersStatus?.fallbackCheck && (
+        <FallbackCheckDisplay fallbackCheck={filtersStatus.fallbackCheck} />
+      )}
+    </div>
+  );
+};
+
+// ============= STRATEGY NEAR-MISSES DISPLAY =============
+// Shows which strategies came closest to matching for debugging NO_STRATEGY_MATCH
+const StrategyNearMissesDisplay = ({ nearMisses }: { nearMisses: any[] }) => {
+  if (!nearMisses || nearMisses.length === 0) return null;
+  
+  return (
+    <div className="pt-2 mt-2 border-t border-border/50 space-y-2">
+      <div className="flex items-center gap-1.5">
+        <Target className="h-3.5 w-3.5 text-orange-400" />
+        <span className="text-xs font-medium text-orange-400">Closest Strategies</span>
+      </div>
+      <div className="space-y-1.5">
+        {nearMisses.slice(0, 3).map((miss, idx) => {
+          const passRatio = miss.totalConditions > 0 ? (miss.passedCount / miss.totalConditions) * 100 : 0;
+          const isClose = passRatio >= 50;
+          
+          return (
+            <div 
+              key={idx} 
+              className={`p-1.5 rounded border ${isClose ? 'bg-orange-500/10 border-orange-500/30' : 'bg-muted/30 border-border/50'}`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className={`text-[10px] font-medium ${isClose ? 'text-orange-400' : 'text-muted-foreground'}`}>
+                  {miss.name}
+                </span>
+                <span className={`text-[10px] font-mono ${isClose ? 'text-orange-400' : 'text-muted-foreground'}`}>
+                  {miss.passedCount}/{miss.totalConditions} ({passRatio.toFixed(0)}%)
+                </span>
+              </div>
+              {miss.skipReason && (
+                <div className="text-[9px] text-muted-foreground italic">
+                  Skip: {miss.skipReason}
+                </div>
+              )}
+              {miss.failedConditions && miss.failedConditions.length > 0 && (
+                <div className="text-[9px] text-muted-foreground space-y-0.5">
+                  {miss.failedConditions.slice(0, 2).map((fc: any, fcIdx: number) => (
+                    <div key={fcIdx} className="flex items-center gap-1">
+                      <XCircle className="h-2.5 w-2.5 text-red-400/70" />
+                      <span>{fc.condition}</span>
+                      {fc.currentValue !== undefined && (
+                        <span className="font-mono text-red-400">
+                          (got: {typeof fc.currentValue === 'number' ? fc.currentValue.toFixed(2) : fc.currentValue})
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                  {miss.failedConditions.length > 2 && (
+                    <span className="text-muted-foreground/60">+{miss.failedConditions.length - 2} more</span>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ============= FALLBACK CHECK DISPLAY =============
+// Shows why the high-quality fallback was not used
+const FallbackCheckDisplay = ({ fallbackCheck }: { fallbackCheck: any }) => {
+  if (!fallbackCheck) return null;
+  
+  const qualityPasses = fallbackCheck.qualityScore >= fallbackCheck.minRequired;
+  
+  return (
+    <div className="pt-2 mt-2 border-t border-border/50 space-y-1.5">
+      <div className="flex items-center gap-1.5">
+        <Zap className="h-3.5 w-3.5 text-purple-400" />
+        <span className="text-xs font-medium text-purple-400">Fallback Entry Check</span>
+      </div>
+      <div className="grid grid-cols-2 gap-1 text-[9px]">
+        <div className={`p-1 rounded ${qualityPasses ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+          Quality: {fallbackCheck.qualityScore}/{fallbackCheck.minRequired}
+        </div>
+        <div className="p-1 rounded bg-muted/30 text-muted-foreground">
+          4h: {fallbackCheck.htf4h}
+        </div>
+        <div className="p-1 rounded bg-muted/30 text-muted-foreground">
+          1h: {fallbackCheck.htf1h}
+        </div>
+        <div className="p-1 rounded bg-muted/30 text-muted-foreground">
+          Mom: {fallbackCheck.momentumState}
+        </div>
+      </div>
+      <div className="text-[9px] text-muted-foreground">
+        <span className={fallbackCheck.eligible === 'yes' ? 'text-green-400' : 'text-red-400'}>
+          {fallbackCheck.eligible === 'yes' ? '✓ Eligible' : `✗ ${fallbackCheck.eligible}`}
+        </span>
+        {fallbackCheck.reversalScore !== undefined && (
+          <span className="ml-2">Reversal: {fallbackCheck.reversalScore}</span>
+        )}
+      </div>
     </div>
   );
 };
