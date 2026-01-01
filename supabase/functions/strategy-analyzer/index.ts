@@ -1524,6 +1524,10 @@ serve(async (req) => {
       | 'BULLISH_DIVERGENCE_AT_EXTREME'
       | 'STOCHRSI_OVERBOUGHT_BLOCK'
       | 'STOCHRSI_OVERSOLD_BLOCK'
+      | 'STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT'
+      | 'STOCHRSI_ABSOLUTE_MAX_OVERSOLD'
+      | 'REGIME_STRATEGY_MISMATCH'
+      | 'CONFIDENCE_BELOW_THRESHOLD'
       | 'ADX_TOO_LOW'
       | 'ADX_TOO_LOW_NO_SQUEEZE'
       | 'MOMENTUM_DIRECTION_OPPOSING'
@@ -2201,6 +2205,74 @@ serve(async (req) => {
         const isExtremeOversold4h = stochRsiK4h < STOCHRSI_OVERSOLD_THRESHOLD;
         const isExtremeOverbought4h = stochRsiK4h > STOCHRSI_OVERBOUGHT_THRESHOLD;
         const isTrendStrong = adx >= STRONG_TREND_ADX_THRESHOLD;
+        
+        // ============= NEW: ABSOLUTE STOCHRSI MAXIMUM HARD GATES =============
+        // PLAN FIX C: Block trades against HTF StochRSI extremes - NO EXCEPTIONS
+        // K >= 98 = at absolute maximum, no room to rise, BLOCK all LONG entries
+        // K <= 2 = at absolute minimum, no room to fall, BLOCK all SHORT entries
+        if (stochRsiK4h >= STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT) {
+          // Block LONG entries at absolute maximum - StochRSI has nowhere to go
+          if (derivedDirection === "long") {
+            rejectedByStochRsiExtreme++;
+            perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT', details: `K=${stochRsiK4h.toFixed(1)} absolute max` });
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute maximum (K=${stochRsiK4h.toFixed(1)} >= ${STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT}) - nowhere to rise, no exceptions allowed`);
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `PLAN FIX C - STOCHRSI ABSOLUTE BLOCK: LONG blocked at K=${stochRsiK4h.toFixed(1)} (absolute max >= ${STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT})`,
+              { 
+                gate: "STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT",
+                direction: "long",
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                threshold: STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT,
+                message: "No exceptions - StochRSI at physical maximum has no room to rise"
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
+        }
+        
+        if (stochRsiK4h <= STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD) {
+          // Block SHORT entries at absolute minimum - StochRSI has nowhere to go
+          if (derivedDirection === "short") {
+            rejectedByStochRsiExtreme++;
+            perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_ABSOLUTE_MAX_OVERSOLD', details: `K=${stochRsiK4h.toFixed(1)} absolute min` });
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute minimum (K=${stochRsiK4h.toFixed(1)} <= ${STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD}) - nowhere to fall, no exceptions allowed`);
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `PLAN FIX C - STOCHRSI ABSOLUTE BLOCK: SHORT blocked at K=${stochRsiK4h.toFixed(1)} (absolute min <= ${STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD})`,
+              { 
+                gate: "STOCHRSI_ABSOLUTE_MAX_OVERSOLD",
+                direction: "short",
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                threshold: STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD,
+                message: "No exceptions - StochRSI at physical minimum has no room to fall"
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
+        }
+        
+        // ============= NEW: PLAN FIX B - REGIME-STRATEGY COMPATIBILITY CHECK =============
+        // Block trend-following/directional strategies in ranging markets with ADX < 25 AND not rising
+        // These strategies need momentum to work - in ranging markets they generate whipsaws
+        const REGIME_STRATEGY_MIN_ADX = 25;
+        const isRangingMarketForStrategies = adx < REGIME_STRATEGY_MIN_ADX && !smartAdxRising;
+        const is4hNeutralWithLowConf = stochFilterTrend4h === "neutral" || stochFilterConf4h < 55;
+        const isUnfavorableForDirectionalTrades = isRangingMarketForStrategies && is4hNeutralWithLowConf;
+        
+        // Track this for use in strategy evaluation - directional strategies will be blocked
+        // but mean-reversion strategies will be allowed
+        const regimeBlocksDirectionalStrategies = isUnfavorableForDirectionalTrades;
+        
+        if (regimeBlocksDirectionalStrategies) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} REGIME-STRATEGY CHECK: Ranging market (ADX=${adx.toFixed(1)} < ${REGIME_STRATEGY_MIN_ADX}, rising=${smartAdxRising}, 4h=${stochFilterTrend4h} ${stochFilterConf4h}%) - will block trend-following strategies`);
+        }
         
         // ===== DIRECTION OVERRIDE: BULLISH REVERSAL AT EXTREME OVERSOLD =====
         // When at extreme oversold (K < 20) with bullish reversal signals, OVERRIDE to LONG
@@ -4615,6 +4687,31 @@ serve(async (req) => {
                 else if (tradeDirection === 'bearish') intendedSignalType = 'short';
               }
               
+              // ============= PLAN FIX B: REGIME-STRATEGY COMPATIBILITY CHECK =============
+              // Block trend-following/directional strategies in ranging markets
+              // Mean-reversion and ranging strategies are allowed
+              const isTrendFollowingOrMomentum = isMomentumType || isTrendFollowingType || 
+                strategyDirection === 'long' || strategyDirection === 'short' || strategyDirection === 'trend';
+              const isRangingOrMeanReversion = strategyDirection === 'ranging' || 
+                strategy.name.toLowerCase().includes('reversion') || 
+                strategy.name.toLowerCase().includes('ranging');
+              
+              if (regimeBlocksDirectionalStrategies && isTrendFollowingOrMomentum && !isRangingOrMeanReversion) {
+                rejectedByStrategy++;
+                perSymbolGateAttribution.set(symbol, { gate: 'REGIME_STRATEGY_MISMATCH', details: `${strategy.name} in ranging mkt` });
+                logger.forSymbol(symbol).warn(`"${strategy.name}": REGIME-STRATEGY MISMATCH - Trend-following strategy blocked in ranging market (ADX=${adx.toFixed(1)}, 4h=${stochFilterTrend4h})`);
+                
+                // Track for near-miss diagnostics
+                strategyNearMisses.push({ 
+                  name: strategy.name, 
+                  passedCount: entryConditions.length, 
+                  totalConditions: entryConditions.length, 
+                  failedConditions: [], 
+                  skipReason: `Regime mismatch: trend strategy in ranging market (ADX=${adx.toFixed(1)})` 
+                });
+                continue;
+              }
+              
               // ============= IMPROVEMENT 4: STRATEGY-SPECIFIC CONSTRAINTS =============
               // EMA Death Cross needs context-awareness to prevent signals in inappropriate conditions
               const fakeBreakoutRisk = trendData.momentum?.fakeBreakoutRisk ?? false;
@@ -5133,6 +5230,33 @@ serve(async (req) => {
         const signalType = best.signalType;
         const isHighPerformer = isStrategyHighPerformerForRegime(strategy.name, currentRegimeType);
         logger.forSymbol(symbol).signal(`Selected "${strategy.name}"${isHighPerformer ? ' ⭐' : ''} [${currentRegimeType}] (${regimeFilteredCandidates.length}/${candidates.length} strategies after regime filter, best score: ${best.score}, direction: ${signalType})`);
+        
+        // ============= PLAN FIX A: CONFIDENCE THRESHOLD ENFORCEMENT =============
+        // Hard reject signals below min_confidence_threshold from risk_parameters
+        // This prevents low-confidence entries like the BNBUSDT 53% case
+        const minConfidenceThreshold = riskParams.min_confidence_threshold ?? 60;
+        if (confidence < minConfidenceThreshold) {
+          rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { gate: 'CONFIDENCE_BELOW_THRESHOLD', details: `${confidence}% < ${minConfidenceThreshold}%` });
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - Confidence ${confidence}% below threshold ${minConfidenceThreshold}% - "${strategy.name}" rejected`);
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `PLAN FIX A - CONFIDENCE BLOCK: ${confidence}% < ${minConfidenceThreshold}% threshold - "${strategy.name}" blocked`,
+            { 
+              gate: "CONFIDENCE_BELOW_THRESHOLD",
+              confidence,
+              threshold: minConfidenceThreshold,
+              strategyName: strategy.name,
+              signalType,
+              qualityScore: best.score,
+              message: "Signal confidence too low for reliable entry"
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
+          );
+          continue;
+        }
         
         // ===== MOMENTUM STRATEGY GATE: MACD ALIGNMENT + VOLUME REQUIREMENT AT HIGH REVERSAL RISK =====
         // For momentum strategies at K>=95 (overbought) or K<=5 (oversold), require MACD alignment

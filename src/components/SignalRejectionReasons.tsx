@@ -3628,6 +3628,7 @@ export const SignalRejectionReasons = () => {
     
     // CRITICAL - Absolute blocks with no exceptions
     if (gate === "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK" || gate === "ABSOLUTE_MIN_STOCHRSI_HARD_BLOCK") return "critical";
+    if (gate === "STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT" || gate === "STOCHRSI_ABSOLUTE_MAX_OVERSOLD") return "critical";
     if (reason.includes("HARD BLOCK")) return "critical";
     if (gate === "BEARISH_DIVERGENCE_AT_EXTREME" || gate === "BULLISH_DIVERGENCE_AT_EXTREME") return "critical";
     if (reason.includes("Reversal risk") && filtersStatus?.reversalRiskScore >= 70) return "critical";
@@ -3643,10 +3644,15 @@ export const SignalRejectionReasons = () => {
     if (gate === "STRATEGY_CONSTRAINT") return "medium";
     if (gate === "STOCHRSI_NOT_RISING" || gate === "STOCHRSI_NOT_FALLING") return "high";
     if (gate === "NO_CLEAR_DIRECTION") return "high";
+    // NEW: Confidence and regime-strategy gates
+    if (gate === "CONFIDENCE_BELOW_THRESHOLD") return "high";
+    if (gate === "REGIME_STRATEGY_MISMATCH") return "high";
     if (reason.includes("HARD GATE")) return "high";
     if (reason.includes("StochRSI extreme")) return "high";
     if (reason.includes("Reversal risk")) return "high";
     if (reason.includes("No clear trade direction")) return "high";
+    if (reason.includes("CONFIDENCE BLOCK")) return "high";
+    if (reason.includes("REGIME-STRATEGY MISMATCH")) return "high";
     if (decision === "REDUCE" || reason.includes("Unified Reversal REDUCE")) return "high";
     
     // MEDIUM - Softer gates that can be bypassed
