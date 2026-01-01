@@ -448,6 +448,30 @@ const BUILT_IN_TEMPLATES = [
       positionSizePercent: 1,  // Smaller position for these "in-between" setups
       priority: 4  // Lower priority than confirmed trend strategies
     }
+  },
+  // NEW: Ranging Market Mean Reversion - specifically for low ADX (ranging) markets
+  // Trades StochRSI extremes expecting mean reversion when there's no clear trend
+  // This strategy ONLY activates when ADX is low (< 23) - the opposite of trend-following strategies
+  {
+    id: 'builtin-ranging-mean-reversion',
+    name: 'Ranging Mean Reversion',
+    signal_direction: 'ranging',  // Special: only active when ADX is low
+    entry_conditions: [
+      // For LONG: StochRSI deeply oversold (K < 15) 
+      // For SHORT: StochRSI deeply overbought (K > 85)
+      // These are handled dynamically based on direction
+      { indicator: 'StochRSI_K', operator: 'below', value: '15', compareToIndicator: false }  // Oversold for LONG
+    ],
+    exit_conditions: [
+      { indicator: 'StochRSI_K', operator: 'above', value: '50', compareToIndicator: false }  // Exit at midline
+    ],
+    indicators: [{ type: 'StochRSI', name: 'StochRSI_K', period: 14 }],
+    risk_settings: { 
+      stopLossPercent: 1.5,   // Tighter stops for ranging markets
+      takeProfitPercent: 2.5, // Smaller targets (mean reversion, not trend)
+      positionSizePercent: 0.75,  // Reduced position size for ranging conditions
+      priority: 5  // Lower priority - only use when other strategies don't match
+    }
   }
 ];
 
@@ -4795,6 +4819,36 @@ serve(async (req) => {
                   // No clear HTF direction - skip neutral strategy
                   logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - neutral strategy but no clear HTF direction (4h=${htf4hTrend} ${htf4hConf.toFixed(0)}%, 1h=${htf1hTrend} ${htf1hConf.toFixed(0)}%)`);
                   strategyNearMisses.push({ name: strategy.name, passedCount: entryConditions.length, totalConditions: entryConditions.length, failedConditions: [], skipReason: `no HTF direction (4h=${htf4hTrend} ${htf4hConf.toFixed(0)}%, 1h=${htf1hTrend} ${htf1hConf.toFixed(0)}%)` });
+                  continue;
+                }
+              } else if (strategyDirection === 'ranging') {
+                // ============= NEW: RANGING MARKET MEAN REVERSION =============
+                // This strategy ONLY activates when ADX is low (no clear trend)
+                // Uses StochRSI extremes for mean reversion entries
+                const RANGING_MAX_ADX = 23;  // Must be below this to be considered ranging
+                const RANGING_STOCHRSI_OVERSOLD = 15;  // K below this = LONG opportunity
+                const RANGING_STOCHRSI_OVERBOUGHT = 85; // K above this = SHORT opportunity
+                
+                // First check: ADX must be low (ranging market)
+                if (adx >= RANGING_MAX_ADX) {
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - ADX ${adx.toFixed(1)} >= ${RANGING_MAX_ADX} (not ranging)`);
+                  strategyNearMisses.push({ name: strategy.name, passedCount: entryConditions.length, totalConditions: entryConditions.length, failedConditions: [], skipReason: `ADX ${adx.toFixed(1)} >= ${RANGING_MAX_ADX} (need ranging market)` });
+                  continue;
+                }
+                
+                // Determine direction based on StochRSI extremes
+                if (stochRsiK4h <= RANGING_STOCHRSI_OVERSOLD) {
+                  // Deeply oversold = LONG opportunity (expect bounce)
+                  strategySignalType = 'long';
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} "${strategy.name}" (ranging): ADX=${adx.toFixed(1)} < ${RANGING_MAX_ADX}, StochRSI K=${stochRsiK4h.toFixed(1)} <= ${RANGING_STOCHRSI_OVERSOLD} → LONG (mean reversion)`);
+                } else if (stochRsiK4h >= RANGING_STOCHRSI_OVERBOUGHT) {
+                  // Deeply overbought = SHORT opportunity (expect pullback)
+                  strategySignalType = 'short';
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} "${strategy.name}" (ranging): ADX=${adx.toFixed(1)} < ${RANGING_MAX_ADX}, StochRSI K=${stochRsiK4h.toFixed(1)} >= ${RANGING_STOCHRSI_OVERBOUGHT} → SHORT (mean reversion)`);
+                } else {
+                  // StochRSI not at extremes - no mean reversion opportunity
+                  logger.forSymbol(symbol).warn(`"${strategy.name}": SKIP - StochRSI K=${stochRsiK4h.toFixed(1)} not at extremes (need <${RANGING_STOCHRSI_OVERSOLD} or >${RANGING_STOCHRSI_OVERBOUGHT})`);
+                  strategyNearMisses.push({ name: strategy.name, passedCount: entryConditions.length, totalConditions: entryConditions.length, failedConditions: [], skipReason: `StochRSI K=${stochRsiK4h.toFixed(1)} not at extremes` });
                   continue;
                 }
               } else {
