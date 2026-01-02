@@ -2664,14 +2664,32 @@ serve(async (req) => {
         // ============= IMPROVEMENT 1: HTF OVERSOLD/OVERBOUGHT HARD GATE =============
         // Global rule for ALL strategies: Block counter-trend continuation at 4h extremes
         // This is market structure, not indicator noise - prevents trading against probability asymmetry
-        const isHTFOversold = stochRsiK4h <= HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK && 
+        // NEW: Use parabolic mode thresholds when ADX is super-strong and rising
+        const adxRisingForBypass = trendData.volatility?.adxRising ?? smartAdxRising ?? false;
+        const adxSlopeForParabolic = fullAdxResult.adxSlope ?? (adxRisingForBypass ? 0.5 : -0.5);
+        const isInParabolicMode = adx >= (HTF_EXTREME_HARD_GATES.PARABOLIC_MODE_MIN_ADX ?? 50) && 
+          (!HTF_EXTREME_HARD_GATES.PARABOLIC_MODE_REQUIRE_ADX_RISING || adxSlopeForParabolic >= 0);
+        
+        // Use relaxed thresholds for parabolic mode (strong trends can stay overbought longer)
+        const htfOverboughtThreshold = isInParabolicMode 
+          ? (HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK_PARABOLIC ?? 92)
+          : HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK;
+        const htfOversoldThreshold = isInParabolicMode
+          ? (HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK_PARABOLIC ?? 8)
+          : HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK;
+        
+        const isHTFOversold = stochRsiK4h <= htfOversoldThreshold && 
                               percentB <= HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK;
-        const isHTFOverbought = stochRsiK4h >= HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK && 
+        const isHTFOverbought = stochRsiK4h >= htfOverboughtThreshold && 
                                 percentB >= HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK;
+        
+        if (isInParabolicMode) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🚀 PARABOLIC MODE ACTIVE: ADX=${adx.toFixed(1)}, slope=${adxSlopeForParabolic.toFixed(2)} - using relaxed HTF thresholds (OB=${htfOverboughtThreshold}, OS=${htfOversoldThreshold})`);
+        }
         
         // ============= NEW: STRONG TREND HTF BYPASS CHECK =============
         // Allow bypass when trend is very strong and no exhaustion signals
-        const adxRisingForBypass = trendData.volatility?.adxRising ?? false;
+        // Note: adxRisingForBypass already declared above
         const tf30m = trendData.timeframes?.['30m'];
         const allTimeframesAligned = (() => {
           // Check if 4h, 1h, and 30m are all aligned in same direction
@@ -2711,11 +2729,24 @@ serve(async (req) => {
         let strongTrendHTFBypassApplied = false;
         let trendContinuationPositionMultiplier = 1.0;
         
+        // Get ADX slope for bypass check
+        const adxSlopeForBypass = fullAdxResult.adxSlope ?? (smartAdxRising ? 0.5 : -0.5);
+        
+        // NEW: Check for parabolic mode (super-strong trends get automatic bypass)
+        const isParabolicMode = adx >= (STRONG_TREND_HTF_BYPASS_PARAMS.SUPER_STRONG_ADX_BYPASS ?? 55) && 
+          adxSlopeForBypass >= 0 && 
+          !adxExhaustion.isExhausted;
+        
+        // UPDATED: Relaxed bypass logic - allow if ADX slope is above minimum threshold
+        const adxSlopeMeetsRequirement = STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX_SLOPE !== undefined
+          ? adxSlopeForBypass >= STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX_SLOPE
+          : (!STRONG_TREND_HTF_BYPASS_PARAMS.REQUIRE_ADX_RISING || adxRisingForBypass);
+        
         const canBypassHTFGate = STRONG_TREND_HTF_BYPASS_PARAMS.ENABLED &&
           adx >= STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX &&
-          (!STRONG_TREND_HTF_BYPASS_PARAMS.REQUIRE_ADX_RISING || adxRisingForBypass) &&
+          adxSlopeMeetsRequirement &&
           unifiedReversal.score < STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE &&
-          (!STRONG_TREND_HTF_BYPASS_PARAMS.REQUIRE_ALL_TF_ALIGNED || allTimeframesAligned) &&
+          (isParabolicMode || !STRONG_TREND_HTF_BYPASS_PARAMS.REQUIRE_ALL_TF_ALIGNED || allTimeframesAligned) &&
           !isExhausted;
         
         // Block SHORT continuation at 4h oversold (bounce is statistically likely)
