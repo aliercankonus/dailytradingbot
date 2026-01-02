@@ -4,13 +4,13 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, TrendingUp, TrendingDown, Target, DollarSign, AlertTriangle, BarChart3, Zap, FlaskConical } from "lucide-react";
+import { ArrowLeft, TrendingUp, TrendingDown, Target, DollarSign, AlertTriangle, BarChart3, Zap, FlaskConical, Activity } from "lucide-react";
 import { usePortfolioHistory } from "@/hooks/usePortfolioHistory";
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { format } from "date-fns";
 import { MomentumBacktestSimulation } from "@/components/MomentumBacktestSimulation";
 import { PhaseComparisonBacktest } from "@/components/PhaseComparisonBacktest";
-
+import ADXExhaustionBacktest from "@/components/ADXExhaustionBacktest";
 const Performance = () => {
   const navigate = useNavigate();
   const [timeRange, setTimeRange] = useState("30");
@@ -133,11 +133,15 @@ const Performance = () => {
           </Card>
         ) : (
           <Tabs defaultValue="portfolio" className="w-full">
-            <TabsList className="grid w-full grid-cols-6">
+            <TabsList className="grid w-full grid-cols-7">
               <TabsTrigger value="portfolio">Portfolio Value</TabsTrigger>
               <TabsTrigger value="pnl">P&L Breakdown</TabsTrigger>
               <TabsTrigger value="winrate">Win Rate</TabsTrigger>
               <TabsTrigger value="drawdown">Drawdown & Risk</TabsTrigger>
+              <TabsTrigger value="adx-backtest" className="flex items-center gap-1">
+                <Activity className="h-3 w-3" />
+                ADX Logic
+              </TabsTrigger>
               <TabsTrigger value="momentum" className="flex items-center gap-1">
                 <Zap className="h-3 w-3" />
                 Momentum
@@ -320,6 +324,10 @@ const Performance = () => {
                   </LineChart>
                 </ResponsiveContainer>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="adx-backtest" className="space-y-4">
+              <ADXExhaustionBacktest />
             </TabsContent>
 
             <TabsContent value="momentum" className="space-y-4">
