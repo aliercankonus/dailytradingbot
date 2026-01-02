@@ -2318,55 +2318,95 @@ serve(async (req) => {
         const isExtremeOverbought4h = stochRsiK4h > STOCHRSI_OVERBOUGHT_THRESHOLD;
         const isTrendStrong = adx >= STRONG_TREND_ADX_THRESHOLD;
         
-        // ============= NEW: ABSOLUTE STOCHRSI MAXIMUM HARD GATES =============
-        // PLAN FIX C: Block trades against HTF StochRSI extremes - NO EXCEPTIONS
+        // ============= ABSOLUTE STOCHRSI MAXIMUM HARD GATES (with Parabolic Bypass) =============
+        // PLAN FIX C: Block trades against HTF StochRSI extremes
         // K >= 98 = at absolute maximum, no room to rise, BLOCK all LONG entries
         // K <= 2 = at absolute minimum, no room to fall, BLOCK all SHORT entries
+        // NEW: Parabolic bypass - in genuine parabolic trends, K can stay at 100 while price rises
+        
+        // Check parabolic bypass conditions (strong trend + no exhaustion)
+        const diGap = fullAdxResult?.diGap ?? 0;
+        const adxSlope = fullAdxResult?.adxSlope ?? 0;
+        const canBypassAbsoluteMax = 
+          adx >= STOCHRSI_THRESHOLDS.PARABOLIC_BYPASS_MIN_ADX &&  // ADX >= 40
+          adxSlope >= STOCHRSI_THRESHOLDS.PARABOLIC_BYPASS_MIN_ADX_SLOPE &&  // ADX rising
+          diGap >= STOCHRSI_THRESHOLDS.PARABOLIC_BYPASS_MIN_DI_GAP &&  // Strong DI gap
+          !adxExhaustion.isExhausted &&  // No exhaustion detected
+          adxExhaustion.isContinuation;  // In continuation mode
+        
+        let parabolicBypassApplied = false;
+        
         if (stochRsiK4h >= STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT) {
           // Block LONG entries at absolute maximum - StochRSI has nowhere to go
           if (derivedDirection === "long") {
-            rejectedByStochRsiExtreme++;
-            perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT', details: `K=${stochRsiK4h.toFixed(1)} absolute max` });
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute maximum (K=${stochRsiK4h.toFixed(1)} >= ${STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT}) - nowhere to rise, no exceptions allowed`);
-            await logRejectionWithAI(
-              supabase, userId, symbol,
-              `PLAN FIX C - STOCHRSI ABSOLUTE BLOCK: LONG blocked at K=${stochRsiK4h.toFixed(1)} (absolute max >= ${STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT})`,
-              { 
-                gate: "STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT",
-                direction: "long",
-                stochRsiK4h: stochRsiK4h.toFixed(1),
-                threshold: STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT,
-                message: "No exceptions - StochRSI at physical maximum has no room to rise"
-              },
-              trendData,
-              riskParams.ai_analysis_enabled !== false,
-              earlyOrderFlowAnalysis
-            );
-            continue;
+            if (canBypassAbsoluteMax) {
+              // Allow entry despite K>=98 - parabolic trend detected
+              parabolicBypassApplied = true;
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} PARABOLIC BYPASS - Allowing LONG at K=${stochRsiK4h.toFixed(1)} (ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)}, continuation mode)`);
+              logger.forSymbol(symbol).info(`   → Position size reduced to ${STOCHRSI_THRESHOLDS.PARABOLIC_BYPASS_POSITION_SIZE}% due to extreme StochRSI`);
+            } else {
+              rejectedByStochRsiExtreme++;
+              perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT', details: `K=${stochRsiK4h.toFixed(1)} absolute max` });
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute maximum (K=${stochRsiK4h.toFixed(1)} >= ${STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT}) - nowhere to rise`);
+              logger.forSymbol(symbol).info(`   → Bypass failed: ADX=${adx.toFixed(1)} (need>=${STOCHRSI_THRESHOLDS.PARABOLIC_BYPASS_MIN_ADX}), slope=${adxSlope.toFixed(2)} (need>=${STOCHRSI_THRESHOLDS.PARABOLIC_BYPASS_MIN_ADX_SLOPE}), DI gap=${diGap.toFixed(1)} (need>=${STOCHRSI_THRESHOLDS.PARABOLIC_BYPASS_MIN_DI_GAP}), exhausted=${adxExhaustion.isExhausted}, continuation=${adxExhaustion.isContinuation}`);
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `STOCHRSI ABSOLUTE BLOCK: LONG blocked at K=${stochRsiK4h.toFixed(1)} (parabolic bypass conditions not met)`,
+                { 
+                  gate: "STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT",
+                  direction: "long",
+                  stochRsiK4h: stochRsiK4h.toFixed(1),
+                  threshold: STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT,
+                  adx: adx.toFixed(1),
+                  adxSlope: adxSlope.toFixed(2),
+                  diGap: diGap.toFixed(1),
+                  isExhausted: adxExhaustion.isExhausted,
+                  isContinuation: adxExhaustion.isContinuation,
+                  message: "Parabolic bypass conditions not met - need ADX>=40 rising, DI gap>=15, no exhaustion, in continuation"
+                },
+                trendData,
+                riskParams.ai_analysis_enabled !== false,
+                earlyOrderFlowAnalysis
+              );
+              continue;
+            }
           }
         }
         
         if (stochRsiK4h <= STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD) {
           // Block SHORT entries at absolute minimum - StochRSI has nowhere to go
           if (derivedDirection === "short") {
-            rejectedByStochRsiExtreme++;
-            perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_ABSOLUTE_MAX_OVERSOLD', details: `K=${stochRsiK4h.toFixed(1)} absolute min` });
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute minimum (K=${stochRsiK4h.toFixed(1)} <= ${STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD}) - nowhere to fall, no exceptions allowed`);
-            await logRejectionWithAI(
-              supabase, userId, symbol,
-              `PLAN FIX C - STOCHRSI ABSOLUTE BLOCK: SHORT blocked at K=${stochRsiK4h.toFixed(1)} (absolute min <= ${STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD})`,
-              { 
-                gate: "STOCHRSI_ABSOLUTE_MAX_OVERSOLD",
-                direction: "short",
-                stochRsiK4h: stochRsiK4h.toFixed(1),
-                threshold: STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD,
-                message: "No exceptions - StochRSI at physical minimum has no room to fall"
-              },
-              trendData,
-              riskParams.ai_analysis_enabled !== false,
-              earlyOrderFlowAnalysis
-            );
-            continue;
+            if (canBypassAbsoluteMax) {
+              // Allow entry despite K<=2 - parabolic downtrend detected
+              parabolicBypassApplied = true;
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} PARABOLIC BYPASS - Allowing SHORT at K=${stochRsiK4h.toFixed(1)} (ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)}, continuation mode)`);
+              logger.forSymbol(symbol).info(`   → Position size reduced to ${STOCHRSI_THRESHOLDS.PARABOLIC_BYPASS_POSITION_SIZE}% due to extreme StochRSI`);
+            } else {
+              rejectedByStochRsiExtreme++;
+              perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_ABSOLUTE_MAX_OVERSOLD', details: `K=${stochRsiK4h.toFixed(1)} absolute min` });
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute minimum (K=${stochRsiK4h.toFixed(1)} <= ${STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD}) - nowhere to fall`);
+              logger.forSymbol(symbol).info(`   → Bypass failed: ADX=${adx.toFixed(1)} (need>=${STOCHRSI_THRESHOLDS.PARABOLIC_BYPASS_MIN_ADX}), slope=${adxSlope.toFixed(2)} (need>=${STOCHRSI_THRESHOLDS.PARABOLIC_BYPASS_MIN_ADX_SLOPE}), DI gap=${diGap.toFixed(1)} (need>=${STOCHRSI_THRESHOLDS.PARABOLIC_BYPASS_MIN_DI_GAP}), exhausted=${adxExhaustion.isExhausted}, continuation=${adxExhaustion.isContinuation}`);
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `STOCHRSI ABSOLUTE BLOCK: SHORT blocked at K=${stochRsiK4h.toFixed(1)} (parabolic bypass conditions not met)`,
+                { 
+                  gate: "STOCHRSI_ABSOLUTE_MAX_OVERSOLD",
+                  direction: "short",
+                  stochRsiK4h: stochRsiK4h.toFixed(1),
+                  threshold: STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD,
+                  adx: adx.toFixed(1),
+                  adxSlope: adxSlope.toFixed(2),
+                  diGap: diGap.toFixed(1),
+                  isExhausted: adxExhaustion.isExhausted,
+                  isContinuation: adxExhaustion.isContinuation,
+                  message: "Parabolic bypass conditions not met - need ADX>=40 rising, DI gap>=15, no exhaustion, in continuation"
+                },
+                trendData,
+                riskParams.ai_analysis_enabled !== false,
+                earlyOrderFlowAnalysis
+              );
+              continue;
+            }
           }
         }
         
@@ -5726,6 +5766,14 @@ serve(async (req) => {
         if (qualifiesForContinuationMode && continuationPositionMultiplier < 1.0) {
           positionSizeMultiplier *= continuationPositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📈 CONTINUATION MODE entry - position size: ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 13: Apply parabolic bypass position reduction (50%)
+        // Entering at K>=98 or K<=2 is risky even in parabolic trends
+        if (parabolicBypassApplied) {
+          const parabolicMultiplier = STOCHRSI_THRESHOLDS.PARABOLIC_BYPASS_POSITION_SIZE / 100;
+          positionSizeMultiplier *= parabolicMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🚀 PARABOLIC BYPASS entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (extreme StochRSI)`);
         }
         
         // Final position size as percentage

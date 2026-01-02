@@ -96,6 +96,12 @@ export const STOCHRSI_THRESHOLDS = {
   // High reversal risk threshold - used for increased penalty scoring
   HIGH_REVERSAL_OVERBOUGHT: 95, // K>=95 = +35 reversal score for LONG
   HIGH_REVERSAL_OVERSOLD: 5,    // K<=5 = +35 reversal score for SHORT
+  // NEW: Parabolic mode bypass for absolute max gates
+  // In parabolic trends, K can stay pegged at 100 while price continues rising
+  PARABOLIC_BYPASS_MIN_ADX: 40,          // ADX must be >= 40 (strong trend)
+  PARABOLIC_BYPASS_MIN_ADX_SLOPE: 0.1,   // ADX must be rising (slope >= 0.1)
+  PARABOLIC_BYPASS_MIN_DI_GAP: 15,       // Strong directional control (DI gap >= 15)
+  PARABOLIC_BYPASS_POSITION_SIZE: 50,    // Reduce position size to 50% when bypassing
 } as const;
 
 // ============= PHASE 3: TIME-IN-EXTREME THRESHOLDS =============
