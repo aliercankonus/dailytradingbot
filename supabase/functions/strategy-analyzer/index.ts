@@ -5779,6 +5779,18 @@ serve(async (req) => {
               gateResults: continuationModeResult?.gateResults || [],
               reason: continuationModeResult?.reason || null,
             },
+            // NEW: Order flow analysis for dashboard consistency
+            orderFlow: {
+              score: orderFlowAnalysis.score,
+              signal: orderFlowAnalysis.signal,
+              confidence: orderFlowAnalysis.confidence,
+              intendedDirection: earlyIntendedDirection,
+              volumeSpike: orderFlowAnalysis.volumeSpike,
+              priceRejection: orderFlowAnalysis.priceRejection,
+              pressure: orderFlowAnalysis.pressure,
+              qualityBonus: orderFlowScore, // The -15 to +15 impact
+              reasons: orderFlowAnalysis.reasons,
+            },
           },
           expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minute TTL for actionable signals
           created_by_rebalancer: false,
