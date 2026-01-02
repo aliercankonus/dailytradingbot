@@ -324,14 +324,35 @@ export function calculateHistoricalATRAvg(klines: any[], atrPeriod: number, atrL
 }
 
 // ============= ADX =============
+// ENHANCED: Now returns +DI, -DI, slope, and peak detection for behavioral exhaustion analysis
 export interface ADXResult {
   adx: number;
   prevAdx: number;
   adxRising: boolean;
+  // NEW: Full DI data for exhaustion detection
+  plusDI: number;
+  minusDI: number;
+  diGap: number;           // Current +DI - -DI (absolute)
+  prevDiGap: number;       // Previous bar's DI gap
+  // NEW: ADX historical data for slope calculation
+  adxArray: number[];      // Last 7 ADX values for trend analysis
+  adxSlope: number;        // Rate of change over last 5 bars
+  adxPeaked: boolean;      // ADX < max of last 5 bars (rollover detection)
 }
 
 export function calculateADXWithDirection(klines: any[], period = 14): ADXResult {
-  const defaultResult: ADXResult = { adx: 0, prevAdx: 0, adxRising: false };
+  const defaultResult: ADXResult = { 
+    adx: 0, 
+    prevAdx: 0, 
+    adxRising: false,
+    plusDI: 0,
+    minusDI: 0,
+    diGap: 0,
+    prevDiGap: 0,
+    adxArray: [],
+    adxSlope: 0,
+    adxPeaked: false
+  };
   const minRequired = 2 * period + 2;
   if (!klines || klines.length < minRequired) return defaultResult;
 
@@ -363,13 +384,21 @@ export function calculateADXWithDirection(klines: any[], period = 14): ADXResult
   }
 
   const dxValues: number[] = [];
+  // NEW: Track DI values for DI gap compression detection
+  const plusDIValues: number[] = [];
+  const minusDIValues: number[] = [];
+  
   if (smoothedTR > 0) {
     const plusDI = (smoothedPlusDM / smoothedTR) * 100;
     const minusDI = (smoothedMinusDM / smoothedTR) * 100;
+    plusDIValues.push(plusDI);
+    minusDIValues.push(minusDI);
     const diSum = plusDI + minusDI;
     dxValues.push(diSum > 0 ? (Math.abs(plusDI - minusDI) / diSum) * 100 : 0);
   } else {
     dxValues.push(0);
+    plusDIValues.push(0);
+    minusDIValues.push(0);
   }
 
   for (let i = period; i < trueRanges.length; i++) {
@@ -380,10 +409,14 @@ export function calculateADXWithDirection(klines: any[], period = 14): ADXResult
     if (smoothedTR > 0) {
       const plusDI = (smoothedPlusDM / smoothedTR) * 100;
       const minusDI = (smoothedMinusDM / smoothedTR) * 100;
+      plusDIValues.push(plusDI);
+      minusDIValues.push(minusDI);
       const diSum = plusDI + minusDI;
       dxValues.push(diSum > 0 ? (Math.abs(plusDI - minusDI) / diSum) * 100 : 0);
     } else {
       dxValues.push(0);
+      plusDIValues.push(0);
+      minusDIValues.push(0);
     }
   }
 
@@ -404,7 +437,42 @@ export function calculateADXWithDirection(klines: any[], period = 14): ADXResult
     ? Math.max(0, Math.min(100, Math.round(adxValues[adxValues.length - 2] * 10) / 10))
     : currentAdx;
   
-  return { adx: currentAdx, prevAdx, adxRising: currentAdx > prevAdx };
+  // NEW: Get current and previous DI values
+  const currentPlusDI = plusDIValues.length > 0 ? plusDIValues[plusDIValues.length - 1] : 0;
+  const currentMinusDI = minusDIValues.length > 0 ? minusDIValues[minusDIValues.length - 1] : 0;
+  const prevPlusDI = plusDIValues.length > 1 ? plusDIValues[plusDIValues.length - 2] : currentPlusDI;
+  const prevMinusDI = minusDIValues.length > 1 ? minusDIValues[minusDIValues.length - 2] : currentMinusDI;
+  
+  const currentDiGap = Math.abs(currentPlusDI - currentMinusDI);
+  const prevDiGap = Math.abs(prevPlusDI - prevMinusDI);
+  
+  // NEW: Get last 7 ADX values for slope and peak detection
+  const recentAdxValues = adxValues.slice(-7);
+  
+  // NEW: Calculate ADX slope over last 5 bars
+  // Slope = (ADX[current] - ADX[n bars ago]) / n
+  const slopeLookback = Math.min(5, adxValues.length - 1);
+  const adxSlope = slopeLookback > 0 
+    ? (adxValues[adxValues.length - 1] - adxValues[adxValues.length - 1 - slopeLookback]) / slopeLookback
+    : 0;
+  
+  // NEW: Detect ADX peak (rollover) - current < max of last 5 bars
+  const peakLookback = Math.min(5, adxValues.length);
+  const adxMax = Math.max(...adxValues.slice(-peakLookback));
+  const adxPeaked = adxValues[adxValues.length - 1] < adxMax * 0.99; // 1% tolerance
+  
+  return { 
+    adx: currentAdx, 
+    prevAdx, 
+    adxRising: currentAdx > prevAdx,
+    plusDI: Math.round(currentPlusDI * 10) / 10,
+    minusDI: Math.round(currentMinusDI * 10) / 10,
+    diGap: Math.round(currentDiGap * 10) / 10,
+    prevDiGap: Math.round(prevDiGap * 10) / 10,
+    adxArray: recentAdxValues.map(v => Math.round(v * 10) / 10),
+    adxSlope: Math.round(adxSlope * 100) / 100,
+    adxPeaked
+  };
 }
 
 export function calculateADX(klines: any[], period = 14): number {

@@ -69,14 +69,17 @@ import {
   detectHigherHighLow,
   detectLowerLowHigh,
   detectContinuationCandle,
+  // NEW: Behavioral ADX exhaustion detection
+  detectADXExhaustion,
   type MomentumScoreResult,
   type PullbackResult,
   type EntryQualityResult,
   type EntryConfirmationResult,
   type MarketRegimeResult as SmartRegimeResult,
-  type ContinuationModeResult
+  type ContinuationModeResult,
+  type ADXExhaustionResult
 } from "../_shared/smart-momentum.ts";
-import { calculateRSIArray, calculateATR } from "../_shared/indicators.ts";
+import { calculateRSIArray, calculateATR, calculateADXWithDirection, type ADXResult } from "../_shared/indicators.ts";
 import { 
   getTechnicalScore, 
   getMomentumScore, 
@@ -1905,7 +1908,27 @@ serve(async (req) => {
         // Detect Bollinger Squeeze
         const bbSqueeze = detectBollingerSqueeze(priceData, 20, 2);
         
-        // Classify market regime using smart module
+        // NEW: Calculate full ADX result with DI data for behavioral exhaustion
+        const fullAdxResult = calculateADXWithDirection(klineData, 14);
+        
+        // NEW: Detect BEHAVIORAL ADX exhaustion (slope-based, not absolute threshold)
+        const adxExhaustion = detectADXExhaustion(
+          fullAdxResult,
+          priceData,
+          rsiArrayForPullback,
+          derivedDirection
+        );
+        
+        // Log ADX exhaustion analysis
+        if (fullAdxResult.adx >= 35) {
+          logger.forSymbol(symbol).info(`📊 ADX BEHAVIORAL: adx=${fullAdxResult.adx.toFixed(1)} slope=${fullAdxResult.adxSlope.toFixed(2)} peaked=${fullAdxResult.adxPeaked} diGap=${fullAdxResult.diGap.toFixed(1)}`);
+          logger.forSymbol(symbol).info(`📊 EXHAUSTION CHECK: isExhausted=${adxExhaustion.isExhausted} isContinuation=${adxExhaustion.isContinuation} type=${adxExhaustion.exhaustionType} score=${adxExhaustion.exhaustionScore}`);
+          if (adxExhaustion.reasons.length > 0) {
+            logger.forSymbol(symbol).info(`   ${adxExhaustion.reasons.join(' | ')}`);
+          }
+        }
+        
+        // Classify market regime using smart module WITH behavioral exhaustion
         const volume1hDataForRegime = trendData.volume?.["1h"] || {};
         const volumeRatioForRegime = volume1hDataForRegime.volumeRatio ?? 1.0;
         const smartRegime = classifySmartRegime(
@@ -1914,7 +1937,8 @@ serve(async (req) => {
           smartMomentum,
           bbSqueeze.bbWidth,
           bbSqueeze.isSqueeze,
-          volumeRatioForRegime
+          volumeRatioForRegime,
+          adxExhaustion  // NEW: Pass behavioral exhaustion result
         );
         
         // Log smart momentum analysis
