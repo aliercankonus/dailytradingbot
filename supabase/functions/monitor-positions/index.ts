@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore, 
@@ -925,6 +925,7 @@ serve(async (req) => {
         }
       }
       
+      
       // ============= PHASE 3: R-MULTIPLE BASED TRAILING ACTIVATION =============
       // Activate trailing at 1.2R instead of fixed percentage
       // R = profit / risk = pnlPercent / (entry - stop) expressed as percent
@@ -989,6 +990,159 @@ serve(async (req) => {
               positionLogger.trade(`PHASE3 STOP UPDATE SELL: Lock ${dynamicTrailingResult.lockR.toFixed(2)}R → stop ${dynamicStop.toFixed(2)}`);
             }
           }
+        }
+      }
+      
+      // ============= CONTINUATION MODE: SPECIAL EXIT LOGIC =============
+      // Continuation mode entries (ADX 45-55 impulse trades) have different exit rules:
+      // 1. Faster partial at 0.8R instead of standard TP1/TP2
+      // 2. Structure-based trailing (1h HH/HL break) instead of ATR
+      // 3. Immediate exit on momentum rollover
+      // 4. Exit on ADX flattening + opposing candle combo
+      const isContinuationModeEntry = position.entry_exception_type === 'CONTINUATION_MODE';
+      let continuationModeExitTriggered = false;
+      let continuationModeExitReason = "";
+      
+      if (isContinuationModeEntry && CONTINUATION_MODE_PARAMS.ENABLED && hasMetMinHoldTime) {
+        positionLogger.debug(`CONTINUATION MODE EXIT CHECK: R=${currentRMultiple.toFixed(2)}, ADX=${positionAdx.toFixed(1)}, Position age=${positionAgeMinutes.toFixed(0)}min`);
+        
+        // Calculate R-multiple for continuation-specific partial exit
+        if (hasValidStopLoss && currentRMultiple >= CONTINUATION_MODE_PARAMS.PARTIAL_EXIT_R_MULTIPLE) {
+          const continuationPartialLevel = position.partial_tp_level || 0;
+          
+          // Take faster partial at 0.8R (instead of waiting for TP1 at ~33% of full TP)
+          if (continuationPartialLevel < 1) {
+            const closePercent = CONTINUATION_MODE_PARAMS.PARTIAL_EXIT_PERCENT / 100; // 50%
+            const closeQuantity = position.quantity * closePercent;
+            const remainingQuantity = position.quantity - closeQuantity;
+            const partialPnl = position.side === "BUY"
+              ? (currentPrice - position.entry_price) * closeQuantity
+              : (position.entry_price - currentPrice) * closeQuantity;
+            
+            positionLogger.trade(`CONTINUATION MODE PARTIAL: Taking ${CONTINUATION_MODE_PARAMS.PARTIAL_EXIT_PERCENT}% at ${currentRMultiple.toFixed(2)}R (threshold: ${CONTINUATION_MODE_PARAMS.PARTIAL_EXIT_R_MULTIPLE}R)`);
+            
+            // Move stop to break-even + buffer for remaining position
+            const slippageBuffer = position.entry_price * (SLIPPAGE_PARAMS.BREAK_EVEN_BUFFER_PERCENT / 100);
+            const newStopAfterPartial = position.side === "BUY" 
+              ? position.entry_price + slippageBuffer
+              : position.entry_price - slippageBuffer;
+            
+            // Update position
+            const { error: contPartialError } = await supabase
+              .from("positions")
+              .update({
+                quantity: remainingQuantity,
+                partial_tp_level: 1,
+                stop_loss: newStopAfterPartial,
+              })
+              .eq("id", position.id)
+              .eq("status", "active");
+            
+            if (!contPartialError) {
+              // Create closed position record for tracking
+              await supabase.from("positions").insert({
+                user_id: position.user_id,
+                symbol: position.symbol,
+                side: position.side,
+                quantity: closeQuantity,
+                entry_price: position.entry_price,
+                exit_price: currentPrice,
+                stop_loss: position.stop_loss,
+                take_profit: position.take_profit,
+                status: "closed",
+                close_reason: "continuation_mode_partial_0.8R",
+                realized_pnl: partialPnl,
+                realized_pnl_percent: pnlPercent,
+                opened_at: position.opened_at,
+                closed_at: new Date().toISOString(),
+                strategy_name: position.strategy_name,
+                trend: position.trend,
+                entry_exception_type: 'CONTINUATION_MODE',
+              });
+              
+              partialTpTaken.push({
+                symbol: position.symbol,
+                side: position.side,
+                level: "0.8R_CONTINUATION",
+                closePercent: closePercent * 100,
+                closeQuantity,
+                pnl: partialPnl,
+                pnlPercent,
+              });
+              
+              positionLogger.success(`CONTINUATION PARTIAL: Closed ${(closePercent * 100).toFixed(0)}% at ${currentRMultiple.toFixed(2)}R, P&L: $${partialPnl.toFixed(2)}, moved stop to BE+buffer: ${newStopAfterPartial.toFixed(2)}`);
+            }
+          }
+        }
+        
+        // EXIT TRIGGER 1: Momentum rollover detection
+        // MACD histogram contracting AND price closes against trend direction
+        if (CONTINUATION_MODE_PARAMS.EXIT_ON_MOMENTUM_ROLLOVER && atrData?.hasDivergence) {
+          const priceAgainstTrend = (position.side === "BUY" && atrData?.priceTrending === "down") ||
+                                    (position.side === "SELL" && atrData?.priceTrending === "up");
+          const macdContracting = (position.side === "BUY" && atrData?.macdTrending === "down") ||
+                                  (position.side === "SELL" && atrData?.macdTrending === "up");
+          
+          if (priceAgainstTrend && macdContracting && pnlPercent > 0) {
+            continuationModeExitTriggered = true;
+            continuationModeExitReason = "momentum_rollover";
+            positionLogger.risk(`CONTINUATION EXIT: Momentum rollover detected - MACD ${atrData?.macdTrending} + Price ${atrData?.priceTrending} against ${position.side}`);
+          }
+        }
+        
+        // EXIT TRIGGER 2: ADX flattening + opposing candle
+        // ADX slope near zero or negative AND current candle closes against position
+        if (!continuationModeExitTriggered && CONTINUATION_MODE_PARAMS.EXIT_ON_ADX_FLATTEN_PLUS_BEARISH_CANDLE) {
+          const adxSlope = trendDataForPosition?.volatility?.adxSlope ?? trendDataForPosition?.momentum?.adxSlope ?? 0;
+          const adxFlattening = adxSlope <= 0.5; // ADX not rising anymore
+          
+          // Check if latest candle closed against position
+          const klines = atrData?.klines;
+          if (klines && klines.length >= 2 && adxFlattening) {
+            const lastCandle = klines[klines.length - 1];
+            const lastOpen = parseFloat(lastCandle[1]);
+            const lastClose = parseFloat(lastCandle[4]);
+            
+            const bearishCandle = lastClose < lastOpen; // Red candle
+            const bullishCandle = lastClose > lastOpen; // Green candle
+            
+            const opposingCandle = (position.side === "BUY" && bearishCandle) || 
+                                   (position.side === "SELL" && bullishCandle);
+            
+            if (opposingCandle && pnlPercent > 0) {
+              continuationModeExitTriggered = true;
+              continuationModeExitReason = "adx_flatten_opposing_candle";
+              positionLogger.risk(`CONTINUATION EXIT: ADX flattening (slope=${adxSlope.toFixed(2)}) + ${bearishCandle ? 'bearish' : 'bullish'} candle against ${position.side}`);
+            }
+          }
+        }
+        
+        // EXIT TRIGGER 3: Structure break (1h swing violation for LONG/SHORT)
+        // For LONG: exit if price breaks below recent swing low (structure break)
+        // For SHORT: exit if price breaks above recent swing high
+        if (!continuationModeExitTriggered && CONTINUATION_MODE_PARAMS.USE_STRUCTURE_TRAILING && swingData) {
+          if (position.side === "BUY" && swingData.swingLow) {
+            const structureBreakPrice = swingData.swingLow * 0.998; // Small buffer
+            if (currentPrice < structureBreakPrice && pnlPercent > 0) {
+              continuationModeExitTriggered = true;
+              continuationModeExitReason = "structure_break_swing_low";
+              positionLogger.risk(`CONTINUATION EXIT: Price ${currentPrice.toFixed(2)} broke swing low ${swingData.swingLow.toFixed(2)}`);
+            }
+          } else if (position.side === "SELL" && swingData.swingHigh) {
+            const structureBreakPrice = swingData.swingHigh * 1.002; // Small buffer
+            if (currentPrice > structureBreakPrice && pnlPercent > 0) {
+              continuationModeExitTriggered = true;
+              continuationModeExitReason = "structure_break_swing_high";
+              positionLogger.risk(`CONTINUATION EXIT: Price ${currentPrice.toFixed(2)} broke swing high ${swingData.swingHigh.toFixed(2)}`);
+            }
+          }
+        }
+        
+        // Execute continuation mode exit if triggered
+        if (continuationModeExitTriggered && !emergencyClose) {
+          emergencyClose = true;
+          emergencyReason = `continuation_${continuationModeExitReason}`;
+          positionLogger.risk(`CONTINUATION MODE EXIT TRIGGERED: ${continuationModeExitReason} at P&L ${pnlPercent.toFixed(2)}%`);
         }
       }
       
