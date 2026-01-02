@@ -778,6 +778,76 @@ export const MOMENTUM_THRESHOLDS = {
   PULLBACK_MIN_SCORE: 3,
 } as const;
 
+// ============= STRONG ADX OVERRIDE PARAMETERS =============
+// Allows momentum score gate bypass when ADX confirms strong trend
+// Scoped to trend-following entries only with exhaustion checks
+export const STRONG_ADX_OVERRIDE_PARAMS = {
+  // Enable strong ADX override
+  ENABLED: true,
+  
+  // Minimum ADX to qualify for override
+  MIN_ADX: 30,
+  
+  // ADX must be rising (not falling) for override at lower ADX levels
+  // When ADX >= VERY_STRONG_ADX, rising is not required (trend already confirmed)
+  REQUIRE_ADX_RISING: true,
+  
+  // Very strong ADX threshold - at this level, ADX rising is not required
+  // because the trend is already strongly confirmed
+  VERY_STRONG_ADX: 35,
+  
+  // Maximum ADX before exhaustion concerns (reduce size above this)
+  EXHAUSTION_ADX: 45,
+  
+  // Position size reduction when ADX > EXHAUSTION_ADX (65% of normal)
+  EXHAUSTION_POSITION_MULTIPLIER: 0.65,
+  
+  // Require exhaustion check to pass (isContinuation or !isExhausted)
+  REQUIRE_EXHAUSTION_CHECK: true,
+  
+  // Only allow for trend-following entry types (not reversal entries)
+  SCOPE_TO_TREND_FOLLOWING: true,
+  
+  // Block if unified reversal score is too high
+  MAX_REVERSAL_SCORE: 50,
+  
+  // Reduced effective threshold when override active (momentum requirement drops to 0)
+  OVERRIDE_MOMENTUM_THRESHOLD: 0,
+} as const;
+
+// ============= REGIME-AWARE MOMENTUM THRESHOLD PARAMETERS =============
+// Don't lower momentum threshold globally - only relax when ADX confirms trend strength
+// This is a separate mechanism from Strong ADX Override (both can apply)
+export const REGIME_AWARE_MOMENTUM_PARAMS = {
+  // Enable regime-aware momentum thresholds
+  ENABLED: true,
+  
+  // Base threshold (used when ADX < 30 or conditions not met)
+  BASE_THRESHOLD: 5,
+  
+  // Strong trend threshold: ADX >= 30, rising, not exhausted
+  // Relaxed from 5 to 2 when ADX confirms strong trend
+  STRONG_TREND_THRESHOLD: 2,
+  STRONG_TREND_MIN_ADX: 30,
+  
+  // Very strong trend threshold: ADX >= 35, not exhausted
+  // Relaxed from 5 to 0 when ADX confirms very strong trend
+  // NOTE: At very strong ADX (>=35), ADX rising is NOT required
+  // because the trend is already confirmed by the high ADX value
+  VERY_STRONG_TREND_THRESHOLD: 0,
+  VERY_STRONG_TREND_MIN_ADX: 35,
+  
+  // ADX must be rising for reduced thresholds at lower ADX (30-34)
+  // At very strong ADX (>=35), rising is not required
+  REQUIRE_ADX_RISING: true,
+  
+  // Block exhausted trends from using reduced threshold
+  BLOCK_IF_EXHAUSTED: true,
+  
+  // Only apply to trend-following entries (not reversal entries)
+  SCOPE_TO_TREND_FOLLOWING: true,
+} as const;
+
 // ============= PULLBACK ENTRY DETECTION PARAMETERS =============
 // Context-aware momentum gate for pullback entries
 // Pullbacks by definition lack strong momentum (that's the opportunity!)
