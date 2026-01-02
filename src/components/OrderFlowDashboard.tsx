@@ -232,30 +232,54 @@ export const OrderFlowDashboard = () => {
     if (delta > 15) pressureTrend = "accumulation";
     else if (delta < -15) pressureTrend = "distribution";
 
-    // Calculate score
+    // Calculate score - MUST respect intendedDirection like backend orderflow.ts
+    const isLong = intendedDirection === "long";
     let score = 50;
     let confidence = 0;
     const reasons: string[] = [];
     
+    // Volume spike contribution - aligned with direction = positive
     if (volumeDetected) {
       const volumePoints = volumeSignificance === "extreme" ? 15 :
                           volumeSignificance === "high" ? 10 :
                           volumeSignificance === "medium" ? 6 : 3;
-      if (volumeType === "bullish") { score += volumePoints; confidence += 15; }
-      else if (volumeType === "bearish") { score -= volumePoints * 0.7; confidence += 10; }
+      
+      if (isLong && volumeType === "bullish") {
+        score += volumePoints; confidence += 15;
+      } else if (!isLong && volumeType === "bearish") {
+        score += volumePoints; confidence += 15;
+      } else if (volumeType !== "neutral") {
+        // Against our direction
+        score -= volumePoints * 0.7; confidence += 10;
+      }
       reasons.push(`Volume spike ${magnitude.toFixed(1)}x (${volumeSignificance})`);
     }
     
+    // Price rejection contribution - aligned with direction = positive
     if (rejectionDetected) {
       const rejectionPoints = Math.min(20, rejectionStrength * 0.3);
-      if (rejectionType === "bullish_rejection") { score += rejectionPoints; confidence += 20; }
-      else if (rejectionType === "bearish_rejection") { score -= rejectionPoints * 0.8; confidence += 15; }
+      
+      if (isLong && rejectionType === "bullish_rejection") {
+        score += rejectionPoints; confidence += 20;
+      } else if (!isLong && rejectionType === "bearish_rejection") {
+        score += rejectionPoints; confidence += 20;
+      } else if (rejectionType !== "none") {
+        // Against our direction
+        score -= rejectionPoints * 0.8; confidence += 15;
+      }
       reasons.push(`${rejectionType.replace('_', ' ')} at ${rejectionLevel} (strength: ${rejectionStrength})`);
     }
     
+    // Pressure contribution - aligned with direction = positive
     const pressurePoints = Math.abs(delta) * 0.15;
-    if (delta > 0) { score += pressurePoints; confidence += Math.min(15, Math.abs(delta) * 0.3); }
-    else { score -= pressurePoints * 0.5; }
+    if (isLong && delta > 0) {
+      score += pressurePoints; confidence += Math.min(15, Math.abs(delta) * 0.3);
+    } else if (!isLong && delta < 0) {
+      score += pressurePoints; confidence += Math.min(15, Math.abs(delta) * 0.3);
+    } else if (Math.abs(delta) > 10) {
+      // Against our direction
+      score -= pressurePoints * 0.5;
+    }
     if (Math.abs(delta) > 20) {
       reasons.push(`${pressureTrend} detected (delta: ${delta > 0 ? '+' : ''}${delta.toFixed(0)})`);
     }
