@@ -402,6 +402,36 @@ export const TradingSignalsDashboard = () => {
               </div>
             )}
 
+            {/* Order Flow Display from Signal */}
+            {signal.indicators?.orderFlow && (
+              <div className="mb-4 p-3 bg-muted/50 rounded-lg border border-border/50">
+                <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                  <Activity className="h-4 w-4" />
+                  Order Flow Analysis
+                </div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Badge variant="outline" className={
+                    (signal.indicators.orderFlow as any).qualityBonus > 0 
+                      ? "border-green-500/30 text-green-400" 
+                      : (signal.indicators.orderFlow as any).qualityBonus < 0 
+                        ? "border-red-500/30 text-red-400" 
+                        : ""
+                  }>
+                    {(signal.indicators.orderFlow as any).qualityBonus > 0 ? '+' : ''}{(signal.indicators.orderFlow as any).qualityBonus} pts
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    Score: {(signal.indicators.orderFlow as any).score}/100
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    Signal: {(signal.indicators.orderFlow as any).signal}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    Dir: {(signal.indicators.orderFlow as any).intendedDirection}
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-between">
               <div className="flex flex-col gap-1">
                 <div className="text-xs text-muted-foreground">

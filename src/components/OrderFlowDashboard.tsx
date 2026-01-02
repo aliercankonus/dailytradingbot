@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { Activity, TrendingUp, TrendingDown, Zap, AlertTriangle, BarChart3, Waves, ArrowUpDown, Grid3X3 } from 'lucide-react';
+import { Activity, TrendingUp, TrendingDown, Zap, AlertTriangle, Grid3X3, ArrowUpDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -82,6 +82,7 @@ interface OrderFlowData {
   confidence: number;
   reasons: string[];
   lastUpdated: Date;
+  intendedDirection: "long" | "short"; // NEW: Track direction used for analysis
 }
 
 export const OrderFlowDashboard = () => {
@@ -121,10 +122,17 @@ export const OrderFlowDashboard = () => {
           const klines = await response.json();
           
           if (Array.isArray(klines) && klines.length >= 30) {
-            const analysis = analyzeOrderFlowLocal(klines, "long");
+            // Detect trend direction from price action (compare close to SMA20)
+            const closes = klines.map((k: any) => parseFloat(k[4]));
+            const sma20 = closes.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20;
+            const currentPrice = closes[closes.length - 1];
+            const intendedDirection: "long" | "short" = currentPrice > sma20 ? "long" : "short";
+            
+            const analysis = analyzeOrderFlowLocal(klines, intendedDirection);
             results.push({
               symbol,
               ...analysis,
+              intendedDirection,
               lastUpdated: new Date()
             });
           }
@@ -348,6 +356,14 @@ export const OrderFlowDashboard = () => {
                         <span className="font-bold text-lg">{data.symbol}</span>
                         <Badge className={getSignalColor(data.signal)}>
                           {data.signal.replace('_', ' ').toUpperCase()}
+                        </Badge>
+                        <Badge variant="outline" className={
+                          data.intendedDirection === "long" 
+                            ? "border-green-500/30 text-green-400" 
+                            : "border-red-500/30 text-red-400"
+                        }>
+                          {data.intendedDirection === "long" ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
+                          {data.intendedDirection.toUpperCase()}
                         </Badge>
                       </div>
                       <div className="flex items-center gap-4">
