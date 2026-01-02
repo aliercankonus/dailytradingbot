@@ -685,6 +685,32 @@ export function detectADXExhaustion(
     return defaultResult;
   }
 
+  // ===== CRITICAL: PARABOLIC MODE OVERRIDE =====
+  // Super-strong trends (ADX >= 55) with rising ADX and no DI compression = NOT exhausted
+  // This is the key fix for missing strong continuation moves like ETHUSDT 1.6% -> 3.3%
+  const diCompressing = adxResult.prevDiGap > 0 && 
+    adxResult.diGap < adxResult.prevDiGap * (1 - ADX_EXHAUSTION_PARAMS.DI_COMPRESSION_MIN_SHRINK);
+  
+  if (adxResult.adx >= 55 && adxResult.adxSlope >= 0 && !diCompressing) {
+    // Super-strong parabolic trend - NOT exhausted, allow continuation
+    return {
+      isExhausted: false,
+      exhaustionType: "none",
+      exhaustionScore: 0,
+      components: {
+        adxRollover: false,
+        adxSlope: adxResult.adxSlope,
+        diCompressing: false,
+        diCompressionBars: 0,
+        momentumDivergence: false,
+        priceRising: prices.length >= 5 && prices[prices.length - 1] > prices[prices.length - 5],
+        hiddenWeakness: false
+      },
+      isContinuation: true,
+      reasons: [`🚀 PARABOLIC MODE: ADX=${adxResult.adx.toFixed(1)}, slope=${adxResult.adxSlope.toFixed(2)}, no DI compression - allowing continuation`]
+    };
+  }
+
   const reasons: string[] = [];
   let exhaustionScore = 0;
   
@@ -723,10 +749,10 @@ export function detectADXExhaustion(
     adxResult.diGap < adxResult.prevDiGap * (1 - ADX_EXHAUSTION_PARAMS.DI_COMPRESSION_MIN_SHRINK);
   
   // Count compression bars (simplified: check if current gap < previous)
-  const diCompressing = diGapShrinking;
+  // Note: diCompressing already checked above for parabolic mode, reuse diGapShrinking here
   const diCompressionBars = diGapShrinking ? 1 : 0; // Would need full DI history for multi-bar check
   
-  if (diCompressing) {
+  if (diGapShrinking) {
     exhaustionScore += ADX_EXHAUSTION_PARAMS.SCORE_DI_COMPRESSING;
     reasons.push(`DI compression: gap shrinking (${adxResult.prevDiGap.toFixed(1)} → ${adxResult.diGap.toFixed(1)})`);
   }
@@ -767,7 +793,7 @@ export function detectADXExhaustion(
   const isContinuation = ADX_EXHAUSTION_PARAMS.CONTINUATION_OVERRIDE &&
     adxResult.adx >= ADX_EXHAUSTION_PARAMS.CONTINUATION_MIN_ADX &&
     adxResult.adxSlope >= ADX_EXHAUSTION_PARAMS.CONTINUATION_MIN_SLOPE &&
-    !diCompressing &&
+    !diGapShrinking &&
     !momentumDivergence;
   
   if (isContinuation) {
@@ -785,7 +811,7 @@ export function detectADXExhaustion(
     // Find primary exhaustion signal
     if (adxRollover && momentumDivergence) exhaustionType = "composite";
     else if (adxRollover) exhaustionType = "rollover";
-    else if (diCompressing) exhaustionType = "di_compression";
+    else if (diGapShrinking) exhaustionType = "di_compression";
     else if (momentumDivergence) exhaustionType = "momentum_divergence";
     else exhaustionType = "composite";
   }
@@ -797,7 +823,7 @@ export function detectADXExhaustion(
     components: {
       adxRollover,
       adxSlope: adxResult.adxSlope,
-      diCompressing,
+      diCompressing: diGapShrinking,
       diCompressionBars,
       momentumDivergence,
       priceRising,

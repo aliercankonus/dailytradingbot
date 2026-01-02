@@ -119,19 +119,22 @@ export const TIME_IN_EXTREME_PARAMS = {
 } as const;
 
 // ============= CONTINUATION MODE PARAMETERS =============
-// Allows entries at higher ADX (45-55) when ALL factors are strongly aligned
+// Allows entries at higher ADX (40-75) when ALL factors are strongly aligned
 // This is a separate trade archetype from pullback/breakout - captures impulse follow-through
+// UPDATED: Expanded ADX range to 40-75 to allow super-strong trends (previously 45-55 was too narrow)
 export const CONTINUATION_MODE_PARAMS = {
   // Enable continuation mode
   ENABLED: true,
   
   // ===== ADX REQUIREMENTS =====
   // ADX range for continuation entries (above normal "exhaustion" threshold)
-  MIN_ADX: 45,
-  MAX_ADX: 55,
+  // UPDATED: Expanded from 45-55 to 40-75 - ADX 60-70 with rising momentum is CONTINUATION, not exhaustion
+  MIN_ADX: 40,
+  MAX_ADX: 75,
   // ADX must not be falling sharply
   REQUIRE_ADX_NOT_FALLING: true,
-  ADX_FALLING_THRESHOLD: -0.5, // ADX slope below this = "falling"
+  // UPDATED: More tolerance for brief dips (was -0.5)
+  ADX_FALLING_THRESHOLD: -1.0, // ADX slope below this = "falling"
   
   // ===== TREND STRUCTURE GATES (NON-NEGOTIABLE) =====
   // 1h must be strongly bullish/bearish
@@ -1099,7 +1102,13 @@ export function isTrendFollowingStrategy(strategyId: string | undefined, strateg
 export const HTF_EXTREME_HARD_GATES = {
   // StochRSI thresholds for hard gate
   STOCHRSI_OVERSOLD_BLOCK: 20,   // K <= 20 for shorts
-  STOCHRSI_OVERBOUGHT_BLOCK: 80, // K >= 80 for longs
+  STOCHRSI_OVERBOUGHT_BLOCK: 80, // K >= 80 for longs (base threshold)
+  // PARABOLIC MODE: Higher threshold when ADX >= 50 and rising (super-strong trends)
+  STOCHRSI_OVERBOUGHT_BLOCK_PARABOLIC: 92, // K >= 92 for longs in parabolic mode
+  STOCHRSI_OVERSOLD_BLOCK_PARABOLIC: 8,    // K <= 8 for shorts in parabolic mode
+  // ADX thresholds for parabolic mode activation
+  PARABOLIC_MODE_MIN_ADX: 50,
+  PARABOLIC_MODE_REQUIRE_ADX_RISING: true,
   // Bollinger %B thresholds for hard gate
   PERCENT_B_OVERSOLD_BLOCK: 20,  // %B <= 20 for shorts
   PERCENT_B_OVERBOUGHT_BLOCK: 80, // %B >= 80 for longs
@@ -1285,15 +1294,24 @@ export const STRONG_TREND_HTF_BYPASS_PARAMS = {
   // Enable HTF gate bypass for very strong trends
   ENABLED: true,
   // Minimum ADX required for bypass (very strong trend)
-  MIN_ADX: 35,
+  // UPDATED: Lowered from 35 to 30 to catch more strong trend continuations
+  MIN_ADX: 30,
   // ADX must be rising (momentum still building)
-  REQUIRE_ADX_RISING: true,
+  // UPDATED: Relaxed - only require not falling sharply (was strict rising)
+  REQUIRE_ADX_RISING: false,
+  // NEW: Slope threshold - ADX slope must be >= this (not falling sharply)
+  MIN_ADX_SLOPE: -0.3,
   // Maximum reversal score to allow bypass (no reversal signals)
-  MAX_REVERSAL_SCORE: 40,
+  // UPDATED: Raised from 40 to 50 to allow more bypasses in strong trends
+  MAX_REVERSAL_SCORE: 50,
   // Require all timeframes aligned in same direction
-  REQUIRE_ALL_TF_ALIGNED: true,
-  // Position size reduction for trend continuation at extreme (50% = half size)
-  POSITION_SIZE_MULTIPLIER: 0.50,
+  // UPDATED: Relaxed - allow if 4h is neutral but 1h is strong
+  REQUIRE_ALL_TF_ALIGNED: false,
+  // NEW: Alternative to all TF aligned - if ADX is super strong, bypass anyway
+  SUPER_STRONG_ADX_BYPASS: 55,
+  // Position size reduction for trend continuation at extreme
+  // UPDATED: Increased from 50% to 65% - strong trends deserve more position
+  POSITION_SIZE_MULTIPLIER: 0.65,
   // Tighter stop loss multiplier for these entries (0.8x ATR instead of normal)
   STOP_LOSS_MULTIPLIER: 0.8,
   // Earlier break-even activation for protection
