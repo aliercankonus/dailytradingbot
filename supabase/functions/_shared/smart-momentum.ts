@@ -1289,3 +1289,168 @@ export function calculateExitSignal(
     reason: reasons.join(" | ") || "No exit signals"
   };
 }
+
+// ============= CONTINUATION MODE DETECTION =============
+// Detects impulse follow-through opportunities at high ADX (45-55) with all factors aligned
+import { CONTINUATION_MODE_PARAMS } from "./constants.ts";
+
+export interface ContinuationModeResult {
+  qualifies: boolean;
+  reason: string;
+  adxInRange: boolean;
+  trendStructureValid: boolean;
+  momentumStrong: boolean;
+  priceActionConfirmed: boolean;
+  volatilityOk: boolean;
+  stochRsiSafe: boolean;
+  noDivergence: boolean;
+  positionSizeMultiplier: number;
+  exitParams: {
+    partialExitR: number;
+    partialExitPercent: number;
+    useStructureTrailing: boolean;
+  };
+  gateResults: {
+    gate: string;
+    passed: boolean;
+    value: string;
+  }[];
+}
+
+// Helper: Detect higher high + higher low pattern (bullish structure)
+export function detectHigherHighLow(prices: number[], lookback: number = 10): boolean {
+  if (prices.length < lookback) return false;
+  const recent = prices.slice(-lookback);
+  const prevHalf = recent.slice(0, Math.floor(lookback / 2));
+  const currHalf = recent.slice(Math.floor(lookback / 2));
+  const prevHigh = Math.max(...prevHalf);
+  const currHigh = Math.max(...currHalf);
+  const prevLow = Math.min(...prevHalf);
+  const currLow = Math.min(...currHalf);
+  return currHigh > prevHigh && currLow > prevLow;
+}
+
+// Helper: Detect lower low + lower high pattern (bearish structure)
+export function detectLowerLowHigh(prices: number[], lookback: number = 10): boolean {
+  if (prices.length < lookback) return false;
+  const recent = prices.slice(-lookback);
+  const prevHalf = recent.slice(0, Math.floor(lookback / 2));
+  const currHalf = recent.slice(Math.floor(lookback / 2));
+  const prevHigh = Math.max(...prevHalf);
+  const currHigh = Math.max(...currHalf);
+  const prevLow = Math.min(...prevHalf);
+  const currLow = Math.min(...currHalf);
+  return currLow < prevLow && currHigh < prevHigh;
+}
+
+// Helper: Detect continuation candle (closes in trend direction)
+export function detectContinuationCandle(klines: any[], direction: "long" | "short"): boolean {
+  if (klines.length < 2) return false;
+  const current = klines[klines.length - 1];
+  const prev = klines[klines.length - 2];
+  const currOpen = parseFloat(current[1]);
+  const currClose = parseFloat(current[4]);
+  const prevClose = parseFloat(prev[4]);
+  if (direction === "long") {
+    return currClose > currOpen && currClose > prevClose;
+  } else {
+    return currClose < currOpen && currClose < prevClose;
+  }
+}
+
+// Main continuation mode detector
+export function detectContinuationMode(
+  adx: number,
+  adxRising: boolean,
+  adxSlope: number,
+  conf1h: number,
+  trend1h: string,
+  conf4h: number,
+  trend4h: string,
+  momentumScore: number,
+  hasDivergence: boolean,
+  hasHigherHighLow: boolean,
+  hasLowerLowHigh: boolean,
+  isContinuationCandle: boolean,
+  candleSizeATR: number,
+  stochRsiK: number,
+  direction: "long" | "short"
+): ContinuationModeResult {
+  const gateResults: { gate: string; passed: boolean; value: string }[] = [];
+  let failureReason = "";
+  
+  // Gate 1: ADX in range (45-55)
+  const adxInRange = adx >= CONTINUATION_MODE_PARAMS.MIN_ADX && adx <= CONTINUATION_MODE_PARAMS.MAX_ADX;
+  gateResults.push({ gate: "ADX_IN_RANGE", passed: adxInRange, value: `${adx.toFixed(1)} (need ${CONTINUATION_MODE_PARAMS.MIN_ADX}-${CONTINUATION_MODE_PARAMS.MAX_ADX})` });
+  if (!adxInRange) failureReason = `ADX ${adx.toFixed(1)} outside 45-55 range`;
+  
+  // Gate 2: ADX not falling (if required)
+  const adxNotFalling = !CONTINUATION_MODE_PARAMS.REQUIRE_ADX_NOT_FALLING || adxSlope >= CONTINUATION_MODE_PARAMS.ADX_FALLING_THRESHOLD;
+  gateResults.push({ gate: "ADX_NOT_FALLING", passed: adxNotFalling, value: `slope=${adxSlope.toFixed(2)}` });
+  if (!adxNotFalling && !failureReason) failureReason = `ADX falling (slope=${adxSlope.toFixed(2)})`;
+  
+  // Gate 3: 1h confidence >= 70% and matches direction
+  const trend1hMatches = (direction === "long" && trend1h === "bullish") || (direction === "short" && trend1h === "bearish");
+  const trendStructureValid = conf1h >= CONTINUATION_MODE_PARAMS.MIN_1H_CONFIDENCE && trend1hMatches;
+  gateResults.push({ gate: "1H_STRUCTURE", passed: trendStructureValid, value: `${trend1h} ${conf1h}% (need ${CONTINUATION_MODE_PARAMS.MIN_1H_CONFIDENCE}%)` });
+  if (!trendStructureValid && !failureReason) failureReason = `1h structure not strong (${trend1h} ${conf1h}%)`;
+  
+  // Gate 4: 4h not opposing
+  const trend4hOpposing = (direction === "long" && trend4h === "bearish") || (direction === "short" && trend4h === "bullish");
+  const htfNotOpposing = !CONTINUATION_MODE_PARAMS.BLOCK_4H_OPPOSING || !trend4hOpposing;
+  gateResults.push({ gate: "4H_NOT_OPPOSING", passed: htfNotOpposing, value: `${trend4h} ${conf4h}%` });
+  if (!htfNotOpposing && !failureReason) failureReason = `4h opposes direction (${trend4h})`;
+  
+  // Gate 5: Momentum score above threshold
+  const momentumStrong = momentumScore >= CONTINUATION_MODE_PARAMS.MIN_MOMENTUM_SCORE;
+  gateResults.push({ gate: "MOMENTUM_STRONG", passed: momentumStrong, value: `${momentumScore} (need ${CONTINUATION_MODE_PARAMS.MIN_MOMENTUM_SCORE})` });
+  if (!momentumStrong && !failureReason) failureReason = `Momentum weak (${momentumScore})`;
+  
+  // Gate 6: No divergence
+  const noDivergence = !CONTINUATION_MODE_PARAMS.BLOCK_ON_DIVERGENCE || !hasDivergence;
+  gateResults.push({ gate: "NO_DIVERGENCE", passed: noDivergence, value: hasDivergence ? "Divergence detected" : "No divergence" });
+  if (!noDivergence && !failureReason) failureReason = "RSI/MACD divergence detected";
+  
+  // Gate 7: Price action confirmed (HH/HL for long, LL/LH for short, or continuation candle)
+  const structureConfirmed = direction === "long" ? hasHigherHighLow : hasLowerLowHigh;
+  const priceActionConfirmed = !CONTINUATION_MODE_PARAMS.REQUIRE_STRUCTURE_CONFIRMATION || 
+    structureConfirmed || 
+    (CONTINUATION_MODE_PARAMS.ALLOW_BREAKOUT_ENTRY && isContinuationCandle);
+  gateResults.push({ gate: "PRICE_ACTION", passed: priceActionConfirmed, value: `structure=${structureConfirmed}, candle=${isContinuationCandle}` });
+  if (!priceActionConfirmed && !failureReason) failureReason = "No price action confirmation";
+  
+  // Gate 8: Volatility OK (no parabolic candle)
+  const volatilityOk = candleSizeATR <= CONTINUATION_MODE_PARAMS.MAX_CANDLE_SIZE_ATR;
+  gateResults.push({ gate: "VOLATILITY_OK", passed: volatilityOk, value: `${candleSizeATR.toFixed(2)}x ATR (max ${CONTINUATION_MODE_PARAMS.MAX_CANDLE_SIZE_ATR}x)` });
+  if (!volatilityOk && !failureReason) failureReason = `Parabolic candle (${candleSizeATR.toFixed(1)}x ATR)`;
+  
+  // Gate 9: StochRSI not at absolute extreme
+  const stochRsiSafe = direction === "long" 
+    ? stochRsiK <= CONTINUATION_MODE_PARAMS.MAX_STOCHRSI_K_LONG
+    : stochRsiK >= CONTINUATION_MODE_PARAMS.MIN_STOCHRSI_K_SHORT;
+  gateResults.push({ gate: "STOCHRSI_SAFE", passed: stochRsiSafe, value: `K=${stochRsiK.toFixed(0)}` });
+  if (!stochRsiSafe && !failureReason) failureReason = `StochRSI at extreme (K=${stochRsiK.toFixed(0)})`;
+  
+  // All gates must pass
+  const qualifies = adxInRange && adxNotFalling && trendStructureValid && htfNotOpposing && 
+    momentumStrong && noDivergence && priceActionConfirmed && volatilityOk && stochRsiSafe;
+  
+  return {
+    qualifies,
+    reason: qualifies ? `Continuation mode: ADX=${adx.toFixed(1)}, 1h ${trend1h} ${conf1h}%` : failureReason,
+    adxInRange,
+    trendStructureValid,
+    momentumStrong,
+    priceActionConfirmed,
+    volatilityOk,
+    stochRsiSafe,
+    noDivergence,
+    positionSizeMultiplier: qualifies ? CONTINUATION_MODE_PARAMS.POSITION_SIZE_MULTIPLIER : 0,
+    exitParams: {
+      partialExitR: CONTINUATION_MODE_PARAMS.PARTIAL_EXIT_R_MULTIPLE,
+      partialExitPercent: CONTINUATION_MODE_PARAMS.PARTIAL_EXIT_PERCENT,
+      useStructureTrailing: CONTINUATION_MODE_PARAMS.USE_STRUCTURE_TRAILING,
+    },
+    gateResults
+  };
+}

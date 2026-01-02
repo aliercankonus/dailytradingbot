@@ -59,6 +59,22 @@ const getEarlySignalStatus = (indicators: any): { isEarly: boolean; reason: stri
   return { isEarly: false, reason: '' };
 };
 
+// Helper to detect continuation mode from indicators
+const getContinuationModeStatus = (indicators: any): { isContinuation: boolean; adx: string; reason: string } => {
+  if (!indicators) return { isContinuation: false, adx: '', reason: '' };
+  
+  const continuationMode = indicators.continuationMode;
+  if (continuationMode?.active) {
+    return { 
+      isContinuation: true, 
+      adx: continuationMode.adx || '',
+      reason: `Impulse follow-through at ADX ${continuationMode.adx} - reduced position size (55%)`
+    };
+  }
+  
+  return { isContinuation: false, adx: '', reason: '' };
+};
+
 export const TradingSignalsDashboard = () => {
   const { signals, loading } = useSignals();
   const { generateSignals, isGenerating } = useSignalGenerator();
@@ -163,6 +179,7 @@ export const TradingSignalsDashboard = () => {
         {signals.map((signal) => {
           const exhaustionStatus = getExhaustionStatus(signal.indicators);
           const earlySignalStatus = getEarlySignalStatus(signal.indicators);
+          const continuationStatus = getContinuationModeStatus(signal.indicators);
           
           return (
           <Card key={signal.id} className="p-6 hover:shadow-lg transition-shadow">
@@ -178,12 +195,23 @@ export const TradingSignalsDashboard = () => {
             )}
             
             {/* Early Signal Banner */}
-            {earlySignalStatus.isEarly && !exhaustionStatus.isExhausted && (
+            {earlySignalStatus.isEarly && !exhaustionStatus.isExhausted && !continuationStatus.isContinuation && (
               <div className="mb-4 p-3 bg-blue-100 dark:bg-blue-950 border border-blue-300 dark:border-blue-800 rounded-lg flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
                 <div>
                   <div className="text-sm font-medium text-blue-800 dark:text-blue-200">Early Detection</div>
                   <div className="text-xs text-blue-700 dark:text-blue-300">{earlySignalStatus.reason}</div>
+                </div>
+              </div>
+            )}
+            
+            {/* Continuation Mode Banner */}
+            {continuationStatus.isContinuation && (
+              <div className="mb-4 p-3 bg-purple-100 dark:bg-purple-950 border border-purple-300 dark:border-purple-800 rounded-lg flex items-center gap-2">
+                <Zap className="h-5 w-5 text-purple-600 dark:text-purple-400 flex-shrink-0" />
+                <div>
+                  <div className="text-sm font-medium text-purple-800 dark:text-purple-200">Continuation Mode</div>
+                  <div className="text-xs text-purple-700 dark:text-purple-300">{continuationStatus.reason}</div>
                 </div>
               </div>
             )}
@@ -203,13 +231,19 @@ export const TradingSignalsDashboard = () => {
                     >
                       {signal.signal_type.toUpperCase()}
                     </Badge>
-                    {earlySignalStatus.isEarly && (
+                    {continuationStatus.isContinuation && (
+                      <Badge variant="outline" className="bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border-purple-300">
+                        <Zap className="h-3 w-3 mr-1" />
+                        Continuation
+                      </Badge>
+                    )}
+                    {earlySignalStatus.isEarly && !continuationStatus.isContinuation && (
                       <Badge variant="outline" className="bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-300">
                         <Sparkles className="h-3 w-3 mr-1" />
                         Early
                       </Badge>
                     )}
-                    {exhaustionStatus.isExhausted && (
+                    {exhaustionStatus.isExhausted && !continuationStatus.isContinuation && (
                       <Badge variant="outline" className="bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-300">
                         <AlertTriangle className="h-3 w-3 mr-1" />
                         Late
