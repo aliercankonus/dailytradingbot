@@ -1928,78 +1928,26 @@ serve(async (req) => {
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} SMART REGIME: ${smartRegime.regime} (score=${smartRegime.regimeScore}) tradeable=${smartRegime.tradeable} threshold=${smartRegime.qualityThreshold}`);
         
         // ============= SMART MOMENTUM GATES =============
-        // Gate 1: Block entries when momentum is EXHAUSTED (unless squeeze breakout)
         const regimeAwareEnabled = riskParams.regime_aware_trading !== false;
         const minMomentumScore = riskParams.min_momentum_score ?? 30;
         const exhaustionBlockEnabled = riskParams.exhaustion_block_enabled !== false;
         
-        if (exhaustionBlockEnabled && smartMomentum.isExhausted && !bbSqueeze.isBreakingOut) {
-          rejectedByHardGates++;
-          perSymbolGateAttribution.set(symbol, { gate: 'MOMENTUM_EXHAUSTED', details: `score=${smartMomentum.score}, overext=${smartMomentum.overextensionATR}ATR` });
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} SMART MOMENTUM GATE: Trend EXHAUSTED - blocking entry`);
-          logger.forSymbol(symbol).debug(`   Score=${smartMomentum.score}, OverextATR=${smartMomentum.overextensionATR}, ADX=${adx.toFixed(1)}, rising=${smartAdxRising}`);
-          await logRejectionWithAI(
-            supabase, userId, symbol,
-            `SMART MOMENTUM: Trend exhausted (score=${smartMomentum.score}, ${smartMomentum.overextensionATR.toFixed(1)} ATR from EMA)`,
-            {
-              gate: "MOMENTUM_EXHAUSTED",
-              momentumScore: smartMomentum.score,
-              direction: smartMomentum.direction,
-              overextensionATR: smartMomentum.overextensionATR,
-              adx: adx.toFixed(1),
-              adxRising: smartAdxRising,
-              components: smartMomentum.components,
-              reasons: smartMomentum.reasons
-            },
-            trendData,
-            riskParams.ai_analysis_enabled !== false,
-            earlyOrderFlowAnalysis
-          );
-          continue;
-        }
-        
-        // Gate 2: Block entries when momentum is WEAKENING against trade direction
-        const momentumAligned = (derivedDirection === "long" && smartMomentum.score > 0) ||
-                                (derivedDirection === "short" && smartMomentum.score < 0);
-        const isMomentumWeakeningAgainstTrade = smartMomentum.isWeakening && !momentumAligned;
-        
-        if (regimeAwareEnabled && isMomentumWeakeningAgainstTrade && Math.abs(smartMomentum.score) < minMomentumScore) {
-          rejectedByHardGates++;
-          perSymbolGateAttribution.set(symbol, { gate: 'MOMENTUM_WEAKENING', details: `score=${smartMomentum.score}, need=${minMomentumScore}` });
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} SMART MOMENTUM GATE: Momentum weakening against ${derivedDirection} (score=${smartMomentum.score})`);
-          await logRejectionWithAI(
-            supabase, userId, symbol,
-            `SMART MOMENTUM: Weakening momentum (${smartMomentum.score}) against ${derivedDirection} direction`,
-            {
-              gate: "MOMENTUM_WEAKENING",
-              momentumScore: smartMomentum.score,
-              derivedDirection,
-              isWeakening: smartMomentum.isWeakening,
-              minRequired: minMomentumScore,
-              components: smartMomentum.components
-            },
-            trendData,
-            riskParams.ai_analysis_enabled !== false,
-            earlyOrderFlowAnalysis
-          );
-          continue;
-        }
-        
-        // ============= CONTINUATION MODE: IMPULSE FOLLOW-THROUGH =============
+        // ============= CONTINUATION MODE: Check BEFORE exhaustion gate =============
         // Allows entries at ADX 45-55 when ALL factors are strongly aligned
         // This captures impulse continuation that would otherwise be blocked as "exhausted"
         let qualifiesForContinuationMode = false;
         let continuationModeResult: ContinuationModeResult | null = null;
         let continuationPositionMultiplier = 1.0;
         
-        if (CONTINUATION_MODE_PARAMS.ENABLED && smartRegime.regime === "EXHAUSTED") {
+        // Check continuation mode when momentum is exhausted
+        if (CONTINUATION_MODE_PARAMS.ENABLED && smartMomentum.isExhausted) {
           // Get trend data for continuation check
           const conf1h = trendData.timeframes?.['1h']?.confidence || 50;
           const trend1h = trendData.timeframes?.['1h']?.trend || "neutral";
           const conf4h = trendData.timeframes?.['4h']?.confidence || 50;
           const trend4h = trendData.timeframes?.['4h']?.trend || "neutral";
           const hasDivergence = trendData.momentum?.hasDivergence || false;
-          const adxSlope = smartAdxRising ? 0.5 : -0.5; // Approximate slope
+          const adxSlope = smartAdxRising ? 0.5 : -0.5;
           
           // Detect price action structure
           const hasHigherHighLow = detectHigherHighLow(priceData, 10);
@@ -2036,17 +1984,81 @@ serve(async (req) => {
           
           if (qualifiesForContinuationMode) {
             continuationPositionMultiplier = continuationModeResult.positionSizeMultiplier;
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ✅ CONTINUATION MODE: Bypassing EXHAUSTED regime - ${continuationModeResult.reason}`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ✅ CONTINUATION MODE QUALIFIED: ${continuationModeResult.reason}`);
             for (const gate of continuationModeResult.gateResults) {
-              logger.forSymbol(symbol).debug(`   ${gate.passed ? '✓' : '✗'} ${gate.gate}: ${gate.value}`);
+              logger.forSymbol(symbol).info(`   ${gate.passed ? '✓' : '✗'} ${gate.gate}: ${gate.value}`);
             }
           } else {
-            logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} Continuation mode rejected: ${continuationModeResult.reason}`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📋 CONTINUATION MODE EVALUATED: Not qualified - ${continuationModeResult.reason}`);
+            // Log first few failed gates for visibility
+            const failedGates = continuationModeResult.gateResults.filter(g => !g.passed).slice(0, 3);
+            for (const gate of failedGates) {
+              logger.forSymbol(symbol).debug(`   ✗ ${gate.gate}: ${gate.value}`);
+            }
           }
         }
         
+        // Gate 1: Block entries when momentum is EXHAUSTED (unless squeeze breakout OR continuation mode)
+        if (exhaustionBlockEnabled && smartMomentum.isExhausted && !bbSqueeze.isBreakingOut && !qualifiesForContinuationMode) {
+          rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { 
+            gate: 'MOMENTUM_EXHAUSTED', 
+            details: `score=${smartMomentum.score}, overext=${smartMomentum.overextensionATR.toFixed(1)}ATR${continuationModeResult ? `, continuation rejected: ${continuationModeResult.reason}` : ''}` 
+          });
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} SMART MOMENTUM GATE: Trend EXHAUSTED - blocking entry`);
+          logger.forSymbol(symbol).debug(`   Score=${smartMomentum.score}, OverextATR=${smartMomentum.overextensionATR.toFixed(1)}, ADX=${adx.toFixed(1)}, rising=${smartAdxRising}`);
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `SMART MOMENTUM: Trend exhausted (score=${smartMomentum.score}, ${smartMomentum.overextensionATR.toFixed(1)} ATR from EMA)${continuationModeResult ? ` | Continuation rejected: ${continuationModeResult.reason}` : ''}`,
+            {
+              gate: "MOMENTUM_EXHAUSTED",
+              momentumScore: smartMomentum.score,
+              direction: smartMomentum.direction,
+              overextensionATR: smartMomentum.overextensionATR,
+              adx: adx.toFixed(1),
+              adxRising: smartAdxRising,
+              components: smartMomentum.components,
+              reasons: smartMomentum.reasons,
+              continuationModeAttempted: CONTINUATION_MODE_PARAMS.ENABLED,
+              continuationModeRejection: continuationModeResult?.reason || "N/A",
+              continuationGateResults: continuationModeResult?.gateResults || []
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
+          );
+          continue;
+        }
+        
+        // Gate 2: Block entries when momentum is WEAKENING against trade direction
+        const momentumAligned = (derivedDirection === "long" && smartMomentum.score > 0) ||
+                                (derivedDirection === "short" && smartMomentum.score < 0);
+        const isMomentumWeakeningAgainstTrade = smartMomentum.isWeakening && !momentumAligned;
+        
+        if (regimeAwareEnabled && isMomentumWeakeningAgainstTrade && Math.abs(smartMomentum.score) < minMomentumScore) {
+          rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { gate: 'MOMENTUM_WEAKENING', details: `score=${smartMomentum.score}, need=${minMomentumScore}` });
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} SMART MOMENTUM GATE: Momentum weakening against ${derivedDirection} (score=${smartMomentum.score})`);
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `SMART MOMENTUM: Weakening momentum (${smartMomentum.score}) against ${derivedDirection} direction`,
+            {
+              gate: "MOMENTUM_WEAKENING",
+              momentumScore: smartMomentum.score,
+              derivedDirection,
+              isWeakening: smartMomentum.isWeakening,
+              minRequired: minMomentumScore,
+              components: smartMomentum.components
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
+          );
+          continue;
+        }
+        
         // Gate 3: Block entries in EXHAUSTED regime (smart regime classification)
-        // MODIFIED: Allow bypass if continuation mode qualifies
+        // NOTE: Continuation mode is already checked above before MOMENTUM_EXHAUSTED gate
         if (regimeAwareEnabled && smartRegime.regime === "EXHAUSTED" && !qualifiesForContinuationMode) {
           rejectedByHardGates++;
           perSymbolGateAttribution.set(symbol, { gate: 'REGIME_EXHAUSTED', details: smartRegime.reason });
