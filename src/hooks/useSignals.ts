@@ -28,8 +28,9 @@ export const useSignals = () => {
       try {
         setLoading(true);
         
-        // Calculate timestamp for 1 minute ago
-        const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
+        // Calculate timestamp for 30 minutes ago (wider window for actionable signals)
+        const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+        const now = new Date().toISOString();
         
         // Get all active positions to filter out used signals
         const { data: activePositions } = await supabase
@@ -39,10 +40,14 @@ export const useSignals = () => {
         
         const usedSignalIds = new Set(activePositions?.map(p => p.signal_id).filter(Boolean));
         
+        // Fetch signals that:
+        // 1. Were created within the last 30 minutes
+        // 2. Haven't expired yet (expires_at > now)
         const { data, error: queryError } = await supabase
           .from('trading_signals')
           .select('*')
-          .gte('created_at', oneMinuteAgo)
+          .gte('created_at', thirtyMinutesAgo)
+          .gt('expires_at', now)
           .order('created_at', { ascending: false });
 
         if (queryError) throw queryError;

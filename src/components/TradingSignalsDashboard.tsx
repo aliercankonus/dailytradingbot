@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useSignals } from '@/hooks/useSignals';
 import { useSignalGenerator } from '@/hooks/useSignalGenerator';
 import { supabase } from '@/integrations/supabase/client';
-import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity, AlertCircle, Clock, Info } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity, AlertCircle, Clock, Info, AlertTriangle, Sparkles } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { getSignalPriorityTier, getSignalPriorityVariant } from '@/lib/utils';
@@ -15,6 +15,49 @@ import { formatDistanceToNow } from 'date-fns';
 import { SignalRejectionReasons } from './SignalRejectionReasons';
 import { MomentumStatusDetails } from './MomentumStatusDetails';
 import { TrendAccelerationIndicator } from './TrendAccelerationIndicator';
+
+// Helper to detect exhaustion risk from signal indicators
+const getExhaustionStatus = (indicators: any): { isExhausted: boolean; reason: string } => {
+  if (!indicators) return { isExhausted: false, reason: '' };
+  
+  // Check timeInExtreme data
+  const timeInExtreme = indicators.timeInExtreme;
+  if (timeInExtreme?.isExhausted) {
+    return { isExhausted: true, reason: `StochRSI extreme for ${timeInExtreme.barsInExtreme} bars` };
+  }
+  
+  // Check ADX exhaustion via regime
+  const regime = indicators.marketRegime;
+  if (regime === 'exhausted' || regime === 'overextended') {
+    return { isExhausted: true, reason: `Market regime: ${regime}` };
+  }
+  
+  // Check ADX phase exhaustion
+  const exceptionDetails = indicators.exceptionDetails;
+  if (exceptionDetails?.trendStrength?.decision === 'REJECT') {
+    return { isExhausted: true, reason: 'Trend strength exhausted' };
+  }
+  
+  return { isExhausted: false, reason: '' };
+};
+
+// Helper to detect early signal from indicators
+const getEarlySignalStatus = (indicators: any): { isEarly: boolean; reason: string } => {
+  if (!indicators) return { isEarly: false, reason: '' };
+  
+  // Check direction source for early detection
+  const directionSource = indicators.directionSource;
+  if (directionSource === '1h-building-override' || directionSource === 'early-momentum-30m+1h') {
+    return { isEarly: true, reason: 'Early trend detection - smaller position recommended' };
+  }
+  
+  // Check for early momentum entry
+  if (indicators.isEarlyMomentumEntry) {
+    return { isEarly: true, reason: 'Early momentum entry' };
+  }
+  
+  return { isEarly: false, reason: '' };
+};
 
 export const TradingSignalsDashboard = () => {
   const { signals, loading } = useSignals();
@@ -117,8 +160,34 @@ export const TradingSignalsDashboard = () => {
       )}
 
       <div className="grid gap-4">
-        {signals.map((signal) => (
+        {signals.map((signal) => {
+          const exhaustionStatus = getExhaustionStatus(signal.indicators);
+          const earlySignalStatus = getEarlySignalStatus(signal.indicators);
+          
+          return (
           <Card key={signal.id} className="p-6 hover:shadow-lg transition-shadow">
+            {/* Exhaustion Warning Banner */}
+            {exhaustionStatus.isExhausted && (
+              <div className="mb-4 p-3 bg-amber-100 dark:bg-amber-950 border border-amber-300 dark:border-amber-800 rounded-lg flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                <div>
+                  <div className="text-sm font-medium text-amber-800 dark:text-amber-200">Exhaustion Risk</div>
+                  <div className="text-xs text-amber-700 dark:text-amber-300">{exhaustionStatus.reason}</div>
+                </div>
+              </div>
+            )}
+            
+            {/* Early Signal Banner */}
+            {earlySignalStatus.isEarly && !exhaustionStatus.isExhausted && (
+              <div className="mb-4 p-3 bg-blue-100 dark:bg-blue-950 border border-blue-300 dark:border-blue-800 rounded-lg flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                <div>
+                  <div className="text-sm font-medium text-blue-800 dark:text-blue-200">Early Detection</div>
+                  <div className="text-xs text-blue-700 dark:text-blue-300">{earlySignalStatus.reason}</div>
+                </div>
+              </div>
+            )}
+            
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center gap-3">
                 {signal.signal_type === 'long' ? (
@@ -128,12 +197,25 @@ export const TradingSignalsDashboard = () => {
                 )}
                 <div>
                   <h3 className="text-xl font-bold">{signal.symbol}</h3>
-                  <Badge 
-                    variant={signal.signal_type === 'long' ? 'default' : 'destructive'}
-                    className="mt-1"
-                  >
-                    {signal.signal_type.toUpperCase()}
-                  </Badge>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Badge 
+                      variant={signal.signal_type === 'long' ? 'default' : 'destructive'}
+                    >
+                      {signal.signal_type.toUpperCase()}
+                    </Badge>
+                    {earlySignalStatus.isEarly && (
+                      <Badge variant="outline" className="bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-300">
+                        <Sparkles className="h-3 w-3 mr-1" />
+                        Early
+                      </Badge>
+                    )}
+                    {exhaustionStatus.isExhausted && (
+                      <Badge variant="outline" className="bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-300">
+                        <AlertTriangle className="h-3 w-3 mr-1" />
+                        Late
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="text-right">
@@ -308,7 +390,8 @@ export const TradingSignalsDashboard = () => {
               )}
             </div>
           </Card>
-        ))}
+        );
+        })}
 
         {signals.length === 0 && (
           <Card className="p-12 text-center">

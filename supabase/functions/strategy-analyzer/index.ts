@@ -5684,7 +5684,7 @@ serve(async (req) => {
               direction: priceDirection,
             },
           },
-          expires_at: new Date(Date.now() + 60000).toISOString(),
+          expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minute TTL for actionable signals
           created_by_rebalancer: false,
         };
 

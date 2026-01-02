@@ -1901,6 +1901,44 @@ export const deriveTradeDirection = (
     return { direction, confidence: conf1h, source: "1h", reasons };
   }
   
+  // ============= PRIORITY 2.5: BUILDING TREND DIRECTION OVERRIDE =============
+  // Catch early trends when 1h is leaning directional (57-59% conf) but 4h is still neutral
+  // Only trigger if ADX is in "building" zone (18-35) and rising
+  const adxRising = trendData.momentum?.adxRising || trendData.volatility?.adxRising || false;
+  const priceMove = trendData.priceActionMomentum?.movePercent || 0;
+  
+  if (
+    trend4h === "neutral" &&
+    trend1h !== "neutral" &&
+    conf1h >= 57 && conf1h < 60 &&
+    adx >= 18 && adx <= 35 &&
+    adxRising &&
+    Math.abs(priceMove) >= 0.8
+  ) {
+    const direction: TradeDirection = trend1h === "bullish" ? "long" : "short";
+    const priceAligned = (trend1h === "bullish" && priceMove > 0) || (trend1h === "bearish" && priceMove < 0);
+    
+    if (priceAligned) {
+      // Reduce confidence for early signals (85% of original)
+      const earlyConf = conf1h * 0.85;
+      
+      reasons.push(`EARLY TREND DETECTION: 1h ${trend1h} (${conf1h.toFixed(0)}% conf, reduced to ${earlyConf.toFixed(0)}%)`);
+      reasons.push(`ADX=${adx.toFixed(1)} rising in building zone (18-35)`);
+      reasons.push(`Price action confirms: ${Math.abs(priceMove).toFixed(2)}% move ${priceMove > 0 ? 'up' : 'down'}`);
+      reasons.push("Early signal - 75% position size recommended");
+      
+      return { 
+        direction, 
+        confidence: earlyConf, 
+        source: "1h-building-override", 
+        reasons,
+        // Mark as early signal for dashboard display
+        isEarlySignal: true,
+        earlyReason: `1h ${trend1h} forming, ADX building at ${adx.toFixed(1)}`,
+      } as DirectionResult & { isEarlySignal?: boolean; earlyReason?: string };
+    }
+  }
+  
   // Priority 3: 4h neutral but 1h+30m aligned
   if (trend4h === "neutral" && trend1h === trend30m && trend1h !== "neutral") {
     const direction: TradeDirection = trend1h === "bullish" ? "long" : "short";
