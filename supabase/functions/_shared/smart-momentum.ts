@@ -1,10 +1,11 @@
 // ============= SMART MOMENTUM DETECTION SYSTEM =============
 // Phase 1: Enhanced Trend Change Detection
 // Phase 2: Smarter Entry Timing
+// Phase 3: Behavioral ADX Exhaustion Detection
 // Part of the comprehensive trading intelligence upgrade
 
-import { calculateEMAArray, calculateRSIArray, calculateMACD, calculateADXWithDirection, calculateVolumeAnalysis, calculateATR } from "./indicators.ts";
-import { ADX_THRESHOLDS } from "./constants.ts";
+import { calculateEMAArray, calculateRSIArray, calculateMACD, calculateADXWithDirection, calculateVolumeAnalysis, calculateATR, type ADXResult } from "./indicators.ts";
+import { ADX_THRESHOLDS, ADX_EXHAUSTION_PARAMS } from "./constants.ts";
 
 // ============= TREND MOMENTUM SCORE =============
 // Scores momentum from -100 (strong bearish) to +100 (strong bullish)
@@ -635,7 +636,180 @@ export function calculateEntryQuality(
   };
 }
 
+// ============= BEHAVIORAL ADX EXHAUSTION DETECTION =============
+// NEW: Exhaustion is about CHANGE (slope), not absolute ADX value
+// A trend is only exhausted when strength is DECAYING, not simply when ADX is high
+
+export interface ADXExhaustionResult {
+  isExhausted: boolean;
+  exhaustionType: "none" | "rollover" | "di_compression" | "momentum_divergence" | "composite";
+  exhaustionScore: number;      // 0-100, higher = more exhausted
+  components: {
+    adxRollover: boolean;       // ADX peaked and declining
+    adxSlope: number;           // Negative = decelerating
+    diCompressing: boolean;     // +DI/-DI gap shrinking
+    diCompressionBars: number;  // Consecutive bars of compression
+    momentumDivergence: boolean; // Price HH but RSI not HH
+    priceRising: boolean;       // Hidden weakness: price rising + ADX flat/falling
+    hiddenWeakness: boolean;    // Rising price but falling ADX
+  };
+  isContinuation: boolean;      // High ADX + rising = NOT exhausted, allow continuation
+  reasons: string[];
+}
+
+export function detectADXExhaustion(
+  adxResult: ADXResult,
+  prices: number[],
+  rsiArray: number[],
+  direction: "long" | "short" | "neutral"
+): ADXExhaustionResult {
+  const defaultResult: ADXExhaustionResult = {
+    isExhausted: false,
+    exhaustionType: "none",
+    exhaustionScore: 0,
+    components: {
+      adxRollover: false,
+      adxSlope: 0,
+      diCompressing: false,
+      diCompressionBars: 0,
+      momentumDivergence: false,
+      priceRising: false,
+      hiddenWeakness: false
+    },
+    isContinuation: false,
+    reasons: []
+  };
+
+  // Only check exhaustion if ADX is above minimum threshold
+  if (adxResult.adx < ADX_EXHAUSTION_PARAMS.MIN_ADX_FOR_EXHAUSTION_CHECK) {
+    return defaultResult;
+  }
+
+  const reasons: string[] = [];
+  let exhaustionScore = 0;
+  
+  // ===== RULE 1: ADX ROLLOVER (Primary Signal) =====
+  // ADX peaks and then flattens or turns down, even if ADX remains >40
+  const adxRollover = adxResult.adxPeaked && adxResult.adxSlope < ADX_EXHAUSTION_PARAMS.SLOPE_NEUTRAL;
+  if (adxRollover) {
+    exhaustionScore += ADX_EXHAUSTION_PARAMS.SCORE_ADX_ROLLOVER;
+    reasons.push(`ADX rollover detected (peaked at ${Math.max(...adxResult.adxArray).toFixed(1)}, now ${adxResult.adx.toFixed(1)})`);
+  }
+
+  // ===== RULE 2: RISING PRICE + FALLING ADX (Hidden Weakness) =====
+  // Price continues higher while ADX is flat or declining
+  const priceRising = prices.length >= 5 && prices[prices.length - 1] > prices[prices.length - 5];
+  const priceFalling = prices.length >= 5 && prices[prices.length - 1] < prices[prices.length - 5];
+  const adxFlat = Math.abs(adxResult.adxSlope) < ADX_EXHAUSTION_PARAMS.SLOPE_ACCELERATING;
+  const adxDeclining = adxResult.adxSlope < ADX_EXHAUSTION_PARAMS.SLOPE_NEUTRAL;
+  
+  // For longs: price rising but ADX not accelerating = hidden weakness
+  // For shorts: price falling but ADX not accelerating = hidden weakness
+  let hiddenWeakness = false;
+  if (direction === "long" && priceRising && (adxFlat || adxDeclining)) {
+    hiddenWeakness = true;
+  } else if (direction === "short" && priceFalling && (adxFlat || adxDeclining)) {
+    hiddenWeakness = true;
+  }
+  
+  if (hiddenWeakness) {
+    exhaustionScore += ADX_EXHAUSTION_PARAMS.SCORE_ADX_SLOPE_NEGATIVE;
+    reasons.push(`Hidden weakness: price ${direction === "long" ? "rising" : "falling"} but ADX flat/declining (slope: ${adxResult.adxSlope.toFixed(2)})`);
+  }
+
+  // ===== RULE 3: +DI / -DI COMPRESSION =====
+  // Distance between +DI and -DI shrinks while ADX stays high
+  const diGapShrinking = adxResult.prevDiGap > 0 && 
+    adxResult.diGap < adxResult.prevDiGap * (1 - ADX_EXHAUSTION_PARAMS.DI_COMPRESSION_MIN_SHRINK);
+  
+  // Count compression bars (simplified: check if current gap < previous)
+  const diCompressing = diGapShrinking;
+  const diCompressionBars = diGapShrinking ? 1 : 0; // Would need full DI history for multi-bar check
+  
+  if (diCompressing) {
+    exhaustionScore += ADX_EXHAUSTION_PARAMS.SCORE_DI_COMPRESSING;
+    reasons.push(`DI compression: gap shrinking (${adxResult.prevDiGap.toFixed(1)} → ${adxResult.diGap.toFixed(1)})`);
+  }
+
+  // ===== RULE 4: MOMENTUM DIVERGENCE (Confirmation Layer) =====
+  // RSI / momentum fails to make a higher high while price does
+  let momentumDivergence = false;
+  if (rsiArray.length >= 5 && prices.length >= 5) {
+    const priceHigherHigh = prices[prices.length - 1] > Math.max(...prices.slice(-5, -1));
+    const priceLowerLow = prices[prices.length - 1] < Math.min(...prices.slice(-5, -1));
+    const rsiHigherHigh = rsiArray[rsiArray.length - 1] > Math.max(...rsiArray.slice(-5, -1));
+    const rsiLowerLow = rsiArray[rsiArray.length - 1] < Math.min(...rsiArray.slice(-5, -1));
+    
+    // Bearish divergence for longs: price higher high but RSI not higher high
+    if (direction === "long" && priceHigherHigh && !rsiHigherHigh) {
+      momentumDivergence = true;
+    }
+    // Bullish divergence for shorts: price lower low but RSI not lower low  
+    else if (direction === "short" && priceLowerLow && !rsiLowerLow) {
+      momentumDivergence = true;
+    }
+  }
+  
+  if (momentumDivergence) {
+    exhaustionScore += ADX_EXHAUSTION_PARAMS.SCORE_MOMENTUM_DIVERGENCE;
+    reasons.push(`Momentum divergence: price making new ${direction === "long" ? "highs" : "lows"} but momentum failing`);
+  }
+
+  // ===== ADX SLOPE NEGATIVE (MINOR SIGNAL) =====
+  if (adxResult.adxSlope < ADX_EXHAUSTION_PARAMS.SLOPE_NEUTRAL && !adxRollover && !hiddenWeakness) {
+    exhaustionScore += ADX_EXHAUSTION_PARAMS.SCORE_ADX_SLOPE_NEGATIVE;
+    reasons.push(`ADX slope negative (${adxResult.adxSlope.toFixed(2)})`);
+  }
+
+  // ===== CRITICAL: CONTINUATION OVERRIDE =====
+  // High ADX + rising + no DI compression = CONTINUATION, not exhaustion
+  // This prevents incorrectly blocking strong trends
+  const isContinuation = ADX_EXHAUSTION_PARAMS.CONTINUATION_OVERRIDE &&
+    adxResult.adx >= ADX_EXHAUSTION_PARAMS.CONTINUATION_MIN_ADX &&
+    adxResult.adxSlope >= ADX_EXHAUSTION_PARAMS.CONTINUATION_MIN_SLOPE &&
+    !diCompressing &&
+    !momentumDivergence;
+  
+  if (isContinuation) {
+    // Reset exhaustion score - this is a strong continuing trend
+    exhaustionScore = 0;
+    reasons.length = 0;
+    reasons.push(`✅ CONTINUATION: ADX=${adxResult.adx.toFixed(1)}, slope=${adxResult.adxSlope.toFixed(2)} (not exhausted)`);
+  }
+
+  // Determine exhaustion type
+  let exhaustionType: ADXExhaustionResult["exhaustionType"] = "none";
+  const isExhausted = !isContinuation && exhaustionScore >= ADX_EXHAUSTION_PARAMS.EXHAUSTION_THRESHOLD;
+  
+  if (isExhausted) {
+    // Find primary exhaustion signal
+    if (adxRollover && momentumDivergence) exhaustionType = "composite";
+    else if (adxRollover) exhaustionType = "rollover";
+    else if (diCompressing) exhaustionType = "di_compression";
+    else if (momentumDivergence) exhaustionType = "momentum_divergence";
+    else exhaustionType = "composite";
+  }
+
+  return {
+    isExhausted,
+    exhaustionType,
+    exhaustionScore: Math.min(100, exhaustionScore),
+    components: {
+      adxRollover,
+      adxSlope: adxResult.adxSlope,
+      diCompressing,
+      diCompressionBars,
+      momentumDivergence,
+      priceRising,
+      hiddenWeakness
+    },
+    isContinuation,
+    reasons
+  };
+}
+
 // ============= MARKET REGIME CLASSIFICATION =============
+// UPDATED: Now uses behavioral ADX exhaustion instead of absolute threshold
 export type MarketRegimeType = "TRENDING" | "RANGING" | "TRANSITIONING" | "EXHAUSTED";
 
 export interface MarketRegimeResult {
@@ -648,6 +822,8 @@ export interface MarketRegimeResult {
   bbSqueeze: boolean;
   bbWidth: number;
   reason: string;
+  // NEW: Exhaustion details for downstream use
+  adxExhaustion?: ADXExhaustionResult;
 }
 
 export function classifyMarketRegime(
@@ -656,7 +832,9 @@ export function classifyMarketRegime(
   momentumScore: MomentumScoreResult,
   bbWidth: number,
   bbSqueeze: boolean,
-  volumeRatio: number
+  volumeRatio: number,
+  // NEW: Optional ADX exhaustion result for behavioral classification
+  adxExhaustion?: ADXExhaustionResult
 ): MarketRegimeResult {
   // Calculate regime score (0-100)
   let regimeScore = 0;
@@ -683,12 +861,30 @@ export function classifyMarketRegime(
   else if (volumeRatio >= 1.0) regimeScore += 8;
   else if (volumeRatio < 0.7) regimeScore -= 10;
 
-  // Classify regime
-  if (adx >= ADX_THRESHOLDS.EXHAUSTION || momentumScore.isExhausted) {
+  // ===== CLASSIFY REGIME =====
+  // UPDATED: Use behavioral ADX exhaustion instead of absolute threshold
+  
+  // Check behavioral exhaustion first (if provided)
+  const behavioralExhausted = adxExhaustion?.isExhausted === true;
+  const isContinuation = adxExhaustion?.isContinuation === true;
+  
+  // Legacy momentum exhaustion check (fallback)
+  const legacyMomentumExhausted = momentumScore.isExhausted;
+  
+  // CRITICAL: High ADX + rising + no behavioral exhaustion = CONTINUATION, not exhaustion
+  // This is the key fix: absolute ADX threshold alone does NOT mean exhausted
+  if (behavioralExhausted && !isContinuation) {
     regime = "EXHAUSTED";
-    reason = adx >= ADX_THRESHOLDS.EXHAUSTION 
-      ? `ADX exhausted at ${adx.toFixed(1)}` 
-      : "Momentum exhausted";
+    reason = `Behavioral exhaustion: ${adxExhaustion?.exhaustionType} (score: ${adxExhaustion?.exhaustionScore})`;
+  } else if (isContinuation) {
+    // High ADX but continuation mode - treat as strong trending, not exhausted
+    regime = "TRENDING";
+    reason = `Strong trend continuation (ADX: ${adx.toFixed(1)}, slope: ${adxExhaustion?.components.adxSlope.toFixed(2)})`;
+    regimeScore = Math.max(regimeScore, 75); // Boost score for continuation
+  } else if (legacyMomentumExhausted && !isContinuation) {
+    // Fallback: legacy momentum exhaustion check
+    regime = "EXHAUSTED";
+    reason = "Momentum exhausted (legacy check)";
   } else if (regimeScore >= 60) {
     regime = "TRENDING";
     reason = `Strong trend (score: ${regimeScore.toFixed(0)}, ADX: ${adx.toFixed(1)})`;
@@ -740,7 +936,8 @@ export function classifyMarketRegime(
     positionSizeMultiplier,
     bbSqueeze,
     bbWidth,
-    reason
+    reason,
+    adxExhaustion
   };
 }
 

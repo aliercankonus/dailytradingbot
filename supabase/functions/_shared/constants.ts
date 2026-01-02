@@ -33,7 +33,48 @@ export const ADX_PHASES = {
   TRANSITION: { min: 18, max: 22, tradeable: true, description: "Emerging trend - allow squeeze/momentum only" },
   EARLY_TREND: { min: 22, max: 30, tradeable: true, description: "Early trend - normal logic" },
   STRONG_TREND: { min: 30, max: 45, tradeable: true, description: "Strong trend - reduced reversal weight" },
-  EXHAUSTION: { min: 45, max: 100, tradeable: true, description: "Exhaustion risk - increase reversal sensitivity" },
+  // UPDATED: High ADX alone is NOT exhaustion - check slope/DI for behavioral exhaustion
+  EXHAUSTION: { min: 45, max: 100, tradeable: true, description: "High ADX - check slope/DI for true exhaustion" },
+} as const;
+
+// ============= BEHAVIORAL ADX EXHAUSTION PARAMETERS =============
+// NEW: Exhaustion is about CHANGE, not absolute value
+// A trend is exhausted when strength stops accelerating and decays, even if ADX is high
+export const ADX_EXHAUSTION_PARAMS = {
+  // ADX must be above this for exhaustion checks to matter
+  MIN_ADX_FOR_EXHAUSTION_CHECK: 35,
+  
+  // ===== ADX SLOPE (RULE 1) =====
+  // ADX slope thresholds for exhaustion detection
+  SLOPE_NEUTRAL: 0,           // Flat ADX = cruising
+  SLOPE_DECLINING: -0.3,      // Slope below this = decelerating
+  SLOPE_ACCELERATING: 0.5,    // Slope above this = still accelerating (not exhausted)
+  
+  // ===== ADX ROLLOVER (RULE 1A) =====
+  // Detect ADX peak - current < max of recent bars
+  ROLLOVER_LOOKBACK_BARS: 5,
+  
+  // ===== DI COMPRESSION (RULE 3) =====
+  // +DI / -DI gap compression detection
+  DI_COMPRESSION_BARS: 3,     // Consecutive bars of shrinking DI gap
+  DI_COMPRESSION_MIN_SHRINK: 0.05, // Gap must shrink by 5% per bar to count
+  
+  // ===== EXHAUSTION SCORING =====
+  // Points added for each exhaustion signal
+  SCORE_ADX_ROLLOVER: 35,     // ADX peaked and declining
+  SCORE_DI_COMPRESSING: 25,   // DI gap shrinking for 3+ bars
+  SCORE_MOMENTUM_DIVERGENCE: 25, // Price HH but RSI not HH
+  SCORE_ADX_SLOPE_NEGATIVE: 15,  // ADX slope below 0
+  
+  // Composite exhaustion threshold (score above this = exhausted)
+  EXHAUSTION_THRESHOLD: 50,
+  
+  // ===== CONTINUATION OVERRIDE =====
+  // High ADX + rising = continuation, NOT exhaustion
+  // This prevents blocking strong trends incorrectly
+  CONTINUATION_OVERRIDE: true,
+  CONTINUATION_MIN_ADX: 40,
+  CONTINUATION_MIN_SLOPE: 0,  // Slope must be >= 0 (not falling)
 } as const;
 
 export type AdxPhase = keyof typeof ADX_PHASES;
