@@ -47,6 +47,8 @@ import {
   TIME_IN_EXTREME_PARAMS,
   // NEW: Trend acceleration exception for catching strong price moves
   TREND_ACCELERATION_PARAMS,
+  // NEW: Continuation mode for high ADX impulse follow-through
+  CONTINUATION_MODE_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -63,11 +65,16 @@ import {
   classifyMarketRegime as classifySmartRegime,
   detectBollingerSqueeze,
   findSwingPoints,
+  detectContinuationMode,
+  detectHigherHighLow,
+  detectLowerLowHigh,
+  detectContinuationCandle,
   type MomentumScoreResult,
   type PullbackResult,
   type EntryQualityResult,
   type EntryConfirmationResult,
-  type MarketRegimeResult as SmartRegimeResult
+  type MarketRegimeResult as SmartRegimeResult,
+  type ContinuationModeResult
 } from "../_shared/smart-momentum.ts";
 import { calculateRSIArray, calculateATR } from "../_shared/indicators.ts";
 import { 
@@ -1978,8 +1985,69 @@ serve(async (req) => {
           continue;
         }
         
+        // ============= CONTINUATION MODE: IMPULSE FOLLOW-THROUGH =============
+        // Allows entries at ADX 45-55 when ALL factors are strongly aligned
+        // This captures impulse continuation that would otherwise be blocked as "exhausted"
+        let qualifiesForContinuationMode = false;
+        let continuationModeResult: ContinuationModeResult | null = null;
+        let continuationPositionMultiplier = 1.0;
+        
+        if (CONTINUATION_MODE_PARAMS.ENABLED && smartRegime.regime === "EXHAUSTED") {
+          // Get trend data for continuation check
+          const conf1h = trendData.timeframes?.['1h']?.confidence || 50;
+          const trend1h = trendData.timeframes?.['1h']?.trend || "neutral";
+          const conf4h = trendData.timeframes?.['4h']?.confidence || 50;
+          const trend4h = trendData.timeframes?.['4h']?.trend || "neutral";
+          const hasDivergence = trendData.momentum?.hasDivergence || false;
+          const adxSlope = smartAdxRising ? 0.5 : -0.5; // Approximate slope
+          
+          // Detect price action structure
+          const hasHigherHighLow = detectHigherHighLow(priceData, 10);
+          const hasLowerLowHigh = detectLowerLowHigh(priceData, 10);
+          const isContinuationCandleNow = detectContinuationCandle(klineData, derivedDirection);
+          
+          // Calculate candle size in ATR for volatility check
+          const lastCandle = klineData[klineData.length - 1];
+          const candleSize = lastCandle ? Math.abs(parseFloat(lastCandle[4]) - parseFloat(lastCandle[1])) : 0;
+          const candleSizeATR = currentATR > 0 ? candleSize / currentATR : 0;
+          
+          // Get StochRSI K
+          const stochRsiK = trendData.stochasticRsi?.["1h"]?.k ?? trendData.stochasticRsi?.aggregated?.k ?? 50;
+          
+          continuationModeResult = detectContinuationMode(
+            adx,
+            smartAdxRising,
+            adxSlope,
+            conf1h,
+            trend1h,
+            conf4h,
+            trend4h,
+            Math.abs(smartMomentum.score),
+            hasDivergence,
+            hasHigherHighLow,
+            hasLowerLowHigh,
+            isContinuationCandleNow,
+            candleSizeATR,
+            stochRsiK,
+            derivedDirection
+          );
+          
+          qualifiesForContinuationMode = continuationModeResult.qualifies;
+          
+          if (qualifiesForContinuationMode) {
+            continuationPositionMultiplier = continuationModeResult.positionSizeMultiplier;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ✅ CONTINUATION MODE: Bypassing EXHAUSTED regime - ${continuationModeResult.reason}`);
+            for (const gate of continuationModeResult.gateResults) {
+              logger.forSymbol(symbol).debug(`   ${gate.passed ? '✓' : '✗'} ${gate.gate}: ${gate.value}`);
+            }
+          } else {
+            logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} Continuation mode rejected: ${continuationModeResult.reason}`);
+          }
+        }
+        
         // Gate 3: Block entries in EXHAUSTED regime (smart regime classification)
-        if (regimeAwareEnabled && smartRegime.regime === "EXHAUSTED") {
+        // MODIFIED: Allow bypass if continuation mode qualifies
+        if (regimeAwareEnabled && smartRegime.regime === "EXHAUSTED" && !qualifiesForContinuationMode) {
           rejectedByHardGates++;
           perSymbolGateAttribution.set(symbol, { gate: 'REGIME_EXHAUSTED', details: smartRegime.reason });
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} SMART REGIME GATE: Market regime EXHAUSTED - blocking new entries`);
@@ -1992,7 +2060,9 @@ serve(async (req) => {
               regimeScore: smartRegime.regimeScore,
               momentumScore: smartMomentum.score,
               adx: adx.toFixed(1),
-              bbSqueeze: bbSqueeze.isSqueeze
+              bbSqueeze: bbSqueeze.isSqueeze,
+              continuationModeAttempted: CONTINUATION_MODE_PARAMS.ENABLED,
+              continuationModeRejection: continuationModeResult?.reason || "N/A"
             },
             trendData,
             riskParams.ai_analysis_enabled !== false,
@@ -5585,6 +5655,12 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🚀 Trend acceleration entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
+        // Step 12: Apply continuation mode position reduction (55%)
+        if (qualifiesForContinuationMode && continuationPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= continuationPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📈 CONTINUATION MODE entry - position size: ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
         // Final position size as percentage
         const strategyPositionSize = (strategy.risk_settings?.positionSizePercent || 100) * positionSizeMultiplier;
 
@@ -5682,6 +5758,14 @@ serve(async (req) => {
               hasStrongMove: hasStrongMove,
               movePercent: Math.abs(priceMove),
               direction: priceDirection,
+            },
+            // NEW: Continuation mode tracking for dashboard
+            continuationMode: {
+              active: qualifiesForContinuationMode,
+              adx: adx.toFixed(1),
+              positionSizeMultiplier: continuationPositionMultiplier,
+              gateResults: continuationModeResult?.gateResults || [],
+              reason: continuationModeResult?.reason || null,
             },
           },
           expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minute TTL for actionable signals

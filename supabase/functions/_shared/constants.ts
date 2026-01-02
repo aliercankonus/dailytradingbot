@@ -77,6 +77,66 @@ export const TIME_IN_EXTREME_PARAMS = {
   PENALTY_EXTREME: 35,
 } as const;
 
+// ============= CONTINUATION MODE PARAMETERS =============
+// Allows entries at higher ADX (45-55) when ALL factors are strongly aligned
+// This is a separate trade archetype from pullback/breakout - captures impulse follow-through
+export const CONTINUATION_MODE_PARAMS = {
+  // Enable continuation mode
+  ENABLED: true,
+  
+  // ===== ADX REQUIREMENTS =====
+  // ADX range for continuation entries (above normal "exhaustion" threshold)
+  MIN_ADX: 45,
+  MAX_ADX: 55,
+  // ADX must not be falling sharply
+  REQUIRE_ADX_NOT_FALLING: true,
+  ADX_FALLING_THRESHOLD: -0.5, // ADX slope below this = "falling"
+  
+  // ===== TREND STRUCTURE GATES (NON-NEGOTIABLE) =====
+  // 1h must be strongly bullish/bearish
+  MIN_1H_CONFIDENCE: 70,
+  // 4h must match direction or be neutral (never opposing)
+  ALLOW_4H_NEUTRAL: true,
+  BLOCK_4H_OPPOSING: true,
+  
+  // ===== MOMENTUM GATES =====
+  // Momentum score must be ABOVE standard threshold
+  MIN_MOMENTUM_SCORE: 35,
+  // No divergence allowed (RSI/MACD divergence blocks entry)
+  BLOCK_ON_DIVERGENCE: true,
+  
+  // ===== PRICE ACTION GATES =====
+  // Higher high + higher low for LONG (or lower low + lower high for SHORT)
+  REQUIRE_STRUCTURE_CONFIRMATION: true,
+  // Entry only on continuation candle (current candle in trend direction)
+  REQUIRE_CONTINUATION_CANDLE: true,
+  // OR break-and-hold above prior local high/low
+  ALLOW_BREAKOUT_ENTRY: true,
+  
+  // ===== VOLATILITY CONTROL =====
+  // Block if candle > 2x ATR (parabolic move)
+  MAX_CANDLE_SIZE_ATR: 2.0,
+  
+  // ===== STOCHRSI SAFETY =====
+  // Maximum StochRSI K for LONG continuation (not at absolute extreme)
+  MAX_STOCHRSI_K_LONG: 92,
+  MIN_STOCHRSI_K_SHORT: 8,
+  
+  // ===== POSITION SIZING =====
+  // Base position size multiplier (55% of normal for safety)
+  POSITION_SIZE_MULTIPLIER: 0.55,
+  
+  // ===== EXIT LOGIC PARAMETERS =====
+  // Faster partial at +0.8R to +1R
+  PARTIAL_EXIT_R_MULTIPLE: 0.8,
+  PARTIAL_EXIT_PERCENT: 50, // Take 50% off at 0.8R
+  // Use structure-based trailing instead of ATR
+  USE_STRUCTURE_TRAILING: true,
+  // Immediate exit triggers
+  EXIT_ON_MOMENTUM_ROLLOVER: true,
+  EXIT_ON_ADX_FLATTEN_PLUS_BEARISH_CANDLE: true,
+} as const;
+
 // ============= MOMENTUM CONTINUATION PARAMETERS =============
 // Allows catching trend continuation during strong moves even when StochRSI is at extremes
 // This addresses the issue of missing 3%+ price moves because StochRSI was already oversold/overbought
