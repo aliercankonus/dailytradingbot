@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useRiskParameters } from './useRiskParameters';
@@ -7,9 +7,18 @@ export const useSignalGenerator = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const { toast } = useToast();
   const { riskParams, loading } = useRiskParameters();
+  const isRunningRef = useRef(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const generateSignals = async () => {
+  const generateSignals = useCallback(async () => {
+    // Prevent concurrent runs
+    if (isRunningRef.current) {
+      console.log('Signal generation already in progress, skipping');
+      return;
+    }
+
     try {
+      isRunningRef.current = true;
       setIsGenerating(true);
       
       // Check if bot is enabled before generating signals
@@ -22,6 +31,12 @@ export const useSignalGenerator = () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         console.log('No active session, skipping signal generation');
+        return;
+      }
+
+      // Check if tab is visible (reduce API calls when tab is hidden)
+      if (document.hidden) {
+        console.log('Tab is hidden, skipping signal generation');
         return;
       }
 
@@ -61,9 +76,10 @@ export const useSignalGenerator = () => {
         variant: "destructive"
       });
     } finally {
+      isRunningRef.current = false;
       setIsGenerating(false);
     }
-  };
+  }, [riskParams?.is_trading_enabled, toast]);
 
   useEffect(() => {
     // Wait for risk parameters to load
@@ -78,15 +94,30 @@ export const useSignalGenerator = () => {
       return;
     }
 
-    console.log('Bot is enabled, starting signal generation');
+    console.log('Bot is enabled, starting signal generation (90s interval)');
     // Generate signals immediately on mount
     generateSignals();
 
-    // Generate signals every 5 minutes
-    const interval = setInterval(generateSignals, 5 * 60 * 1000);
+    // Generate signals every 90 seconds for faster detection
+    intervalRef.current = setInterval(generateSignals, 90 * 1000);
 
-    return () => clearInterval(interval);
-  }, [riskParams?.is_trading_enabled, loading]);
+    // Visibility change handler - generate when tab becomes visible
+    const handleVisibilityChange = () => {
+      if (!document.hidden && riskParams?.is_trading_enabled) {
+        console.log('Tab became visible, generating signals');
+        generateSignals();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [riskParams?.is_trading_enabled, loading, generateSignals]);
 
   return { generateSignals, isGenerating };
 };
