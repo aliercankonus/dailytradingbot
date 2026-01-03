@@ -3867,11 +3867,21 @@ serve(async (req) => {
         // This is a graduated approach based on ADX level
         let regimeAwareMomentumThreshold: number = baseMomentumThreshold;
         let regimeAwareApplied = false;
+        let regimeAwareTier = 'none'; // Track which tier was applied for logging
+        
+        // Get ADX slope for near-very-strong tier checks
+        const adxSlopeForRegime = fullAdxResult?.adxSlope ?? 0;
         
         if (REGIME_AWARE_MOMENTUM_PARAMS.ENABLED && !isReversalEntry) {
-          // At very strong ADX (>= 35), ADX rising is NOT required because trend is confirmed
+          // Check if ADX qualifies for each tier
           const isVeryStrongAdx = adx >= REGIME_AWARE_MOMENTUM_PARAMS.VERY_STRONG_TREND_MIN_ADX;
-          const adxRisingForRegime = smartAdxRising || !REGIME_AWARE_MOMENTUM_PARAMS.REQUIRE_ADX_RISING || isVeryStrongAdx;
+          // NEW: Near very strong tier (ADX 33-35, slope not sharply negative)
+          const isNearVeryStrongAdx = (
+            adx >= (REGIME_AWARE_MOMENTUM_PARAMS.NEAR_VERY_STRONG_TREND_MIN_ADX ?? 33) &&
+            adx < REGIME_AWARE_MOMENTUM_PARAMS.VERY_STRONG_TREND_MIN_ADX &&
+            adxSlopeForRegime >= (REGIME_AWARE_MOMENTUM_PARAMS.NEAR_VERY_STRONG_MIN_SLOPE ?? -0.3)
+          );
+          const adxRisingForRegime = smartAdxRising || !REGIME_AWARE_MOMENTUM_PARAMS.REQUIRE_ADX_RISING || isVeryStrongAdx || isNearVeryStrongAdx;
           const notExhaustedForRegime = !REGIME_AWARE_MOMENTUM_PARAMS.BLOCK_IF_EXHAUSTED || 
                                         !adxExhaustion.isExhausted || 
                                         adxExhaustion.isContinuation;
@@ -3882,14 +3892,25 @@ serve(async (req) => {
               // Very strong trend (ADX >= 35): threshold = 0, ADX rising NOT required
               regimeAwareMomentumThreshold = REGIME_AWARE_MOMENTUM_PARAMS.VERY_STRONG_TREND_THRESHOLD;
               regimeAwareApplied = true;
+              regimeAwareTier = 'very-strong';
               logger.forSymbol(symbol).info(
-                `${LOG_CATEGORIES.MOMENTUM} REGIME-AWARE THRESHOLD: Very strong ADX=${adx.toFixed(1)} >= ${REGIME_AWARE_MOMENTUM_PARAMS.VERY_STRONG_TREND_MIN_ADX} (rising not required), ` +
+                `${LOG_CATEGORIES.MOMENTUM} 🚀 REGIME-AWARE THRESHOLD: Very strong ADX=${adx.toFixed(1)} >= ${REGIME_AWARE_MOMENTUM_PARAMS.VERY_STRONG_TREND_MIN_ADX} (rising not required), ` +
+                `threshold relaxed ${baseMomentumThreshold} → ${regimeAwareMomentumThreshold}`
+              );
+            } else if (isNearVeryStrongAdx) {
+              // NEW: Near very strong trend (ADX 33-35, slope >= -0.3): threshold = 1
+              regimeAwareMomentumThreshold = REGIME_AWARE_MOMENTUM_PARAMS.NEAR_VERY_STRONG_TREND_THRESHOLD ?? 1;
+              regimeAwareApplied = true;
+              regimeAwareTier = 'near-very-strong';
+              logger.forSymbol(symbol).info(
+                `${LOG_CATEGORIES.MOMENTUM} 🚀 REGIME-AWARE THRESHOLD: Near-very-strong ADX=${adx.toFixed(1)} (33-35 range), slope=${adxSlopeForRegime.toFixed(2)} >= -0.3, ` +
                 `threshold relaxed ${baseMomentumThreshold} → ${regimeAwareMomentumThreshold}`
               );
             } else if (adx >= REGIME_AWARE_MOMENTUM_PARAMS.STRONG_TREND_MIN_ADX && adxRisingForRegime) {
               // Strong trend (ADX >= 30, rising): threshold = 2
               regimeAwareMomentumThreshold = REGIME_AWARE_MOMENTUM_PARAMS.STRONG_TREND_THRESHOLD;
               regimeAwareApplied = true;
+              regimeAwareTier = 'strong';
               logger.forSymbol(symbol).info(
                 `${LOG_CATEGORIES.MOMENTUM} REGIME-AWARE THRESHOLD: Strong ADX=${adx.toFixed(1)} >= ${REGIME_AWARE_MOMENTUM_PARAMS.STRONG_TREND_MIN_ADX} rising=${smartAdxRising}, ` +
                 `threshold relaxed ${baseMomentumThreshold} → ${regimeAwareMomentumThreshold}`
@@ -3906,11 +3927,21 @@ serve(async (req) => {
         // Scoped to trend-following entries only with exhaustion checks
         let strongAdxOverrideApplied = false;
         let strongAdxPositionMultiplier = 1.0;
+        let strongAdxOverrideTier = 'none'; // Track which tier was used
+        
+        // Get ADX slope for near-very-strong tier checks
+        const adxSlopeForOverride = fullAdxResult?.adxSlope ?? 0;
         
         if (STRONG_ADX_OVERRIDE_PARAMS.ENABLED && earlyMomentumScore < effectiveMomentumThreshold) {
           // At very strong ADX (>= VERY_STRONG_ADX), ADX rising is NOT required
           const isVeryStrongAdxForOverride = adx >= (STRONG_ADX_OVERRIDE_PARAMS.VERY_STRONG_ADX ?? 35);
-          const adxRisingForOverride = smartAdxRising || !STRONG_ADX_OVERRIDE_PARAMS.REQUIRE_ADX_RISING || isVeryStrongAdxForOverride;
+          // NEW: Near very strong tier (ADX 33-35, slope >= -0.3)
+          const isNearVeryStrongAdxForOverride = (
+            adx >= (STRONG_ADX_OVERRIDE_PARAMS.NEAR_VERY_STRONG_ADX ?? 33) &&
+            adx < (STRONG_ADX_OVERRIDE_PARAMS.VERY_STRONG_ADX ?? 35) &&
+            adxSlopeForOverride >= (STRONG_ADX_OVERRIDE_PARAMS.NEAR_VERY_STRONG_MIN_SLOPE ?? -0.3)
+          );
+          const adxRisingForOverride = smartAdxRising || !STRONG_ADX_OVERRIDE_PARAMS.REQUIRE_ADX_RISING || isVeryStrongAdxForOverride || isNearVeryStrongAdxForOverride;
           const scopeOkForOverride = !STRONG_ADX_OVERRIDE_PARAMS.SCOPE_TO_TREND_FOLLOWING || !isReversalEntry;
           const reversalScoreOk = unifiedReversal.score <= STRONG_ADX_OVERRIDE_PARAMS.MAX_REVERSAL_SCORE;
           const exhaustionCheckPasses = !STRONG_ADX_OVERRIDE_PARAMS.REQUIRE_EXHAUSTION_CHECK || 
@@ -3929,17 +3960,31 @@ serve(async (req) => {
             strongAdxOverrideApplied = true;
             effectiveMomentumThreshold = STRONG_ADX_OVERRIDE_PARAMS.OVERRIDE_MOMENTUM_THRESHOLD;
             
-            // Reduce position size if ADX indicates exhaustion risk
-            if (adx > STRONG_ADX_OVERRIDE_PARAMS.EXHAUSTION_ADX) {
-              strongAdxPositionMultiplier = STRONG_ADX_OVERRIDE_PARAMS.EXHAUSTION_POSITION_MULTIPLIER;
+            // Determine which tier applied and set position multiplier accordingly
+            if (isVeryStrongAdxForOverride) {
+              strongAdxOverrideTier = 'very-strong';
+              // Reduce position size if ADX indicates exhaustion risk
+              if (adx > STRONG_ADX_OVERRIDE_PARAMS.EXHAUSTION_ADX) {
+                strongAdxPositionMultiplier = STRONG_ADX_OVERRIDE_PARAMS.EXHAUSTION_POSITION_MULTIPLIER;
+                logger.forSymbol(symbol).info(
+                  `${LOG_CATEGORIES.MOMENTUM} STRONG ADX OVERRIDE: ADX=${adx.toFixed(1)} > ${STRONG_ADX_OVERRIDE_PARAMS.EXHAUSTION_ADX}, ` +
+                  `reducing position to ${(strongAdxPositionMultiplier * 100).toFixed(0)}%`
+                );
+              }
+            } else if (isNearVeryStrongAdxForOverride) {
+              // NEW: Near very strong tier - apply 80% position size for safety
+              strongAdxOverrideTier = 'near-very-strong';
+              strongAdxPositionMultiplier = STRONG_ADX_OVERRIDE_PARAMS.NEAR_VERY_STRONG_POSITION_MULTIPLIER ?? 0.80;
               logger.forSymbol(symbol).info(
-                `${LOG_CATEGORIES.MOMENTUM} STRONG ADX OVERRIDE: ADX=${adx.toFixed(1)} > ${STRONG_ADX_OVERRIDE_PARAMS.EXHAUSTION_ADX}, ` +
+                `${LOG_CATEGORIES.MOMENTUM} NEAR-VERY-STRONG ADX OVERRIDE: ADX=${adx.toFixed(1)} (33-35 range), slope=${adxSlopeForOverride.toFixed(2)}, ` +
                 `reducing position to ${(strongAdxPositionMultiplier * 100).toFixed(0)}%`
               );
+            } else {
+              strongAdxOverrideTier = 'strong';
             }
             
             logger.forSymbol(symbol).info(
-              `${LOG_CATEGORIES.MOMENTUM} ✓ STRONG ADX OVERRIDE ACTIVE: ADX=${adx.toFixed(1)} rising=${smartAdxRising} veryStrong=${isVeryStrongAdxForOverride}, ` +
+              `${LOG_CATEGORIES.MOMENTUM} ✓ STRONG ADX OVERRIDE ACTIVE [${strongAdxOverrideTier}]: ADX=${adx.toFixed(1)} slope=${adxSlopeForOverride.toFixed(2)} rising=${smartAdxRising}, ` +
               `exhausted=${adxExhaustion.isExhausted}, continuation=${adxExhaustion.isContinuation}, ` +
               `reversalScore=${unifiedReversal.score} - bypassing momentum threshold (${baseMomentumThreshold} → ${effectiveMomentumThreshold})`
             );
@@ -3947,7 +3992,7 @@ serve(async (req) => {
             // Log why override didn't apply
             const failureReasons: string[] = [];
             if (adx < STRONG_ADX_OVERRIDE_PARAMS.MIN_ADX) failureReasons.push(`ADX=${adx.toFixed(1)} < ${STRONG_ADX_OVERRIDE_PARAMS.MIN_ADX}`);
-            if (!adxRisingForOverride) failureReasons.push(`ADX not rising (veryStrong=${isVeryStrongAdxForOverride})`);
+            if (!adxRisingForOverride) failureReasons.push(`ADX not rising/stable (veryStrong=${isVeryStrongAdxForOverride}, nearVeryStrong=${isNearVeryStrongAdxForOverride}, slope=${adxSlopeForOverride.toFixed(2)})`);
             if (!scopeOkForOverride) failureReasons.push('reversal entry (scoped out)');
             if (!reversalScoreOk) failureReasons.push(`reversalScore=${unifiedReversal.score} > ${STRONG_ADX_OVERRIDE_PARAMS.MAX_REVERSAL_SCORE}`);
             if (!exhaustionCheckPasses) failureReasons.push('exhaustion check failed');
@@ -3962,20 +4007,22 @@ serve(async (req) => {
           rejectedByHardGates++;
           perSymbolGateAttribution.set(symbol, { 
             gate: 'MOMENTUM_WEAKENING', 
-            details: `score=${earlyMomentumScore}, need=${effectiveMomentumThreshold}` 
+            details: `score=${earlyMomentumScore}, need=${effectiveMomentumThreshold}, adx=${adx.toFixed(1)}, slope=${adxSlopeForOverride.toFixed(2)}` 
           });
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: Momentum score too low (${earlyMomentumScore} < ${effectiveMomentumThreshold}${isPullbackSetupDetected ? ' [pullback threshold]' : ''}${regimeAwareApplied ? ' [regime-aware]' : ''}) - insufficient momentum confirmation`,
+            `HARD GATE: Momentum score too low (${earlyMomentumScore} < ${effectiveMomentumThreshold}${isPullbackSetupDetected ? ' [pullback threshold]' : ''}${regimeAwareApplied ? ` [regime-aware:${regimeAwareTier}]` : ''}) - insufficient momentum confirmation`,
             { 
               gate: "MOMENTUM_SCORE_TOO_LOW",
               momentumScore: earlyMomentumScore,
               momentumRequired: effectiveMomentumThreshold,
               baseMomentumThreshold,
               regimeAwareApplied,
+              regimeAwareTier,
               regimeAwareMomentumThreshold,
               strongAdxOverrideAttempted: STRONG_ADX_OVERRIDE_PARAMS.ENABLED,
               strongAdxOverrideApplied,
+              strongAdxOverrideTier,
               isPullbackSetup: isPullbackSetupDetected,
               isPullbackValid,
               momentumState: momentum?.state || "none",
@@ -3987,6 +4034,7 @@ serve(async (req) => {
               stochFilterTrend4h,
               stochFilterConf4h,
               adx: adx.toFixed(1),
+              adxSlope: adxSlopeForOverride.toFixed(2),
               adxRising: smartAdxRising,
               exhausted: adxExhaustion.isExhausted,
               continuation: adxExhaustion.isContinuation,
@@ -4005,13 +4053,13 @@ serve(async (req) => {
         // Log success with context
         if (strongAdxOverrideApplied) {
           logger.forSymbol(symbol).info(
-            `${LOG_CATEGORIES.SUCCESS} ✓ STRONG ADX OVERRIDE: Momentum gate bypassed (ADX=${adx.toFixed(1)}) - ` +
+            `${LOG_CATEGORIES.SUCCESS} ✓ STRONG ADX OVERRIDE [${strongAdxOverrideTier}]: Momentum gate bypassed (ADX=${adx.toFixed(1)}, slope=${adxSlopeForOverride.toFixed(2)}) - ` +
             `position size ${(strongAdxPositionMultiplier * 100).toFixed(0)}%`
           );
         } else if (isPullbackValid) {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} PULLBACK ENTRY: Momentum gate passed with reduced threshold (${earlyMomentumScore} >= ${effectiveMomentumThreshold}) - position size ${(pullbackPositionMultiplier * 100).toFixed(0)}%`);
         } else if (regimeAwareApplied) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} REGIME-AWARE: Momentum gate passed with relaxed threshold (${earlyMomentumScore} >= ${effectiveMomentumThreshold})`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} REGIME-AWARE [${regimeAwareTier}]: Momentum gate passed with relaxed threshold (${earlyMomentumScore} >= ${effectiveMomentumThreshold})`);
         } else {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Momentum score gate passed (${earlyMomentumScore} >= ${effectiveMomentumThreshold})`);
         }
