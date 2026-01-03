@@ -789,12 +789,25 @@ export const STRONG_ADX_OVERRIDE_PARAMS = {
   MIN_ADX: 30,
   
   // ADX must be rising (not falling) for override at lower ADX levels
-  // When ADX >= VERY_STRONG_ADX, rising is not required (trend already confirmed)
+  // When ADX >= VERY_STRONG_ADX or NEAR_VERY_STRONG_ADX with acceptable slope, rising is not required
   REQUIRE_ADX_RISING: true,
   
   // Very strong ADX threshold - at this level, ADX rising is not required
   // because the trend is already strongly confirmed
   VERY_STRONG_ADX: 35,
+  
+  // NEW: Near very strong ADX threshold (33-35)
+  // At this level, allow override if ADX slope is not sharply negative
+  // This captures moves like AVAXUSDT where ADX=34.7 but not rising
+  NEAR_VERY_STRONG_ADX: 33,
+  
+  // ADX slope threshold for near-very-strong tier
+  // If slope >= this, consider it "not falling sharply" and allow override
+  // -0.3 allows slight decline while blocking sharp drops
+  NEAR_VERY_STRONG_MIN_SLOPE: -0.3,
+  
+  // Position size multiplier for near-very-strong tier (80% for safety)
+  NEAR_VERY_STRONG_POSITION_MULTIPLIER: 0.80,
   
   // Maximum ADX before exhaustion concerns (reduce size above this)
   EXHAUSTION_ADX: 45,
@@ -837,8 +850,15 @@ export const REGIME_AWARE_MOMENTUM_PARAMS = {
   VERY_STRONG_TREND_THRESHOLD: 0,
   VERY_STRONG_TREND_MIN_ADX: 35,
   
-  // ADX must be rising for reduced thresholds at lower ADX (30-34)
-  // At very strong ADX (>=35), rising is not required
+  // NEW: Near very strong tier (ADX 33-35)
+  // Threshold = 1 when ADX is 33-35 and slope is not sharply negative
+  // This captures moves like AVAXUSDT where ADX=34.7 but not rising
+  NEAR_VERY_STRONG_TREND_THRESHOLD: 1,
+  NEAR_VERY_STRONG_TREND_MIN_ADX: 33,
+  NEAR_VERY_STRONG_MIN_SLOPE: -0.3,
+  
+  // ADX must be rising for reduced thresholds at lower ADX (30-33)
+  // At very strong ADX (>=35) or near-very-strong with acceptable slope, rising is not required
   REQUIRE_ADX_RISING: true,
   
   // Block exhausted trends from using reduced threshold
