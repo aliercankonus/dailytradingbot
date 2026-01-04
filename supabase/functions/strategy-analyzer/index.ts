@@ -1885,10 +1885,20 @@ serve(async (req) => {
         const symbolHistData = historicalDataMap.get(symbol);
         const klineData = symbolHistData?.klines || [];
         const priceData = symbolHistData?.prices || [];
-        const smartAdxRising = trendData.volatility?.adxRising ?? false;
         const currentATR = calculateATR(klineData, 14);
         
-        // Calculate momentum score (-100 to +100)
+        // NEW: Calculate full ADX result FIRST to get accurate slope for momentum calculation
+        const fullAdxResult = calculateADXWithDirection(klineData, 14);
+        
+        // FIX: Use ADX slope from fullAdxResult for accurate rising detection
+        // Previously: smartAdxRising = trendData.volatility?.adxRising ?? false (unreliable)
+        // Now: Check ADX slope directly - slope > 0 means ADX is rising
+        const adxSlopeForMomentum = fullAdxResult.adxSlope ?? 0;
+        const smartAdxRising = adxSlopeForMomentum > 0 || (trendData.volatility?.adxRising === true);
+        
+        logger.forSymbol(symbol).debug(`📊 ADX slope check: slope=${adxSlopeForMomentum.toFixed(3)}, trendData.adxRising=${trendData.volatility?.adxRising}, final smartAdxRising=${smartAdxRising}`);
+        
+        // Calculate momentum score (-100 to +100) with CORRECT adxRising value
         const smartMomentum = calculateMomentumScore(klineData, priceData, adx, smartAdxRising, currentATR);
         
         // Find swing points for pullback detection
@@ -1910,9 +1920,6 @@ serve(async (req) => {
         
         // Detect Bollinger Squeeze
         const bbSqueeze = detectBollingerSqueeze(priceData, 20, 2);
-        
-        // NEW: Calculate full ADX result with DI data for behavioral exhaustion
-        const fullAdxResult = calculateADXWithDirection(klineData, 14);
         
         // NEW: Detect BEHAVIORAL ADX exhaustion (slope-based, not absolute threshold)
         const adxExhaustion = detectADXExhaustion(
@@ -2062,7 +2069,29 @@ serve(async (req) => {
                                 (derivedDirection === "short" && smartMomentum.score < 0);
         const isMomentumWeakeningAgainstTrade = smartMomentum.isWeakening && !momentumAligned;
         
-        if (regimeAwareEnabled && isMomentumWeakeningAgainstTrade && Math.abs(smartMomentum.score) < minMomentumScore) {
+        // NEW: Strong ADX Override for Momentum Weakening Gate
+        // If ADX is >= 30 and rising (or very strong), the trend is confirmed enough to bypass the weakening gate
+        // This prevents blocking entries in strong trends where momentum score may be slightly negative
+        const momentumWeakeningAdxSlope = fullAdxResult?.adxSlope ?? 0;
+        const isVeryStrongAdxForWeakening = adx >= (STRONG_ADX_OVERRIDE_PARAMS.VERY_STRONG_ADX ?? 35);
+        const isNearVeryStrongAdxForWeakening = (
+          adx >= (STRONG_ADX_OVERRIDE_PARAMS.NEAR_VERY_STRONG_ADX ?? 33) &&
+          adx < (STRONG_ADX_OVERRIDE_PARAMS.VERY_STRONG_ADX ?? 35) &&
+          momentumWeakeningAdxSlope >= (STRONG_ADX_OVERRIDE_PARAMS.NEAR_VERY_STRONG_MIN_SLOPE ?? -0.3)
+        );
+        const adxRisingForWeakeningBypass = smartAdxRising || isVeryStrongAdxForWeakening || isNearVeryStrongAdxForWeakening;
+        const hasStrongADXOverrideForWeakening = (
+          STRONG_ADX_OVERRIDE_PARAMS.ENABLED &&
+          adx >= STRONG_ADX_OVERRIDE_PARAMS.MIN_ADX &&
+          adxRisingForWeakeningBypass &&
+          !adxExhaustion.isExhausted  // Don't override if ADX is exhausting
+        );
+        
+        if (hasStrongADXOverrideForWeakening && isMomentumWeakeningAgainstTrade) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 💪 STRONG ADX OVERRIDE: Bypassing momentum weakening gate (ADX=${adx.toFixed(1)}, slope=${momentumWeakeningAdxSlope.toFixed(3)}, rising=${smartAdxRising}, score=${smartMomentum.score})`);
+        }
+        
+        if (regimeAwareEnabled && isMomentumWeakeningAgainstTrade && Math.abs(smartMomentum.score) < minMomentumScore && !hasStrongADXOverrideForWeakening) {
           rejectedByHardGates++;
           perSymbolGateAttribution.set(symbol, { gate: 'MOMENTUM_WEAKENING', details: `score=${smartMomentum.score}, need=${minMomentumScore}` });
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} SMART MOMENTUM GATE: Momentum weakening against ${derivedDirection} (score=${smartMomentum.score})`);
@@ -2075,7 +2104,13 @@ serve(async (req) => {
               derivedDirection,
               isWeakening: smartMomentum.isWeakening,
               minRequired: minMomentumScore,
-              components: smartMomentum.components
+              components: smartMomentum.components,
+              strongAdxOverrideChecked: true,
+              strongAdxOverrideApplied: false,
+              adx: adx.toFixed(1),
+              adxSlope: momentumWeakeningAdxSlope.toFixed(3),
+              adxRising: smartAdxRising,
+              isExhausted: adxExhaustion.isExhausted
             },
             trendData,
             riskParams.ai_analysis_enabled !== false,
