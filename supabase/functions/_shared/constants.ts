@@ -320,7 +320,7 @@ export const CONFIDENCE_THRESHOLDS = {
   // PENALTY_STRONG: 80,     // REMOVED
   // PENALTY_HEAVY: 85,      // REMOVED
   WEAK_4H: 58,
-  STRONG_ALIGNMENT_1H: 58,
+  STRONG_ALIGNMENT_1H: 55,
 } as const;
 
 export const RISK_PARAMS = {
