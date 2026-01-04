@@ -1366,21 +1366,44 @@ export const VOLUME_RELAXATION_PARAMS = {
 // ============= STRONG TREND OVEREXTENSION RELAXATION =============
 // Raise overextension thresholds during confirmed strong trends
 // Allows riding momentum in genuinely strong trends without premature blocking
+// NEW: Tiered approach - very strong ADX (35+) gets highest thresholds, near-very-strong (33-35) gets intermediate
 export const STRONG_TREND_OVEREXTENSION_PARAMS = {
   // Enable overextension threshold relaxation for strong trends
   ENABLED: true,
   // Minimum ADX required for strong trend mode
   MIN_ADX: 30,
-  // ADX must be rising for strong trend mode
+  
+  // NEW: Very strong ADX tier (35+) - ADX rising NOT required, highest thresholds
+  VERY_STRONG_ADX: 35,
+  
+  // NEW: Near-very-strong ADX tier (33-35) - requires slope not falling sharply
+  NEAR_VERY_STRONG_ADX: 33,
+  NEAR_VERY_STRONG_MIN_SLOPE: -0.3,
+  
+  // ADX must be rising for strong trend mode (only required below VERY_STRONG_ADX)
   REQUIRE_ADX_RISING: true,
   // 4h and 1h must be aligned in same direction
   REQUIRE_HTF_ALIGNMENT: true,
+  
+  // NEW: Price action momentum can override HTF alignment requirement
+  // If price moved 2%+ in trend direction, HTF alignment is less critical
+  PRICE_ACTION_OVERRIDE_ENABLED: true,
+  PRICE_ACTION_MIN_MOVE_PERCENT: 2.0,
+  
   // Relaxed overextension threshold for LONG (default is 110, strong trend allows 120)
   PERCENT_B_THRESHOLD_LONG: 120,
   // Relaxed underextension threshold for SHORT (default is -10, strong trend allows -20)
   PERCENT_B_THRESHOLD_SHORT: -20,
+  
+  // NEW: Very strong trend allows even higher thresholds (130)
+  VERY_STRONG_PERCENT_B_THRESHOLD_LONG: 130,
+  VERY_STRONG_PERCENT_B_THRESHOLD_SHORT: -30,
+  
   // Position size reduction when entering at relaxed threshold (60% = 40% reduction)
   POSITION_SIZE_MULTIPLIER: 0.60,
+  
+  // NEW: Very strong trend mode gets less reduction (70%)
+  VERY_STRONG_POSITION_SIZE_MULTIPLIER: 0.70,
 } as const;
 
 // ============= STRONG TREND HTF BYPASS PARAMETERS =============
