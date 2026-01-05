@@ -1561,24 +1561,33 @@ export const STRONG_TREND_HTF_BYPASS_PARAMS = {
   // Enable HTF gate bypass for very strong trends
   ENABLED: true,
   // Minimum ADX required for bypass (very strong trend)
-  // UPDATED: Lowered from 35 to 30 to catch more strong trend continuations
-  MIN_ADX: 30,
+  // UPDATED: Lowered from 30 to 25 to catch ETHUSDT-like situations (ADX 25.2)
+  MIN_ADX: 25,
   // ADX must be rising (momentum still building)
   // UPDATED: Relaxed - only require not falling sharply (was strict rising)
   REQUIRE_ADX_RISING: false,
   // NEW: Slope threshold - ADX slope must be >= this (not falling sharply)
+  // Positive slope gets priority for bypass even at lower ADX
   MIN_ADX_SLOPE: -0.3,
+  // NEW: Rising slope threshold - if ADX >= 25 AND slope >= this, allow bypass
+  RISING_SLOPE_THRESHOLD: 0.02,
   // Maximum reversal score to allow bypass (no reversal signals)
   // UPDATED: Raised from 40 to 50 to allow more bypasses in strong trends
   MAX_REVERSAL_SCORE: 50,
   // Require all timeframes aligned in same direction
   // UPDATED: Relaxed - allow if 4h is neutral but 1h is strong
   REQUIRE_ALL_TF_ALIGNED: false,
+  // NEW: Relaxed alignment ADX threshold - above this, only require 4h alignment
+  // BTCUSDT had ADX 41.6 but 1h/30m were neutral - this allows bypass
+  RELAXED_ALIGNMENT_MIN_ADX: 35,
   // NEW: Alternative to all TF aligned - if ADX is super strong, bypass anyway
-  SUPER_STRONG_ADX_BYPASS: 55,
+  // UPDATED: Lowered from 55 to 45 - ADX 40-50 is already very strong
+  SUPER_STRONG_ADX_BYPASS: 45,
   // Position size reduction for trend continuation at extreme
   // UPDATED: Increased from 50% to 65% - strong trends deserve more position
   POSITION_SIZE_MULTIPLIER: 0.65,
+  // NEW: Reduced position for borderline cases (ADX 25-30)
+  BORDERLINE_POSITION_SIZE_MULTIPLIER: 0.50,
   // Tighter stop loss multiplier for these entries (0.8x ATR instead of normal)
   STOP_LOSS_MULTIPLIER: 0.8,
   // Earlier break-even activation for protection

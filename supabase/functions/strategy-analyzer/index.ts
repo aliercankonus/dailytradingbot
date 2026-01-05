@@ -2874,12 +2874,23 @@ serve(async (req) => {
         // Allow bypass when trend is very strong and no exhaustion signals
         // Note: adxRisingForBypass already declared above
         const tf30m = trendData.timeframes?.['30m'];
+        
+        // Check 4h alignment for relaxed mode
+        const tf4hDir = stochFilterTrend4h;
+        const tf1hDir = stochFilterTrend1h;
+        const tf30mDir = tf30m?.trend || tf30m?.indicators?.emaSignal || "neutral";
+        
+        const is4hAligned = (() => {
+          if (intendedTradeDirection === "long") {
+            return tf4hDir === "bullish";
+          } else if (intendedTradeDirection === "short") {
+            return tf4hDir === "bearish";
+          }
+          return false;
+        })();
+        
         const allTimeframesAligned = (() => {
           // Check if 4h, 1h, and 30m are all aligned in same direction
-          const tf4hDir = stochFilterTrend4h;
-          const tf1hDir = stochFilterTrend1h;
-          const tf30mDir = tf30m?.trend || tf30m?.indicators?.emaSignal || "neutral";
-          
           if (intendedTradeDirection === "long") {
             return tf4hDir === "bullish" && tf1hDir === "bullish" && tf30mDir === "bullish";
           } else if (intendedTradeDirection === "short") {
@@ -2887,6 +2898,11 @@ serve(async (req) => {
           }
           return false;
         })();
+        
+        // NEW: Relaxed alignment - when ADX is strong (>=35), only require 4h alignment
+        // This addresses BTCUSDT case: ADX 41.6, 4h bullish, but 1h/30m neutral
+        const relaxedAlignmentMinADX = STRONG_TREND_HTF_BYPASS_PARAMS.RELAXED_ALIGNMENT_MIN_ADX ?? 35;
+        const hasRelaxedAlignment = adx >= relaxedAlignmentMinADX && is4hAligned;
         
         // Detect trend exhaustion (actual reversal likely vs just overbought in strong trend)
         const isExhausted = (() => {
@@ -2914,9 +2930,11 @@ serve(async (req) => {
         
         // Get ADX slope for bypass check
         const adxSlopeForBypass = fullAdxResult.adxSlope ?? (smartAdxRising ? 0.5 : -0.5);
+        const risingSlope = adxSlopeForBypass >= (STRONG_TREND_HTF_BYPASS_PARAMS.RISING_SLOPE_THRESHOLD ?? 0.02);
         
         // NEW: Check for parabolic mode (super-strong trends get automatic bypass)
-        const isParabolicMode = adx >= (STRONG_TREND_HTF_BYPASS_PARAMS.SUPER_STRONG_ADX_BYPASS ?? 55) && 
+        // UPDATED: Lowered from 55 to 45 - ADX 40-50 is already very strong
+        const isParabolicMode = adx >= (STRONG_TREND_HTF_BYPASS_PARAMS.SUPER_STRONG_ADX_BYPASS ?? 45) && 
           adxSlopeForBypass >= 0 && 
           !adxExhaustion.isExhausted;
         
@@ -2925,30 +2943,79 @@ serve(async (req) => {
           ? adxSlopeForBypass >= STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX_SLOPE
           : (!STRONG_TREND_HTF_BYPASS_PARAMS.REQUIRE_ADX_RISING || adxRisingForBypass);
         
+        // NEW: Alternative bypass path - 4h aligned + ADX >= MIN + rising slope
+        // This catches cases like ETHUSDT (ADX 25.2 but rising) and BTCUSDT (ADX 41.6, 4h aligned)
+        const alternativeBypassPath = is4hAligned && 
+          adx >= STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX && 
+          risingSlope &&
+          !isExhausted;
+        
+        // Determine alignment status for bypass
+        const alignmentMet = isParabolicMode || 
+          hasRelaxedAlignment || 
+          allTimeframesAligned || 
+          !STRONG_TREND_HTF_BYPASS_PARAMS.REQUIRE_ALL_TF_ALIGNED;
+        
         const canBypassHTFGate = STRONG_TREND_HTF_BYPASS_PARAMS.ENABLED &&
           adx >= STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX &&
           adxSlopeMeetsRequirement &&
           unifiedReversal.score < STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE &&
-          (isParabolicMode || !STRONG_TREND_HTF_BYPASS_PARAMS.REQUIRE_ALL_TF_ALIGNED || allTimeframesAligned) &&
+          (alignmentMet || alternativeBypassPath) &&
           !isExhausted;
+        
+        // Determine position size based on bypass type
+        const getBypassPositionMultiplier = () => {
+          if (isParabolicMode) {
+            // Parabolic mode - strongest confidence
+            return STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
+          } else if (adx >= relaxedAlignmentMinADX && allTimeframesAligned) {
+            // Strong ADX + full alignment - full bypass size
+            return STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
+          } else if (hasRelaxedAlignment) {
+            // Relaxed alignment (4h only) - slightly reduced
+            return STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER * 0.9;
+          } else if (alternativeBypassPath) {
+            // Alternative path (rising slope) - more conservative
+            return STRONG_TREND_HTF_BYPASS_PARAMS.BORDERLINE_POSITION_SIZE_MULTIPLIER ?? 0.50;
+          } else if (adx >= 30) {
+            // ADX 30+ with basic conditions
+            return STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
+          } else {
+            // ADX 25-30 borderline case
+            return STRONG_TREND_HTF_BYPASS_PARAMS.BORDERLINE_POSITION_SIZE_MULTIPLIER ?? 0.50;
+          }
+        };
+        
+        // Log bypass decision details for debugging
+        if (isHTFOverbought || isHTFOversold) {
+          const bypassType = isParabolicMode ? 'PARABOLIC' : 
+            hasRelaxedAlignment ? 'RELAXED_ALIGNMENT' : 
+            alternativeBypassPath ? 'RISING_SLOPE' : 
+            allTimeframesAligned ? 'FULL_ALIGNMENT' : 'BASIC';
+          
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF BYPASS CHECK: type=${bypassType}, ADX=${adx.toFixed(1)}, slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
+          logger.forSymbol(symbol).info(`   → canBypass=${canBypassHTFGate}, parabolic=${isParabolicMode}, relaxedAlign=${hasRelaxedAlignment}, altPath=${alternativeBypassPath}, exhausted=${isExhausted}`);
+        }
         
         // Block SHORT continuation at 4h oversold (bounce is statistically likely)
         if (intendedTradeDirection === "short" && isHTFOversold) {
           if (canBypassHTFGate) {
-            // Allow with reduced position size
+            // Allow with reduced position size - use dynamic multiplier based on bypass type
             strongTrendHTFBypassApplied = true;
-            trendContinuationPositionMultiplier = STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} STRONG TREND HTF BYPASS: Allowing SHORT at 4h oversold`);
-            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} rising=${adxRisingForBypass}, reversal=${unifiedReversal.score}, allTFsAligned=${allTimeframesAligned}, exhausted=${isExhausted}`);
+            trendContinuationPositionMultiplier = getBypassPositionMultiplier();
+            const bypassType = isParabolicMode ? 'PARABOLIC' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} STRONG TREND HTF BYPASS [${bypassType}]: Allowing SHORT at 4h oversold`);
+            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}, exhausted=${isExhausted}`);
             logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
           } else {
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { gate: 'HTF_EXTREME_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking SHORT at 4h oversold (StochRSI K=${stochRsiK4h.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK}, %B=${percentB.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK})`);
 
-            if (!canBypassHTFGate) {
-              logger.forSymbol(symbol).debug(`   Bypass check failed: ADX=${adx.toFixed(1)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX}? rising=${adxRisingForBypass}, reversal=${unifiedReversal.score}<${STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE}?, TFsAligned=${allTimeframesAligned}, exhausted=${isExhausted}`);
-            }
+            // Enhanced debug logging for bypass failure
+            logger.forSymbol(symbol).debug(`   Bypass check: ADX=${adx.toFixed(1)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX}? slope=${adxSlopeForBypass.toFixed(3)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX_SLOPE}? reversal=${unifiedReversal.score}<${STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE}?`);
+            logger.forSymbol(symbol).debug(`   → 4hAligned=${is4hAligned}, relaxedAlign=${hasRelaxedAlignment}, altPath=${alternativeBypassPath}, parabolic=${isParabolicMode}, exhausted=${isExhausted}`);
+            
             await logRejectionWithAI(
               supabase, userId, symbol,
               `IMPROVEMENT 1 - HTF EXTREME GATE: SHORT blocked at 4h oversold (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
@@ -2963,9 +3030,12 @@ serve(async (req) => {
                 },
                 bypassCheck: {
                   adx: adx.toFixed(1),
-                  adxRising: adxRisingForBypass,
+                  adxSlope: adxSlopeForBypass.toFixed(3),
+                  is4hAligned,
+                  hasRelaxedAlignment,
+                  alternativeBypassPath,
+                  isParabolicMode,
                   reversalScore: unifiedReversal.score,
-                  allTimeframesAligned,
                   isExhausted,
                   canBypass: false
                 },
@@ -2982,20 +3052,22 @@ serve(async (req) => {
         // Block LONG continuation at 4h overbought (reversal is statistically likely)
         if (intendedTradeDirection === "long" && isHTFOverbought) {
           if (canBypassHTFGate) {
-            // Allow with reduced position size
+            // Allow with reduced position size - use dynamic multiplier based on bypass type
             strongTrendHTFBypassApplied = true;
-            trendContinuationPositionMultiplier = STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} STRONG TREND HTF BYPASS: Allowing LONG at 4h overbought`);
-            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} rising=${adxRisingForBypass}, reversal=${unifiedReversal.score}, allTFsAligned=${allTimeframesAligned}, exhausted=${isExhausted}`);
+            trendContinuationPositionMultiplier = getBypassPositionMultiplier();
+            const bypassType = isParabolicMode ? 'PARABOLIC' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} STRONG TREND HTF BYPASS [${bypassType}]: Allowing LONG at 4h overbought`);
+            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}, exhausted=${isExhausted}`);
             logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
           } else {
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { gate: 'HTF_EXTREME_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking LONG at 4h overbought (StochRSI K=${stochRsiK4h.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK}, %B=${percentB.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK})`);
 
-            if (!canBypassHTFGate) {
-              logger.forSymbol(symbol).debug(`   Bypass check failed: ADX=${adx.toFixed(1)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX}? rising=${adxRisingForBypass}, reversal=${unifiedReversal.score}<${STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE}?, TFsAligned=${allTimeframesAligned}, exhausted=${isExhausted}`);
-            }
+            // Enhanced debug logging for bypass failure
+            logger.forSymbol(symbol).debug(`   Bypass check: ADX=${adx.toFixed(1)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX}? slope=${adxSlopeForBypass.toFixed(3)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX_SLOPE}? reversal=${unifiedReversal.score}<${STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE}?`);
+            logger.forSymbol(symbol).debug(`   → 4hAligned=${is4hAligned}, relaxedAlign=${hasRelaxedAlignment}, altPath=${alternativeBypassPath}, parabolic=${isParabolicMode}, exhausted=${isExhausted}`);
+            
             await logRejectionWithAI(
               supabase, userId, symbol,
               `IMPROVEMENT 1 - HTF EXTREME GATE: LONG blocked at 4h overbought (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
@@ -3010,9 +3082,12 @@ serve(async (req) => {
                 },
                 bypassCheck: {
                   adx: adx.toFixed(1),
-                  adxRising: adxRisingForBypass,
+                  adxSlope: adxSlopeForBypass.toFixed(3),
+                  is4hAligned,
+                  hasRelaxedAlignment,
+                  alternativeBypassPath,
+                  isParabolicMode,
                   reversalScore: unifiedReversal.score,
-                  allTimeframesAligned,
                   isExhausted,
                   canBypass: false
                 },
