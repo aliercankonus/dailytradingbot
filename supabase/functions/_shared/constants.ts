@@ -388,6 +388,10 @@ export const R_MULTIPLE_TRAILING_PARAMS = {
 // Strong trends get more tolerance for pullbacks (normal retracements)
 // Addresses the BTCUSDT case where 0.03%/min threshold exited too early
 export const DECAY_VELOCITY_TIERS = {
+  // Minimum observation time before evaluating decay velocity
+  // Prevents false positives from brief sub-minute pullbacks
+  MIN_OBSERVATION_MINUTES: 2,
+  
   // Base tier (current behavior - for weak/misaligned trends)
   BASE_EXIT_PER_MINUTE: 0.03,        // 3%/min decay triggers exit
   BASE_MAX_DECAY_MINUTES: 10,        // Max 10 minutes of decay before forced exit
