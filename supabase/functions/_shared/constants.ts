@@ -269,6 +269,10 @@ export const BOLLINGER_TIERED_BYPASS_PARAMS = {
   ABSOLUTE_MAX_PERCENT_B_LONG: 97,  // Hard cap: no LONG above 97
   ABSOLUTE_MIN_PERCENT_B_SHORT: 3,  // Hard cap: no SHORT below 3
   
+  // Extended ceiling for confirmed HTF bypass scenarios (strong trend already validated)
+  HTF_BYPASS_EXTENDED_MAX_PERCENT_B_LONG: 115,  // Allow up to 115% when HTF bypass confirmed
+  HTF_BYPASS_EXTENDED_MIN_PERCENT_B_SHORT: -15, // Allow down to -15% when HTF bypass confirmed
+  
   // ============= TIER 1: Moderate trend (conditional allow %B 90-95) =============
   TIER1: {
     MAX_PERCENT_B_LONG: 95,
