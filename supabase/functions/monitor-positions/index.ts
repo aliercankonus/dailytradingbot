@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore, 
@@ -804,23 +804,61 @@ serve(async (req) => {
         }
       }
       
-      // ============= SMART AITS: DECAY VELOCITY DETECTION =============
+      // ============= SMART AITS: DECAY VELOCITY DETECTION (TIERED) =============
       // Check for rapid profit decay and trigger emergency exit if needed
+      // TIERED: Strong trends get more tolerance for normal pullbacks
       if (userSettings.decayVelocityExitEnabled && newPeakPnl > userSettings.activationPercent && minutesSincePeak > 0) {
         const decayPercent = newPeakPnl - pnlPercent;
         const decayVelocity = decayPercent / minutesSincePeak; // % per minute
         
-        // Emergency exit if decay exceeds threshold (rapid profit loss)
-        if (decayVelocity > EMERGENCY_EXIT_PARAMS.DECAY_VELOCITY_EXIT_PER_MINUTE && pnlPercent > 0) {
-          positionLogger.risk(`SMART AITS: Rapid decay detected ${position.side} - velocity ${(decayVelocity * 100).toFixed(2)}%/min, triggering emergency exit`);
+        // Get trend data for tiered threshold determination
+        const positionAdx = trendDataForPosition?.volatility?.adx || trendDataForPosition?.momentum?.adx || 20;
+        const adxSlope = trendDataForPosition?.volatility?.adxSlope ?? trendDataForPosition?.momentum?.adxSlope ?? 0;
+        const primaryTrend = trendDataForPosition?.primaryTrend || 'ranging';
+        const isAlignedWithPosition = (position.side === 'BUY' && primaryTrend === 'bullish') || 
+                                       (position.side === 'SELL' && primaryTrend === 'bearish');
+        
+        // Determine decay velocity tier based on trend strength
+        let decayTier: 'base' | 'tier1' | 'tier2' | 'tier3' = 'base';
+        let decayThreshold: number = DECAY_VELOCITY_TIERS.BASE_EXIT_PER_MINUTE;
+        let maxDecayMinutes: number = DECAY_VELOCITY_TIERS.BASE_MAX_DECAY_MINUTES;
+        
+        // Only apply strong trend exception if trend aligns with position
+        if (isAlignedWithPosition) {
+          if (positionAdx >= DECAY_VELOCITY_TIERS.TIER3_MIN_ADX && adxSlope >= DECAY_VELOCITY_TIERS.TIER3_MIN_ADX_SLOPE) {
+            decayTier = 'tier3';
+            decayThreshold = DECAY_VELOCITY_TIERS.TIER3_EXIT_PER_MINUTE;
+            maxDecayMinutes = DECAY_VELOCITY_TIERS.TIER3_MAX_DECAY_MINUTES;
+          } else if (positionAdx >= DECAY_VELOCITY_TIERS.TIER2_MIN_ADX && adxSlope >= DECAY_VELOCITY_TIERS.TIER2_MIN_ADX_SLOPE) {
+            decayTier = 'tier2';
+            decayThreshold = DECAY_VELOCITY_TIERS.TIER2_EXIT_PER_MINUTE;
+            maxDecayMinutes = DECAY_VELOCITY_TIERS.TIER2_MAX_DECAY_MINUTES;
+          } else if (positionAdx >= DECAY_VELOCITY_TIERS.TIER1_MIN_ADX && adxSlope >= DECAY_VELOCITY_TIERS.TIER1_MIN_ADX_SLOPE) {
+            decayTier = 'tier1';
+            decayThreshold = DECAY_VELOCITY_TIERS.TIER1_EXIT_PER_MINUTE;
+            maxDecayMinutes = DECAY_VELOCITY_TIERS.TIER1_MAX_DECAY_MINUTES;
+          }
+        }
+        
+        // Safety: Force exit if decay persists beyond tier's max time
+        const forceExitByTime = minutesSincePeak > maxDecayMinutes && decayVelocity > DECAY_VELOCITY_TIERS.FORCE_EXIT_MIN_VELOCITY;
+        
+        // Emergency exit if decay exceeds tier threshold OR time safety triggered
+        if ((decayVelocity > decayThreshold || forceExitByTime) && pnlPercent > 0) {
+          const exitReason = forceExitByTime ? 'smart_aits_prolonged_decay' : 'smart_aits_rapid_decay';
+          positionLogger.risk(`SMART AITS [${decayTier.toUpperCase()}]: ${forceExitByTime ? 'Prolonged' : 'Rapid'} decay detected ${position.side} - velocity ${(decayVelocity * 100).toFixed(2)}%/min (threshold ${(decayThreshold * 100).toFixed(2)}%/min), ADX=${positionAdx.toFixed(1)}, slope=${adxSlope.toFixed(3)}, aligned=${isAlignedWithPosition}`);
+          
           emergencyExits.push({
             symbol: position.symbol,
             side: position.side,
-            reason: `smart_aits_rapid_decay`,
+            reason: exitReason,
             peakPnl: newPeakPnl,
             currentPnl: pnlPercent,
             decayVelocity: decayVelocity * 100,
             minutesSincePeak,
+            decayTier,
+            adx: positionAdx,
+            adxSlope,
           });
           
           // Close position immediately
@@ -836,7 +874,7 @@ serve(async (req) => {
               exit_price: currentPrice,
               realized_pnl: realizedPnl,
               realized_pnl_percent: pnlPercent,
-              close_reason: "smart_aits_rapid_decay",
+              close_reason: exitReason,
             })
             .eq("id", position.id)
             .eq("status", "active");
@@ -848,11 +886,14 @@ serve(async (req) => {
               id: position.id,
               symbol: position.symbol,
               side: position.side,
-              reason: "smart_aits_rapid_decay",
+              reason: exitReason,
               pnlPercent,
             });
           }
           continue; // Skip to next position
+        } else if (decayVelocity > DECAY_VELOCITY_TIERS.BASE_EXIT_PER_MINUTE && decayTier !== 'base') {
+          // Log when decay exceeds base but is allowed by tier exception
+          positionLogger.info(`SMART AITS [${decayTier.toUpperCase()}]: Decay ${(decayVelocity * 100).toFixed(2)}%/min tolerated (threshold ${(decayThreshold * 100).toFixed(2)}%/min) - ADX=${positionAdx.toFixed(1)}, slope=${adxSlope.toFixed(3)}, aligned=${isAlignedWithPosition}, mins=${minutesSincePeak.toFixed(0)}/${maxDecayMinutes}`);
         }
       }
       
