@@ -3424,10 +3424,16 @@ serve(async (req) => {
         let bollingerBypassPositionMultiplier = 1.0;
         
         if (intendedTradeDirection === "long" && percentB > longMaxPercentB) {
-          // Check if bypass is enabled and within bypassable range (up to 97, not above)
+          // Determine the absolute ceiling based on whether HTF bypass was already applied
+          // When HTF bypass is active, we know trend is strong - allow higher %B with reduced size
+          const absoluteMaxPercentB = strongTrendHTFBypassApplied 
+            ? BOLLINGER_TIERED_BYPASS_PARAMS.HTF_BYPASS_EXTENDED_MAX_PERCENT_B_LONG 
+            : BOLLINGER_TIERED_BYPASS_PARAMS.ABSOLUTE_MAX_PERCENT_B_LONG;
+          
+          // Check if bypass is enabled and within bypassable range
           if (BOLLINGER_TIERED_BYPASS_PARAMS.ENABLED && 
               percentB > BOLLINGER_TIERED_BYPASS_PARAMS.BASE_MAX_PERCENT_B_LONG &&
-              percentB <= BOLLINGER_TIERED_BYPASS_PARAMS.ABSOLUTE_MAX_PERCENT_B_LONG) {
+              percentB <= absoluteMaxPercentB) {
             
             // Get DI gap for bypass check (use ADXResult properties)
             const diPlus = fullAdxResult.plusDI ?? 25;
@@ -3475,17 +3481,26 @@ serve(async (req) => {
             );
             
             // Determine tier and thresholds
-            if (tier3Eligible && percentB <= BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.MAX_PERCENT_B_LONG) {
+            // When HTF bypass is active, extend the %B thresholds for each tier
+            const htfExtendedBonus = strongTrendHTFBypassApplied ? 15 : 0; // Allow 15% higher %B
+            const tier3MaxPercentB = BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.MAX_PERCENT_B_LONG + htfExtendedBonus;
+            const tier2MaxPercentB = BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.MAX_PERCENT_B_LONG + htfExtendedBonus;
+            const tier1MaxPercentB = BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MAX_PERCENT_B_LONG + htfExtendedBonus;
+            
+            // Additional position size reduction for extended %B
+            const htfExtendedPositionReduction = (strongTrendHTFBypassApplied && percentB > 97) ? 0.65 : 1.0;
+            
+            if (tier3Eligible && percentB <= tier3MaxPercentB) {
               bollingerBypassTier = 'tier3';
-              bollingerBypassPositionMultiplier = BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.POSITION_SIZE / 100;
+              bollingerBypassPositionMultiplier = (BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.POSITION_SIZE / 100) * htfExtendedPositionReduction;
               bollingerBypassApplied = true;
-            } else if (tier2Eligible && percentB <= BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.MAX_PERCENT_B_LONG) {
+            } else if (tier2Eligible && percentB <= tier2MaxPercentB) {
               bollingerBypassTier = 'tier2';
-              bollingerBypassPositionMultiplier = BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.POSITION_SIZE / 100;
+              bollingerBypassPositionMultiplier = (BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.POSITION_SIZE / 100) * htfExtendedPositionReduction;
               bollingerBypassApplied = true;
-            } else if (tier1Eligible && percentB <= BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MAX_PERCENT_B_LONG) {
+            } else if (tier1Eligible && percentB <= tier1MaxPercentB) {
               bollingerBypassTier = 'tier1';
-              bollingerBypassPositionMultiplier = BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.POSITION_SIZE / 100;
+              bollingerBypassPositionMultiplier = (BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.POSITION_SIZE / 100) * htfExtendedPositionReduction;
               bollingerBypassApplied = true;
             }
             
@@ -3526,9 +3541,10 @@ serve(async (req) => {
             }
             
             if (bollingerBypassApplied) {
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 BOLLINGER TIERED BYPASS [${bollingerBypassTier.toUpperCase()}] - Allowing LONG at %B=${percentB.toFixed(1)}`);
+              const htfExtendedNote = (strongTrendHTFBypassApplied && percentB > 97) ? ' [HTF EXTENDED]' : '';
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 BOLLINGER TIERED BYPASS [${bollingerBypassTier.toUpperCase()}]${htfExtendedNote} - Allowing LONG at %B=${percentB.toFixed(1)}`);
               logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)}, 4h conf=${stochFilterConf4h.toFixed(0)}%`);
-              logger.forSymbol(symbol).info(`   → Position size reduced to ${(bollingerBypassPositionMultiplier * 100).toFixed(0)}% due to elevated %B`);
+              logger.forSymbol(symbol).info(`   → Position size reduced to ${(bollingerBypassPositionMultiplier * 100).toFixed(0)}% due to elevated %B${htfExtendedNote ? ' (extra reduction for extended %B)' : ''}`);
               if (priceActionResultLong) {
                 const confirmedList = Object.entries(priceActionResultLong.confirmations)
                   .filter(([_, v]) => v)
