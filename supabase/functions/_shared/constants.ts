@@ -404,11 +404,18 @@ export const DECAY_VELOCITY_TIERS = {
   TIER2_EXIT_PER_MINUTE: 0.07,       // 7%/min tolerance
   TIER2_MAX_DECAY_MINUTES: 20,       // 20 min cap
   
-  // Tier 3: Very strong trend (ADX >= 35)
+  // Tier 3: Very strong trend (ADX 35-40)
   TIER3_MIN_ADX: 35,
   TIER3_MIN_ADX_SLOPE: 0.03,         // Clearly rising
   TIER3_EXIT_PER_MINUTE: 0.10,       // 10%/min tolerance
   TIER3_MAX_DECAY_MINUTES: 30,       // 30 min cap
+  
+  // Tier 4: Extremely strong trend (ADX >= 40)
+  // Maximum tolerance for very strong volatility pullbacks
+  TIER4_MIN_ADX: 40,
+  TIER4_MIN_ADX_SLOPE: 0.02,         // Rising (relaxed from 0.03)
+  TIER4_EXIT_PER_MINUTE: 0.15,       // 15%/min tolerance - handles strong trend volatility
+  TIER4_MAX_DECAY_MINUTES: 45,       // 45 min cap for extended moves
   
   // Force exit threshold: minimum decay velocity for time-based exit
   FORCE_EXIT_MIN_VELOCITY: 0.02,     // 2%/min - any decay above this can trigger time cap

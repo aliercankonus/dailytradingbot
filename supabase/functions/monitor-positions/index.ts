@@ -819,13 +819,17 @@ serve(async (req) => {
                                        (position.side === 'SELL' && primaryTrend === 'bearish');
         
         // Determine decay velocity tier based on trend strength
-        let decayTier: 'base' | 'tier1' | 'tier2' | 'tier3' = 'base';
+        let decayTier: 'base' | 'tier1' | 'tier2' | 'tier3' | 'tier4' = 'base';
         let decayThreshold: number = DECAY_VELOCITY_TIERS.BASE_EXIT_PER_MINUTE;
         let maxDecayMinutes: number = DECAY_VELOCITY_TIERS.BASE_MAX_DECAY_MINUTES;
         
         // Only apply strong trend exception if trend aligns with position
         if (isAlignedWithPosition) {
-          if (positionAdx >= DECAY_VELOCITY_TIERS.TIER3_MIN_ADX && adxSlope >= DECAY_VELOCITY_TIERS.TIER3_MIN_ADX_SLOPE) {
+          if (positionAdx >= DECAY_VELOCITY_TIERS.TIER4_MIN_ADX && adxSlope >= DECAY_VELOCITY_TIERS.TIER4_MIN_ADX_SLOPE) {
+            decayTier = 'tier4';
+            decayThreshold = DECAY_VELOCITY_TIERS.TIER4_EXIT_PER_MINUTE;
+            maxDecayMinutes = DECAY_VELOCITY_TIERS.TIER4_MAX_DECAY_MINUTES;
+          } else if (positionAdx >= DECAY_VELOCITY_TIERS.TIER3_MIN_ADX && adxSlope >= DECAY_VELOCITY_TIERS.TIER3_MIN_ADX_SLOPE) {
             decayTier = 'tier3';
             decayThreshold = DECAY_VELOCITY_TIERS.TIER3_EXIT_PER_MINUTE;
             maxDecayMinutes = DECAY_VELOCITY_TIERS.TIER3_MAX_DECAY_MINUTES;
