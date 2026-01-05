@@ -6175,22 +6175,30 @@ serve(async (req) => {
         // ============= PLAN FIX A: CONFIDENCE THRESHOLD ENFORCEMENT =============
         // Hard reject signals below min_confidence_threshold from risk_parameters
         // This prevents low-confidence entries like the BNBUSDT 53% case
-        const minConfidenceThreshold = riskParams.min_confidence_threshold ?? 60;
+        // RELAXED: When HTF bypass is applied, use a lower threshold since trend strength is already confirmed
+        const baseConfidenceThreshold = riskParams.min_confidence_threshold ?? 60;
+        const htfBypassConfidenceRelaxation = strongTrendHTFBypassApplied ? 5 : 0; // Relax by 5% when HTF bypassed
+        const minConfidenceThreshold = baseConfidenceThreshold - htfBypassConfidenceRelaxation;
         if (confidence < minConfidenceThreshold) {
           rejectedByHardGates++;
-          perSymbolGateAttribution.set(symbol, { gate: 'CONFIDENCE_BELOW_THRESHOLD', details: `${confidence}% < ${minConfidenceThreshold}%` });
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - Confidence ${confidence}% below threshold ${minConfidenceThreshold}% - "${strategy.name}" rejected`);
+          const htfBypassNote = strongTrendHTFBypassApplied ? ` [HTF bypassed, threshold relaxed from ${baseConfidenceThreshold}% to ${minConfidenceThreshold}%]` : '';
+          perSymbolGateAttribution.set(symbol, { gate: 'CONFIDENCE_BELOW_THRESHOLD', details: `${confidence}% < ${minConfidenceThreshold}%${htfBypassNote}` });
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - Confidence ${confidence}% below threshold ${minConfidenceThreshold}%${htfBypassNote} - "${strategy.name}" rejected`);
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `PLAN FIX A - CONFIDENCE BLOCK: ${confidence}% < ${minConfidenceThreshold}% threshold - "${strategy.name}" blocked`,
+            `PLAN FIX A - CONFIDENCE BLOCK: ${confidence}% < ${minConfidenceThreshold}% threshold${htfBypassNote} - "${strategy.name}" blocked`,
             { 
               gate: "CONFIDENCE_BELOW_THRESHOLD",
               confidence,
               threshold: minConfidenceThreshold,
+              baseThreshold: baseConfidenceThreshold,
+              htfBypassApplied: strongTrendHTFBypassApplied,
               strategyName: strategy.name,
               signalType,
               qualityScore: best.score,
-              message: "Signal confidence too low for reliable entry"
+              message: strongTrendHTFBypassApplied 
+                ? "Signal confidence still too low even with HTF bypass relaxation" 
+                : "Signal confidence too low for reliable entry"
             },
             trendData,
             riskParams.ai_analysis_enabled !== false,
