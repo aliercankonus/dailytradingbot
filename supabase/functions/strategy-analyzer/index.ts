@@ -6172,7 +6172,14 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🚀 TIERED BYPASS [${bypassTier.toUpperCase()}] entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (extreme StochRSI)`);
         }
         
-        // Step 14: Apply Strong ADX Override position reduction (65% when ADX > 45)
+        // Step 14: Apply Bollinger tiered bypass position reduction
+        // Entering at high %B (90-97) requires reduced position size even with bypass
+        if (bollingerBypassApplied && bollingerBypassPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= bollingerBypassPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🎯 BOLLINGER BYPASS [${bollingerBypassTier.toUpperCase()}] entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (high %B)`);
+        }
+        
+        // Step 15: Apply Strong ADX Override position reduction (65% when ADX > 45)
         // Entries via Strong ADX Override with high ADX get reduced position size
         if (strongAdxOverrideApplied && strongAdxPositionMultiplier < 1.0) {
           positionSizeMultiplier *= strongAdxPositionMultiplier;
