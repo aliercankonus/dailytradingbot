@@ -76,13 +76,16 @@ import {
   detectContinuationCandle,
   // NEW: Behavioral ADX exhaustion detection
   detectADXExhaustion,
+  // NEW: Price action confirmation for Bollinger bypass
+  checkBollingerBypassPriceAction,
   type MomentumScoreResult,
   type PullbackResult,
   type EntryQualityResult,
   type EntryConfirmationResult,
   type MarketRegimeResult as SmartRegimeResult,
   type ContinuationModeResult,
-  type ADXExhaustionResult
+  type ADXExhaustionResult,
+  type BollingerPriceActionResult
 } from "../_shared/smart-momentum.ts";
 import { calculateRSIArray, calculateATR, calculateADXWithDirection, type ADXResult } from "../_shared/indicators.ts";
 import { 
@@ -3203,10 +3206,53 @@ serve(async (req) => {
               bollingerBypassAppliedShort = true;
             }
             
+            // ============= NEW: PRICE ACTION CONFIRMATION FOR SHORT BYPASS =============
+            // At least ONE confirmation must pass to prevent chasing single-candle expansions
+            let priceActionConfirmedShort = false;
+            let priceActionResultShort: BollingerPriceActionResult | null = null;
+            
+            if (bollingerBypassAppliedShort && BOLLINGER_TIERED_BYPASS_PARAMS.REQUIRE_PRICE_ACTION_CONFIRMATION) {
+              priceActionResultShort = checkBollingerBypassPriceAction(
+                klineData,
+                "short",
+                smartPullback?.pullbackDepth ?? 0,
+                currentATR,
+                {
+                  shallowPullbackMaxDepth: BOLLINGER_TIERED_BYPASS_PARAMS.SHALLOW_PULLBACK_MAX_DEPTH,
+                  structureLookbackBars: BOLLINGER_TIERED_BYPASS_PARAMS.STRUCTURE_LOOKBACK_BARS,
+                  consolidationMaxCandleAtr: BOLLINGER_TIERED_BYPASS_PARAMS.CONSOLIDATION_MAX_CANDLE_ATR,
+                  consolidationLookbackBars: BOLLINGER_TIERED_BYPASS_PARAMS.CONSOLIDATION_LOOKBACK_BARS,
+                  consolidationCompressionFactor: BOLLINGER_TIERED_BYPASS_PARAMS.CONSOLIDATION_COMPRESSION_FACTOR,
+                  wickRejectionLookbackBars: BOLLINGER_TIERED_BYPASS_PARAMS.WICK_REJECTION_LOOKBACK_BARS,
+                  wickRejectionMinCount: BOLLINGER_TIERED_BYPASS_PARAMS.WICK_REJECTION_MIN_COUNT,
+                  wickRejectionWickPercent: BOLLINGER_TIERED_BYPASS_PARAMS.WICK_REJECTION_WICK_PERCENT
+                }
+              );
+              
+              priceActionConfirmedShort = priceActionResultShort.anyConfirmationPassed;
+              
+              if (!priceActionConfirmedShort) {
+                // Price action not confirmed - revoke bypass
+                bollingerBypassAppliedShort = false;
+                bollingerBypassTierShort = 'none';
+                bollingerBypassPositionMultiplierShort = 1.0;
+                
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER BYPASS REVOKED (SHORT) - No price action confirmation`);
+                logger.forSymbol(symbol).info(`   → ${priceActionResultShort.reasons.join(' | ')}`);
+              }
+            }
+            
             if (bollingerBypassAppliedShort) {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 BOLLINGER TIERED BYPASS [${bollingerBypassTierShort.toUpperCase()}] - Allowing SHORT at %B=${percentB.toFixed(1)}`);
               logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)}, DI->${diMinus.toFixed(1)} > DI+=${diPlus.toFixed(1)}`);
               logger.forSymbol(symbol).info(`   → Position size reduced to ${(bollingerBypassPositionMultiplierShort * 100).toFixed(0)}% due to low %B`);
+              if (priceActionResultShort) {
+                const confirmedList = Object.entries(priceActionResultShort.confirmations)
+                  .filter(([_, v]) => v)
+                  .map(([k, _]) => k)
+                  .join(', ');
+                logger.forSymbol(symbol).info(`   → Price action confirmed: ${confirmedList || 'none'}`);
+              }
             } else {
               // Log why bypass failed
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER BYPASS FAILED for SHORT at %B=${percentB.toFixed(1)}`);
@@ -3350,10 +3396,53 @@ serve(async (req) => {
               bollingerBypassApplied = true;
             }
             
+            // ============= NEW: PRICE ACTION CONFIRMATION FOR LONG BYPASS =============
+            // At least ONE confirmation must pass to prevent chasing single-candle expansions
+            let priceActionConfirmedLong = false;
+            let priceActionResultLong: BollingerPriceActionResult | null = null;
+            
+            if (bollingerBypassApplied && BOLLINGER_TIERED_BYPASS_PARAMS.REQUIRE_PRICE_ACTION_CONFIRMATION) {
+              priceActionResultLong = checkBollingerBypassPriceAction(
+                klineData,
+                "long",
+                smartPullback?.pullbackDepth ?? 0,
+                currentATR,
+                {
+                  shallowPullbackMaxDepth: BOLLINGER_TIERED_BYPASS_PARAMS.SHALLOW_PULLBACK_MAX_DEPTH,
+                  structureLookbackBars: BOLLINGER_TIERED_BYPASS_PARAMS.STRUCTURE_LOOKBACK_BARS,
+                  consolidationMaxCandleAtr: BOLLINGER_TIERED_BYPASS_PARAMS.CONSOLIDATION_MAX_CANDLE_ATR,
+                  consolidationLookbackBars: BOLLINGER_TIERED_BYPASS_PARAMS.CONSOLIDATION_LOOKBACK_BARS,
+                  consolidationCompressionFactor: BOLLINGER_TIERED_BYPASS_PARAMS.CONSOLIDATION_COMPRESSION_FACTOR,
+                  wickRejectionLookbackBars: BOLLINGER_TIERED_BYPASS_PARAMS.WICK_REJECTION_LOOKBACK_BARS,
+                  wickRejectionMinCount: BOLLINGER_TIERED_BYPASS_PARAMS.WICK_REJECTION_MIN_COUNT,
+                  wickRejectionWickPercent: BOLLINGER_TIERED_BYPASS_PARAMS.WICK_REJECTION_WICK_PERCENT
+                }
+              );
+              
+              priceActionConfirmedLong = priceActionResultLong.anyConfirmationPassed;
+              
+              if (!priceActionConfirmedLong) {
+                // Price action not confirmed - revoke bypass
+                bollingerBypassApplied = false;
+                bollingerBypassTier = 'none';
+                bollingerBypassPositionMultiplier = 1.0;
+                
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER BYPASS REVOKED (LONG) - No price action confirmation`);
+                logger.forSymbol(symbol).info(`   → ${priceActionResultLong.reasons.join(' | ')}`);
+              }
+            }
+            
             if (bollingerBypassApplied) {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 BOLLINGER TIERED BYPASS [${bollingerBypassTier.toUpperCase()}] - Allowing LONG at %B=${percentB.toFixed(1)}`);
               logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)}, 4h conf=${stochFilterConf4h.toFixed(0)}%`);
               logger.forSymbol(symbol).info(`   → Position size reduced to ${(bollingerBypassPositionMultiplier * 100).toFixed(0)}% due to elevated %B`);
+              if (priceActionResultLong) {
+                const confirmedList = Object.entries(priceActionResultLong.confirmations)
+                  .filter(([_, v]) => v)
+                  .map(([k, _]) => k)
+                  .join(', ');
+                logger.forSymbol(symbol).info(`   → Price action confirmed: ${confirmedList || 'none'}`);
+              }
             } else {
               // Log why bypass failed
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER BYPASS FAILED at %B=${percentB.toFixed(1)}`);

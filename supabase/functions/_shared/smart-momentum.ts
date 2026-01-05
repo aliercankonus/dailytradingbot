@@ -1102,6 +1102,195 @@ export function findSwingPoints(
   };
 }
 
+// ============= BOLLINGER BYPASS PRICE ACTION CONFIRMATION =============
+// Validates price action before allowing Bollinger bypass entries
+// At least ONE of the confirmations must pass to prevent chasing single-candle expansions
+export interface BollingerPriceActionResult {
+  anyConfirmationPassed: boolean;
+  confirmations: {
+    shallowPullback: boolean;
+    structureIntact: boolean;
+    consolidationBreakout: boolean;
+    noWickRejection: boolean;
+  };
+  details: {
+    pullbackDepth: number;
+    hasHigherLows: boolean;
+    hasLowerHighs: boolean;
+    isConsolidating: boolean;
+    wickRejectionCount: number;
+  };
+  reasons: string[];
+}
+
+export function checkBollingerBypassPriceAction(
+  klines: any[],
+  direction: "long" | "short",
+  pullbackDepth: number,
+  currentATR: number,
+  params: {
+    shallowPullbackMaxDepth: number;
+    structureLookbackBars: number;
+    consolidationMaxCandleAtr: number;
+    consolidationLookbackBars: number;
+    consolidationCompressionFactor: number;
+    wickRejectionLookbackBars: number;
+    wickRejectionMinCount: number;
+    wickRejectionWickPercent: number;
+  }
+): BollingerPriceActionResult {
+  const reasons: string[] = [];
+  const confirmations = {
+    shallowPullback: false,
+    structureIntact: false,
+    consolidationBreakout: false,
+    noWickRejection: false
+  };
+  const details = {
+    pullbackDepth: pullbackDepth,
+    hasHigherLows: false,
+    hasLowerHighs: false,
+    isConsolidating: false,
+    wickRejectionCount: 0
+  };
+  
+  if (klines.length < 10) {
+    return {
+      anyConfirmationPassed: false,
+      confirmations,
+      details,
+      reasons: ["Insufficient data for price action analysis"]
+    };
+  }
+  
+  // 1. SHALLOW PULLBACK CHECK (≤ 38.2% Fib retracement)
+  // A shallow pullback means we're not chasing an overextended move
+  if (pullbackDepth > 0 && pullbackDepth <= params.shallowPullbackMaxDepth) {
+    confirmations.shallowPullback = true;
+    reasons.push(`✓ Shallow pullback: ${pullbackDepth.toFixed(1)}% ≤ ${params.shallowPullbackMaxDepth}%`);
+  } else if (pullbackDepth > params.shallowPullbackMaxDepth) {
+    reasons.push(`✗ Deep pullback: ${pullbackDepth.toFixed(1)}% > ${params.shallowPullbackMaxDepth}%`);
+  } else {
+    reasons.push(`✗ No pullback detected`);
+  }
+  
+  // 2. TREND STRUCTURE CHECK (Higher-lows for long, Lower-highs for short)
+  const lookback = params.structureLookbackBars;
+  if (klines.length >= lookback) {
+    const recent = klines.slice(-lookback);
+    const prevHalf = recent.slice(0, Math.floor(lookback / 2));
+    const currHalf = recent.slice(Math.floor(lookback / 2));
+    
+    // Find highs and lows for each half
+    const prevHigh = Math.max(...prevHalf.map(k => parseFloat(k[2])));
+    const currHigh = Math.max(...currHalf.map(k => parseFloat(k[2])));
+    const prevLow = Math.min(...prevHalf.map(k => parseFloat(k[3])));
+    const currLow = Math.min(...currHalf.map(k => parseFloat(k[3])));
+    
+    details.hasHigherLows = currLow > prevLow;
+    details.hasLowerHighs = currHigh < prevHigh;
+    
+    if (direction === "long" && currHigh >= prevHigh && currLow > prevLow) {
+      confirmations.structureIntact = true;
+      reasons.push(`✓ Bullish structure: HH/HL intact`);
+    } else if (direction === "short" && currLow <= prevLow && currHigh < prevHigh) {
+      confirmations.structureIntact = true;
+      reasons.push(`✓ Bearish structure: LL/LH intact`);
+    } else if (direction === "long") {
+      reasons.push(`✗ Bullish structure broken: HL=${details.hasHigherLows}`);
+    } else {
+      reasons.push(`✗ Bearish structure broken: LH=${details.hasLowerHighs}`);
+    }
+  }
+  
+  // 3. CONSOLIDATION/FLAG CHECK (Low volatility compression before breakout)
+  const consolidationBars = Math.min(params.consolidationLookbackBars, klines.length - 1);
+  if (consolidationBars >= 2 && currentATR > 0) {
+    const recentCandles = klines.slice(-consolidationBars - 1, -1); // Exclude current candle
+    const currentCandle = klines[klines.length - 1];
+    
+    const currentRange = Math.abs(parseFloat(currentCandle[2]) - parseFloat(currentCandle[3]));
+    const currentRangeAtr = currentRange / currentATR;
+    
+    // Check if recent candles show compression
+    let compressionCount = 0;
+    const avgRange = recentCandles.reduce((sum, k) => {
+      return sum + Math.abs(parseFloat(k[2]) - parseFloat(k[3]));
+    }, 0) / recentCandles.length;
+    
+    for (const candle of recentCandles) {
+      const range = Math.abs(parseFloat(candle[2]) - parseFloat(candle[3]));
+      if (range <= avgRange * params.consolidationCompressionFactor) {
+        compressionCount++;
+      }
+    }
+    
+    details.isConsolidating = currentRangeAtr <= params.consolidationMaxCandleAtr && 
+                               compressionCount >= consolidationBars / 2;
+    
+    if (details.isConsolidating) {
+      confirmations.consolidationBreakout = true;
+      reasons.push(`✓ Consolidation detected: candle ${currentRangeAtr.toFixed(2)}x ATR, ${compressionCount}/${consolidationBars} compressed`);
+    } else {
+      reasons.push(`✗ No consolidation: candle ${currentRangeAtr.toFixed(2)}x ATR (max ${params.consolidationMaxCandleAtr})`);
+    }
+  }
+  
+  // 4. WICK REJECTION CLUSTER CHECK
+  // For LONG: upper wicks should NOT dominate (sellers rejecting at highs)
+  // For SHORT: lower wicks should NOT dominate (buyers rejecting at lows)
+  const wickLookback = Math.min(params.wickRejectionLookbackBars, klines.length);
+  let rejectionWickCount = 0;
+  
+  for (let i = klines.length - wickLookback; i < klines.length; i++) {
+    if (i < 0) continue;
+    const candle = klines[i];
+    const open = parseFloat(candle[1]);
+    const high = parseFloat(candle[2]);
+    const low = parseFloat(candle[3]);
+    const close = parseFloat(candle[4]);
+    
+    const candleRange = high - low;
+    if (candleRange <= 0) continue;
+    
+    const body = Math.abs(close - open);
+    const upperWick = high - Math.max(open, close);
+    const lowerWick = Math.min(open, close) - low;
+    
+    const upperWickPercent = (upperWick / candleRange) * 100;
+    const lowerWickPercent = (lowerWick / candleRange) * 100;
+    
+    if (direction === "long" && upperWickPercent > params.wickRejectionWickPercent) {
+      rejectionWickCount++;
+    } else if (direction === "short" && lowerWickPercent > params.wickRejectionWickPercent) {
+      rejectionWickCount++;
+    }
+  }
+  
+  details.wickRejectionCount = rejectionWickCount;
+  
+  // No wick rejection cluster = confirmation passes
+  if (rejectionWickCount < params.wickRejectionMinCount) {
+    confirmations.noWickRejection = true;
+    reasons.push(`✓ No wick rejection cluster: ${rejectionWickCount}/${wickLookback} rejection wicks`);
+  } else {
+    reasons.push(`✗ Wick rejection cluster: ${rejectionWickCount}/${wickLookback} candles show ${direction === "long" ? "upper" : "lower"} rejection`);
+  }
+  
+  // ANY confirmation passing = allow bypass
+  const anyConfirmationPassed = confirmations.shallowPullback || 
+                                 confirmations.structureIntact || 
+                                 confirmations.consolidationBreakout || 
+                                 confirmations.noWickRejection;
+  
+  return {
+    anyConfirmationPassed,
+    confirmations,
+    details,
+    reasons
+  };
+}
+
 // ============= PHASE 3: CONTEXT-AWARE STOP LOSS CALCULATION =============
 export interface ContextAwareStopResult {
   stopLoss: number;
