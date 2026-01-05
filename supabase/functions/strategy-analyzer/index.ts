@@ -52,6 +52,8 @@ import {
   // NEW: Strong ADX Override and Regime-Aware Momentum
   STRONG_ADX_OVERRIDE_PARAMS,
   REGIME_AWARE_MOMENTUM_PARAMS,
+  // NEW: Bollinger tiered bypass for strong trend re-entries
+  BOLLINGER_TIERED_BYPASS_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -3185,41 +3187,132 @@ serve(async (req) => {
           longMaxPercentB = BOLLINGER_ENTRY_GATES.LONG_MAX_PERCENT_B; // 65
         }
         
+        // ============= BOLLINGER TIERED BYPASS FOR STRONG TRENDS =============
+        // Allows LONG entries at %B 90-97 when trend is confirmed strong
+        // Similar to StochRSI tiered bypass - graduated access based on ADX/DI
+        let bollingerBypassApplied = false;
+        let bollingerBypassTier: 'none' | 'tier1' | 'tier2' | 'tier3' = 'none';
+        let bollingerBypassPositionMultiplier = 1.0;
+        
         if (intendedTradeDirection === "long" && percentB > longMaxPercentB) {
-          rejectedByHardGates++;
-          const trendContext = isStrongBullishTrend ? " (strong bullish trend)" : 
-                               isBullishTrendConfirmed ? " (bullish trend)" :
-                               isInSqueeze4h ? (isRangingMarket ? " (ranging squeeze)" : " (squeeze)") : "";
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER POSITION FILTER - Blocking LONG at %B=${percentB.toFixed(1)} > ${longMaxPercentB}${trendContext}`);
-          await logRejectionWithAI(
-            supabase, userId, symbol,
-            `IMPROVEMENT 2 - BOLLINGER GATE: LONG blocked at %B=${percentB.toFixed(1)} > ${longMaxPercentB}${trendContext}`,
-            { 
-              gate: "BOLLINGER_POSITION_FILTER_LONG",
-              direction: "long",
-              percentB: percentB.toFixed(1),
-              requiredPercentB: longMaxPercentB,
-              isInSqueeze4h,
-              isRangingMarket,
-              isBullishTrendConfirmed,
-              isStrongBullishTrend,
-              stochFilterTrend4h,
-              stochFilterConf4h: stochFilterConf4h.toFixed(1),
-              adx: adx.toFixed(1),
-              message: "Longs at high %B blocked - no bullish trend confirmation"
-            },
-            trendData,
-            false,
-            earlyOrderFlowAnalysis
-          );
-          continue;
+          // Check if bypass is enabled and within bypassable range (up to 97, not above)
+          if (BOLLINGER_TIERED_BYPASS_PARAMS.ENABLED && 
+              percentB > BOLLINGER_TIERED_BYPASS_PARAMS.BASE_MAX_PERCENT_B_LONG &&
+              percentB <= BOLLINGER_TIERED_BYPASS_PARAMS.ABSOLUTE_MAX_PERCENT_B_LONG) {
+            
+            // Get DI gap for bypass check (use ADXResult properties)
+            const diPlus = fullAdxResult.plusDI ?? 25;
+            const diMinus = fullAdxResult.minusDI ?? 25;
+            const diGap = fullAdxResult.diGap ?? Math.abs(diPlus - diMinus);
+            const diAligned = (derivedDirection === "long" && diPlus > diMinus) ||
+                              (derivedDirection === "short" && diMinus > diPlus);
+            
+            // Check exhaustion (must NOT be exhausted)
+            const isExhausted = adxExhaustion?.isExhausted === true;
+            const isContinuation = adxExhaustion?.isContinuation === true;
+            
+            // HTF alignment check
+            const htf4hAlignedForBypass = stochFilterTrend4h === "bullish" && 
+                                           stochFilterConf4h >= BOLLINGER_TIERED_BYPASS_PARAMS.MIN_HTF_4H_CONFIDENCE;
+            
+            // Determine eligible tier (check from highest to lowest)
+            const tier3Eligible = (
+              adx >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.MIN_ADX &&
+              adxSlope >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.MIN_ADX_SLOPE &&
+              diGap >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.MIN_DI_GAP &&
+              diAligned &&
+              !isExhausted &&
+              htf4hAlignedForBypass
+            );
+            
+            const tier2Eligible = (
+              adx >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.MIN_ADX &&
+              adxSlope >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.MIN_ADX_SLOPE &&
+              diGap >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.MIN_DI_GAP &&
+              diAligned &&
+              !isExhausted &&
+              htf4hAlignedForBypass &&
+              (isContinuation || !BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.REQUIRE_CONTINUATION)
+            );
+            
+            const tier1Eligible = (
+              adx >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_ADX &&
+              adxSlope >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_ADX_SLOPE &&
+              diGap >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_DI_GAP &&
+              diAligned &&
+              !isExhausted &&
+              htf4hAlignedForBypass &&
+              (isContinuation || !BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.REQUIRE_CONTINUATION)
+            );
+            
+            // Determine tier and thresholds
+            if (tier3Eligible && percentB <= BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.MAX_PERCENT_B_LONG) {
+              bollingerBypassTier = 'tier3';
+              bollingerBypassPositionMultiplier = BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.POSITION_SIZE / 100;
+              bollingerBypassApplied = true;
+            } else if (tier2Eligible && percentB <= BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.MAX_PERCENT_B_LONG) {
+              bollingerBypassTier = 'tier2';
+              bollingerBypassPositionMultiplier = BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.POSITION_SIZE / 100;
+              bollingerBypassApplied = true;
+            } else if (tier1Eligible && percentB <= BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MAX_PERCENT_B_LONG) {
+              bollingerBypassTier = 'tier1';
+              bollingerBypassPositionMultiplier = BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.POSITION_SIZE / 100;
+              bollingerBypassApplied = true;
+            }
+            
+            if (bollingerBypassApplied) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 BOLLINGER TIERED BYPASS [${bollingerBypassTier.toUpperCase()}] - Allowing LONG at %B=${percentB.toFixed(1)}`);
+              logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)}, 4h conf=${stochFilterConf4h.toFixed(0)}%`);
+              logger.forSymbol(symbol).info(`   → Position size reduced to ${(bollingerBypassPositionMultiplier * 100).toFixed(0)}% due to elevated %B`);
+            } else {
+              // Log why bypass failed
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER BYPASS FAILED at %B=${percentB.toFixed(1)}`);
+              logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)} (tier1>=${BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_ADX}), slope=${adxSlope.toFixed(2)} (tier1>=${BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_ADX_SLOPE})`);
+              logger.forSymbol(symbol).info(`   → DI gap=${diGap.toFixed(1)} (tier1>=${BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_DI_GAP}), exhausted=${isExhausted}, continuation=${isContinuation}`);
+              logger.forSymbol(symbol).info(`   → 4h aligned=${htf4hAlignedForBypass} (conf=${stochFilterConf4h.toFixed(0)}%, trend=${stochFilterTrend4h})`);
+            }
+          }
+          
+          // If bypass not applied, block the entry
+          if (!bollingerBypassApplied) {
+            rejectedByHardGates++;
+            const trendContext = isStrongBullishTrend ? " (strong bullish trend)" : 
+                                 isBullishTrendConfirmed ? " (bullish trend)" :
+                                 isInSqueeze4h ? (isRangingMarket ? " (ranging squeeze)" : " (squeeze)") : "";
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER POSITION FILTER - Blocking LONG at %B=${percentB.toFixed(1)} > ${longMaxPercentB}${trendContext}`);
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `IMPROVEMENT 2 - BOLLINGER GATE: LONG blocked at %B=${percentB.toFixed(1)} > ${longMaxPercentB}${trendContext}`,
+              { 
+                gate: "BOLLINGER_POSITION_FILTER_LONG",
+                direction: "long",
+                percentB: percentB.toFixed(1),
+                requiredPercentB: longMaxPercentB,
+                isInSqueeze4h,
+                isRangingMarket,
+                isBullishTrendConfirmed,
+                isStrongBullishTrend,
+                stochFilterTrend4h,
+                stochFilterConf4h: stochFilterConf4h.toFixed(1),
+                adx: adx.toFixed(1),
+                message: "Longs at high %B blocked - no bullish trend confirmation"
+              },
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
         }
         
-        // Log if trend context allowed a LONG that would otherwise be blocked
+        // Log if trend context or bypass allowed a LONG that would otherwise be blocked
         if (intendedTradeDirection === "long" && 
             percentB > BOLLINGER_ENTRY_GATES.LONG_MAX_PERCENT_B && 
-            (isBullishTrendConfirmed || isStrongBullishTrend)) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} TREND CONTEXT RELAXATION: Allowing LONG at %B=${percentB.toFixed(1)} (4h bullish ${stochFilterConf4h.toFixed(0)}%, ADX=${adx.toFixed(1)})`);
+            (isBullishTrendConfirmed || isStrongBullishTrend || bollingerBypassApplied)) {
+          const relaxationReason = bollingerBypassApplied 
+            ? `tiered bypass ${bollingerBypassTier} (${(bollingerBypassPositionMultiplier * 100).toFixed(0)}% size)`
+            : `trend confirmation (4h ${stochFilterConf4h.toFixed(0)}%)`;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} TREND CONTEXT RELAXATION: Allowing LONG at %B=${percentB.toFixed(1)} via ${relaxationReason}, ADX=${adx.toFixed(1)}`);
         }
         
         // ============= IMPROVEMENT 3: SQUEEZE CONTEXT ARBITRATION =============
