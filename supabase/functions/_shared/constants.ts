@@ -302,7 +302,7 @@ export const BOLLINGER_TIERED_BYPASS_PARAMS = {
     REQUIRE_CONTINUATION: false,  // Can be initial entry at tier 3
   },
   
-  // ============= SAFETY GATES (All must pass) =============
+// ============= SAFETY GATES (All must pass) =============
   // Exhaustion check - block if exhausted
   REQUIRE_NO_EXHAUSTION: true,
   
@@ -312,6 +312,30 @@ export const BOLLINGER_TIERED_BYPASS_PARAMS = {
   
   // Entry type detection
   IS_CONTINUATION_LOOKBACK_MINUTES: 240,  // 4 hours - if closed position in last 4h, it's re-entry
+  
+  // ============= PRICE ACTION CONFIRMATION (At least ONE must pass) =============
+  // Prevents chasing single-candle expansions at extreme %B
+  REQUIRE_PRICE_ACTION_CONFIRMATION: true,
+  
+  // 1. Shallow pullback - must be ≤ 38.2% Fib retracement (not chasing overextended move)
+  SHALLOW_PULLBACK_MAX_DEPTH: 38.2,
+  
+  // 2. Higher-low/Lower-high structure - trend structure must be intact
+  //    Checked via detectHigherHighLow / detectLowerLowHigh
+  STRUCTURE_LOOKBACK_BARS: 10,
+  
+  // 3. Consolidation/Flag detection - low volatility before breakout
+  //    Requires current candle range < ATR * multiplier AND recent candles compacting
+  CONSOLIDATION_MAX_CANDLE_ATR: 0.6,    // Current candle must be < 0.6x ATR
+  CONSOLIDATION_LOOKBACK_BARS: 4,       // Check last 4 candles for compression
+  CONSOLIDATION_COMPRESSION_FACTOR: 0.8, // Each candle range should be ≤ 80% of average
+  
+  // 4. Wick rejection cluster detection - blocks if too many wick rejections near band
+  //    Long entries blocked if upper wicks > 50% of candle range on 3+ of last 5 candles
+  //    Short entries blocked if lower wicks > 50% of candle range on 3+ of last 5 candles
+  WICK_REJECTION_LOOKBACK_BARS: 5,
+  WICK_REJECTION_MIN_COUNT: 3,          // Min candles with rejection wicks
+  WICK_REJECTION_WICK_PERCENT: 50,      // Wick must be > 50% of candle range
 } as const;
 
 // ============= TREND ACCELERATION PARAMETERS =============
