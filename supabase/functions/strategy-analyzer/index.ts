@@ -3131,41 +3131,131 @@ serve(async (req) => {
           shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_MIN_PERCENT_B; // 35
         }
         
+        // ============= BOLLINGER TIERED BYPASS FOR STRONG BEARISH TRENDS (SHORT) =============
+        // Allows SHORT entries at %B 3-10 when trend is confirmed strong bearish
+        // Similar to StochRSI tiered bypass - graduated access based on ADX/DI
+        let bollingerBypassAppliedShort = false;
+        let bollingerBypassTierShort: 'none' | 'tier1' | 'tier2' | 'tier3' = 'none';
+        let bollingerBypassPositionMultiplierShort = 1.0;
+        
         if (intendedTradeDirection === "short" && percentB < shortMinPercentB) {
-          rejectedByHardGates++;
-          const trendContext = isStrongBearishTrend ? " (strong bearish trend)" : 
-                               isBearishTrendConfirmed ? " (bearish trend)" :
-                               isInSqueeze4h ? (isRangingMarket ? " (ranging squeeze)" : " (squeeze)") : "";
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER POSITION FILTER - Blocking SHORT at %B=${percentB.toFixed(1)} < ${shortMinPercentB}${trendContext}`);
-          await logRejectionWithAI(
-            supabase, userId, symbol,
-            `IMPROVEMENT 2 - BOLLINGER GATE: SHORT blocked at %B=${percentB.toFixed(1)} < ${shortMinPercentB}${trendContext}`,
-            { 
-              gate: "BOLLINGER_POSITION_FILTER_SHORT",
-              direction: "short",
-              percentB: percentB.toFixed(1),
-              requiredPercentB: shortMinPercentB,
-              isInSqueeze4h,
-              isRangingMarket,
-              isBearishTrendConfirmed,
-              isStrongBearishTrend,
-              stochFilterTrend4h,
-              stochFilterConf4h: stochFilterConf4h.toFixed(1),
-              adx: adx.toFixed(1),
-              message: "Shorts at low %B blocked - no bearish trend confirmation"
-            },
-            trendData,
-            false,
-            earlyOrderFlowAnalysis
-          );
-          continue;
+          // Check if bypass is enabled and within bypassable range (down to 3, not below)
+          if (BOLLINGER_TIERED_BYPASS_PARAMS.ENABLED && 
+              percentB < BOLLINGER_TIERED_BYPASS_PARAMS.BASE_MIN_PERCENT_B_SHORT &&
+              percentB >= BOLLINGER_TIERED_BYPASS_PARAMS.ABSOLUTE_MIN_PERCENT_B_SHORT) {
+            
+            // Get DI gap for bypass check (use ADXResult properties)
+            const diPlus = fullAdxResult.plusDI ?? 25;
+            const diMinus = fullAdxResult.minusDI ?? 25;
+            const diGap = fullAdxResult.diGap ?? Math.abs(diPlus - diMinus);
+            const diAlignedShort = diMinus > diPlus; // For SHORT: DI- must be > DI+
+            
+            // Check exhaustion (must NOT be exhausted)
+            const isExhausted = adxExhaustion?.isExhausted === true;
+            const isContinuation = adxExhaustion?.isContinuation === true;
+            
+            // HTF alignment check - 4h must be bearish for SHORT bypass
+            const htf4hAlignedForBypassShort = stochFilterTrend4h === "bearish" && 
+                                               stochFilterConf4h >= BOLLINGER_TIERED_BYPASS_PARAMS.MIN_HTF_4H_CONFIDENCE;
+            
+            // Determine eligible tier (check from highest to lowest)
+            const tier3EligibleShort = (
+              adx >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.MIN_ADX &&
+              adxSlope >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.MIN_ADX_SLOPE &&
+              diGap >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.MIN_DI_GAP &&
+              diAlignedShort &&
+              !isExhausted &&
+              htf4hAlignedForBypassShort
+            );
+            
+            const tier2EligibleShort = (
+              adx >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.MIN_ADX &&
+              adxSlope >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.MIN_ADX_SLOPE &&
+              diGap >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.MIN_DI_GAP &&
+              diAlignedShort &&
+              !isExhausted &&
+              htf4hAlignedForBypassShort &&
+              (isContinuation || !BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.REQUIRE_CONTINUATION)
+            );
+            
+            const tier1EligibleShort = (
+              adx >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_ADX &&
+              adxSlope >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_ADX_SLOPE &&
+              diGap >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_DI_GAP &&
+              diAlignedShort &&
+              !isExhausted &&
+              htf4hAlignedForBypassShort &&
+              (isContinuation || !BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.REQUIRE_CONTINUATION)
+            );
+            
+            // Determine tier and thresholds (for SHORT: %B must be >= tier minimum)
+            if (tier3EligibleShort && percentB >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.MIN_PERCENT_B_SHORT) {
+              bollingerBypassTierShort = 'tier3';
+              bollingerBypassPositionMultiplierShort = BOLLINGER_TIERED_BYPASS_PARAMS.TIER3.POSITION_SIZE / 100;
+              bollingerBypassAppliedShort = true;
+            } else if (tier2EligibleShort && percentB >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.MIN_PERCENT_B_SHORT) {
+              bollingerBypassTierShort = 'tier2';
+              bollingerBypassPositionMultiplierShort = BOLLINGER_TIERED_BYPASS_PARAMS.TIER2.POSITION_SIZE / 100;
+              bollingerBypassAppliedShort = true;
+            } else if (tier1EligibleShort && percentB >= BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_PERCENT_B_SHORT) {
+              bollingerBypassTierShort = 'tier1';
+              bollingerBypassPositionMultiplierShort = BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.POSITION_SIZE / 100;
+              bollingerBypassAppliedShort = true;
+            }
+            
+            if (bollingerBypassAppliedShort) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 BOLLINGER TIERED BYPASS [${bollingerBypassTierShort.toUpperCase()}] - Allowing SHORT at %B=${percentB.toFixed(1)}`);
+              logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)}, DI->${diMinus.toFixed(1)} > DI+=${diPlus.toFixed(1)}`);
+              logger.forSymbol(symbol).info(`   → Position size reduced to ${(bollingerBypassPositionMultiplierShort * 100).toFixed(0)}% due to low %B`);
+            } else {
+              // Log why bypass failed
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER BYPASS FAILED for SHORT at %B=${percentB.toFixed(1)}`);
+              logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)} (tier1>=${BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_ADX}), slope=${adxSlope.toFixed(2)}`);
+              logger.forSymbol(symbol).info(`   → DI gap=${diGap.toFixed(1)}, DI- aligned=${diAlignedShort}, exhausted=${isExhausted}`);
+              logger.forSymbol(symbol).info(`   → 4h aligned=${htf4hAlignedForBypassShort} (trend=${stochFilterTrend4h}, conf=${stochFilterConf4h.toFixed(0)}%)`);
+            }
+          }
+          
+          // If bypass not applied, block the entry
+          if (!bollingerBypassAppliedShort) {
+            rejectedByHardGates++;
+            const trendContext = isStrongBearishTrend ? " (strong bearish trend)" : 
+                                 isBearishTrendConfirmed ? " (bearish trend)" :
+                                 isInSqueeze4h ? (isRangingMarket ? " (ranging squeeze)" : " (squeeze)") : "";
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER POSITION FILTER - Blocking SHORT at %B=${percentB.toFixed(1)} < ${shortMinPercentB}${trendContext}`);
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `IMPROVEMENT 2 - BOLLINGER GATE: SHORT blocked at %B=${percentB.toFixed(1)} < ${shortMinPercentB}${trendContext}`,
+              { 
+                gate: "BOLLINGER_POSITION_FILTER_SHORT",
+                direction: "short",
+                percentB: percentB.toFixed(1),
+                requiredPercentB: shortMinPercentB,
+                isInSqueeze4h,
+                isRangingMarket,
+                isBearishTrendConfirmed,
+                isStrongBearishTrend,
+                stochFilterTrend4h,
+                stochFilterConf4h: stochFilterConf4h.toFixed(1),
+                adx: adx.toFixed(1),
+                message: "Shorts at low %B blocked - no bearish trend confirmation"
+              },
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
         }
         
-        // Log if trend context allowed a SHORT that would otherwise be blocked
+        // Log if trend context or bypass allowed a SHORT that would otherwise be blocked
         if (intendedTradeDirection === "short" && 
             percentB < BOLLINGER_ENTRY_GATES.SHORT_MIN_PERCENT_B && 
-            (isBearishTrendConfirmed || isStrongBearishTrend)) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} TREND CONTEXT RELAXATION: Allowing SHORT at %B=${percentB.toFixed(1)} (4h bearish ${stochFilterConf4h.toFixed(0)}%, ADX=${adx.toFixed(1)})`);
+            (isBearishTrendConfirmed || isStrongBearishTrend || bollingerBypassAppliedShort)) {
+          const relaxationReasonShort = bollingerBypassAppliedShort 
+            ? `tiered bypass ${bollingerBypassTierShort} (${(bollingerBypassPositionMultiplierShort * 100).toFixed(0)}% size)`
+            : `trend confirmation (4h ${stochFilterConf4h.toFixed(0)}%)`;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} TREND CONTEXT RELAXATION: Allowing SHORT at %B=${percentB.toFixed(1)} via ${relaxationReasonShort}, ADX=${adx.toFixed(1)}`);
         }
         
         // LONG gate: Determine appropriate %B threshold based on trend, squeeze, and ranging
@@ -6173,10 +6263,17 @@ serve(async (req) => {
         }
         
         // Step 14: Apply Bollinger tiered bypass position reduction
-        // Entering at high %B (90-97) requires reduced position size even with bypass
+        // Entering at high %B (90-97) for LONG or low %B (3-10) for SHORT requires reduced position size
         if (bollingerBypassApplied && bollingerBypassPositionMultiplier < 1.0) {
           positionSizeMultiplier *= bollingerBypassPositionMultiplier;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🎯 BOLLINGER BYPASS [${bollingerBypassTier.toUpperCase()}] entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (high %B)`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🎯 BOLLINGER BYPASS [${bollingerBypassTier.toUpperCase()}] LONG entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (high %B)`);
+        }
+        
+        // Step 14b: Apply Bollinger tiered bypass position reduction for SHORT
+        // Entering at low %B (3-10) requires reduced position size even with bypass
+        if (bollingerBypassAppliedShort && bollingerBypassPositionMultiplierShort < 1.0) {
+          positionSizeMultiplier *= bollingerBypassPositionMultiplierShort;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🎯 BOLLINGER BYPASS [${bollingerBypassTierShort.toUpperCase()}] SHORT entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (low %B)`);
         }
         
         // Step 15: Apply Strong ADX Override position reduction (65% when ADX > 45)
