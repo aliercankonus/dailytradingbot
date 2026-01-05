@@ -3820,8 +3820,12 @@ serve(async (req) => {
           );
           
           // Additional safety conditions that MUST pass regardless of score
+          // RELAXED: When HTF bypass was already applied (confirming strong trend), accept neutral 1h
+          const tf1hAcceptable = stochFilterTrend1h === "bullish" || 
+            (strongTrendHTFBypassApplied && stochFilterTrend1h !== "bearish"); // Neutral OK if HTF bypassed
+          
           const baseSafetyConditions = stochFilterTrend4h === "bullish" && 
-            stochFilterTrend1h === "bullish" && 
+            tf1hAcceptable && 
             !hasBearishDivergence && 
             stochRsiRising;
           
@@ -3846,8 +3850,9 @@ serve(async (req) => {
             logger.forSymbol(symbol).debug(`   Trend strength breakdown: 4hConf=${trendStrengthResult.components.confidence4hPoints}, 1hConf=${trendStrengthResult.components.confidence1hPoints}, ADX=${trendStrengthResult.components.adxPoints}, momentum=${trendStrengthResult.components.momentumPoints}`);
           } else {
             rejectedByStochRsiExtreme++;
+            const htfBypassNote = strongTrendHTFBypassApplied ? ` [HTF bypassed, 1h=${stochFilterTrend1h} relaxed]` : '';
             const blockReason = !baseSafetyConditions
-              ? `base safety conditions failed (4h=${stochFilterTrend4h}, 1h=${stochFilterTrend1h}, divergence=${hasBearishDivergence}, rising=${stochRsiRising})`
+              ? `base safety conditions failed (4h=${stochFilterTrend4h}, 1h=${stochFilterTrend1h}, divergence=${hasBearishDivergence}, rising=${stochRsiRising})${htfBypassNote}`
               : trendStrengthResult.decision === 'REJECT'
                 ? `trend strength too low: ${trendStrengthResult.reason}`
                 : `no valid breakout (%B=${percentB.toFixed(1)}, volumeRatio=${volumeRatio.toFixed(2)})`;
