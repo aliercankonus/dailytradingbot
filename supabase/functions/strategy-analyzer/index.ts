@@ -2950,18 +2950,32 @@ serve(async (req) => {
           risingSlope &&
           !isExhausted;
         
+        // NEW: High ADX bypass path - when ADX >= 40, allow bypass with just 4h alignment
+        // This catches BTCUSDT (ADX 41.6, 4h bullish but slope falling during consolidation)
+        // Rationale: ADX 40+ indicates a very strong trend, even if slope is briefly negative during pullback
+        const highADXBypassPath = is4hAligned &&
+          adx >= 40 && // Very strong trend threshold
+          unifiedReversal.score < 35 && // Lower reversal threshold for safety
+          !isExhausted &&
+          !adxExhaustion.isExhausted;
+        
         // Determine alignment status for bypass
         const alignmentMet = isParabolicMode || 
           hasRelaxedAlignment || 
           allTimeframesAligned || 
           !STRONG_TREND_HTF_BYPASS_PARAMS.REQUIRE_ALL_TF_ALIGNED;
         
+        // FIXED: Allow bypass if high ADX path is met, even without rising slope
         const canBypassHTFGate = STRONG_TREND_HTF_BYPASS_PARAMS.ENABLED &&
           adx >= STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX &&
-          adxSlopeMeetsRequirement &&
           unifiedReversal.score < STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE &&
-          (alignmentMet || alternativeBypassPath) &&
-          !isExhausted;
+          !isExhausted &&
+          (
+            // Path 1: Normal bypass with slope requirement
+            (adxSlopeMeetsRequirement && (alignmentMet || alternativeBypassPath)) ||
+            // Path 2: High ADX (40+) with 4h alignment - no slope requirement
+            highADXBypassPath
+          );
         
         // Determine position size based on bypass type
         const getBypassPositionMultiplier = () => {
@@ -2980,6 +2994,9 @@ serve(async (req) => {
           } else if (adx >= 30) {
             // ADX 30+ with basic conditions
             return STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
+          } else if (highADXBypassPath) {
+            // High ADX (40+) path - conservative due to potentially falling slope
+            return STRONG_TREND_HTF_BYPASS_PARAMS.BORDERLINE_POSITION_SIZE_MULTIPLIER ?? 0.50;
           } else {
             // ADX 25-30 borderline case
             return STRONG_TREND_HTF_BYPASS_PARAMS.BORDERLINE_POSITION_SIZE_MULTIPLIER ?? 0.50;
@@ -2989,12 +3006,13 @@ serve(async (req) => {
         // Log bypass decision details for debugging
         if (isHTFOverbought || isHTFOversold) {
           const bypassType = isParabolicMode ? 'PARABOLIC' : 
+            highADXBypassPath ? 'HIGH_ADX_4H_ALIGNED' :
             hasRelaxedAlignment ? 'RELAXED_ALIGNMENT' : 
             alternativeBypassPath ? 'RISING_SLOPE' : 
             allTimeframesAligned ? 'FULL_ALIGNMENT' : 'BASIC';
           
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF BYPASS CHECK: type=${bypassType}, ADX=${adx.toFixed(1)}, slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
-          logger.forSymbol(symbol).info(`   → canBypass=${canBypassHTFGate}, parabolic=${isParabolicMode}, relaxedAlign=${hasRelaxedAlignment}, altPath=${alternativeBypassPath}, exhausted=${isExhausted}`);
+          logger.forSymbol(symbol).info(`   → canBypass=${canBypassHTFGate}, parabolic=${isParabolicMode}, relaxedAlign=${hasRelaxedAlignment}, altPath=${alternativeBypassPath}, highADX=${highADXBypassPath}, exhausted=${isExhausted}`);
         }
         
         // Block SHORT continuation at 4h oversold (bounce is statistically likely)
@@ -3003,7 +3021,7 @@ serve(async (req) => {
             // Allow with reduced position size - use dynamic multiplier based on bypass type
             strongTrendHTFBypassApplied = true;
             trendContinuationPositionMultiplier = getBypassPositionMultiplier();
-            const bypassType = isParabolicMode ? 'PARABOLIC' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
+            const bypassType = isParabolicMode ? 'PARABOLIC' : highADXBypassPath ? 'HIGH_ADX' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} STRONG TREND HTF BYPASS [${bypassType}]: Allowing SHORT at 4h oversold`);
             logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}, exhausted=${isExhausted}`);
             logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
@@ -3055,7 +3073,7 @@ serve(async (req) => {
             // Allow with reduced position size - use dynamic multiplier based on bypass type
             strongTrendHTFBypassApplied = true;
             trendContinuationPositionMultiplier = getBypassPositionMultiplier();
-            const bypassType = isParabolicMode ? 'PARABOLIC' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
+            const bypassType = isParabolicMode ? 'PARABOLIC' : highADXBypassPath ? 'HIGH_ADX' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} STRONG TREND HTF BYPASS [${bypassType}]: Allowing LONG at 4h overbought`);
             logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}, exhausted=${isExhausted}`);
             logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
