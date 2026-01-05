@@ -807,7 +807,8 @@ serve(async (req) => {
       // ============= SMART AITS: DECAY VELOCITY DETECTION (TIERED) =============
       // Check for rapid profit decay and trigger emergency exit if needed
       // TIERED: Strong trends get more tolerance for normal pullbacks
-      if (userSettings.decayVelocityExitEnabled && newPeakPnl > userSettings.activationPercent && minutesSincePeak > 0) {
+      // MINIMUM OBSERVATION: Wait 2 minutes before evaluating to avoid false positives from brief dips
+      if (userSettings.decayVelocityExitEnabled && newPeakPnl > userSettings.activationPercent && minutesSincePeak >= DECAY_VELOCITY_TIERS.MIN_OBSERVATION_MINUTES) {
         const decayPercent = newPeakPnl - pnlPercent;
         const decayVelocity = decayPercent / minutesSincePeak; // % per minute
         
