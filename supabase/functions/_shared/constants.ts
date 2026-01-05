@@ -383,6 +383,37 @@ export const R_MULTIPLE_TRAILING_PARAMS = {
   FALLBACK_TO_PERCENT: true,
 } as const;
 
+// ============= SMART AITS DECAY VELOCITY TIERS =============
+// Tiered decay velocity thresholds based on trend strength
+// Strong trends get more tolerance for pullbacks (normal retracements)
+// Addresses the BTCUSDT case where 0.03%/min threshold exited too early
+export const DECAY_VELOCITY_TIERS = {
+  // Base tier (current behavior - for weak/misaligned trends)
+  BASE_EXIT_PER_MINUTE: 0.03,        // 3%/min decay triggers exit
+  BASE_MAX_DECAY_MINUTES: 10,        // Max 10 minutes of decay before forced exit
+  
+  // Tier 1: Moderate trend (ADX 25-30)
+  TIER1_MIN_ADX: 25,
+  TIER1_MIN_ADX_SLOPE: 0,            // Not falling
+  TIER1_EXIT_PER_MINUTE: 0.05,       // 5%/min tolerance
+  TIER1_MAX_DECAY_MINUTES: 15,       // 15 min cap
+  
+  // Tier 2: Strong trend (ADX 30-35)
+  TIER2_MIN_ADX: 30,
+  TIER2_MIN_ADX_SLOPE: 0.02,         // Rising
+  TIER2_EXIT_PER_MINUTE: 0.07,       // 7%/min tolerance
+  TIER2_MAX_DECAY_MINUTES: 20,       // 20 min cap
+  
+  // Tier 3: Very strong trend (ADX >= 35)
+  TIER3_MIN_ADX: 35,
+  TIER3_MIN_ADX_SLOPE: 0.03,         // Clearly rising
+  TIER3_EXIT_PER_MINUTE: 0.10,       // 10%/min tolerance
+  TIER3_MAX_DECAY_MINUTES: 30,       // 30 min cap
+  
+  // Force exit threshold: minimum decay velocity for time-based exit
+  FORCE_EXIT_MIN_VELOCITY: 0.02,     // 2%/min - any decay above this can trigger time cap
+} as const;
+
 // ============= PROGRESSIVE PROFIT LOCK PARAMETERS =============
 // Bridge the gap between break-even (0.5%) and trailing activation (0.7%)
 // Positions that peak between these levels should lock partial profits, not just break-even
