@@ -253,6 +253,67 @@ export const MOMENTUM_CONTINUATION_PARAMS = {
   STOP_LOSS_MULTIPLIER: 1.5,  // 1.5x ATR instead of 2x
 } as const;
 
+// ============= BOLLINGER TIERED BYPASS FOR STRONG TREND RE-ENTRIES =============
+// Allows LONG entries at %B 90-97 when trend is confirmed strong
+// Similar to StochRSI tiered bypass - graduated access based on ADX/DI
+// Addresses missed continuation trades when %B is high but trend is valid
+export const BOLLINGER_TIERED_BYPASS_PARAMS = {
+  // Enable tiered bypass for high %B entries
+  ENABLED: true,
+  
+  // Base %B threshold (no bypass)
+  BASE_MAX_PERCENT_B_LONG: 90,      // Default: block LONG above 90
+  BASE_MIN_PERCENT_B_SHORT: 10,     // Default: block SHORT below 10
+  
+  // Absolute ceiling - NEVER bypass above this
+  ABSOLUTE_MAX_PERCENT_B_LONG: 97,  // Hard cap: no LONG above 97
+  ABSOLUTE_MIN_PERCENT_B_SHORT: 3,  // Hard cap: no SHORT below 3
+  
+  // ============= TIER 1: Moderate trend (conditional allow %B 90-95) =============
+  TIER1: {
+    MAX_PERCENT_B_LONG: 95,
+    MIN_PERCENT_B_SHORT: 5,
+    MIN_ADX: 25,
+    MIN_ADX_SLOPE: 0.02,
+    MIN_DI_GAP: 10,
+    POSITION_SIZE: 40,  // 40% position size
+    REQUIRE_CONTINUATION: true,  // Must be re-entry/continuation
+  },
+  
+  // ============= TIER 2: Strong trend (allow %B 90-97) =============
+  TIER2: {
+    MAX_PERCENT_B_LONG: 97,
+    MIN_PERCENT_B_SHORT: 3,
+    MIN_ADX: 35,
+    MIN_ADX_SLOPE: 0.03,
+    MIN_DI_GAP: 15,
+    POSITION_SIZE: 50,  // 50% position size
+    REQUIRE_CONTINUATION: true,
+  },
+  
+  // ============= TIER 3: Very strong trend (allow %B 90-97 with higher size) =============
+  TIER3: {
+    MAX_PERCENT_B_LONG: 97,
+    MIN_PERCENT_B_SHORT: 3,
+    MIN_ADX: 40,
+    MIN_ADX_SLOPE: 0,     // Not falling
+    MIN_DI_GAP: 18,
+    POSITION_SIZE: 60,    // 60% position size
+    REQUIRE_CONTINUATION: false,  // Can be initial entry at tier 3
+  },
+  
+  // ============= SAFETY GATES (All must pass) =============
+  // Exhaustion check - block if exhausted
+  REQUIRE_NO_EXHAUSTION: true,
+  
+  // HTF alignment requirement
+  MIN_HTF_4H_CONFIDENCE: 65,  // 4h must be 65%+ aligned
+  REQUIRE_HTF_ALIGNED: true,
+  
+  // Entry type detection
+  IS_CONTINUATION_LOOKBACK_MINUTES: 240,  // 4 hours - if closed position in last 4h, it's re-entry
+} as const;
+
 // ============= TREND ACCELERATION PARAMETERS =============
 // Allows catching strong price moves (3%+) that would otherwise be blocked by:
 // - NO_MOMENTUM_CONFIRMATION (ADX < 28)
