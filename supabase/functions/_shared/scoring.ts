@@ -1901,6 +1901,49 @@ export const deriveTradeDirection = (
     return { direction, confidence: conf1h, source: "1h", reasons };
   }
   
+  // ============= PRIORITY 2.3: CONSECUTIVE CANDLE MOMENTUM OVERRIDE =============
+  // When 1h has 5+ consecutive candles in the same direction, allow signal even if 4h is neutral
+  // This catches strong momentum moves that lagging indicators haven't confirmed yet
+  const consecutiveBars1h = trendData.momentum?.consecutiveBars1h ?? 0;
+  const consecutiveBars30m = trendData.momentum?.consecutiveBars30m ?? 0;
+  
+  if (
+    trend4h === "neutral" &&
+    consecutiveBars1h >= 5 &&
+    adx >= 20  // Minimum ADX to ensure some trend strength
+  ) {
+    // Determine direction from 1h MACD histogram direction (consecutive bars are in this direction)
+    // If 1h trend is available use it, otherwise infer from lower TFs
+    const inferredDirection = trend1h !== "neutral" ? trend1h : 
+                              (trend30m !== "neutral" ? trend30m : null);
+    
+    if (inferredDirection) {
+      const direction: TradeDirection = inferredDirection === "bullish" ? "long" : "short";
+      
+      // Calculate confidence based on consecutive bars and supporting factors
+      let baseConf = 55 + Math.min(15, (consecutiveBars1h - 5) * 3);  // 55-70% based on bars
+      const adxBonus = Math.min(10, (adx - 20) * 0.5);  // Up to +10% for stronger ADX
+      const conf30mBonus = consecutiveBars30m >= 4 ? 5 : 0;  // +5% if 30m confirms
+      const conf1hBonus = conf1h >= 55 ? Math.min(5, (conf1h - 55) * 0.5) : 0;  // Up to +5% for 1h conf
+      
+      const finalConf = Math.min(75, baseConf + adxBonus + conf30mBonus + conf1hBonus) * 0.85;  // 15% safety reduction
+      
+      reasons.push(`CONSECUTIVE CANDLE OVERRIDE: ${consecutiveBars1h} consecutive 1h bars in ${inferredDirection} direction`);
+      reasons.push(`4h neutral but price action confirms momentum`);
+      reasons.push(`ADX=${adx.toFixed(1)}, 30m bars=${consecutiveBars30m}`);
+      reasons.push("Momentum-based entry - 65% position size recommended");
+      
+      return { 
+        direction, 
+        confidence: finalConf, 
+        source: "consecutive-candle-momentum", 
+        reasons,
+        isEarlySignal: true,
+        earlyReason: `${consecutiveBars1h} consecutive 1h candles ${inferredDirection}, ADX=${adx.toFixed(1)}`,
+      } as DirectionResult & { isEarlySignal?: boolean; earlyReason?: string };
+    }
+  }
+  
   // ============= PRIORITY 2.5: BUILDING TREND DIRECTION OVERRIDE =============
   // Catch early trends when 1h is leaning directional (57-59% conf) but 4h is still neutral
   // Only trigger if ADX is in "building" zone (18-35) and rising
