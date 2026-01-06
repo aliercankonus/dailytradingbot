@@ -1100,6 +1100,10 @@ serve(async (req) => {
         adxRising,
         fakeBreakoutRisk,
         genuineMomentum,
+        // NEW: Consecutive bars in same direction for price action confirmation
+        consecutiveBars1h: countConsecutiveBarsInDirection(trend1h.indicators?.macdHistogramArray),
+        consecutiveBars15m: barsAligned15m,
+        consecutiveBars30m: barsAligned30m,
       },
       volatility: {
         atr: Math.round(currentATR * 100) / 100,

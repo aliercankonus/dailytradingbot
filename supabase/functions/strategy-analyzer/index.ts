@@ -5128,8 +5128,23 @@ serve(async (req) => {
         let momentumContinuationBonus = 0;
         
         if (fakeBreakoutRisk) {
-          fakeBreakoutPenalty = -8; // -8 quality points for MACD expanding but ADX falling
-          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.MOMENTUM} FAKE BREAKOUT RISK: MACD expanding but ADX falling → quality penalty ${fakeBreakoutPenalty}`);
+          // Check if price action confirms the move (3+ consecutive bars in same direction)
+          const consecutiveBars1h = momentum?.consecutiveBars1h ?? 0;
+          const consecutiveBars15m = momentum?.consecutiveBars15m ?? 0;
+          const consecutiveBars30m = momentum?.consecutiveBars30m ?? 0;
+          
+          // Price action confirmation: 3+ consecutive 1h bars OR 4+ bars on lower timeframes
+          const priceActionConfirms = consecutiveBars1h >= 3 || 
+                                       (consecutiveBars15m >= 4 && consecutiveBars30m >= 4);
+          
+          if (priceActionConfirms) {
+            // Reduced penalty when price action confirms the move
+            fakeBreakoutPenalty = -3; // Reduced from -8 to -3
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.MOMENTUM} FAKE BREAKOUT RISK (REDUCED): ADX falling but price action confirms (1h=${consecutiveBars1h}, 15m=${consecutiveBars15m}, 30m=${consecutiveBars30m} consecutive bars) → reduced penalty ${fakeBreakoutPenalty}`);
+          } else {
+            fakeBreakoutPenalty = -8; // Full penalty when price action doesn't confirm
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.MOMENTUM} FAKE BREAKOUT RISK: MACD expanding but ADX falling, no price action confirmation (1h=${consecutiveBars1h}, 15m=${consecutiveBars15m}, 30m=${consecutiveBars30m} bars) → quality penalty ${fakeBreakoutPenalty}`);
+          }
         }
         
         if (genuineMomentum) {
