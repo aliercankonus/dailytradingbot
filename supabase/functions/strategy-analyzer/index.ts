@@ -3251,8 +3251,12 @@ serve(async (req) => {
             const isContinuation = adxExhaustion?.isContinuation === true;
             
             // HTF alignment check - 4h must be bearish for SHORT bypass
+            // When HTF bypass is already applied, relax confidence requirement since trend was validated
+            const htfBypassConfidenceThresholdShort = strongTrendHTFBypassApplied 
+              ? BOLLINGER_TIERED_BYPASS_PARAMS.MIN_HTF_4H_CONFIDENCE - 10  // Lower threshold (55% instead of 65%)
+              : BOLLINGER_TIERED_BYPASS_PARAMS.MIN_HTF_4H_CONFIDENCE;
             const htf4hAlignedForBypassShort = stochFilterTrend4h === "bearish" && 
-                                               stochFilterConf4h >= BOLLINGER_TIERED_BYPASS_PARAMS.MIN_HTF_4H_CONFIDENCE;
+                                               stochFilterConf4h >= htfBypassConfidenceThresholdShort;
             
             // Determine eligible tier (check from highest to lowest)
             const tier3EligibleShort = (
@@ -3351,7 +3355,8 @@ serve(async (req) => {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER BYPASS FAILED for SHORT at %B=${percentB.toFixed(1)}`);
               logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)} (tier1>=${BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_ADX}), slope=${adxSlope.toFixed(2)}`);
               logger.forSymbol(symbol).info(`   → DI gap=${diGap.toFixed(1)}, DI- aligned=${diAlignedShort}, exhausted=${isExhausted}`);
-              logger.forSymbol(symbol).info(`   → 4h aligned=${htf4hAlignedForBypassShort} (trend=${stochFilterTrend4h}, conf=${stochFilterConf4h.toFixed(0)}%)`);
+              const htfRelaxedNote = strongTrendHTFBypassApplied ? ` [HTF relaxed: ${htfBypassConfidenceThresholdShort}%]` : '';
+              logger.forSymbol(symbol).info(`   → 4h aligned=${htf4hAlignedForBypassShort} (trend=${stochFilterTrend4h}, conf=${stochFilterConf4h.toFixed(0)}%${htfRelaxedNote})`);
             }
           }
           
@@ -3447,8 +3452,12 @@ serve(async (req) => {
             const isContinuation = adxExhaustion?.isContinuation === true;
             
             // HTF alignment check
+            // When HTF bypass is already applied, relax confidence requirement since trend was validated
+            const htfBypassConfidenceThreshold = strongTrendHTFBypassApplied 
+              ? BOLLINGER_TIERED_BYPASS_PARAMS.MIN_HTF_4H_CONFIDENCE - 10  // Lower threshold (55% instead of 65%)
+              : BOLLINGER_TIERED_BYPASS_PARAMS.MIN_HTF_4H_CONFIDENCE;
             const htf4hAlignedForBypass = stochFilterTrend4h === "bullish" && 
-                                           stochFilterConf4h >= BOLLINGER_TIERED_BYPASS_PARAMS.MIN_HTF_4H_CONFIDENCE;
+                                           stochFilterConf4h >= htfBypassConfidenceThreshold;
             
             // Determine eligible tier (check from highest to lowest)
             const tier3Eligible = (
@@ -3557,7 +3566,8 @@ serve(async (req) => {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} BOLLINGER BYPASS FAILED at %B=${percentB.toFixed(1)}`);
               logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)} (tier1>=${BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_ADX}), slope=${adxSlope.toFixed(2)} (tier1>=${BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_ADX_SLOPE})`);
               logger.forSymbol(symbol).info(`   → DI gap=${diGap.toFixed(1)} (tier1>=${BOLLINGER_TIERED_BYPASS_PARAMS.TIER1.MIN_DI_GAP}), exhausted=${isExhausted}, continuation=${isContinuation}`);
-              logger.forSymbol(symbol).info(`   → 4h aligned=${htf4hAlignedForBypass} (conf=${stochFilterConf4h.toFixed(0)}%, trend=${stochFilterTrend4h})`);
+              const htfRelaxedNote = strongTrendHTFBypassApplied ? ` [HTF relaxed: ${htfBypassConfidenceThreshold}%]` : '';
+              logger.forSymbol(symbol).info(`   → 4h aligned=${htf4hAlignedForBypass} (conf=${stochFilterConf4h.toFixed(0)}%, trend=${stochFilterTrend4h}${htfRelaxedNote})`);
             }
           }
           
