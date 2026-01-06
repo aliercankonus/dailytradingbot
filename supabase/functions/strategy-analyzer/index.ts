@@ -1855,6 +1855,16 @@ serve(async (req) => {
           const priceMove = trendData.priceActionMomentum?.movePercent || 0;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} PRICE ACTION MOMENTUM: ${priceMove.toFixed(2)}% move detected - position size ${(priceActionMomentumPositionMultiplier * 100).toFixed(0)}%`);
         }
+        
+        // ============= CONSECUTIVE CANDLE MOMENTUM POSITION SIZING =============
+        // Apply 65% position size for consecutive candle momentum entries (5+ consecutive 1h bars with neutral 4h)
+        let consecutiveCandlePositionMultiplier = 1.0;
+        if (directionResult.source === "consecutive-candle-momentum") {
+          consecutiveCandlePositionMultiplier = 0.65;  // 65% position size
+          const consecutiveBars1h = momentum?.consecutiveBars1h ?? 0;
+          const consecutiveBars30m = momentum?.consecutiveBars30m ?? 0;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} CONSECUTIVE CANDLE MOMENTUM: ${consecutiveBars1h} 1h bars (30m=${consecutiveBars30m}) - position size ${(consecutiveCandlePositionMultiplier * 100).toFixed(0)}%`);
+        }
 
         // ============= PHASE 4 (9 FINDINGS): ENHANCED MARKET REGIME DETECTION =============
         // Finding 2 & 5: Use quantified regime score with graduated penalties
@@ -6476,6 +6486,12 @@ serve(async (req) => {
         if (priceActionMomentumPositionMultiplier < 1.0) {
           positionSizeMultiplier *= priceActionMomentumPositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Price action momentum entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 10b: Apply consecutive candle momentum position reduction (65%)
+        if (consecutiveCandlePositionMultiplier < 1.0) {
+          positionSizeMultiplier *= consecutiveCandlePositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Consecutive candle momentum entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
         // Step 11: Apply trend acceleration position reduction (70% or 50% if overextended)
