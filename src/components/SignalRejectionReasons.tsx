@@ -1857,6 +1857,34 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
         </div>
       )}
       
+      {/* Consecutive Candle Counts */}
+      <div className="space-y-1.5">
+        <div className="text-[10px] text-muted-foreground mb-1">Consecutive Candles (Price Action):</div>
+        <div className="grid grid-cols-3 gap-1.5">
+          <div className={`p-1.5 rounded text-center text-[10px] ${(momentum?.consecutiveBars1h ?? 0) >= 5 ? 'bg-green-500/20 border border-green-500/30' : 'bg-muted/30'}`}>
+            <div className="text-muted-foreground">1H Bars</div>
+            <div className={`font-bold ${(momentum?.consecutiveBars1h ?? 0) >= 5 ? 'text-green-400' : (momentum?.consecutiveBars1h ?? 0) >= 3 ? 'text-yellow-400' : ''}`}>
+              {momentum?.consecutiveBars1h ?? 'N/A'}
+            </div>
+            <div className="text-[8px] text-muted-foreground">need 5+</div>
+          </div>
+          <div className={`p-1.5 rounded text-center text-[10px] ${(momentum?.consecutiveBars30m ?? 0) >= 4 ? 'bg-green-500/20 border border-green-500/30' : 'bg-muted/30'}`}>
+            <div className="text-muted-foreground">30M Bars</div>
+            <div className={`font-bold ${(momentum?.consecutiveBars30m ?? 0) >= 4 ? 'text-green-400' : (momentum?.consecutiveBars30m ?? 0) >= 3 ? 'text-yellow-400' : ''}`}>
+              {momentum?.consecutiveBars30m ?? 'N/A'}
+            </div>
+            <div className="text-[8px] text-muted-foreground">need 4+</div>
+          </div>
+          <div className={`p-1.5 rounded text-center text-[10px] ${(momentum?.consecutiveBars15m ?? 0) >= 4 ? 'bg-green-500/20 border border-green-500/30' : 'bg-muted/30'}`}>
+            <div className="text-muted-foreground">15M Bars</div>
+            <div className={`font-bold ${(momentum?.consecutiveBars15m ?? 0) >= 4 ? 'text-green-400' : (momentum?.consecutiveBars15m ?? 0) >= 3 ? 'text-yellow-400' : ''}`}>
+              {momentum?.consecutiveBars15m ?? 'N/A'}
+            </div>
+            <div className="text-[8px] text-muted-foreground">need 4+</div>
+          </div>
+        </div>
+      </div>
+      
       {/* Context Info */}
       <div className="grid grid-cols-4 gap-1.5 text-[10px]">
         <div className="p-1.5 bg-muted/30 rounded text-center">
