@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceDot, ReferenceLine } from 'recharts';
+import { useMemo, useState, useCallback } from 'react';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceDot, ReferenceLine, Brush, ReferenceArea } from 'recharts';
 import { format } from 'date-fns';
 import { formatPrice } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { TrendingUp } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { TrendingUp, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 
 interface PriceEvent {
   timestamp: string;
@@ -32,6 +33,11 @@ interface TradeLifecyclePriceChartProps {
 }
 
 export const TradeLifecyclePriceChart = ({ events, stopLoss, takeProfit, side }: TradeLifecyclePriceChartProps) => {
+  const [zoomState, setZoomState] = useState<{ startIndex: number; endIndex: number } | null>(null);
+  const [refAreaLeft, setRefAreaLeft] = useState<string | null>(null);
+  const [refAreaRight, setRefAreaRight] = useState<string | null>(null);
+  const [isSelecting, setIsSelecting] = useState(false);
+
   const chartData = useMemo(() => {
     if (!events || events.length === 0) return [];
 
@@ -95,12 +101,17 @@ export const TradeLifecyclePriceChart = ({ events, stopLoss, takeProfit, side }:
     return priceEvents;
   }, [events]);
 
-  const { minPrice, maxPrice, entryPrice } = useMemo(() => {
-    if (chartData.length === 0) return { minPrice: 0, maxPrice: 0, entryPrice: 0 };
+  const visibleData = useMemo(() => {
+    if (!zoomState || chartData.length === 0) return chartData;
+    return chartData.slice(zoomState.startIndex, zoomState.endIndex + 1);
+  }, [chartData, zoomState]);
 
-    const prices = chartData.map(d => d.price);
-    if (stopLoss) prices.push(stopLoss);
-    if (takeProfit) prices.push(takeProfit);
+  const { minPrice, maxPrice, entryPrice } = useMemo(() => {
+    if (visibleData.length === 0) return { minPrice: 0, maxPrice: 0, entryPrice: 0 };
+
+    const prices = visibleData.map(d => d.price);
+    if (stopLoss && (!zoomState || visibleData.some(d => d.type === 'entry'))) prices.push(stopLoss);
+    if (takeProfit && (!zoomState || visibleData.some(d => d.type === 'entry'))) prices.push(takeProfit);
 
     const min = Math.min(...prices);
     const max = Math.max(...prices);
@@ -112,7 +123,80 @@ export const TradeLifecyclePriceChart = ({ events, stopLoss, takeProfit, side }:
       maxPrice: max + padding,
       entryPrice: entry
     };
-  }, [chartData, stopLoss, takeProfit]);
+  }, [visibleData, stopLoss, takeProfit, zoomState, chartData]);
+
+  const handleMouseDown = useCallback((e: any) => {
+    if (e?.activeLabel) {
+      setRefAreaLeft(e.activeLabel);
+      setIsSelecting(true);
+    }
+  }, []);
+
+  const handleMouseMove = useCallback((e: any) => {
+    if (isSelecting && e?.activeLabel) {
+      setRefAreaRight(e.activeLabel);
+    }
+  }, [isSelecting]);
+
+  const handleMouseUp = useCallback(() => {
+    if (refAreaLeft && refAreaRight && refAreaLeft !== refAreaRight) {
+      const leftIndex = chartData.findIndex(d => d.timestamp === refAreaLeft);
+      const rightIndex = chartData.findIndex(d => d.timestamp === refAreaRight);
+      
+      if (leftIndex !== -1 && rightIndex !== -1) {
+        const startIndex = Math.min(leftIndex, rightIndex);
+        const endIndex = Math.max(leftIndex, rightIndex);
+        setZoomState({ startIndex, endIndex });
+      }
+    }
+    setRefAreaLeft(null);
+    setRefAreaRight(null);
+    setIsSelecting(false);
+  }, [refAreaLeft, refAreaRight, chartData]);
+
+  const handleZoomIn = useCallback(() => {
+    if (chartData.length <= 2) return;
+    
+    const currentStart = zoomState?.startIndex ?? 0;
+    const currentEnd = zoomState?.endIndex ?? chartData.length - 1;
+    const range = currentEnd - currentStart;
+    
+    if (range <= 2) return;
+    
+    const shrink = Math.max(1, Math.floor(range * 0.2));
+    setZoomState({
+      startIndex: currentStart + shrink,
+      endIndex: currentEnd - shrink
+    });
+  }, [chartData.length, zoomState]);
+
+  const handleZoomOut = useCallback(() => {
+    if (!zoomState) return;
+    
+    const expand = Math.max(1, Math.floor((zoomState.endIndex - zoomState.startIndex) * 0.3));
+    const newStart = Math.max(0, zoomState.startIndex - expand);
+    const newEnd = Math.min(chartData.length - 1, zoomState.endIndex + expand);
+    
+    if (newStart === 0 && newEnd === chartData.length - 1) {
+      setZoomState(null);
+    } else {
+      setZoomState({ startIndex: newStart, endIndex: newEnd });
+    }
+  }, [chartData.length, zoomState]);
+
+  const handleReset = useCallback(() => {
+    setZoomState(null);
+  }, []);
+
+  const handleBrushChange = useCallback((brushState: any) => {
+    if (brushState && brushState.startIndex !== undefined && brushState.endIndex !== undefined) {
+      if (brushState.startIndex === 0 && brushState.endIndex === chartData.length - 1) {
+        setZoomState(null);
+      } else {
+        setZoomState({ startIndex: brushState.startIndex, endIndex: brushState.endIndex });
+      }
+    }
+  }, [chartData.length]);
 
   if (chartData.length === 0) {
     return null;
@@ -153,20 +237,68 @@ export const TradeLifecyclePriceChart = ({ events, stopLoss, takeProfit, side }:
     return null;
   };
 
+  const showBrush = chartData.length > 3;
+
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm flex items-center gap-2">
-          <TrendingUp className="h-4 w-4" />
-          Price Movement
-        </CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <TrendingUp className="h-4 w-4" />
+            Price Movement
+            {zoomState && (
+              <span className="text-xs text-muted-foreground font-normal">
+                (Zoomed: {visibleData.length} of {chartData.length} events)
+              </span>
+            )}
+          </CardTitle>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleZoomIn}
+              disabled={chartData.length <= 2 || (zoomState && zoomState.endIndex - zoomState.startIndex <= 2)}
+              title="Zoom In"
+            >
+              <ZoomIn className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleZoomOut}
+              disabled={!zoomState}
+              title="Zoom Out"
+            >
+              <ZoomOut className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleReset}
+              disabled={!zoomState}
+              title="Reset Zoom"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
-        <div className="h-[200px] w-full">
+        <div className="text-xs text-muted-foreground mb-2 text-center">
+          Drag on chart to zoom • Use brush below to pan
+        </div>
+        <div className={showBrush ? "h-[240px]" : "h-[200px]"} style={{ width: '100%' }}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={chartData}
-              margin={{ top: 20, right: 30, left: 10, bottom: 10 }}
+              margin={{ top: 20, right: 30, left: 10, bottom: showBrush ? 30 : 10 }}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
             >
               <XAxis
                 dataKey="timestamp"
@@ -175,6 +307,8 @@ export const TradeLifecyclePriceChart = ({ events, stopLoss, takeProfit, side }:
                 fontSize={11}
                 tickLine={false}
                 axisLine={false}
+                allowDataOverflow
+                domain={zoomState ? [visibleData[0]?.timestamp, visibleData[visibleData.length - 1]?.timestamp] : ['dataMin', 'dataMax']}
               />
               <YAxis
                 domain={[minPrice, maxPrice]}
@@ -184,6 +318,7 @@ export const TradeLifecyclePriceChart = ({ events, stopLoss, takeProfit, side }:
                 tickLine={false}
                 axisLine={false}
                 width={65}
+                allowDataOverflow
               />
               <Tooltip content={<CustomTooltip />} />
               
@@ -230,6 +365,17 @@ export const TradeLifecyclePriceChart = ({ events, stopLoss, takeProfit, side }:
                 />
               )}
 
+              {/* Zoom Selection Area */}
+              {refAreaLeft && refAreaRight && (
+                <ReferenceArea
+                  x1={refAreaLeft}
+                  x2={refAreaRight}
+                  strokeOpacity={0.3}
+                  fill="hsl(var(--primary))"
+                  fillOpacity={0.2}
+                />
+              )}
+
               {/* Price Line */}
               <Line
                 type="monotone"
@@ -238,6 +384,7 @@ export const TradeLifecyclePriceChart = ({ events, stopLoss, takeProfit, side }:
                 strokeWidth={2}
                 dot={false}
                 activeDot={false}
+                isAnimationActive={false}
               />
 
               {/* Event Markers */}
@@ -252,6 +399,20 @@ export const TradeLifecyclePriceChart = ({ events, stopLoss, takeProfit, side }:
                   strokeWidth={2}
                 />
               ))}
+
+              {/* Brush for panning */}
+              {showBrush && (
+                <Brush
+                  dataKey="timestamp"
+                  height={20}
+                  stroke="hsl(var(--border))"
+                  fill="hsl(var(--muted))"
+                  tickFormatter={(val) => format(new Date(val), 'HH:mm')}
+                  onChange={handleBrushChange}
+                  startIndex={zoomState?.startIndex}
+                  endIndex={zoomState?.endIndex}
+                />
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>
