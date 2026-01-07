@@ -4,12 +4,11 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, TrendingUp, TrendingDown, Target, DollarSign, AlertTriangle, BarChart3, Zap, FlaskConical, Activity } from "lucide-react";
+import { ArrowLeft, TrendingUp, TrendingDown, Target, DollarSign, AlertTriangle, BarChart3, Zap, Activity } from "lucide-react";
 import { usePortfolioHistory } from "@/hooks/usePortfolioHistory";
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { format } from "date-fns";
 import { MomentumBacktestSimulation } from "@/components/MomentumBacktestSimulation";
-import { PhaseComparisonBacktest } from "@/components/PhaseComparisonBacktest";
 import ADXExhaustionBacktest from "@/components/ADXExhaustionBacktest";
 const Performance = () => {
   const navigate = useNavigate();
@@ -133,7 +132,7 @@ const Performance = () => {
           </Card>
         ) : (
           <Tabs defaultValue="portfolio" className="w-full">
-            <TabsList className="grid w-full grid-cols-7">
+            <TabsList className="grid w-full grid-cols-6">
               <TabsTrigger value="portfolio">Portfolio Value</TabsTrigger>
               <TabsTrigger value="pnl">P&L Breakdown</TabsTrigger>
               <TabsTrigger value="winrate">Win Rate</TabsTrigger>
@@ -145,10 +144,6 @@ const Performance = () => {
               <TabsTrigger value="momentum" className="flex items-center gap-1">
                 <Zap className="h-3 w-3" />
                 Momentum
-              </TabsTrigger>
-              <TabsTrigger value="phase-comparison" className="flex items-center gap-1">
-                <FlaskConical className="h-3 w-3" />
-                Phase 1-8
               </TabsTrigger>
             </TabsList>
 
@@ -332,10 +327,6 @@ const Performance = () => {
 
             <TabsContent value="momentum" className="space-y-4">
               <MomentumBacktestSimulation />
-            </TabsContent>
-
-            <TabsContent value="phase-comparison" className="space-y-4">
-              <PhaseComparisonBacktest />
             </TabsContent>
 
           </Tabs>
