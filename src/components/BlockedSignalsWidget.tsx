@@ -1,9 +1,13 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useBlockedSignals } from "@/hooks/useBlockedSignals";
 import { AlertTriangle, TrendingDown, TrendingUp, Clock, Activity, Ban } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+
+const LIMIT_OPTIONS = [15, 30, 50, 100] as const;
 
 const getRejectionCategory = (reason: string): { label: string; color: string; icon: React.ReactNode } => {
   const lowerReason = reason.toLowerCase();
@@ -37,7 +41,8 @@ const getRejectionCategory = (reason: string): { label: string; color: string; i
 };
 
 export function BlockedSignalsWidget() {
-  const { data: blockedSignals, isLoading, error } = useBlockedSignals(15);
+  const [limit, setLimit] = useState<number>(50);
+  const { data: blockedSignals, isLoading, error } = useBlockedSignals(limit);
 
   if (isLoading) {
     return (
@@ -81,9 +86,23 @@ export function BlockedSignalsWidget() {
             <Ban className="h-4 w-4 text-muted-foreground" />
             Blocked Signals
           </span>
-          <Badge variant="outline" className="text-xs">
-            {signals.length} recent
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Select value={String(limit)} onValueChange={(v) => setLimit(Number(v))}>
+              <SelectTrigger className="h-7 w-[70px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-popover border-border z-50">
+                {LIMIT_OPTIONS.map((opt) => (
+                  <SelectItem key={opt} value={String(opt)} className="text-xs">
+                    {opt}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Badge variant="outline" className="text-xs">
+              {signals.length}
+            </Badge>
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
