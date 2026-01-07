@@ -4202,8 +4202,8 @@ serve(async (req) => {
                                    (intendedTradeDirection === "short" && microTrendDir === "bearish");
           
           // Check micro-trend persistence (3+ consecutive readings)
-          // Using existing persistence data from calculate-trend
-          const microTrendPersistence = trendData.microTrend?.persistence?.count || 0;
+          // Using existing persistence data from calculate-trend (persistence is a number, not object)
+          const microTrendPersistence = trendData.microTrend?.persistence ?? 0;
           const hasSufficientPersistence = microTrendPersistence >= QUIET_TREND_PARAMS.MIN_CONSECUTIVE_READINGS;
           
           // Check 4H not opposing
@@ -4313,7 +4313,7 @@ serve(async (req) => {
                     symbolAllowed: QUIET_TREND_PARAMS.ALLOWED_SYMBOLS.includes(symbol),
                     priceMove: priceMoveForQuiet.toFixed(1),
                     microTrend: trendData.microTrend?.direction,
-                    persistence: trendData.microTrend?.persistence?.count || 0,
+                    persistence: trendData.microTrend?.persistence ?? 0,
                   },
                   trend,
                   confidence,
@@ -4361,7 +4361,7 @@ serve(async (req) => {
                   adxInRange: adx >= QUIET_TREND_PARAMS.MIN_ADX,
                   priceMove: priceMoveForQuiet.toFixed(1),
                   microTrend: trendData.microTrend?.direction,
-                  persistence: trendData.microTrend?.persistence?.count || 0,
+                  persistence: trendData.microTrend?.persistence ?? 0,
                 },
                 trend,
                 confidence,
