@@ -1242,6 +1242,25 @@ serve(async (req) => {
         if (hasEnoughTrades && hasEnoughDiversity && isBelowThreshold) {
           disabledSymbols.add(symbol);
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REJECTION} SYMBOL FILTER: disabled - win rate ${stats.winRate.toFixed(1)}% < ${SYMBOL_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades across ${stats.uniqueStrategies.size} strategies)`);
+          
+          // Log to rejection table so it appears in dashboard
+          await logRejectionWithAI(
+            supabase,
+            userId,
+            symbol,
+            `SYMBOL DISABLED: Win rate ${stats.winRate.toFixed(1)}% below ${SYMBOL_WIN_RATE_THRESHOLD}% threshold (${stats.wins}W/${stats.total - stats.wins}L across ${stats.uniqueStrategies.size} strategies)`,
+            { 
+              filterType: 'symbol_performance',
+              winRate: stats.winRate,
+              wins: stats.wins,
+              losses: stats.total - stats.wins,
+              totalTrades: stats.total,
+              strategiesCount: stats.uniqueStrategies.size,
+              threshold: SYMBOL_WIN_RATE_THRESHOLD
+            },
+            { direction: 'blocked' },
+            false  // No AI analysis for symbol-level blocks
+          );
         } else if (hasEnoughTrades && !hasEnoughDiversity && isBelowThreshold) {
           logger.forSymbol(symbol).warn(`SYMBOL SKIP: low win rate ${stats.winRate.toFixed(1)}% but only ${stats.uniqueStrategies.size} strategy(s) - need ${SYMBOL_MIN_UNIQUE_STRATEGIES}+ for filter`);
         }

@@ -17,6 +17,14 @@ export interface BlockedSignal {
     squeeze?: boolean;
     quietTrendCheck?: string;
     priceMove?: number;
+    // Symbol performance filter fields
+    filterType?: string;
+    winRate?: number;
+    wins?: number;
+    losses?: number;
+    totalTrades?: number;
+    strategiesCount?: number;
+    threshold?: number;
   } | null;
   trend_data: {
     direction?: string;
