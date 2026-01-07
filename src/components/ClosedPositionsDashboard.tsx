@@ -648,7 +648,18 @@ const PositionsTable = ({ positions, getCloseReasonBadge, onPositionClick }: Pos
             <TableRow 
               key={position.id} 
               className="cursor-pointer hover:bg-muted/50 transition-colors"
-              onClick={() => onPositionClick(position.id)}
+              onMouseDown={(e) => {
+                // Prevent text selection on double-click
+                if (e.detail > 1) e.preventDefault();
+              }}
+              onPointerUp={(e) => {
+                // Use onPointerUp for better Safari compatibility
+                // Check if the click target is not the button
+                const target = e.target as HTMLElement;
+                if (!target.closest('button')) {
+                  onPositionClick(position.id);
+                }
+              }}
             >
               <TableCell className="font-medium">{position.symbol}</TableCell>
               <TableCell>
@@ -697,7 +708,12 @@ const PositionsTable = ({ positions, getCloseReasonBadge, onPositionClick }: Pos
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7"
+                  onPointerDown={(e) => {
+                    // Stop propagation on pointer down to prevent row click
+                    e.stopPropagation();
+                  }}
                   onClick={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
                     onPositionClick(position.id);
                   }}
