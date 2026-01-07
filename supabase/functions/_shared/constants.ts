@@ -1915,3 +1915,43 @@ export const QUIET_TREND_PARAMS = {
   // ===== STOP LOSS (Tighter for low ADX) =====
   STOP_LOSS_ATR_MULTIPLIER: 1.25,   // Tighter than normal 1.5x
 } as const;
+
+// ============= MOMENTUM EXHAUSTION OVERRIDE PARAMETERS =============
+// Allows entries in REGIME_EXHAUSTED when momentum is still confirmed and trend is strong
+// This addresses over-blocking in strong-ADX, confirmed-momentum scenarios
+// All safety conditions must pass - this is a disciplined exception, not a bypass
+export const MOMENTUM_EXHAUSTION_OVERRIDE_PARAMS = {
+  ENABLED: true,
+  
+  // ===== CORE REQUIREMENTS =====
+  MIN_ADX: 30,                           // Only in genuinely strong trends
+  REQUIRED_MOMENTUM_STATE: "confirmed",  // Strongest momentum signal required
+  
+  // ===== CRITICAL SAFETY GATES =====
+  // Gap 1 Fix: StochRSI floor/ceiling protection
+  // Block shorts at absolute floor (high snapback risk)
+  // Block longs at absolute ceiling
+  BLOCK_IF_STOCHRSI_K_BELOW: 2,          // No shorts when K <= 2
+  BLOCK_IF_STOCHRSI_K_ABOVE: 98,         // No longs when K >= 98
+  
+  // Gap 2 Fix: Strict timeframe alignment
+  // 1h MUST align with direction (not optional)
+  REQUIRE_1H_ALIGNMENT: true,
+  // 30m alignment adds confidence but not required
+  ALLOW_30M_AS_BONUS: true,
+  BONUS_30M_POSITION_INCREASE: 0.10,     // +10% position if 30m also aligns
+  
+  // Gap 3 Fix: Time-in-regime constraint
+  // Don't override fresh exhaustion signals (often correct)
+  MIN_EXHAUSTION_AGE_MINUTES: 30,
+  // Proxy: if regimeScore < 70, exhaustion has been present for a while
+  MATURE_EXHAUSTION_SCORE_THRESHOLD: 70,
+  
+  // ===== RISK MANAGEMENT =====
+  POSITION_SIZE_MULTIPLIER: 0.60,        // 60% of normal position
+  MAX_POSITION_WITH_30M_BONUS: 0.70,     // Max 70% even with 30m alignment
+  STOP_MULTIPLIER: 0.70,                 // Tighter stops (30% tighter)
+  
+  // ===== TRACKING =====
+  EXCEPTION_TYPE: "MOMENTUM_OVERRIDE_EXHAUSTION" as const,
+} as const;

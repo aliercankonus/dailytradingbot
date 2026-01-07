@@ -58,6 +58,8 @@ import {
   QUIET_TREND_PARAMS,
   // NEW: Stealth trend detection for catching gradual price grinds
   STEALTH_TREND_PARAMS,
+  // NEW: Momentum exhaustion override for strong-ADX confirmed-momentum scenarios
+  MOMENTUM_EXHAUSTION_OVERRIDE_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -1664,7 +1666,9 @@ serve(async (req) => {
       | 'QUIET_TREND_BLOCKED'
       // NEW: Stealth trend detection gates
       | 'STEALTH_TREND_ALLOWED'
-      | 'STEALTH_TREND_HTF_BYPASS';
+      | 'STEALTH_TREND_HTF_BYPASS'
+      // NEW: Momentum exhaustion override
+      | 'MOMENTUM_EXHAUSTION_OVERRIDE';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -2229,28 +2233,119 @@ serve(async (req) => {
         
         // Gate 3: Block entries in EXHAUSTED regime (smart regime classification)
         // NOTE: Continuation mode is already checked above before MOMENTUM_EXHAUSTED gate
+        // NEW: Allow momentum override if ALL safety conditions pass
+        // Track override state for later position sizing
+        let momentumExhaustionOverrideApplied = false;
+        let momentumExhaustionPositionMultiplier = 1.0;
+        let momentumExhaustionStopMultiplier = 1.0;
+        
         if (regimeAwareEnabled && smartRegime.regime === "EXHAUSTED" && !qualifiesForContinuationMode) {
-          rejectedByHardGates++;
-          perSymbolGateAttribution.set(symbol, { gate: 'REGIME_EXHAUSTED', details: smartRegime.reason });
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} SMART REGIME GATE: Market regime EXHAUSTED - blocking new entries`);
-          await logRejectionWithAI(
-            supabase, userId, symbol,
-            `SMART REGIME: ${smartRegime.reason}`,
-            {
-              gate: "REGIME_EXHAUSTED",
-              regime: smartRegime.regime,
-              regimeScore: smartRegime.regimeScore,
-              momentumScore: smartMomentum.score,
-              adx: adx.toFixed(1),
-              bbSqueeze: bbSqueeze.isSqueeze,
-              continuationModeAttempted: CONTINUATION_MODE_PARAMS.ENABLED,
-              continuationModeRejection: continuationModeResult?.reason || "N/A"
-            },
-            trendData,
-            riskParams.ai_analysis_enabled !== false,
-            earlyOrderFlowAnalysis
-          );
-          continue;
+          const overrideParams = MOMENTUM_EXHAUSTION_OVERRIDE_PARAMS;
+          let allowMomentumOverride = false;
+          
+          if (overrideParams.ENABLED) {
+            const adxValue = adx || 0;
+            const momentumState = trendData.momentum?.state || "none";
+            const stoch4h = trendData.stochasticRsi?.['4h']?.k ?? 50;
+            const trend1h = trendData.timeframes?.['1h'];
+            const trend30m = trendData.timeframes?.['30m'];
+            
+            // Calculate exhaustion age proxy: if regimeScore < 70, it's been a while (mature)
+            const exhaustionMature = smartRegime.regimeScore < overrideParams.MATURE_EXHAUSTION_SCORE_THRESHOLD;
+            const estimatedAge = exhaustionMature ? 45 : 15; // Simplified proxy
+            
+            // ===== SAFETY CHECKS =====
+            // Gap 1: StochRSI absolute floor/ceiling protection
+            const stochSafe = derivedDirection === "short" 
+              ? stoch4h > overrideParams.BLOCK_IF_STOCHRSI_K_BELOW
+              : stoch4h < overrideParams.BLOCK_IF_STOCHRSI_K_ABOVE;
+            
+            // Gap 2: Strict 1h alignment (MUST match, not optional)
+            const trend1hDirection = trend1h?.trend?.toLowerCase() || trend1h?.direction?.toLowerCase() || "";
+            const has1hAlignment = trend1hDirection === derivedDirection.toLowerCase();
+            
+            // Gap 3: Time-in-regime constraint
+            const isExhaustionMature = estimatedAge >= overrideParams.MIN_EXHAUSTION_AGE_MINUTES;
+            
+            // Core requirements
+            const hasStrongADX = adxValue >= overrideParams.MIN_ADX;
+            const hasMomentumConfirmed = momentumState === overrideParams.REQUIRED_MOMENTUM_STATE;
+            
+            // ===== DETERMINE IF OVERRIDE ALLOWED =====
+            allowMomentumOverride = 
+              hasMomentumConfirmed &&
+              hasStrongADX &&
+              has1hAlignment &&
+              stochSafe &&
+              isExhaustionMature;
+            
+            if (allowMomentumOverride) {
+              // Check for 30m bonus
+              const trend30mDirection = trend30m?.trend?.toLowerCase() || trend30m?.direction?.toLowerCase() || "";
+              const has30mAlignment = trend30mDirection === derivedDirection.toLowerCase();
+              
+              // Calculate position multiplier
+              let calcPositionMultiplier: number = overrideParams.POSITION_SIZE_MULTIPLIER;
+              if (has30mAlignment && overrideParams.ALLOW_30M_AS_BONUS) {
+                calcPositionMultiplier = Math.min(
+                  overrideParams.MAX_POSITION_WITH_30M_BONUS,
+                  overrideParams.POSITION_SIZE_MULTIPLIER + overrideParams.BONUS_30M_POSITION_INCREASE
+                );
+              }
+              
+              // Store for later application
+              momentumExhaustionOverrideApplied = true;
+              momentumExhaustionPositionMultiplier = calcPositionMultiplier;
+              momentumExhaustionStopMultiplier = overrideParams.STOP_MULTIPLIER;
+              
+              logger.forSymbol(symbol).info(`⚡ MOMENTUM OVERRIDE: Bypassing regime exhaustion (score: ${smartRegime.regimeScore})`);
+              logger.forSymbol(symbol).info(`   ADX=${adxValue.toFixed(1)}, momentum=${momentumState}, stoch4h=${stoch4h.toFixed(1)}`);
+              logger.forSymbol(symbol).info(`   1h_aligned=${has1hAlignment}, 30m_aligned=${has30mAlignment}`);
+              logger.forSymbol(symbol).info(`   Position: ${(calcPositionMultiplier * 100).toFixed(0)}%, Stop: ${(overrideParams.STOP_MULTIPLIER * 100).toFixed(0)}%`);
+            } else {
+              // Log detailed override failure reasons
+              logger.forSymbol(symbol).debug(`   Override check failed: ADX=${adxValue.toFixed(1)} (need>=${overrideParams.MIN_ADX}), momentum=${momentumState} (need=confirmed)`);
+              logger.forSymbol(symbol).debug(`   Safety: 1h_aligned=${has1hAlignment}, stoch4h=${stoch4h.toFixed(1)} (safe=${stochSafe}), mature=${isExhaustionMature}`);
+            }
+          }
+          
+          // If override not allowed, reject
+          if (!allowMomentumOverride) {
+            rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'REGIME_EXHAUSTED', 
+              details: `${smartRegime.reason} (override conditions not met)` 
+            });
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} SMART REGIME GATE: Market regime EXHAUSTED - blocking new entries`);
+            const overrideParams = MOMENTUM_EXHAUSTION_OVERRIDE_PARAMS;
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `SMART REGIME: ${smartRegime.reason}`,
+              {
+                gate: "REGIME_EXHAUSTED",
+                regime: smartRegime.regime,
+                regimeScore: smartRegime.regimeScore,
+                momentumScore: smartMomentum.score,
+                adx: adx.toFixed(1),
+                bbSqueeze: bbSqueeze.isSqueeze,
+                continuationModeAttempted: CONTINUATION_MODE_PARAMS.ENABLED,
+                continuationModeRejection: continuationModeResult?.reason || "N/A",
+                overrideAttempted: overrideParams.ENABLED,
+                overrideConditions: overrideParams.ENABLED ? {
+                  adxCheck: { value: adx, required: overrideParams.MIN_ADX, passed: adx >= overrideParams.MIN_ADX },
+                  momentumCheck: { value: trendData.momentum?.state, required: "confirmed", passed: trendData.momentum?.state === "confirmed" },
+                  stochSafe: { value: trendData.stochasticRsi?.['4h']?.k, safeForDirection: derivedDirection === "short" ? `>${overrideParams.BLOCK_IF_STOCHRSI_K_BELOW}` : `<${overrideParams.BLOCK_IF_STOCHRSI_K_ABOVE}` },
+                  alignment1h: { checked: true },
+                  exhaustionMature: { regimeScore: smartRegime.regimeScore, threshold: overrideParams.MATURE_EXHAUSTION_SCORE_THRESHOLD }
+                } : undefined
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
+          // If override allowed, continue processing (don't reject)
         }
         
         // Store momentum analysis in database (async, don't block)
@@ -6842,6 +6937,13 @@ serve(async (req) => {
         if (strongAdxOverrideApplied && strongAdxPositionMultiplier < 1.0) {
           positionSizeMultiplier *= strongAdxPositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ✓ STRONG ADX OVERRIDE entry (ADX > ${STRONG_ADX_OVERRIDE_PARAMS.EXHAUSTION_ADX}) - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 16: Apply Momentum Exhaustion Override position reduction (60-70%)
+        // Entries via momentum override in exhausted regime get reduced position and tighter stops
+        if (momentumExhaustionOverrideApplied && momentumExhaustionPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= momentumExhaustionPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚡ MOMENTUM EXHAUSTION OVERRIDE entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
         // Final position size as percentage
