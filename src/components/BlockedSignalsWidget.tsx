@@ -8,6 +8,9 @@ import { formatDistanceToNow } from "date-fns";
 const getRejectionCategory = (reason: string): { label: string; color: string; icon: React.ReactNode } => {
   const lowerReason = reason.toLowerCase();
   
+  if (lowerReason.includes("symbol disabled")) {
+    return { label: "Symbol Filter", color: "bg-red-500/20 text-red-400 border-red-500/30", icon: <Ban className="h-3 w-3" /> };
+  }
   if (lowerReason.includes("adx")) {
     return { label: "ADX", color: "bg-amber-500/20 text-amber-400 border-amber-500/30", icon: <Activity className="h-3 w-3" /> };
   }
@@ -120,30 +123,47 @@ export function BlockedSignalsWidget() {
                     
                     {filters && (
                       <div className="flex flex-wrap gap-1.5">
-                        {typeof filters.adx === 'number' && (
-                          <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
-                            ADX:{filters.adx.toFixed(1)}
-                          </span>
-                        )}
-                        {typeof filters.stochRsiK4h === 'number' && (
-                          <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
-                            K4h:{filters.stochRsiK4h.toFixed(0)}
-                          </span>
-                        )}
-                        {filters.trend4h && (
-                          <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                            4h:{filters.trend4h}
-                          </span>
-                        )}
-                        {typeof filters.priceMove === 'number' && (
-                          <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
-                            Move:{filters.priceMove.toFixed(1)}%
-                          </span>
-                        )}
-                        {typeof filters.squeeze === 'boolean' && (
-                          <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                            Squeeze:{filters.squeeze ? "Yes" : "No"}
-                          </span>
+                        {/* Show win rate stats for symbol filter blocks */}
+                        {filters.filterType === 'symbol_performance' ? (
+                          <>
+                            <span className="text-xs bg-red-500/10 text-red-400 px-1.5 py-0.5 rounded font-mono">
+                              WinRate:{typeof filters.winRate === 'number' ? filters.winRate.toFixed(1) : '?'}%
+                            </span>
+                            <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
+                              {filters.wins ?? 0}W/{filters.losses ?? 0}L
+                            </span>
+                            <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                              {filters.strategiesCount ?? 0} strategies
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            {typeof filters.adx === 'number' && (
+                              <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
+                                ADX:{filters.adx.toFixed(1)}
+                              </span>
+                            )}
+                            {typeof filters.stochRsiK4h === 'number' && (
+                              <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
+                                K4h:{filters.stochRsiK4h.toFixed(0)}
+                              </span>
+                            )}
+                            {filters.trend4h && (
+                              <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                                4h:{filters.trend4h}
+                              </span>
+                            )}
+                            {typeof filters.priceMove === 'number' && (
+                              <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
+                                Move:{filters.priceMove.toFixed(1)}%
+                              </span>
+                            )}
+                            {typeof filters.squeeze === 'boolean' && (
+                              <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                                Squeeze:{filters.squeeze ? "Yes" : "No"}
+                              </span>
+                            )}
+                          </>
                         )}
                       </div>
                     )}
