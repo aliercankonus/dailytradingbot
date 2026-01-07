@@ -120,12 +120,12 @@ export function BlockedSignalsWidget() {
                     
                     {filters && (
                       <div className="flex flex-wrap gap-1.5">
-                        {filters.adx !== undefined && (
+                        {typeof filters.adx === 'number' && (
                           <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
                             ADX:{filters.adx.toFixed(1)}
                           </span>
                         )}
-                        {filters.stochRsiK4h !== undefined && (
+                        {typeof filters.stochRsiK4h === 'number' && (
                           <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
                             K4h:{filters.stochRsiK4h.toFixed(0)}
                           </span>
@@ -135,12 +135,12 @@ export function BlockedSignalsWidget() {
                             4h:{filters.trend4h}
                           </span>
                         )}
-                        {filters.priceMove !== undefined && (
+                        {typeof filters.priceMove === 'number' && (
                           <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
                             Move:{filters.priceMove.toFixed(1)}%
                           </span>
                         )}
-                        {filters.squeeze !== undefined && (
+                        {typeof filters.squeeze === 'boolean' && (
                           <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
                             Squeeze:{filters.squeeze ? "Yes" : "No"}
                           </span>
