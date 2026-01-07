@@ -1167,10 +1167,17 @@ serve(async (req) => {
     const STRATEGY_MIN_TRADES_FOR_FILTER = STRATEGY_PARAMS.MIN_TRADES_FOR_FILTER;
     const STRATEGY_HIGH_PERFORMER_THRESHOLD = STRATEGY_PARAMS.WIN_RATE_HIGH_PERFORMER;
     
-    // Fetch positions with trend to determine regime at time of trade
+    // ============= PARTIAL WIN CONFIGURATION =============
+    // Break-even exits should not count as losses - they preserved capital
+    // Trades that reached profitable peaks but ended flat/negative get partial credit
+    const PARTIAL_WIN_WEIGHT = 0.5;  // How much a partial win counts (0.5 = half a win)
+    const PARTIAL_WIN_PEAK_THRESHOLD = 0.3;  // Minimum peak P&L % to qualify as partial win
+    const BREAK_EVEN_CLOSE_REASONS = ['break_even', 'break_even_stop'];  // Exclude from win rate
+    
+    // Fetch positions with trend, close_reason, and peak_pnl_percent for fair win rate calculation
     const { data: recentPositions } = await supabase
       .from("positions")
-      .select("symbol, strategy_name, realized_pnl, trend")
+      .select("symbol, strategy_name, realized_pnl, trend, close_reason, peak_pnl_percent")
       .eq("user_id", userId)
       .eq("status", "closed")
       .order("closed_at", { ascending: false })
@@ -1184,7 +1191,15 @@ serve(async (req) => {
     const SYMBOL_MIN_UNIQUE_STRATEGIES = STRATEGY_PARAMS.MIN_UNIQUE_STRATEGIES;
     
     // Calculate win rate per symbol with strategy diversity tracking
-    const symbolWinRates = new Map<string, { wins: number; total: number; winRate: number; uniqueStrategies: Set<string> }>();
+    // NEW: Track break-even and partial wins for fairer calculation
+    const symbolWinRates = new Map<string, { 
+      wins: number; 
+      total: number; 
+      winRate: number; 
+      uniqueStrategies: Set<string>;
+      breakEvenCount: number;
+      partialWinCount: number;
+    }>();
     const disabledSymbols = new Set<string>();
     
     // ============= REGIME-AWARE STRATEGY STATS =============
@@ -1211,12 +1226,50 @@ serve(async (req) => {
       for (const trade of recentPositions) {
         const strategyName = trade.strategy_name || "Unknown";
         const regime = getRegimeFromTrend(trade.trend);
+        const closeReason = trade.close_reason || '';
+        const peakPnlPercent = trade.peak_pnl_percent || 0;
+        const realizedPnl = trade.realized_pnl || 0;
+        
+        // ===== IMPROVED WIN RATE: Exclude break-even and credit partial wins =====
+        // Skip break-even trades entirely (they preserved capital, not wins or losses)
+        const isBreakEven = BREAK_EVEN_CLOSE_REASONS.includes(closeReason);
+        
+        // Partial win: reached profitable peak but ended flat/negative
+        const isPartialWin = !isBreakEven && 
+                             realizedPnl <= 0 && 
+                             peakPnlPercent > PARTIAL_WIN_PEAK_THRESHOLD;
+        
+        // Full win: positive realized P&L
+        const isFullWin = realizedPnl > 0;
         
         // Symbol performance with strategy diversity tracking (regime-agnostic for symbols)
-        const symbolStats = symbolWinRates.get(trade.symbol) || { wins: 0, total: 0, winRate: 0, uniqueStrategies: new Set() };
-        symbolStats.total++;
-        if ((trade.realized_pnl || 0) > 0) symbolStats.wins++;
-        symbolStats.winRate = (symbolStats.wins / symbolStats.total) * 100;
+        const symbolStats = symbolWinRates.get(trade.symbol) || { 
+          wins: 0, 
+          total: 0, 
+          winRate: 0, 
+          uniqueStrategies: new Set(),
+          breakEvenCount: 0,
+          partialWinCount: 0
+        };
+        
+        if (isBreakEven) {
+          // Break-even: don't count toward win rate at all
+          symbolStats.breakEvenCount++;
+        } else {
+          // Count this trade
+          symbolStats.total++;
+          
+          if (isFullWin) {
+            symbolStats.wins += 1;
+          } else if (isPartialWin) {
+            symbolStats.wins += PARTIAL_WIN_WEIGHT;  // 0.5 win
+            symbolStats.partialWinCount++;
+          }
+          // else: full loss, wins stays the same
+          
+          symbolStats.winRate = symbolStats.total > 0 ? (symbolStats.wins / symbolStats.total) * 100 : 0;
+        }
+        
         symbolStats.uniqueStrategies.add(strategyName);
         symbolWinRates.set(trade.symbol, symbolStats);
         
@@ -1226,9 +1279,17 @@ serve(async (req) => {
         }
         const strategyRegimes = strategyWinRatesByRegime.get(strategyName)!;
         const strategyStats = strategyRegimes.get(regime) || { wins: 0, total: 0, winRate: 0, uniqueSymbols: new Set() };
-        strategyStats.total++;
-        if ((trade.realized_pnl || 0) > 0) strategyStats.wins++;
-        strategyStats.winRate = (strategyStats.wins / strategyStats.total) * 100;
+        
+        // Apply same partial win logic to strategy stats
+        if (!isBreakEven) {
+          strategyStats.total++;
+          if (isFullWin) {
+            strategyStats.wins += 1;
+          } else if (isPartialWin) {
+            strategyStats.wins += PARTIAL_WIN_WEIGHT;
+          }
+          strategyStats.winRate = strategyStats.total > 0 ? (strategyStats.wins / strategyStats.total) * 100 : 0;
+        }
         strategyStats.uniqueSymbols.add(trade.symbol);
         strategyRegimes.set(regime, strategyStats);
       }
@@ -1241,20 +1302,23 @@ serve(async (req) => {
         
         if (hasEnoughTrades && hasEnoughDiversity && isBelowThreshold) {
           disabledSymbols.add(symbol);
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REJECTION} SYMBOL FILTER: disabled - win rate ${stats.winRate.toFixed(1)}% < ${SYMBOL_WIN_RATE_THRESHOLD}% (${stats.wins}/${stats.total} trades across ${stats.uniqueStrategies.size} strategies)`);
+          const lossCount = stats.total - stats.wins;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.REJECTION} SYMBOL FILTER: disabled - win rate ${stats.winRate.toFixed(1)}% < ${SYMBOL_WIN_RATE_THRESHOLD}% (${stats.wins.toFixed(1)}W/${lossCount.toFixed(1)}L, ${stats.breakEvenCount}BE, ${stats.partialWinCount} partial across ${stats.uniqueStrategies.size} strategies)`);
           
           // Log to rejection table so it appears in dashboard
           await logRejectionWithAI(
             supabase,
             userId,
             symbol,
-            `SYMBOL DISABLED: Win rate ${stats.winRate.toFixed(1)}% below ${SYMBOL_WIN_RATE_THRESHOLD}% threshold (${stats.wins}W/${stats.total - stats.wins}L across ${stats.uniqueStrategies.size} strategies)`,
+            `SYMBOL DISABLED: Win rate ${stats.winRate.toFixed(1)}% below ${SYMBOL_WIN_RATE_THRESHOLD}% threshold (${stats.wins.toFixed(1)}W/${lossCount.toFixed(1)}L, ${stats.breakEvenCount} break-even excluded, ${stats.partialWinCount} partial wins across ${stats.uniqueStrategies.size} strategies)`,
             { 
               filterType: 'symbol_performance',
               winRate: stats.winRate,
               wins: stats.wins,
-              losses: stats.total - stats.wins,
+              losses: lossCount,
               totalTrades: stats.total,
+              breakEvenCount: stats.breakEvenCount,
+              partialWinCount: stats.partialWinCount,
               strategiesCount: stats.uniqueStrategies.size,
               threshold: SYMBOL_WIN_RATE_THRESHOLD
             },

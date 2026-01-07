@@ -149,8 +149,18 @@ export function BlockedSignalsWidget() {
                               WinRate:{typeof filters.winRate === 'number' ? filters.winRate.toFixed(1) : '?'}%
                             </span>
                             <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
-                              {filters.wins ?? 0}W/{filters.losses ?? 0}L
+                              {typeof filters.wins === 'number' ? filters.wins.toFixed(1) : 0}W/{typeof filters.losses === 'number' ? filters.losses.toFixed(1) : 0}L
                             </span>
+                            {(filters.breakEvenCount || 0) > 0 && (
+                              <span className="text-xs bg-yellow-500/10 text-yellow-400 px-1.5 py-0.5 rounded">
+                                {filters.breakEvenCount}BE
+                              </span>
+                            )}
+                            {(filters.partialWinCount || 0) > 0 && (
+                              <span className="text-xs bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded">
+                                {filters.partialWinCount}partial
+                              </span>
+                            )}
                             <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
                               {filters.strategiesCount ?? 0} strategies
                             </span>

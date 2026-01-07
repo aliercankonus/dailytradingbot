@@ -25,6 +25,9 @@ export interface BlockedSignal {
     totalTrades?: number;
     strategiesCount?: number;
     threshold?: number;
+    // NEW: Break-even and partial win tracking for fairer win rate
+    breakEvenCount?: number;
+    partialWinCount?: number;
   } | null;
   trend_data: {
     direction?: string;
