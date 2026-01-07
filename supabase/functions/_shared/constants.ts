@@ -1116,10 +1116,17 @@ export const STEALTH_TREND_PARAMS = {
   
   // ===== ADX THRESHOLDS =====
   // Maximum ADX for stealth trend (if higher, use normal logic - it's not "stealth")
-  MAX_ADX_FOR_STEALTH: 22,
+  // UPDATED: Raised from 22 to 25 to catch "dead zone" ADX (22-25) moves
+  MAX_ADX_FOR_STEALTH: 25,
   // Minimum ADX to allow stealth bypass (still need some directional movement)
   // Below this, there's truly no trend even for stealth
   ADX_BYPASS_MINIMUM: 12,
+  
+  // ===== DRIFT-BASED ADX SCALING =====
+  // For larger drifts, allow higher ADX values to still qualify as "stealth"
+  // This addresses moves where drift is significant but ADX rises to 22-28 range
+  ADX_SCALE_STRONG_DRIFT: 28,    // Allow up to ADX 28 when drift >= 2.5%
+  ADX_SCALE_MODERATE_DRIFT: 26,  // Allow up to ADX 26 when drift >= 2.0%
   
   // ===== DIRECTION ALIGNMENT =====
   // Require 1h trend to match drift direction (reduces false positives)
