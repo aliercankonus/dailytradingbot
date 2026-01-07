@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useClosedPositions } from '@/hooks/useClosedPositions';
-import { Loader2, TrendingUp, TrendingDown, Target, ShieldAlert, Archive, Filter, X, Layers } from 'lucide-react';
+import { Loader2, TrendingUp, TrendingDown, Target, ShieldAlert, Archive, Filter, X, Layers, History } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMemo, useState } from 'react';
@@ -12,6 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { formatPrice, formatPercent, formatQuantity } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { TradeLifecycleDialog } from './TradeLifecycleDialog';
 
 export const ClosedPositionsDashboard = () => {
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -25,7 +26,9 @@ export const ClosedPositionsDashboard = () => {
   const [sideFilter, setSideFilter] = useState<string>('all');
   const [strategyFilter, setStrategyFilter] = useState<string>('all');
   const [closeReasonFilter, setCloseReasonFilter] = useState<string>('all');
-  const [hidePartialCloses, setHidePartialCloses] = useState(true); // NEW: Hide partial closes by default
+  const [hidePartialCloses, setHidePartialCloses] = useState(true);
+  const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null);
+  const [lifecycleDialogOpen, setLifecycleDialogOpen] = useState(false);
 
   const getCloseReason = (position: any): string => {
     // Use stored close_reason if available
@@ -552,7 +555,14 @@ export const ClosedPositionsDashboard = () => {
             )}
 
             <TabsContent value={activeTab} className="space-y-4">
-              <PositionsTable positions={paginatedPositions} getCloseReasonBadge={getCloseReasonBadge} />
+              <PositionsTable 
+                positions={paginatedPositions} 
+                getCloseReasonBadge={getCloseReasonBadge}
+                onPositionClick={(positionId) => {
+                  setSelectedPositionId(positionId);
+                  setLifecycleDialogOpen(true);
+                }}
+              />
               
               {/* Pagination Controls */}
               {totalPages > 1 && (
@@ -589,6 +599,13 @@ export const ClosedPositionsDashboard = () => {
           </Tabs>
         </CardContent>
       </Card>
+
+      {/* Trade Lifecycle Dialog */}
+      <TradeLifecycleDialog
+        positionId={selectedPositionId}
+        open={lifecycleDialogOpen}
+        onOpenChange={setLifecycleDialogOpen}
+      />
     </div>
   );
 };
@@ -596,9 +613,10 @@ export const ClosedPositionsDashboard = () => {
 interface PositionsTableProps {
   positions: any[];
   getCloseReasonBadge: (position: any) => JSX.Element;
+  onPositionClick: (positionId: string) => void;
 }
 
-const PositionsTable = ({ positions, getCloseReasonBadge }: PositionsTableProps) => {
+const PositionsTable = ({ positions, getCloseReasonBadge, onPositionClick }: PositionsTableProps) => {
   if (positions.length === 0) {
     return (
       <div className="text-center py-8 text-muted-foreground">
@@ -622,11 +640,16 @@ const PositionsTable = ({ positions, getCloseReasonBadge }: PositionsTableProps)
             <TableHead className="text-right">P&L %</TableHead>
             <TableHead>Close Reason</TableHead>
             <TableHead>Closed</TableHead>
+            <TableHead className="w-10"></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {positions.map((position) => (
-            <TableRow key={position.id}>
+            <TableRow 
+              key={position.id} 
+              className="cursor-pointer hover:bg-muted/50 transition-colors"
+              onClick={() => onPositionClick(position.id)}
+            >
               <TableCell className="font-medium">{position.symbol}</TableCell>
               <TableCell>
                 <Badge className={`${position.side === 'BUY' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'}`}>
@@ -668,6 +691,20 @@ const PositionsTable = ({ positions, getCloseReasonBadge }: PositionsTableProps)
                 <span className="text-sm text-muted-foreground">
                   {formatDistanceToNow(new Date(position.updated_at), { addSuffix: true })}
                 </span>
+              </TableCell>
+              <TableCell>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onPositionClick(position.id);
+                  }}
+                  title="View trade lifecycle"
+                >
+                  <History className="h-4 w-4 text-muted-foreground" />
+                </Button>
               </TableCell>
             </TableRow>
           ))}
