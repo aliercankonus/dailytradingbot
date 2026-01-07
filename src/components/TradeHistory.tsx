@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ArrowUpRight, ArrowDownRight, Filter, Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, Filter, Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Layers } from "lucide-react";
 import { useOpenTrades } from "@/hooks/useOpenTrades";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState, useMemo } from "react";
@@ -226,9 +226,16 @@ export const TradeHistory = () => {
                     </div>
                   </td>
                   <td className="py-3 px-2">
-                    <Badge variant="outline" className="text-xs">
-                      {trade.strategy_name || 'Unknown'}
-                    </Badge>
+                    {trade.is_hedge || trade.strategy_name?.startsWith('Hedge:') ? (
+                      <Badge variant="outline" className="gap-1 text-xs bg-indigo-500/10 text-indigo-500 border-indigo-500/20">
+                        <Layers className="h-3 w-3" />
+                        {trade.strategy_name || 'Hedge'}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs">
+                        {trade.strategy_name || 'Unknown'}
+                      </Badge>
+                    )}
                   </td>
                   <td className="py-3 px-2">
                     <Badge

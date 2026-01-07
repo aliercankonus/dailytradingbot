@@ -634,9 +634,16 @@ const PositionsTable = ({ positions, getCloseReasonBadge }: PositionsTableProps)
                 </Badge>
               </TableCell>
               <TableCell>
-                <span className="text-sm text-muted-foreground">
-                  {position.strategy_name || 'N/A'}
-                </span>
+                {position.is_hedge || position.strategy_name?.startsWith('Hedge:') ? (
+                  <Badge variant="outline" className="gap-1 bg-indigo-500/10 text-indigo-500 border-indigo-500/20">
+                    <Layers className="h-3 w-3" />
+                    {position.strategy_name || 'Hedge'}
+                  </Badge>
+                ) : (
+                  <span className="text-sm text-muted-foreground">
+                    {position.strategy_name || 'N/A'}
+                  </span>
+                )}
               </TableCell>
               <TableCell className="text-right">{formatPrice(position.entry_price, 4, '$')}</TableCell>
               <TableCell className="text-right">{formatPrice(position.exit_price, 4, '$')}</TableCell>
