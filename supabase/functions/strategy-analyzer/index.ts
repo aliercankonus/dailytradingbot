@@ -54,6 +54,8 @@ import {
   REGIME_AWARE_MOMENTUM_PARAMS,
   // NEW: Bollinger tiered bypass for strong trend re-entries
   BOLLINGER_TIERED_BYPASS_PARAMS,
+  // NEW: Quiet trend detection for catching sustained directional drifts at low ADX
+  QUIET_TREND_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -1571,7 +1573,10 @@ serve(async (req) => {
       // NEW: Trend acceleration gates
       | 'TREND_ACCELERATION_ALLOWED'
       | 'TREND_ACCELERATION_BOLLINGER_BYPASS'
-      | 'TREND_ACCELERATION_MOMENTUM_BYPASS';
+      | 'TREND_ACCELERATION_MOMENTUM_BYPASS'
+      // NEW: Quiet trend detection gates
+      | 'QUIET_TREND_ALLOWED'
+      | 'QUIET_TREND_BLOCKED';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -4162,14 +4167,117 @@ serve(async (req) => {
         // These are non-negotiable requirements for ANY signal
         // Quality score should RANK good trades, not RESCUE weak ones
         
+        // ============= NEW: QUIET TREND DETECTION EXCEPTION =============
+        // Allows entries when ADX is low but price is grinding consistently in one direction
+        // Phase 1: BTC/ETH only, 50% position size, strict safety gates
+        let qualifiesForQuietTrend = false;
+        let quietTrendPositionMultiplier = 1.0;
+        let quietTrendReason = "";
+        
+        if (QUIET_TREND_PARAMS.ENABLED && adx < ADX_THRESHOLDS.MINIMUM) {
+          // Check symbol allowed (Phase 1: BTC/ETH only)
+          const isSymbolAllowed = QUIET_TREND_PARAMS.ALLOWED_SYMBOLS.includes(symbol);
+          
+          // Check ADX in quiet range (15-22)
+          const isADXInQuietRange = adx >= QUIET_TREND_PARAMS.MIN_ADX && adx <= QUIET_TREND_PARAMS.MAX_ADX;
+          
+          // Check ADX not falling sharply (block end-of-move entries)
+          const adxSlopeForQuiet = fullAdxResult.adxSlope ?? 0;
+          const prevAdxApprox = adx - (adxSlopeForQuiet * 5); // Approximate previous ADX
+          const adxDrop = prevAdxApprox - adx;
+          const isADXStable = !QUIET_TREND_PARAMS.REQUIRE_ADX_NOT_FALLING || adxDrop <= QUIET_TREND_PARAMS.MAX_ADX_DROP;
+          
+          // Check price move threshold (1.5%+ in 6 hours)
+          const priceActionForQuiet = trendData.priceActionMomentum;
+          const priceMoveForQuiet = Math.abs(priceActionForQuiet?.movePercent || 0);
+          const hasSufficientMove = priceMoveForQuiet >= QUIET_TREND_PARAMS.MIN_PRICE_MOVE_PERCENT;
+          
+          // Check slope (move per hour) - ensures sustained move, not single bar
+          const movePerHour = priceMoveForQuiet / QUIET_TREND_PARAMS.LOOKBACK_HOURS;
+          const hasSufficientSlope = movePerHour >= QUIET_TREND_PARAMS.MIN_AVG_MOVE_PER_HOUR;
+          
+          // Check micro-trend direction aligns with intended trade
+          const microTrendDir = trendData.microTrend?.direction || "neutral";
+          const microTrendAligns = (intendedTradeDirection === "long" && microTrendDir === "bullish") ||
+                                   (intendedTradeDirection === "short" && microTrendDir === "bearish");
+          
+          // Check micro-trend persistence (3+ consecutive readings)
+          // Using existing persistence data from calculate-trend
+          const microTrendPersistence = trendData.microTrend?.persistence?.count || 0;
+          const hasSufficientPersistence = microTrendPersistence >= QUIET_TREND_PARAMS.MIN_CONSECUTIVE_READINGS;
+          
+          // Check 4H not opposing
+          const trend4hForQuiet = stochFilterTrend4h;
+          const is4hOpposing = (intendedTradeDirection === "long" && trend4hForQuiet === "bearish") ||
+                               (intendedTradeDirection === "short" && trend4hForQuiet === "bullish");
+          const htfGatePasses = !QUIET_TREND_PARAMS.BLOCK_4H_OPPOSING || !is4hOpposing;
+          
+          // Check StochRSI not at extremes (don't chase)
+          let stochRsiSafeForQuiet = true;
+          if (QUIET_TREND_PARAMS.BLOCK_IF_STOCHRSI_EXTREME) {
+            if (intendedTradeDirection === "long" && stochRsiK4h > QUIET_TREND_PARAMS.MAX_STOCHRSI_K_LONG) {
+              stochRsiSafeForQuiet = false;
+            }
+            if (intendedTradeDirection === "short" && stochRsiK4h < QUIET_TREND_PARAMS.MIN_STOCHRSI_K_SHORT) {
+              stochRsiSafeForQuiet = false;
+            }
+          }
+          
+          // Check volume confirmation if required
+          const volume1h = trendData.volume?.["1h"];
+          const volumeRatioForQuiet = volume1h?.volumeRatio ?? 1.0;
+          const volumeConfirms = !QUIET_TREND_PARAMS.REQUIRE_VOLUME_CONFIRM || volumeRatioForQuiet >= 0.8;
+          
+          // Build debug info for logging
+          const quietTrendChecks = {
+            symbol: isSymbolAllowed,
+            adxRange: isADXInQuietRange,
+            adxStable: isADXStable,
+            priceMove: hasSufficientMove,
+            slope: hasSufficientSlope,
+            microTrendAligns,
+            persistence: hasSufficientPersistence,
+            htfOK: htfGatePasses,
+            stochRsiSafe: stochRsiSafeForQuiet,
+            volumeOK: volumeConfirms,
+          };
+          
+          // All conditions must pass for quiet trend exception
+          if (isSymbolAllowed && isADXInQuietRange && isADXStable && hasSufficientMove && 
+              hasSufficientSlope && microTrendAligns && hasSufficientPersistence && 
+              htfGatePasses && stochRsiSafeForQuiet && volumeConfirms) {
+            qualifiesForQuietTrend = true;
+            quietTrendPositionMultiplier = QUIET_TREND_PARAMS.POSITION_SIZE_MULTIPLIER;
+            quietTrendReason = `Quiet ${intendedTradeDirection} trend: ${priceMoveForQuiet.toFixed(1)}% move, ADX=${adx.toFixed(1)}, slope=${movePerHour.toFixed(2)}%/hr, persistence=${microTrendPersistence}`;
+            
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🌊 QUIET TREND EXCEPTION: ${quietTrendReason}`);
+            logger.forSymbol(symbol).info(`   Checks: ${JSON.stringify(quietTrendChecks)}`);
+            logger.forSymbol(symbol).info(`   Position size reduced to ${(quietTrendPositionMultiplier * 100).toFixed(0)}%`);
+          } else {
+            // Log why quiet trend was not allowed (for debugging)
+            const failedChecks = Object.entries(quietTrendChecks)
+              .filter(([_, v]) => !v)
+              .map(([k, _]) => k);
+            logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} Quiet trend check failed: ${failedChecks.join(", ")}`);
+            logger.forSymbol(symbol).debug(`   Details: ADX=${adx.toFixed(1)}, move=${priceMoveForQuiet.toFixed(1)}%, slope=${movePerHour.toFixed(2)}%/hr, microTrend=${microTrendDir}/${microTrendPersistence}, 4h=${trend4hForQuiet}, K=${stochRsiK4h.toFixed(1)}`);
+          }
+        }
+        
         // GATE 1: ADX must be >= MINIMUM for any trade (trend strength required)
-        // EXCEPTION: Squeeze breakout allows ADX 18-20 if strict conditions are met
+        // EXCEPTION 1: Squeeze breakout allows ADX 18-20 if strict conditions are met
+        // EXCEPTION 2: Quiet trend allows ADX 15-22 if price is grinding consistently
         let squeezeBreakoutActive = false;
         let squeezePositionMultiplier = 1.0;
         
         if (adx < ADX_THRESHOLDS.MINIMUM) {
-          // Check for squeeze breakout exception (only if ADX >= 18)
-          if (adx >= ADX_THRESHOLDS.SQUEEZE_MINIMUM) {
+          // NEW: Check if quiet trend exception applies (bypasses ADX gate)
+          if (qualifiesForQuietTrend) {
+            // QUIET TREND EXCEPTION - allow entry with reduced position size
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🌊 QUIET TREND BYPASS: Skipping ADX gate (ADX=${adx.toFixed(1)}) - ${quietTrendReason}`);
+            perSymbolGateAttribution.set(symbol, { gate: 'QUIET_TREND_ALLOWED', details: quietTrendReason });
+            // Position multiplier already set above
+          } else if (adx >= ADX_THRESHOLDS.SQUEEZE_MINIMUM) {
+            // Check for squeeze breakout exception (only if ADX >= 18)
             const squeezeResult = isValidSqueezeBreakout(trendData, derivedDirection);
             
             if (squeezeResult.isValid) {
@@ -4180,12 +4288,19 @@ serve(async (req) => {
               logger.forSymbol(symbol).debug(`   Squeeze reasons: ${squeezeResult.reasons.join(", ")}`);
               logger.forSymbol(symbol).debug(`   Position size reduced to ${(squeezePositionMultiplier * 100).toFixed(0)}%`);
             } else {
+              // Check if quiet trend exception was close but didn't qualify
+              const priceActionForQuiet = trendData.priceActionMomentum;
+              const priceMoveForQuiet = Math.abs(priceActionForQuiet?.movePercent || 0);
+              const quietTrendCloseMsg = priceMoveForQuiet >= 1.0 
+                ? `, quiet trend check: move=${priceMoveForQuiet.toFixed(1)}% (needs ${QUIET_TREND_PARAMS.MIN_PRICE_MOVE_PERCENT}%)`
+                : "";
+              
               // Squeeze conditions not met - reject with ADX reason + squeeze failure reasons
               rejectedByHardGates++;
-              perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW_NO_SQUEEZE', details: `ADX=${adx.toFixed(1)}, squeeze failed` });
+              perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW_NO_SQUEEZE', details: `ADX=${adx.toFixed(1)}, squeeze failed${quietTrendCloseMsg}` });
               await logRejectionWithAI(
                 supabase, userId, symbol,
-                `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.MINIMUM}) - squeeze breakout not valid: ${squeezeResult.reasons.join(", ")}`,
+                `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.MINIMUM}) - squeeze breakout not valid: ${squeezeResult.reasons.join(", ")}${quietTrendCloseMsg}`,
                 { 
                   gate: "ADX_TOO_LOW_NO_SQUEEZE",
                   adx: adx.toFixed(1),
@@ -4193,6 +4308,13 @@ serve(async (req) => {
                   squeezeMinimum: ADX_THRESHOLDS.SQUEEZE_MINIMUM,
                   squeezeValid: false,
                   squeezeReasons: squeezeResult.reasons,
+                  quietTrendCheck: {
+                    enabled: QUIET_TREND_PARAMS.ENABLED,
+                    symbolAllowed: QUIET_TREND_PARAMS.ALLOWED_SYMBOLS.includes(symbol),
+                    priceMove: priceMoveForQuiet.toFixed(1),
+                    microTrend: trendData.microTrend?.direction,
+                    persistence: trendData.microTrend?.persistence?.count || 0,
+                  },
                   trend,
                   confidence,
                   derivedDirection,
@@ -4216,17 +4338,31 @@ serve(async (req) => {
               continue;
             }
           } else {
-            // ADX < 18: No squeeze exception possible
+            // ADX < 18: No squeeze exception possible, but check quiet trend for diagnostic
+            const priceActionForQuiet = trendData.priceActionMomentum;
+            const priceMoveForQuiet = Math.abs(priceActionForQuiet?.movePercent || 0);
+            const quietTrendDiag = QUIET_TREND_PARAMS.ENABLED && adx >= QUIET_TREND_PARAMS.MIN_ADX
+              ? ` | Quiet trend: ADX=${adx.toFixed(1)} in range, move=${priceMoveForQuiet.toFixed(1)}%`
+              : "";
+            
             rejectedByHardGates++;
-            perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW', details: `ADX=${adx.toFixed(1)}<18` });
+            perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW', details: `ADX=${adx.toFixed(1)}<18${quietTrendDiag}` });
             await logRejectionWithAI(
               supabase, userId, symbol,
-              `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.SQUEEZE_MINIMUM}) - no trend strength, below squeeze minimum`,
+              `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.SQUEEZE_MINIMUM}) - no trend strength, below squeeze minimum${quietTrendDiag}`,
               { 
                 gate: "ADX_TOO_LOW",
                 adx: adx.toFixed(1),
                 adxRequired: ADX_THRESHOLDS.MINIMUM,
                 squeezeMinimum: ADX_THRESHOLDS.SQUEEZE_MINIMUM,
+                quietTrendCheck: {
+                  enabled: QUIET_TREND_PARAMS.ENABLED,
+                  symbolAllowed: QUIET_TREND_PARAMS.ALLOWED_SYMBOLS.includes(symbol),
+                  adxInRange: adx >= QUIET_TREND_PARAMS.MIN_ADX,
+                  priceMove: priceMoveForQuiet.toFixed(1),
+                  microTrend: trendData.microTrend?.direction,
+                  persistence: trendData.microTrend?.persistence?.count || 0,
+                },
                 trend,
                 confidence,
                 trendConsistency: trendData.trueAlignment?.score?.toFixed(1),
@@ -4254,6 +4390,12 @@ serve(async (req) => {
         if (squeezeBreakoutActive && squeezePositionMultiplier < 1.0) {
           reversalPositionMultiplier = Math.min(reversalPositionMultiplier, squeezePositionMultiplier);
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Squeeze breakout - position size capped at ${(squeezePositionMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Apply quiet trend position size reduction if active
+        if (qualifiesForQuietTrend && quietTrendPositionMultiplier < 1.0) {
+          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, quietTrendPositionMultiplier);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🌊 Quiet trend - position size capped at ${(quietTrendPositionMultiplier * 100).toFixed(0)}%`);
         }
 
         // RELAXED: Allow entry when momentum.state is "none" IF ADX >= 28 (strong trend exception)

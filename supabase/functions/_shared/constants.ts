@@ -1798,3 +1798,55 @@ export const EXIT_MANAGEMENT_PRIORITY = {
   // Emergency exit threshold (skip normal checks)
   EMERGENCY_THRESHOLD: 80,
 } as const;
+
+// ============= QUIET TREND DETECTION PARAMETERS =============
+// Catches sustained directional price moves when ADX is low but price is grinding consistently
+// These are "quiet declines/rises" that slip through traditional ADX gates
+// Phase 1: BTC/ETH only with conservative position sizing
+export const QUIET_TREND_PARAMS = {
+  // Enable quiet trend detection
+  ENABLED: true,
+  
+  // ===== ASSET RESTRICTIONS (Phase 1: BTC/ETH only) =====
+  // Only liquid, large-cap assets that can sustain quiet directional drifts
+  ALLOWED_SYMBOLS: ["BTCUSDT", "ETHUSDT"],
+  
+  // ===== PRICE SLOPE DETECTION (replaces simple persistence count) =====
+  // Total price move required over lookback period
+  MIN_PRICE_MOVE_PERCENT: 1.5,      // 1.5% total move over lookback
+  LOOKBACK_HOURS: 6,                // Check last 6 hours
+  // Minimum slope (move per hour) - ensures move is sustained, not single-bar
+  MIN_AVG_MOVE_PER_HOUR: 0.20,      // 0.2% per hour minimum slope
+  
+  // ===== ADX REQUIREMENTS =====
+  // ADX must be in "quiet" range (low but not dead)
+  MIN_ADX: 15,                      // Relaxed from 20 - still requires some trend
+  MAX_ADX: 22,                      // Only applies when ADX is below normal threshold
+  // ADX stability check - block if ADX is collapsing (end of move entries)
+  REQUIRE_ADX_NOT_FALLING: true,
+  MAX_ADX_DROP: 3,                  // Max ADX points drop over lookback (blocks end-of-move)
+  
+  // ===== MICRO-TREND PERSISTENCE =====
+  // Minimum consecutive micro-trend readings in same direction
+  MIN_CONSECUTIVE_READINGS: 3,      // 3+ consecutive readings (tracked in signal flow)
+  
+  // ===== HTF GATES =====
+  ALLOW_4H_NEUTRAL: true,           // Allow when 4H is neutral (the common case)
+  BLOCK_4H_OPPOSING: true,          // ALWAYS block when 4H actively opposes direction
+  
+  // ===== ENTRY TIMING (prevent late chasing) =====
+  // Don't enter if price already moved too far from recent swing
+  MAX_DISTANCE_FROM_4H_EXTREME_PERCENT: 1.2,  // Don't enter if 1.2%+ from swing
+  
+  // ===== VOLUME & STOCHRSI SAFETY =====
+  REQUIRE_VOLUME_CONFIRM: true,     // Volume should support direction
+  BLOCK_IF_STOCHRSI_EXTREME: true,  // Don't chase at absolute extremes
+  MAX_STOCHRSI_K_LONG: 85,          // Don't chase overbought for longs
+  MIN_STOCHRSI_K_SHORT: 15,         // Don't chase oversold for shorts
+  
+  // ===== POSITION SIZING (Conservative) =====
+  POSITION_SIZE_MULTIPLIER: 0.50,   // 50% position size for safety
+  
+  // ===== STOP LOSS (Tighter for low ADX) =====
+  STOP_LOSS_ATR_MULTIPLIER: 1.25,   // Tighter than normal 1.5x
+} as const;
