@@ -3068,8 +3068,33 @@ serve(async (req) => {
           allTimeframesAligned || 
           !STRONG_TREND_HTF_BYPASS_PARAMS.REQUIRE_ALL_TF_ALIGNED;
         
+        // ===== NEW: Extract stealth trend data for HTF bypass check =====
+        const stealthTrendHTF = trendData.stealthTrend || { 
+          detected: false, 
+          htfBypassAllowed: false,
+          direction: "neutral",
+          stealthScore: 0,
+          driftPercent: 0,
+          positionMultiplier: 0.5,
+          stopMultiplier: 0.6
+        };
+        
+        // Check if stealth trend direction matches intended trade direction
+        const stealthDirectionMatchesHTF = (
+          (intendedTradeDirection === "short" && stealthTrendHTF.direction === "bearish") ||
+          (intendedTradeDirection === "long" && stealthTrendHTF.direction === "bullish")
+        );
+        
+        // NEW: Stealth HTF bypass path - when stealth trend detected with high score
+        const stealthHTFBypassPath = stealthTrendHTF.detected && 
+          stealthTrendHTF.htfBypassAllowed && 
+          stealthDirectionMatchesHTF &&
+          stealthTrendHTF.stealthScore >= 60; // Require high score for HTF bypass
+        
         // FIXED: Allow bypass if high ADX path is met, even without rising slope
-        const canBypassHTFGate = STRONG_TREND_HTF_BYPASS_PARAMS.ENABLED &&
+        // OR if stealth HTF bypass is valid
+        const canBypassHTFGate = (
+          STRONG_TREND_HTF_BYPASS_PARAMS.ENABLED &&
           adx >= STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX &&
           unifiedReversal.score < STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE &&
           !isExhausted &&
@@ -3078,11 +3103,15 @@ serve(async (req) => {
             (adxSlopeMeetsRequirement && (alignmentMet || alternativeBypassPath)) ||
             // Path 2: High ADX (40+) with 4h alignment - no slope requirement
             highADXBypassPath
-          );
+          )
+        ) || stealthHTFBypassPath; // Path 3: Stealth trend with high score
         
         // Determine position size based on bypass type
         const getBypassPositionMultiplier = () => {
-          if (isParabolicMode) {
+          // NEW: Stealth HTF bypass path - use stealth position multiplier
+          if (stealthHTFBypassPath) {
+            return stealthTrendHTF.positionMultiplier;
+          } else if (isParabolicMode) {
             // Parabolic mode - strongest confidence
             return STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
           } else if (adx >= relaxedAlignmentMinADX && allTimeframesAligned) {
@@ -3108,14 +3137,20 @@ serve(async (req) => {
         
         // Log bypass decision details for debugging
         if (isHTFOverbought || isHTFOversold) {
-          const bypassType = isParabolicMode ? 'PARABOLIC' : 
+          const bypassType = stealthHTFBypassPath ? 'STEALTH_TREND' :
+            isParabolicMode ? 'PARABOLIC' : 
             highADXBypassPath ? 'HIGH_ADX_4H_ALIGNED' :
             hasRelaxedAlignment ? 'RELAXED_ALIGNMENT' : 
             alternativeBypassPath ? 'RISING_SLOPE' : 
             allTimeframesAligned ? 'FULL_ALIGNMENT' : 'BASIC';
           
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF BYPASS CHECK: type=${bypassType}, ADX=${adx.toFixed(1)}, slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
-          logger.forSymbol(symbol).info(`   → canBypass=${canBypassHTFGate}, parabolic=${isParabolicMode}, relaxedAlign=${hasRelaxedAlignment}, altPath=${alternativeBypassPath}, highADX=${highADXBypassPath}, exhausted=${isExhausted}`);
+          logger.forSymbol(symbol).info(`   → canBypass=${canBypassHTFGate}, parabolic=${isParabolicMode}, relaxedAlign=${hasRelaxedAlignment}, altPath=${alternativeBypassPath}, highADX=${highADXBypassPath}, stealth=${stealthHTFBypassPath}, exhausted=${isExhausted}`);
+          
+          // Extra logging for stealth bypass
+          if (stealthTrendHTF.detected) {
+            logger.forSymbol(symbol).info(`   🕵️ STEALTH: detected=${stealthTrendHTF.detected}, htfBypass=${stealthTrendHTF.htfBypassAllowed}, score=${stealthTrendHTF.stealthScore}, drift=${stealthTrendHTF.driftPercent?.toFixed(2) || 0}%, dirMatch=${stealthDirectionMatchesHTF}`);
+          }
         }
         
         // Block SHORT continuation at 4h oversold (bounce is statistically likely)
@@ -3124,9 +3159,9 @@ serve(async (req) => {
             // Allow with reduced position size - use dynamic multiplier based on bypass type
             strongTrendHTFBypassApplied = true;
             trendContinuationPositionMultiplier = getBypassPositionMultiplier();
-            const bypassType = isParabolicMode ? 'PARABOLIC' : highADXBypassPath ? 'HIGH_ADX' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} STRONG TREND HTF BYPASS [${bypassType}]: Allowing SHORT at 4h oversold`);
-            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}, exhausted=${isExhausted}`);
+            const bypassType = stealthHTFBypassPath ? 'STEALTH_TREND' : isParabolicMode ? 'PARABOLIC' : highADXBypassPath ? 'HIGH_ADX' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ${stealthHTFBypassPath ? '🕵️' : ''} HTF BYPASS [${bypassType}]: Allowing SHORT at 4h oversold`);
+            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}, exhausted=${isExhausted}${stealthHTFBypassPath ? `, stealth_drift=${stealthTrendHTF.driftPercent?.toFixed(2) || 0}%, stealth_score=${stealthTrendHTF.stealthScore}` : ''}`);
             logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
           } else {
             rejectedByHardGates++;
@@ -3158,7 +3193,14 @@ serve(async (req) => {
                   isParabolicMode,
                   reversalScore: unifiedReversal.score,
                   isExhausted,
-                  canBypass: false
+                  canBypass: false,
+                  stealthTrend: {
+                    detected: stealthTrendHTF.detected,
+                    htfBypassAllowed: stealthTrendHTF.htfBypassAllowed,
+                    score: stealthTrendHTF.stealthScore,
+                    drift: stealthTrendHTF.driftPercent,
+                    directionMatch: stealthDirectionMatchesHTF
+                  }
                 },
                 message: "Bounce statistically likely at 4h oversold - blocking SHORT continuation"
               },
@@ -3176,9 +3218,9 @@ serve(async (req) => {
             // Allow with reduced position size - use dynamic multiplier based on bypass type
             strongTrendHTFBypassApplied = true;
             trendContinuationPositionMultiplier = getBypassPositionMultiplier();
-            const bypassType = isParabolicMode ? 'PARABOLIC' : highADXBypassPath ? 'HIGH_ADX' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} STRONG TREND HTF BYPASS [${bypassType}]: Allowing LONG at 4h overbought`);
-            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}, exhausted=${isExhausted}`);
+            const bypassType = stealthHTFBypassPath ? 'STEALTH_TREND' : isParabolicMode ? 'PARABOLIC' : highADXBypassPath ? 'HIGH_ADX' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ${stealthHTFBypassPath ? '🕵️' : ''} HTF BYPASS [${bypassType}]: Allowing LONG at 4h overbought`);
+            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}, exhausted=${isExhausted}${stealthHTFBypassPath ? `, stealth_drift=${stealthTrendHTF.driftPercent?.toFixed(2) || 0}%, stealth_score=${stealthTrendHTF.stealthScore}` : ''}`);
             logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
           } else {
             rejectedByHardGates++;
