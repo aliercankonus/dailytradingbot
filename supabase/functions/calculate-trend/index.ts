@@ -256,10 +256,21 @@ function calculateStealthTrend(
   const driftPercent = ((currentClose - pastClose) / pastClose) * 100;
   const absDrift = Math.abs(driftPercent);
   
+  // ===== DRIFT-BASED ADX THRESHOLD SCALING =====
+  // Larger drifts can tolerate higher ADX values and still be "stealth"
+  // This fixes the "ADX dead zone" (22-25) where moves are blocked
+  let effectiveMaxADX: number = params.MAX_ADX_FOR_STEALTH; // Base: 25
+  
+  if (absDrift >= 2.5 && params.ADX_SCALE_STRONG_DRIFT) {
+    effectiveMaxADX = params.ADX_SCALE_STRONG_DRIFT as number; // 28 for strong drift
+  } else if (absDrift >= 2.0 && params.ADX_SCALE_MODERATE_DRIFT) {
+    effectiveMaxADX = params.ADX_SCALE_MODERATE_DRIFT as number; // 26 for moderate drift
+  }
+  
   // Check if this qualifies as stealth trend
   const isStealthDetected = 
     absDrift >= params.MIN_DRIFT_PERCENT &&
-    currentADX <= params.MAX_ADX_FOR_STEALTH;
+    currentADX <= effectiveMaxADX;
   
   // Direction based on drift
   const direction: "bullish" | "bearish" | "neutral" = 
@@ -284,7 +295,16 @@ function calculateStealthTrend(
     stealthScore += Math.min(40, absDrift * 20);
     
     // Lower ADX = more stealth (up to 20 points)
-    stealthScore += Math.min(20, (params.MAX_ADX_FOR_STEALTH - currentADX) * 2);
+    // Use effectiveMaxADX for proper scaling
+    stealthScore += Math.min(20, (effectiveMaxADX - currentADX) * 2);
+    
+    // ===== NEW: Extra points for very large drifts =====
+    // Larger drifts are stronger signals even with elevated ADX
+    if (absDrift >= 2.5) {
+      stealthScore += 15;  // Strong drift bonus
+    } else if (absDrift >= 2.0) {
+      stealthScore += 10;  // Moderate drift bonus
+    }
     
     // Bonus if 1h trend matches drift direction (15 points)
     if (params.REQUIRE_1H_ALIGNMENT || true) {
@@ -310,7 +330,7 @@ function calculateStealthTrend(
     }
     
     stealthScore = Math.max(0, Math.min(100, stealthScore));
-    reason = `${direction} drift ${driftPercent.toFixed(2)}% over ${params.DRIFT_WINDOW_HOURS}h with ADX ${currentADX.toFixed(1)}, score ${stealthScore}`;
+    reason = `${direction} drift ${driftPercent.toFixed(2)}% over ${params.DRIFT_WINDOW_HOURS}h with ADX ${currentADX.toFixed(1)} (max=${effectiveMaxADX}), score ${stealthScore}`;
   }
   
   // Determine HTF bypass eligibility (higher bar)
