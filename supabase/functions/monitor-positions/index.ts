@@ -1869,7 +1869,7 @@ serve(async (req) => {
                 status: "active",
                 is_hedge: true,
                 parent_position_id: position.id,
-                strategy_name: null, // Prevent strategy stat pollution
+                strategy_name: "Hedge: Reversal Protection", // Clear label for hedge positions
                 trend: currentTrend,
                 confidence_score: reversalRisk.riskScore,
               })

@@ -17,6 +17,7 @@ interface Trade {
   executed_at: string;
   closed_at: string | null;
   strategy_name: string | null;
+  is_hedge: boolean | null;
 }
 
 export const useOpenTrades = () => {
