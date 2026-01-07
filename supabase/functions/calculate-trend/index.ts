@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 // ============= SHARED MODULES - Single source of truth =============
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, TIME_IN_EXTREME_PARAMS, MICRO_TREND_PARAMS, MOMENTUM_CONTINUATION_PARAMS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, TIME_IN_EXTREME_PARAMS, MICRO_TREND_PARAMS, MOMENTUM_CONTINUATION_PARAMS, STEALTH_TREND_PARAMS } from "../_shared/constants.ts";
 import { 
   calculateEMA, calculateEMAArray, calculateRSI, calculateRSIArray, calculateMACD,
   calculateStochasticRSI, calculateBarsAtExtreme, calculateATR, calculateHistoricalATRAvg,
@@ -196,6 +196,150 @@ function countConsecutiveBarsInDirection(histogramArray: number[] | undefined): 
     }
   }
   return count;
+}
+
+// ============= STEALTH TREND DETECTION =============
+// Detects gradual price grinds that slip through ADX/momentum filters
+// These "stealth" moves accumulate to significant drops (2-4%) while ADX stays low
+interface StealthTrendResult {
+  detected: boolean;
+  direction: "bullish" | "bearish" | "neutral";
+  driftPercent: number;
+  driftDuration: number; // hours
+  adxBypassAllowed: boolean;
+  htfBypassAllowed: boolean;
+  stealthScore: number; // 0-100
+  positionMultiplier: number;
+  stopMultiplier: number;
+  reason: string;
+}
+
+function calculateStealthTrend(
+  klines15m: any[],
+  currentADX: number,
+  trend1h: { trend: string; confidence: number },
+  trend30m: { trend: string; confidence: number },
+  stochRsiK4h: number
+): StealthTrendResult {
+  const params = STEALTH_TREND_PARAMS;
+  
+  // Default result (no stealth trend)
+  const defaultResult: StealthTrendResult = {
+    detected: false,
+    direction: "neutral",
+    driftPercent: 0,
+    driftDuration: params.DRIFT_WINDOW_HOURS,
+    adxBypassAllowed: false,
+    htfBypassAllowed: false,
+    stealthScore: 0,
+    positionMultiplier: 1.0,
+    stopMultiplier: 1.0,
+    reason: "No stealth trend detected"
+  };
+  
+  if (!params.ENABLED || klines15m.length < 20) {
+    return defaultResult;
+  }
+  
+  // Calculate price at start of drift window (4 hours ago using 15m candles)
+  const candlesPerHour = 4; // 15-minute candles
+  const lookbackCandles = params.DRIFT_WINDOW_HOURS * candlesPerHour;
+  
+  const currentClose = parseFloat(klines15m[klines15m.length - 1][4]);
+  const pastIndex = Math.max(0, klines15m.length - 1 - lookbackCandles);
+  const pastClose = parseFloat(klines15m[pastIndex][4]);
+  
+  if (!Number.isFinite(currentClose) || !Number.isFinite(pastClose) || pastClose === 0) {
+    return defaultResult;
+  }
+  
+  const driftPercent = ((currentClose - pastClose) / pastClose) * 100;
+  const absDrift = Math.abs(driftPercent);
+  
+  // Check if this qualifies as stealth trend
+  const isStealthDetected = 
+    absDrift >= params.MIN_DRIFT_PERCENT &&
+    currentADX <= params.MAX_ADX_FOR_STEALTH;
+  
+  // Direction based on drift
+  const direction: "bullish" | "bearish" | "neutral" = 
+    driftPercent < -params.MIN_DRIFT_PERCENT ? "bearish" :
+    driftPercent > params.MIN_DRIFT_PERCENT ? "bullish" : "neutral";
+  
+  // Can we bypass ADX gates?
+  const adxBypassAllowed = 
+    isStealthDetected && 
+    currentADX >= params.ADX_BYPASS_MINIMUM;
+  
+  // Safety gate: Block at StochRSI extremes
+  const isStochRsiSafe = !params.BLOCK_AT_STOCHRSI_EXTREMES || 
+    (stochRsiK4h >= params.STOCHRSI_EXTREME_THRESHOLD && stochRsiK4h <= (100 - params.STOCHRSI_EXTREME_THRESHOLD));
+  
+  // Calculate stealth score (how confident are we in this pattern)
+  let stealthScore = 0;
+  let reason = "";
+  
+  if (isStealthDetected) {
+    // Points for drift size (up to 40 points)
+    stealthScore += Math.min(40, absDrift * 20);
+    
+    // Lower ADX = more stealth (up to 20 points)
+    stealthScore += Math.min(20, (params.MAX_ADX_FOR_STEALTH - currentADX) * 2);
+    
+    // Bonus if 1h trend matches drift direction (15 points)
+    if (params.REQUIRE_1H_ALIGNMENT || true) {
+      if ((direction === "bearish" && trend1h.trend === "bearish") ||
+          (direction === "bullish" && trend1h.trend === "bullish")) {
+        stealthScore += 15;
+        if (trend1h.confidence >= params.MIN_1H_CONFIDENCE_FOR_ALIGNMENT) {
+          stealthScore += 5;
+        }
+      }
+    }
+    
+    // Bonus if 30m also aligns (10 points)
+    if (!params.REQUIRE_30M_ALIGNMENT || 
+        ((direction === "bearish" && trend30m.trend === "bearish") ||
+         (direction === "bullish" && trend30m.trend === "bullish"))) {
+      stealthScore += 10;
+    }
+    
+    // Penalty if StochRSI is at dangerous extremes
+    if (!isStochRsiSafe) {
+      stealthScore -= 20;
+    }
+    
+    stealthScore = Math.max(0, Math.min(100, stealthScore));
+    reason = `${direction} drift ${driftPercent.toFixed(2)}% over ${params.DRIFT_WINDOW_HOURS}h with ADX ${currentADX.toFixed(1)}, score ${stealthScore}`;
+  }
+  
+  // Determine HTF bypass eligibility (higher bar)
+  const htfBypassAllowed = isStealthDetected && 
+    stealthScore >= params.MIN_SCORE_FOR_HTF_BYPASS &&
+    isStochRsiSafe;
+  
+  // Calculate position size based on stealth strength
+  let positionMultiplier = 1.0;
+  if (isStealthDetected && stealthScore >= params.MIN_SCORE_FOR_ADX_BYPASS) {
+    if (absDrift >= params.STRONG_DRIFT_PERCENT) {
+      positionMultiplier = params.STRONG_STEALTH_POSITION_PERCENT / 100;
+    } else {
+      positionMultiplier = params.MAX_POSITION_PERCENT / 100;
+    }
+  }
+  
+  return {
+    detected: isStealthDetected && stealthScore >= params.MIN_SCORE_FOR_ADX_BYPASS,
+    direction,
+    driftPercent: Math.round(driftPercent * 100) / 100,
+    driftDuration: params.DRIFT_WINDOW_HOURS,
+    adxBypassAllowed: adxBypassAllowed && stealthScore >= params.MIN_SCORE_FOR_ADX_BYPASS,
+    htfBypassAllowed,
+    stealthScore,
+    positionMultiplier,
+    stopMultiplier: params.STOP_MULTIPLIER,
+    reason: isStealthDetected ? reason : "No stealth trend detected (drift or ADX outside range)"
+  };
 }
 
 // ============= MICRO-TREND DETECTION =============
@@ -830,6 +974,24 @@ serve(async (req) => {
       }
     }
     
+    // ============= STEALTH TREND DETECTION =============
+    // Detect gradual price grinds (2-4% moves) that slip through ADX/momentum filters
+    const stealthTrend = calculateStealthTrend(
+      klines15m,
+      adx,
+      trend1h,
+      trend30m,
+      stochRsi4h.k
+    );
+    
+    if (stealthTrend.detected) {
+      symLog.info(`${LOG_CATEGORIES.TREND} 🕵️ STEALTH TREND: ${stealthTrend.direction} drift ${stealthTrend.driftPercent.toFixed(2)}% over ${stealthTrend.driftDuration}h | ADX=${adx.toFixed(1)}, score=${stealthTrend.stealthScore}`);
+      symLog.info(`   → ADX bypass=${stealthTrend.adxBypassAllowed}, HTF bypass=${stealthTrend.htfBypassAllowed}, position=${(stealthTrend.positionMultiplier * 100).toFixed(0)}%`);
+    } else if (Math.abs(stealthTrend.driftPercent) >= 1.0) {
+      // Log near-misses for debugging
+      symLog.info(`${LOG_CATEGORIES.TREND} 🕵️ STEALTH CHECK: drift ${stealthTrend.driftPercent.toFixed(2)}% (below threshold or ADX ${adx.toFixed(1)} too high) - ${stealthTrend.reason}`);
+    }
+    
     // Divergence alignment validation
     const PULLBACK_ALIGNMENT_THRESHOLD = 55;
     const EARLY_REVERSAL_ALIGNMENT_THRESHOLD = 45;
@@ -1163,6 +1325,19 @@ serve(async (req) => {
         movePercent: priceActionMomentum.movePercent,
         isStrongMove: priceActionMomentum.isStrongMove,
         canOverrideNeutralAlignment: priceActionMomentum.canOverrideNeutralAlignment,
+      },
+      // NEW: Stealth trend detection for catching gradual price grinds
+      stealthTrend: {
+        detected: stealthTrend.detected,
+        direction: stealthTrend.direction,
+        driftPercent: stealthTrend.driftPercent,
+        driftDuration: stealthTrend.driftDuration,
+        adxBypassAllowed: stealthTrend.adxBypassAllowed,
+        htfBypassAllowed: stealthTrend.htfBypassAllowed,
+        stealthScore: stealthTrend.stealthScore,
+        positionMultiplier: stealthTrend.positionMultiplier,
+        stopMultiplier: stealthTrend.stopMultiplier,
+        reason: stealthTrend.reason,
       },
     };
 

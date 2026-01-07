@@ -1098,6 +1098,64 @@ export const CORRELATION_PARAMS = {
   MIN_POSITION_SIZE_FLOOR: 0.5,
 } as const;
 
+// ============= STEALTH TREND DETECTION PARAMETERS =============
+// Detects gradual price grinds (2-4% drops/rises) that slip through ADX/momentum filters
+// These "stealth" moves have low ADX because they're slow and steady, not impulsive
+// This addresses the scenario: BTC/ETH/BNB/SOL all dropping 2-4% but ADX staying < 20
+export const STEALTH_TREND_PARAMS = {
+  // Enable stealth trend detection
+  ENABLED: true,
+  
+  // ===== CUMULATIVE DRIFT DETECTION =====
+  // Minimum cumulative price drift to trigger stealth detection
+  MIN_DRIFT_PERCENT: 1.5,
+  // Time window for drift calculation (hours) - uses 15m candles internally
+  DRIFT_WINDOW_HOURS: 4,
+  // Minimum drift to consider as "strong" stealth trend
+  STRONG_DRIFT_PERCENT: 2.0,
+  
+  // ===== ADX THRESHOLDS =====
+  // Maximum ADX for stealth trend (if higher, use normal logic - it's not "stealth")
+  MAX_ADX_FOR_STEALTH: 22,
+  // Minimum ADX to allow stealth bypass (still need some directional movement)
+  // Below this, there's truly no trend even for stealth
+  ADX_BYPASS_MINIMUM: 12,
+  
+  // ===== DIRECTION ALIGNMENT =====
+  // Require 1h trend to match drift direction (reduces false positives)
+  REQUIRE_1H_ALIGNMENT: true,
+  // Require 30m to also match (stricter filter)
+  REQUIRE_30M_ALIGNMENT: false,
+  // Minimum 1h confidence when alignment is checked
+  MIN_1H_CONFIDENCE_FOR_ALIGNMENT: 50,
+  
+  // ===== POSITION SIZING (Risk Management) =====
+  // Maximum position size for stealth entries (percentage of normal)
+  MAX_POSITION_PERCENT: 50,
+  // Position size for strong stealth trends (drift >= STRONG_DRIFT_PERCENT)
+  STRONG_STEALTH_POSITION_PERCENT: 60,
+  
+  // ===== STOP LOSS ADJUSTMENT =====
+  // Tighter stops for stealth entries (multiplier on normal ATR-based stop)
+  STOP_MULTIPLIER: 0.6,
+  // Take profit multiplier (earlier exits for stealth entries)
+  TP_MULTIPLIER: 1.5,
+  
+  // ===== STEALTH SCORE THRESHOLDS =====
+  // Minimum stealth score (0-100) to allow ADX gate bypass
+  MIN_SCORE_FOR_ADX_BYPASS: 50,
+  // Minimum stealth score to allow HTF floor bypass (higher requirement)
+  MIN_SCORE_FOR_HTF_BYPASS: 60,
+  
+  // ===== SAFETY GATES =====
+  // Block stealth entries if StochRSI is at absolute extremes (truly exhausted)
+  BLOCK_AT_STOCHRSI_EXTREMES: true,
+  STOCHRSI_EXTREME_THRESHOLD: 3, // Block if K < 3 or K > 97
+  
+  // Require direction alignment with drift (drift bearish + signal SHORT must match)
+  REQUIRE_DIRECTION_ALIGNMENT: true,
+} as const;
+
 // Order execution parameters
 export const ORDER_EXECUTION_PARAMS = {
   // Maximum number of retries for transient order failures

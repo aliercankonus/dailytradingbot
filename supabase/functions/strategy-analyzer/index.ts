@@ -56,6 +56,8 @@ import {
   BOLLINGER_TIERED_BYPASS_PARAMS,
   // NEW: Quiet trend detection for catching sustained directional drifts at low ADX
   QUIET_TREND_PARAMS,
+  // NEW: Stealth trend detection for catching gradual price grinds
+  STEALTH_TREND_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -1659,7 +1661,10 @@ serve(async (req) => {
       | 'TREND_ACCELERATION_MOMENTUM_BYPASS'
       // NEW: Quiet trend detection gates
       | 'QUIET_TREND_ALLOWED'
-      | 'QUIET_TREND_BLOCKED';
+      | 'QUIET_TREND_BLOCKED'
+      // NEW: Stealth trend detection gates
+      | 'STEALTH_TREND_ALLOWED'
+      | 'STEALTH_TREND_HTF_BYPASS';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -4349,12 +4354,43 @@ serve(async (req) => {
         // GATE 1: ADX must be >= MINIMUM for any trade (trend strength required)
         // EXCEPTION 1: Squeeze breakout allows ADX 18-20 if strict conditions are met
         // EXCEPTION 2: Quiet trend allows ADX 15-22 if price is grinding consistently
+        // EXCEPTION 3: Stealth trend allows ADX 12-22 if cumulative drift is significant
         let squeezeBreakoutActive = false;
         let squeezePositionMultiplier = 1.0;
+        let stealthTrendBypassActive = false;
+        let stealthTrendPositionMultiplier = 1.0;
+        
+        // Extract stealth trend data from trend analysis
+        const stealthTrend = trendData.stealthTrend || { 
+          detected: false, 
+          adxBypassAllowed: false,
+          htfBypassAllowed: false,
+          direction: 'neutral',
+          driftPercent: 0,
+          stealthScore: 0,
+          positionMultiplier: 1.0,
+          stopMultiplier: 1.0,
+          reason: 'No stealth trend data'
+        };
+        
+        // Check if stealth trend direction matches intended trade direction
+        const stealthDirectionMatches = (
+          (intendedTradeDirection === "short" && stealthTrend.direction === "bearish") ||
+          (intendedTradeDirection === "long" && stealthTrend.direction === "bullish")
+        );
         
         if (adx < ADX_THRESHOLDS.MINIMUM) {
-          // NEW: Check if quiet trend exception applies (bypasses ADX gate)
-          if (qualifiesForQuietTrend) {
+          // NEW: Check if stealth trend exception applies (bypasses ADX gate for gradual grinds)
+          if (stealthTrend.detected && stealthTrend.adxBypassAllowed && stealthDirectionMatches) {
+            // STEALTH TREND EXCEPTION - allow entry with reduced position size
+            stealthTrendBypassActive = true;
+            stealthTrendPositionMultiplier = stealthTrend.positionMultiplier;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🕵️ STEALTH TREND BYPASS: ADX gate bypassed (ADX=${adx.toFixed(1)}, drift=${stealthTrend.driftPercent.toFixed(2)}%, score=${stealthTrend.stealthScore})`);
+            logger.forSymbol(symbol).info(`   → Direction=${stealthTrend.direction}, position=${(stealthTrendPositionMultiplier * 100).toFixed(0)}%, stopMultiplier=${stealthTrend.stopMultiplier}`);
+            perSymbolGateAttribution.set(symbol, { gate: 'STEALTH_TREND_ALLOWED', details: stealthTrend.reason });
+          } 
+          // Check if quiet trend exception applies (bypasses ADX gate)
+          else if (qualifiesForQuietTrend) {
             // QUIET TREND EXCEPTION - allow entry with reduced position size
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🌊 QUIET TREND BYPASS: Skipping ADX gate (ADX=${adx.toFixed(1)}) - ${quietTrendReason}`);
             perSymbolGateAttribution.set(symbol, { gate: 'QUIET_TREND_ALLOWED', details: quietTrendReason });
@@ -4479,6 +4515,12 @@ serve(async (req) => {
         if (qualifiesForQuietTrend && quietTrendPositionMultiplier < 1.0) {
           reversalPositionMultiplier = Math.min(reversalPositionMultiplier, quietTrendPositionMultiplier);
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🌊 Quiet trend - position size capped at ${(quietTrendPositionMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Apply stealth trend position size reduction if active
+        if (stealthTrendBypassActive && stealthTrendPositionMultiplier < 1.0) {
+          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, stealthTrendPositionMultiplier);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🕵️ Stealth trend - position size capped at ${(stealthTrendPositionMultiplier * 100).toFixed(0)}%`);
         }
 
         // RELAXED: Allow entry when momentum.state is "none" IF ADX >= 28 (strong trend exception)
