@@ -8,6 +8,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { formatPrice, formatPercent, formatQuantity } from '@/lib/utils';
 import { formatDistanceToNow, format } from 'date-fns';
 import { Loader2 } from 'lucide-react';
+import { TradeLifecyclePriceChart } from './TradeLifecyclePriceChart';
 
 interface TradeLifecycleDialogProps {
   positionId: string | null;
@@ -286,6 +287,14 @@ export const TradeLifecycleDialog = ({ positionId, open, onOpenChange }: TradeLi
                 </div>
               </CardContent>
             </Card>
+
+            {/* Price Movement Chart */}
+            <TradeLifecyclePriceChart
+              events={lifecycleData.events}
+              stopLoss={lifecycleData.rootPosition?.stop_loss || lifecycleData.mainPosition.stop_loss}
+              takeProfit={lifecycleData.rootPosition?.take_profit || lifecycleData.mainPosition.take_profit}
+              side={lifecycleData.mainPosition.side}
+            />
 
             {/* Timeline */}
             <div>
