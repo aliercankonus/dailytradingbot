@@ -7075,6 +7075,20 @@ serve(async (req) => {
                 isContinuation: adxExhaustion.isContinuation,
               },
             },
+            // NEW: Momentum Exhaustion Override tracking for dashboard analytics
+            momentumExhaustionOverride: {
+              applied: momentumExhaustionOverrideApplied,
+              positionSizeMultiplier: momentumExhaustionPositionMultiplier,
+              stopMultiplier: momentumExhaustionStopMultiplier,
+              effectiveStopLossPercent: momentumExhaustionOverrideApplied ? stopLossPercent : null,
+              conditions: momentumExhaustionOverrideApplied ? {
+                adx: adx.toFixed(1),
+                momentumState: trendData.momentum?.state || "none",
+                stoch4h: (trendData.stochasticRsi?.['4h']?.k ?? 50).toFixed(1),
+                regimeScore: smartRegime.regimeScore,
+                regime: smartRegime.regime,
+              } : null,
+            },
             // NEW: Order flow analysis for dashboard consistency
             orderFlow: {
               score: orderFlowAnalysis.score,
