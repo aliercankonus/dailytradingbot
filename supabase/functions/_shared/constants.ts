@@ -1110,9 +1110,20 @@ export const STEALTH_TREND_PARAMS = {
   // Minimum cumulative price drift to trigger stealth detection
   MIN_DRIFT_PERCENT: 1.5,
   // Time window for drift calculation (hours) - uses 15m candles internally
-  DRIFT_WINDOW_HOURS: 4,
+  // UPDATED: Extended from 4h to 8h to capture slow grinds distributed over 6-8 hours
+  DRIFT_WINDOW_HOURS: 8,
   // Minimum drift to consider as "strong" stealth trend
   STRONG_DRIFT_PERCENT: 2.0,
+  
+  // ===== MONOTONICITY REQUIREMENT =====
+  // Drift must be consistent (not oscillating) to qualify as stealth trend
+  // This prevents false triggers during Asia session chop, pre-news compression, range oscillation
+  REQUIRE_MONOTONIC_DRIFT: true,
+  // Minimum percentage of bars that must move in drift direction
+  // e.g., 70% = 7 of 10 bars must close in same direction as drift
+  MONOTONIC_MIN_CONSISTENCY_PERCENT: 70,
+  // Allow brief counter-moves of up to this percentage before disqualifying
+  MAX_COUNTER_MOVE_PERCENT: 0.3,  // 0.3% counter-moves allowed mid-grind
   
   // ===== ADX THRESHOLDS =====
   // Maximum ADX for stealth trend (if higher, use normal logic - it's not "stealth")
@@ -1161,6 +1172,92 @@ export const STEALTH_TREND_PARAMS = {
   
   // Require direction alignment with drift (drift bearish + signal SHORT must match)
   REQUIRE_DIRECTION_ALIGNMENT: true,
+} as const;
+
+// ============= LATE GRIND ACCEPTANCE MODE =============
+// Allows entry AFTER 1.5-2.0% has already occurred
+// Only if pullback fails (continuation proven)
+// This captures the middle 30% of the move, not the dangerous start
+export const LATE_GRIND_ACCEPTANCE_PARAMS = {
+  ENABLED: true,
+  
+  // ===== ENTRY REQUIREMENTS =====
+  // Minimum drift already occurred before entry considered
+  MIN_PRIOR_DRIFT_PERCENT: 1.5,
+  
+  // Drift threshold for "strong" late grind (allows slightly larger position)
+  STRONG_PRIOR_DRIFT_PERCENT: 2.5,
+  
+  // ===== PULLBACK FAILURE DETECTION =====
+  // Entry only on failed pullback - price tried to reverse but couldn't
+  REQUIRE_FAILED_PULLBACK: true,
+  
+  // Maximum pullback depth allowed (% of prior move)
+  // If pullback > this, trend may be reversing
+  MAX_PULLBACK_DEPTH_PERCENT: 38.2,  // Fibonacci 38.2% retracement
+  
+  // Minimum pullback that must have occurred (proves buyers/sellers tried)
+  MIN_PULLBACK_DEPTH_PERCENT: 15,
+  
+  // Pullback must fail within this many bars
+  MAX_PULLBACK_BARS: 8,  // 8 x 15min = 2 hours
+  
+  // ===== CONFIRMATION REQUIREMENTS =====
+  // After pullback fails, require continuation candle
+  REQUIRE_CONTINUATION_CANDLE: true,
+  
+  // HTF must be at least "biased" (not neutral-flat)
+  REQUIRE_HTF_BIAS: true,
+  MIN_HTF_CONFIDENCE: 50,  // 4h must show some directional bias
+  
+  // ===== POSITION SIZING (Conservative) =====
+  // Small size - we're entering mid-move
+  POSITION_SIZE_MULTIPLIER: 0.40,  // 40% of normal
+  
+  // Stronger grind = slightly larger size
+  STRONG_GRIND_POSITION_SIZE_MULTIPLIER: 0.50,  // 50% for 2.5%+ drift
+  
+  // ===== STOP LOSS (Tight) =====
+  // Tighter stop - market could snap back
+  STOP_MULTIPLIER: 0.50,  // 50% of normal ATR-based stop
+  
+  // Alternative: structure-based stop at pullback low/high
+  USE_STRUCTURE_STOP: true,
+  
+  // ===== SAFETY GATES =====
+  // Block if StochRSI at absolute extremes
+  BLOCK_AT_STOCHRSI_EXTREMES: true,
+  STOCHRSI_EXTREME_LONG: 95,   // Block LONG if K >= 95
+  STOCHRSI_EXTREME_SHORT: 5,   // Block SHORT if K <= 5
+  
+  // Block if ADX is collapsing (trend dying)
+  REQUIRE_ADX_NOT_COLLAPSING: true,
+  ADX_COLLAPSE_THRESHOLD: -0.5,  // ADX slope below this = collapsing
+  
+  // Exception type for tracking
+  EXCEPTION_TYPE: "LATE_GRIND_ACCEPTANCE" as const,
+} as const;
+
+// ============= CORRELATION CONFIDENCE MULTIPLIER =============
+// When multiple symbols drift together, INCREASE confidence score
+// This does NOT bypass gates - it makes stealth trend more believable
+export const CORRELATION_CONFIDENCE_PARAMS = {
+  ENABLED: true,
+  
+  // Minimum symbols drifting in same direction to apply bonus
+  MIN_CORRELATED_SYMBOLS: 3,
+  
+  // Minimum average drift across correlated symbols
+  MIN_AVG_DRIFT_PERCENT: 0.5,
+  
+  // Must persist for at least this duration
+  MIN_PERSISTENCE_MINUTES: 90,
+  
+  // Confidence score bonus (added to stealth score)
+  CONFIDENCE_BONUS: 15,  // +15 points to stealth score
+  
+  // Position size stays conservative (no bypass)
+  // This just makes the signal more likely to pass thresholds
 } as const;
 
 // Order execution parameters
