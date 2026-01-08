@@ -1864,6 +1864,15 @@ serve(async (req) => {
         const trendConsistency = trueAlignment?.score || 0;
         const adx = trendData.volatility?.adx || 0;
         const momentum = trendData.momentum;
+        
+        // ============= NEUTRAL PERSISTENCE BONUS =============
+        // Extract neutral persistence data for confidence bonuses on stealth/grind entries
+        const neutralPersistence = trendData.neutralPersistence || {
+          isCurrentlyNeutral: false,
+          durationMinutes: 0,
+          confidenceBonus: 0,
+          reason: "No neutral persistence data"
+        };
         // Derive higher timeframe data from correct paths
         const htfTrend4h = timeframes?.['4h']?.trend || timeframes?.['4h']?.indicators?.emaSignal || "neutral";
         const htfTrend1h = timeframes?.['1h']?.trend || timeframes?.['1h']?.indicators?.emaSignal || "neutral";
@@ -2016,8 +2025,11 @@ serve(async (req) => {
                 : LATE_GRIND_ACCEPTANCE_PARAMS.POSITION_SIZE_MULTIPLIER;
               lateGrindStopMultiplier = LATE_GRIND_ACCEPTANCE_PARAMS.STOP_MULTIPLIER;
               
+              // Apply neutral persistence bonus to Late Grind scoring
+              const neutralBonus = NEUTRAL_PERSISTENCE_PARAMS.APPLY_TO_LATE_GRIND ? neutralPersistence.confidenceBonus : 0;
+              
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🐌 LATE GRIND ACCEPTANCE: drift=${stealthDrift.toFixed(2)}%, pullback ${failedPullbackDetected ? 'failed' : 'skipped'} (depth=${pullbackDepth.toFixed(1)}%), allowing ${intendedDirection} at ${(lateGrindPositionMultiplier * 100).toFixed(0)}% size`);
-              logger.forSymbol(symbol).info(`   HTF bias=${htf4hConfidence.toFixed(0)}%, ADX slope=${adxSlope.toFixed(2)}, StochK4h=${stochK4h.toFixed(1)}`);
+              logger.forSymbol(symbol).info(`   HTF bias=${htf4hConfidence.toFixed(0)}%, ADX slope=${adxSlope.toFixed(2)}, StochK4h=${stochK4h.toFixed(1)}${neutralBonus > 0 ? `, neutral bonus=+${neutralBonus}` : ''}`);
             }
           }
         }
@@ -4638,14 +4650,21 @@ serve(async (req) => {
         
         if (adx < ADX_THRESHOLDS.MINIMUM) {
           // NEW: Check if stealth trend exception applies (bypasses ADX gate for gradual grinds)
+          // Apply neutral persistence bonus to stealth score for evaluation
+          const stealthScoreWithBonus = stealthTrend.stealthScore + 
+            (NEUTRAL_PERSISTENCE_PARAMS.APPLY_TO_STEALTH_TREND ? neutralPersistence.confidenceBonus : 0);
+          
           if (stealthTrend.detected && stealthTrend.adxBypassAllowed && stealthDirectionMatches) {
             // STEALTH TREND EXCEPTION - allow entry with reduced position size
             stealthTrendBypassActive = true;
             stealthTrendPositionMultiplier = stealthTrend.positionMultiplier;
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🕵️ STEALTH TREND BYPASS: ADX gate bypassed (ADX=${adx.toFixed(1)}, drift=${stealthTrend.driftPercent.toFixed(2)}%, score=${stealthTrend.stealthScore})`);
+            const neutralBonusMsg = neutralPersistence.confidenceBonus > 0 
+              ? `, neutralBonus=+${neutralPersistence.confidenceBonus}` 
+              : '';
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🕵️ STEALTH TREND BYPASS: ADX gate bypassed (ADX=${adx.toFixed(1)}, drift=${stealthTrend.driftPercent.toFixed(2)}%, score=${stealthScoreWithBonus}${neutralBonusMsg})`);
             logger.forSymbol(symbol).info(`   → Direction=${stealthTrend.direction}, position=${(stealthTrendPositionMultiplier * 100).toFixed(0)}%, stopMultiplier=${stealthTrend.stopMultiplier}`);
             perSymbolGateAttribution.set(symbol, { gate: 'STEALTH_TREND_ALLOWED', details: stealthTrend.reason });
-          } 
+          }
           // Check if quiet trend exception applies (bypasses ADX gate)
           else if (qualifiesForQuietTrend) {
             // QUIET TREND EXCEPTION - allow entry with reduced position size
