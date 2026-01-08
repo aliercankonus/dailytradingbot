@@ -2052,3 +2052,37 @@ export const MOMENTUM_EXHAUSTION_OVERRIDE_PARAMS = {
   // ===== TRACKING =====
   EXCEPTION_TYPE: "MOMENTUM_OVERRIDE_EXHAUSTION" as const,
 } as const;
+
+// ============= NEUTRAL PERSISTENCE MODELING =============
+// Tracks how long a market has been neutral
+// Longer neutral periods that resolve into drift are more meaningful
+// This is a CONFIDENCE MULTIPLIER, never a gate bypass
+export const NEUTRAL_PERSISTENCE_PARAMS = {
+  ENABLED: true,
+  
+  // ===== NEUTRAL STATE DEFINITION =====
+  // All timeframes must have confidence below this to count as "neutral"
+  NEUTRAL_CONFIDENCE_THRESHOLD: 55,
+  // Maximum netSignal magnitude for neutral state
+  MAX_NET_SIGNAL_FOR_NEUTRAL: 4,
+  
+  // ===== PERSISTENCE TRACKING =====
+  // Minimum duration to consider persistence meaningful (minutes)
+  MIN_DURATION_MINUTES: 60,
+  // Maximum duration bonus cap (minutes) - beyond this, no additional bonus
+  MAX_DURATION_CAP_MINUTES: 480,  // 8 hours
+  
+  // ===== CONFIDENCE BONUSES =====
+  // Bonus per hour of neutral persistence (added to stealth/grind score)
+  BONUS_PER_HOUR: 2,  // +2 points per hour neutral
+  // Maximum bonus from persistence
+  MAX_BONUS: 10,  // Cap at +10 points
+  
+  // ===== APPLICATION =====
+  // Apply bonus to Late Grind Acceptance scoring
+  APPLY_TO_LATE_GRIND: true,
+  // Apply bonus to Stealth Trend scoring  
+  APPLY_TO_STEALTH_TREND: true,
+  // Apply bonus to Quiet Trend detection
+  APPLY_TO_QUIET_TREND: true,
+} as const;

@@ -26,6 +26,7 @@ import { LossAttributionDashboard } from "@/components/LossAttributionDashboard"
 import { MomentumStatusDashboard } from "@/components/MomentumStatusDashboard";
 import { ExitManagementDashboard } from "@/components/ExitManagementDashboard";
 import { MarketConditionsDashboard } from "@/components/MarketConditionsDashboard";
+import LateGrindAnalyticsDashboard from "@/components/LateGrindAnalyticsDashboard";
 import { BlockedSignalsWidget } from "@/components/BlockedSignalsWidget";
 
 const Index = () => {
@@ -162,6 +163,7 @@ const Index = () => {
 
           <TabsContent value="monitor" className="space-y-6">
             <MomentumStatusDashboard />
+            <LateGrindAnalyticsDashboard />
             <OrderFlowDashboard />
             <WebSocketHealthDashboard />
           </TabsContent>

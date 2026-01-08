@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 // ============= SHARED MODULES - Single source of truth =============
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, TIME_IN_EXTREME_PARAMS, MICRO_TREND_PARAMS, MOMENTUM_CONTINUATION_PARAMS, STEALTH_TREND_PARAMS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, TIME_IN_EXTREME_PARAMS, MICRO_TREND_PARAMS, MOMENTUM_CONTINUATION_PARAMS, STEALTH_TREND_PARAMS, NEUTRAL_PERSISTENCE_PARAMS } from "../_shared/constants.ts";
 import { 
   calculateEMA, calculateEMAArray, calculateRSI, calculateRSIArray, calculateMACD,
   calculateStochasticRSI, calculateBarsAtExtreme, calculateATR, calculateHistoricalATRAvg,
@@ -416,6 +416,100 @@ function calculateStealthTrend(
     positionMultiplier,
     stopMultiplier: params.STOP_MULTIPLIER,
     reason: isStealthDetected ? reason : "No stealth trend detected (drift or ADX outside range)"
+  };
+}
+
+// ============= NEUTRAL PERSISTENCE MODELING =============
+// Tracks how long a market has been neutral
+// Longer neutral periods that resolve into drift are more meaningful
+// This is a CONFIDENCE MULTIPLIER, never a gate bypass
+interface NeutralPersistenceResult {
+  isCurrentlyNeutral: boolean;
+  neutralDurationMinutes: number;
+  confidenceBonus: number;
+  reason: string;
+}
+
+function calculateNeutralPersistence(
+  klines15m: any[],
+  trend4h: { trend: string; confidence: number },
+  trend1h: { trend: string; confidence: number },
+  trend30m: { trend: string; confidence: number },
+  currentNetSignal: number
+): NeutralPersistenceResult {
+  const params = NEUTRAL_PERSISTENCE_PARAMS;
+  
+  // Default result
+  const defaultResult: NeutralPersistenceResult = {
+    isCurrentlyNeutral: false,
+    neutralDurationMinutes: 0,
+    confidenceBonus: 0,
+    reason: "Not neutral or not tracked"
+  };
+  
+  if (!params.ENABLED || klines15m.length < 20) {
+    return defaultResult;
+  }
+  
+  // Check if currently neutral (all TFs below threshold)
+  const isNeutral = 
+    trend4h.confidence < params.NEUTRAL_CONFIDENCE_THRESHOLD &&
+    trend1h.confidence < params.NEUTRAL_CONFIDENCE_THRESHOLD &&
+    trend30m.confidence < params.NEUTRAL_CONFIDENCE_THRESHOLD &&
+    Math.abs(currentNetSignal) <= params.MAX_NET_SIGNAL_FOR_NEUTRAL;
+  
+  if (!isNeutral) {
+    return { ...defaultResult, reason: "Market not currently neutral" };
+  }
+  
+  // Count how many candles have been neutral (look back through 15m candles)
+  // Check price oscillation pattern - true neutral shows small, alternating moves
+  let neutralBars = 0;
+  const candlesPerHour = 4;
+  const maxLookback = Math.floor(params.MAX_DURATION_CAP_MINUTES / 15);
+  const lookbackCandles = Math.min(maxLookback, klines15m.length - 1);
+  
+  for (let i = klines15m.length - 1; i >= klines15m.length - lookbackCandles && i >= 1; i--) {
+    const close = parseFloat(klines15m[i][4]);
+    const open = parseFloat(klines15m[i][1]);
+    const prevClose = parseFloat(klines15m[i-1][4]);
+    
+    if (!Number.isFinite(close) || !Number.isFinite(open) || !Number.isFinite(prevClose) || open === 0 || prevClose === 0) {
+      continue;
+    }
+    
+    // Bar is "neutral" if it's small and doesn't strongly continue prior direction
+    const barChange = Math.abs((close - open) / open) * 100;
+    const interBarChange = Math.abs((close - prevClose) / prevClose) * 100;
+    
+    // Neutral bar criteria: small candle, no strong momentum
+    if (barChange < 0.3 && interBarChange < 0.4) {
+      neutralBars++;
+    } else {
+      break;  // Sequence broken
+    }
+  }
+  
+  const neutralDurationMinutes = neutralBars * 15;
+  
+  if (neutralDurationMinutes < params.MIN_DURATION_MINUTES) {
+    return {
+      isCurrentlyNeutral: true,
+      neutralDurationMinutes,
+      confidenceBonus: 0,
+      reason: `Neutral for ${neutralDurationMinutes}min (min: ${params.MIN_DURATION_MINUTES})`
+    };
+  }
+  
+  // Calculate bonus (capped)
+  const hours = Math.min(neutralDurationMinutes / 60, params.MAX_DURATION_CAP_MINUTES / 60);
+  const confidenceBonus = Math.min(params.MAX_BONUS, Math.floor(hours * params.BONUS_PER_HOUR));
+  
+  return {
+    isCurrentlyNeutral: true,
+    neutralDurationMinutes,
+    confidenceBonus,
+    reason: `Neutral for ${neutralDurationMinutes}min, bonus: +${confidenceBonus}`
   };
 }
 
@@ -1069,6 +1163,30 @@ serve(async (req) => {
       symLog.info(`${LOG_CATEGORIES.TREND} 🕵️ STEALTH CHECK: drift ${stealthTrend.driftPercent.toFixed(2)}% (below threshold or ADX ${adx.toFixed(1)} too high) - ${stealthTrend.reason}`);
     }
     
+    // ============= NEUTRAL PERSISTENCE MODELING =============
+    // Track how long market has been neutral - longer neutral periods that
+    // resolve into drift are more meaningful signals
+    const netSignal = (
+      (trend4h.trend === "bullish" ? 1 : trend4h.trend === "bearish" ? -1 : 0) * 4 +
+      (trend1h.trend === "bullish" ? 1 : trend1h.trend === "bearish" ? -1 : 0) * 3 +
+      (trend30m.trend === "bullish" ? 1 : trend30m.trend === "bearish" ? -1 : 0) * 2 +
+      (trend15m.trend === "bullish" ? 1 : trend15m.trend === "bearish" ? -1 : 0) * 1
+    );
+    
+    const neutralPersistence = calculateNeutralPersistence(
+      klines15m,
+      trend4h,
+      trend1h,
+      trend30m,
+      netSignal
+    );
+    
+    if (neutralPersistence.isCurrentlyNeutral && neutralPersistence.confidenceBonus > 0) {
+      symLog.info(`${LOG_CATEGORIES.MARKET} 🔄 NEUTRAL PERSISTENCE: ${neutralPersistence.neutralDurationMinutes}min, bonus: +${neutralPersistence.confidenceBonus} - ${neutralPersistence.reason}`);
+    } else if (neutralPersistence.isCurrentlyNeutral) {
+      symLog.info(`${LOG_CATEGORIES.MARKET} 🔄 NEUTRAL STATE: ${neutralPersistence.neutralDurationMinutes}min (no bonus yet)`);
+    }
+    
     // Divergence alignment validation
     const PULLBACK_ALIGNMENT_THRESHOLD = 55;
     const EARLY_REVERSAL_ALIGNMENT_THRESHOLD = 45;
@@ -1415,6 +1533,13 @@ serve(async (req) => {
         positionMultiplier: stealthTrend.positionMultiplier,
         stopMultiplier: stealthTrend.stopMultiplier,
         reason: stealthTrend.reason,
+      },
+      // NEW: Neutral persistence modeling for confidence bonus on stealth/grind entries
+      neutralPersistence: {
+        isCurrentlyNeutral: neutralPersistence.isCurrentlyNeutral,
+        durationMinutes: neutralPersistence.neutralDurationMinutes,
+        confidenceBonus: neutralPersistence.confidenceBonus,
+        reason: neutralPersistence.reason,
       },
       // NEW: Include 15m klines for Late Grind Acceptance pullback detection
       klines15m: klines15m.slice(-20),  // Last 20 candles for pullback analysis
