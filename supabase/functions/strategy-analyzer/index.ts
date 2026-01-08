@@ -64,6 +64,8 @@ import {
   CORRELATION_CONFIDENCE_PARAMS,
   // NEW: Momentum exhaustion override for strong-ADX confirmed-momentum scenarios
   MOMENTUM_EXHAUSTION_OVERRIDE_PARAMS,
+  // NEW: Neutral persistence modeling for confidence bonus
+  NEUTRAL_PERSISTENCE_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
