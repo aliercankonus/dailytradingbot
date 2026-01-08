@@ -7064,6 +7064,13 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚡ MOMENTUM EXHAUSTION OVERRIDE entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
+        // Step 17: Apply Late Grind Acceptance position reduction (40-50%)
+        // Entries via late grind acceptance get reduced position and tighter stops
+        if (lateGrindAccepted && lateGrindPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= lateGrindPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🐌 LATE GRIND ACCEPTANCE entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
         // Final position size as percentage
         const strategyPositionSize = (strategy.risk_settings?.positionSizePercent || 100) * positionSizeMultiplier;
 
@@ -7074,6 +7081,12 @@ serve(async (req) => {
         if (momentumExhaustionOverrideApplied && momentumExhaustionStopMultiplier < 1.0) {
           stopLossPercent *= momentumExhaustionStopMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚡ MOMENTUM EXHAUSTION OVERRIDE - tighter stop applied: ${stopLossPercent.toFixed(2)}%`);
+        }
+        
+        // Apply tighter stops for late grind acceptance entries (50% of normal = 50% tighter)
+        if (lateGrindAccepted && lateGrindStopMultiplier < 1.0) {
+          stopLossPercent *= lateGrindStopMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🐌 LATE GRIND ACCEPTANCE - tighter stop applied: ${stopLossPercent.toFixed(2)}%`);
         }
         
         const takeProfitPercent = strategy.risk_settings?.takeProfitPercent || stopLossPercent * 2.5;
@@ -7205,6 +7218,20 @@ serve(async (req) => {
                 stoch4h: (trendData.stochasticRsi?.['4h']?.k ?? 50).toFixed(1),
                 regimeScore: smartRegime.regimeScore,
                 regime: smartRegime.regime,
+              } : null,
+            },
+            // NEW: Late Grind Acceptance tracking for dashboard analytics
+            lateGrindAcceptance: {
+              applied: lateGrindAccepted,
+              exceptionType: lateGrindExceptionType,
+              positionSizeMultiplier: lateGrindPositionMultiplier,
+              stopMultiplier: lateGrindStopMultiplier,
+              stealthDrift: trendData.stealthTrend?.driftPercent || 0,
+              direction: lateGrindDirection,
+              conditions: lateGrindAccepted ? {
+                htfBias: trendData.timeframes?.['4h']?.confidence || 0,
+                adxSlope: trendData.volatility?.adxSlope || 0,
+                stochK4h: (trendData.stochasticRsi?.['4h']?.k ?? 50),
               } : null,
             },
             // NEW: Order flow analysis for dashboard consistency
