@@ -6949,7 +6949,15 @@ serve(async (req) => {
         // Final position size as percentage
         const strategyPositionSize = (strategy.risk_settings?.positionSizePercent || 100) * positionSizeMultiplier;
 
-        const stopLossPercent = strategy.risk_settings?.stopLossPercent || riskParams.max_risk_per_trade_percent;
+        // Calculate stop loss - apply momentum exhaustion override tighter stop if applicable
+        let stopLossPercent = strategy.risk_settings?.stopLossPercent || riskParams.max_risk_per_trade_percent;
+        
+        // Apply tighter stops for momentum exhaustion override entries (70% of normal = 30% tighter)
+        if (momentumExhaustionOverrideApplied && momentumExhaustionStopMultiplier < 1.0) {
+          stopLossPercent *= momentumExhaustionStopMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚡ MOMENTUM EXHAUSTION OVERRIDE - tighter stop applied: ${stopLossPercent.toFixed(2)}%`);
+        }
+        
         const takeProfitPercent = strategy.risk_settings?.takeProfitPercent || stopLossPercent * 2.5;
 
         // Map "neutral" to "ranging" for database enum compatibility
