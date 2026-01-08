@@ -241,7 +241,7 @@ function calculateStealthTrend(
     return defaultResult;
   }
   
-  // Calculate price at start of drift window (4 hours ago using 15m candles)
+  // Calculate price at start of drift window (8 hours ago using 15m candles)
   const candlesPerHour = 4; // 15-minute candles
   const lookbackCandles = params.DRIFT_WINDOW_HOURS * candlesPerHour;
   
@@ -267,8 +267,8 @@ function calculateStealthTrend(
     effectiveMaxADX = params.ADX_SCALE_MODERATE_DRIFT as number; // 26 for moderate drift
   }
   
-  // Check if this qualifies as stealth trend
-  const isStealthDetected = 
+  // Check if this qualifies as stealth trend (basic check)
+  const isBasicStealthDetected = 
     absDrift >= params.MIN_DRIFT_PERCENT &&
     currentADX <= effectiveMaxADX;
   
@@ -276,6 +276,53 @@ function calculateStealthTrend(
   const direction: "bullish" | "bearish" | "neutral" = 
     driftPercent < -params.MIN_DRIFT_PERCENT ? "bearish" :
     driftPercent > params.MIN_DRIFT_PERCENT ? "bullish" : "neutral";
+  
+  // ===== MONOTONICITY CHECK =====
+  // Prevents false triggers during Asia session chop, pre-news compression, range oscillation
+  let isMonotonic = true;
+  let monotonicConsistency = 0;
+  let maxCounterMove = 0;
+  
+  if (params.REQUIRE_MONOTONIC_DRIFT && isBasicStealthDetected) {
+    const candlesInWindow = klines15m.slice(-lookbackCandles);
+    let barsInDriftDirection = 0;
+    
+    for (let i = 1; i < candlesInWindow.length; i++) {
+      const close = parseFloat(candlesInWindow[i][4]);
+      const prevClose = parseFloat(candlesInWindow[i - 1][4]);
+      
+      if (!Number.isFinite(close) || !Number.isFinite(prevClose) || prevClose === 0) continue;
+      
+      const barMove = ((close - prevClose) / prevClose) * 100;
+      
+      // Count bars moving in drift direction
+      if ((driftPercent < 0 && barMove < 0) || (driftPercent > 0 && barMove > 0)) {
+        barsInDriftDirection++;
+      }
+      
+      // Track largest counter-move
+      if ((driftPercent < 0 && barMove > 0) || (driftPercent > 0 && barMove < 0)) {
+        maxCounterMove = Math.max(maxCounterMove, Math.abs(barMove));
+      }
+    }
+    
+    const totalBars = candlesInWindow.length - 1;
+    monotonicConsistency = totalBars > 0 ? (barsInDriftDirection / totalBars) * 100 : 0;
+    
+    isMonotonic = monotonicConsistency >= params.MONOTONIC_MIN_CONSISTENCY_PERCENT &&
+                  maxCounterMove <= params.MAX_COUNTER_MOVE_PERCENT;
+    
+    if (!isMonotonic) {
+      return {
+        ...defaultResult,
+        driftPercent: Math.round(driftPercent * 100) / 100,
+        reason: `Drift not monotonic: ${monotonicConsistency.toFixed(0)}% consistency (need ${params.MONOTONIC_MIN_CONSISTENCY_PERCENT}%), max counter-move ${maxCounterMove.toFixed(2)}% (max ${params.MAX_COUNTER_MOVE_PERCENT}%)`
+      };
+    }
+  }
+  
+  // Full stealth detection after monotonicity check
+  const isStealthDetected = isBasicStealthDetected && isMonotonic;
   
   // Can we bypass ADX gates?
   const adxBypassAllowed = 
@@ -298,12 +345,22 @@ function calculateStealthTrend(
     // Use effectiveMaxADX for proper scaling
     stealthScore += Math.min(20, (effectiveMaxADX - currentADX) * 2);
     
-    // ===== NEW: Extra points for very large drifts =====
+    // ===== Extra points for very large drifts =====
     // Larger drifts are stronger signals even with elevated ADX
     if (absDrift >= 2.5) {
       stealthScore += 15;  // Strong drift bonus
     } else if (absDrift >= 2.0) {
       stealthScore += 10;  // Moderate drift bonus
+    }
+    
+    // ===== Bonus for high monotonicity (up to 15 points) =====
+    // More consistent drift = higher confidence
+    if (monotonicConsistency >= 80) {
+      stealthScore += 15;
+    } else if (monotonicConsistency >= 75) {
+      stealthScore += 10;
+    } else if (monotonicConsistency >= 70) {
+      stealthScore += 5;
     }
     
     // Bonus if 1h trend matches drift direction (15 points)
@@ -330,7 +387,7 @@ function calculateStealthTrend(
     }
     
     stealthScore = Math.max(0, Math.min(100, stealthScore));
-    reason = `${direction} drift ${driftPercent.toFixed(2)}% over ${params.DRIFT_WINDOW_HOURS}h with ADX ${currentADX.toFixed(1)} (max=${effectiveMaxADX}), score ${stealthScore}`;
+    reason = `${direction} drift ${driftPercent.toFixed(2)}% over ${params.DRIFT_WINDOW_HOURS}h with ADX ${currentADX.toFixed(1)} (max=${effectiveMaxADX}), monotonic ${monotonicConsistency.toFixed(0)}%, score ${stealthScore}`;
   }
   
   // Determine HTF bypass eligibility (higher bar)

@@ -58,6 +58,10 @@ import {
   QUIET_TREND_PARAMS,
   // NEW: Stealth trend detection for catching gradual price grinds
   STEALTH_TREND_PARAMS,
+  // NEW: Late Grind Acceptance Mode - enter mid-move on failed pullback
+  LATE_GRIND_ACCEPTANCE_PARAMS,
+  // NEW: Correlation Confidence Multiplier - boost stealth score when symbols drift together
+  CORRELATION_CONFIDENCE_PARAMS,
   // NEW: Momentum exhaustion override for strong-ADX confirmed-momentum scenarios
   MOMENTUM_EXHAUSTION_OVERRIDE_PARAMS,
   isMomentumStrategy,
@@ -1907,8 +1911,117 @@ serve(async (req) => {
         // This ensures all downstream gates use the same direction logic
         const directionResult = deriveTradeDirection(trendData, trend);
         
-        // REJECT EARLY: If no clear trade direction can be determined
-        if (!directionResult.direction) {
+        // ============= LATE GRIND ACCEPTANCE MODE =============
+        // Allows entry AFTER 1.5%+ drift has occurred, ONLY if pullback fails (continuation proven)
+        // This captures the middle 30% of slow grinds, not the dangerous start
+        let lateGrindAccepted = false;
+        let lateGrindPositionMultiplier = 1.0;
+        let lateGrindStopMultiplier = 1.0;
+        let lateGrindExceptionType = "";
+        let lateGrindDirection: "long" | "short" | null = null;
+        
+        if (LATE_GRIND_ACCEPTANCE_PARAMS.ENABLED && !directionResult.direction) {
+          const stealthTrend = trendData.stealthTrend || { detected: false, driftPercent: 0, direction: "neutral", stealthScore: 0 };
+          const stealthDrift = Math.abs(stealthTrend.driftPercent || 0);
+          const driftDirection = stealthTrend.direction;
+          const adxSlope = trendData.volatility?.adxSlope ?? 0;
+          const stochK4h = trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
+          const htf4hConfidence = timeframes?.['4h']?.confidence ?? 0;
+          
+          // Check if sufficient drift has occurred
+          if (stealthDrift >= LATE_GRIND_ACCEPTANCE_PARAMS.MIN_PRIOR_DRIFT_PERCENT) {
+            // Determine intended direction from drift
+            const intendedDirection: "long" | "short" = driftDirection === "bullish" ? "long" : "short";
+            
+            // Check HTF bias (4h must show some directional bias, not flat neutral)
+            const hasHTFBias = !LATE_GRIND_ACCEPTANCE_PARAMS.REQUIRE_HTF_BIAS || 
+              htf4hConfidence >= LATE_GRIND_ACCEPTANCE_PARAMS.MIN_HTF_CONFIDENCE;
+            
+            // Check ADX not collapsing (trend not dying)
+            const adxNotCollapsing = !LATE_GRIND_ACCEPTANCE_PARAMS.REQUIRE_ADX_NOT_COLLAPSING || 
+              adxSlope >= LATE_GRIND_ACCEPTANCE_PARAMS.ADX_COLLAPSE_THRESHOLD;
+            
+            // Check StochRSI safety (not at absolute extremes)
+            let stochSafe = true;
+            if (LATE_GRIND_ACCEPTANCE_PARAMS.BLOCK_AT_STOCHRSI_EXTREMES) {
+              if (intendedDirection === "long" && stochK4h >= LATE_GRIND_ACCEPTANCE_PARAMS.STOCHRSI_EXTREME_LONG) {
+                stochSafe = false;
+              } else if (intendedDirection === "short" && stochK4h <= LATE_GRIND_ACCEPTANCE_PARAMS.STOCHRSI_EXTREME_SHORT) {
+                stochSafe = false;
+              }
+            }
+            
+            // Detect failed pullback using recent price action
+            // Failed pullback = price retraced 15-38.2% of prior move but couldn't continue reversal
+            const klines15m = trendData.klines15m || [];
+            let failedPullbackDetected = false;
+            let pullbackDepth = 0;
+            
+            if (klines15m.length >= LATE_GRIND_ACCEPTANCE_PARAMS.MAX_PULLBACK_BARS + 2) {
+              const recentCandles = klines15m.slice(-LATE_GRIND_ACCEPTANCE_PARAMS.MAX_PULLBACK_BARS);
+              const closes = recentCandles.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+              const highs = recentCandles.map((k: any) => parseFloat(k[2])).filter(Number.isFinite);
+              const lows = recentCandles.map((k: any) => parseFloat(k[3])).filter(Number.isFinite);
+              
+              if (closes.length >= 3) {
+                // For bearish drift (looking for SHORT): find high point in pullback, current should be below it
+                // For bullish drift (looking for LONG): find low point in pullback, current should be above it
+                if (driftDirection === "bearish") {
+                  const highOfPullback = Math.max(...highs);
+                  const currentClose = closes[closes.length - 1];
+                  const lowBeforePullback = Math.min(...lows.slice(0, 3));
+                  const moveRange = highOfPullback - lowBeforePullback;
+                  
+                  if (moveRange > 0 && stealthDrift > 0) {
+                    pullbackDepth = ((highOfPullback - lowBeforePullback) / (stealthDrift / 100 * currentClose)) * 100;
+                    // Pullback failed if current is below high of pullback (sellers regained control)
+                    const pullbackFailed = currentClose < highOfPullback * 0.998; // Allow 0.2% tolerance
+                    failedPullbackDetected = pullbackFailed && 
+                      pullbackDepth >= LATE_GRIND_ACCEPTANCE_PARAMS.MIN_PULLBACK_DEPTH_PERCENT &&
+                      pullbackDepth <= LATE_GRIND_ACCEPTANCE_PARAMS.MAX_PULLBACK_DEPTH_PERCENT;
+                  }
+                } else if (driftDirection === "bullish") {
+                  const lowOfPullback = Math.min(...lows);
+                  const currentClose = closes[closes.length - 1];
+                  const highBeforePullback = Math.max(...highs.slice(0, 3));
+                  const moveRange = highBeforePullback - lowOfPullback;
+                  
+                  if (moveRange > 0 && stealthDrift > 0) {
+                    pullbackDepth = ((highBeforePullback - lowOfPullback) / (stealthDrift / 100 * currentClose)) * 100;
+                    // Pullback failed if current is above low of pullback (buyers regained control)
+                    const pullbackFailed = currentClose > lowOfPullback * 1.002; // Allow 0.2% tolerance
+                    failedPullbackDetected = pullbackFailed && 
+                      pullbackDepth >= LATE_GRIND_ACCEPTANCE_PARAMS.MIN_PULLBACK_DEPTH_PERCENT &&
+                      pullbackDepth <= LATE_GRIND_ACCEPTANCE_PARAMS.MAX_PULLBACK_DEPTH_PERCENT;
+                  }
+                }
+              }
+            }
+            
+            // Skip pullback check if not required
+            const pullbackCheckPassed = !LATE_GRIND_ACCEPTANCE_PARAMS.REQUIRE_FAILED_PULLBACK || failedPullbackDetected;
+            
+            if (pullbackCheckPassed && hasHTFBias && adxNotCollapsing && stochSafe) {
+              // Allow late grind entry!
+              lateGrindAccepted = true;
+              lateGrindDirection = intendedDirection;
+              lateGrindExceptionType = LATE_GRIND_ACCEPTANCE_PARAMS.EXCEPTION_TYPE;
+              
+              // Determine position size (40% normal, 50% for strong grind)
+              const isStrongGrind = stealthDrift >= LATE_GRIND_ACCEPTANCE_PARAMS.STRONG_PRIOR_DRIFT_PERCENT;
+              lateGrindPositionMultiplier = isStrongGrind 
+                ? LATE_GRIND_ACCEPTANCE_PARAMS.STRONG_GRIND_POSITION_SIZE_MULTIPLIER 
+                : LATE_GRIND_ACCEPTANCE_PARAMS.POSITION_SIZE_MULTIPLIER;
+              lateGrindStopMultiplier = LATE_GRIND_ACCEPTANCE_PARAMS.STOP_MULTIPLIER;
+              
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🐌 LATE GRIND ACCEPTANCE: drift=${stealthDrift.toFixed(2)}%, pullback ${failedPullbackDetected ? 'failed' : 'skipped'} (depth=${pullbackDepth.toFixed(1)}%), allowing ${intendedDirection} at ${(lateGrindPositionMultiplier * 100).toFixed(0)}% size`);
+              logger.forSymbol(symbol).info(`   HTF bias=${htf4hConfidence.toFixed(0)}%, ADX slope=${adxSlope.toFixed(2)}, StochK4h=${stochK4h.toFixed(1)}`);
+            }
+          }
+        }
+        
+        // REJECT EARLY: If no clear trade direction can be determined AND late grind not accepted
+        if (!directionResult.direction && !lateGrindAccepted) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
@@ -1920,7 +2033,9 @@ serve(async (req) => {
               trend4h: htfTrend4h,
               trend1h: htfTrend1h,
               primaryTrend: trend,
-              confidence: directionResult.confidence
+              confidence: directionResult.confidence,
+              lateGrindChecked: LATE_GRIND_ACCEPTANCE_PARAMS.ENABLED,
+              stealthDrift: trendData.stealthTrend?.driftPercent || 0
             },
             trendData,
             riskParams.ai_analysis_enabled !== false,
@@ -1930,8 +2045,11 @@ serve(async (req) => {
         }
         
         // Use derived direction consistently throughout signal generation
-        const derivedDirection = directionResult.direction;
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} Direction derived: ${derivedDirection} from ${directionResult.source} (${directionResult.confidence.toFixed(0)}% conf)`);
+        // If late grind accepted, use lateGrindDirection instead of directionResult.direction
+        // We know derivedDirection is non-null here because we continue if both are null above
+        const derivedDirection = (directionResult.direction || lateGrindDirection) as "long" | "short";
+        const derivedSource = lateGrindAccepted ? "late-grind-acceptance" : directionResult.source;
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} Direction derived: ${derivedDirection} from ${derivedSource} (${directionResult.confidence.toFixed(0)}% conf)${lateGrindAccepted ? ' [LATE_GRIND]' : ''}`);
         if (directionResult.reasons.some(r => r.includes("Warning"))) {
           logger.forSymbol(symbol).warn(`   ${directionResult.reasons.filter(r => r.includes("Warning")).join(", ")}`);
         }
