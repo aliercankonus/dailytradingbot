@@ -1416,6 +1416,8 @@ serve(async (req) => {
         stopMultiplier: stealthTrend.stopMultiplier,
         reason: stealthTrend.reason,
       },
+      // NEW: Include 15m klines for Late Grind Acceptance pullback detection
+      klines15m: klines15m.slice(-20),  // Last 20 candles for pullback analysis
     };
 
     return new Response(
