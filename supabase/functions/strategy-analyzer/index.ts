@@ -1940,13 +1940,21 @@ serve(async (req) => {
           const htf4hConfidence = timeframes?.['4h']?.confidence ?? 0;
           
           // Check if sufficient drift has occurred
-          if (stealthDrift >= LATE_GRIND_ACCEPTANCE_PARAMS.MIN_PRIOR_DRIFT_PERCENT) {
+          // Apply neutral persistence bonus to relax Late Grind thresholds
+          const lateGrindNeutralBonus = NEUTRAL_PERSISTENCE_PARAMS.APPLY_TO_LATE_GRIND ? neutralPersistence.confidenceBonus : 0;
+          
+          // Lower min drift requirement by bonus (e.g., bonus of 5 reduces 3% to 2.5%)
+          const effectiveMinDrift = Math.max(1.5, LATE_GRIND_ACCEPTANCE_PARAMS.MIN_PRIOR_DRIFT_PERCENT - (lateGrindNeutralBonus * 0.1));
+          
+          if (stealthDrift >= effectiveMinDrift) {
             // Determine intended direction from drift
             const intendedDirection: "long" | "short" = driftDirection === "bullish" ? "long" : "short";
             
             // Check HTF bias (4h must show some directional bias, not flat neutral)
+            // Neutral bonus reduces required confidence
+            const effectiveHTFConfidence = Math.max(20, LATE_GRIND_ACCEPTANCE_PARAMS.MIN_HTF_CONFIDENCE - lateGrindNeutralBonus);
             const hasHTFBias = !LATE_GRIND_ACCEPTANCE_PARAMS.REQUIRE_HTF_BIAS || 
-              htf4hConfidence >= LATE_GRIND_ACCEPTANCE_PARAMS.MIN_HTF_CONFIDENCE;
+              htf4hConfidence >= effectiveHTFConfidence;
             
             // Check ADX not collapsing (trend not dying)
             const adxNotCollapsing = !LATE_GRIND_ACCEPTANCE_PARAMS.REQUIRE_ADX_NOT_COLLAPSING || 
@@ -2024,12 +2032,13 @@ serve(async (req) => {
                 ? LATE_GRIND_ACCEPTANCE_PARAMS.STRONG_GRIND_POSITION_SIZE_MULTIPLIER 
                 : LATE_GRIND_ACCEPTANCE_PARAMS.POSITION_SIZE_MULTIPLIER;
               lateGrindStopMultiplier = LATE_GRIND_ACCEPTANCE_PARAMS.STOP_MULTIPLIER;
-              
-              // Apply neutral persistence bonus to Late Grind scoring
-              const neutralBonus = NEUTRAL_PERSISTENCE_PARAMS.APPLY_TO_LATE_GRIND ? neutralPersistence.confidenceBonus : 0;
+              // Neutral bonus was already applied to thresholds above
+              const bonusAppliedMsg = lateGrindNeutralBonus > 0 
+                ? `, neutralBonus=+${lateGrindNeutralBonus} (minDrift=${effectiveMinDrift.toFixed(1)}%, minHTF=${effectiveHTFConfidence}%)` 
+                : '';
               
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🐌 LATE GRIND ACCEPTANCE: drift=${stealthDrift.toFixed(2)}%, pullback ${failedPullbackDetected ? 'failed' : 'skipped'} (depth=${pullbackDepth.toFixed(1)}%), allowing ${intendedDirection} at ${(lateGrindPositionMultiplier * 100).toFixed(0)}% size`);
-              logger.forSymbol(symbol).info(`   HTF bias=${htf4hConfidence.toFixed(0)}%, ADX slope=${adxSlope.toFixed(2)}, StochK4h=${stochK4h.toFixed(1)}${neutralBonus > 0 ? `, neutral bonus=+${neutralBonus}` : ''}`);
+              logger.forSymbol(symbol).info(`   HTF bias=${htf4hConfidence.toFixed(0)}%, ADX slope=${adxSlope.toFixed(2)}, StochK4h=${stochK4h.toFixed(1)}${bonusAppliedMsg}`);
             }
           }
         }
@@ -4654,12 +4663,20 @@ serve(async (req) => {
           const stealthScoreWithBonus = stealthTrend.stealthScore + 
             (NEUTRAL_PERSISTENCE_PARAMS.APPLY_TO_STEALTH_TREND ? neutralPersistence.confidenceBonus : 0);
           
-          if (stealthTrend.detected && stealthTrend.adxBypassAllowed && stealthDirectionMatches) {
+          // Allow bypass if original adxBypassAllowed OR if neutral bonus pushes score over threshold (50)
+          const stealthBypassAllowedWithBonus = stealthTrend.adxBypassAllowed || 
+            (stealthTrend.stealthScore < 50 && stealthScoreWithBonus >= 50 && adx >= 12);
+          
+          if (stealthTrend.detected && stealthBypassAllowedWithBonus && stealthDirectionMatches) {
             // STEALTH TREND EXCEPTION - allow entry with reduced position size
             stealthTrendBypassActive = true;
-            stealthTrendPositionMultiplier = stealthTrend.positionMultiplier;
+            // If neutral bonus enabled the bypass, use more conservative position size
+            const neutralBonusEnabledBypass = !stealthTrend.adxBypassAllowed && stealthBypassAllowedWithBonus;
+            stealthTrendPositionMultiplier = neutralBonusEnabledBypass 
+              ? Math.min(stealthTrend.positionMultiplier, 0.35) // 35% max if neutral enabled it
+              : stealthTrend.positionMultiplier;
             const neutralBonusMsg = neutralPersistence.confidenceBonus > 0 
-              ? `, neutralBonus=+${neutralPersistence.confidenceBonus}` 
+              ? `, neutralBonus=+${neutralPersistence.confidenceBonus}${neutralBonusEnabledBypass ? ' (ENABLED)' : ''}` 
               : '';
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🕵️ STEALTH TREND BYPASS: ADX gate bypassed (ADX=${adx.toFixed(1)}, drift=${stealthTrend.driftPercent.toFixed(2)}%, score=${stealthScoreWithBonus}${neutralBonusMsg})`);
             logger.forSymbol(symbol).info(`   → Direction=${stealthTrend.direction}, position=${(stealthTrendPositionMultiplier * 100).toFixed(0)}%, stopMultiplier=${stealthTrend.stopMultiplier}`);
