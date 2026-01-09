@@ -2053,6 +2053,61 @@ export const MOMENTUM_EXHAUSTION_OVERRIDE_PARAMS = {
   EXCEPTION_TYPE: "MOMENTUM_OVERRIDE_EXHAUSTION" as const,
 } as const;
 
+// ============= LOW ADX TREND EXCEPTION =============
+// Allows entries when ADX is 15-20 BUT higher timeframe trend is strong
+// AND price action structure confirms direction (not just indicator alignment)
+// Phase 1 improvement to capture strong HTF setups in low-energy markets
+export const LOW_ADX_TREND_EXCEPTION_PARAMS = {
+  ENABLED: true,
+  
+  // ===== ADX BOUNDS =====
+  MIN_ADX: 15,                    // Allow down to ADX 15
+  MAX_ADX: 20,                    // Only applies below normal threshold
+  
+  // ===== HTF REQUIREMENTS (Strict) =====
+  MIN_HTF_CONFIDENCE: 70,         // 4h trend must be >= 70% confidence
+  MIN_1H_CONFIDENCE: 60,          // 1h must also show direction
+  REQUIRE_TREND_ALIGNMENT: true,  // 4h and 1h must agree on direction
+  
+  // ===== STRUCTURE CONFIRMATION (Critical - not just indicator alignment) =====
+  REQUIRE_STRUCTURE_CONFIRMATION: true,
+  // For LONG: higher high + higher low (HH/HL)
+  // For SHORT: lower low + lower high (LL/LH)
+  STRUCTURE_LOOKBACK_BARS: 12,    // 12 x 15min = 3 hours of structure
+  
+  // ===== ADDITIONAL SAFETY =====
+  REQUIRE_MOMENTUM_NOT_OPPOSING: true,
+  // Block if momentum state is "exhausted" or opposing direction
+  BLOCK_IF_MOMENTUM_EXHAUSTED: true,
+  // Block if reversal score is already elevated
+  MAX_REVERSAL_SCORE: 50,
+  
+  // ===== POSITION SIZING (Conservative) =====
+  POSITION_SIZE_MULTIPLIER: 0.50,  // 50% position size for safety
+  STOP_LOSS_MULTIPLIER: 0.8,       // Tighter stops
+  
+  // ===== TRACKING =====
+  EXCEPTION_TYPE: "LOW_ADX_TREND_EXCEPTION" as const,
+} as const;
+
+// ============= REGIME-ADAPTIVE ADX THRESHOLDS =============
+// ADX threshold should not be fixed - it should scale with market regime
+// Phase 2 improvement: different thresholds for different market conditions
+export const REGIME_ADAPTIVE_ADX_PARAMS = {
+  ENABLED: true,
+  
+  // Threshold by regime (replaces fixed ADX_THRESHOLDS.MINIMUM for entry gates)
+  THRESHOLDS: {
+    RANGING: 22,      // Ranging markets need stronger confirmation
+    TRANSITION: 18,   // Emerging trends can have lower ADX
+    TRENDING: 15,     // Established trends - ADX may be consolidating
+    SQUEEZE: 15,      // Squeeze breakouts work at lower ADX
+  } as Record<string, number>,
+  
+  // Log when regime-adaptive threshold is applied
+  LOG_REGIME_THRESHOLD: true,
+} as const;
+
 // ============= NEUTRAL PERSISTENCE MODELING =============
 // Tracks how long a market has been neutral
 // Longer neutral periods that resolve into drift are more meaningful
