@@ -66,6 +66,10 @@ import {
   MOMENTUM_EXHAUSTION_OVERRIDE_PARAMS,
   // NEW: Neutral persistence modeling for confidence bonus
   NEUTRAL_PERSISTENCE_PARAMS,
+  // NEW: Phase 1 - Low ADX trend exception for strong HTF setups
+  LOW_ADX_TREND_EXCEPTION_PARAMS,
+  // NEW: Phase 2 - Regime-adaptive ADX thresholds
+  REGIME_ADAPTIVE_ADX_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -1674,7 +1678,9 @@ serve(async (req) => {
       | 'STEALTH_TREND_ALLOWED'
       | 'STEALTH_TREND_HTF_BYPASS'
       // NEW: Momentum exhaustion override
-      | 'MOMENTUM_EXHAUSTION_OVERRIDE';
+      | 'MOMENTUM_EXHAUSTION_OVERRIDE'
+      // Phase 1: Low ADX trend exception
+      | 'LOW_ADX_TREND_EXCEPTION';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -4637,6 +4643,8 @@ serve(async (req) => {
         let squeezePositionMultiplier = 1.0;
         let stealthTrendBypassActive = false;
         let stealthTrendPositionMultiplier = 1.0;
+        let lowAdxTrendExceptionActive = false;
+        let lowAdxTrendPositionMultiplier = 1.0;
         
         // Extract stealth trend data from trend analysis
         const stealthTrend = trendData.stealthTrend || { 
@@ -4658,37 +4666,111 @@ serve(async (req) => {
         );
         
         if (adx < ADX_THRESHOLDS.MINIMUM) {
+          // ============= PHASE 1: LOW ADX TREND EXCEPTION =============
+          // Check if HTF is strong AND structure confirms direction (not just indicators)
+          let lowAdxExceptionAllowed = false;
+          let lowAdxExceptionReason = "";
+          let lowAdxPositionMultiplier = LOW_ADX_TREND_EXCEPTION_PARAMS.POSITION_SIZE_MULTIPLIER;
+          
+          if (LOW_ADX_TREND_EXCEPTION_PARAMS.ENABLED && 
+              adx >= LOW_ADX_TREND_EXCEPTION_PARAMS.MIN_ADX && 
+              adx < LOW_ADX_TREND_EXCEPTION_PARAMS.MAX_ADX) {
+            
+            const htfConfidence = trendData?.timeframes?.['4h']?.confidence || 0;
+            const tf1hConfidence = trendData?.timeframes?.['1h']?.confidence || 0;
+            const trend4h = trendData?.timeframes?.['4h']?.trend || "neutral";
+            const trend1h = trendData?.timeframes?.['1h']?.trend || "neutral";
+            
+            // Check HTF requirements
+            const htfStrong = htfConfidence >= LOW_ADX_TREND_EXCEPTION_PARAMS.MIN_HTF_CONFIDENCE;
+            const tf1hStrong = tf1hConfidence >= LOW_ADX_TREND_EXCEPTION_PARAMS.MIN_1H_CONFIDENCE;
+            const trendsAligned = trend4h === trend1h && trend4h !== "neutral";
+            const htfMatchesDirection = (
+              (derivedDirection === "long" && trend4h === "bullish") ||
+              (derivedDirection === "short" && trend4h === "bearish")
+            );
+            
+            // Check structure confirmation (HH/HL for LONG, LL/LH for SHORT)
+            const prices15m = trendData?.prices?.['15m'] || [];
+            const closePrices = prices15m.map((k: any) => parseFloat(k[4]));
+            const hasStructure = LOW_ADX_TREND_EXCEPTION_PARAMS.REQUIRE_STRUCTURE_CONFIRMATION
+              ? (derivedDirection === "long"
+                ? detectHigherHighLow(closePrices, LOW_ADX_TREND_EXCEPTION_PARAMS.STRUCTURE_LOOKBACK_BARS)
+                : detectLowerLowHigh(closePrices, LOW_ADX_TREND_EXCEPTION_PARAMS.STRUCTURE_LOOKBACK_BARS))
+              : true;
+            
+            // Check momentum not opposing
+            const momentumState = momentum?.state || "none";
+            const momentumNotOpposing = LOW_ADX_TREND_EXCEPTION_PARAMS.REQUIRE_MOMENTUM_NOT_OPPOSING
+              ? (momentumState !== "exhausted" && 
+                 !(momentumState === "confirmed" && !momentum?.confirms))
+              : true;
+            
+            // Check reversal score not elevated
+            const reversalScoreOk = unifiedReversal.score < LOW_ADX_TREND_EXCEPTION_PARAMS.MAX_REVERSAL_SCORE;
+            
+            if (htfStrong && tf1hStrong && trendsAligned && htfMatchesDirection && 
+                hasStructure && momentumNotOpposing && reversalScoreOk) {
+              lowAdxExceptionAllowed = true;
+              lowAdxExceptionReason = `HTF=${htfConfidence}%, 1h=${tf1hConfidence}%, structure=${hasStructure ? '✓' : '✗'}`;
+              
+              logger.forSymbol(symbol).info(
+                `${LOG_CATEGORIES.SUCCESS} 🎯 LOW_ADX_TREND_EXCEPTION: ADX=${adx.toFixed(1)} ` +
+                `allowed with HTF confirmation (${lowAdxExceptionReason})`
+              );
+              logger.forSymbol(symbol).debug(
+                `   → Direction=${derivedDirection}, 4h=${trend4h}/${htfConfidence}%, 1h=${trend1h}/${tf1hConfidence}%, ` +
+                `reversal=${unifiedReversal.score}, position=${(lowAdxPositionMultiplier * 100).toFixed(0)}%`
+              );
+              perSymbolGateAttribution.set(symbol, { gate: 'LOW_ADX_TREND_EXCEPTION', details: lowAdxExceptionReason });
+            } else {
+              // Log why exception didn't apply for debugging
+              logger.forSymbol(symbol).debug(
+                `LOW_ADX_TREND_EXCEPTION check: htfStrong=${htfStrong}(${htfConfidence}%), ` +
+                `1hStrong=${tf1hStrong}(${tf1hConfidence}%), aligned=${trendsAligned}, ` +
+                `dirMatch=${htfMatchesDirection}, structure=${hasStructure}, ` +
+                `momentum=${momentumNotOpposing}, reversal=${reversalScoreOk}(${unifiedReversal.score})`
+              );
+            }
+          }
+          
+          if (lowAdxExceptionAllowed) {
+            // Apply LOW_ADX_TREND_EXCEPTION - track position multiplier for later use
+            lowAdxTrendExceptionActive = true;
+            lowAdxTrendPositionMultiplier = lowAdxPositionMultiplier;
+          }
           // NEW: Check if stealth trend exception applies (bypasses ADX gate for gradual grinds)
           // Apply neutral persistence bonus to stealth score for evaluation
-          const stealthScoreWithBonus = stealthTrend.stealthScore + 
-            (NEUTRAL_PERSISTENCE_PARAMS.APPLY_TO_STEALTH_TREND ? neutralPersistence.confidenceBonus : 0);
-          
-          // Allow bypass if original adxBypassAllowed OR if neutral bonus pushes score over threshold (50)
-          const stealthBypassAllowedWithBonus = stealthTrend.adxBypassAllowed || 
-            (stealthTrend.stealthScore < 50 && stealthScoreWithBonus >= 50 && adx >= 12);
-          
-          if (stealthTrend.detected && stealthBypassAllowedWithBonus && stealthDirectionMatches) {
-            // STEALTH TREND EXCEPTION - allow entry with reduced position size
-            stealthTrendBypassActive = true;
-            // If neutral bonus enabled the bypass, use more conservative position size
-            const neutralBonusEnabledBypass = !stealthTrend.adxBypassAllowed && stealthBypassAllowedWithBonus;
-            stealthTrendPositionMultiplier = neutralBonusEnabledBypass 
-              ? Math.min(stealthTrend.positionMultiplier, 0.35) // 35% max if neutral enabled it
-              : stealthTrend.positionMultiplier;
-            const neutralBonusMsg = neutralPersistence.confidenceBonus > 0 
-              ? `, neutralBonus=+${neutralPersistence.confidenceBonus}${neutralBonusEnabledBypass ? ' (ENABLED)' : ''}` 
-              : '';
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🕵️ STEALTH TREND BYPASS: ADX gate bypassed (ADX=${adx.toFixed(1)}, drift=${stealthTrend.driftPercent.toFixed(2)}%, score=${stealthScoreWithBonus}${neutralBonusMsg})`);
-            logger.forSymbol(symbol).info(`   → Direction=${stealthTrend.direction}, position=${(stealthTrendPositionMultiplier * 100).toFixed(0)}%, stopMultiplier=${stealthTrend.stopMultiplier}`);
-            perSymbolGateAttribution.set(symbol, { gate: 'STEALTH_TREND_ALLOWED', details: stealthTrend.reason });
-          }
-          // Check if quiet trend exception applies (bypasses ADX gate)
-          else if (qualifiesForQuietTrend) {
-            // QUIET TREND EXCEPTION - allow entry with reduced position size
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🌊 QUIET TREND BYPASS: Skipping ADX gate (ADX=${adx.toFixed(1)}) - ${quietTrendReason}`);
-            perSymbolGateAttribution.set(symbol, { gate: 'QUIET_TREND_ALLOWED', details: quietTrendReason });
-            // Position multiplier already set above
-          } else if (adx >= ADX_THRESHOLDS.SQUEEZE_MINIMUM) {
+          else {
+            const stealthScoreWithBonus = stealthTrend.stealthScore + 
+              (NEUTRAL_PERSISTENCE_PARAMS.APPLY_TO_STEALTH_TREND ? neutralPersistence.confidenceBonus : 0);
+            
+            // Allow bypass if original adxBypassAllowed OR if neutral bonus pushes score over threshold (50)
+            const stealthBypassAllowedWithBonus = stealthTrend.adxBypassAllowed || 
+              (stealthTrend.stealthScore < 50 && stealthScoreWithBonus >= 50 && adx >= 12);
+            
+            if (stealthTrend.detected && stealthBypassAllowedWithBonus && stealthDirectionMatches) {
+              // STEALTH TREND EXCEPTION - allow entry with reduced position size
+              stealthTrendBypassActive = true;
+              // If neutral bonus enabled the bypass, use more conservative position size
+              const neutralBonusEnabledBypass = !stealthTrend.adxBypassAllowed && stealthBypassAllowedWithBonus;
+              stealthTrendPositionMultiplier = neutralBonusEnabledBypass 
+                ? Math.min(stealthTrend.positionMultiplier, 0.35) // 35% max if neutral enabled it
+                : stealthTrend.positionMultiplier;
+              const neutralBonusMsg = neutralPersistence.confidenceBonus > 0 
+                ? `, neutralBonus=+${neutralPersistence.confidenceBonus}${neutralBonusEnabledBypass ? ' (ENABLED)' : ''}` 
+                : '';
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🕵️ STEALTH TREND BYPASS: ADX gate bypassed (ADX=${adx.toFixed(1)}, drift=${stealthTrend.driftPercent.toFixed(2)}%, score=${stealthScoreWithBonus}${neutralBonusMsg})`);
+              logger.forSymbol(symbol).info(`   → Direction=${stealthTrend.direction}, position=${(stealthTrendPositionMultiplier * 100).toFixed(0)}%, stopMultiplier=${stealthTrend.stopMultiplier}`);
+              perSymbolGateAttribution.set(symbol, { gate: 'STEALTH_TREND_ALLOWED', details: stealthTrend.reason });
+            }
+            // Check if quiet trend exception applies (bypasses ADX gate)
+            else if (qualifiesForQuietTrend) {
+              // QUIET TREND EXCEPTION - allow entry with reduced position size
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🌊 QUIET TREND BYPASS: Skipping ADX gate (ADX=${adx.toFixed(1)}) - ${quietTrendReason}`);
+              perSymbolGateAttribution.set(symbol, { gate: 'QUIET_TREND_ALLOWED', details: quietTrendReason });
+              // Position multiplier already set above
+            } else if (adx >= ADX_THRESHOLDS.SQUEEZE_MINIMUM) {
             // Check for squeeze breakout exception (only if ADX >= 18)
             const squeezeResult = isValidSqueezeBreakout(trendData, derivedDirection);
             
@@ -4749,7 +4831,7 @@ serve(async (req) => {
               );
               continue;
             }
-          } else {
+            } else {
             // ADX < 18: No squeeze exception possible, but check quiet trend for diagnostic
             const priceActionForQuiet = trendData.priceActionMomentum;
             const priceMoveForQuiet = Math.abs(priceActionForQuiet?.movePercent || 0);
@@ -4796,6 +4878,7 @@ serve(async (req) => {
             );
             continue;
           }
+          }
         }
         
         // Apply squeeze breakout position size reduction if active
@@ -4814,6 +4897,12 @@ serve(async (req) => {
         if (stealthTrendBypassActive && stealthTrendPositionMultiplier < 1.0) {
           reversalPositionMultiplier = Math.min(reversalPositionMultiplier, stealthTrendPositionMultiplier);
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🕵️ Stealth trend - position size capped at ${(stealthTrendPositionMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Apply LOW_ADX_TREND_EXCEPTION position size reduction if active
+        if (lowAdxTrendExceptionActive && lowAdxTrendPositionMultiplier < 1.0) {
+          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, lowAdxTrendPositionMultiplier);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🎯 Low ADX trend exception - position size capped at ${(lowAdxTrendPositionMultiplier * 100).toFixed(0)}%`);
         }
 
         // RELAXED: Allow entry when momentum.state is "none" IF ADX >= 28 (strong trend exception)
