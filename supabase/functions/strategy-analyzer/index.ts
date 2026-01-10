@@ -572,6 +572,34 @@ const getVolumeScore = (trendData: any, trend: string): number => {
   return sharedGetVolumeScore(volumeConfirms, volumeSpike, volumeRatio, hasRangeExpansion, trend);
 };
 
+// ============= PHASE 2: REGIME-ADAPTIVE ADX THRESHOLD FUNCTION =============
+// Returns ADX threshold based on current market regime instead of fixed value
+const getAdaptiveAdxThreshold = (regime: string | undefined): number => {
+  if (!REGIME_ADAPTIVE_ADX_PARAMS.ENABLED) {
+    return ADX_THRESHOLDS.MINIMUM;  // Default: 20
+  }
+  
+  const normalizedRegime = (regime || 'ranging').toUpperCase();
+  const thresholds = REGIME_ADAPTIVE_ADX_PARAMS.THRESHOLDS;
+  
+  switch (normalizedRegime) {
+    case 'RANGING':
+      return thresholds.RANGING || 22;
+    case 'TRANSITION':
+    case 'TRANSITIONING':
+      return thresholds.TRANSITION || 18;
+    case 'TRENDING':
+    case 'STRONG_TREND':
+      return thresholds.TRENDING || 15;
+    case 'SQUEEZE':
+    case 'SQUEEZE_BUILDING':
+      return thresholds.SQUEEZE || 15;
+    default:
+      // Unknown regime - use conservative default
+      return ADX_THRESHOLDS.MINIMUM;
+  }
+};
+
 // ============= SCORING FUNCTIONS IMPORTED FROM SHARED MODULE =============
 // getConfidencePenalty, calculateUnifiedReversalScore, detectMarketRegime
 // UnifiedReversalResult, MarketRegime types
@@ -4635,16 +4663,27 @@ serve(async (req) => {
           }
         }
         
-        // GATE 1: ADX must be >= MINIMUM for any trade (trend strength required)
+        // GATE 1: ADX must be >= threshold for any trade (trend strength required)
+        // PHASE 2: Use regime-adaptive ADX threshold instead of fixed MINIMUM
         // EXCEPTION 1: Squeeze breakout allows ADX 18-20 if strict conditions are met
         // EXCEPTION 2: Quiet trend allows ADX 15-22 if price is grinding consistently
         // EXCEPTION 3: Stealth trend allows ADX 12-22 if cumulative drift is significant
+        // EXCEPTION 4: LOW_ADX_TREND_EXCEPTION allows ADX 15-20 with strong HTF + structure
         let squeezeBreakoutActive = false;
         let squeezePositionMultiplier = 1.0;
         let stealthTrendBypassActive = false;
         let stealthTrendPositionMultiplier = 1.0;
         let lowAdxTrendExceptionActive = false;
         let lowAdxTrendPositionMultiplier = 1.0;
+        
+        // PHASE 2: Get regime-adaptive ADX threshold
+        const effectiveAdxThreshold = getAdaptiveAdxThreshold(regime.regime);
+        if (REGIME_ADAPTIVE_ADX_PARAMS.ENABLED && REGIME_ADAPTIVE_ADX_PARAMS.LOG_REGIME_THRESHOLD) {
+          logger.forSymbol(symbol).debug(
+            `${LOG_CATEGORIES.GATE} REGIME_ADAPTIVE_ADX: regime=${regime.regime}, ` +
+            `effectiveThreshold=${effectiveAdxThreshold} (vs fixed=${ADX_THRESHOLDS.MINIMUM}), ADX=${adx.toFixed(1)}`
+          );
+        }
         
         // Extract stealth trend data from trend analysis
         const stealthTrend = trendData.stealthTrend || { 
@@ -4665,7 +4704,8 @@ serve(async (req) => {
           (intendedTradeDirection === "long" && stealthTrend.direction === "bullish")
         );
         
-        if (adx < ADX_THRESHOLDS.MINIMUM) {
+        // Use regime-adaptive threshold instead of fixed MINIMUM
+        if (adx < effectiveAdxThreshold) {
           // ============= PHASE 1: LOW ADX TREND EXCEPTION =============
           // Check if HTF is strong AND structure confirms direction (not just indicators)
           let lowAdxExceptionAllowed = false;
@@ -4690,6 +4730,19 @@ serve(async (req) => {
               (derivedDirection === "short" && trend4h === "bearish")
             );
             
+            // NEW: 1h fallback - if 4h is moderate but 1h is very strong, still allow
+            const allow1hFallback = LOW_ADX_TREND_EXCEPTION_PARAMS.ALLOW_1H_FALLBACK || false;
+            const fallbackMin4h = LOW_ADX_TREND_EXCEPTION_PARAMS.FALLBACK_MIN_4H_CONFIDENCE || 60;
+            const fallbackMin1h = LOW_ADX_TREND_EXCEPTION_PARAMS.FALLBACK_MIN_1H_CONFIDENCE || 70;
+            
+            const htfOkViaFallback = allow1hFallback && 
+              htfConfidence >= fallbackMin4h && 
+              tf1hConfidence >= fallbackMin1h;
+            
+            // Either standard htfStrong OR fallback qualifies
+            const htfQualifies = htfStrong || htfOkViaFallback;
+            const htfQualifyReason = htfStrong ? 'standard' : (htfOkViaFallback ? '1h-fallback' : 'failed');
+            
             // Check structure confirmation (HH/HL for LONG, LL/LH for SHORT)
             const prices15m = trendData?.prices?.['15m'] || [];
             const closePrices = prices15m.map((k: any) => parseFloat(k[4]));
@@ -4709,10 +4762,10 @@ serve(async (req) => {
             // Check reversal score not elevated
             const reversalScoreOk = unifiedReversal.score < LOW_ADX_TREND_EXCEPTION_PARAMS.MAX_REVERSAL_SCORE;
             
-            if (htfStrong && tf1hStrong && trendsAligned && htfMatchesDirection && 
+            if (htfQualifies && tf1hStrong && trendsAligned && htfMatchesDirection && 
                 hasStructure && momentumNotOpposing && reversalScoreOk) {
               lowAdxExceptionAllowed = true;
-              lowAdxExceptionReason = `HTF=${htfConfidence}%, 1h=${tf1hConfidence}%, structure=${hasStructure ? '✓' : '✗'}`;
+              lowAdxExceptionReason = `HTF=${htfConfidence}% (${htfQualifyReason}), 1h=${tf1hConfidence}%, structure=${hasStructure ? '✓' : '✗'}`;
               
               logger.forSymbol(symbol).info(
                 `${LOG_CATEGORIES.SUCCESS} 🎯 LOW_ADX_TREND_EXCEPTION: ADX=${adx.toFixed(1)} ` +
@@ -4726,7 +4779,7 @@ serve(async (req) => {
             } else {
               // Log why exception didn't apply for debugging
               logger.forSymbol(symbol).debug(
-                `LOW_ADX_TREND_EXCEPTION check: htfStrong=${htfStrong}(${htfConfidence}%), ` +
+                `LOW_ADX_TREND_EXCEPTION check: htfQualifies=${htfQualifies}(${htfConfidence}% ${htfQualifyReason}), ` +
                 `1hStrong=${tf1hStrong}(${tf1hConfidence}%), aligned=${trendsAligned}, ` +
                 `dirMatch=${htfMatchesDirection}, structure=${hasStructure}, ` +
                 `momentum=${momentumNotOpposing}, reversal=${reversalScoreOk}(${unifiedReversal.score})`
@@ -4794,11 +4847,14 @@ serve(async (req) => {
               perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW_NO_SQUEEZE', details: `ADX=${adx.toFixed(1)}, squeeze failed${quietTrendCloseMsg}` });
               await logRejectionWithAI(
                 supabase, userId, symbol,
-                `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.MINIMUM}) - squeeze breakout not valid: ${squeezeResult.reasons.join(", ")}${quietTrendCloseMsg}`,
+                `HARD GATE: ADX too low (${adx.toFixed(1)} < ${effectiveAdxThreshold}) - squeeze breakout not valid: ${squeezeResult.reasons.join(", ")}${quietTrendCloseMsg}`,
                 { 
                   gate: "ADX_TOO_LOW_NO_SQUEEZE",
                   adx: adx.toFixed(1),
-                  adxRequired: ADX_THRESHOLDS.MINIMUM,
+                  adxRequired: effectiveAdxThreshold,
+                  adxFixedMinimum: ADX_THRESHOLDS.MINIMUM,
+                  regimeAdaptive: REGIME_ADAPTIVE_ADX_PARAMS.ENABLED,
+                  regime: regime.regime,
                   squeezeMinimum: ADX_THRESHOLDS.SQUEEZE_MINIMUM,
                   squeezeValid: false,
                   squeezeReasons: squeezeResult.reasons,
@@ -4847,7 +4903,10 @@ serve(async (req) => {
               { 
                 gate: "ADX_TOO_LOW",
                 adx: adx.toFixed(1),
-                adxRequired: ADX_THRESHOLDS.MINIMUM,
+                adxRequired: effectiveAdxThreshold,
+                adxFixedMinimum: ADX_THRESHOLDS.MINIMUM,
+                regimeAdaptive: REGIME_ADAPTIVE_ADX_PARAMS.ENABLED,
+                regime: regime.regime,
                 squeezeMinimum: ADX_THRESHOLDS.SQUEEZE_MINIMUM,
                 quietTrendCheck: {
                   enabled: QUIET_TREND_PARAMS.ENABLED,
