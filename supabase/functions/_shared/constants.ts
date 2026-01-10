@@ -1172,6 +1172,11 @@ export const STEALTH_TREND_PARAMS = {
   
   // Require direction alignment with drift (drift bearish + signal SHORT must match)
   REQUIRE_DIRECTION_ALIGNMENT: true,
+  
+  // ===== NEUTRAL MARKET DRIFT MULTIPLIER (Phase 2) =====
+  // When all TFs are neutral, accept smaller drift as confirmation
+  NEUTRAL_MARKET_DRIFT_MULTIPLIER: 0.6,  // 60% of normal threshold
+  NEUTRAL_MARKET_LOG_AGGRESSIVELY: true,
 } as const;
 
 // ============= LATE GRIND ACCEPTANCE MODE =============
@@ -2064,10 +2069,16 @@ export const LOW_ADX_TREND_EXCEPTION_PARAMS = {
   MIN_ADX: 15,                    // Allow down to ADX 15
   MAX_ADX: 20,                    // Only applies below normal threshold
   
-  // ===== HTF REQUIREMENTS (Strict) =====
-  MIN_HTF_CONFIDENCE: 70,         // 4h trend must be >= 70% confidence
+// ===== HTF REQUIREMENTS (Relaxed for real-world conditions) =====
+  MIN_HTF_CONFIDENCE: 65,         // 4h trend must be >= 65% confidence (lowered from 70)
   MIN_1H_CONFIDENCE: 60,          // 1h must also show direction
   REQUIRE_TREND_ALIGNMENT: true,  // 4h and 1h must agree on direction
+  
+  // ===== 1H FALLBACK (NEW) =====
+  // If 4h is moderate (60-65%) but 1h is very strong (>=70%), still allow entry
+  ALLOW_1H_FALLBACK: true,
+  FALLBACK_MIN_4H_CONFIDENCE: 60,   // 4h must be at least 60% for fallback
+  FALLBACK_MIN_1H_CONFIDENCE: 70,   // 1h must be >= 70% for fallback to apply
   
   // ===== STRUCTURE CONFIRMATION (Critical - not just indicator alignment) =====
   REQUIRE_STRUCTURE_CONFIRMATION: true,
