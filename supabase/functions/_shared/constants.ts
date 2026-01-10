@@ -2069,9 +2069,9 @@ export const LOW_ADX_TREND_EXCEPTION_PARAMS = {
   MIN_ADX: 15,                    // Allow down to ADX 15
   MAX_ADX: 20,                    // Only applies below normal threshold
   
-// ===== HTF REQUIREMENTS (Relaxed for real-world conditions) =====
-  MIN_HTF_CONFIDENCE: 65,         // 4h trend must be >= 65% confidence (lowered from 70)
-  MIN_1H_CONFIDENCE: 60,          // 1h must also show direction
+// ===== HTF REQUIREMENTS (Further relaxed for real-world conditions) =====
+  MIN_HTF_CONFIDENCE: 60,         // 4h trend must be >= 60% confidence (lowered from 65)
+  MIN_1H_CONFIDENCE: 55,          // 1h must also show direction (lowered from 60)
   REQUIRE_TREND_ALIGNMENT: true,  // 4h and 1h must agree on direction
   
   // ===== 1H FALLBACK (NEW) =====

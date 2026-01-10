@@ -4678,12 +4678,10 @@ serve(async (req) => {
         
         // PHASE 2: Get regime-adaptive ADX threshold
         const effectiveAdxThreshold = getAdaptiveAdxThreshold(regime.regime);
-        if (REGIME_ADAPTIVE_ADX_PARAMS.ENABLED && REGIME_ADAPTIVE_ADX_PARAMS.LOG_REGIME_THRESHOLD) {
-          logger.forSymbol(symbol).debug(
-            `${LOG_CATEGORIES.GATE} REGIME_ADAPTIVE_ADX: regime=${regime.regime}, ` +
-            `effectiveThreshold=${effectiveAdxThreshold} (vs fixed=${ADX_THRESHOLDS.MINIMUM}), ADX=${adx.toFixed(1)}`
-          );
-        }
+        // Always log at INFO level to verify regime-adaptive threshold is working
+        logger.forSymbol(symbol).info(
+          `${LOG_CATEGORIES.GATE} REGIME_ADAPTIVE: threshold=${effectiveAdxThreshold} (regime=${regime.regime}), ADX=${adx.toFixed(1)}, fixed=${ADX_THRESHOLDS.MINIMUM}`
+        );
         
         // Extract stealth trend data from trend analysis
         const stealthTrend = trendData.stealthTrend || { 
@@ -4777,10 +4775,10 @@ serve(async (req) => {
               );
               perSymbolGateAttribution.set(symbol, { gate: 'LOW_ADX_TREND_EXCEPTION', details: lowAdxExceptionReason });
             } else {
-              // Log why exception didn't apply for debugging
-              logger.forSymbol(symbol).debug(
-                `LOW_ADX_TREND_EXCEPTION check: htfQualifies=${htfQualifies}(${htfConfidence}% ${htfQualifyReason}), ` +
-                `1hStrong=${tf1hStrong}(${tf1hConfidence}%), aligned=${trendsAligned}, ` +
+              // Log why exception didn't apply - INFO level for visibility
+              logger.forSymbol(symbol).info(
+                `${LOG_CATEGORIES.GATE} LOW_ADX_TREND_EXCEPTION check FAILED: htf=${htfQualifies}(${htfConfidence}% ${htfQualifyReason}), ` +
+                `1h=${tf1hStrong}(${tf1hConfidence}%), aligned=${trendsAligned}, ` +
                 `dirMatch=${htfMatchesDirection}, structure=${hasStructure}, ` +
                 `momentum=${momentumNotOpposing}, reversal=${reversalScoreOk}(${unifiedReversal.score})`
               );
