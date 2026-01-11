@@ -574,6 +574,9 @@ const getVolumeScore = (trendData: any, trend: string): number => {
 
 // ============= PHASE 2: REGIME-ADAPTIVE ADX THRESHOLD FUNCTION =============
 // Returns ADX threshold based on current market regime instead of fixed value
+// FIXED: These thresholds are for EXCEPTION PATHS - lower = easier to qualify
+// The main ADX gate still uses ADX_THRESHOLDS.MINIMUM (20)
+// This function returns the threshold for LOW_ADX exceptions to apply
 const getAdaptiveAdxThreshold = (regime: string | undefined): number => {
   if (!REGIME_ADAPTIVE_ADX_PARAMS.ENABLED) {
     return ADX_THRESHOLDS.MINIMUM;  // Default: 20
@@ -582,21 +585,27 @@ const getAdaptiveAdxThreshold = (regime: string | undefined): number => {
   const normalizedRegime = (regime || 'ranging').toUpperCase();
   const thresholds = REGIME_ADAPTIVE_ADX_PARAMS.THRESHOLDS;
   
+  // CRITICAL FIX: These should be LOWER for ranging/transition to HELP entries
+  // Lower threshold = exception applies more easily = more entries allowed
   switch (normalizedRegime) {
     case 'RANGING':
-      return thresholds.RANGING || 22;
+      // Ranging: 18 - allows exceptions to trigger more easily
+      return thresholds.RANGING || 18;
     case 'TRANSITION':
     case 'TRANSITIONING':
-      return thresholds.TRANSITION || 18;
+      // Transition: 16 - prime time for catching emerging trends
+      return thresholds.TRANSITION || 16;
     case 'TRENDING':
     case 'STRONG_TREND':
+      // Trending: 15 - established trends, ADX may be consolidating
       return thresholds.TRENDING || 15;
     case 'SQUEEZE':
     case 'SQUEEZE_BUILDING':
-      return thresholds.SQUEEZE || 15;
+      // Squeeze: 14 - lowest threshold, breakouts work at low ADX
+      return thresholds.SQUEEZE || 14;
     default:
-      // Unknown regime - use conservative default
-      return ADX_THRESHOLDS.MINIMUM;
+      // Unknown regime - use moderate default (18)
+      return 18;
   }
 };
 
@@ -4708,7 +4717,7 @@ serve(async (req) => {
           // Check if HTF is strong AND structure confirms direction (not just indicators)
           let lowAdxExceptionAllowed = false;
           let lowAdxExceptionReason = "";
-          let lowAdxPositionMultiplier = LOW_ADX_TREND_EXCEPTION_PARAMS.POSITION_SIZE_MULTIPLIER;
+          let lowAdxPositionMultiplier: number = LOW_ADX_TREND_EXCEPTION_PARAMS.POSITION_SIZE_MULTIPLIER;
           
           if (LOW_ADX_TREND_EXCEPTION_PARAMS.ENABLED && 
               adx >= LOW_ADX_TREND_EXCEPTION_PARAMS.MIN_ADX && 
@@ -4722,13 +4731,34 @@ serve(async (req) => {
             // Check HTF requirements
             const htfStrong = htfConfidence >= LOW_ADX_TREND_EXCEPTION_PARAMS.MIN_HTF_CONFIDENCE;
             const tf1hStrong = tf1hConfidence >= LOW_ADX_TREND_EXCEPTION_PARAMS.MIN_1H_CONFIDENCE;
-            const trendsAligned = trend4h === trend1h && trend4h !== "neutral";
-            const htfMatchesDirection = (
+            
+            // CRITICAL FIX: Allow neutral 4h if 1h is strongly directional
+            const allowNeutral4h = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).ALLOW_NEUTRAL_4H || false;
+            const neutral4hMin1h = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).NEUTRAL_4H_MIN_1H_CONFIDENCE || 65;
+            
+            // Standard alignment: both agree and both directional
+            const standardTrendsAligned = trend4h === trend1h && trend4h !== "neutral";
+            // NEW: Neutral 4h fallback - 4h is neutral but 1h is strongly directional
+            const neutral4hFallbackAligned = allowNeutral4h && 
+              trend4h === "neutral" && 
+              trend1h !== "neutral" && 
+              tf1hConfidence >= neutral4hMin1h;
+            const trendsAligned = standardTrendsAligned || neutral4hFallbackAligned;
+            const alignReason = standardTrendsAligned ? 'standard' : (neutral4hFallbackAligned ? 'neutral-4h-fallback' : 'failed');
+            
+            // CRITICAL FIX: Allow direction match from 1h when 4h is neutral
+            const standardDirectionMatch = (
               (derivedDirection === "long" && trend4h === "bullish") ||
               (derivedDirection === "short" && trend4h === "bearish")
             );
+            const neutral4hDirectionMatch = trend4h === "neutral" && (
+              (derivedDirection === "long" && trend1h === "bullish") ||
+              (derivedDirection === "short" && trend1h === "bearish")
+            );
+            const htfMatchesDirection = standardDirectionMatch || neutral4hDirectionMatch;
+            const dirMatchReason = standardDirectionMatch ? '4h-match' : (neutral4hDirectionMatch ? '1h-match' : 'none');
             
-            // NEW: 1h fallback - if 4h is moderate but 1h is very strong, still allow
+            // 1h fallback - if 4h is moderate but 1h is very strong, still allow
             const allow1hFallback = LOW_ADX_TREND_EXCEPTION_PARAMS.ALLOW_1H_FALLBACK || false;
             const fallbackMin4h = LOW_ADX_TREND_EXCEPTION_PARAMS.FALLBACK_MIN_4H_CONFIDENCE || 60;
             const fallbackMin1h = LOW_ADX_TREND_EXCEPTION_PARAMS.FALLBACK_MIN_1H_CONFIDENCE || 70;
@@ -4750,6 +4780,19 @@ serve(async (req) => {
                 : detectLowerLowHigh(closePrices, LOW_ADX_TREND_EXCEPTION_PARAMS.STRUCTURE_LOOKBACK_BARS))
               : true;
             
+            // NEW: Structure fallback - if 1h is very strong + good price momentum, bypass structure
+            const allowStructureFallback = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).ALLOW_STRUCTURE_FALLBACK || false;
+            const structureFallbackMin1h = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).STRUCTURE_FALLBACK_MIN_1H || 70;
+            const structureFallbackMinMove = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).STRUCTURE_FALLBACK_MIN_MOVE || 0.5;
+            const priceMove = Math.abs(momentum?.priceChange || 0);
+            
+            const structureFallbackOk = allowStructureFallback && 
+              !hasStructure && 
+              tf1hConfidence >= structureFallbackMin1h && 
+              priceMove >= structureFallbackMinMove;
+            const structurePasses = hasStructure || structureFallbackOk;
+            const structureReason = hasStructure ? 'confirmed' : (structureFallbackOk ? 'fallback-1h-strong' : 'failed');
+            
             // Check momentum not opposing
             const momentumState = momentum?.state || "none";
             const momentumNotOpposing = LOW_ADX_TREND_EXCEPTION_PARAMS.REQUIRE_MOMENTUM_NOT_OPPOSING
@@ -4760,10 +4803,17 @@ serve(async (req) => {
             // Check reversal score not elevated
             const reversalScoreOk = unifiedReversal.score < LOW_ADX_TREND_EXCEPTION_PARAMS.MAX_REVERSAL_SCORE;
             
+            // Apply extra position reduction if using neutral 4h fallback
+            if (neutral4hFallbackAligned) {
+              const neutral4hReduction = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).NEUTRAL_4H_POSITION_REDUCTION || 0.40;
+              lowAdxPositionMultiplier = Math.min(lowAdxPositionMultiplier, neutral4hReduction);
+            }
+            
             if (htfQualifies && tf1hStrong && trendsAligned && htfMatchesDirection && 
-                hasStructure && momentumNotOpposing && reversalScoreOk) {
+                structurePasses && momentumNotOpposing && reversalScoreOk) {
               lowAdxExceptionAllowed = true;
-              lowAdxExceptionReason = `HTF=${htfConfidence}% (${htfQualifyReason}), 1h=${tf1hConfidence}%, structure=${hasStructure ? '✓' : '✗'}`;
+              lowAdxExceptionReason = `HTF=${htfConfidence}% (${htfQualifyReason}), 1h=${tf1hConfidence}%, ` +
+                `align=${alignReason}, dir=${dirMatchReason}, struct=${structureReason}`;
               
               logger.forSymbol(symbol).info(
                 `${LOG_CATEGORIES.SUCCESS} 🎯 LOW_ADX_TREND_EXCEPTION: ADX=${adx.toFixed(1)} ` +
@@ -4777,9 +4827,10 @@ serve(async (req) => {
             } else {
               // Log why exception didn't apply - INFO level for visibility
               logger.forSymbol(symbol).info(
-                `${LOG_CATEGORIES.GATE} LOW_ADX_TREND_EXCEPTION check FAILED: htf=${htfQualifies}(${htfConfidence}% ${htfQualifyReason}), ` +
-                `1h=${tf1hStrong}(${tf1hConfidence}%), aligned=${trendsAligned}, ` +
-                `dirMatch=${htfMatchesDirection}, structure=${hasStructure}, ` +
+                `${LOG_CATEGORIES.GATE} LOW_ADX_TREND_EXCEPTION check FAILED: ` +
+                `htf=${htfQualifies}(${htfConfidence}%/${htfQualifyReason}), ` +
+                `1h=${tf1hStrong}(${tf1hConfidence}%), align=${trendsAligned}(${alignReason}), ` +
+                `dir=${htfMatchesDirection}(${dirMatchReason}), struct=${structurePasses}(${structureReason}), ` +
                 `momentum=${momentumNotOpposing}, reversal=${reversalScoreOk}(${unifiedReversal.score})`
               );
             }

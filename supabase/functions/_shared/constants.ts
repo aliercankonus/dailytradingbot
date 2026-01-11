@@ -2066,25 +2066,36 @@ export const LOW_ADX_TREND_EXCEPTION_PARAMS = {
   ENABLED: true,
   
   // ===== ADX BOUNDS =====
-  MIN_ADX: 15,                    // Allow down to ADX 15
+  MIN_ADX: 12,                    // Allow down to ADX 12 (lowered from 15 for current market)
   MAX_ADX: 20,                    // Only applies below normal threshold
   
-// ===== HTF REQUIREMENTS (Further relaxed for real-world conditions) =====
-  MIN_HTF_CONFIDENCE: 60,         // 4h trend must be >= 60% confidence (lowered from 65)
-  MIN_1H_CONFIDENCE: 55,          // 1h must also show direction (lowered from 60)
+  // ===== HTF REQUIREMENTS (Further relaxed for real-world conditions) =====
+  MIN_HTF_CONFIDENCE: 60,         // 4h trend must be >= 60% confidence
+  MIN_1H_CONFIDENCE: 55,          // 1h must also show direction
   REQUIRE_TREND_ALIGNMENT: true,  // 4h and 1h must agree on direction
   
-  // ===== 1H FALLBACK (NEW) =====
+  // ===== 1H FALLBACK =====
   // If 4h is moderate (60-65%) but 1h is very strong (>=70%), still allow entry
   ALLOW_1H_FALLBACK: true,
   FALLBACK_MIN_4H_CONFIDENCE: 60,   // 4h must be at least 60% for fallback
   FALLBACK_MIN_1H_CONFIDENCE: 70,   // 1h must be >= 70% for fallback to apply
+  
+  // ===== NEUTRAL 4H HANDLING (CRITICAL FIX) =====
+  // Low ADX environments often have neutral 4h - allow exception if 1h is strong
+  ALLOW_NEUTRAL_4H: true,               // Allow exception when 4h is neutral
+  NEUTRAL_4H_MIN_1H_CONFIDENCE: 65,     // But require strong 1h (65%+)
+  NEUTRAL_4H_POSITION_REDUCTION: 0.40,  // Extra conservative (40% vs 50%)
   
   // ===== STRUCTURE CONFIRMATION (Critical - not just indicator alignment) =====
   REQUIRE_STRUCTURE_CONFIRMATION: true,
   // For LONG: higher high + higher low (HH/HL)
   // For SHORT: lower low + lower high (LL/LH)
   STRUCTURE_LOOKBACK_BARS: 12,    // 12 x 15min = 3 hours of structure
+  
+  // ===== STRUCTURE FALLBACK (if 1h is very strong) =====
+  ALLOW_STRUCTURE_FALLBACK: true,       // Allow bypass if 1h very strong
+  STRUCTURE_FALLBACK_MIN_1H: 70,        // Require 70%+ 1h confidence
+  STRUCTURE_FALLBACK_MIN_MOVE: 0.5,     // And 0.5%+ price move momentum
   
   // ===== ADDITIONAL SAFETY =====
   REQUIRE_MOMENTUM_NOT_OPPOSING: true,
@@ -2107,12 +2118,13 @@ export const LOW_ADX_TREND_EXCEPTION_PARAMS = {
 export const REGIME_ADAPTIVE_ADX_PARAMS = {
   ENABLED: true,
   
-  // Threshold by regime (replaces fixed ADX_THRESHOLDS.MINIMUM for entry gates)
+  // Threshold by regime - FIXED: Lower thresholds for ranging to HELP entries, not block them
+  // These are thresholds for exception paths - lower = easier to enter
   THRESHOLDS: {
-    RANGING: 22,      // Ranging markets need stronger confirmation
-    TRANSITION: 18,   // Emerging trends can have lower ADX
-    TRENDING: 15,     // Established trends - ADX may be consolidating
-    SQUEEZE: 15,      // Squeeze breakouts work at lower ADX
+    RANGING: 18,      // Ranging: use LOWER threshold (18) to ALLOW exception entries
+    TRANSITION: 16,   // Emerging trends: even lower (16) - good time to enter
+    TRENDING: 15,     // Established trends: keep low (15)
+    SQUEEZE: 14,      // Squeeze breakouts: lowest (14) - prime entry zone
   } as Record<string, number>,
   
   // Log when regime-adaptive threshold is applied
