@@ -158,6 +158,14 @@ import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } fr
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
 import { createLogger, logError, LOG_CATEGORIES } from "../_shared/logging.ts";
 import { getKlines, get24hrTicker, parseKlinePrices } from "../_shared/binance.ts";
+import { 
+  isShadowModeEnabled, 
+  logShadowSignal, 
+  compareMACDGate, 
+  compareADXExhaustionGate, 
+  compareStochRSIGate,
+  type ShadowModeSignal 
+} from "../_shared/shadow-mode.ts";
 
 // Create logger for this function
 const logger = createLogger('strategy-analyzer');
@@ -1210,6 +1218,12 @@ serve(async (req) => {
       return new Response(JSON.stringify({ message: "Trading is disabled", signals: [] }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Check if shadow mode is enabled for this user (defaults to true during validation period)
+    const shadowModeEnabled = riskParams.shadow_mode_enabled ?? true;
+    if (shadowModeEnabled) {
+      logger.info(`🔮 Shadow mode ENABLED - tracking gate relaxation changes`);
     }
 
     // Fetch active trading symbols
@@ -2478,6 +2492,49 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`📊 EXHAUSTION CHECK: isExhausted=${adxExhaustion.isExhausted} isContinuation=${adxExhaustion.isContinuation} type=${adxExhaustion.exhaustionType} score=${adxExhaustion.exhaustionScore}`);
           if (adxExhaustion.reasons.length > 0) {
             logger.forSymbol(symbol).info(`   ${adxExhaustion.reasons.join(' | ')}`);
+          }
+          
+          // ===== SHADOW MODE: Compare old vs new ADX exhaustion gate logic =====
+          // Get trend age from trend data (bars since trend started)
+          const trendAgeBars = trendData.trendAge?.bars ?? 0;
+          // Price action confirmed = continuation candles or structure intact
+          const priceActionConfirmed = adxExhaustion.isContinuation || !adxExhaustion.isExhausted;
+          
+          const adxExhaustionComparison = compareADXExhaustionGate(
+            adxExhaustion.exhaustionScore,
+            fullAdxResult.adxSlope < 0 ? Math.abs(fullAdxResult.adxSlope * 10) : 0, // Approximate decline
+            trendAgeBars,
+            priceActionConfirmed
+          );
+          
+          // Log shadow signal if gate behavior changed (old would have blocked, new passes)
+          if (adxExhaustionComparison.wouldHaveChanged && shadowModeEnabled) {
+            logShadowSignal(supabase as any, {
+              userId,
+              symbol,
+              signalType: derivedDirection as 'long' | 'short',
+              strategyName: 'N/A',
+              gateBlockedBy: 'adx_exhaustion',
+              oldGateResult: 'blocked',
+              newGateResult: 'passed',
+              gateDetails: {
+                exhaustionScore: adxExhaustion.exhaustionScore,
+                adx: fullAdxResult.adx,
+                adxSlope: fullAdxResult.adxSlope,
+                trendAgeBars,
+                priceActionConfirmed,
+                isContinuation: adxExhaustion.isContinuation,
+                oldThreshold: adxExhaustionComparison.oldThreshold,
+                newThreshold: adxExhaustionComparison.newThreshold,
+              },
+              confidenceScore: confidence,
+              trend,
+              indicators: {
+                adxPeaked: fullAdxResult.adxPeaked,
+                diGap: fullAdxResult.diGap,
+                exhaustionType: adxExhaustion.exhaustionType,
+              }
+            }).catch(err => logger.forSymbol(symbol).error(`Shadow mode ADX exhaustion log failed: ${err}`));
           }
         }
         
@@ -5938,6 +5995,41 @@ serve(async (req) => {
           const adxOverrideWithRising = adx >= MACD_GATE_PARAMS.ADX_OVERRIDE_WITH_RISING && adxRisingForMacd;
           const adxOverrideUnconditional = adx >= MACD_GATE_PARAMS.ADX_OVERRIDE_UNCONDITIONAL;
           const hasAdxOverride = adxOverrideWithRising || adxOverrideUnconditional;
+          
+          // ===== SHADOW MODE: Compare old vs new MACD gate logic =====
+          const macdGateComparison = compareMACDGate(
+            consecutiveOpposingBars,
+            macdHistogramValue,
+            adx
+          );
+          
+          // Log shadow signal if gate behavior changed (old blocked, new passes)
+          if (macdGateComparison.wouldHaveChanged && shadowModeEnabled) {
+            logShadowSignal(supabase as any, {
+              userId,
+              symbol,
+              signalType: derivedDirection as 'long' | 'short',
+              strategyName: 'N/A',
+              gateBlockedBy: 'macd_divergence',
+              oldGateResult: 'blocked',
+              newGateResult: 'passed',
+              gateDetails: {
+                opposingBars: consecutiveOpposingBars,
+                histogramMagnitude: macdHistMagnitude,
+                adx,
+                adxRising: adxRisingForMacd,
+                oldThreshold: macdGateComparison.oldThreshold,
+                newThreshold: macdGateComparison.newThreshold,
+              },
+              confidenceScore: confidence,
+              trend,
+              indicators: {
+                macdHistogram: macdHistogramValue,
+                macdDirectionAligned,
+                hasMacdDivergence,
+              }
+            }).catch(err => logger.forSymbol(symbol).error(`Shadow mode MACD log failed: ${err}`));
+          }
           
           // Determine gate action based on conditions
           if (isMacdNeutral) {
