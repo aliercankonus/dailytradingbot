@@ -115,13 +115,16 @@ export const MomentumStatusDetails = () => {
                             )}
                             </div>
                             <Badge
-                              variant={trend === "bullish" ? "default" : trend === "bearish" ? "destructive" : "outline"}
+                              variant={trend === "bullish" ? "default" : trend === "bearish" ? "destructive" : "secondary"}
+                              className={trend === "ranging" ? "bg-slate-600 text-white dark:bg-slate-500 dark:text-white" : ""}
                             >
                               {trend === "bullish" ? (
                                 <TrendingUp className="h-3 w-3 mr-1" />
                               ) : trend === "bearish" ? (
                                 <TrendingDown className="h-3 w-3 mr-1" />
-                              ) : null}
+                              ) : (
+                                <Minus className="h-3 w-3 mr-1" />
+                              )}
                               {trend ?? "unknown"}
                             </Badge>
                           </div>
