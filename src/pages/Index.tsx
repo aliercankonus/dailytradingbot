@@ -28,6 +28,7 @@ import { ExitManagementDashboard } from "@/components/ExitManagementDashboard";
 import { MarketConditionsDashboard } from "@/components/MarketConditionsDashboard";
 import LateGrindAnalyticsDashboard from "@/components/LateGrindAnalyticsDashboard";
 import { BlockedSignalsWidget } from "@/components/BlockedSignalsWidget";
+import { ShadowModeValidationWidget } from "@/components/ShadowModeValidationWidget";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -119,6 +120,7 @@ const Index = () => {
                 <BlockedSignalsWidget />
               </div>
             </div>
+            <ShadowModeValidationWidget />
             <SignalTimingMonitor />
             <TradingSignalsDashboard />
             <AIAnalysisDashboard />
