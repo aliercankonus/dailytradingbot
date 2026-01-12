@@ -2323,9 +2323,9 @@ export const PRE_MOMENTUM_STOCHRSI_PARAMS = {
   ENABLED: true,
   
   // ===== STOCHRSI THRESHOLDS =====
-  // Deeply oversold/overbought threshold for pre-momentum entry
-  MAX_STOCHRSI_K_FOR_SHORT: 15,   // K < 15 = deeply oversold, allow SHORT
-  MIN_STOCHRSI_K_FOR_LONG: 85,    // K > 85 = deeply overbought, allow LONG
+  // Relaxed threshold for SHORT to catch more moves like AVAX (K=15.7)
+  MAX_STOCHRSI_K_FOR_SHORT: 18,   // K < 18 = oversold zone, allow SHORT (was 15)
+  MIN_STOCHRSI_K_FOR_LONG: 82,    // K > 82 = overbought zone, allow LONG (was 85)
   
   // ===== ADX REQUIREMENTS =====
   // Must have some trend strength (not completely flat)
