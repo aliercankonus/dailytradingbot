@@ -2106,7 +2106,7 @@ export const LOW_ADX_TREND_EXCEPTION_PARAMS = {
   // ===== NEUTRAL 4H HANDLING (CRITICAL FIX) =====
   // Low ADX environments often have neutral 4h - allow exception if 1h is strong
   ALLOW_NEUTRAL_4H: true,               // Allow exception when 4h is neutral
-  NEUTRAL_4H_MIN_1H_CONFIDENCE: 65,     // But require strong 1h (65%+)
+  NEUTRAL_4H_MIN_1H_CONFIDENCE: 60,     // Lowered to match TRANSITIONAL_MIN_1H_CONFIDENCE (60%+)
   NEUTRAL_4H_POSITION_REDUCTION: 0.40,  // Extra conservative (40% vs 50%)
   
   // ===== STRUCTURE CONFIRMATION (Critical - not just indicator alignment) =====
