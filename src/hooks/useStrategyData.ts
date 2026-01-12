@@ -36,11 +36,16 @@ export const useStrategyData = () => {
 
         if (positionsError) throw positionsError;
 
-        // Calculate performance by strategy
+        // Calculate performance by strategy - filter out null/empty strategy names
         const performanceMap = new Map<string, { total_trades: number; winning_trades: number; total_profit: number }>();
         
         (positionsData || []).forEach(position => {
-          const strategyName = position.strategy_name || 'Unknown';
+          // Skip positions without a valid strategy name
+          if (!position.strategy_name || position.strategy_name.trim() === '') {
+            return;
+          }
+          
+          const strategyName = position.strategy_name;
           const current = performanceMap.get(strategyName) || { total_trades: 0, winning_trades: 0, total_profit: 0 };
           
           current.total_trades++;
@@ -75,18 +80,24 @@ export const useStrategyData = () => {
 
         if (builtInError) throw builtInError;
 
+        // Create a set of custom strategy names for deduplication
+        const customStrategyNames = new Set((allCustomData || []).map(cs => cs.name));
+
         // Merge built-in strategies with actual performance data
-        const builtInStrategies: Strategy[] = (builtInData || []).map(s => {
-          const performance = performanceMap.get(s.strategy_name);
-          return {
-            id: s.id,
-            strategy_name: s.strategy_name,
-            status: s.status,
-            total_trades: performance?.total_trades || 0,
-            winning_trades: performance?.winning_trades || 0,
-            total_profit: performance?.total_profit || 0
-          };
-        });
+        // Filter out any that also exist in custom_strategies to prevent duplicates
+        const builtInStrategies: Strategy[] = (builtInData || [])
+          .filter(s => !customStrategyNames.has(s.strategy_name))
+          .map(s => {
+            const performance = performanceMap.get(s.strategy_name);
+            return {
+              id: s.id,
+              strategy_name: s.strategy_name,
+              status: s.status,
+              total_trades: performance?.total_trades || 0,
+              winning_trades: performance?.winning_trades || 0,
+              total_profit: performance?.total_profit || 0
+            };
+          });
 
         // Transform ONLY active custom strategies for display
         const activeCustomData = (allCustomData || []).filter(cs => cs.is_active);
@@ -110,26 +121,29 @@ export const useStrategyData = () => {
         ]);
         
         performanceMap.forEach((perf, strategyName) => {
-          if (!allStrategyNames.has(strategyName)) {
-            // Check if this is a custom strategy that's been deactivated
-            const isCustomStrategy = customStrategyStatusMap.has(strategyName);
-            const isActive = customStrategyStatusMap.get(strategyName) ?? true; // Default to active for unknown strategies
-            
-            // Only add if it's active (or not a custom strategy)
-            if (!isCustomStrategy || isActive) {
-              builtInStrategies.push({
-                id: `generated-${strategyName}`,
-                strategy_name: strategyName,
-                status: 'active',
-                total_trades: perf.total_trades,
-                winning_trades: perf.winning_trades,
-                total_profit: perf.total_profit
-              });
-            }
+          // Skip if already in the list or if it's "Unknown"
+          if (allStrategyNames.has(strategyName) || strategyName === 'Unknown') {
+            return;
+          }
+          
+          // Check if this is a custom strategy that's been deactivated
+          const isCustomStrategy = customStrategyStatusMap.has(strategyName);
+          const isActive = customStrategyStatusMap.get(strategyName) ?? true;
+          
+          // Only add if it's active (or not a custom strategy)
+          if (!isCustomStrategy || isActive) {
+            builtInStrategies.push({
+              id: `generated-${strategyName}`,
+              strategy_name: strategyName,
+              status: 'active',
+              total_trades: perf.total_trades,
+              winning_trades: perf.winning_trades,
+              total_profit: perf.total_profit
+            });
           }
         });
 
-        // Combine both arrays
+        // Combine both arrays - no duplicates now
         const combinedStrategies = [...builtInStrategies, ...customStrategies];
         setStrategies(combinedStrategies);
       } catch (err) {
