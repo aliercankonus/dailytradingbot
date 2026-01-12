@@ -88,6 +88,8 @@ import {
   STOCHRSI_ADX_ALIGNMENT_PARAMS,
   // NEW: Relaxed Order Flow when 1h directional
   RELAXED_ORDER_FLOW_PARAMS,
+  // PHASE 2: MACD Gate Optimization - duration and magnitude checks
+  MACD_GATE_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -5883,38 +5885,111 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Neutral 4h gate passed (4h=${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`);
         }
         
-        // ============= PHASE 2 IMPROVEMENT: MACD ALIGNMENT HARD GATE =============
-        // When MACD direction is misaligned with intended trade direction, block the signal
-        // This prevents entries where MACD contradicts the trade direction
-        // EXCEPTION: Skip this gate if Unified Reversal Score >= 50 (already penalized in URS)
+        // ============= PHASE 2 OPTIMIZATION: MACD ALIGNMENT GATE (DURATION + MAGNITUDE) =============
+        // UPDATED: Convert hard block to probabilistic scoring with duration and magnitude checks
+        // Now uses MACD_GATE_PARAMS for optimized thresholds
         const macdDirectionAligned = momentum?.macdDirectionAligned ?? true;
         const hasMacdDivergence = momentum?.hasDivergence ?? false;
+        // Use already-defined macdHistogramValue from line 5769
+        const macdHistMagnitude = Math.abs(macdHistogramValue);
+        const adxRisingForMacd = smartAdxRising || (trendData.volatility?.adxRising ?? false);
+        
+        // Get MACD histogram history for duration check (from trendData if available)
+        // We need to check if MACD has been opposing for 3+ consecutive bars
+        const macdHistogramHistory = trendData.momentum?.macdHistogramHistory || [];
+        
+        // Calculate consecutive opposing bars
+        let consecutiveOpposingBars = 0;
+        if (macdHistogramHistory.length > 0 && derivedDirection) {
+          const isLong = derivedDirection === "long";
+          for (let i = macdHistogramHistory.length - 1; i >= 0; i--) {
+            const hist = macdHistogramHistory[i];
+            const isOpposing = isLong ? hist < 0 : hist > 0;
+            if (isOpposing) {
+              consecutiveOpposingBars++;
+            } else {
+              break;
+            }
+          }
+        } else if (!macdDirectionAligned) {
+          // Fallback: if no history, assume current bar is opposing
+          consecutiveOpposingBars = 1;
+        }
         
         // PHASE 2: Reduce double-counting - if URS already penalized reversal risk heavily,
         // don't apply MACD divergence hard gate again (orthogonal logic)
         const ursAlreadyPenalizedMacd = unifiedReversal.score >= 50;
         
-        if ((!macdDirectionAligned || hasMacdDivergence) && !ursAlreadyPenalizedMacd) {
-          // Allow if ADX is very strong (>= 35) - strong trends can override MACD misalignment
-          const allowMacdOverride = adx >= ADX_THRESHOLDS.EXCEPTIONAL;
+        // Position multiplier for MACD soft blocks
+        let macdPositionMultiplier = 1.0;
+        let macdGateAction: 'ALLOW' | 'SOFT_BLOCK' | 'HARD_BLOCK' = 'ALLOW';
+        
+        if ((!macdDirectionAligned || hasMacdDivergence) && !ursAlreadyPenalizedMacd && MACD_GATE_PARAMS.ENABLED) {
+          // ===== NEW PHASE 2 LOGIC: Duration + Magnitude + ADX Checks =====
           
-          if (!allowMacdOverride) {
+          // Check 1: Magnitude check - ignore if MACD is too small to matter
+          const isMacdNeutral = macdHistMagnitude < MACD_GATE_PARAMS.NEUTRAL_HISTOGRAM_THRESHOLD;
+          const isMacdSignificant = macdHistMagnitude >= MACD_GATE_PARAMS.MIN_HISTOGRAM_FOR_BLOCK;
+          
+          // Check 2: Duration check - only block if opposing for 3+ bars
+          const hasOpposedLongEnough = consecutiveOpposingBars >= MACD_GATE_PARAMS.MIN_OPPOSITION_BARS;
+          
+          // Check 3: ADX override - lowered thresholds
+          const adxOverrideWithRising = adx >= MACD_GATE_PARAMS.ADX_OVERRIDE_WITH_RISING && adxRisingForMacd;
+          const adxOverrideUnconditional = adx >= MACD_GATE_PARAMS.ADX_OVERRIDE_UNCONDITIONAL;
+          const hasAdxOverride = adxOverrideWithRising || adxOverrideUnconditional;
+          
+          // Determine gate action based on conditions
+          if (isMacdNeutral) {
+            // MACD is too small to matter - treat as neutral, allow entry
+            macdGateAction = 'ALLOW';
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} MACD MAGNITUDE CHECK: Histogram ${macdHistogramValue.toFixed(6)} is neutral (< ${MACD_GATE_PARAMS.NEUTRAL_HISTOGRAM_THRESHOLD}) - ignoring misalignment`);
+          } else if (hasAdxOverride) {
+            // ADX override allows entry (lowered from 35 to 25/28)
+            macdGateAction = 'ALLOW';
+            const overrideType = adxOverrideUnconditional ? 'UNCONDITIONAL' : 'WITH_RISING';
+            const threshold = adxOverrideUnconditional ? MACD_GATE_PARAMS.ADX_OVERRIDE_UNCONDITIONAL : MACD_GATE_PARAMS.ADX_OVERRIDE_WITH_RISING;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} MACD gate bypassed via ADX override [${overrideType}] (ADX=${adx.toFixed(1)} >= ${threshold}, rising=${adxRisingForMacd})`);
+          } else if (!hasOpposedLongEnough) {
+            // MACD hasn't opposed long enough - soft block with reduced position
+            macdGateAction = 'SOFT_BLOCK';
+            macdPositionMultiplier = MACD_GATE_PARAMS.POSITION_MULTIPLIER_WEAK;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} MACD DURATION CHECK: Only ${consecutiveOpposingBars} opposing bars (< ${MACD_GATE_PARAMS.MIN_OPPOSITION_BARS}) - soft block at ${(macdPositionMultiplier * 100).toFixed(0)}% position`);
+          } else if (!isMacdSignificant) {
+            // MACD magnitude not significant enough for hard block - soft block
+            macdGateAction = 'SOFT_BLOCK';
+            macdPositionMultiplier = MACD_GATE_PARAMS.POSITION_MULTIPLIER_SOFT;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} MACD MAGNITUDE CHECK: Histogram ${macdHistMagnitude.toFixed(6)} < ${MACD_GATE_PARAMS.MIN_HISTOGRAM_FOR_BLOCK} - soft block at ${(macdPositionMultiplier * 100).toFixed(0)}% position`);
+          } else if (adx < MACD_GATE_PARAMS.SCORE_MULTIPLIER_BELOW_ADX) {
+            // Below ADX 25, use score multiplier instead of hard block
+            macdGateAction = 'SOFT_BLOCK';
+            macdPositionMultiplier = MACD_GATE_PARAMS.POSITION_MULTIPLIER_SOFT;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} MACD gate converted to soft block (ADX=${adx.toFixed(1)} < ${MACD_GATE_PARAMS.SCORE_MULTIPLIER_BELOW_ADX}) - ${(macdPositionMultiplier * 100).toFixed(0)}% position`);
+          } else {
+            // All conditions met for hard block: significant magnitude + 3+ bars opposing + no ADX override
+            macdGateAction = 'HARD_BLOCK';
             rejectedByHardGates++;
             const macdReason = hasMacdDivergence 
-              ? "MACD divergence detected" 
-              : "MACD direction misaligned with trade";
+              ? `MACD divergence (${consecutiveOpposingBars} bars opposing, magnitude=${macdHistMagnitude.toFixed(6)})` 
+              : `MACD misaligned ${consecutiveOpposingBars} bars (magnitude=${macdHistMagnitude.toFixed(6)})`;
             perSymbolGateAttribution.set(symbol, { gate: 'MACD_MISALIGNED', details: macdReason });
             await logRejectionWithAI(
               supabase, userId, symbol,
-              `HARD GATE: ${macdReason} (ADX=${adx.toFixed(1)} < ${ADX_THRESHOLDS.EXCEPTIONAL} for override)`,
+              `HARD GATE: ${macdReason} (ADX=${adx.toFixed(1)}, override needs >= ${MACD_GATE_PARAMS.ADX_OVERRIDE_WITH_RISING} rising or >= ${MACD_GATE_PARAMS.ADX_OVERRIDE_UNCONDITIONAL})`,
               { 
                 gate: "MACD_MISALIGNED",
                 macdDirectionAligned,
                 hasMacdDivergence,
-                macdHistogram: momentum?.macdHistogram?.toFixed(4),
+                macdHistogram: macdHistogramValue.toFixed(6),
+                macdHistogramMagnitude: macdHistMagnitude.toFixed(6),
+                consecutiveOpposingBars,
+                minOppositionBars: MACD_GATE_PARAMS.MIN_OPPOSITION_BARS,
+                minMagnitudeForBlock: MACD_GATE_PARAMS.MIN_HISTOGRAM_FOR_BLOCK,
                 macdExpanding: momentum?.macdExpanding,
                 adx: adx.toFixed(1),
-                adxRequiredForOverride: ADX_THRESHOLDS.EXCEPTIONAL,
+                adxRising: adxRisingForMacd,
+                adxOverrideWithRising: MACD_GATE_PARAMS.ADX_OVERRIDE_WITH_RISING,
+                adxOverrideUnconditional: MACD_GATE_PARAMS.ADX_OVERRIDE_UNCONDITIONAL,
                 ursScore: unifiedReversal.score,
                 trend,
                 confidence
@@ -5924,7 +5999,6 @@ serve(async (req) => {
             );
             continue;
           }
-          logger.forSymbol(symbol).warn(`MACD misalignment overridden by strong trend (ADX=${adx.toFixed(1)} >= ${ADX_THRESHOLDS.EXCEPTIONAL})`);
         } else if ((!macdDirectionAligned || hasMacdDivergence) && ursAlreadyPenalizedMacd) {
           // Log that we're skipping the gate due to URS already handling it
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} MACD divergence gate skipped - already penalized in URS (score=${unifiedReversal.score})`);
