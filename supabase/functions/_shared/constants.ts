@@ -230,8 +230,11 @@ export const MOMENTUM_CONTINUATION_PARAMS = {
   PRICE_MOVE_LOOKBACK_HOURS: 6,       // Look back 6 hours (6 1h candles)
   // Override neutral alignment when price action confirms direction
   OVERRIDE_NEUTRAL_ALIGNMENT: true,
-  // ADX requirement for price action override
-  MIN_ADX_FOR_PRICE_ACTION: 22,
+  // ADX requirement for price action override - TIERED based on move strength
+  // For 2%+ moves, ADX 18 is enough (price action is clear)
+  // For 1.5-2% moves, ADX 20 required
+  MIN_ADX_FOR_PRICE_ACTION: 18,       // Lowered from 22 - a 2.8% move with ADX 20.7 is clearly trending!
+  MIN_ADX_FOR_MODERATE_MOVE: 20,      // Slightly higher for smaller moves
   
   // ===== EXHAUSTION SENSITIVITY (LOWERED) =====
   // Require MORE bars at extreme before blocking (was 4, now 8)
@@ -241,8 +244,8 @@ export const MOMENTUM_CONTINUATION_PARAMS = {
   
   // ===== STRONG MOVE CONTINUATION =====
   // For catching continuation during very strong moves
-  STRONG_MOVE_THRESHOLD_PERCENT: 2.5,  // 2.5% move in lookback period
-  STRONG_MOVE_MIN_ADX: 23,             // Minimum ADX for strong move exception
+  STRONG_MOVE_THRESHOLD_PERCENT: 2.0,  // 2.0% move in lookback period (lowered from 2.5%)
+  STRONG_MOVE_MIN_ADX: 18,             // Lowered from 23 - strong price moves override weak ADX
   // Ignore StochRSI extremes if MACD histogram is expanding in trend direction
   ALLOW_WITH_MACD_EXPANSION: true,
   
