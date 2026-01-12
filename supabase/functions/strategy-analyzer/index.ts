@@ -80,6 +80,14 @@ import {
   MOMENTUM_DIRECTION_OVERRIDE_PARAMS,
   // NEW: Order Flow Direction Fallback - use order flow when trends neutral
   ORDER_FLOW_DIRECTION_PARAMS,
+  // NEW: Pre-Momentum StochRSI Extreme Entry - catch moves before momentum confirms
+  PRE_MOMENTUM_STOCHRSI_PARAMS,
+  // NEW: Short-Term Alignment Override - when 1h/30m/micro all agree
+  SHORT_TERM_ALIGNMENT_PARAMS,
+  // NEW: StochRSI-ADX Alignment - reduce ADX threshold when indicators align
+  STOCHRSI_ADX_ALIGNMENT_PARAMS,
+  // NEW: Relaxed Order Flow when 1h directional
+  RELAXED_ORDER_FLOW_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -2145,27 +2153,126 @@ serve(async (req) => {
         let orderFlowDerivedDirection: "long" | "short" | null = null;
         let orderFlowDerivedPositionMultiplier = 1.0;
         
+        // ============= RELAXED ORDER FLOW WHEN 1H DIRECTIONAL =============
+        // When 1h trend is clear, accept lower order flow score
         if (!directionResult.direction && !lateGrindAccepted && !momentumDirectionOverrideApplied && ORDER_FLOW_DIRECTION_PARAMS.ENABLED) {
           const orderFlowScore = earlyOrderFlowAnalysis?.score ?? 0;
           const orderFlowSignal = earlyOrderFlowAnalysis?.signal ?? "neutral";
           const adxSufficient = adx >= ORDER_FLOW_DIRECTION_PARAMS.MIN_ADX;
           
+          // IMPROVED: Use relaxed order flow score when 1h is directional
+          const is1hDirectional = htfTrend1h === "bearish" || htfTrend1h === "bullish";
+          const effectiveMinScore = is1hDirectional && RELAXED_ORDER_FLOW_PARAMS.ENABLED
+            ? RELAXED_ORDER_FLOW_PARAMS.RELAXED_MIN_ORDER_FLOW_SCORE
+            : ORDER_FLOW_DIRECTION_PARAMS.MIN_ORDER_FLOW_SCORE;
+          
           const isStrongSignal = ORDER_FLOW_DIRECTION_PARAMS.REQUIRE_STRONG_SIGNAL
             ? (orderFlowSignal === "strong_buy" || orderFlowSignal === "strong_sell")
             : true;
           
-          if (orderFlowScore >= ORDER_FLOW_DIRECTION_PARAMS.MIN_ORDER_FLOW_SCORE && isStrongSignal && adxSufficient) {
+          if (orderFlowScore >= effectiveMinScore && isStrongSignal && adxSufficient) {
             orderFlowDerivedDirection = orderFlowSignal === "strong_buy" || orderFlowSignal === "buy" ? "long" : "short";
             orderFlowDirectionOverrideApplied = true;
             orderFlowDerivedPositionMultiplier = ORDER_FLOW_DIRECTION_PARAMS.POSITION_SIZE_MULTIPLIER;
             
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 📊 ORDER FLOW DIRECTION FALLBACK: Deriving ${orderFlowDerivedDirection} from ${orderFlowSignal} (score=${orderFlowScore})`);
-            logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, Position size: ${(orderFlowDerivedPositionMultiplier * 100).toFixed(0)}%`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 📊 ORDER FLOW DIRECTION FALLBACK: Deriving ${orderFlowDerivedDirection} from ${orderFlowSignal} (score=${orderFlowScore}, minRequired=${effectiveMinScore})`);
+            logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, 1h_directional=${is1hDirectional}, Position size: ${(orderFlowDerivedPositionMultiplier * 100).toFixed(0)}%`);
+          }
+        }
+        
+        // ============= NEW: PRE-MOMENTUM STOCHRSI EXTREME ENTRY =============
+        // When StochRSI is at deep extremes (K < 15 for SHORT, K > 85 for LONG)
+        // with directional 1h trend but momentum not yet confirmed, allow entry
+        let preMomentumStochRsiOverrideApplied = false;
+        let preMomentumDirection: "long" | "short" | null = null;
+        let preMomentumPositionMultiplier = 1.0;
+        
+        const stochK1h = trendData.stochasticRsi?.['1h']?.k ?? 50;
+        const stochD1h = trendData.stochasticRsi?.['1h']?.d ?? 50;
+        const conf1hForPreMomentum = timeframes?.['1h']?.confidence ?? 50;
+        
+        if (!directionResult.direction && !lateGrindAccepted && !momentumDirectionOverrideApplied && !orderFlowDirectionOverrideApplied && PRE_MOMENTUM_STOCHRSI_PARAMS.ENABLED) {
+          const adxSufficient = adx >= PRE_MOMENTUM_STOCHRSI_PARAMS.MIN_ADX;
+          const momentumState = momentum?.state || "none";
+          const isNotConfirmed = momentumState === "none" || momentumState === "building";
+          
+          // Check for SHORT: deeply oversold StochRSI + 1h bearish
+          const isDeeplySold = stochK1h < PRE_MOMENTUM_STOCHRSI_PARAMS.MAX_STOCHRSI_K_FOR_SHORT;
+          const is1hBearish = htfTrend1h === "bearish" && conf1hForPreMomentum >= PRE_MOMENTUM_STOCHRSI_PARAMS.MIN_1H_CONFIDENCE;
+          const isStochDeclining = stochK1h < stochD1h;  // K < D = declining
+          
+          // Check for LONG: deeply overbought StochRSI + 1h bullish
+          const isDeeplyBought = stochK1h > PRE_MOMENTUM_STOCHRSI_PARAMS.MIN_STOCHRSI_K_FOR_LONG;
+          const is1hBullish = htfTrend1h === "bullish" && conf1hForPreMomentum >= PRE_MOMENTUM_STOCHRSI_PARAMS.MIN_1H_CONFIDENCE;
+          const isStochRising = stochK1h > stochD1h;  // K > D = rising
+          
+          if (adxSufficient && isNotConfirmed) {
+            if (isDeeplySold && is1hBearish && isStochDeclining) {
+              preMomentumDirection = "short";
+              preMomentumStochRsiOverrideApplied = true;
+              preMomentumPositionMultiplier = conf1hForPreMomentum >= 65
+                ? PRE_MOMENTUM_STOCHRSI_PARAMS.STRONG_SETUP_MULTIPLIER
+                : PRE_MOMENTUM_STOCHRSI_PARAMS.POSITION_SIZE_MULTIPLIER;
+              
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔴 PRE-MOMENTUM STOCHRSI: Deeply oversold (K=${stochK1h.toFixed(1)} < ${PRE_MOMENTUM_STOCHRSI_PARAMS.MAX_STOCHRSI_K_FOR_SHORT}) + 1h bearish (${conf1hForPreMomentum.toFixed(0)}%) → SHORT`);
+              logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, StochRSI K<D=${isStochDeclining}, Position: ${(preMomentumPositionMultiplier * 100).toFixed(0)}%`);
+            } else if (isDeeplyBought && is1hBullish && isStochRising) {
+              preMomentumDirection = "long";
+              preMomentumStochRsiOverrideApplied = true;
+              preMomentumPositionMultiplier = conf1hForPreMomentum >= 65
+                ? PRE_MOMENTUM_STOCHRSI_PARAMS.STRONG_SETUP_MULTIPLIER
+                : PRE_MOMENTUM_STOCHRSI_PARAMS.POSITION_SIZE_MULTIPLIER;
+              
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🟢 PRE-MOMENTUM STOCHRSI: Deeply overbought (K=${stochK1h.toFixed(1)} > ${PRE_MOMENTUM_STOCHRSI_PARAMS.MIN_STOCHRSI_K_FOR_LONG}) + 1h bullish (${conf1hForPreMomentum.toFixed(0)}%) → LONG`);
+              logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, StochRSI K>D=${isStochRising}, Position: ${(preMomentumPositionMultiplier * 100).toFixed(0)}%`);
+            }
+          }
+        }
+        
+        // ============= NEW: SHORT-TERM ALIGNMENT OVERRIDE =============
+        // When 1h, 30m, and micro trend all agree but momentum is "none"
+        let shortTermAlignmentOverrideApplied = false;
+        let shortTermAlignmentDirection: "long" | "short" | null = null;
+        let shortTermAlignmentPositionMultiplier = 1.0;
+        
+        if (!directionResult.direction && !lateGrindAccepted && !momentumDirectionOverrideApplied && 
+            !orderFlowDirectionOverrideApplied && !preMomentumStochRsiOverrideApplied && SHORT_TERM_ALIGNMENT_PARAMS.ENABLED) {
+          
+          const trend30m = trendData.multiTimeframeTrends?.timeframe30m?.trend || timeframes?.['30m']?.trend || "neutral";
+          const microDirection = trendData.microTrend?.direction || "neutral";
+          const momentumState = momentum?.state || "none";
+          const adxSufficient = adx >= SHORT_TERM_ALIGNMENT_PARAMS.MIN_ADX;
+          
+          // Check if all 3 short-term timeframes align for bearish
+          const allBearish = htfTrend1h === "bearish" && trend30m === "bearish" && microDirection === "bearish";
+          // Check if all 3 short-term timeframes align for bullish
+          const allBullish = htfTrend1h === "bullish" && trend30m === "bullish" && microDirection === "bullish";
+          
+          // Only apply when momentum is "none" (not conflicting for other reasons)
+          const momentumNone = momentumState === "none" && SHORT_TERM_ALIGNMENT_PARAMS.ALLOW_WHEN_MOMENTUM_NONE;
+          
+          if (adxSufficient && momentumNone) {
+            if (allBearish) {
+              shortTermAlignmentDirection = "short";
+              shortTermAlignmentOverrideApplied = true;
+              shortTermAlignmentPositionMultiplier = SHORT_TERM_ALIGNMENT_PARAMS.POSITION_SIZE_MULTIPLIER;
+              
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 📉 SHORT-TERM ALIGNMENT: All bearish (1h=${htfTrend1h}, 30m=${trend30m}, micro=${microDirection}) → SHORT`);
+              logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, momentum=${momentumState}, Position: ${(shortTermAlignmentPositionMultiplier * 100).toFixed(0)}%`);
+            } else if (allBullish) {
+              shortTermAlignmentDirection = "long";
+              shortTermAlignmentOverrideApplied = true;
+              shortTermAlignmentPositionMultiplier = SHORT_TERM_ALIGNMENT_PARAMS.POSITION_SIZE_MULTIPLIER;
+              
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 📈 SHORT-TERM ALIGNMENT: All bullish (1h=${htfTrend1h}, 30m=${trend30m}, micro=${microDirection}) → LONG`);
+              logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, momentum=${momentumState}, Position: ${(shortTermAlignmentPositionMultiplier * 100).toFixed(0)}%`);
+            }
           }
         }
         
         // REJECT EARLY: If no clear trade direction can be determined AND no overrides applied
-        const hasDirectionOverride = momentumDirectionOverrideApplied || orderFlowDirectionOverrideApplied;
+        const hasDirectionOverride = momentumDirectionOverrideApplied || orderFlowDirectionOverrideApplied || 
+                                     preMomentumStochRsiOverrideApplied || shortTermAlignmentOverrideApplied;
         if (!directionResult.direction && !lateGrindAccepted && !hasDirectionOverride) {
           rejectedByHardGates++;
           await logRejectionWithAI(
@@ -2182,9 +2289,15 @@ serve(async (req) => {
               lateGrindChecked: LATE_GRIND_ACCEPTANCE_PARAMS.ENABLED,
               momentumDirectionOverrideChecked: MOMENTUM_DIRECTION_OVERRIDE_PARAMS.ENABLED,
               orderFlowDirectionChecked: ORDER_FLOW_DIRECTION_PARAMS.ENABLED,
+              preMomentumStochRsiChecked: PRE_MOMENTUM_STOCHRSI_PARAMS.ENABLED,
+              shortTermAlignmentChecked: SHORT_TERM_ALIGNMENT_PARAMS.ENABLED,
+              stochK1h: stochK1h.toFixed(1),
+              stochD1h: stochD1h.toFixed(1),
               orderFlowScore: earlyOrderFlowAnalysis?.score ?? 0,
               orderFlowSignal: earlyOrderFlowAnalysis?.signal ?? "neutral",
               stealthDrift: trendData.stealthTrend?.driftPercent || 0,
+              trend30m: trendData.multiTimeframeTrends?.timeframe30m?.trend || timeframes?.['30m']?.trend || "neutral",
+              microDirection: trendData.microTrend?.direction || "neutral",
               momentum: {
                 confirms: momentum?.confirms ?? false,
                 state: momentum?.state ?? 'none',
@@ -2207,32 +2320,44 @@ serve(async (req) => {
         }
         
         // Use derived direction consistently throughout signal generation
-        // Priority: original direction > late grind > momentum override > order flow override
+        // Priority: original direction > late grind > momentum override > order flow > pre-momentum > short-term alignment
         const derivedDirection = (
           directionResult.direction || 
           lateGrindDirection || 
           momentumDerivedDirection || 
-          orderFlowDerivedDirection
+          orderFlowDerivedDirection ||
+          preMomentumDirection ||
+          shortTermAlignmentDirection
         ) as "long" | "short";
         
         // Determine source for logging
-        const derivedSource = momentumDirectionOverrideApplied 
-          ? "momentum-direction-override"
-          : orderFlowDirectionOverrideApplied 
-            ? "order-flow-direction"
-            : lateGrindAccepted 
-              ? "late-grind-acceptance" 
-              : directionResult.source;
+        const derivedSource = preMomentumStochRsiOverrideApplied
+          ? "pre-momentum-stochrsi-extreme"
+          : shortTermAlignmentOverrideApplied
+            ? "short-term-alignment"
+            : momentumDirectionOverrideApplied 
+              ? "momentum-direction-override"
+              : orderFlowDirectionOverrideApplied 
+                ? "order-flow-direction"
+                : lateGrindAccepted 
+                  ? "late-grind-acceptance" 
+                  : directionResult.source;
         
         // Apply override position multipliers if used
         let overridePositionMultiplier = 1.0;
-        if (momentumDirectionOverrideApplied) {
+        if (preMomentumStochRsiOverrideApplied) {
+          overridePositionMultiplier = preMomentumPositionMultiplier;
+        } else if (shortTermAlignmentOverrideApplied) {
+          overridePositionMultiplier = shortTermAlignmentPositionMultiplier;
+        } else if (momentumDirectionOverrideApplied) {
           overridePositionMultiplier = momentumDerivedPositionMultiplier;
         } else if (orderFlowDirectionOverrideApplied) {
           overridePositionMultiplier = orderFlowDerivedPositionMultiplier;
         }
         
-        const overrideSuffix = momentumDirectionOverrideApplied ? ' [MOMENTUM_OVERRIDE]' 
+        const overrideSuffix = preMomentumStochRsiOverrideApplied ? ' [PRE_MOMENTUM_STOCHRSI]'
+          : shortTermAlignmentOverrideApplied ? ' [SHORT_TERM_ALIGNMENT]'
+          : momentumDirectionOverrideApplied ? ' [MOMENTUM_OVERRIDE]' 
           : orderFlowDirectionOverrideApplied ? ' [ORDER_FLOW_OVERRIDE]' 
           : lateGrindAccepted ? ' [LATE_GRIND]' : '';
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} Direction derived: ${derivedDirection} from ${derivedSource} (${directionResult.confidence.toFixed(0)}% conf)${overrideSuffix}`);
@@ -5260,15 +5385,39 @@ serve(async (req) => {
         // RELAXED: Allow entry when momentum.state is "none" IF ADX >= 28 (strong trend exception)
         // This enables early entries when trend strength itself provides conviction
         // NEW: Also allow if trend acceleration detected (strong price move with ADX rising)
+        // NEW: StochRSI-ADX alignment reduces threshold from 28 to 22 when indicators align
         const momentumState = momentum?.state || "none";
         const momentumConfirms = momentum?.confirms ?? false;
-        const isStrongTrendException = adx >= ADX_THRESHOLDS.STRONG_TREND_EXCEPTION; // 28+ (relaxed from 30)
+        
+        // ============= DYNAMIC ADX THRESHOLD WITH STOCHRSI ALIGNMENT =============
+        // When 1h bearish AND StochRSI < 20, OR 1h bullish AND StochRSI > 80,
+        // reduce the strong trend exception threshold from 28 to 22
+        let effectiveStrongTrendADX: number = ADX_THRESHOLDS.STRONG_TREND_EXCEPTION; // Default 23
+        let stochRsiAdxAlignmentActive = false;
+        
+        if (STOCHRSI_ADX_ALIGNMENT_PARAMS.ENABLED) {
+          const stochRsiAlignsWithBearish = 
+            htfTrend1h === "bearish" && stochK1h < STOCHRSI_ADX_ALIGNMENT_PARAMS.BEARISH_STOCHRSI_THRESHOLD;
+          const stochRsiAlignsWithBullish = 
+            htfTrend1h === "bullish" && stochK1h > STOCHRSI_ADX_ALIGNMENT_PARAMS.BULLISH_STOCHRSI_THRESHOLD;
+          
+          if (stochRsiAlignsWithBearish || stochRsiAlignsWithBullish) {
+            effectiveStrongTrendADX = STOCHRSI_ADX_ALIGNMENT_PARAMS.REDUCED_ADX_THRESHOLD as number;
+            stochRsiAdxAlignmentActive = true;
+            logger.forSymbol(symbol).debug(`📊 STOCHRSI-ADX ALIGNMENT: 1h=${htfTrend1h}, StochK=${stochK1h.toFixed(1)} → ADX threshold reduced to ${effectiveStrongTrendADX}`);
+          }
+        }
+        
+        const isStrongTrendException = adx >= effectiveStrongTrendADX;
         
         // Momentum passes if:
         // 1. State is confirmed/building/mixed AND confirms is true, OR
-        // 2. State is "none" BUT ADX >= 28 (strong trend exception for early entries), OR
-        // 3. Trend acceleration detected (2.5%+ price move with ADX >= 20 and rising)
-        const momentumPasses = momentumConfirms || (momentumState !== "none") || isStrongTrendException || qualifiesForTrendAcceleration;
+        // 2. State is "none" BUT ADX >= threshold (strong trend exception for early entries), OR
+        // 3. Trend acceleration detected (2.5%+ price move with ADX >= 20 and rising), OR
+        // 4. Pre-momentum StochRSI extreme detected, OR
+        // 5. Short-term alignment override detected
+        const hasPremiumOverride = preMomentumStochRsiOverrideApplied || shortTermAlignmentOverrideApplied;
+        const momentumPasses = momentumConfirms || (momentumState !== "none") || isStrongTrendException || qualifiesForTrendAcceleration || hasPremiumOverride;
         
         if (!momentumPasses) {
           rejectedByHardGates++;
