@@ -1835,6 +1835,7 @@ export const isValidSqueezeBreakout = (
 // ============= DERIVE TRADE DIRECTION =============
 // Explicitly derives trade direction from multi-timeframe trend data
 // Returns null if no clear direction can be determined
+// PHASE 1 OPTIMIZATION: Now uses weighted direction derivation + persistence bonus
 export type TradeDirection = "long" | "short";
 
 export interface DirectionResult {
@@ -1842,13 +1843,22 @@ export interface DirectionResult {
   confidence: number;
   source: string;  // Which timeframe/signal determined direction
   reasons: string[];
+  isWeightedDerivation?: boolean;      // NEW: Used weighted sum
+  hasPersistenceBonus?: boolean;       // NEW: Got persistence bonus
+  orderFlowTiebreaker?: boolean;       // NEW: Order flow resolved tie
+  positionSizeMultiplier?: number;     // NEW: Recommended position size
 }
+
+// Import direction params
+import { GATE_RELAXATION_FLAGS, DIRECTION_DERIVATION_PARAMS } from "./constants.ts";
 
 export const deriveTradeDirection = (
   trendData: any,
-  primaryTrend: string
+  primaryTrend: string,
+  orderFlowData?: { score: number; signal: string } | null
 ): DirectionResult => {
   const reasons: string[] = [];
+  const P = DIRECTION_DERIVATION_PARAMS;
   
   if (!trendData) {
     return { direction: null, confidence: 0, source: "none", reasons: ["No trend data"] };
@@ -1865,6 +1875,93 @@ export const deriveTradeDirection = (
   
   // Get ADX for price action override check
   const adx = trendData.volatility?.adx || trendData.momentum?.adx || 0;
+  
+  // ============= NEW: PHASE 1 WEIGHTED DIRECTION DERIVATION =============
+  // Instead of requiring one strong timeframe, use weighted sum of all timeframes
+  // This relaxes the NO_CLEAR_DIRECTION gate significantly
+  if (GATE_RELAXATION_FLAGS.DIRECTION_WEIGHTED) {
+    // Convert trend to directional value: bullish=+1, neutral=0, bearish=-1
+    const trendToValue = (trend: string, conf: number): number => {
+      // Use lowered neutral threshold (45% instead of 55%)
+      if (trend === "neutral" && conf < P.NEUTRAL_THRESHOLD) return 0;
+      // Trends with conf 45-54% contribute partial weight
+      const confWeight = Math.min(1, conf / 65);  // Scale 0-65% to 0-1
+      if (trend === "bullish") return confWeight;
+      if (trend === "bearish") return -confWeight;
+      // For "neutral" but conf >= 45%, infer from nearby timeframes
+      return 0;
+    };
+    
+    const val4h = trendToValue(trend4h, conf4h);
+    const val1h = trendToValue(trend1h, conf1h);
+    const val30m = trendToValue(trend30m, conf30m);
+    
+    // Calculate weighted sum
+    const weightedSum = (val4h * P.WEIGHT_4H) + (val1h * P.WEIGHT_1H) + (val30m * P.WEIGHT_30M);
+    
+    // Check for direction persistence bonus
+    let persistenceBonus = 0;
+    if (GATE_RELAXATION_FLAGS.DIRECTION_PERSISTENCE) {
+      // Check if direction has been stable for N candles (from trend data if available)
+      const directionStableBars = trendData.momentum?.directionStableBars ?? 0;
+      if (directionStableBars >= P.PERSISTENCE_BARS) {
+        persistenceBonus = P.PERSISTENCE_BONUS;
+        reasons.push(`PERSISTENCE BONUS: Direction stable for ${directionStableBars} bars → +${(persistenceBonus * 100).toFixed(0)}% threshold reduction`);
+      }
+    }
+    
+    // Adjusted threshold with persistence bonus
+    const effectiveThreshold = P.WEIGHTED_SUM_THRESHOLD - persistenceBonus;
+    
+    // If weighted sum exceeds threshold, derive direction
+    if (Math.abs(weightedSum) >= effectiveThreshold) {
+      const direction: TradeDirection = weightedSum > 0 ? "long" : "short";
+      // Calculate confidence from weighted sum magnitude
+      const derivedConf = Math.min(70, 50 + Math.abs(weightedSum) * 30);
+      
+      reasons.push(`WEIGHTED DIRECTION: Sum=${weightedSum.toFixed(2)} (threshold=${effectiveThreshold.toFixed(2)})`);
+      reasons.push(`TF values: 4h=${val4h.toFixed(2)}*${P.WEIGHT_4H}, 1h=${val1h.toFixed(2)}*${P.WEIGHT_1H}, 30m=${val30m.toFixed(2)}*${P.WEIGHT_30M}`);
+      
+      return { 
+        direction, 
+        confidence: derivedConf, 
+        source: "weighted-derivation", 
+        reasons,
+        isWeightedDerivation: true,
+        hasPersistenceBonus: persistenceBonus > 0,
+        positionSizeMultiplier: 0.75,  // Reduced position for weighted signals
+      };
+    }
+    
+    // ============= ORDER FLOW TIEBREAKER =============
+    // When weighted sum is marginal (0.35-0.54), use order flow if strong
+    if (Math.abs(weightedSum) >= 0.35 && Math.abs(weightedSum) < effectiveThreshold && orderFlowData) {
+      const ofScore = orderFlowData.score;
+      const ofSignal = orderFlowData.signal?.toLowerCase() || "";
+      
+      if (ofScore >= P.ORDER_FLOW_MIN_SCORE && (ofSignal === "strong_buy" || ofSignal === "strong_sell")) {
+        const direction: TradeDirection = ofSignal === "strong_buy" ? "long" : "short";
+        
+        // Verify order flow agrees with weighted direction tendency
+        const weightedDirection = weightedSum > 0 ? "long" : "short";
+        if (direction === weightedDirection) {
+          const derivedConf = Math.min(65, 50 + ofScore * 0.2);
+          reasons.push(`ORDER FLOW TIEBREAKER: weightedSum=${weightedSum.toFixed(2)} marginal, orderFlow=${ofScore} ${ofSignal}`);
+          reasons.push(`Order flow confirms weighted direction → allowing entry with reduced size`);
+          
+          return {
+            direction,
+            confidence: derivedConf,
+            source: "order-flow-tiebreaker",
+            reasons,
+            isWeightedDerivation: true,
+            orderFlowTiebreaker: true,
+            positionSizeMultiplier: P.ORDER_FLOW_POSITION_MULTIPLIER,
+          };
+        }
+      }
+    }
+  }
   
   // ============= PRIORITY 0: PRICE ACTION MOMENTUM OVERRIDE =============
   // If price has moved strongly (2%+) in a clear direction, use that direction
@@ -1892,7 +1989,8 @@ export const deriveTradeDirection = (
         direction, 
         confidence: finalConf, 
         source: "price-action-momentum", 
-        reasons 
+        reasons,
+        positionSizeMultiplier: 0.75,
       };
     }
   }
@@ -1919,30 +2017,26 @@ export const deriveTradeDirection = (
   
   // ============= PRIORITY 2.3: CONSECUTIVE CANDLE MOMENTUM OVERRIDE =============
   // When 1h has 5+ consecutive candles in the same direction, allow signal even if 4h is neutral
-  // This catches strong momentum moves that lagging indicators haven't confirmed yet
   const consecutiveBars1h = trendData.momentum?.consecutiveBars1h ?? 0;
   const consecutiveBars30m = trendData.momentum?.consecutiveBars30m ?? 0;
   
   if (
     trend4h === "neutral" &&
     consecutiveBars1h >= 5 &&
-    adx >= 20  // Minimum ADX to ensure some trend strength
+    adx >= 20
   ) {
-    // Determine direction from 1h MACD histogram direction (consecutive bars are in this direction)
-    // If 1h trend is available use it, otherwise infer from lower TFs
     const inferredDirection = trend1h !== "neutral" ? trend1h : 
                               (trend30m !== "neutral" ? trend30m : null);
     
     if (inferredDirection) {
       const direction: TradeDirection = inferredDirection === "bullish" ? "long" : "short";
       
-      // Calculate confidence based on consecutive bars and supporting factors
-      let baseConf = 55 + Math.min(15, (consecutiveBars1h - 5) * 3);  // 55-70% based on bars
-      const adxBonus = Math.min(10, (adx - 20) * 0.5);  // Up to +10% for stronger ADX
-      const conf30mBonus = consecutiveBars30m >= 4 ? 5 : 0;  // +5% if 30m confirms
-      const conf1hBonus = conf1h >= 55 ? Math.min(5, (conf1h - 55) * 0.5) : 0;  // Up to +5% for 1h conf
+      let baseConf = 55 + Math.min(15, (consecutiveBars1h - 5) * 3);
+      const adxBonus = Math.min(10, (adx - 20) * 0.5);
+      const conf30mBonus = consecutiveBars30m >= 4 ? 5 : 0;
+      const conf1hBonus = conf1h >= 55 ? Math.min(5, (conf1h - 55) * 0.5) : 0;
       
-      const finalConf = Math.min(75, baseConf + adxBonus + conf30mBonus + conf1hBonus) * 0.85;  // 15% safety reduction
+      const finalConf = Math.min(75, baseConf + adxBonus + conf30mBonus + conf1hBonus) * 0.85;
       
       reasons.push(`CONSECUTIVE CANDLE OVERRIDE: ${consecutiveBars1h} consecutive 1h bars in ${inferredDirection} direction`);
       reasons.push(`4h neutral but price action confirms momentum`);
@@ -1954,15 +2048,12 @@ export const deriveTradeDirection = (
         confidence: finalConf, 
         source: "consecutive-candle-momentum", 
         reasons,
-        isEarlySignal: true,
-        earlyReason: `${consecutiveBars1h} consecutive 1h candles ${inferredDirection}, ADX=${adx.toFixed(1)}`,
-      } as DirectionResult & { isEarlySignal?: boolean; earlyReason?: string };
+        positionSizeMultiplier: 0.65,
+      } as DirectionResult;
     }
   }
   
   // ============= PRIORITY 2.5: BUILDING TREND DIRECTION OVERRIDE =============
-  // Catch early trends when 1h is leaning directional (57-59% conf) but 4h is still neutral
-  // Only trigger if ADX is in "building" zone (18-35) and rising
   const adxRising = trendData.momentum?.adxRising || trendData.volatility?.adxRising || false;
   const priceMove = trendData.priceActionMomentum?.movePercent || 0;
   
@@ -1978,7 +2069,6 @@ export const deriveTradeDirection = (
     const priceAligned = (trend1h === "bullish" && priceMove > 0) || (trend1h === "bearish" && priceMove < 0);
     
     if (priceAligned) {
-      // Reduce confidence for early signals (85% of original)
       const earlyConf = conf1h * 0.85;
       
       reasons.push(`EARLY TREND DETECTION: 1h ${trend1h} (${conf1h.toFixed(0)}% conf, reduced to ${earlyConf.toFixed(0)}%)`);
@@ -1991,10 +2081,8 @@ export const deriveTradeDirection = (
         confidence: earlyConf, 
         source: "1h-building-override", 
         reasons,
-        // Mark as early signal for dashboard display
-        isEarlySignal: true,
-        earlyReason: `1h ${trend1h} forming, ADX building at ${adx.toFixed(1)}`,
-      } as DirectionResult & { isEarlySignal?: boolean; earlyReason?: string };
+        positionSizeMultiplier: 0.75,
+      } as DirectionResult;
     }
   }
   
@@ -2033,7 +2121,6 @@ export const deriveTradeDirection = (
       return { direction: "short", confidence: avgConf * 0.9, source: "2-of-3", reasons };
     }
     
-    // 4h directional with only 1 other TF agreeing
     if (trend4h !== "neutral" && conf4h >= 50) {
       const agreeing = directionalTimeframes.filter(t => t.trend === trend4h);
       if (agreeing.length >= 2) {
@@ -2073,7 +2160,8 @@ export const deriveTradeDirection = (
         direction, 
         confidence: reducedConf, 
         source: "early-momentum-30m+1h", 
-        reasons 
+        reasons,
+        positionSizeMultiplier: 0.50,
       };
     }
   }
@@ -2087,8 +2175,8 @@ export const deriveTradeDirection = (
     return { direction, confidence: primaryConf * 0.8, source: "primary", reasons };
   }
   
-  // No clear direction
-  reasons.push("All timeframes neutral or conflicting");
+  // No clear direction - but log what we tried
+  reasons.push("All timeframes neutral or conflicting after weighted derivation");
   reasons.push(`4h: ${trend4h} (${conf4h}%), 1h: ${trend1h} (${conf1h}%), 30m: ${trend30m} (${conf30m}%)`);
   return { direction: null, confidence: 0, source: "none", reasons };
 };

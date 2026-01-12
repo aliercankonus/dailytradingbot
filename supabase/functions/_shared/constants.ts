@@ -2451,3 +2451,137 @@ export const NEUTRAL_PERSISTENCE_PARAMS = {
   // Apply bonus to Quiet Trend detection
   APPLY_TO_QUIET_TREND: true,
 } as const;
+
+// ============= GATE RELAXATION FLAGS =============
+// Per-gate feature flags for phased rollout of probabilistic gate system
+// Each flag can be independently disabled for immediate rollback
+export const GATE_RELAXATION_FLAGS = {
+  // Phase 1: Direction derivation improvements
+  DIRECTION_WEIGHTED: true,           // Use weighted sum instead of requiring one strong TF
+  DIRECTION_PERSISTENCE: true,        // Bonus for consistent direction over 3-5 candles
+  
+  // Phase 2: MACD gate optimization
+  MACD_DURATION_CHECK: true,          // Only block after 3+ consecutive opposing bars
+  MACD_MAGNITUDE_CHECK: true,         // Ignore small divergences
+  
+  // Phase 3: ADX exhaustion refinement
+  EXHAUSTION_TIME_CONTEXT: true,      // Require minimum trend age for exhaustion
+  EXHAUSTION_PRICE_ACTION: true,      // Require price action confirmation
+  
+  // Phase 4: StochRSI optimization
+  STOCHRSI_DYNAMIC: true,             // Dynamic thresholds based on ADX
+  STOCHRSI_PENALTY_CAP: true,         // Cap StochRSI penalty contribution
+} as const;
+
+// ============= DIRECTION DERIVATION PARAMS =============
+// Phase 1: Weighted direction derivation with persistence bonus
+// Replaces brittle single-timeframe requirements with probabilistic aggregation
+export const DIRECTION_DERIVATION_PARAMS = {
+  // Neutral confidence threshold (was 55, lowered to 45)
+  // Confidence 40-54% now contributes to weighted sum instead of being "neutral"
+  NEUTRAL_THRESHOLD: 45,
+  
+  // Weighted sum threshold for direction derivation
+  // If weighted sum exceeds this, derive direction from it
+  WEIGHTED_SUM_THRESHOLD: 0.55,
+  
+  // Timeframe weights for direction derivation
+  // 4h: 40%, 1h: 40%, 30m: 20%
+  WEIGHT_4H: 0.40,
+  WEIGHT_1H: 0.40,
+  WEIGHT_30M: 0.20,
+  
+  // Direction persistence bonus
+  // If direction remains stable for N bars, reduce confidence threshold
+  PERSISTENCE_BARS: 4,              // 4 bars of consistent direction
+  PERSISTENCE_BONUS: 0.08,          // 8% confidence boost
+  
+  // Order flow as direction tiebreaker
+  // When weighted sum is marginal (0.35-0.54), use order flow if strong
+  ORDER_FLOW_MIN_SCORE: 60,         // Minimum order flow score to use as tiebreaker
+  ORDER_FLOW_POSITION_MULTIPLIER: 0.60,  // 60% position when using order flow direction
+} as const;
+
+// ============= MACD GATE PARAMS =============
+// Phase 2: Softened MACD gate with duration and magnitude checks
+// Converts hard block to score multiplier in most cases
+export const MACD_GATE_PARAMS = {
+  ENABLED: true,
+  
+  // ADX override thresholds (lowered from 35)
+  ADX_OVERRIDE_WITH_RISING: 25,       // Allow override if ADX >= 25 AND rising
+  ADX_OVERRIDE_UNCONDITIONAL: 28,     // Allow override if ADX >= 28 regardless of slope
+  
+  // MACD opposition duration check (NEW)
+  // Only block if MACD has opposed for N+ consecutive bars
+  MIN_OPPOSITION_BARS: 3,             // Require 3 bars of opposing MACD
+  
+  // MACD magnitude check (NEW)
+  // Small divergences don't warrant blocking
+  MIN_HISTOGRAM_FOR_BLOCK: 0.0002,    // Only block if |histogram| > this
+  NEUTRAL_HISTOGRAM_THRESHOLD: 0.00005, // Below this = treat as neutral
+  
+  // Position sizing for soft blocks (instead of hard block)
+  POSITION_MULTIPLIER_SOFT: 0.75,     // 75% position when not blocking
+  POSITION_MULTIPLIER_WEAK: 0.85,     // 85% when misalignment is weak
+  
+  // Reclassify to score multiplier below this ADX
+  SCORE_MULTIPLIER_BELOW_ADX: 25,     // Below ADX 25, use score multiplier not block
+} as const;
+
+// ============= ADX EXHAUSTION REFINED PARAMS =============
+// Phase 3: More nuanced exhaustion detection with time context
+// Prevents blocking strong trends incorrectly
+export const ADX_EXHAUSTION_REFINED_PARAMS = {
+  // Minimum ADX decline for rollover (NEW)
+  // ADX must decline by at least this many points from peak
+  MIN_ADX_DECLINE_FOR_ROLLOVER: 3,    // 3 point minimum decline
+  
+  // Current ADX must also be below this
+  MAX_ADX_FOR_EXHAUSTION: 40,         // Only exhaustion if ADX < 40
+  
+  // Time-in-trend context (NEW from expert review)
+  // Short trends rolling over != exhaustion
+  MIN_TREND_AGE_BARS: 40,             // Minimum 40 bars (40 1h candles) for exhaustion
+  
+  // Reduced scoring for rollover alone
+  SCORE_ADX_ROLLOVER: 35,             // Was 60, now 35 (allows with reduced position)
+  
+  // Exhaustion threshold raised
+  EXHAUSTION_THRESHOLD: 70,           // Was 50, now 70 (requires multiple signals)
+  
+  // Position sizing for near-exhaustion
+  POSITION_MULTIPLIER_35_49: 0.80,    // Score 35-49: 80% position
+  POSITION_MULTIPLIER_50_69: 0.65,    // Score 50-69: 65% position
+  // Score >= 70: BLOCK (multiple signals confirm exhaustion)
+} as const;
+
+// ============= STOCHRSI DYNAMIC PARAMS =============
+// Phase 4: Dynamic thresholds and capped penalty contribution
+// Prevents StochRSI from alone blocking strong momentum moves
+export const STOCHRSI_DYNAMIC_PARAMS = {
+  // Dynamic extreme thresholds based on ADX
+  // Stronger trends allow more room at extremes
+  EXTREME_THRESHOLDS: {
+    ADX_LOW: { adxMax: 20, oversold: 10, overbought: 90 },      // Standard
+    ADX_MODERATE: { adxMax: 30, oversold: 8, overbought: 92 },  // Tighter
+    ADX_HIGH: { adxMax: 100, oversold: 5, overbought: 95 },     // Tightest
+  },
+  
+  // Time-in-extreme penalty adjustments
+  // Raised thresholds to allow more room for trend continuation
+  BARS_FOR_PENALTY_BY_ADX: {
+    ADX_BELOW_25: 5,    // Standard: 5 bars before penalty
+    ADX_25_35: 7,       // Moderate trend: 7 bars before penalty
+    ADX_ABOVE_35: 10,   // Strong trend: 10 bars before penalty
+  },
+  
+  // Penalty score adjustments (reduced from original)
+  PENALTY_MODERATE: 12,   // Was 15
+  PENALTY_HIGH: 18,       // Was 25
+  PENALTY_EXTREME: 25,    // Was 35
+  
+  // CAP: Maximum StochRSI contribution to reversal score (NEW)
+  // StochRSI alone can NEVER push exhaustion over block threshold
+  MAX_STOCHRSI_PENALTY: 20,  // Capped at 20 points
+} as const;
