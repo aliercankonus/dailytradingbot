@@ -337,9 +337,9 @@ const getTrendDisplayLabel = (
 // Helper to get trend label color based on variant
 const getTrendLabelStyles = (variant: 'neutral' | 'conflicting' | 'unknown'): string => {
   switch (variant) {
-    case 'neutral': return 'text-yellow-400 border-yellow-500/30';
-    case 'conflicting': return 'text-orange-400 border-orange-500/30';
-    case 'unknown': return 'text-muted-foreground border-muted/50';
+    case 'neutral': return 'text-amber-300 bg-amber-500/20 border-amber-500/40';
+    case 'conflicting': return 'text-orange-300 bg-orange-500/20 border-orange-500/40';
+    case 'unknown': return 'text-muted-foreground bg-muted/30 border-muted/50';
   }
 };
 
