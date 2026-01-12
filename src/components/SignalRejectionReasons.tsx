@@ -3134,6 +3134,111 @@ const UnifiedReversalDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
   );
 };
 
+// Reusable Momentum Indicators Panel - shows MACD, momentum status, and fake breakout risk
+const MomentumIndicatorsPanel = ({ trendData, filtersStatus }: { trendData?: any; filtersStatus?: any }) => {
+  // Extract momentum data from trend_data.timeframes['1h'].indicators or trend_data.momentum
+  const indicators1h = trendData?.timeframes?.['1h']?.indicators || {};
+  const momentumData = trendData?.momentum || {};
+  
+  // MACD Histogram - check multiple possible locations
+  const macdHistogram = coerceNumeric(
+    indicators1h?.macdHistogram ?? 
+    momentumData?.macdHistogram ?? 
+    filtersStatus?.macdHistogram ?? 
+    trendData?.indicators?.macdHistogram,
+    null
+  );
+  
+  // MACD status flags
+  const macdExpanding = momentumData?.macdExpanding ?? filtersStatus?.macdExpanding ?? false;
+  const macdStrong = momentumData?.macdStrong ?? filtersStatus?.macdStrong ?? false;
+  const fakeBreakoutRisk = momentumData?.fakeBreakoutRisk ?? filtersStatus?.fakeBreakoutRisk ?? false;
+  const genuineMomentum = momentumData?.genuineMomentum ?? filtersStatus?.genuineMomentum ?? false;
+  
+  // ADX and trend strength
+  const adx = coerceNumeric(trendData?.volatility?.adx ?? filtersStatus?.adx, null);
+  const adxRising = momentumData?.adxRising ?? filtersStatus?.adxRising ?? false;
+  
+  // Consecutive bars for momentum persistence
+  const consecutiveBars1h = coerceNumeric(momentumData?.consecutiveBars1h, null);
+  
+  const hasAnyData = macdHistogram !== null || adx !== null;
+  
+  if (!hasAnyData) return null;
+  
+  return (
+    <div className="space-y-2 p-2 bg-muted/30 rounded border border-border/50">
+      <div className="flex items-center gap-1.5 mb-2">
+        <Activity className="h-3.5 w-3.5 text-blue-400" />
+        <span className="text-[10px] font-semibold text-blue-400">Momentum Indicators</span>
+      </div>
+      
+      <div className="grid grid-cols-2 gap-2">
+        {/* MACD Histogram */}
+        {macdHistogram !== null && (
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-muted-foreground">MACD Histogram</span>
+            <span className={`text-[10px] font-mono font-medium ${
+              macdHistogram > 0 ? 'text-green-400' : macdHistogram < 0 ? 'text-red-400' : 'text-muted-foreground'
+            }`}>
+              {macdHistogram > 0 ? '+' : ''}{macdHistogram.toFixed(2)}
+            </span>
+          </div>
+        )}
+        
+        {/* ADX */}
+        {adx !== null && (
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-muted-foreground">ADX</span>
+            <span className={`text-[10px] font-mono font-medium ${
+              adx >= 25 ? 'text-green-400' : adx >= 20 ? 'text-yellow-400' : 'text-muted-foreground'
+            }`}>
+              {adx.toFixed(1)} {adxRising ? '↑' : ''}
+            </span>
+          </div>
+        )}
+        
+        {/* Consecutive Bars */}
+        {consecutiveBars1h !== null && (
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-muted-foreground">Consecutive Bars</span>
+            <span className="text-[10px] font-mono font-medium">{consecutiveBars1h}</span>
+          </div>
+        )}
+      </div>
+      
+      {/* Status Badges */}
+      <div className="flex flex-wrap gap-1 mt-2">
+        {macdExpanding && (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-green-400 border-green-500/30">
+            MACD Expanding
+          </Badge>
+        )}
+        {macdStrong && (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-green-400 border-green-500/30">
+            MACD Strong
+          </Badge>
+        )}
+        {genuineMomentum && (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-green-400 border-green-500/30">
+            ✓ Genuine Momentum
+          </Badge>
+        )}
+        {fakeBreakoutRisk && (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-orange-400 border-orange-500/30">
+            ⚠️ Fake Breakout Risk
+          </Badge>
+        )}
+        {!macdExpanding && !macdStrong && !genuineMomentum && !fakeBreakoutRisk && (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-muted-foreground border-muted/30">
+            Neutral Momentum
+          </Badge>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // No Direction Display - for NO_CLEAR_DIRECTION rejections
 const NoDirectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const trend4h = filtersStatus?.trend4h || trendData?.primaryTrend || "unknown";
@@ -3230,6 +3335,9 @@ const NoDirectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
           </Tooltip>
         </TooltipProvider>
       </div>
+      
+      {/* NEW: Momentum Indicators Panel */}
+      <MomentumIndicatorsPanel trendData={trendData} filtersStatus={filtersStatus} />
       
       {/* Source Info */}
       {source && source !== "direction_check" && (

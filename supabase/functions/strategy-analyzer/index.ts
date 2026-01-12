@@ -1632,12 +1632,25 @@ serve(async (req) => {
 
     logger.info(`${LOG_CATEGORIES.SIGNAL} Fetching trend data for ${eligibleSymbols.length} eligible symbols (after win rate filter)`);
 
-    const trendResults = await Promise.all(eligibleSymbols.map(async (symbol) => {
+    // Sequential fetch with delay to reduce Binance API rate limiting (429 errors)
+    // Each calculate-trend call makes multiple Binance API requests, so we need spacing
+    const TREND_FETCH_DELAY_MS = 150; // 150ms between symbols to stay under rate limits
+    
+    const trendResults: { symbol: string; trendData: any }[] = [];
+    for (let i = 0; i < eligibleSymbols.length; i++) {
+      const symbol = eligibleSymbols[i];
       try {
+        // Add delay between requests (skip first one)
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, TREND_FETCH_DELAY_MS));
+        }
         const { data, error } = await supabase.functions.invoke("calculate-trend", { body: { symbol } });
-        return { symbol, trendData: error ? null : data };
-      } catch { return { symbol, trendData: null }; }
-    }));
+        trendResults.push({ symbol, trendData: error ? null : data });
+      } catch (err) {
+        logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.BINANCE} Trend fetch failed: ${err}`);
+        trendResults.push({ symbol, trendData: null });
+      }
+    }
 
     const trendDataMap = new Map<string, any>();
     trendResults.forEach(({ symbol, trendData }) => {
