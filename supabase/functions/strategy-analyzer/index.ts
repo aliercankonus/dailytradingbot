@@ -3672,23 +3672,35 @@ serve(async (req) => {
         
         // ============= PHASE 1 FIX: NEGATIVE %B MOMENTUM CONTINUATION FOR SHORTS =============
         // When %B < 0 (price below lower Bollinger band), this is momentum continuation, NOT bounce risk
-        // Allow shorts with momentum confirmation (MACD expanding OR 1h directional)
+        // Allow shorts with momentum confirmation (MACD expanding OR 1h directional OR strong price move)
         let negativePercentBBypassApplied = false;
         let negativePercentBPositionMultiplier = 1.0;
         
         if (intendedTradeDirection === "short" && percentB < 0 && 
             BOLLINGER_ENTRY_GATES.ALLOW_SHORTS_BELOW_ZERO_PERCENT_B) {
-          // Check momentum confirmation
+          // FIX: Use stochFilterTrend1h/stochFilterConf1h instead of timeframes object
+          // Also check for strong price moves as additional confirmation
+          const priceMove = trendData.priceActionMomentum?.movePercent || 0;
+          const hasPriceActionConfirmation = Math.abs(priceMove) >= 1.0 && priceMove < 0; // Negative = bearish
+          
+          // Check momentum confirmation - multiple sources
           const hasMomentumConfirmation = !BOLLINGER_ENTRY_GATES.SHORT_BELOW_ZERO_REQUIRE_MOMENTUM ||
             momentum?.macdExpanding === true ||
-            (timeframes?.['1h']?.trend === "bearish" && (timeframes?.['1h']?.confidence || 0) >= 55);
+            (stochFilterTrend1h === "bearish" && stochFilterConf1h >= 55) ||
+            hasPriceActionConfirmation;
           
           if (hasMomentumConfirmation) {
             negativePercentBBypassApplied = true;
             negativePercentBPositionMultiplier = BOLLINGER_ENTRY_GATES.SHORT_BELOW_ZERO_POSITION_REDUCTION;
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔥 NEGATIVE %B BYPASS ACTIVATED: %B=${percentB.toFixed(1)} < 0 with momentum confirmation`);
-            logger.forSymbol(symbol).info(`   → MACD expanding=${momentum?.macdExpanding}, 1h=${timeframes?.['1h']?.trend} ${timeframes?.['1h']?.confidence?.toFixed(0)}%`);
+            const confirmSource = momentum?.macdExpanding ? "MACD expanding" : 
+              (stochFilterTrend1h === "bearish" && stochFilterConf1h >= 55) ? `1h bearish ${stochFilterConf1h.toFixed(0)}%` :
+              hasPriceActionConfirmation ? `price drop ${priceMove.toFixed(1)}%` : "unknown";
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔥 NEGATIVE %B BYPASS ACTIVATED: %B=${percentB.toFixed(1)} < 0 via ${confirmSource}`);
+            logger.forSymbol(symbol).info(`   → MACD expanding=${momentum?.macdExpanding}, 1h=${stochFilterTrend1h} ${stochFilterConf1h.toFixed(0)}%, price=${priceMove.toFixed(1)}%`);
             logger.forSymbol(symbol).info(`   → Position size reduced to ${(negativePercentBPositionMultiplier * 100).toFixed(0)}% for safety`);
+          } else {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} NEGATIVE %B BYPASS FAILED: %B=${percentB.toFixed(1)} but no momentum confirmation`);
+            logger.forSymbol(symbol).info(`   → MACD expanding=${momentum?.macdExpanding}, 1h=${stochFilterTrend1h} ${stochFilterConf1h.toFixed(0)}%, price=${priceMove.toFixed(1)}%`);
           }
         }
         
