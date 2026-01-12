@@ -70,7 +70,32 @@ export const StrategyOverview = () => {
               </Badge>
             </div>
             
-            <h4 className="font-semibold text-foreground mb-2">{strategy.name}</h4>
+            <h4 className="font-semibold text-foreground mb-3">{strategy.name}</h4>
+            
+            {/* Win Rate Visual Indicator */}
+            <div className="mb-3">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-xs text-muted-foreground">Win Rate</span>
+                <span className={`text-sm font-bold font-mono ${
+                  parseFloat(strategy.winRate) >= 60 ? 'text-profit' :
+                  parseFloat(strategy.winRate) >= 40 ? 'text-warning' : 'text-loss'
+                }`}>
+                  {strategy.winRate}%
+                </span>
+              </div>
+              <div className="h-2 bg-secondary rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    parseFloat(strategy.winRate) >= 60 
+                      ? 'bg-gradient-to-r from-profit/70 to-profit' 
+                      : parseFloat(strategy.winRate) >= 40 
+                        ? 'bg-gradient-to-r from-warning/70 to-warning'
+                        : 'bg-gradient-to-r from-loss/70 to-loss'
+                  }`}
+                  style={{ width: `${Math.min(parseFloat(strategy.winRate), 100)}%` }}
+                />
+              </div>
+            </div>
             
             <div className="space-y-1 text-sm">
               <div className="flex justify-between">
@@ -81,10 +106,6 @@ export const StrategyOverview = () => {
                 }`}>
                   {strategy.performance}
                 </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Win Rate:</span>
-                <span className="text-foreground font-mono">{strategy.winRate}%</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Trades:</span>
