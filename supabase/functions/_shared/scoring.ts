@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, type AdxPhase, type ExceptionType } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, type AdxPhase, type ExceptionType } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -130,16 +130,22 @@ export const detectBreakoutMode = (trendData: any): BreakoutModeResult => {
   };
 };
 
-// ============= PHASE 3: TIME-IN-EXTREME PENALTY =============
+// ============= PHASE 4: TIME-IN-EXTREME PENALTY (DYNAMIC) =============
+// PHASE 4 UPDATE: Dynamic thresholds based on ADX + capped contribution
 // Tracks how long StochRSI has been at extreme levels
 // K = 95 for 1 candle = early momentum, might continue
 // K = 95 for 12 candles = exhausted move, reversal likely
+// NEW: Stronger trends allow more time at extremes before penalty
 
 export interface TimeInExtremePenalty {
   penalty: number;
+  rawPenalty: number;        // Before cap applied
+  cappedPenalty: number;     // After MAX_STOCHRSI_PENALTY cap
   barsAtExtreme: number;
   isExhausted: boolean;
   reason: string;
+  adxTier: string;           // Which ADX tier was used
+  dynamicThreshold: number;  // Dynamic MIN_BARS_FOR_PENALTY based on ADX
 }
 
 export const calculateTimeInExtremePenalty = (
@@ -153,6 +159,26 @@ export const calculateTimeInExtremePenalty = (
   
   const isLong = signalType === "bullish" || signalType === "long";
   
+  // Get ADX for dynamic threshold calculation
+  const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 20;
+  
+  // PHASE 4: Dynamic thresholds based on ADX
+  // Stronger trends allow more bars at extreme before penalty kicks in
+  const DP = STOCHRSI_DYNAMIC_PARAMS;
+  let minBarsForPenalty: number;
+  let adxTier: string;
+  
+  if (adx >= 35) {
+    minBarsForPenalty = DP.BARS_FOR_PENALTY_BY_ADX.ADX_ABOVE_35;  // 10 bars
+    adxTier = "ADX_ABOVE_35";
+  } else if (adx >= 25) {
+    minBarsForPenalty = DP.BARS_FOR_PENALTY_BY_ADX.ADX_25_35;     // 7 bars
+    adxTier = "ADX_25_35";
+  } else {
+    minBarsForPenalty = DP.BARS_FOR_PENALTY_BY_ADX.ADX_BELOW_25;  // 5 bars (standard)
+    adxTier = "ADX_BELOW_25";
+  }
+  
   // For LONG: overbought is bad (risky), oversold is good
   // For SHORT: oversold is bad (risky), overbought is good
   const riskyBars1h = isLong ? barsAtExtreme1h.barsOverbought : barsAtExtreme1h.barsOversold;
@@ -162,41 +188,61 @@ export const calculateTimeInExtremePenalty = (
   // 4h bars at extreme are more significant than 1h
   const effectiveBars = Math.max(riskyBars4h * 1.5, riskyBars1h);
   
-  let penalty = 0;
+  let rawPenalty = 0;
   let isExhausted = false;
   let reason = "";
   
   const P = TIME_IN_EXTREME_PARAMS;
   
-  if (effectiveBars < P.MIN_BARS_FOR_PENALTY) {
+  // PHASE 4: Scale thresholds based on dynamic minBarsForPenalty
+  // Original thresholds: MIN=5, MODERATE=8, HIGH=12, EXTREME=16
+  // Scale proportionally based on ADX tier
+  const scaleFactor = minBarsForPenalty / P.MIN_BARS_FOR_PENALTY;
+  const moderateBars = Math.round(P.MODERATE_BARS * scaleFactor);
+  const highBars = Math.round(P.HIGH_BARS * scaleFactor);
+  const extremeBars = Math.round(P.EXTREME_BARS * scaleFactor);
+  
+  if (effectiveBars < minBarsForPenalty) {
     // No penalty for fresh extremes (early momentum)
     reason = effectiveBars > 0 
-      ? `Early extreme (${effectiveBars.toFixed(0)} bars) - no penalty yet` 
+      ? `Early extreme (${effectiveBars.toFixed(0)} bars < ${minBarsForPenalty} threshold for ${adxTier}) - no penalty` 
       : "Not at extreme";
-  } else if (effectiveBars >= P.EXTREME_BARS) {
-    // 12+ bars at extreme = exhausted momentum
-    penalty = P.PENALTY_EXTREME;
+  } else if (effectiveBars >= extremeBars) {
+    // Exhausted momentum - use REDUCED penalties from STOCHRSI_DYNAMIC_PARAMS
+    rawPenalty = DP.PENALTY_EXTREME;  // 25 (was 35)
     isExhausted = true;
-    reason = `EXHAUSTED: ${effectiveBars.toFixed(0)} bars at extreme (>= ${P.EXTREME_BARS}) → +${penalty} reversal`;
-  } else if (effectiveBars >= P.HIGH_BARS) {
-    // 9+ bars at extreme = high exhaustion risk
-    penalty = P.PENALTY_HIGH;
-    reason = `HIGH exhaustion: ${effectiveBars.toFixed(0)} bars at extreme (>= ${P.HIGH_BARS}) → +${penalty} reversal`;
-  } else if (effectiveBars >= P.MODERATE_BARS) {
-    // 6+ bars at extreme = moderate exhaustion risk
-    penalty = P.PENALTY_MODERATE;
-    reason = `MODERATE exhaustion: ${effectiveBars.toFixed(0)} bars at extreme (>= ${P.MODERATE_BARS}) → +${penalty} reversal`;
+    reason = `EXHAUSTED: ${effectiveBars.toFixed(0)} bars >= ${extremeBars} (${adxTier}) → +${rawPenalty} reversal`;
+  } else if (effectiveBars >= highBars) {
+    // High exhaustion risk
+    rawPenalty = DP.PENALTY_HIGH;     // 18 (was 25)
+    reason = `HIGH exhaustion: ${effectiveBars.toFixed(0)} bars >= ${highBars} (${adxTier}) → +${rawPenalty} reversal`;
+  } else if (effectiveBars >= moderateBars) {
+    // Moderate exhaustion risk
+    rawPenalty = DP.PENALTY_MODERATE; // 12 (was 15)
+    reason = `MODERATE exhaustion: ${effectiveBars.toFixed(0)} bars >= ${moderateBars} (${adxTier}) → +${rawPenalty} reversal`;
   } else {
-    // 3-5 bars = early warning, minimal penalty
-    penalty = 5;
-    reason = `EARLY WARNING: ${effectiveBars.toFixed(0)} bars at extreme → +5 reversal`;
+    // Between minBarsForPenalty and moderateBars = early warning, minimal penalty
+    rawPenalty = 4;  // Reduced from 5
+    reason = `EARLY WARNING: ${effectiveBars.toFixed(0)} bars (${adxTier}) → +4 reversal`;
+  }
+  
+  // PHASE 4 KEY: Cap StochRSI penalty contribution at MAX_STOCHRSI_PENALTY (20)
+  // This ensures StochRSI alone can NEVER push exhaustion score over block threshold
+  const cappedPenalty = Math.min(rawPenalty, DP.MAX_STOCHRSI_PENALTY);
+  
+  if (rawPenalty > cappedPenalty) {
+    reason += ` [CAPPED: ${rawPenalty} → ${cappedPenalty}]`;
   }
   
   return {
-    penalty,
+    penalty: cappedPenalty,  // Use capped value as the actual penalty
+    rawPenalty,
+    cappedPenalty,
     barsAtExtreme: effectiveBars,
     isExhausted,
     reason,
+    adxTier,
+    dynamicThreshold: minBarsForPenalty,
   };
 };
 
@@ -1393,11 +1439,26 @@ export const calculateUnifiedReversalScore = (
   // PHASE 2: Calculate separated risk scores BEFORE final decision
   const separatedRisk = calculateSeparatedRisk(breakdown, trendData, signalType);
   
-  // Calculate total with ADX weight - PHASE 3: Include time-in-extreme
+  // PHASE 4: Apply overall StochRSI contribution cap
+  // Sum all StochRSI-related components and cap at MAX_STOCHRSI_PENALTY (20)
+  // This ensures StochRSI alone can NEVER push exhaustion over block threshold
+  const rawTotalStochRSI = breakdown.stochRsiScore + breakdown.stochRsiZoneScore + breakdown.timeInExtremeScore;
+  const cappedTotalStochRSI = Math.min(rawTotalStochRSI, STOCHRSI_DYNAMIC_PARAMS.MAX_STOCHRSI_PENALTY);
+  
+  // Calculate how much to reduce each component proportionally if cap is hit
+  if (rawTotalStochRSI > cappedTotalStochRSI) {
+    const reductionRatio = cappedTotalStochRSI / rawTotalStochRSI;
+    breakdown.stochRsiScore = Math.round(breakdown.stochRsiScore * reductionRatio);
+    breakdown.stochRsiZoneScore = Math.round(breakdown.stochRsiZoneScore * reductionRatio);
+    breakdown.timeInExtremeScore = Math.round(breakdown.timeInExtremeScore * reductionRatio);
+    reasons.push(`PHASE 4 CAP: Total StochRSI ${rawTotalStochRSI} → ${cappedTotalStochRSI} (MAX=${STOCHRSI_DYNAMIC_PARAMS.MAX_STOCHRSI_PENALTY})`);
+  }
+  
+  // Calculate total with ADX weight - PHASE 3/4: Include time-in-extreme (now capped)
   const rawScore = breakdown.stochRsiScore + breakdown.stochRsiZoneScore + 
                    breakdown.momentumScore + breakdown.macdScore + 
                    breakdown.timeframeScore + breakdown.volumeScore +
-                   breakdown.timeInExtremeScore;  // PHASE 3
+                   breakdown.timeInExtremeScore;  // PHASE 3/4
   
   const adxWeight = getAdxWeight(adx);
   
