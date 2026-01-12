@@ -2128,6 +2128,7 @@ serve(async (req) => {
                 lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend ?? false,
                 macdDirectionAligned: momentum?.macdDirectionAligned ?? false,
                 macdExpanding: momentum?.macdExpanding ?? false,
+                macdHistogram: momentum?.macdHistogram?.toFixed(4) ?? '0.0000',
                 consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
                 consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
                 consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
@@ -2714,6 +2715,7 @@ serve(async (req) => {
                 lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend,
                 macdDirectionAligned: momentum?.macdDirectionAligned,
                 macdExpanding: momentum?.macdExpanding,
+                macdHistogram: momentum?.macdHistogram?.toFixed(4) ?? '0.0000',
                 consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
                 consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
                 consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
@@ -5068,6 +5070,7 @@ serve(async (req) => {
                     state: momentum?.state || "none",
                     confirms: momentum?.confirms ?? false,
                     macdExpanding: momentum?.macdExpanding ?? false,
+                    macdHistogram: momentum?.macdHistogram?.toFixed(4) ?? '0.0000',
                     consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
                     consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
                     consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
@@ -5605,6 +5608,7 @@ serve(async (req) => {
                   lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend ?? false,
                   macdDirectionAligned: momentum?.macdDirectionAligned ?? false,
                   macdExpanding: momentum?.macdExpanding ?? false,
+                  macdHistogram: momentum?.macdHistogram?.toFixed(4) ?? '0.0000',
                   consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
                   consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
                   consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
