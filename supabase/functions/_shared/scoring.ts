@@ -578,7 +578,8 @@ export const getAdxScore = (adx: number): number => {
 
 // ============= MOMENTUM SCORE (0-20 points) =============
 // IMPROVED: Better scoring for momentum continuation during strong moves
-export const getMomentumScore = (momentum: any, adx: number = 0, adxRising: boolean = false): number => {
+// ENHANCED: StochRSI decline bonus for early bearish/bullish momentum detection
+export const getMomentumScore = (momentum: any, adx: number = 0, adxRising: boolean = false, stochRsiData?: { k: number; d: number }): number => {
   if (!momentum) return 0;
   
   const state = momentum.state || "none";
@@ -622,6 +623,21 @@ export const getMomentumScore = (momentum: any, adx: number = 0, adxRising: bool
   
   // Volume bonus
   if (volumeConfirms) score += 4;
+  
+  // ============= NEW: STOCHRSI DECLINE BONUS =============
+  // When StochRSI K is at extreme and declining (K < D), add momentum bonus
+  // This helps detect early bearish/bullish momentum before MACD confirms
+  if (stochRsiData) {
+    const { k, d } = stochRsiData;
+    // Bearish bonus: K < 20 and K < D (declining from oversold = bearish momentum building)
+    if (k < 20 && k < d) {
+      score += 3;  // +3 for declining StochRSI in oversold zone
+    }
+    // Bullish bonus: K > 80 and K > D (rising from overbought = bullish momentum building)
+    else if (k > 80 && k > d) {
+      score += 3;  // +3 for rising StochRSI in overbought zone
+    }
+  }
   
   return Math.min(20, score);
 };

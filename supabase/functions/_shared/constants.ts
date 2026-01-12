@@ -2316,6 +2316,108 @@ export const ORDER_FLOW_DIRECTION_PARAMS = {
   EXCEPTION_TYPE: "ORDER_FLOW_DIRECTION" as const,
 } as const;
 
+// ============= PRE-MOMENTUM STOCHRSI EXTREME ENTRY =============
+// When StochRSI is at deep extremes with directional 1h trend but momentum not yet confirmed,
+// allow reduced-size entry. This catches moves like AVAX 2.30% drop that indicators lag.
+export const PRE_MOMENTUM_STOCHRSI_PARAMS = {
+  ENABLED: true,
+  
+  // ===== STOCHRSI THRESHOLDS =====
+  // Deeply oversold/overbought threshold for pre-momentum entry
+  MAX_STOCHRSI_K_FOR_SHORT: 15,   // K < 15 = deeply oversold, allow SHORT
+  MIN_STOCHRSI_K_FOR_LONG: 85,    // K > 85 = deeply overbought, allow LONG
+  
+  // ===== ADX REQUIREMENTS =====
+  // Must have some trend strength (not completely flat)
+  MIN_ADX: 18,
+  
+  // ===== 1H TREND REQUIREMENTS =====
+  // 1h must be directional and match the intended direction
+  REQUIRE_1H_DIRECTIONAL: true,
+  MIN_1H_CONFIDENCE: 55,          // 1h must show >= 55% confidence in direction
+  
+  // ===== POSITION SIZING =====
+  POSITION_SIZE_MULTIPLIER: 0.50, // 50% of normal for safety
+  STRONG_SETUP_MULTIPLIER: 0.60,  // 60% when 1h confidence >= 65%
+  
+  // ===== STOP LOSS =====
+  STOP_LOSS_MULTIPLIER: 0.8,      // Tighter stops (0.8x ATR)
+  
+  // ===== EXCEPTION TYPE FOR TRACKING =====
+  EXCEPTION_TYPE: "PRE_MOMENTUM_STOCHRSI_EXTREME" as const,
+} as const;
+
+// ============= SHORT-TERM ALIGNMENT OVERRIDE =============
+// When 1h, 30m, and micro trend all agree but momentum is "none",
+// allow entry with reduced size. This captures coordinated moves across timeframes.
+export const SHORT_TERM_ALIGNMENT_PARAMS = {
+  ENABLED: true,
+  
+  // ===== TIMEFRAME REQUIREMENTS =====
+  // All 3 short-term timeframes must agree on direction
+  REQUIRE_1H_DIRECTION: true,
+  REQUIRE_30M_DIRECTION: true,
+  REQUIRE_MICRO_DIRECTION: true,
+  
+  // ===== ADX REQUIREMENTS =====
+  MIN_ADX: 18,                    // Must not be completely ranging
+  
+  // ===== MOMENTUM OVERRIDE =====
+  // Only applies when momentum state is "none" (not blocking for other reasons)
+  ALLOW_WHEN_MOMENTUM_NONE: true,
+  
+  // ===== POSITION SIZING =====
+  POSITION_SIZE_MULTIPLIER: 0.55, // 55% of normal
+  
+  // ===== EXCEPTION TYPE =====
+  EXCEPTION_TYPE: "SHORT_TERM_ALIGNMENT_OVERRIDE" as const,
+} as const;
+
+// ============= STOCHRSI DECLINE MOMENTUM BONUS =============
+// When StochRSI K is already low and declining (K < D), indicates building bearish momentum
+// Add momentum score bonus for scoring purposes
+export const STOCHRSI_DECLINE_BONUS_PARAMS = {
+  ENABLED: true,
+  
+  // ===== THRESHOLDS =====
+  // K must be below this for bearish bonus
+  MAX_K_FOR_BEARISH_BONUS: 20,
+  // K must be above this for bullish bonus
+  MIN_K_FOR_BULLISH_BONUS: 80,
+  
+  // ===== BONUS VALUE =====
+  MOMENTUM_SCORE_BONUS: 3,        // +3 to momentum score when K declining from extreme
+} as const;
+
+// ============= DYNAMIC ADX THRESHOLD WITH STOCHRSI ALIGNMENT =============
+// When 1h bearish AND StochRSI < 20, reduce ADX threshold from 28 to 22
+// This allows strong-trend exceptions at lower ADX when indicators align
+export const STOCHRSI_ADX_ALIGNMENT_PARAMS = {
+  ENABLED: true,
+  
+  // ===== STOCHRSI THRESHOLDS =====
+  // For bearish: StochRSI K must be below this
+  BEARISH_STOCHRSI_THRESHOLD: 20,
+  // For bullish: StochRSI K must be above this
+  BULLISH_STOCHRSI_THRESHOLD: 80,
+  
+  // ===== ADX THRESHOLD REDUCTION =====
+  // Original strong trend ADX threshold is 28, reduce to this when aligned
+  REDUCED_ADX_THRESHOLD: 22,
+  
+  // ===== 1H REQUIREMENT =====
+  REQUIRE_1H_MATCH: true,         // 1h trend must match direction
+} as const;
+
+// ============= RELAXED ORDER FLOW WHEN 1H DIRECTIONAL =============
+// When 1h trend is clear, accept lower order flow score for direction fallback
+export const RELAXED_ORDER_FLOW_PARAMS = {
+  ENABLED: true,
+  
+  // When 1h is directional, reduce order flow requirement from 70 to 60
+  RELAXED_MIN_ORDER_FLOW_SCORE: 60,
+} as const;
+
 // ============= NEUTRAL PERSISTENCE MODELING =============
 // Tracks how long a market has been neutral
 // Longer neutral periods that resolve into drift are more meaningful
