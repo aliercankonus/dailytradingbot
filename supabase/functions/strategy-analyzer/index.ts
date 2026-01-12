@@ -4822,11 +4822,83 @@ serve(async (req) => {
               lowAdxPositionMultiplier = Math.min(lowAdxPositionMultiplier, neutral4hReduction);
             }
             
-            if (htfQualifies && tf1hStrong && trendsAligned && htfMatchesDirection && 
-                structurePasses && momentumNotOpposing && reversalScoreOk) {
+            // ============= TIERED ADX ZONE CHECK =============
+            // Transitional Zone (ADX 20-25) requires ADDITIONAL momentum confirmation
+            const coreZoneMaxAdx = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).CORE_ZONE_MAX_ADX || 20;
+            const transitionalMinAdx = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_ZONE_MIN_ADX || 20;
+            const transitionalMaxAdx = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_ZONE_MAX_ADX || 25;
+            
+            const isInTransitionalZone = adx >= transitionalMinAdx && adx < transitionalMaxAdx;
+            const isInCoreZone = adx < coreZoneMaxAdx;
+            
+            let transitionalZonePasses = true;
+            let transitionalReason = "";
+            
+            if (isInTransitionalZone) {
+              // Transitional zone requires additional confirmation
+              const requireMomentumExpanding = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_REQUIRE_MOMENTUM_EXPANDING ?? true;
+              const requireDirectionConsistent = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_REQUIRE_DIRECTION_CONSISTENT ?? true;
+              const requireNoHtfConflict = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_REQUIRE_NO_HTF_CONFLICT ?? true;
+              const transitionalMin1h = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_MIN_1H_CONFIDENCE || 60;
+              const transitionalPositionReduction = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_POSITION_REDUCTION || 0.45;
+              
+              // Check MACD expanding
+              const macdExpanding = trendData?.timeframes?.['1h']?.indicators?.macdExpanding === true;
+              const momentumExpandingOk = !requireMomentumExpanding || macdExpanding;
+              
+              // Check direction consistency - recent candles confirm direction
+              const consistentCandles = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_CONSISTENT_CANDLES || 3;
+              const prices1h = trendData?.prices?.['1h'] || [];
+              const recentCloses = prices1h.slice(-5).map((k: any) => parseFloat(k[4]));
+              let directionConsistentCount = 0;
+              for (let i = 1; i < recentCloses.length; i++) {
+                const isUp = recentCloses[i] > recentCloses[i - 1];
+                if ((derivedDirection === "long" && isUp) || (derivedDirection === "short" && !isUp)) {
+                  directionConsistentCount++;
+                }
+              }
+              const directionConsistentOk = !requireDirectionConsistent || directionConsistentCount >= consistentCandles;
+              
+              // Check no HTF conflict - 4h must not oppose 1h direction
+              const htfConflict = (
+                (trend1h === "bullish" && trend4h === "bearish") ||
+                (trend1h === "bearish" && trend4h === "bullish")
+              );
+              const noHtfConflictOk = !requireNoHtfConflict || !htfConflict;
+              
+              // Higher 1h confidence requirement for transitional zone
+              const tf1hStrongTransitional = tf1hConfidence >= transitionalMin1h;
+              
+              transitionalZonePasses = momentumExpandingOk && directionConsistentOk && noHtfConflictOk && tf1hStrongTransitional;
+              
+              if (transitionalZonePasses) {
+                // Apply transitional zone position reduction
+                lowAdxPositionMultiplier = Math.min(lowAdxPositionMultiplier, transitionalPositionReduction);
+                transitionalReason = `TRANSITIONAL_ZONE(ADX=${adx.toFixed(1)}): macdExp=${macdExpanding}, ` +
+                  `dirConsistent=${directionConsistentCount}/${consistentCandles}, noConflict=${!htfConflict}, 1h=${tf1hConfidence}%`;
+                logger.forSymbol(symbol).info(
+                  `${LOG_CATEGORIES.SUCCESS} 📊 TRANSITIONAL ZONE CONFIRMED: ${transitionalReason}`
+                );
+              } else {
+                transitionalReason = `TRANSITIONAL_ZONE FAILED: macdExp=${macdExpanding}(${momentumExpandingOk}), ` +
+                  `dirConsistent=${directionConsistentCount}/${consistentCandles}(${directionConsistentOk}), ` +
+                  `noConflict=${!htfConflict}(${noHtfConflictOk}), 1h=${tf1hConfidence}%(${tf1hStrongTransitional})`;
+                logger.forSymbol(symbol).info(
+                  `${LOG_CATEGORIES.GATE} 📊 ${transitionalReason}`
+                );
+              }
+            }
+            
+            // Final decision: base requirements + transitional zone requirements (if applicable)
+            const baseRequirementsMet = htfQualifies && tf1hStrong && trendsAligned && htfMatchesDirection && 
+                structurePasses && momentumNotOpposing && reversalScoreOk;
+            
+            if (baseRequirementsMet && transitionalZonePasses) {
               lowAdxExceptionAllowed = true;
-              lowAdxExceptionReason = `HTF=${htfConfidence}% (${htfQualifyReason}), 1h=${tf1hConfidence}%, ` +
-                `align=${alignReason}, dir=${dirMatchReason}, struct=${structureReason}`;
+              const zoneLabel = isInCoreZone ? "CORE" : "TRANSITIONAL";
+              lowAdxExceptionReason = `[${zoneLabel}] HTF=${htfConfidence}% (${htfQualifyReason}), 1h=${tf1hConfidence}%, ` +
+                `align=${alignReason}, dir=${dirMatchReason}, struct=${structureReason}` +
+                (isInTransitionalZone ? ` | ${transitionalReason}` : '');
               
               logger.forSymbol(symbol).info(
                 `${LOG_CATEGORIES.SUCCESS} 🎯 LOW_ADX_TREND_EXCEPTION: ADX=${adx.toFixed(1)} ` +
@@ -4839,12 +4911,14 @@ serve(async (req) => {
               perSymbolGateAttribution.set(symbol, { gate: 'LOW_ADX_TREND_EXCEPTION', details: lowAdxExceptionReason });
             } else {
               // Log why exception didn't apply - INFO level for visibility
+              const failReason = !baseRequirementsMet 
+                ? `BASE FAILED: htf=${htfQualifies}(${htfConfidence}%/${htfQualifyReason}), ` +
+                  `1h=${tf1hStrong}(${tf1hConfidence}%), align=${trendsAligned}(${alignReason}), ` +
+                  `dir=${htfMatchesDirection}(${dirMatchReason}), struct=${structurePasses}(${structureReason}), ` +
+                  `momentum=${momentumNotOpposing}, reversal=${reversalScoreOk}(${unifiedReversal.score})`
+                : transitionalReason;
               logger.forSymbol(symbol).info(
-                `${LOG_CATEGORIES.GATE} LOW_ADX_TREND_EXCEPTION check FAILED: ` +
-                `htf=${htfQualifies}(${htfConfidence}%/${htfQualifyReason}), ` +
-                `1h=${tf1hStrong}(${tf1hConfidence}%), align=${trendsAligned}(${alignReason}), ` +
-                `dir=${htfMatchesDirection}(${dirMatchReason}), struct=${structurePasses}(${structureReason}), ` +
-                `momentum=${momentumNotOpposing}, reversal=${reversalScoreOk}(${unifiedReversal.score})`
+                `${LOG_CATEGORIES.GATE} LOW_ADX_TREND_EXCEPTION check FAILED: ${failReason}`
               );
             }
           }

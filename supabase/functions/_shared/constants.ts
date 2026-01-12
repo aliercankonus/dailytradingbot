@@ -2059,15 +2059,38 @@ export const MOMENTUM_EXHAUSTION_OVERRIDE_PARAMS = {
 } as const;
 
 // ============= LOW ADX TREND EXCEPTION =============
-// Allows entries when ADX is 15-20 BUT higher timeframe trend is strong
+// Allows entries when ADX is low BUT higher timeframe trend is strong
 // AND price action structure confirms direction (not just indicator alignment)
 // Phase 1 improvement to capture strong HTF setups in low-energy markets
+// 
+// TIERED APPROACH (Market-aware):
+// - Core Zone (12-20): Standard confirmations (HTF + structure)
+// - Transitional Zone (20-25): Requires ADDITIONAL momentum confirmation
+//   This prevents false positives in choppy 20-25 ADX environments
 export const LOW_ADX_TREND_EXCEPTION_PARAMS = {
   ENABLED: true,
   
   // ===== ADX BOUNDS =====
   MIN_ADX: 12,                    // Allow down to ADX 12 (lowered from 15 for current market)
-  MAX_ADX: 20,                    // Only applies below normal threshold
+  MAX_ADX: 25,                    // RAISED from 20 to 25 to capture emerging trends (BNBUSDT ADX 22.6)
+  
+  // ===== TIERED ADX ZONES =====
+  // Core Zone: ADX 12-20 - standard confirmations apply
+  CORE_ZONE_MAX_ADX: 20,
+  // Transitional Zone: ADX 20-25 - requires additional momentum confirmation
+  TRANSITIONAL_ZONE_MIN_ADX: 20,
+  TRANSITIONAL_ZONE_MAX_ADX: 25,
+  
+  // ===== TRANSITIONAL ZONE REQUIREMENTS (20-25 ADX) =====
+  // These ADDITIONAL requirements apply only in the 20-25 ADX zone
+  // to prevent false positives in choppy emerging-trend environments
+  TRANSITIONAL_REQUIRE_MOMENTUM_EXPANDING: true,    // MACD must be expanding
+  TRANSITIONAL_REQUIRE_MACD_STRONG: false,          // MACD strong is optional (too strict)
+  TRANSITIONAL_REQUIRE_DIRECTION_CONSISTENT: true,  // Recent candles must confirm direction
+  TRANSITIONAL_CONSISTENT_CANDLES: 3,               // Min 3 of last 5 candles in direction
+  TRANSITIONAL_REQUIRE_NO_HTF_CONFLICT: true,       // 4h must not oppose 1h direction
+  TRANSITIONAL_MIN_1H_CONFIDENCE: 60,               // Higher 1h confidence requirement
+  TRANSITIONAL_POSITION_REDUCTION: 0.45,            // Extra position reduction (45% vs 50%)
   
   // ===== HTF REQUIREMENTS (Further relaxed for real-world conditions) =====
   MIN_HTF_CONFIDENCE: 60,         // 4h trend must be >= 60% confidence
