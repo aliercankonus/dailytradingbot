@@ -1657,12 +1657,15 @@ const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
   const momentum = filtersStatus?.momentum || trendData?.momentum;
   const macdHistogramValue =
     momentum?.macdHistogram ??
+    filtersStatus?.macdHistogram ??
     trendData?.timeframes?.["1h"]?.indicators?.macdHistogram ??
     trendData?.timeframes?.["4h"]?.indicators?.macdHistogram;
   const macdHistogramDisplay =
     typeof macdHistogramValue === "number"
       ? macdHistogramValue.toFixed(4)
-      : macdHistogramValue || "N/A";
+      : typeof macdHistogramValue === 'string' && macdHistogramValue !== ''
+        ? macdHistogramValue
+        : "N/A";
   const stochRsi =
     filtersStatus?.stochRsi ||
     trendData?.stochasticRsi?.aggregated ||
@@ -1800,12 +1803,15 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
 
   const macdHistogramValue =
     momentum?.macdHistogram ??
+    filtersStatus?.macdHistogram ??
     trendData?.timeframes?.["1h"]?.indicators?.macdHistogram ??
     trendData?.timeframes?.["4h"]?.indicators?.macdHistogram;
   const macdHistogramDisplay =
     typeof macdHistogramValue === "number"
       ? macdHistogramValue.toFixed(4)
-      : macdHistogramValue || "N/A";
+      : typeof macdHistogramValue === 'string' && macdHistogramValue !== ''
+        ? macdHistogramValue
+        : "N/A";
   
   const getMomentumStateColor = (state: string) => {
     if (state === "confirmed") return "text-green-400 bg-green-500/20";
@@ -2476,7 +2482,11 @@ const HardGateMacdMisalignedDisplay = ({ filtersStatus, trendData }: { filtersSt
   const momentum = filtersStatus?.momentum || trendData?.momentum;
   
   const macdHistogram = momentum?.macdHistogram ?? trendData?.timeframes?.['1h']?.indicators?.macdHistogram;
-  const macdDisplay = typeof macdHistogram === 'number' ? macdHistogram.toFixed(4) : "N/A";
+  const macdDisplay = typeof macdHistogram === 'number' 
+    ? macdHistogram.toFixed(4) 
+    : typeof macdHistogram === 'string' && macdHistogram !== '' 
+      ? macdHistogram 
+      : "N/A";
   
   return (
     <div className="space-y-3 p-3 bg-yellow-500/10 rounded-md border border-yellow-500/30">
@@ -3140,14 +3150,17 @@ const MomentumIndicatorsPanel = ({ trendData, filtersStatus }: { trendData?: any
   const indicators1h = trendData?.timeframes?.['1h']?.indicators || {};
   const momentumData = trendData?.momentum || {};
   
-  // MACD Histogram - check multiple possible locations
-  const macdHistogram = coerceNumeric(
+  // MACD Histogram - check multiple possible locations including filtersStatus.momentum
+  const macdHistogramRaw = 
     indicators1h?.macdHistogram ?? 
     momentumData?.macdHistogram ?? 
+    filtersStatus?.momentum?.macdHistogram ??
     filtersStatus?.macdHistogram ?? 
-    trendData?.indicators?.macdHistogram,
-    null
-  );
+    trendData?.indicators?.macdHistogram;
+  // Handle both number and string values (edge function stores as string via .toFixed(4))
+  const macdHistogram = typeof macdHistogramRaw === 'string' 
+    ? parseFloat(macdHistogramRaw) 
+    : coerceNumeric(macdHistogramRaw, null);
   
   // MACD status flags
   const macdExpanding = momentumData?.macdExpanding ?? filtersStatus?.macdExpanding ?? false;
