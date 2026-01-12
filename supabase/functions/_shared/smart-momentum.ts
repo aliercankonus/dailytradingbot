@@ -637,23 +637,30 @@ export function calculateEntryQuality(
 }
 
 // ============= BEHAVIORAL ADX EXHAUSTION DETECTION =============
-// NEW: Exhaustion is about CHANGE (slope), not absolute ADX value
-// A trend is only exhausted when strength is DECAYING, not simply when ADX is high
+// PHASE 3 UPDATE: Refined exhaustion with time-in-trend context and minimum ADX decline
+// Exhaustion is about CHANGE (slope) AND CONTEXT, not absolute ADX value
+// A trend is only exhausted when strength is DECAYING significantly over time
+
+import { ADX_EXHAUSTION_REFINED_PARAMS } from "./constants.ts";
 
 export interface ADXExhaustionResult {
   isExhausted: boolean;
   exhaustionType: "none" | "rollover" | "di_compression" | "momentum_divergence" | "composite";
   exhaustionScore: number;      // 0-100, higher = more exhausted
   components: {
-    adxRollover: boolean;       // ADX peaked and declining
+    adxRollover: boolean;       // ADX peaked and declining by 3+ points
     adxSlope: number;           // Negative = decelerating
     diCompressing: boolean;     // +DI/-DI gap shrinking
     diCompressionBars: number;  // Consecutive bars of compression
     momentumDivergence: boolean; // Price HH but RSI not HH
     priceRising: boolean;       // Hidden weakness: price rising + ADX flat/falling
     hiddenWeakness: boolean;    // Rising price but falling ADX
+    adxDeclineFromPeak: number; // NEW: How many points ADX declined from peak
+    trendAge: number;           // NEW: Estimated trend age in bars
+    priceActionConfirmed: boolean; // NEW: Reversal candles present
   };
   isContinuation: boolean;      // High ADX + rising = NOT exhausted, allow continuation
+  positionMultiplier: number;   // NEW: 0.65-1.0 based on exhaustion level (not hard block)
   reasons: string[];
 }
 
@@ -674,9 +681,13 @@ export function detectADXExhaustion(
       diCompressionBars: 0,
       momentumDivergence: false,
       priceRising: false,
-      hiddenWeakness: false
+      hiddenWeakness: false,
+      adxDeclineFromPeak: 0,
+      trendAge: 0,
+      priceActionConfirmed: false
     },
     isContinuation: false,
+    positionMultiplier: 1.0,
     reasons: []
   };
 
@@ -685,9 +696,16 @@ export function detectADXExhaustion(
     return defaultResult;
   }
 
+  // ===== NEW: CALCULATE TREND AGE =====
+  // Estimate how long the trend has been active by counting bars where ADX > 20
+  const trendAge = adxResult.adxArray.filter(adx => adx >= 20).length;
+  
+  // ===== NEW: CALCULATE ADX DECLINE FROM PEAK =====
+  const adxPeak = Math.max(...adxResult.adxArray);
+  const adxDeclineFromPeak = adxPeak - adxResult.adx;
+
   // ===== CRITICAL: PARABOLIC MODE OVERRIDE =====
   // Super-strong trends (ADX >= 55) with rising ADX and no DI compression = NOT exhausted
-  // This is the key fix for missing strong continuation moves like ETHUSDT 1.6% -> 3.3%
   const diCompressing = adxResult.prevDiGap > 0 && 
     adxResult.diGap < adxResult.prevDiGap * (1 - ADX_EXHAUSTION_PARAMS.DI_COMPRESSION_MIN_SHRINK);
   
@@ -704,9 +722,13 @@ export function detectADXExhaustion(
         diCompressionBars: 0,
         momentumDivergence: false,
         priceRising: prices.length >= 5 && prices[prices.length - 1] > prices[prices.length - 5],
-        hiddenWeakness: false
+        hiddenWeakness: false,
+        adxDeclineFromPeak: 0,
+        trendAge,
+        priceActionConfirmed: false
       },
       isContinuation: true,
+      positionMultiplier: 1.0,
       reasons: [`🚀 PARABOLIC MODE: ADX=${adxResult.adx.toFixed(1)}, slope=${adxResult.adxSlope.toFixed(2)}, no DI compression - allowing continuation`]
     };
   }
@@ -714,23 +736,38 @@ export function detectADXExhaustion(
   const reasons: string[] = [];
   let exhaustionScore = 0;
   
-  // ===== RULE 1: ADX ROLLOVER (Primary Signal) =====
-  // ADX peaks and then flattens or turns down, even if ADX remains >40
-  const adxRollover = adxResult.adxPeaked && adxResult.adxSlope < ADX_EXHAUSTION_PARAMS.SLOPE_NEUTRAL;
+  // ===== RULE 1: ADX ROLLOVER (Primary Signal) - REFINED =====
+  // ADX rollover is only valid if:
+  // 1. ADX declined by >= 3 points from peak (MIN_ADX_DECLINE_FOR_ROLLOVER)
+  // 2. Current ADX < 40 (MAX_ADX_FOR_EXHAUSTION)
+  // 3. Trend age >= 40 bars (MIN_TREND_AGE_FOR_EXHAUSTION)
+  const meetsDeclineRequirement = adxDeclineFromPeak >= ADX_EXHAUSTION_REFINED_PARAMS.MIN_ADX_DECLINE_FOR_ROLLOVER;
+  const meetsAdxCapRequirement = adxResult.adx < ADX_EXHAUSTION_REFINED_PARAMS.MAX_ADX_FOR_EXHAUSTION;
+  const meetsTrendAgeRequirement = trendAge >= ADX_EXHAUSTION_REFINED_PARAMS.MIN_TREND_AGE_FOR_EXHAUSTION;
+  
+  const adxRollover = adxResult.adxPeaked && 
+    adxResult.adxSlope < ADX_EXHAUSTION_PARAMS.SLOPE_NEUTRAL &&
+    meetsDeclineRequirement &&
+    meetsAdxCapRequirement;
+  
   if (adxRollover) {
-    exhaustionScore += ADX_EXHAUSTION_PARAMS.SCORE_ADX_ROLLOVER;
-    reasons.push(`ADX rollover detected (peaked at ${Math.max(...adxResult.adxArray).toFixed(1)}, now ${adxResult.adx.toFixed(1)})`);
+    // Only add full score if trend age requirement is met
+    if (meetsTrendAgeRequirement) {
+      exhaustionScore += ADX_EXHAUSTION_REFINED_PARAMS.SCORE_ADX_ROLLOVER; // Reduced from 60 to 35
+      reasons.push(`ADX rollover: peak ${adxPeak.toFixed(1)} → ${adxResult.adx.toFixed(1)} (${adxDeclineFromPeak.toFixed(1)}pt decline, ${trendAge} bar trend)`);
+    } else {
+      // Young trend rolling over - much lower weight
+      exhaustionScore += Math.round(ADX_EXHAUSTION_REFINED_PARAMS.SCORE_ADX_ROLLOVER * 0.4);
+      reasons.push(`⚠️ Young trend rollover (${trendAge} bars < ${ADX_EXHAUSTION_REFINED_PARAMS.MIN_TREND_AGE_FOR_EXHAUSTION} min) - reduced weight`);
+    }
   }
 
   // ===== RULE 2: RISING PRICE + FALLING ADX (Hidden Weakness) =====
-  // Price continues higher while ADX is flat or declining
   const priceRising = prices.length >= 5 && prices[prices.length - 1] > prices[prices.length - 5];
   const priceFalling = prices.length >= 5 && prices[prices.length - 1] < prices[prices.length - 5];
   const adxFlat = Math.abs(adxResult.adxSlope) < ADX_EXHAUSTION_PARAMS.SLOPE_ACCELERATING;
   const adxDeclining = adxResult.adxSlope < ADX_EXHAUSTION_PARAMS.SLOPE_NEUTRAL;
   
-  // For longs: price rising but ADX not accelerating = hidden weakness
-  // For shorts: price falling but ADX not accelerating = hidden weakness
   let hiddenWeakness = false;
   if (direction === "long" && priceRising && (adxFlat || adxDeclining)) {
     hiddenWeakness = true;
@@ -739,26 +776,24 @@ export function detectADXExhaustion(
   }
   
   if (hiddenWeakness) {
-    exhaustionScore += ADX_EXHAUSTION_PARAMS.SCORE_ADX_SLOPE_NEGATIVE;
-    reasons.push(`Hidden weakness: price ${direction === "long" ? "rising" : "falling"} but ADX flat/declining (slope: ${adxResult.adxSlope.toFixed(2)})`);
+    // Only add score if trend is mature enough
+    if (meetsTrendAgeRequirement) {
+      exhaustionScore += ADX_EXHAUSTION_REFINED_PARAMS.SCORE_HIDDEN_WEAKNESS;
+      reasons.push(`Hidden weakness: price ${direction === "long" ? "rising" : "falling"} but ADX flat/declining (slope: ${adxResult.adxSlope.toFixed(2)})`);
+    }
   }
 
   // ===== RULE 3: +DI / -DI COMPRESSION =====
-  // Distance between +DI and -DI shrinks while ADX stays high
   const diGapShrinking = adxResult.prevDiGap > 0 && 
     adxResult.diGap < adxResult.prevDiGap * (1 - ADX_EXHAUSTION_PARAMS.DI_COMPRESSION_MIN_SHRINK);
-  
-  // Count compression bars (simplified: check if current gap < previous)
-  // Note: diCompressing already checked above for parabolic mode, reuse diGapShrinking here
-  const diCompressionBars = diGapShrinking ? 1 : 0; // Would need full DI history for multi-bar check
+  const diCompressionBars = diGapShrinking ? 1 : 0;
   
   if (diGapShrinking) {
-    exhaustionScore += ADX_EXHAUSTION_PARAMS.SCORE_DI_COMPRESSING;
+    exhaustionScore += ADX_EXHAUSTION_REFINED_PARAMS.SCORE_DI_COMPRESSION;
     reasons.push(`DI compression: gap shrinking (${adxResult.prevDiGap.toFixed(1)} → ${adxResult.diGap.toFixed(1)})`);
   }
 
   // ===== RULE 4: MOMENTUM DIVERGENCE (Confirmation Layer) =====
-  // RSI / momentum fails to make a higher high while price does
   let momentumDivergence = false;
   if (rsiArray.length >= 5 && prices.length >= 5) {
     const priceHigherHigh = prices[prices.length - 1] > Math.max(...prices.slice(-5, -1));
@@ -766,30 +801,47 @@ export function detectADXExhaustion(
     const rsiHigherHigh = rsiArray[rsiArray.length - 1] > Math.max(...rsiArray.slice(-5, -1));
     const rsiLowerLow = rsiArray[rsiArray.length - 1] < Math.min(...rsiArray.slice(-5, -1));
     
-    // Bearish divergence for longs: price higher high but RSI not higher high
     if (direction === "long" && priceHigherHigh && !rsiHigherHigh) {
       momentumDivergence = true;
-    }
-    // Bullish divergence for shorts: price lower low but RSI not lower low  
-    else if (direction === "short" && priceLowerLow && !rsiLowerLow) {
+    } else if (direction === "short" && priceLowerLow && !rsiLowerLow) {
       momentumDivergence = true;
     }
   }
   
   if (momentumDivergence) {
-    exhaustionScore += ADX_EXHAUSTION_PARAMS.SCORE_MOMENTUM_DIVERGENCE;
+    exhaustionScore += ADX_EXHAUSTION_REFINED_PARAMS.SCORE_MOMENTUM_DIVERGENCE;
     reasons.push(`Momentum divergence: price making new ${direction === "long" ? "highs" : "lows"} but momentum failing`);
+  }
+
+  // ===== NEW: PRICE ACTION CONFIRMATION =====
+  // Look for reversal candle patterns to confirm exhaustion
+  let priceActionConfirmed = false;
+  if (prices.length >= 3) {
+    const lastPrice = prices[prices.length - 1];
+    const prevPrice = prices[prices.length - 2];
+    const prevPrevPrice = prices[prices.length - 3];
+    
+    if (direction === "long") {
+      // Bearish reversal: higher high followed by lower close
+      priceActionConfirmed = prevPrice > prevPrevPrice && lastPrice < prevPrice;
+    } else if (direction === "short") {
+      // Bullish reversal: lower low followed by higher close
+      priceActionConfirmed = prevPrice < prevPrevPrice && lastPrice > prevPrice;
+    }
+  }
+  
+  if (priceActionConfirmed && exhaustionScore > 0) {
+    exhaustionScore += ADX_EXHAUSTION_REFINED_PARAMS.SCORE_PRICE_ACTION_CONFIRM;
+    reasons.push(`Price action confirms reversal pattern`);
   }
 
   // ===== ADX SLOPE NEGATIVE (MINOR SIGNAL) =====
   if (adxResult.adxSlope < ADX_EXHAUSTION_PARAMS.SLOPE_NEUTRAL && !adxRollover && !hiddenWeakness) {
-    exhaustionScore += ADX_EXHAUSTION_PARAMS.SCORE_ADX_SLOPE_NEGATIVE;
+    exhaustionScore += ADX_EXHAUSTION_REFINED_PARAMS.SCORE_SLOPE_NEGATIVE;
     reasons.push(`ADX slope negative (${adxResult.adxSlope.toFixed(2)})`);
   }
 
   // ===== CRITICAL: CONTINUATION OVERRIDE =====
-  // High ADX + rising + no DI compression = CONTINUATION, not exhaustion
-  // This prevents incorrectly blocking strong trends
   const isContinuation = ADX_EXHAUSTION_PARAMS.CONTINUATION_OVERRIDE &&
     adxResult.adx >= ADX_EXHAUSTION_PARAMS.CONTINUATION_MIN_ADX &&
     adxResult.adxSlope >= ADX_EXHAUSTION_PARAMS.CONTINUATION_MIN_SLOPE &&
@@ -797,18 +849,30 @@ export function detectADXExhaustion(
     !momentumDivergence;
   
   if (isContinuation) {
-    // Reset exhaustion score - this is a strong continuing trend
     exhaustionScore = 0;
     reasons.length = 0;
     reasons.push(`✅ CONTINUATION: ADX=${adxResult.adx.toFixed(1)}, slope=${adxResult.adxSlope.toFixed(2)} (not exhausted)`);
   }
 
+  // ===== NEW: POSITION MULTIPLIER BASED ON EXHAUSTION SCORE =====
+  // Instead of hard blocking, use tiered position sizing
+  let positionMultiplier = 1.0;
+  const { SOFT_EXHAUSTION_THRESHOLD, HARD_EXHAUSTION_THRESHOLD, 
+          POSITION_MULTIPLIER_SOFT, POSITION_MULTIPLIER_HARD } = ADX_EXHAUSTION_REFINED_PARAMS;
+  
+  if (!isContinuation) {
+    if (exhaustionScore >= HARD_EXHAUSTION_THRESHOLD) {
+      positionMultiplier = POSITION_MULTIPLIER_HARD; // 0.65
+    } else if (exhaustionScore >= SOFT_EXHAUSTION_THRESHOLD) {
+      positionMultiplier = POSITION_MULTIPLIER_SOFT; // 0.80
+    }
+  }
+
   // Determine exhaustion type
   let exhaustionType: ADXExhaustionResult["exhaustionType"] = "none";
-  const isExhausted = !isContinuation && exhaustionScore >= ADX_EXHAUSTION_PARAMS.EXHAUSTION_THRESHOLD;
+  const isExhausted = !isContinuation && exhaustionScore >= ADX_EXHAUSTION_REFINED_PARAMS.EXHAUSTION_THRESHOLD;
   
   if (isExhausted) {
-    // Find primary exhaustion signal
     if (adxRollover && momentumDivergence) exhaustionType = "composite";
     else if (adxRollover) exhaustionType = "rollover";
     else if (diGapShrinking) exhaustionType = "di_compression";
@@ -827,9 +891,13 @@ export function detectADXExhaustion(
       diCompressionBars,
       momentumDivergence,
       priceRising,
-      hiddenWeakness
+      hiddenWeakness,
+      adxDeclineFromPeak,
+      trendAge,
+      priceActionConfirmed
     },
     isContinuation,
+    positionMultiplier,
     reasons
   };
 }
