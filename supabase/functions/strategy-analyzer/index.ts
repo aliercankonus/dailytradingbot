@@ -70,6 +70,12 @@ import {
   LOW_ADX_TREND_EXCEPTION_PARAMS,
   // NEW: Phase 2 - Regime-adaptive ADX thresholds
   REGIME_ADAPTIVE_ADX_PARAMS,
+  // NEW: Phase 3 - Price Action Direction Override
+  PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS,
+  // NEW: Phase 5 - Strong Momentum Override for undeniable momentum
+  STRONG_MOMENTUM_OVERRIDE_PARAMS,
+  // NEW: Phase 6 - Momentum Bonus System for gate relaxation
+  MOMENTUM_BONUS_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -3664,6 +3670,28 @@ serve(async (req) => {
           shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_MIN_PERCENT_B; // 35
         }
         
+        // ============= PHASE 1 FIX: NEGATIVE %B MOMENTUM CONTINUATION FOR SHORTS =============
+        // When %B < 0 (price below lower Bollinger band), this is momentum continuation, NOT bounce risk
+        // Allow shorts with momentum confirmation (MACD expanding OR 1h directional)
+        let negativePercentBBypassApplied = false;
+        let negativePercentBPositionMultiplier = 1.0;
+        
+        if (intendedTradeDirection === "short" && percentB < 0 && 
+            BOLLINGER_ENTRY_GATES.ALLOW_SHORTS_BELOW_ZERO_PERCENT_B) {
+          // Check momentum confirmation
+          const hasMomentumConfirmation = !BOLLINGER_ENTRY_GATES.SHORT_BELOW_ZERO_REQUIRE_MOMENTUM ||
+            momentum?.macdExpanding === true ||
+            (timeframes?.['1h']?.trend === "bearish" && (timeframes?.['1h']?.confidence || 0) >= 55);
+          
+          if (hasMomentumConfirmation) {
+            negativePercentBBypassApplied = true;
+            negativePercentBPositionMultiplier = BOLLINGER_ENTRY_GATES.SHORT_BELOW_ZERO_POSITION_REDUCTION;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔥 NEGATIVE %B BYPASS ACTIVATED: %B=${percentB.toFixed(1)} < 0 with momentum confirmation`);
+            logger.forSymbol(symbol).info(`   → MACD expanding=${momentum?.macdExpanding}, 1h=${timeframes?.['1h']?.trend} ${timeframes?.['1h']?.confidence?.toFixed(0)}%`);
+            logger.forSymbol(symbol).info(`   → Position size reduced to ${(negativePercentBPositionMultiplier * 100).toFixed(0)}% for safety`);
+          }
+        }
+        
         // ============= BOLLINGER TIERED BYPASS FOR STRONG BEARISH TRENDS (SHORT) =============
         // Allows SHORT entries at %B 3-10 when trend is confirmed strong bearish
         // Similar to StochRSI tiered bypass - graduated access based on ADX/DI
@@ -3671,7 +3699,8 @@ serve(async (req) => {
         let bollingerBypassTierShort: 'none' | 'tier1' | 'tier2' | 'tier3' = 'none';
         let bollingerBypassPositionMultiplierShort = 1.0;
         
-        if (intendedTradeDirection === "short" && percentB < shortMinPercentB) {
+        // Skip standard Bollinger bypass checks if negative %B bypass already applied
+        if (intendedTradeDirection === "short" && percentB < shortMinPercentB && !negativePercentBBypassApplied) {
           // Check if bypass is enabled and within bypassable range (down to 3, not below)
           if (BOLLINGER_TIERED_BYPASS_PARAMS.ENABLED && 
               percentB < BOLLINGER_TIERED_BYPASS_PARAMS.BASE_MIN_PERCENT_B_SHORT &&
@@ -3797,8 +3826,8 @@ serve(async (req) => {
             }
           }
           
-          // If bypass not applied, block the entry
-          if (!bollingerBypassAppliedShort) {
+          // If bypass not applied AND negative %B bypass not applied, block the entry
+          if (!bollingerBypassAppliedShort && !negativePercentBBypassApplied) {
             rejectedByHardGates++;
             const trendContext = isStrongBearishTrend ? " (strong bearish trend)" : 
                                  isBearishTrendConfirmed ? " (bearish trend)" :
@@ -3819,6 +3848,7 @@ serve(async (req) => {
                 stochFilterTrend4h,
                 stochFilterConf4h: stochFilterConf4h.toFixed(1),
                 adx: adx.toFixed(1),
+                negativePercentBBypassChecked: percentB < 0,
                 message: "Shorts at low %B blocked - no bearish trend confirmation"
               },
               trendData,
@@ -3832,10 +3862,12 @@ serve(async (req) => {
         // Log if trend context or bypass allowed a SHORT that would otherwise be blocked
         if (intendedTradeDirection === "short" && 
             percentB < BOLLINGER_ENTRY_GATES.SHORT_MIN_PERCENT_B && 
-            (isBearishTrendConfirmed || isStrongBearishTrend || bollingerBypassAppliedShort)) {
-          const relaxationReasonShort = bollingerBypassAppliedShort 
-            ? `tiered bypass ${bollingerBypassTierShort} (${(bollingerBypassPositionMultiplierShort * 100).toFixed(0)}% size)`
-            : `trend confirmation (4h ${stochFilterConf4h.toFixed(0)}%)`;
+            (isBearishTrendConfirmed || isStrongBearishTrend || bollingerBypassAppliedShort || negativePercentBBypassApplied)) {
+          const relaxationReasonShort = negativePercentBBypassApplied
+            ? `negative %B bypass (${(negativePercentBPositionMultiplier * 100).toFixed(0)}% size)`
+            : bollingerBypassAppliedShort 
+              ? `tiered bypass ${bollingerBypassTierShort} (${(bollingerBypassPositionMultiplierShort * 100).toFixed(0)}% size)`
+              : `trend confirmation (4h ${stochFilterConf4h.toFixed(0)}%)`;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} TREND CONTEXT RELAXATION: Allowing SHORT at %B=${percentB.toFixed(1)} via ${relaxationReasonShort}, ADX=${adx.toFixed(1)}`);
         }
         
@@ -5594,14 +5626,14 @@ serve(async (req) => {
         
         // ===== PHASE 2: HARDENED MICRO-TREND CHECK =====
         // Allows signals when 4h is neutral but lower TFs are aligned
-        // Now requires: ADX >= 25, persistence >= 3 bars, volume confirmation
+        // Now requires: ADX >= 23 (lowered from 25), persistence >= 3 bars, volume confirmation
         const microTrend = trendData.microTrend;
         
-        // PHASE 2: Stricter micro-trend validation
+        // PHASE 2: Stricter micro-trend validation (with lowered ADX threshold)
         const hasMicroTrendBypass = microTrend?.hasMicroTrend === true && 
           !microTrend?.blocked &&  // Must not be blocked by safety checks
           microTrend?.alignment >= MICRO_TREND_PARAMS.MIN_ALIGNMENT_SCORE && 
-          microTrend?.adxSufficient === true &&  // ADX >= 25 required
+          microTrend?.adxSufficient === true &&  // ADX >= 23 required (lowered from 25)
           microTrend?.volumeConfirmed === true &&  // Volume confirmation required
           microTrend?.persistence >= MICRO_TREND_PARAMS.MIN_PERSISTENCE_BARS &&  // 3+ bars persistence
           (microTrend?.direction === "bullish" || microTrend?.direction === "bearish");
@@ -5619,9 +5651,126 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} MICRO-TREND detected but BLOCKED: ${microTrend.blockReason}`);
         }
         
+        // ===== PHASE 3: PRICE ACTION DIRECTION OVERRIDE =====
+        // When all timeframes show neutral/low confidence, derive direction from price action
+        // This allows entries based on significant price moves even without HTF confirmation
+        let priceActionOverrideActive = false;
+        let priceActionOverrideDirection: "bullish" | "bearish" | "neutral" = "neutral";
+        let priceActionOverridePositionMultiplier = 1.0;
+        
+        if (PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.ENABLED) {
+          const priceActionMomentum = trendData.priceActionMomentum;
+          const priceMovePercent = Math.abs(priceActionMomentum?.movePercent || 0);
+          const priceDirection = priceActionMomentum?.direction || "neutral";
+          const macdExpandingForOverride = momentum?.macdExpanding === true;
+          const macdHistogramForOverride = momentum?.macdHistogram || 0;
+          const macdMatchesDirection = (priceDirection === "bullish" && macdHistogramForOverride > 0) ||
+                                       (priceDirection === "bearish" && macdHistogramForOverride < 0);
+          
+          // Check if conditions for price action override are met
+          const meetsMinMove = priceMovePercent >= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.MIN_PRICE_MOVE_PERCENT;
+          const isStrongMove = priceMovePercent >= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.STRONG_PRICE_MOVE_PERCENT;
+          const macdOk = !PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.REQUIRE_MACD_EXPANDING || macdExpandingForOverride;
+          const macdDirectionOk = !PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.REQUIRE_MACD_DIRECTION_MATCH || macdMatchesDirection;
+          const adxInRange = adx >= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.MIN_ADX && 
+                            adx <= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.MAX_ADX;
+          const reversalScoreOk = unifiedReversal.score <= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.MAX_REVERSAL_SCORE;
+          
+          if (meetsMinMove && macdOk && macdDirectionOk && adxInRange && reversalScoreOk && 
+              (priceDirection === "bullish" || priceDirection === "bearish")) {
+            priceActionOverrideActive = true;
+            priceActionOverrideDirection = priceDirection;
+            priceActionOverridePositionMultiplier = isStrongMove 
+              ? PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.STRONG_POSITION_REDUCTION
+              : PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.STANDARD_POSITION_REDUCTION;
+            
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🚀 PRICE ACTION OVERRIDE ACTIVE: ${priceMovePercent.toFixed(2)}% ${priceDirection.toUpperCase()} move`);
+            logger.forSymbol(symbol).info(`   → MACD expanding=${macdExpandingForOverride}, direction match=${macdMatchesDirection}`);
+            logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, reversal score=${unifiedReversal.score}`);
+            logger.forSymbol(symbol).info(`   → Position size: ${(priceActionOverridePositionMultiplier * 100).toFixed(0)}%`);
+          }
+        }
+        
+        // ===== PHASE 5: STRONG MOMENTUM OVERRIDE =====
+        // Bypass HTF alignment gates when momentum is undeniably strong
+        // This is the "momentum is overwhelming" exception path
+        let strongMomentumOverrideActive = false;
+        let strongMomentumOverridePositionMultiplier = 1.0;
+        
+        if (STRONG_MOMENTUM_OVERRIDE_PARAMS.ENABLED && !htfAligned && confidence < 65) {
+          const priceActionMomentum = trendData.priceActionMomentum;
+          const priceMovePercent = Math.abs(priceActionMomentum?.movePercent || 0);
+          const macdExpandingForSMO = momentum?.macdExpanding === true;
+          const macdStrongForSMO = momentum?.macdStrong === true;
+          const reversalScoreOkForSMO = unifiedReversal.score < STRONG_MOMENTUM_OVERRIDE_PARAMS.MAX_REVERSAL_SCORE;
+          const adxOkForSMO = adx >= STRONG_MOMENTUM_OVERRIDE_PARAMS.MIN_ADX;
+          
+          // Primary path: All conditions met (expanding + strong + move + adx + reversal)
+          const primaryPathMet = macdExpandingForSMO && 
+                                macdStrongForSMO && 
+                                priceMovePercent >= STRONG_MOMENTUM_OVERRIDE_PARAMS.MIN_PRICE_MOVE_PERCENT &&
+                                adxOkForSMO &&
+                                reversalScoreOkForSMO;
+          
+          // Fallback path: Expanding only (no strong) but larger move required
+          const fallbackPathMet = STRONG_MOMENTUM_OVERRIDE_PARAMS.ALLOW_WITHOUT_STRONG_MACD &&
+                                 macdExpandingForSMO &&
+                                 !macdStrongForSMO &&
+                                 priceMovePercent >= STRONG_MOMENTUM_OVERRIDE_PARAMS.FALLBACK_EXPANDING_ONLY_MIN_MOVE &&
+                                 adxOkForSMO &&
+                                 reversalScoreOkForSMO;
+          
+          if (primaryPathMet || fallbackPathMet) {
+            strongMomentumOverrideActive = true;
+            strongMomentumOverridePositionMultiplier = STRONG_MOMENTUM_OVERRIDE_PARAMS.POSITION_SIZE_MULTIPLIER;
+            
+            const pathUsed = primaryPathMet ? "PRIMARY" : "FALLBACK";
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ⚡ STRONG MOMENTUM OVERRIDE (${pathUsed}): Bypassing HTF alignment`);
+            logger.forSymbol(symbol).info(`   → MACD: expanding=${macdExpandingForSMO}, strong=${macdStrongForSMO}`);
+            logger.forSymbol(symbol).info(`   → Price move: ${priceMovePercent.toFixed(2)}%, ADX=${adx.toFixed(1)}, reversal=${unifiedReversal.score}`);
+            logger.forSymbol(symbol).info(`   → Position size: ${(strongMomentumOverridePositionMultiplier * 100).toFixed(0)}%`);
+          }
+        }
+        
+        // ===== PHASE 6: MOMENTUM BONUS SYSTEM =====
+        // Apply bonuses to gate thresholds when momentum is strong
+        let momentumBonus = 0;
+        let gateThresholdMultiplier = 1.0;
+        
+        if (MOMENTUM_BONUS_PARAMS.ENABLED) {
+          const priceActionMomentum = trendData.priceActionMomentum;
+          const priceMovePercent = Math.abs(priceActionMomentum?.movePercent || 0);
+          
+          // Accumulate bonuses
+          if (priceMovePercent >= MOMENTUM_BONUS_PARAMS.MIN_PRICE_MOVE_FOR_REDUCTION) {
+            momentumBonus += MOMENTUM_BONUS_PARAMS.PRICE_ACTION_BONUS;
+          }
+          if (momentum?.macdExpanding === true) {
+            momentumBonus += MOMENTUM_BONUS_PARAMS.MACD_EXPANDING_BONUS;
+          }
+          if (momentum?.macdStrong === true) {
+            momentumBonus += MOMENTUM_BONUS_PARAMS.MACD_STRONG_BONUS;
+          }
+          
+          // Cap bonus
+          momentumBonus = Math.min(momentumBonus, MOMENTUM_BONUS_PARAMS.MAX_TOTAL_BONUS);
+          
+          // Apply gate threshold reduction when strong momentum
+          if (priceMovePercent >= MOMENTUM_BONUS_PARAMS.MIN_PRICE_MOVE_FOR_REDUCTION) {
+            gateThresholdMultiplier = MOMENTUM_BONUS_PARAMS.GATE_THRESHOLD_REDUCTION_MULTIPLIER;
+          }
+          
+          if (momentumBonus > 0 && MOMENTUM_BONUS_PARAMS.LOG_BONUS_APPLICATION) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} MOMENTUM BONUS: +${momentumBonus} points, gate threshold multiplier: ${gateThresholdMultiplier}`);
+          }
+        }
+        
         // CRITICAL FIX: Also bypass HTF gate if LOW_ADX_TREND_EXCEPTION is active
+        // OR if PRICE_ACTION_OVERRIDE is active OR if STRONG_MOMENTUM_OVERRIDE is active
         // This allows transitional zone (ADX 20-25) entries when HTF confirmation exists via the exception
-        if (!htfAligned && confidence < 65 && !has1hStrongDirection && !hasMicroTrendBypass && !lowAdxTrendExceptionActive) {
+        const anyOverrideActive = lowAdxTrendExceptionActive || priceActionOverrideActive || strongMomentumOverrideActive;
+        
+        if (!htfAligned && confidence < 65 && !has1hStrongDirection && !hasMicroTrendBypass && !anyOverrideActive) {
           rejectedByHardGates++;
           const microTrendInfo = microTrend?.blocked 
             ? `blocked (${microTrend.blockReason})`

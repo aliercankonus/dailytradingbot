@@ -831,8 +831,9 @@ export const BREAKOUT_MODE_PARAMS = {
 // ============= PHASE 2: MICRO-TREND HARDENING PARAMETERS =============
 // Stricter requirements for micro-trend bypass when 4h is neutral
 export const MICRO_TREND_PARAMS = {
-  // MANDATORY: Minimum ADX required for micro-trend bypass (was no requirement)
-  MIN_ADX: 25,
+  // MANDATORY: Minimum ADX required for micro-trend bypass
+  // LOWERED from 25 to 23 to include edge cases like BNBUSDT (ADX 24.9)
+  MIN_ADX: 23,
   // MANDATORY: Minimum consecutive bars the micro-trend must persist
   MIN_PERSISTENCE_BARS: 3,
   // MANDATORY: Volume must be above 20-period MA
@@ -1534,6 +1535,7 @@ export const HTF_EXTREME_HARD_GATES = {
 // Exception: In confirmed bearish trends, low %B indicates trend continuation - shorts are VALID
 // Same logic applies symmetrically for longs at high %B
 // UPDATED: Relaxed LONG thresholds based on actual performance data showing LONGs performing well
+// PHASE 1 FIX: Allow shorts when %B < 0 (price below lower band = continuation, not bounce risk)
 export const BOLLINGER_ENTRY_GATES = {
   // BASE THRESHOLDS (applied in neutral/unclear trend)
   SHORT_MIN_PERCENT_B: 35,        // Shorts require %B >= 35 (relaxed from 40 to allow more signals)
@@ -1548,6 +1550,12 @@ export const BOLLINGER_ENTRY_GATES = {
   SHORT_BEARISH_TREND_MIN_PERCENT_B: 15,      // Bearish 4h trend: allow shorts down to %B >= 15
   SHORT_STRONG_BEARISH_MIN_PERCENT_B: 5,      // Strong bearish (ADX >= 22): allow down to %B >= 5
   
+  // PHASE 1 NEW: Allow shorts when %B is NEGATIVE (price broke below lower band)
+  // This is a momentum continuation signal, NOT a bounce risk
+  ALLOW_SHORTS_BELOW_ZERO_PERCENT_B: true,    // NEW: Allow shorts when %B < 0
+  SHORT_BELOW_ZERO_REQUIRE_MOMENTUM: true,    // Require MACD expanding OR 1h directional
+  SHORT_BELOW_ZERO_POSITION_REDUCTION: 0.60,  // 60% position size for extreme %B entries
+  
   // TREND-CONTEXT RELAXATION FOR LONGS (allow continuation in bullish trends)
   // If 4h is bullish with 60%+ confidence, longs are continuation - allow higher %B
   LONG_BULLISH_TREND_MAX_PERCENT_B: 85,       // Bullish 4h trend: allow longs up to %B <= 85
@@ -1558,6 +1566,89 @@ export const BOLLINGER_ENTRY_GATES = {
   
   // ADX threshold for "ranging market" - below this, apply relaxed squeeze rules
   RANGING_ADX_THRESHOLD: 23,
+} as const;
+
+// ============= PHASE 3: PRICE ACTION DIRECTION OVERRIDE =============
+// When all timeframes show neutral/low confidence, derive direction from price action
+// This allows entries based on significant price moves even without HTF confirmation
+export const PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS = {
+  ENABLED: true,
+  
+  // Minimum price move in 6 hours to derive direction
+  MIN_PRICE_MOVE_PERCENT: 1.5,
+  // Strong price move threshold (more aggressive entry)
+  STRONG_PRICE_MOVE_PERCENT: 2.0,
+  
+  // Additional requirements for override
+  REQUIRE_MACD_EXPANDING: true,           // MACD must be expanding
+  REQUIRE_MACD_DIRECTION_MATCH: true,     // MACD histogram must match price direction
+  
+  // Maximum ADX for price action override (in strong trends, use normal flow)
+  MAX_ADX: 28,                            // Only apply in moderate/weak trend environments
+  // Minimum ADX required (avoid completely dead markets)
+  MIN_ADX: 15,
+  
+  // Position sizing for price action override entries
+  STANDARD_POSITION_REDUCTION: 0.50,      // 50% for 1.5%+ moves
+  STRONG_POSITION_REDUCTION: 0.65,        // 65% for 2%+ moves (more confidence)
+  
+  // Maximum reversal score allowed
+  MAX_REVERSAL_SCORE: 45,
+  
+  // Direction derived from price action becomes the "intended direction"
+  EXCEPTION_TYPE: "PRICE_ACTION_OVERRIDE" as const,
+} as const;
+
+// ============= PHASE 5: STRONG MOMENTUM OVERRIDE =============
+// Bypass HTF alignment gates when momentum is undeniably strong
+// This is the "momentum is overwhelming" exception path
+export const STRONG_MOMENTUM_OVERRIDE_PARAMS = {
+  ENABLED: true,
+  
+  // ALL of these must be true to activate override
+  REQUIRE_MACD_EXPANDING: true,
+  REQUIRE_MACD_STRONG: true,              // MACD must be in "strong" state
+  MIN_PRICE_MOVE_PERCENT: 1.5,            // Price must have moved 1.5%+
+  MIN_ADX: 20,                            // ADX must be >= 20 (some trend)
+  MAX_REVERSAL_SCORE: 50,                 // Reversal score must be < 50
+  
+  // Optional relaxations
+  ALLOW_WITHOUT_STRONG_MACD: false,       // Strict: require strong MACD
+  FALLBACK_EXPANDING_ONLY_MIN_MOVE: 2.0,  // If MACD only expanding (not strong), need 2%+ move
+  
+  // Position sizing
+  POSITION_SIZE_MULTIPLIER: 0.55,         // 55% position size for momentum override entries
+  
+  // Stop loss adjustment (tighter)
+  STOP_LOSS_MULTIPLIER: 0.75,             // 0.75x normal stop (tighter)
+  
+  EXCEPTION_TYPE: "STRONG_MOMENTUM_OVERRIDE" as const,
+} as const;
+
+// ============= PHASE 6: MOMENTUM BONUS SYSTEM =============
+// Apply bonuses to confidence/quality scores when momentum is strong
+// Helps borderline cases pass gates without removing gate safety
+export const MOMENTUM_BONUS_PARAMS = {
+  ENABLED: true,
+  
+  // Bonus for strong price action momentum (1.5%+ move)
+  PRICE_ACTION_BONUS: 8,                  // +8 points to confidence
+  // Bonus for expanding MACD
+  MACD_EXPANDING_BONUS: 5,                // +5 points
+  // Bonus for MACD strong state
+  MACD_STRONG_BONUS: 5,                   // +5 points (stacks with expanding)
+  
+  // Maximum total bonus from momentum
+  MAX_TOTAL_BONUS: 15,
+  
+  // Threshold reduction for gates when momentum is strong
+  // Applied multiplicatively to gate thresholds (0.8 = 20% easier)
+  GATE_THRESHOLD_REDUCTION_MULTIPLIER: 0.80,
+  // Only apply reduction when price moved >= this
+  MIN_PRICE_MOVE_FOR_REDUCTION: 1.5,
+  
+  // Log when bonus is applied
+  LOG_BONUS_APPLICATION: true,
 } as const;
 
 // ============= RANGING MARKET DETECTION PARAMETERS =============
@@ -2092,9 +2183,10 @@ export const LOW_ADX_TREND_EXCEPTION_PARAMS = {
   TRANSITIONAL_MIN_1H_CONFIDENCE: 60,               // Higher 1h confidence requirement
   TRANSITIONAL_POSITION_REDUCTION: 0.45,            // Extra position reduction (45% vs 50%)
   
-  // ===== HTF REQUIREMENTS (Further relaxed for real-world conditions) =====
-  MIN_HTF_CONFIDENCE: 60,         // 4h trend must be >= 60% confidence
-  MIN_1H_CONFIDENCE: 55,          // 1h must also show direction
+  // ===== HTF REQUIREMENTS (Significantly relaxed - Phase 4 Gate Relaxation) =====
+  // LOWERED from 60% to 50% to allow more signals through
+  MIN_HTF_CONFIDENCE: 50,         // 4h trend must be >= 50% confidence
+  MIN_1H_CONFIDENCE: 50,          // 1h must also show direction (lowered from 55%)
   REQUIRE_TREND_ALIGNMENT: true,  // 4h and 1h must agree on direction
   
   // ===== 1H FALLBACK =====
