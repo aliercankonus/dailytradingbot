@@ -5619,14 +5619,17 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} MICRO-TREND detected but BLOCKED: ${microTrend.blockReason}`);
         }
         
-        if (!htfAligned && confidence < 65 && !has1hStrongDirection && !hasMicroTrendBypass) {
+        // CRITICAL FIX: Also bypass HTF gate if LOW_ADX_TREND_EXCEPTION is active
+        // This allows transitional zone (ADX 20-25) entries when HTF confirmation exists via the exception
+        if (!htfAligned && confidence < 65 && !has1hStrongDirection && !hasMicroTrendBypass && !lowAdxTrendExceptionActive) {
           rejectedByHardGates++;
           const microTrendInfo = microTrend?.blocked 
             ? `blocked (${microTrend.blockReason})`
             : microTrend?.hasMicroTrend === false 
               ? "not detected"
               : `insufficient (align=${microTrend?.alignment}, persist=${microTrend?.persistence}, volOK=${microTrend?.volumeConfirmed})`;
-          perSymbolGateAttribution.set(symbol, { gate: 'HTF_NOT_ALIGNED', details: `conf=${confidence}%, 1h=${confidence1h}%` });
+          const lowAdxInfo = lowAdxTrendExceptionActive ? ` (LOW_ADX_EXCEPTION active)` : '';
+          perSymbolGateAttribution.set(symbol, { gate: 'HTF_NOT_ALIGNED', details: `conf=${confidence}%, 1h=${confidence1h}%${lowAdxInfo}` });
           await logRejectionWithAI(
             supabase, userId, symbol,
             `HARD GATE: HTF not aligned, confidence too low, 1h not strong, and micro-trend ${microTrendInfo}`,
@@ -5648,6 +5651,11 @@ serve(async (req) => {
         // Log if using 1h strong direction exception
         if (!htfAligned && confidence < 65 && has1hStrongDirection) {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate passed via strong 1h (1h=${trend1h} ${confidence1h}%)`);
+        }
+        
+        // Log if using LOW_ADX_TREND_EXCEPTION to bypass HTF gate
+        if (!htfAligned && confidence < 65 && !has1hStrongDirection && !hasMicroTrendBypass && lowAdxTrendExceptionActive) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate passed via LOW_ADX_TREND_EXCEPTION (ADX=${adx.toFixed(1)} in 12-25 range with HTF confirmation)`);
         }
         
         // GATE 4: Confidence Dead Zone - REMOVED
