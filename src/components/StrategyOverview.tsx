@@ -54,6 +54,7 @@ export const StrategyOverview = () => {
         ) : (
           strategies
             .filter(s => s.status === 'active')
+            .sort((a, b) => parseFloat(b.winRate) - parseFloat(a.winRate))
             .map((strategy, idx) => (
           <div
             key={idx}
