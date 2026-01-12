@@ -1695,40 +1695,53 @@ export type MarketContext = 'TREND_CONTINUATION' | 'MEAN_REVERSION' | 'NEUTRAL';
 // ============= IMPROVEMENT 4: STRATEGY-SPECIFIC CONSTRAINTS =============
 // Lagging strategies like EMA Death Cross need context-awareness
 // Prevents signals in inappropriate conditions
+// UPDATED: Relaxed thresholds - oversold/overbought in trend direction is continuation, not risk
 export const STRATEGY_SPECIFIC_CONSTRAINTS = {
   EMA_DEATH_CROSS: {
-    // Minimum ADX required (strong trend validation)
-    MIN_ADX: 25,
+    // Minimum ADX required (strong trend validation) - LOWERED from 25 to 23
+    MIN_ADX: 23,
     // StochRSI must be above this (not oversold - bounce risk) - NORMAL mode
-    MIN_STOCHRSI_K: 30,
+    // RELAXED: Lowered from 30 to 15 - oversold in bearish trend is momentum continuation
+    MIN_STOCHRSI_K: 15,
     // STRONG TREND EXCEPTION: When ADX >= this, allow lower StochRSI
-    STRONG_TREND_ADX_THRESHOLD: 30,
+    // LOWERED from 30 to 25 to catch more trending conditions
+    STRONG_TREND_ADX_THRESHOLD: 25,
     // Minimum StochRSI allowed even in strong trend mode (absolute floor)
-    STRONG_TREND_MIN_STOCHRSI_K: 10,
+    // LOWERED from 10 to 3 - in strong bearish, K near 0 is continuation
+    STRONG_TREND_MIN_STOCHRSI_K: 3,
     // Require StochRSI falling (K < D) for strong trend exception
-    STRONG_TREND_REQUIRE_FALLING: true,
+    // DISABLED - in continuation moves, K can stay pinned low while price falls
+    STRONG_TREND_REQUIRE_FALLING: false,
     // %B must be above this (not at lower band)
-    MIN_PERCENT_B: 40,
+    // LOWERED from 40 to 20 - price below lower band in bearish is continuation
+    MIN_PERCENT_B: 20,
     // In strong trend mode, allow lower %B
-    STRONG_TREND_MIN_PERCENT_B: 20,
+    // LOWERED from 20 to 0 - allow negative %B in strong trends
+    STRONG_TREND_MIN_PERCENT_B: 0,
     // Hard block on fake breakout risk
     BLOCK_ON_FAKE_BREAKOUT: true,
   },
   EMA_GOLDEN_CROSS: {
-    // Minimum ADX required
-    MIN_ADX: 25,
+    // Minimum ADX required - LOWERED from 25 to 23
+    MIN_ADX: 23,
     // StochRSI must be below this (not overbought - reversal risk) - NORMAL mode
-    MAX_STOCHRSI_K: 70,
+    // RELAXED: Raised from 70 to 85 - overbought in bullish trend is momentum continuation
+    MAX_STOCHRSI_K: 85,
     // STRONG TREND EXCEPTION: When ADX >= this, allow higher StochRSI
-    STRONG_TREND_ADX_THRESHOLD: 30,
+    // LOWERED from 30 to 25 to catch more trending conditions
+    STRONG_TREND_ADX_THRESHOLD: 25,
     // Maximum StochRSI allowed even in strong trend mode (absolute ceiling)
-    STRONG_TREND_MAX_STOCHRSI_K: 90,
+    // RAISED from 90 to 97 - in strong bullish, K near 100 is continuation
+    STRONG_TREND_MAX_STOCHRSI_K: 97,
     // Require StochRSI rising (K > D) for strong trend exception
-    STRONG_TREND_REQUIRE_RISING: true,
+    // DISABLED - in continuation moves, K can stay pinned high while price rises
+    STRONG_TREND_REQUIRE_RISING: false,
     // %B must be below this (not at upper band)
-    MAX_PERCENT_B: 60,
+    // RAISED from 60 to 80 - price above upper band in bullish is continuation
+    MAX_PERCENT_B: 80,
     // In strong trend mode, allow higher %B
-    STRONG_TREND_MAX_PERCENT_B: 80,
+    // RAISED from 80 to 100+ - allow very high %B in strong trends
+    STRONG_TREND_MAX_PERCENT_B: 110,
     // Hard block on fake breakout risk
     BLOCK_ON_FAKE_BREAKOUT: true,
   },
