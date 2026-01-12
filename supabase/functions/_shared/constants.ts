@@ -2262,6 +2262,60 @@ export const REGIME_ADAPTIVE_ADX_PARAMS = {
   LOG_REGIME_THRESHOLD: true,
 } as const;
 
+// ============= CONFIRMED MOMENTUM DIRECTION OVERRIDE =============
+// When all timeframes are neutral but momentum is CONFIRMED, use MACD histogram
+// direction to derive trade direction. This addresses the disconnect between
+// strong momentum confirmation and neutral EMA-based trend classification.
+export const MOMENTUM_DIRECTION_OVERRIDE_PARAMS = {
+  ENABLED: true,
+  
+  // ===== ACTIVATION CONDITIONS =====
+  // Requires momentum state to be "confirmed"
+  REQUIRE_CONFIRMED_MOMENTUM: true,
+  // Requires genuine momentum (MACD expanding + ADX rising)
+  REQUIRE_GENUINE_MOMENTUM: true,
+  // Minimum ADX for override to apply
+  MIN_ADX: 20,
+  
+  // ===== MACD DIRECTION THRESHOLDS =====
+  // Minimum MACD histogram magnitude to use as direction source
+  // (avoids noise from near-zero histograms)
+  MIN_MACD_MAGNITUDE: 0.00005,
+  // Strong MACD magnitude (gets higher position size)
+  STRONG_MACD_MAGNITUDE: 0.0002,
+  
+  // ===== POSITION SIZING =====
+  // Base position size multiplier for momentum-derived direction
+  POSITION_SIZE_MULTIPLIER: 0.60,    // 60% of normal
+  // Higher size for strong MACD signal
+  STRONG_MACD_POSITION_MULTIPLIER: 0.70,  // 70% of normal
+  
+  // ===== EXCEPTION TYPE FOR TRACKING =====
+  EXCEPTION_TYPE: "MOMENTUM_DIRECTION_OVERRIDE" as const,
+} as const;
+
+// ============= ORDER FLOW DIRECTION FALLBACK =============
+// When trends are neutral but order flow shows strong buy/sell pressure,
+// use order flow signal to derive trade direction.
+export const ORDER_FLOW_DIRECTION_PARAMS = {
+  ENABLED: true,
+  
+  // ===== ACTIVATION CONDITIONS =====
+  // Minimum order flow score to use as direction source
+  MIN_ORDER_FLOW_SCORE: 70,
+  // Order flow signal must be strong_buy or strong_sell
+  REQUIRE_STRONG_SIGNAL: true,
+  // Minimum ADX (must not be completely flat market)
+  MIN_ADX: 18,
+  
+  // ===== POSITION SIZING =====
+  // Position size multiplier for order-flow-derived direction
+  POSITION_SIZE_MULTIPLIER: 0.55,    // 55% of normal (more conservative)
+  
+  // ===== EXCEPTION TYPE FOR TRACKING =====
+  EXCEPTION_TYPE: "ORDER_FLOW_DIRECTION" as const,
+} as const;
+
 // ============= NEUTRAL PERSISTENCE MODELING =============
 // Tracks how long a market has been neutral
 // Longer neutral periods that resolve into drift are more meaningful
