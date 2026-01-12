@@ -1252,9 +1252,14 @@ serve(async (req) => {
       const priceDirection = priceChange > 0 ? "bullish" : priceChange < 0 ? "bearish" : "neutral";
       
       // Check if can override neutral alignment (for momentum continuation at extremes)
+      // Use TIERED ADX requirement: stronger price moves require less ADX confirmation
+      const adxThreshold = meetsStrongThreshold 
+        ? MOMENTUM_CONTINUATION_PARAMS.MIN_ADX_FOR_PRICE_ACTION  // 18 for 2%+ moves
+        : (MOMENTUM_CONTINUATION_PARAMS.MIN_ADX_FOR_MODERATE_MOVE || MOMENTUM_CONTINUATION_PARAMS.MIN_ADX_FOR_PRICE_ACTION);  // 20 for 1.5-2% moves
+      
       const canOverride = MOMENTUM_CONTINUATION_PARAMS.OVERRIDE_NEUTRAL_ALIGNMENT &&
         meetsThreshold &&
-        adx >= MOMENTUM_CONTINUATION_PARAMS.MIN_ADX_FOR_PRICE_ACTION;
+        adx >= adxThreshold;
       
       priceActionMomentum = {
         hasStrongMove: meetsThreshold,
