@@ -2123,7 +2123,12 @@ export const calculateQualityScore = (
   
   const adxScore = getAdxScore(adx);
   const adxRising = trendData?.volatility?.adxRising ?? false;
-  const momentumScore = getMomentumScore(momentum, adx, adxRising);
+  
+  // Extract StochRSI data for the decline bonus calculation
+  const stochRsi1h = trendData?.stochasticRsi?.['1h'];
+  const stochRsiData = stochRsi1h ? { k: stochRsi1h.k ?? 50, d: stochRsi1h.d ?? 50 } : undefined;
+  
+  const momentumScore = getMomentumScore(momentum, adx, adxRising, stochRsiData);
   const alignmentScore = getAlignmentScore(confidence, consistency, aligned, trendData);
   const technicalScore = getTechnicalScore(trendData, effectiveTrend, symbol);
   const volumeScoreVal = getVolumeScore(volumeConfirms, volumeSpike, volumeRatio, hasRangeExpansion, effectiveTrend);
