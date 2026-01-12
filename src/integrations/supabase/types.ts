@@ -907,6 +907,8 @@ export type Database = {
           recovery_trades_today: number | null
           regime_aware_trading: boolean | null
           require_volume_confirmation: boolean | null
+          shadow_mode_enabled: boolean | null
+          shadow_mode_started_at: string | null
           sms_notifications_enabled: boolean | null
           stale_peak_protection_enabled: boolean | null
           standard_tp_multiplier: number | null
@@ -1002,6 +1004,8 @@ export type Database = {
           recovery_trades_today?: number | null
           regime_aware_trading?: boolean | null
           require_volume_confirmation?: boolean | null
+          shadow_mode_enabled?: boolean | null
+          shadow_mode_started_at?: string | null
           sms_notifications_enabled?: boolean | null
           stale_peak_protection_enabled?: boolean | null
           standard_tp_multiplier?: number | null
@@ -1097,6 +1101,8 @@ export type Database = {
           recovery_trades_today?: number | null
           regime_aware_trading?: boolean | null
           require_volume_confirmation?: boolean | null
+          shadow_mode_enabled?: boolean | null
+          shadow_mode_started_at?: string | null
           sms_notifications_enabled?: boolean | null
           stale_peak_protection_enabled?: boolean | null
           standard_tp_multiplier?: number | null
@@ -1163,6 +1169,84 @@ export type Database = {
           user_id?: string
           win_rate?: number | null
           winning_trades?: number | null
+        }
+        Relationships: []
+      }
+      shadow_mode_signals: {
+        Row: {
+          confidence_score: number | null
+          created_at: string
+          entry_price: number | null
+          expires_at: string
+          gate_blocked_by: string
+          gate_details: Json | null
+          id: string
+          indicators: Json | null
+          new_gate_result: string
+          new_position_multiplier: number | null
+          old_gate_result: string
+          old_position_multiplier: number | null
+          outcome_notes: string | null
+          outcome_tracked: boolean | null
+          signal_type: string
+          simulated_pnl_percent: number | null
+          stop_loss: number | null
+          strategy_name: string | null
+          symbol: string
+          take_profit: number | null
+          trend: string | null
+          user_id: string
+          would_have_won: boolean | null
+        }
+        Insert: {
+          confidence_score?: number | null
+          created_at?: string
+          entry_price?: number | null
+          expires_at?: string
+          gate_blocked_by: string
+          gate_details?: Json | null
+          id?: string
+          indicators?: Json | null
+          new_gate_result: string
+          new_position_multiplier?: number | null
+          old_gate_result: string
+          old_position_multiplier?: number | null
+          outcome_notes?: string | null
+          outcome_tracked?: boolean | null
+          signal_type: string
+          simulated_pnl_percent?: number | null
+          stop_loss?: number | null
+          strategy_name?: string | null
+          symbol: string
+          take_profit?: number | null
+          trend?: string | null
+          user_id: string
+          would_have_won?: boolean | null
+        }
+        Update: {
+          confidence_score?: number | null
+          created_at?: string
+          entry_price?: number | null
+          expires_at?: string
+          gate_blocked_by?: string
+          gate_details?: Json | null
+          id?: string
+          indicators?: Json | null
+          new_gate_result?: string
+          new_position_multiplier?: number | null
+          old_gate_result?: string
+          old_position_multiplier?: number | null
+          outcome_notes?: string | null
+          outcome_tracked?: boolean | null
+          signal_type?: string
+          simulated_pnl_percent?: number | null
+          stop_loss?: number | null
+          strategy_name?: string | null
+          symbol?: string
+          take_profit?: number | null
+          trend?: string | null
+          user_id?: string
+          would_have_won?: boolean | null
         }
         Relationships: []
       }
