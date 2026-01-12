@@ -2701,7 +2701,11 @@ serve(async (req) => {
                 state: momentum?.state,
                 hasDivergence: momentum?.hasDivergence,
                 lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend,
-                macdDirectionAligned: momentum?.macdDirectionAligned
+                macdDirectionAligned: momentum?.macdDirectionAligned,
+                macdExpanding: momentum?.macdExpanding,
+                consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
+                consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
+                consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
               },
               stochRsi: trendData.stochasticRsi?.aggregated,
               trend1h: htfTrend1h
@@ -5052,7 +5056,10 @@ serve(async (req) => {
                   momentum: {
                     state: momentum?.state || "none",
                     confirms: momentum?.confirms ?? false,
-                    macdExpanding: momentum?.macdExpanding ?? false
+                    macdExpanding: momentum?.macdExpanding ?? false,
+                    consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
+                    consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
+                    consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
                   },
                   bollinger: {
                     squeeze4h: trendData.bollingerBands?.['4h']?.squeeze,
@@ -5103,7 +5110,10 @@ serve(async (req) => {
                   state: momentum?.state || "none",
                   confirms: momentum?.confirms ?? false,
                   macdHistogram: momentum?.macdHistogram?.toFixed(4),
-                  lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend
+                  lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend,
+                  consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
+                  consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
+                  consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
                 },
                 stochRsi: trendData.stochasticRsi?.aggregated,
                 volatility: {
@@ -5182,14 +5192,19 @@ serve(async (req) => {
                 stochRsiSafe: stochRsiSafeForAcceleration,
                 htfMatches: htfMatchesDirection
               },
-              // Detailed momentum analysis
+              // Detailed momentum analysis - INCLUDE ALL FIELDS FOR DEBUGGING
               momentum: {
                 state: momentumState,
                 confirms: momentumConfirms,
                 macdHistogram: momentum?.macdHistogram?.toFixed(4),
                 macdDirectionAligned: momentum?.macdDirectionAligned,
+                macdExpanding: momentum?.macdExpanding,
                 lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend,
-                hasDivergence: momentum?.hasDivergence
+                hasDivergence: momentum?.hasDivergence,
+                // Consecutive bar counts for price action confirmation
+                consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
+                consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
+                consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
               },
               stochRsi: trendData.stochasticRsi?.aggregated,
               htfFilter: {
