@@ -59,6 +59,17 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
       const getTfTrend = (tf: string) =>
         timeframes?.[tf]?.trend ?? timeframes?.[tf]?.indicators?.emaSignal ?? "unknown";
 
+      const toNumber = (value: unknown, fallback = 0) => {
+        const n = typeof value === "string" ? parseFloat(value) : typeof value === "number" ? value : Number(value);
+        return Number.isFinite(n) ? n : fallback;
+      };
+
+      const macdHistogramRaw =
+        data.momentum?.macdHistogram ??
+        timeframes?.["1h"]?.indicators?.macdHistogram ??
+        timeframes?.["1h"]?.indicators?.macd?.histogram ??
+        0;
+
       return {
         symbol,
         momentum: {
@@ -68,9 +79,11 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
           state: data.momentum?.state ?? "none",
           lastCloseAlignsWithTrend: data.momentum?.lastCloseAlignsWithTrend ?? false,
           hasDivergence: data.momentum?.hasDivergence ?? false,
-          macdHistogram: timeframes["1h"]?.indicators?.macd?.histogram ?? 0,
+          macdHistogram: toNumber(macdHistogramRaw, 0),
           macdExpanding: data.momentum?.macdExpanding ?? false,
-          macdDirectionAligned: data.momentum?.macdStrong || data.momentum?.macdExpanding,
+          macdDirectionAligned:
+            data.momentum?.macdDirectionAligned ??
+            Boolean(data.momentum?.macdStrong || data.momentum?.macdExpanding),
           adx: volatility.adx ?? 0,
           adxRising: data.momentum?.adxRising,
           fakeBreakoutRisk: data.momentum?.fakeBreakoutRisk,
