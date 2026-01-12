@@ -2120,7 +2120,18 @@ serve(async (req) => {
               primaryTrend: trend,
               confidence: directionResult.confidence,
               lateGrindChecked: LATE_GRIND_ACCEPTANCE_PARAMS.ENABLED,
-              stealthDrift: trendData.stealthTrend?.driftPercent || 0
+              stealthDrift: trendData.stealthTrend?.driftPercent || 0,
+              momentum: {
+                confirms: momentum?.confirms ?? false,
+                state: momentum?.state ?? 'none',
+                hasDivergence: momentum?.hasDivergence ?? false,
+                lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend ?? false,
+                macdDirectionAligned: momentum?.macdDirectionAligned ?? false,
+                macdExpanding: momentum?.macdExpanding ?? false,
+                consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
+                consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
+                consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
+              }
             },
             trendData,
             riskParams.ai_analysis_enabled !== false,
@@ -5586,7 +5597,18 @@ serve(async (req) => {
                 confidence1h: conf1hForGate,
                 requiredConfidence: 55,
                 is1hDirectional,
-                adx: adx.toFixed(1)
+                adx: adx.toFixed(1),
+                momentum: {
+                  confirms: momentum?.confirms ?? false,
+                  state: momentum?.state ?? 'none',
+                  hasDivergence: momentum?.hasDivergence ?? false,
+                  lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend ?? false,
+                  macdDirectionAligned: momentum?.macdDirectionAligned ?? false,
+                  macdExpanding: momentum?.macdExpanding ?? false,
+                  consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
+                  consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
+                  consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
+                }
               },
               trendData,
               riskParams.ai_analysis_enabled !== false
@@ -5816,7 +5838,18 @@ serve(async (req) => {
               trend1h, 
               microTrend: microTrend || null,
               microTrendInfo,
-              gate: "HTF_NOT_ALIGNED" 
+              gate: "HTF_NOT_ALIGNED",
+              momentum: {
+                confirms: momentum?.confirms ?? false,
+                state: momentum?.state ?? 'none',
+                hasDivergence: momentum?.hasDivergence ?? false,
+                lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend ?? false,
+                macdDirectionAligned: momentum?.macdDirectionAligned ?? false,
+                macdExpanding: momentum?.macdExpanding ?? false,
+                consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
+                consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
+                consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
+              }
             },
             trendData,
             riskParams.ai_analysis_enabled !== false
