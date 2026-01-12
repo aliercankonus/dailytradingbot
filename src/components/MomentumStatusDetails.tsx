@@ -230,9 +230,9 @@ export const MomentumStatusDetails = () => {
                                         </span>
                                       </div>
                                     ) : (
-                                      <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800">
-                                        <Minus className="h-3 w-3 text-gray-600 dark:text-gray-400" />
-                                        <span className="text-xs text-gray-700 dark:text-gray-300 font-medium">Neutral</span>
+                                      <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600">
+                                        <Minus className="h-3 w-3 text-slate-700 dark:text-slate-200" />
+                                        <span className="text-xs text-slate-800 dark:text-slate-100 font-medium">Neutral</span>
                                       </div>
                                     )}
                                   </>
