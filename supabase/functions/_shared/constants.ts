@@ -2543,16 +2543,26 @@ export const ADX_EXHAUSTION_REFINED_PARAMS = {
   // Time-in-trend context (NEW from expert review)
   // Short trends rolling over != exhaustion
   MIN_TREND_AGE_BARS: 40,             // Minimum 40 bars (40 1h candles) for exhaustion
+  MIN_TREND_AGE_FOR_EXHAUSTION: 40,   // Alias for clarity in smart-momentum.ts
   
-  // Reduced scoring for rollover alone
+  // ===== SCORING (Reduced weights for score multiplier approach) =====
   SCORE_ADX_ROLLOVER: 35,             // Was 60, now 35 (allows with reduced position)
+  SCORE_HIDDEN_WEAKNESS: 12,          // Reduced from 15
+  SCORE_DI_COMPRESSION: 20,           // Reduced from 25
+  SCORE_MOMENTUM_DIVERGENCE: 20,      // Reduced from 25
+  SCORE_PRICE_ACTION_CONFIRM: 15,     // NEW: Bonus when reversal candle confirms
+  SCORE_SLOPE_NEGATIVE: 10,           // Reduced from 15
   
-  // Exhaustion threshold raised
+  // ===== EXHAUSTION THRESHOLDS =====
   EXHAUSTION_THRESHOLD: 70,           // Was 50, now 70 (requires multiple signals)
+  SOFT_EXHAUSTION_THRESHOLD: 35,      // Score 35-49: use POSITION_MULTIPLIER_SOFT
+  HARD_EXHAUSTION_THRESHOLD: 50,      // Score 50-69: use POSITION_MULTIPLIER_HARD
   
-  // Position sizing for near-exhaustion
+  // ===== POSITION SIZING (Score-based instead of hard block) =====
   POSITION_MULTIPLIER_35_49: 0.80,    // Score 35-49: 80% position
   POSITION_MULTIPLIER_50_69: 0.65,    // Score 50-69: 65% position
+  POSITION_MULTIPLIER_SOFT: 0.80,     // Alias: Score 35-49
+  POSITION_MULTIPLIER_HARD: 0.65,     // Alias: Score 50-69
   // Score >= 70: BLOCK (multiple signals confirm exhaustion)
 } as const;
 
