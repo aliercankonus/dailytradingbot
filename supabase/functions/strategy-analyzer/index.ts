@@ -76,6 +76,10 @@ import {
   STRONG_MOMENTUM_OVERRIDE_PARAMS,
   // NEW: Phase 6 - Momentum Bonus System for gate relaxation
   MOMENTUM_BONUS_PARAMS,
+  // NEW: Confirmed Momentum Direction Override - use MACD direction when trends neutral
+  MOMENTUM_DIRECTION_OVERRIDE_PARAMS,
+  // NEW: Order Flow Direction Fallback - use order flow when trends neutral
+  ORDER_FLOW_DIRECTION_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -2105,8 +2109,64 @@ serve(async (req) => {
           }
         }
         
-        // REJECT EARLY: If no clear trade direction can be determined AND late grind not accepted
-        if (!directionResult.direction && !lateGrindAccepted) {
+        // ============= NEW: CONFIRMED MOMENTUM DIRECTION OVERRIDE =============
+        // When all timeframes are neutral but momentum is CONFIRMED, use MACD histogram
+        // direction to derive trade direction. This addresses momentum-trend disconnect.
+        let momentumDirectionOverrideApplied = false;
+        let momentumDerivedDirection: "long" | "short" | null = null;
+        let momentumDerivedPositionMultiplier = 1.0;
+        
+        if (!directionResult.direction && !lateGrindAccepted && MOMENTUM_DIRECTION_OVERRIDE_PARAMS.ENABLED) {
+          const momentumConfirmed = momentum?.state === "confirmed";
+          const genuineMomentum = momentum?.genuineMomentum === true;
+          const adxSufficient = adx >= MOMENTUM_DIRECTION_OVERRIDE_PARAMS.MIN_ADX;
+          const macdHist = momentum?.macdHistogram ?? 0;
+          const macdMagnitude = Math.abs(macdHist);
+          
+          if (momentumConfirmed && genuineMomentum && adxSufficient && macdMagnitude >= MOMENTUM_DIRECTION_OVERRIDE_PARAMS.MIN_MACD_MAGNITUDE) {
+            // Use MACD histogram to determine direction
+            momentumDerivedDirection = macdHist > 0 ? "long" : "short";
+            momentumDirectionOverrideApplied = true;
+            
+            // Determine position size based on MACD strength
+            momentumDerivedPositionMultiplier = macdMagnitude >= MOMENTUM_DIRECTION_OVERRIDE_PARAMS.STRONG_MACD_MAGNITUDE
+              ? MOMENTUM_DIRECTION_OVERRIDE_PARAMS.STRONG_MACD_POSITION_MULTIPLIER
+              : MOMENTUM_DIRECTION_OVERRIDE_PARAMS.POSITION_SIZE_MULTIPLIER;
+            
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 MOMENTUM DIRECTION OVERRIDE: Deriving ${momentumDerivedDirection} from MACD histogram=${macdHist.toFixed(6)}`);
+            logger.forSymbol(symbol).info(`   → Momentum confirmed=${momentumConfirmed}, genuine=${genuineMomentum}, ADX=${adx.toFixed(1)}, MACD expanding=${momentum?.macdExpanding}`);
+            logger.forSymbol(symbol).info(`   → Position size: ${(momentumDerivedPositionMultiplier * 100).toFixed(0)}%`);
+          }
+        }
+        
+        // ============= NEW: ORDER FLOW DIRECTION FALLBACK =============
+        // When trends are neutral but order flow shows strong buy/sell pressure
+        let orderFlowDirectionOverrideApplied = false;
+        let orderFlowDerivedDirection: "long" | "short" | null = null;
+        let orderFlowDerivedPositionMultiplier = 1.0;
+        
+        if (!directionResult.direction && !lateGrindAccepted && !momentumDirectionOverrideApplied && ORDER_FLOW_DIRECTION_PARAMS.ENABLED) {
+          const orderFlowScore = earlyOrderFlowAnalysis?.score ?? 0;
+          const orderFlowSignal = earlyOrderFlowAnalysis?.signal ?? "neutral";
+          const adxSufficient = adx >= ORDER_FLOW_DIRECTION_PARAMS.MIN_ADX;
+          
+          const isStrongSignal = ORDER_FLOW_DIRECTION_PARAMS.REQUIRE_STRONG_SIGNAL
+            ? (orderFlowSignal === "strong_buy" || orderFlowSignal === "strong_sell")
+            : true;
+          
+          if (orderFlowScore >= ORDER_FLOW_DIRECTION_PARAMS.MIN_ORDER_FLOW_SCORE && isStrongSignal && adxSufficient) {
+            orderFlowDerivedDirection = orderFlowSignal === "strong_buy" || orderFlowSignal === "buy" ? "long" : "short";
+            orderFlowDirectionOverrideApplied = true;
+            orderFlowDerivedPositionMultiplier = ORDER_FLOW_DIRECTION_PARAMS.POSITION_SIZE_MULTIPLIER;
+            
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 📊 ORDER FLOW DIRECTION FALLBACK: Deriving ${orderFlowDerivedDirection} from ${orderFlowSignal} (score=${orderFlowScore})`);
+            logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, Position size: ${(orderFlowDerivedPositionMultiplier * 100).toFixed(0)}%`);
+          }
+        }
+        
+        // REJECT EARLY: If no clear trade direction can be determined AND no overrides applied
+        const hasDirectionOverride = momentumDirectionOverrideApplied || orderFlowDirectionOverrideApplied;
+        if (!directionResult.direction && !lateGrindAccepted && !hasDirectionOverride) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
@@ -2120,10 +2180,15 @@ serve(async (req) => {
               primaryTrend: trend,
               confidence: directionResult.confidence,
               lateGrindChecked: LATE_GRIND_ACCEPTANCE_PARAMS.ENABLED,
+              momentumDirectionOverrideChecked: MOMENTUM_DIRECTION_OVERRIDE_PARAMS.ENABLED,
+              orderFlowDirectionChecked: ORDER_FLOW_DIRECTION_PARAMS.ENABLED,
+              orderFlowScore: earlyOrderFlowAnalysis?.score ?? 0,
+              orderFlowSignal: earlyOrderFlowAnalysis?.signal ?? "neutral",
               stealthDrift: trendData.stealthTrend?.driftPercent || 0,
               momentum: {
                 confirms: momentum?.confirms ?? false,
                 state: momentum?.state ?? 'none',
+                genuineMomentum: momentum?.genuineMomentum ?? false,
                 hasDivergence: momentum?.hasDivergence ?? false,
                 lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend ?? false,
                 macdDirectionAligned: momentum?.macdDirectionAligned ?? false,
@@ -2142,11 +2207,35 @@ serve(async (req) => {
         }
         
         // Use derived direction consistently throughout signal generation
-        // If late grind accepted, use lateGrindDirection instead of directionResult.direction
-        // We know derivedDirection is non-null here because we continue if both are null above
-        const derivedDirection = (directionResult.direction || lateGrindDirection) as "long" | "short";
-        const derivedSource = lateGrindAccepted ? "late-grind-acceptance" : directionResult.source;
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} Direction derived: ${derivedDirection} from ${derivedSource} (${directionResult.confidence.toFixed(0)}% conf)${lateGrindAccepted ? ' [LATE_GRIND]' : ''}`);
+        // Priority: original direction > late grind > momentum override > order flow override
+        const derivedDirection = (
+          directionResult.direction || 
+          lateGrindDirection || 
+          momentumDerivedDirection || 
+          orderFlowDerivedDirection
+        ) as "long" | "short";
+        
+        // Determine source for logging
+        const derivedSource = momentumDirectionOverrideApplied 
+          ? "momentum-direction-override"
+          : orderFlowDirectionOverrideApplied 
+            ? "order-flow-direction"
+            : lateGrindAccepted 
+              ? "late-grind-acceptance" 
+              : directionResult.source;
+        
+        // Apply override position multipliers if used
+        let overridePositionMultiplier = 1.0;
+        if (momentumDirectionOverrideApplied) {
+          overridePositionMultiplier = momentumDerivedPositionMultiplier;
+        } else if (orderFlowDirectionOverrideApplied) {
+          overridePositionMultiplier = orderFlowDerivedPositionMultiplier;
+        }
+        
+        const overrideSuffix = momentumDirectionOverrideApplied ? ' [MOMENTUM_OVERRIDE]' 
+          : orderFlowDirectionOverrideApplied ? ' [ORDER_FLOW_OVERRIDE]' 
+          : lateGrindAccepted ? ' [LATE_GRIND]' : '';
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} Direction derived: ${derivedDirection} from ${derivedSource} (${directionResult.confidence.toFixed(0)}% conf)${overrideSuffix}`);
         if (directionResult.reasons.some(r => r.includes("Warning"))) {
           logger.forSymbol(symbol).warn(`   ${directionResult.reasons.filter(r => r.includes("Warning")).join(", ")}`);
         }
@@ -5584,14 +5673,28 @@ serve(async (req) => {
         const is1hDirectional = htfTrend1h === "bullish" || htfTrend1h === "bearish";
         
         if (is4hNeutral) {
-          // Relaxed thresholds: 55% for 4h OR directional 1h with 50%+
-          const passesNeutralGate = conf4hForGate >= 55 || (is1hDirectional && conf1hForGate >= 50);
+          // ============= NEW: CONFIRMED MOMENTUM BYPASS =============
+          // When momentum is confirmed with genuine momentum and ADX is trending,
+          // bypass the strict neutral 4h confidence gate since momentum confirmation
+          // provides sufficient directional evidence
+          const momentumConfirmedBypass = (
+            momentum?.state === "confirmed" &&
+            momentum?.genuineMomentum === true &&
+            adx >= 25 &&  // ADX must be in trending range
+            (momentum?.macdExpanding === true || momentum?.adxRising === true)
+          );
+          
+          // Relaxed thresholds: 55% for 4h OR directional 1h with 50%+ OR momentum confirmed
+          const passesNeutralGate = conf4hForGate >= 55 || 
+            (is1hDirectional && conf1hForGate >= 50) ||
+            momentumConfirmedBypass;
+          
           if (!passesNeutralGate) {
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { gate: 'NEUTRAL_4H_LOW_CONFIDENCE', details: `4h=${conf4hForGate.toFixed(0)}%, 1h=${conf1hForGate.toFixed(0)}%` });
             await logRejectionWithAI(
               supabase, userId, symbol,
-              `HARD GATE: Neutral 4h requires 55%+ confidence OR directional 1h with 50%+ (4h=${trend4hForNeutralGate} ${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`,
+              `HARD GATE: Neutral 4h requires 55%+ confidence OR directional 1h with 50%+ OR confirmed momentum (4h=${trend4hForNeutralGate} ${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`,
               { 
                 gate: "NEUTRAL_4H_LOW_CONFIDENCE",
                 trend4h: trend4hForNeutralGate,
@@ -5601,6 +5704,10 @@ serve(async (req) => {
                 requiredConfidence: 55,
                 is1hDirectional,
                 adx: adx.toFixed(1),
+                momentumConfirmedBypassChecked: true,
+                momentumConfirmed: momentum?.state === "confirmed",
+                genuineMomentum: momentum?.genuineMomentum === true,
+                macdExpanding: momentum?.macdExpanding === true,
                 momentum: {
                   confirms: momentum?.confirms ?? false,
                   state: momentum?.state ?? 'none',
@@ -5618,6 +5725,11 @@ serve(async (req) => {
               riskParams.ai_analysis_enabled !== false
             );
             continue;
+          }
+          
+          // Log if momentum bypass was used
+          if (momentumConfirmedBypass && !(conf4hForGate >= 55) && !(is1hDirectional && conf1hForGate >= 50)) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 MOMENTUM CONFIRMED BYPASS: Neutral 4h gate bypassed due to confirmed momentum (ADX=${adx.toFixed(1)}, MACD expanding=${momentum?.macdExpanding})`);
           }
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Neutral 4h gate passed (4h=${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`);
         }
@@ -7612,6 +7724,14 @@ serve(async (req) => {
         if (lateGrindAccepted && lateGrindPositionMultiplier < 1.0) {
           positionSizeMultiplier *= lateGrindPositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🐌 LATE GRIND ACCEPTANCE entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 18: Apply Momentum/Order Flow Direction Override position reduction (55-70%)
+        // Entries derived from momentum or order flow when trends are neutral get reduced position
+        if (overridePositionMultiplier < 1.0) {
+          positionSizeMultiplier *= overridePositionMultiplier;
+          const overrideType = momentumDirectionOverrideApplied ? "MOMENTUM DIRECTION" : "ORDER FLOW DIRECTION";
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🎯 ${overrideType} OVERRIDE entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
         // Final position size as percentage
