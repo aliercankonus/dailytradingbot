@@ -1455,6 +1455,13 @@ serve(async (req) => {
         state: momentumState,
         macdExpanding,
         macdStrong,
+        // IMPORTANT: Include actual MACD histogram value for UI display
+        macdHistogram: trend1h.indicators?.macdHistogram ?? 0,
+        macdDirectionAligned: (trend1h.indicators?.macdHistogram ?? 0) > 0 
+          ? (dominantTrend === "bullish") 
+          : (trend1h.indicators?.macdHistogram ?? 0) < 0 
+            ? (dominantTrend === "bearish") 
+            : false,
         lastCloseAlignsWithTrend,
         hasDivergence,
         confirms: momentumConfirms,
