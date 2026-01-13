@@ -7421,6 +7421,7 @@ serve(async (req) => {
           signalType: "long" | "short";
           positionSizeMultiplier?: number;  // Added for convergence entries
           convergenceEntry?: boolean;       // Flag for logging
+          percentBBypassMultiplier?: number; // PHASE 2 FIX: Carry %B bypass multiplier (0.70) through to position sizing
         }
         const candidates: StrategyCandidate[] = [];
         
@@ -7614,6 +7615,9 @@ serve(async (req) => {
               // EMA Death Cross needs context-awareness to prevent signals in inappropriate conditions
               const fakeBreakoutRisk = trendData.momentum?.fakeBreakoutRisk ?? false;
               
+              // PHASE 2 FIX: Track %B bypass multiplier at strategy level to carry through to position sizing
+              let strategyPercentBBypassMultiplier = 1.0;
+              
               // EMA Death Cross validation (SHORT signals)
               if (strategy.name === 'EMA Death Cross' || strategy.id === 'builtin-ema-death') {
                 const constraints = STRATEGY_SPECIFIC_CONSTRAINTS.EMA_DEATH_CROSS;
@@ -7702,6 +7706,11 @@ serve(async (req) => {
                 const adxRelaxLabel = useReducedAdx ? ' [ADX RELAXED - 1h conf]' : '';
                 const bypassLabel = deathCrossPercentBBypassActive ? ' [%B BYPASS - ADX RISING]' : '';
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed${modeLabel}${adxRelaxLabel}${bypassLabel} (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, falling=${stochRsiFalling})`);
+                
+                // PHASE 2 FIX: Carry bypass multiplier to candidate for position sizing
+                if (deathCrossPercentBBypassActive && deathCrossPercentBBypassMultiplier < 1.0) {
+                  strategyPercentBBypassMultiplier = deathCrossPercentBBypassMultiplier;
+                }
               }
               
               // EMA Golden Cross validation (LONG signals)
@@ -7792,6 +7801,11 @@ serve(async (req) => {
                 const adxRelaxLabel = useReducedAdx ? ' [ADX RELAXED - 1h conf]' : '';
                 const bypassLabel = goldenCrossPercentBBypassActive ? ' [%B BYPASS - ADX RISING]' : '';
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed${modeLabel}${adxRelaxLabel}${bypassLabel} (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, rising=${stochRsiRising})`);
+                
+                // PHASE 2 FIX: Carry bypass multiplier to candidate for position sizing
+                if (goldenCrossPercentBBypassActive && goldenCrossPercentBBypassMultiplier < 1.0) {
+                  strategyPercentBBypassMultiplier = goldenCrossPercentBBypassMultiplier;
+                }
               }
               
               if (isMomentumType && !is4hDirectional) {
@@ -7955,6 +7969,8 @@ serve(async (req) => {
                 score: qualityScore + strategyBonus * 5,
                 indicatorValues,
                 signalType: strategySignalType,
+                // PHASE 2 FIX: Carry %B bypass multiplier through to position sizing
+                percentBBypassMultiplier: strategyPercentBBypassMultiplier < 1.0 ? strategyPercentBBypassMultiplier : undefined,
               });
             }
           } catch (err) {
@@ -8528,6 +8544,21 @@ serve(async (req) => {
         if (priceActionEarlyEntryActive && priceActionEarlyPositionMultiplier < 1.0) {
           positionSizeMultiplier *= priceActionEarlyPositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📈 PRICE ACTION EARLY ENTRY - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 20: Apply ADX Rising %B Bypass position reduction (70%)
+        // PHASE 2 FIX: Entries via %B bypass (ADX rising, extended %B) get reduced position
+        const candidatePercentBBypassMultiplier = best.percentBBypassMultiplier ?? 1.0;
+        if (candidatePercentBBypassMultiplier < 1.0) {
+          positionSizeMultiplier *= candidatePercentBBypassMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📊 ADX RISING %B BYPASS entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 21: Apply convergence entry position reduction (if applicable)
+        const candidateConvergenceMultiplier = best.positionSizeMultiplier ?? 1.0;
+        if (candidateConvergenceMultiplier < 1.0) {
+          positionSizeMultiplier *= candidateConvergenceMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🔀 CONVERGENCE ENTRY - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
         // Final position size as percentage
