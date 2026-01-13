@@ -642,16 +642,19 @@ const checkHardContradictions = (
   
   // CHECK 1: Momentum Direction Contradiction
   // Block if momentum score strongly contradicts direction
+  // For LONG: momentum must not be strongly negative (< -10)
+  // For SHORT: momentum must not be strongly positive (> +10)
   if (config.MOMENTUM_CONTRADICTION_ENABLED) {
+    const threshold = Math.abs(config.MOMENTUM_CONTRADICTION_THRESHOLD); // Ensure positive
     const momentumContradicts = 
-      (derivedDirection === 'long' && momentumScore < config.MOMENTUM_CONTRADICTION_THRESHOLD) ||
-      (derivedDirection === 'short' && momentumScore > -config.MOMENTUM_CONTRADICTION_THRESHOLD);
+      (derivedDirection === 'long' && momentumScore < -threshold) ||
+      (derivedDirection === 'short' && momentumScore > threshold);
     
     if (momentumContradicts) {
       return {
         hasContradiction: true,
         contradictionType: 'MOMENTUM_DIRECTION_OPPOSING',
-        details: `MomScore=${momentumScore}, Dir=${derivedDirection}`
+        details: `MomScore=${momentumScore.toFixed(1)}, Dir=${derivedDirection}, Threshold=±${threshold}`
       };
     }
   }
