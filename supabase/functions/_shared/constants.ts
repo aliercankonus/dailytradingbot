@@ -2595,3 +2595,49 @@ export const STOCHRSI_DYNAMIC_PARAMS = {
   // StochRSI alone can NEVER push exhaustion over block threshold
   MAX_STOCHRSI_PENALTY: 20,  // Capped at 20 points
 } as const;
+
+// ============= PRE-SIGNAL VALIDITY GATE PARAMS =============
+// Phase 1: Semantic consistency checks for signal types
+// Blocks signals that don't meet fundamental requirements for their type
+export const SIGNAL_TYPE_VALIDITY_PARAMS = {
+  // Enable the pre-signal validity gate
+  ENABLED: true,
+  
+  // ===== MOMENTUM BREAKOUT REQUIREMENTS =====
+  // Momentum Breakout signals MUST satisfy ALL of:
+  MOMENTUM_BREAKOUT: {
+    MIN_ADX: 25,              // Trend must be confirmed (ADX >= 25)
+    REQUIRE_ADX_NOT_FALLING: true,  // ADX slope must be >= 0
+    REQUIRE_POSITIVE_MOMENTUM: true, // Momentum score must be > 0
+    REQUIRE_MACD_ALIGNED: true,      // MACD slope must align with direction
+    BLOCK_IF_RANGING: true,          // Block if regime is RANGING (unless squeeze)
+  },
+  
+  // ===== HARD CONTRADICTION BLOCKS =====
+  // These block signals regardless of quality score
+  HARD_CONTRADICTIONS: {
+    // Block if momentum score strongly contradicts direction
+    // e.g., momentum score -15 for a LONG signal
+    MOMENTUM_CONTRADICTION_THRESHOLD: -10,  // Block long if momentum < -10
+    MOMENTUM_CONTRADICTION_ENABLED: true,
+    
+    // Block if MACD slope opposes direction at low ADX
+    // Strong trends (ADX >= 30) can tolerate MACD divergence
+    MACD_CONTRADICTION_MIN_ADX: 30,
+    MACD_CONTRADICTION_MIN_SLOPE: 0.1,  // MACD slope must oppose by at least this
+    MACD_CONTRADICTION_ENABLED: true,
+  },
+  
+  // ===== VOLUME MINIMUM REQUIREMENTS =====
+  VOLUME_MIN_THRESHOLD: 5,  // Volume score must be >= 5/10
+  VOLUME_PENALTY_PER_POINT: 3,  // -3 quality per point below threshold
+  
+  // ===== SQUEEZE STATE HANDLING =====
+  // Delay breakout classification during squeeze with low ADX
+  SQUEEZE_RECLASSIFICATION: {
+    ENABLED: true,
+    MAX_ADX_FOR_RECLASSIFICATION: 25,  // Reclassify if ADX < 25 during squeeze
+    RECLASSIFY_TO: 'WATCHLIST',        // Mark as watchlist instead of generating signal
+    BLOCK_BREAKOUT_STRATEGIES: true,   // Block breakout strategies during low-ADX squeeze
+  },
+} as const;

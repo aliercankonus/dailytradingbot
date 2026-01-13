@@ -90,6 +90,8 @@ import {
   RELAXED_ORDER_FLOW_PARAMS,
   // PHASE 2: MACD Gate Optimization - duration and magnitude checks
   MACD_GATE_PARAMS,
+  // NEW: Pre-Signal Validity Gate for semantic consistency
+  SIGNAL_TYPE_VALIDITY_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -538,6 +540,174 @@ const BUILT_IN_TEMPLATES = [
     }
   }
 ];
+
+// ============= PHASE 1: PRE-SIGNAL VALIDITY GATE =============
+// Checks semantic consistency between signal type and market state BEFORE quality scoring
+// This prevents invalid signal types from reaching the scoring phase
+
+interface SignalTypeValidation {
+  isValid: boolean;
+  blockReason?: string;
+  violations: string[];
+  signalType: string;
+}
+
+const validateSignalTypeRequirements = (
+  strategyId: string,
+  strategyName: string,
+  trendData: any,
+  derivedDirection: string
+): SignalTypeValidation => {
+  if (!SIGNAL_TYPE_VALIDITY_PARAMS.ENABLED) {
+    return { isValid: true, violations: [], signalType: strategyName };
+  }
+  
+  const violations: string[] = [];
+  const adx = trendData?.volatility?.adx || 0;
+  const adxSlope = trendData?.volatility?.adxSlope || 0;
+  const momentum = trendData?.momentum || {};
+  const momentumScore = momentum?.momentumScore || 0;
+  const macdSlope = momentum?.macdSlope || 0;
+  const regime = trendData?.regime?.regime || 'RANGING';
+  const bbSqueeze = trendData?.bollingerBand?.squeeze || trendData?.bollingerBands?.['4h']?.squeeze || false;
+  
+  // MOMENTUM BREAKOUT strategy requirements
+  const isMomentumBreakout = strategyId === 'builtin-momentum-breakout' || 
+    strategyName === 'Momentum Breakout' ||
+    strategyName.toLowerCase().includes('momentum');
+  
+  if (isMomentumBreakout) {
+    const config = SIGNAL_TYPE_VALIDITY_PARAMS.MOMENTUM_BREAKOUT;
+    
+    // Requirement 1: ADX >= 25 (confirmed trend)
+    if (adx < config.MIN_ADX) {
+      violations.push(`ADX ${adx.toFixed(1)} < ${config.MIN_ADX} required`);
+    }
+    
+    // Requirement 2: ADX slope >= 0 (not decaying)
+    if (config.REQUIRE_ADX_NOT_FALLING && adxSlope < 0) {
+      violations.push(`ADX slope ${adxSlope.toFixed(2)} negative (trend decaying)`);
+    }
+    
+    // Requirement 3: Momentum score > 0 (positive momentum)
+    if (config.REQUIRE_POSITIVE_MOMENTUM && momentumScore <= 0) {
+      violations.push(`Momentum score ${momentumScore} not positive`);
+    }
+    
+    // Requirement 4: MACD slope aligned with direction
+    if (config.REQUIRE_MACD_ALIGNED) {
+      const macdAligned = (derivedDirection === 'long' && macdSlope >= 0) ||
+                         (derivedDirection === 'short' && macdSlope <= 0);
+      if (!macdAligned) {
+        violations.push(`MACD slope ${macdSlope.toFixed(3)} opposes ${derivedDirection}`);
+      }
+    }
+    
+    // Requirement 5: Market regime != RANGING (unless squeeze)
+    if (config.BLOCK_IF_RANGING && regime === 'RANGING' && !bbSqueeze) {
+      violations.push(`Regime RANGING without squeeze setup`);
+    }
+  }
+  
+  return {
+    isValid: violations.length === 0,
+    blockReason: violations.length > 0 ? violations.join(' | ') : undefined,
+    violations,
+    signalType: strategyName
+  };
+};
+
+// ============= PHASE 2: HARD CONTRADICTION CHECKS =============
+// These are checked at the symbol level (before per-strategy evaluation)
+
+interface HardContradictionResult {
+  hasContradiction: boolean;
+  contradictionType?: string;
+  details?: string;
+}
+
+const checkHardContradictions = (
+  trendData: any,
+  derivedDirection: string
+): HardContradictionResult => {
+  if (!SIGNAL_TYPE_VALIDITY_PARAMS.ENABLED) {
+    return { hasContradiction: false };
+  }
+  
+  const config = SIGNAL_TYPE_VALIDITY_PARAMS.HARD_CONTRADICTIONS;
+  const momentum = trendData?.momentum || {};
+  const momentumScore = momentum?.momentumScore || 0;
+  const macdSlope = momentum?.macdSlope || 0;
+  const adx = trendData?.volatility?.adx || 0;
+  
+  // CHECK 1: Momentum Direction Contradiction
+  // Block if momentum score strongly contradicts direction
+  if (config.MOMENTUM_CONTRADICTION_ENABLED) {
+    const momentumContradicts = 
+      (derivedDirection === 'long' && momentumScore < config.MOMENTUM_CONTRADICTION_THRESHOLD) ||
+      (derivedDirection === 'short' && momentumScore > -config.MOMENTUM_CONTRADICTION_THRESHOLD);
+    
+    if (momentumContradicts) {
+      return {
+        hasContradiction: true,
+        contradictionType: 'MOMENTUM_DIRECTION_OPPOSING',
+        details: `MomScore=${momentumScore}, Dir=${derivedDirection}`
+      };
+    }
+  }
+  
+  // CHECK 2: MACD + Low ADX Contradiction
+  // MACD slope opposing direction at ADX < 30 = dangerous entry
+  if (config.MACD_CONTRADICTION_ENABLED && adx < config.MACD_CONTRADICTION_MIN_ADX) {
+    const macdOpposesDirection = 
+      (derivedDirection === 'long' && macdSlope < -config.MACD_CONTRADICTION_MIN_SLOPE) ||
+      (derivedDirection === 'short' && macdSlope > config.MACD_CONTRADICTION_MIN_SLOPE);
+    
+    if (macdOpposesDirection) {
+      return {
+        hasContradiction: true,
+        contradictionType: 'MACD_DIRECTION_CONTRADICTION',
+        details: `Slope=${macdSlope.toFixed(3)}, Dir=${derivedDirection}, ADX=${adx.toFixed(1)}`
+      };
+    }
+  }
+  
+  return { hasContradiction: false };
+};
+
+// ============= PHASE 4: SQUEEZE STATE CLASSIFICATION =============
+// Delay breakout classification during BB squeeze with low ADX
+
+interface SqueezeClassificationResult {
+  shouldReclassify: boolean;
+  newClassification?: string;
+  reason?: string;
+}
+
+const classifySqueezeState = (
+  trendData: any,
+  strategyName: string
+): SqueezeClassificationResult => {
+  const config = SIGNAL_TYPE_VALIDITY_PARAMS.SQUEEZE_RECLASSIFICATION;
+  
+  if (!config.ENABLED) {
+    return { shouldReclassify: false };
+  }
+  
+  const bbSqueeze = trendData?.bollingerBand?.squeeze || trendData?.bollingerBands?.['4h']?.squeeze || false;
+  const adx = trendData?.volatility?.adx || 0;
+  const isBreakoutStrategy = strategyName.toLowerCase().includes('breakout');
+  
+  if (bbSqueeze && adx < config.MAX_ADX_FOR_RECLASSIFICATION && isBreakoutStrategy && config.BLOCK_BREAKOUT_STRATEGIES) {
+    return {
+      shouldReclassify: true,
+      newClassification: config.RECLASSIFY_TO,
+      reason: `squeeze=true, ADX=${adx.toFixed(1)} < ${config.MAX_ADX_FOR_RECLASSIFICATION}`
+    };
+  }
+  
+  return { shouldReclassify: false };
+};
 
 // ============= IMPROVEMENT #1: Quality Score System =============
 // Replace tier-based filtering with unified 0-100 quality score
@@ -1764,7 +1934,13 @@ serve(async (req) => {
       // NEW: Momentum exhaustion override
       | 'MOMENTUM_EXHAUSTION_OVERRIDE'
       // Phase 1: Low ADX trend exception
-      | 'LOW_ADX_TREND_EXCEPTION';
+      | 'LOW_ADX_TREND_EXCEPTION'
+      // NEW: Pre-signal validity gates
+      | 'SIGNAL_TYPE_SEMANTIC_MISMATCH'
+      | 'SQUEEZE_RECLASSIFICATION'
+      | 'HARD_CONTRADICTION'
+      | 'MOMENTUM_DIRECTION_OPPOSING'
+      | 'MACD_DIRECTION_CONTRADICTION';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -4923,6 +5099,34 @@ serve(async (req) => {
         // These are non-negotiable requirements for ANY signal
         // Quality score should RANK good trades, not RESCUE weak ones
         
+        // ============= PHASE 2: HARD CONTRADICTION CHECK =============
+        // Block if momentum/MACD strongly contradicts derived direction
+        const hardContradiction = checkHardContradictions(trendData, derivedDirection);
+        if (hardContradiction.hasContradiction) {
+          rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { 
+            gate: hardContradiction.contradictionType || 'HARD_CONTRADICTION', 
+            details: hardContradiction.details || '' 
+          });
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK: ${hardContradiction.contradictionType} - ${hardContradiction.details}`);
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `HARD CONTRADICTION: ${hardContradiction.contradictionType} - ${hardContradiction.details}`,
+            {
+              gate: hardContradiction.contradictionType,
+              details: hardContradiction.details,
+              derivedDirection,
+              momentumScore: trendData?.momentum?.momentumScore,
+              macdSlope: trendData?.momentum?.macdSlope,
+              adx: adx.toFixed(1)
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
+          );
+          continue;
+        }
+        
         // ============= NEW: QUIET TREND DETECTION EXCEPTION =============
         // Allows entries when ADX is low but price is grinding consistently in one direction
         // Phase 1: BTC/ETH only, 50% position size, strict safety gates
@@ -7078,6 +7282,52 @@ serve(async (req) => {
           const entryConditions = strategy.entry_conditions || [];
           if (!indicators.length || !entryConditions.length) {
             logger.forSymbol(symbol).warn(`Strategy "${strategy.name}" skipped - no indicators/conditions`);
+            continue;
+          }
+          
+          // ============= PHASE 1: PRE-SIGNAL VALIDITY GATE =============
+          // Check semantic consistency BEFORE any other evaluation
+          const signalTypeValidation = validateSignalTypeRequirements(
+            strategy.id || '',
+            strategy.name,
+            trendData,
+            derivedDirection
+          );
+          
+          if (!signalTypeValidation.isValid) {
+            rejectedByStrategy++;
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'SIGNAL_TYPE_SEMANTIC_MISMATCH', 
+              details: signalTypeValidation.violations[0] || '' 
+            });
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} PRE-SIGNAL VALIDITY: ${strategy.name} invalid - ${signalTypeValidation.blockReason}`);
+            strategyNearMisses.push({
+              name: strategy.name,
+              passedCount: 0,
+              totalConditions: entryConditions.length,
+              failedConditions: [],
+              skipReason: `Signal type invalid: ${signalTypeValidation.violations.join(', ')}`
+            });
+            continue;
+          }
+          
+          // ============= PHASE 4: SQUEEZE STATE CLASSIFICATION =============
+          // Block breakout strategies during low-ADX squeeze (reclassify as watchlist)
+          const squeezeClass = classifySqueezeState(trendData, strategy.name);
+          if (squeezeClass.shouldReclassify) {
+            rejectedByStrategy++;
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'SQUEEZE_RECLASSIFICATION', 
+              details: squeezeClass.reason || '' 
+            });
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} SQUEEZE RECLASSIFICATION: ${strategy.name} → ${squeezeClass.newClassification} (${squeezeClass.reason})`);
+            strategyNearMisses.push({
+              name: strategy.name,
+              passedCount: 0,
+              totalConditions: entryConditions.length,
+              failedConditions: [],
+              skipReason: `Squeeze reclassified: ${squeezeClass.reason}`
+            });
             continue;
           }
 

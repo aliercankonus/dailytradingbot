@@ -612,14 +612,31 @@ export const getConfidencePenalty = (
 };
 
 // ============= ADX SCORE (0-25 points) =============
-export const getAdxScore = (adx: number): number => {
-  if (adx >= ADX_THRESHOLDS.EXTREME) return 25;
-  if (adx >= ADX_THRESHOLDS.VERY_STRONG) return 22;
-  if (adx >= ADX_THRESHOLDS.STRONG) return 18;
-  if (adx >= ADX_THRESHOLDS.MINIMUM) return 14;
-  if (adx >= ADX_THRESHOLDS.WEAK) return 8;
-  if (adx >= ADX_THRESHOLDS.VERY_WEAK) return 4;
-  return 0;
+// PHASE 3 UPDATE: Increased penalty for ADX falling when ADX is weak
+export const getAdxScore = (adx: number, adxSlope?: number): number => {
+  let baseScore: number;
+  
+  if (adx >= ADX_THRESHOLDS.EXTREME) baseScore = 25;
+  else if (adx >= ADX_THRESHOLDS.VERY_STRONG) baseScore = 22;
+  else if (adx >= ADX_THRESHOLDS.STRONG) baseScore = 18;
+  else if (adx >= ADX_THRESHOLDS.MINIMUM) baseScore = 14;
+  else if (adx >= ADX_THRESHOLDS.WEAK) baseScore = 8;
+  else if (adx >= ADX_THRESHOLDS.VERY_WEAK) baseScore = 4;
+  else baseScore = 0;
+  
+  // PHASE 3: Apply ADX falling penalty
+  // Falling ADX with weak trend = double penalty
+  if (adxSlope !== undefined && adxSlope < 0) {
+    if (adx < 25) {
+      // Weak AND falling ADX = -8 penalty (was -3)
+      baseScore = Math.max(0, baseScore - 8);
+    } else {
+      // Strong but falling ADX = -5 penalty (was -3)
+      baseScore = Math.max(0, baseScore - 5);
+    }
+  }
+  
+  return baseScore;
 };
 
 // ============= MOMENTUM SCORE (0-20 points) =============
