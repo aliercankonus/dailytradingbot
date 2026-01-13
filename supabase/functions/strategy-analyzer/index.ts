@@ -8461,6 +8461,13 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🎯 ${overrideType} OVERRIDE entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
+        // Step 19: Apply Price Action Early Entry position reduction (50%)
+        // PHASE 2 FIX: Entries via price action early entry (ADX 12-18) get reduced position
+        if (priceActionEarlyEntryActive && priceActionEarlyPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= priceActionEarlyPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📈 PRICE ACTION EARLY ENTRY - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
         // Final position size as percentage
         const strategyPositionSize = (strategy.risk_settings?.positionSizePercent || 100) * positionSizeMultiplier;
 
@@ -8479,7 +8486,20 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🐌 LATE GRIND ACCEPTANCE - tighter stop applied: ${stopLossPercent.toFixed(2)}%`);
         }
         
-        const takeProfitPercent = strategy.risk_settings?.takeProfitPercent || stopLossPercent * 2.5;
+        // Apply tighter stops for price action early entry (70% of normal = 30% tighter)
+        // PHASE 2 FIX: Price action early entries need tighter risk management
+        if (priceActionEarlyEntryActive && PRICE_ACTION_EARLY_ENTRY_PARAMS.STOP_LOSS_MULTIPLIER < 1.0) {
+          stopLossPercent *= PRICE_ACTION_EARLY_ENTRY_PARAMS.STOP_LOSS_MULTIPLIER;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📈 PRICE ACTION EARLY ENTRY - tighter stop applied: ${stopLossPercent.toFixed(2)}%`);
+        }
+        
+        let takeProfitPercent = strategy.risk_settings?.takeProfitPercent || stopLossPercent * 2.5;
+        
+        // Apply tighter TP for price action early entry (1.2x multiplier = closer TP)
+        if (priceActionEarlyEntryActive && PRICE_ACTION_EARLY_ENTRY_PARAMS.TAKE_PROFIT_MULTIPLIER < 2.5) {
+          takeProfitPercent *= (PRICE_ACTION_EARLY_ENTRY_PARAMS.TAKE_PROFIT_MULTIPLIER / 2.5);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📈 PRICE ACTION EARLY ENTRY - tighter TP applied: ${takeProfitPercent.toFixed(2)}%`);
+        }
 
         // Map "neutral" to "ranging" for database enum compatibility
         const dbTrend = trend === "neutral" ? "ranging" : trend;
@@ -8622,6 +8642,21 @@ serve(async (req) => {
                 htfBias: trendData.timeframes?.['4h']?.confidence || 0,
                 adxSlope: trendData.volatility?.adxSlope || 0,
                 stochK4h: (trendData.stochasticRsi?.['4h']?.k ?? 50),
+              } : null,
+            },
+            // PHASE 2: Price Action Early Entry tracking for dashboard analytics
+            priceActionEarlyEntry: {
+              applied: priceActionEarlyEntryActive,
+              positionSizeMultiplier: priceActionEarlyPositionMultiplier,
+              stopMultiplier: PRICE_ACTION_EARLY_ENTRY_PARAMS.STOP_LOSS_MULTIPLIER,
+              takeProfitMultiplier: PRICE_ACTION_EARLY_ENTRY_PARAMS.TAKE_PROFIT_MULTIPLIER,
+              breakEvenActivationPercent: PRICE_ACTION_EARLY_ENTRY_PARAMS.BREAK_EVEN_ACTIVATION_PERCENT,
+              conditions: priceActionEarlyEntryActive ? {
+                adx: adx.toFixed(1),
+                adxSlope: (fullAdxResult.adxSlope ?? 0).toFixed(3),
+                priceMove: Math.abs(trendData.priceActionMomentum?.movePercent || 0).toFixed(2),
+                minRequired: PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_PRICE_MOVE_PERCENT,
+                direction: trendData.priceActionMomentum?.direction || 'none',
               } : null,
             },
             // NEW: Order flow analysis for dashboard consistency
