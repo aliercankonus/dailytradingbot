@@ -338,6 +338,8 @@ export interface ADXResult {
   adxArray: number[];      // Last 7 ADX values for trend analysis
   adxSlope: number;        // Rate of change over last 5 bars
   adxPeaked: boolean;      // ADX < max of last 5 bars (rollover detection)
+  // PHASE 2: Smoothed slope (average of last 3 slope calculations) to prevent single-bar spikes
+  adxSlopeSmoothed: number;
 }
 
 export function calculateADXWithDirection(klines: any[], period = 14): ADXResult {
@@ -351,7 +353,8 @@ export function calculateADXWithDirection(klines: any[], period = 14): ADXResult
     prevDiGap: 0,
     adxArray: [],
     adxSlope: 0,
-    adxPeaked: false
+    adxPeaked: false,
+    adxSlopeSmoothed: 0
   };
   const minRequired = 2 * period + 2;
   if (!klines || klines.length < minRequired) return defaultResult;
@@ -456,6 +459,24 @@ export function calculateADXWithDirection(klines: any[], period = 14): ADXResult
     ? (adxValues[adxValues.length - 1] - adxValues[adxValues.length - 1 - slopeLookback]) / slopeLookback
     : 0;
   
+  // PHASE 2: Calculate smoothed slope (average of last 3 slope calculations)
+  // This prevents single-bar spikes from triggering bypasses
+  const slopePoints = Math.min(3, adxValues.length - slopeLookback - 1);
+  let adxSlopeSmoothed = adxSlope; // Default to current slope
+  if (slopePoints >= 2 && adxValues.length > slopeLookback + slopePoints) {
+    const slopes: number[] = [];
+    for (let i = 0; i < slopePoints; i++) {
+      const endIdx = adxValues.length - 1 - i;
+      const startIdx = endIdx - slopeLookback;
+      if (startIdx >= 0) {
+        slopes.push((adxValues[endIdx] - adxValues[startIdx]) / slopeLookback);
+      }
+    }
+    if (slopes.length >= 2) {
+      adxSlopeSmoothed = slopes.reduce((a, b) => a + b, 0) / slopes.length;
+    }
+  }
+  
   // NEW: Detect ADX peak (rollover) - current < max of last 5 bars
   const peakLookback = Math.min(5, adxValues.length);
   const adxMax = Math.max(...adxValues.slice(-peakLookback));
@@ -471,7 +492,8 @@ export function calculateADXWithDirection(klines: any[], period = 14): ADXResult
     prevDiGap: Math.round(prevDiGap * 10) / 10,
     adxArray: recentAdxValues.map(v => Math.round(v * 10) / 10),
     adxSlope: Math.round(adxSlope * 100) / 100,
-    adxPeaked
+    adxPeaked,
+    adxSlopeSmoothed: Math.round(adxSlopeSmoothed * 100) / 100
   };
 }
 
