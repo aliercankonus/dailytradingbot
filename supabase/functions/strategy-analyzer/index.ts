@@ -7813,11 +7813,11 @@ serve(async (req) => {
                 const is1hDirectional = htfTrend1h === "bullish" || htfTrend1h === "bearish";
                 const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
                 const is1hConfident = conf1h >= 60;
-                const is1hVeryConfident = conf1h >= 70;  // IMPROVEMENT: Very high 1h confidence
+                const is1hVeryConfident = conf1h >= 62;  // PHASE 1 FIX: Lowered from 70 - 62%+ 1h conf is already directional
                 const isMomentumBuilding = earlyMomentumScore >= MOMENTUM_THRESHOLDS.MIN_SCORE;
                 const momentumState = momentum?.state || "unknown";
                 
-                // IMPROVEMENT 1: Allow "mixed" momentum state when 1h confidence is very high (>=70%)
+                // IMPROVEMENT 1: Allow "mixed" momentum state when 1h confidence is solid (>=62%)
                 // The strong 1h trend itself is the signal - we don't need momentum state confirmation
                 const isMomentumStateGood = momentumState === "confirmed" || momentumState === "building" || 
                   (momentumState === "mixed" && is1hVeryConfident);
@@ -7826,14 +7826,14 @@ serve(async (req) => {
                 const allowMomentumEntry = is1hDirectional && is1hConfident && isMomentumBuilding && isMomentumStateGood;
                 
                 if (allowMomentumEntry) {
-                  const mixedOverride = momentumState === "mixed" ? " [MIXED STATE OVERRIDE - 1h conf >= 70%]" : "";
+                  const mixedOverride = momentumState === "mixed" ? " [MIXED STATE OVERRIDE - 1h conf >= 62%]" : "";
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}" [${strategyType}]: MOMENTUM ALLOWED - 4h neutral but 1h ${htfTrend1h} (${conf1h}%), momentum ${momentumState} (score=${earlyMomentumScore})${mixedOverride}`);
                   // Continue with strategy evaluation - don't skip
                 } else {
                   const skipReason = !is1hDirectional ? `1h neutral` : 
                     !is1hConfident ? `1h conf ${conf1h}% < 60%` :
                     !isMomentumBuilding ? `momentum score ${earlyMomentumScore} < ${MOMENTUM_THRESHOLDS.MIN_SCORE}` :
-                    `momentum state ${momentumState} (need confirmed/building, or mixed with 1h conf >= 70%)`;
+                    `momentum state ${momentumState} (need confirmed/building, or mixed with 1h conf >= 62%)`;
                   logger.forSymbol(symbol).warn(`"${strategy.name}" [${strategyType}]: SKIP - momentum strategy, 4h ${htfTrend4h}, ${skipReason}`);
                   
                   // Track for convergence fallback - strategy passed conditions but failed momentum filter
@@ -7993,22 +7993,35 @@ serve(async (req) => {
           const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
           const reversalResult = calculateUnifiedReversalScore(trendData, tradeDirection === 'bullish' ? 'long' : 'short', 'unknown');
           
-          // All filtered strategies must agree on direction
-          const uniqueDirections = new Set(passedConditionsButFiltered.map(s => s.direction));
-          const isDirectionConsensus = uniqueDirections.size === 1;
-          const consensusDirection = passedConditionsButFiltered[0].direction;
+          // PHASE 3 FIX: Allow dominant direction with HTF alignment, not just strict consensus
+          const longCount = passedConditionsButFiltered.filter(s => s.direction === 'long').length;
+          const shortCount = passedConditionsButFiltered.filter(s => s.direction === 'short').length;
+          const isDirectionConsensus = longCount === 0 || shortCount === 0;
+          
+          // NEW: Allow if one direction has clear majority (2:1 or better) AND HTF aligns
+          const htfAlignment = (htfTrend4h === 'bullish' && longCount > shortCount) || 
+                              (htfTrend4h === 'bearish' && shortCount > longCount);
+          const directionDominance = Math.max(longCount, shortCount) >= Math.min(longCount, shortCount) * 2;
+          const canUseConvergenceWithDominance = 
+            !isDirectionConsensus && directionDominance && htfAlignment &&
+            Math.max(longCount, shortCount) >= CONVERGENCE_MIN_STRATEGIES;
+          
+          const consensusDirection = isDirectionConsensus 
+            ? passedConditionsButFiltered[0].direction
+            : (longCount > shortCount ? 'long' : 'short');
           
           const canUseConvergence = 
             qualityScore >= CONVERGENCE_MIN_QUALITY &&
             conf1h >= CONVERGENCE_MIN_1H_CONF &&
             reversalResult.score < CONVERGENCE_MAX_REVERSAL &&
-            isDirectionConsensus;
+            (isDirectionConsensus || canUseConvergenceWithDominance);
           
           if (canUseConvergence) {
             // Create a convergence candidate
+            const convergenceLabel = isDirectionConsensus ? 'Consensus' : 'Dominant Direction';
             const convergenceStrategy = {
               id: 'convergence-entry',
-              name: `Multi-Strategy Convergence (${passedConditionsButFiltered.map(s => s.name).join(' + ')})`,
+              name: `Multi-Strategy ${convergenceLabel} (${passedConditionsButFiltered.map(s => s.name).join(' + ')})`,
               risk_settings: {
                 stopLossPercent: 2.5,
                 takeProfitPercent: 4,
@@ -8022,21 +8035,25 @@ serve(async (req) => {
             const convergenceIndicators = new Map<string, number>();
             convergenceIndicators.set("Price", parseFloat(marketDataMap.get(symbol)?.lastPrice || "0"));
             
+            // Use reduced position size if using dominance mode (not full consensus)
+            const positionMult = isDirectionConsensus ? CONVERGENCE_POSITION_MULT : CONVERGENCE_POSITION_MULT * 0.80;
+            
             candidates.push({
               strategy: convergenceStrategy,
               score: qualityScore,
               indicatorValues: convergenceIndicators,
               signalType: consensusDirection,
-              positionSizeMultiplier: CONVERGENCE_POSITION_MULT,
+              positionSizeMultiplier: positionMult,
               convergenceEntry: true
             });
             
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} CONVERGENCE ENTRY: ${passedConditionsButFiltered.length} strategies agreed (${passedConditionsButFiltered.map(s => s.name).join(', ')}), direction=${consensusDirection}, quality=${qualityScore}, 1h conf=${conf1h}%`);
+            const dominanceNote = !isDirectionConsensus ? ` [DOMINANCE MODE: ${longCount}L/${shortCount}S + 4h=${htfTrend4h}]` : '';
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} CONVERGENCE ENTRY: ${passedConditionsButFiltered.length} strategies (${passedConditionsButFiltered.map(s => s.name).join(', ')}), direction=${consensusDirection}, quality=${qualityScore}, 1h conf=${conf1h}%${dominanceNote}`);
           } else {
             const blockReason = qualityScore < CONVERGENCE_MIN_QUALITY ? `quality ${qualityScore} < ${CONVERGENCE_MIN_QUALITY}` :
               conf1h < CONVERGENCE_MIN_1H_CONF ? `1h conf ${conf1h}% < ${CONVERGENCE_MIN_1H_CONF}%` :
               reversalResult.score >= CONVERGENCE_MAX_REVERSAL ? `reversal ${reversalResult.score} >= ${CONVERGENCE_MAX_REVERSAL}` :
-              `no direction consensus`;
+              `no direction consensus (${longCount}L/${shortCount}S, 4h=${htfTrend4h}, dominance=${directionDominance}, htfAlign=${htfAlignment})`;
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} CONVERGENCE blocked: ${passedConditionsButFiltered.length} strategies agreed but ${blockReason}`);
           }
         }
@@ -8102,6 +8119,72 @@ serve(async (req) => {
             
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} HIGH-QUALITY FALLBACK ENTRY: quality=${qualityScore}, direction=${fallbackDirection}, momentum=${momentum?.state}, reversal=${reversalScore}`);
             logger.forSymbol(symbol).info(`   → Position size reduced to ${FALLBACK_POSITION_MULT * 100}% for fallback entry`);
+          }
+        }
+        
+        // ============= PHASE 2: NEAR-QUALITY FALLBACK ENTRY =============
+        // When quality is close (60-69), HTF is directional, ADX confirms trend
+        // This captures setups that narrowly miss the quality threshold
+        const NEAR_QUALITY_MIN = 60;
+        const NEAR_QUALITY_MAX = 69;  // Below regular fallback
+        const NEAR_QUALITY_MIN_ADX = 20;  // Need confirmed trend
+        const NEAR_QUALITY_MIN_HTF_CONF = 60;
+        const NEAR_QUALITY_MAX_REVERSAL = 35;  // Stricter than regular fallback
+        const NEAR_QUALITY_POSITION_MULT = 0.30;  // Much smaller position
+        
+        if (candidates.length === 0) {
+          const conf4h = stochFilterConf4h || 0;
+          const conf1h = stochFilterConf1h || 0;
+          const htf4hDir = htfTrend4h;
+          const htf1hDir = htfTrend1h;
+          const reversalScore = unifiedReversal.score;
+          
+          // Determine fallback direction from HTF
+          let nearQualityDirection: "long" | "short" | null = null;
+          if (htf4hDir === 'bullish' && conf4h >= NEAR_QUALITY_MIN_HTF_CONF) {
+            nearQualityDirection = 'long';
+          } else if (htf4hDir === 'bearish' && conf4h >= NEAR_QUALITY_MIN_HTF_CONF) {
+            nearQualityDirection = 'short';
+          } else if (htf1hDir === 'bullish' && conf1h >= 70) {
+            nearQualityDirection = 'long';
+          } else if (htf1hDir === 'bearish' && conf1h >= 70) {
+            nearQualityDirection = 'short';
+          }
+          
+          const canUseNearQualityFallback = 
+            qualityScore >= NEAR_QUALITY_MIN &&
+            qualityScore <= NEAR_QUALITY_MAX &&  // Between 60-69
+            adx >= NEAR_QUALITY_MIN_ADX &&  // Confirmed trend
+            nearQualityDirection !== null &&
+            reversalScore < NEAR_QUALITY_MAX_REVERSAL;  // Stricter reversal check
+          
+          if (canUseNearQualityFallback && nearQualityDirection) {
+            // Create near-quality fallback candidate
+            const nearQualityStrategy = {
+              id: 'near-quality-fallback',
+              name: `Near-Quality Fallback (Q=${qualityScore}, ADX=${adx.toFixed(1)})`,
+              risk_settings: {
+                stopLossPercent: 1.8,  // Tighter stops
+                takeProfitPercent: 3.0,
+                positionSizePercent: 1,
+                priority: 1
+              }
+            };
+            
+            const nearQualityIndicators = new Map<string, number>();
+            nearQualityIndicators.set("Price", currentPrice);
+            
+            candidates.push({
+              strategy: nearQualityStrategy,
+              score: qualityScore,
+              indicatorValues: nearQualityIndicators,
+              signalType: nearQualityDirection,
+              positionSizeMultiplier: NEAR_QUALITY_POSITION_MULT,
+              convergenceEntry: false
+            });
+            
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} NEAR-QUALITY FALLBACK: quality=${qualityScore}, ADX=${adx.toFixed(1)}, direction=${nearQualityDirection}, reversal=${reversalScore}`);
+            logger.forSymbol(symbol).info(`   → Position size reduced to ${NEAR_QUALITY_POSITION_MULT * 100}% for near-quality entry`);
           }
         }
 
