@@ -5,7 +5,9 @@
 export const ADX_THRESHOLDS = {
   VERY_WEAK: 12,
   SEVERE_PENALTY: 15,
-  WEAK: 18,
+  // PHASE 1 FIX: Reduced from 18 to 15 to allow earlier entries during breakout initiation
+  // ADX 15-18 is where impulsive moves START - waiting for 18 misses 30-50% of the move
+  WEAK: 15,
   // SQUEEZE_MINIMUM: Allows squeeze breakout entries when ADX is 15-20 (relaxed from 18)
   // This enables more signals during transitional/ranging markets when squeeze breakouts occur
   SQUEEZE_MINIMUM: 15,
@@ -29,8 +31,8 @@ export const ADX_THRESHOLDS = {
 // PHASE 1 IMPROVEMENT: Replace raw thresholds with phase classification
 // Each phase has different behavior for signal generation
 export const ADX_PHASES = {
-  RANGE: { min: 0, max: 18, tradeable: false, description: "No trend - reject" },
-  TRANSITION: { min: 18, max: 22, tradeable: true, description: "Emerging trend - allow squeeze/momentum only" },
+  RANGE: { min: 0, max: 15, tradeable: false, description: "No trend - reject (reduced from 18)" },
+  TRANSITION: { min: 15, max: 22, tradeable: true, description: "Emerging trend - allow squeeze/momentum/price action entry" },
   EARLY_TREND: { min: 22, max: 30, tradeable: true, description: "Early trend - normal logic" },
   STRONG_TREND: { min: 30, max: 45, tradeable: true, description: "Strong trend - reduced reversal weight" },
   // UPDATED: High ADX alone is NOT exhaustion - check slope/DI for behavioral exhaustion
@@ -1520,13 +1522,14 @@ export function isTrendFollowingStrategy(strategyId: string | undefined, strateg
 // When 4h StochRSI >= 80 AND %B >= 80, reversal is likely - block LONGS
 export const HTF_EXTREME_HARD_GATES = {
   // StochRSI thresholds for hard gate
-  STOCHRSI_OVERSOLD_BLOCK: 20,   // K <= 20 for shorts
-  STOCHRSI_OVERBOUGHT_BLOCK: 80, // K >= 80 for longs (base threshold)
-  // PARABOLIC MODE: Higher threshold when ADX >= 50 and rising (super-strong trends)
-  STOCHRSI_OVERBOUGHT_BLOCK_PARABOLIC: 92, // K >= 92 for longs in parabolic mode
-  STOCHRSI_OVERSOLD_BLOCK_PARABOLIC: 8,    // K <= 8 for shorts in parabolic mode
+  // PHASE 3 FIX: Tightened oversold, raised overbought for more headroom in trends
+  STOCHRSI_OVERSOLD_BLOCK: 18,   // Tightened from 20 - K <= 18 for shorts
+  STOCHRSI_OVERBOUGHT_BLOCK: 85, // Raised from 80 - K >= 85 for longs (more headroom for trends)
+  // PARABOLIC MODE: Higher threshold when ADX >= 45 and rising (super-strong trends)
+  STOCHRSI_OVERBOUGHT_BLOCK_PARABOLIC: 94, // Raised from 92 for longs in parabolic mode
+  STOCHRSI_OVERSOLD_BLOCK_PARABOLIC: 6,    // Lowered from 8 for shorts in parabolic mode
   // ADX thresholds for parabolic mode activation
-  PARABOLIC_MODE_MIN_ADX: 50,
+  PARABOLIC_MODE_MIN_ADX: 45,              // Lowered from 50 - activate parabolic mode earlier
   PARABOLIC_MODE_REQUIRE_ADX_RISING: true,
   // Bollinger %B thresholds for hard gate
   PERCENT_B_OVERSOLD_BLOCK: 20,  // %B <= 20 for shorts
@@ -2667,4 +2670,61 @@ export const SIGNAL_TYPE_VALIDITY_PARAMS = {
     RECLASSIFY_TO: 'WATCHLIST',        // Mark as watchlist instead of generating signal
     BLOCK_BREAKOUT_STRATEGIES: true,   // Block breakout strategies during low-ADX squeeze
   },
+} as const;
+
+// ============= PRICE ACTION EARLY ENTRY OVERRIDE =============
+// PHASE 2: When ADX is below threshold BUT price action shows clear direction,
+// allow early entry with conservative sizing. This catches moves before lagging indicators confirm.
+// CRITICAL: This addresses the "confirmation trap" where ADX lags behind breakout initiation
+export const PRICE_ACTION_EARLY_ENTRY_PARAMS = {
+  ENABLED: true,
+  
+  // Minimum price move in last 6 hours to trigger override
+  MIN_PRICE_MOVE_PERCENT: 0.8,
+  
+  // ADX range where this applies (below normal threshold but not dead)
+  MIN_ADX: 12,
+  MAX_ADX: 18,  // Above this, normal gates apply
+  
+  // REFINEMENT (per technical review): Require ADX slope >= 0 (momentum building, not decaying)
+  // Changed from false/-0.2 to true/0.0 to avoid fake spikes during low-energy ranges
+  REQUIRE_ADX_RISING: true,
+  MIN_ADX_SLOPE: 0.0,  // Slope must be non-negative (momentum building)
+  
+  // Require price direction to match derived direction
+  REQUIRE_DIRECTION_MATCH: true,
+  
+  // StochRSI limits - don't enter at extremes even with price action
+  MAX_STOCHRSI_FOR_LONG: 85,  // Still some room before extreme
+  MIN_STOCHRSI_FOR_SHORT: 15,
+  
+  // Position sizing for early entries (conservative)
+  POSITION_SIZE_MULTIPLIER: 0.50,  // 50% position
+  
+  // Tighter risk management for early entries
+  STOP_LOSS_MULTIPLIER: 0.7,       // 70% of normal ATR stop
+  TAKE_PROFIT_MULTIPLIER: 1.2,     // Tighter TP target
+  BREAK_EVEN_ACTIVATION_PERCENT: 0.3,  // Move to BE at 0.3%
+} as const;
+
+// ============= ADX RISING DIRECTIONAL BYPASS FOR HTF EXTREME =============
+// PHASE 4: When ADX is rising strongly AND 1h trend matches direction,
+// allow bypass of HTF extreme gates even without other conditions.
+// This prevents blocking valid longs during trending markets.
+export const ADX_RISING_DIRECTIONAL_BYPASS_PARAMS = {
+  ENABLED: true,
+  
+  // ADX requirements
+  MIN_ADX: 15,                    // Minimum ADX for bypass
+  MIN_ADX_SLOPE: 0.5,             // ADX must be rising strongly (slope >= 0.5)
+  
+  // Reversal check
+  MAX_REVERSAL_SCORE: 45,         // No significant reversal signals
+  
+  // REFINEMENT (per technical review): Require directional confirmation
+  // 1h trend direction must match derived direction
+  REQUIRE_DIRECTIONAL_CONFIRMATION: true,
+  
+  // Position sizing for bypass
+  POSITION_SIZE_MULTIPLIER: 0.60,  // 60% position for this bypass path
 } as const;

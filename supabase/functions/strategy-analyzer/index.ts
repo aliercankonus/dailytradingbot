@@ -78,6 +78,10 @@ import {
   MOMENTUM_BONUS_PARAMS,
   // NEW: Confirmed Momentum Direction Override - use MACD direction when trends neutral
   MOMENTUM_DIRECTION_OVERRIDE_PARAMS,
+  // NEW: Phase 2 - Price Action Early Entry Override
+  PRICE_ACTION_EARLY_ENTRY_PARAMS,
+  // NEW: Phase 4 - ADX Rising Directional Bypass for HTF Extreme
+  ADX_RISING_DIRECTIONAL_BYPASS_PARAMS,
   // NEW: Order Flow Direction Fallback - use order flow when trends neutral
   ORDER_FLOW_DIRECTION_PARAMS,
   // NEW: Pre-Momentum StochRSI Extreme Entry - catch moves before momentum confirms
@@ -2018,7 +2022,9 @@ serve(async (req) => {
       | 'SQUEEZE_RECLASSIFICATION'
       | 'HARD_CONTRADICTION'
       | 'MOMENTUM_DIRECTION_OPPOSING'
-      | 'MACD_DIRECTION_CONTRADICTION';
+      | 'MACD_DIRECTION_CONTRADICTION'
+      // PHASE 2: Price action early entry gate
+      | 'PRICE_ACTION_EARLY_ALLOWED';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -3933,8 +3939,25 @@ serve(async (req) => {
           stealthDirectionMatchesHTF &&
           stealthTrendHTF.stealthScore >= 60; // Require high score for HTF bypass
         
+        // PHASE 4: ADX Rising + Directional Bypass (per technical review refinement)
+        // When ADX is rising strongly AND 1h trend matches direction, allow bypass
+        // This prevents blocking valid longs during trending markets
+        const adxRisingDirectionalBypass = (
+          ADX_RISING_DIRECTIONAL_BYPASS_PARAMS.ENABLED &&
+          adxSlopeForBypass >= ADX_RISING_DIRECTIONAL_BYPASS_PARAMS.MIN_ADX_SLOPE && // ADX rising strongly (>= 0.5)
+          adx >= ADX_RISING_DIRECTIONAL_BYPASS_PARAMS.MIN_ADX &&                     // Minimum ADX (>= 15)
+          unifiedReversal.score < ADX_RISING_DIRECTIONAL_BYPASS_PARAMS.MAX_REVERSAL_SCORE && // No reversal signals
+          !isExhausted &&
+          // REFINEMENT: Require directional confirmation (1h trend matches derived direction)
+          (!ADX_RISING_DIRECTIONAL_BYPASS_PARAMS.REQUIRE_DIRECTIONAL_CONFIRMATION || (
+            (derivedDirection === 'long' && tf1hDir === 'bullish') ||
+            (derivedDirection === 'short' && tf1hDir === 'bearish')
+          ))
+        );
+        
         // FIXED: Allow bypass if high ADX path is met, even without rising slope
         // OR if stealth HTF bypass is valid
+        // OR if ADX rising directional bypass is valid (NEW - Phase 4)
         const canBypassHTFGate = (
           STRONG_TREND_HTF_BYPASS_PARAMS.ENABLED &&
           adx >= STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX &&
@@ -3946,13 +3969,17 @@ serve(async (req) => {
             // Path 2: High ADX (40+) with 4h alignment - no slope requirement
             highADXBypassPath
           )
-        ) || stealthHTFBypassPath; // Path 3: Stealth trend with high score
+        ) || stealthHTFBypassPath      // Path 3: Stealth trend with high score
+          || adxRisingDirectionalBypass; // Path 4: ADX rising + directional confirmation (NEW)
         
         // Determine position size based on bypass type
         const getBypassPositionMultiplier = () => {
           // NEW: Stealth HTF bypass path - use stealth position multiplier
           if (stealthHTFBypassPath) {
             return stealthTrendHTF.positionMultiplier;
+          } else if (adxRisingDirectionalBypass) {
+            // PHASE 4: ADX Rising Directional bypass - use configured multiplier
+            return ADX_RISING_DIRECTIONAL_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
           } else if (isParabolicMode) {
             // Parabolic mode - strongest confidence
             return STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
@@ -3980,6 +4007,7 @@ serve(async (req) => {
         // Log bypass decision details for debugging
         if (isHTFOverbought || isHTFOversold) {
           const bypassType = stealthHTFBypassPath ? 'STEALTH_TREND' :
+            adxRisingDirectionalBypass ? 'ADX_RISING_DIRECTIONAL' :  // NEW - Phase 4
             isParabolicMode ? 'PARABOLIC' : 
             highADXBypassPath ? 'HIGH_ADX_4H_ALIGNED' :
             hasRelaxedAlignment ? 'RELAXED_ALIGNMENT' : 
@@ -3987,7 +4015,7 @@ serve(async (req) => {
             allTimeframesAligned ? 'FULL_ALIGNMENT' : 'BASIC';
           
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF BYPASS CHECK: type=${bypassType}, ADX=${adx.toFixed(1)}, slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
-          logger.forSymbol(symbol).info(`   → canBypass=${canBypassHTFGate}, parabolic=${isParabolicMode}, relaxedAlign=${hasRelaxedAlignment}, altPath=${alternativeBypassPath}, highADX=${highADXBypassPath}, stealth=${stealthHTFBypassPath}, exhausted=${isExhausted}`);
+          logger.forSymbol(symbol).info(`   → canBypass=${canBypassHTFGate}, parabolic=${isParabolicMode}, relaxedAlign=${hasRelaxedAlignment}, altPath=${alternativeBypassPath}, highADX=${highADXBypassPath}, stealth=${stealthHTFBypassPath}, adxRisingDir=${adxRisingDirectionalBypass}, exhausted=${isExhausted}`);
           
           // Extra logging for stealth bypass
           if (stealthTrendHTF.detected) {
@@ -5313,6 +5341,9 @@ serve(async (req) => {
         let stealthTrendPositionMultiplier = 1.0;
         let lowAdxTrendExceptionActive = false;
         let lowAdxTrendPositionMultiplier = 1.0;
+        // PHASE 2: Price action early entry tracking
+        let priceActionEarlyEntryActive = false;
+        let priceActionEarlyPositionMultiplier = 1.0;
         
         // PHASE 2: Get regime-adaptive ADX threshold
         const effectiveAdxThreshold = getAdaptiveAdxThreshold(regime.regime);
@@ -5644,57 +5675,110 @@ serve(async (req) => {
               continue;
             }
             } else {
-            // ADX < 18: No squeeze exception possible, but check quiet trend for diagnostic
-            const priceActionForQuiet = trendData.priceActionMomentum;
-            const priceMoveForQuiet = Math.abs(priceActionForQuiet?.movePercent || 0);
-            const quietTrendDiag = QUIET_TREND_PARAMS.ENABLED && adx >= QUIET_TREND_PARAMS.MIN_ADX
-              ? ` | Quiet trend: ADX=${adx.toFixed(1)} in range, move=${priceMoveForQuiet.toFixed(1)}%`
-              : "";
+            // ADX < SQUEEZE_MINIMUM (now 15): Check for Price Action Early Entry Override (Phase 2)
+            // This catches moves before lagging ADX confirms - addresses the "confirmation trap"
+            const priceActionForEarly = trendData.priceActionMomentum;
+            const priceMoveForEarly = Math.abs(priceActionForEarly?.movePercent || 0);
+            const adxSlope = fullAdxResult.adxSlope ?? 0;
+            const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 50;
             
-            rejectedByHardGates++;
-            perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW', details: `ADX=${adx.toFixed(1)}<18${quietTrendDiag}` });
-            await logRejectionWithAI(
-              supabase, userId, symbol,
-              `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.SQUEEZE_MINIMUM}) - no trend strength, below squeeze minimum${quietTrendDiag}`,
-              { 
-                gate: "ADX_TOO_LOW",
-                adx: adx.toFixed(1),
-                adxRequired: effectiveAdxThreshold,
-                adxFixedMinimum: ADX_THRESHOLDS.MINIMUM,
-                regimeAdaptive: REGIME_ADAPTIVE_ADX_PARAMS.ENABLED,
-                regime: regime.regime,
-                squeezeMinimum: ADX_THRESHOLDS.SQUEEZE_MINIMUM,
-                quietTrendCheck: {
-                  enabled: QUIET_TREND_PARAMS.ENABLED,
-                  symbolAllowed: QUIET_TREND_PARAMS.ALLOWED_SYMBOLS.includes(symbol),
-                  adxInRange: adx >= QUIET_TREND_PARAMS.MIN_ADX,
-                  priceMove: priceMoveForQuiet.toFixed(1),
-                  microTrend: trendData.microTrend?.direction,
-                  persistence: trendData.microTrend?.persistence ?? 0,
-                },
-                trend,
-                confidence,
-                trendConsistency: trendData.trueAlignment?.score?.toFixed(1),
-                momentum: {
-                  state: momentum?.state || "none",
-                  confirms: momentum?.confirms ?? false,
-                  macdHistogram: momentum?.macdHistogram?.toFixed(4),
-                  lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend,
-                  consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
-                  consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
-                  consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
-                },
-                stochRsi: trendData.stochasticRsi?.aggregated,
-                volatility: {
-                  atrPercent: trendData.volatility?.atrPercent?.toFixed(2),
-                  isRanging: trendData.volatility?.isRanging
-                }
-              },
-              trendData,
-              riskParams.ai_analysis_enabled !== false,
-              earlyOrderFlowAnalysis
+            // PHASE 2: Price Action Early Entry Override
+            const priceActionValid = 
+              PRICE_ACTION_EARLY_ENTRY_PARAMS.ENABLED &&
+              priceMoveForEarly >= PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_PRICE_MOVE_PERCENT &&
+              adx >= PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_ADX &&
+              adx < PRICE_ACTION_EARLY_ENTRY_PARAMS.MAX_ADX &&
+              (!PRICE_ACTION_EARLY_ENTRY_PARAMS.REQUIRE_ADX_RISING || adxSlope >= PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_ADX_SLOPE);
+            
+            const directionMatch = !PRICE_ACTION_EARLY_ENTRY_PARAMS.REQUIRE_DIRECTION_MATCH || (
+              (derivedDirection === 'long' && priceActionForEarly?.direction === 'bullish') ||
+              (derivedDirection === 'short' && priceActionForEarly?.direction === 'bearish')
             );
-            continue;
+            
+            const stochRsiOkForEarly = derivedDirection === 'long' 
+              ? stochK4h < PRICE_ACTION_EARLY_ENTRY_PARAMS.MAX_STOCHRSI_FOR_LONG
+              : stochK4h > PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_STOCHRSI_FOR_SHORT;
+            
+            if (priceActionValid && directionMatch && stochRsiOkForEarly) {
+              // PRICE ACTION EARLY ENTRY ALLOWED
+              priceActionEarlyEntryActive = true;
+              priceActionEarlyPositionMultiplier = PRICE_ACTION_EARLY_ENTRY_PARAMS.POSITION_SIZE_MULTIPLIER;
+              logger.forSymbol(symbol).info(
+                `${LOG_CATEGORIES.SUCCESS} 📈 PRICE_ACTION_EARLY_ENTRY: Bypassing ADX ${adx.toFixed(1)} < ${ADX_THRESHOLDS.SQUEEZE_MINIMUM} ` +
+                `due to ${priceMoveForEarly.toFixed(2)}% price move, slope=${adxSlope.toFixed(3)}, stochK=${stochK4h.toFixed(1)}`
+              );
+              logger.forSymbol(symbol).info(
+                `   → Direction=${derivedDirection}, priceDir=${priceActionForEarly?.direction}, position=${(priceActionEarlyPositionMultiplier * 100).toFixed(0)}%`
+              );
+              perSymbolGateAttribution.set(symbol, { 
+                gate: 'PRICE_ACTION_EARLY_ALLOWED', 
+                details: `move=${priceMoveForEarly.toFixed(1)}%, slope=${adxSlope.toFixed(2)}, adx=${adx.toFixed(1)}` 
+              });
+              // Continue to signal generation (don't reject)
+            } else {
+              // Normal ADX rejection - include price action diagnostic
+              const quietTrendDiag = QUIET_TREND_PARAMS.ENABLED && adx >= QUIET_TREND_PARAMS.MIN_ADX
+                ? ` | Quiet trend: ADX=${adx.toFixed(1)} in range, move=${priceMoveForEarly.toFixed(1)}%`
+                : "";
+              const earlyEntryDiag = ` | PriceAction: move=${priceMoveForEarly.toFixed(1)}%(need ${PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_PRICE_MOVE_PERCENT}%), ` +
+                `valid=${priceActionValid}, dirMatch=${directionMatch}, stochOk=${stochRsiOkForEarly}, slope=${adxSlope.toFixed(2)}`;
+            
+              rejectedByHardGates++;
+              perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW', details: `ADX=${adx.toFixed(1)}<${ADX_THRESHOLDS.SQUEEZE_MINIMUM}${quietTrendDiag}` });
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.SQUEEZE_MINIMUM}) - no trend strength, below squeeze minimum${quietTrendDiag}${earlyEntryDiag}`,
+                { 
+                  gate: "ADX_TOO_LOW",
+                  adx: adx.toFixed(1),
+                  adxRequired: effectiveAdxThreshold,
+                  adxFixedMinimum: ADX_THRESHOLDS.MINIMUM,
+                  regimeAdaptive: REGIME_ADAPTIVE_ADX_PARAMS.ENABLED,
+                  regime: regime.regime,
+                  squeezeMinimum: ADX_THRESHOLDS.SQUEEZE_MINIMUM,
+                  priceActionEarlyEntry: {
+                    enabled: PRICE_ACTION_EARLY_ENTRY_PARAMS.ENABLED,
+                    priceMove: priceMoveForEarly.toFixed(2),
+                    minRequired: PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_PRICE_MOVE_PERCENT,
+                    adxSlope: adxSlope.toFixed(3),
+                    minSlope: PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_ADX_SLOPE,
+                    priceActionValid,
+                    directionMatch,
+                    stochRsiOk: stochRsiOkForEarly,
+                    stochK4h: stochK4h.toFixed(1),
+                  },
+                  quietTrendCheck: {
+                    enabled: QUIET_TREND_PARAMS.ENABLED,
+                    symbolAllowed: QUIET_TREND_PARAMS.ALLOWED_SYMBOLS.includes(symbol),
+                    adxInRange: adx >= QUIET_TREND_PARAMS.MIN_ADX,
+                    priceMove: priceMoveForEarly.toFixed(1),
+                    microTrend: trendData.microTrend?.direction,
+                    persistence: trendData.microTrend?.persistence ?? 0,
+                  },
+                  trend,
+                  confidence,
+                  trendConsistency: trendData.trueAlignment?.score?.toFixed(1),
+                  momentum: {
+                    state: momentum?.state || "none",
+                    confirms: momentum?.confirms ?? false,
+                    macdHistogram: momentum?.macdHistogram?.toFixed(4),
+                    lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend,
+                    consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
+                    consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
+                    consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
+                  },
+                  stochRsi: trendData.stochasticRsi?.aggregated,
+                  volatility: {
+                    atrPercent: trendData.volatility?.atrPercent?.toFixed(2),
+                    isRanging: trendData.volatility?.isRanging
+                  }
+                },
+                trendData,
+                riskParams.ai_analysis_enabled !== false,
+                earlyOrderFlowAnalysis
+              );
+              continue;
+            }
           }
           }
         }
