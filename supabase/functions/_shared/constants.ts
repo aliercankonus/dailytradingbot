@@ -2613,6 +2613,33 @@ export const SIGNAL_TYPE_VALIDITY_PARAMS = {
     BLOCK_IF_RANGING: true,          // Block if regime is RANGING (unless squeeze)
   },
   
+  // ===== MEAN REVERSION REQUIREMENTS =====
+  // Mean Reversion signals should only trigger at extremes, NOT during strong trends
+  MEAN_REVERSION: {
+    MAX_ADX: 35,                        // Block if ADX > 35 (trend too strong for reversal)
+    BLOCK_IF_ADX_EXPANDING: true,       // Block if ADX slope is positive and high
+    ADX_EXPANSION_THRESHOLD: 1.5,       // ADX slope threshold for "expanding"
+    REQUIRE_EXTREME_READING: true,      // Require RSI/StochRSI at extremes
+    RSI_OVERSOLD: 35,                   // RSI threshold for oversold (long signals)
+    RSI_OVERBOUGHT: 65,                 // RSI threshold for overbought (short signals)
+    STOCH_OVERSOLD: 25,                 // StochRSI threshold for oversold
+    STOCH_OVERBOUGHT: 75,               // StochRSI threshold for overbought
+    BLOCK_IF_MOMENTUM_CONFIRMS_TREND: true,  // Block if momentum strongly supports opposite
+    MOMENTUM_TREND_THRESHOLD: 15,       // Block if momentum > 15 (or < -15) confirms trend
+  },
+  
+  // ===== TREND FOLLOWING REQUIREMENTS =====
+  // Trend Following signals need a confirmed trend, NOT ranging markets
+  TREND_FOLLOWING: {
+    MIN_ADX: 20,                        // Require ADX >= 20 (trend must exist)
+    REQUIRE_MOMENTUM_ALIGNED: true,     // Momentum must match signal direction
+    MIN_ALIGNED_MOMENTUM: 5,            // Minimum momentum score in signal direction
+    BLOCK_IF_EXHAUSTED: true,           // Block at trend exhaustion
+    EXHAUSTION_ADX: 50,                 // ADX level considered potentially exhausted
+    EXHAUSTION_SLOPE: -0.5,             // Negative slope threshold for exhaustion
+    BLOCK_IF_RANGING: true,             // Block in RANGING regime
+  },
+  
   // ===== HARD CONTRADICTION BLOCKS =====
   // These block signals regardless of quality score
   HARD_CONTRADICTIONS: {
