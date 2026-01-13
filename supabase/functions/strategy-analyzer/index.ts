@@ -5105,7 +5105,7 @@ serve(async (req) => {
         if (hardContradiction.hasContradiction) {
           rejectedByHardGates++;
           perSymbolGateAttribution.set(symbol, { 
-            gate: hardContradiction.contradictionType || 'HARD_CONTRADICTION', 
+            gate: (hardContradiction.contradictionType || 'HARD_CONTRADICTION') as GateType, 
             details: hardContradiction.details || '' 
           });
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK: ${hardContradiction.contradictionType} - ${hardContradiction.details}`);
