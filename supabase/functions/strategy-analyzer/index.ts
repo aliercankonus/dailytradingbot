@@ -95,6 +95,7 @@ import {
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
+  isMeanReversionStrategy,
   detectStrategyType,
   type ExceptionType,
   type MarketContext
@@ -606,6 +607,80 @@ const validateSignalTypeRequirements = (
     // Requirement 5: Market regime != RANGING (unless squeeze)
     if (config.BLOCK_IF_RANGING && regime === 'RANGING' && !bbSqueeze) {
       violations.push(`Regime RANGING without squeeze setup`);
+    }
+  }
+  
+  // ===== MEAN REVERSION strategy requirements =====
+  const isMeanReversion = isMeanReversionStrategy(strategyId, strategyName);
+  
+  if (isMeanReversion) {
+    const config = SIGNAL_TYPE_VALIDITY_PARAMS.MEAN_REVERSION;
+    const rsi = momentum?.rsi || 50;
+    const stochRsi = momentum?.stochRsi || momentum?.stochRsiK || 50;
+    
+    // Requirement 1: ADX must NOT be too high (strong trends crush reversals)
+    if (adx > config.MAX_ADX) {
+      violations.push(`ADX ${adx.toFixed(1)} > ${config.MAX_ADX} (trend too strong for reversal)`);
+    }
+    
+    // Requirement 2: ADX should NOT be expanding rapidly
+    if (config.BLOCK_IF_ADX_EXPANDING && adxSlope > config.ADX_EXPANSION_THRESHOLD) {
+      violations.push(`ADX slope ${adxSlope.toFixed(2)} > ${config.ADX_EXPANSION_THRESHOLD} (trend expanding)`);
+    }
+    
+    // Requirement 3: RSI or StochRSI must be at extremes for the signal direction
+    if (config.REQUIRE_EXTREME_READING) {
+      const atExtreme = 
+        (derivedDirection === 'long' && (rsi < config.RSI_OVERSOLD || stochRsi < config.STOCH_OVERSOLD)) ||
+        (derivedDirection === 'short' && (rsi > config.RSI_OVERBOUGHT || stochRsi > config.STOCH_OVERBOUGHT));
+      
+      if (!atExtreme) {
+        violations.push(`No extreme: RSI=${rsi.toFixed(1)}, StochRSI=${stochRsi.toFixed(1)} for ${derivedDirection}`);
+      }
+    }
+    
+    // Requirement 4: Momentum should NOT strongly confirm the trend (else not reversing)
+    if (config.BLOCK_IF_MOMENTUM_CONFIRMS_TREND) {
+      const momentumConfirmsTrend = 
+        (derivedDirection === 'long' && momentumScore < -config.MOMENTUM_TREND_THRESHOLD) ||
+        (derivedDirection === 'short' && momentumScore > config.MOMENTUM_TREND_THRESHOLD);
+      
+      if (momentumConfirmsTrend) {
+        violations.push(`Momentum ${momentumScore} strongly confirms trend, not reversal`);
+      }
+    }
+  }
+  
+  // ===== TREND FOLLOWING strategy requirements =====
+  const isTrendFollowing = isTrendFollowingStrategy(strategyId, strategyName);
+  
+  if (isTrendFollowing) {
+    const config = SIGNAL_TYPE_VALIDITY_PARAMS.TREND_FOLLOWING;
+    
+    // Requirement 1: ADX must be >= minimum (trend must exist)
+    if (adx < config.MIN_ADX) {
+      violations.push(`ADX ${adx.toFixed(1)} < ${config.MIN_ADX} (no trend for trend-following)`);
+    }
+    
+    // Requirement 2: Momentum must be aligned with direction
+    if (config.REQUIRE_MOMENTUM_ALIGNED) {
+      const momentumAligned = 
+        (derivedDirection === 'long' && momentumScore > config.MIN_ALIGNED_MOMENTUM) ||
+        (derivedDirection === 'short' && momentumScore < -config.MIN_ALIGNED_MOMENTUM);
+      
+      if (!momentumAligned) {
+        violations.push(`Momentum ${momentumScore} not aligned with ${derivedDirection} (need >${config.MIN_ALIGNED_MOMENTUM})`);
+      }
+    }
+    
+    // Requirement 3: ADX should NOT be exhausted (> threshold with negative slope)
+    if (config.BLOCK_IF_EXHAUSTED && adx > config.EXHAUSTION_ADX && adxSlope < config.EXHAUSTION_SLOPE) {
+      violations.push(`Trend exhausted: ADX ${adx.toFixed(1)} > ${config.EXHAUSTION_ADX} with slope ${adxSlope.toFixed(2)}`);
+    }
+    
+    // Requirement 4: Market regime should NOT be RANGING
+    if (config.BLOCK_IF_RANGING && regime === 'RANGING') {
+      violations.push(`Regime RANGING not suitable for trend-following`);
     }
   }
   
