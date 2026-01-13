@@ -96,6 +96,8 @@ import {
   MACD_GATE_PARAMS,
   // NEW: Pre-Signal Validity Gate for semantic consistency
   SIGNAL_TYPE_VALIDITY_PARAMS,
+  // PHASE 2: ADX Rising %B Bypass - allows extended %B when ADX rising
+  ADX_RISING_PERCENT_B_BYPASS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -7653,11 +7655,40 @@ serve(async (req) => {
                   continue;
                 }
                 
-                // %B requirement with strong trend exception
+                // %B requirement with strong trend exception AND ADX rising bypass
+                // PHASE 2: ADX Rising %B Bypass - when ADX is rising, extended %B is continuation
+                const slopeForBypassDeath = ADX_RISING_PERCENT_B_BYPASS.USE_SMOOTHED_SLOPE 
+                  ? (fullAdxResult?.adxSlopeSmoothed ?? fullAdxResult?.adxSlope ?? 0)
+                  : (fullAdxResult?.adxSlope ?? 0);
+                
+                const adxRisingBypassPercentBDeath = 
+                  ADX_RISING_PERCENT_B_BYPASS.ENABLED &&
+                  slopeForBypassDeath >= ADX_RISING_PERCENT_B_BYPASS.MIN_SLOPE &&
+                  adx >= ADX_RISING_PERCENT_B_BYPASS.MIN_ADX &&
+                  percentB >= ADX_RISING_PERCENT_B_BYPASS.MIN_PERCENT_B_FLOOR;
+                
+                let deathCrossPercentBBypassActive = false;
+                let deathCrossPercentBBypassMultiplier = 1.0;
+                
                 if (percentB < effectiveMinPercentB) {
-                  rejectedByStrategy++;
-                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - %B ${percentB.toFixed(1)} < ${effectiveMinPercentB}${isStrongTrendMode ? ' (strong trend mode)' : ''}`);
-                  continue;
+                  if (adxRisingBypassPercentBDeath) {
+                    // STRUCTURED OVERRIDE LOG: OVERRIDE_REASON=ADX_RISING_EXTENSION
+                    logger.forSymbol(symbol).info(
+                      `${LOG_CATEGORIES.SUCCESS} "${strategy.name}": OVERRIDE_REASON=ADX_RISING_EXTENSION | ` +
+                      `%B=${percentB.toFixed(1)} bypassed (<${effectiveMinPercentB}, >${ADX_RISING_PERCENT_B_BYPASS.MIN_PERCENT_B_FLOOR}) | ` +
+                      `ADX=${adx.toFixed(1)}, slope_smoothed=${slopeForBypassDeath.toFixed(3)}`
+                    );
+                    deathCrossPercentBBypassActive = true;
+                    deathCrossPercentBBypassMultiplier = ADX_RISING_PERCENT_B_BYPASS.POSITION_SIZE_MULTIPLIER;
+                  } else {
+                    rejectedByStrategy++;
+                    logger.forSymbol(symbol).warn(
+                      `"${strategy.name}": IMPROVEMENT 4 BLOCK - %B ${percentB.toFixed(1)} < ${effectiveMinPercentB}` +
+                      `${isStrongTrendMode ? ' (strong trend mode)' : ''} | ` +
+                      `bypass_failed: slope=${slopeForBypassDeath.toFixed(3)} (need>=${ADX_RISING_PERCENT_B_BYPASS.MIN_SLOPE}), adx=${adx.toFixed(1)} (need>=${ADX_RISING_PERCENT_B_BYPASS.MIN_ADX})`
+                    );
+                    continue;
+                  }
                 }
                 
                 // Fake breakout risk block
@@ -7669,7 +7700,8 @@ serve(async (req) => {
                 
                 const modeLabel = isStrongTrendMode ? ' [STRONG TREND MODE]' : '';
                 const adxRelaxLabel = useReducedAdx ? ' [ADX RELAXED - 1h conf]' : '';
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed${modeLabel}${adxRelaxLabel} (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, falling=${stochRsiFalling})`);
+                const bypassLabel = deathCrossPercentBBypassActive ? ' [%B BYPASS - ADX RISING]' : '';
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed${modeLabel}${adxRelaxLabel}${bypassLabel} (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, falling=${stochRsiFalling})`);
               }
               
               // EMA Golden Cross validation (LONG signals)
@@ -7713,11 +7745,40 @@ serve(async (req) => {
                   continue;
                 }
                 
-                // %B requirement with strong trend exception
+                // %B requirement with strong trend exception AND ADX rising bypass
+                // PHASE 2: ADX Rising %B Bypass - when ADX is rising, extended %B is continuation
+                const slopeForBypass = ADX_RISING_PERCENT_B_BYPASS.USE_SMOOTHED_SLOPE 
+                  ? (fullAdxResult?.adxSlopeSmoothed ?? fullAdxResult?.adxSlope ?? 0)
+                  : (fullAdxResult?.adxSlope ?? 0);
+                
+                const adxRisingBypassPercentB = 
+                  ADX_RISING_PERCENT_B_BYPASS.ENABLED &&
+                  slopeForBypass >= ADX_RISING_PERCENT_B_BYPASS.MIN_SLOPE &&
+                  adx >= ADX_RISING_PERCENT_B_BYPASS.MIN_ADX &&
+                  percentB <= ADX_RISING_PERCENT_B_BYPASS.MAX_PERCENT_B_CAP;
+                
+                let goldenCrossPercentBBypassActive = false;
+                let goldenCrossPercentBBypassMultiplier = 1.0;
+                
                 if (percentB > effectiveMaxPercentB) {
-                  rejectedByStrategy++;
-                  logger.forSymbol(symbol).warn(`"${strategy.name}": IMPROVEMENT 4 BLOCK - %B ${percentB.toFixed(1)} > ${effectiveMaxPercentB}${isStrongTrendMode ? ' (strong trend mode)' : ''}`);
-                  continue;
+                  if (adxRisingBypassPercentB) {
+                    // STRUCTURED OVERRIDE LOG: OVERRIDE_REASON=ADX_RISING_EXTENSION
+                    logger.forSymbol(symbol).info(
+                      `${LOG_CATEGORIES.SUCCESS} "${strategy.name}": OVERRIDE_REASON=ADX_RISING_EXTENSION | ` +
+                      `%B=${percentB.toFixed(1)} bypassed (>${effectiveMaxPercentB}, <${ADX_RISING_PERCENT_B_BYPASS.MAX_PERCENT_B_CAP}) | ` +
+                      `ADX=${adx.toFixed(1)}, slope_smoothed=${slopeForBypass.toFixed(3)}`
+                    );
+                    goldenCrossPercentBBypassActive = true;
+                    goldenCrossPercentBBypassMultiplier = ADX_RISING_PERCENT_B_BYPASS.POSITION_SIZE_MULTIPLIER;
+                  } else {
+                    rejectedByStrategy++;
+                    logger.forSymbol(symbol).warn(
+                      `"${strategy.name}": IMPROVEMENT 4 BLOCK - %B ${percentB.toFixed(1)} > ${effectiveMaxPercentB}` +
+                      `${isStrongTrendMode ? ' (strong trend mode)' : ''} | ` +
+                      `bypass_failed: slope=${slopeForBypass.toFixed(3)} (need>=${ADX_RISING_PERCENT_B_BYPASS.MIN_SLOPE}), adx=${adx.toFixed(1)} (need>=${ADX_RISING_PERCENT_B_BYPASS.MIN_ADX})`
+                    );
+                    continue;
+                  }
                 }
                 
                 // Fake breakout risk block
@@ -7729,7 +7790,8 @@ serve(async (req) => {
                 
                 const modeLabel = isStrongTrendMode ? ' [STRONG TREND MODE]' : '';
                 const adxRelaxLabel = useReducedAdx ? ' [ADX RELAXED - 1h conf]' : '';
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed${modeLabel}${adxRelaxLabel} (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, rising=${stochRsiRising})`);
+                const bypassLabel = goldenCrossPercentBBypassActive ? ' [%B BYPASS - ADX RISING]' : '';
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} "${strategy.name}": IMPROVEMENT 4 constraints passed${modeLabel}${adxRelaxLabel}${bypassLabel} (ADX=${adx.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}, rising=${stochRsiRising})`);
               }
               
               if (isMomentumType && !is4hDirectional) {

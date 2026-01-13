@@ -1710,8 +1710,8 @@ export const STRATEGY_SPECIFIC_CONSTRAINTS = {
     // RELAXED: Lowered from 30 to 15 - oversold in bearish trend is momentum continuation
     MIN_STOCHRSI_K: 15,
     // STRONG TREND EXCEPTION: When ADX >= this, allow lower StochRSI
-    // LOWERED from 30 to 25 to catch more trending conditions
-    STRONG_TREND_ADX_THRESHOLD: 25,
+    // PHASE 1 FIX: LOWERED from 25 to 20 - ADX 20-25 is gap zone where good signals get blocked
+    STRONG_TREND_ADX_THRESHOLD: 20,
     // Minimum StochRSI allowed even in strong trend mode (absolute floor)
     // LOWERED from 10 to 3 - in strong bearish, K near 0 is continuation
     STRONG_TREND_MIN_STOCHRSI_K: 3,
@@ -1734,8 +1734,8 @@ export const STRATEGY_SPECIFIC_CONSTRAINTS = {
     // RELAXED: Raised from 70 to 85 - overbought in bullish trend is momentum continuation
     MAX_STOCHRSI_K: 85,
     // STRONG TREND EXCEPTION: When ADX >= this, allow higher StochRSI
-    // LOWERED from 30 to 25 to catch more trending conditions
-    STRONG_TREND_ADX_THRESHOLD: 25,
+    // PHASE 1 FIX: LOWERED from 25 to 20 - ADX 20-25 is gap zone where good signals get blocked
+    STRONG_TREND_ADX_THRESHOLD: 20,
     // Maximum StochRSI allowed even in strong trend mode (absolute ceiling)
     // RAISED from 90 to 97 - in strong bullish, K near 100 is continuation
     STRONG_TREND_MAX_STOCHRSI_K: 97,
@@ -1751,6 +1751,26 @@ export const STRATEGY_SPECIFIC_CONSTRAINTS = {
     // Hard block on fake breakout risk
     BLOCK_ON_FAKE_BREAKOUT: true,
   },
+} as const;
+
+// ============= PHASE 2: ADX RISING %B BYPASS PARAMETERS =============
+// Allows %B block bypass when ADX is rising, indicating trend strengthening
+// In rising ADX scenarios, extended %B is continuation, not exhaustion
+export const ADX_RISING_PERCENT_B_BYPASS = {
+  // Enable ADX rising %B bypass
+  ENABLED: true,
+  // Use smoothed slope to avoid single-bar spikes (average of last 3 calculations)
+  USE_SMOOTHED_SLOPE: true,
+  // Minimum smoothed slope required for bypass
+  MIN_SLOPE: 0.3,
+  // Minimum ADX for bypass eligibility
+  MIN_ADX: 18,
+  // Maximum %B allowed even with bypass (absolute cap for LONG)
+  MAX_PERCENT_B_CAP: 115,
+  // Minimum %B allowed even with bypass (absolute floor for SHORT)
+  MIN_PERCENT_B_FLOOR: -15,
+  // Position size reduction for bypassed entries (70% = 30% reduction)
+  POSITION_SIZE_MULTIPLIER: 0.70,
 } as const;
 
 // ============= EARLY MOMENTUM ENTRY PARAMETERS =============
