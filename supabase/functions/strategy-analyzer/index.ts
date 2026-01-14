@@ -3398,13 +3398,69 @@ serve(async (req) => {
           }
         }
         
-        // Determine which tier applies (highest tier wins, including new Tier 0)
-        let bypassTier: 'none' | 'tier0' | 'tier1' | 'tier2' | 'tier3' | 'after_exit' = 'none';
+        // ============= PHASE 3: STRONG TREND BOLLINGER EXTENSION =============
+        // Allow entries at %B > 97 when ADX >= 45 and 4h trend strongly aligns
+        // This catches continuation moves when price is riding above upper Bollinger band
+        let bollingerExtensionAllowed = false;
+        let bollingerExtPositionMultiplier = 1.0;
+        
+        if (STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.ENABLED) {
+          const htfConf4hForBB = trendData.timeframes?.['4h']?.confidence ?? 0;
+          const htfDir4hForBB = trendData.timeframes?.['4h']?.trend ?? 'neutral';
+          
+          // Check if direction matches 4h trend
+          const htf4hAlignedForBB = (derivedDirection === 'long' && htfDir4hForBB === 'bullish') ||
+                                    (derivedDirection === 'short' && htfDir4hForBB === 'bearish');
+          
+          // Check ADX requirements
+          const meetsAdxForBB = adx >= STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.MIN_ADX;
+          const meetsAdxSlopeForBB = adxSlope >= STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.MIN_ADX_SLOPE;
+          const meetsDiGapForBB = diGap >= STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.MIN_DI_GAP;
+          
+          // Check HTF alignment
+          const meetsHtfForBB = !STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.REQUIRE_HTF_ALIGNED ||
+                               (htf4hAlignedForBB && htfConf4hForBB >= STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.MIN_HTF_4H_CONFIDENCE);
+          
+          // Check StochRSI safety - must not be at absolute extreme
+          const stochRsiSafeForLongBB = stochRsiK4h < STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.MAX_STOCHRSI_K_LONG;
+          const stochRsiSafeForShortBB = stochRsiK4h > STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.MIN_STOCHRSI_K_SHORT;
+          
+          // Check if %B is in the extension zone (> 97 for long, < 3 for short)
+          const isLongBBExtension = derivedDirection === 'long' && percentB > 97 && percentB <= STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.EXTENDED_MAX_PERCENT_B_LONG;
+          const isShortBBExtension = derivedDirection === 'short' && percentB < 3 && percentB >= STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.EXTENDED_MIN_PERCENT_B_SHORT;
+          
+          // Apply extension logic
+          if (meetsAdxForBB && meetsAdxSlopeForBB && meetsDiGapForBB && meetsHtfForBB) {
+            if ((isLongBBExtension && stochRsiSafeForLongBB) || (isShortBBExtension && stochRsiSafeForShortBB)) {
+              bollingerExtensionAllowed = true;
+              bollingerExtPositionMultiplier = STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.POSITION_SIZE_MULTIPLIER;
+              
+              const direction = derivedDirection === 'long' ? 'LONG' : 'SHORT';
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.ENTRY} PHASE 3: BOLLINGER EXTENSION BYPASS - Allowing ${direction} at %B=${percentB.toFixed(1)}`);
+              logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)} (>=${STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.MIN_ADX}), slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)}`);
+              logger.forSymbol(symbol).info(`   → 4h trend: ${htfDir4hForBB} at ${htfConf4hForBB.toFixed(0)}% confidence (aligned=${htf4hAlignedForBB})`);
+              logger.forSymbol(symbol).info(`   → StochRSI K=${stochRsiK4h.toFixed(1)} (within safety limit), Position size: ${(bollingerExtPositionMultiplier * 100).toFixed(0)}%`);
+            }
+          } else {
+            // Log why extension wasn't allowed (debug level)
+            if (isLongBBExtension || isShortBBExtension) {
+              logger.forSymbol(symbol).debug(`[BOLLINGER_EXT] %B=${percentB.toFixed(1)} in extension zone but conditions not met: ADX=${meetsAdxForBB}, slope=${meetsAdxSlopeForBB}, DI=${meetsDiGapForBB}, HTF=${meetsHtfForBB}`);
+            }
+          }
+        }
+        
+        // Determine which tier applies (highest tier wins, including new Tier 0 and Bollinger Extension)
+        let bypassTier: 'none' | 'tier0' | 'tier1' | 'tier2' | 'tier3' | 'after_exit' | 'bollinger_ext' = 'none';
         let tieredPositionSizePercent = 100;
         
-        // PHASE 2: Check Trend Continuation After Exit first (highest priority when applicable)
+        // PHASE 3: Check Bollinger Extension first (allows entries at extreme %B)
+        if (bollingerExtensionAllowed) {
+          bypassTier = 'bollinger_ext';
+          tieredPositionSizePercent = bollingerExtPositionMultiplier * 100;
+        }
+        // PHASE 2: Check Trend Continuation After Exit (second priority when applicable)
         // This allows re-entry with relaxed StochRSI thresholds after profitable exits
-        if (trendContinuationAfterExitAllowed && afterExitDirection === derivedDirection) {
+        else if (trendContinuationAfterExitAllowed && afterExitDirection === derivedDirection) {
           bypassTier = 'after_exit';
           tieredPositionSizePercent = afterExitPositionMultiplier * 100;
         }
@@ -3451,13 +3507,17 @@ serve(async (req) => {
           tieredPositionSizePercent = STOCHRSI_THRESHOLDS.TIER1_POSITION_SIZE;
         }
         
-        // Phase 2: For after_exit bypass, use relaxed StochRSI thresholds
-        const effectiveAbsoluteMaxOverbought = trendContinuationAfterExitAllowed && derivedDirection === "long"
+        // Phase 2/3: For after_exit or bollinger_ext bypass, use relaxed StochRSI thresholds
+        const effectiveAbsoluteMaxOverbought = (trendContinuationAfterExitAllowed && derivedDirection === "long")
           ? TREND_CONTINUATION_AFTER_EXIT_PARAMS.MAX_STOCHRSI_K_LONG_REENTRY
-          : STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT;
-        const effectiveAbsoluteMaxOversold = trendContinuationAfterExitAllowed && derivedDirection === "short"
+          : bollingerExtensionAllowed && derivedDirection === "long"
+            ? STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.MAX_STOCHRSI_K_LONG
+            : STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT;
+        const effectiveAbsoluteMaxOversold = (trendContinuationAfterExitAllowed && derivedDirection === "short")
           ? TREND_CONTINUATION_AFTER_EXIT_PARAMS.MIN_STOCHRSI_K_SHORT_REENTRY
-          : STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD;
+          : bollingerExtensionAllowed && derivedDirection === "short"
+            ? STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.MIN_STOCHRSI_K_SHORT
+            : STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD;
         
         const canBypassAbsoluteMax = bypassTier !== 'none';
         
@@ -3470,14 +3530,14 @@ serve(async (req) => {
             if (canBypassAbsoluteMax) {
               // Allow entry despite K>=threshold - tiered bypass based on trend strength or recent profitable exit
               parabolicBypassApplied = true;
-              const bypassReason = bypassTier === 'after_exit' ? 'TREND_CONTINUATION_AFTER_EXIT' : bypassTier.toUpperCase();
+              const bypassReason = bypassTier === 'after_exit' ? 'TREND_CONTINUATION_AFTER_EXIT' : bypassTier === 'bollinger_ext' ? 'BOLLINGER_EXTENSION' : bypassTier.toUpperCase();
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} TIERED BYPASS [${bypassReason}] - Allowing LONG at K=${stochRsiK4h.toFixed(1)} (threshold=${effectiveAbsoluteMaxOverbought}, ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)})`);
               logger.forSymbol(symbol).info(`   → Position size reduced to ${tieredPositionSizePercent}% due to extreme StochRSI`);
             } else {
               rejectedByStochRsiExtreme++;
               perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT', details: `K=${stochRsiK4h.toFixed(1)} >= ${effectiveAbsoluteMaxOverbought}` });
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at maximum (K=${stochRsiK4h.toFixed(1)} >= ${effectiveAbsoluteMaxOverbought}) - nowhere to rise`);
-              logger.forSymbol(symbol).info(`   → Tiered bypass failed: ADX=${adx.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX}), slope=${adxSlope.toFixed(2)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE}), DI gap=${diGap.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP}), exhausted=${adxExhaustion.isExhausted}, continuation=${adxExhaustion.isContinuation}, afterExitAllowed=${trendContinuationAfterExitAllowed}`);
+              logger.forSymbol(symbol).info(`   → Tiered bypass failed: ADX=${adx.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX}), slope=${adxSlope.toFixed(2)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE}), DI gap=${diGap.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP}), exhausted=${adxExhaustion.isExhausted}, continuation=${adxExhaustion.isContinuation}, afterExitAllowed=${trendContinuationAfterExitAllowed}, bollingerExtAllowed=${bollingerExtensionAllowed}`);
               await logRejectionWithAI(
                 supabase, userId, symbol,
                 `STOCHRSI ABSOLUTE BLOCK: LONG blocked at K=${stochRsiK4h.toFixed(1)} (parabolic bypass conditions not met)`,
@@ -3488,6 +3548,7 @@ serve(async (req) => {
                   threshold: effectiveAbsoluteMaxOverbought,
                   normalThreshold: STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT,
                   trendContinuationAfterExitAllowed,
+                  bollingerExtensionAllowed,
                   adx: adx.toFixed(1),
                   adxSlope: adxSlope.toFixed(2),
                   diGap: diGap.toFixed(1),
@@ -3512,14 +3573,14 @@ serve(async (req) => {
             if (canBypassAbsoluteMax) {
               // Allow entry despite K<=threshold - tiered bypass based on trend strength or recent profitable exit
               parabolicBypassApplied = true;
-              const bypassReason = bypassTier === 'after_exit' ? 'TREND_CONTINUATION_AFTER_EXIT' : bypassTier.toUpperCase();
+              const bypassReason = bypassTier === 'after_exit' ? 'TREND_CONTINUATION_AFTER_EXIT' : bypassTier === 'bollinger_ext' ? 'BOLLINGER_EXTENSION' : bypassTier.toUpperCase();
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} TIERED BYPASS [${bypassReason}] - Allowing SHORT at K=${stochRsiK4h.toFixed(1)} (threshold=${effectiveAbsoluteMaxOversold}, ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)})`);
               logger.forSymbol(symbol).info(`   → Position size reduced to ${tieredPositionSizePercent}% due to extreme StochRSI`);
             } else {
               rejectedByStochRsiExtreme++;
               perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_ABSOLUTE_MAX_OVERSOLD', details: `K=${stochRsiK4h.toFixed(1)} <= ${effectiveAbsoluteMaxOversold}` });
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at minimum (K=${stochRsiK4h.toFixed(1)} <= ${effectiveAbsoluteMaxOversold}) - nowhere to fall`);
-              logger.forSymbol(symbol).info(`   → Tiered bypass failed: ADX=${adx.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX}), slope=${adxSlope.toFixed(2)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE}), DI gap=${diGap.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP}), exhausted=${adxExhaustion.isExhausted}, continuation=${adxExhaustion.isContinuation}, afterExitAllowed=${trendContinuationAfterExitAllowed}`);
+              logger.forSymbol(symbol).info(`   → Tiered bypass failed: ADX=${adx.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX}), slope=${adxSlope.toFixed(2)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE}), DI gap=${diGap.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP}), exhausted=${adxExhaustion.isExhausted}, continuation=${adxExhaustion.isContinuation}, afterExitAllowed=${trendContinuationAfterExitAllowed}, bollingerExtAllowed=${bollingerExtensionAllowed}`);
               await logRejectionWithAI(
                 supabase, userId, symbol,
                 `STOCHRSI ABSOLUTE BLOCK: SHORT blocked at K=${stochRsiK4h.toFixed(1)} (parabolic bypass conditions not met)`,
@@ -3530,6 +3591,7 @@ serve(async (req) => {
                   threshold: effectiveAbsoluteMaxOversold,
                   normalThreshold: STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD,
                   trendContinuationAfterExitAllowed,
+                  bollingerExtensionAllowed,
                   adx: adx.toFixed(1),
                   adxSlope: adxSlope.toFixed(2),
                   diGap: diGap.toFixed(1),
