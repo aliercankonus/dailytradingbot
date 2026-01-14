@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Settings, Coins, BarChart3 } from "lucide-react";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { BotStatus } from "@/components/BotStatus";
+import { TodayPerformanceWidget } from "@/components/TodayPerformanceWidget";
 import { TradeHistory } from "@/components/TradeHistory";
 import { PortfolioMetrics } from "@/components/PortfolioMetrics";
 import { LivePriceCard } from "@/components/LivePriceCard";
@@ -84,12 +85,15 @@ const Index = () => {
               <CloseAllTradesButton />
             </div>
             
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-stretch">
               <div className="lg:col-span-1">
                 <BotStatus />
               </div>
               <div className="lg:col-span-2">
                 <PortfolioMetrics />
+              </div>
+              <div className="lg:col-span-1">
+                <TodayPerformanceWidget />
               </div>
             </div>
 
