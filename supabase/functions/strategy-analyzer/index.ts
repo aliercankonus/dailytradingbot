@@ -98,6 +98,10 @@ import {
   SIGNAL_TYPE_VALIDITY_PARAMS,
   // PHASE 2: ADX Rising %B Bypass - allows extended %B when ADX rising
   ADX_RISING_PERCENT_B_BYPASS,
+  // PHASE 1-4: Missed opportunity fixes
+  TREND_CONTINUATION_AFTER_EXIT_PARAMS,
+  STRONG_TREND_BOLLINGER_EXTENSION_PARAMS,
+  EARLY_TREND_DETECTION_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -3324,9 +3328,18 @@ serve(async (req) => {
         const diGap = fullAdxResult?.diGap ?? 0;
         const adxSlope = fullAdxResult?.adxSlope ?? 0;
         
-        // Determine which tier applies (highest tier wins)
-        let bypassTier: 'none' | 'tier1' | 'tier2' | 'tier3' = 'none';
+        // Determine which tier applies (highest tier wins, including new Tier 0)
+        let bypassTier: 'none' | 'tier0' | 'tier1' | 'tier2' | 'tier3' = 'none';
         let tieredPositionSizePercent = 100;
+        
+        // PHASE 1 FIX: NEW Tier 0 (Ultra Strong) - ADX >= 50, no continuation requirement
+        // Allows entries when ADX is very high even if slope slightly negative
+        const tier0Eligible = 
+          adx >= STOCHRSI_THRESHOLDS.TIER0_MIN_ADX &&
+          adxSlope >= STOCHRSI_THRESHOLDS.TIER0_MIN_ADX_SLOPE &&
+          diGap >= STOCHRSI_THRESHOLDS.TIER0_MIN_DI_GAP &&
+          !adxExhaustion.isExhausted;
+          // No continuation requirement for Tier 0
         
         // Tier 3 (Very Strong) - highest thresholds, most confidence
         const tier3Eligible = 
@@ -3342,15 +3355,20 @@ serve(async (req) => {
           diGap >= STOCHRSI_THRESHOLDS.TIER2_MIN_DI_GAP &&
           !adxExhaustion.isExhausted;
         
-        // Tier 1 (Base) - lowest thresholds, requires continuation mode for extra safety
+        // Tier 1 (Base) - lowest thresholds
+        // PHASE 1 FIX: Removed continuation requirement - now just needs ADX/slope/DI thresholds
         const tier1Eligible = 
           adx >= STOCHRSI_THRESHOLDS.TIER1_MIN_ADX &&
           adxSlope >= STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE &&
           diGap >= STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP &&
-          !adxExhaustion.isExhausted &&
-          adxExhaustion.isContinuation;  // Tier 1 requires continuation mode
+          !adxExhaustion.isExhausted;
+          // Removed: adxExhaustion.isContinuation - no longer required
         
-        if (tier3Eligible) {
+        // Select highest eligible tier (Tier 0 is highest for very strong ADX)
+        if (tier0Eligible) {
+          bypassTier = 'tier0';
+          tieredPositionSizePercent = STOCHRSI_THRESHOLDS.TIER0_POSITION_SIZE;
+        } else if (tier3Eligible) {
           bypassTier = 'tier3';
           tieredPositionSizePercent = STOCHRSI_THRESHOLDS.TIER3_POSITION_SIZE;
         } else if (tier2Eligible) {
