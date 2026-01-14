@@ -661,20 +661,43 @@ serve(async (req) => {
       logger.info(`📈 Strong ADX (${adxValue.toFixed(1)}): Quality threshold lowered to ${dynamicQualityThreshold}`);
     }
     
-    // Check signal quality score from indicators
+    // ============================================================
+    // GRADUATED QUALITY THRESHOLD SYSTEM
+    // Instead of hard blocking, use graduated position reduction for borderline scores
+    // ADX >= 50 provides additional relaxation as strong trends confirm direction
+    // ============================================================
     const signalQualityScore = signal.indicators?.qualityScore ?? 0;
-    if (signalQualityScore > 0 && signalQualityScore < dynamicQualityThreshold) {
+    const hardMinQualityThreshold = 55; // Never allow below 55
+    
+    // ADX-based quality relaxation for very strong trends
+    const adxBasedQualityRelaxation = adxValue >= 50 ? 5 : adxValue >= 40 ? 3 : 0;
+    const effectiveQualityThreshold = Math.max(hardMinQualityThreshold, dynamicQualityThreshold - adxBasedQualityRelaxation);
+    
+    let qualityPositionReduction = 0;
+    
+    if (signalQualityScore > 0 && signalQualityScore < hardMinQualityThreshold) {
+      // HARD BLOCK: Below 55 is never allowed
       await logExecutionRejection(supabase, user.id, signal.symbol, 'Quality Score Too Low', signal, trendData, { 
         qualityScore: signalQualityScore, 
-        threshold: dynamicQualityThreshold, 
+        threshold: hardMinQualityThreshold, 
         isRecoveryMode: isInRecoveryMode,
         confidence1h,
         isNeutralStrategy,
-        adx: adxValue
+        adx: adxValue,
+        reason: 'Below hard minimum of 55'
       });
-      throw new Error(`Signal quality score (${signalQualityScore}) below dynamic threshold (${dynamicQualityThreshold}) - trade cancelled`);
+      throw new Error(`Signal quality score (${signalQualityScore}) below hard minimum (${hardMinQualityThreshold}) - trade cancelled`);
+    } else if (signalQualityScore > 0 && signalQualityScore < 60) {
+      // SOFT GATE: 55-60 → Allow with 30% position reduction
+      qualityPositionReduction = 30;
+      logger.info(`✓ GRADUATED QUALITY: Score ${signalQualityScore} in 55-60 zone → -30% position (ADX=${adxValue.toFixed(1)}, relaxation=${adxBasedQualityRelaxation})`);
+    } else if (signalQualityScore > 0 && signalQualityScore < effectiveQualityThreshold) {
+      // SOFT GATE: 60-threshold → Allow with 15% position reduction
+      qualityPositionReduction = 15;
+      logger.info(`✓ GRADUATED QUALITY: Score ${signalQualityScore} in 60-${effectiveQualityThreshold} zone → -15% position (ADX=${adxValue.toFixed(1)})`);
+    } else {
+      logger.validation(`✓ Quality check: ${signalQualityScore} >= ${effectiveQualityThreshold} threshold`, true);
     }
-    logger.validation(`✓ Quality check: ${signalQualityScore} >= ${dynamicQualityThreshold} threshold`, true);
 
     // ============================================================
     // VOLUME SCORE VALIDATION (aligned with strategy-analyzer)
@@ -1571,6 +1594,17 @@ serve(async (req) => {
       const prevQuantity = quantity;
       quantity *= momentumPositionMultiplier;
       logger.info(`📊 Momentum adjustment: ${prevQuantity.toFixed(4)} × ${momentumPositionMultiplier.toFixed(2)} = ${quantity.toFixed(4)}`);
+    }
+
+    // ============================================================
+    // GRADUATED QUALITY THRESHOLD POSITION REDUCTION
+    // Applied for borderline quality scores (55-60 or 60-threshold)
+    // ============================================================
+    if (qualityPositionReduction > 0) {
+      const qualityMultiplier = (100 - qualityPositionReduction) / 100;
+      const prevQuantity = quantity;
+      quantity *= qualityMultiplier;
+      logger.info(`📊 Quality score adjustment: ${prevQuantity.toFixed(4)} × ${qualityMultiplier.toFixed(2)} (-${qualityPositionReduction}%) = ${quantity.toFixed(4)}`);
     }
     // Apply confidence-based position size scaling (INVERTED: high confidence = REDUCE size)
     // High confidence indicates trend exhaustion, not strength
