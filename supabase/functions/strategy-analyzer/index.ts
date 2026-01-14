@@ -2836,10 +2836,33 @@ serve(async (req) => {
           adxExhaustion.isExhausted
         );
         
+        // ============= MASTER REGIME GATE OVERRIDES =============
+        // Extract regime-aware thresholds for use in all gate checks
+        const regimeGates = masterRegime.gateOverrides;
+        const isRegimeOverrideActive = masterRegime.isStrongTrendOverride || masterRegime.isParabolicOverride;
+        
+        // Regime-aware Bollinger thresholds (used in %B gate checks)
+        const regimeBollingerMaxPercentB = regimeGates.bollingerMaxPercentB;
+        const regimeBollingerMinPercentB = regimeGates.bollingerMinPercentB;
+        
+        // Regime-aware StochRSI thresholds (used in overbought/oversold checks)
+        const regimeStochRsiMaxK = regimeGates.stochRsiMaxK;
+        const regimeStochRsiMinK = regimeGates.stochRsiMinK;
+        
+        // Regime-aware momentum minimum (used in momentum gate)
+        const regimeMomentumMinimum = regimeGates.momentumScoreMinimum;
+        
+        // Regime-aware quality boost (applied to entry quality scores)
+        const regimeQualityBoost = regimeGates.qualityBoost;
+        
+        // Regime-aware position multiplier (applied to position sizing)
+        const regimePositionMultiplier = regimeGates.positionMultiplier;
+        
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🎯 MASTER REGIME: ${masterRegime.regime} - ${masterRegime.reason}`);
-        if (masterRegime.isStrongTrendOverride || masterRegime.isParabolicOverride) {
-          logger.forSymbol(symbol).info(`   → Gates become CONTEXT: BB max=${masterRegime.gateOverrides.bollingerMaxPercentB}, StochRSI max=${masterRegime.gateOverrides.stochRsiMaxK}, MomMin=${masterRegime.gateOverrides.momentumScoreMinimum}`);
-          logger.forSymbol(symbol).info(`   → Quality boost: +${masterRegime.gateOverrides.qualityBoost}, Position: ${(masterRegime.gateOverrides.positionMultiplier * 100).toFixed(0)}%`);
+        if (isRegimeOverrideActive) {
+          logger.forSymbol(symbol).info(`   → Gates become CONTEXT: BB max=${regimeBollingerMaxPercentB}%, min=${regimeBollingerMinPercentB}%`);
+          logger.forSymbol(symbol).info(`   → StochRSI: max K=${regimeStochRsiMaxK}, min K=${regimeStochRsiMinK}`);
+          logger.forSymbol(symbol).info(`   → Momentum min=${regimeMomentumMinimum}, Quality boost: +${regimeQualityBoost}, Position: ${(regimePositionMultiplier * 100).toFixed(0)}%`);
         }
         
         // ============= PHASE 2: ADX-AWARE MOMENTUM THRESHOLD =============
@@ -2861,9 +2884,11 @@ serve(async (req) => {
         
         // ============= SMART MOMENTUM GATES =============
         const regimeAwareEnabled = riskParams.regime_aware_trading !== false;
-        // PHASE 2: Use ADX-aware momentum threshold instead of flat value
-        const minMomentumScore = masterRegime.isStrongTrendOverride 
-          ? masterMomentumThreshold.threshold 
+        // PHASE 2: Use regime-aware momentum threshold
+        // When master regime indicates strong trend, use regime gate override (which may be 0)
+        // Otherwise fall back to ADX-aware threshold or user setting
+        const minMomentumScore = isRegimeOverrideActive 
+          ? Math.min(regimeMomentumMinimum, masterMomentumThreshold.threshold)  // Regime minimum or ADX-aware, whichever is lower
           : (riskParams.min_momentum_score ?? 30);
         const exhaustionBlockEnabled = riskParams.exhaustion_block_enabled !== false;
         
@@ -4493,9 +4518,14 @@ serve(async (req) => {
                                         (qualifiesForTrendAcceleration && derivedDirection === "long");
         const isStrongBullishTrend = isBullishTrendConfirmed && adx >= ADX_THRESHOLDS.MODERATE;
         
-        // SHORT gate: Determine appropriate %B threshold based on trend, squeeze, and ranging
+        // SHORT gate: Determine appropriate %B threshold based on trend, squeeze, ranging, AND master regime
+        // Master regime overrides take precedence when active (PARABOLIC or STRONG_TREND)
         let shortMinPercentB: number;
-        if (isStrongBearishTrend) {
+        if (isRegimeOverrideActive) {
+          // REGIME OVERRIDE: Use regime-based minimum (can be negative for shorts in strong downtrends)
+          shortMinPercentB = regimeBollingerMinPercentB;
+          logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} BOLLINGER SHORT: Using regime override min %B=${shortMinPercentB} (${masterRegime.regime})`);
+        } else if (isStrongBearishTrend) {
           // Strong bearish trend: allow shorts much lower (trend continuation)
           shortMinPercentB = BOLLINGER_ENTRY_GATES.SHORT_STRONG_BEARISH_MIN_PERCENT_B; // 5
         } else if (isBearishTrendConfirmed) {
@@ -4725,9 +4755,14 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} TREND CONTEXT RELAXATION: Allowing SHORT at %B=${percentB.toFixed(1)} via ${relaxationReasonShort}, ADX=${adx.toFixed(1)}`);
         }
         
-        // LONG gate: Determine appropriate %B threshold based on trend, squeeze, and ranging
+        // LONG gate: Determine appropriate %B threshold based on trend, squeeze, ranging, AND master regime
+        // Master regime overrides take precedence when active (PARABOLIC or STRONG_TREND)
         let longMaxPercentB: number;
-        if (isStrongBullishTrend) {
+        if (isRegimeOverrideActive) {
+          // REGIME OVERRIDE: Use regime-based maximum (can be >100 for longs in strong uptrends)
+          longMaxPercentB = regimeBollingerMaxPercentB;
+          logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} BOLLINGER LONG: Using regime override max %B=${longMaxPercentB} (${masterRegime.regime})`);
+        } else if (isStrongBullishTrend) {
           // Strong bullish trend: allow longs much higher (trend continuation)
           longMaxPercentB = BOLLINGER_ENTRY_GATES.LONG_STRONG_BULLISH_MAX_PERCENT_B; // 95
         } else if (isBullishTrendConfirmed) {
@@ -5518,9 +5553,12 @@ serve(async (req) => {
           }
         }
         
-        // Log StochRSI status for monitoring
-        if (stochRsiK4h < STOCHRSI_THRESHOLDS.OVERSOLD || stochRsiK4h > STOCHRSI_THRESHOLDS.OVERBOUGHT) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} (proceeding with ${intendedTradeDirection || "neutral"} direction)`);
+        // Log StochRSI status for monitoring - use regime-aware thresholds
+        const effectiveOversoldThreshold = isRegimeOverrideActive ? regimeStochRsiMinK : STOCHRSI_THRESHOLDS.OVERSOLD;
+        const effectiveOverboughtThreshold = isRegimeOverrideActive ? regimeStochRsiMaxK : STOCHRSI_THRESHOLDS.OVERBOUGHT;
+        if (stochRsiK4h < effectiveOversoldThreshold || stochRsiK4h > effectiveOverboughtThreshold) {
+          const regimeNote = isRegimeOverrideActive ? ` [REGIME: oversold<${effectiveOversoldThreshold}, overbought>${effectiveOverboughtThreshold}]` : '';
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.STOCHRSI} 4h StochRSI K=${stochRsiK4h.toFixed(1)} (proceeding with ${intendedTradeDirection || "neutral"} direction)${regimeNote}`);
         }
 
         // ================= HARD ENTRY GATES =================
@@ -7419,8 +7457,17 @@ serve(async (req) => {
 
         const { score: rawQualityScore, breakdown: rawBreakdown } = calculateQualityScore(qualityFactors);
         
-        // ============= PHASE 4: Apply Fake Breakout Penalty, Genuine Momentum Bonus, and Continuation Bonus =============
-        const qualityScore = Math.max(0, Math.min(100, rawQualityScore + fakeBreakoutPenalty + genuineMomentumBonus + momentumContinuationBonus));
+        // ============= PHASE 4: Apply Fake Breakout Penalty, Genuine Momentum Bonus, Continuation Bonus, AND Regime Quality Boost =============
+        let qualityScore = Math.max(0, Math.min(100, rawQualityScore + fakeBreakoutPenalty + genuineMomentumBonus + momentumContinuationBonus));
+        
+        // Apply regime-aware quality boost for strong trend/parabolic regimes
+        let regimeQualityBoostApplied = 0;
+        if (isRegimeOverrideActive && regimeQualityBoost > 0) {
+          // Cap the boosted score at 85 to avoid over-boosting marginal entries
+          const boostedScore = Math.min(qualityScore + regimeQualityBoost, 85);
+          regimeQualityBoostApplied = boostedScore - qualityScore;
+          qualityScore = boostedScore;
+        }
         
         // Build final breakdown string including adjustments
         let breakdown = rawBreakdown;
@@ -7433,10 +7480,14 @@ serve(async (req) => {
         if (momentumContinuationBonus !== 0) {
           breakdown += ` MCONT:+${momentumContinuationBonus}`;
         }
+        if (regimeQualityBoostApplied > 0) {
+          breakdown += ` REGIME:+${regimeQualityBoostApplied}`;
+        }
         
         // Log if adjustments were applied
-        if (fakeBreakoutPenalty !== 0 || genuineMomentumBonus !== 0 || momentumContinuationBonus !== 0) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Quality adjusted: ${rawQualityScore}→${qualityScore} (FAKE:${fakeBreakoutPenalty}, GMOM:+${genuineMomentumBonus}, MCONT:+${momentumContinuationBonus})`);
+        if (fakeBreakoutPenalty !== 0 || genuineMomentumBonus !== 0 || momentumContinuationBonus !== 0 || regimeQualityBoostApplied > 0) {
+          const regimeNote = regimeQualityBoostApplied > 0 ? `, REGIME:+${regimeQualityBoostApplied}` : '';
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Quality adjusted: ${rawQualityScore}→${qualityScore} (FAKE:${fakeBreakoutPenalty}, GMOM:+${genuineMomentumBonus}, MCONT:+${momentumContinuationBonus}${regimeNote})`);
         }
         
         // ===== SCENARIO 6 FINDING 7: DYNAMIC POSITION SIZE =====
@@ -8981,6 +9032,12 @@ serve(async (req) => {
         if (candidateConvergenceMultiplier < 1.0) {
           positionSizeMultiplier *= candidateConvergenceMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🔀 CONVERGENCE ENTRY - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 22: Apply MASTER REGIME position multiplier (PARABOLIC/STRONG_TREND get reduced size for safety)
+        if (isRegimeOverrideActive && regimePositionMultiplier < 1.0) {
+          positionSizeMultiplier *= regimePositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🎯 MASTER REGIME (${masterRegime.regime}) - position size capped at ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
         // Final position size as percentage
