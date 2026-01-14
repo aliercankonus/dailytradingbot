@@ -355,7 +355,6 @@ interface SignalData {
   entry_price: number;
   stop_loss: number;
   take_profit: number;
-  strategy_id?: string;
   strategy_name: string;
   reason: string;
   indicators: any;
@@ -9033,7 +9032,6 @@ serve(async (req) => {
           take_profit: signalType === "long"
             ? currentPrice * (1 + takeProfitPercent / 100)
             : currentPrice * (1 - takeProfitPercent / 100),
-          strategy_id: strategy.id?.startsWith('builtin-') ? null : strategy.id,  // Built-in strategies use string IDs, DB expects UUID
           strategy_name: strategy.name,
           reason: `${strategy.name} | Quality: ${qualityScore}/100 | ${pullbackAnalysis.reason}`,
           indicators: {
