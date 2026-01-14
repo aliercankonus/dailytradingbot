@@ -642,8 +642,16 @@ export const getAdxScore = (adx: number, adxSlope?: number): number => {
 // ============= MOMENTUM SCORE (0-20 points) =============
 // IMPROVED: Better scoring for momentum continuation during strong moves
 // ENHANCED: StochRSI decline bonus for early bearish/bullish momentum detection
-export const getMomentumScore = (momentum: any, adx: number = 0, adxRising: boolean = false, stochRsiData?: { k: number; d: number }): number => {
-  if (!momentum) return 0;
+// PHASE 1 FIX: Add momentum floor for very strong ADX (trend strength IS momentum)
+export const getMomentumScore = (momentum: any, adx: number = 0, adxRising: boolean = false, stochRsiData?: { k: number; d: number }, adxSlope?: number): number => {
+  if (!momentum) {
+    // PHASE 1 FIX: Even without momentum data, very high ADX IS momentum confirmation
+    // ADX >= 40 with non-falling slope = trend strength is the momentum
+    if (adx >= 40 && (adxSlope === undefined || adxSlope > -0.5)) {
+      return 8;  // Floor at 8/20 for very strong trends
+    }
+    return 0;
+  }
   
   const state = momentum.state || "none";
   const confirms = momentum.confirms || false;
@@ -702,6 +710,16 @@ export const getMomentumScore = (momentum: any, adx: number = 0, adxRising: bool
     }
   }
   
+  // ============= PHASE 1 FIX: MOMENTUM FLOOR FOR VERY STRONG ADX =============
+  // When ADX >= 40 and not sharply falling, the trend strength IS confirmation of momentum
+  // Apply minimum score of 8 to prevent false rejections during consolidation in strong trends
+  const effectiveAdxSlope = adxSlope ?? (adxRising ? 0.5 : -0.3);
+  if (adx >= 40 && effectiveAdxSlope > -0.5) {
+    score = Math.max(score, 8);  // Floor at 8/20 for very strong trends
+  } else if (adx >= 35 && effectiveAdxSlope > -0.3) {
+    score = Math.max(score, 6);  // Floor at 6/20 for strong trends
+  }
+  
   return Math.min(20, score);
 };
 
@@ -721,6 +739,7 @@ export const getAlignmentScore = (
   const trend30m = tf?.['30m']?.trend || "neutral";
   const conf1h = tf?.['1h']?.confidence || 50;
   const conf4h = tf?.['4h']?.confidence || 50;
+  const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
   
   // Full alignment bonus (0-8)
   if (aligned) {
@@ -744,6 +763,17 @@ export const getAlignmentScore = (
     else if (trend1h !== "neutral" && conf1h >= 60) {
       score += 3;
     }
+  }
+  
+  // ============= PHASE 4 FIX: LOADING ZONE BONUS =============
+  // Add points when StochRSI is in 30-70 loading zone AND ADX is strong
+  // This rewards entries that have room to run
+  const stochRsi1h = trendData?.stochasticRsi?.['1h'];
+  const stochK1h = stochRsi1h?.k ?? 50;
+  if (stochK1h >= 30 && stochK1h <= 70 && adx >= 35) {
+    score += 3;  // +3 for loading zone with strong ADX
+  } else if (stochK1h >= 35 && stochK1h <= 65 && adx >= 25) {
+    score += 2;  // +2 for ideal loading zone with moderate ADX
   }
   
   // ============= 1H CONFIDENCE BONUS (NEW) =============
@@ -2277,6 +2307,7 @@ export const calculateQualityScore = (
   } 
 } => {
   const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
+  const adxSlope = trendData?.volatility?.adxSlope ?? undefined;
   const confidence = trendData?.confidence || 50;
   const consistency = trendData?.trueAlignment?.score || 50;
   const momentum = trendData?.momentum || {};
@@ -2287,14 +2318,15 @@ export const calculateQualityScore = (
   const volumeRatio = trendData?.volatility?.volumeRatio || momentum.volumeBoost || 1.0;
   const hasRangeExpansion = (trendData?.volatility?.relativeATR || 1) > 1.0;
   
-  const adxScore = getAdxScore(adx);
+  const adxScore = getAdxScore(adx, adxSlope);
   const adxRising = trendData?.volatility?.adxRising ?? false;
   
   // Extract StochRSI data for the decline bonus calculation
   const stochRsi1h = trendData?.stochasticRsi?.['1h'];
   const stochRsiData = stochRsi1h ? { k: stochRsi1h.k ?? 50, d: stochRsi1h.d ?? 50 } : undefined;
   
-  const momentumScore = getMomentumScore(momentum, adx, adxRising, stochRsiData);
+  // PHASE 1 FIX: Pass adxSlope to getMomentumScore for momentum floor calculation
+  const momentumScore = getMomentumScore(momentum, adx, adxRising, stochRsiData, adxSlope);
   const alignmentScore = getAlignmentScore(confidence, consistency, aligned, trendData);
   const technicalScore = getTechnicalScore(trendData, effectiveTrend, symbol);
   const volumeScoreVal = getVolumeScore(volumeConfirms, volumeSpike, volumeRatio, hasRangeExpansion, effectiveTrend);

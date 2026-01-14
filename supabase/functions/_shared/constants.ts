@@ -703,6 +703,10 @@ export const QUALITY_THRESHOLDS = {
   EXCEPTIONAL_ADX_MIN: 60,
   // Strong ADX threshold (ADX >= 25) - raised from 53 to 63
   STRONG_ADX_MIN: 63,
+  // NEW PHASE 2: Ultra-strong ADX threshold (ADX >= 50) - very high ADX IS the quality confirmation
+  ULTRA_STRONG_ADX_MIN: 55,
+  // NEW PHASE 2: Very high ADX threshold (ADX >= 45) - allows lower quality for confirmed strong trends
+  VERY_HIGH_ADX_MIN: 58,
   // Recovery mode boost added to base threshold
   RECOVERY_BOOST: 10,
   // PHASE 1: Near miss threshold - signals within this many points of threshold are logged for analysis
