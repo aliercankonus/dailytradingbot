@@ -8,7 +8,6 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import { TrendingUp, TrendingDown, Target, Activity, Info, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useEffect } from 'react';
-import { useCustomStrategies } from '@/hooks/useCustomStrategies';
 import { useSymbols } from '@/hooks/useSymbols';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -22,7 +21,6 @@ interface BacktestingModuleProps {
 export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
   const { results, runningBacktest, runBacktest, progress } = useBacktesting();
   const { toast } = useToast();
-  const { strategies: customStrategies } = useCustomStrategies();
   const { activeSymbols, symbols } = useSymbols();
 
   const [formData, setFormData] = useState({
@@ -44,72 +42,66 @@ export const BacktestingModule = ({ strategies }: BacktestingModuleProps) => {
 
   useEffect(() => {
     if (formData.strategyId) {
-      // Find the strategy in custom strategies
-      const customStrategy = customStrategies.find(s => s.id === formData.strategyId);
-      if (customStrategy) {
-        setSelectedStrategyConfig(customStrategy);
-      } else {
-        // It's a built-in strategy
-        const builtIn = strategies.find(s => s.id === formData.strategyId);
-        if (builtIn) {
-          const name = builtIn.name.toLowerCase();
-          if (name.includes('mean reversion')) {
-            setSelectedStrategyConfig({
-              name: builtIn.name,
-              isBuiltIn: true,
-              indicators: [
-                { type: 'price', name: 'price' },
-                { type: 'bb_lower', name: 'bb_lower', period: 20 },
-                { type: 'bb_middle', name: 'bb_middle', period: 20 },
-                { type: 'rsi', name: 'rsi', period: 14 },
-              ],
-              entry_conditions: [
-                { indicator: 'price', operator: '<', targetIndicator: 'bb_lower' },
-                { indicator: 'rsi', operator: '<', value: 30 },
-              ],
-              exit_conditions: [
-                { indicator: 'price', operator: '>=', targetIndicator: 'bb_middle' },
-              ],
-              risk_settings: { stopLossPercent: 2, takeProfitPercent: 4 },
-            });
-          } else if (name.includes('momentum')) {
-            setSelectedStrategyConfig({
-              name: builtIn.name,
-              isBuiltIn: true,
-              indicators: [
-                { type: 'macd', name: 'macd', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
-                { type: 'macd_signal', name: 'macd_signal', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
-              ],
-              entry_conditions: [
-                { indicator: 'macd', operator: '>', targetIndicator: 'macd_signal' },
-              ],
-              exit_conditions: [
-                { indicator: 'macd', operator: '<', targetIndicator: 'macd_signal' },
-              ],
-              risk_settings: { stopLossPercent: 3, takeProfitPercent: 6 },
-            });
-          } else if (name.includes('grid')) {
-            setSelectedStrategyConfig({
-              name: builtIn.name,
-              isBuiltIn: true,
-              indicators: [
-                { type: 'price', name: 'price' },
-                { type: 'bb_lower', name: 'bb_lower', period: 20 },
-                { type: 'bb_upper', name: 'bb_upper', period: 20 },
-              ],
-              entry_conditions: [
-                { indicator: 'price', operator: '<=', targetIndicator: 'bb_lower' },
-              ],
-              exit_conditions: [
-                { indicator: 'price', operator: '>=', targetIndicator: 'bb_upper' },
-              ],
-              risk_settings: { stopLossPercent: 1.5, takeProfitPercent: 1.5 },
-            });
-          }
+      // Find the strategy in the passed strategies prop (built-in only now)
+      const builtIn = strategies.find(s => s.id === formData.strategyId);
+      if (builtIn) {
+        const name = builtIn.name.toLowerCase();
+        if (name.includes('mean reversion')) {
+          setSelectedStrategyConfig({
+            name: builtIn.name,
+            isBuiltIn: true,
+            indicators: [
+              { type: 'price', name: 'price' },
+              { type: 'bb_lower', name: 'bb_lower', period: 20 },
+              { type: 'bb_middle', name: 'bb_middle', period: 20 },
+              { type: 'rsi', name: 'rsi', period: 14 },
+            ],
+            entry_conditions: [
+              { indicator: 'price', operator: '<', targetIndicator: 'bb_lower' },
+              { indicator: 'rsi', operator: '<', value: 30 },
+            ],
+            exit_conditions: [
+              { indicator: 'price', operator: '>=', targetIndicator: 'bb_middle' },
+            ],
+            risk_settings: { stopLossPercent: 2, takeProfitPercent: 4 },
+          });
+        } else if (name.includes('momentum')) {
+          setSelectedStrategyConfig({
+            name: builtIn.name,
+            isBuiltIn: true,
+            indicators: [
+              { type: 'macd', name: 'macd', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+              { type: 'macd_signal', name: 'macd_signal', fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+            ],
+            entry_conditions: [
+              { indicator: 'macd', operator: '>', targetIndicator: 'macd_signal' },
+            ],
+            exit_conditions: [
+              { indicator: 'macd', operator: '<', targetIndicator: 'macd_signal' },
+            ],
+            risk_settings: { stopLossPercent: 3, takeProfitPercent: 6 },
+          });
+        } else if (name.includes('grid')) {
+          setSelectedStrategyConfig({
+            name: builtIn.name,
+            isBuiltIn: true,
+            indicators: [
+              { type: 'price', name: 'price' },
+              { type: 'bb_lower', name: 'bb_lower', period: 20 },
+              { type: 'bb_upper', name: 'bb_upper', period: 20 },
+            ],
+            entry_conditions: [
+              { indicator: 'price', operator: '<=', targetIndicator: 'bb_lower' },
+            ],
+            exit_conditions: [
+              { indicator: 'price', operator: '>=', targetIndicator: 'bb_upper' },
+            ],
+            risk_settings: { stopLossPercent: 1.5, takeProfitPercent: 1.5 },
+          });
         }
       }
     }
-  }, [formData.strategyId, customStrategies, strategies]);
+  }, [formData.strategyId, strategies]);
 
   const handleRunBacktest = async () => {
     if (!formData.strategyId) {

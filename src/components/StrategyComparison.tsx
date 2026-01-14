@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,7 +15,6 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { TrendingUp, TrendingDown, Target, Activity } from "lucide-react";
 
 interface BacktestResult {
   id: string;
@@ -98,11 +96,6 @@ export const StrategyComparison = () => {
           }
         });
       }
-
-      // Fetch custom strategies
-      const { data: customData, error: customError } = await supabase.from("custom_strategies").select("*");
-
-      if (customError) console.error("Error fetching custom strategies:", customError);
 
       // Use a Map to group by strategy name, aggregating across all symbols
       const resultsMap = new Map<string, BacktestResult>();
@@ -195,25 +188,6 @@ export const StrategyComparison = () => {
             sharpe_ratio: 0,
             max_drawdown: p.max_drawdown || 0,
             total_trades: p.total_trades || 0,
-            profit_factor: 0,
-            results_data: null,
-            initial_capital: 10000,
-          });
-        }
-      });
-
-      // Add custom strategies only if not already in map
-      (customData || []).forEach((cs) => {
-        if (!resultsMap.has(cs.name)) {
-          resultsMap.set(cs.name, {
-            id: cs.id,
-            strategy_name: cs.name,
-            symbol: "Custom",
-            win_rate: 0,
-            net_profit: 0,
-            sharpe_ratio: 0,
-            max_drawdown: 0,
-            total_trades: 0,
             profit_factor: 0,
             results_data: null,
             initial_capital: 10000,
@@ -316,7 +290,7 @@ export const StrategyComparison = () => {
                 <thead>
                   <tr className="border-b border-border">
                     <th className="text-left py-3 px-4">Metric</th>
-                    {selectedResults.map((result, idx) => (
+                    {selectedResults.map((result) => (
                       <th key={result.id} className="text-right py-3 px-4">
                         <div className="flex flex-col items-end gap-1">
                           <Badge variant="outline">{result.strategy_name}</Badge>
@@ -444,9 +418,12 @@ export const StrategyComparison = () => {
                   })()}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="trade" label={{ value: "Trade Number", position: "insideBottom", offset: -5 }} />
-                  <YAxis label={{ value: "Equity ($)", angle: -90, position: "insideLeft" }} />
-                  <Tooltip />
+                  <XAxis dataKey="trade" label={{ value: "Trade #", position: "insideBottom", offset: -5 }} />
+                  <YAxis
+                    tickFormatter={(value) => `$${value.toLocaleString()}`}
+                    label={{ value: "Portfolio Value", angle: -90, position: "insideLeft" }}
+                  />
+                  <Tooltip formatter={(value: number) => `$${value.toLocaleString()}`} />
                   <Legend />
                   {selectedResults.map((result, idx) => (
                     <Line

@@ -10,7 +10,6 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Index from "./pages/Index";
 import Settings from "./pages/Settings";
 import Strategies from "./pages/Strategies";
-import StrategyBuilder from "./pages/StrategyBuilder";
 import Symbols from "./pages/Symbols";
 import Performance from "./pages/Performance";
 import Auth from "./pages/Auth";
@@ -33,8 +32,6 @@ const App = () => (
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
               <Route path="/symbols" element={<ProtectedRoute><Symbols /></ProtectedRoute>} />
               <Route path="/strategies" element={<ProtectedRoute><Strategies /></ProtectedRoute>} />
-              <Route path="/strategies/new" element={<ProtectedRoute><StrategyBuilder /></ProtectedRoute>} />
-              <Route path="/strategies/edit/:id" element={<ProtectedRoute><StrategyBuilder /></ProtectedRoute>} />
               <Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />

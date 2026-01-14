@@ -1337,25 +1337,25 @@ serve(async (req) => {
     let positionSizePercent = 1.0; // Default fallback if strategy not found
     
     // First check if signal has positionSizePercent in indicators (for rebalancer signals)
+    // ============================================================
+    // UNIFIED ADAPTIVE POSITION SIZING
+    // Position size comes from signal indicators (set by strategy-analyzer)
+    // No custom strategy lookup needed - built-in templates handle this
+    // ============================================================
     if (signal.indicators && typeof signal.indicators === 'object' && 'positionSizePercent' in signal.indicators) {
       positionSizePercent = signal.indicators.positionSizePercent as number;
       logger.info(`Using signal's positionSizePercent from indicators: ${positionSizePercent}%`);
-    } else if (signal.strategy_id) {
-      // Fetch from strategy for regular strategy signals
-      const { data: strategy } = await supabase
-        .from('custom_strategies')
-        .select('risk_settings')
-        .eq('id', signal.strategy_id)
-        .maybeSingle();
-      
-      if (strategy?.risk_settings && typeof strategy.risk_settings === 'object' && 'positionSizePercent' in strategy.risk_settings) {
-        positionSizePercent = strategy.risk_settings.positionSizePercent as number;
-        logger.info(`Using strategy's positionSizePercent: ${positionSizePercent}%`);
-      } else {
-        logger.warn('Strategy risk_settings missing positionSizePercent, using default 1%');
-      }
     } else {
-      logger.warn('Signal has no strategy_id or indicators.positionSizePercent, using default 1%');
+      // Default based on quality score - higher quality = larger position
+      const qualityScore = signal.indicators?.qualityScore ?? 60;
+      if (qualityScore >= 80) {
+        positionSizePercent = 2.0;
+      } else if (qualityScore >= 70) {
+        positionSizePercent = 1.5;
+      } else {
+        positionSizePercent = 1.0;
+      }
+      logger.info(`Using quality-based positionSizePercent: ${positionSizePercent}% (quality=${qualityScore})`);
     }
 
     // ============================================================
