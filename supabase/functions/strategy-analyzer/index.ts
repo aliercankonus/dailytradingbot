@@ -2121,6 +2121,8 @@ serve(async (req) => {
     
     // ============= DYNAMIC QUALITY THRESHOLD =============
     // Adjust threshold based on market conditions:
+    // - Ultra-strong ADX (≥50): Allow lowest quality (ADX IS the confirmation)
+    // - Very high ADX (≥45): Allow lower quality
     // - Strong ADX (≥35): Allow lower quality (more signals in strong trends)
     // - Normal ADX (20-35): Standard threshold
     // - Recovery mode: Higher threshold (fewer, higher quality signals)
@@ -2142,6 +2144,13 @@ serve(async (req) => {
       } else if (confidence1h && confidence1h >= 65) {
         // RELAXED: If 1h shows strong direction (≥65% confidence), allow lower threshold
         baseThreshold = QUALITY_THRESHOLDS.STRONG_1H_MIN;
+      } else if (adx >= 50) {
+        // NEW PHASE 2: Ultra-strong ADX (≥50) = ADX IS the quality confirmation
+        // Very high trend strength proves the trade, lower threshold to 55
+        baseThreshold = QUALITY_THRESHOLDS.ULTRA_STRONG_ADX_MIN;
+      } else if (adx >= 45) {
+        // NEW PHASE 2: Very high ADX (≥45) = strong trend, lower threshold to 58
+        baseThreshold = QUALITY_THRESHOLDS.VERY_HIGH_ADX_MIN;
       } else if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) {
         // Very strong trends = allow more signals
         baseThreshold = QUALITY_THRESHOLDS.EXCEPTIONAL_ADX_MIN;
@@ -5014,9 +5023,27 @@ serve(async (req) => {
             !hasBearishDivergence &&
             notTrueExhaustionLong;
           
+          // ============= PHASE 5 FIX: VERY HIGH ADX RISING GATE RELAXATION =============
+          // When ADX >= 50 and 4h is aligned, ignore the "K <= D" (not rising) condition
+          // for K values in the 80-92 range. Only hard block if K >= 93 AND K <= D
+          // This fixes false rejections in very strong trends during consolidation
+          const veryHighAdxBypassAllowed = (
+            adx >= 50 &&
+            stochFilterTrend4h === "bullish" &&
+            stochFilterConf4h >= 60 &&
+            stochRsiK4h >= 80 &&
+            stochRsiK4h < 93 &&  // Only relax for K 80-92, not at true extremes
+            !hasBearishDivergence
+          );
+          
+          if (veryHighAdxBypassAllowed && !stochRsiRising) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} VERY HIGH ADX BYPASS: ADX=${adx.toFixed(1)} >= 50, K=${stochRsiK4h.toFixed(1)} in 80-92 zone, 4h aligned - ignoring "K <= D" condition`);
+          }
+          
           // MANDATORY: StochRSI must be rising (K > D) for any extreme overbought entry
-          // EXCEPTION: Allow if momentum continuation conditions are met
-          if (!stochRsiRising && !momentumContinuationAllowedLong) {
+          // EXCEPTION 1: Allow if momentum continuation conditions are met
+          // EXCEPTION 2: Allow if very high ADX bypass conditions are met (Phase 5)
+          if (!stochRsiRising && !momentumContinuationAllowedLong && !veryHighAdxBypassAllowed) {
             rejectedByStochRsiExtreme++;
             perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} not rising` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - StochRSI not rising at overbought (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
@@ -5037,6 +5064,14 @@ serve(async (req) => {
                   noDivergence: !hasBearishDivergence,
                   notExhausted: notTrueExhaustionLong,
                   result: momentumContinuationAllowedLong
+                },
+                veryHighAdxBypassCheck: {
+                  adx: adx.toFixed(1),
+                  adxSufficient: adx >= 50,
+                  kInRange: stochRsiK4h >= 80 && stochRsiK4h < 93,
+                  htfAligned: stochFilterTrend4h === "bullish" && stochFilterConf4h >= 60,
+                  noDivergence: !hasBearishDivergence,
+                  result: veryHighAdxBypassAllowed
                 }
               },
               trendData,
