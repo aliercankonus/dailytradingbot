@@ -3276,6 +3276,7 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Unified reversal check passed (${unifiedReversal.score}/100)`);
         }
 
+        
         // ============= STOCHRSI EXTREME FILTER WITH SMART EXCEPTIONS =============
         // Prevent entries at extreme oversold/overbought 4h levels where bounces are likely
         // BUT allow if multiple strong trend continuation signals are present
@@ -3328,74 +3329,155 @@ serve(async (req) => {
         const diGap = fullAdxResult?.diGap ?? 0;
         const adxSlope = fullAdxResult?.adxSlope ?? 0;
         
+        // ============= PHASE 2: TREND CONTINUATION AFTER EXIT =============
+        // Check for recent profitable exits to allow relaxed re-entry thresholds
+        // This catches continuation moves after taking profit too early
+        let trendContinuationAfterExitAllowed = false;
+        let afterExitPositionMultiplier = 1.0;
+        let afterExitDirection: "long" | "short" | null = null;
+        
+        if (TREND_CONTINUATION_AFTER_EXIT_PARAMS.ENABLED) {
+          // Calculate lookback time
+          const lookbackHours = TREND_CONTINUATION_AFTER_EXIT_PARAMS.LOOKBACK_HOURS;
+          const lookbackTime = new Date(Date.now() - lookbackHours * 60 * 60 * 1000).toISOString();
+          
+          // Query recent profitable closes for this symbol
+          const { data: recentProfitableExits } = await supabase
+            .from("positions")
+            .select("id, symbol, side, realized_pnl_percent, close_reason, closed_at, trend")
+            .eq("user_id", userId)
+            .eq("symbol", symbol)
+            .eq("status", "closed")
+            .gte("closed_at", lookbackTime)
+            .order("closed_at", { ascending: false })
+            .limit(5);
+          
+          if (recentProfitableExits && recentProfitableExits.length > 0) {
+            // Check for qualifying profitable exits
+            const qualifyingExit = recentProfitableExits.find(exit => {
+              const profitPercent = exit.realized_pnl_percent || 0;
+              const closeReason = exit.close_reason || '';
+              const meetsProfit = profitPercent >= TREND_CONTINUATION_AFTER_EXIT_PARAMS.MIN_PROFIT_PERCENT;
+              const meetsTpRequirement = !TREND_CONTINUATION_AFTER_EXIT_PARAMS.REQUIRE_TP_EXIT || 
+                closeReason.includes('take_profit') || closeReason.includes('tp') || closeReason === 'partial_tp';
+              return meetsProfit && meetsTpRequirement;
+            });
+            
+            if (qualifyingExit) {
+              // Determine direction from the original trade
+              const originalDirection: "long" | "short" = qualifyingExit.side === "buy" ? "long" : "short";
+              
+              // Check ADX requirements
+              const meetsAdx = adx >= TREND_CONTINUATION_AFTER_EXIT_PARAMS.MIN_ADX;
+              const meetsAdxSlope = adxSlope >= TREND_CONTINUATION_AFTER_EXIT_PARAMS.MIN_ADX_SLOPE;
+              
+              // Check HTF alignment
+              const htf4hConfidenceForExit = trendData.timeframes?.['4h']?.confidence ?? 0;
+              const meetsHtf = htf4hConfidenceForExit >= TREND_CONTINUATION_AFTER_EXIT_PARAMS.MIN_HTF_4H_CONFIDENCE;
+              
+              // Check if current direction matches original
+              const currentDirection = derivedDirection;
+              const directionMatches = !TREND_CONTINUATION_AFTER_EXIT_PARAMS.REQUIRE_SAME_DIRECTION || 
+                currentDirection === originalDirection;
+              
+              if (meetsAdx && meetsAdxSlope && meetsHtf && directionMatches) {
+                trendContinuationAfterExitAllowed = true;
+                afterExitPositionMultiplier = TREND_CONTINUATION_AFTER_EXIT_PARAMS.POSITION_SIZE_MULTIPLIER;
+                afterExitDirection = originalDirection;
+                
+                const minutesSinceClose = Math.round((Date.now() - new Date(qualifyingExit.closed_at).getTime()) / 60000);
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.ENTRY} TREND CONTINUATION AFTER EXIT - Allowing relaxed re-entry`);
+                logger.forSymbol(symbol).info(`   → Original trade: ${qualifyingExit.side} with +${qualifyingExit.realized_pnl_percent?.toFixed(2)}% profit`);
+                logger.forSymbol(symbol).info(`   → Closed ${minutesSinceClose}min ago via ${qualifyingExit.close_reason}`);
+                logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)} (>=${TREND_CONTINUATION_AFTER_EXIT_PARAMS.MIN_ADX}), slope=${adxSlope.toFixed(2)} (>=${TREND_CONTINUATION_AFTER_EXIT_PARAMS.MIN_ADX_SLOPE})`);
+                logger.forSymbol(symbol).info(`   → Position size: ${(afterExitPositionMultiplier * 100).toFixed(0)}%, StochRSI relaxed to K=${TREND_CONTINUATION_AFTER_EXIT_PARAMS.MAX_STOCHRSI_K_LONG_REENTRY} (LONG) / K=${TREND_CONTINUATION_AFTER_EXIT_PARAMS.MIN_STOCHRSI_K_SHORT_REENTRY} (SHORT)`);
+              } else {
+                logger.forSymbol(symbol).debug(`[TREND_CONTINUATION_EXIT] Qualifying exit found but conditions not met: ADX=${meetsAdx}, slope=${meetsAdxSlope}, HTF=${meetsHtf}, direction=${directionMatches}`);
+              }
+            }
+          }
+        }
+        
         // Determine which tier applies (highest tier wins, including new Tier 0)
-        let bypassTier: 'none' | 'tier0' | 'tier1' | 'tier2' | 'tier3' = 'none';
+        let bypassTier: 'none' | 'tier0' | 'tier1' | 'tier2' | 'tier3' | 'after_exit' = 'none';
         let tieredPositionSizePercent = 100;
         
+        // PHASE 2: Check Trend Continuation After Exit first (highest priority when applicable)
+        // This allows re-entry with relaxed StochRSI thresholds after profitable exits
+        if (trendContinuationAfterExitAllowed && afterExitDirection === derivedDirection) {
+          bypassTier = 'after_exit';
+          tieredPositionSizePercent = afterExitPositionMultiplier * 100;
+        }
         // PHASE 1 FIX: NEW Tier 0 (Ultra Strong) - ADX >= 50, no continuation requirement
         // Allows entries when ADX is very high even if slope slightly negative
-        const tier0Eligible = 
+        else if (
           adx >= STOCHRSI_THRESHOLDS.TIER0_MIN_ADX &&
           adxSlope >= STOCHRSI_THRESHOLDS.TIER0_MIN_ADX_SLOPE &&
           diGap >= STOCHRSI_THRESHOLDS.TIER0_MIN_DI_GAP &&
-          !adxExhaustion.isExhausted;
-          // No continuation requirement for Tier 0
-        
+          !adxExhaustion.isExhausted
+        ) {
+          bypassTier = 'tier0';
+          tieredPositionSizePercent = STOCHRSI_THRESHOLDS.TIER0_POSITION_SIZE;
+        }
         // Tier 3 (Very Strong) - highest thresholds, most confidence
-        const tier3Eligible = 
+        else if (
           adx >= STOCHRSI_THRESHOLDS.TIER3_MIN_ADX &&
           adxSlope >= STOCHRSI_THRESHOLDS.TIER3_MIN_ADX_SLOPE &&
           diGap >= STOCHRSI_THRESHOLDS.TIER3_MIN_DI_GAP &&
-          !adxExhaustion.isExhausted;
-        
+          !adxExhaustion.isExhausted
+        ) {
+          bypassTier = 'tier3';
+          tieredPositionSizePercent = STOCHRSI_THRESHOLDS.TIER3_POSITION_SIZE;
+        }
         // Tier 2 (Strong) - moderate thresholds
-        const tier2Eligible = 
+        else if (
           adx >= STOCHRSI_THRESHOLDS.TIER2_MIN_ADX &&
           adxSlope >= STOCHRSI_THRESHOLDS.TIER2_MIN_ADX_SLOPE &&
           diGap >= STOCHRSI_THRESHOLDS.TIER2_MIN_DI_GAP &&
-          !adxExhaustion.isExhausted;
-        
+          !adxExhaustion.isExhausted
+        ) {
+          bypassTier = 'tier2';
+          tieredPositionSizePercent = STOCHRSI_THRESHOLDS.TIER2_POSITION_SIZE;
+        }
         // Tier 1 (Base) - lowest thresholds
         // PHASE 1 FIX: Removed continuation requirement - now just needs ADX/slope/DI thresholds
-        const tier1Eligible = 
+        else if (
           adx >= STOCHRSI_THRESHOLDS.TIER1_MIN_ADX &&
           adxSlope >= STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE &&
           diGap >= STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP &&
-          !adxExhaustion.isExhausted;
-          // Removed: adxExhaustion.isContinuation - no longer required
-        
-        // Select highest eligible tier (Tier 0 is highest for very strong ADX)
-        if (tier0Eligible) {
-          bypassTier = 'tier0';
-          tieredPositionSizePercent = STOCHRSI_THRESHOLDS.TIER0_POSITION_SIZE;
-        } else if (tier3Eligible) {
-          bypassTier = 'tier3';
-          tieredPositionSizePercent = STOCHRSI_THRESHOLDS.TIER3_POSITION_SIZE;
-        } else if (tier2Eligible) {
-          bypassTier = 'tier2';
-          tieredPositionSizePercent = STOCHRSI_THRESHOLDS.TIER2_POSITION_SIZE;
-        } else if (tier1Eligible) {
+          !adxExhaustion.isExhausted
+        ) {
           bypassTier = 'tier1';
           tieredPositionSizePercent = STOCHRSI_THRESHOLDS.TIER1_POSITION_SIZE;
         }
+        
+        // Phase 2: For after_exit bypass, use relaxed StochRSI thresholds
+        const effectiveAbsoluteMaxOverbought = trendContinuationAfterExitAllowed && derivedDirection === "long"
+          ? TREND_CONTINUATION_AFTER_EXIT_PARAMS.MAX_STOCHRSI_K_LONG_REENTRY
+          : STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT;
+        const effectiveAbsoluteMaxOversold = trendContinuationAfterExitAllowed && derivedDirection === "short"
+          ? TREND_CONTINUATION_AFTER_EXIT_PARAMS.MIN_STOCHRSI_K_SHORT_REENTRY
+          : STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD;
         
         const canBypassAbsoluteMax = bypassTier !== 'none';
         
         let parabolicBypassApplied = false;
         
-        if (stochRsiK4h >= STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT) {
+        if (stochRsiK4h >= effectiveAbsoluteMaxOverbought) {
           // Block LONG entries at absolute maximum - StochRSI has nowhere to go
+          // NOTE: effectiveAbsoluteMaxOverbought is 95 for trend continuation after exit, 98 otherwise
           if (derivedDirection === "long") {
             if (canBypassAbsoluteMax) {
-              // Allow entry despite K>=98 - tiered bypass based on trend strength
+              // Allow entry despite K>=threshold - tiered bypass based on trend strength or recent profitable exit
               parabolicBypassApplied = true;
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} TIERED BYPASS [${bypassTier.toUpperCase()}] - Allowing LONG at K=${stochRsiK4h.toFixed(1)} (ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)})`);
+              const bypassReason = bypassTier === 'after_exit' ? 'TREND_CONTINUATION_AFTER_EXIT' : bypassTier.toUpperCase();
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} TIERED BYPASS [${bypassReason}] - Allowing LONG at K=${stochRsiK4h.toFixed(1)} (threshold=${effectiveAbsoluteMaxOverbought}, ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)})`);
               logger.forSymbol(symbol).info(`   → Position size reduced to ${tieredPositionSizePercent}% due to extreme StochRSI`);
             } else {
               rejectedByStochRsiExtreme++;
-              perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT', details: `K=${stochRsiK4h.toFixed(1)} absolute max` });
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute maximum (K=${stochRsiK4h.toFixed(1)} >= ${STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT}) - nowhere to rise`);
-              logger.forSymbol(symbol).info(`   → Tiered bypass failed: ADX=${adx.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX}), slope=${adxSlope.toFixed(2)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE}), DI gap=${diGap.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP}), exhausted=${adxExhaustion.isExhausted}, continuation=${adxExhaustion.isContinuation}`);
+              perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT', details: `K=${stochRsiK4h.toFixed(1)} >= ${effectiveAbsoluteMaxOverbought}` });
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at maximum (K=${stochRsiK4h.toFixed(1)} >= ${effectiveAbsoluteMaxOverbought}) - nowhere to rise`);
+              logger.forSymbol(symbol).info(`   → Tiered bypass failed: ADX=${adx.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX}), slope=${adxSlope.toFixed(2)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE}), DI gap=${diGap.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP}), exhausted=${adxExhaustion.isExhausted}, continuation=${adxExhaustion.isContinuation}, afterExitAllowed=${trendContinuationAfterExitAllowed}`);
               await logRejectionWithAI(
                 supabase, userId, symbol,
                 `STOCHRSI ABSOLUTE BLOCK: LONG blocked at K=${stochRsiK4h.toFixed(1)} (parabolic bypass conditions not met)`,
@@ -3403,14 +3485,16 @@ serve(async (req) => {
                   gate: "STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT",
                   direction: "long",
                   stochRsiK4h: stochRsiK4h.toFixed(1),
-                  threshold: STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT,
+                  threshold: effectiveAbsoluteMaxOverbought,
+                  normalThreshold: STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT,
+                  trendContinuationAfterExitAllowed,
                   adx: adx.toFixed(1),
                   adxSlope: adxSlope.toFixed(2),
                   diGap: diGap.toFixed(1),
                   isExhausted: adxExhaustion.isExhausted,
                   isContinuation: adxExhaustion.isContinuation,
                   tier1Thresholds: { adx: STOCHRSI_THRESHOLDS.TIER1_MIN_ADX, slope: STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE, diGap: STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP },
-                  message: "Tiered bypass conditions not met - need ADX>=25/30/35, slope>=0.03/0.05/0.08, DI gap>=10/12/15, no exhaustion"
+                  message: "Tiered bypass conditions not met - need ADX>=25/30/35, slope>=0.03/0.05/0.08, DI gap>=10/12/15, no exhaustion OR recent profitable exit with ADX>=30"
                 },
                 trendData,
                 riskParams.ai_analysis_enabled !== false,
@@ -3421,19 +3505,21 @@ serve(async (req) => {
           }
         }
         
-        if (stochRsiK4h <= STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD) {
+        if (stochRsiK4h <= effectiveAbsoluteMaxOversold) {
           // Block SHORT entries at absolute minimum - StochRSI has nowhere to go
+          // NOTE: effectiveAbsoluteMaxOversold is 5 for trend continuation after exit, 2 otherwise
           if (derivedDirection === "short") {
             if (canBypassAbsoluteMax) {
-              // Allow entry despite K<=2 - tiered bypass based on trend strength
+              // Allow entry despite K<=threshold - tiered bypass based on trend strength or recent profitable exit
               parabolicBypassApplied = true;
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} TIERED BYPASS [${bypassTier.toUpperCase()}] - Allowing SHORT at K=${stochRsiK4h.toFixed(1)} (ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)})`);
+              const bypassReason = bypassTier === 'after_exit' ? 'TREND_CONTINUATION_AFTER_EXIT' : bypassTier.toUpperCase();
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} TIERED BYPASS [${bypassReason}] - Allowing SHORT at K=${stochRsiK4h.toFixed(1)} (threshold=${effectiveAbsoluteMaxOversold}, ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)}, DI gap=${diGap.toFixed(1)})`);
               logger.forSymbol(symbol).info(`   → Position size reduced to ${tieredPositionSizePercent}% due to extreme StochRSI`);
             } else {
               rejectedByStochRsiExtreme++;
-              perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_ABSOLUTE_MAX_OVERSOLD', details: `K=${stochRsiK4h.toFixed(1)} absolute min` });
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute minimum (K=${stochRsiK4h.toFixed(1)} <= ${STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD}) - nowhere to fall`);
-              logger.forSymbol(symbol).info(`   → Tiered bypass failed: ADX=${adx.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX}), slope=${adxSlope.toFixed(2)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE}), DI gap=${diGap.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP}), exhausted=${adxExhaustion.isExhausted}, continuation=${adxExhaustion.isContinuation}`);
+              perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_ABSOLUTE_MAX_OVERSOLD', details: `K=${stochRsiK4h.toFixed(1)} <= ${effectiveAbsoluteMaxOversold}` });
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at minimum (K=${stochRsiK4h.toFixed(1)} <= ${effectiveAbsoluteMaxOversold}) - nowhere to fall`);
+              logger.forSymbol(symbol).info(`   → Tiered bypass failed: ADX=${adx.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX}), slope=${adxSlope.toFixed(2)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE}), DI gap=${diGap.toFixed(1)} (tier1>=${STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP}), exhausted=${adxExhaustion.isExhausted}, continuation=${adxExhaustion.isContinuation}, afterExitAllowed=${trendContinuationAfterExitAllowed}`);
               await logRejectionWithAI(
                 supabase, userId, symbol,
                 `STOCHRSI ABSOLUTE BLOCK: SHORT blocked at K=${stochRsiK4h.toFixed(1)} (parabolic bypass conditions not met)`,
@@ -3441,14 +3527,16 @@ serve(async (req) => {
                   gate: "STOCHRSI_ABSOLUTE_MAX_OVERSOLD",
                   direction: "short",
                   stochRsiK4h: stochRsiK4h.toFixed(1),
-                  threshold: STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD,
+                  threshold: effectiveAbsoluteMaxOversold,
+                  normalThreshold: STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD,
+                  trendContinuationAfterExitAllowed,
                   adx: adx.toFixed(1),
                   adxSlope: adxSlope.toFixed(2),
                   diGap: diGap.toFixed(1),
                   isExhausted: adxExhaustion.isExhausted,
                   isContinuation: adxExhaustion.isContinuation,
                   tier1Thresholds: { adx: STOCHRSI_THRESHOLDS.TIER1_MIN_ADX, slope: STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE, diGap: STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP },
-                  message: "Tiered bypass conditions not met - need ADX>=25/30/35, slope>=0.03/0.05/0.08, DI gap>=10/12/15, no exhaustion"
+                  message: "Tiered bypass conditions not met - need ADX>=25/30/35, slope>=0.03/0.05/0.08, DI gap>=10/12/15, no exhaustion OR recent profitable exit with ADX>=30"
                 },
                 trendData,
                 riskParams.ai_analysis_enabled !== false,
