@@ -2886,3 +2886,224 @@ export const ADX_RISING_DIRECTIONAL_BYPASS_PARAMS = {
   // Position sizing for bypass
   POSITION_SIZE_MULTIPLIER: 0.60,  // 60% position for this bypass path
 } as const;
+
+// ============= PHASE 0: MASTER MARKET REGIME CLASSIFIER =============
+// Critical foundation: ADX defines regime, all other gates change meaning based on regime
+// This formalizes the insight that "indicators are treated as peers instead of regime-dependent authorities"
+export const MARKET_REGIME_CLASSIFIER = {
+  // Regime definitions with ADX thresholds
+  NORMAL: { minADX: 15, maxADX: 30 },
+  STRONG_TREND: { minADX: 30, maxADX: 45 },
+  PARABOLIC: { minADX: 45, maxADX: 100 },
+  STEALTH_DRIFT: { maxADX: 28, minDriftPercent: 1.5 },  // Low ADX but consistent drift
+  
+  // Gate behavior by regime - when in STRONG_TREND or PARABOLIC, gates downgrade to "context"
+  GATE_OVERRIDES: {
+    PARABOLIC: {
+      bollingerMaxPercentB: 115,         // Allow 115% B (price 15% above upper band)
+      bollingerMinPercentB: -15,         // Allow -15% B for shorts
+      stochRsiMaxK: 98,                  // Nearly no StochRSI limit
+      stochRsiMinK: 2,
+      momentumScoreMinimum: 0,           // Momentum score cannot block
+      qualityBoost: 10,                  // +10 to quality score
+      positionMultiplier: 0.45,          // 45% position for safety
+    },
+    STRONG_TREND: {
+      bollingerMaxPercentB: 105,         // Allow 105% B
+      bollingerMinPercentB: -5,
+      stochRsiMaxK: 95,
+      stochRsiMinK: 5,
+      momentumScoreMinimum: 0,           // Momentum score cannot block at strong trend
+      qualityBoost: 5,                   // +5 to quality score
+      positionMultiplier: 0.55,          // 55% position
+    },
+    NORMAL: {
+      bollingerMaxPercentB: 90,
+      bollingerMinPercentB: 10,
+      stochRsiMaxK: 85,
+      stochRsiMinK: 15,
+      momentumScoreMinimum: 5,           // Standard momentum requirement
+      qualityBoost: 0,
+      positionMultiplier: 1.0,
+    },
+    STEALTH_DRIFT: {
+      bollingerMaxPercentB: 85,
+      bollingerMinPercentB: 15,
+      stochRsiMaxK: 80,
+      stochRsiMinK: 20,
+      momentumScoreMinimum: 3,
+      qualityBoost: 3,
+      positionMultiplier: 0.50,
+    }
+  },
+  
+  // Additional requirements per regime
+  REQUIRE_HTF_ALIGNMENT_BY_REGIME: {
+    PARABOLIC: false,        // In parabolic, ADX IS the confirmation
+    STRONG_TREND: true,      // Need 4h aligned
+    NORMAL: true,            // Need 4h aligned
+    STEALTH_DRIFT: true,     // Need 1h aligned
+  }
+} as const;
+
+// Market regime type
+export type MasterMarketRegime = 'PARABOLIC' | 'STRONG_TREND' | 'NORMAL' | 'STEALTH_DRIFT';
+
+// ============= PHASE 1: STRONG ADX UNIVERSAL OVERRIDE =============
+// When ADX confirms regime, gates downgrade from "hard block" to "context adjustment"
+// Key insight: "Bollinger should downgrade from 'gate' to 'context'"
+export const STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS = {
+  ENABLED: true,
+  
+  // Tier 1: Strong trend override (ADX 40+)
+  TIER1_MIN_ADX: 40,
+  TIER1_REQUIRE_SLOPE_POSITIVE: true,
+  TIER1_MIN_SLOPE: 0,              // Slope must be non-negative
+  TIER1_BOLLINGER_BECOMES_CONTEXT: true,
+  TIER1_STOCHRSI_BECOMES_CONTEXT: true,
+  TIER1_MOMENTUM_BECOMES_CONTEXT: true,
+  TIER1_POSITION_SIZE: 0.55,       // 55% of normal position
+  
+  // Tier 2: Parabolic override (ADX 50+)
+  TIER2_MIN_ADX: 50,
+  TIER2_SLOPE_TOLERANCE: -0.5,     // Allow slight decline (trend cruising)
+  TIER2_ALL_GATES_CONTEXT: true,   // All gates become context, not blockers
+  TIER2_POSITION_SIZE: 0.40,       // 40% position (late entry, higher risk)
+  TIER2_TIGHTER_STOP: 1.2,         // 1.2x ATR instead of 2x
+  
+  // Safety: Still respect behavioral exhaustion
+  RESPECT_BEHAVIORAL_EXHAUSTION: true,
+  MAX_REVERSAL_SCORE: 50,
+} as const;
+
+// ============= PHASE 2: MOMENTUM SCORE BEHAVIOR CHANGE =============
+// At high ADX, momentum score cannot BLOCK - it can only adjust position size and stops
+// Key insight: "At ADX ≥ 40: Momentum score cannot block. It can only reduce position size or increase stop tightness."
+export const MOMENTUM_SCORE_BEHAVIOR_PARAMS = {
+  ENABLED: true,
+  
+  // ADX threshold above which momentum score cannot block signals
+  CANNOT_BLOCK_ABOVE_ADX: 40,
+  
+  // Instead of blocking, low momentum score adjusts these:
+  LOW_SCORE_POSITION_REDUCTION: 0.30,    // 30% smaller position
+  LOW_SCORE_STOP_TIGHTENING: 0.75,       // 25% tighter stop (0.75 multiplier)
+  
+  // Momentum divergence detection (replacing binary "confirms")
+  // "Is momentum diverging or confirming?" replaces binary check
+  DIVERGING_POSITION_PENALTY: 0.40,      // 40% reduction if diverging
+  CONFIRMING_POSITION_BONUS: 0.10,       // 10% bonus if confirming
+  
+  // Graduated ADX-based momentum thresholds
+  // Replaces flat MIN_MOMENTUM_SCORE with ADX-aware thresholds
+  ADX_40_MIN_SCORE: 0,    // At ADX ≥ 40, no minimum momentum score
+  ADX_35_MIN_SCORE: 2,    // At ADX ≥ 35, minimum 2
+  ADX_30_MIN_SCORE: 3,    // At ADX ≥ 30, minimum 3
+  ADX_25_MIN_SCORE: 4,    // At ADX ≥ 25, minimum 4
+  DEFAULT_MIN_SCORE: 5,   // Below ADX 25, standard threshold
+  
+  // Require price action confirmation when bypassing momentum
+  REQUIRE_PRICE_ACTION_CONFIRMATION: true,
+} as const;
+
+// ============= PHASE 3: TREND CONTINUATION RE-ENTRY (ENHANCED) =============
+// "Exit logic is 'stateful', Entry logic is 'stateless' - This is one of the most expensive bugs in trend systems"
+// This enhancement makes entry logic stateful by remembering recent profitable exits
+export const TREND_CONTINUATION_REENTRY_PARAMS = {
+  ENABLED: true,
+  
+  // ===== RECENT PROFITABLE EXIT DETECTION =====
+  LOOKBACK_HOURS: 4,              // Extended from 2 to catch more opportunities
+  MIN_PROFIT_PERCENT: 1.0,        // Reduced from 2.0 to capture smaller wins
+  ALLOW_SAME_CANDLE_REENTRY: true, // Don't wait if trend still valid
+  POSITION_SIZE_MULTIPLIER: 0.50, // 50% position for re-entries
+  
+  // ===== THRESHOLD RELAXATION FOR RE-ENTRY =====
+  QUALITY_THRESHOLD_REDUCTION: 15,  // -15 points from normal threshold
+  STOCHRSI_RELAXATION: 10,          // Allow +10 higher K for LONG re-entry
+  BOLLINGER_RELAXATION: 10,         // Allow +10% higher %B for LONG
+  
+  // ===== ADX REQUIREMENTS =====
+  MIN_ADX: 25,                    // Lowered from 30 to catch more re-entries
+  MIN_ADX_SLOPE: -0.5,            // Allow slightly declining (cruising trend)
+  
+  // ===== DIRECTION AND HTF =====
+  REQUIRE_SAME_DIRECTION: true,
+  MIN_HTF_4H_CONFIDENCE: 55,      // Lowered from 60
+  
+  // ===== STOP LOSS =====
+  TIGHT_STOP_PERCENT: 1.5,        // Tighter stop for re-entries
+} as const;
+
+// ============= PHASE 4: QUALITY SCORE NEAR-MISS BOOST =============
+// Boost quality scores that are within range of threshold when ADX is strong
+// Key insight: "Cap the boost so quality score cannot exceed 'normal max'"
+export const QUALITY_NEAR_MISS_BOOST_PARAMS = {
+  ENABLED: true,
+  
+  // Range within threshold to be considered "near miss"
+  NEAR_MISS_RANGE: 5,
+  
+  // Boosts by ADX level
+  ADX_35_BOOST: 3,              // +3 points if ADX ≥ 35
+  ADX_40_BOOST: 5,              // +5 points if ADX ≥ 40
+  ADX_45_BOOST: 7,              // +7 points if ADX ≥ 45
+  
+  // HTF alignment boost
+  HTF_ALIGNED_BOOST: 2,         // +2 if 4H+1H aligned
+  
+  // Critical: Cap to prevent artificial inflation
+  MAX_BOOSTED_SCORE: 75,        // Never boost above 75 regardless of conditions
+} as const;
+
+// ============= PHASE 5: STEALTH TREND ADX + SLOPE LOGGING =============
+// "Log ADX slope more aggressively. Flat ADX at 28 ≠ rising ADX at 28."
+export const STEALTH_TREND_ENHANCED_PARAMS = {
+  // Extended ADX thresholds
+  MAX_ADX_FOR_STEALTH: 30,       // Raised from 25 to catch more opportunities
+  STRONG_DRIFT_ADX_EXTENSION: 32, // For 2.5%+ drift, allow up to ADX 32
+  
+  // Slope-aware detection
+  REQUIRE_SLOPE_LOG: true,
+  FLAT_SLOPE_THRESHOLD: 0.1,     // |slope| < 0.1 = flat
+  RISING_SLOPE_BONUS: 5,         // +5 quality for rising ADX
+  FALLING_SLOPE_PENALTY: 10,     // -10 quality for falling ADX
+} as const;
+
+// ============= PHASE 6: LATE GRIND RELAXATION (CONSOLIDATION PAUSE) =============
+// "Many strong trends do not pull back - they pause, compress, resume."
+export const LATE_GRIND_ENHANCED_PARAMS = {
+  REQUIRE_FAILED_PULLBACK: false,    // Make optional
+  MIN_PRIOR_DRIFT_PERCENT: 2.0,      // Reduced from 3%
+  
+  // Alternative entry condition: consolidation pause
+  ALLOW_CONSOLIDATION_PAUSE: true,
+  CONSOLIDATION_MIN_CANDLES: 3,      // 3+ small candles in a row
+  CONSOLIDATION_MAX_CANDLE_ATR: 0.5, // Each candle < 0.5 ATR
+  CONSOLIDATION_POSITION_SIZE: 0.45, // 45% position for pause entries
+} as const;
+
+// ============= PHASE 7: IMPULSE CONTINUATION EXCEPTION =============
+// New exception type for catching moves mid-impulse
+export const IMPULSE_CONTINUATION_PARAMS = {
+  ENABLED: true,
+  
+  // Trigger conditions
+  MIN_ADX: 35,
+  MIN_PRICE_MOVE_PERCENT: 2.0,
+  PRICE_MOVE_LOOKBACK_HOURS: 4,
+  REQUIRE_HTF_ALIGNMENT: true,      // 1h+4h must match
+  
+  // Gate bypasses (becomes context, not gate)
+  BOLLINGER_BECOMES_CONTEXT: true,
+  STOCHRSI_BECOMES_CONTEXT: true,
+  MOMENTUM_SCORE_BECOMES_CONTEXT: true,
+  
+  // Risk controls
+  POSITION_SIZE: 0.45,              // 45% position for late impulse entry
+  STOP_MULTIPLIER: 1.5,             // Tighter stop for late entry
+  
+  // Safety gates
+  MAX_REVERSAL_SCORE: 50,
+  BLOCK_IF_EXHAUSTED: true,
+} as const;
