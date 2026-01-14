@@ -5299,9 +5299,27 @@ serve(async (req) => {
             !hasBullishDivergence &&
             notTrueExhaustion;
           
+          // ============= PHASE 5 FIX: VERY HIGH ADX FALLING GATE RELAXATION (SHORT) =============
+          // Mirror of LONG bypass: When ADX >= 50 and 4h is aligned bearish, ignore the "K >= D" 
+          // (not falling) condition for K values in the 8-20 range. Only hard block if K <= 7 AND K >= D
+          // This fixes false rejections in very strong downtrends during consolidation
+          const veryHighAdxBypassAllowedShort = (
+            adx >= 50 &&
+            stochFilterTrend4h === "bearish" &&
+            stochFilterConf4h >= 60 &&
+            stochRsiK4h > 7 &&    // Only relax for K 8-20, not at true extremes
+            stochRsiK4h <= 20 &&
+            !hasBullishDivergence
+          );
+          
+          if (veryHighAdxBypassAllowedShort && !stochRsiFalling) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} VERY HIGH ADX BYPASS (SHORT): ADX=${adx.toFixed(1)} >= 50, K=${stochRsiK4h.toFixed(1)} in 8-20 zone, 4h aligned bearish - ignoring "K >= D" condition`);
+          }
+          
           // MANDATORY: StochRSI must be falling (K < D) for any extreme oversold entry
-          // EXCEPTION: Allow if momentum continuation conditions are met
-          if (!stochRsiFalling && !momentumContinuationAllowed) {
+          // EXCEPTION 1: Allow if momentum continuation conditions are met
+          // EXCEPTION 2: Allow if very high ADX bypass conditions are met (Phase 5)
+          if (!stochRsiFalling && !momentumContinuationAllowed && !veryHighAdxBypassAllowedShort) {
             rejectedByStochRsiExtreme++;
             perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} not falling` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking SHORT - StochRSI not falling at oversold (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
@@ -5321,6 +5339,14 @@ serve(async (req) => {
                   noDivergence: !hasBullishDivergence,
                   notExhausted: notTrueExhaustion,
                   result: momentumContinuationAllowed
+                },
+                veryHighAdxBypassCheck: {
+                  adx: adx.toFixed(1),
+                  adxSufficient: adx >= 50,
+                  kInRange: stochRsiK4h > 7 && stochRsiK4h <= 20,
+                  htfAligned: stochFilterTrend4h === "bearish" && stochFilterConf4h >= 60,
+                  noDivergence: !hasBullishDivergence,
+                  result: veryHighAdxBypassAllowedShort
                 }
               },
               trendData,
