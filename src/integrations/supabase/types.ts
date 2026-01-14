@@ -86,7 +86,6 @@ export type Database = {
           results_data: Json | null
           sharpe_ratio: number | null
           start_date: string
-          strategy_id: string | null
           strategy_name: string
           symbol: string
           total_loss: number | null
@@ -113,7 +112,6 @@ export type Database = {
           results_data?: Json | null
           sharpe_ratio?: number | null
           start_date: string
-          strategy_id?: string | null
           strategy_name: string
           symbol: string
           total_loss?: number | null
@@ -140,7 +138,6 @@ export type Database = {
           results_data?: Json | null
           sharpe_ratio?: number | null
           start_date?: string
-          strategy_id?: string | null
           strategy_name?: string
           symbol?: string
           total_loss?: number | null
@@ -149,59 +146,6 @@ export type Database = {
           user_id?: string
           win_rate?: number | null
           winning_trades?: number | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "backtesting_results_strategy_id_fkey"
-            columns: ["strategy_id"]
-            isOneToOne: false
-            referencedRelation: "custom_strategies"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      custom_strategies: {
-        Row: {
-          created_at: string | null
-          description: string | null
-          entry_conditions: Json
-          exit_conditions: Json
-          id: string
-          indicators: Json
-          is_active: boolean | null
-          name: string
-          risk_settings: Json | null
-          signal_direction: string | null
-          updated_at: string | null
-          user_id: string
-        }
-        Insert: {
-          created_at?: string | null
-          description?: string | null
-          entry_conditions?: Json
-          exit_conditions?: Json
-          id?: string
-          indicators?: Json
-          is_active?: boolean | null
-          name: string
-          risk_settings?: Json | null
-          signal_direction?: string | null
-          updated_at?: string | null
-          user_id: string
-        }
-        Update: {
-          created_at?: string | null
-          description?: string | null
-          entry_conditions?: Json
-          exit_conditions?: Json
-          id?: string
-          indicators?: Json
-          is_active?: boolean | null
-          name?: string
-          risk_settings?: Json | null
-          signal_direction?: string | null
-          updated_at?: string | null
-          user_id?: string
         }
         Relationships: []
       }
@@ -1413,7 +1357,6 @@ export type Database = {
           risk_reward_ratio: number | null
           signal_type: Database["public"]["Enums"]["signal_type"]
           stop_loss: number | null
-          strategy_id: string | null
           strategy_name: string | null
           symbol: string
           take_profit: number | null
@@ -1432,7 +1375,6 @@ export type Database = {
           risk_reward_ratio?: number | null
           signal_type: Database["public"]["Enums"]["signal_type"]
           stop_loss?: number | null
-          strategy_id?: string | null
           strategy_name?: string | null
           symbol: string
           take_profit?: number | null
@@ -1451,22 +1393,13 @@ export type Database = {
           risk_reward_ratio?: number | null
           signal_type?: Database["public"]["Enums"]["signal_type"]
           stop_loss?: number | null
-          strategy_id?: string | null
           strategy_name?: string | null
           symbol?: string
           take_profit?: number | null
           trend?: Database["public"]["Enums"]["market_trend"]
           user_id?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "trading_signals_strategy_id_fkey"
-            columns: ["strategy_id"]
-            isOneToOne: false
-            referencedRelation: "custom_strategies"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       trading_symbols_config: {
         Row: {

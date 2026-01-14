@@ -1,53 +1,27 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Edit, Trash2, Power, TrendingUp, Activity } from "lucide-react";
+import { ArrowLeft, TrendingUp, Activity, Edit, Power } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { useCustomStrategies } from "@/hooks/useCustomStrategies";
 import { useBuiltInStrategies } from "@/hooks/useBuiltInStrategies";
 import { useStrategyPerformanceUpdater } from "@/hooks/useStrategyPerformanceUpdater";
 import { BacktestingModule } from "@/components/BacktestingModule";
 import { StrategyComparison } from "@/components/StrategyComparison";
-import { StrategyOptimizer } from "@/components/StrategyOptimizer";
-
 import { MonteCarloSimulation } from "@/components/MonteCarloSimulation";
 import { EditBuiltInStrategyDialog } from "@/components/EditBuiltInStrategyDialog";
 
 const Strategies = () => {
   const navigate = useNavigate();
-  const { strategies: customStrategies, loading: customLoading, deleteStrategy, toggleActive } = useCustomStrategies();
   const { strategies: builtInStrategies, loading: builtInLoading, toggleStatus, refetch: refetchBuiltIn } = useBuiltInStrategies();
   const { updatePerformance, isUpdating } = useStrategyPerformanceUpdater();
-  const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editingBuiltInStrategy, setEditingBuiltInStrategy] = useState<any>(null);
 
   const handleUpdatePerformance = async () => {
     await updatePerformance();
     refetchBuiltIn();
-  };
-
-  const handleDelete = async () => {
-    if (deleteId) {
-      await deleteStrategy(deleteId);
-      setDeleteId(null);
-    }
-  };
-
-  const handleCustomToggle = async (id: string, currentState: boolean) => {
-    await toggleActive(id, !currentState);
   };
 
   const handleBuiltInToggle = async (id: string, currentStatus: string) => {
@@ -69,25 +43,19 @@ const Strategies = () => {
                 <ArrowLeft className="h-5 w-5" />
               </Button>
               <div>
-                <h1 className="text-2xl font-bold text-foreground">Strategy Management</h1>
-                <p className="text-sm text-muted-foreground">Create and manage your custom trading strategies</p>
+                <h1 className="text-2xl font-bold text-foreground">Trading Performance</h1>
+                <p className="text-sm text-muted-foreground">Monitor and analyze your trading strategies</p>
               </div>
             </div>
-            <Button onClick={() => navigate('/strategies/new')} className="gap-2">
-              <Plus className="h-4 w-4" />
-              New Strategy
-            </Button>
           </div>
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-6">
         <Tabs defaultValue="all" className="w-full">
-          <TabsList className="grid w-full grid-cols-6 mb-6">
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="custom">Custom</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-4 mb-6">
+            <TabsTrigger value="all">Strategies</TabsTrigger>
             <TabsTrigger value="backtesting">Backtest</TabsTrigger>
-            <TabsTrigger value="optimizer">Optimizer</TabsTrigger>
             <TabsTrigger value="monte-carlo">Monte Carlo</TabsTrigger>
             <TabsTrigger value="comparison">Compare</TabsTrigger>
           </TabsList>
@@ -96,7 +64,7 @@ const Strategies = () => {
             {/* Built-in Strategies */}
             <div>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-semibold">Built-in Trading Strategies</h2>
+                <h2 className="text-xl font-semibold">Active Trading Strategies</h2>
                 <Button 
                   onClick={handleUpdatePerformance} 
                   disabled={isUpdating}
@@ -115,7 +83,7 @@ const Strategies = () => {
                 </div>
               ) : builtInStrategies.length === 0 ? (
                 <Card className="p-12 text-center">
-                  <p className="text-muted-foreground">No built-in strategies available</p>
+                  <p className="text-muted-foreground">No strategies available. Run the auto-trader to generate performance data.</p>
                 </Card>
               ) : (
                 <div className="grid grid-cols-1 gap-4">
@@ -183,244 +151,18 @@ const Strategies = () => {
                 </div>
               )}
             </div>
-
-            {/* Custom Strategies */}
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-semibold">Custom Strategies</h2>
-                <Button onClick={() => navigate('/strategies/new')} size="sm" className="gap-2">
-                  <Plus className="h-4 w-4" />
-                  New Strategy
-                </Button>
-              </div>
-              {customLoading ? (
-                <div className="text-center py-12">
-                  <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
-                  <p className="mt-4 text-muted-foreground">Loading strategies...</p>
-                </div>
-              ) : customStrategies.length === 0 ? (
-          <Card className="p-12 text-center">
-            <div className="max-w-md mx-auto space-y-4">
-              <div className="h-16 w-16 mx-auto rounded-full bg-secondary/50 flex items-center justify-center">
-                <Plus className="h-8 w-8 text-muted-foreground" />
-              </div>
-              <h2 className="text-xl font-semibold text-foreground">No strategies yet</h2>
-              <p className="text-muted-foreground">
-                Create your first custom strategy to start automated trading with your own rules
-              </p>
-              <Button onClick={() => navigate('/strategies/new')} className="gap-2">
-                <Plus className="h-4 w-4" />
-                Create Strategy
-              </Button>
-            </div>
-              </Card>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {customStrategies.map((strategy) => (
-              <Card key={strategy.id} className="p-6 hover:border-primary/50 transition-colors">
-                <div className="space-y-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-lg text-foreground mb-1">
-                        {strategy.name}
-                      </h3>
-                      {strategy.description && (
-                        <p className="text-sm text-muted-foreground line-clamp-2">
-                          {strategy.description}
-                        </p>
-                      )}
-                    </div>
-                    <Badge variant={strategy.is_active ? "default" : "secondary"}>
-                      {strategy.is_active ? "Active" : "Inactive"}
-                    </Badge>
-                  </div>
-
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Entry Conditions:</span>
-                      <span className="font-mono text-foreground">
-                        {Array.isArray(strategy.entry_conditions) ? strategy.entry_conditions.length : 0}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Exit Conditions:</span>
-                      <span className="font-mono text-foreground">
-                        {Array.isArray(strategy.exit_conditions) ? strategy.exit_conditions.length : 0}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Indicators:</span>
-                      <span className="font-mono text-foreground">
-                        {Array.isArray(strategy.indicators) ? strategy.indicators.length : 0}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 pt-4 border-t border-border">
-                    <div className="flex items-center gap-2 flex-1">
-                      <Power className="h-4 w-4 text-muted-foreground" />
-                      <Switch
-                        checked={strategy.is_active}
-                        onCheckedChange={() => handleCustomToggle(strategy.id, strategy.is_active)}
-                      />
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => navigate(`/strategies/edit/${strategy.id}`)}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setDeleteId(strategy.id)}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-                  ))}
-                </div>
-              )}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="custom">
-            {customLoading ? (
-              <div className="text-center py-12">
-                <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
-                <p className="mt-4 text-muted-foreground">Loading strategies...</p>
-              </div>
-            ) : customStrategies.length === 0 ? (
-              <Card className="p-12 text-center">
-                <div className="max-w-md mx-auto space-y-4">
-                  <div className="h-16 w-16 mx-auto rounded-full bg-secondary/50 flex items-center justify-center">
-                    <Plus className="h-8 w-8 text-muted-foreground" />
-                  </div>
-                  <h2 className="text-xl font-semibold text-foreground">No custom strategies yet</h2>
-                  <p className="text-muted-foreground">
-                    Create your first custom strategy to start automated trading with your own rules
-                  </p>
-                  <Button onClick={() => navigate('/strategies/new')} className="gap-2">
-                    <Plus className="h-4 w-4" />
-                    Create Strategy
-                  </Button>
-                </div>
-              </Card>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {customStrategies.map((strategy) => (
-                  <Card key={strategy.id} className="p-6 hover:border-primary/50 transition-colors">
-                    <div className="space-y-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-lg text-foreground mb-1">
-                            {strategy.name}
-                          </h3>
-                          {strategy.description && (
-                            <p className="text-sm text-muted-foreground line-clamp-2">
-                              {strategy.description}
-                            </p>
-                          )}
-                        </div>
-                        <Badge variant={strategy.is_active ? "default" : "secondary"}>
-                          {strategy.is_active ? "Active" : "Inactive"}
-                        </Badge>
-                      </div>
-
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Entry Conditions:</span>
-                          <span className="font-mono text-foreground">
-                            {Array.isArray(strategy.entry_conditions) ? strategy.entry_conditions.length : 0}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Exit Conditions:</span>
-                          <span className="font-mono text-foreground">
-                            {Array.isArray(strategy.exit_conditions) ? strategy.exit_conditions.length : 0}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Indicators:</span>
-                          <span className="font-mono text-foreground">
-                            {Array.isArray(strategy.indicators) ? strategy.indicators.length : 0}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 pt-4 border-t border-border">
-                        <div className="flex items-center gap-2 flex-1">
-                          <Power className="h-4 w-4 text-muted-foreground" />
-                          <Switch
-                            checked={strategy.is_active}
-                            onCheckedChange={() => handleCustomToggle(strategy.id, strategy.is_active)}
-                          />
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => navigate(`/strategies/edit/${strategy.id}`)}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setDeleteId(strategy.id)}
-                          className="text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            )}
           </TabsContent>
 
           <TabsContent value="backtesting">
-            {customStrategies.length === 0 && builtInStrategies.length === 0 ? (
+            {builtInStrategies.length === 0 ? (
               <Card className="p-12 text-center">
                 <p className="text-muted-foreground">
-                  Create a strategy first before running backtests
+                  No strategies available for backtesting. Run the auto-trader first.
                 </p>
-                <Button onClick={() => navigate('/strategies/new')} className="mt-4 gap-2">
-                  <Plus className="h-4 w-4" />
-                  Create Strategy
-                </Button>
               </Card>
             ) : (
               <BacktestingModule 
-                strategies={[
-                  ...builtInStrategies.map(s => ({ id: s.id, name: s.strategy_name })),
-                  ...customStrategies.map(s => ({ id: s.id, name: s.name }))
-                ]}
-              />
-            )}
-          </TabsContent>
-
-          <TabsContent value="optimizer">
-            {customStrategies.length === 0 && builtInStrategies.length === 0 ? (
-              <Card className="p-12 text-center">
-                <p className="text-muted-foreground">
-                  Create a strategy first before running optimization
-                </p>
-                <Button onClick={() => navigate('/strategies/new')} className="mt-4 gap-2">
-                  <Plus className="h-4 w-4" />
-                  Create Strategy
-                </Button>
-              </Card>
-            ) : (
-              <StrategyOptimizer 
-                strategies={[
-                  ...builtInStrategies.map(s => ({ id: s.id, name: s.strategy_name })),
-                  ...customStrategies.map(s => ({ id: s.id, name: s.name }))
-                ]} 
+                strategies={builtInStrategies.map(s => ({ id: s.id, name: s.strategy_name }))}
               />
             )}
           </TabsContent>
@@ -429,44 +171,19 @@ const Strategies = () => {
             <StrategyComparison />
           </TabsContent>
 
-
           <TabsContent value="monte-carlo">
-            {customStrategies.length === 0 && builtInStrategies.length === 0 ? (
+            {builtInStrategies.length === 0 ? (
               <Card className="p-12 text-center">
-                <p className="text-muted-foreground">Create a strategy first to run Monte Carlo simulations</p>
-                <Button onClick={() => navigate('/strategies/new')} className="mt-4 gap-2">
-                  <Plus className="h-4 w-4" />
-                  Create Strategy
-                </Button>
+                <p className="text-muted-foreground">No strategies available for Monte Carlo simulations.</p>
               </Card>
             ) : (
               <MonteCarloSimulation 
-                strategies={[
-                  ...builtInStrategies.map(s => ({ id: s.id, name: s.strategy_name })),
-                  ...customStrategies.map(s => ({ id: s.id, name: s.name }))
-                ]} 
+                strategies={builtInStrategies.map(s => ({ id: s.id, name: s.strategy_name }))}
               />
             )}
           </TabsContent>
         </Tabs>
       </main>
-
-      <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Strategy</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this strategy? This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <EditBuiltInStrategyDialog
         strategy={editingBuiltInStrategy}

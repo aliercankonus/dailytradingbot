@@ -57,21 +57,7 @@ export const useStrategyData = () => {
           performanceMap.set(strategyName, current);
         });
 
-        // Fetch ALL custom strategies (not just active) to check their status
-        const { data: allCustomData, error: allCustomError } = await supabase
-          .from('custom_strategies')
-          .select('*')
-          .eq('user_id', user.id);
-
-        if (allCustomError) throw allCustomError;
-
-        // Create a map of custom strategy name -> is_active status
-        const customStrategyStatusMap = new Map<string, boolean>();
-        (allCustomData || []).forEach(cs => {
-          customStrategyStatusMap.set(cs.name, cs.is_active);
-        });
-
-        // Fetch built-in strategies (from strategy_performance or fallback)
+        // Fetch built-in strategies from strategy_performance
         const { data: builtInData, error: builtInError } = await supabase
           .from('strategy_performance')
           .select('*')
@@ -80,45 +66,21 @@ export const useStrategyData = () => {
 
         if (builtInError) throw builtInError;
 
-        // Create a set of custom strategy names for deduplication
-        const customStrategyNames = new Set((allCustomData || []).map(cs => cs.name));
-
         // Merge built-in strategies with actual performance data
-        // Filter out any that also exist in custom_strategies to prevent duplicates
-        const builtInStrategies: Strategy[] = (builtInData || [])
-          .filter(s => !customStrategyNames.has(s.strategy_name))
-          .map(s => {
-            const performance = performanceMap.get(s.strategy_name);
-            return {
-              id: s.id,
-              strategy_name: s.strategy_name,
-              status: s.status,
-              total_trades: performance?.total_trades || 0,
-              winning_trades: performance?.winning_trades || 0,
-              total_profit: performance?.total_profit || 0
-            };
-          });
-
-        // Transform ONLY active custom strategies for display
-        const activeCustomData = (allCustomData || []).filter(cs => cs.is_active);
-        const customStrategies: Strategy[] = activeCustomData.map(cs => {
-          const performance = performanceMap.get(cs.name);
+        const builtInStrategies: Strategy[] = (builtInData || []).map(s => {
+          const performance = performanceMap.get(s.strategy_name);
           return {
-            id: cs.id,
-            strategy_name: cs.name,
-            status: 'active',
+            id: s.id,
+            strategy_name: s.strategy_name,
+            status: s.status,
             total_trades: performance?.total_trades || 0,
             winning_trades: performance?.winning_trades || 0,
             total_profit: performance?.total_profit || 0
           };
         });
 
-        // Add strategies that have trades but aren't in builtInStrategies OR customStrategies
-        // BUT respect the is_active status from custom_strategies if it exists
-        const allStrategyNames = new Set([
-          ...builtInStrategies.map(s => s.strategy_name),
-          ...customStrategies.map(s => s.strategy_name)
-        ]);
+        // Add strategies that have trades but aren't in builtInStrategies
+        const allStrategyNames = new Set(builtInStrategies.map(s => s.strategy_name));
         
         performanceMap.forEach((perf, strategyName) => {
           // Skip if already in the list or if it's "Unknown"
@@ -126,26 +88,17 @@ export const useStrategyData = () => {
             return;
           }
           
-          // Check if this is a custom strategy that's been deactivated
-          const isCustomStrategy = customStrategyStatusMap.has(strategyName);
-          const isActive = customStrategyStatusMap.get(strategyName) ?? true;
-          
-          // Only add if it's active (or not a custom strategy)
-          if (!isCustomStrategy || isActive) {
-            builtInStrategies.push({
-              id: `generated-${strategyName}`,
-              strategy_name: strategyName,
-              status: 'active',
-              total_trades: perf.total_trades,
-              winning_trades: perf.winning_trades,
-              total_profit: perf.total_profit
-            });
-          }
+          builtInStrategies.push({
+            id: `generated-${strategyName}`,
+            strategy_name: strategyName,
+            status: 'active',
+            total_trades: perf.total_trades,
+            winning_trades: perf.winning_trades,
+            total_profit: perf.total_profit
+          });
         });
 
-        // Combine both arrays - no duplicates now
-        const combinedStrategies = [...builtInStrategies, ...customStrategies];
-        setStrategies(combinedStrategies);
+        setStrategies(builtInStrategies);
       } catch (err) {
         console.error('Error fetching strategies:', err);
         setError(err instanceof Error ? err.message : 'Failed to fetch strategies');

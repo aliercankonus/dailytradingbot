@@ -1699,12 +1699,14 @@ serve(async (req) => {
     logger.info(`${LOG_CATEGORIES.SUMMARY} Symbol filter: ${symbols.length} total → ${activeSymbols.length} active (${disabledSymbols.size} disabled)`);
     logger.info(`${LOG_CATEGORIES.SUMMARY} Strategy filter by regime: trending=${disabledStrategiesByRegime.get("trending")!.size} disabled/${highPerformingStrategiesByRegime.get("trending")!.size} high, ranging=${disabledStrategiesByRegime.get("ranging")!.size} disabled/${highPerformingStrategiesByRegime.get("ranging")!.size} high`);
 
-    // Fetch custom strategies (REQUIRED)
-    const { data: customStrategies, error: strategiesError } = await supabase
-      .from("custom_strategies")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("is_active", true);
+    // ============================================================
+    // UNIFIED ADAPTIVE STRATEGY SYSTEM
+    // Only use built-in templates - no custom user strategies
+    // The system automatically selects the best strategy based on:
+    // - Market regime (trending/ranging)
+    // - Quality scoring
+    // - ADX/momentum conditions
+    // ============================================================
 
     // Fetch manually paused strategies from strategy_performance table
     const { data: pausedStrategiesData } = await supabase
@@ -1721,21 +1723,10 @@ serve(async (req) => {
       logger.info(`${LOG_CATEGORIES.SUMMARY} Manually paused strategies: ${Array.from(pausedStrategyNames).join(', ')}`);
     }
 
-    // Combine user's custom strategies with built-in templates
-    // User strategies are evaluated first (they take priority), then built-ins fill gaps
-    // NOTE: Strategy filtering is now DEFERRED to per-symbol evaluation based on regime
-    const userStrategies = (customStrategies || []).filter(s => 
-      !pausedStrategyNames.has(s.name.toLowerCase())
-    );
-    const userStrategyNames = new Set(userStrategies.map(s => s.name.toLowerCase()));
-    
-    // Add built-in templates that don't duplicate user strategies AND are not paused
-    const builtInToInclude = BUILT_IN_TEMPLATES.filter(t => 
-      !userStrategyNames.has(t.name.toLowerCase()) && 
+    // Use only built-in templates that are not paused
+    const allStrategies = BUILT_IN_TEMPLATES.filter(t => 
       !pausedStrategyNames.has(t.name.toLowerCase())
     );
-    
-    const allStrategies = [...userStrategies, ...builtInToInclude];
     
     // Helper: Check if strategy is disabled for a given regime
     const isStrategyDisabledForRegime = (strategyName: string, regime: RegimeType): boolean => {
@@ -1747,7 +1738,7 @@ serve(async (req) => {
       return highPerformingStrategiesByRegime.get(regime)?.has(strategyName) || false;
     };
     
-    logger.info(`${LOG_CATEGORIES.SUMMARY} ${activeSymbols.length} symbols | ${userStrategies.length} user strategies + ${builtInToInclude.length} built-in templates = ${allStrategies.length} total (regime-aware filtering applied per symbol)`);
+    logger.info(`${LOG_CATEGORIES.SUMMARY} ${activeSymbols.length} symbols | ${allStrategies.length} built-in strategies active (regime-aware filtering applied per symbol)`);
 
     // Fetch recent signals and active positions
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
