@@ -9,7 +9,7 @@ import { RealtimePricesProvider } from "@/contexts/RealtimePricesContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Index from "./pages/Index";
 import Settings from "./pages/Settings";
-import Strategies from "./pages/Strategies";
+
 import Symbols from "./pages/Symbols";
 import Performance from "./pages/Performance";
 import Auth from "./pages/Auth";
@@ -31,7 +31,7 @@ const App = () => (
               <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
               <Route path="/symbols" element={<ProtectedRoute><Symbols /></ProtectedRoute>} />
-              <Route path="/strategies" element={<ProtectedRoute><Strategies /></ProtectedRoute>} />
+              
               <Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />

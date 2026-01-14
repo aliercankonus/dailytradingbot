@@ -1,8 +1,7 @@
 import { useNavigate } from "react-router-dom";
-import { Settings, Layers, Coins, BarChart3 } from "lucide-react";
+import { Settings, Coins, BarChart3 } from "lucide-react";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { BotStatus } from "@/components/BotStatus";
-import { StrategyOverview } from "@/components/StrategyOverview";
 import { TradeHistory } from "@/components/TradeHistory";
 import { PortfolioMetrics } from "@/components/PortfolioMetrics";
 import { LivePriceCard } from "@/components/LivePriceCard";
@@ -55,13 +54,6 @@ const Index = () => {
                 <Coins className="h-5 w-5 text-muted-foreground hover:text-foreground" />
               </button>
               <button
-                onClick={() => navigate('/strategies')}
-                className="p-2 hover:bg-accent rounded-lg transition-colors"
-                aria-label="Strategies"
-              >
-                <Layers className="h-5 w-5 text-muted-foreground hover:text-foreground" />
-              </button>
-              <button
                 onClick={() => navigate('/settings')}
                 className="p-2 hover:bg-accent rounded-lg transition-colors"
                 aria-label="Settings"
@@ -103,12 +95,8 @@ const Index = () => {
 
             <TradeHistory />
 
-            <div className="grid grid-cols-1 gap-6">
-              <LivePriceCard />
-              <StrategyOverview />
-            </div>
+            <LivePriceCard />
 
-            
           </TabsContent>
 
           <TabsContent value="signals" className="space-y-6">
