@@ -100,13 +100,24 @@ export const STOCHRSI_THRESHOLDS = {
   HIGH_REVERSAL_OVERSOLD: 5,    // K<=5 = +35 reversal score for SHORT
   // NEW: Tiered parabolic bypass for absolute max gates
   // In parabolic trends, K can stay pegged at 100 while price continues rising
-  // Three tiers provide graduated access based on trend strength
+  // FOUR tiers provide graduated access based on trend strength
   
-  // Tier 1: Base level - moderate trend strength (requires continuation mode)
+  // PHASE 1 FIX: NEW Tier 0 (Ultra Strong) - ADX >= 50, no continuation requirement
+  // Allows entries when ADX is very high even if slope slightly negative or DI shrinking
+  // This fixes missed opportunities during strong trend continuation
+  TIER0_MIN_ADX: 50,
+  TIER0_MIN_ADX_SLOPE: -0.5,  // Allow slightly negative slope (trend cruising)
+  TIER0_MIN_DI_GAP: 8,        // Relaxed DI gap (gap can shrink during consolidation)
+  TIER0_POSITION_SIZE: 30,    // Conservative 30% position due to late entry
+  TIER0_REQUIRE_CONTINUATION: false,  // NO continuation requirement
+  
+  // Tier 1: Base level - moderate trend strength (NO LONGER requires continuation)
+  // PHASE 1 FIX: Removed continuation requirement to allow more entries
   TIER1_MIN_ADX: 25,
   TIER1_MIN_ADX_SLOPE: 0.03,
   TIER1_MIN_DI_GAP: 10,
   TIER1_POSITION_SIZE: 40,  // Most conservative
+  TIER1_REQUIRE_CONTINUATION: false,  // Removed continuation requirement
   
   // Tier 2: Strong trend
   TIER2_MIN_ADX: 30,
@@ -256,6 +267,129 @@ export const MOMENTUM_CONTINUATION_PARAMS = {
   MAX_CONTINUATION_TRADES_PER_DAY: 1,
   // Tighter stop loss multiplier for continuation entries at extremes
   STOP_LOSS_MULTIPLIER: 1.5,  // 1.5x ATR instead of 2x
+} as const;
+
+// ============= PHASE 2: TREND CONTINUATION AFTER EXIT =============
+// Allows re-entry with relaxed thresholds after profitable exit
+// Addresses: Missing continuation moves after taking profit too early
+export const TREND_CONTINUATION_AFTER_EXIT_PARAMS = {
+  // Enable this feature
+  ENABLED: true,
+  
+  // ===== RECENT PROFITABLE EXIT DETECTION =====
+  // How long ago can the profitable exit have been (hours)
+  LOOKBACK_HOURS: 2,
+  // Minimum profit % to qualify as "profitable exit"
+  MIN_PROFIT_PERCENT: 2.0,
+  // Only count take_profit closes, not stop losses
+  REQUIRE_TP_EXIT: true,
+  
+  // ===== RELAXED STOCHRSI THRESHOLDS FOR RE-ENTRY =====
+  // Allow LONG re-entry even when K is very high (normally blocked at 80+)
+  MAX_STOCHRSI_K_LONG_REENTRY: 95,  // Allow up to K=95 for re-entry
+  // Allow SHORT re-entry even when K is very low (normally blocked at 20-)
+  MIN_STOCHRSI_K_SHORT_REENTRY: 5,   // Allow down to K=5 for re-entry
+  
+  // ===== ADX REQUIREMENTS =====
+  // ADX must still be strong for re-entry
+  MIN_ADX: 30,
+  // ADX slope can be slightly negative (trend cruising, not accelerating)
+  MIN_ADX_SLOPE: -0.3,
+  
+  // ===== POSITION SIZING =====
+  // Reduced position size for re-entries (safety first)
+  POSITION_SIZE_MULTIPLIER: 0.40,  // 40% of normal
+  
+  // ===== TREND DIRECTION MATCH =====
+  // Re-entry must be same direction as original trade
+  REQUIRE_SAME_DIRECTION: true,
+  // 4h trend must still align
+  MIN_HTF_4H_CONFIDENCE: 60,
+  
+  // ===== STOP LOSS TIGHTENING =====
+  // Tighter stop for re-entries (use 1.5% instead of normal)
+  TIGHT_STOP_PERCENT: 1.5,
+} as const;
+
+// ============= PHASE 3: STRONG TREND BOLLINGER EXTENSION =============
+// Allows entries at %B > 97 when trend is exceptionally strong
+// Addresses: Missing continuation when price stays above upper band
+export const STRONG_TREND_BOLLINGER_EXTENSION_PARAMS = {
+  // Enable this feature
+  ENABLED: true,
+  
+  // ===== EXTENDED %B THRESHOLDS =====
+  // Maximum %B for LONG when strong trend (beyond normal 97 cap)
+  EXTENDED_MAX_PERCENT_B_LONG: 105,   // Allow up to 105% (5% outside upper band)
+  // Minimum %B for SHORT when strong trend (beyond normal 3 cap)
+  EXTENDED_MIN_PERCENT_B_SHORT: -5,   // Allow down to -5% (5% outside lower band)
+  
+  // ===== ADX REQUIREMENTS FOR EXTENSION =====
+  // Very high ADX required for this extension
+  MIN_ADX: 45,
+  // ADX slope can be flat but not falling sharply
+  MIN_ADX_SLOPE: -0.2,
+  // DI gap must be strong
+  MIN_DI_GAP: 12,
+  
+  // ===== HTF ALIGNMENT =====
+  // 4h must strongly align
+  MIN_HTF_4H_CONFIDENCE: 70,
+  REQUIRE_HTF_ALIGNED: true,
+  
+  // ===== POSITION SIZING =====
+  // Reduced position for extended entries
+  POSITION_SIZE_MULTIPLIER: 0.35,  // 35% of normal
+  
+  // ===== STOP LOSS TIGHTENING =====
+  // Tighter stop for extended entries
+  TIGHT_STOP_PERCENT: 1.5,
+  
+  // ===== STOCHRSI SAFETY =====
+  // StochRSI must not be at absolute extreme (still has some room)
+  MAX_STOCHRSI_K_LONG: 96,   // Block if K >= 96
+  MIN_STOCHRSI_K_SHORT: 4,   // Block if K <= 4
+} as const;
+
+// ============= PHASE 4: EARLY TREND DETECTION =============
+// Catch trends earlier when ADX is rising and direction is clear
+// Addresses: Missing early moves because waiting for ADX >= 25
+export const EARLY_TREND_DETECTION_PARAMS = {
+  // Enable this feature
+  ENABLED: true,
+  
+  // ===== ADX RISING DETECTION =====
+  // Minimum ADX for early entry (lower than normal 25 threshold)
+  MIN_ADX: 18,
+  // ADX must be rising (positive slope)
+  MIN_ADX_SLOPE: 0.1,  // Slope > 0.1 = clearly rising
+  
+  // ===== TIMEFRAME ALIGNMENT =====
+  // Both 4h and 1h must agree on direction
+  REQUIRE_4H_1H_ALIGNMENT: true,
+  // Minimum confidence on each timeframe
+  MIN_4H_CONFIDENCE: 55,
+  MIN_1H_CONFIDENCE: 55,
+  
+  // ===== STOCHRSI LOADING ZONE =====
+  // StochRSI must be in "loading" zone (not at extremes)
+  // This catches moves BEFORE they become overbought/oversold
+  LONG_STOCHRSI_MIN: 30,   // K must be >= 30
+  LONG_STOCHRSI_MAX: 70,   // K must be <= 70
+  SHORT_STOCHRSI_MIN: 30,  // K must be >= 30
+  SHORT_STOCHRSI_MAX: 70,  // K must be <= 70
+  
+  // ===== VOLUME CONFIRMATION =====
+  // Volume should be above average for early entries
+  REQUIRE_ABOVE_AVERAGE_VOLUME: true,
+  MIN_VOLUME_RATIO: 1.1,  // 10% above average
+  
+  // ===== POSITION SIZING =====
+  // Moderate position size for early entries
+  POSITION_SIZE_MULTIPLIER: 0.50,  // 50% of normal
+  
+  // ===== ENTRY TYPE LOGGING =====
+  ENTRY_TYPE_LABEL: "EARLY_TREND_DETECTION",
 } as const;
 
 // ============= BOLLINGER TIERED BYPASS FOR STRONG TREND RE-ENTRIES =============
