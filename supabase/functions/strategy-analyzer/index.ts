@@ -156,6 +156,11 @@ import {
   calculateTrendStrength,
   determineExceptionPriority,
   checkExceptionBudget,
+  // NEW: Phase 0-7 imports
+  classifyMasterRegime,
+  getEffectiveMomentumThreshold,
+  applyQualityNearMissBoost,
+  checkImpulseContinuation,
   type UnifiedReversalResult,
   type MarketRegime,
   type MarketRegimeEnhancedResult,
@@ -165,7 +170,9 @@ import {
   type TrendStrengthResult,
   type ExceptionResult,
   type ExceptionBudgetResult,
-  type SetupType
+  type SetupType,
+  type MasterRegimeResult,
+  type ImpulseContinuationResult
 } from "../_shared/scoring.ts";
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
@@ -2817,6 +2824,32 @@ serve(async (req) => {
           adxExhaustion  // NEW: Pass behavioral exhaustion result
         );
         
+        // ============= PHASE 0: MASTER MARKET REGIME CLASSIFICATION =============
+        // Critical foundation: ADX defines regime, all other gates change meaning based on regime
+        // This runs ONCE at start of symbol processing - all subsequent gates reference this
+        const driftPercent = trendData.stealthTrend?.driftPercent || 0;
+        const masterRegime = classifyMasterRegime(
+          adx,
+          fullAdxResult.adxSlope ?? (smartAdxRising ? 0.5 : -0.3),
+          driftPercent,
+          htfTrend4h,
+          htfTrend1h,
+          adxExhaustion.isExhausted
+        );
+        
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🎯 MASTER REGIME: ${masterRegime.regime} - ${masterRegime.reason}`);
+        if (masterRegime.isStrongTrendOverride || masterRegime.isParabolicOverride) {
+          logger.forSymbol(symbol).info(`   → Gates become CONTEXT: BB max=${masterRegime.gateOverrides.bollingerMaxPercentB}, StochRSI max=${masterRegime.gateOverrides.stochRsiMaxK}, MomMin=${masterRegime.gateOverrides.momentumScoreMinimum}`);
+          logger.forSymbol(symbol).info(`   → Quality boost: +${masterRegime.gateOverrides.qualityBoost}, Position: ${(masterRegime.gateOverrides.positionMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // ============= PHASE 2: ADX-AWARE MOMENTUM THRESHOLD =============
+        // Get effective momentum threshold based on ADX level
+        const masterMomentumThreshold = getEffectiveMomentumThreshold(adx, fullAdxResult.adxSlope ?? 0);
+        if (masterMomentumThreshold.adjustmentType !== 'default') {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 📊 MOMENTUM THRESHOLD: ${masterMomentumThreshold.threshold} (${masterMomentumThreshold.adjustmentType}), canBlock=${masterMomentumThreshold.canBlock}`);
+        }
+        
         // Log smart momentum analysis
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} SMART MOMENTUM: score=${smartMomentum.score} dir=${smartMomentum.direction} accel=${smartMomentum.isAccelerating} weak=${smartMomentum.isWeakening} exhaust=${smartMomentum.isExhausted}`);
         if (smartMomentum.reasons.length > 0) {
@@ -2829,7 +2862,10 @@ serve(async (req) => {
         
         // ============= SMART MOMENTUM GATES =============
         const regimeAwareEnabled = riskParams.regime_aware_trading !== false;
-        const minMomentumScore = riskParams.min_momentum_score ?? 30;
+        // PHASE 2: Use ADX-aware momentum threshold instead of flat value
+        const minMomentumScore = masterRegime.isStrongTrendOverride 
+          ? masterMomentumThreshold.threshold 
+          : (riskParams.min_momentum_score ?? 30);
         const exhaustionBlockEnabled = riskParams.exhaustion_block_enabled !== false;
         
         // ============= CONTINUATION MODE: Check BEFORE exhaustion gate =============

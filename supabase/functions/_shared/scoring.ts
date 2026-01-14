@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, type AdxPhase, type ExceptionType } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, type AdxPhase, type ExceptionType, type MasterMarketRegime } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -2346,5 +2346,299 @@ export const calculateQualityScore = (
       volume: volumeScoreVal,
       confidencePenalty
     }
+  };
+};
+
+// ============= PHASE 0: MASTER MARKET REGIME CLASSIFIER =============
+// Critical foundation: ADX defines regime, all other gates change meaning based on regime
+// This is evaluated ONCE at the start of symbol processing, and all gates reference it
+
+export interface MasterRegimeResult {
+  regime: MasterMarketRegime;
+  gateOverrides: {
+    bollingerMaxPercentB: number;
+    bollingerMinPercentB: number;
+    stochRsiMaxK: number;
+    stochRsiMinK: number;
+    momentumScoreMinimum: number;
+    qualityBoost: number;
+    positionMultiplier: number;
+  };
+  requireHTFAlignment: boolean;
+  isStrongTrendOverride: boolean;
+  isParabolicOverride: boolean;
+  reason: string;
+}
+
+export const classifyMasterRegime = (
+  adx: number,
+  adxSlope: number,
+  driftPercent: number = 0,
+  htf4hTrend: string = "neutral",
+  htf1hTrend: string = "neutral",
+  isExhausted: boolean = false
+): MasterRegimeResult => {
+  const RC = MARKET_REGIME_CLASSIFIER;
+  const SAUO = STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS;
+  
+  // PARABOLIC: ADX >= 45 and not exhausted (or ADX >= 50 regardless)
+  // In parabolic regime, ADX IS the confirmation - gates become context
+  if (adx >= RC.PARABOLIC.minADX && !isExhausted) {
+    const overrides = RC.GATE_OVERRIDES.PARABOLIC;
+    return {
+      regime: 'PARABOLIC',
+      gateOverrides: {
+        bollingerMaxPercentB: overrides.bollingerMaxPercentB,
+        bollingerMinPercentB: overrides.bollingerMinPercentB,
+        stochRsiMaxK: overrides.stochRsiMaxK,
+        stochRsiMinK: overrides.stochRsiMinK,
+        momentumScoreMinimum: overrides.momentumScoreMinimum,
+        qualityBoost: overrides.qualityBoost,
+        positionMultiplier: overrides.positionMultiplier,
+      },
+      requireHTFAlignment: RC.REQUIRE_HTF_ALIGNMENT_BY_REGIME.PARABOLIC,
+      isStrongTrendOverride: true,
+      isParabolicOverride: true,
+      reason: `PARABOLIC regime: ADX=${adx.toFixed(1)} >= ${RC.PARABOLIC.minADX}, exhausted=${isExhausted} - all gates become context`,
+    };
+  }
+  
+  // STRONG_TREND: ADX 30-45 (or 40+ with Tier 1 override)
+  // Gates are relaxed but not completely bypassed
+  if (adx >= RC.STRONG_TREND.minADX && !isExhausted) {
+    const overrides = RC.GATE_OVERRIDES.STRONG_TREND;
+    
+    // Check for Tier 1 universal override (ADX 40+ with positive slope)
+    const isTier1Override = SAUO.ENABLED && 
+      adx >= SAUO.TIER1_MIN_ADX && 
+      (!SAUO.TIER1_REQUIRE_SLOPE_POSITIVE || adxSlope >= SAUO.TIER1_MIN_SLOPE);
+    
+    const effectivePositionMultiplier = isTier1Override 
+      ? SAUO.TIER1_POSITION_SIZE 
+      : overrides.positionMultiplier;
+    
+    return {
+      regime: 'STRONG_TREND',
+      gateOverrides: {
+        bollingerMaxPercentB: overrides.bollingerMaxPercentB,
+        bollingerMinPercentB: overrides.bollingerMinPercentB,
+        stochRsiMaxK: overrides.stochRsiMaxK,
+        stochRsiMinK: overrides.stochRsiMinK,
+        momentumScoreMinimum: overrides.momentumScoreMinimum,
+        qualityBoost: overrides.qualityBoost,
+        positionMultiplier: effectivePositionMultiplier,
+      },
+      requireHTFAlignment: RC.REQUIRE_HTF_ALIGNMENT_BY_REGIME.STRONG_TREND,
+      isStrongTrendOverride: true,
+      isParabolicOverride: false,
+      reason: `STRONG_TREND regime: ADX=${adx.toFixed(1)} [${RC.STRONG_TREND.minADX}-${RC.STRONG_TREND.maxADX}], tier1=${isTier1Override} - gates relaxed`,
+    };
+  }
+  
+  // STEALTH_DRIFT: Low ADX but consistent price drift
+  // This catches "stealth" moves that slip through ADX/momentum filters
+  if (adx <= RC.STEALTH_DRIFT.maxADX && Math.abs(driftPercent) >= RC.STEALTH_DRIFT.minDriftPercent) {
+    const overrides = RC.GATE_OVERRIDES.STEALTH_DRIFT;
+    return {
+      regime: 'STEALTH_DRIFT',
+      gateOverrides: {
+        bollingerMaxPercentB: overrides.bollingerMaxPercentB,
+        bollingerMinPercentB: overrides.bollingerMinPercentB,
+        stochRsiMaxK: overrides.stochRsiMaxK,
+        stochRsiMinK: overrides.stochRsiMinK,
+        momentumScoreMinimum: overrides.momentumScoreMinimum,
+        qualityBoost: overrides.qualityBoost,
+        positionMultiplier: overrides.positionMultiplier,
+      },
+      requireHTFAlignment: RC.REQUIRE_HTF_ALIGNMENT_BY_REGIME.STEALTH_DRIFT,
+      isStrongTrendOverride: false,
+      isParabolicOverride: false,
+      reason: `STEALTH_DRIFT regime: ADX=${adx.toFixed(1)} <= ${RC.STEALTH_DRIFT.maxADX}, drift=${driftPercent.toFixed(2)}% - gradual price grind detected`,
+    };
+  }
+  
+  // NORMAL: Standard gates apply
+  const overrides = RC.GATE_OVERRIDES.NORMAL;
+  return {
+    regime: 'NORMAL',
+    gateOverrides: {
+      bollingerMaxPercentB: overrides.bollingerMaxPercentB,
+      bollingerMinPercentB: overrides.bollingerMinPercentB,
+      stochRsiMaxK: overrides.stochRsiMaxK,
+      stochRsiMinK: overrides.stochRsiMinK,
+      momentumScoreMinimum: overrides.momentumScoreMinimum,
+      qualityBoost: overrides.qualityBoost,
+      positionMultiplier: overrides.positionMultiplier,
+    },
+    requireHTFAlignment: RC.REQUIRE_HTF_ALIGNMENT_BY_REGIME.NORMAL,
+    isStrongTrendOverride: false,
+    isParabolicOverride: false,
+    reason: `NORMAL regime: ADX=${adx.toFixed(1)} - standard gate behavior`,
+  };
+};
+
+// ============= PHASE 2: ADX-AWARE MOMENTUM THRESHOLD =============
+// Returns the effective minimum momentum score based on ADX level
+// Key insight: At high ADX, momentum score should not block, only adjust position
+
+export const getEffectiveMomentumThreshold = (
+  adx: number,
+  adxSlope: number = 0
+): { threshold: number; canBlock: boolean; adjustmentType: string } => {
+  const MSB = MOMENTUM_SCORE_BEHAVIOR_PARAMS;
+  
+  if (!MSB.ENABLED) {
+    return { threshold: MSB.DEFAULT_MIN_SCORE, canBlock: true, adjustmentType: 'disabled' };
+  }
+  
+  // At very high ADX, momentum score cannot block - only adjust position
+  if (adx >= MSB.CANNOT_BLOCK_ABOVE_ADX) {
+    return { 
+      threshold: MSB.ADX_40_MIN_SCORE, 
+      canBlock: false, 
+      adjustmentType: 'adx_override_no_block' 
+    };
+  }
+  
+  // Graduated thresholds based on ADX level
+  if (adx >= 40) {
+    return { threshold: MSB.ADX_40_MIN_SCORE, canBlock: true, adjustmentType: 'adx_40' };
+  }
+  if (adx >= 35) {
+    return { threshold: MSB.ADX_35_MIN_SCORE, canBlock: true, adjustmentType: 'adx_35' };
+  }
+  if (adx >= 30) {
+    return { threshold: MSB.ADX_30_MIN_SCORE, canBlock: true, adjustmentType: 'adx_30' };
+  }
+  if (adx >= 25) {
+    return { threshold: MSB.ADX_25_MIN_SCORE, canBlock: true, adjustmentType: 'adx_25' };
+  }
+  
+  return { threshold: MSB.DEFAULT_MIN_SCORE, canBlock: true, adjustmentType: 'default' };
+};
+
+// ============= PHASE 4: QUALITY NEAR-MISS BOOST =============
+// Apply boost to quality scores that are within range of threshold
+
+export const applyQualityNearMissBoost = (
+  qualityScore: number,
+  threshold: number,
+  adx: number,
+  htfAligned: boolean
+): { boostedScore: number; boostApplied: number; reason: string } => {
+  const NMB = QUALITY_NEAR_MISS_BOOST_PARAMS;
+  
+  if (!NMB.ENABLED) {
+    return { boostedScore: qualityScore, boostApplied: 0, reason: 'boost_disabled' };
+  }
+  
+  // Check if score is in near-miss range
+  const gapToThreshold = threshold - qualityScore;
+  if (gapToThreshold <= 0 || gapToThreshold > NMB.NEAR_MISS_RANGE) {
+    return { 
+      boostedScore: qualityScore, 
+      boostApplied: 0, 
+      reason: gapToThreshold <= 0 ? 'already_passing' : 'not_near_miss' 
+    };
+  }
+  
+  // Calculate boost based on ADX level
+  let boost = 0;
+  let reasons: string[] = [];
+  
+  if (adx >= 45) {
+    boost += NMB.ADX_45_BOOST;
+    reasons.push(`ADX_45+: +${NMB.ADX_45_BOOST}`);
+  } else if (adx >= 40) {
+    boost += NMB.ADX_40_BOOST;
+    reasons.push(`ADX_40+: +${NMB.ADX_40_BOOST}`);
+  } else if (adx >= 35) {
+    boost += NMB.ADX_35_BOOST;
+    reasons.push(`ADX_35+: +${NMB.ADX_35_BOOST}`);
+  }
+  
+  // HTF alignment boost
+  if (htfAligned) {
+    boost += NMB.HTF_ALIGNED_BOOST;
+    reasons.push(`HTF_ALIGNED: +${NMB.HTF_ALIGNED_BOOST}`);
+  }
+  
+  // Apply cap
+  const boostedScore = Math.min(qualityScore + boost, NMB.MAX_BOOSTED_SCORE);
+  const actualBoost = boostedScore - qualityScore;
+  
+  if (actualBoost > 0) {
+    reasons.push(`capped_at_${NMB.MAX_BOOSTED_SCORE}`);
+  }
+  
+  return {
+    boostedScore,
+    boostApplied: actualBoost,
+    reason: actualBoost > 0 ? reasons.join(', ') : 'no_boost_applied'
+  };
+};
+
+// ============= PHASE 7: IMPULSE CONTINUATION CHECK =============
+// Detect impulse continuation conditions for exception entry
+
+export interface ImpulseContinuationResult {
+  isActive: boolean;
+  gatesBecomeContext: boolean;
+  positionMultiplier: number;
+  stopMultiplier: number;
+  reason: string;
+}
+
+export const checkImpulseContinuation = (
+  adx: number,
+  priceMovePct: number,
+  htf4hTrend: string,
+  htf1hTrend: string,
+  derivedDirection: string,
+  reversalScore: number,
+  isExhausted: boolean
+): ImpulseContinuationResult => {
+  const ICP = IMPULSE_CONTINUATION_PARAMS;
+  
+  if (!ICP.ENABLED) {
+    return { isActive: false, gatesBecomeContext: false, positionMultiplier: 1.0, stopMultiplier: 1.0, reason: 'disabled' };
+  }
+  
+  // Safety: Block if exhausted
+  if (ICP.BLOCK_IF_EXHAUSTED && isExhausted) {
+    return { isActive: false, gatesBecomeContext: false, positionMultiplier: 1.0, stopMultiplier: 1.0, reason: 'blocked_exhausted' };
+  }
+  
+  // Safety: Block if reversal score too high
+  if (reversalScore >= ICP.MAX_REVERSAL_SCORE) {
+    return { isActive: false, gatesBecomeContext: false, positionMultiplier: 1.0, stopMultiplier: 1.0, reason: 'blocked_high_reversal' };
+  }
+  
+  // Check minimum ADX
+  if (adx < ICP.MIN_ADX) {
+    return { isActive: false, gatesBecomeContext: false, positionMultiplier: 1.0, stopMultiplier: 1.0, reason: 'adx_too_low' };
+  }
+  
+  // Check minimum price move
+  if (priceMovePct < ICP.MIN_PRICE_MOVE_PERCENT) {
+    return { isActive: false, gatesBecomeContext: false, positionMultiplier: 1.0, stopMultiplier: 1.0, reason: 'price_move_insufficient' };
+  }
+  
+  // Check HTF alignment if required
+  if (ICP.REQUIRE_HTF_ALIGNMENT) {
+    const htfAligned = (derivedDirection === 'long' && htf4hTrend === 'bullish' && htf1hTrend === 'bullish') ||
+                       (derivedDirection === 'short' && htf4hTrend === 'bearish' && htf1hTrend === 'bearish');
+    if (!htfAligned) {
+      return { isActive: false, gatesBecomeContext: false, positionMultiplier: 1.0, stopMultiplier: 1.0, reason: 'htf_not_aligned' };
+    }
+  }
+  
+  // Impulse continuation active - gates become context
+  return {
+    isActive: true,
+    gatesBecomeContext: ICP.BOLLINGER_BECOMES_CONTEXT && ICP.STOCHRSI_BECOMES_CONTEXT && ICP.MOMENTUM_SCORE_BECOMES_CONTEXT,
+    positionMultiplier: ICP.POSITION_SIZE,
+    stopMultiplier: ICP.STOP_MULTIPLIER,
+    reason: `IMPULSE_CONTINUATION: ADX=${adx.toFixed(1)}, move=${priceMovePct.toFixed(2)}%`,
   };
 };
