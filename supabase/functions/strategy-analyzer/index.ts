@@ -8582,39 +8582,58 @@ serve(async (req) => {
         const isHighPerformer = isStrategyHighPerformerForRegime(strategy.name, currentRegimeType);
         logger.forSymbol(symbol).signal(`Selected "${strategy.name}"${isHighPerformer ? ' ⭐' : ''} [${currentRegimeType}] (${regimeFilteredCandidates.length}/${candidates.length} strategies after regime filter, best score: ${best.score}, direction: ${signalType})`);
         
-        // ============= PLAN FIX A: CONFIDENCE THRESHOLD ENFORCEMENT =============
-        // Hard reject signals below min_confidence_threshold from risk_parameters
-        // This prevents low-confidence entries like the BNBUSDT 53% case
-        // RELAXED: When HTF bypass is applied, use a lower threshold since trend strength is already confirmed
+        // ============= PHASE 3: GRADUATED CONFIDENCE THRESHOLD =============
+        // Graduated system: hard block below 55%, soft gates above with position reduction
+        // ADX-based relaxation: very strong trends confirm direction independently
         const baseConfidenceThreshold = riskParams.min_confidence_threshold ?? 60;
-        const htfBypassConfidenceRelaxation = strongTrendHTFBypassApplied ? 5 : 0; // Relax by 5% when HTF bypassed
-        const minConfidenceThreshold = baseConfidenceThreshold - htfBypassConfidenceRelaxation;
-        if (confidence < minConfidenceThreshold) {
+        const htfBypassConfidenceRelaxation = strongTrendHTFBypassApplied ? 5 : 0;
+        
+        // NEW: ADX-based confidence relaxation - very strong trends confirm direction
+        const adxBasedConfidenceRelaxation = adx >= 50 ? 10 : adx >= 40 ? 5 : 0;
+        const effectiveConfidenceRelaxation = Math.max(htfBypassConfidenceRelaxation, adxBasedConfidenceRelaxation);
+        
+        const minConfidenceThreshold = baseConfidenceThreshold - effectiveConfidenceRelaxation;
+        const hardBlockThreshold = 55; // Never allow below 55%
+        
+        let confidencePositionReduction = 0;
+        
+        if (confidence < hardBlockThreshold) {
+          // HARD BLOCK: Below 55% is never allowed
           rejectedByHardGates++;
-          const htfBypassNote = strongTrendHTFBypassApplied ? ` [HTF bypassed, threshold relaxed from ${baseConfidenceThreshold}% to ${minConfidenceThreshold}%]` : '';
-          perSymbolGateAttribution.set(symbol, { gate: 'CONFIDENCE_BELOW_THRESHOLD', details: `${confidence}% < ${minConfidenceThreshold}%${htfBypassNote}` });
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - Confidence ${confidence}% below threshold ${minConfidenceThreshold}%${htfBypassNote} - "${strategy.name}" rejected`);
+          perSymbolGateAttribution.set(symbol, { gate: 'CONFIDENCE_BELOW_THRESHOLD', details: `${confidence}% < ${hardBlockThreshold}% (hard minimum)` });
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - Confidence ${confidence}% below hard minimum ${hardBlockThreshold}%`);
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `PLAN FIX A - CONFIDENCE BLOCK: ${confidence}% < ${minConfidenceThreshold}% threshold${htfBypassNote} - "${strategy.name}" blocked`,
+            `HARD BLOCK: Confidence ${confidence}% < ${hardBlockThreshold}% hard minimum - "${strategy.name}" blocked`,
             { 
-              gate: "CONFIDENCE_BELOW_THRESHOLD",
+              gate: "CONFIDENCE_BELOW_HARD_MINIMUM",
               confidence,
-              threshold: minConfidenceThreshold,
-              baseThreshold: baseConfidenceThreshold,
-              htfBypassApplied: strongTrendHTFBypassApplied,
+              threshold: hardBlockThreshold,
               strategyName: strategy.name,
               signalType,
               qualityScore: best.score,
-              message: strongTrendHTFBypassApplied 
-                ? "Signal confidence still too low even with HTF bypass relaxation" 
-                : "Signal confidence too low for reliable entry"
+              message: "Signal confidence below hard minimum (55%) - too unreliable for any entry"
             },
             trendData,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
           continue;
+        } else if (confidence < 60) {
+          // SOFT GATE: 55-60% → Allow with 30% position reduction
+          confidencePositionReduction = 30;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} GRADUATED CONFIDENCE: ${confidence}% in 55-60 zone → -30% position (ADX=${adx.toFixed(1)}, relaxation=${effectiveConfidenceRelaxation}%)`);
+        } else if (confidence < minConfidenceThreshold) {
+          // SOFT GATE: 60-threshold → Allow with 15% position reduction
+          confidencePositionReduction = 15;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} GRADUATED CONFIDENCE: ${confidence}% in 60-${minConfidenceThreshold} zone → -15% position (ADX=${adx.toFixed(1)}, relaxation=${effectiveConfidenceRelaxation}%)`);
+        }
+        
+        // Apply confidence-based position reduction to reversal multiplier
+        if (confidencePositionReduction > 0) {
+          const confidenceMultiplier = (100 - confidencePositionReduction) / 100;
+          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, confidenceMultiplier);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Confidence position reduction applied: ${confidencePositionReduction}% → multiplier=${confidenceMultiplier.toFixed(2)}`);
         }
         
         // ===== MOMENTUM STRATEGY GATE: MACD ALIGNMENT + VOLUME REQUIREMENT AT HIGH REVERSAL RISK =====
