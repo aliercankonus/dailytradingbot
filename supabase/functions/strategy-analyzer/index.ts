@@ -3570,14 +3570,15 @@ serve(async (req) => {
         }
         
         // Phase 2/3: For after_exit or bollinger_ext bypass, use relaxed StochRSI thresholds
-        const effectiveAbsoluteMaxOverbought = (trendContinuationAfterExitAllowed && derivedDirection === "long")
+        // NOTE: early_trend does NOT relax thresholds - it operates in the 30-70 loading zone
+        const effectiveAbsoluteMaxOverbought = (trendContinuationAfterExitAllowed && afterExitDirection === "long" && derivedDirection === "long")
           ? TREND_CONTINUATION_AFTER_EXIT_PARAMS.MAX_STOCHRSI_K_LONG_REENTRY
-          : bollingerExtensionAllowed && derivedDirection === "long"
+          : (bollingerExtensionAllowed && derivedDirection === "long")
             ? STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.MAX_STOCHRSI_K_LONG
             : STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT;
-        const effectiveAbsoluteMaxOversold = (trendContinuationAfterExitAllowed && derivedDirection === "short")
+        const effectiveAbsoluteMaxOversold = (trendContinuationAfterExitAllowed && afterExitDirection === "short" && derivedDirection === "short")
           ? TREND_CONTINUATION_AFTER_EXIT_PARAMS.MIN_STOCHRSI_K_SHORT_REENTRY
-          : bollingerExtensionAllowed && derivedDirection === "short"
+          : (bollingerExtensionAllowed && derivedDirection === "short")
             ? STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.MIN_STOCHRSI_K_SHORT
             : STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD;
         
