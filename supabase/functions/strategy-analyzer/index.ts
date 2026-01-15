@@ -102,6 +102,7 @@ import {
   TREND_CONTINUATION_AFTER_EXIT_PARAMS,
   STRONG_TREND_BOLLINGER_EXTENSION_PARAMS,
   EARLY_TREND_DETECTION_PARAMS,
+  STRATEGY_ADX_RESTRICTIONS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -8092,6 +8093,61 @@ serve(async (req) => {
                   skipReason: `Regime mismatch: trend strategy in ranging market (ADX=${adx.toFixed(1)})` 
                 });
                 continue;
+              }
+              
+              // ============= PHASE 4: STRATEGY-SPECIFIC ADX RESTRICTIONS =============
+              // Expert insight: "HTF Neutral Breakout strategy must be explicitly disabled when ADX ≥ 35"
+              // Check if current ADX violates strategy's allowed range
+              const strategyRestriction = STRATEGY_ADX_RESTRICTIONS[strategy.name];
+              if (strategyRestriction) {
+                // Check MAX_ADX: Strategy blocked if ADX is too high
+                if (strategyRestriction.MAX_ADX !== undefined && adx >= strategyRestriction.MAX_ADX) {
+                  rejectedByStrategy++;
+                  perSymbolGateAttribution.set(symbol, { gate: 'STRATEGY_ADX_LIMIT', details: `${strategy.name} ADX ${adx.toFixed(1)} >= ${strategyRestriction.MAX_ADX}` });
+                  logger.forSymbol(symbol).warn(`STRATEGY_ADX_BLOCK: "${strategy.name}" disabled at ADX=${adx.toFixed(1)} >= ${strategyRestriction.MAX_ADX} (${strategyRestriction.REASON})`);
+                  
+                  // Log rejection with AI for analysis
+                  logRejectionWithAI(
+                    supabase,
+                    userId,
+                    symbol,
+                    `Strategy ${strategy.name} blocked by ADX restriction`,
+                    trendData,
+                    {
+                      strategy_name: strategy.name,
+                      adx: adx.toFixed(1),
+                      max_allowed_adx: strategyRestriction.MAX_ADX,
+                      reason: strategyRestriction.REASON,
+                      blockReasonCode: 'STRATEGY_ADX_LIMIT',
+                      primaryGateFailed: 'strategy_max_adx'
+                    }
+                  );
+                  
+                  strategyNearMisses.push({ 
+                    name: strategy.name, 
+                    passedCount: entryConditions.length, 
+                    totalConditions: entryConditions.length, 
+                    failedConditions: [], 
+                    skipReason: `ADX ${adx.toFixed(1)} >= max ${strategyRestriction.MAX_ADX}: ${strategyRestriction.REASON}` 
+                  });
+                  continue;
+                }
+                
+                // Check MIN_ADX: Strategy blocked if ADX is too low
+                if (strategyRestriction.MIN_ADX !== undefined && adx < strategyRestriction.MIN_ADX) {
+                  rejectedByStrategy++;
+                  perSymbolGateAttribution.set(symbol, { gate: 'STRATEGY_ADX_LIMIT', details: `${strategy.name} ADX ${adx.toFixed(1)} < ${strategyRestriction.MIN_ADX}` });
+                  logger.forSymbol(symbol).info(`STRATEGY_ADX_BLOCK: "${strategy.name}" requires ADX >= ${strategyRestriction.MIN_ADX}, current=${adx.toFixed(1)} (${strategyRestriction.REASON})`);
+                  
+                  strategyNearMisses.push({ 
+                    name: strategy.name, 
+                    passedCount: entryConditions.length, 
+                    totalConditions: entryConditions.length, 
+                    failedConditions: [], 
+                    skipReason: `ADX ${adx.toFixed(1)} < min ${strategyRestriction.MIN_ADX}: ${strategyRestriction.REASON}` 
+                  });
+                  continue;
+                }
               }
               
               // ============= IMPROVEMENT 4: STRATEGY-SPECIFIC CONSTRAINTS =============
