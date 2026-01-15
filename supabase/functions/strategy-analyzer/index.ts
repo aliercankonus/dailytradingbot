@@ -2032,7 +2032,9 @@ serve(async (req) => {
       // PHASE 8-9: Counter-trend and mature trend protection
       | 'COUNTER_TREND_PROTECTION'
       | 'MATURE_TREND_NO_PULLBACK'
-      | 'STRATEGY_ADX_LIMIT';
+      | 'STRATEGY_ADX_LIMIT'
+      // PHASE 5: Position deduplication
+      | 'POSITION_DEDUPLICATION';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -2193,6 +2195,45 @@ serve(async (req) => {
           user_id: userId, symbol,
           rejection_reason: `Max trades per symbol reached: ${currentTradeCount}/${riskParams.max_trades_per_symbol} trades active`,
           filters_status: { currentTradeCount, maxTradesPerSymbol: riskParams.max_trades_per_symbol },
+          checked_at: new Date().toISOString(),
+        });
+        continue;
+      }
+
+      // ============= PHASE 5: POSITION DEDUPLICATION (30-MINUTE WINDOW) =============
+      // Expert insight: Prevent multiple concurrent entries on the same symbol within 30 minutes
+      // This reduces compound losses from duplicate entries during rapid signal generation
+      // Uses .limit(1) defensively instead of .single() to prevent errors if multiple rows exist
+      const deduplicationWindowMs = 30 * 60 * 1000; // 30 minutes
+      const deduplicationCutoff = new Date(Date.now() - deduplicationWindowMs).toISOString();
+      
+      const { data: recentPositions, error: dedupError } = await supabase
+        .from('positions')
+        .select('id, opened_at, side, status')
+        .eq('user_id', userId)
+        .eq('symbol', symbol)
+        .gte('opened_at', deduplicationCutoff)
+        .limit(1);
+      
+      if (!dedupError && recentPositions && recentPositions.length > 0) {
+        const recentPosition = recentPositions[0];
+        const openedAgo = Math.round((Date.now() - new Date(recentPosition.opened_at).getTime()) / (1000 * 60));
+        perSymbolGateAttribution.set(symbol, { gate: 'POSITION_DEDUPLICATION', details: `Position opened ${openedAgo}min ago` });
+        
+        logger.forSymbol(symbol).info(`POSITION_DEDUP: Skipping - ${recentPosition.status} position opened ${openedAgo}min ago (within 30min window)`);
+        
+        await supabase.from("signal_rejection_log").insert({
+          user_id: userId, 
+          symbol,
+          rejection_reason: `Position deduplication: ${recentPosition.status} position opened ${openedAgo} minutes ago (within 30-minute window)`,
+          filters_status: { 
+            recentPositionId: recentPosition.id,
+            recentPositionStatus: recentPosition.status,
+            recentPositionSide: recentPosition.side,
+            openedMinutesAgo: openedAgo,
+            deduplicationWindowMinutes: 30,
+            gate: 'POSITION_DEDUPLICATION'
+          },
           checked_at: new Date().toISOString(),
         });
         continue;
