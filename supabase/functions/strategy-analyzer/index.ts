@@ -98,6 +98,8 @@ import {
   SIGNAL_TYPE_VALIDITY_PARAMS,
   // PHASE 2: ADX Rising %B Bypass - allows extended %B when ADX rising
   ADX_RISING_PERCENT_B_BYPASS,
+  // PHASE 8: Counter-Trend Protection Gate - single source of truth
+  COUNTER_TREND_PROTECTION,
   // PHASE 1-4: Missed opportunity fixes
   TREND_CONTINUATION_AFTER_EXIT_PARAMS,
   STRONG_TREND_BOLLINGER_EXTENSION_PARAMS,
@@ -2929,32 +2931,24 @@ serve(async (req) => {
         // ============= CRITICAL: COUNTER-TREND PROTECTION GATE (Phase 8) =============
         // PREVENTS: Trading LONG when trend is strongly bearish, or SHORT when strongly bullish
         // This gate runs IMMEDIATELY after regime classification to block counter-trend entries
-        // ROOT CAUSE: All 5 recent losses were counter-trend entries that would be blocked here
-        const COUNTER_TREND = {
-          ENABLED: true,
-          ADX_THRESHOLD_FOR_BLOCK: 35,
-          MOMENTUM_STRONG_OPPOSITE_LONG: -20,
-          MOMENTUM_STRONG_OPPOSITE_SHORT: 20,
-          MOMENTUM_NEUTRAL_MIN: -10,
-          MOMENTUM_NEUTRAL_MAX: 10,
-        };
+        // NOW USES: Shared COUNTER_TREND_PROTECTION from constants.ts (single source of truth)
         
         // Check for counter-trend entry (LONG against bearish trend, or SHORT against bullish trend)
         const isCounterTrendLong = derivedDirection === "long" && (
-          // ADX >= 35 AND trend direction is bearish = BLOCK LONG
-          (adx >= COUNTER_TREND.ADX_THRESHOLD_FOR_BLOCK && regimeTrendDirection === 'bearish') ||
+          // ADX >= threshold AND trend direction is bearish = BLOCK LONG
+          (adx >= COUNTER_TREND_PROTECTION.ADX_THRESHOLD_FOR_BLOCK && regimeTrendDirection === 'bearish') ||
           // Momentum strongly negative = BLOCK LONG
-          (smartMomentum.score < COUNTER_TREND.MOMENTUM_STRONG_OPPOSITE_LONG)
+          (smartMomentum.score < COUNTER_TREND_PROTECTION.MOMENTUM.STRONG_OPPOSITE_LONG)
         );
         
         const isCounterTrendShort = derivedDirection === "short" && (
-          // ADX >= 35 AND trend direction is bullish = BLOCK SHORT
-          (adx >= COUNTER_TREND.ADX_THRESHOLD_FOR_BLOCK && regimeTrendDirection === 'bullish') ||
+          // ADX >= threshold AND trend direction is bullish = BLOCK SHORT
+          (adx >= COUNTER_TREND_PROTECTION.ADX_THRESHOLD_FOR_BLOCK && regimeTrendDirection === 'bullish') ||
           // Momentum strongly positive = BLOCK SHORT
-          (smartMomentum.score > COUNTER_TREND.MOMENTUM_STRONG_OPPOSITE_SHORT)
+          (smartMomentum.score > COUNTER_TREND_PROTECTION.MOMENTUM.STRONG_OPPOSITE_SHORT)
         );
         
-        if (COUNTER_TREND.ENABLED && (isCounterTrendLong || isCounterTrendShort)) {
+        if (COUNTER_TREND_PROTECTION.ENABLED && (isCounterTrendLong || isCounterTrendShort)) {
           rejectedByHardGates++;
           const blockReason = isCounterTrendLong 
             ? `LONG blocked against ${regimeTrendDirection} trend (ADX=${adx.toFixed(1)}, momentum=${smartMomentum.score})`
@@ -2965,10 +2959,12 @@ serve(async (req) => {
             details: blockReason 
           });
           
-          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 COUNTER_TREND_BLOCK: ${symbol} | ${derivedDirection.toUpperCase()} blocked`);
-          logger.forSymbol(symbol).warn(`   → ADX=${adx.toFixed(1)}, regime=${masterRegime.regime}, trendDirection=${regimeTrendDirection}`);
-          logger.forSymbol(symbol).warn(`   → Momentum score=${smartMomentum.score}, direction=${smartMomentum.direction}`);
-          logger.forSymbol(symbol).warn(`   → This prevents trading against strong established trends`);
+          if (COUNTER_TREND_PROTECTION.LOG_BLOCKS) {
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 COUNTER_TREND_BLOCK: ${symbol} | ${derivedDirection.toUpperCase()} blocked`);
+            logger.forSymbol(symbol).warn(`   → ADX=${adx.toFixed(1)}, regime=${masterRegime.regime}, trendDirection=${regimeTrendDirection}`);
+            logger.forSymbol(symbol).warn(`   → Momentum score=${smartMomentum.score}, direction=${smartMomentum.direction}`);
+            logger.forSymbol(symbol).warn(`   → This prevents trading against strong established trends`);
+          }
           
           await logRejectionWithAI(
             supabase, userId, symbol,
@@ -2985,7 +2981,8 @@ serve(async (req) => {
               momentumScore: smartMomentum.score,
               momentumDirection: smartMomentum.direction,
               masterRegime: masterRegime.regime,
-              threshold: COUNTER_TREND.ADX_THRESHOLD_FOR_BLOCK,
+              threshold: COUNTER_TREND_PROTECTION.ADX_THRESHOLD_FOR_BLOCK,
+              momentumThresholds: COUNTER_TREND_PROTECTION.MOMENTUM,
               // Timeframe labels for debugging
               timeframes: {
                 adxTimeframe: '1h',
