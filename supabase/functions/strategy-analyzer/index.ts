@@ -2027,7 +2027,11 @@ serve(async (req) => {
       | 'MOMENTUM_DIRECTION_OPPOSING'
       | 'MACD_DIRECTION_CONTRADICTION'
       // PHASE 2: Price action early entry gate
-      | 'PRICE_ACTION_EARLY_ALLOWED';
+      | 'PRICE_ACTION_EARLY_ALLOWED'
+      // PHASE 8-9: Counter-trend and mature trend protection
+      | 'COUNTER_TREND_PROTECTION'
+      | 'MATURE_TREND_NO_PULLBACK'
+      | 'STRATEGY_ADX_LIMIT';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -2827,13 +2831,20 @@ serve(async (req) => {
         // Critical foundation: ADX defines regime, all other gates change meaning based on regime
         // This runs ONCE at start of symbol processing - all subsequent gates reference this
         const driftPercent = trendData.stealthTrend?.driftPercent || 0;
+        
+        // NEW: Pass DI values for accurate trend direction derivation
+        const diPlusForRegime = fullAdxResult.plusDI ?? 25;
+        const diMinusForRegime = fullAdxResult.minusDI ?? 25;
+        
         const masterRegime = classifyMasterRegime(
           adx,
           fullAdxResult.adxSlope ?? (smartAdxRising ? 0.5 : -0.3),
           driftPercent,
           htfTrend4h,
           htfTrend1h,
-          adxExhaustion.isExhausted
+          adxExhaustion.isExhausted,
+          diPlusForRegime,    // NEW: Pass DI+ for trend direction
+          diMinusForRegime    // NEW: Pass DI- for trend direction
         );
         
         // ============= MASTER REGIME GATE OVERRIDES =============
@@ -2858,11 +2869,112 @@ serve(async (req) => {
         // Regime-aware position multiplier (applied to position sizing)
         const regimePositionMultiplier = regimeGates.positionMultiplier;
         
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🎯 MASTER REGIME: ${masterRegime.regime} - ${masterRegime.reason}`);
+        // NEW: Extract enhanced regime fields for counter-trend protection
+        const regimeTrendDirection = masterRegime.trendDirection;
+        const regimeIsMatureTrend = masterRegime.isMatureTrend;
+        const regimeRequirePullback = masterRegime.requirePullback;
+        const regimeRuleId = masterRegime.regimeRuleId;
+        
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🎯 MASTER REGIME: ${masterRegime.regime} (${regimeRuleId}) - ${masterRegime.reason}`);
+        logger.forSymbol(symbol).info(`   → Trend direction: ${regimeTrendDirection}, isMatureTrend: ${regimeIsMatureTrend}, requirePullback: ${regimeRequirePullback}`);
         if (isRegimeOverrideActive) {
           logger.forSymbol(symbol).info(`   → Gates become CONTEXT: BB max=${regimeBollingerMaxPercentB}%, min=${regimeBollingerMinPercentB}%`);
           logger.forSymbol(symbol).info(`   → StochRSI: max K=${regimeStochRsiMaxK}, min K=${regimeStochRsiMinK}`);
           logger.forSymbol(symbol).info(`   → Momentum min=${regimeMomentumMinimum}, Quality boost: +${regimeQualityBoost}, Position: ${(regimePositionMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // ============= CRITICAL: COUNTER-TREND PROTECTION GATE (Phase 8) =============
+        // PREVENTS: Trading LONG when trend is strongly bearish, or SHORT when strongly bullish
+        // This gate runs IMMEDIATELY after regime classification to block counter-trend entries
+        // ROOT CAUSE: All 5 recent losses were counter-trend entries that would be blocked here
+        const COUNTER_TREND = {
+          ENABLED: true,
+          ADX_THRESHOLD_FOR_BLOCK: 35,
+          MOMENTUM_STRONG_OPPOSITE_LONG: -20,
+          MOMENTUM_STRONG_OPPOSITE_SHORT: 20,
+          MOMENTUM_NEUTRAL_MIN: -10,
+          MOMENTUM_NEUTRAL_MAX: 10,
+        };
+        
+        // Check for counter-trend entry (LONG against bearish trend, or SHORT against bullish trend)
+        const isCounterTrendLong = derivedDirection === "long" && (
+          // ADX >= 35 AND trend direction is bearish = BLOCK LONG
+          (adx >= COUNTER_TREND.ADX_THRESHOLD_FOR_BLOCK && regimeTrendDirection === 'bearish') ||
+          // Momentum strongly negative = BLOCK LONG
+          (smartMomentum.score < COUNTER_TREND.MOMENTUM_STRONG_OPPOSITE_LONG)
+        );
+        
+        const isCounterTrendShort = derivedDirection === "short" && (
+          // ADX >= 35 AND trend direction is bullish = BLOCK SHORT
+          (adx >= COUNTER_TREND.ADX_THRESHOLD_FOR_BLOCK && regimeTrendDirection === 'bullish') ||
+          // Momentum strongly positive = BLOCK SHORT
+          (smartMomentum.score > COUNTER_TREND.MOMENTUM_STRONG_OPPOSITE_SHORT)
+        );
+        
+        if (COUNTER_TREND.ENABLED && (isCounterTrendLong || isCounterTrendShort)) {
+          rejectedByHardGates++;
+          const blockReason = isCounterTrendLong 
+            ? `LONG blocked against ${regimeTrendDirection} trend (ADX=${adx.toFixed(1)}, momentum=${smartMomentum.score})`
+            : `SHORT blocked against ${regimeTrendDirection} trend (ADX=${adx.toFixed(1)}, momentum=${smartMomentum.score})`;
+          
+          perSymbolGateAttribution.set(symbol, { 
+            gate: 'COUNTER_TREND_PROTECTION', 
+            details: blockReason 
+          });
+          
+          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 COUNTER_TREND_BLOCK: ${symbol} | ${derivedDirection.toUpperCase()} blocked`);
+          logger.forSymbol(symbol).warn(`   → ADX=${adx.toFixed(1)}, regime=${masterRegime.regime}, trendDirection=${regimeTrendDirection}`);
+          logger.forSymbol(symbol).warn(`   → Momentum score=${smartMomentum.score}, direction=${smartMomentum.direction}`);
+          logger.forSymbol(symbol).warn(`   → This prevents trading against strong established trends`);
+          
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `COUNTER_TREND_PROTECTION: ${blockReason}`,
+            {
+              gate: "COUNTER_TREND_PROTECTION",
+              blockReasonCode: "COUNTER_TREND",
+              primaryGateFailed: isCounterTrendLong ? "long_against_bearish" : "short_against_bullish",
+              regimeRuleId,
+              derivedDirection,
+              adx: adx.toFixed(1),
+              adxSlope: (fullAdxResult.adxSlope ?? 0).toFixed(2),
+              regimeTrendDirection,
+              momentumScore: smartMomentum.score,
+              momentumDirection: smartMomentum.direction,
+              masterRegime: masterRegime.regime,
+              threshold: COUNTER_TREND.ADX_THRESHOLD_FOR_BLOCK,
+              // Timeframe labels for debugging
+              timeframes: {
+                adxTimeframe: '1h',
+                regimeTimeframe: '4h',
+                signalTimeframe: '15m',
+              }
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
+          );
+          continue;
+        }
+        
+        // ============= MATURE TREND PROTECTION (Phase 9) =============
+        // Expert insight: "ADX > 45 with declining slope often signals trend maturity, not opportunity"
+        // Requires pullback confirmation for entries during mature trends
+        let matureTrendPositionMultiplier = 1.0;
+        if (regimeIsMatureTrend && regimeRequirePullback) {
+          // Check if we have a valid pullback
+          const hasPullbackConfirmation = smartPullback.isPullback && 
+                                          smartPullback.pullbackDepth >= 0.5 &&
+                                          smartPullback.isValidPullback;
+          
+          if (!hasPullbackConfirmation) {
+            // No pullback in mature trend - reduce position significantly or block
+            matureTrendPositionMultiplier = 0.25;  // 25% position for no pullback
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ MATURE_TREND: ADX=${adx.toFixed(1)} with declining slope - no pullback confirmation`);
+            logger.forSymbol(symbol).warn(`   → Position reduced to 25% for safety (alternative to blocking)`);
+          } else {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.ENTRY} ✅ MATURE_TREND with pullback confirmation: depth=${smartPullback.pullbackDepth.toFixed(1)}%`);
+          }
         }
         
         // ============= PHASE 2: ADX-AWARE MOMENTUM THRESHOLD =============
