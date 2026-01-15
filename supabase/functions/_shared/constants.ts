@@ -3107,3 +3107,151 @@ export const IMPULSE_CONTINUATION_PARAMS = {
   MAX_REVERSAL_SCORE: 50,
   BLOCK_IF_EXHAUSTED: true,
 } as const;
+
+// ============= PHASE 8: COUNTER-TREND PROTECTION GATE (CRITICAL) =============
+// PREVENTS: Trading LONG when trend is strongly bearish, or SHORT when strongly bullish
+// ROOT CAUSE: These 5 losses were all counter-trend entries blocked by this gate
+export const COUNTER_TREND_PROTECTION = {
+  ENABLED: true,
+  
+  // ===== ADX THRESHOLD FOR BLOCK =====
+  // Block LONG when ADX > threshold AND trend is bearish (and vice versa)
+  ADX_THRESHOLD_FOR_BLOCK: 35,
+  
+  // ===== MOMENTUM OPPOSITION THRESHOLDS (TIGHTLY BOUNDED) =====
+  // Block when momentum is strongly opposite to intended direction
+  MOMENTUM: {
+    // Block LONG if momentum < -20
+    STRONG_OPPOSITE_LONG: -20,
+    // Block SHORT if momentum > +20
+    STRONG_OPPOSITE_SHORT: 20,
+    // "Neutral" momentum zone (neither confirms nor opposes)
+    NEUTRAL_MIN: -10,
+    NEUTRAL_MAX: 10,
+  },
+  
+  // ===== TREND DIRECTION CONFIDENCE =====
+  // Use trend direction confidence, not just label
+  USE_DIRECTION_CONFIDENCE: true,
+  // If trend confidence < this, fall back to momentum-only logic
+  DIRECTION_CONFIDENCE_FALLBACK: 50,
+  
+  // ===== LOGGING =====
+  LOG_BLOCKS: true,
+} as const;
+
+// ============= PHASE 9: ADX EXHAUSTION / LATE TREND PROTECTION (NEW) =============
+// Expert insight: "ADX > 45 with declining slope often signals trend maturity, not opportunity"
+// Prevents entries during late-stage trend exhaustion
+export const ADX_EXHAUSTION_LATE_ENTRY_PROTECTION = {
+  ENABLED: true,
+  
+  // ===== MATURE TREND DETECTION =====
+  // When ADX >= this AND slope < 0: trend is mature/exhausting
+  MIN_ADX_FOR_CHECK: 45,
+  DECLINING_SLOPE_THRESHOLD: 0,  // Slope < 0 = declining
+  
+  // ===== ACTION WHEN MATURE TREND DETECTED =====
+  // Option A: Block new entries entirely (conservative)
+  BLOCK_NEW_ENTRIES: false,
+  
+  // Option B: Require pullback confirmation (recommended)
+  REQUIRE_PULLBACK_CONFIRMATION: true,
+  PULLBACK_MIN_PERCENT: 0.5,  // At least 0.5% pullback from recent high/low
+  
+  // ===== ALTERNATIVE: REDUCED POSITION + TIGHTER STOP =====
+  // If not blocking, apply these risk reductions
+  ALTERNATIVE_POSITION_REDUCTION: 0.25,  // 25% of normal position
+  TIGHTER_STOP_MULTIPLIER: 0.75,         // 75% of normal stop (tighter)
+} as const;
+
+// ============= PHASE 10: STRATEGY-SPECIFIC ADX RESTRICTIONS =============
+// Expert insight: "HTF Neutral Breakout strategy must be explicitly disabled when ADX ≥ 35"
+// Certain strategies are only valid in specific ADX ranges
+export const STRATEGY_ADX_RESTRICTIONS: Record<string, {
+  MAX_ADX?: number;
+  MIN_ADX?: number;
+  REASON: string;
+}> = {
+  'HTF Neutral Breakout': {
+    MAX_ADX: 35,              // Disable when ADX >= 35 (not designed for strong trends)
+    MIN_ADX: 15,              // Require some trend (not dead market)
+    REASON: 'Strategy designed for HTF neutral conditions, not strong trends'
+  },
+  'Mean Reversion': {
+    MAX_ADX: 40,
+    REASON: 'Mean reversion fails in strong trends'
+  },
+  'Bollinger Band Breakout': {
+    MAX_ADX: 50,              // Allow in most conditions
+    MIN_ADX: 18,              // Require some volatility
+    REASON: 'Breakout needs volatility but not parabolic moves'
+  },
+  // Trend-following strategies have MIN requirements instead
+  'Momentum Breakout': {
+    MIN_ADX: 22,
+    REASON: 'Requires established momentum'
+  },
+  'EMA Golden Cross': {
+    MIN_ADX: 20,
+    REASON: 'EMA crossovers need trend development'
+  },
+  'EMA Death Cross': {
+    MIN_ADX: 20,
+    REASON: 'EMA crossovers need trend development'
+  },
+} as const;
+
+// ============= PHASE 11: MOMENTUM-DIRECTION ALIGNMENT (TIGHTLY BOUNDED) =============
+// Expert insight: "Neutral" must be tightly bounded (-10 to +10), not loosely defined
+// Ensures momentum score aligns with intended trade direction
+export const MOMENTUM_DIRECTION_ALIGNMENT = {
+  ENABLED: true,
+  
+  // ===== TIGHTLY BOUNDED "NEUTRAL" ZONE =====
+  NEUTRAL_MIN: -10,
+  NEUTRAL_MAX: 10,
+  
+  // ===== STRONG OPPOSITE THRESHOLDS =====
+  // Block LONG if momentum < this
+  STRONG_OPPOSITE_LONG: -20,
+  // Block SHORT if momentum > this
+  STRONG_OPPOSITE_SHORT: 20,
+  
+  // ===== ADX-AWARE BEHAVIOR =====
+  // In strong ADX (>= 40), allow neutral momentum but never opposite
+  // In weaker ADX (< 40), require aligned momentum
+  ALLOW_NEUTRAL_ABOVE_ADX: 40,
+} as const;
+
+// ============= PHASE 12: STRUCTURED LOGGING FOR BLOCK DECISIONS =============
+// Expert insight: Log block_reason_code (enum), primary_gate_failed, and rule IDs
+// Enables post-mortem analysis and system iteration
+export const BLOCK_DECISION_LOGGING = {
+  ENABLED: true,
+  
+  // Block reason codes (for structured logging)
+  REASON_CODES: {
+    COUNTER_TREND: 'COUNTER_TREND',
+    STRATEGY_ADX_LIMIT: 'STRATEGY_ADX_LIMIT',
+    MOMENTUM_DIRECTION_MISMATCH: 'MOMENTUM_DIRECTION_MISMATCH',
+    MATURE_TREND_NO_PULLBACK: 'MATURE_TREND_NO_PULLBACK',
+    QUALITY_THRESHOLD: 'QUALITY_THRESHOLD',
+    BOLLINGER_GATE: 'BOLLINGER_GATE',
+    STOCHRSI_GATE: 'STOCHRSI_GATE',
+    EXHAUSTION: 'EXHAUSTION',
+    DEDUPLICATION: 'DEDUPLICATION',
+  } as const,
+  
+  // Include timeframe labels in logs
+  INCLUDE_TIMEFRAME_LABELS: true,
+  // ADX timeframe (for clarity)
+  ADX_TIMEFRAME: '1h',
+  // Regime timeframe (for clarity)
+  REGIME_TIMEFRAME: '4h',
+  // Signal timeframe (for clarity)
+  SIGNAL_TIMEFRAME: '15m',
+} as const;
+
+// Type for block reason codes
+export type BlockReasonCode = typeof BLOCK_DECISION_LOGGING.REASON_CODES[keyof typeof BLOCK_DECISION_LOGGING.REASON_CODES];

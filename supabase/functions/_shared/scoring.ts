@@ -2352,6 +2352,7 @@ export const calculateQualityScore = (
 // ============= PHASE 0: MASTER MARKET REGIME CLASSIFIER =============
 // Critical foundation: ADX defines regime, all other gates change meaning based on regime
 // This is evaluated ONCE at the start of symbol processing, and all gates reference it
+// ENHANCED: Now includes trendDirection, isMatureTrend, and regimeRuleId for better traceability
 
 export interface MasterRegimeResult {
   regime: MasterMarketRegime;
@@ -2368,6 +2369,11 @@ export interface MasterRegimeResult {
   isStrongTrendOverride: boolean;
   isParabolicOverride: boolean;
   reason: string;
+  // NEW FIELDS (Phase 3 Enhancement)
+  trendDirection: 'bullish' | 'bearish' | 'neutral';  // Actual trend direction from HTF
+  isMatureTrend: boolean;        // ADX >= 45 AND slope < 0 (trend exhausting)
+  requirePullback: boolean;      // When mature, require pullback for entry
+  regimeRuleId: string;          // Log WHY this regime was chosen (traceability)
 }
 
 export const classifyMasterRegime = (
@@ -2376,13 +2382,40 @@ export const classifyMasterRegime = (
   driftPercent: number = 0,
   htf4hTrend: string = "neutral",
   htf1hTrend: string = "neutral",
-  isExhausted: boolean = false
+  isExhausted: boolean = false,
+  // NEW: Optional DI values for explicit trend direction
+  diPlus: number = 25,
+  diMinus: number = 25
 ): MasterRegimeResult => {
   const RC = MARKET_REGIME_CLASSIFIER;
   const SAUO = STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS;
   
+  // Derive actual trend direction from DI and HTF trends
+  // Priority: 1) DI gap, 2) 4h trend, 3) 1h trend
+  let trendDirection: 'bullish' | 'bearish' | 'neutral';
+  const diGap = Math.abs(diPlus - diMinus);
+  
+  if (diGap >= 5) {
+    // Significant DI gap - use DI for direction
+    trendDirection = diPlus > diMinus ? 'bullish' : 'bearish';
+  } else if (htf4hTrend !== "neutral") {
+    // Use 4h trend if DI gap is narrow
+    trendDirection = htf4hTrend === "bullish" ? 'bullish' : htf4hTrend === "bearish" ? 'bearish' : 'neutral';
+  } else if (htf1hTrend !== "neutral") {
+    // Fall back to 1h trend
+    trendDirection = htf1hTrend === "bullish" ? 'bullish' : htf1hTrend === "bearish" ? 'bearish' : 'neutral';
+  } else {
+    trendDirection = 'neutral';
+  }
+  
+  // Check for mature trend (ADX >= 45 AND slope < 0)
+  // Expert insight: "ADX > 45 with declining slope often signals trend maturity, not opportunity"
+  const isMatureTrend = adx >= 45 && adxSlope < 0;
+  const requirePullback = isMatureTrend;
+  
   // PARABOLIC: ADX >= 45 and not exhausted (or ADX >= 50 regardless)
   // In parabolic regime, ADX IS the confirmation - gates become context
+  // PRIORITY 1: Check ADX thresholds FIRST, before other conditions
   if (adx >= RC.PARABOLIC.minADX && !isExhausted) {
     const overrides = RC.GATE_OVERRIDES.PARABOLIC;
     return {
@@ -2400,11 +2433,17 @@ export const classifyMasterRegime = (
       isStrongTrendOverride: true,
       isParabolicOverride: true,
       reason: `PARABOLIC regime: ADX=${adx.toFixed(1)} >= ${RC.PARABOLIC.minADX}, exhausted=${isExhausted} - all gates become context`,
+      // NEW fields
+      trendDirection,
+      isMatureTrend,
+      requirePullback,
+      regimeRuleId: 'RULE_001_PARABOLIC_ADX_45',
     };
   }
   
   // STRONG_TREND: ADX 30-45 (or 40+ with Tier 1 override)
   // Gates are relaxed but not completely bypassed
+  // PRIORITY 2: Check for STRONG_TREND (ADX >= 30)
   if (adx >= RC.STRONG_TREND.minADX && !isExhausted) {
     const overrides = RC.GATE_OVERRIDES.STRONG_TREND;
     
@@ -2432,6 +2471,11 @@ export const classifyMasterRegime = (
       isStrongTrendOverride: true,
       isParabolicOverride: false,
       reason: `STRONG_TREND regime: ADX=${adx.toFixed(1)} [${RC.STRONG_TREND.minADX}-${RC.STRONG_TREND.maxADX}], tier1=${isTier1Override} - gates relaxed`,
+      // NEW fields
+      trendDirection,
+      isMatureTrend,
+      requirePullback,
+      regimeRuleId: isTier1Override ? 'RULE_002_STRONG_TREND_TIER1_ADX_40' : 'RULE_003_STRONG_TREND_ADX_30',
     };
   }
   
@@ -2454,6 +2498,11 @@ export const classifyMasterRegime = (
       isStrongTrendOverride: false,
       isParabolicOverride: false,
       reason: `STEALTH_DRIFT regime: ADX=${adx.toFixed(1)} <= ${RC.STEALTH_DRIFT.maxADX}, drift=${driftPercent.toFixed(2)}% - gradual price grind detected`,
+      // NEW fields
+      trendDirection,
+      isMatureTrend: false,
+      requirePullback: false,
+      regimeRuleId: 'RULE_004_STEALTH_DRIFT',
     };
   }
   
@@ -2474,6 +2523,11 @@ export const classifyMasterRegime = (
     isStrongTrendOverride: false,
     isParabolicOverride: false,
     reason: `NORMAL regime: ADX=${adx.toFixed(1)} - standard gate behavior`,
+    // NEW fields
+    trendDirection,
+    isMatureTrend: false,
+    requirePullback: false,
+    regimeRuleId: 'RULE_005_NORMAL',
   };
 };
 
