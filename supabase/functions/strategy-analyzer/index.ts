@@ -103,6 +103,7 @@ import {
   STRONG_TREND_BOLLINGER_EXTENSION_PARAMS,
   EARLY_TREND_DETECTION_PARAMS,
   STRATEGY_ADX_RESTRICTIONS,
+  MOMENTUM_DIRECTION_ALIGNMENT,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -3017,6 +3018,96 @@ serve(async (req) => {
           } else {
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.ENTRY} ✅ MATURE_TREND with pullback confirmation: depth=${smartPullback.pullbackDepth.toFixed(1)}%`);
           }
+        }
+        
+        // ============= PHASE 11: MOMENTUM-DIRECTION ALIGNMENT CHECK =============
+        // Expert insight: "Neutral" must be tightly bounded (-10 to +10), not loosely defined
+        // Ensures momentum score aligns with intended trade direction
+        // In strong ADX (>= 40), allow neutral momentum but NEVER opposite
+        // In weaker ADX (< 40), require aligned or neutral momentum
+        if (MOMENTUM_DIRECTION_ALIGNMENT.ENABLED) {
+          const momentumScore = smartMomentum.score;
+          const isNeutralMomentum = momentumScore >= MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MIN && 
+                                    momentumScore <= MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MAX;
+          const isStrongADX = adx >= MOMENTUM_DIRECTION_ALIGNMENT.ALLOW_NEUTRAL_ABOVE_ADX;
+          
+          // Check for momentum-direction mismatch
+          let momentumDirectionMismatch = false;
+          let mismatchReason = '';
+          
+          if (derivedDirection === 'long') {
+            // For LONG: block if momentum strongly negative
+            if (momentumScore < MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_LONG) {
+              momentumDirectionMismatch = true;
+              mismatchReason = `LONG blocked: momentum ${momentumScore} < ${MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_LONG}`;
+            }
+            // In weak ADX, also require positive or neutral momentum
+            else if (!isStrongADX && !isNeutralMomentum && momentumScore < 0) {
+              // Only block if momentum is significantly negative (between -10 and -20)
+              if (momentumScore < MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MIN) {
+                momentumDirectionMismatch = true;
+                mismatchReason = `LONG blocked (weak ADX=${adx.toFixed(1)}): momentum ${momentumScore} is negative but below neutral zone`;
+              }
+            }
+          } else if (derivedDirection === 'short') {
+            // For SHORT: block if momentum strongly positive
+            if (momentumScore > MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_SHORT) {
+              momentumDirectionMismatch = true;
+              mismatchReason = `SHORT blocked: momentum ${momentumScore} > ${MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_SHORT}`;
+            }
+            // In weak ADX, also require negative or neutral momentum
+            else if (!isStrongADX && !isNeutralMomentum && momentumScore > 0) {
+              // Only block if momentum is significantly positive (between +10 and +20)
+              if (momentumScore > MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MAX) {
+                momentumDirectionMismatch = true;
+                mismatchReason = `SHORT blocked (weak ADX=${adx.toFixed(1)}): momentum ${momentumScore} is positive but above neutral zone`;
+              }
+            }
+          }
+          
+          if (momentumDirectionMismatch) {
+            rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'MOMENTUM_DIRECTION_OPPOSING', 
+              details: mismatchReason 
+            });
+            
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 MOMENTUM_DIRECTION_MISMATCH: ${mismatchReason}`);
+            logger.forSymbol(symbol).warn(`   → ADX=${adx.toFixed(1)}, isStrongADX=${isStrongADX}, neutralZone=[${MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MIN}, ${MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MAX}]`);
+            
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `MOMENTUM_DIRECTION_MISMATCH: ${mismatchReason}`,
+              {
+                gate: "MOMENTUM_DIRECTION_OPPOSING",
+                blockReasonCode: "MOMENTUM_DIRECTION_MISMATCH",
+                primaryGateFailed: derivedDirection === 'long' ? "long_negative_momentum" : "short_positive_momentum",
+                derivedDirection,
+                momentumScore,
+                adx: adx.toFixed(1),
+                isStrongADX,
+                isNeutralMomentum,
+                thresholds: {
+                  strongOppositeLong: MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_LONG,
+                  strongOppositeShort: MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_SHORT,
+                  neutralMin: MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MIN,
+                  neutralMax: MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MAX,
+                  allowNeutralAboveADX: MOMENTUM_DIRECTION_ALIGNMENT.ALLOW_NEUTRAL_ABOVE_ADX,
+                }
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
+          
+          // Log successful momentum-direction alignment
+          const alignmentStatus = isNeutralMomentum ? 'neutral' : (
+            (derivedDirection === 'long' && momentumScore > 0) || 
+            (derivedDirection === 'short' && momentumScore < 0) ? 'aligned' : 'weak'
+          );
+          logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.MOMENTUM} ✅ MOMENTUM-DIRECTION: ${alignmentStatus} (momentum=${momentumScore}, direction=${derivedDirection}, ADX=${adx.toFixed(1)})`);
         }
         
         // ============= PHASE 2: ADX-AWARE MOMENTUM THRESHOLD =============
