@@ -5408,7 +5408,8 @@ serve(async (req) => {
           // MANDATORY: StochRSI must be rising (K > D) for any extreme overbought entry
           // EXCEPTION 1: Allow if momentum continuation conditions are met
           // EXCEPTION 2: Allow if very high ADX bypass conditions are met (Phase 5)
-          if (!stochRsiRising && !momentumContinuationAllowedLong && !veryHighAdxBypassAllowed) {
+          // EXCEPTION 3: Allow if ADAPTIVE_FULL_MODE bypass is active (skipStochRSIGate)
+          if (!stochRsiRising && !momentumContinuationAllowedLong && !veryHighAdxBypassAllowed && !skipStochRSIGate) {
             rejectedByStochRsiExtreme++;
             perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} not rising` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking LONG - StochRSI not rising at overbought (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
@@ -5684,7 +5685,8 @@ serve(async (req) => {
           // MANDATORY: StochRSI must be falling (K < D) for any extreme oversold entry
           // EXCEPTION 1: Allow if momentum continuation conditions are met
           // EXCEPTION 2: Allow if very high ADX bypass conditions are met (Phase 5)
-          if (!stochRsiFalling && !momentumContinuationAllowed && !veryHighAdxBypassAllowedShort) {
+          // EXCEPTION 3: Allow if ADAPTIVE_FULL_MODE bypass is active (skipStochRSIGate)
+          if (!stochRsiFalling && !momentumContinuationAllowed && !veryHighAdxBypassAllowedShort && !skipStochRSIGate) {
             rejectedByStochRsiExtreme++;
             perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} not falling` });
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} Blocking SHORT - StochRSI not falling at oversold (K=${stochRsiK4h.toFixed(1)}, D=${stochRsiD4h.toFixed(1)})`);
