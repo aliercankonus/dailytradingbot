@@ -106,6 +106,10 @@ import {
   EARLY_TREND_DETECTION_PARAMS,
   STRATEGY_ADX_RESTRICTIONS,
   MOMENTUM_DIRECTION_ALIGNMENT,
+  // PHASE 13-15: Strategy-specific HTF alignment and ranging market protection
+  STRATEGY_DIRECTION_REQUIREMENTS,
+  RANGING_MARKET_PROTECTION,
+  NEUTRAL_LOW_ADX_QUALITY_GATE,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -2037,7 +2041,10 @@ serve(async (req) => {
       | 'MATURE_TREND_NO_PULLBACK'
       | 'STRATEGY_ADX_LIMIT'
       // PHASE 5: Position deduplication
-      | 'POSITION_DEDUPLICATION';
+      | 'POSITION_DEDUPLICATION'
+      // PHASE 13-14: Strategy HTF alignment and ranging market protection
+      | 'STRATEGY_HTF_ALIGNMENT'
+      | 'RANGING_MARKET_PAUSE';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -2147,7 +2154,12 @@ serve(async (req) => {
       } else if (isNeutralTrend) {
         // Neutral trends (with HTF direction) get lower threshold since quality scoring
         // is optimized for directional 5m trends - neutral relies on 1h direction instead
-        baseThreshold = QUALITY_THRESHOLDS.NEUTRAL_MIN;
+        // PHASE 15: If ADX is also below threshold, boost quality requirement
+        if (NEUTRAL_LOW_ADX_QUALITY_GATE.ENABLED && adx < NEUTRAL_LOW_ADX_QUALITY_GATE.ADX_THRESHOLD) {
+          baseThreshold = QUALITY_THRESHOLDS.NEUTRAL_MIN + NEUTRAL_LOW_ADX_QUALITY_GATE.QUALITY_THRESHOLD_BOOST;
+        } else {
+          baseThreshold = QUALITY_THRESHOLDS.NEUTRAL_MIN;
+        }
       } else if (confidence1h && confidence1h >= 65) {
         // RELAXED: If 1h shows strong direction (≥65% confidence), allow lower threshold
         baseThreshold = QUALITY_THRESHOLDS.STRONG_1H_MIN;
@@ -2997,7 +3009,34 @@ serve(async (req) => {
           continue;
         }
         
-        // ============= MATURE TREND PROTECTION (Phase 9) =============
+        // ============= PHASE 14: RANGING MARKET DETECTION & PROTECTION =============
+        // Expert insight: System keeps checking for signals in ranging markets, potentially allowing low-quality entries
+        // When ALL timeframes are neutral for extended periods, pause non-range strategies
+        let isInRangingMarket = false;
+        let rangingMarketPositionMultiplier = 1.0;
+        
+        if (RANGING_MARKET_PROTECTION.ENABLED) {
+          // Check if all timeframes are neutral/low confidence
+          const htf4hConf = trendData.timeframes?.['4h']?.confidence ?? 0;
+          const htf1hConf = trendData.timeframes?.['1h']?.confidence ?? 0;
+          const htf30mConf = trendData.timeframes?.['30m']?.confidence ?? 0;
+          
+          const all4hNeutral = htfTrend4h === 'neutral' || htf4hConf < RANGING_MARKET_PROTECTION.MIN_CONFIDENCE_TO_BREAK_RANGE;
+          const all1hNeutral = htfTrend1h === 'neutral' || htf1hConf < RANGING_MARKET_PROTECTION.MIN_CONFIDENCE_TO_BREAK_RANGE;
+          const adxBelowThreshold = adx < RANGING_MARKET_PROTECTION.NEUTRAL_ADX_THRESHOLD;
+          
+          // Ranging market = both 4h and 1h are neutral + ADX is below threshold
+          isInRangingMarket = all4hNeutral && all1hNeutral && adxBelowThreshold;
+          
+          if (isInRangingMarket) {
+            rangingMarketPositionMultiplier = RANGING_MARKET_PROTECTION.RANGING_POSITION_MULTIPLIER;
+            if (RANGING_MARKET_PROTECTION.LOG_BLOCKS) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 RANGING MARKET DETECTED: 4h=${htfTrend4h}(${htf4hConf}%), 1h=${htfTrend1h}(${htf1hConf}%), ADX=${adx.toFixed(1)}`);
+              logger.forSymbol(symbol).info(`   → Position reduced to ${(rangingMarketPositionMultiplier * 100).toFixed(0)}%, only range strategies allowed`);
+            }
+          }
+        }
+        
         // Expert insight: "ADX > 45 with declining slope often signals trend maturity, not opportunity"
         // Requires pullback confirmation for entries during mature trends
         let matureTrendPositionMultiplier = 1.0;
@@ -8224,6 +8263,27 @@ serve(async (req) => {
                 continue;
               }
               
+              // ============= PHASE 14: RANGING MARKET STRATEGY CHECK =============
+              // When in ranging market, only allow strategies designed for range trading
+              if (isInRangingMarket && RANGING_MARKET_PROTECTION.ENABLED) {
+                const isAllowedInRange = RANGING_MARKET_PROTECTION.ALLOWED_STRATEGIES_IN_RANGE.includes(strategy.name);
+                
+                if (!isAllowedInRange) {
+                  rejectedByStrategy++;
+                  perSymbolGateAttribution.set(symbol, { gate: 'RANGING_MARKET_PAUSE', details: `${strategy.name} not allowed in ranging` });
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} RANGING_MARKET_PAUSE: "${strategy.name}" blocked - not in allowed list for ranging markets`);
+                  
+                  strategyNearMisses.push({ 
+                    name: strategy.name, 
+                    passedCount: entryConditions.length, 
+                    totalConditions: entryConditions.length, 
+                    failedConditions: [], 
+                    skipReason: `Ranging market: strategy not allowed (only ${RANGING_MARKET_PROTECTION.ALLOWED_STRATEGIES_IN_RANGE.join(', ')})` 
+                  });
+                  continue;
+                }
+              }
+              
               // ============= PHASE 4: STRATEGY-SPECIFIC ADX RESTRICTIONS =============
               // Expert insight: "HTF Neutral Breakout strategy must be explicitly disabled when ADX ≥ 35"
               // Check if current ADX violates strategy's allowed range
@@ -8277,6 +8337,107 @@ serve(async (req) => {
                   });
                   continue;
                 }
+              }
+              
+              // ============= PHASE 13: STRATEGY-SPECIFIC HTF ALIGNMENT REQUIREMENT =============
+              // Expert insight: "EMA Death Cross generated SELL signals during neutral trend"
+              // Crossover-based strategies require HTF confirmation in the trade direction
+              const strategyDirReq = STRATEGY_DIRECTION_REQUIREMENTS[strategy.name];
+              if (strategyDirReq) {
+                const htf1hTrend = htfTrend1h;
+                const htf4hTrend = htfTrend4h;
+                const currentMomentumScore = smartMomentum.score;
+                
+                // Check 1h directional requirement
+                let htfRequirementMet = true;
+                let htfMismatchReason = '';
+                
+                if (strategyDirReq.require1hDirectional) {
+                  // For SELL strategies: 1h must be bearish (or 4h bearish with neutral 1h allowed)
+                  // For BUY strategies: 1h must be bullish (or 4h bullish with neutral 1h allowed)
+                  const expectedDirection = strategyDirReq.side === 'SELL' ? 'bearish' : 'bullish';
+                  
+                  const htf1hMatches = htf1hTrend === expectedDirection;
+                  const htf4hMatches = htf4hTrend === expectedDirection;
+                  const htf4hNeutralAllowed = strategyDirReq.allowNeutral4h && htf4hTrend === 'neutral' && htf1hMatches;
+                  
+                  if (!htf1hMatches && !htf4hMatches && !htf4hNeutralAllowed) {
+                    htfRequirementMet = false;
+                    htfMismatchReason = `1h=${htf1hTrend}, 4h=${htf4hTrend} (need ${expectedDirection})`;
+                  }
+                }
+                
+                // Check ADX requirement
+                if (htfRequirementMet && strategyDirReq.requireMinADX !== undefined) {
+                  if (adx < strategyDirReq.requireMinADX) {
+                    htfRequirementMet = false;
+                    htfMismatchReason = `ADX=${adx.toFixed(1)} < ${strategyDirReq.requireMinADX}`;
+                  }
+                }
+                
+                // Check momentum alignment requirement
+                if (htfRequirementMet && strategyDirReq.requireMomentumAligned && strategyDirReq.minMomentumScore !== undefined) {
+                  const minMom = strategyDirReq.minMomentumScore;
+                  // For SELL: momentum must be <= minMomentumScore (negative)
+                  // For BUY: momentum must be >= minMomentumScore (positive)
+                  if (strategyDirReq.side === 'SELL' && currentMomentumScore > minMom) {
+                    htfRequirementMet = false;
+                    htfMismatchReason = `Momentum=${currentMomentumScore} > ${minMom} (need negative for SHORT)`;
+                  } else if (strategyDirReq.side === 'BUY' && currentMomentumScore < minMom) {
+                    htfRequirementMet = false;
+                    htfMismatchReason = `Momentum=${currentMomentumScore} < ${minMom} (need positive for LONG)`;
+                  }
+                }
+                
+                if (!htfRequirementMet) {
+                  rejectedByStrategy++;
+                  perSymbolGateAttribution.set(symbol, { 
+                    gate: 'STRATEGY_HTF_ALIGNMENT', 
+                    details: `${strategy.name}: ${htfMismatchReason}` 
+                  });
+                  logger.forSymbol(symbol).warn(
+                    `${LOG_CATEGORIES.GATE} STRATEGY_HTF_ALIGNMENT: "${strategy.name}" blocked - ${strategyDirReq.REASON}`
+                  );
+                  logger.forSymbol(symbol).warn(
+                    `   → Mismatch: ${htfMismatchReason}`
+                  );
+                  
+                  // Log rejection for analysis
+                  logRejectionWithAI(
+                    supabase,
+                    userId,
+                    symbol,
+                    `STRATEGY_HTF_ALIGNMENT: ${strategy.name} blocked - ${htfMismatchReason}`,
+                    {
+                      gate: 'STRATEGY_HTF_ALIGNMENT',
+                      strategy_name: strategy.name,
+                      expected_side: strategyDirReq.side,
+                      htf1h: htf1hTrend,
+                      htf4h: htf4hTrend,
+                      adx: adx.toFixed(1),
+                      minAdxRequired: strategyDirReq.requireMinADX,
+                      momentumScore: currentMomentumScore,
+                      minMomentumRequired: strategyDirReq.minMomentumScore,
+                      reason: strategyDirReq.REASON,
+                      blockReasonCode: 'STRATEGY_HTF_MISMATCH',
+                    },
+                    trendData,
+                    riskParams.ai_analysis_enabled !== false
+                  );
+                  
+                  strategyNearMisses.push({ 
+                    name: strategy.name, 
+                    passedCount: entryConditions.length, 
+                    totalConditions: entryConditions.length, 
+                    failedConditions: [], 
+                    skipReason: `HTF alignment: ${htfMismatchReason}` 
+                  });
+                  continue;
+                }
+                
+                logger.forSymbol(symbol).info(
+                  `${LOG_CATEGORIES.SUCCESS} STRATEGY_HTF_ALIGNMENT: "${strategy.name}" passed - 1h=${htf1hTrend}, 4h=${htf4hTrend}, momentum=${currentMomentumScore}, ADX=${adx.toFixed(1)}`
+                );
               }
               
               // ============= IMPROVEMENT 4: STRATEGY-SPECIFIC CONSTRAINTS =============
