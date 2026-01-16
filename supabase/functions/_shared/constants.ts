@@ -3255,3 +3255,111 @@ export const BLOCK_DECISION_LOGGING = {
 
 // Type for block reason codes
 export type BlockReasonCode = typeof BLOCK_DECISION_LOGGING.REASON_CODES[keyof typeof BLOCK_DECISION_LOGGING.REASON_CODES];
+
+// ============= PHASE 13: STRATEGY-SPECIFIC HTF ALIGNMENT REQUIREMENTS =============
+// Expert insight: "EMA Death Cross generated SELL signals during neutral trend"
+// Solution: Crossover-based strategies require HTF confirmation in the trade direction
+// This prevents trading EMA crossovers when higher timeframes don't support the direction
+export const STRATEGY_DIRECTION_REQUIREMENTS: Record<string, {
+  side: 'BUY' | 'SELL';
+  require1hDirectional?: boolean;
+  requireMinADX?: number;
+  requireMomentumAligned?: boolean;
+  minMomentumScore?: number;  // Positive for BUY, negative for SELL
+  allowNeutral4h?: boolean;   // Allow if 1h is directional
+  REASON: string;
+}> = {
+  'EMA Death Cross': {
+    side: 'SELL',
+    require1hDirectional: true,
+    requireMinADX: 22,
+    requireMomentumAligned: true,
+    minMomentumScore: -10,  // Must be negative for SHORT
+    allowNeutral4h: true,   // Allow if 1h is bearish
+    REASON: 'EMA Death Cross requires 1h bearish confirmation and negative momentum'
+  },
+  'EMA Golden Cross': {
+    side: 'BUY',
+    require1hDirectional: true,
+    requireMinADX: 22,
+    requireMomentumAligned: true,
+    minMomentumScore: 10,   // Must be positive for LONG
+    allowNeutral4h: true,   // Allow if 1h is bullish
+    REASON: 'EMA Golden Cross requires 1h bullish confirmation and positive momentum'
+  },
+  'MACD Bearish Cross': {
+    side: 'SELL',
+    require1hDirectional: true,
+    requireMinADX: 20,
+    requireMomentumAligned: true,
+    minMomentumScore: -5,
+    allowNeutral4h: true,
+    REASON: 'MACD Bearish Cross requires bearish momentum confirmation'
+  },
+  'MACD Crossover': {
+    side: 'BUY',
+    require1hDirectional: true,
+    requireMinADX: 20,
+    requireMomentumAligned: true,
+    minMomentumScore: 5,
+    allowNeutral4h: true,
+    REASON: 'MACD Crossover requires bullish momentum confirmation'
+  },
+} as const;
+
+// ============= PHASE 14: RANGING MARKET PROTECTION =============
+// Expert insight: System keeps checking for signals in ranging markets, potentially allowing low-quality entries
+// Solution: Pause most strategies when all timeframes are neutral for extended periods
+export const RANGING_MARKET_PROTECTION = {
+  ENABLED: true,
+  
+  // ===== NEUTRAL STREAK DETECTION =====
+  // How many consecutive neutral readings before pausing
+  // Each check is ~5 minutes, so 6 = ~30 minutes of all-neutral
+  NEUTRAL_STREAK_THRESHOLD: 6,
+  
+  // Minimum confidence for any timeframe to break ranging mode
+  MIN_CONFIDENCE_TO_BREAK_RANGE: 60,
+  
+  // ===== STRATEGY ALLOWLISTING =====
+  // When in ranging mode, ONLY allow these strategies (designed for range trading)
+  ALLOWED_STRATEGIES_IN_RANGE: [
+    'Mean Reversion',
+    'Mean Reversion Scalp',
+    'Bollinger Band Breakout',  // Can detect range expansion
+    'RSI Oversold/Overbought',  // Mean reversion
+    'RSI Overbought Short',     // Mean reversion
+  ] as readonly string[],
+  
+  // ===== POSITION SIZING IN RANGING MARKET =====
+  // Reduce position size when in ranging market
+  RANGING_POSITION_MULTIPLIER: 0.25,  // 25% of normal position
+  
+  // ===== QUALITY GATE TIGHTENING =====
+  // Require higher quality score when primary trend is neutral AND ADX < 30
+  NEUTRAL_TREND_QUALITY_BOOST: 10,  // Add +10 to quality threshold
+  NEUTRAL_ADX_THRESHOLD: 30,        // ADX must be below this for the boost
+  
+  // ===== LOGGING =====
+  LOG_BLOCKS: true,
+} as const;
+
+// ============= PHASE 15: NEUTRAL TREND + LOW ADX QUALITY GATE =============
+// Expert insight: Trades allowed with ADX < 35 and neutral trend led to losses
+// Solution: Require higher confidence when ADX is low and trend is neutral
+export const NEUTRAL_LOW_ADX_QUALITY_GATE = {
+  ENABLED: true,
+  
+  // ===== THRESHOLDS =====
+  // Apply extra quality requirement when:
+  // 1. Primary trend is neutral
+  // 2. ADX is below this threshold
+  ADX_THRESHOLD: 30,
+  
+  // ===== QUALITY BOOST =====
+  // Add this many points to the minimum quality threshold
+  QUALITY_THRESHOLD_BOOST: 10,  // Minimum quality becomes 70 instead of 60
+  
+  // ===== LOGGING =====
+  LOG_APPLICATION: true,
+} as const;
