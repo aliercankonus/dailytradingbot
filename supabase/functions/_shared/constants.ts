@@ -3403,3 +3403,99 @@ export const ADAPTIVE_SIGNAL_MODE = {
 
 export type AdaptiveSignalModeType = typeof ADAPTIVE_SIGNAL_MODE.MODE;
 
+// ============= PHASE 10: SAME-DIRECTION RE-ENTRY PROTECTION =============
+// Prevents same-direction re-entry after timeout/trailing stop closes
+// Expert insight: "When a trade closes due to timeout or trailing stop, the trend often pauses"
+// This cooldown prevents entering same direction before trend confirms continuation
+export const SAME_DIRECTION_REENTRY_PROTECTION = {
+  ENABLED: true,
+  
+  // Cooldown minutes after these close reasons
+  COOLDOWN_MINUTES: 45,
+  
+  // Close reasons that trigger cooldown (non-loss exits that indicate trend pause)
+  TRIGGER_CLOSE_REASONS: [
+    'trailing_stop_loss',
+    'micro_trend_timeout', 
+    'volume_relaxation_timeout',
+    'break_even',
+  ] as readonly string[],
+  
+  // Allow opposite direction entries during cooldown
+  ALLOW_OPPOSITE_DIRECTION: true,
+  
+  // Logging
+  LOG_BLOCKS: true,
+} as const;
+
+// ============= PHASE 11: TREND EXHAUSTION DETECTION (ADX SLOPE + TREND STRENGTH) =============
+// Expert insight: "ADX > 40 declining with weak trend strength = trend exhaustion"
+// This blocks entries when trend is running out of steam
+export const TREND_EXHAUSTION_PROTECTION = {
+  ENABLED: true,
+  
+  // Block when ADX slope < 0 AND trend strength < this threshold
+  TREND_STRENGTH_THRESHOLD: 40,
+  
+  // Only check when ADX is above this (trend was meaningful)
+  MIN_ADX_FOR_CHECK: 25,
+  
+  // ADX slope considered "declining"
+  ADX_SLOPE_DECLINE_THRESHOLD: 0,
+  
+  // Optional: reduce position instead of blocking
+  REDUCE_POSITION_INSTEAD_OF_BLOCK: false,
+  EXHAUSTION_POSITION_MULTIPLIER: 0.25,
+  
+  // Logging
+  LOG_BLOCKS: true,
+} as const;
+
+// ============= PHASE 12: REGIME TRANSITION PROTECTION =============
+// Expert insight: "When regime weakens, require stronger confirmation"
+// Transitions from PARABOLIC → NORMAL or STRONG_TREND → RANGING need higher quality
+export const REGIME_TRANSITION_PROTECTION = {
+  ENABLED: true,
+  
+  // Additional quality score required after regime weakening
+  QUALITY_BOOST_ON_WEAKENING: 20,
+  
+  // Time window to consider regime transition (minutes)
+  TRANSITION_WINDOW_MINUTES: 30,
+  
+  // Regime weakening transitions that trigger boost
+  WEAKENING_TRANSITIONS: {
+    FROM_PARABOLIC: ['STRONG_TREND', 'NORMAL', 'STEALTH_DRIFT', 'RANGE'],
+    FROM_STRONG_TREND: ['NORMAL', 'STEALTH_DRIFT', 'RANGE'],
+    FROM_NORMAL: ['RANGE'],
+  } as const,
+  
+  // Logging
+  LOG_BLOCKS: true,
+} as const;
+
+// ============= PHASE 13: MOMENTUM REVERSAL PROTECTION =============
+// Expert insight: "Momentum flipping from strongly directional to neutral = reversal risk"
+// This blocks same-direction entries when momentum has reversed
+export const MOMENTUM_REVERSAL_PROTECTION = {
+  ENABLED: true,
+  
+  // Was strongly directional at > |this value|
+  STRONG_MOMENTUM_THRESHOLD: 25,
+  
+  // Now in neutral zone at |< this value|
+  NEUTRAL_ZONE_THRESHOLD: 10,
+  
+  // Lookback window for checking previous momentum (minutes)
+  LOOKBACK_MINUTES: 30,
+  
+  // Block same-direction entry on momentum reversal
+  BLOCK_SAME_DIRECTION: true,
+  
+  // Allow opposite direction entries (momentum reversal may signal new direction)
+  ALLOW_OPPOSITE_DIRECTION: true,
+  
+  // Logging
+  LOG_BLOCKS: true,
+} as const;
+
