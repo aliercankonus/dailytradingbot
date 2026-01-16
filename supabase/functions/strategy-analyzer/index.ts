@@ -3636,6 +3636,11 @@ serve(async (req) => {
         // ============= STOCHRSI EXTREME FILTER WITH SMART EXCEPTIONS =============
         // Prevent entries at extreme oversold/overbought 4h levels where bounces are likely
         // BUT allow if multiple strong trend continuation signals are present
+        // PHASE 4: In FULL adaptive mode, skip StochRSI gate - adaptive engine handles extremes
+        const skipStochRSIGate = ADAPTIVE_SIGNAL_MODE.MODE === 'FULL';
+        if (skipStochRSIGate) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ADAPTIVE FULL MODE: Skipping StochRSI gate - adaptive engine will handle extremes`);
+        }
         const stochRsi4h = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi?.aggregated;
         const stochRsi1h = trendData.stochasticRsi?.["1h"];
         const stochRsiK4h = stochRsi4h?.k ?? 50;
@@ -3942,9 +3947,10 @@ serve(async (req) => {
         
         let parabolicBypassApplied = false;
         
-        if (stochRsiK4h >= effectiveAbsoluteMaxOverbought) {
+        if (stochRsiK4h >= effectiveAbsoluteMaxOverbought && !skipStochRSIGate) {
           // Block LONG entries at absolute maximum - StochRSI has nowhere to go
           // NOTE: effectiveAbsoluteMaxOverbought is 95 for trend continuation after exit, 98 otherwise
+          // PHASE 4: Skip this gate entirely in FULL adaptive mode
           if (derivedDirection === "long") {
             if (canBypassAbsoluteMax) {
               // Allow entry despite K>=threshold - tiered bypass based on trend strength or recent profitable exit
@@ -3986,9 +3992,10 @@ serve(async (req) => {
           }
         }
         
-        if (stochRsiK4h <= effectiveAbsoluteMaxOversold) {
+        if (stochRsiK4h <= effectiveAbsoluteMaxOversold && !skipStochRSIGate) {
           // Block SHORT entries at absolute minimum - StochRSI has nowhere to go
           // NOTE: effectiveAbsoluteMaxOversold is 5 for trend continuation after exit, 2 otherwise
+          // PHASE 4: Skip this gate entirely in FULL adaptive mode
           if (derivedDirection === "short") {
             if (canBypassAbsoluteMax) {
               // Allow entry despite K<=threshold - tiered bypass based on trend strength or recent profitable exit
@@ -4161,10 +4168,11 @@ serve(async (req) => {
         // ===== CRITICAL: ABSOLUTE MAXIMUM STOCHRSI HARD BLOCK GATES =====
         // These gates have NO EXCEPTIONS - K>=98 for LONG or K<=2 for SHORT means BLOCK
         // At these levels, there is physically no more room for the indicator to continue
+        // PHASE 4: Skip these gates in FULL adaptive mode - adaptive engine handles extremes
         const ABSOLUTE_MAX_OB = STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERBOUGHT ?? 98;
         const ABSOLUTE_MAX_OS = STOCHRSI_THRESHOLDS.ABSOLUTE_MAX_OVERSOLD ?? 2;
         
-        if (intendedTradeDirection === "long" && stochRsiK4h >= ABSOLUTE_MAX_OB) {
+        if (intendedTradeDirection === "long" && stochRsiK4h >= ABSOLUTE_MAX_OB && !skipStochRSIGate) {
           rejectedByStochRsiExtreme++;
           perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} absolute max` });
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute maximum (K=${stochRsiK4h.toFixed(1)} >= ${ABSOLUTE_MAX_OB}) - nowhere to rise, no exceptions allowed`);
@@ -4198,7 +4206,7 @@ serve(async (req) => {
           continue;
         }
         
-        if (intendedTradeDirection === "short" && stochRsiK4h <= ABSOLUTE_MAX_OS) {
+        if (intendedTradeDirection === "short" && stochRsiK4h <= ABSOLUTE_MAX_OS && !skipStochRSIGate) {
           rejectedByStochRsiExtreme++;
           perSymbolGateAttribution.set(symbol, { gate: 'STOCHRSI_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} absolute min` });
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HARD BLOCK - 4h StochRSI at absolute minimum (K=${stochRsiK4h.toFixed(1)} <= ${ABSOLUTE_MAX_OS}) - nowhere to fall, no exceptions allowed`);

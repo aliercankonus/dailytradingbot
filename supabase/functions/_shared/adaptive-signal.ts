@@ -106,7 +106,8 @@ export const determineAdaptiveDirection = (
 ): { direction: 'long' | 'short'; confidence: number; reason: string } | null => {
   const {
     htfTrend4h, htfTrend1h, htfConf4h, htfConf1h,
-    adx, adxRising, momentumScore, momentumState,
+    adx, adxRising, momentumScore, momentumState, momentumConfirms,
+    macdHistogram, macdExpanding, primaryTrend, trendConsistency,
     stochRsiK, reversalScore, orderFlowScore, orderFlowSignal
   } = ctx;
 
@@ -147,6 +148,44 @@ export const determineAdaptiveDirection = (
     }
   }
 
+  // ===== CASE 2.5: Confirmed momentum with MACD direction ===== (NEW - Phase 1)
+  // When HTF is neutral but momentum is confirmed and MACD shows clear direction
+  if (htfTrend4h === 'neutral' && momentumConfirms && macdExpanding) {
+    if (macdHistogram < -0.5 && adx >= ADX_THRESHOLDS.MINIMUM) {
+      return {
+        direction: 'short',
+        confidence: 70,
+        reason: `Confirmed bearish momentum (MACD=${macdHistogram.toFixed(1)}, ADX=${adx.toFixed(1)}, expanding)`
+      };
+    }
+    if (macdHistogram > 0.5 && adx >= ADX_THRESHOLDS.MINIMUM) {
+      return {
+        direction: 'long',
+        confidence: 70,
+        reason: `Confirmed bullish momentum (MACD=${macdHistogram.toFixed(1)}, ADX=${adx.toFixed(1)}, expanding)`
+      };
+    }
+  }
+
+  // ===== CASE 2.7: High trend consistency with moderate ADX ===== (NEW - Phase 5)
+  // When primary trend direction is clear and trend consistency is high
+  if (trendConsistency >= 60 && adx >= ADX_THRESHOLDS.MINIMUM) {
+    if (primaryTrend === 'bearish') {
+      return {
+        direction: 'short',
+        confidence: 68,
+        reason: `High trend consistency bearish (${trendConsistency}%, ADX=${adx.toFixed(1)})`
+      };
+    }
+    if (primaryTrend === 'bullish') {
+      return {
+        direction: 'long',
+        confidence: 68,
+        reason: `High trend consistency bullish (${trendConsistency}%, ADX=${adx.toFixed(1)})`
+      };
+    }
+  }
+
   // ===== CASE 3: 4h neutral but 1h directional with momentum =====
   if (htfTrend4h === 'neutral' && adx >= ADX_THRESHOLDS.WEAK) {
     if (htfTrend1h === 'bullish' && htfConf1h >= 60 && momentumScore >= 15) {
@@ -165,21 +204,21 @@ export const determineAdaptiveDirection = (
     }
   }
 
-  // ===== CASE 4: Strong momentum override (both HTFs neutral) =====
+  // ===== CASE 4: Momentum override (both HTFs neutral) ===== (UPDATED - Phase 2)
+  // REDUCED threshold from 35 to 20 for faster breakout detection
   if (htfTrend4h === 'neutral' && htfTrend1h === 'neutral') {
-    // Only allow if momentum is very strong AND ADX is rising
-    if (momentumScore >= 35 && adxRising && adx >= ADX_THRESHOLDS.WEAK) {
+    if (momentumScore >= 20 && adxRising && adx >= ADX_THRESHOLDS.WEAK) {
       return {
         direction: 'long',
         confidence: 65,
-        reason: `Strong bullish momentum breakout (score=${momentumScore}, ADX rising)`
+        reason: `Bullish momentum breakout (score=${momentumScore}, ADX rising)`
       };
     }
-    if (momentumScore <= -35 && adxRising && adx >= ADX_THRESHOLDS.WEAK) {
+    if (momentumScore <= -20 && adxRising && adx >= ADX_THRESHOLDS.WEAK) {
       return {
         direction: 'short',
         confidence: 65,
-        reason: `Strong bearish momentum breakout (score=${momentumScore}, ADX rising)`
+        reason: `Bearish momentum breakout (score=${momentumScore}, ADX rising)`
       };
     }
   }
@@ -379,6 +418,12 @@ export const generateAdaptiveSignal = (
   // Step 1: Determine direction from indicators
   const directionResult = determineAdaptiveDirection(ctx);
   if (!directionResult) {
+    // NEW: Add logging when no direction is found (Phase 3)
+    console.log(`[ADAPTIVE] No direction for ${symbol}: ` +
+      `4h=${ctx.htfTrend4h} 1h=${ctx.htfTrend1h} ADX=${ctx.adx.toFixed(1)} ` +
+      `momentum=${ctx.momentumScore} confirms=${ctx.momentumConfirms} ` +
+      `macd=${ctx.macdHistogram.toFixed(1)} expanding=${ctx.macdExpanding} ` +
+      `trendConsist=${ctx.trendConsistency}% primary=${ctx.primaryTrend}`);
     return null;  // No clear direction
   }
 
