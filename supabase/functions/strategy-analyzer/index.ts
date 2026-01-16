@@ -3153,7 +3153,11 @@ serve(async (req) => {
         // Expert insight: "ADX declining + weak trend strength = exhausted trend"
         // Block entries when trend is running out of steam (AVAXUSDT losses at 19:20)
         if (TREND_EXHAUSTION_PROTECTION.ENABLED) {
-          const trendStrength = trendData.trendStrength ?? 50;
+          // Calculate trend strength from timeframe confidences (0-100 scale)
+          // Uses 4h and 1h confidence weighted average as proxy for trend strength
+          const conf4h = trendData.timeframes?.['4h']?.confidence ?? 50;
+          const conf1h = trendData.timeframes?.['1h']?.confidence ?? 50;
+          const trendStrength = Math.round((conf4h * 0.6 + conf1h * 0.4));  // Weighted average
           const adxSlope = fullAdxResult.adxSlope ?? 0;
           const adxDeclining = adxSlope < TREND_EXHAUSTION_PROTECTION.ADX_SLOPE_DECLINE_THRESHOLD;
           const weakTrendStrength = trendStrength < TREND_EXHAUSTION_PROTECTION.TREND_STRENGTH_THRESHOLD;
