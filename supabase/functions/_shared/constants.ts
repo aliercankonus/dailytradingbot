@@ -3138,6 +3138,20 @@ export const COUNTER_TREND_PROTECTION = {
   
   // ===== LOGGING =====
   LOG_BLOCKS: true,
+  
+  // ===== PHASE 2 FIX: FALLBACK TO TREND-ALIGNED DIRECTION =====
+  // When counter-trend is blocked, attempt to derive the opposite (trend-aligned) direction
+  // This prevents missing SHORT opportunities when LONG is blocked against bearish trend
+  FALLBACK_TO_TREND_ALIGNED: true,
+  
+  // Position multiplier for fallback entries (reduced for safety)
+  FALLBACK_POSITION_MULTIPLIER: 0.50,
+  
+  // Only allow fallback if regime is not RANGING
+  REQUIRE_TRENDING_REGIME: true,
+  
+  // Log fallback entries
+  LOG_FALLBACKS: true,
 } as const;
 
 // ============= PHASE 9: ADX EXHAUSTION / LATE TREND PROTECTION (NEW) =============
@@ -3426,6 +3440,31 @@ export const SAME_DIRECTION_REENTRY_PROTECTION = {
   
   // Logging
   LOG_BLOCKS: true,
+} as const;
+
+// ============= PRICE ACTION PULLBACK PARAMETERS =============
+// Expert insight: "A bounce against a strong HTF trend is a pullback, not momentum"
+// When price action derives counter-trend direction, check if it's a pullback for HTF-aligned entry
+export const PRICE_ACTION_PULLBACK_PARAMS = {
+  ENABLED: true,
+  
+  // Maximum move % to consider a pullback (larger moves = breakout, not pullback)
+  MAX_PULLBACK_PERCENT: 2.5,
+  
+  // Minimum 4h confidence for pullback entry
+  MIN_HTF_CONFIDENCE: 65,
+  
+  // Position size multiplier for pullback entries (reduced for safety)
+  POSITION_SIZE_MULTIPLIER: 0.50,
+  
+  // Confidence reduction for pullback-derived direction (safety)
+  CONFIDENCE_MULTIPLIER: 0.85,
+  
+  // Max confidence for pullback entries
+  MAX_CONFIDENCE: 70,
+  
+  // Logging
+  LOG_ENTRIES: true,
 } as const;
 
 // ============= PHASE 11: TREND EXHAUSTION DETECTION (ADX SLOPE + TREND STRENGTH) =============

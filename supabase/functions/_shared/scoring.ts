@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, type AdxPhase, type ExceptionType, type MasterMarketRegime } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, type AdxPhase, type ExceptionType, type MasterMarketRegime } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -2074,6 +2074,7 @@ export const deriveTradeDirection = (
   // ============= PRIORITY 0: PRICE ACTION MOMENTUM OVERRIDE =============
   // If price has moved strongly (2%+) in a clear direction, use that direction
   // even when all timeframes show neutral. This catches continuation moves.
+  // PHASE 1 FIX: But ONLY if it aligns with HTF trend OR HTF is neutral
   const priceActionMomentum = trendData.priceActionMomentum;
   if (priceActionMomentum?.canOverrideNeutralAlignment && priceActionMomentum?.hasStrongMove) {
     const priceDirection = priceActionMomentum.direction;
@@ -2084,22 +2085,87 @@ export const deriveTradeDirection = (
       const direction: TradeDirection = priceDirection === "bullish" ? "long" : "short";
       const isStrongMove = priceActionMomentum.isStrongMove;
       
-      // Calculate confidence based on move strength and ADX
-      const moveConf = isStrongMove ? 70 : 60;
-      const adxBonus = Math.min(15, (adx - 20) * 1.5);  // Up to +15% for ADX > 30
-      const finalConf = Math.min(85, moveConf + Math.max(0, adxBonus)) * 0.9;  // 10% reduction for safety
+      // ===== NEW: CHECK HTF ALIGNMENT BEFORE DERIVING DIRECTION =====
+      // A bounce against a strong HTF trend is NOT momentum - it's a pullback
+      const htf4h = trendData.timeframes?.['4h'];
+      const htfTrend4h = htf4h?.trend || "neutral";
+      const htfConf4h = htf4h?.confidence ?? 50;
+      const isHtfDirectional = htfTrend4h !== "neutral" && htfConf4h >= 60;
       
-      reasons.push(`PRICE ACTION OVERRIDE: ${movePercent.toFixed(2)}% ${priceDirection} move`);
-      reasons.push(`ADX=${adx.toFixed(1)} confirms trend strength`);
-      reasons.push("All timeframes neutral but price action clear - 75% position size");
-      
-      return { 
-        direction, 
-        confidence: finalConf, 
-        source: "price-action-momentum", 
-        reasons,
-        positionSizeMultiplier: 0.75,
-      };
+      if (isHtfDirectional && PRICE_ACTION_PULLBACK_PARAMS.ENABLED) {
+        const htfAligned = (htfTrend4h === "bullish" && priceDirection === "bullish") ||
+                           (htfTrend4h === "bearish" && priceDirection === "bearish");
+        
+        if (!htfAligned) {
+          // Price action is counter to HTF - this is a pullback, not momentum
+          // Consider deriving HTF-aligned direction instead if pullback is moderate
+          const isPullback = movePercent < PRICE_ACTION_PULLBACK_PARAMS.MAX_PULLBACK_PERCENT;
+          
+          if (isPullback && htfConf4h >= PRICE_ACTION_PULLBACK_PARAMS.MIN_HTF_CONFIDENCE) {
+            // Derive trend-aligned direction from pullback
+            const pullbackDirection: TradeDirection = htfTrend4h === "bullish" ? "long" : "short";
+            const pullbackConf = Math.min(
+              PRICE_ACTION_PULLBACK_PARAMS.MAX_CONFIDENCE,
+              htfConf4h * PRICE_ACTION_PULLBACK_PARAMS.CONFIDENCE_MULTIPLIER
+            );
+            
+            if (PRICE_ACTION_PULLBACK_PARAMS.LOG_ENTRIES) {
+              reasons.push(`PRICE ACTION PULLBACK: ${movePercent.toFixed(2)}% bounce against ${htfTrend4h} 4h trend (${htfConf4h.toFixed(0)}% conf)`);
+              reasons.push(`Deriving ${pullbackDirection.toUpperCase()} from HTF continuation after pullback`);
+              reasons.push("Pullback entry - reduced position size for safety");
+            }
+            
+            return { 
+              direction: pullbackDirection, 
+              confidence: pullbackConf, 
+              source: "price-action-pullback", 
+              reasons,
+              positionSizeMultiplier: PRICE_ACTION_PULLBACK_PARAMS.POSITION_SIZE_MULTIPLIER,
+            };
+          } else {
+            // Strong counter-trend move OR HTF confidence too low - skip price action override entirely
+            reasons.push(`Skipping price action: ${movePercent.toFixed(2)}% move against ${htfTrend4h} 4h trend (${htfConf4h.toFixed(0)}% conf)`);
+            reasons.push(`Move too strong or HTF confidence too low for pullback entry`);
+            // Don't return - let normal direction derivation handle it
+          }
+        } else {
+          // Price action aligns with HTF - proceed with normal override logic
+          // Calculate confidence based on move strength and ADX
+          const moveConf = isStrongMove ? 70 : 60;
+          const adxBonus = Math.min(15, (adx - 20) * 1.5);  // Up to +15% for ADX > 30
+          const finalConf = Math.min(85, moveConf + Math.max(0, adxBonus)) * 0.9;  // 10% reduction for safety
+          
+          reasons.push(`PRICE ACTION OVERRIDE: ${movePercent.toFixed(2)}% ${priceDirection} move (aligned with ${htfTrend4h} 4h)`);
+          reasons.push(`ADX=${adx.toFixed(1)} confirms trend strength`);
+          reasons.push("HTF-aligned price action - 75% position size");
+          
+          return { 
+            direction, 
+            confidence: finalConf, 
+            source: "price-action-momentum-aligned", 
+            reasons,
+            positionSizeMultiplier: 0.75,
+          };
+        }
+      } else {
+        // HTF is neutral - original behavior: use price action direction
+        // Calculate confidence based on move strength and ADX
+        const moveConf = isStrongMove ? 70 : 60;
+        const adxBonus = Math.min(15, (adx - 20) * 1.5);  // Up to +15% for ADX > 30
+        const finalConf = Math.min(85, moveConf + Math.max(0, adxBonus)) * 0.9;  // 10% reduction for safety
+        
+        reasons.push(`PRICE ACTION OVERRIDE: ${movePercent.toFixed(2)}% ${priceDirection} move`);
+        reasons.push(`ADX=${adx.toFixed(1)} confirms trend strength`);
+        reasons.push("All timeframes neutral but price action clear - 75% position size");
+        
+        return { 
+          direction, 
+          confidence: finalConf, 
+          source: "price-action-momentum", 
+          reasons,
+          positionSizeMultiplier: 0.75,
+        };
+      }
     }
   }
   
