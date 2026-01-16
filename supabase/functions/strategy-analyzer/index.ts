@@ -2728,7 +2728,8 @@ serve(async (req) => {
         
         // Use derived direction consistently throughout signal generation
         // Priority: original direction > late grind > momentum override > order flow > pre-momentum > short-term alignment
-        const derivedDirection = (
+        // NOTE: Using 'let' to allow COUNTER_TREND fallback to override direction
+        let derivedDirection = (
           directionResult.direction || 
           lateGrindDirection || 
           momentumDerivedDirection || 
@@ -2737,8 +2738,8 @@ serve(async (req) => {
           shortTermAlignmentDirection
         ) as "long" | "short";
         
-        // Determine source for logging
-        const derivedSource = preMomentumStochRsiOverrideApplied
+        // Determine source for logging (can be updated by fallback)
+        let derivedSource = preMomentumStochRsiOverrideApplied
           ? "pre-momentum-stochrsi-extreme"
           : shortTermAlignmentOverrideApplied
             ? "short-term-alignment"
@@ -2761,6 +2762,10 @@ serve(async (req) => {
         } else if (orderFlowDirectionOverrideApplied) {
           overridePositionMultiplier = orderFlowDerivedPositionMultiplier;
         }
+        
+        // Track if counter-trend fallback was applied (for position sizing)
+        let counterTrendFallbackApplied = false;
+        let counterTrendFallbackMultiplier = 1.0;
         
         const overrideSuffix = preMomentumStochRsiOverrideApplied ? ' [PRE_MOMENTUM_STOCHRSI]'
           : shortTermAlignmentOverrideApplied ? ' [SHORT_TERM_ALIGNMENT]'
@@ -3101,52 +3106,86 @@ serve(async (req) => {
         );
         
         if (COUNTER_TREND_PROTECTION.ENABLED && (isCounterTrendLong || isCounterTrendShort)) {
-          rejectedByHardGates++;
           const blockReason = isCounterTrendLong 
             ? `LONG blocked against ${regimeTrendDirection} trend (ADX=${adx.toFixed(1)}, momentum=${smartMomentum.score})`
             : `SHORT blocked against ${regimeTrendDirection} trend (ADX=${adx.toFixed(1)}, momentum=${smartMomentum.score})`;
           
-          perSymbolGateAttribution.set(symbol, { 
-            gate: 'COUNTER_TREND_PROTECTION', 
-            details: blockReason 
-          });
+          // ===== PHASE 2 FIX: ATTEMPT FALLBACK TO TREND-ALIGNED DIRECTION =====
+          // Instead of rejecting immediately, try to derive the opposite (trend-aligned) direction
+          const fallbackDirection: "long" | "short" = isCounterTrendLong ? "short" : "long";
+          const fallbackAligns = (fallbackDirection === "short" && regimeTrendDirection === "bearish") ||
+                                 (fallbackDirection === "long" && regimeTrendDirection === "bullish");
           
-          if (COUNTER_TREND_PROTECTION.LOG_BLOCKS) {
-            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 COUNTER_TREND_BLOCK: ${symbol} | ${derivedDirection.toUpperCase()} blocked`);
-            logger.forSymbol(symbol).warn(`   → ADX=${adx.toFixed(1)}, regime=${masterRegime.regime}, trendDirection=${regimeTrendDirection}`);
-            logger.forSymbol(symbol).warn(`   → Momentum score=${smartMomentum.score}, direction=${smartMomentum.direction}`);
-            logger.forSymbol(symbol).warn(`   → This prevents trading against strong established trends`);
+          // Only apply fallback if: enabled, regime is trending (not low-ADX), and fallback aligns with regime
+          // Note: MasterMarketRegime doesn't include "RANGING" - use ADX < 20 as proxy for non-trending
+          const isRangingMarket = adx < 20 && (masterRegime.regime === "NORMAL" || masterRegime.regime === "STEALTH_DRIFT");
+          const canApplyFallback = COUNTER_TREND_PROTECTION.FALLBACK_TO_TREND_ALIGNED && 
+                                   fallbackAligns && 
+                                   (!COUNTER_TREND_PROTECTION.REQUIRE_TRENDING_REGIME || !isRangingMarket);
+          
+          if (canApplyFallback) {
+            // Override derived direction to trend-aligned
+            const originalDirection = derivedDirection;
+            derivedDirection = fallbackDirection;
+            derivedSource = "counter-trend-fallback";
+            counterTrendFallbackApplied = true;
+            counterTrendFallbackMultiplier = COUNTER_TREND_PROTECTION.FALLBACK_POSITION_MULTIPLIER;
+            
+            if (COUNTER_TREND_PROTECTION.LOG_FALLBACKS) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔄 COUNTER_TREND_FALLBACK: ${originalDirection.toUpperCase()} → ${fallbackDirection.toUpperCase()}`);
+              logger.forSymbol(symbol).info(`   → Original ${originalDirection.toUpperCase()} was counter to ${regimeTrendDirection} trend (ADX=${adx.toFixed(1)})`);
+              logger.forSymbol(symbol).info(`   → Switching to trend-aligned ${fallbackDirection.toUpperCase()} with ${(counterTrendFallbackMultiplier * 100).toFixed(0)}% position`);
+            }
+            
+            // DON'T continue - let the rest of the gates evaluate this new direction
+          } else {
+            // No valid fallback - reject as before
+            rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'COUNTER_TREND_PROTECTION', 
+              details: blockReason 
+            });
+            
+            if (COUNTER_TREND_PROTECTION.LOG_BLOCKS) {
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 COUNTER_TREND_BLOCK: ${symbol} | ${derivedDirection.toUpperCase()} blocked`);
+              logger.forSymbol(symbol).warn(`   → ADX=${adx.toFixed(1)}, regime=${masterRegime.regime}, trendDirection=${regimeTrendDirection}`);
+              logger.forSymbol(symbol).warn(`   → Momentum score=${smartMomentum.score}, direction=${smartMomentum.direction}`);
+              logger.forSymbol(symbol).warn(`   → Fallback not possible: fallbackAligns=${fallbackAligns}, regime=${masterRegime.regime}`);
+            }
+            
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `COUNTER_TREND_PROTECTION: ${blockReason}`,
+              {
+                gate: "COUNTER_TREND_PROTECTION",
+                blockReasonCode: "COUNTER_TREND",
+                primaryGateFailed: isCounterTrendLong ? "long_against_bearish" : "short_against_bullish",
+                regimeRuleId,
+                derivedDirection,
+                fallbackDirection,
+                fallbackAttempted: COUNTER_TREND_PROTECTION.FALLBACK_TO_TREND_ALIGNED,
+                fallbackReason: !fallbackAligns ? "direction_mismatch" : "regime_ranging",
+                adx: adx.toFixed(1),
+                adxSlope: (fullAdxResult.adxSlope ?? 0).toFixed(2),
+                regimeTrendDirection,
+                momentumScore: smartMomentum.score,
+                momentumDirection: smartMomentum.direction,
+                masterRegime: masterRegime.regime,
+                threshold: COUNTER_TREND_PROTECTION.ADX_THRESHOLD_FOR_BLOCK,
+                momentumThresholds: COUNTER_TREND_PROTECTION.MOMENTUM,
+                // Timeframe labels for debugging
+                timeframes: {
+                  adxTimeframe: '1h',
+                  regimeTimeframe: '4h',
+                  signalTimeframe: '15m',
+                }
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
           }
-          
-          await logRejectionWithAI(
-            supabase, userId, symbol,
-            `COUNTER_TREND_PROTECTION: ${blockReason}`,
-            {
-              gate: "COUNTER_TREND_PROTECTION",
-              blockReasonCode: "COUNTER_TREND",
-              primaryGateFailed: isCounterTrendLong ? "long_against_bearish" : "short_against_bullish",
-              regimeRuleId,
-              derivedDirection,
-              adx: adx.toFixed(1),
-              adxSlope: (fullAdxResult.adxSlope ?? 0).toFixed(2),
-              regimeTrendDirection,
-              momentumScore: smartMomentum.score,
-              momentumDirection: smartMomentum.direction,
-              masterRegime: masterRegime.regime,
-              threshold: COUNTER_TREND_PROTECTION.ADX_THRESHOLD_FOR_BLOCK,
-              momentumThresholds: COUNTER_TREND_PROTECTION.MOMENTUM,
-              // Timeframe labels for debugging
-              timeframes: {
-                adxTimeframe: '1h',
-                regimeTimeframe: '4h',
-                signalTimeframe: '15m',
-              }
-            },
-            trendData,
-            riskParams.ai_analysis_enabled !== false,
-            earlyOrderFlowAnalysis
-          );
-          continue;
         }
         
         // ============= PHASE 11: TREND EXHAUSTION PROTECTION =============
