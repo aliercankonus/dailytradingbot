@@ -9148,12 +9148,67 @@ serve(async (req) => {
           }
         }
 
+        // ============= PHASE 16: HYBRID MODE FALLBACK =============
+        // If no strategy candidates but we have a valid adaptive signal, use it as fallback
+        if (candidates.length === 0 && ADAPTIVE_SIGNAL_MODE.MODE === 'HYBRID' && adaptiveSignalResult) {
+          const adaptiveQuality = calculateAdaptiveQualityScore(adaptiveSignalResult.qualityFactors);
+          
+          if (adaptiveQuality.score >= ADAPTIVE_SIGNAL_MODE.HYBRID_MIN_QUALITY) {
+            const entryLabel = getEntryTypeLabel(adaptiveSignalResult.entryType);
+            const adaptiveStrategy = {
+              id: `adaptive-${adaptiveSignalResult.entryType.toLowerCase()}`,
+              name: `[HYBRID] ${entryLabel}`,
+              risk_settings: {
+                stopLossPercent: adaptiveSignalResult.stopLossPercent,
+                takeProfitPercent: adaptiveSignalResult.takeProfitPercent,
+                positionSizePercent: 1,
+                priority: 5
+              }
+            };
+            
+            const adaptiveIndicators = new Map<string, number>();
+            adaptiveIndicators.set("Price", parseFloat(marketDataMap.get(symbol)?.lastPrice || '0'));
+            
+            candidates.push({
+              strategy: adaptiveStrategy,
+              score: adaptiveQuality.score,
+              indicatorValues: adaptiveIndicators,
+              signalType: adaptiveSignalResult.direction,
+              positionSizeMultiplier: adaptiveSignalResult.positionSizeMultiplier * ADAPTIVE_SIGNAL_MODE.HYBRID_POSITION_MULTIPLIER,
+              convergenceEntry: false
+            });
+            
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ADAPTIVE HYBRID FALLBACK: No strategy matched, using ${entryLabel} (quality=${adaptiveQuality.score}, dir=${adaptiveSignalResult.direction})`);
+          } else {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ADAPTIVE HYBRID blocked: quality ${adaptiveQuality.score} < ${ADAPTIVE_SIGNAL_MODE.HYBRID_MIN_QUALITY}`);
+          }
+        }
+        
+        // ============= SHADOW MODE COMPARISON =============
+        // Compare adaptive signal vs selected strategy for analytics
+        if (ADAPTIVE_SIGNAL_MODE.MODE === 'SHADOW' && adaptiveSignalResult && candidates.length > 0 && ADAPTIVE_SIGNAL_MODE.LOG_COMPARISON_RESULTS) {
+          const strategyCandidate = candidates[0];
+          const directionMatch = adaptiveSignalResult.direction === strategyCandidate.signalType;
+          const qualityDelta = (calculateAdaptiveQualityScore(adaptiveSignalResult.qualityFactors).score) - strategyCandidate.score;
+          
+          logger.forSymbol(symbol).info(
+            `📊 SHADOW COMPARISON: ` +
+            `Strategy=${strategyCandidate.strategy.name}(${strategyCandidate.signalType}) vs ` +
+            `Adaptive=${adaptiveSignalResult.entryType}(${adaptiveSignalResult.direction}) | ` +
+            `Direction: ${directionMatch ? '✅ MATCH' : '❌ MISMATCH'} | ` +
+            `Quality Delta: ${qualityDelta > 0 ? '+' : ''}${qualityDelta.toFixed(1)}`
+          );
+        }
+        
         if (candidates.length === 0) {
           rejectedByStrategy++;
           const convergenceNote = passedConditionsButFiltered.length >= CONVERGENCE_MIN_STRATEGIES 
             ? ` (${passedConditionsButFiltered.length} passed conditions but failed convergence check)` 
             : '';
-          perSymbolGateAttribution.set(symbol, { gate: 'NO_STRATEGY_MATCH', details: `0/${allStrategies.length} conditions met${convergenceNote}` });
+          const adaptiveNote = adaptiveSignalResult 
+            ? ` | Adaptive would signal: ${adaptiveSignalResult.direction} (${adaptiveSignalResult.entryType})` 
+            : '';
+          perSymbolGateAttribution.set(symbol, { gate: 'NO_STRATEGY_MATCH', details: `0/${allStrategies.length} conditions met${convergenceNote}${adaptiveNote}` });
           
           // Sort near-misses by how close they were (most conditions passed first)
           strategyNearMisses.sort((a, b) => {
@@ -9176,6 +9231,13 @@ serve(async (req) => {
               passedConditionsButFiltered: passedConditionsButFiltered.length > 0 ? passedConditionsButFiltered : undefined,
               // NEW: Near-miss diagnostics for debugging
               strategyNearMisses: topNearMisses.length > 0 ? topNearMisses : undefined,
+              // NEW: Adaptive signal that would have been generated
+              adaptiveSignal: adaptiveSignalResult ? {
+                direction: adaptiveSignalResult.direction,
+                entryType: adaptiveSignalResult.entryType,
+                confidence: adaptiveSignalResult.confidence,
+                reason: adaptiveSignalResult.reason
+              } : null,
               // Fallback check info
               fallbackCheck: {
                 qualityScore,
