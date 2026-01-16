@@ -3375,8 +3375,8 @@ export const NEUTRAL_LOW_ADX_QUALITY_GATE = {
 // - HYBRID (2): Use adaptive for symbols with no strategy match
 // - FULL (3): Replace strategy loop entirely with adaptive generation
 export const ADAPTIVE_SIGNAL_MODE = {
-  // Current mode - HYBRID: use adaptive as fallback when no strategy matches
-  MODE: 'HYBRID' as 'DISABLED' | 'SHADOW' | 'HYBRID' | 'FULL',
+  // Current mode - FULL: replace strategy loop entirely with adaptive generation
+  MODE: 'FULL' as 'DISABLED' | 'SHADOW' | 'HYBRID' | 'FULL',
   
   // ===== SHADOW MODE SETTINGS =====
   // When MODE='SHADOW', log adaptive signals without executing
