@@ -110,6 +110,8 @@ import {
   STRATEGY_DIRECTION_REQUIREMENTS,
   RANGING_MARKET_PROTECTION,
   NEUTRAL_LOW_ADX_QUALITY_GATE,
+  // PHASE 16: Strategy-independent adaptive signal generation
+  ADAPTIVE_SIGNAL_MODE,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -194,6 +196,19 @@ import {
   compareStochRSIGate,
   type ShadowModeSignal 
 } from "../_shared/shadow-mode.ts";
+// NEW: Strategy-Independent Adaptive Signal Generation Module
+import {
+  generateAdaptiveSignal,
+  determineAdaptiveDirection,
+  calculateAdaptiveParameters,
+  classifyEntryType,
+  calculateAdaptiveQualityScore,
+  getAdaptiveMinQuality,
+  getEntryTypeLabel,
+  type AdaptiveSignalResult,
+  type AdaptiveContext,
+  type AdaptiveEntryType
+} from "../_shared/adaptive-signal.ts";
 
 // Create logger for this function
 const logger = createLogger('strategy-analyzer');
@@ -8076,6 +8091,122 @@ serve(async (req) => {
           percentBBypassMultiplier?: number; // PHASE 2 FIX: Carry %B bypass multiplier (0.70) through to position sizing
         }
         const candidates: StrategyCandidate[] = [];
+        
+        // ============= PHASE 16: ADAPTIVE SIGNAL GENERATION =============
+        // Strategy-independent signal generation based purely on market conditions
+        // Runs in parallel with strategy loop for shadow comparison, or replaces it in FULL mode
+        let adaptiveSignalResult: AdaptiveSignalResult | null = null;
+        let adaptiveSignalLogged = false;
+        
+        if (ADAPTIVE_SIGNAL_MODE.MODE !== 'DISABLED') {
+          // Build adaptive context from all calculated values
+          const adaptiveContext: AdaptiveContext = {
+            // Trend data
+            htfTrend4h: htfTrend4h || 'neutral',
+            htfTrend1h: htfTrend1h || 'neutral',
+            htfConf4h: stochFilterConf4h || 50,
+            htfConf1h: stochFilterConf1h || 50,
+            primaryTrend: trend,
+            trendConsistency: trendConsistency || 50,
+            
+            // ADX data
+            adx: adx,
+            adxSlope: fullAdxResult?.adxSlope ?? 0,
+            adxRising: trendData.volatility?.adxRising ?? false,
+            diGap: fullAdxResult?.diGap ?? 0,
+            
+            // Momentum data
+            momentumScore: earlyMomentumScore || 0,
+            momentumState: momentum?.state || 'none',
+            momentumConfirms: momentum?.confirms ?? false,
+            macdHistogram: trendData.macd?.histogram ?? 0,
+            macdExpanding: momentum?.macdExpanding ?? false,
+            
+            // StochRSI data
+            stochRsiK: stochRsiK4h,
+            stochRsiD: stochRsiD4h,
+            stochRsiTrend: stochFilterTrend4h || 'neutral',
+            
+            // Bollinger data
+            percentB: percentB,
+            bbSqueeze: trendData.bollinger?.squeeze ?? false,
+            
+            // Reversal data
+            reversalScore: unifiedReversal.score,
+            
+            // Volume data
+            volumeConfirms: momentum?.volumeConfirms ?? false,
+            volumeRatio: volumeRatio,
+            
+            // Order flow
+            orderFlowScore: earlyOrderFlowAnalysis?.score ?? 0,
+            orderFlowSignal: earlyOrderFlowAnalysis?.signal ?? 'neutral',
+            
+            // Pullback analysis
+            isPullback: pullbackAnalysis.isPullback,
+            pullbackDepth: pullbackAnalysis.pullbackDepth || 0,
+            entryTimingScore: pullbackAnalysis.entryTimingScore || 0,
+            
+            // Price action
+            priceMove6h: priceMove || 0,
+            
+            // Current price and ATR
+            currentPrice: parseFloat(marketDataMap.get(symbol)?.lastPrice || '0'),
+            atr: trendData.volatility?.atr ?? 0,
+          };
+          
+          // Generate adaptive signal
+          adaptiveSignalResult = generateAdaptiveSignal(
+            symbol,
+            adaptiveContext,
+            qualityScore,
+            breakdown
+          );
+          
+          if (adaptiveSignalResult) {
+            const entryLabel = getEntryTypeLabel(adaptiveSignalResult.entryType);
+            
+            // Log adaptive signal generation
+            if (ADAPTIVE_SIGNAL_MODE.LOG_ADAPTIVE_SIGNALS) {
+              logger.forSymbol(symbol).info(
+                `${LOG_CATEGORIES.SUCCESS} ADAPTIVE SIGNAL: ${adaptiveSignalResult.direction.toUpperCase()} | ` +
+                `Type: ${entryLabel} | Conf: ${adaptiveSignalResult.confidence}% | ` +
+                `SL: ${adaptiveSignalResult.stopLossPercent.toFixed(2)}% | TP: ${adaptiveSignalResult.takeProfitPercent.toFixed(2)}% | ` +
+                `Position: ${(adaptiveSignalResult.positionSizeMultiplier * 100).toFixed(0)}% | ` +
+                `Reason: ${adaptiveSignalResult.reason}`
+              );
+            }
+            
+            // In FULL mode, add adaptive signal as primary candidate
+            if (ADAPTIVE_SIGNAL_MODE.MODE === 'FULL') {
+              const adaptiveStrategy = {
+                id: `adaptive-${adaptiveSignalResult.entryType.toLowerCase()}`,
+                name: entryLabel,
+                risk_settings: {
+                  stopLossPercent: adaptiveSignalResult.stopLossPercent,
+                  takeProfitPercent: adaptiveSignalResult.takeProfitPercent,
+                  positionSizePercent: 1,
+                  priority: 10  // High priority
+                }
+              };
+              
+              const adaptiveIndicators = new Map<string, number>();
+              adaptiveIndicators.set("Price", adaptiveContext.currentPrice);
+              
+              candidates.push({
+                strategy: adaptiveStrategy,
+                score: qualityScore,
+                indicatorValues: adaptiveIndicators,
+                signalType: adaptiveSignalResult.direction,
+                positionSizeMultiplier: adaptiveSignalResult.positionSizeMultiplier * ADAPTIVE_SIGNAL_MODE.FULL_POSITION_MULTIPLIER,
+                convergenceEntry: false
+              });
+              
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ADAPTIVE MODE (FULL): Added "${entryLabel}" as primary candidate`);
+              adaptiveSignalLogged = true;
+            }
+          }
+        }
         
         // IMPROVEMENT 4: Track strategies that pass conditions but fail secondary filters
         // Used for multi-strategy convergence fallback

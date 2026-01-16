@@ -3363,3 +3363,43 @@ export const NEUTRAL_LOW_ADX_QUALITY_GATE = {
   // ===== LOGGING =====
   LOG_APPLICATION: true,
 } as const;
+
+// ============= ADAPTIVE SIGNAL GENERATION MODE =============
+// PHASE 16: Strategy-Independent Signal Generation
+// When enabled, signals are generated purely from technical indicators
+// without relying on named strategies or templates.
+//
+// This is a phased migration:
+// - DISABLED (0): Use traditional strategy loop (12+ strategies)
+// - SHADOW (1): Run adaptive in shadow mode, compare with strategy-based
+// - HYBRID (2): Use adaptive for symbols with no strategy match
+// - FULL (3): Replace strategy loop entirely with adaptive generation
+export const ADAPTIVE_SIGNAL_MODE = {
+  // Current mode - start with SHADOW for safe testing
+  MODE: 'SHADOW' as 'DISABLED' | 'SHADOW' | 'HYBRID' | 'FULL',
+  
+  // ===== SHADOW MODE SETTINGS =====
+  // When MODE='SHADOW', log adaptive signals without executing
+  // This allows comparing adaptive vs strategy-based signals
+  SHADOW_LOG_ENABLED: true,
+  SHADOW_COMPARE_DIRECTION: true,  // Compare direction match %
+  SHADOW_COMPARE_QUALITY: true,    // Compare quality score deltas
+  
+  // ===== HYBRID MODE SETTINGS =====
+  // When MODE='HYBRID', use adaptive as fallback
+  HYBRID_FALLBACK_ONLY: true,       // Only use adaptive if no strategy matches
+  HYBRID_MIN_QUALITY: 65,           // Higher quality threshold for adaptive
+  HYBRID_POSITION_MULTIPLIER: 0.6,  // Reduced position for adaptive signals
+  
+  // ===== FULL MODE SETTINGS =====
+  // When MODE='FULL', only use adaptive generation
+  FULL_MIN_QUALITY: 60,             // Standard quality threshold
+  FULL_POSITION_MULTIPLIER: 1.0,    // Full position sizing
+  
+  // ===== LOGGING =====
+  LOG_ADAPTIVE_SIGNALS: true,
+  LOG_COMPARISON_RESULTS: true,
+} as const;
+
+export type AdaptiveSignalModeType = typeof ADAPTIVE_SIGNAL_MODE.MODE;
+
