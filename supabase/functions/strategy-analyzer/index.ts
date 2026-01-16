@@ -112,6 +112,11 @@ import {
   NEUTRAL_LOW_ADX_QUALITY_GATE,
   // PHASE 16: Strategy-independent adaptive signal generation
   ADAPTIVE_SIGNAL_MODE,
+  // PHASE 10-13: Trend exhaustion protection gates
+  SAME_DIRECTION_REENTRY_PROTECTION,
+  TREND_EXHAUSTION_PROTECTION,
+  REGIME_TRANSITION_PROTECTION,
+  MOMENTUM_REVERSAL_PROTECTION,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -2059,7 +2064,12 @@ serve(async (req) => {
       | 'POSITION_DEDUPLICATION'
       // PHASE 13-14: Strategy HTF alignment and ranging market protection
       | 'STRATEGY_HTF_ALIGNMENT'
-      | 'RANGING_MARKET_PAUSE';
+      | 'RANGING_MARKET_PAUSE'
+      // PHASE 10-13: Trend exhaustion protection gates
+      | 'SAME_DIRECTION_COOLDOWN'
+      | 'TREND_EXHAUSTION_PROTECTION'
+      | 'REGIME_TRANSITION_PROTECTION'
+      | 'MOMENTUM_REVERSAL_PROTECTION';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -2267,6 +2277,39 @@ serve(async (req) => {
           checked_at: new Date().toISOString(),
         });
         continue;
+      }
+
+      // ============= PHASE 10: SAME-DIRECTION RE-ENTRY COOLDOWN =============
+      // Expert insight: "When a trade closes due to timeout or trailing stop, the trend pauses"
+      // Block same-direction entries for 45 minutes after non-loss exits
+      // This was added after analyzing AVAXUSDT losses from re-entering same direction too quickly
+      let sameDirectionCooldownActive = false;
+      let cooldownSide: string | null = null;
+      
+      if (SAME_DIRECTION_REENTRY_PROTECTION.ENABLED) {
+        const cooldownCutoff = new Date(Date.now() - SAME_DIRECTION_REENTRY_PROTECTION.COOLDOWN_MINUTES * 60 * 1000).toISOString();
+        
+        const { data: recentTimeoutClose } = await supabase
+          .from('positions')
+          .select('id, side, close_reason, closed_at, symbol')
+          .eq('user_id', userId)
+          .eq('symbol', symbol)
+          .eq('status', 'closed')
+          .in('close_reason', SAME_DIRECTION_REENTRY_PROTECTION.TRIGGER_CLOSE_REASONS as unknown as string[])
+          .gte('closed_at', cooldownCutoff)
+          .order('closed_at', { ascending: false })
+          .limit(1);
+        
+        if (recentTimeoutClose && recentTimeoutClose.length > 0) {
+          const recentClose = recentTimeoutClose[0];
+          const closedMinutesAgo = Math.round((Date.now() - new Date(recentClose.closed_at).getTime()) / (1000 * 60));
+          cooldownSide = recentClose.side;
+          sameDirectionCooldownActive = true;
+          
+          if (SAME_DIRECTION_REENTRY_PROTECTION.LOG_BLOCKS) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⏳ SAME_DIRECTION_COOLDOWN: ${symbol} | ${recentClose.close_reason} closed ${closedMinutesAgo}min ago | Blocking ${cooldownSide === 'sell' ? 'SHORT' : 'LONG'} for ${SAME_DIRECTION_REENTRY_PROTECTION.COOLDOWN_MINUTES - closedMinutesAgo}min`);
+          }
+        }
       }
 
       // ============= PHASE 6 (9 FINDINGS): LOSS-CLUSTERING COOLDOWN CHECK =====
@@ -2729,6 +2772,43 @@ serve(async (req) => {
           logger.forSymbol(symbol).warn(`   ${directionResult.reasons.filter(r => r.includes("Warning")).join(", ")}`);
         }
         
+        // ============= PHASE 10: SAME-DIRECTION RE-ENTRY COOLDOWN GATE =============
+        // Check if derived direction matches the cooldown side
+        // cooldownSide is 'sell' for SHORT positions, 'buy' for LONG positions
+        if (SAME_DIRECTION_REENTRY_PROTECTION.ENABLED && sameDirectionCooldownActive && cooldownSide) {
+          const isSameDirection = (cooldownSide === 'sell' && derivedDirection === 'short') ||
+                                   (cooldownSide === 'buy' && derivedDirection === 'long');
+          
+          if (isSameDirection) {
+            rejectedByHardGates++;
+            const blockMsg = `Same-direction ${derivedDirection.toUpperCase()} blocked during cooldown (${cooldownSide === 'sell' ? 'SHORT' : 'LONG'} position closed recently)`;
+            perSymbolGateAttribution.set(symbol, { gate: 'SAME_DIRECTION_COOLDOWN', details: blockMsg });
+            
+            if (SAME_DIRECTION_REENTRY_PROTECTION.LOG_BLOCKS) {
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 SAME_DIRECTION_COOLDOWN: ${blockMsg}`);
+              logger.forSymbol(symbol).warn(`   → This prevents re-entering same direction after timeout/trailing closes`);
+            }
+            
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `SAME_DIRECTION_COOLDOWN: ${blockMsg}`,
+              {
+                gate: "SAME_DIRECTION_COOLDOWN",
+                derivedDirection,
+                cooldownSide,
+                cooldownMinutes: SAME_DIRECTION_REENTRY_PROTECTION.COOLDOWN_MINUTES,
+                triggerCloseReasons: SAME_DIRECTION_REENTRY_PROTECTION.TRIGGER_CLOSE_REASONS,
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          } else if (SAME_DIRECTION_REENTRY_PROTECTION.LOG_BLOCKS) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ SAME_DIRECTION_COOLDOWN: Opposite direction ${derivedDirection.toUpperCase()} allowed during cooldown`);
+          }
+        }
+        
         // ============= EARLY MOMENTUM ENTRY POSITION SIZING =============
         // Apply 50% position size reduction for early momentum entries (30m+1h without 4h)
         let earlyMomentumPositionMultiplier = 1.0;
@@ -2955,6 +3035,51 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`   → Momentum min=${regimeMomentumMinimum}, Quality boost: +${regimeQualityBoost}, Position: ${(regimePositionMultiplier * 100).toFixed(0)}%`);
         }
         
+        // ============= PHASE 12: REGIME TRANSITION QUALITY BOOST =============
+        // Expert insight: "When regime weakens, require stronger confirmation"
+        // Track regime transitions and add quality boost for same-direction entries
+        let regimeTransitionQualityBoost = 0;
+        
+        if (REGIME_TRANSITION_PROTECTION.ENABLED) {
+          // Query last signal for this symbol to check if regime changed
+          const transitionCutoff = new Date(Date.now() - REGIME_TRANSITION_PROTECTION.TRANSITION_WINDOW_MINUTES * 60 * 1000).toISOString();
+          
+          const { data: lastSignalForRegime } = await supabase
+            .from('trading_signals')
+            .select('id, indicators')
+            .eq('user_id', userId)
+            .eq('symbol', symbol)
+            .gte('created_at', transitionCutoff)
+            .order('created_at', { ascending: false })
+            .limit(1);
+          
+          if (lastSignalForRegime && lastSignalForRegime.length > 0) {
+            const previousRegime = lastSignalForRegime[0].indicators?.masterRegime?.regime;
+            const currentRegime = masterRegime.regime;
+            
+            if (previousRegime && previousRegime !== currentRegime) {
+              // Check for weakening transitions
+              let isWeakeningTransition = false;
+              
+              if (previousRegime === 'PARABOLIC' && REGIME_TRANSITION_PROTECTION.WEAKENING_TRANSITIONS.FROM_PARABOLIC.includes(currentRegime as any)) {
+                isWeakeningTransition = true;
+              } else if (previousRegime === 'STRONG_TREND' && REGIME_TRANSITION_PROTECTION.WEAKENING_TRANSITIONS.FROM_STRONG_TREND.includes(currentRegime as any)) {
+                isWeakeningTransition = true;
+              } else if (previousRegime === 'NORMAL' && REGIME_TRANSITION_PROTECTION.WEAKENING_TRANSITIONS.FROM_NORMAL.includes(currentRegime as any)) {
+                isWeakeningTransition = true;
+              }
+              
+              if (isWeakeningTransition) {
+                regimeTransitionQualityBoost = REGIME_TRANSITION_PROTECTION.QUALITY_BOOST_ON_WEAKENING;
+                
+                if (REGIME_TRANSITION_PROTECTION.LOG_BLOCKS) {
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ REGIME_TRANSITION: ${previousRegime} → ${currentRegime} | +${regimeTransitionQualityBoost} quality required`);
+                }
+              }
+            }
+          }
+        }
+        
         // ============= CRITICAL: COUNTER-TREND PROTECTION GATE (Phase 8) =============
         // PREVENTS: Trading LONG when trend is strongly bearish, or SHORT when strongly bullish
         // This gate runs IMMEDIATELY after regime classification to block counter-trend entries
@@ -3022,6 +3147,131 @@ serve(async (req) => {
             earlyOrderFlowAnalysis
           );
           continue;
+        }
+        
+        // ============= PHASE 11: TREND EXHAUSTION PROTECTION =============
+        // Expert insight: "ADX declining + weak trend strength = exhausted trend"
+        // Block entries when trend is running out of steam (AVAXUSDT losses at 19:20)
+        if (TREND_EXHAUSTION_PROTECTION.ENABLED) {
+          const trendStrength = trendData.trendStrength ?? 50;
+          const adxSlope = fullAdxResult.adxSlope ?? 0;
+          const adxDeclining = adxSlope < TREND_EXHAUSTION_PROTECTION.ADX_SLOPE_DECLINE_THRESHOLD;
+          const weakTrendStrength = trendStrength < TREND_EXHAUSTION_PROTECTION.TREND_STRENGTH_THRESHOLD;
+          const adxWasMeaningful = adx >= TREND_EXHAUSTION_PROTECTION.MIN_ADX_FOR_CHECK;
+          
+          if (adxDeclining && weakTrendStrength && adxWasMeaningful) {
+            if (TREND_EXHAUSTION_PROTECTION.REDUCE_POSITION_INSTEAD_OF_BLOCK) {
+              // Reduce position instead of blocking
+              const exhaustionMultiplier = TREND_EXHAUSTION_PROTECTION.EXHAUSTION_POSITION_MULTIPLIER;
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ TREND_EXHAUSTION: ADX=${adx.toFixed(1)} declining (slope=${adxSlope.toFixed(2)}), trendStrength=${trendStrength}% - position reduced to ${(exhaustionMultiplier * 100).toFixed(0)}%`);
+            } else {
+              // Block entry entirely
+              rejectedByHardGates++;
+              const blockMsg = `ADX=${adx.toFixed(1)} declining (slope=${adxSlope.toFixed(2)}) with weak trend strength (${trendStrength}%)`;
+              perSymbolGateAttribution.set(symbol, { gate: 'TREND_EXHAUSTION_PROTECTION', details: blockMsg });
+              
+              if (TREND_EXHAUSTION_PROTECTION.LOG_BLOCKS) {
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 TREND_EXHAUSTION_GATE: ${blockMsg}`);
+                logger.forSymbol(symbol).warn(`   → Trend is exhausted - blocking entry to prevent losses like AVAXUSDT at 19:20`);
+              }
+              
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `TREND_EXHAUSTION_PROTECTION: ${blockMsg}`,
+                {
+                  gate: "TREND_EXHAUSTION_PROTECTION",
+                  adx: adx.toFixed(1),
+                  adxSlope: adxSlope.toFixed(2),
+                  trendStrength,
+                  thresholds: {
+                    adxSlopeDeclineThreshold: TREND_EXHAUSTION_PROTECTION.ADX_SLOPE_DECLINE_THRESHOLD,
+                    trendStrengthThreshold: TREND_EXHAUSTION_PROTECTION.TREND_STRENGTH_THRESHOLD,
+                    minAdxForCheck: TREND_EXHAUSTION_PROTECTION.MIN_ADX_FOR_CHECK,
+                  }
+                },
+                trendData,
+                riskParams.ai_analysis_enabled !== false,
+                earlyOrderFlowAnalysis
+              );
+              continue;
+            }
+          }
+        }
+        
+        // ============= PHASE 12: MOMENTUM REVERSAL PROTECTION =============
+        // Expert insight: "Momentum flipping from strongly directional to neutral = reversal risk"
+        // Block same-direction entries when momentum has reversed (e.g., was -35, now -9)
+        if (MOMENTUM_REVERSAL_PROTECTION.ENABLED) {
+          const currentMomentum = smartMomentum.score;
+          
+          // Query recent signal/position momentum for this symbol
+          const momentumLookbackCutoff = new Date(Date.now() - MOMENTUM_REVERSAL_PROTECTION.LOOKBACK_MINUTES * 60 * 1000).toISOString();
+          
+          const { data: recentSignalWithMomentum } = await supabase
+            .from('trading_signals')
+            .select('id, signal_type, indicators')
+            .eq('user_id', userId)
+            .eq('symbol', symbol)
+            .gte('created_at', momentumLookbackCutoff)
+            .order('created_at', { ascending: false })
+            .limit(1);
+          
+          if (recentSignalWithMomentum && recentSignalWithMomentum.length > 0) {
+            const recentSignal = recentSignalWithMomentum[0];
+            const previousMomentum = recentSignal.indicators?.smartMomentum?.score ?? recentSignal.indicators?.momentumScore;
+            
+            if (previousMomentum !== undefined && typeof previousMomentum === 'number') {
+              const wasStronglyBearish = previousMomentum <= -MOMENTUM_REVERSAL_PROTECTION.STRONG_MOMENTUM_THRESHOLD;
+              const wasStronglyBullish = previousMomentum >= MOMENTUM_REVERSAL_PROTECTION.STRONG_MOMENTUM_THRESHOLD;
+              const nowNeutral = Math.abs(currentMomentum) < MOMENTUM_REVERSAL_PROTECTION.NEUTRAL_ZONE_THRESHOLD;
+              
+              // Check for momentum reversal against intended direction
+              let momentumReversalDetected = false;
+              let reversalType = '';
+              
+              // Block short if was strongly bearish but now neutral (momentum lost)
+              if (wasStronglyBearish && nowNeutral && derivedDirection === 'short') {
+                momentumReversalDetected = true;
+                reversalType = 'bearish_to_neutral';
+              }
+              // Block long if was strongly bullish but now neutral (momentum lost)
+              else if (wasStronglyBullish && nowNeutral && derivedDirection === 'long') {
+                momentumReversalDetected = true;
+                reversalType = 'bullish_to_neutral';
+              }
+              
+              if (momentumReversalDetected && MOMENTUM_REVERSAL_PROTECTION.BLOCK_SAME_DIRECTION) {
+                rejectedByHardGates++;
+                const blockMsg = `Momentum reversed (${reversalType}): was ${previousMomentum}, now ${currentMomentum}`;
+                perSymbolGateAttribution.set(symbol, { gate: 'MOMENTUM_REVERSAL_PROTECTION', details: blockMsg });
+                
+                if (MOMENTUM_REVERSAL_PROTECTION.LOG_BLOCKS) {
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 MOMENTUM_REVERSAL: ${blockMsg}`);
+                  logger.forSymbol(symbol).warn(`   → ${derivedDirection.toUpperCase()} blocked because momentum flipped from strong to neutral`);
+                }
+                
+                await logRejectionWithAI(
+                  supabase, userId, symbol,
+                  `MOMENTUM_REVERSAL_PROTECTION: ${blockMsg}`,
+                  {
+                    gate: "MOMENTUM_REVERSAL_PROTECTION",
+                    reversalType,
+                    previousMomentum,
+                    currentMomentum,
+                    derivedDirection,
+                    thresholds: {
+                      strongMomentumThreshold: MOMENTUM_REVERSAL_PROTECTION.STRONG_MOMENTUM_THRESHOLD,
+                      neutralZoneThreshold: MOMENTUM_REVERSAL_PROTECTION.NEUTRAL_ZONE_THRESHOLD,
+                    }
+                  },
+                  trendData,
+                  riskParams.ai_analysis_enabled !== false,
+                  earlyOrderFlowAnalysis
+                );
+                continue;
+              }
+            }
+          }
         }
         
         // ============= PHASE 14: RANGING MARKET DETECTION & PROTECTION =============
@@ -8012,7 +8262,7 @@ serve(async (req) => {
         // ============= DYNAMIC QUALITY THRESHOLD =============
         // Calculate threshold based on ADX, 1h confidence, neutral trend, and low volume for this specific symbol
         const isNeutralTrend = tradeDirectionForGate === 'neutral';
-        const MIN_QUALITY_SCORE = getMinQualityScore(adx, isInRecoveryMode, confidence1h, isNeutralTrend, lowVolumeBoost);
+        const MIN_QUALITY_SCORE = getMinQualityScore(adx, isInRecoveryMode, confidence1h, isNeutralTrend, lowVolumeBoost) + regimeTransitionQualityBoost;
         
         // Check minimum quality threshold
         if (qualityScore < MIN_QUALITY_SCORE) {
