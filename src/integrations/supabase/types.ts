@@ -776,6 +776,9 @@ export type Database = {
           ai_analysis_enabled: boolean | null
           auto_execute_signals: boolean | null
           auto_rebalance_enabled: boolean | null
+          base_position_size_percent: number | null
+          base_stop_loss_percent: number | null
+          base_take_profit_multiplier: number | null
           break_even_activation_percent: number | null
           break_even_enabled: boolean | null
           circuit_breaker_triggered: boolean | null
@@ -800,8 +803,11 @@ export type Database = {
           early_profit_lock_threshold: number | null
           early_reversal_position_size_percent: number | null
           email_notifications_enabled: boolean | null
+          enable_adx_position_scaling: boolean | null
+          enable_atr_based_stops: boolean | null
           enable_early_reversal_signals: boolean | null
           enable_pullback_signals: boolean | null
+          enable_quality_based_sizing: boolean | null
           exhaustion_block_enabled: boolean | null
           hedge_position_size_percent: number | null
           hedge_reversal_risk_max: number | null
@@ -851,6 +857,7 @@ export type Database = {
           recovery_trades_today: number | null
           regime_aware_trading: boolean | null
           require_volume_confirmation: boolean | null
+          risk_profile: string | null
           shadow_mode_enabled: boolean | null
           shadow_mode_started_at: string | null
           sms_notifications_enabled: boolean | null
@@ -873,6 +880,9 @@ export type Database = {
           ai_analysis_enabled?: boolean | null
           auto_execute_signals?: boolean | null
           auto_rebalance_enabled?: boolean | null
+          base_position_size_percent?: number | null
+          base_stop_loss_percent?: number | null
+          base_take_profit_multiplier?: number | null
           break_even_activation_percent?: number | null
           break_even_enabled?: boolean | null
           circuit_breaker_triggered?: boolean | null
@@ -897,8 +907,11 @@ export type Database = {
           early_profit_lock_threshold?: number | null
           early_reversal_position_size_percent?: number | null
           email_notifications_enabled?: boolean | null
+          enable_adx_position_scaling?: boolean | null
+          enable_atr_based_stops?: boolean | null
           enable_early_reversal_signals?: boolean | null
           enable_pullback_signals?: boolean | null
+          enable_quality_based_sizing?: boolean | null
           exhaustion_block_enabled?: boolean | null
           hedge_position_size_percent?: number | null
           hedge_reversal_risk_max?: number | null
@@ -948,6 +961,7 @@ export type Database = {
           recovery_trades_today?: number | null
           regime_aware_trading?: boolean | null
           require_volume_confirmation?: boolean | null
+          risk_profile?: string | null
           shadow_mode_enabled?: boolean | null
           shadow_mode_started_at?: string | null
           sms_notifications_enabled?: boolean | null
@@ -970,6 +984,9 @@ export type Database = {
           ai_analysis_enabled?: boolean | null
           auto_execute_signals?: boolean | null
           auto_rebalance_enabled?: boolean | null
+          base_position_size_percent?: number | null
+          base_stop_loss_percent?: number | null
+          base_take_profit_multiplier?: number | null
           break_even_activation_percent?: number | null
           break_even_enabled?: boolean | null
           circuit_breaker_triggered?: boolean | null
@@ -994,8 +1011,11 @@ export type Database = {
           early_profit_lock_threshold?: number | null
           early_reversal_position_size_percent?: number | null
           email_notifications_enabled?: boolean | null
+          enable_adx_position_scaling?: boolean | null
+          enable_atr_based_stops?: boolean | null
           enable_early_reversal_signals?: boolean | null
           enable_pullback_signals?: boolean | null
+          enable_quality_based_sizing?: boolean | null
           exhaustion_block_enabled?: boolean | null
           hedge_position_size_percent?: number | null
           hedge_reversal_risk_max?: number | null
@@ -1045,6 +1065,7 @@ export type Database = {
           recovery_trades_today?: number | null
           regime_aware_trading?: boolean | null
           require_volume_confirmation?: boolean | null
+          risk_profile?: string | null
           shadow_mode_enabled?: boolean | null
           shadow_mode_started_at?: string | null
           sms_notifications_enabled?: boolean | null

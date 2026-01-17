@@ -10277,11 +10277,74 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🎯 MASTER REGIME (${masterRegime.regime}) - position size capped at ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
-        // Final position size as percentage
-        const strategyPositionSize = (strategy.risk_settings?.positionSizePercent || 100) * positionSizeMultiplier;
-
-        // Calculate stop loss - apply momentum exhaustion override tighter stop if applicable
-        let stopLossPercent = strategy.risk_settings?.stopLossPercent || riskParams.max_risk_per_trade_percent;
+        // ============= UNIFIED RISK CALCULATION (NEW) =============
+        // Use user-configured base values from risk_parameters instead of legacy strategy templates
+        // The system applies intelligent adjustments based on market conditions
+        
+        // Get base values from unified settings (fallback to legacy values if not set)
+        const basePositionSize = riskParams.base_position_size_percent ?? 1.5;
+        const baseStopLoss = riskParams.base_stop_loss_percent ?? 2.0;
+        const baseTpMultiplier = riskParams.base_take_profit_multiplier ?? 2.5;
+        const riskProfile = riskParams.risk_profile ?? 'balanced';
+        const enableAtrStops = riskParams.enable_atr_based_stops ?? true;
+        const enableAdxScaling = riskParams.enable_adx_position_scaling ?? true;
+        const enableQualityScaling = riskParams.enable_quality_based_sizing ?? true;
+        
+        // Risk profile multipliers
+        const profileMultipliers: Record<string, { size: number; sl: number }> = {
+          conservative: { size: 0.7, sl: 0.8 },
+          balanced: { size: 1.0, sl: 1.0 },
+          aggressive: { size: 1.3, sl: 1.2 }
+        };
+        const profileMult = profileMultipliers[riskProfile] || profileMultipliers.balanced;
+        
+        // Start with base position size adjusted by risk profile
+        let unifiedPositionSize = basePositionSize * profileMult.size;
+        
+        // Apply cumulative position size multiplier from gates/overrides
+        unifiedPositionSize *= positionSizeMultiplier;
+        
+        // ADX-based position scaling (optional)
+        if (enableAdxScaling) {
+          const adxValue = trendData?.volatility?.adx || 0;
+          if (adxValue >= 35) {
+            unifiedPositionSize *= 0.85; // Late in trend, reduce
+          } else if (adxValue >= 25) {
+            unifiedPositionSize *= 1.0; // Sweet spot
+          } else if (adxValue < 18) {
+            unifiedPositionSize *= 0.6; // Weak trend, cautious
+          }
+        }
+        
+        // Quality-based sizing (optional)
+        if (enableQualityScaling) {
+          if (qualityScore >= 80) {
+            unifiedPositionSize *= 1.15; // High quality bonus
+          } else if (qualityScore < 60) {
+            unifiedPositionSize *= 0.7; // Low quality penalty
+          }
+        }
+        
+        // Cap position size
+        unifiedPositionSize = Math.max(0.2, Math.min(5.0, unifiedPositionSize));
+        
+        const strategyPositionSize = unifiedPositionSize;
+        
+        // Calculate stop loss with risk profile adjustment
+        let stopLossPercent = baseStopLoss * profileMult.sl;
+        
+        // ATR-based dynamic stops (optional)
+        if (enableAtrStops) {
+          const atr = trendData?.volatility?.atr || 0;
+          if (atr > 0 && currentPrice > 0) {
+            const atrPercent = (atr / currentPrice) * 100;
+            const atrBasedStop = atrPercent * 2.0;
+            // Blend with base stop
+            stopLossPercent = (stopLossPercent + atrBasedStop) / 2;
+            // Cap at reasonable limits
+            stopLossPercent = Math.max(1.0, Math.min(5.0, stopLossPercent));
+          }
+        }
         
         // Apply tighter stops for momentum exhaustion override entries (70% of normal = 30% tighter)
         if (momentumExhaustionOverrideApplied && momentumExhaustionStopMultiplier < 1.0) {
@@ -10296,19 +10359,23 @@ serve(async (req) => {
         }
         
         // Apply tighter stops for price action early entry (70% of normal = 30% tighter)
-        // PHASE 2 FIX: Price action early entries need tighter risk management
         if (priceActionEarlyEntryActive && PRICE_ACTION_EARLY_ENTRY_PARAMS.STOP_LOSS_MULTIPLIER < 1.0) {
           stopLossPercent *= PRICE_ACTION_EARLY_ENTRY_PARAMS.STOP_LOSS_MULTIPLIER;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📈 PRICE ACTION EARLY ENTRY - tighter stop applied: ${stopLossPercent.toFixed(2)}%`);
         }
         
-        let takeProfitPercent = strategy.risk_settings?.takeProfitPercent || stopLossPercent * 2.5;
+        // Take profit = stop loss × user-configured multiplier
+        let takeProfitPercent = stopLossPercent * baseTpMultiplier;
         
-        // Apply tighter TP for price action early entry (1.2x multiplier = closer TP)
+        // Apply tighter TP for price action early entry
         if (priceActionEarlyEntryActive && PRICE_ACTION_EARLY_ENTRY_PARAMS.TAKE_PROFIT_MULTIPLIER < 2.5) {
-          takeProfitPercent *= (PRICE_ACTION_EARLY_ENTRY_PARAMS.TAKE_PROFIT_MULTIPLIER / 2.5);
+          takeProfitPercent *= (PRICE_ACTION_EARLY_ENTRY_PARAMS.TAKE_PROFIT_MULTIPLIER / baseTpMultiplier);
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📈 PRICE ACTION EARLY ENTRY - tighter TP applied: ${takeProfitPercent.toFixed(2)}%`);
         }
+        
+        // Log unified risk calculation
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 💰 UNIFIED RISK: Profile=${riskProfile}, Position=${strategyPositionSize.toFixed(2)}% (base ${basePositionSize}%), SL=${stopLossPercent.toFixed(2)}% (base ${baseStopLoss}%), TP=${takeProfitPercent.toFixed(2)}% (${baseTpMultiplier}x)`);
+
 
         // Map "neutral" to "ranging" for database enum compatibility
         const dbTrend = trend === "neutral" ? "ranging" : trend;

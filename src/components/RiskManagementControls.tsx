@@ -6,12 +6,13 @@ import { Switch } from '@/components/ui/switch';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { usePositions } from '@/hooks/usePositions';
 import { useRealtimePricesContext } from '@/contexts/RealtimePricesContext';
-import { Shield, AlertTriangle, DollarSign, TrendingDown } from 'lucide-react';
+import { Shield, AlertTriangle, DollarSign, TrendingDown, Target } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useEffect } from 'react';
 import { TrailingStopSettings } from '@/components/TrailingStopSettings';
 import { DivergenceSettings } from '@/components/DivergenceSettings';
 import { LossManagementSettings } from '@/components/LossManagementSettings';
+import { UnifiedRiskSettings } from '@/components/UnifiedRiskSettings';
 import {
   Accordion,
   AccordionContent,
@@ -157,7 +158,25 @@ export const RiskManagementControls = () => {
         </Card>
       </div>
 
-      <Accordion type="multiple" defaultValue={["basic", "advanced", "position"]} className="space-y-4">
+      <Accordion type="multiple" defaultValue={["trade-sizing", "basic", "position"]} className="space-y-4">
+        {/* Trade Sizing (NEW - Primary) */}
+        <AccordionItem value="trade-sizing">
+          <Card>
+            <AccordionTrigger className="px-6 py-4 hover:no-underline">
+              <div className="flex items-center gap-3">
+                <Target className="h-5 w-5 text-primary" />
+                <div className="text-left">
+                  <h3 className="text-lg font-semibold">Trade Sizing</h3>
+                  <p className="text-sm text-muted-foreground">Position size, stop loss, and take profit</p>
+                </div>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="px-6 pb-6">
+              <UnifiedRiskSettings />
+            </AccordionContent>
+          </Card>
+        </AccordionItem>
+
         {/* Basic Risk Parameters */}
         <AccordionItem value="basic">
           <Card>
