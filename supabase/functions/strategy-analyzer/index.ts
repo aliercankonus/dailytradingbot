@@ -7229,22 +7229,58 @@ serve(async (req) => {
           // Direction from MACD histogram during squeeze
           const squeezeDirection: "long" | "short" = (momentum?.macdHistogram || 0) > 0 ? "long" : "short";
           
-          // StochRSI loading zone check
+          // StochRSI loading zone check - extended zones for extreme conditions
           const stochRsiK1hForSqueeze = trendData.stochRsi?.["1h"]?.k ?? 50;
           const stochRsiInLoadingZone = squeezeDirection === "long"
             ? stochRsiK1hForSqueeze <= SQUEEZE_MOMENTUM_BYPASS_PARAMS.LONG_MAX_STOCHRSI_K
             : stochRsiK1hForSqueeze >= SQUEEZE_MOMENTUM_BYPASS_PARAMS.SHORT_MIN_STOCHRSI_K;
+          
+          // EXTREME StochRSI check - for alternative bypass when squeeze detection fails
+          // Long: StochRSI K <= 25 (deeply oversold)
+          // Short: StochRSI K >= 75 (deeply overbought)
+          const stochRsiK4h = trendData.stochRsi?.["4h"]?.k ?? 50;
+          const isStochRsiExtremeFor4h = squeezeDirection === "long"
+            ? stochRsiK4h <= 30 // 4h deeply oversold
+            : stochRsiK4h >= 70; // 4h deeply overbought
+          const isStochRsiExtremeFor1h = squeezeDirection === "long"
+            ? stochRsiK1hForSqueeze <= 35 // 1h oversold area
+            : stochRsiK1hForSqueeze >= 65; // 1h overbought area
           
           // Order flow confirmation (optional strength boost)
           const orderFlowConfirms = !SQUEEZE_MOMENTUM_BYPASS_PARAMS.USE_ORDER_FLOW_CONFIRMATION ||
             ((earlyOrderFlowAnalysis?.score ?? 0) >= SQUEEZE_MOMENTUM_BYPASS_PARAMS.MIN_ORDER_FLOW_SCORE &&
              earlyOrderFlowAnalysis?.signal === (squeezeDirection === "long" ? "buy" : "sell"));
           
-          const squeezeBypassApplies = 
-            squeezeBypassEnabled &&
+          // ALTERNATIVE BYPASS PATH: Strong momentum + extreme StochRSI + low ADX
+          // This catches the "pre-expansion" regime where:
+          // - Trend is neutral (ADX < 25) so traditional squeeze may not trigger
+          // - But momentum is confirmed and building
+          // - And price is at extreme (StochRSI oversold/overbought)
+          // - MACD histogram magnitude is significant (>= 5.0 for extra confidence)
+          const strongMomentumBypassPath = 
+            momentumQualifiesForSqueeze &&
+            !isValidSqueeze && // Squeeze not detected by percentile method
+            adx >= 18 && adx < 25 && // Low-ADX transitional zone
+            isStochRsiExtremeFor4h && // 4h StochRSI extreme
+            isStochRsiExtremeFor1h && // 1h StochRSI also loaded
+            Math.abs(momentum?.macdHistogram || 0) >= 5.0; // Strong MACD signal
+          
+          // Standard squeeze bypass
+          const standardSqueezeBypass = 
             isValidSqueeze &&
             momentumQualifiesForSqueeze &&
             stochRsiInLoadingZone;
+          
+          const squeezeBypassApplies = 
+            squeezeBypassEnabled &&
+            (standardSqueezeBypass || strongMomentumBypassPath);
+          
+          // DEBUG: Log squeeze bypass check details
+          logger.forSymbol(symbol).info(`🔍 SQUEEZE_BYPASS_CHECK: enabled=${squeezeBypassEnabled} isSqueeze=${bbSqueezeResult.isSqueeze} intensity=${bbSqueezeResult.squeezeIntensity?.toFixed(0) ?? 'N/A'}% (need>=${SQUEEZE_MOMENTUM_BYPASS_PARAMS.MIN_SQUEEZE_INTENSITY})`);
+          logger.forSymbol(symbol).info(`   → Momentum: state=${momentum?.state} genuine=${momentum?.genuineMomentum} ADX=${adx.toFixed(1)} (need>=${SQUEEZE_MOMENTUM_BYPASS_PARAMS.MIN_ADX})`);
+          logger.forSymbol(symbol).info(`   → MACD: expanding=${momentum?.macdExpanding} histogram=${(momentum?.macdHistogram ?? 0).toFixed(2)} (need>=2, strong>=5)`);
+          logger.forSymbol(symbol).info(`   → StochRSI: 1h K=${stochRsiK1hForSqueeze.toFixed(1)} 4h K=${stochRsiK4h.toFixed(1)} | extreme4h=${isStochRsiExtremeFor4h} extreme1h=${isStochRsiExtremeFor1h}`);
+          logger.forSymbol(symbol).info(`   → Bypass paths: standardSqueeze=${standardSqueezeBypass} strongMomentum=${strongMomentumBypassPath} → APPLIES=${squeezeBypassApplies}`);
           
           // Track squeeze bypass position multiplier for later use
           let squeezeBypassPositionMultiplier = 1.0;
