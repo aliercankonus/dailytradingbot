@@ -117,6 +117,9 @@ import {
   TREND_EXHAUSTION_PROTECTION,
   REGIME_TRANSITION_PROTECTION,
   MOMENTUM_REVERSAL_PROTECTION,
+  // NEW: Squeeze momentum bypass for regime-aware gate system
+  SQUEEZE_MOMENTUM_BYPASS_PARAMS,
+  SQUEEZE_BREAKOUT_SIGNAL_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -7206,65 +7209,150 @@ serve(async (req) => {
         const is1hDirectional = htfTrend1h === "bullish" || htfTrend1h === "bearish";
         
         if (is4hNeutral) {
-          // ============= NEW: CONFIRMED MOMENTUM BYPASS =============
-          // When momentum is confirmed with genuine momentum and ADX is trending,
-          // bypass the strict neutral 4h confidence gate since momentum confirmation
-          // provides sufficient directional evidence
-          const momentumConfirmedBypass = (
+          // ============= NEW: SQUEEZE MOMENTUM BYPASS =============
+          // In squeeze regimes, neutral trends are EXPECTED - use momentum for direction
+          // This bypass fires BEFORE the standard momentum bypass to catch compression-before-breakout patterns
+          const squeezeBypassEnabled = SQUEEZE_MOMENTUM_BYPASS_PARAMS.ENABLED;
+          const bbSqueezeResult = bbSqueeze; // From earlier calculation (line ~2912)
+          
+          const isValidSqueeze = 
+            bbSqueezeResult.isSqueeze && 
+            bbSqueezeResult.squeezeIntensity >= SQUEEZE_MOMENTUM_BYPASS_PARAMS.MIN_SQUEEZE_INTENSITY;
+          
+          const momentumQualifiesForSqueeze = 
             momentum?.state === "confirmed" &&
             momentum?.genuineMomentum === true &&
-            adx >= 25 &&  // ADX must be in trending range
-            (momentum?.macdExpanding === true || momentum?.adxRising === true)
-          );
+            adx >= SQUEEZE_MOMENTUM_BYPASS_PARAMS.MIN_ADX &&  // 18, not 25!
+            momentum?.macdExpanding === true &&
+            Math.abs(momentum?.macdHistogram || 0) >= SQUEEZE_MOMENTUM_BYPASS_PARAMS.MIN_MACD_MAGNITUDE;
           
-          // Relaxed thresholds: 55% for 4h OR directional 1h with 50%+ OR momentum confirmed
-          const passesNeutralGate = conf4hForGate >= 55 || 
-            (is1hDirectional && conf1hForGate >= 50) ||
-            momentumConfirmedBypass;
+          // Direction from MACD histogram during squeeze
+          const squeezeDirection: "long" | "short" = (momentum?.macdHistogram || 0) > 0 ? "long" : "short";
           
-          if (!passesNeutralGate) {
-            rejectedByHardGates++;
-            perSymbolGateAttribution.set(symbol, { gate: 'NEUTRAL_4H_LOW_CONFIDENCE', details: `4h=${conf4hForGate.toFixed(0)}%, 1h=${conf1hForGate.toFixed(0)}%` });
-            await logRejectionWithAI(
-              supabase, userId, symbol,
-              `HARD GATE: Neutral 4h requires 55%+ confidence OR directional 1h with 50%+ OR confirmed momentum (4h=${trend4hForNeutralGate} ${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`,
-              { 
-                gate: "NEUTRAL_4H_LOW_CONFIDENCE",
-                trend4h: trend4hForNeutralGate,
-                confidence4h: conf4hForGate,
-                trend1h: htfTrend1h,
-                confidence1h: conf1hForGate,
-                requiredConfidence: 55,
-                is1hDirectional,
-                adx: adx.toFixed(1),
-                momentumConfirmedBypassChecked: true,
-                momentumConfirmed: momentum?.state === "confirmed",
-                genuineMomentum: momentum?.genuineMomentum === true,
-                macdExpanding: momentum?.macdExpanding === true,
-                momentum: {
-                  confirms: momentum?.confirms ?? false,
-                  state: momentum?.state ?? 'none',
-                  hasDivergence: momentum?.hasDivergence ?? false,
-                  lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend ?? false,
-                  macdDirectionAligned: momentum?.macdDirectionAligned ?? false,
-                  macdExpanding: momentum?.macdExpanding ?? false,
-                  macdHistogram: momentum?.macdHistogram?.toFixed(4) ?? '0.0000',
-                  consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
-                  consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
-                  consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
-                }
-              },
-              trendData,
-              riskParams.ai_analysis_enabled !== false
+          // StochRSI loading zone check
+          const stochRsiK1hForSqueeze = trendData.stochRsi?.["1h"]?.k ?? 50;
+          const stochRsiInLoadingZone = squeezeDirection === "long"
+            ? stochRsiK1hForSqueeze <= SQUEEZE_MOMENTUM_BYPASS_PARAMS.LONG_MAX_STOCHRSI_K
+            : stochRsiK1hForSqueeze >= SQUEEZE_MOMENTUM_BYPASS_PARAMS.SHORT_MIN_STOCHRSI_K;
+          
+          // Order flow confirmation (optional strength boost)
+          const orderFlowConfirms = !SQUEEZE_MOMENTUM_BYPASS_PARAMS.USE_ORDER_FLOW_CONFIRMATION ||
+            ((earlyOrderFlowAnalysis?.score ?? 0) >= SQUEEZE_MOMENTUM_BYPASS_PARAMS.MIN_ORDER_FLOW_SCORE &&
+             earlyOrderFlowAnalysis?.signal === (squeezeDirection === "long" ? "buy" : "sell"));
+          
+          const squeezeBypassApplies = 
+            squeezeBypassEnabled &&
+            isValidSqueeze &&
+            momentumQualifiesForSqueeze &&
+            stochRsiInLoadingZone;
+          
+          // Track squeeze bypass position multiplier for later use
+          let squeezeBypassPositionMultiplier = 1.0;
+          let squeezeBypassUsed = false;
+          
+          if (squeezeBypassApplies) {
+            // BYPASS THE GATE - squeeze + momentum is sufficient evidence
+            squeezeBypassUsed = true;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 SQUEEZE_MOMENTUM_BYPASS: Bypassing NEUTRAL_4H_LOW_CONFIDENCE`);
+            logger.forSymbol(symbol).info(`   Squeeze: intensity=${bbSqueezeResult.squeezeIntensity}%, width_pctl=${bbSqueezeResult.bbWidthPercentile}%`);
+            logger.forSymbol(symbol).info(`   Momentum: confirmed=${momentum?.state}, genuine=${momentum?.genuineMomentum}, MACD=${(momentum?.macdHistogram ?? 0).toFixed(2)}`);
+            logger.forSymbol(symbol).info(`   Direction derived: ${squeezeDirection.toUpperCase()}, StochRSI K=${stochRsiK1hForSqueeze.toFixed(1)}`);
+            
+            // Apply position size multiplier for squeeze entries
+            squeezeBypassPositionMultiplier = orderFlowConfirms 
+              ? SQUEEZE_MOMENTUM_BYPASS_PARAMS.ORDER_FLOW_CONFIRMED_MULTIPLIER
+              : SQUEEZE_MOMENTUM_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
+            
+            // Log squeeze bypass and record the source
+            derivedSource = "squeeze-momentum-bypass";
+            logger.forSymbol(symbol).info(`   → Squeeze bypass active, using derivedDirection=${derivedDirection.toUpperCase()}, squeezeDirection=${squeezeDirection.toUpperCase()}`);
+            
+            // DON'T reject - continue to next gates
+          } else {
+            // ============= EXISTING: CONFIRMED MOMENTUM BYPASS =============
+            // When momentum is confirmed with genuine momentum and ADX is trending,
+            // bypass the strict neutral 4h confidence gate since momentum confirmation
+            // provides sufficient directional evidence
+            const momentumConfirmedBypass = (
+              momentum?.state === "confirmed" &&
+              momentum?.genuineMomentum === true &&
+              adx >= 25 &&  // ADX must be in trending range
+              (momentum?.macdExpanding === true || momentum?.adxRising === true)
             );
-            continue;
+            
+            // Relaxed thresholds: 55% for 4h OR directional 1h with 50%+ OR momentum confirmed
+            const passesNeutralGate = conf4hForGate >= 55 || 
+              (is1hDirectional && conf1hForGate >= 50) ||
+              momentumConfirmedBypass;
+            
+            if (!passesNeutralGate) {
+              rejectedByHardGates++;
+              perSymbolGateAttribution.set(symbol, { gate: 'NEUTRAL_4H_LOW_CONFIDENCE', details: `4h=${conf4hForGate.toFixed(0)}%, 1h=${conf1hForGate.toFixed(0)}%` });
+              
+              // Build squeeze bypass result for logging
+              const squeezeBypassResult = {
+                isSqueezeValid: isValidSqueeze,
+                squeezeIntensity: bbSqueezeResult.squeezeIntensity,
+                bbWidthPercentile: bbSqueezeResult.bbWidthPercentile,
+                momentumQualified: momentumQualifiesForSqueeze,
+                adx: adx,
+                adxRequired: SQUEEZE_MOMENTUM_BYPASS_PARAMS.MIN_ADX,
+                stochRsiK: stochRsiK1hForSqueeze,
+                stochRsiInZone: stochRsiInLoadingZone,
+                orderFlowConfirms: orderFlowConfirms,
+                orderFlowScore: earlyOrderFlowAnalysis?.score ?? 0,
+                macdHistogram: momentum?.macdHistogram ?? 0,
+                macdExpanding: momentum?.macdExpanding ?? false,
+                failedRequirement: !squeezeBypassEnabled ? "disabled" :
+                  !isValidSqueeze ? "squeeze_not_valid" :
+                  !momentumQualifiesForSqueeze ? "momentum_not_qualified" :
+                  !stochRsiInLoadingZone ? "stochrsi_not_in_zone" : null
+              };
+              
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `HARD GATE: Neutral 4h requires 55%+ confidence OR directional 1h with 50%+ OR confirmed momentum (4h=${trend4hForNeutralGate} ${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`,
+                { 
+                  gate: "NEUTRAL_4H_LOW_CONFIDENCE",
+                  trend4h: trend4hForNeutralGate,
+                  confidence4h: conf4hForGate,
+                  trend1h: htfTrend1h,
+                  confidence1h: conf1hForGate,
+                  requiredConfidence: 55,
+                  is1hDirectional,
+                  adx: adx.toFixed(1),
+                  momentumConfirmedBypassChecked: true,
+                  momentumConfirmed: momentum?.state === "confirmed",
+                  genuineMomentum: momentum?.genuineMomentum === true,
+                  macdExpanding: momentum?.macdExpanding === true,
+                  // NEW: Include squeeze bypass attempt details
+                  squeezeBypassChecked: true,
+                  squeezeBypassResult,
+                  momentum: {
+                    confirms: momentum?.confirms ?? false,
+                    state: momentum?.state ?? 'none',
+                    hasDivergence: momentum?.hasDivergence ?? false,
+                    lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend ?? false,
+                    macdDirectionAligned: momentum?.macdDirectionAligned ?? false,
+                    macdExpanding: momentum?.macdExpanding ?? false,
+                    macdHistogram: momentum?.macdHistogram?.toFixed(4) ?? '0.0000',
+                    consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
+                    consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
+                    consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
+                  }
+                },
+                trendData,
+                riskParams.ai_analysis_enabled !== false
+              );
+              continue;
+            }
+            
+            // Log if momentum bypass was used
+            if (momentumConfirmedBypass && !(conf4hForGate >= 55) && !(is1hDirectional && conf1hForGate >= 50)) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 MOMENTUM CONFIRMED BYPASS: Neutral 4h gate bypassed due to confirmed momentum (ADX=${adx.toFixed(1)}, MACD expanding=${momentum?.macdExpanding})`);
+            }
           }
-          
-          // Log if momentum bypass was used
-          if (momentumConfirmedBypass && !(conf4hForGate >= 55) && !(is1hDirectional && conf1hForGate >= 50)) {
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 MOMENTUM CONFIRMED BYPASS: Neutral 4h gate bypassed due to confirmed momentum (ADX=${adx.toFixed(1)}, MACD expanding=${momentum?.macdExpanding})`);
-          }
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Neutral 4h gate passed (4h=${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Neutral 4h gate passed (4h=${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%${squeezeBypassUsed ? ', via SQUEEZE_BYPASS' : ''})`);
         }
         
         // ============= PHASE 2 OPTIMIZATION: MACD ALIGNMENT GATE (DURATION + MAGNITUDE) =============
