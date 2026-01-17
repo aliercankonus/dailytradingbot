@@ -22,6 +22,16 @@ interface UserProcessResult {
     trendFollowing?: number;
     other?: number;
   };
+  // Phase 1: Detailed rejection tracking
+  rejectionBreakdown?: {
+    byHardGates?: number;
+    byQuality?: number;
+    byStrategy?: number;
+    byReversalRisk?: number;
+    byRegime?: number;
+    byStochRsiExtreme?: number;
+  };
+  perSymbolAttribution?: Record<string, { gate: string; details: string }>;
 }
 
 serve(async (req) => {
@@ -135,7 +145,36 @@ serve(async (req) => {
 
             const signalsGenerated = analyzerResult?.totalSignalsGenerated || 0;
             const signalsExecuted = analyzerResult?.executedSignals || 0;
-            const rejected = analyzerResult?.rejectedByMultiTimeframeAnalysis || 0;
+            
+            // ===== PHASE 1: COMPREHENSIVE REJECTION LOGGING =====
+            // Extract ALL rejection categories from analyzer result for proper visibility
+            const rejections = analyzerResult?.rejections || {};
+            const totalRejected = (rejections.byHardGates || 0) + 
+                                  (rejections.byQuality || 0) + 
+                                  (rejections.byStrategy || 0) +
+                                  (rejections.byReversalRisk || 0) +
+                                  (rejections.byRegime || 0) +
+                                  (rejections.byStochRsiExtreme || 0);
+            
+            // Get per-symbol gate attribution for detailed debugging
+            const perSymbolAttribution = analyzerResult?.perSymbolAttribution || {};
+            
+            // Log detailed rejections for each active symbol
+            const activeSymbols = Object.keys(perSymbolAttribution);
+            if (activeSymbols.length > 0) {
+              userLogger.info(`📊 PER-SYMBOL GATE ATTRIBUTION:`);
+              for (const sym of activeSymbols) {
+                const attr = perSymbolAttribution[sym];
+                if (attr && attr.gate) {
+                  userLogger.info(`   ${sym}: ${attr.gate} → ${attr.details || 'no details'}`);
+                }
+              }
+            }
+            
+            // Log rejection breakdown
+            if (totalRejected > 0) {
+              userLogger.info(`📊 REJECTION BREAKDOWN: HardGates=${rejections.byHardGates || 0}, Quality=${rejections.byQuality || 0}, Strategy=${rejections.byStrategy || 0}, Reversal=${rejections.byReversalRisk || 0}, Regime=${rejections.byRegime || 0}, StochRSI=${rejections.byStochRsiExtreme || 0}`);
+            }
             
             // Extract strategy type breakdown from analyzer result if available
             const signalDetails = analyzerResult?.signalDetails || [];
@@ -160,7 +199,7 @@ serve(async (req) => {
               }
             }
 
-            userLogger.summary(`Generated ${signalsGenerated} signals, executed ${signalsExecuted}, rejected ${rejected}`);
+            userLogger.summary(`Generated ${signalsGenerated} signals, executed ${signalsExecuted}, rejected ${totalRejected} (gates=${rejections.byHardGates || 0}, quality=${rejections.byQuality || 0}, strategy=${rejections.byStrategy || 0})`);
             if (signalsExecuted > 0) {
               userLogger.info(`Strategy breakdown: Momentum=${strategyBreakdown.momentum}, MeanReversion=${strategyBreakdown.meanReversion}, TrendFollow=${strategyBreakdown.trendFollowing}, Other=${strategyBreakdown.other}`);
             }
@@ -170,7 +209,9 @@ serve(async (req) => {
               success: true,
               signals: signalsGenerated,
               executed: signalsExecuted,
-              rejected,
+              rejected: totalRejected,
+              rejectionBreakdown: totalRejected > 0 ? rejections : undefined,
+              perSymbolAttribution: activeSymbols.length > 0 ? perSymbolAttribution : undefined,
               message: analyzerResult?.message || 'Auto-trader processing completed',
               strategyBreakdown: signalsExecuted > 0 ? strategyBreakdown : undefined,
             };

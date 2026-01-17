@@ -2172,7 +2172,18 @@ serve(async (req) => {
     const BASE_MIN_QUALITY_SCORE = QUALITY_THRESHOLDS.BASE_MIN;
     const DEFAULT_MIN_QUALITY = BASE_MIN_QUALITY_SCORE;
     
-    const getMinQualityScore = (adx: number, inRecovery: boolean, confidence1h?: number, isNeutralTrend?: boolean, lowVolumeBoost: number = 0): number => {
+    // ============= PHASE 4: ENHANCED QUALITY THRESHOLD WITH EARLY TREND DETECTION =============
+    // Added: momentumScore and adxRising parameters for early trend exception
+    const getMinQualityScore = (
+      adx: number, 
+      inRecovery: boolean, 
+      confidence1h?: number, 
+      isNeutralTrend?: boolean, 
+      lowVolumeBoost: number = 0,
+      momentumScore: number = 0,      // NEW: Smart momentum score for early trend detection
+      adxRising: boolean = false,     // NEW: ADX direction for early trend detection
+      macdExpanding: boolean = false  // NEW: MACD expansion for genuine momentum
+    ): number => {
       let baseThreshold: number;
       
       if (inRecovery) {
@@ -2207,8 +2218,32 @@ serve(async (req) => {
         baseThreshold = BASE_MIN_QUALITY_SCORE;
       }
       
+      // ===== PHASE 4: EARLY TREND DETECTION EXCEPTION =====
+      // Skip or reduce lowVolumeBoost when genuine momentum is present
+      // This catches ETH-type scenarios where volume is temporarily depressed but momentum is real
+      let effectiveLowVolumeBoost = lowVolumeBoost;
+      
+      // Conditions for early trend exception:
+      // 1. Smart momentum score >= 12 (indicating genuine momentum)
+      // 2. MACD is expanding (confirming directional pressure)
+      // 3. ADX is rising OR already >= 18 (trend is building/present)
+      const hasGenuineMomentum = momentumScore >= 12;
+      const hasExpandingMacd = macdExpanding;
+      const hasTrendEvidence = adxRising || adx >= 18;
+      
+      const qualifiesForEarlyTrendException = hasGenuineMomentum && hasExpandingMacd && hasTrendEvidence;
+      
+      if (qualifiesForEarlyTrendException && lowVolumeBoost > 0) {
+        // Reduce or skip the low volume boost when genuine momentum is present
+        // Halve the boost instead of eliminating it completely (conservative approach)
+        effectiveLowVolumeBoost = Math.floor(lowVolumeBoost / 2);
+        
+        // Log when early trend exception is applied (will be logged in the main loop)
+        // This is just a marker that can be used for logging
+      }
+      
       // Apply low-volume boost (informational tightening during low-activity periods)
-      return baseThreshold + lowVolumeBoost;
+      return baseThreshold + effectiveLowVolumeBoost;
     };
     
     if (isInRecoveryMode) {
@@ -6872,7 +6907,22 @@ serve(async (req) => {
         // ============= CONTEXT-AWARE MOMENTUM GATE FOR PULLBACK ENTRIES =============
         // Pullbacks by definition lack strong momentum - that's the opportunity!
         // Detect pullback setups and use reduced momentum threshold (3 vs 5)
-        const earlyMomentumScore = getMomentumScore(momentum, adx, trendData.volatility?.adxRising ?? false);
+        const legacyMomentumScore = getMomentumScore(momentum, adx, trendData.volatility?.adxRising ?? false);
+        
+        // ===== PHASE 2 FIX: UNIFIED MOMENTUM GATING =====
+        // The legacy getMomentumScore() can return 0 while smartMomentum.score shows 15-20
+        // This mismatch causes AVAX-type rejections where momentum is clearly present
+        // Solution: Use the HIGHER of the two scores to prevent false rejections
+        // Normalize smartMomentum.score from 0-100 scale to 0-10 gate scale
+        const normalizedSmartMomentumScore = Math.round(smartMomentum.score / 10);
+        
+        // Use the higher score - if either system sees momentum, we have momentum
+        const earlyMomentumScore = Math.max(legacyMomentumScore, normalizedSmartMomentumScore);
+        
+        // Log when smart momentum rescued a would-be rejection
+        if (normalizedSmartMomentumScore > legacyMomentumScore && normalizedSmartMomentumScore >= 5) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🔧 UNIFIED MOMENTUM: smartMomentum.score=${smartMomentum.score} (normalized=${normalizedSmartMomentumScore}) > legacy=${legacyMomentumScore} → using ${earlyMomentumScore}`);
+        }
         
         // ===== STOCHRSI DATA VALIDATION =====
         // Validate StochRSI values before pullback detection to prevent false signals
@@ -8429,8 +8479,13 @@ serve(async (req) => {
 
         // ============= DYNAMIC QUALITY THRESHOLD =============
         // Calculate threshold based on ADX, 1h confidence, neutral trend, and low volume for this specific symbol
+        // PHASE 4: Now includes momentum data for early trend detection exception
         const isNeutralTrend = tradeDirectionForGate === 'neutral';
-        const MIN_QUALITY_SCORE = getMinQualityScore(adx, isInRecoveryMode, confidence1h, isNeutralTrend, lowVolumeBoost) + regimeTransitionQualityBoost;
+        const macdExpandingForQuality = momentum?.macdExpanding === true;
+        const MIN_QUALITY_SCORE = getMinQualityScore(
+          adx, isInRecoveryMode, confidence1h, isNeutralTrend, lowVolumeBoost,
+          smartMomentum.score, smartAdxRising, macdExpandingForQuality
+        ) + regimeTransitionQualityBoost;
         
         // Check minimum quality threshold
         if (qualityScore < MIN_QUALITY_SCORE) {
@@ -9573,6 +9628,89 @@ serve(async (req) => {
             
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} NEAR-QUALITY FALLBACK: quality=${qualityScore}, ADX=${adx.toFixed(1)}, direction=${nearQualityDirection}, reversal=${reversalScore}`);
             logger.forSymbol(symbol).info(`   → Position size reduced to ${NEAR_QUALITY_POSITION_MULT * 100}% for near-quality entry`);
+          }
+        }
+        
+        // ============= PHASE 3: ADAPTIVE TREND ENTRY FALLBACK =============
+        // When quality passes base threshold (55+) but no strategy matched
+        // This captures BNB-type scenarios where everything looks good but no template fits
+        // Uses derivedDirection with conservative position sizing
+        const ADAPTIVE_FALLBACK_MIN_QUALITY = 55;  // Lowered from 70
+        const ADAPTIVE_FALLBACK_MIN_HTF_CONF = 55; // Lowered from 60
+        const ADAPTIVE_FALLBACK_MAX_REVERSAL = 45; // Slightly higher tolerance
+        const ADAPTIVE_FALLBACK_POSITION_MULT = 0.35; // Conservative position
+        
+        if (candidates.length === 0 && qualityScore >= ADAPTIVE_FALLBACK_MIN_QUALITY) {
+          const conf4h = stochFilterConf4h || 0;
+          const conf1h = stochFilterConf1h || 0;
+          const htf4hDir = htfTrend4h;
+          const htf1hDir = htfTrend1h;
+          const reversalScore = unifiedReversal.score;
+          
+          // Use derivedDirection if available, otherwise derive from HTF
+          let adaptiveFallbackDirection: "long" | "short" | null = null;
+          
+          if (derivedDirection === "long" || derivedDirection === "short") {
+            adaptiveFallbackDirection = derivedDirection;
+          } else if (htf4hDir === 'bullish' && conf4h >= ADAPTIVE_FALLBACK_MIN_HTF_CONF) {
+            adaptiveFallbackDirection = 'long';
+          } else if (htf4hDir === 'bearish' && conf4h >= ADAPTIVE_FALLBACK_MIN_HTF_CONF) {
+            adaptiveFallbackDirection = 'short';
+          } else if (htf1hDir === 'bullish' && conf1h >= 60) {
+            adaptiveFallbackDirection = 'long';
+          } else if (htf1hDir === 'bearish' && conf1h >= 60) {
+            adaptiveFallbackDirection = 'short';
+          }
+          
+          // Momentum check - require at least one momentum signal
+          const hasMomentumEvidence = 
+            momentum?.state === 'confirmed' || 
+            momentum?.state === 'building' ||
+            smartMomentum.score >= 10 ||
+            (momentum?.macdExpanding === true && adx >= 18);
+          
+          const canUseAdaptiveFallback = 
+            adaptiveFallbackDirection !== null &&
+            hasMomentumEvidence &&
+            reversalScore < ADAPTIVE_FALLBACK_MAX_REVERSAL;
+          
+          if (canUseAdaptiveFallback && adaptiveFallbackDirection) {
+            // Create adaptive fallback candidate
+            const adaptiveFallbackStrategy = {
+              id: 'adaptive-trend-entry',
+              name: `Adaptive Trend Entry (Q=${qualityScore}, dir=${adaptiveFallbackDirection})`,
+              risk_settings: {
+                stopLossPercent: 2.0,  // Tighter stops for adaptive
+                takeProfitPercent: 3.5,
+                positionSizePercent: 1,
+                priority: 2
+              }
+            };
+            
+            const adaptiveFallbackIndicators = new Map<string, number>();
+            adaptiveFallbackIndicators.set("Price", currentPrice);
+            
+            candidates.push({
+              strategy: adaptiveFallbackStrategy,
+              score: qualityScore,
+              indicatorValues: adaptiveFallbackIndicators,
+              signalType: adaptiveFallbackDirection,
+              positionSizeMultiplier: ADAPTIVE_FALLBACK_POSITION_MULT,
+              convergenceEntry: false
+            });
+            
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 ADAPTIVE TREND ENTRY: No strategy matched but conditions good`);
+            logger.forSymbol(symbol).info(`   → Quality=${qualityScore}, Direction=${adaptiveFallbackDirection}, Momentum=${momentum?.state}/${smartMomentum.score}`);
+            logger.forSymbol(symbol).info(`   → HTF: 4h=${htf4hDir} (${conf4h}%), 1h=${htf1hDir} (${conf1h}%), Reversal=${reversalScore}`);
+            logger.forSymbol(symbol).info(`   → Position size reduced to ${ADAPTIVE_FALLBACK_POSITION_MULT * 100}% for adaptive entry`);
+          } else {
+            // Log why adaptive fallback didn't apply for debugging
+            const blockReasons: string[] = [];
+            if (!adaptiveFallbackDirection) blockReasons.push('no direction');
+            if (!hasMomentumEvidence) blockReasons.push(`no momentum (state=${momentum?.state}, smart=${smartMomentum.score})`);
+            if (reversalScore >= ADAPTIVE_FALLBACK_MAX_REVERSAL) blockReasons.push(`reversal=${reversalScore}>=${ADAPTIVE_FALLBACK_MAX_REVERSAL}`);
+            
+            logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} ADAPTIVE TREND ENTRY blocked: ${blockReasons.join(', ')}`);
           }
         }
 
