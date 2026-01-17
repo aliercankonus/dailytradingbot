@@ -3538,3 +3538,76 @@ export const MOMENTUM_REVERSAL_PROTECTION = {
   LOG_BLOCKS: true,
 } as const;
 
+// ============= SQUEEZE MOMENTUM BYPASS PARAMETERS =============
+// NEW: Regime-aware gate system - allows entries during Bollinger squeeze when momentum is confirmed
+// In squeeze regimes, neutral trends are EXPECTED - use momentum for direction instead of trend confidence
+// This addresses the NEUTRAL_4H_LOW_CONFIDENCE gate blocking valid entries during compression phases
+export const SQUEEZE_MOMENTUM_BYPASS_PARAMS = {
+  ENABLED: true,
+  
+  // ===== SQUEEZE DETECTION REQUIREMENTS =====
+  // Use existing detectBollingerSqueeze() output
+  MIN_SQUEEZE_INTENSITY: 60,           // squeezeIntensity >= 60 (tight squeeze)
+  MAX_BB_WIDTH_PERCENTILE: 25,         // bbWidthPercentile <= 25 (bottom 25%)
+  
+  // ===== MOMENTUM REQUIREMENTS FOR BYPASS =====
+  // Much lower ADX threshold during squeeze (ADX naturally low in compression)
+  MIN_ADX: 18,                         // Down from 25 - squeeze environments have low ADX
+  REQUIRE_MOMENTUM_CONFIRMED: true,    // momentum.state === "confirmed"
+  REQUIRE_GENUINE_MOMENTUM: true,      // momentum.genuineMomentum === true
+  
+  // ===== MACD REQUIREMENTS =====
+  REQUIRE_MACD_EXPANDING: true,        // MACD histogram must be expanding
+  MIN_MACD_MAGNITUDE: 2.0,             // Minimum histogram magnitude for direction confidence
+  
+  // ===== STOCHRSI LOADING ZONE =====
+  // For LONG: StochRSI should be in lower half (not overbought)
+  // For SHORT: StochRSI should be in upper half (not oversold)
+  LONG_MAX_STOCHRSI_K: 55,             // K <= 55 for long entries during squeeze
+  SHORT_MIN_STOCHRSI_K: 45,            // K >= 45 for short entries during squeeze
+  
+  // ===== ORDER FLOW CONFIRMATION (OPTIONAL BUT STRENGTHENS) =====
+  USE_ORDER_FLOW_CONFIRMATION: true,
+  MIN_ORDER_FLOW_SCORE: 55,            // Order flow score >= 55
+  
+  // ===== POSITION SIZING =====
+  POSITION_SIZE_MULTIPLIER: 0.60,      // 60% position for squeeze entries (moderate risk)
+  
+  // ===== MULTI-TIMEFRAME SQUEEZE BONUS =====
+  // If order flow confirms, increase position size slightly
+  ORDER_FLOW_CONFIRMED_MULTIPLIER: 0.75,  // 75% position if order flow confirms
+  
+  // ===== LOGGING =====
+  LOG_BYPASS_DETAILS: true,
+} as const;
+
+// ============= SQUEEZE BREAKOUT SIGNAL PARAMETERS =============
+// Defines squeeze breakout as a primary signal type with specific confidence and risk parameters
+// Triggered when price crosses Bollinger band during or just after squeeze
+export const SQUEEZE_BREAKOUT_SIGNAL_PARAMS = {
+  ENABLED: true,
+  
+  // ===== BREAKOUT DETECTION =====
+  // Triggered when price crosses band during or just after squeeze
+  DETECT_BREAKOUT_DURING_SQUEEZE: true,
+  DETECT_BREAKOUT_POST_SQUEEZE: true,
+  POST_SQUEEZE_LOOKBACK_BARS: 3,       // Check last 3 bars for recent squeeze exit
+  
+  // ===== SIGNAL GENERATION =====
+  GENERATE_SIGNAL_ON_BREAKOUT: true,
+  SIGNAL_CONFIDENCE_BASE: 65,          // Base confidence for squeeze breakout signals
+  SIGNAL_CONFIDENCE_BONUS_PER_TF: 5,   // +5% confidence per additional TF indicator alignment
+  
+  // ===== CONFIRMATION REQUIREMENTS =====
+  REQUIRE_VOLUME_CONFIRMATION: true,
+  MIN_VOLUME_RATIO: 1.2,               // 20% above average volume
+  REQUIRE_MACD_ALIGNMENT: true,        // MACD must agree with breakout direction
+  
+  // ===== RISK PARAMETERS =====
+  STOP_LOSS_ATR_MULTIPLIER: 1.5,       // Tighter stop for breakouts
+  TAKE_PROFIT_ATR_MULTIPLIER: 3.0,     // Higher R:R for breakouts
+  
+  // ===== POSITION SIZING =====
+  POSITION_SIZE_MULTIPLIER: 0.70,      // 70% position for breakout entries
+} as const;
+
