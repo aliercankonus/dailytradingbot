@@ -64,6 +64,14 @@ export interface RiskParameters {
   min_entry_quality_score: number;
   trending_regime_min_adx: number;
   ranging_regime_max_adx: number;
+  // Unified Risk Settings (NEW)
+  base_position_size_percent: number;
+  base_stop_loss_percent: number;
+  base_take_profit_multiplier: number;
+  risk_profile: string;
+  enable_atr_based_stops: boolean;
+  enable_adx_position_scaling: boolean;
+  enable_quality_based_sizing: boolean;
 }
 
 export const useRiskParameters = () => {
