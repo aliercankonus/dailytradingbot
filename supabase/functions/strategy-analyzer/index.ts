@@ -3445,13 +3445,26 @@ serve(async (req) => {
           if (derivedDirection === 'long') {
             // For LONG: block if momentum strongly negative
             if (momentumScore < MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_LONG) {
-              // Check for early trend detection exception
-              if (trendDirectionAgrees && momentumScore >= -30) {
-                // Trend is bullish but momentum is lagging - allow with reduced position
+              // Check for early trend detection exception with graduated position scaling
+              // When 1h trend is bullish, allow LONG entries even with lagging momentum
+              if (trendDirectionAgrees) {
                 earlyTrendBypassApplied = true;
-                earlyTrendPositionMultiplier = 0.6; // 60% position for early entries
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🌅 EARLY TREND ENTRY: LONG allowed despite negative momentum (${momentumScore})`);
-                logger.forSymbol(symbol).info(`   → 1h trend is bullish (${regimeTrendDirection}), momentum will catch up - reducing position to 60%`);
+                // Graduated position sizing based on how far momentum lags
+                if (momentumScore >= -30) {
+                  earlyTrendPositionMultiplier = 0.7; // 70% for mild lag (-20 to -30)
+                } else if (momentumScore >= -50) {
+                  earlyTrendPositionMultiplier = 0.5; // 50% for significant lag (-30 to -50)
+                } else {
+                  // Below -50 is too extreme - block even with trend agreement
+                  earlyTrendBypassApplied = false;
+                  momentumDirectionMismatch = true;
+                  mismatchReason = `LONG blocked: momentum ${momentumScore} < -50 (too extreme even with bullish trend)`;
+                }
+                
+                if (earlyTrendBypassApplied) {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🌅 EARLY TREND ENTRY: LONG allowed despite negative momentum (${momentumScore})`);
+                  logger.forSymbol(symbol).info(`   → 1h trend is bullish (${regimeTrendDirection}), momentum will catch up - position at ${(earlyTrendPositionMultiplier * 100).toFixed(0)}%`);
+                }
               } else {
                 momentumDirectionMismatch = true;
                 mismatchReason = `LONG blocked: momentum ${momentumScore} < ${MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_LONG}`;
@@ -3476,12 +3489,25 @@ serve(async (req) => {
           } else if (derivedDirection === 'short') {
             // For SHORT: block if momentum strongly positive
             if (momentumScore > MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_SHORT) {
-              // Check for early trend detection exception
-              if (trendDirectionAgrees && momentumScore <= 30) {
+              // Check for early trend detection exception with graduated position scaling
+              if (trendDirectionAgrees) {
                 earlyTrendBypassApplied = true;
-                earlyTrendPositionMultiplier = 0.6;
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🌅 EARLY TREND ENTRY: SHORT allowed despite positive momentum (${momentumScore})`);
-                logger.forSymbol(symbol).info(`   → 1h trend is bearish (${regimeTrendDirection}), momentum will catch up - reducing position to 60%`);
+                // Graduated position sizing based on how far momentum lags
+                if (momentumScore <= 30) {
+                  earlyTrendPositionMultiplier = 0.7; // 70% for mild lag (+20 to +30)
+                } else if (momentumScore <= 50) {
+                  earlyTrendPositionMultiplier = 0.5; // 50% for significant lag (+30 to +50)
+                } else {
+                  // Above +50 is too extreme - block even with trend agreement
+                  earlyTrendBypassApplied = false;
+                  momentumDirectionMismatch = true;
+                  mismatchReason = `SHORT blocked: momentum ${momentumScore} > +50 (too extreme even with bearish trend)`;
+                }
+                
+                if (earlyTrendBypassApplied) {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🌅 EARLY TREND ENTRY: SHORT allowed despite positive momentum (${momentumScore})`);
+                  logger.forSymbol(symbol).info(`   → 1h trend is bearish (${regimeTrendDirection}), momentum will catch up - position at ${(earlyTrendPositionMultiplier * 100).toFixed(0)}%`);
+                }
               } else {
                 momentumDirectionMismatch = true;
                 mismatchReason = `SHORT blocked: momentum ${momentumScore} > ${MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_SHORT}`;
