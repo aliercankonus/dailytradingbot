@@ -3420,6 +3420,10 @@ serve(async (req) => {
         // Ensures momentum score aligns with intended trade direction
         // In strong ADX (>= 40), allow neutral momentum but NEVER opposite
         // In weaker ADX (< 40), require aligned or neutral momentum
+        // 
+        // EARLY TREND DETECTION EXCEPTION:
+        // If the regime trend direction (1h) agrees with trade direction but momentum is lagging,
+        // allow entry with reduced position. Momentum often lags price action in early trends.
         if (MOMENTUM_DIRECTION_ALIGNMENT.ENABLED) {
           const momentumScore = smartMomentum.score;
           const isNeutralMomentum = momentumScore >= MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MIN && 
@@ -3429,35 +3433,82 @@ serve(async (req) => {
           // Check for momentum-direction mismatch
           let momentumDirectionMismatch = false;
           let mismatchReason = '';
+          let earlyTrendBypassApplied = false;
+          let earlyTrendPositionMultiplier = 1.0;
+          
+          // EARLY TREND DETECTION: If regime direction agrees, allow lagging momentum
+          const trendDirectionAgrees = (
+            (derivedDirection === 'long' && regimeTrendDirection === 'bullish') ||
+            (derivedDirection === 'short' && regimeTrendDirection === 'bearish')
+          );
           
           if (derivedDirection === 'long') {
             // For LONG: block if momentum strongly negative
             if (momentumScore < MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_LONG) {
-              momentumDirectionMismatch = true;
-              mismatchReason = `LONG blocked: momentum ${momentumScore} < ${MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_LONG}`;
+              // Check for early trend detection exception
+              if (trendDirectionAgrees && momentumScore >= -30) {
+                // Trend is bullish but momentum is lagging - allow with reduced position
+                earlyTrendBypassApplied = true;
+                earlyTrendPositionMultiplier = 0.6; // 60% position for early entries
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🌅 EARLY TREND ENTRY: LONG allowed despite negative momentum (${momentumScore})`);
+                logger.forSymbol(symbol).info(`   → 1h trend is bullish (${regimeTrendDirection}), momentum will catch up - reducing position to 60%`);
+              } else {
+                momentumDirectionMismatch = true;
+                mismatchReason = `LONG blocked: momentum ${momentumScore} < ${MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_LONG}`;
+              }
             }
             // In weak ADX, also require positive or neutral momentum
             else if (!isStrongADX && !isNeutralMomentum && momentumScore < 0) {
               // Only block if momentum is significantly negative (between -10 and -20)
               if (momentumScore < MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MIN) {
-                momentumDirectionMismatch = true;
-                mismatchReason = `LONG blocked (weak ADX=${adx.toFixed(1)}): momentum ${momentumScore} is negative but below neutral zone`;
+                // Check for early trend detection exception
+                if (trendDirectionAgrees) {
+                  earlyTrendBypassApplied = true;
+                  earlyTrendPositionMultiplier = 0.7; // 70% position for weak ADX early entries
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🌅 EARLY TREND ENTRY: LONG allowed despite negative momentum in weak ADX`);
+                  logger.forSymbol(symbol).info(`   → momentum=${momentumScore}, ADX=${adx.toFixed(1)}, 1h trend=${regimeTrendDirection} - reducing position to 70%`);
+                } else {
+                  momentumDirectionMismatch = true;
+                  mismatchReason = `LONG blocked (weak ADX=${adx.toFixed(1)}): momentum ${momentumScore} is negative but below neutral zone`;
+                }
               }
             }
           } else if (derivedDirection === 'short') {
             // For SHORT: block if momentum strongly positive
             if (momentumScore > MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_SHORT) {
-              momentumDirectionMismatch = true;
-              mismatchReason = `SHORT blocked: momentum ${momentumScore} > ${MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_SHORT}`;
+              // Check for early trend detection exception
+              if (trendDirectionAgrees && momentumScore <= 30) {
+                earlyTrendBypassApplied = true;
+                earlyTrendPositionMultiplier = 0.6;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🌅 EARLY TREND ENTRY: SHORT allowed despite positive momentum (${momentumScore})`);
+                logger.forSymbol(symbol).info(`   → 1h trend is bearish (${regimeTrendDirection}), momentum will catch up - reducing position to 60%`);
+              } else {
+                momentumDirectionMismatch = true;
+                mismatchReason = `SHORT blocked: momentum ${momentumScore} > ${MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_SHORT}`;
+              }
             }
             // In weak ADX, also require negative or neutral momentum
             else if (!isStrongADX && !isNeutralMomentum && momentumScore > 0) {
               // Only block if momentum is significantly positive (between +10 and +20)
               if (momentumScore > MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MAX) {
-                momentumDirectionMismatch = true;
-                mismatchReason = `SHORT blocked (weak ADX=${adx.toFixed(1)}): momentum ${momentumScore} is positive but above neutral zone`;
+                // Check for early trend detection exception
+                if (trendDirectionAgrees) {
+                  earlyTrendBypassApplied = true;
+                  earlyTrendPositionMultiplier = 0.7;
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🌅 EARLY TREND ENTRY: SHORT allowed despite positive momentum in weak ADX`);
+                  logger.forSymbol(symbol).info(`   → momentum=${momentumScore}, ADX=${adx.toFixed(1)}, 1h trend=${regimeTrendDirection} - reducing position to 70%`);
+                } else {
+                  momentumDirectionMismatch = true;
+                  mismatchReason = `SHORT blocked (weak ADX=${adx.toFixed(1)}): momentum ${momentumScore} is positive but above neutral zone`;
+                }
               }
             }
+          }
+          
+          // Track early trend bypass for position sizing later
+          if (earlyTrendBypassApplied) {
+            // Store the multiplier to apply later during signal generation
+            (trendData as any).earlyTrendPositionMultiplier = earlyTrendPositionMultiplier;
           }
           
           if (momentumDirectionMismatch) {
