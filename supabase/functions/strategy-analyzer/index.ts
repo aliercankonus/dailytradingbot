@@ -3138,11 +3138,12 @@ serve(async (req) => {
         const isCounterTrendLong = derivedDirection === "long" && (
           // CASE 1: Strong trend in opposite direction = BLOCK LONG
           (adx >= COUNTER_TREND_PROTECTION.ADX_THRESHOLD_FOR_BLOCK && regimeTrendDirection === 'bearish') ||
-          // CASE 2: Bearish trend + strongly negative momentum = BLOCK LONG  
+          // CASE 2: Bearish trend + strongly negative momentum = BLOCK LONG
           // (Both conditions required - momentum alone doesn't block anymore)
           (regimeTrendDirection === 'bearish' && smartMomentum.score < COUNTER_TREND_PROTECTION.MOMENTUM.STRONG_OPPOSITE_LONG) ||
-          // CASE 3: EXTREME momentum opposition blocks regardless (< -35)
-          (smartMomentum.score < -35)
+          // CASE 3: EXTREME momentum opposition ONLY blocks if trend is NOT aligned
+          // This prevents ETH-style false blocks: bullish trend + long direction should not be blocked by momentum score alone
+          (regimeTrendDirection !== 'bullish' && smartMomentum.score < -35)
         );
         
         const isCounterTrendShort = derivedDirection === "short" && (
@@ -3151,8 +3152,8 @@ serve(async (req) => {
           // CASE 2: Bullish trend + strongly positive momentum = BLOCK SHORT
           // (Both conditions required - momentum alone doesn't block anymore)
           (regimeTrendDirection === 'bullish' && smartMomentum.score > COUNTER_TREND_PROTECTION.MOMENTUM.STRONG_OPPOSITE_SHORT) ||
-          // CASE 3: EXTREME momentum opposition blocks regardless (> 35)
-          (smartMomentum.score > 35)
+          // CASE 3: EXTREME momentum opposition ONLY blocks if trend is NOT aligned
+          (regimeTrendDirection !== 'bearish' && smartMomentum.score > 35)
         );
         
         if (COUNTER_TREND_PROTECTION.ENABLED && (isCounterTrendLong || isCounterTrendShort)) {
