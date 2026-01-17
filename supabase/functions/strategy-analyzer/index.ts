@@ -3129,18 +3129,30 @@ serve(async (req) => {
         // NOW USES: Shared COUNTER_TREND_PROTECTION from constants.ts (single source of truth)
         
         // Check for counter-trend entry (LONG against bearish trend, or SHORT against bullish trend)
+        // ===== CRITICAL BUG FIX =====
+        // Previous logic: Momentum alone could trigger block, even when trend aligned!
+        // Example bug: ETH LONG blocked because momentum=-42, even though trend was BULLISH
+        // Fix: Momentum opposition should ONLY block when COMBINED with adverse trend direction
+        // OR when momentum is VERY strongly opposite (score < -35 for long, > 35 for short)
+        
         const isCounterTrendLong = derivedDirection === "long" && (
-          // ADX >= threshold AND trend direction is bearish = BLOCK LONG
+          // CASE 1: Strong trend in opposite direction = BLOCK LONG
           (adx >= COUNTER_TREND_PROTECTION.ADX_THRESHOLD_FOR_BLOCK && regimeTrendDirection === 'bearish') ||
-          // Momentum strongly negative = BLOCK LONG
-          (smartMomentum.score < COUNTER_TREND_PROTECTION.MOMENTUM.STRONG_OPPOSITE_LONG)
+          // CASE 2: Bearish trend + strongly negative momentum = BLOCK LONG  
+          // (Both conditions required - momentum alone doesn't block anymore)
+          (regimeTrendDirection === 'bearish' && smartMomentum.score < COUNTER_TREND_PROTECTION.MOMENTUM.STRONG_OPPOSITE_LONG) ||
+          // CASE 3: EXTREME momentum opposition blocks regardless (< -35)
+          (smartMomentum.score < -35)
         );
         
         const isCounterTrendShort = derivedDirection === "short" && (
-          // ADX >= threshold AND trend direction is bullish = BLOCK SHORT
+          // CASE 1: Strong trend in opposite direction = BLOCK SHORT
           (adx >= COUNTER_TREND_PROTECTION.ADX_THRESHOLD_FOR_BLOCK && regimeTrendDirection === 'bullish') ||
-          // Momentum strongly positive = BLOCK SHORT
-          (smartMomentum.score > COUNTER_TREND_PROTECTION.MOMENTUM.STRONG_OPPOSITE_SHORT)
+          // CASE 2: Bullish trend + strongly positive momentum = BLOCK SHORT
+          // (Both conditions required - momentum alone doesn't block anymore)
+          (regimeTrendDirection === 'bullish' && smartMomentum.score > COUNTER_TREND_PROTECTION.MOMENTUM.STRONG_OPPOSITE_SHORT) ||
+          // CASE 3: EXTREME momentum opposition blocks regardless (> 35)
+          (smartMomentum.score > 35)
         );
         
         if (COUNTER_TREND_PROTECTION.ENABLED && (isCounterTrendLong || isCounterTrendShort)) {
@@ -6913,15 +6925,22 @@ serve(async (req) => {
         // The legacy getMomentumScore() can return 0 while smartMomentum.score shows 15-20
         // This mismatch causes AVAX-type rejections where momentum is clearly present
         // Solution: Use the HIGHER of the two scores to prevent false rejections
-        // Normalize smartMomentum.score from 0-100 scale to 0-10 gate scale
-        const normalizedSmartMomentumScore = Math.round(smartMomentum.score / 10);
+        // 
+        // ===== BUG FIX: Normalization was too aggressive =====
+        // Previous: Math.round(4/10) = 0, so score of 4 became 0
+        // Fix: Use Math.ceil to preserve weak-but-present momentum, with minimum floor of 1 if any momentum exists
+        // Also: smartMomentum.score can be NEGATIVE (bearish), so we use absolute value for gate
+        const absSmartMomentum = Math.abs(smartMomentum.score);
+        const normalizedSmartMomentumScore = absSmartMomentum > 0 
+          ? Math.max(1, Math.ceil(absSmartMomentum / 10))  // Minimum 1 if any momentum present
+          : 0;
         
         // Use the higher score - if either system sees momentum, we have momentum
         const earlyMomentumScore = Math.max(legacyMomentumScore, normalizedSmartMomentumScore);
         
         // Log when smart momentum rescued a would-be rejection
-        if (normalizedSmartMomentumScore > legacyMomentumScore && normalizedSmartMomentumScore >= 5) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🔧 UNIFIED MOMENTUM: smartMomentum.score=${smartMomentum.score} (normalized=${normalizedSmartMomentumScore}) > legacy=${legacyMomentumScore} → using ${earlyMomentumScore}`);
+        if (normalizedSmartMomentumScore > legacyMomentumScore) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🔧 UNIFIED MOMENTUM: smartMomentum.score=${smartMomentum.score} (abs=${absSmartMomentum}, normalized=${normalizedSmartMomentumScore}) > legacy=${legacyMomentumScore} → using ${earlyMomentumScore}`);
         }
         
         // ===== STOCHRSI DATA VALIDATION =====
@@ -10526,6 +10545,13 @@ serve(async (req) => {
         logger.info(`${LOG_CATEGORIES.GATE} ${gate}: ${symbols.join(', ')}`);
       });
       logger.info(`${LOG_CATEGORIES.GATE} ===================================`);
+      
+      // ===== COMPACT SUMMARY FOR AUTO-TRADER =====
+      // Format: "SYM1:GATE1, SYM2:GATE2, ..."
+      const compactAttribution = Array.from(perSymbolGateAttribution.entries())
+        .map(([sym, { gate, details }]) => `${sym}:${gate}(${details || '-'})`)
+        .join(' | ');
+      logger.info(`🚧 GATE_SUMMARY: ${compactAttribution || 'NO_REJECTIONS'}`);
     }
 
     return new Response(JSON.stringify({
