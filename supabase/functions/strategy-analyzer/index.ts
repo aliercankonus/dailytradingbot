@@ -7230,7 +7230,8 @@ serve(async (req) => {
           const squeezeDirection: "long" | "short" = (momentum?.macdHistogram || 0) > 0 ? "long" : "short";
           
           // StochRSI loading zone check - extended zones for extreme conditions
-          const stochRsiK1hForSqueeze = trendData.stochRsi?.["1h"]?.k ?? 50;
+          // FIXED: Use stochasticRsi (not stochRsi) to match calculate-trend output
+          const stochRsiK1hForSqueeze = trendData.stochasticRsi?.["1h"]?.k ?? 50;
           const stochRsiInLoadingZone = squeezeDirection === "long"
             ? stochRsiK1hForSqueeze <= SQUEEZE_MOMENTUM_BYPASS_PARAMS.LONG_MAX_STOCHRSI_K
             : stochRsiK1hForSqueeze >= SQUEEZE_MOMENTUM_BYPASS_PARAMS.SHORT_MIN_STOCHRSI_K;
@@ -7238,7 +7239,7 @@ serve(async (req) => {
           // EXTREME StochRSI check - for alternative bypass when squeeze detection fails
           // Long: StochRSI K <= 25 (deeply oversold)
           // Short: StochRSI K >= 75 (deeply overbought)
-          const stochRsiK4h = trendData.stochRsi?.["4h"]?.k ?? 50;
+          const stochRsiK4h = trendData.stochasticRsi?.["4h"]?.k ?? 50;
           const isStochRsiExtremeFor4h = squeezeDirection === "long"
             ? stochRsiK4h <= 30 // 4h deeply oversold
             : stochRsiK4h >= 70; // 4h deeply overbought
