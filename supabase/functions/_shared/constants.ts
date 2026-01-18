@@ -3558,7 +3558,7 @@ export const SQUEEZE_MOMENTUM_BYPASS_PARAMS = {
   
   // ===== MACD REQUIREMENTS =====
   REQUIRE_MACD_EXPANDING: true,        // MACD histogram must be expanding
-  MIN_MACD_MAGNITUDE: 2.0,             // Minimum histogram magnitude for direction confidence
+  MIN_MACD_MAGNITUDE: 1.5,             // Reduced from 2.0 to catch early squeeze momentum (ETH had 1.78)
   
   // ===== STOCHRSI LOADING ZONE =====
   // For LONG: StochRSI should be in lower half (not overbought)
