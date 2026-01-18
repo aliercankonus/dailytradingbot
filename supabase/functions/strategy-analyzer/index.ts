@@ -7379,14 +7379,28 @@ serve(async (req) => {
           // StochRSI loading zone check - extended zones for extreme conditions
           // FIXED: Use stochasticRsi (not stochRsi) to match calculate-trend output
           const stochRsiK1hForSqueeze = trendData.stochasticRsi?.["1h"]?.k ?? 50;
-          const stochRsiInLoadingZone = squeezeDirection === "long"
+          const stochRsiK4h = trendData.stochasticRsi?.["4h"]?.k ?? 50;
+          
+          // Standard loading zone check
+          const stochRsiInStandardLoadingZone = squeezeDirection === "long"
             ? stochRsiK1hForSqueeze <= SQUEEZE_MOMENTUM_BYPASS_PARAMS.LONG_MAX_STOCHRSI_K
             : stochRsiK1hForSqueeze >= SQUEEZE_MOMENTUM_BYPASS_PARAMS.SHORT_MIN_STOCHRSI_K;
+          
+          // NEW: StochRSI Divergence Pattern Exception
+          // For LONG in squeeze: 1h in loading zone (30-55) + 4h overbought (>80) = mean-reversion entry
+          // For SHORT in squeeze: 1h in loading zone (45-70) + 4h oversold (<20) = mean-reversion entry
+          // This catches reversions when 4h is at extreme but 1h is resetting
+          const stochRsiDivergencePattern = squeezeDirection === "long"
+            ? (stochRsiK1hForSqueeze >= 25 && stochRsiK1hForSqueeze <= 60 && stochRsiK4h >= 75)
+            : (stochRsiK1hForSqueeze >= 40 && stochRsiK1hForSqueeze <= 75 && stochRsiK4h <= 25);
+          
+          // Allow bypass if standard loading zone OR divergence pattern
+          const stochRsiInLoadingZone = stochRsiInStandardLoadingZone || stochRsiDivergencePattern;
           
           // EXTREME StochRSI check - for alternative bypass when squeeze detection fails
           // Long: StochRSI K <= 25 (deeply oversold)
           // Short: StochRSI K >= 75 (deeply overbought)
-          const stochRsiK4h = trendData.stochasticRsi?.["4h"]?.k ?? 50;
+          // (stochRsiK4h already declared above for divergence pattern check)
           const isStochRsiExtremeFor4h = squeezeDirection === "long"
             ? stochRsiK4h <= 30 // 4h deeply oversold
             : stochRsiK4h >= 70; // 4h deeply overbought
@@ -7426,8 +7440,8 @@ serve(async (req) => {
           // DEBUG: Log squeeze bypass check details
           logger.forSymbol(symbol).info(`🔍 SQUEEZE_BYPASS_CHECK: enabled=${squeezeBypassEnabled} isSqueeze=${bbSqueezeResult.isSqueeze} intensity=${bbSqueezeResult.squeezeIntensity?.toFixed(0) ?? 'N/A'}% (need>=${SQUEEZE_MOMENTUM_BYPASS_PARAMS.MIN_SQUEEZE_INTENSITY})`);
           logger.forSymbol(symbol).info(`   → Momentum: state=${momentum?.state} genuine=${momentum?.genuineMomentum} ADX=${adx.toFixed(1)} (need>=${SQUEEZE_MOMENTUM_BYPASS_PARAMS.MIN_ADX})`);
-          logger.forSymbol(symbol).info(`   → MACD: expanding=${momentum?.macdExpanding} histogram=${(momentum?.macdHistogram ?? 0).toFixed(2)} (need>=2, strong>=5)`);
-          logger.forSymbol(symbol).info(`   → StochRSI: 1h K=${stochRsiK1hForSqueeze.toFixed(1)} 4h K=${stochRsiK4h.toFixed(1)} | extreme4h=${isStochRsiExtremeFor4h} extreme1h=${isStochRsiExtremeFor1h}`);
+          logger.forSymbol(symbol).info(`   → MACD: expanding=${momentum?.macdExpanding} histogram=${(momentum?.macdHistogram ?? 0).toFixed(2)} (need>=${SQUEEZE_MOMENTUM_BYPASS_PARAMS.MIN_MACD_MAGNITUDE})`);
+          logger.forSymbol(symbol).info(`   → StochRSI: 1h K=${stochRsiK1hForSqueeze.toFixed(1)} 4h K=${stochRsiK4h.toFixed(1)} | standardLoading=${stochRsiInStandardLoadingZone} divergencePattern=${stochRsiDivergencePattern}`);
           logger.forSymbol(symbol).info(`   → Bypass paths: standardSqueeze=${standardSqueezeBypass} strongMomentum=${strongMomentumBypassPath} → APPLIES=${squeezeBypassApplies}`);
           
           // Track squeeze bypass position multiplier for later use
