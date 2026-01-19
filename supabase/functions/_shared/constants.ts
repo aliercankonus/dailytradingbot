@@ -3611,3 +3611,56 @@ export const SQUEEZE_BREAKOUT_SIGNAL_PARAMS = {
   POSITION_SIZE_MULTIPLIER: 0.70,      // 70% position for breakout entries
 } as const;
 
+// ============= MOVE EXHAUSTION FILTER =============
+// Prevents entries when price has already moved significantly from swing points
+// Addresses: Late entries into exhausted trends (e.g., shorting after 10% drop)
+export const MOVE_EXHAUSTION_FILTER_PARAMS = {
+  ENABLED: true,
+  
+  // ===== PERCENTAGE THRESHOLDS =====
+  // Block SHORT if price already dropped this much from 24h high
+  MAX_DROP_PERCENT_FOR_SHORT: 8.0,  // 8% drop = too late to short
+  // Block LONG if price already rallied this much from 24h low
+  MAX_RALLY_PERCENT_FOR_LONG: 8.0,  // 8% rally = too late to long
+  
+  // ===== GRADUATED RESPONSE =====
+  // Soft threshold: reduce position size instead of hard block
+  SOFT_THRESHOLD_PERCENT: 5.0,        // 5% move = reduce position
+  SOFT_THRESHOLD_POSITION_SIZE: 0.35, // 35% position for late entries
+  
+  // Hard threshold: complete block
+  HARD_THRESHOLD_PERCENT: 10.0,       // 10% move = hard block
+  
+  // ===== STOCHRSI ALIGNMENT REQUIRED =====
+  // For late shorts: StochRSI must be > 50 (not already oversold)
+  // For late longs: StochRSI must be < 50 (not already overbought)
+  REQUIRE_STOCHRSI_ALIGNMENT: true,
+  STOCHRSI_NOT_OVERSOLD_FOR_SHORT: 50,  // K must be > 50 for late short
+  STOCHRSI_NOT_OVERBOUGHT_FOR_LONG: 50, // K must be < 50 for late long
+  
+  // ===== EXCEPTION: STRONG TREND CONTINUATION =====
+  // Allow entry despite exhaustion if ADX is very strong and rising
+  ALLOW_STRONG_TREND_EXCEPTION: true,
+  EXCEPTION_MIN_ADX: 40,              // Very strong trend
+  EXCEPTION_MIN_ADX_SLOPE: 0.2,       // ADX must be rising
+  EXCEPTION_POSITION_SIZE: 0.40,      // 40% position for exception entries
+  
+  // ===== ADDITIONAL ENTRY QUALITY GATES =====
+  // For short entries at soft threshold: require StochRSI K > this
+  SOFT_SHORT_MIN_STOCHRSI: 35,
+  // For long entries at soft threshold: require StochRSI K < this
+  SOFT_LONG_MAX_STOCHRSI: 65,
+  
+  // ===== LOOKBACK PERIOD =====
+  // Hours to look back for swing high/low calculation
+  SWING_LOOKBACK_HOURS: 24,
+  
+  // ===== ATR-BASED ALTERNATIVE =====
+  // Block if price moved more than X ATRs from swing (optional)
+  USE_ATR_BASED_THRESHOLD: false,
+  MAX_ATR_DISTANCE_FOR_ENTRY: 4.0,    // 4 ATRs from swing = overextended
+  
+  // ===== LOGGING =====
+  LOG_EXHAUSTION_CHECKS: true,
+} as const;
+

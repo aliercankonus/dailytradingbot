@@ -120,6 +120,8 @@ import {
   // NEW: Squeeze momentum bypass for regime-aware gate system
   SQUEEZE_MOMENTUM_BYPASS_PARAMS,
   SQUEEZE_BREAKOUT_SIGNAL_PARAMS,
+  // NEW: Move exhaustion filter to prevent late trend entries
+  MOVE_EXHAUSTION_FILTER_PARAMS,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -2072,7 +2074,10 @@ serve(async (req) => {
       | 'SAME_DIRECTION_COOLDOWN'
       | 'TREND_EXHAUSTION_PROTECTION'
       | 'REGIME_TRANSITION_PROTECTION'
-      | 'MOMENTUM_REVERSAL_PROTECTION';
+      | 'MOMENTUM_REVERSAL_PROTECTION'
+      // NEW: Move exhaustion gate to prevent late trend entries
+      | 'MOVE_EXHAUSTED_SHORT'
+      | 'MOVE_EXHAUSTED_LONG';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -3289,6 +3294,144 @@ serve(async (req) => {
               );
               continue;
             }
+          }
+        }
+        
+        // ============= NEW: MOVE EXHAUSTION FILTER =============
+        // Prevents late entries when price has already moved significantly from swing points
+        // Example: AVAX dropped 10%+ from swing high - too late to SHORT
+        let moveExhaustionPositionMultiplier = 1.0;
+        
+        if (MOVE_EXHAUSTION_FILTER_PARAMS.ENABLED) {
+          const priceDistance = trendData.priceDistanceFromSwing;
+          const stochRsiK4h = trendData.stochasticRsi?.['4h']?.k ?? 50;
+          const adxSlope = fullAdxResult.adxSlope ?? 0;
+          
+          let moveExhaustionBlocked = false;
+          let moveExhaustionReason = '';
+          let moveExhaustionSoftGate = false;
+          
+          if (derivedDirection === 'short' && priceDistance) {
+            const distanceFromHigh = priceDistance.distanceFromHighPercent ?? 0;
+            
+            // ===== HARD BLOCK: Price dropped too far already =====
+            if (distanceFromHigh >= MOVE_EXHAUSTION_FILTER_PARAMS.HARD_THRESHOLD_PERCENT) {
+              // Check for strong trend exception
+              const strongTrendException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_STRONG_TREND_EXCEPTION &&
+                adx >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX &&
+                adxSlope >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX_SLOPE;
+              
+              if (strongTrendException) {
+                moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_POSITION_SIZE;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION EXCEPTION: Price dropped ${distanceFromHigh.toFixed(1)}% but ADX=${adx.toFixed(1)} rising (slope=${adxSlope.toFixed(2)}) - allowing with ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}% position`);
+              } else {
+                moveExhaustionBlocked = true;
+                moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% from 24h high ($${priceDistance.high24h.toFixed(2)}), too late to SHORT (threshold: ${MOVE_EXHAUSTION_FILTER_PARAMS.HARD_THRESHOLD_PERCENT}%)`;
+              }
+            }
+            // ===== SOFT GATE: Check StochRSI alignment =====
+            else if (distanceFromHigh >= MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_PERCENT) {
+              // For late shorts: StochRSI must NOT be already oversold
+              if (MOVE_EXHAUSTION_FILTER_PARAMS.REQUIRE_STOCHRSI_ALIGNMENT && 
+                  stochRsiK4h < MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERSOLD_FOR_SHORT) {
+                moveExhaustionBlocked = true;
+                moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} < ${MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERSOLD_FOR_SHORT} (already oversold), too late to SHORT`;
+              } else if (stochRsiK4h < MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_SHORT_MIN_STOCHRSI) {
+                // Soft StochRSI gate - reduce position instead of block
+                moveExhaustionSoftGate = true;
+                moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_POSITION_SIZE;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION SOFT: Price dropped ${distanceFromHigh.toFixed(1)}% with StochRSI K=${stochRsiK4h.toFixed(0)}, reducing position to ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+              } else {
+                // Allow with reduced position since move is extended
+                moveExhaustionSoftGate = true;
+                moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_POSITION_SIZE;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION SOFT: Price dropped ${distanceFromHigh.toFixed(1)}%, reducing position to ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+              }
+            }
+          } else if (derivedDirection === 'long' && priceDistance) {
+            const distanceFromLow = priceDistance.distanceFromLowPercent ?? 0;
+            
+            // ===== HARD BLOCK: Price rallied too far already =====
+            if (distanceFromLow >= MOVE_EXHAUSTION_FILTER_PARAMS.HARD_THRESHOLD_PERCENT) {
+              // Check for strong trend exception
+              const strongTrendException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_STRONG_TREND_EXCEPTION &&
+                adx >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX &&
+                adxSlope >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX_SLOPE;
+              
+              if (strongTrendException) {
+                moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_POSITION_SIZE;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION EXCEPTION: Price rallied ${distanceFromLow.toFixed(1)}% but ADX=${adx.toFixed(1)} rising (slope=${adxSlope.toFixed(2)}) - allowing with ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}% position`);
+              } else {
+                moveExhaustionBlocked = true;
+                moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% from 24h low ($${priceDistance.low24h.toFixed(2)}), too late to LONG (threshold: ${MOVE_EXHAUSTION_FILTER_PARAMS.HARD_THRESHOLD_PERCENT}%)`;
+              }
+            }
+            // ===== SOFT GATE: Check StochRSI alignment =====
+            else if (distanceFromLow >= MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_PERCENT) {
+              // For late longs: StochRSI must NOT be already overbought
+              if (MOVE_EXHAUSTION_FILTER_PARAMS.REQUIRE_STOCHRSI_ALIGNMENT && 
+                  stochRsiK4h > MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG) {
+                moveExhaustionBlocked = true;
+                moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} > ${MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG} (already overbought), too late to LONG`;
+              } else if (stochRsiK4h > MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_LONG_MAX_STOCHRSI) {
+                // Soft StochRSI gate - reduce position instead of block
+                moveExhaustionSoftGate = true;
+                moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_POSITION_SIZE;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION SOFT: Price rallied ${distanceFromLow.toFixed(1)}% with StochRSI K=${stochRsiK4h.toFixed(0)}, reducing position to ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+              } else {
+                // Allow with reduced position since move is extended
+                moveExhaustionSoftGate = true;
+                moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_POSITION_SIZE;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION SOFT: Price rallied ${distanceFromLow.toFixed(1)}%, reducing position to ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+              }
+            }
+          }
+          
+          // Log swing distance for debugging if significant
+          if (MOVE_EXHAUSTION_FILTER_PARAMS.LOG_EXHAUSTION_CHECKS && priceDistance) {
+            const highDist = priceDistance.distanceFromHighPercent ?? 0;
+            const lowDist = priceDistance.distanceFromLowPercent ?? 0;
+            if (highDist >= 3 || lowDist >= 3) {
+              logger.forSymbol(symbol).debug(`📊 SWING DISTANCE: ${highDist.toFixed(1)}% from high, ${lowDist.toFixed(1)}% from low | StochRSI K=${stochRsiK4h.toFixed(0)}`);
+            }
+          }
+          
+          if (moveExhaustionBlocked) {
+            rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { 
+              gate: derivedDirection === 'short' ? 'MOVE_EXHAUSTED_SHORT' : 'MOVE_EXHAUSTED_LONG', 
+              details: moveExhaustionReason 
+            });
+            
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${moveExhaustionReason}`);
+            
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              moveExhaustionReason,
+              {
+                gate: derivedDirection === 'short' ? 'MOVE_EXHAUSTED_SHORT' : 'MOVE_EXHAUSTED_LONG',
+                derivedDirection,
+                priceDistanceFromSwing: priceDistance,
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                adx: adx.toFixed(1),
+                adxSlope: adxSlope.toFixed(2),
+                thresholds: {
+                  hardThresholdPercent: MOVE_EXHAUSTION_FILTER_PARAMS.HARD_THRESHOLD_PERCENT,
+                  softThresholdPercent: MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_PERCENT,
+                  stochRsiNotOversoldForShort: MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERSOLD_FOR_SHORT,
+                  stochRsiNotOverboughtForLong: MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG,
+                  exceptionMinAdx: MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX,
+                },
+                // Context for debugging
+                swingHigh24h: priceDistance?.high24h,
+                swingLow24h: priceDistance?.low24h,
+                currentPrice: trendData.currentPrice,
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
           }
         }
         
@@ -10456,6 +10599,12 @@ serve(async (req) => {
         if (momentumExhaustionOverrideApplied && momentumExhaustionStopMultiplier < 1.0) {
           stopLossPercent *= momentumExhaustionStopMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚡ MOMENTUM EXHAUSTION OVERRIDE - tighter stop applied: ${stopLossPercent.toFixed(2)}%`);
+        }
+        
+        // Apply position reduction for move exhaustion (soft gate entries at 35%)
+        if (moveExhaustionPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= moveExhaustionPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⛔ MOVE EXHAUSTION entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
         // Apply tighter stops for late grind acceptance entries (50% of normal = 50% tighter)
