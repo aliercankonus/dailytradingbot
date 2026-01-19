@@ -97,62 +97,72 @@ export const PerformanceAnalytics = () => {
       return acc;
     }, [] as any[]);
 
-  // Strategy Type Breakdown
+  // Strategy Type Breakdown (with proper breakeven handling)
   const strategyTypeData = trades
     .filter(t => t.closed_at)
     .reduce((acc, trade) => {
       const strategyType = detectStrategyType('', trade.strategy_name || '');
       const existing = acc.find(d => d.type === strategyType);
+      const pnl = trade.realized_pnl || 0;
       
       if (existing) {
-        existing.totalPnL += trade.realized_pnl || 0;
+        existing.totalPnL += pnl;
         existing.trades += 1;
-        if ((trade.realized_pnl || 0) > 0) existing.wins += 1;
+        if (pnl > 0) existing.wins += 1;
+        else if (pnl < 0) existing.losses += 1;
       } else {
         acc.push({
           type: strategyType,
           label: getStrategyTypeLabel(strategyType),
           color: getStrategyTypeColor(strategyType),
-          totalPnL: trade.realized_pnl || 0,
+          totalPnL: pnl,
           trades: 1,
-          wins: (trade.realized_pnl || 0) > 0 ? 1 : 0,
+          wins: pnl > 0 ? 1 : 0,
+          losses: pnl < 0 ? 1 : 0,
         });
       }
       return acc;
     }, [] as any[]);
 
+  // Win rate excludes breakeven trades
   strategyTypeData.forEach(s => {
-    s.winRate = s.trades > 0 ? (s.wins / s.trades) * 100 : 0;
+    const decisiveTrades = s.wins + s.losses;
+    s.winRate = decisiveTrades > 0 ? (s.wins / decisiveTrades) * 100 : 0;
     s.avgPnL = s.trades > 0 ? s.totalPnL / s.trades : 0;
   });
 
   // Sort by total trades descending
   strategyTypeData.sort((a, b) => b.trades - a.trades);
 
-  // Strategy comparison (individual strategies)
+  // Strategy comparison (individual strategies with proper breakeven handling)
   const strategyData = trades
     .filter(t => t.closed_at)
     .reduce((acc, trade) => {
       const strategy = trade.strategy_name || 'Default Strategy';
       const existing = acc.find(d => d.strategy === strategy);
+      const pnl = trade.realized_pnl || 0;
       
       if (existing) {
-        existing.totalPnL += trade.realized_pnl || 0;
+        existing.totalPnL += pnl;
         existing.trades += 1;
-        if ((trade.realized_pnl || 0) > 0) existing.wins += 1;
+        if (pnl > 0) existing.wins += 1;
+        else if (pnl < 0) existing.losses += 1;
       } else {
         acc.push({
           strategy,
-          totalPnL: trade.realized_pnl || 0,
+          totalPnL: pnl,
           trades: 1,
-          wins: (trade.realized_pnl || 0) > 0 ? 1 : 0,
+          wins: pnl > 0 ? 1 : 0,
+          losses: pnl < 0 ? 1 : 0,
         });
       }
       return acc;
     }, [] as any[]);
 
+  // Win rate excludes breakeven trades
   strategyData.forEach(s => {
-    s.winRate = s.trades > 0 ? (s.wins / s.trades) * 100 : 0;
+    const decisiveTrades = s.wins + s.losses;
+    s.winRate = decisiveTrades > 0 ? (s.wins / decisiveTrades) * 100 : 0;
   });
 
   const totalPnL = trades
