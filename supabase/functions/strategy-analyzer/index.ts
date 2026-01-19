@@ -4151,6 +4151,49 @@ serve(async (req) => {
           .then(({ error }) => {
             if (error) logger.forSymbol(symbol).debug(`Failed to store regime history: ${error.message}`);
           });
+        
+        // ============= MEAN REVERSION EARLY DETECTION (BEFORE PRE_RECOVERY GATE) =============
+        // CRITICAL: Runs BEFORE PRE_RECOVERY to potentially flip direction for extreme oversold/overbought
+        // This allows mean reversion to suggest LONG when direction would be SHORT at extreme oversold
+        const earlyMeanReversionSignal = MEAN_REVERSION_CONFIG.ENABLED ? detectExhaustion(trendData) : null;
+        let meanReversionDirectionFlipApplied = false;
+        let originalDerivedDirection = derivedDirection;
+        
+        if (earlyMeanReversionSignal?.detected && earlyMeanReversionSignal?.allowed) {
+          // Log mean reversion detection regardless of direction match
+          logger.forSymbol(symbol).info(
+            `${LOG_CATEGORIES.ENTRY} 🔄 MEAN_REVERSION EARLY CHECK: ${earlyMeanReversionSignal.direction?.toUpperCase() || 'NONE'} exhaustion detected ` +
+            `(score=${earlyMeanReversionSignal.exhaustionScore}, phase=${earlyMeanReversionSignal.trendPhase})`
+          );
+          logger.forSymbol(symbol).info(`   Triggers: ${earlyMeanReversionSignal.triggers.slice(0, 3).join(' | ')}`);
+          
+          // Check if mean reversion suggests OPPOSITE direction to derived direction
+          // This is the key fix: allow direction flip when at extreme exhaustion
+          const suggestsOppositeDirection = 
+            (earlyMeanReversionSignal.direction === 'long' && derivedDirection === 'short') ||
+            (earlyMeanReversionSignal.direction === 'short' && derivedDirection === 'long');
+          
+          if (suggestsOppositeDirection && earlyMeanReversionSignal.exhaustionScore >= 70) {
+            // FLIP DIRECTION: Mean reversion detected extreme exhaustion opposite to trend
+            originalDerivedDirection = derivedDirection;
+            derivedDirection = earlyMeanReversionSignal.direction!;
+            meanReversionDirectionFlipApplied = true;
+            derivedSource = "mean_reversion_flip";
+            
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION DIRECTION FLIP: ${originalDerivedDirection.toUpperCase()} → ${derivedDirection.toUpperCase()}`
+            );
+            logger.forSymbol(symbol).info(
+              `   Exhaustion score ${earlyMeanReversionSignal.exhaustionScore} >= 70, phase=${earlyMeanReversionSignal.trendPhase}, ` +
+              `position=${(earlyMeanReversionSignal.positionMultiplier * 100).toFixed(0)}%`
+            );
+          }
+        } else if (earlyMeanReversionSignal && !earlyMeanReversionSignal.allowed) {
+          logger.forSymbol(symbol).debug(
+            `[MEAN_REVERSION] Early check blocked by regime: ${earlyMeanReversionSignal.trendPhase}/${earlyMeanReversionSignal.expansionState}`
+          );
+        }
+        
         // Finding 1: In pre-recovery state, require deep pullback OR squeeze breakout
         // Get pullback analysis early for pre-recovery gate check
         const rsi = trendData?.timeframes?.['1h']?.indicators?.rsi ?? 50;
@@ -4163,7 +4206,10 @@ serve(async (req) => {
           rsi > PRE_RECOVERY_PARAMS.DEEP_PULLBACK_RSI_SHORT;
         const hasDeepPullback = isDeepPullbackLong || isDeepPullbackShort;
         
-        if (isPreRecovery && PRE_RECOVERY_PARAMS.BLOCK_CONTINUATION_WITHOUT_STRUCTURE) {
+        // NEW: Mean reversion direction flip bypasses PRE_RECOVERY gate (it's a different strategy)
+        const meanReversionBypassPreRecovery = meanReversionDirectionFlipApplied && (earlyMeanReversionSignal?.exhaustionScore ?? 0) >= 70;
+        
+        if (isPreRecovery && PRE_RECOVERY_PARAMS.BLOCK_CONTINUATION_WITHOUT_STRUCTURE && !meanReversionBypassPreRecovery) {
           // Pre-recovery requires either deep pullback OR valid squeeze breakout
           if (!hasDeepPullback && !squeezeBreakoutForPreRecovery.isValid) {
             rejectedByHardGates++;
@@ -4182,7 +4228,11 @@ serve(async (req) => {
                 hasDeepPullback,
                 squeezeValid: squeezeBreakoutForPreRecovery.isValid,
                 squeezeReasons: squeezeBreakoutForPreRecovery.reasons,
-                derivedDirection
+                derivedDirection,
+                meanReversionChecked: true,
+                meanReversionDetected: earlyMeanReversionSignal?.detected ?? false,
+                meanReversionDirection: earlyMeanReversionSignal?.direction ?? null,
+                meanReversionScore: earlyMeanReversionSignal?.exhaustionScore ?? 0
               },
               trendData,
               riskParams.ai_analysis_enabled !== false,
@@ -4191,6 +4241,8 @@ serve(async (req) => {
             continue;
           }
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} PRE-RECOVERY: Entry allowed via ${hasDeepPullback ? 'deep pullback' : 'squeeze breakout'}`);
+        } else if (meanReversionBypassPreRecovery) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} PRE-RECOVERY: Bypassed via MEAN_REVERSION direction flip (${derivedDirection.toUpperCase()})`);
         }
         
         // ============= PHASE 4 (9 FINDINGS): REGIME CONFIDENCE GATE =============
@@ -5215,58 +5267,58 @@ serve(async (req) => {
           stealthDirectionMatchesHTF &&
           stealthTrendHTF.stealthScore >= 60; // Require high score for HTF bypass
         
-        // ============= MEAN REVERSION EARLY DETECTION (BEFORE BLOCKING GATES) =============
-        // CRITICAL: Runs BEFORE tiered gates and bypass calculations to prevent gate collision
-        // Detects exhaustion signals and sets direction-aware bypass flags
-        let meanReversionSignal: ExhaustionSignal | null = null;
+        // ============= MEAN REVERSION GATE BYPASS SETUP =============
+        // Uses the early detection signal from before PRE_RECOVERY gate
+        // Sets up bypass flags for tiered gates based on direction alignment
+        let meanReversionSignal: ExhaustionSignal | null = earlyMeanReversionSignal;
         let meanReversionBypassGates: Set<string> = new Set();
-        let meanReversionPositionMultiplier = 1.0;
-        let meanReversionQualityScore = 0;
+        let meanReversionPositionMultiplier = earlyMeanReversionSignal?.positionMultiplier ?? 1.0;
+        let meanReversionQualityScore = earlyMeanReversionSignal?.qualityScore ?? 0;
         let meanReversionActive = false;
         
-        if (MEAN_REVERSION_CONFIG.ENABLED) {
-          meanReversionSignal = detectExhaustion(trendData);
+        // If direction flip was applied, the signal already matches the (new) derivedDirection
+        if (meanReversionDirectionFlipApplied && meanReversionSignal?.detected && meanReversionSignal?.allowed) {
+          // Direction flip means MR detection matches current direction - set up bypasses
+          meanReversionSignal.gateBypasses.forEach(bypass => {
+            if (bypass.allowedDirection === derivedDirection) {
+              meanReversionBypassGates.add(bypass.gate);
+            }
+          });
+          meanReversionActive = meanReversionBypassGates.size > 0;
           
-          if (meanReversionSignal.detected && meanReversionSignal.allowed) {
-            // Check if the detected direction matches our intended direction
-            // Mean reversion detection finds opportunities - we only bypass if it aligns with what we'd trade
-            const meanReversionMatchesDirection = 
-              (meanReversionSignal.direction === 'long' && intendedTradeDirection === 'long') ||
-              (meanReversionSignal.direction === 'short' && intendedTradeDirection === 'short');
+          logger.forSymbol(symbol).info(
+            `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION gate bypass active (from direction flip): ` +
+            `${Array.from(meanReversionBypassGates).join(', ')} | Position: ${(meanReversionPositionMultiplier * 100).toFixed(0)}%`
+          );
+        } else if (meanReversionSignal?.detected && meanReversionSignal?.allowed) {
+          // No flip - check if detection matches intended direction (original logic)
+          const meanReversionMatchesDirection = 
+            (meanReversionSignal.direction === 'long' && intendedTradeDirection === 'long') ||
+            (meanReversionSignal.direction === 'short' && intendedTradeDirection === 'short');
+          
+          if (meanReversionMatchesDirection) {
+            // Set bypass flags for the gate system - direction-aware
+            meanReversionSignal.gateBypasses.forEach(bypass => {
+              if (bypass.allowedDirection === intendedTradeDirection) {
+                meanReversionBypassGates.add(bypass.gate);
+              }
+            });
             
-            if (meanReversionMatchesDirection) {
-              // Set bypass flags for the gate system - direction-aware
-              meanReversionSignal.gateBypasses.forEach(bypass => {
-                if (bypass.allowedDirection === intendedTradeDirection) {
-                  meanReversionBypassGates.add(bypass.gate);
-                }
-              });
-              
-              meanReversionPositionMultiplier = meanReversionSignal.positionMultiplier;
-              meanReversionQualityScore = meanReversionSignal.qualityScore;
-              meanReversionActive = meanReversionBypassGates.size > 0;
-              
+            meanReversionPositionMultiplier = meanReversionSignal.positionMultiplier;
+            meanReversionQualityScore = meanReversionSignal.qualityScore;
+            meanReversionActive = meanReversionBypassGates.size > 0;
+            
+            if (meanReversionActive) {
               logger.forSymbol(symbol).info(
-                `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION detected: ${meanReversionSignal.direction?.toUpperCase()} ` +
-                `(confidence=${meanReversionSignal.confidence.toFixed(0)}%, regime=${meanReversionSignal.trendPhase}/${meanReversionSignal.expansionState})`
-              );
-              logger.forSymbol(symbol).info(
-                `   Triggers: ${meanReversionSignal.triggers.slice(0, 4).join(' | ')}`
-              );
-              logger.forSymbol(symbol).info(
-                `   Bypassing gates: ${Array.from(meanReversionBypassGates).join(', ')} | Position: ${(meanReversionPositionMultiplier * 100).toFixed(0)}%`
-              );
-            } else if (meanReversionSignal.direction) {
-              // Detected opposite direction - this is a signal AGAINST our current direction
-              // Don't bypass, but log it as a warning
-              logger.forSymbol(symbol).warn(
-                `${LOG_CATEGORIES.GATE} ⚠️ MEAN_REVERSION conflict: Detected ${meanReversionSignal.direction?.toUpperCase()} exhaustion ` +
-                `but direction is ${intendedTradeDirection?.toUpperCase()} - gates NOT bypassed`
+                `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION bypass active: ${meanReversionSignal.direction?.toUpperCase()} ` +
+                `(confidence=${meanReversionSignal.confidence.toFixed(0)}%, gates=${Array.from(meanReversionBypassGates).join(', ')})`
               );
             }
-          } else if (meanReversionSignal && !meanReversionSignal.allowed) {
+          } else if (meanReversionSignal.direction) {
+            // Detected opposite direction - this is a signal AGAINST our current direction
+            // Direction flip should have been handled earlier, but log if it wasn't
             logger.forSymbol(symbol).debug(
-              `[MEAN_REVERSION] Blocked by regime: ${meanReversionSignal.trendPhase}/${meanReversionSignal.expansionState}`
+              `[MEAN_REVERSION] Direction mismatch: ${meanReversionSignal.direction?.toUpperCase()} vs intended ${intendedTradeDirection?.toUpperCase()}`
             );
           }
         }
