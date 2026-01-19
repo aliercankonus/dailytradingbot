@@ -63,22 +63,27 @@ export function useLateGrindAnalytics() {
         };
       }
 
-      // Calculate stats
+      // Calculate stats (excluding breakeven trades from win rate)
       const winners = positions.filter(p => (p.realized_pnl || 0) > 0);
-      const losers = positions.filter(p => (p.realized_pnl || 0) <= 0);
+      const losers = positions.filter(p => (p.realized_pnl || 0) < 0);
+      const breakeven = positions.filter(p => (p.realized_pnl || 0) === 0);
       
       const totalProfit = winners.reduce((sum, p) => sum + (p.realized_pnl || 0), 0);
       const totalLoss = Math.abs(losers.reduce((sum, p) => sum + (p.realized_pnl || 0), 0));
       const totalPnl = positions.reduce((sum, p) => sum + (p.realized_pnl || 0), 0);
       
+      // Win rate excludes breakeven trades
+      const decisiveTrades = winners.length + losers.length;
+      
       // Symbol breakdown
-      const symbolBreakdown: Record<string, { trades: number; wins: number; totalPnl: number }> = {};
+      const symbolBreakdown: Record<string, { trades: number; wins: number; losses: number; totalPnl: number }> = {};
       positions.forEach(p => {
         if (!symbolBreakdown[p.symbol]) {
-          symbolBreakdown[p.symbol] = { trades: 0, wins: 0, totalPnl: 0 };
+          symbolBreakdown[p.symbol] = { trades: 0, wins: 0, losses: 0, totalPnl: 0 };
         }
         symbolBreakdown[p.symbol].trades++;
         if ((p.realized_pnl || 0) > 0) symbolBreakdown[p.symbol].wins++;
+        else if ((p.realized_pnl || 0) < 0) symbolBreakdown[p.symbol].losses++;
         symbolBreakdown[p.symbol].totalPnl += p.realized_pnl || 0;
       });
 
@@ -86,7 +91,7 @@ export function useLateGrindAnalytics() {
         totalTrades: positions.length,
         winningTrades: winners.length,
         losingTrades: losers.length,
-        winRate: positions.length > 0 ? (winners.length / positions.length) * 100 : 0,
+        winRate: decisiveTrades > 0 ? (winners.length / decisiveTrades) * 100 : 0,
         avgProfit: winners.length > 0 ? totalProfit / winners.length : 0,
         avgLoss: losers.length > 0 ? totalLoss / losers.length : 0,
         profitFactor: totalLoss > 0 ? totalProfit / totalLoss : totalProfit > 0 ? Infinity : 0,
@@ -97,7 +102,8 @@ export function useLateGrindAnalytics() {
             sym,
             {
               trades: stats.trades,
-              winRate: stats.trades > 0 ? (stats.wins / stats.trades) * 100 : 0,
+              // Win rate excludes breakeven trades for symbol breakdown too
+              winRate: (stats.wins + stats.losses) > 0 ? (stats.wins / (stats.wins + stats.losses)) * 100 : 0,
               avgPnl: stats.trades > 0 ? stats.totalPnl / stats.trades : 0,
             }
           ])

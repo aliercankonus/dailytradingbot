@@ -122,14 +122,15 @@ serve(async (req) => {
         const totalReturnPercent =
           user.portfolio_value > 0 ? (totalPnL / user.portfolio_value) * 100 : 0;
 
-        // Calculate trade statistics
+        // Calculate trade statistics (excluding breakeven trades from win rate)
         const closedTrades = allTrades || [];
         const winningTrades = closedTrades.filter((t) => (t.realized_pnl || 0) > 0);
-        const losingTrades = closedTrades.filter((t) => (t.realized_pnl || 0) <= 0);
-        const winRate =
-          closedTrades.length > 0
-            ? (winningTrades.length / closedTrades.length) * 100
-            : 0;
+        const losingTrades = closedTrades.filter((t) => (t.realized_pnl || 0) < 0);
+        const breakEvenTrades = closedTrades.filter((t) => (t.realized_pnl || 0) === 0);
+        const decisiveTrades = winningTrades.length + losingTrades.length;
+        const winRate = decisiveTrades > 0
+          ? (winningTrades.length / decisiveTrades) * 100
+          : 0;
 
         // Calculate performance metrics
         const avgWin =

@@ -70,24 +70,28 @@ export const PerformanceAnalytics = () => {
       return acc;
     }, [] as any[]);
 
-  // Win/Loss ratio over time
+  // Win/Loss ratio over time (excluding breakeven)
   const winLossData = trades
     .filter(t => t.closed_at)
     .reduce((acc, trade) => {
       const month = new Date(trade.closed_at!).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
       const existing = acc.find(d => d.month === month);
+      const pnl = trade.realized_pnl || 0;
       
       if (existing) {
-        if ((trade.realized_pnl || 0) > 0) {
+        if (pnl > 0) {
           existing.wins += 1;
-        } else {
+        } else if (pnl < 0) {
           existing.losses += 1;
+        } else {
+          existing.breakeven += 1;
         }
       } else {
         acc.push({
           month,
-          wins: (trade.realized_pnl || 0) > 0 ? 1 : 0,
-          losses: (trade.realized_pnl || 0) <= 0 ? 1 : 0,
+          wins: pnl > 0 ? 1 : 0,
+          losses: pnl < 0 ? 1 : 0,
+          breakeven: pnl === 0 ? 1 : 0,
         });
       }
       return acc;
@@ -155,14 +159,18 @@ export const PerformanceAnalytics = () => {
     .filter(t => t.closed_at)
     .reduce((sum, t) => sum + (t.realized_pnl || 0), 0);
   
+  // Exclude breakeven trades from win rate calculation
   const winningTrades = trades.filter(t => t.closed_at && (t.realized_pnl || 0) > 0).length;
-  const losingTrades = trades.filter(t => t.closed_at && (t.realized_pnl || 0) <= 0).length;
-  const totalClosedTrades = winningTrades + losingTrades;
-  const winRate = totalClosedTrades > 0 ? (winningTrades / totalClosedTrades) * 100 : 0;
+  const losingTrades = trades.filter(t => t.closed_at && (t.realized_pnl || 0) < 0).length;
+  const breakEvenTrades = trades.filter(t => t.closed_at && (t.realized_pnl || 0) === 0).length;
+  const decisiveTrades = winningTrades + losingTrades;
+  const totalClosedTrades = winningTrades + losingTrades + breakEvenTrades;
+  const winRate = decisiveTrades > 0 ? (winningTrades / decisiveTrades) * 100 : 0;
 
   const pieData = [
     { name: 'Wins', value: winningTrades, color: '#10b981' },
     { name: 'Losses', value: losingTrades, color: '#ef4444' },
+    { name: 'Breakeven', value: breakEvenTrades, color: '#6b7280' },
   ];
 
   const strategyTypePieData = strategyTypeData.map(s => ({
@@ -194,7 +202,7 @@ export const PerformanceAnalytics = () => {
           </div>
           <div className="text-2xl font-bold">{winRate.toFixed(1)}%</div>
           <div className="text-xs text-muted-foreground">
-            {winningTrades}/{totalClosedTrades} trades
+            {winningTrades}W / {losingTrades}L{breakEvenTrades > 0 ? ` / ${breakEvenTrades}BE` : ''}
           </div>
         </Card>
 
