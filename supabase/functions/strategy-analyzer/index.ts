@@ -2082,7 +2082,10 @@ serve(async (req) => {
       | 'MOVE_EXHAUSTED_LONG'
       // NEW: Deep StochRSI extreme hard gate (no exceptions)
       | 'DEEP_STOCHRSI_OVERSOLD_HARD_GATE'
-      | 'DEEP_STOCHRSI_OVERBOUGHT_HARD_GATE';
+      | 'DEEP_STOCHRSI_OVERBOUGHT_HARD_GATE'
+      // NEW: Severe HTF gate (Tier 1 - no bypass, covers K 5-15 for shorts, 85-95 for longs)
+      | 'SEVERE_HTF_OVERSOLD_BLOCK'
+      | 'SEVERE_HTF_OVERBOUGHT_BLOCK';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -4963,30 +4966,51 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 📉 STRONG TREND RELAXATION [tier=${overextensionTier}]: Allowing SHORT at %B=${percentB.toFixed(1)} (threshold lowered to ${overextensionThresholdShort} due to ADX=${adx.toFixed(1)}, slope=${adxSlopeForOverextension.toFixed(2)}, priceActionOverride=${priceActionMomentumOverride})`);
         }
         
-        // ============= IMPROVEMENT 1: HTF OVERSOLD/OVERBOUGHT HARD GATE =============
+        // ============= IMPROVEMENT 1: HTF OVERSOLD/OVERBOUGHT HARD GATE (TWO-TIER SYSTEM) =============
         // Global rule for ALL strategies: Block counter-trend continuation at 4h extremes
-        // This is market structure, not indicator noise - prevents trading against probability asymmetry
-        // NEW: Use parabolic mode thresholds when ADX is super-strong and rising
+        // TIER 1 (SEVERE): StochRSI-only (K < 15 for shorts, K > 85 for longs) - NO BYPASS
+        // TIER 2 (STANDARD): Combined (K + %B) - bypass allowed with strong trend
+        // This fills the gap between Deep Gate (K < 5) and ensures continuous protection
+        
         const adxRisingForBypass = trendData.volatility?.adxRising ?? smartAdxRising ?? false;
         const adxSlopeForParabolic = fullAdxResult.adxSlope ?? (adxRisingForBypass ? 0.5 : -0.5);
-        const isInParabolicMode = adx >= (HTF_EXTREME_HARD_GATES.PARABOLIC_MODE_MIN_ADX ?? 50) && 
+        const isInParabolicMode = adx >= (HTF_EXTREME_HARD_GATES.PARABOLIC_MODE_MIN_ADX ?? 45) && 
           (!HTF_EXTREME_HARD_GATES.PARABOLIC_MODE_REQUIRE_ADX_RISING || adxSlopeForParabolic >= 0);
         
-        // Use relaxed thresholds for parabolic mode (strong trends can stay overbought longer)
+        // ============= TIER 1: SEVERE STOCHRSI-ONLY GATE (NO BYPASS) =============
+        // This gate catches K in range 5-15 (shorts) or 85-95 (longs) that Deep Gate misses
+        const severeOversoldThreshold = HTF_EXTREME_HARD_GATES.SEVERE_OVERSOLD_K_THRESHOLD ?? 15;
+        const severeOverboughtThreshold = HTF_EXTREME_HARD_GATES.SEVERE_OVERBOUGHT_K_THRESHOLD ?? 85;
+        const severeGateAllowsBypass = HTF_EXTREME_HARD_GATES.SEVERE_GATE_ALLOW_BYPASS ?? false;
+        
+        // TIER 1 blocks based on StochRSI alone (K between Deep Gate and Severe threshold)
+        // Note: Deep Gate already caught K < 5, so this catches 5 <= K < 15 for shorts
+        const isSevereOversold = stochRsiK4h >= DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD && 
+                                  stochRsiK4h < severeOversoldThreshold;
+        const isSevereOverbought = stochRsiK4h > severeOverboughtThreshold && 
+                                    stochRsiK4h <= DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD;
+        
+        // ============= TIER 2: STANDARD COMBINED GATE (WITH BYPASS) =============
+        // Use parabolic mode thresholds for standard gate when ADX is super-strong
         const htfOverboughtThreshold = isInParabolicMode 
           ? (HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK_PARABOLIC ?? 92)
-          : HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK;
+          : (HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK ?? 80);
         const htfOversoldThreshold = isInParabolicMode
           ? (HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK_PARABOLIC ?? 8)
-          : HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK;
+          : (HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK ?? 20);
         
+        // Standard gate requires BOTH K AND %B to be in extreme zone
         const isHTFOversold = stochRsiK4h <= htfOversoldThreshold && 
-                              percentB <= HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK;
+                              percentB <= (HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK ?? 25);
         const isHTFOverbought = stochRsiK4h >= htfOverboughtThreshold && 
-                                percentB >= HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK;
+                                percentB >= (HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK ?? 75);
         
+        // Log tier status
+        if (isSevereOversold || isSevereOverbought) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ SEVERE HTF ZONE: K=${stochRsiK4h.toFixed(1)} (severe thresholds: OS<${severeOversoldThreshold}, OB>${severeOverboughtThreshold})`);
+        }
         if (isInParabolicMode) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🚀 PARABOLIC MODE ACTIVE: ADX=${adx.toFixed(1)}, slope=${adxSlopeForParabolic.toFixed(2)} - using relaxed HTF thresholds (OB=${htfOverboughtThreshold}, OS=${htfOversoldThreshold})`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🚀 PARABOLIC MODE ACTIVE: ADX=${adx.toFixed(1)}, slope=${adxSlopeForParabolic.toFixed(2)} - Tier 2 thresholds (OB=${htfOverboughtThreshold}, OS=${htfOversoldThreshold})`);
         }
         
         // ============= NEW: STRONG TREND HTF BYPASS CHECK =============
@@ -5230,17 +5254,79 @@ serve(async (req) => {
           }
         }
         
-        // Log bypass decision details for debugging
+        // ============= TIER 1: SEVERE STOCHRSI GATE (NO BYPASS ALLOWED) =============
+        // This catches K values between Deep Gate (5/95) and Severe threshold (15/85)
+        // Unlike Tier 2, this gate has NO bypass - if K is in severe zone, block the trade
+        if (!severeGateAllowsBypass) {
+          // Block SHORT when K is in severe oversold zone (5 <= K < 15)
+          if (intendedTradeDirection === "short" && isSevereOversold) {
+            rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { gate: 'SEVERE_HTF_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} in severe zone [${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}-${severeOversoldThreshold})` });
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 SEVERE OVERSOLD GATE - Blocking SHORT at 4h K=${stochRsiK4h.toFixed(1)} (in severe zone ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}-${severeOversoldThreshold}, NO BYPASS)`);
+            logger.forSymbol(symbol).info(`   → Bounce probability ~70%+ in severe zone, %B=${percentB.toFixed(1)}, ADX=${adx.toFixed(1)}`);
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `SEVERE OVERSOLD GATE (TIER 1): SHORT blocked - 4h StochRSI K=${stochRsiK4h.toFixed(1)} is in severe oversold zone (${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD} <= K < ${severeOversoldThreshold})`,
+              { 
+                gate: "SEVERE_HTF_OVERSOLD",
+                tier: 1,
+                direction: "short",
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                severeThreshold: severeOversoldThreshold,
+                deepThreshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
+                percentB: percentB.toFixed(1),
+                adx: adx.toFixed(1),
+                bypassAllowed: false,
+                message: `Bounce probability ~70%+ in severe zone K=${stochRsiK4h.toFixed(1)}, blocking SHORT with NO bypass allowed`
+              },
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
+          
+          // Block LONG when K is in severe overbought zone (85 < K <= 95)
+          if (intendedTradeDirection === "long" && isSevereOverbought) {
+            rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { gate: 'SEVERE_HTF_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} in severe zone (${severeOverboughtThreshold}-${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}]` });
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 SEVERE OVERBOUGHT GATE - Blocking LONG at 4h K=${stochRsiK4h.toFixed(1)} (in severe zone ${severeOverboughtThreshold}-${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}, NO BYPASS)`);
+            logger.forSymbol(symbol).info(`   → Pullback probability ~70%+ in severe zone, %B=${percentB.toFixed(1)}, ADX=${adx.toFixed(1)}`);
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `SEVERE OVERBOUGHT GATE (TIER 1): LONG blocked - 4h StochRSI K=${stochRsiK4h.toFixed(1)} is in severe overbought zone (${severeOverboughtThreshold} < K <= ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD})`,
+              { 
+                gate: "SEVERE_HTF_OVERBOUGHT",
+                tier: 1,
+                direction: "long",
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                severeThreshold: severeOverboughtThreshold,
+                deepThreshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
+                percentB: percentB.toFixed(1),
+                adx: adx.toFixed(1),
+                bypassAllowed: false,
+                message: `Pullback probability ~70%+ in severe zone K=${stochRsiK4h.toFixed(1)}, blocking LONG with NO bypass allowed`
+              },
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
+        }
+        
+        // ============= TIER 2: STANDARD HTF GATE (BYPASS ALLOWED) =============
+        // Log bypass decision details for debugging (only for Tier 2 - standard combined gate)
         if (isHTFOverbought || isHTFOversold) {
           const bypassType = stealthHTFBypassPath ? 'STEALTH_TREND' :
-            adxRisingDirectionalBypass ? 'ADX_RISING_DIRECTIONAL' :  // NEW - Phase 4
+            adxRisingDirectionalBypass ? 'ADX_RISING_DIRECTIONAL' :
             isParabolicMode ? 'PARABOLIC' : 
             highADXBypassPath ? 'HIGH_ADX_4H_ALIGNED' :
             hasRelaxedAlignment ? 'RELAXED_ALIGNMENT' : 
             alternativeBypassPath ? 'RISING_SLOPE' : 
             allTimeframesAligned ? 'FULL_ALIGNMENT' : 'BASIC';
           
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF BYPASS CHECK: type=${bypassType}, ADX=${adx.toFixed(1)}, slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} TIER 2 HTF BYPASS CHECK: type=${bypassType}, ADX=${adx.toFixed(1)}, slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
           logger.forSymbol(symbol).info(`   → canBypass=${canBypassHTFGate}, parabolic=${isParabolicMode}, relaxedAlign=${hasRelaxedAlignment}, altPath=${alternativeBypassPath}, highADX=${highADXBypassPath}, stealth=${stealthHTFBypassPath}, adxRisingDir=${adxRisingDirectionalBypass}, exhausted=${isExhausted}`);
           
           // Extra logging for stealth bypass
