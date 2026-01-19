@@ -138,6 +138,26 @@ export const STOCHRSI_THRESHOLDS = {
   PARABOLIC_BYPASS_POSITION_SIZE: 50,    // Default position size
 } as const;
 
+// ============= DEEP STOCHRSI EXTREME HARD GATE =============
+// Universal block for deep oversold/overbought - NO EXCEPTIONS ALLOWED
+// When StochRSI is at extreme levels (K < 5 or K > 95), bounce/reversal probability is very high (~80%+)
+// This gate executes BEFORE any bypass logic and cannot be overridden by momentum, ADX, or trend confirmation
+export const DEEP_STOCHRSI_HARD_GATE = {
+  ENABLED: true,
+  
+  // Deep oversold threshold - block ALL SHORTs when 4h K below this
+  // At K < 5, bounce probability is ~80%+ (statistically poor short entry)
+  DEEP_OVERSOLD_K_THRESHOLD: 5,
+  
+  // Deep overbought threshold - block ALL LONGs when 4h K above this
+  // At K > 95, pullback probability is ~80%+ (statistically poor long entry)
+  DEEP_OVERBOUGHT_K_THRESHOLD: 95,
+  
+  // NO EXCEPTIONS - not even strong ADX, momentum, or trend confirmation can override
+  // The probability of bounce/pullback at these extremes is too high to justify any entry
+  ALLOW_EXCEPTIONS: false,
+} as const;
+
 // ============= PHASE 3: TIME-IN-EXTREME THRESHOLDS =============
 // Tracks consecutive bars at StochRSI extremes for exhaustion detection
 // UPDATED: Raised thresholds to allow more room for trend continuation
@@ -1696,9 +1716,14 @@ export const BOLLINGER_ENTRY_GATES = {
   
   // PHASE 1 NEW: Allow shorts when %B is NEGATIVE (price broke below lower band)
   // This is a momentum continuation signal, NOT a bounce risk
+  // HOWEVER: Must respect deep oversold floor - if StochRSI is too low, bypass is disabled
   ALLOW_SHORTS_BELOW_ZERO_PERCENT_B: true,    // NEW: Allow shorts when %B < 0
   SHORT_BELOW_ZERO_REQUIRE_MOMENTUM: true,    // Require MACD expanding OR 1h directional
   SHORT_BELOW_ZERO_POSITION_REDUCTION: 0.60,  // 60% position size for extreme %B entries
+  
+  // NEW: StochRSI floor for negative %B bypass - if K is deeply oversold, don't bypass
+  // This prevents the bypass from activating when bounce probability is too high
+  SHORT_BELOW_ZERO_MIN_STOCHRSI_K: 15,        // Don't bypass if K < 15 (too oversold for short)
   
   // TREND-CONTEXT RELAXATION FOR LONGS (allow continuation in bullish trends)
   // If 4h is bullish with 60%+ confidence, longs are continuation - allow higher %B
