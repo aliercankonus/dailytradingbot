@@ -3725,3 +3725,103 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   LOG_EXHAUSTION_CHECKS: true,
 } as const;
 
+// ============= MEAN REVERSION STRATEGY CONFIGURATION =============
+// Asymmetric thresholds for LONG (Bounce) vs SHORT (Reversal)
+// SHORTs have stricter requirements due to crypto's upward bias
+
+export const MEAN_REVERSION_CONFIG = {
+  ENABLED: true,
+  
+  // LONG (Bounce) - More Aggressive
+  LONG: {
+    K_THRESHOLD: 5,               // K < 5 triggers bounce detection
+    PERCENT_B_THRESHOLD: 15,      // %B < 15 (below lower Bollinger)
+    POSITION_SIZE: 0.40,          // 40% of normal position
+    STOP_LOSS_PERCENT: 1.8,       // Wider stop for reversals
+    TAKE_PROFIT_PERCENT: 2.5,     // Target mean reversion to middle
+    MAX_ADX: 30,                  // Only in weak/moderate trends
+    REQUIRE_MOMENTUM_SHIFT: true,
+    MIN_BARS_AT_EXTREME: 3,
+  },
+  
+  // SHORT (Reversal) - More Conservative
+  SHORT: {
+    K_THRESHOLD: 97,              // K > 97 (stricter than LONG's 5)
+    PERCENT_B_THRESHOLD: 90,      // %B > 90 (well above upper Bollinger)
+    POSITION_SIZE: 0.25,          // Only 25% of normal position
+    STOP_LOSS_PERCENT: 2.2,       // Even wider stop
+    TAKE_PROFIT_PERCENT: 2.0,     // Modest target
+    MAX_ADX: 25,                  // Only in weaker trends
+    REQUIRE_HTF_NOT_BULLISH: true,
+    REQUIRE_BEARISH_DIVERGENCE: true,
+    MIN_BARS_AT_EXTREME: 4,
+  },
+  
+  // Quality Score Capping - prevents outranking trend trades
+  MAX_QUALITY_SCORE: 78,
+  
+  // Volatility-Adjusted Exit
+  EXIT: {
+    BASE_TIMEOUT_ATR_MULTIPLE: 1.5,
+    MAX_HOLD_HOURS: 4,
+    FAILURE_ATR_THRESHOLD: 0.8,
+    FAILURE_TIME_BARS: 4,
+    QUICK_PROFIT_TARGET_PERCENT: 1.5,
+    TRAILING_ACTIVATION_PERCENT: 0.8,
+    TRAILING_DISTANCE_PERCENT: 0.3,
+  },
+} as const;
+
+// ============= TREND PHASE GATE (Orthogonal to Expansion) =============
+// Classifies trend phase independently for clean regime separation
+
+export const TREND_PHASE_GATE = {
+  EARLY_TREND: {
+    ADX_MIN: 20,
+    ADX_MAX: 35,
+    ADX_SLOPE_MIN: 0.3,           // Rising ADX = early trend
+  },
+  LATE_TREND: {
+    ADX_MIN: 35,
+    ADX_SLOPE_MAX: 0,             // Flat/declining ADX = late trend
+    DI_COMPRESSION: true,
+  },
+  RANGE: {
+    ADX_MAX: 20,
+  },
+} as const;
+
+// ============= EXPANSION GATE (Orthogonal to Trend Phase) =============
+// Classifies expansion state independently for clean regime separation
+
+export const EXPANSION_GATE = {
+  NORMAL: {
+    VOLUME_RATIO_MAX: 1.5,
+    NO_SQUEEZE_RELEASE: true,
+  },
+  EXPANSION: {
+    VOLUME_SPIKE_MIN: 2.0,
+    OR_SQUEEZE_RELEASE: true,
+    ADX_SLOPE_MIN: 0.5,
+  },
+  BREAKOUT: {
+    VOLUME_SPIKE_MIN: 2.5,
+    ADX_SPIKE: true,
+    PRICE_RANGE_EXPANSION: true,
+  },
+} as const;
+
+// ============= MEAN REVERSION REGIME REQUIREMENTS =============
+// Mean reversion requires BOTH favorable trend phase AND expansion state
+
+export const MEAN_REVERSION_REGIME_REQUIREMENTS = {
+  ALLOWED_TREND_PHASES: ['RANGE', 'LATE_TREND'] as const,
+  ALLOWED_EXPANSION_STATES: ['NORMAL'] as const,  // Never in expansion
+  
+  // Position adjustments by phase
+  POSITION_MULTIPLIERS: {
+    'RANGE': 1.0,
+    'LATE_TREND': 0.70,
+  } as const,
+} as const;
+

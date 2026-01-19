@@ -437,6 +437,8 @@ export type Database = {
           closed_by_rebalancer: boolean | null
           confidence_score: number | null
           current_price: number | null
+          entry_atr: number | null
+          entry_atr_percent: number | null
           entry_exception_type: string | null
           entry_price: number
           executed_at: string | null
@@ -446,6 +448,7 @@ export type Database = {
           id: string
           initial_risk_amount: number | null
           is_hedge: boolean | null
+          max_adverse_excursion_atr: number | null
           opened_at: string | null
           opened_by_rebalancer: boolean | null
           order_type: string | null
@@ -485,6 +488,8 @@ export type Database = {
           closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
+          entry_atr?: number | null
+          entry_atr_percent?: number | null
           entry_exception_type?: string | null
           entry_price: number
           executed_at?: string | null
@@ -494,6 +499,7 @@ export type Database = {
           id?: string
           initial_risk_amount?: number | null
           is_hedge?: boolean | null
+          max_adverse_excursion_atr?: number | null
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
@@ -533,6 +539,8 @@ export type Database = {
           closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
+          entry_atr?: number | null
+          entry_atr_percent?: number | null
           entry_exception_type?: string | null
           entry_price?: number
           executed_at?: string | null
@@ -542,6 +550,7 @@ export type Database = {
           id?: string
           initial_risk_amount?: number | null
           is_hedge?: boolean | null
+          max_adverse_excursion_atr?: number | null
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
@@ -607,6 +616,8 @@ export type Database = {
           closed_by_rebalancer: boolean | null
           confidence_score: number | null
           current_price: number | null
+          entry_atr: number | null
+          entry_atr_percent: number | null
           entry_exception_type: string | null
           entry_price: number
           executed_at: string | null
@@ -614,6 +625,7 @@ export type Database = {
           exit_price: number | null
           id: string
           initial_risk_amount: number | null
+          max_adverse_excursion_atr: number | null
           opened_at: string | null
           opened_by_rebalancer: boolean | null
           order_type: string | null
@@ -652,6 +664,8 @@ export type Database = {
           closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
+          entry_atr?: number | null
+          entry_atr_percent?: number | null
           entry_exception_type?: string | null
           entry_price: number
           executed_at?: string | null
@@ -659,6 +673,7 @@ export type Database = {
           exit_price?: number | null
           id: string
           initial_risk_amount?: number | null
+          max_adverse_excursion_atr?: number | null
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
@@ -697,6 +712,8 @@ export type Database = {
           closed_by_rebalancer?: boolean | null
           confidence_score?: number | null
           current_price?: number | null
+          entry_atr?: number | null
+          entry_atr_percent?: number | null
           entry_exception_type?: string | null
           entry_price?: number
           executed_at?: string | null
@@ -704,6 +721,7 @@ export type Database = {
           exit_price?: number | null
           id?: string
           initial_risk_amount?: number | null
+          max_adverse_excursion_atr?: number | null
           opened_at?: string | null
           opened_by_rebalancer?: boolean | null
           order_type?: string | null
