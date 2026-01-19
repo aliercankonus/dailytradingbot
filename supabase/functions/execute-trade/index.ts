@@ -878,12 +878,20 @@ serve(async (req) => {
         const conf1h = trendData?.timeframes?.['1h']?.confidence || 0;
         
         // Check for trend formation conditions
+        // FIX: Require 4h trend alignment for volume relaxation to prevent counter-trend entries
+        const trend4h = trendData?.timeframes?.['4h']?.trend || "neutral";
+        const signalDirection = signal.signal_type === 'long' ? 'bullish' : 'bearish';
+        
+        // FIX: Volume relaxation only applies when 4h trend matches signal direction (or is neutral)
+        const htf4hAlignedOrNeutral = trend4h === "neutral" || trend4h === signalDirection;
+        
         const isTrendForming = VOLUME_RELAXATION_PARAMS.ENABLED &&
           adx >= VOLUME_RELAXATION_PARAMS.MIN_ADX &&
           (!VOLUME_RELAXATION_PARAMS.REQUIRE_ADX_RISING || adxRising) &&
           trend30m !== "neutral" && trend1h !== "neutral" &&
           trend30m === trend1h &&  // 30m and 1h agree on direction
-          conf30m >= 55 && conf1h >= 50;  // Reasonable confidence in both
+          conf30m >= 55 && conf1h >= 50 &&  // Reasonable confidence in both
+          htf4hAlignedOrNeutral;  // FIX: 4h must not be opposing signal
         
         // Determine minimum volume ratio based on conditions
         const minVolumeRatio = isTrendForming 

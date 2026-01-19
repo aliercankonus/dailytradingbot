@@ -7718,16 +7718,28 @@ serve(async (req) => {
         // ===== PHASE 2: HARDENED MICRO-TREND CHECK =====
         // Allows signals when 4h is neutral but lower TFs are aligned
         // Now requires: ADX >= 23 (lowered from 25), persistence >= 3 bars, volume confirmation
+        // FIX: Added HTF alignment check to prevent counter-trend entries
         const microTrend = trendData.microTrend;
         
+        // Get 4h trend direction for counter-trend validation
+        const htfTrend4hForMicroTrend = htfTrend4h || "neutral";
+        
         // PHASE 2: Stricter micro-trend validation (with lowered ADX threshold)
+        // FIX: Now includes 4h counter-trend check - don't allow MICRO_TREND if 4h is strongly opposing
+        const microTrendDirection = microTrend?.direction || "neutral";
+        const is4hCounterTrend = (microTrendDirection === "bullish" && htfTrend4hForMicroTrend === "bearish") ||
+                                  (microTrendDirection === "bearish" && htfTrend4hForMicroTrend === "bullish");
+        
+        // FIX: Block micro-trend if 4h trend is strongly opposing (prevents counter-trend entries)
+        // Allow if 4h is neutral or aligned with micro-trend direction
         const hasMicroTrendBypass = microTrend?.hasMicroTrend === true && 
           !microTrend?.blocked &&  // Must not be blocked by safety checks
           microTrend?.alignment >= MICRO_TREND_PARAMS.MIN_ALIGNMENT_SCORE && 
           microTrend?.adxSufficient === true &&  // ADX >= 23 required (lowered from 25)
           microTrend?.volumeConfirmed === true &&  // Volume confirmation required
           microTrend?.persistence >= MICRO_TREND_PARAMS.MIN_PERSISTENCE_BARS &&  // 3+ bars persistence
-          (microTrend?.direction === "bullish" || microTrend?.direction === "bearish");
+          (microTrend?.direction === "bullish" || microTrend?.direction === "bearish") &&
+          !is4hCounterTrend;  // FIX: Block if 4h trend is opposing
         
         // Position size reduction for micro-trend entries
         let microTrendPositionMultiplier = 1.0;
@@ -7737,7 +7749,10 @@ serve(async (req) => {
         
         // Log micro-trend bypass when used
         if (hasMicroTrendBypass && !htfAligned && confidence < 65) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate bypassed via MICRO-TREND (${microTrend.direction}, alignment=${microTrend.alignment}%, persist=${microTrend.persistence}, volOK=${microTrend.volumeConfirmed}, ADX=${adx.toFixed(1)})`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate bypassed via MICRO-TREND (${microTrend.direction}, alignment=${microTrend.alignment}%, persist=${microTrend.persistence}, volOK=${microTrend.volumeConfirmed}, ADX=${adx.toFixed(1)}, 4h=${htfTrend4hForMicroTrend})`);
+        } else if (is4hCounterTrend && microTrend?.hasMicroTrend && !htfAligned && confidence < 65) {
+          // FIX: Log when micro-trend is blocked due to counter-trend
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} MICRO-TREND BLOCKED: 4h trend (${htfTrend4hForMicroTrend}) opposes micro-trend (${microTrendDirection}) - preventing counter-trend entry`);
         } else if (microTrend?.blocked && !htfAligned && confidence < 65) {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} MICRO-TREND detected but BLOCKED: ${microTrend.blockReason}`);
         }
