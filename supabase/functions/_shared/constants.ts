@@ -138,18 +138,25 @@ export const STOCHRSI_THRESHOLDS = {
   PARABOLIC_BYPASS_POSITION_SIZE: 50,    // Default position size
 } as const;
 
-// ============= DEEP STOCHRSI EXTREME HARD GATE =============
+// ============= TIER 0: DEEP STOCHRSI EXTREME HARD GATE =============
+// TIER HIERARCHY:
+//   Tier 0 (DEEP): K < 5 or K > 95 - Universal block, NO EXCEPTIONS
+//   Tier 1 (SEVERE): 5 <= K < 15 or 85 < K <= 95 - Block, NO BYPASS
+//   Tier 2 (STANDARD): K <= 20 & %B <= 25 or K >= 80 & %B >= 75 - Block with RESTRICTED bypass
+//   Tier 3 (CAUTION): K <= 30 or K >= 70 - Penalty scoring, no hard block
+//
 // Universal block for deep oversold/overbought - NO EXCEPTIONS ALLOWED
 // When StochRSI is at extreme levels (K < 5 or K > 95), bounce/reversal probability is very high (~80%+)
 // This gate executes BEFORE any bypass logic and cannot be overridden by momentum, ADX, or trend confirmation
 export const DEEP_STOCHRSI_HARD_GATE = {
   ENABLED: true,
+  TIER: 0 as const,  // Explicit tier label
   
-  // Deep oversold threshold - block ALL SHORTs when 4h K below this
+  // Tier 0: Deep oversold threshold - block ALL SHORTs when 4h K below this
   // At K < 5, bounce probability is ~80%+ (statistically poor short entry)
   DEEP_OVERSOLD_K_THRESHOLD: 5,
   
-  // Deep overbought threshold - block ALL LONGs when 4h K above this
+  // Tier 0: Deep overbought threshold - block ALL LONGs when 4h K above this
   // At K > 95, pullback probability is ~80%+ (statistically poor long entry)
   DEEP_OVERBOUGHT_K_THRESHOLD: 95,
   
@@ -1674,43 +1681,59 @@ export function isTrendFollowingStrategy(strategyId: string | undefined, strateg
   return detectStrategyType(strategyId, strategyName) === 'TREND_FOLLOWING';
 }
 
-// ============= IMPROVEMENT 1: HTF OVERSOLD/OVERBOUGHT HARD GATES =============
+// ============= HTF OVERSOLD/OVERBOUGHT HARD GATES (TIERS 1 & 2) =============
+// TIER HIERARCHY:
+//   Tier 0 (DEEP): K < 5 or K > 95 - Universal block, NO EXCEPTIONS (see DEEP_STOCHRSI_HARD_GATE)
+//   Tier 1 (SEVERE): 5 <= K < 15 or 85 < K <= 95 - Block, NO BYPASS
+//   Tier 2 (STANDARD): K <= 20 & %B <= 25 or K >= 80 & %B >= 75 - Block with RESTRICTED bypass
+//   Tier 3 (CAUTION): K <= 30 or K >= 70 - Penalty scoring, no hard block
+//
 // Global rule for ALL strategies: Block counter-trend continuation at extremes
-// UPDATED: Now has TWO tiers:
-//   Tier 1 (SEVERE): StochRSI-only gate (K < 15 for shorts, K > 85 for longs) - NO BYPASS ALLOWED
-//   Tier 2 (STANDARD): Combined gate (K <= 20 AND %B <= 25) - bypass allowed with strong trend
-// This fills the gap between Deep Gate (K < 5) and the combined gate
 export const HTF_EXTREME_HARD_GATES = {
   // ============= TIER 1: SEVERE STOCHRSI-ONLY GATE (NO BYPASS) =============
-  // When StochRSI is in severe zone (5-15 for shorts, 85-95 for longs), block WITHOUT bypass
-  // This is a tighter gate than Deep (K < 5) but doesn't require %B confirmation
-  SEVERE_OVERSOLD_K_THRESHOLD: 15,   // K < 15 = block SHORT with no bypass (up from Deep's K < 5)
-  SEVERE_OVERBOUGHT_K_THRESHOLD: 85, // K > 85 = block LONG with no bypass
-  SEVERE_GATE_ALLOW_BYPASS: false,   // NO bypass allowed for severe zone
+  // Tier 1 catches 5 <= K < 15 (shorts) or 85 < K <= 95 (longs) - where Tier 0 doesn't reach
+  // When StochRSI is in severe zone, block WITHOUT bypass - %B confirmation not required
+  TIER_1_LABEL: 'SEVERE' as const,
+  SEVERE_OVERSOLD_K_THRESHOLD: 15,   // Tier 1: K < 15 = block SHORT with no bypass
+  SEVERE_OVERBOUGHT_K_THRESHOLD: 85, // Tier 1: K > 85 = block LONG with no bypass
+  SEVERE_GATE_ALLOW_BYPASS: false,   // Tier 1: NO bypass allowed
   
   // ============= TIER 2: STANDARD COMBINED GATE (WITH BYPASS) =============
-  // StochRSI thresholds for standard combined gate (requires BOTH K AND %B)
-  STOCHRSI_OVERSOLD_BLOCK: 20,   // Raised from 18 - K <= 20 for shorts (combined with %B)
-  STOCHRSI_OVERBOUGHT_BLOCK: 80, // Lowered from 85 - K >= 80 for longs (combined with %B)
+  // Tier 2 requires BOTH K AND %B to be in extreme zone - more permissive than Tier 1
+  TIER_2_LABEL: 'STANDARD' as const,
+  STOCHRSI_OVERSOLD_BLOCK: 20,   // Tier 2: K <= 20 for shorts (combined with %B)
+  STOCHRSI_OVERBOUGHT_BLOCK: 80, // Tier 2: K >= 80 for longs (combined with %B)
   
   // PARABOLIC MODE: Relaxed thresholds only apply to Tier 2 (NOT Tier 1)
-  // But parabolic bypass only works if K is NOT in severe zone
-  STOCHRSI_OVERBOUGHT_BLOCK_PARABOLIC: 92, // Lowered from 94 - tighter during parabolic
-  STOCHRSI_OVERSOLD_BLOCK_PARABOLIC: 8,    // Raised from 6 - tighter during parabolic
+  // But parabolic bypass only works if K is NOT in Tier 1 severe zone
+  STOCHRSI_OVERBOUGHT_BLOCK_PARABOLIC: 92, // Tier 2 parabolic: relaxed from 80
+  STOCHRSI_OVERSOLD_BLOCK_PARABOLIC: 8,    // Tier 2 parabolic: relaxed from 20
   
   // ADX thresholds for parabolic mode activation
   PARABOLIC_MODE_MIN_ADX: 45,
   PARABOLIC_MODE_REQUIRE_ADX_RISING: true,
   
-  // Bollinger %B thresholds for standard combined gate
-  PERCENT_B_OVERSOLD_BLOCK: 25,  // Raised from 20 - %B <= 25 for shorts (more protective)
-  PERCENT_B_OVERBOUGHT_BLOCK: 75, // Lowered from 80 - %B >= 75 for longs (more protective)
+  // Bollinger %B thresholds for Tier 2 combined gate
+  PERCENT_B_OVERSOLD_BLOCK: 25,  // Tier 2: %B <= 25 for shorts
+  PERCENT_B_OVERBOUGHT_BLOCK: 75, // Tier 2: %B >= 75 for longs
   
-  // ============= BYPASS RESTRICTIONS =============
-  // Even when bypass is allowed (Tier 2 only), these conditions must be met
-  BYPASS_MIN_ADX: 35,              // ADX must be >= 35 for any bypass
-  BYPASS_MAX_REVERSAL_SCORE: 45,   // Reversal score must be < 45 for bypass
-  BYPASS_POSITION_REDUCTION: 0.50, // 50% position size when bypassing (down from 60%)
+  // ============= TIER 2 BYPASS RESTRICTIONS =============
+  // Bypass is ONLY allowed for Tier 2 (not Tier 0 or Tier 1), and must meet ALL conditions
+  BYPASS_MIN_ADX: 35,              // Tier 2 bypass: ADX must be >= 35
+  BYPASS_MAX_REVERSAL_SCORE: 45,   // Tier 2 bypass: Reversal score must be < 45
+  BYPASS_POSITION_REDUCTION: 0.50, // Tier 2 bypass: 50% position size
+} as const;
+
+// ============= TIER 3: CAUTION ZONE (PENALTY SCORING) =============
+// Tier 3 is informational - adds penalties to quality/reversal scoring but doesn't hard block
+// Applied via reversal score calculations when K is in caution zone
+export const TIER_3_CAUTION_ZONE = {
+  TIER_3_LABEL: 'CAUTION' as const,
+  // Caution zone thresholds - penalty scoring, no hard block
+  OVERSOLD_K_THRESHOLD: 30,   // K <= 30 = caution zone for shorts
+  OVERBOUGHT_K_THRESHOLD: 70, // K >= 70 = caution zone for longs
+  // Penalty points added to reversal score when in caution zone
+  CAUTION_ZONE_PENALTY: 10,
 } as const;
 
 // ============= IMPROVEMENT 2: BOLLINGER POSITION FILTER (CONTEXT-AWARE) =============
