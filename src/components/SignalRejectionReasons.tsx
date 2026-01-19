@@ -2923,6 +2923,414 @@ const StrategyConstraintGateDisplay = ({ filtersStatus, trendData }: { filtersSt
   );
 };
 
+// ============= TIER 0/1 SEVERE HTF GATE DISPLAY =============
+// For TIER_0_DEEP_OVERSOLD, TIER_0_DEEP_OVERBOUGHT, SEVERE_HTF_OVERSOLD, SEVERE_HTF_OVERBOUGHT
+const SevereHTFGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const gate = filtersStatus?.gate || "";
+  const stochRsiK = coerceNumeric(filtersStatus?.stochRsiK4h ?? filtersStatus?.stochRsiK ?? trendData?.stochasticRsi?.['4h']?.k, 50);
+  const stochRsiD = coerceNumeric(filtersStatus?.stochRsiD4h ?? filtersStatus?.stochRsiD ?? trendData?.stochasticRsi?.['4h']?.d, 50);
+  const direction = filtersStatus?.direction || (stochRsiK < 50 ? "short" : "long");
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  
+  // Determine tier
+  const isTier0 = gate.includes("TIER_0") || gate.includes("DEEP") || stochRsiK < 5 || stochRsiK > 95;
+  const tierLabel = isTier0 ? "TIER 0 (DEEP)" : "TIER 1 (SEVERE)";
+  const tierBg = isTier0 ? "bg-red-600/20" : "bg-red-500/20";
+  const tierBorder = isTier0 ? "border-red-600/40" : "border-red-500/40";
+  const tierText = isTier0 ? "text-red-400" : "text-red-400";
+  
+  // Thresholds
+  const tier0Threshold = stochRsiK < 50 ? 5 : 95;
+  const tier1LowerThreshold = stochRsiK < 50 ? 5 : 85;
+  const tier1UpperThreshold = stochRsiK < 50 ? 15 : 95;
+  
+  const isOversold = stochRsiK < 50;
+  const blockedDirection = isOversold ? "SHORT" : "LONG";
+  
+  return (
+    <div className={`space-y-3 p-3 rounded-md border ${tierBg} ${tierBorder}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Ban className={`h-4 w-4 ${tierText}`} />
+          <span className={`text-xs font-semibold ${tierText}`}>
+            {tierLabel}: StochRSI HARD GATE
+          </span>
+        </div>
+        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+          {blockedDirection} Blocked
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        4H StochRSI K is at extreme level. {isTier0 ? "NO bypass is allowed at this level." : "NO bypass is allowed for Tier 1."}
+      </div>
+      
+      {/* StochRSI Gauge */}
+      <div className="space-y-2">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">4H StochRSI K</span>
+          <span className={`font-mono font-bold ${tierText}`}>{stochRsiK.toFixed(1)}</span>
+        </div>
+        <div className="relative h-3 bg-muted/50 rounded-full overflow-hidden">
+          <div 
+            className={`h-full rounded-full ${isTier0 ? 'bg-red-600' : 'bg-red-500'}`}
+            style={{ width: `${stochRsiK}%` }}
+          />
+          {/* Threshold markers */}
+          <div className="absolute top-0 h-full w-0.5 bg-red-600/70" style={{ left: '5%' }} title="Tier 0: K=5" />
+          <div className="absolute top-0 h-full w-0.5 bg-orange-500/70" style={{ left: '15%' }} title="Tier 1: K=15" />
+          <div className="absolute top-0 h-full w-0.5 bg-orange-500/70" style={{ left: '85%' }} title="Tier 1: K=85" />
+          <div className="absolute top-0 h-full w-0.5 bg-red-600/70" style={{ left: '95%' }} title="Tier 0: K=95" />
+        </div>
+        <div className="flex justify-between text-[8px] text-muted-foreground">
+          <span>0</span>
+          <span className="text-red-400">T0: 5</span>
+          <span className="text-orange-400">T1: 15</span>
+          <span className="text-muted-foreground">50</span>
+          <span className="text-orange-400">T1: 85</span>
+          <span className="text-red-400">T0: 95</span>
+          <span>100</span>
+        </div>
+      </div>
+      
+      {/* Context Grid */}
+      <div className="grid grid-cols-3 gap-2 text-[10px]">
+        <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">StochRSI K</div>
+          <div className={`text-lg font-bold ${tierText}`}>{stochRsiK.toFixed(1)}</div>
+        </div>
+        <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">StochRSI D</div>
+          <div className="text-lg font-bold text-foreground">{stochRsiD.toFixed(1)}</div>
+        </div>
+        <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">ADX</div>
+          <div className="text-lg font-bold text-foreground">{adx.toFixed(1)}</div>
+        </div>
+      </div>
+      
+      {/* No bypass explanation */}
+      <div className="flex items-center gap-1.5 p-2 bg-red-500/20 rounded text-[10px] text-red-400">
+        <Ban className="h-3.5 w-3.5" />
+        <span className="font-medium">NO BYPASS ALLOWED - {tierLabel}</span>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className={tierText}>⛔ Why blocked:</span> StochRSI K={stochRsiK.toFixed(1)} is in the 
+        {isTier0 ? ` Tier 0 (Deep) zone (K ${isOversold ? '<5' : '>95'})` : ` Tier 1 (Severe) zone (K ${isOversold ? '5-15' : '85-95'})`}. 
+        {isOversold 
+          ? " Market is deeply oversold - SHORT entries are blocked to prevent catching a falling knife."
+          : " Market is deeply overbought - LONG entries are blocked to prevent buying the top."
+        }
+      </div>
+    </div>
+  );
+};
+
+// ============= MOVE EXHAUSTION DISPLAY =============
+// For MOVE_EXHAUSTED_SHORT and MOVE_EXHAUSTED_LONG gates
+const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const direction = filtersStatus?.direction || "short";
+  const priceDistancePercent = coerceNumeric(filtersStatus?.priceDistancePercent ?? filtersStatus?.movePercent, 0);
+  const stochRsiK = coerceNumeric(filtersStatus?.stochRsiK4h ?? filtersStatus?.stochRsiK ?? trendData?.stochasticRsi?.['4h']?.k, 50);
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const adxSlope = coerceNumeric(filtersStatus?.adxSlope ?? trendData?.volatility?.adxSlope, 0);
+  const isHardBlock = priceDistancePercent >= 10;
+  const isSoftBlock = priceDistancePercent >= 5 && priceDistancePercent < 10;
+  
+  const getExhaustionLevel = () => {
+    if (priceDistancePercent >= 10) return { label: "HARD BLOCK (>10%)", color: "text-red-400", bg: "bg-red-500/20", border: "border-red-500/30" };
+    if (priceDistancePercent >= 7) return { label: "High Exhaustion (7-10%)", color: "text-orange-400", bg: "bg-orange-500/20", border: "border-orange-500/30" };
+    if (priceDistancePercent >= 5) return { label: "Soft Block (5-7%)", color: "text-yellow-400", bg: "bg-yellow-500/20", border: "border-yellow-500/30" };
+    return { label: "Normal", color: "text-muted-foreground", bg: "bg-muted/30", border: "border-muted/50" };
+  };
+  
+  const exhaustionLevel = getExhaustionLevel();
+  const isShort = direction.toLowerCase() === "short";
+  const swingLabel = isShort ? "24h Low" : "24h High";
+  
+  return (
+    <div className={`space-y-3 p-3 rounded-md border ${exhaustionLevel.bg} ${exhaustionLevel.border}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <TrendingDown className={`h-4 w-4 ${exhaustionLevel.color}`} />
+          <span className={`text-xs font-semibold ${exhaustionLevel.color}`}>
+            MOVE EXHAUSTED: {direction.toUpperCase()}
+          </span>
+        </div>
+        <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${exhaustionLevel.color}`}>
+          {exhaustionLevel.label}
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        Price has moved {priceDistancePercent.toFixed(1)}% from {swingLabel}. 
+        {isHardBlock ? " Entry is blocked due to extreme exhaustion." : " Entry size reduced due to late-cycle risk."}
+      </div>
+      
+      {/* Exhaustion Progress */}
+      <div className="space-y-1.5">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Distance from {swingLabel}</span>
+          <span className={`font-mono font-bold ${exhaustionLevel.color}`}>{priceDistancePercent.toFixed(1)}%</span>
+        </div>
+        <div className="relative h-2.5 bg-muted/50 rounded-full overflow-hidden">
+          <div 
+            className={`h-full rounded-full transition-all ${
+              priceDistancePercent >= 10 ? 'bg-red-500' : 
+              priceDistancePercent >= 7 ? 'bg-orange-500' : 
+              priceDistancePercent >= 5 ? 'bg-yellow-500' : 'bg-green-500'
+            }`}
+            style={{ width: `${Math.min(priceDistancePercent * 8, 100)}%` }}
+          />
+          {/* Threshold markers */}
+          <div className="absolute top-0 h-full w-0.5 bg-yellow-400/60" style={{ left: '40%' }} title="5% Soft" />
+          <div className="absolute top-0 h-full w-0.5 bg-red-400/60" style={{ left: '80%' }} title="10% Hard" />
+        </div>
+        <div className="flex justify-between text-[8px] text-muted-foreground">
+          <span>0%</span>
+          <span className="text-yellow-400">5% (0.35x)</span>
+          <span className="text-red-400">10% (Block)</span>
+          <span>12.5%+</span>
+        </div>
+      </div>
+      
+      {/* Context Grid */}
+      <div className="grid grid-cols-3 gap-2 text-[10px]">
+        <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">Move %</div>
+          <div className={`text-lg font-bold ${exhaustionLevel.color}`}>{priceDistancePercent.toFixed(1)}%</div>
+        </div>
+        <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">StochRSI K</div>
+          <div className={`text-lg font-bold ${stochRsiK < 30 || stochRsiK > 70 ? 'text-orange-400' : 'text-foreground'}`}>
+            {stochRsiK.toFixed(1)}
+          </div>
+        </div>
+        <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">ADX</div>
+          <div className="text-lg font-bold text-foreground">{adx.toFixed(1)}</div>
+          <div className={`text-[8px] ${adxSlope > 0 ? 'text-green-400' : adxSlope < 0 ? 'text-red-400' : 'text-muted-foreground'}`}>
+            Slope: {adxSlope > 0 ? '+' : ''}{adxSlope.toFixed(2)}
+          </div>
+        </div>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className={exhaustionLevel.color}>⚠️ Why blocked:</span> Price has already moved {priceDistancePercent.toFixed(1)}% 
+        from {swingLabel}. 
+        {isHardBlock 
+          ? ` Moves >10% indicate extreme exhaustion. Entry blocked to avoid late chase.`
+          : ` Moves >5% combined with overextended StochRSI suggest reduced position sizing (0.35x).`
+        }
+      </div>
+    </div>
+  );
+};
+
+// ============= PRE-RECOVERY STRUCTURE DISPLAY =============
+// For PRE_RECOVERY_STRUCTURE gate
+const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const consecutiveLosses = coerceNumeric(filtersStatus?.consecutiveLosses ?? filtersStatus?.consecutive_losses, 0);
+  const lossThreshold = coerceNumeric(filtersStatus?.lossThreshold ?? filtersStatus?.consecutive_loss_threshold, 3);
+  const rsi = coerceNumeric(filtersStatus?.rsi ?? trendData?.technicalIndicators?.rsi, 50);
+  const isInSqueeze = filtersStatus?.isInSqueeze ?? trendData?.bollingerBands?.['4h']?.squeeze ?? false;
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const direction = filtersStatus?.direction || "unknown";
+  
+  // Requirements for pre-recovery entry
+  const hasDeepPullback = (direction === "long" && rsi < 30) || (direction === "short" && rsi > 70);
+  const hasSqueeze = isInSqueeze;
+  const hasHighADX = adx >= 25;
+  
+  return (
+    <div className="space-y-3 p-3 rounded-md border bg-amber-500/10 border-amber-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <AlertTriangle className="h-4 w-4 text-amber-400" />
+          <span className="text-xs font-semibold text-amber-400">
+            PRE-RECOVERY STRUCTURE
+          </span>
+        </div>
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-400">
+          {consecutiveLosses} consecutive losses
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        System is in pre-recovery mode after {consecutiveLosses} consecutive losses. 
+        Stricter entry requirements are enforced.
+      </div>
+      
+      {/* Requirements Checklist */}
+      <div className="space-y-1.5">
+        <div className="text-[10px] text-muted-foreground font-medium">Entry Requirements:</div>
+        
+        <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${hasDeepPullback ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+          {hasDeepPullback ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+          <span>Deep Pullback (RSI {direction === "long" ? "<30" : ">70"}): </span>
+          <span className="font-mono">{rsi.toFixed(1)}</span>
+        </div>
+        
+        <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${hasSqueeze ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+          {hasSqueeze ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+          <span>Squeeze Active: </span>
+          <span className="font-mono">{hasSqueeze ? "Yes" : "No"}</span>
+        </div>
+        
+        <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${hasHighADX ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+          {hasHighADX ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+          <span>ADX ≥25: </span>
+          <span className="font-mono">{adx.toFixed(1)}</span>
+        </div>
+      </div>
+      
+      {/* Context Grid */}
+      <div className="grid grid-cols-3 gap-2 text-[10px]">
+        <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">Losses</div>
+          <div className="text-lg font-bold text-amber-400">{consecutiveLosses}/{lossThreshold}</div>
+        </div>
+        <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">RSI</div>
+          <div className={`text-lg font-bold ${hasDeepPullback ? 'text-green-400' : 'text-muted-foreground'}`}>
+            {rsi.toFixed(1)}
+          </div>
+        </div>
+        <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">ADX</div>
+          <div className={`text-lg font-bold ${hasHighADX ? 'text-green-400' : 'text-muted-foreground'}`}>
+            {adx.toFixed(1)}
+          </div>
+        </div>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-amber-400">⚠️ Why blocked:</span> After {consecutiveLosses} consecutive losses, 
+        the system requires stricter entry conditions: deep pullback OR squeeze active. 
+        Current conditions don't meet these requirements.
+      </div>
+    </div>
+  );
+};
+
+// ============= MOMENTUM DIRECTION OPPOSING DISPLAY =============
+// For MOMENTUM_DIRECTION_OPPOSING gate
+const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const signalDirection = filtersStatus?.signalDirection || filtersStatus?.direction || "long";
+  const momentumDirection = filtersStatus?.momentumDirection || trendData?.momentum?.direction || "unknown";
+  const momentumScore = coerceNumeric(filtersStatus?.momentumScore ?? trendData?.momentum?.score, 0);
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const macdHistogram = coerceNumeric(filtersStatus?.macdHistogram ?? trendData?.macd?.histogram, 0);
+  const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend || "unknown";
+  
+  const isLong = signalDirection.toLowerCase() === "long";
+  const opposingDirection = isLong ? "bearish" : "bullish";
+  
+  // Check bypass conditions
+  const isWeakMomentum = Math.abs(macdHistogram) < 0.0001;
+  const isExceptionalADX = adx >= 35;
+  const canBypass = isWeakMomentum || isExceptionalADX;
+  
+  return (
+    <div className="space-y-3 p-3 rounded-md border bg-orange-500/10 border-orange-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Activity className="h-4 w-4 text-orange-400" />
+          <span className="text-xs font-semibold text-orange-400">
+            MOMENTUM DIRECTION OPPOSING
+          </span>
+        </div>
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-orange-500/20 text-orange-400">
+          {signalDirection.toUpperCase()} vs {opposingDirection.toUpperCase()} momentum
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        Signal direction ({signalDirection.toUpperCase()}) conflicts with momentum direction ({momentumDirection}).
+        {canBypass ? " Bypass conditions may apply." : " Entry blocked."}
+      </div>
+      
+      {/* Momentum Gauge */}
+      <div className="space-y-1.5">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Momentum Score</span>
+          <span className={`font-mono font-bold ${
+            momentumScore > 30 ? 'text-green-400' : 
+            momentumScore < -30 ? 'text-red-400' : 'text-yellow-400'
+          }`}>{momentumScore > 0 ? '+' : ''}{momentumScore.toFixed(0)}</span>
+        </div>
+        <div className="relative h-2.5 bg-muted/50 rounded-full overflow-hidden">
+          {/* Center at 50%, scale from -100 to +100 */}
+          <div 
+            className={`absolute h-full rounded-full ${momentumScore >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
+            style={{ 
+              left: momentumScore >= 0 ? '50%' : `${50 + (momentumScore / 2)}%`,
+              width: `${Math.abs(momentumScore) / 2}%`
+            }}
+          />
+          {/* Center line */}
+          <div className="absolute top-0 h-full w-0.5 bg-foreground/30" style={{ left: '50%' }} />
+          {/* Threshold lines */}
+          <div className="absolute top-0 h-full w-0.5 bg-yellow-400/40" style={{ left: '25%' }} title="-50" />
+          <div className="absolute top-0 h-full w-0.5 bg-yellow-400/40" style={{ left: '75%' }} title="+50" />
+        </div>
+        <div className="flex justify-between text-[8px] text-muted-foreground">
+          <span className="text-red-400">-100 (Bearish)</span>
+          <span>0 (Neutral)</span>
+          <span className="text-green-400">+100 (Bullish)</span>
+        </div>
+      </div>
+      
+      {/* Context Grid */}
+      <div className="grid grid-cols-3 gap-2 text-[10px]">
+        <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">Momentum</div>
+          <div className={`text-sm font-bold capitalize ${
+            momentumDirection === 'bullish' ? 'text-green-400' : 
+            momentumDirection === 'bearish' ? 'text-red-400' : 'text-yellow-400'
+          }`}>{momentumDirection}</div>
+        </div>
+        <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">ADX</div>
+          <div className={`text-lg font-bold ${adx >= 35 ? 'text-green-400' : 'text-foreground'}`}>
+            {adx.toFixed(1)}
+          </div>
+          <div className="text-[8px] text-muted-foreground">{adx >= 35 ? "Exceptional" : "Normal"}</div>
+        </div>
+        <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">1H Trend</div>
+          <div className={`text-sm font-bold capitalize ${
+            trend1h === 'bullish' ? 'text-green-400' : 
+            trend1h === 'bearish' ? 'text-red-400' : 'text-yellow-400'
+          }`}>{trend1h}</div>
+        </div>
+      </div>
+      
+      {/* Bypass conditions */}
+      <div className="space-y-1">
+        <div className="text-[10px] text-muted-foreground font-medium">Bypass Conditions:</div>
+        <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${isWeakMomentum ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+          {isWeakMomentum ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+          <span>Very Weak MACD (|histogram| {"<"} 0.0001): </span>
+          <span className="font-mono">{Math.abs(macdHistogram).toFixed(5)}</span>
+        </div>
+        <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${isExceptionalADX ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+          {isExceptionalADX ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+          <span>Exceptional ADX (≥35): </span>
+          <span className="font-mono">{adx.toFixed(1)}</span>
+        </div>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-orange-400">⚠️ Why blocked:</span> Attempting {signalDirection.toUpperCase()} entry 
+        while momentum is {momentumDirection}. This gate prevents entries against the current momentum direction 
+        unless momentum is very weak or ADX is exceptionally strong (≥35).
+      </div>
+    </div>
+  );
+};
+
 // Unified Reversal Display - for BLOCK/REDUCE decisions from unified reversal scoring
 const UnifiedReversalDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const score = coerceNumeric(filtersStatus?.unifiedReversalScore ?? filtersStatus?.score ?? filtersStatus?.unifiedScore ?? filtersStatus?.reversalScore, 0);
@@ -3775,25 +4183,32 @@ export const SignalRejectionReasons = () => {
     const gate = filtersStatus?.gate || "";
     const decision = filtersStatus?.decision;
     
-    // CRITICAL - Absolute blocks with no exceptions
+    // CRITICAL - Tier 0/1 gates with absolutely no bypass
     if (gate === "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK" || gate === "ABSOLUTE_MIN_STOCHRSI_HARD_BLOCK") return "critical";
     if (gate === "STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT" || gate === "STOCHRSI_ABSOLUTE_MAX_OVERSOLD") return "critical";
+    if (gate === "TIER_0_DEEP_OVERSOLD" || gate === "TIER_0_DEEP_OVERBOUGHT") return "critical";
+    if (gate === "DEEP_STOCHRSI_HARD_GATE") return "critical";
+    if (gate === "SEVERE_HTF_OVERSOLD" || gate === "SEVERE_HTF_OVERBOUGHT") return "critical";
+    if (reason.includes("TIER 0") || reason.includes("TIER 1")) return "critical";
     if (reason.includes("HARD BLOCK")) return "critical";
     if (gate === "BEARISH_DIVERGENCE_AT_EXTREME" || gate === "BULLISH_DIVERGENCE_AT_EXTREME") return "critical";
     if (reason.includes("Reversal risk") && filtersStatus?.reversalRiskScore >= 70) return "critical";
     if (decision === "BLOCK" || reason.includes("Unified Reversal BLOCK")) return "critical";
     
-    // HIGH - Important gates that block trades
+    // HIGH - Important gates that block trades (Tier 2 with restricted bypass)
     if (gate === "ADX_TOO_LOW") return "high";
     if (gate === "NO_MOMENTUM_CONFIRMATION") return "high";
     if (gate === "BOLLINGER_OVEREXTENSION_GATE" || gate === "BOLLINGER_UNDEREXTENSION_GATE") return "high";
     if (gate === "HTF_EXTREME_OVERSOLD_BLOCK" || gate === "HTF_EXTREME_OVERBOUGHT_BLOCK") return "critical";
+    if (gate === "STOCHRSI_OVERSOLD_BLOCK" || gate === "STOCHRSI_OVERBOUGHT_BLOCK") return "high";
     if (gate === "BOLLINGER_POSITION_FILTER_SHORT") return "high";
     if (gate === "SQUEEZE_CONTEXT_MEAN_REVERSION") return "high";
-    if (gate === "STRATEGY_CONSTRAINT") return "medium";
     if (gate === "STOCHRSI_NOT_RISING" || gate === "STOCHRSI_NOT_FALLING") return "high";
     if (gate === "NO_CLEAR_DIRECTION") return "high";
-    // NEW: Confidence and regime-strategy gates
+    // Move exhaustion and momentum direction gates
+    if (gate === "MOVE_EXHAUSTED_SHORT" || gate === "MOVE_EXHAUSTED_LONG") return "high";
+    if (gate === "MOMENTUM_DIRECTION_OPPOSING") return "high";
+    // Confidence and regime-strategy gates
     if (gate === "CONFIDENCE_BELOW_THRESHOLD") return "high";
     if (gate === "REGIME_STRATEGY_MISMATCH") return "high";
     if (reason.includes("HARD GATE")) return "high";
@@ -3804,7 +4219,9 @@ export const SignalRejectionReasons = () => {
     if (reason.includes("REGIME-STRATEGY MISMATCH")) return "high";
     if (decision === "REDUCE" || reason.includes("Unified Reversal REDUCE")) return "high";
     
-    // MEDIUM - Softer gates that can be bypassed
+    // MEDIUM - Pre-recovery state and softer gates that can be bypassed (Tier 3)
+    if (gate === "PRE_RECOVERY_STRUCTURE") return "medium";
+    if (gate === "STRATEGY_CONSTRAINT") return "medium";
     if (gate === "NEUTRAL_4H_LOW_CONFIDENCE") return "medium";
     if (gate === "CONFIDENCE_DEAD_ZONE") return "medium";
     if (gate === "HTF_NOT_ALIGNED") return "medium";
@@ -3993,10 +4410,37 @@ export const SignalRejectionReasons = () => {
       return <HardBlockStochRsiDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
-    // NEW: HTF Extreme Gate (4h oversold/overbought)
+    // TIER 0/1: Severe HTF Gate (Deep oversold/overbought - NO bypass)
+    if (fs?.gate === "TIER_0_DEEP_OVERSOLD" || fs?.gate === "TIER_0_DEEP_OVERBOUGHT" ||
+        fs?.gate === "DEEP_STOCHRSI_HARD_GATE" ||
+        fs?.gate === "SEVERE_HTF_OVERSOLD" || fs?.gate === "SEVERE_HTF_OVERBOUGHT" ||
+        reason.includes("TIER 0") || reason.includes("TIER 1") ||
+        reason.includes("SEVERE") || reason.includes("DEEP")) {
+      return <SevereHTFGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // TIER 2: HTF Extreme Gate (4h oversold/overbought with restricted bypass)
     if (fs?.gate === "HTF_EXTREME_OVERSOLD_BLOCK" || fs?.gate === "HTF_EXTREME_OVERBOUGHT_BLOCK" || 
-        fs?.gate === "HTF_EXTREME_GATE" || reason.includes("HTF EXTREME GATE")) {
+        fs?.gate === "HTF_EXTREME_GATE" || fs?.gate === "STOCHRSI_OVERSOLD_BLOCK" || 
+        fs?.gate === "STOCHRSI_OVERBOUGHT_BLOCK" || reason.includes("HTF EXTREME GATE")) {
       return <HTFExtremeGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // Move Exhaustion Gate (price moved too far from swing high/low)
+    if (fs?.gate === "MOVE_EXHAUSTED_SHORT" || fs?.gate === "MOVE_EXHAUSTED_LONG" ||
+        reason.includes("MOVE_EXHAUSTED") || reason.includes("MOVE EXHAUSTED")) {
+      return <MoveExhaustionDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // Pre-Recovery Structure Gate (after consecutive losses)
+    if (fs?.gate === "PRE_RECOVERY_STRUCTURE" || reason.includes("PRE-RECOVERY") || reason.includes("PRE_RECOVERY")) {
+      return <PreRecoveryGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // Momentum Direction Opposing Gate
+    if (fs?.gate === "MOMENTUM_DIRECTION_OPPOSING" || reason.includes("MOMENTUM_DIRECTION") ||
+        reason.includes("momentum direction") || reason.includes("MOMENTUM DIRECTION MISMATCH")) {
+      return <MomentumDirectionOpposingDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // NEW: Bollinger LONG Gate (for longs above upper BB)
