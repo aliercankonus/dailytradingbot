@@ -337,9 +337,11 @@ const logRejectionWithAI = async (
   enableAI: boolean = false,  // Default to false, controlled by ai_analysis_enabled
   orderFlow?: OrderFlowAnalysis | null  // Optional Order Flow data
 ) => {
-  // Extract StochRSI K/D values from trendData for consistent logging
+  // Extract StochRSI K/D values from trendData for consistent logging (all timeframes)
   const stochRsi4h = trendData?.stochasticRsi?.["4h"] || trendData?.stochasticRsi?.aggregated;
   const stochRsi1h = trendData?.stochasticRsi?.["1h"];
+  const stochRsi30m = trendData?.stochasticRsi?.["30m"];
+  const stochRsi15m = trendData?.stochasticRsi?.["15m"];
   const stochRsiData = {
     stochRsi4h: {
       k: stochRsi4h?.k ?? null,
@@ -348,6 +350,14 @@ const logRejectionWithAI = async (
     stochRsi1h: {
       k: stochRsi1h?.k ?? null,
       d: stochRsi1h?.d ?? null,
+    },
+    stochRsi30m: {
+      k: stochRsi30m?.k ?? null,
+      d: stochRsi30m?.d ?? null,
+    },
+    stochRsi15m: {
+      k: stochRsi15m?.k ?? null,
+      d: stochRsi15m?.d ?? null,
     }
   };
   
