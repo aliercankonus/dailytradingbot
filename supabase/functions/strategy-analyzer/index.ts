@@ -10390,6 +10390,92 @@ serve(async (req) => {
           }
         }
         
+        // ============= MEAN REVERSION SIGNAL GENERATION =============
+        // Generate mean reversion signals when exhaustion is detected and conditions are met
+        // This runs as an alternative/additional path to strategy-based signals
+        if (MEAN_REVERSION_CONFIG.ENABLED && meanReversionSignal?.detected && meanReversionSignal.allowed) {
+          // Check signal precedence - qualified trend signals (Q >= 70) take priority
+          const trendSignalsForPrecedence = candidates.map(c => ({
+            symbol,
+            qualityScore: c.score,
+            strategy_name: c.strategy.name
+          }));
+          
+          const precedenceResult = checkSignalPrecedence(meanReversionSignal, trendSignalsForPrecedence);
+          
+          if (!precedenceResult.suppress) {
+            // Mean reversion signal is allowed - add as candidate
+            const mrDirection = meanReversionSignal.direction as 'long' | 'short';
+            const mrConfig = mrDirection === 'long' ? MEAN_REVERSION_CONFIG.LONG : MEAN_REVERSION_CONFIG.SHORT;
+            
+            // Calculate stop loss and take profit using ATR-based approach
+            const currentPrice = parseFloat(marketDataMap.get(symbol)?.lastPrice || '0');
+            const currentATR = trendData?.volatility?.atr ?? (currentPrice * 0.02); // Fallback: 2% of price
+            const atrPercent = (currentATR / currentPrice) * 100;
+            
+            // Mean reversion uses tighter stops (1.5 ATR) and tighter TP (1.5 ATR target)
+            const mrStopLossPercent = Math.min(mrConfig.STOP_LOSS_PERCENT, atrPercent * 1.5);
+            const mrTakeProfitPercent = Math.min(mrConfig.TAKE_PROFIT_PERCENT, atrPercent * 1.5);
+            
+            // Apply precedence reduction if needed
+            let mrPositionMultiplier = meanReversionSignal.positionMultiplier;
+            if (precedenceResult.reduceSize) {
+              mrPositionMultiplier *= 0.5;
+              logger.forSymbol(symbol).info(
+                `${LOG_CATEGORIES.RISK} 🔄 MEAN_REVERSION size reduced 50%: ${precedenceResult.reason}`
+              );
+            }
+            
+            // Create mean reversion strategy object
+            const mrStrategyName = mrDirection === 'long' 
+              ? 'Mean Reversion Bounce' 
+              : 'Mean Reversion Reversal';
+              
+            const mrStrategy = {
+              id: `mean-reversion-${mrDirection}`,
+              name: mrStrategyName,
+              risk_settings: {
+                stopLossPercent: mrStopLossPercent,
+                takeProfitPercent: mrTakeProfitPercent,
+                positionSizePercent: 1,
+                priority: 8  // High priority for mean reversion signals
+              }
+            };
+            
+            const mrIndicators = new Map<string, number>();
+            mrIndicators.set("Price", currentPrice);
+            mrIndicators.set("StochRSI_K", trendData?.stochasticRsi?.['4h']?.k ?? 50);
+            mrIndicators.set("PercentB", trendData?.bollingerBands?.['4h']?.percentB ?? 50);
+            mrIndicators.set("ADX", trendData?.volatility?.adx ?? 20);
+            mrIndicators.set("ExhaustionScore", meanReversionSignal.exhaustionScore);
+            
+            candidates.push({
+              strategy: mrStrategy,
+              score: meanReversionSignal.qualityScore,
+              indicatorValues: mrIndicators,
+              signalType: mrDirection,
+              positionSizeMultiplier: mrPositionMultiplier,
+              convergenceEntry: false
+            });
+            
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION SIGNAL: ${mrDirection.toUpperCase()} | ` +
+              `Quality: ${meanReversionSignal.qualityScore.toFixed(0)} | ` +
+              `Confidence: ${meanReversionSignal.confidence.toFixed(0)}% | ` +
+              `Position: ${(mrPositionMultiplier * 100).toFixed(0)}% | ` +
+              `SL: ${mrStopLossPercent.toFixed(2)}% | TP: ${mrTakeProfitPercent.toFixed(2)}%`
+            );
+            logger.forSymbol(symbol).info(
+              `   → Regime: ${meanReversionSignal.trendPhase}/${meanReversionSignal.expansionState} | ` +
+              `Triggers: ${meanReversionSignal.triggers.slice(0, 3).join(', ')}`
+            );
+          } else {
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.GATE} 🔄 MEAN_REVERSION SUPPRESSED: ${precedenceResult.reason}`
+            );
+          }
+        }
+        
         // ============= SHADOW MODE COMPARISON =============
         // Compare adaptive signal vs selected strategy for analytics
         if (ADAPTIVE_SIGNAL_MODE.MODE === 'SHADOW' && adaptiveSignalResult && candidates.length > 0 && ADAPTIVE_SIGNAL_MODE.LOG_COMPARISON_RESULTS) {
@@ -11171,6 +11257,26 @@ serve(async (req) => {
               pressure: orderFlowAnalysis.pressure,
               qualityBonus: orderFlowScore, // The -15 to +15 impact
               reasons: orderFlowAnalysis.reasons,
+            },
+            // NEW: Mean Reversion tracking for dashboard analytics
+            meanReversion: meanReversionSignal ? {
+              detected: meanReversionSignal.detected,
+              allowed: meanReversionSignal.allowed,
+              direction: meanReversionSignal.direction,
+              confidence: meanReversionSignal.confidence,
+              exhaustionScore: meanReversionSignal.exhaustionScore,
+              qualityScore: meanReversionSignal.qualityScore,
+              trendPhase: meanReversionSignal.trendPhase,
+              expansionState: meanReversionSignal.expansionState,
+              positionMultiplier: meanReversionPositionMultiplier,
+              triggers: meanReversionSignal.triggers?.slice(0, 5),
+              gateBypasses: meanReversionBypassGates.size > 0 ? Array.from(meanReversionBypassGates) : [],
+              isMeanReversionSignal: strategy.name.includes('Mean Reversion'),
+            } : {
+              detected: false,
+              allowed: false,
+              direction: null,
+              isMeanReversionSignal: false,
             },
           },
           expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minute TTL for actionable signals
