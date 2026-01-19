@@ -913,10 +913,13 @@ serve(async (req) => {
         
         // Log if trend formation relaxation was applied
         if (isTrendForming && volumeRatio < 0.2) {
-          logger.info(`📊 VOLUME RELAXATION: Allowing entry at ${(volumeRatio * 100).toFixed(0)}% volume due to trend formation (ADX=${adx.toFixed(1)} rising=${adxRising}, 30m=${trend30m}, 1h=${trend1h})`);
+          logger.info(`📊 VOLUME RELAXATION: Allowing entry at ${(volumeRatio * 100).toFixed(0)}% volume due to trend formation (ADX=${adx.toFixed(1)} rising=${adxRising}, 30m=${trend30m}, 1h=${trend1h}, 4h=${trend4h})`);
           // Apply position size reduction for relaxed volume entries
           (signal as any).volumeRelaxationApplied = true;
           (signal as any).volumeRelaxationMultiplier = VOLUME_RELAXATION_PARAMS.POSITION_SIZE_MULTIPLIER;
+        } else if (!isTrendForming && volumeRatio < 0.2 && volumeRatio >= 0.1 && !htf4hAlignedOrNeutral) {
+          // FIX: Log when volume relaxation is blocked due to 4h counter-trend
+          logger.info(`📊 VOLUME RELAXATION BLOCKED: 4h trend (${trend4h}) opposes signal (${signalDirection}) - using standard volume threshold`);
         }
 
         // Log volume spike detection (informational)
