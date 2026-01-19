@@ -1300,6 +1300,37 @@ serve(async (req) => {
       }
     }
 
+    // ============= MOVE EXHAUSTION: PRICE DISTANCE FROM SWING =============
+    // Calculate how far price has moved from 24h swing high/low
+    // Used to prevent late entries into exhausted trends
+    const swingKlines24h = klines1h.slice(-24);
+    const swingHighs24h = swingKlines24h.map((k: any) => parseFloat(k[2])).filter(Number.isFinite);
+    const swingLows24h = swingKlines24h.map((k: any) => parseFloat(k[3])).filter(Number.isFinite);
+    
+    const swingHigh24h = swingHighs24h.length > 0 ? Math.max(...swingHighs24h) : currentPrice;
+    const swingLow24h = swingLows24h.length > 0 ? Math.min(...swingLows24h) : currentPrice;
+    
+    // Calculate distance from swing points as percentage
+    const distanceFromHighPercent = swingHigh24h > 0 
+      ? ((swingHigh24h - currentPrice) / swingHigh24h) * 100 
+      : 0;
+    const distanceFromLowPercent = swingLow24h > 0 
+      ? ((currentPrice - swingLow24h) / swingLow24h) * 100 
+      : 0;
+    
+    // ATR-normalized distance (how many ATRs has price moved)
+    const atrNormalizedFromHigh = currentATR > 0 && currentPrice > 0
+      ? distanceFromHighPercent / (currentATR / currentPrice * 100)
+      : 0;
+    const atrNormalizedFromLow = currentATR > 0 && currentPrice > 0
+      ? distanceFromLowPercent / (currentATR / currentPrice * 100)
+      : 0;
+    
+    // Log if significant move detected
+    if (distanceFromHighPercent >= 5 || distanceFromLowPercent >= 5) {
+      symLog.info(`${LOG_CATEGORIES.TREND} SWING DISTANCE: ${distanceFromHighPercent.toFixed(1)}% from high ($${swingHigh24h.toFixed(2)}), ${distanceFromLowPercent.toFixed(1)}% from low ($${swingLow24h.toFixed(2)})`);
+    }
+
     // Momentum state calculation
     const lastClose = prices1h.length >= 1 ? prices1h[prices1h.length - 1] : 0;
     const prevClose = prices1h.length >= 2 ? prices1h[prices1h.length - 2] : lastClose;
@@ -1507,6 +1538,15 @@ serve(async (req) => {
         inPullback,
         pullbackPercent: Math.round(pullbackPercent * 10) / 10,
         pullbackConditionsMet: inPullback && rsiInPullbackZone(trend1h.indicators.rsi, effectiveTrendForMomentum),
+      },
+      // NEW: Price distance from 24h swing points for move exhaustion filter
+      priceDistanceFromSwing: {
+        high24h: Math.round(swingHigh24h * 100) / 100,
+        low24h: Math.round(swingLow24h * 100) / 100,
+        distanceFromHighPercent: Math.round(distanceFromHighPercent * 100) / 100,
+        distanceFromLowPercent: Math.round(distanceFromLowPercent * 100) / 100,
+        atrNormalizedFromHigh: Math.round(atrNormalizedFromHigh * 100) / 100,
+        atrNormalizedFromLow: Math.round(atrNormalizedFromLow * 100) / 100,
       },
       marketStructure,
       // NEW: Micro-trend detection for when 4h is neutral
