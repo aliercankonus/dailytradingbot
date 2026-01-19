@@ -1903,7 +1903,6 @@ serve(async (req) => {
     const entryAtrPercent = trendData?.volatility?.atrPercent ?? atrPercent ?? 1.5;
     const entryAtr = (entryAtrPercent / 100) * executedPrice;  // Convert percent to absolute ATR
     logger.info(`📊 Entry ATR stored: ${entryAtr.toFixed(4)} (${entryAtrPercent.toFixed(2)}% of entry price)`);
-    logger.info(`📊 Entry ATR stored: ${entryAtr.toFixed(4)} (${entryAtrPercent.toFixed(2)}% of entry price)`);
 
     // Create position record with all trade data including reversal tracking
     const { data: position, error: positionError } = await supabase
