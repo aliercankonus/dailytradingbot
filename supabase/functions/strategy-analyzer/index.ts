@@ -326,6 +326,7 @@ Trend Data: ${JSON.stringify(rejection.trend_data, null, 2)}`;
 };
 
 // Helper function to log rejection with optional AI analysis and Order Flow data
+// ENHANCED: Automatically extracts StochRSI K/D values from trendData for all rejection logs
 const logRejectionWithAI = async (
   supabase: any,
   userId: string,
@@ -336,19 +337,41 @@ const logRejectionWithAI = async (
   enableAI: boolean = false,  // Default to false, controlled by ai_analysis_enabled
   orderFlow?: OrderFlowAnalysis | null  // Optional Order Flow data
 ) => {
-  // Merge Order Flow data into filters_status if provided
-  const enrichedFiltersStatus = orderFlow ? {
-    ...filtersStatus,
-    order_flow: {
-      score: orderFlow.score,
-      signal: orderFlow.signal,
-      confidence: orderFlow.confidence,
-      volumeSpike: orderFlow.volumeSpike,
-      priceRejection: orderFlow.priceRejection,
-      pressure: orderFlow.pressure,
-      reasons: orderFlow.reasons
+  // Extract StochRSI K/D values from trendData for consistent logging
+  const stochRsi4h = trendData?.stochasticRsi?.["4h"] || trendData?.stochasticRsi?.aggregated;
+  const stochRsi1h = trendData?.stochasticRsi?.["1h"];
+  const stochRsiData = {
+    stochRsi4h: {
+      k: stochRsi4h?.k ?? null,
+      d: stochRsi4h?.d ?? null,
+    },
+    stochRsi1h: {
+      k: stochRsi1h?.k ?? null,
+      d: stochRsi1h?.d ?? null,
     }
-  } : filtersStatus;
+  };
+  
+  // Merge Order Flow data and StochRSI data into filters_status
+  let enrichedFiltersStatus = {
+    ...filtersStatus,
+    ...stochRsiData, // Always include StochRSI K/D values
+  };
+  
+  // Add Order Flow data if provided
+  if (orderFlow) {
+    enrichedFiltersStatus = {
+      ...enrichedFiltersStatus,
+      order_flow: {
+        score: orderFlow.score,
+        signal: orderFlow.signal,
+        confidence: orderFlow.confidence,
+        volumeSpike: orderFlow.volumeSpike,
+        priceRejection: orderFlow.priceRejection,
+        pressure: orderFlow.pressure,
+        reasons: orderFlow.reasons
+      }
+    };
+  }
 
   const { data, error } = await supabase
     .from("signal_rejection_log")
