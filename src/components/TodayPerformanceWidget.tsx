@@ -8,6 +8,7 @@ import { startOfDay, startOfWeek, startOfMonth, isAfter } from "date-fns";
 interface PeriodStats {
   totalPnL: number;
   winningTrades: number;
+  losingTrades: number;
   totalTrades: number;
   winRate: number;
 }
@@ -46,7 +47,7 @@ const StatsDisplay = ({ stats, label }: { stats: PeriodStats; label: string }) =
         {stats.totalTrades}
       </div>
       <div className="text-xs text-muted-foreground mt-0.5">
-        {stats.winningTrades}W / {stats.totalTrades - stats.winningTrades}L
+        {stats.winningTrades}W / {stats.losingTrades}L
       </div>
     </div>
   </div>
@@ -76,7 +77,7 @@ export const TodayPerformanceWidget = () => {
       const decisiveTrades = winningTrades + losingTrades;
       const winRate = decisiveTrades > 0 ? (winningTrades / decisiveTrades) * 100 : 0;
 
-      return { totalPnL, winningTrades, totalTrades, winRate };
+      return { totalPnL, winningTrades, losingTrades, totalTrades, winRate };
     };
 
     return {
