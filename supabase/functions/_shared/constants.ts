@@ -3617,12 +3617,6 @@ export const SQUEEZE_BREAKOUT_SIGNAL_PARAMS = {
 export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   ENABLED: true,
   
-  // ===== PERCENTAGE THRESHOLDS =====
-  // Block SHORT if price already dropped this much from 24h high
-  MAX_DROP_PERCENT_FOR_SHORT: 8.0,  // 8% drop = too late to short
-  // Block LONG if price already rallied this much from 24h low
-  MAX_RALLY_PERCENT_FOR_LONG: 8.0,  // 8% rally = too late to long
-  
   // ===== GRADUATED RESPONSE =====
   // Soft threshold: reduce position size instead of hard block
   SOFT_THRESHOLD_PERCENT: 5.0,        // 5% move = reduce position
