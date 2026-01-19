@@ -5086,19 +5086,23 @@ serve(async (req) => {
           ? adxSlopeForBypass >= STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX_SLOPE
           : (!STRONG_TREND_HTF_BYPASS_PARAMS.REQUIRE_ADX_RISING || adxRisingForBypass);
         
-        // NEW: Alternative bypass path - 4h aligned + ADX >= MIN + rising slope
-        // This catches cases like ETHUSDT (ADX 25.2 but rising) and BTCUSDT (ADX 41.6, 4h aligned)
+        // TIGHTENED: Get bypass thresholds from HTF_EXTREME_HARD_GATES (stricter than STRONG_TREND_HTF_BYPASS_PARAMS)
+        const htfBypassMinADXForPaths = HTF_EXTREME_HARD_GATES.BYPASS_MIN_ADX ?? 35;
+        const htfBypassMaxReversalForPaths = HTF_EXTREME_HARD_GATES.BYPASS_MAX_REVERSAL_SCORE ?? 45;
+        
+        // NEW: Alternative bypass path - 4h aligned + ADX >= tightened threshold + rising slope
+        // TIGHTENED: Uses 35 instead of 25 for MIN_ADX
         const alternativeBypassPath = is4hAligned && 
-          adx >= STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX && 
+          adx >= htfBypassMinADXForPaths &&  // TIGHTENED from STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX (25)
           risingSlope &&
+          unifiedReversal.score < htfBypassMaxReversalForPaths && // ADDED: reversal check
           !isExhausted;
         
         // NEW: High ADX bypass path - when ADX >= 40, allow bypass with just 4h alignment
-        // This catches BTCUSDT (ADX 41.6, 4h bullish but slope falling during consolidation)
-        // Rationale: ADX 40+ indicates a very strong trend, even if slope is briefly negative during pullback
+        // TIGHTENED: Must also meet bypass thresholds
         const highADXBypassPath = is4hAligned &&
-          adx >= 40 && // Very strong trend threshold
-          unifiedReversal.score < 35 && // Lower reversal threshold for safety
+          adx >= Math.max(40, htfBypassMinADXForPaths) && // Must meet both 40 AND tightened threshold
+          unifiedReversal.score < Math.min(35, htfBypassMaxReversalForPaths) && // Tightest reversal check
           !isExhausted &&
           !adxExhaustion.isExhausted;
         
@@ -5147,52 +5151,66 @@ serve(async (req) => {
           ))
         );
         
+        // ============= TIER 2 HTF BYPASS ELIGIBILITY =============
+        // High ADX bypass path - use the earlier-defined tightened thresholds
+        // htfBypassMinADXForPaths and htfBypassMaxReversalForPaths are defined above (line ~5089)
+        const highADXBypassPathTightened = is4hAligned &&
+          adx >= Math.max(40, htfBypassMinADXForPaths) && // Must meet both 40 AND bypass min
+          unifiedReversal.score < Math.min(35, htfBypassMaxReversalForPaths) && // Tightest of both
+          !isExhausted &&
+          !adxExhaustion.isExhausted;
+        
         // FIXED: Allow bypass if high ADX path is met, even without rising slope
         // OR if stealth HTF bypass is valid
         // OR if ADX rising directional bypass is valid (NEW - Phase 4)
+        // TIGHTENED: Use HTF_EXTREME_HARD_GATES thresholds (htfBypassMinADXForPaths=35, htfBypassMaxReversalForPaths=45)
         const canBypassHTFGate = (
           STRONG_TREND_HTF_BYPASS_PARAMS.ENABLED &&
-          adx >= STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX &&
-          unifiedReversal.score < STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE &&
+          adx >= htfBypassMinADXForPaths &&  // TIGHTENED: 35 instead of 25
+          unifiedReversal.score < htfBypassMaxReversalForPaths &&  // TIGHTENED: 45 instead of 50
           !isExhausted &&
           (
             // Path 1: Normal bypass with slope requirement
             (adxSlopeMeetsRequirement && (alignmentMet || alternativeBypassPath)) ||
-            // Path 2: High ADX (40+) with 4h alignment - no slope requirement
-            highADXBypassPath
+            // Path 2: High ADX (40+) with 4h alignment - no slope requirement (TIGHTENED)
+            highADXBypassPathTightened
           )
         ) || stealthHTFBypassPath      // Path 3: Stealth trend with high score
           || adxRisingDirectionalBypass; // Path 4: ADX rising + directional confirmation (NEW)
         
         // Determine position size based on bypass type
+        // TIGHTENED: Use HTF_EXTREME_HARD_GATES.BYPASS_POSITION_REDUCTION as maximum cap
+        const htfBypassMaxPosition = HTF_EXTREME_HARD_GATES.BYPASS_POSITION_REDUCTION ?? 0.50;
+        
         const getBypassPositionMultiplier = () => {
-          // NEW: Stealth HTF bypass path - use stealth position multiplier
+          // All bypass position sizes are CAPPED at htfBypassMaxPosition (50%)
+          // NEW: Stealth HTF bypass path - use stealth position multiplier (capped)
           if (stealthHTFBypassPath) {
-            return stealthTrendHTF.positionMultiplier;
+            return Math.min(stealthTrendHTF.positionMultiplier, htfBypassMaxPosition);
           } else if (adxRisingDirectionalBypass) {
-            // PHASE 4: ADX Rising Directional bypass - use configured multiplier
-            return ADX_RISING_DIRECTIONAL_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
+            // PHASE 4: ADX Rising Directional bypass - use configured multiplier (capped)
+            return Math.min(ADX_RISING_DIRECTIONAL_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER, htfBypassMaxPosition);
           } else if (isParabolicMode) {
-            // Parabolic mode - strongest confidence
-            return STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
+            // Parabolic mode - strongest confidence, but still capped
+            return htfBypassMaxPosition; // Was 0.65, now capped at 0.50
           } else if (adx >= relaxedAlignmentMinADX && allTimeframesAligned) {
-            // Strong ADX + full alignment - full bypass size
-            return STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
+            // Strong ADX + full alignment - capped bypass size
+            return htfBypassMaxPosition;
           } else if (hasRelaxedAlignment) {
-            // Relaxed alignment (4h only) - slightly reduced
-            return STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER * 0.9;
+            // Relaxed alignment (4h only) - reduced from cap
+            return htfBypassMaxPosition * 0.9; // 45%
           } else if (alternativeBypassPath) {
-            // Alternative path (rising slope) - more conservative
-            return STRONG_TREND_HTF_BYPASS_PARAMS.BORDERLINE_POSITION_SIZE_MULTIPLIER ?? 0.50;
-          } else if (adx >= 30) {
-            // ADX 30+ with basic conditions
-            return STRONG_TREND_HTF_BYPASS_PARAMS.POSITION_SIZE_MULTIPLIER;
-          } else if (highADXBypassPath) {
+            // Alternative path (rising slope) - conservative
+            return htfBypassMaxPosition * 0.9; // 45%
+          } else if (adx >= htfBypassMinADXForPaths) {
+            // ADX meets tightened bypass threshold
+            return htfBypassMaxPosition;
+          } else if (highADXBypassPathTightened) {
             // High ADX (40+) path - conservative due to potentially falling slope
-            return STRONG_TREND_HTF_BYPASS_PARAMS.BORDERLINE_POSITION_SIZE_MULTIPLIER ?? 0.50;
+            return htfBypassMaxPosition * 0.9; // 45%
           } else {
-            // ADX 25-30 borderline case
-            return STRONG_TREND_HTF_BYPASS_PARAMS.BORDERLINE_POSITION_SIZE_MULTIPLIER ?? 0.50;
+            // Fallback - most conservative
+            return htfBypassMaxPosition * 0.8; // 40%
           }
         };
         
