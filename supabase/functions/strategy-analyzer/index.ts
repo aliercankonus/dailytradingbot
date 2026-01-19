@@ -129,6 +129,7 @@ import {
   isTrendFollowingStrategy,
   isMeanReversionStrategy,
   detectStrategyType,
+  MEAN_REVERSION_CONFIG,
   type ExceptionType,
   type MarketContext
 } from "../_shared/constants.ts";
@@ -208,6 +209,15 @@ import {
   compareStochRSIGate,
   type ShadowModeSignal 
 } from "../_shared/shadow-mode.ts";
+// NEW: Mean Reversion Strategy Module
+import {
+  detectExhaustion,
+  checkSignalPrecedence,
+  calculateMeanReversionStop,
+  calculateMeanReversionTP,
+  type ExhaustionSignal,
+  type GateBypass
+} from "../_shared/mean-reversion.ts";
 // NEW: Strategy-Independent Adaptive Signal Generation Module
 import {
   generateAdaptiveSignal,
@@ -5205,6 +5215,71 @@ serve(async (req) => {
           stealthDirectionMatchesHTF &&
           stealthTrendHTF.stealthScore >= 60; // Require high score for HTF bypass
         
+        // ============= MEAN REVERSION EARLY DETECTION (BEFORE BLOCKING GATES) =============
+        // CRITICAL: Runs BEFORE tiered gates and bypass calculations to prevent gate collision
+        // Detects exhaustion signals and sets direction-aware bypass flags
+        let meanReversionSignal: ExhaustionSignal | null = null;
+        let meanReversionBypassGates: Set<string> = new Set();
+        let meanReversionPositionMultiplier = 1.0;
+        let meanReversionQualityScore = 0;
+        let meanReversionActive = false;
+        
+        if (MEAN_REVERSION_CONFIG.ENABLED) {
+          meanReversionSignal = detectExhaustion(trendData);
+          
+          if (meanReversionSignal.detected && meanReversionSignal.allowed) {
+            // Check if the detected direction matches our intended direction
+            // Mean reversion detection finds opportunities - we only bypass if it aligns with what we'd trade
+            const meanReversionMatchesDirection = 
+              (meanReversionSignal.direction === 'long' && intendedTradeDirection === 'long') ||
+              (meanReversionSignal.direction === 'short' && intendedTradeDirection === 'short');
+            
+            if (meanReversionMatchesDirection) {
+              // Set bypass flags for the gate system - direction-aware
+              meanReversionSignal.gateBypasses.forEach(bypass => {
+                if (bypass.allowedDirection === intendedTradeDirection) {
+                  meanReversionBypassGates.add(bypass.gate);
+                }
+              });
+              
+              meanReversionPositionMultiplier = meanReversionSignal.positionMultiplier;
+              meanReversionQualityScore = meanReversionSignal.qualityScore;
+              meanReversionActive = meanReversionBypassGates.size > 0;
+              
+              logger.forSymbol(symbol).info(
+                `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION detected: ${meanReversionSignal.direction?.toUpperCase()} ` +
+                `(confidence=${meanReversionSignal.confidence.toFixed(0)}%, regime=${meanReversionSignal.trendPhase}/${meanReversionSignal.expansionState})`
+              );
+              logger.forSymbol(symbol).info(
+                `   Triggers: ${meanReversionSignal.triggers.slice(0, 4).join(' | ')}`
+              );
+              logger.forSymbol(symbol).info(
+                `   Bypassing gates: ${Array.from(meanReversionBypassGates).join(', ')} | Position: ${(meanReversionPositionMultiplier * 100).toFixed(0)}%`
+              );
+            } else if (meanReversionSignal.direction) {
+              // Detected opposite direction - this is a signal AGAINST our current direction
+              // Don't bypass, but log it as a warning
+              logger.forSymbol(symbol).warn(
+                `${LOG_CATEGORIES.GATE} ⚠️ MEAN_REVERSION conflict: Detected ${meanReversionSignal.direction?.toUpperCase()} exhaustion ` +
+                `but direction is ${intendedTradeDirection?.toUpperCase()} - gates NOT bypassed`
+              );
+            }
+          } else if (meanReversionSignal && !meanReversionSignal.allowed) {
+            logger.forSymbol(symbol).debug(
+              `[MEAN_REVERSION] Blocked by regime: ${meanReversionSignal.trendPhase}/${meanReversionSignal.expansionState}`
+            );
+          }
+        }
+        
+        // Helper function to check if a gate should be bypassed for mean reversion
+        const shouldBypassForMeanReversion = (gateName: string, direction: string): boolean => {
+          if (!meanReversionActive) return false;
+          if (!meanReversionBypassGates.has(gateName)) return false;
+          // Ensure bypass is direction-specific
+          const bypass = meanReversionSignal?.gateBypasses.find(b => b.gate === gateName);
+          return bypass?.allowedDirection === direction;
+        };
+        
         // PHASE 4: ADX Rising + Directional Bypass (per technical review refinement)
         // When ADX is rising strongly AND 1h trend matches direction, allow bypass
         // This prevents blocking valid longs during trending markets
@@ -5234,6 +5309,7 @@ serve(async (req) => {
         // OR if stealth HTF bypass is valid
         // OR if ADX rising directional bypass is valid (NEW - Phase 4)
         // TIGHTENED: Use HTF_EXTREME_HARD_GATES thresholds (htfBypassMinADXForPaths=35, htfBypassMaxReversalForPaths=45)
+        // NEW: Also allow bypass for mean reversion trades
         const canBypassHTFGate = (
           STRONG_TREND_HTF_BYPASS_PARAMS.ENABLED &&
           adx >= htfBypassMinADXForPaths &&  // TIGHTENED: 35 instead of 25
@@ -5246,7 +5322,8 @@ serve(async (req) => {
             highADXBypassPathTightened
           )
         ) || stealthHTFBypassPath      // Path 3: Stealth trend with high score
-          || adxRisingDirectionalBypass; // Path 4: ADX rising + directional confirmation (NEW)
+          || adxRisingDirectionalBypass // Path 4: ADX rising + directional confirmation
+          || meanReversionActive;       // Path 5: Mean reversion detected - bypass for counter-trend entries
         
         // Determine position size based on bypass type
         // TIGHTENED: Use HTF_EXTREME_HARD_GATES.BYPASS_POSITION_REDUCTION as maximum cap
@@ -5254,8 +5331,10 @@ serve(async (req) => {
         
         const getBypassPositionMultiplier = () => {
           // All bypass position sizes are CAPPED at htfBypassMaxPosition (50%)
-          // NEW: Stealth HTF bypass path - use stealth position multiplier (capped)
-          if (stealthHTFBypassPath) {
+          // NEW: Mean reversion bypass - use the calculated mean reversion multiplier
+          if (meanReversionActive) {
+            return Math.min(meanReversionPositionMultiplier, htfBypassMaxPosition);
+          } else if (stealthHTFBypassPath) {
             return Math.min(stealthTrendHTF.positionMultiplier, htfBypassMaxPosition);
           } else if (adxRisingDirectionalBypass) {
             // PHASE 4: ADX Rising Directional bypass - use configured multiplier (capped)
@@ -5283,13 +5362,17 @@ serve(async (req) => {
             return htfBypassMaxPosition * 0.8; // 40%
           }
         };
-        
         // ============= TIER 0: DEEP STOCHRSI EXTREME HARD GATE (NO EXCEPTIONS) =============
         // Tier 0 is the most restrictive - absolute block at K < 5 or K > 95
         // When K < 5 (deeply oversold) or K > 95 (deeply overbought), bounce/reversal probability is ~80%+
         // NO EXCEPTIONS: Not even strong ADX, momentum, or trend confirmation can override this gate
+        // EXCEPTION: Mean reversion LONG at deeply oversold (K < 5) IS allowed - that's the entry signal
         if (DEEP_STOCHRSI_HARD_GATE.ENABLED) {
           // Tier 0: Block ALL shorts when deeply oversold (K < 5)
+          // Mean reversion LONG bypass: When detecting a bounce opportunity, allow LONG at K < 5
+          const tier0OversoldBypass = shouldBypassForMeanReversion('TIER_0_DEEP_OVERSOLD', 'long') && 
+                                       intendedTradeDirection === 'long';
+          
           if (intendedTradeDirection === "short" && stochRsiK4h < DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD) {
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { gate: 'TIER_0_DEEP_OVERSOLD', details: `K=${stochRsiK4h.toFixed(1)} < ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}` });
@@ -5307,6 +5390,7 @@ serve(async (req) => {
                 percentB: percentB.toFixed(1),
                 adx: adx.toFixed(1),
                 allowExceptions: DEEP_STOCHRSI_HARD_GATE.ALLOW_EXCEPTIONS,
+                meanReversionBypass: false,
                 message: `Bounce probability extremely high (~80%+) at K=${stochRsiK4h.toFixed(1)}, blocking SHORT with NO EXCEPTIONS`
               },
               trendData,
@@ -5316,7 +5400,16 @@ serve(async (req) => {
             continue;
           }
           
+          // Log if mean reversion bypass allowed a LONG at deeply oversold
+          if (tier0OversoldBypass && stochRsiK4h < DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔄 TIER 0 BYPASSED for MEAN_REVERSION_LONG at K=${stochRsiK4h.toFixed(1)}`);
+          }
+          
           // Tier 0: Block ALL longs when deeply overbought (K > 95)
+          // Mean reversion SHORT bypass: When detecting a reversal opportunity, allow SHORT at K > 95
+          const tier0OverboughtBypass = shouldBypassForMeanReversion('TIER_0_DEEP_OVERBOUGHT', 'short') && 
+                                         intendedTradeDirection === 'short';
+          
           if (intendedTradeDirection === "long" && stochRsiK4h > DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD) {
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { gate: 'TIER_0_DEEP_OVERBOUGHT', details: `K=${stochRsiK4h.toFixed(1)} > ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}` });
@@ -5334,6 +5427,7 @@ serve(async (req) => {
                 percentB: percentB.toFixed(1),
                 adx: adx.toFixed(1),
                 allowExceptions: DEEP_STOCHRSI_HARD_GATE.ALLOW_EXCEPTIONS,
+                meanReversionBypass: false,
                 message: `Pullback probability extremely high (~80%+) at K=${stochRsiK4h.toFixed(1)}, blocking LONG with NO EXCEPTIONS`
               },
               trendData,
@@ -5342,13 +5436,24 @@ serve(async (req) => {
             );
             continue;
           }
+          
+          // Log if mean reversion bypass allowed a SHORT at deeply overbought
+          if (tier0OverboughtBypass && stochRsiK4h > DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔄 TIER 0 BYPASSED for MEAN_REVERSION_SHORT at K=${stochRsiK4h.toFixed(1)}`);
+          }
         }
         
-        // ============= TIER 1: SEVERE STOCHRSI GATE (NO BYPASS ALLOWED) =============
+        // ============= TIER 1: SEVERE STOCHRSI GATE (NO BYPASS ALLOWED - EXCEPT MEAN REVERSION) =============
         // This catches K values between Deep Gate (5/95) and Severe threshold (15/85)
         // Unlike Tier 2, this gate has NO bypass - if K is in severe zone, block the trade
+        // EXCEPTION: Mean reversion trades CAN bypass Tier 1 if detection confidence is high
         if (!severeGateAllowsBypass) {
+          // Check for mean reversion Tier 1 bypasses
+          const tier1OversoldBypass = shouldBypassForMeanReversion('TIER_1_SEVERE_OVERSOLD', 'long');
+          const tier1OverboughtBypass = shouldBypassForMeanReversion('TIER_1_SEVERE_OVERBOUGHT', 'short');
+          
           // Block SHORT when K is in severe oversold zone (5 <= K < 15)
+          // BUT allow LONG if mean reversion detected (that's the entry opportunity)
           if (intendedTradeDirection === "short" && isSevereOversold) {
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { gate: 'SEVERE_HTF_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} in severe zone [${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}-${severeOversoldThreshold})` });
@@ -5367,6 +5472,7 @@ serve(async (req) => {
                 percentB: percentB.toFixed(1),
                 adx: adx.toFixed(1),
                 bypassAllowed: false,
+                meanReversionBypass: false,
                 message: `Bounce probability ~70%+ in severe zone K=${stochRsiK4h.toFixed(1)}, blocking SHORT with NO bypass allowed`
               },
               trendData,
@@ -5376,7 +5482,13 @@ serve(async (req) => {
             continue;
           }
           
+          // Log if mean reversion bypass allowed a LONG in severe oversold zone
+          if (tier1OversoldBypass && isSevereOversold && intendedTradeDirection === 'long') {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔄 TIER 1 BYPASSED for MEAN_REVERSION_LONG at K=${stochRsiK4h.toFixed(1)}`);
+          }
+          
           // Block LONG when K is in severe overbought zone (85 < K <= 95)
+          // BUT allow SHORT if mean reversion detected (that's the entry opportunity)
           if (intendedTradeDirection === "long" && isSevereOverbought) {
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { gate: 'SEVERE_HTF_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} in severe zone (${severeOverboughtThreshold}-${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}]` });
@@ -5395,6 +5507,7 @@ serve(async (req) => {
                 percentB: percentB.toFixed(1),
                 adx: adx.toFixed(1),
                 bypassAllowed: false,
+                meanReversionBypass: false,
                 message: `Pullback probability ~70%+ in severe zone K=${stochRsiK4h.toFixed(1)}, blocking LONG with NO bypass allowed`
               },
               trendData,
@@ -5403,12 +5516,19 @@ serve(async (req) => {
             );
             continue;
           }
+          
+          // Log if mean reversion bypass allowed a SHORT in severe overbought zone
+          if (tier1OverboughtBypass && isSevereOverbought && intendedTradeDirection === 'short') {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔄 TIER 1 BYPASSED for MEAN_REVERSION_SHORT at K=${stochRsiK4h.toFixed(1)}`);
+          }
         }
         
         // ============= TIER 2: STANDARD HTF GATE (BYPASS ALLOWED) =============
+        // Include mean reversion as a valid bypass type
         // Log bypass decision details for debugging (only for Tier 2 - standard combined gate)
         if (isHTFOverbought || isHTFOversold) {
-          const bypassType = stealthHTFBypassPath ? 'STEALTH_TREND' :
+          const bypassType = meanReversionActive ? 'MEAN_REVERSION' :
+            stealthHTFBypassPath ? 'STEALTH_TREND' :
             adxRisingDirectionalBypass ? 'ADX_RISING_DIRECTIONAL' :
             isParabolicMode ? 'PARABOLIC' : 
             highADXBypassPath ? 'HIGH_ADX_4H_ALIGNED' :
