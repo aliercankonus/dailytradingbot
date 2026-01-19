@@ -2617,6 +2617,9 @@ const HTFExtremeGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
         </div>
       </div>
       
+      {/* NEW: Multi-TF StochRSI Panel for complete picture */}
+      <MultiTimeframeStochRSIPanel filtersStatus={filtersStatus} trendData={trendData} />
+      
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
         <span className={isOversold ? "text-blue-400" : "text-red-400"}>⚠️ Why blocked:</span>{" "}
         {isOversold 
@@ -3023,6 +3026,9 @@ const SevereHTFGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any
           : " Market is deeply overbought - LONG entries are blocked to prevent buying the top."
         }
       </div>
+      
+      {/* NEW: Multi-TF StochRSI Panel for context on lower timeframes */}
+      <MultiTimeframeStochRSIPanel filtersStatus={filtersStatus} trendData={trendData} />
     </div>
   );
 };
@@ -3124,6 +3130,9 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
           : ` Moves >5% combined with overextended StochRSI suggest reduced position sizing (0.35x).`
         }
       </div>
+      
+      {/* NEW: Multi-TF StochRSI Panel for exhaustion context */}
+      <MultiTimeframeStochRSIPanel filtersStatus={filtersStatus} trendData={trendData} />
     </div>
   );
 };
@@ -3552,6 +3561,125 @@ const UnifiedReversalDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
   );
 };
 
+// Reusable Multi-Timeframe StochRSI Panel - shows K/D values for all timeframes with visual gauges
+const MultiTimeframeStochRSIPanel = ({ filtersStatus, trendData }: { filtersStatus?: any; trendData?: any }) => {
+  // Extract StochRSI data from enriched filters_status (populated by logRejectionWithAI)
+  const stochRsi4h = filtersStatus?.stochRsi4h || {};
+  const stochRsi1h = filtersStatus?.stochRsi1h || {};
+  const stochRsi30m = filtersStatus?.stochRsi30m || {};
+  const stochRsi15m = filtersStatus?.stochRsi15m || {};
+  
+  // Fallback to trendData if not in filtersStatus
+  const k4h = coerceNumeric(stochRsi4h?.k ?? trendData?.stochasticRsi?.['4h']?.k ?? trendData?.stochasticRsi?.aggregated?.k, null);
+  const d4h = coerceNumeric(stochRsi4h?.d ?? trendData?.stochasticRsi?.['4h']?.d ?? trendData?.stochasticRsi?.aggregated?.d, null);
+  const k1h = coerceNumeric(stochRsi1h?.k ?? trendData?.stochasticRsi?.['1h']?.k, null);
+  const d1h = coerceNumeric(stochRsi1h?.d ?? trendData?.stochasticRsi?.['1h']?.d, null);
+  const k30m = coerceNumeric(stochRsi30m?.k ?? trendData?.stochasticRsi?.['30m']?.k, null);
+  const d30m = coerceNumeric(stochRsi30m?.d ?? trendData?.stochasticRsi?.['30m']?.d, null);
+  const k15m = coerceNumeric(stochRsi15m?.k ?? trendData?.stochasticRsi?.['15m']?.k, null);
+  const d15m = coerceNumeric(stochRsi15m?.d ?? trendData?.stochasticRsi?.['15m']?.d, null);
+  
+  // Check if we have any data to display
+  const hasAnyData = k4h !== null || k1h !== null || k30m !== null || k15m !== null;
+  if (!hasAnyData) return null;
+  
+  // Helper to get color for K value
+  const getKColor = (k: number | null): string => {
+    if (k === null) return 'text-muted-foreground';
+    if (k <= 5 || k >= 95) return 'text-red-500';
+    if (k <= 15 || k >= 85) return 'text-orange-400';
+    if (k <= 20 || k >= 80) return 'text-yellow-400';
+    return 'text-foreground';
+  };
+  
+  // Helper to get zone label
+  const getZoneLabel = (k: number | null): string => {
+    if (k === null) return '-';
+    if (k <= 5) return 'Deep OS';
+    if (k <= 15) return 'Severe OS';
+    if (k <= 20) return 'Oversold';
+    if (k >= 95) return 'Deep OB';
+    if (k >= 85) return 'Severe OB';
+    if (k >= 80) return 'Overbought';
+    if (k >= 40 && k <= 60) return 'Neutral';
+    return k < 50 ? 'Low' : 'High';
+  };
+  
+  // Mini StochRSI gauge component
+  const StochRSIGauge = ({ label, k, d }: { label: string; k: number | null; d: number | null }) => {
+    if (k === null) return (
+      <div className="p-1.5 bg-muted/20 rounded border border-border/30 text-center">
+        <div className="text-[9px] text-muted-foreground">{label}</div>
+        <div className="text-[10px] text-muted-foreground">-</div>
+      </div>
+    );
+    
+    const kColor = getKColor(k);
+    const zone = getZoneLabel(k);
+    
+    return (
+      <div className="p-1.5 bg-muted/30 rounded border border-border/50">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[9px] text-muted-foreground">{label}</span>
+          <span className={`text-[9px] ${kColor}`}>{zone}</span>
+        </div>
+        {/* Mini gauge */}
+        <div className="relative h-1.5 bg-muted/50 rounded-full overflow-hidden mb-1">
+          {/* Oversold zone */}
+          <div className="absolute left-0 top-0 h-full bg-blue-500/20" style={{ width: '20%' }} />
+          {/* Overbought zone */}
+          <div className="absolute right-0 top-0 h-full bg-red-500/20" style={{ width: '20%' }} />
+          {/* K value bar */}
+          <div 
+            className={`h-full rounded-full ${
+              k <= 20 ? 'bg-blue-500' : 
+              k >= 80 ? 'bg-red-500' : 
+              'bg-green-500'
+            }`}
+            style={{ width: `${k}%` }}
+          />
+          {/* D value marker */}
+          {d !== null && (
+            <div 
+              className="absolute top-0 h-full w-0.5 bg-yellow-400"
+              style={{ left: `${d}%` }}
+              title={`D: ${d.toFixed(1)}`}
+            />
+          )}
+        </div>
+        {/* K/D values */}
+        <div className="flex justify-between text-[9px]">
+          <span className={`font-mono font-medium ${kColor}`}>K: {k.toFixed(1)}</span>
+          <span className="font-mono text-muted-foreground">D: {d !== null ? d.toFixed(1) : '-'}</span>
+        </div>
+      </div>
+    );
+  };
+  
+  return (
+    <div className="space-y-2 p-2 bg-muted/30 rounded border border-border/50">
+      <div className="flex items-center gap-1.5 mb-2">
+        <Gauge className="h-3.5 w-3.5 text-purple-400" />
+        <span className="text-[10px] font-semibold text-purple-400">Multi-TF StochRSI</span>
+      </div>
+      
+      <div className="grid grid-cols-4 gap-1.5">
+        <StochRSIGauge label="4H" k={k4h} d={d4h} />
+        <StochRSIGauge label="1H" k={k1h} d={d1h} />
+        <StochRSIGauge label="30m" k={k30m} d={d30m} />
+        <StochRSIGauge label="15m" k={k15m} d={d15m} />
+      </div>
+      
+      {/* Legend */}
+      <div className="flex justify-center gap-3 text-[8px] text-muted-foreground pt-1">
+        <span><span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-0.5"></span> Oversold (≤20)</span>
+        <span><span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-0.5"></span> Neutral</span>
+        <span><span className="inline-block w-2 h-2 rounded-full bg-red-500 mr-0.5"></span> Overbought (≥80)</span>
+      </div>
+    </div>
+  );
+};
+
 // Reusable Momentum Indicators Panel - shows MACD, momentum status, and fake breakout risk
 const MomentumIndicatorsPanel = ({ trendData, filtersStatus }: { trendData?: any; filtersStatus?: any }) => {
   // Extract momentum data from trend_data.timeframes['1h'].indicators or trend_data.momentum
@@ -3756,6 +3884,9 @@ const NoDirectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
           </Tooltip>
         </TooltipProvider>
       </div>
+      
+      {/* NEW: Multi-TF StochRSI Panel */}
+      <MultiTimeframeStochRSIPanel filtersStatus={filtersStatus} trendData={trendData} />
       
       {/* NEW: Momentum Indicators Panel */}
       <MomentumIndicatorsPanel trendData={trendData} filtersStatus={filtersStatus} />
