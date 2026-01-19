@@ -1895,6 +1895,16 @@ serve(async (req) => {
     const initialRiskAmount = Math.abs(executedPrice - stopLoss) * quantity;
     logger.info(`📊 Initial risk calculated: $${initialRiskAmount.toFixed(2)} (entry: $${executedPrice.toFixed(2)}, SL: $${stopLoss.toFixed(2)}, qty: ${quantity.toFixed(4)})`);
 
+    // ============================================================
+    // MEAN REVERSION SUPPORT: STORE ENTRY ATR FOR EXIT CALCULATIONS
+    // ATR at entry provides stable baseline for volatility-adjusted exits
+    // ============================================================
+    // ATR is extracted from trendData volatility object
+    const entryAtrPercent = trendData?.volatility?.atrPercent ?? atrPercent ?? 1.5;
+    const entryAtr = (entryAtrPercent / 100) * executedPrice;  // Convert percent to absolute ATR
+    logger.info(`📊 Entry ATR stored: ${entryAtr.toFixed(4)} (${entryAtrPercent.toFixed(2)}% of entry price)`);
+    logger.info(`📊 Entry ATR stored: ${entryAtr.toFixed(4)} (${entryAtrPercent.toFixed(2)}% of entry price)`);
+
     // Create position record with all trade data including reversal tracking
     const { data: position, error: positionError } = await supabase
       .from('positions')
@@ -1925,6 +1935,9 @@ serve(async (req) => {
         entry_exception_type: entryExceptionType,
         // PHASE 2/4: Enhanced tracking fields
         initial_risk_amount: initialRiskAmount,
+        // MEAN REVERSION: Entry ATR for volatility-adjusted exits
+        entry_atr: entryAtr,
+        entry_atr_percent: entryAtrPercent,
         execution_slippage_percent: postExecutionSlippage,
         volume_relaxation_applied: volumeRelaxationApplied,
       })
