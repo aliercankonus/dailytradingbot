@@ -679,8 +679,18 @@ serve(async (req) => {
       // SCENARIO 5 FIX: Conditional volatility exit - extreme volatility alone = conditional exit
       // If P&L > 0 AND trendConfidence >= 55: reduce 50% instead of full exit
       // If P&L < 0 OR confidence < 55: full exit
+      // FIX: Add 5-minute grace period before extreme_volatility can trigger
       else if (atrRatio >= EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD) {
-        if (earlyPnlPercent > 0 && positionConfidence >= 55) {
+        const positionAgeForVolatility = position.opened_at 
+          ? (Date.now() - new Date(position.opened_at).getTime()) / (1000 * 60) 
+          : 999;
+        const VOLATILITY_GRACE_PERIOD_MINUTES = 5;
+        
+        // FIX: Skip extreme volatility exit for positions younger than 5 minutes
+        // This prevents killing trades before they have time to develop
+        if (positionAgeForVolatility < VOLATILITY_GRACE_PERIOD_MINUTES) {
+          positionLogger.info(`VOLATILITY GRACE: Position age ${positionAgeForVolatility.toFixed(1)}min < ${VOLATILITY_GRACE_PERIOD_MINUTES}min grace period - skipping extreme volatility check (ATR ${atrRatio.toFixed(2)}x)`);
+        } else if (earlyPnlPercent > 0 && positionConfidence >= 55) {
           // SCENARIO 5: Conditional - profitable position in confident trend should reduce, not exit
           positionLogger.info(`CONDITIONAL VOLATILITY: ATR ${atrRatio.toFixed(2)}x extreme but P&L ${earlyPnlPercent.toFixed(2)}% > 0 and confidence ${positionConfidence}% >= 55 - would reduce 50% (logging only, full reduction requires position management)`);
           // Note: Full position reduction requires execute-trade integration, for now we log and skip exit
@@ -688,7 +698,7 @@ serve(async (req) => {
         } else {
           emergencyClose = true;
           emergencyReason = "extreme_volatility";
-          positionLogger.risk(`EXTREME VOLATILITY EXIT: ATR ${atrRatio.toFixed(2)}x with P&L ${earlyPnlPercent.toFixed(2)}% or confidence ${positionConfidence}% < 55 - full exit triggered`);
+          positionLogger.risk(`EXTREME VOLATILITY EXIT: ATR ${atrRatio.toFixed(2)}x with P&L ${earlyPnlPercent.toFixed(2)}% or confidence ${positionConfidence}% < 55 - full exit triggered (age: ${positionAgeForVolatility.toFixed(0)}min)`);
         }
       }
 
