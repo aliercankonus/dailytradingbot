@@ -742,7 +742,7 @@ const validateSignalTypeRequirements = (
   
   if (isMeanReversion) {
     const config = SIGNAL_TYPE_VALIDITY_PARAMS.MEAN_REVERSION;
-    const rsi = momentum?.rsi || 50;
+    const rsi = trendData?.timeframes?.['1h']?.indicators?.rsi ?? 50;
     const stochRsi = momentum?.stochRsi || momentum?.stochRsiK || 50;
     
     // Requirement 1: ADX must NOT be too high (strong trends crush reversals)
@@ -1048,13 +1048,13 @@ interface PullbackAnalysis {
 }
 
 const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis => {
-  const indicators = trendData.indicators || {};
+  const indicators1h = trendData?.timeframes?.['1h']?.indicators || {};
   const stochRsi = trendData.stochasticRsi?.aggregated || {};
   const stoch4h = trendData.stochasticRsi?.['4h'] || {};
   const k4h = stoch4h.k ?? 50;
   const bollingerBands = trendData.bollingerBands || {};
   const bb1h = bollingerBands["1h"] || {};
-  const rsi = indicators.rsi || 50;
+  const rsi = indicators1h.rsi ?? 50;
   const adx = trendData?.volatility?.adx || 0;
   const momentum = trendData?.momentum || {};
   const percentB = bb1h.percentB || 50;
@@ -4153,7 +4153,7 @@ serve(async (req) => {
           });
         // Finding 1: In pre-recovery state, require deep pullback OR squeeze breakout
         // Get pullback analysis early for pre-recovery gate check
-        const rsi = trendData.rsi?.value ?? 50;
+        const rsi = trendData?.timeframes?.['1h']?.indicators?.rsi ?? 50;
         const squeezeBreakoutForPreRecovery = isValidSqueezeBreakout(trendData, derivedDirection);
         
         // Check for deep pullback conditions (RSI + structure)
@@ -8554,7 +8554,7 @@ serve(async (req) => {
           const htfTrend1hForRecovery = timeframes?.['1h']?.trend || "neutral";
           
           // Extract RSI for recovery mode checks
-          const recoveryRsi = trendData?.indicators?.rsi || 50;
+          const recoveryRsi = trendData?.timeframes?.['1h']?.indicators?.rsi ?? 50;
           
           // ===== FINDING 8: COOLDOWN AFTER RECOVERY LOSS =====
           // Check if we're in cooldown period after a recovery loss
