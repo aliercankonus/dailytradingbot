@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore, 
@@ -328,6 +328,7 @@ serve(async (req) => {
     const trendExits = [];
     const partialTpTaken = [];
     const emergencyExits = []; // NEW: Track emergency exits
+    const meanReversionExits: { symbol: string; side: string; reason: string; maeAtr: number; pnlPercent: number; positionAgeBars: number }[] = []; // Track mean reversion specific exits
     const volatilityAlerts = []; // NEW: Track volatility alerts
     const hedgesOpened: { symbol: string; parentSide: string; hedgeSide: string; hedgeQuantity: number; reversalRisk: number; parentPositionId: string; hedgePositionId: string }[] = []; // Track hedges opened for reversal risk
     const hedgesClosed: { symbol: string; parentSide: string; hedgePositionId: string; riskScore: number }[] = []; // NEW: Track hedges closed when risk drops
@@ -811,6 +812,126 @@ serve(async (req) => {
         
         if (peakUpdateError) {
           positionLogger.error(`Error updating peak P&L for ${position.id}: ${peakUpdateError}`);
+        }
+      }
+      
+      // ============= MEAN REVERSION: MAE TRACKING & ATR-BASED EXIT LOGIC =============
+      // Special monitoring for mean reversion trades with ATR-based exits and early adverse protection
+      let meanReversionExitTriggered = false;
+      let meanReversionExitReason = "";
+      
+      if (isMeanReversion && MEAN_REVERSION_CONFIG.ENABLED) {
+        // Get entry ATR (stored at execution) or calculate from current data
+        const entryAtr = position.entry_atr || (atrData?.atr || currentPrice * 0.02);
+        const entryAtrPercent = position.entry_atr_percent || atrPercent;
+        
+        // Calculate current adverse excursion in ATR units
+        const currentAdverseMove = position.side === "BUY"
+          ? Math.max(0, position.entry_price - currentPrice) // For LONG: adverse = price below entry
+          : Math.max(0, currentPrice - position.entry_price); // For SHORT: adverse = price above entry
+        const currentAdverseAtr = entryAtr > 0 ? currentAdverseMove / entryAtr : 0;
+        
+        // Calculate favorable move in ATR units
+        const currentFavorableMove = position.side === "BUY"
+          ? Math.max(0, currentPrice - position.entry_price)
+          : Math.max(0, position.entry_price - currentPrice);
+        const currentFavorableAtr = entryAtr > 0 ? currentFavorableMove / entryAtr : 0;
+        
+        // Track max adverse excursion (update if current is worse)
+        const existingMae = position.max_adverse_excursion_atr || 0;
+        const newMaeAtr = Math.max(existingMae, currentAdverseAtr);
+        
+        // Update MAE in database if it increased
+        if (newMaeAtr > existingMae) {
+          const { error: maeError } = await supabase
+            .from("positions")
+            .update({ max_adverse_excursion_atr: newMaeAtr })
+            .eq("id", position.id)
+            .eq("status", "active");
+          
+          if (!maeError) {
+            positionLogger.debug(`MEAN REVERSION MAE: Updated to ${newMaeAtr.toFixed(2)} ATR (adverse: $${currentAdverseMove.toFixed(2)})`);
+          }
+        }
+        
+        // Calculate position age in bars (1h candles)
+        const positionAgeBars = positionAgeMinutes / 60;
+        
+        // ============= EARLY ADVERSE EXIT PROTECTION =============
+        // If position moves against us by FAILURE_ATR_THRESHOLD within FAILURE_TIME_BARS,
+        // exit early to prevent larger losses (mean reversion thesis is failing)
+        if (positionAgeBars <= MEAN_REVERSION_CONFIG.EXIT.FAILURE_TIME_BARS && 
+            currentAdverseAtr >= MEAN_REVERSION_CONFIG.EXIT.FAILURE_ATR_THRESHOLD) {
+          meanReversionExitTriggered = true;
+          meanReversionExitReason = "mean_reversion_early_failure";
+          positionLogger.risk(`MEAN REVERSION EARLY FAILURE: ${currentAdverseAtr.toFixed(2)} ATR adverse (>= ${MEAN_REVERSION_CONFIG.EXIT.FAILURE_ATR_THRESHOLD} ATR) within ${positionAgeBars.toFixed(1)} bars (limit: ${MEAN_REVERSION_CONFIG.EXIT.FAILURE_TIME_BARS}) - thesis failed early`);
+        }
+        
+        // ============= ATR-BASED TARGET EXIT =============
+        // If position moves in our favor by BASE_TIMEOUT_ATR_MULTIPLE, take profit
+        if (!meanReversionExitTriggered && currentFavorableAtr >= MEAN_REVERSION_CONFIG.EXIT.BASE_TIMEOUT_ATR_MULTIPLE) {
+          // This triggers a take-profit at ATR target instead of waiting for fixed TP
+          positionLogger.trade(`MEAN REVERSION ATR TARGET: Reached ${currentFavorableAtr.toFixed(2)} ATR favorable (target: ${MEAN_REVERSION_CONFIG.EXIT.BASE_TIMEOUT_ATR_MULTIPLE} ATR)`);
+          // Tighten stop to lock in most of the gain
+          const lockPrice = position.side === "BUY"
+            ? position.entry_price + (currentFavorableMove * 0.7) // Lock 70% of gain
+            : position.entry_price - (currentFavorableMove * 0.7);
+          
+          if ((position.side === "BUY" && lockPrice > (newStopLoss || 0)) ||
+              (position.side === "SELL" && lockPrice < (newStopLoss || Infinity))) {
+            newStopLoss = lockPrice;
+            positionLogger.trade(`MEAN REVERSION LOCK: Tightening stop to ${lockPrice.toFixed(2)} (70% of ${currentFavorableAtr.toFixed(2)} ATR gain)`);
+          }
+        }
+        
+        // ============= QUICK PROFIT TARGET =============
+        // Take profit at quick target percentage - activate aggressive trailing
+        if (!meanReversionExitTriggered && pnlPercent >= MEAN_REVERSION_CONFIG.EXIT.QUICK_PROFIT_TARGET_PERCENT) {
+          const quickTrailingDistance = position.entry_price * (MEAN_REVERSION_CONFIG.EXIT.TRAILING_DISTANCE_PERCENT / 100);
+          const quickTrailingStop = position.side === "BUY"
+            ? currentPrice - quickTrailingDistance
+            : currentPrice + quickTrailingDistance;
+          
+          if ((position.side === "BUY" && quickTrailingStop > (newStopLoss || 0)) ||
+              (position.side === "SELL" && quickTrailingStop < (newStopLoss || Infinity))) {
+            newStopLoss = quickTrailingStop;
+            positionLogger.trade(`MEAN REVERSION TRAILING: P&L ${pnlPercent.toFixed(2)}% >= ${MEAN_REVERSION_CONFIG.EXIT.QUICK_PROFIT_TARGET_PERCENT}% - stop at ${quickTrailingStop.toFixed(2)}`);
+          }
+        }
+        
+        // ============= TIME-BASED FAILURE EXIT =============
+        // If position hasn't reached target after MAX_HOLD_HOURS, exit to free capital
+        const maxHoldMinutes = MEAN_REVERSION_CONFIG.EXIT.MAX_HOLD_HOURS * 60;
+        if (!meanReversionExitTriggered && positionAgeMinutes >= maxHoldMinutes && pnlPercent < MEAN_REVERSION_CONFIG.EXIT.QUICK_PROFIT_TARGET_PERCENT) {
+          meanReversionExitTriggered = true;
+          meanReversionExitReason = "mean_reversion_time_exit";
+          positionLogger.risk(`MEAN REVERSION TIME EXIT: Position held ${(positionAgeMinutes / 60).toFixed(1)}h (max: ${MEAN_REVERSION_CONFIG.EXIT.MAX_HOLD_HOURS}h) without reaching ${MEAN_REVERSION_CONFIG.EXIT.QUICK_PROFIT_TARGET_PERCENT}% target (current: ${pnlPercent.toFixed(2)}%)`);
+        }
+        
+        // ============= TREND CONTINUATION FAILURE =============
+        // If ADX starts rising strongly, our mean reversion thesis is wrong
+        const mrAdxSlope = trendDataForPosition?.volatility?.adxSlope ?? trendDataForPosition?.momentum?.adxSlope ?? 0;
+        if (!meanReversionExitTriggered && positionAdx >= MEAN_REVERSION_CONFIG.LONG.MAX_ADX && mrAdxSlope > 0.5 && pnlPercent < 0) {
+          meanReversionExitTriggered = true;
+          meanReversionExitReason = "mean_reversion_trend_continuation";
+          positionLogger.risk(`MEAN REVERSION TREND FAILURE: ADX ${positionAdx.toFixed(1)} >= ${MEAN_REVERSION_CONFIG.LONG.MAX_ADX} with rising slope ${mrAdxSlope.toFixed(2)} - trend continuing, thesis failed`);
+        }
+        
+        // Apply mean reversion exit to emergency close
+        if (meanReversionExitTriggered) {
+          emergencyClose = true;
+          emergencyReason = meanReversionExitReason;
+          
+          // Track for analytics
+          const mrMaeAtr = position.max_adverse_excursion_atr || newMaeAtr;
+          meanReversionExits.push({
+            symbol: position.symbol,
+            side: position.side,
+            reason: meanReversionExitReason,
+            maeAtr: mrMaeAtr,
+            pnlPercent,
+            positionAgeBars: positionAgeMinutes / 60,
+          });
         }
       }
       
@@ -2800,10 +2921,11 @@ serve(async (req) => {
       trendExits,
       partialTpTaken,
       emergencyExits,
+      meanReversionExits,
       volatilityAlerts,
       hedgesOpened,
       hedgesClosed,
-      message: `Updated ${updates.length} positions, ${trailingStopUpdates.length} trailing stops, ${breakEvenUpdates.length} break-even stops, ${partialTpTaken.length} partial TPs, closed ${closedPositions.length} positions (${trendExits.length} trend exits, ${emergencyExits.length} emergency exits), ${volatilityAlerts.length} volatility alerts, ${hedgesOpened.length} hedges opened`,
+      message: `Updated ${updates.length} positions, ${trailingStopUpdates.length} trailing stops, ${breakEvenUpdates.length} break-even stops, ${partialTpTaken.length} partial TPs, closed ${closedPositions.length} positions (${trendExits.length} trend exits, ${emergencyExits.length} emergency exits, ${meanReversionExits.length} MR exits), ${volatilityAlerts.length} volatility alerts, ${hedgesOpened.length} hedges opened`,
     };
     const message = JSON.stringify(responseData);
     for (const client of clients) {
