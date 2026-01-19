@@ -1676,22 +1676,41 @@ export function isTrendFollowingStrategy(strategyId: string | undefined, strateg
 
 // ============= IMPROVEMENT 1: HTF OVERSOLD/OVERBOUGHT HARD GATES =============
 // Global rule for ALL strategies: Block counter-trend continuation at extremes
-// When 4h StochRSI <= 20 AND %B <= 20, bounce is statistically likely - block SHORTS
-// When 4h StochRSI >= 80 AND %B >= 80, reversal is likely - block LONGS
+// UPDATED: Now has TWO tiers:
+//   Tier 1 (SEVERE): StochRSI-only gate (K < 15 for shorts, K > 85 for longs) - NO BYPASS ALLOWED
+//   Tier 2 (STANDARD): Combined gate (K <= 20 AND %B <= 25) - bypass allowed with strong trend
+// This fills the gap between Deep Gate (K < 5) and the combined gate
 export const HTF_EXTREME_HARD_GATES = {
-  // StochRSI thresholds for hard gate
-  // PHASE 3 FIX: Tightened oversold, raised overbought for more headroom in trends
-  STOCHRSI_OVERSOLD_BLOCK: 18,   // Tightened from 20 - K <= 18 for shorts
-  STOCHRSI_OVERBOUGHT_BLOCK: 85, // Raised from 80 - K >= 85 for longs (more headroom for trends)
-  // PARABOLIC MODE: Higher threshold when ADX >= 45 and rising (super-strong trends)
-  STOCHRSI_OVERBOUGHT_BLOCK_PARABOLIC: 94, // Raised from 92 for longs in parabolic mode
-  STOCHRSI_OVERSOLD_BLOCK_PARABOLIC: 6,    // Lowered from 8 for shorts in parabolic mode
+  // ============= TIER 1: SEVERE STOCHRSI-ONLY GATE (NO BYPASS) =============
+  // When StochRSI is in severe zone (5-15 for shorts, 85-95 for longs), block WITHOUT bypass
+  // This is a tighter gate than Deep (K < 5) but doesn't require %B confirmation
+  SEVERE_OVERSOLD_K_THRESHOLD: 15,   // K < 15 = block SHORT with no bypass (up from Deep's K < 5)
+  SEVERE_OVERBOUGHT_K_THRESHOLD: 85, // K > 85 = block LONG with no bypass
+  SEVERE_GATE_ALLOW_BYPASS: false,   // NO bypass allowed for severe zone
+  
+  // ============= TIER 2: STANDARD COMBINED GATE (WITH BYPASS) =============
+  // StochRSI thresholds for standard combined gate (requires BOTH K AND %B)
+  STOCHRSI_OVERSOLD_BLOCK: 20,   // Raised from 18 - K <= 20 for shorts (combined with %B)
+  STOCHRSI_OVERBOUGHT_BLOCK: 80, // Lowered from 85 - K >= 80 for longs (combined with %B)
+  
+  // PARABOLIC MODE: Relaxed thresholds only apply to Tier 2 (NOT Tier 1)
+  // But parabolic bypass only works if K is NOT in severe zone
+  STOCHRSI_OVERBOUGHT_BLOCK_PARABOLIC: 92, // Lowered from 94 - tighter during parabolic
+  STOCHRSI_OVERSOLD_BLOCK_PARABOLIC: 8,    // Raised from 6 - tighter during parabolic
+  
   // ADX thresholds for parabolic mode activation
-  PARABOLIC_MODE_MIN_ADX: 45,              // Lowered from 50 - activate parabolic mode earlier
+  PARABOLIC_MODE_MIN_ADX: 45,
   PARABOLIC_MODE_REQUIRE_ADX_RISING: true,
-  // Bollinger %B thresholds for hard gate
-  PERCENT_B_OVERSOLD_BLOCK: 20,  // %B <= 20 for shorts
-  PERCENT_B_OVERBOUGHT_BLOCK: 80, // %B >= 80 for longs
+  
+  // Bollinger %B thresholds for standard combined gate
+  PERCENT_B_OVERSOLD_BLOCK: 25,  // Raised from 20 - %B <= 25 for shorts (more protective)
+  PERCENT_B_OVERBOUGHT_BLOCK: 75, // Lowered from 80 - %B >= 75 for longs (more protective)
+  
+  // ============= BYPASS RESTRICTIONS =============
+  // Even when bypass is allowed (Tier 2 only), these conditions must be met
+  BYPASS_MIN_ADX: 35,              // ADX must be >= 35 for any bypass
+  BYPASS_MAX_REVERSAL_SCORE: 45,   // Reversal score must be < 45 for bypass
+  BYPASS_POSITION_REDUCTION: 0.50, // 50% position size when bypassing (down from 60%)
 } as const;
 
 // ============= IMPROVEMENT 2: BOLLINGER POSITION FILTER (CONTEXT-AWARE) =============
