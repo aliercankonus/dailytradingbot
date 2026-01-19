@@ -326,7 +326,7 @@ Trend Data: ${JSON.stringify(rejection.trend_data, null, 2)}`;
 };
 
 // Helper function to log rejection with optional AI analysis and Order Flow data
-// ENHANCED: Automatically extracts StochRSI K/D values from trendData for all rejection logs
+// ENHANCED: Automatically extracts StochRSI K/D and Bollinger %B values from trendData for all rejection logs
 const logRejectionWithAI = async (
   supabase: any,
   userId: string,
@@ -351,10 +351,29 @@ const logRejectionWithAI = async (
     }
   };
   
-  // Merge Order Flow data and StochRSI data into filters_status
+  // Extract Bollinger Band %B and squeeze values from trendData for consistent logging
+  const bb4h = trendData?.bollingerBands?.["4h"];
+  const bb1h = trendData?.bollingerBands?.["1h"];
+  const bollingerData = {
+    bollinger4h: {
+      percentB: bb4h?.percentB ?? null,
+      squeeze: bb4h?.squeeze ?? null,
+      squeezeIntensity: bb4h?.squeezeIntensity ?? null,
+      pricePosition: bb4h?.pricePosition ?? null,
+    },
+    bollinger1h: {
+      percentB: bb1h?.percentB ?? null,
+      squeeze: bb1h?.squeeze ?? null,
+      squeezeIntensity: bb1h?.squeezeIntensity ?? null,
+      pricePosition: bb1h?.pricePosition ?? null,
+    }
+  };
+  
+  // Merge Order Flow data, StochRSI data, and Bollinger data into filters_status
   let enrichedFiltersStatus = {
     ...filtersStatus,
     ...stochRsiData, // Always include StochRSI K/D values
+    ...bollingerData, // Always include Bollinger %B values
   };
   
   // Add Order Flow data if provided
