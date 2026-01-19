@@ -30,6 +30,8 @@ import {
   BOLLINGER_ENTRY_GATES,
   SQUEEZE_CONTEXT_PARAMS,
   STRATEGY_SPECIFIC_CONSTRAINTS,
+  // NEW: Deep StochRSI extreme hard gate (universal block, no exceptions)
+  DEEP_STOCHRSI_HARD_GATE,
   LOW_VOLUME_DETECTION_PARAMS,
   RANGING_MARKET_DETECTION_PARAMS,
   EARLY_MOMENTUM_ENTRY_PARAMS,
@@ -2077,7 +2079,10 @@ serve(async (req) => {
       | 'MOMENTUM_REVERSAL_PROTECTION'
       // NEW: Move exhaustion gate to prevent late trend entries
       | 'MOVE_EXHAUSTED_SHORT'
-      | 'MOVE_EXHAUSTED_LONG';
+      | 'MOVE_EXHAUSTED_LONG'
+      // NEW: Deep StochRSI extreme hard gate (no exceptions)
+      | 'DEEP_STOCHRSI_OVERSOLD_HARD_GATE'
+      | 'DEEP_STOCHRSI_OVERBOUGHT_HARD_GATE';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -5167,6 +5172,64 @@ serve(async (req) => {
           }
         };
         
+        // ============= DEEP STOCHRSI EXTREME HARD GATE (NO EXCEPTIONS) =============
+        // This gate executes BEFORE any bypass logic - completely blocks trades at extreme StochRSI
+        // When K < 5 (deeply oversold) or K > 95 (deeply overbought), bounce/reversal probability is ~80%+
+        // NO EXCEPTIONS: Not even strong ADX, momentum, or trend confirmation can override this gate
+        if (DEEP_STOCHRSI_HARD_GATE.ENABLED) {
+          // Block ALL shorts when deeply oversold (K < 5)
+          if (intendedTradeDirection === "short" && stochRsiK4h < DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD) {
+            rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { gate: 'DEEP_STOCHRSI_OVERSOLD_HARD_GATE', details: `K=${stochRsiK4h.toFixed(1)} < ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}` });
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 DEEP OVERSOLD HARD GATE - Blocking SHORT at 4h K=${stochRsiK4h.toFixed(1)} < ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD} (NO EXCEPTIONS)`);
+            logger.forSymbol(symbol).info(`   → Bounce probability ~80%+ at K < ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}, %B=${percentB.toFixed(1)}`);
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `DEEP OVERSOLD HARD GATE: SHORT blocked - 4h StochRSI K=${stochRsiK4h.toFixed(1)} is deeply oversold (< ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD})`,
+              { 
+                gate: "DEEP_STOCHRSI_OVERSOLD",
+                direction: "short",
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
+                percentB: percentB.toFixed(1),
+                adx: adx.toFixed(1),
+                allowExceptions: DEEP_STOCHRSI_HARD_GATE.ALLOW_EXCEPTIONS,
+                message: `Bounce probability extremely high (~80%+) at K=${stochRsiK4h.toFixed(1)}, blocking SHORT with NO EXCEPTIONS`
+              },
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
+          
+          // Block ALL longs when deeply overbought (K > 95)
+          if (intendedTradeDirection === "long" && stochRsiK4h > DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD) {
+            rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { gate: 'DEEP_STOCHRSI_OVERBOUGHT_HARD_GATE', details: `K=${stochRsiK4h.toFixed(1)} > ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}` });
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 DEEP OVERBOUGHT HARD GATE - Blocking LONG at 4h K=${stochRsiK4h.toFixed(1)} > ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD} (NO EXCEPTIONS)`);
+            logger.forSymbol(symbol).info(`   → Pullback probability ~80%+ at K > ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}, %B=${percentB.toFixed(1)}`);
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `DEEP OVERBOUGHT HARD GATE: LONG blocked - 4h StochRSI K=${stochRsiK4h.toFixed(1)} is deeply overbought (> ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD})`,
+              { 
+                gate: "DEEP_STOCHRSI_OVERBOUGHT",
+                direction: "long",
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
+                percentB: percentB.toFixed(1),
+                adx: adx.toFixed(1),
+                allowExceptions: DEEP_STOCHRSI_HARD_GATE.ALLOW_EXCEPTIONS,
+                message: `Pullback probability extremely high (~80%+) at K=${stochRsiK4h.toFixed(1)}, blocking LONG with NO EXCEPTIONS`
+              },
+              trendData,
+              false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
+        }
+        
         // Log bypass decision details for debugging
         if (isHTFOverbought || isHTFOversold) {
           const bypassType = stealthHTFBypassPath ? 'STEALTH_TREND' :
@@ -5413,34 +5476,46 @@ serve(async (req) => {
         // ============= PHASE 1 FIX: NEGATIVE %B MOMENTUM CONTINUATION FOR SHORTS =============
         // When %B < 0 (price below lower Bollinger band), this is momentum continuation, NOT bounce risk
         // Allow shorts with momentum confirmation (MACD expanding OR 1h directional OR strong price move)
+        // NEW: Must also respect StochRSI floor - if K is too deeply oversold, bypass is blocked
         let negativePercentBBypassApplied = false;
         let negativePercentBPositionMultiplier = 1.0;
         
+        // Get StochRSI floor for negative %B bypass (default 15 if not set)
+        const stochRsiFloorForNegativeB = BOLLINGER_ENTRY_GATES.SHORT_BELOW_ZERO_MIN_STOCHRSI_K ?? 15;
+        const stochRsiAboveFloor = stochRsiK4h >= stochRsiFloorForNegativeB;
+        
         if (intendedTradeDirection === "short" && percentB < 0 && 
             BOLLINGER_ENTRY_GATES.ALLOW_SHORTS_BELOW_ZERO_PERCENT_B) {
-          // FIX: Use stochFilterTrend1h/stochFilterConf1h instead of timeframes object
-          // Also check for strong price moves as additional confirmation
-          const priceMove = trendData.priceActionMomentum?.movePercent || 0;
-          const hasPriceActionConfirmation = Math.abs(priceMove) >= 1.0 && priceMove < 0; // Negative = bearish
           
-          // Check momentum confirmation - multiple sources
-          const hasMomentumConfirmation = !BOLLINGER_ENTRY_GATES.SHORT_BELOW_ZERO_REQUIRE_MOMENTUM ||
-            momentum?.macdExpanding === true ||
-            (stochFilterTrend1h === "bearish" && stochFilterConf1h >= 55) ||
-            hasPriceActionConfirmation;
-          
-          if (hasMomentumConfirmation) {
-            negativePercentBBypassApplied = true;
-            negativePercentBPositionMultiplier = BOLLINGER_ENTRY_GATES.SHORT_BELOW_ZERO_POSITION_REDUCTION;
-            const confirmSource = momentum?.macdExpanding ? "MACD expanding" : 
-              (stochFilterTrend1h === "bearish" && stochFilterConf1h >= 55) ? `1h bearish ${stochFilterConf1h.toFixed(0)}%` :
-              hasPriceActionConfirmation ? `price drop ${priceMove.toFixed(1)}%` : "unknown";
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔥 NEGATIVE %B BYPASS ACTIVATED: %B=${percentB.toFixed(1)} < 0 via ${confirmSource}`);
-            logger.forSymbol(symbol).info(`   → MACD expanding=${momentum?.macdExpanding}, 1h=${stochFilterTrend1h} ${stochFilterConf1h.toFixed(0)}%, price=${priceMove.toFixed(1)}%`);
-            logger.forSymbol(symbol).info(`   → Position size reduced to ${(negativePercentBPositionMultiplier * 100).toFixed(0)}% for safety`);
+          // NEW: Check StochRSI floor first - block bypass if too deeply oversold
+          if (!stochRsiAboveFloor) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} NEGATIVE %B BYPASS BLOCKED BY STOCHRSI FLOOR: K=${stochRsiK4h.toFixed(1)} < ${stochRsiFloorForNegativeB}`);
+            logger.forSymbol(symbol).info(`   → %B=${percentB.toFixed(1)} < 0 but StochRSI too oversold for SHORT continuation`);
           } else {
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} NEGATIVE %B BYPASS FAILED: %B=${percentB.toFixed(1)} but no momentum confirmation`);
-            logger.forSymbol(symbol).info(`   → MACD expanding=${momentum?.macdExpanding}, 1h=${stochFilterTrend1h} ${stochFilterConf1h.toFixed(0)}%, price=${priceMove.toFixed(1)}%`);
+            // FIX: Use stochFilterTrend1h/stochFilterConf1h instead of timeframes object
+            // Also check for strong price moves as additional confirmation
+            const priceMove = trendData.priceActionMomentum?.movePercent || 0;
+            const hasPriceActionConfirmation = Math.abs(priceMove) >= 1.0 && priceMove < 0; // Negative = bearish
+            
+            // Check momentum confirmation - multiple sources
+            const hasMomentumConfirmation = !BOLLINGER_ENTRY_GATES.SHORT_BELOW_ZERO_REQUIRE_MOMENTUM ||
+              momentum?.macdExpanding === true ||
+              (stochFilterTrend1h === "bearish" && stochFilterConf1h >= 55) ||
+              hasPriceActionConfirmation;
+            
+            if (hasMomentumConfirmation) {
+              negativePercentBBypassApplied = true;
+              negativePercentBPositionMultiplier = BOLLINGER_ENTRY_GATES.SHORT_BELOW_ZERO_POSITION_REDUCTION;
+              const confirmSource = momentum?.macdExpanding ? "MACD expanding" : 
+                (stochFilterTrend1h === "bearish" && stochFilterConf1h >= 55) ? `1h bearish ${stochFilterConf1h.toFixed(0)}%` :
+                hasPriceActionConfirmation ? `price drop ${priceMove.toFixed(1)}%` : "unknown";
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔥 NEGATIVE %B BYPASS ACTIVATED: %B=${percentB.toFixed(1)} < 0 via ${confirmSource}`);
+              logger.forSymbol(symbol).info(`   → MACD expanding=${momentum?.macdExpanding}, 1h=${stochFilterTrend1h} ${stochFilterConf1h.toFixed(0)}%, price=${priceMove.toFixed(1)}%, K=${stochRsiK4h.toFixed(1)} (floor=${stochRsiFloorForNegativeB})`);
+              logger.forSymbol(symbol).info(`   → Position size reduced to ${(negativePercentBPositionMultiplier * 100).toFixed(0)}% for safety`);
+            } else {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} NEGATIVE %B BYPASS FAILED: %B=${percentB.toFixed(1)} but no momentum confirmation`);
+              logger.forSymbol(symbol).info(`   → MACD expanding=${momentum?.macdExpanding}, 1h=${stochFilterTrend1h} ${stochFilterConf1h.toFixed(0)}%, price=${priceMove.toFixed(1)}%`);
+            }
           }
         }
         
