@@ -30,6 +30,9 @@ export interface ExhaustionSignal {
   gateBypasses: GateBypass[];
   positionMultiplier: number;
   qualityScore: number;
+  // NEW: Extreme exhaustion tracking
+  isExtremeExhaustion: boolean;   // True when K at statistical extremes
+  adxWasOverridden: boolean;      // True when high ADX was bypassed
 }
 
 interface ExhaustionCheck {
@@ -39,6 +42,8 @@ interface ExhaustionCheck {
   exhaustionScore: number;
   triggers: string[];
   gatesToBypass: string[];
+  isExtremeExhaustion: boolean;  // NEW: Flags when ADX override is active
+  adxWasOverridden: boolean;     // NEW: Logs whether ADX was bypassed
 }
 
 // ============= REGIME CLASSIFICATION (ORTHOGONAL) =============
@@ -129,9 +134,32 @@ function checkOversoldExhaustion(trendData: any): ExhaustionCheck {
   const prevMacdHist = trendData?.momentum?.prevMacdHistogram ?? macdHist;
   const volumeRatio = trendData?.volume?.ratio ?? 1.0;
   
+  // VWAP distance check for extreme exhaustion validation
+  const vwapDistance = trendData?.vwap?.distancePercent ?? 0;
+  const atr = trendData?.volatility?.atr ?? trendData?.atr ?? 0;
+  const currentPrice = trendData?.price ?? trendData?.currentPrice ?? 0;
+  const vwap = trendData?.vwap?.value ?? currentPrice;
+  const atrDistanceFromVwap = atr > 0 && currentPrice > 0 
+    ? Math.abs(currentPrice - vwap) / atr 
+    : 0;
+  
   const config = MEAN_REVERSION_CONFIG.LONG;
+  const extremeConfig = MEAN_REVERSION_CONFIG.EXTREME_EXHAUSTION;
   const triggers: string[] = [];
   let score = 0;
+  let isExtremeExhaustion = false;
+  let adxWasOverridden = false;
+  
+  // ===== EXTREME EXHAUSTION DETECTION =====
+  // When K is at statistical extremes, ADX becomes informational, not blocking
+  const isDeepExhaustion = stochK <= extremeConfig.LONG_K_EXTREME;
+  const adxNotAccelerating = adxSlope <= extremeConfig.MAX_ADX_SLOPE;
+  const sufficientDistance = atrDistanceFromVwap >= extremeConfig.MIN_ATR_DISTANCE_FROM_VWAP;
+  
+  if (isDeepExhaustion && adxNotAccelerating && sufficientDistance) {
+    isExtremeExhaustion = true;
+    triggers.push(`EXTREME EXHAUSTION: K=${stochK.toFixed(1)} <= ${extremeConfig.LONG_K_EXTREME}, ADX slope=${adxSlope.toFixed(2)} <= ${extremeConfig.MAX_ADX_SLOPE}, VWAP distance=${atrDistanceFromVwap.toFixed(1)} ATRs`);
+  }
   
   // Check K threshold (deep oversold)
   if (stochK <= config.K_THRESHOLD) {
@@ -145,17 +173,25 @@ function checkOversoldExhaustion(trendData: any): ExhaustionCheck {
     score += 25;
   }
   
-  // Check ADX ceiling (not in super-strong trend)
+  // ===== ADX LOGIC: CONDITIONAL ON EXHAUSTION DEPTH =====
   if (adx <= config.MAX_ADX) {
     triggers.push(`ADX=${adx.toFixed(1)} <= ${config.MAX_ADX}`);
     score += 15;
+  } else if (isExtremeExhaustion) {
+    // EXTREME EXHAUSTION OVERRIDE: ADX becomes informational, not blocking
+    adxWasOverridden = true;
+    triggers.push(`ADX=${adx.toFixed(1)} > ${config.MAX_ADX} → OVERRIDDEN by extreme exhaustion (K=${stochK.toFixed(1)}, ADX slope=${adxSlope.toFixed(2)})`);
+    // No penalty applied - ADX is informational here
+    score += 5; // Small bonus for meeting extreme criteria
   } else {
-    score -= 40; // Strong trend = dangerous for mean reversion
-    triggers.push(`ADX=${adx.toFixed(1)} > ${config.MAX_ADX} (PENALTY)`);
+    // Normal case: high ADX without extreme exhaustion = penalty
+    score -= 40;
+    triggers.push(`ADX=${adx.toFixed(1)} > ${config.MAX_ADX} (PENALTY - not extreme exhaustion)`);
   }
   
-  // NEW: ADX slope penalty - prevents knife-catching during acceleration
-  if (adxSlope > 0.25) {
+  // ADX slope penalty - prevents knife-catching during acceleration
+  // But not applied during extreme exhaustion (already validated ADX not accelerating)
+  if (!isExtremeExhaustion && adxSlope > 0.25) {
     triggers.push(`ADX rising (slope=${adxSlope.toFixed(2)}) — trend acceleration risk`);
     score -= 25;
   }
@@ -186,6 +222,8 @@ function checkOversoldExhaustion(trendData: any): ExhaustionCheck {
       'TIER_1_SEVERE_OVERSOLD', 
       'HTF_EXTREME_OVERSOLD_BLOCK'
     ] : [],
+    isExtremeExhaustion,
+    adxWasOverridden,
   };
 }
 
@@ -197,14 +235,38 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
                  trendData?.stochasticRsi?.aggregated?.k ?? 50;
   const percentB = trendData?.bollingerBands?.['4h']?.percentB ?? 50;
   const adx = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
+  const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
   const htf4h = trendData?.timeframes?.['4h']?.trend ?? trendData?.htfTrend4h ?? 'neutral';
   const hasDivergence = trendData?.momentum?.hasDivergence ?? false;
   const momentumDirection = trendData?.momentum?.direction ?? 'neutral';
   const momentumScore = trendData?.momentum?.score ?? 0;
   
+  // VWAP distance check for extreme exhaustion validation
+  const vwapDistance = trendData?.vwap?.distancePercent ?? 0;
+  const atr = trendData?.volatility?.atr ?? trendData?.atr ?? 0;
+  const currentPrice = trendData?.price ?? trendData?.currentPrice ?? 0;
+  const vwap = trendData?.vwap?.value ?? currentPrice;
+  const atrDistanceFromVwap = atr > 0 && currentPrice > 0 
+    ? Math.abs(currentPrice - vwap) / atr 
+    : 0;
+  
   const config = MEAN_REVERSION_CONFIG.SHORT;
+  const extremeConfig = MEAN_REVERSION_CONFIG.EXTREME_EXHAUSTION;
   const triggers: string[] = [];
   let score = 0;
+  let isExtremeExhaustion = false;
+  let adxWasOverridden = false;
+  
+  // ===== EXTREME EXHAUSTION DETECTION =====
+  // When K is at statistical extremes, ADX becomes informational, not blocking
+  const isDeepExhaustion = stochK >= extremeConfig.SHORT_K_EXTREME;
+  const adxNotAccelerating = adxSlope <= extremeConfig.MAX_ADX_SLOPE;
+  const sufficientDistance = atrDistanceFromVwap >= extremeConfig.MIN_ATR_DISTANCE_FROM_VWAP;
+  
+  if (isDeepExhaustion && adxNotAccelerating && sufficientDistance) {
+    isExtremeExhaustion = true;
+    triggers.push(`EXTREME EXHAUSTION: K=${stochK.toFixed(1)} >= ${extremeConfig.SHORT_K_EXTREME}, ADX slope=${adxSlope.toFixed(2)} <= ${extremeConfig.MAX_ADX_SLOPE}, VWAP distance=${atrDistanceFromVwap.toFixed(1)} ATRs`);
+  }
   
   // Stricter thresholds for SHORT
   if (stochK >= config.K_THRESHOLD) {
@@ -217,15 +279,24 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
     score += 25;
   }
   
+  // ===== ADX LOGIC: CONDITIONAL ON EXHAUSTION DEPTH =====
   if (adx <= config.MAX_ADX) {
     triggers.push(`ADX=${adx.toFixed(1)} <= ${config.MAX_ADX}`);
     score += 15;
+  } else if (isExtremeExhaustion) {
+    // EXTREME EXHAUSTION OVERRIDE: ADX becomes informational, not blocking
+    adxWasOverridden = true;
+    triggers.push(`ADX=${adx.toFixed(1)} > ${config.MAX_ADX} → OVERRIDDEN by extreme exhaustion (K=${stochK.toFixed(1)}, ADX slope=${adxSlope.toFixed(2)})`);
+    // No penalty applied - ADX is informational here
+    score += 5; // Small bonus for meeting extreme criteria
   } else {
-    score -= 50; // Even stronger penalty for shorting strong trends
-    triggers.push(`ADX=${adx.toFixed(1)} > ${config.MAX_ADX} (STRONG PENALTY)`);
+    // Normal case: high ADX without extreme exhaustion = even stronger penalty for shorts
+    score -= 50;
+    triggers.push(`ADX=${adx.toFixed(1)} > ${config.MAX_ADX} (STRONG PENALTY - not extreme exhaustion)`);
   }
   
   // HTF veto for shorts - HARD BLOCK if 4h is bullish
+  // Note: This remains a hard block even during extreme exhaustion
   if (config.REQUIRE_HTF_NOT_BULLISH && htf4h === 'bullish') {
     triggers.push('4h bullish - SHORT blocked');
     score -= 100; // Hard block
@@ -261,6 +332,8 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
       'TIER_1_SEVERE_OVERBOUGHT',
       'HTF_EXTREME_OVERBOUGHT_BLOCK'
     ] : [],
+    isExtremeExhaustion,
+    adxWasOverridden,
   };
 }
 
@@ -292,6 +365,8 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
       gateBypasses: [],
       positionMultiplier: 0,
       qualityScore: 0,
+      isExtremeExhaustion: false,
+      adxWasOverridden: false,
     };
   }
   
@@ -326,15 +401,24 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
       gateBypasses: [],
       positionMultiplier: 0,
       qualityScore: 0,
+      isExtremeExhaustion: false,
+      adxWasOverridden: false,
     };
   }
   
   // 6. Calculate position multiplier with regime adjustment
+  // CRITICAL: Apply 50% reduction for extreme exhaustion trades (high ADX override)
   const config = selectedSignal.direction === 'long' 
     ? MEAN_REVERSION_CONFIG.LONG 
     : MEAN_REVERSION_CONFIG.SHORT;
   const phaseMultiplier = getPhasePositionMultiplier(trendPhase);
-  const positionMultiplier = config.POSITION_SIZE * phaseMultiplier;
+  let positionMultiplier = config.POSITION_SIZE * phaseMultiplier;
+  
+  // Apply extreme exhaustion risk reduction
+  if (selectedSignal.isExtremeExhaustion && selectedSignal.adxWasOverridden) {
+    const extremeMultiplier = MEAN_REVERSION_CONFIG.EXTREME_EXHAUSTION.POSITION_SIZE_MULTIPLIER;
+    positionMultiplier *= extremeMultiplier;
+  }
   
   // 7. Calculate quality score with CAP at 78
   const rawQuality = 55 + (selectedSignal.confidence * 0.3);
@@ -360,6 +444,8 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
     gateBypasses,
     positionMultiplier,
     qualityScore: cappedQuality,
+    isExtremeExhaustion: selectedSignal.isExtremeExhaustion,
+    adxWasOverridden: selectedSignal.adxWasOverridden,
   };
 }
 

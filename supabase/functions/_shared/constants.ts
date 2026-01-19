@@ -3739,7 +3739,7 @@ export const MEAN_REVERSION_CONFIG = {
     POSITION_SIZE: 0.40,          // 40% of normal position
     STOP_LOSS_PERCENT: 1.8,       // Wider stop for reversals
     TAKE_PROFIT_PERCENT: 2.5,     // Target mean reversion to middle
-    MAX_ADX: 30,                  // Only in weak/moderate trends
+    MAX_ADX: 30,                  // Normal max ADX (informational at extremes)
     REQUIRE_MOMENTUM_SHIFT: true,
     MIN_BARS_AT_EXTREME: 3,
   },
@@ -3751,7 +3751,7 @@ export const MEAN_REVERSION_CONFIG = {
     POSITION_SIZE: 0.25,          // Only 25% of normal position
     STOP_LOSS_PERCENT: 2.2,       // Even wider stop
     TAKE_PROFIT_PERCENT: 2.0,     // Modest target
-    MAX_ADX: 25,                  // Only in weaker trends
+    MAX_ADX: 25,                  // Normal max ADX (informational at extremes)
     REQUIRE_HTF_NOT_BULLISH: true,
     REQUIRE_BEARISH_DIVERGENCE: true,
     MIN_BARS_AT_EXTREME: 4,
@@ -3759,6 +3759,25 @@ export const MEAN_REVERSION_CONFIG = {
   
   // Quality Score Capping - prevents outranking trend trades
   MAX_QUALITY_SCORE: 78,
+  
+  // ===== EXTREME EXHAUSTION OVERRIDE =====
+  // When exhaustion is extreme, ADX becomes informational, not blocking
+  // This addresses late-stage moves where ADX peaks near local exhaustion
+  EXTREME_EXHAUSTION: {
+    // Thresholds where ADX veto is lifted
+    LONG_K_EXTREME: 5,            // K <= 5 = deep statistical exhaustion
+    SHORT_K_EXTREME: 95,          // K >= 95 = deep statistical exhaustion
+    
+    // Safety requirements when overriding ADX
+    MAX_ADX_SLOPE: 0,             // ADX must be flat/declining (not accelerating)
+    MIN_ATR_DISTANCE_FROM_VWAP: 1.5,  // Price must be extended from VWAP
+    
+    // Risk adjustments for high-ADX mean reversion
+    POSITION_SIZE_MULTIPLIER: 0.50,   // 50% of normal MR size
+    FASTER_STOP_MULTIPLIER: 0.75,     // Tighter stop (volatility-based)
+    NO_REENTRY: true,                 // No averaging or re-entries
+    TARGET_PARTIAL_REVERSION: true,   // Only target VWAP/mid-BB, not full reversion
+  },
   
   // Volatility-Adjusted Exit
   EXIT: {
