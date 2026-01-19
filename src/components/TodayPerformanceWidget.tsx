@@ -70,8 +70,11 @@ export const TodayPerformanceWidget = () => {
 
       const totalPnL = filteredPositions.reduce((sum, p) => sum + (p.realized_pnl || 0), 0);
       const winningTrades = filteredPositions.filter(p => (p.realized_pnl || 0) > 0).length;
+      const losingTrades = filteredPositions.filter(p => (p.realized_pnl || 0) < 0).length;
       const totalTrades = filteredPositions.length;
-      const winRate = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0;
+      // Win rate excludes breakeven trades (P&L = 0)
+      const decisiveTrades = winningTrades + losingTrades;
+      const winRate = decisiveTrades > 0 ? (winningTrades / decisiveTrades) * 100 : 0;
 
       return { totalPnL, winningTrades, totalTrades, winRate };
     };

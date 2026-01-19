@@ -1494,6 +1494,7 @@ export type Database = {
         Row: {
           avg_loss: number | null
           avg_win: number | null
+          breakeven_trades: number | null
           largest_loss: number | null
           largest_win: number | null
           losing_trades: number | null
