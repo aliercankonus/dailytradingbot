@@ -351,9 +351,11 @@ const logRejectionWithAI = async (
     }
   };
   
-  // Extract Bollinger Band %B and squeeze values from trendData for consistent logging
+  // Extract Bollinger Band %B and squeeze values from trendData for consistent logging (all timeframes)
   const bb4h = trendData?.bollingerBands?.["4h"];
   const bb1h = trendData?.bollingerBands?.["1h"];
+  const bb30m = trendData?.bollingerBands?.["30m"];
+  const bb15m = trendData?.bollingerBands?.["15m"];
   const bollingerData = {
     bollinger4h: {
       percentB: bb4h?.percentB ?? null,
@@ -366,6 +368,18 @@ const logRejectionWithAI = async (
       squeeze: bb1h?.squeeze ?? null,
       squeezeIntensity: bb1h?.squeezeIntensity ?? null,
       pricePosition: bb1h?.pricePosition ?? null,
+    },
+    bollinger30m: {
+      percentB: bb30m?.percentB ?? null,
+      squeeze: bb30m?.squeeze ?? null,
+      squeezeIntensity: bb30m?.squeezeIntensity ?? null,
+      pricePosition: bb30m?.pricePosition ?? null,
+    },
+    bollinger15m: {
+      percentB: bb15m?.percentB ?? null,
+      squeeze: bb15m?.squeeze ?? null,
+      squeezeIntensity: bb15m?.squeezeIntensity ?? null,
+      pricePosition: bb15m?.pricePosition ?? null,
     }
   };
   
