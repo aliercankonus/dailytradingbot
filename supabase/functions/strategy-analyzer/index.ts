@@ -2817,6 +2817,8 @@ serve(async (req) => {
             `No clear trade direction: ${directionResult.reasons.join(", ")}`,
             { 
               gate: "NO_CLEAR_DIRECTION",
+              derivedDirection: directionResult.direction || null,
+              direction: directionResult.direction || null,
               source: directionResult.source,
               reasons: directionResult.reasons,
               trend4h: htfTrend4h,
@@ -3366,6 +3368,8 @@ serve(async (req) => {
                 `TREND_EXHAUSTION_PROTECTION: ${blockMsg}`,
                 {
                   gate: "TREND_EXHAUSTION_PROTECTION",
+                  derivedDirection,
+                  direction: derivedDirection,
                   adx: adx.toFixed(1),
                   adxSlope: adxSlope.toFixed(2),
                   trendStrength,
@@ -3921,8 +3925,9 @@ serve(async (req) => {
             `SMART MOMENTUM: Trend exhausted (score=${smartMomentum.score}, ${smartMomentum.overextensionATR.toFixed(1)} ATR from EMA)${continuationModeResult ? ` | Continuation rejected: ${continuationModeResult.reason}` : ''}`,
             {
               gate: "MOMENTUM_EXHAUSTED",
-              momentumScore: smartMomentum.score,
+              derivedDirection,
               direction: smartMomentum.direction,
+              momentumScore: smartMomentum.score,
               overextensionATR: smartMomentum.overextensionATR,
               adx: adx.toFixed(1),
               adxRising: smartAdxRising,
@@ -4720,6 +4725,7 @@ serve(async (req) => {
                 `STOCHRSI ABSOLUTE BLOCK: LONG blocked at K=${stochRsiK4h.toFixed(1)} (parabolic bypass conditions not met)`,
                 { 
                   gate: "STOCHRSI_ABSOLUTE_MAX_OVERBOUGHT",
+                  derivedDirection,
                   direction: "long",
                   stochRsiK4h: stochRsiK4h.toFixed(1),
                   threshold: effectiveAbsoluteMaxOverbought,
@@ -4765,6 +4771,7 @@ serve(async (req) => {
                 `STOCHRSI ABSOLUTE BLOCK: SHORT blocked at K=${stochRsiK4h.toFixed(1)} (parabolic bypass conditions not met)`,
                 { 
                   gate: "STOCHRSI_ABSOLUTE_MAX_OVERSOLD",
+                  derivedDirection,
                   direction: "short",
                   stochRsiK4h: stochRsiK4h.toFixed(1),
                   threshold: effectiveAbsoluteMaxOversold,
@@ -5675,6 +5682,7 @@ serve(async (req) => {
               `IMPROVEMENT 1 - HTF EXTREME GATE: SHORT blocked at 4h oversold (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
               { 
                 gate: "HTF_EXTREME_OVERSOLD_BLOCK",
+                derivedDirection,
                 direction: "short",
                 stochRsiK4h: stochRsiK4h.toFixed(1),
                 percentB: percentB.toFixed(1),
@@ -5734,6 +5742,7 @@ serve(async (req) => {
               `IMPROVEMENT 1 - HTF EXTREME GATE: LONG blocked at 4h overbought (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
               { 
                 gate: "HTF_EXTREME_OVERBOUGHT_BLOCK",
+                derivedDirection,
                 direction: "long",
                 stochRsiK4h: stochRsiK4h.toFixed(1),
                 percentB: percentB.toFixed(1),
@@ -7864,6 +7873,8 @@ serve(async (req) => {
             `HARD GATE: Momentum score too low (${earlyMomentumScore} < ${effectiveMomentumThreshold}${isPullbackSetupDetected ? ' [pullback threshold]' : ''}${regimeAwareApplied ? ` [regime-aware:${regimeAwareTier}]` : ''}) - insufficient momentum confirmation`,
             { 
               gate: "MOMENTUM_SCORE_TOO_LOW",
+              derivedDirection,
+              direction: derivedDirection,
               momentumScore: earlyMomentumScore,
               momentumRequired: effectiveMomentumThreshold,
               baseMomentumThreshold,
@@ -8132,6 +8143,8 @@ serve(async (req) => {
                 `HARD GATE: Neutral 4h requires 55%+ confidence OR directional 1h with 50%+ OR confirmed momentum (4h=${trend4hForNeutralGate} ${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`,
                 { 
                   gate: "NEUTRAL_4H_LOW_CONFIDENCE",
+                  derivedDirection,
+                  direction: derivedDirection,
                   trend4h: trend4hForNeutralGate,
                   confidence4h: conf4hForGate,
                   trend1h: htfTrend1h,
@@ -9250,6 +9263,8 @@ serve(async (req) => {
                 : `Quality score too low: ${qualityScore}/100 (min: ${MIN_QUALITY_SCORE}, ADX=${adx.toFixed(1)})`,
             {
               gate: "QUALITY_THRESHOLD",
+              derivedDirection,
+              direction: derivedDirection,
               qualityScore, breakdown, minRequired: MIN_QUALITY_SCORE,
               dynamicThreshold: true,
               adx: adx.toFixed(1),
@@ -10623,6 +10638,8 @@ serve(async (req) => {
             `No strategy conditions met (quality passed: ${qualityScore}/100)${convergenceNote}`,
             {
               gate: "NO_STRATEGY_MATCH",
+              derivedDirection,
+              direction: derivedDirection,
               qualityScore, breakdown,
               strategiesEvaluated: allStrategies.length,
               regime: regime.regime,
@@ -10669,7 +10686,13 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} All ${candidates.length} strategies disabled for ${currentRegimeType} regime`);
           await logRejectionWithAI(supabase, userId, symbol, 
             `All matching strategies disabled for ${currentRegimeType} regime`,
-            { regime: currentRegimeType, strategiesFiltered: candidates.map(c => c.strategy.name) },
+            { 
+              gate: "NO_STRATEGY_MATCH_REGIME_FILTER",
+              derivedDirection,
+              direction: derivedDirection,
+              regime: currentRegimeType, 
+              strategiesFiltered: candidates.map(c => c.strategy.name) 
+            },
             trendData, riskParams.ai_analysis_enabled !== false);
           continue;
         }
