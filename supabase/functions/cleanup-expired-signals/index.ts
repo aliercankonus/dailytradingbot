@@ -61,6 +61,20 @@ Deno.serve(async (req) => {
       console.log(`Deleted ${regimeDeleted || 0} market regime history records older than 24h`);
     }
 
+    // Clean up momentum_analysis - keep only last 24 hours
+    console.log('Cleaning up momentum_analysis table (keeping last 24h)...');
+    
+    const { error: momentumDeleteError, count: momentumDeleted } = await supabase
+      .from('momentum_analysis')
+      .delete({ count: 'exact' })
+      .lt('recorded_at', oneDayAgo);
+
+    if (momentumDeleteError) {
+      console.error('Error deleting old momentum analysis:', momentumDeleteError);
+    } else {
+      console.log(`Deleted ${momentumDeleted || 0} momentum analysis records older than 24h`);
+    }
+
     // Clean up signal_rejection_log - keep only last 500 rows
     // Delete using timestamp cutoff instead of fetching IDs (more efficient)
     console.log('Cleaning up signal_rejection_log table...');
@@ -173,6 +187,7 @@ Deno.serve(async (req) => {
         skipped: expiredSignals.length - signalsToDelete.length,
         rejectionLogsDeleted,
         marketRegimeDeleted: regimeDeleted || 0,
+        momentumAnalysisDeleted: momentumDeleted || 0,
         signals: signalsToDelete.map(s => ({
           symbol: s.symbol,
           type: s.signal_type,
