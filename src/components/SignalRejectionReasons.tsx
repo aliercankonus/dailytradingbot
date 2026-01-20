@@ -3037,7 +3037,21 @@ const SevereHTFGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any
 // For MOVE_EXHAUSTED_SHORT and MOVE_EXHAUSTED_LONG gates
 const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "short";
-  const priceDistancePercent = coerceNumeric(filtersStatus?.priceDistancePercent ?? filtersStatus?.movePercent, 0);
+  const isShort = direction.toLowerCase() === "short";
+  
+  // FIX: Extract price distance from nested priceDistanceFromSwing object
+  // Backend logs: priceDistanceFromSwing: { high24h, low24h, distanceFromHighPercent, distanceFromLowPercent }
+  const priceDistanceFromSwing = filtersStatus?.priceDistanceFromSwing;
+  const rawDistancePercent = isShort 
+    ? (priceDistanceFromSwing?.distanceFromHighPercent ?? filtersStatus?.priceDistancePercent ?? filtersStatus?.movePercent)
+    : (priceDistanceFromSwing?.distanceFromLowPercent ?? filtersStatus?.priceDistancePercent ?? filtersStatus?.movePercent);
+  const priceDistancePercent = coerceNumeric(rawDistancePercent, 0);
+  
+  // Extract swing prices for context
+  const swingHigh24h = coerceNumeric(priceDistanceFromSwing?.high24h ?? filtersStatus?.swingHigh24h, 0);
+  const swingLow24h = coerceNumeric(priceDistanceFromSwing?.low24h ?? filtersStatus?.swingLow24h, 0);
+  const currentPrice = coerceNumeric(filtersStatus?.currentPrice ?? trendData?.currentPrice, 0);
+  
   const stochRsiK = coerceNumeric(filtersStatus?.stochRsiK4h ?? filtersStatus?.stochRsiK ?? trendData?.stochasticRsi?.['4h']?.k, 50);
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   const adxSlope = coerceNumeric(filtersStatus?.adxSlope ?? trendData?.volatility?.adxSlope, 0);
@@ -3052,8 +3066,8 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
   };
   
   const exhaustionLevel = getExhaustionLevel();
-  const isShort = direction.toLowerCase() === "short";
-  const swingLabel = isShort ? "24h Low" : "24h High";
+  const swingLabel = isShort ? "24h High" : "24h Low";
+  const swingPrice = isShort ? swingHigh24h : swingLow24h;
   
   return (
     <div className={`space-y-3 p-3 rounded-md border ${exhaustionLevel.bg} ${exhaustionLevel.border}`}>
@@ -3101,11 +3115,16 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
         </div>
       </div>
       
-      {/* Context Grid */}
-      <div className="grid grid-cols-3 gap-2 text-[10px]">
+      {/* Context Grid - Enhanced with swing price info */}
+      <div className="grid grid-cols-4 gap-2 text-[10px]">
         <div className="p-2 rounded border bg-muted/30 text-center">
           <div className="text-muted-foreground">Move %</div>
           <div className={`text-lg font-bold ${exhaustionLevel.color}`}>{priceDistancePercent.toFixed(1)}%</div>
+        </div>
+        <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">{swingLabel}</div>
+          <div className="text-sm font-bold text-foreground">${swingPrice > 0 ? swingPrice.toFixed(2) : 'N/A'}</div>
+          {currentPrice > 0 && <div className="text-[8px] text-muted-foreground">Now: ${currentPrice.toFixed(2)}</div>}
         </div>
         <div className="p-2 rounded border bg-muted/30 text-center">
           <div className="text-muted-foreground">StochRSI K</div>
@@ -3124,7 +3143,7 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
       
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
         <span className={exhaustionLevel.color}>⚠️ Why blocked:</span> Price has already moved {priceDistancePercent.toFixed(1)}% 
-        from {swingLabel}. 
+        from {swingLabel}{swingPrice > 0 ? ` ($${swingPrice.toFixed(2)})` : ''}. 
         {isHardBlock 
           ? ` Moves >10% indicate extreme exhaustion. Entry blocked to avoid late chase.`
           : ` Moves >5% combined with overextended StochRSI suggest reduced position sizing (0.35x).`
