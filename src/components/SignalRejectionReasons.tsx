@@ -2570,7 +2570,7 @@ const HardGateMacdMisalignedDisplay = ({ filtersStatus, trendData }: { filtersSt
 const HTFExtremeGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const stochRsiK4h = coerceNumeric(filtersStatus?.stochRsiK4h ?? trendData?.stochasticRsi?.['4h']?.k, 50);
   const percentB = coerceNumeric(filtersStatus?.percentB ?? trendData?.bollingerBands?.['4h']?.percentB, 50);
-  const direction = filtersStatus?.direction || filtersStatus?.derivedDirection || "unknown";
+  const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
   const isOversold = stochRsiK4h <= 20 && percentB <= 20;
   const isOverbought = stochRsiK4h >= 80 && percentB >= 80;
   
@@ -2719,7 +2719,7 @@ const BollingerShortGateDisplay = ({ filtersStatus, trendData }: { filtersStatus
   const percentB = coerceNumeric(filtersStatus?.percentB ?? trendData?.bollingerBands?.['4h']?.percentB, 50);
   const required = coerceNumeric(filtersStatus?.requiredPercentB, 40);
   const isInSqueeze = filtersStatus?.isInSqueeze4h ?? filtersStatus?.isInSqueeze ?? false;
-  const direction = filtersStatus?.direction || "short";
+  const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "short";
   const deficit = required - percentB;
   
   return (
@@ -2789,7 +2789,7 @@ const SqueezeContextGateDisplay = ({ filtersStatus, trendData }: { filtersStatus
   const marketContext = filtersStatus?.marketContext || "MEAN_REVERSION";
   const stochRsiK4h = coerceNumeric(filtersStatus?.stochRsiK4h ?? trendData?.stochasticRsi?.['4h']?.k, 50);
   const squeezePercent = coerceNumeric(filtersStatus?.squeezePercent ?? trendData?.bollingerBands?.['4h']?.squeezeIntensity ?? trendData?.bb?.['4h']?.squeezePercent, 0);
-  const direction = filtersStatus?.direction || filtersStatus?.derivedDirection || "short";
+  const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "short";
   const isInSqueeze = filtersStatus?.isInSqueeze4h ?? filtersStatus?.isInSqueeze ?? true;
   const isOversold = stochRsiK4h <= 20;
   
@@ -2932,7 +2932,7 @@ const SevereHTFGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any
   const gate = filtersStatus?.gate || "";
   const stochRsiK = coerceNumeric(filtersStatus?.stochRsiK4h ?? filtersStatus?.stochRsiK ?? trendData?.stochasticRsi?.['4h']?.k, 50);
   const stochRsiD = coerceNumeric(filtersStatus?.stochRsiD4h ?? filtersStatus?.stochRsiD ?? trendData?.stochasticRsi?.['4h']?.d, 50);
-  const direction = filtersStatus?.direction || (stochRsiK < 50 ? "short" : "long");
+  const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || (stochRsiK < 50 ? "short" : "long");
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   
   // Determine tier
@@ -3036,7 +3036,7 @@ const SevereHTFGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any
 // ============= MOVE EXHAUSTION DISPLAY =============
 // For MOVE_EXHAUSTED_SHORT and MOVE_EXHAUSTED_LONG gates
 const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
-  const direction = filtersStatus?.direction || "short";
+  const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "short";
   const priceDistancePercent = coerceNumeric(filtersStatus?.priceDistancePercent ?? filtersStatus?.movePercent, 0);
   const stochRsiK = coerceNumeric(filtersStatus?.stochRsiK4h ?? filtersStatus?.stochRsiK ?? trendData?.stochasticRsi?.['4h']?.k, 50);
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
@@ -3236,7 +3236,7 @@ const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
 // ============= MOMENTUM DIRECTION OPPOSING DISPLAY =============
 // For MOMENTUM_DIRECTION_OPPOSING gate
 const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
-  const signalDirection = filtersStatus?.signalDirection || filtersStatus?.direction || filtersStatus?.derivedDirection || "long";
+  const signalDirection = filtersStatus?.signalDirection || filtersStatus?.derivedDirection || filtersStatus?.direction || "long";
   const momentumScore = coerceNumeric(filtersStatus?.momentumScore ?? trendData?.momentum?.score, 0);
   // Derive momentum direction from score if not explicitly provided
   const derivedMomentumDir = momentumScore > 10 ? "bullish" : momentumScore < -10 ? "bearish" : "neutral";
