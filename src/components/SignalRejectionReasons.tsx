@@ -3142,17 +3142,23 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
 const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const consecutiveLosses = coerceNumeric(filtersStatus?.consecutiveLosses ?? filtersStatus?.consecutive_losses, 0);
   const lossThreshold = coerceNumeric(filtersStatus?.lossThreshold ?? filtersStatus?.consecutive_loss_threshold, 3);
-  const rsi = coerceNumeric(filtersStatus?.rsi ?? trendData?.technicalIndicators?.rsi, 50);
-  const isInSqueeze = filtersStatus?.isInSqueeze ?? trendData?.bollingerBands?.['4h']?.squeeze ?? false;
+  const rsi = coerceNumeric(filtersStatus?.rsi ?? trendData?.technicalIndicators?.rsi ?? trendData?.timeframes?.['1h']?.indicators?.rsi, 50);
+  const isInSqueeze = filtersStatus?.isInSqueeze ?? filtersStatus?.squeezeValid ?? trendData?.bollingerBands?.['4h']?.squeeze ?? false;
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
-  const direction = filtersStatus?.direction || "unknown";
+  // FIXED: Read derivedDirection (the actual field name in the log)
+  const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
+  // Also read explicit hasDeepPullback from backend if available
+  const backendHasDeepPullback = filtersStatus?.hasDeepPullback;
   
   // Requirements for pre-recovery entry (match backend thresholds from PRE_RECOVERY_PARAMS)
   // FIXED: Backend uses 35/65, not 30/70
   const DEEP_PULLBACK_RSI_LONG = 35;   // RSI must be below this for LONG pullback
   const DEEP_PULLBACK_RSI_SHORT = 65;  // RSI must be above this for SHORT pullback
-  const hasDeepPullback = (direction === "long" && rsi < DEEP_PULLBACK_RSI_LONG) || 
-                          (direction === "short" && rsi > DEEP_PULLBACK_RSI_SHORT);
+  
+  // Use backend value if available, otherwise calculate locally
+  const hasDeepPullback = backendHasDeepPullback !== undefined 
+    ? backendHasDeepPullback 
+    : ((direction === "long" && rsi < DEEP_PULLBACK_RSI_LONG) || (direction === "short" && rsi > DEEP_PULLBACK_RSI_SHORT));
   const hasSqueeze = isInSqueeze;
   const hasHighADX = adx >= 25;
   
