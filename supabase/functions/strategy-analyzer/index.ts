@@ -4163,6 +4163,21 @@ serve(async (req) => {
         let preRecoveryMROverrideApplied = false;
         let preRecoveryMRPositionMultiplier = 1.0;
         
+        // DIAGNOSTIC: Always log raw MR detection values for debugging
+        const stochK4h = trendData?.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 
+                         trendData?.stochasticRsi?.['4h']?.k ?? 
+                         trendData?.stochasticRsi?.aggregated?.k ?? null;
+        const rsi4h = trendData?.timeframes?.['4h']?.indicators?.rsi ?? 
+                      trendData?.rsi?.['4h'] ?? null;
+        logger.forSymbol(symbol).debug(
+          `[MEAN_REVERSION] Raw detection: detected=${earlyMeanReversionSignal?.detected ?? 'N/A'}, ` +
+          `allowed=${earlyMeanReversionSignal?.allowed ?? 'N/A'}, ` +
+          `isExtremeExhaustion=${earlyMeanReversionSignal?.isExtremeExhaustion ?? 'N/A'}, ` +
+          `phase=${earlyMeanReversionSignal?.trendPhase ?? 'N/A'}/${earlyMeanReversionSignal?.expansionState ?? 'N/A'}, ` +
+          `4hK=${stochK4h?.toFixed(1) ?? 'N/A'}, 4hRSI=${rsi4h?.toFixed(1) ?? 'N/A'}, ` +
+          `derivedDir=${derivedDirection}`
+        );
+        
         if (earlyMeanReversionSignal?.detected && earlyMeanReversionSignal?.allowed) {
           // Log mean reversion detection regardless of direction match
           logger.forSymbol(symbol).info(
