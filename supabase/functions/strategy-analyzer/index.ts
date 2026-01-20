@@ -4155,15 +4155,20 @@ serve(async (req) => {
         // ============= MEAN REVERSION EARLY DETECTION (BEFORE PRE_RECOVERY GATE) =============
         // CRITICAL: Runs BEFORE PRE_RECOVERY to potentially flip direction for extreme oversold/overbought
         // This allows mean reversion to suggest LONG when direction would be SHORT at extreme oversold
+        // PRE-RECOVERY MR OVERRIDE: When in pre-recovery with extreme exhaustion opposite to trend,
+        // allow direction flip with stacked position sizing (~32.5% of normal)
         const earlyMeanReversionSignal = MEAN_REVERSION_CONFIG.ENABLED ? detectExhaustion(trendData) : null;
         let meanReversionDirectionFlipApplied = false;
         let originalDerivedDirection = derivedDirection;
+        let preRecoveryMROverrideApplied = false;
+        let preRecoveryMRPositionMultiplier = 1.0;
         
         if (earlyMeanReversionSignal?.detected && earlyMeanReversionSignal?.allowed) {
           // Log mean reversion detection regardless of direction match
           logger.forSymbol(symbol).info(
             `${LOG_CATEGORIES.ENTRY} 🔄 MEAN_REVERSION EARLY CHECK: ${earlyMeanReversionSignal.direction?.toUpperCase() || 'NONE'} exhaustion detected ` +
-            `(score=${earlyMeanReversionSignal.exhaustionScore}, phase=${earlyMeanReversionSignal.trendPhase})`
+            `(score=${earlyMeanReversionSignal.exhaustionScore}, phase=${earlyMeanReversionSignal.trendPhase}, ` +
+            `preRecoveryOverride=${earlyMeanReversionSignal.preRecoveryOverrideAllowed})`
           );
           logger.forSymbol(symbol).info(`   Triggers: ${earlyMeanReversionSignal.triggers.slice(0, 3).join(' | ')}`);
           
@@ -4174,18 +4179,39 @@ serve(async (req) => {
             (earlyMeanReversionSignal.direction === 'short' && derivedDirection === 'long');
           
           if (suggestsOppositeDirection && earlyMeanReversionSignal.exhaustionScore >= 70) {
+            // ============= PRE-RECOVERY MR OVERRIDE =============
+            // Special handling when in pre-recovery: apply stacked position multipliers
+            // Pre-recovery reduction (35%) * MR extreme exhaustion (50%) = ~32.5% of normal
+            if (isPreRecovery && earlyMeanReversionSignal.preRecoveryOverrideAllowed) {
+              preRecoveryMROverrideApplied = true;
+              // Stack: pre-recovery reduction (65%) * MR extreme exhaustion (50%) = 32.5%
+              const preRecoveryReduction = 1 - PRE_RECOVERY_PARAMS.POSITION_SIZE_REDUCTION; // 0.65
+              const mrExtremeReduction = MEAN_REVERSION_CONFIG.EXTREME_EXHAUSTION.POSITION_SIZE_MULTIPLIER; // 0.50
+              preRecoveryMRPositionMultiplier = preRecoveryReduction * mrExtremeReduction; // ~0.325
+              
+              logger.forSymbol(symbol).info(
+                `${LOG_CATEGORIES.SUCCESS} 🔄 PRE_RECOVERY_MR_OVERRIDE: Allowing ${earlyMeanReversionSignal.direction?.toUpperCase()} ` +
+                `despite pre-recovery state (losses=${consecutiveLosses})`
+              );
+              logger.forSymbol(symbol).info(
+                `   Stacked position: ${(preRecoveryMRPositionMultiplier * 100).toFixed(1)}% ` +
+                `(pre-recovery ${(preRecoveryReduction * 100).toFixed(0)}% × MR extreme ${(mrExtremeReduction * 100).toFixed(0)}%)`
+              );
+            }
+            
             // FLIP DIRECTION: Mean reversion detected extreme exhaustion opposite to trend
             originalDerivedDirection = derivedDirection;
             derivedDirection = earlyMeanReversionSignal.direction!;
             meanReversionDirectionFlipApplied = true;
-            derivedSource = "mean_reversion_flip";
+            derivedSource = preRecoveryMROverrideApplied ? "pre_recovery_mr_override" : "mean_reversion_flip";
             
             logger.forSymbol(symbol).info(
               `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION DIRECTION FLIP: ${originalDerivedDirection.toUpperCase()} → ${derivedDirection.toUpperCase()}`
             );
             logger.forSymbol(symbol).info(
               `   Exhaustion score ${earlyMeanReversionSignal.exhaustionScore} >= 70, phase=${earlyMeanReversionSignal.trendPhase}, ` +
-              `position=${(earlyMeanReversionSignal.positionMultiplier * 100).toFixed(0)}%`
+              `position=${(earlyMeanReversionSignal.positionMultiplier * 100).toFixed(0)}%` +
+              (preRecoveryMROverrideApplied ? ` (PRE_RECOVERY_MR_OVERRIDE active)` : '')
             );
           }
         } else if (earlyMeanReversionSignal && !earlyMeanReversionSignal.allowed) {
@@ -4206,8 +4232,10 @@ serve(async (req) => {
           rsi > PRE_RECOVERY_PARAMS.DEEP_PULLBACK_RSI_SHORT;
         const hasDeepPullback = isDeepPullbackLong || isDeepPullbackShort;
         
-        // NEW: Mean reversion direction flip bypasses PRE_RECOVERY gate (it's a different strategy)
-        const meanReversionBypassPreRecovery = meanReversionDirectionFlipApplied && (earlyMeanReversionSignal?.exhaustionScore ?? 0) >= 70;
+        // Mean reversion direction flip bypasses PRE_RECOVERY gate (it's a different strategy)
+        // PRE_RECOVERY_MR_OVERRIDE is the special case where we're in pre-recovery AND flipping direction
+        const meanReversionBypassPreRecovery = meanReversionDirectionFlipApplied && 
+          ((earlyMeanReversionSignal?.exhaustionScore ?? 0) >= 70 || preRecoveryMROverrideApplied);
         
         if (isPreRecovery && PRE_RECOVERY_PARAMS.BLOCK_CONTINUATION_WITHOUT_STRUCTURE && !meanReversionBypassPreRecovery) {
           // Pre-recovery requires either deep pullback OR valid squeeze breakout
@@ -4232,7 +4260,8 @@ serve(async (req) => {
                 meanReversionChecked: true,
                 meanReversionDetected: earlyMeanReversionSignal?.detected ?? false,
                 meanReversionDirection: earlyMeanReversionSignal?.direction ?? null,
-                meanReversionScore: earlyMeanReversionSignal?.exhaustionScore ?? 0
+                meanReversionScore: earlyMeanReversionSignal?.exhaustionScore ?? 0,
+                preRecoveryOverrideAllowed: earlyMeanReversionSignal?.preRecoveryOverrideAllowed ?? false
               },
               trendData,
               riskParams.ai_analysis_enabled !== false,
@@ -4242,7 +4271,10 @@ serve(async (req) => {
           }
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} PRE-RECOVERY: Entry allowed via ${hasDeepPullback ? 'deep pullback' : 'squeeze breakout'}`);
         } else if (meanReversionBypassPreRecovery) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} PRE-RECOVERY: Bypassed via MEAN_REVERSION direction flip (${derivedDirection.toUpperCase()})`);
+          const bypassType = preRecoveryMROverrideApplied 
+            ? `PRE_RECOVERY_MR_OVERRIDE (${(preRecoveryMRPositionMultiplier * 100).toFixed(1)}% position)` 
+            : 'MEAN_REVERSION direction flip';
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} PRE-RECOVERY: Bypassed via ${bypassType} (${derivedDirection.toUpperCase()})`);
         }
         
         // ============= PHASE 4 (9 FINDINGS): REGIME CONFIDENCE GATE =============
@@ -5270,9 +5302,13 @@ serve(async (req) => {
         // ============= MEAN REVERSION GATE BYPASS SETUP =============
         // Uses the early detection signal from before PRE_RECOVERY gate
         // Sets up bypass flags for tiered gates based on direction alignment
+        // PRE_RECOVERY_MR_OVERRIDE: Uses stacked position multiplier when in pre-recovery + direction flip
         let meanReversionSignal: ExhaustionSignal | null = earlyMeanReversionSignal;
         let meanReversionBypassGates: Set<string> = new Set();
-        let meanReversionPositionMultiplier = earlyMeanReversionSignal?.positionMultiplier ?? 1.0;
+        // Use stacked pre-recovery MR multiplier if PRE_RECOVERY_MR_OVERRIDE was applied
+        let meanReversionPositionMultiplier = preRecoveryMROverrideApplied 
+          ? preRecoveryMRPositionMultiplier 
+          : (earlyMeanReversionSignal?.positionMultiplier ?? 1.0);
         let meanReversionQualityScore = earlyMeanReversionSignal?.qualityScore ?? 0;
         let meanReversionActive = false;
         
@@ -5286,8 +5322,9 @@ serve(async (req) => {
           });
           meanReversionActive = meanReversionBypassGates.size > 0;
           
+          const overrideType = preRecoveryMROverrideApplied ? 'PRE_RECOVERY_MR_OVERRIDE' : 'direction flip';
           logger.forSymbol(symbol).info(
-            `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION gate bypass active (from direction flip): ` +
+            `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION gate bypass active (from ${overrideType}): ` +
             `${Array.from(meanReversionBypassGates).join(', ')} | Position: ${(meanReversionPositionMultiplier * 100).toFixed(0)}%`
           );
         } else if (meanReversionSignal?.detected && meanReversionSignal?.allowed) {
