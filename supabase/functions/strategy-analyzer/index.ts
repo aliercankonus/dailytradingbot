@@ -3786,6 +3786,7 @@ serve(async (req) => {
                 primaryGateFailed: derivedDirection === 'long' ? "long_negative_momentum" : "short_positive_momentum",
                 derivedDirection,
                 momentumScore,
+                momentumState: trendData?.momentum?.state || "none",
                 adx: adx.toFixed(1),
                 isStrongADX,
                 isNeutralMomentum,
