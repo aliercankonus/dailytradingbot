@@ -211,12 +211,18 @@ function checkOversoldExhaustion(trendData: any): ExhaustionCheck {
     score += 10;
   }
   
-  const detected = score >= 70;
+  // FIXED: Extreme exhaustion automatically qualifies as detected
+  // Even if score < 70, K at statistical extremes with ADX/VWAP validation = valid signal
+  const detected = score >= 70 || isExtremeExhaustion;
+  
+  // Ensure minimum confidence for extreme exhaustion (since we're bypassing score threshold)
+  // Extreme exhaustion validated by K, ADX slope, VWAP distance = at least 70 confidence
+  const effectiveConfidence = isExtremeExhaustion ? Math.max(70, score) : score;
   
   return {
     detected,
     direction: 'long',
-    confidence: Math.min(100, Math.max(0, score)),
+    confidence: Math.min(100, Math.max(0, effectiveConfidence)),
     exhaustionScore: score,
     triggers,
     gatesToBypass: detected ? [
@@ -320,13 +326,16 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
     triggers.push(`Momentum still strongly bullish (score=${momentumScore})`);
     score -= 30;
   }
+  // FIXED: Extreme exhaustion automatically qualifies as detected (higher base threshold for shorts)
+  const detected = score >= 75 || isExtremeExhaustion;
   
-  const detected = score >= 75; // Higher threshold for shorts
+  // Ensure minimum confidence for extreme exhaustion (since we're bypassing score threshold)
+  const effectiveConfidence = isExtremeExhaustion ? Math.max(70, score) : score;
   
   return {
     detected,
     direction: 'short',
-    confidence: Math.min(100, Math.max(0, score)),
+    confidence: Math.min(100, Math.max(0, effectiveConfidence)),
     exhaustionScore: score,
     triggers,
     gatesToBypass: detected ? [
