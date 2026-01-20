@@ -3147,8 +3147,12 @@ const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   const direction = filtersStatus?.direction || "unknown";
   
-  // Requirements for pre-recovery entry
-  const hasDeepPullback = (direction === "long" && rsi < 30) || (direction === "short" && rsi > 70);
+  // Requirements for pre-recovery entry (match backend thresholds from PRE_RECOVERY_PARAMS)
+  // FIXED: Backend uses 35/65, not 30/70
+  const DEEP_PULLBACK_RSI_LONG = 35;   // RSI must be below this for LONG pullback
+  const DEEP_PULLBACK_RSI_SHORT = 65;  // RSI must be above this for SHORT pullback
+  const hasDeepPullback = (direction === "long" && rsi < DEEP_PULLBACK_RSI_LONG) || 
+                          (direction === "short" && rsi > DEEP_PULLBACK_RSI_SHORT);
   const hasSqueeze = isInSqueeze;
   const hasHighADX = adx >= 25;
   
@@ -3177,7 +3181,7 @@ const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
         
         <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${hasDeepPullback ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
           {hasDeepPullback ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
-          <span>Deep Pullback (RSI {direction === "long" ? "<30" : ">70"}): </span>
+          <span>Deep Pullback (RSI {direction === "long" ? `<${DEEP_PULLBACK_RSI_LONG}` : `>${DEEP_PULLBACK_RSI_SHORT}`}): </span>
           <span className="font-mono">{rsi.toFixed(1)}</span>
         </div>
         
