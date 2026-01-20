@@ -30,9 +30,11 @@ export interface ExhaustionSignal {
   gateBypasses: GateBypass[];
   positionMultiplier: number;
   qualityScore: number;
-  // NEW: Extreme exhaustion tracking
+  // Extreme exhaustion tracking
   isExtremeExhaustion: boolean;   // True when K at statistical extremes
   adxWasOverridden: boolean;      // True when high ADX was bypassed
+  // Pre-recovery override capability
+  preRecoveryOverrideAllowed: boolean;  // True when conditions allow pre-recovery direction flip
 }
 
 interface ExhaustionCheck {
@@ -367,6 +369,7 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
       qualityScore: 0,
       isExtremeExhaustion: false,
       adxWasOverridden: false,
+      preRecoveryOverrideAllowed: false,
     };
   }
   
@@ -403,6 +406,7 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
       qualityScore: 0,
       isExtremeExhaustion: false,
       adxWasOverridden: false,
+      preRecoveryOverrideAllowed: false,
     };
   }
   
@@ -432,6 +436,12 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
     confidence: selectedSignal.confidence,
   }));
   
+  // 9. Determine if pre-recovery override is allowed
+  // Pre-recovery override requires: extreme exhaustion + non-accelerating ADX + sufficient VWAP distance
+  const preRecoveryOverrideAllowed = 
+    selectedSignal.isExtremeExhaustion && 
+    selectedSignal.adxWasOverridden;
+  
   return {
     detected: true,
     direction: selectedSignal.direction,
@@ -446,6 +456,7 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
     qualityScore: cappedQuality,
     isExtremeExhaustion: selectedSignal.isExtremeExhaustion,
     adxWasOverridden: selectedSignal.adxWasOverridden,
+    preRecoveryOverrideAllowed,
   };
 }
 
