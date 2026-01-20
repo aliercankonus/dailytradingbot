@@ -3230,8 +3230,9 @@ const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
 // ============= MOMENTUM DIRECTION OPPOSING DISPLAY =============
 // For MOMENTUM_DIRECTION_OPPOSING gate
 const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
-  const signalDirection = filtersStatus?.signalDirection || filtersStatus?.direction || "long";
+  const signalDirection = filtersStatus?.signalDirection || filtersStatus?.direction || filtersStatus?.derivedDirection || "long";
   const momentumDirection = filtersStatus?.momentumDirection || trendData?.momentum?.direction || "unknown";
+  const momentumState = filtersStatus?.momentumState || trendData?.momentum?.state || "unknown";
   const momentumScore = coerceNumeric(filtersStatus?.momentumScore ?? trendData?.momentum?.score, 0);
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   const macdHistogram = coerceNumeric(filtersStatus?.macdHistogram ?? trendData?.macd?.histogram, 0);
@@ -3244,6 +3245,17 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
   const isWeakMomentum = Math.abs(macdHistogram) < 0.0001;
   const isExceptionalADX = adx >= 35;
   const canBypass = isWeakMomentum || isExceptionalADX;
+  
+  // Momentum state styling
+  const getMomentumStateColor = (state: string) => {
+    switch (state?.toLowerCase()) {
+      case 'confirmed': return 'text-green-400';
+      case 'building': return 'text-blue-400';
+      case 'mixed': return 'text-yellow-400';
+      case 'none': return 'text-muted-foreground';
+      default: return 'text-muted-foreground';
+    }
+  };
   
   return (
     <div className="space-y-3 p-3 rounded-md border bg-orange-500/10 border-orange-500/30">
@@ -3295,19 +3307,25 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
         </div>
       </div>
       
-      {/* Context Grid */}
-      <div className="grid grid-cols-3 gap-2 text-[10px]">
+      {/* Context Grid - 4 columns now including Momentum State */}
+      <div className="grid grid-cols-4 gap-2 text-[10px]">
         <div className="p-2 rounded border bg-muted/30 text-center">
-          <div className="text-muted-foreground">Momentum</div>
+          <div className="text-muted-foreground">Direction</div>
           <div className={`text-sm font-bold capitalize ${
             momentumDirection === 'bullish' ? 'text-green-400' : 
             momentumDirection === 'bearish' ? 'text-red-400' : 'text-yellow-400'
           }`}>{momentumDirection}</div>
         </div>
         <div className="p-2 rounded border bg-muted/30 text-center">
+          <div className="text-muted-foreground">State</div>
+          <div className={`text-sm font-bold capitalize ${getMomentumStateColor(momentumState)}`}>
+            {momentumState}
+          </div>
+        </div>
+        <div className="p-2 rounded border bg-muted/30 text-center">
           <div className="text-muted-foreground">ADX</div>
           <div className={`text-lg font-bold ${adx >= 35 ? 'text-green-400' : 'text-foreground'}`}>
-            {adx.toFixed(1)}
+            {parseFloat(String(adx)).toFixed(1)}
           </div>
           <div className="text-[8px] text-muted-foreground">{adx >= 35 ? "Exceptional" : "Normal"}</div>
         </div>
