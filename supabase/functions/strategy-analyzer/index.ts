@@ -4265,6 +4265,15 @@ serve(async (req) => {
             rejectedByHardGates++;
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} PRE-RECOVERY GATE: Blocking entry - requires deep pullback OR squeeze breakout`);
             logger.forSymbol(symbol).debug(`   RSI=${rsi.toFixed(1)}, deepPullback=${hasDeepPullback}, squeeze=${squeezeBreakoutForPreRecovery.isValid}`);
+            // Extract squeeze breakdown data for UI display
+            const bollinger = trendData?.bollingerBands || {};
+            const bb4h = bollinger['4h'] || bollinger;
+            const bb1h = bollinger['1h'] || {};
+            const squeeze4h = bb4h.squeeze || bb4h.squeezeActive || false;
+            const squeeze1h = bb1h.squeeze || bb1h.squeezeActive || false;
+            const percentB4h = bb4h.percentB ?? 50;
+            const percentB1h = bb1h.percentB ?? 50;
+            
             await logRejectionWithAI(
               supabase,
               userId,
@@ -4278,7 +4287,13 @@ serve(async (req) => {
                 hasDeepPullback,
                 squeezeValid: squeezeBreakoutForPreRecovery.isValid,
                 squeezeReasons: squeezeBreakoutForPreRecovery.reasons,
+                // NEW: Squeeze breakdown for detailed UI display
+                squeeze4h,
+                squeeze1h,
+                percentB4h,
+                percentB1h,
                 derivedDirection,
+                direction: derivedDirection, // Ensure both fields present
                 meanReversionChecked: true,
                 meanReversionDetected: earlyMeanReversionSignal?.detected ?? false,
                 meanReversionDirection: earlyMeanReversionSignal?.direction ?? null,

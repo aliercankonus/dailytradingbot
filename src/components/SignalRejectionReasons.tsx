@@ -3143,12 +3143,19 @@ const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
   const consecutiveLosses = coerceNumeric(filtersStatus?.consecutiveLosses ?? filtersStatus?.consecutive_losses, 0);
   const lossThreshold = coerceNumeric(filtersStatus?.lossThreshold ?? filtersStatus?.consecutive_loss_threshold, 3);
   const rsi = coerceNumeric(filtersStatus?.rsi ?? trendData?.technicalIndicators?.rsi ?? trendData?.timeframes?.['1h']?.indicators?.rsi, 50);
-  const isInSqueeze = filtersStatus?.isInSqueeze ?? filtersStatus?.squeezeValid ?? trendData?.bollingerBands?.['4h']?.squeeze ?? false;
+  const squeezeValid = filtersStatus?.squeezeValid ?? false;
+  const squeezeReasons = filtersStatus?.squeezeReasons ?? [];
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   // FIXED: Read derivedDirection (the actual field name in the log)
   const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
   // Also read explicit hasDeepPullback from backend if available
   const backendHasDeepPullback = filtersStatus?.hasDeepPullback;
+  
+  // Squeeze breakdown data from backend
+  const squeeze4h = filtersStatus?.squeeze4h ?? trendData?.bollingerBands?.['4h']?.squeeze ?? false;
+  const squeeze1h = filtersStatus?.squeeze1h ?? trendData?.bollingerBands?.['1h']?.squeeze ?? false;
+  const percentB4h = coerceNumeric(filtersStatus?.percentB4h ?? trendData?.bollingerBands?.['4h']?.percentB, 50);
+  const percentB1h = coerceNumeric(filtersStatus?.percentB1h ?? trendData?.bollingerBands?.['1h']?.percentB, 50);
   
   // Requirements for pre-recovery entry (match backend thresholds from PRE_RECOVERY_PARAMS)
   // FIXED: Backend uses 35/65, not 30/70
@@ -3159,8 +3166,34 @@ const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
   const hasDeepPullback = backendHasDeepPullback !== undefined 
     ? backendHasDeepPullback 
     : ((direction === "long" && rsi < DEEP_PULLBACK_RSI_LONG) || (direction === "short" && rsi > DEEP_PULLBACK_RSI_SHORT));
-  const hasSqueeze = isInSqueeze;
+  const hasSqueeze = squeezeValid;
   const hasHighADX = adx >= 25;
+  
+  // Derive squeeze failure reason for display
+  const getSqueezeFailureReason = () => {
+    if (squeezeReasons && squeezeReasons.length > 0) {
+      return squeezeReasons[0]; // Backend provides specific reason
+    }
+    // Fallback: derive from available data
+    if (!squeeze4h && !squeeze1h) return "No HTF squeeze detected";
+    const isLong = direction === "long";
+    const priceAtEdge = isLong 
+      ? (percentB4h > 70 || percentB1h > 70)
+      : (percentB4h < 30 || percentB1h < 30);
+    if (!priceAtEdge) return `Price not at band edge (%B4h=${percentB4h.toFixed(0)}, %B1h=${percentB1h.toFixed(0)})`;
+    return "Momentum or divergence check failed";
+  };
+  
+  // Squeeze breakout requires 4 conditions:
+  // 1. HTF Squeeze (4h or 1h)
+  // 2. Price at Band Edge (%B >70 for LONG, <30 for SHORT)
+  // 3. Momentum Building
+  // 4. No Divergence
+  const hasHTFSqueeze = squeeze4h || squeeze1h;
+  const isLong = direction === "long";
+  const priceAtCorrectEdge = isLong 
+    ? (percentB4h > 70 || percentB1h > 70)
+    : (percentB4h < 30 || percentB1h < 30);
   
   return (
     <div className="space-y-3 p-3 rounded-md border bg-amber-500/10 border-amber-500/30">
@@ -3183,7 +3216,7 @@ const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
       
       {/* Requirements Checklist */}
       <div className="space-y-1.5">
-        <div className="text-[10px] text-muted-foreground font-medium">Entry Requirements:</div>
+        <div className="text-[10px] text-muted-foreground font-medium">Entry Requirements (need at least ONE):</div>
         
         <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${hasDeepPullback ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
           {hasDeepPullback ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
@@ -3191,10 +3224,40 @@ const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
           <span className="font-mono">{rsi.toFixed(1)}</span>
         </div>
         
-        <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${hasSqueeze ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-          {hasSqueeze ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
-          <span>Squeeze Active: </span>
-          <span className="font-mono">{hasSqueeze ? "Yes" : "No"}</span>
+        {/* Enhanced Squeeze Breakout Display */}
+        <div className={`p-1.5 rounded text-[10px] ${hasSqueeze ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+          <div className="flex items-center gap-1.5">
+            {hasSqueeze ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+            <span>Squeeze Breakout Valid: </span>
+            <span className="font-mono">{hasSqueeze ? "Yes" : "No"}</span>
+          </div>
+          
+          {/* Show specific failure reason when squeeze invalid */}
+          {!hasSqueeze && (
+            <div className="mt-1.5 ml-4 space-y-1">
+              <div className="text-orange-400 text-[9px] font-medium">
+                ↳ {getSqueezeFailureReason()}
+              </div>
+              
+              {/* Squeeze Breakdown - show 4 conditions */}
+              <div className="grid grid-cols-2 gap-1 mt-1">
+                <div className={`flex items-center gap-1 ${hasHTFSqueeze ? 'text-green-400' : 'text-red-400'}`}>
+                  {hasHTFSqueeze ? <CheckCircle2 className="h-2.5 w-2.5" /> : <XCircle className="h-2.5 w-2.5" />}
+                  <span className="text-[9px]">HTF Squeeze: {squeeze4h ? '4h' : squeeze1h ? '1h' : 'None'}</span>
+                </div>
+                <div className={`flex items-center gap-1 ${priceAtCorrectEdge ? 'text-green-400' : 'text-red-400'}`}>
+                  {priceAtCorrectEdge ? <CheckCircle2 className="h-2.5 w-2.5" /> : <XCircle className="h-2.5 w-2.5" />}
+                  <span className="text-[9px]">Band Edge: %B {isLong ? '>70' : '<30'}</span>
+                </div>
+              </div>
+              
+              {/* %B Values */}
+              <div className="flex gap-2 text-[9px] text-muted-foreground">
+                <span>%B4h: <span className="font-mono">{percentB4h.toFixed(0)}</span></span>
+                <span>%B1h: <span className="font-mono">{percentB1h.toFixed(0)}</span></span>
+              </div>
+            </div>
+          )}
         </div>
         
         <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${hasHighADX ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
@@ -3226,7 +3289,7 @@ const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
       
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
         <span className="text-amber-400">⚠️ Why blocked:</span> After {consecutiveLosses} consecutive losses, 
-        the system requires stricter entry conditions: deep pullback OR squeeze active. 
+        the system requires stricter entry conditions: deep pullback OR valid squeeze breakout. 
         Current conditions don't meet these requirements.
       </div>
     </div>
