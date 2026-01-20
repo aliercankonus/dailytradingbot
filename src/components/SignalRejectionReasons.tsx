@@ -3231,9 +3231,11 @@ const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
 // For MOMENTUM_DIRECTION_OPPOSING gate
 const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const signalDirection = filtersStatus?.signalDirection || filtersStatus?.direction || filtersStatus?.derivedDirection || "long";
-  const momentumDirection = filtersStatus?.momentumDirection || trendData?.momentum?.direction || "unknown";
-  const momentumState = filtersStatus?.momentumState || trendData?.momentum?.state || "unknown";
   const momentumScore = coerceNumeric(filtersStatus?.momentumScore ?? trendData?.momentum?.score, 0);
+  // Derive momentum direction from score if not explicitly provided
+  const derivedMomentumDir = momentumScore > 10 ? "bullish" : momentumScore < -10 ? "bearish" : "neutral";
+  const momentumDirection = filtersStatus?.momentumDirection || trendData?.momentum?.direction || derivedMomentumDir;
+  const momentumState = filtersStatus?.momentumState || trendData?.momentum?.state || "unknown";
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   const macdHistogram = coerceNumeric(filtersStatus?.macdHistogram ?? trendData?.macd?.histogram, 0);
   const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend || "unknown";
