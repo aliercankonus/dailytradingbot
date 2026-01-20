@@ -75,6 +75,35 @@ Deno.serve(async (req) => {
       console.log(`Deleted ${momentumDeleted || 0} momentum analysis records older than 24h`);
     }
 
+    // Clean up entry_quality_log - keep only last 7 days
+    console.log('Cleaning up entry_quality_log table (keeping last 7 days)...');
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    
+    const { error: entryQualityDeleteError, count: entryQualityDeleted } = await supabase
+      .from('entry_quality_log')
+      .delete({ count: 'exact' })
+      .lt('created_at', sevenDaysAgo);
+
+    if (entryQualityDeleteError) {
+      console.error('Error deleting old entry quality logs:', entryQualityDeleteError);
+    } else {
+      console.log(`Deleted ${entryQualityDeleted || 0} entry quality logs older than 7 days`);
+    }
+
+    // Clean up shadow_mode_signals - keep only last 7 days
+    console.log('Cleaning up shadow_mode_signals table (keeping last 7 days)...');
+    
+    const { error: shadowDeleteError, count: shadowDeleted } = await supabase
+      .from('shadow_mode_signals')
+      .delete({ count: 'exact' })
+      .lt('created_at', sevenDaysAgo);
+
+    if (shadowDeleteError) {
+      console.error('Error deleting old shadow mode signals:', shadowDeleteError);
+    } else {
+      console.log(`Deleted ${shadowDeleted || 0} shadow mode signals older than 7 days`);
+    }
+
     // Clean up signal_rejection_log - keep only last 500 rows
     // Delete using timestamp cutoff instead of fetching IDs (more efficient)
     console.log('Cleaning up signal_rejection_log table...');
@@ -188,6 +217,8 @@ Deno.serve(async (req) => {
         rejectionLogsDeleted,
         marketRegimeDeleted: regimeDeleted || 0,
         momentumAnalysisDeleted: momentumDeleted || 0,
+        entryQualityDeleted: entryQualityDeleted || 0,
+        shadowSignalsDeleted: shadowDeleted || 0,
         signals: signalsToDelete.map(s => ({
           symbol: s.symbol,
           type: s.signal_type,
