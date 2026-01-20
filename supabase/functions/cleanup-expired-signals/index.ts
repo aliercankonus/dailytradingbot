@@ -46,6 +46,21 @@ Deno.serve(async (req) => {
 
     console.log('Starting expired signals cleanup...');
 
+    // Clean up market_regime_history - keep only last 24 hours
+    console.log('Cleaning up market_regime_history table (keeping last 24h)...');
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    
+    const { error: regimeDeleteError, count: regimeDeleted } = await supabase
+      .from('market_regime_history')
+      .delete({ count: 'exact' })
+      .lt('recorded_at', oneDayAgo);
+
+    if (regimeDeleteError) {
+      console.error('Error deleting old market regime history:', regimeDeleteError);
+    } else {
+      console.log(`Deleted ${regimeDeleted || 0} market regime history records older than 24h`);
+    }
+
     // Clean up signal_rejection_log - keep only last 500 rows
     // Delete using timestamp cutoff instead of fetching IDs (more efficient)
     console.log('Cleaning up signal_rejection_log table...');
@@ -157,6 +172,7 @@ Deno.serve(async (req) => {
         deleted: signalsToDelete.length,
         skipped: expiredSignals.length - signalsToDelete.length,
         rejectionLogsDeleted,
+        marketRegimeDeleted: regimeDeleted || 0,
         signals: signalsToDelete.map(s => ({
           symbol: s.symbol,
           type: s.signal_type,
