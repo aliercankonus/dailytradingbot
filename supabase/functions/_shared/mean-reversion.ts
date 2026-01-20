@@ -345,14 +345,42 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
  * Main entry point for exhaustion detection
  * Runs BEFORE blocking gates to prevent gate collision
  * Returns signal with direction-aware gate bypasses
+ * 
+ * FIX: Evaluates exhaustion FIRST, then applies regime as modifier (not blocker)
+ * when extreme exhaustion is detected. This prevents the deadlock where
+ * regime blocks MR before exhaustion is even evaluated.
  */
 export function detectExhaustion(trendData: any): ExhaustionSignal {
-  // 1. Classify regime using orthogonal checks
+  // 1. FIRST: Evaluate exhaustion checks BEFORE regime gating
+  // This prevents the regime from blocking detection of extreme exhaustion
+  const oversoldSignal = checkOversoldExhaustion(trendData);
+  const overboughtSignal = checkOverboughtExhaustion(trendData);
+  
+  // 2. Classify regime using orthogonal checks
   const trendPhase = classifyTrendPhase(trendData);
   const expansionState = classifyExpansionState(trendData);
   
-  // 2. Check if regime allows mean reversion
-  const allowed = isMeanReversionAllowed(trendPhase, expansionState);
+  // 3. Check if regime allows mean reversion
+  const regimeAllowsMR = isMeanReversionAllowed(trendPhase, expansionState);
+  
+  // 4. CRITICAL: Extreme exhaustion can override regime blocking
+  // If K is at statistical extremes, regime becomes informational, not blocking
+  const extremeExhaustionDetected = oversoldSignal.isExtremeExhaustion || overboughtSignal.isExtremeExhaustion;
+  
+  // Log regime override for diagnostics
+  if (extremeExhaustionDetected && !regimeAllowsMR) {
+    const stochK = trendData?.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 
+                   trendData?.stochasticRsi?.['4h']?.k ?? 
+                   trendData?.stochasticRsi?.aggregated?.k ?? 50;
+    console.log(
+      `[MEAN_REVERSION] EXTREME_EXHAUSTION_OVERRIDE: Regime ${trendPhase}/${expansionState} would block, ` +
+      `but K=${stochK.toFixed(1)} at extreme → allowing evaluation`
+    );
+  }
+  
+  // 5. Determine if we should proceed
+  // Proceed if: regime allows MR OR extreme exhaustion detected
+  const allowed = regimeAllowsMR || extremeExhaustionDetected;
   
   if (!allowed) {
     return {
@@ -373,13 +401,7 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
     };
   }
   
-  // 3. Check for oversold exhaustion (LONG opportunity)
-  const oversoldSignal = checkOversoldExhaustion(trendData);
-  
-  // 4. Check for overbought exhaustion (SHORT opportunity)
-  const overboughtSignal = checkOverboughtExhaustion(trendData);
-  
-  // 5. Select stronger signal
+  // 6. Select stronger signal
   let selectedSignal: ExhaustionCheck;
   if (oversoldSignal.detected && overboughtSignal.detected) {
     // Both detected - use stronger
