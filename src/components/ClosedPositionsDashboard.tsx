@@ -26,7 +26,7 @@ export const ClosedPositionsDashboard = () => {
   const [sideFilter, setSideFilter] = useState<string>('all');
   const [strategyFilter, setStrategyFilter] = useState<string>('all');
   const [closeReasonFilter, setCloseReasonFilter] = useState<string>('all');
-  const [hidePartialCloses, setHidePartialCloses] = useState(true);
+  const [hidePartialCloses, setHidePartialCloses] = useState(false);
   const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null);
   const [lifecycleDialogOpen, setLifecycleDialogOpen] = useState(false);
 
