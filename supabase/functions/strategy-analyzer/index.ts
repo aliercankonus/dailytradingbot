@@ -124,6 +124,10 @@ import {
   SQUEEZE_BREAKOUT_SIGNAL_PARAMS,
   // NEW: Move exhaustion filter to prevent late trend entries
   MOVE_EXHAUSTION_FILTER_PARAMS,
+  // NEW: Momentum direction hard gate and flip detection
+  MOMENTUM_DIRECTION_HARD_GATE,
+  MOMENTUM_FLIP_DETECTION,
+  MICRO_TREND_MOMENTUM_SAFETY,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -150,6 +154,9 @@ import {
   detectADXExhaustion,
   // NEW: Price action confirmation for Bollinger bypass
   checkBollingerBypassPriceAction,
+  // NEW: Momentum flip detection and direction alignment
+  detectMomentumFlip,
+  checkMomentumDirectionAlignment,
   type MomentumScoreResult,
   type PullbackResult,
   type EntryQualityResult,
@@ -157,7 +164,8 @@ import {
   type MarketRegimeResult as SmartRegimeResult,
   type ContinuationModeResult,
   type ADXExhaustionResult,
-  type BollingerPriceActionResult
+  type BollingerPriceActionResult,
+  type MomentumFlipResult
 } from "../_shared/smart-momentum.ts";
 import { calculateRSIArray, calculateATR, calculateADXWithDirection, type ADXResult } from "../_shared/indicators.ts";
 import { 
@@ -2164,7 +2172,10 @@ serve(async (req) => {
       | 'DEEP_STOCHRSI_OVERBOUGHT_HARD_GATE'
       // TIER 1: Severe HTF gate (no bypass, covers K 5-15 for shorts, 85-95 for longs)
       | 'SEVERE_HTF_OVERSOLD_BLOCK'
-      | 'SEVERE_HTF_OVERBOUGHT_BLOCK';
+      | 'SEVERE_HTF_OVERBOUGHT_BLOCK'
+      // Momentum direction hard gates
+      | 'MOMENTUM_DIRECTION_HARD_GATE'
+      | 'MOMENTUM_FLIP_COOLDOWN';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -2909,6 +2920,8 @@ serve(async (req) => {
           logger.forSymbol(symbol).warn(`   ${directionResult.reasons.filter(r => r.includes("Warning")).join(", ")}`);
         }
         
+        // NOTE: MOMENTUM_DIRECTION_HARD_GATE and MOMENTUM_FLIP_DETECTION gates moved after smartMomentum calculation
+        // (see after line ~3250 where smartMomentum is calculated)
         // ============= PHASE 10: SAME-DIRECTION RE-ENTRY COOLDOWN GATE =============
         // Check if derived direction matches the cooldown side
         // cooldownSide is 'sell' for SHORT positions, 'buy' for LONG positions
@@ -3023,6 +3036,39 @@ serve(async (req) => {
         // Calculate momentum score (-100 to +100) with CORRECT adxRising value
         const smartMomentum = calculateMomentumScore(klineData, priceData, adx, smartAdxRising, currentATR);
         
+        // ============= CRITICAL: MOMENTUM DIRECTION HARD GATE =============
+        // This gate runs BEFORE any exception overrides (MICRO_TREND, STRONG_TREND, etc.)
+        // Root cause fix: System entered SHORT just as momentum flipped bullish (from -64 to +36)
+        if (MOMENTUM_DIRECTION_HARD_GATE.ENABLED) {
+          const momentumCheck = checkMomentumDirectionAlignment(
+            smartMomentum.score,
+            derivedDirection,
+            MOMENTUM_DIRECTION_HARD_GATE.BLOCK_SHORT_ABOVE_SCORE,
+            MOMENTUM_DIRECTION_HARD_GATE.BLOCK_LONG_BELOW_SCORE
+          );
+          
+          if (momentumCheck.blocked) {
+            // Check for exception: Very high ADX with HTF alignment
+            const htfAlignedWithDir = (derivedDirection === 'long' && htfTrend4h === 'bullish') ||
+                                       (derivedDirection === 'short' && htfTrend4h === 'bearish');
+            const exceptionAllowed = adx >= MOMENTUM_DIRECTION_HARD_GATE.EXCEPTION_MIN_ADX &&
+              (!MOMENTUM_DIRECTION_HARD_GATE.EXCEPTION_REQUIRE_HTF_ALIGNMENT || htfAlignedWithDir);
+            
+            if (!exceptionAllowed) {
+              rejectedByHardGates++;
+              perSymbolGateAttribution.set(symbol, { gate: 'MOMENTUM_DIRECTION_HARD_GATE', details: momentumCheck.reason });
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 MOMENTUM_DIRECTION_HARD_GATE: ${momentumCheck.reason}`);
+              logger.forSymbol(symbol).warn(`   → Momentum=${smartMomentum.score.toFixed(0)}, ADX=${adx.toFixed(1)}, 4h=${htfTrend4h}`);
+              await logRejectionWithAI(supabase, userId, symbol, `MOMENTUM_DIRECTION_HARD_GATE: ${momentumCheck.reason}`,
+                { gate: "MOMENTUM_DIRECTION_HARD_GATE", derivedDirection, momentumScore: smartMomentum.score, adx, htfTrend4h, severity: momentumCheck.severity },
+                trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              continue;
+            } else {
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ MOMENTUM_HARD_GATE bypassed: ADX=${adx.toFixed(1)} >= ${MOMENTUM_DIRECTION_HARD_GATE.EXCEPTION_MIN_ADX}`);
+            }
+          }
+        }
+
         // Find swing points for pullback detection
         const swingPoints = findSwingPoints(klineData, 20);
         

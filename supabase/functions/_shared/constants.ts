@@ -3844,3 +3844,75 @@ export const MEAN_REVERSION_REGIME_REQUIREMENTS = {
   } as const,
 } as const;
 
+// ============= PHASE: MOMENTUM DIRECTION HARD GATE =============
+// CRITICAL FIX: Prevents counter-trend entries when momentum has flipped
+// This gate runs BEFORE any exception overrides (MICRO_TREND, STRONG_TREND, etc.)
+// Root cause: System entered SHORT just as momentum flipped bullish (from -64 to +36)
+export const MOMENTUM_DIRECTION_HARD_GATE = {
+  ENABLED: true,
+  
+  // ===== CORE BLOCKING THRESHOLDS =====
+  // Block SHORT when momentum score is above this (positive = bullish momentum)
+  BLOCK_SHORT_ABOVE_SCORE: 20,
+  // Block LONG when momentum score is below this (negative = bearish momentum)
+  BLOCK_LONG_BELOW_SCORE: -20,
+  
+  // ===== EXCEPTION CONDITIONS =====
+  // Only allow override if ADX is extremely high (trend is undeniable)
+  EXCEPTION_MIN_ADX: 55,
+  // Even with high ADX, require 4h trend to match
+  EXCEPTION_REQUIRE_HTF_ALIGNMENT: true,
+  // Position size if exception applied
+  EXCEPTION_POSITION_MULTIPLIER: 0.30,  // 30% position for risky override
+  
+  // ===== LOGGING =====
+  LOG_ALL_CHECKS: true,
+  LOG_BLOCKS: true,
+} as const;
+
+// ============= PHASE: MOMENTUM FLIP DETECTION =============
+// Detects when momentum recently changed direction (e.g., bearish to bullish)
+// Implements a cooldown period after flip to avoid "catching falling knives" or "shorting breakouts"
+export const MOMENTUM_FLIP_DETECTION = {
+  ENABLED: true,
+  
+  // ===== FLIP DETECTION THRESHOLDS =====
+  // Minimum score magnitude to be considered "directional" (not neutral)
+  DIRECTIONAL_THRESHOLD: 25,
+  // Minimum score change to be considered a "flip"
+  MIN_FLIP_DELTA: 40,  // e.g., from -30 to +10 = 40 point swing
+  
+  // ===== COOLDOWN AFTER FLIP =====
+  // Number of minutes to wait after a momentum flip before allowing same-direction entries
+  COOLDOWN_MINUTES: 30,
+  // Block entries that go WITH the old direction immediately after flip
+  // e.g., if momentum just flipped from -50 to +20, block SHORT entries
+  BLOCK_OLD_DIRECTION_ENTRIES: true,
+  
+  // ===== POSITION SIZE DURING COOLDOWN =====
+  // If allowing entries during cooldown (in new direction), reduce position
+  NEW_DIRECTION_POSITION_MULTIPLIER: 0.50,  // 50% position for new direction during cooldown
+  
+  // ===== EXCEPTION: STRONG CONFIRMATION =====
+  // Allow entry if new direction has very strong confirmation
+  BYPASS_COOLDOWN_MIN_ADX: 45,
+  BYPASS_COOLDOWN_MIN_SCORE: 50,  // New direction must be strongly confirmed
+  BYPASS_COOLDOWN_REQUIRE_HTF: true,  // 4h must align with new direction
+} as const;
+
+// ============= MICRO_TREND MOMENTUM ALIGNMENT REQUIREMENT =============
+// Strengthens MICRO_TREND exception to require momentum alignment
+// Prevents MICRO_TREND from allowing entries against momentum direction
+export const MICRO_TREND_MOMENTUM_SAFETY = {
+  ENABLED: true,
+  
+  // ===== MOMENTUM ALIGNMENT REQUIREMENT =====
+  // For bullish micro-trend: momentum score must be > this (not bearish)
+  MIN_MOMENTUM_FOR_BULLISH: -10,  // Allow slightly negative, but not strongly bearish
+  // For bearish micro-trend: momentum score must be < this (not bullish)
+  MAX_MOMENTUM_FOR_BEARISH: 10,   // Allow slightly positive, but not strongly bullish
+  
+  // ===== LOGGING =====
+  LOG_DENIALS: true,
+} as const;
+
