@@ -1934,3 +1934,164 @@ export function detectContinuationMode(
     gateResults
   };
 }
+
+// ============= MOMENTUM FLIP DETECTION =============
+// Detects when momentum direction has recently changed
+// Used to implement cooldown periods after direction flips
+
+export interface MomentumFlipResult {
+  flipped: boolean;               // Did momentum flip direction?
+  from: 'bullish' | 'bearish' | 'neutral';
+  to: 'bullish' | 'bearish' | 'neutral';
+  delta: number;                  // Absolute change in score
+  oldScore: number;
+  newScore: number;
+  cooldownActive: boolean;        // Should we block entries?
+  safeDirection: 'long' | 'short' | 'none';  // Which direction is safe to trade
+  blockedDirection: 'long' | 'short' | 'none';  // Which direction is blocked
+  reason: string;
+}
+
+/**
+ * Detects if momentum has recently flipped direction
+ * @param currentScore Current momentum score (-100 to +100)
+ * @param previousScore Previous momentum score from last signal/check
+ * @param directionalThreshold Score magnitude to be considered "directional"
+ * @param minFlipDelta Minimum change to be considered a "flip"
+ */
+export function detectMomentumFlip(
+  currentScore: number,
+  previousScore: number | undefined | null,
+  directionalThreshold: number = 25,
+  minFlipDelta: number = 40
+): MomentumFlipResult {
+  const defaultResult: MomentumFlipResult = {
+    flipped: false,
+    from: 'neutral',
+    to: 'neutral',
+    delta: 0,
+    oldScore: previousScore ?? 0,
+    newScore: currentScore,
+    cooldownActive: false,
+    safeDirection: 'none',
+    blockedDirection: 'none',
+    reason: 'No previous momentum data'
+  };
+
+  // If no previous score, can't detect flip
+  if (previousScore === undefined || previousScore === null) {
+    return defaultResult;
+  }
+
+  // Classify directions
+  const classifyDirection = (score: number): 'bullish' | 'bearish' | 'neutral' => {
+    if (score >= directionalThreshold) return 'bullish';
+    if (score <= -directionalThreshold) return 'bearish';
+    return 'neutral';
+  };
+
+  const previousDir = classifyDirection(previousScore);
+  const currentDir = classifyDirection(currentScore);
+  const delta = Math.abs(currentScore - previousScore);
+
+  // Check for flip: was directional, now different direction
+  const wasDirectional = previousDir !== 'neutral';
+  const nowDirectional = currentDir !== 'neutral';
+  const directionChanged = previousDir !== currentDir && wasDirectional;
+  const isSignificantChange = delta >= minFlipDelta;
+
+  // Determine if this is a meaningful flip
+  const flipped = directionChanged && isSignificantChange;
+
+  // Determine safe and blocked directions
+  let safeDirection: 'long' | 'short' | 'none' = 'none';
+  let blockedDirection: 'long' | 'short' | 'none' = 'none';
+  let reason = '';
+
+  if (flipped) {
+    // Flipped from bearish to bullish: block SHORT (old direction), safe to LONG
+    if (previousDir === 'bearish' && currentDir === 'bullish') {
+      safeDirection = 'long';
+      blockedDirection = 'short';
+      reason = `Momentum flipped BEARISH→BULLISH (${previousScore.toFixed(0)}→${currentScore.toFixed(0)}), blocking SHORT`;
+    }
+    // Flipped from bullish to bearish: block LONG (old direction), safe to SHORT
+    else if (previousDir === 'bullish' && currentDir === 'bearish') {
+      safeDirection = 'short';
+      blockedDirection = 'long';
+      reason = `Momentum flipped BULLISH→BEARISH (${previousScore.toFixed(0)}→${currentScore.toFixed(0)}), blocking LONG`;
+    }
+    // Flipped from bearish to neutral: partial flip, still risky to SHORT
+    else if (previousDir === 'bearish' && currentDir === 'neutral') {
+      blockedDirection = 'short';
+      reason = `Momentum fading from bearish to neutral (${previousScore.toFixed(0)}→${currentScore.toFixed(0)}), SHORT risky`;
+    }
+    // Flipped from bullish to neutral: partial flip, still risky to LONG
+    else if (previousDir === 'bullish' && currentDir === 'neutral') {
+      blockedDirection = 'long';
+      reason = `Momentum fading from bullish to neutral (${previousScore.toFixed(0)}→${currentScore.toFixed(0)}), LONG risky`;
+    }
+  } else if (!flipped && delta > 0) {
+    reason = `No flip detected: ${previousDir}→${currentDir}, delta=${delta.toFixed(0)} (min=${minFlipDelta})`;
+  }
+
+  return {
+    flipped,
+    from: previousDir,
+    to: currentDir,
+    delta,
+    oldScore: previousScore,
+    newScore: currentScore,
+    cooldownActive: flipped,  // Cooldown is active when flip is detected
+    safeDirection,
+    blockedDirection,
+    reason
+  };
+}
+
+/**
+ * Check if momentum is aligned with intended trade direction
+ * Returns true if safe to proceed, false if blocked
+ */
+export function checkMomentumDirectionAlignment(
+  momentumScore: number,
+  intendedDirection: 'long' | 'short',
+  blockShortAbove: number = 20,
+  blockLongBelow: number = -20
+): { aligned: boolean; blocked: boolean; reason: string; severity: 'low' | 'medium' | 'high' } {
+  
+  // For LONG: block if momentum is strongly bearish
+  if (intendedDirection === 'long' && momentumScore < blockLongBelow) {
+    const severity = momentumScore < -40 ? 'high' : momentumScore < -30 ? 'medium' : 'low';
+    return {
+      aligned: false,
+      blocked: true,
+      reason: `LONG blocked: momentum ${momentumScore.toFixed(0)} < ${blockLongBelow} (bearish)`,
+      severity
+    };
+  }
+  
+  // For SHORT: block if momentum is strongly bullish
+  if (intendedDirection === 'short' && momentumScore > blockShortAbove) {
+    const severity = momentumScore > 40 ? 'high' : momentumScore > 30 ? 'medium' : 'low';
+    return {
+      aligned: false,
+      blocked: true,
+      reason: `SHORT blocked: momentum ${momentumScore.toFixed(0)} > ${blockShortAbove} (bullish)`,
+      severity
+    };
+  }
+  
+  // Aligned or neutral - safe to proceed
+  const aligned = (intendedDirection === 'long' && momentumScore > 0) || 
+                  (intendedDirection === 'short' && momentumScore < 0);
+  
+  return {
+    aligned,
+    blocked: false,
+    reason: aligned 
+      ? `Momentum ${momentumScore.toFixed(0)} aligns with ${intendedDirection.toUpperCase()}`
+      : `Momentum ${momentumScore.toFixed(0)} is neutral for ${intendedDirection.toUpperCase()}`,
+    severity: 'low'
+  };
+}
