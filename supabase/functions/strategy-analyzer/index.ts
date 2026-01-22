@@ -128,6 +128,9 @@ import {
   MOMENTUM_DIRECTION_HARD_GATE,
   MOMENTUM_FLIP_DETECTION,
   MICRO_TREND_MOMENTUM_SAFETY,
+  // NEW: Trend reversal detection and move exhausted reversal gates
+  TREND_REVERSAL_DETECTION_GATE,
+  MOVE_EXHAUSTED_REVERSAL_GATE,
   isMomentumStrategy,
   isNeutralStrategy,
   isTrendFollowingStrategy,
@@ -2175,7 +2178,10 @@ serve(async (req) => {
       | 'SEVERE_HTF_OVERBOUGHT_BLOCK'
       // Momentum direction hard gates
       | 'MOMENTUM_DIRECTION_HARD_GATE'
-      | 'MOMENTUM_FLIP_COOLDOWN';
+      | 'MOMENTUM_FLIP_COOLDOWN'
+      // NEW: Trend reversal and move exhausted reversal gates
+      | 'MOVE_EXHAUSTED_REVERSAL'
+      | 'TREND_REVERSAL_DETECTION';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -3065,6 +3071,149 @@ serve(async (req) => {
               continue;
             } else {
               logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ MOMENTUM_HARD_GATE bypassed: ADX=${adx.toFixed(1)} >= ${MOMENTUM_DIRECTION_HARD_GATE.EXCEPTION_MIN_ADX}`);
+            }
+          }
+        }
+
+        // ============= CRITICAL: MOVE EXHAUSTED REVERSAL GATE (SHORT SYMMETRY FIX) =============
+        // ROOT CAUSE FIX: SHORTs have no equivalent gate to block entries during rallies
+        // LONGs are blocked by "MOVE_EXHAUSTED: Price rallied 5%" but SHORTs were missing this
+        if (MOVE_EXHAUSTED_REVERSAL_GATE.ENABLED && derivedDirection === 'short') {
+          const priceChange4h = trendData.priceChange?.percent4h ?? 0;
+          const stochRsiK4h = trendData.stochasticRsi?.['4h']?.k ?? 50;
+          
+          // Block SHORT if price ROSE significantly in last hours
+          if (priceChange4h > MOVE_EXHAUSTED_REVERSAL_GATE.BLOCK_SHORT_IF_PRICE_ROSE_PERCENT) {
+            // Check for exception: strong downtrend with 4h bearish
+            const exceptionAllowed = MOVE_EXHAUSTED_REVERSAL_GATE.EXCEPTION_MIN_ADX &&
+              adx >= MOVE_EXHAUSTED_REVERSAL_GATE.EXCEPTION_MIN_ADX &&
+              (!MOVE_EXHAUSTED_REVERSAL_GATE.EXCEPTION_REQUIRE_BEARISH_4H || htfTrend4h === 'bearish');
+            
+            if (!exceptionAllowed) {
+              rejectedByHardGates++;
+              const blockReason = `MOVE_EXHAUSTED_REVERSAL: Price rose ${priceChange4h.toFixed(1)}% in last 4h (threshold: ${MOVE_EXHAUSTED_REVERSAL_GATE.BLOCK_SHORT_IF_PRICE_ROSE_PERCENT}%), too late to SHORT`;
+              perSymbolGateAttribution.set(symbol, { gate: 'MOVE_EXHAUSTED_REVERSAL', details: blockReason });
+              
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+              logger.forSymbol(symbol).warn(`   → This prevents shorting into rallies (symmetric with LONG protection)`);
+              
+              await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                gate: "MOVE_EXHAUSTED_REVERSAL",
+                derivedDirection,
+                priceChange4h: priceChange4h.toFixed(2),
+                stochRsiK4h: stochRsiK4h.toFixed(1),
+                htfTrend4h,
+                adx: adx.toFixed(1),
+                threshold: MOVE_EXHAUSTED_REVERSAL_GATE.BLOCK_SHORT_IF_PRICE_ROSE_PERCENT,
+              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              continue;
+            } else {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTED_REVERSAL bypassed: ADX=${adx.toFixed(1)}, 4h=${htfTrend4h}`);
+            }
+          }
+          
+          // Also check: StochRSI already oversold during rally = bad short
+          if (priceChange4h > 0.5 && stochRsiK4h < MOVE_EXHAUSTED_REVERSAL_GATE.MIN_STOCHRSI_K_FOR_LATE_SHORT) {
+            rejectedByHardGates++;
+            const blockReason = `MOVE_EXHAUSTED_REVERSAL: Price rising (${priceChange4h.toFixed(1)}%) + StochRSI K=${stochRsiK4h.toFixed(0)} < ${MOVE_EXHAUSTED_REVERSAL_GATE.MIN_STOCHRSI_K_FOR_LATE_SHORT} (oversold), can't SHORT`;
+            perSymbolGateAttribution.set(symbol, { gate: 'MOVE_EXHAUSTED_REVERSAL', details: blockReason });
+            
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+            
+            await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+              gate: "MOVE_EXHAUSTED_REVERSAL",
+              derivedDirection,
+              priceChange4h: priceChange4h.toFixed(2),
+              stochRsiK4h: stochRsiK4h.toFixed(1),
+              reason: "oversold_during_rally",
+            }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+            continue;
+          }
+        }
+        
+        // ============= CRITICAL: TREND REVERSAL DETECTION GATE =============
+        // Detects when indicators show a trend is reversing and blocks entries in OLD direction
+        if (TREND_REVERSAL_DETECTION_GATE.ENABLED) {
+          const stochK = trendData.stochasticRsi?.['4h']?.k ?? 50;
+          const stochKPrev = trendData.stochasticRsi?.['4h']?.prevK ?? stochK;
+          const macdHist = trendData.momentum?.macdHistogram ?? 0;
+          const macdHistPrev = trendData.momentum?.macdHistogramPrevious ?? macdHist;
+          const priceChange4h = trendData.priceChange?.percent4h ?? 0;
+          
+          // Detect BULLISH reversal (blocks SHORT)
+          const stochCrossingUp = stochKPrev < TREND_REVERSAL_DETECTION_GATE.STOCH_CROSSING_UP_MIN_K && 
+                                  stochK > TREND_REVERSAL_DETECTION_GATE.STOCH_CROSSING_UP_MIN_K &&
+                                  stochK < 50; // Still in lower half but rising
+          const macdFlippingPositive = TREND_REVERSAL_DETECTION_GATE.MACD_FLIP_DETECTION && 
+                                       macdHistPrev < 0 && macdHist > 0;
+          const priceRisingSignificantly = priceChange4h > TREND_REVERSAL_DETECTION_GATE.MIN_PRICE_CHANGE_PERCENT;
+          
+          const bullishReversalDetected = (stochCrossingUp || macdFlippingPositive) && priceRisingSignificantly;
+          
+          // Detect BEARISH reversal (blocks LONG)
+          const stochCrossingDown = stochKPrev > TREND_REVERSAL_DETECTION_GATE.STOCH_CROSSING_DOWN_MAX_K && 
+                                    stochK < TREND_REVERSAL_DETECTION_GATE.STOCH_CROSSING_DOWN_MAX_K &&
+                                    stochK > 50; // Still in upper half but falling
+          const macdFlippingNegative = TREND_REVERSAL_DETECTION_GATE.MACD_FLIP_DETECTION && 
+                                       macdHistPrev > 0 && macdHist < 0;
+          const priceFallingSignificantly = priceChange4h < -TREND_REVERSAL_DETECTION_GATE.MIN_PRICE_CHANGE_PERCENT;
+          
+          const bearishReversalDetected = (stochCrossingDown || macdFlippingNegative) && priceFallingSignificantly;
+          
+          // Block entries in OLD direction
+          if (derivedDirection === 'short' && bullishReversalDetected && TREND_REVERSAL_DETECTION_GATE.BLOCK_SHORT_ON_BULLISH_REVERSAL) {
+            // Check exception
+            const exceptionAllowed = adx >= TREND_REVERSAL_DETECTION_GATE.EXCEPTION_MIN_ADX &&
+              (!TREND_REVERSAL_DETECTION_GATE.EXCEPTION_REQUIRE_HTF_ALIGNMENT || htfTrend4h === 'bearish');
+            
+            if (!exceptionAllowed) {
+              rejectedByHardGates++;
+              const blockReason = `TREND_REVERSAL: Bullish reversal detected (StochRSI crossing up: ${stochCrossingUp}, MACD flipping positive: ${macdFlippingPositive}, price +${priceChange4h.toFixed(1)}%) - blocking SHORT`;
+              perSymbolGateAttribution.set(symbol, { gate: 'TREND_REVERSAL_DETECTION', details: blockReason });
+              
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+              
+              await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                gate: "TREND_REVERSAL_DETECTION",
+                derivedDirection,
+                reversalType: "bullish",
+                stochK: stochK.toFixed(1),
+                stochKPrev: stochKPrev.toFixed(1),
+                macdHist: macdHist.toFixed(4),
+                macdHistPrev: macdHistPrev.toFixed(4),
+                priceChange4h: priceChange4h.toFixed(2),
+                stochCrossingUp,
+                macdFlippingPositive,
+              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              continue;
+            }
+          }
+          
+          if (derivedDirection === 'long' && bearishReversalDetected && TREND_REVERSAL_DETECTION_GATE.BLOCK_LONG_ON_BEARISH_REVERSAL) {
+            // Check exception
+            const exceptionAllowed = adx >= TREND_REVERSAL_DETECTION_GATE.EXCEPTION_MIN_ADX &&
+              (!TREND_REVERSAL_DETECTION_GATE.EXCEPTION_REQUIRE_HTF_ALIGNMENT || htfTrend4h === 'bullish');
+            
+            if (!exceptionAllowed) {
+              rejectedByHardGates++;
+              const blockReason = `TREND_REVERSAL: Bearish reversal detected (StochRSI crossing down: ${stochCrossingDown}, MACD flipping negative: ${macdFlippingNegative}, price ${priceChange4h.toFixed(1)}%) - blocking LONG`;
+              perSymbolGateAttribution.set(symbol, { gate: 'TREND_REVERSAL_DETECTION', details: blockReason });
+              
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+              
+              await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                gate: "TREND_REVERSAL_DETECTION",
+                derivedDirection,
+                reversalType: "bearish",
+                stochK: stochK.toFixed(1),
+                stochKPrev: stochKPrev.toFixed(1),
+                macdHist: macdHist.toFixed(4),
+                macdHistPrev: macdHistPrev.toFixed(4),
+                priceChange4h: priceChange4h.toFixed(2),
+                stochCrossingDown,
+                macdFlippingNegative,
+              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              continue;
             }
           }
         }
