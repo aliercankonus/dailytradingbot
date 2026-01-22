@@ -3207,9 +3207,11 @@ export const COUNTER_TREND_PROTECTION = {
   LOG_BLOCKS: true,
   
   // ===== PHASE 2 FIX: FALLBACK TO TREND-ALIGNED DIRECTION =====
+  // DISABLED: This was causing 100% SHORT bias by flipping valid LONG signals into SHORTs
+  // ROOT CAUSE OF 30% WIN RATE: Signals were being flipped to SHORT during bullish reversals
   // When counter-trend is blocked, attempt to derive the opposite (trend-aligned) direction
   // This prevents missing SHORT opportunities when LONG is blocked against bearish trend
-  FALLBACK_TO_TREND_ALIGNED: true,
+  FALLBACK_TO_TREND_ALIGNED: false,  // DISABLED - was causing directional bias
   
   // Position multiplier for fallback entries (reduced for safety)
   FALLBACK_POSITION_MULTIPLIER: 0.50,
@@ -3853,9 +3855,9 @@ export const MOMENTUM_DIRECTION_HARD_GATE = {
   
   // ===== CORE BLOCKING THRESHOLDS =====
   // Block SHORT when momentum score is above this (positive = bullish momentum)
-  BLOCK_SHORT_ABOVE_SCORE: 20,
+  BLOCK_SHORT_ABOVE_SCORE: 15,  // Tightened from 20 - block SHORT earlier when momentum is bullish
   // Block LONG when momentum score is below this (negative = bearish momentum)
-  BLOCK_LONG_BELOW_SCORE: -20,
+  BLOCK_LONG_BELOW_SCORE: -15,  // Tightened from -20 - block LONG earlier when momentum is bearish
   
   // ===== EXCEPTION CONDITIONS =====
   // Only allow override if ADX is extremely high (trend is undeniable)
@@ -3867,6 +3869,74 @@ export const MOMENTUM_DIRECTION_HARD_GATE = {
   
   // ===== LOGGING =====
   LOG_ALL_CHECKS: true,
+  LOG_BLOCKS: true,
+} as const;
+
+// ============= PHASE: TREND REVERSAL DETECTION GATE =============
+// Detects when price action indicates a trend is reversing
+// Blocks entries in the OLD direction when reversal signals are present
+export const TREND_REVERSAL_DETECTION_GATE = {
+  ENABLED: true,
+  
+  // ===== STOCHRSI REVERSAL SIGNALS =====
+  // Detect StochRSI crossing up from oversold (bullish reversal)
+  STOCH_CROSSING_UP_THRESHOLD: 30,  // K was below this
+  STOCH_CROSSING_UP_MIN_K: 20,      // K is now above this
+  // Detect StochRSI crossing down from overbought (bearish reversal)
+  STOCH_CROSSING_DOWN_THRESHOLD: 70, // K was above this
+  STOCH_CROSSING_DOWN_MAX_K: 80,     // K is now below this
+  
+  // ===== MACD REVERSAL SIGNALS =====
+  // Detect MACD histogram flipping positive (bullish reversal) or negative (bearish reversal)
+  MACD_FLIP_DETECTION: true,
+  
+  // ===== PRICE ACTION REVERSAL SIGNALS =====
+  // Detect recent price direction change
+  PRICE_REVERSAL_LOOKBACK_HOURS: 4,
+  MIN_PRICE_CHANGE_PERCENT: 1.0,  // Price must have moved at least 1% in new direction
+  
+  // ===== BLOCK BEHAVIOR =====
+  // Block SHORT when bullish reversal detected
+  BLOCK_SHORT_ON_BULLISH_REVERSAL: true,
+  // Block LONG when bearish reversal detected
+  BLOCK_LONG_ON_BEARISH_REVERSAL: true,
+  
+  // ===== POSITION SIZE FOR NEW DIRECTION =====
+  // When entering in new direction after reversal detection
+  NEW_DIRECTION_POSITION_MULTIPLIER: 0.60,
+  
+  // ===== EXCEPTION: STRONG TREND CONTINUATION =====
+  // Allow entry against reversal signals if ADX is very high AND 4h confirms
+  EXCEPTION_MIN_ADX: 50,
+  EXCEPTION_REQUIRE_HTF_ALIGNMENT: true,
+  
+  // ===== LOGGING =====
+  LOG_BLOCKS: true,
+} as const;
+
+// ============= PHASE: MOVE EXHAUSTED REVERSAL GATE (SHORT SYMMETRY) =============
+// CRITICAL: Adds symmetric protection for SHORTs that LONGs already have
+// Prevents shorting when price is RALLYING (just like we block LONGs when price is dumping)
+export const MOVE_EXHAUSTED_REVERSAL_GATE = {
+  ENABLED: true,
+  
+  // ===== PRICE RALLY DETECTION FOR SHORT BLOCK =====
+  // Block SHORT if price ROSE more than this in last 4 hours
+  BLOCK_SHORT_IF_PRICE_ROSE_PERCENT: 1.5,
+  // Lookback period for price move detection
+  LOOKBACK_HOURS: 4,
+  
+  // ===== STOCHRSI ALIGNMENT FOR LATE SHORTS =====
+  // For shorts during price rally: StochRSI K must be ABOVE this (not oversold)
+  MIN_STOCHRSI_K_FOR_LATE_SHORT: 40,
+  
+  // ===== EXCEPTION: STRONG DOWNTREND =====
+  // Allow SHORT despite rally if ADX >= this AND 4h is bearish
+  EXCEPTION_MIN_ADX: 35,
+  EXCEPTION_REQUIRE_BEARISH_4H: true,
+  EXCEPTION_POSITION_SIZE: 0.40,
+  
+  // ===== LOGGING =====
   LOG_BLOCKS: true,
 } as const;
 
@@ -3903,14 +3973,28 @@ export const MOMENTUM_FLIP_DETECTION = {
 // ============= MICRO_TREND MOMENTUM ALIGNMENT REQUIREMENT =============
 // Strengthens MICRO_TREND exception to require momentum alignment
 // Prevents MICRO_TREND from allowing entries against momentum direction
+// ROOT CAUSE FIX: MICRO_TREND was bypassing momentum checks and entering SHORTs against bullish momentum
 export const MICRO_TREND_MOMENTUM_SAFETY = {
   ENABLED: true,
   
-  // ===== MOMENTUM ALIGNMENT REQUIREMENT =====
+  // ===== MOMENTUM ALIGNMENT REQUIREMENT (TIGHTENED) =====
   // For bullish micro-trend: momentum score must be > this (not bearish)
-  MIN_MOMENTUM_FOR_BULLISH: -10,  // Allow slightly negative, but not strongly bearish
+  MIN_MOMENTUM_FOR_BULLISH: 0,    // TIGHTENED from -10 - no negative momentum for LONG
   // For bearish micro-trend: momentum score must be < this (not bullish)
-  MAX_MOMENTUM_FOR_BEARISH: 10,   // Allow slightly positive, but not strongly bullish
+  MAX_MOMENTUM_FOR_BEARISH: 0,    // TIGHTENED from 10 - no positive momentum for SHORT
+  
+  // ===== 4H TREND REQUIREMENT =====
+  // Block SHORT micro-trend if 4h is bullish
+  BLOCK_SHORT_IF_4H_BULLISH: true,
+  // Block LONG micro-trend if 4h is bearish  
+  BLOCK_LONG_IF_4H_BEARISH: true,
+  
+  // ===== MINIMUM CANDLE PERSISTENCE =====
+  // Require micro-trend to persist for at least this many candles
+  MIN_PERSISTENCE_CANDLES: 3,
+  
+  // ===== MINIMUM ADX FOR MICRO_TREND =====
+  MIN_ADX_FOR_MICRO_TREND: 20,  // Some trend strength required
   
   // ===== LOGGING =====
   LOG_DENIALS: true,
