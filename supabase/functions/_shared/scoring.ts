@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, type AdxPhase, type ExceptionType, type MasterMarketRegime } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, MOMENTUM_FALLBACK_DIRECTION_PARAMS, type AdxPhase, type ExceptionType, type MasterMarketRegime } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -1951,10 +1951,11 @@ export interface DirectionResult {
   confidence: number;
   source: string;  // Which timeframe/signal determined direction
   reasons: string[];
-  isWeightedDerivation?: boolean;      // NEW: Used weighted sum
-  hasPersistenceBonus?: boolean;       // NEW: Got persistence bonus
-  orderFlowTiebreaker?: boolean;       // NEW: Order flow resolved tie
-  positionSizeMultiplier?: number;     // NEW: Recommended position size
+  isWeightedDerivation?: boolean;      // Used weighted sum
+  hasPersistenceBonus?: boolean;       // Got persistence bonus
+  orderFlowTiebreaker?: boolean;       // Order flow resolved tie
+  positionSizeMultiplier?: number;     // Recommended position size
+  isMomentumFallback?: boolean;        // Used momentum + order flow fallback
 }
 
 // Import direction params
@@ -2347,6 +2348,89 @@ export const deriveTradeDirection = (
     reasons.push(`Primary trend ${primaryTrend} (${primaryConf.toFixed(0)}% confidence)`);
     reasons.push("Warning: Using primary trend as fallback - lower conviction");
     return { direction, confidence: primaryConf * 0.8, source: "primary", reasons };
+  }
+  
+  // ============= PRIORITY 7: MOMENTUM + ORDER FLOW FALLBACK =============
+  // When all other methods fail, use momentum score + order flow to derive direction
+  // This prevents the "deadlock" where bullish momentum + buy order flow = no signal
+  if (MOMENTUM_FALLBACK_DIRECTION_PARAMS.ENABLED) {
+    const P = MOMENTUM_FALLBACK_DIRECTION_PARAMS;
+    
+    // Get momentum data from trendData
+    const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+    const stochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
+    
+    // Check if we have strong enough momentum signal
+    const absMomentum = Math.abs(momentumScore);
+    if (absMomentum >= P.MIN_MOMENTUM_SCORE && adx >= P.MIN_ADX) {
+      const momentumDirection: TradeDirection = momentumScore > 0 ? "long" : "short";
+      
+      // Check order flow alignment
+      const ofScore = orderFlowData?.score ?? 0;
+      const ofSignal = orderFlowData?.signal?.toLowerCase() ?? "";
+      const orderFlowDirection = 
+        (ofSignal.includes("buy") || ofSignal === "bullish") ? "long" :
+        (ofSignal.includes("sell") || ofSignal === "bearish") ? "short" : null;
+      
+      const orderFlowAligned = orderFlowDirection === momentumDirection;
+      const orderFlowStrong = ofScore >= P.STRONG_ORDER_FLOW_SCORE && orderFlowAligned;
+      const orderFlowSupports = ofScore >= P.MIN_ORDER_FLOW_SCORE && orderFlowAligned;
+      
+      // Check StochRSI context (oversold favors LONG, overbought favors SHORT for mean reversion)
+      const stochOversold = stochK <= P.STOCHRSI_EXTREME_OVERSOLD;
+      const stochOverbought = stochK >= P.STOCHRSI_EXTREME_OVERBOUGHT;
+      const stochConfirmsLong = momentumDirection === "long" && stochOversold;
+      const stochConfirmsShort = momentumDirection === "short" && stochOverbought;
+      const stochConfirms = stochConfirmsLong || stochConfirmsShort;
+      
+      // Calculate confidence based on signal strength
+      let confidence: number = P.BASE_CONFIDENCE;
+      let positionMultiplier: number = P.BASE_POSITION_MULTIPLIER;
+      
+      // Strong momentum bonus
+      if (absMomentum >= P.STRONG_MOMENTUM_SCORE) {
+        confidence += 5;
+      }
+      
+      // Order flow confirmation bonus
+      if (orderFlowStrong) {
+        confidence += 8;
+        positionMultiplier = P.STRONG_POSITION_MULTIPLIER;
+      } else if (orderFlowSupports) {
+        confidence += 4;
+        positionMultiplier = 0.60;
+      }
+      
+      // StochRSI extreme context bonus (mean reversion setup)
+      if (stochConfirms) {
+        confidence += 5;
+      }
+      
+      confidence = Math.min(confidence, P.MAX_CONFIDENCE);
+      
+      // Only proceed if we have at least one confirmation (order flow OR stochRSI)
+      const hasConfirmation = orderFlowSupports || stochConfirms;
+      
+      if (hasConfirmation) {
+        reasons.push(`MOMENTUM FALLBACK: score=${momentumScore.toFixed(0)} → ${momentumDirection.toUpperCase()}`);
+        reasons.push(`Order flow: score=${ofScore.toFixed(0)}, signal=${ofSignal}, aligned=${orderFlowAligned}`);
+        reasons.push(`StochRSI K=${stochK.toFixed(0)} (${stochOversold ? 'oversold' : stochOverbought ? 'overbought' : 'normal'})`);
+        reasons.push(`ADX=${adx.toFixed(1)} | Confidence=${confidence.toFixed(0)}% | Position=${(positionMultiplier * 100).toFixed(0)}%`);
+        reasons.push("Timeframes neutral/conflicting - momentum + order flow determining direction");
+        
+        return {
+          direction: momentumDirection,
+          confidence,
+          source: "momentum-fallback",
+          reasons,
+          positionSizeMultiplier: positionMultiplier,
+          isMomentumFallback: true,
+        };
+      } else {
+        // Log why we didn't use the fallback (for debugging)
+        reasons.push(`MOMENTUM FALLBACK SKIPPED: momentum=${momentumScore.toFixed(0)} but no confirmation (OF aligned=${orderFlowAligned}, stochConfirms=${stochConfirms})`);
+      }
+    }
   }
   
   // No clear direction - but log what we tried

@@ -4000,3 +4000,43 @@ export const MICRO_TREND_MOMENTUM_SAFETY = {
   LOG_DENIALS: true,
 } as const;
 
+// ============= MOMENTUM FALLBACK DIRECTION PARAMS =============
+// When timeframe trends conflict or are neutral, use momentum + order flow to derive direction
+// This prevents the "deadlock" where bullish momentum + buy order flow = no signal
+export const MOMENTUM_FALLBACK_DIRECTION_PARAMS = {
+  // Enable this fallback mechanism
+  ENABLED: true,
+  
+  // ===== MOMENTUM SCORE THRESHOLDS =====
+  // Minimum absolute momentum score to derive direction
+  MIN_MOMENTUM_SCORE: 20,           // |score| >= 20 to derive direction
+  // Strong momentum threshold for higher confidence
+  STRONG_MOMENTUM_SCORE: 35,        // |score| >= 35 = strong signal
+  
+  // ===== ORDER FLOW REQUIREMENTS =====
+  // Minimum order flow score to support momentum direction
+  MIN_ORDER_FLOW_SCORE: 50,         // Order flow must be >= 50
+  // Strong order flow for confirmation
+  STRONG_ORDER_FLOW_SCORE: 65,      // >= 65 = strong confirmation
+  
+  // ===== STOCHRSI CONTEXT =====
+  // If StochRSI is extreme AND momentum confirms, boost confidence
+  STOCHRSI_EXTREME_OVERSOLD: 15,    // K <= 15 = oversold context for LONG
+  STOCHRSI_EXTREME_OVERBOUGHT: 85,  // K >= 85 = overbought context for SHORT (mean reversion)
+  
+  // ===== ADX REQUIREMENTS =====
+  // Minimum ADX for momentum fallback (still need some trend structure)
+  MIN_ADX: 18,
+  
+  // ===== POSITION SIZING =====
+  // Reduced position for momentum-derived entries
+  BASE_POSITION_MULTIPLIER: 0.55,   // 55% of normal
+  STRONG_POSITION_MULTIPLIER: 0.70, // 70% when both momentum + order flow are strong
+  
+  // ===== CONFIDENCE CALCULATION =====
+  // Base confidence for momentum fallback
+  BASE_CONFIDENCE: 50,
+  // Maximum confidence achievable
+  MAX_CONFIDENCE: 65,
+} as const;
+
