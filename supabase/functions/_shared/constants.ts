@@ -4000,9 +4000,54 @@ export const MICRO_TREND_MOMENTUM_SAFETY = {
   LOG_DENIALS: true,
 } as const;
 
+// ============= MOMENTUM OVERRIDE DIRECTION PARAMS =============
+// HIGH PRIORITY: When momentum conditions are met, OVERRIDE the 30m trend direction
+// This allows LONG signals when momentum is bullish even if 30m trend is bearish
+// Logic: momentumScore > 20 AND momentumSlope > 0 AND orderFlow = bullish 
+//        AND StochRSI < oversold AND NOT (ADX_30m > 30 AND ADX_slope > 0)
+export const MOMENTUM_OVERRIDE_DIRECTION_PARAMS = {
+  // Enable this momentum override mechanism
+  ENABLED: true,
+  
+  // ===== MOMENTUM SCORE THRESHOLDS =====
+  // Minimum momentum score to trigger override (positive for LONG)
+  MIN_MOMENTUM_SCORE: 20,           // score > 20 for LONG override
+  // Strong momentum for enhanced confidence
+  STRONG_MOMENTUM_SCORE: 35,        // score >= 35 = strong signal
+  
+  // ===== MOMENTUM SLOPE REQUIREMENT =====
+  // Momentum must be INCREASING (slope > 0) to confirm direction
+  MIN_MOMENTUM_SLOPE: 0,            // macdSlope > 0 = momentum accelerating
+  
+  // ===== ORDER FLOW REQUIREMENTS =====
+  // Order flow must align with momentum direction
+  MIN_ORDER_FLOW_SCORE: 45,         // Order flow must be >= 45
+  STRONG_ORDER_FLOW_SCORE: 60,      // >= 60 = strong confirmation
+  
+  // ===== STOCHRSI OVERSOLD/OVERBOUGHT =====
+  // For LONG override: StochRSI should be oversold (favor mean reversion)
+  // For SHORT override: StochRSI should be overbought
+  STOCHRSI_OVERSOLD_THRESHOLD: 25,  // K <= 25 favors LONG override
+  STOCHRSI_OVERBOUGHT_THRESHOLD: 75, // K >= 75 favors SHORT override
+  
+  // ===== ADX BLOCKING CONDITION =====
+  // Block override if 30m has established strong trend (ADX > 30 AND rising)
+  // This prevents fighting a confirmed 30m trend
+  BLOCK_IF_30M_ADX_ABOVE: 30,       // If 30m ADX > 30...
+  BLOCK_IF_ADX_SLOPE_ABOVE: 0,      // ...AND slope > 0, BLOCK override
+  
+  // ===== POSITION SIZING =====
+  BASE_POSITION_MULTIPLIER: 0.60,   // 60% of normal for override entries
+  STRONG_POSITION_MULTIPLIER: 0.75, // 75% when all conditions strongly met
+  
+  // ===== CONFIDENCE CALCULATION =====
+  BASE_CONFIDENCE: 55,
+  MAX_CONFIDENCE: 70,
+} as const;
+
 // ============= MOMENTUM FALLBACK DIRECTION PARAMS =============
-// When timeframe trends conflict or are neutral, use momentum + order flow to derive direction
-// This prevents the "deadlock" where bullish momentum + buy order flow = no signal
+// LOWER PRIORITY: When timeframe trends conflict or are neutral, use momentum + order flow
+// This is the fallback after all other direction methods fail
 export const MOMENTUM_FALLBACK_DIRECTION_PARAMS = {
   // Enable this fallback mechanism
   ENABLED: true,
