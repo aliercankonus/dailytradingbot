@@ -1956,10 +1956,11 @@ export interface DirectionResult {
   orderFlowTiebreaker?: boolean;       // Order flow resolved tie
   positionSizeMultiplier?: number;     // Recommended position size
   isMomentumFallback?: boolean;        // Used momentum + order flow fallback
+  isMomentumOverride?: boolean;        // Used momentum override (higher priority than 30m trend)
 }
 
 // Import direction params
-import { GATE_RELAXATION_FLAGS, DIRECTION_DERIVATION_PARAMS } from "./constants.ts";
+import { GATE_RELAXATION_FLAGS, DIRECTION_DERIVATION_PARAMS, MOMENTUM_OVERRIDE_DIRECTION_PARAMS } from "./constants.ts";
 
 export const deriveTradeDirection = (
   trendData: any,
@@ -2069,6 +2070,149 @@ export const deriveTradeDirection = (
           };
         }
       }
+    }
+  }
+  
+  // ============= PRIORITY 0.5: MOMENTUM-AWARE DIRECTION OVERRIDE =============
+  // When momentum conditions are met, OVERRIDE the 30m trend to derive direction
+  // This prevents missing LONG signals when momentum is bullish but 30m is bearish
+  // Logic: momentumScore > 20 AND momentumSlope > 0 AND orderFlow = bullish 
+  //        AND StochRSI < oversold_threshold AND NOT (ADX_30m > 30 AND ADX_slope > 0)
+  if (MOMENTUM_OVERRIDE_DIRECTION_PARAMS.ENABLED) {
+    const MO = MOMENTUM_OVERRIDE_DIRECTION_PARAMS;
+    
+    // Get momentum data
+    const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+    const momentumSlope = trendData.smartMomentum?.components?.macdSlope ?? trendData.momentum?.macdSlope ?? 0;
+    const stochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
+    
+    // Get 30m ADX data for blocking condition
+    const adx30m = timeframes['30m']?.adx ?? trendData.volatility?.adx ?? 0;
+    const adxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
+    
+    // Get order flow data
+    const ofScore = orderFlowData?.score ?? 0;
+    const ofSignal = orderFlowData?.signal?.toLowerCase() ?? "";
+    const orderFlowBullish = ofSignal.includes("buy") || ofSignal === "bullish" || ofSignal === "strong_buy";
+    const orderFlowBearish = ofSignal.includes("sell") || ofSignal === "bearish" || ofSignal === "strong_sell";
+    
+    // Check for LONG override conditions
+    const longMomentumOk = momentumScore > MO.MIN_MOMENTUM_SCORE && momentumSlope > MO.MIN_MOMENTUM_SLOPE;
+    const longStochOk = stochK <= MO.STOCHRSI_OVERSOLD_THRESHOLD;
+    const longOrderFlowOk = orderFlowBullish && ofScore >= MO.MIN_ORDER_FLOW_SCORE;
+    
+    // Check for SHORT override conditions  
+    const shortMomentumOk = momentumScore < -MO.MIN_MOMENTUM_SCORE && momentumSlope < -MO.MIN_MOMENTUM_SLOPE;
+    const shortStochOk = stochK >= MO.STOCHRSI_OVERBOUGHT_THRESHOLD;
+    const shortOrderFlowOk = orderFlowBearish && ofScore >= MO.MIN_ORDER_FLOW_SCORE;
+    
+    // Blocking condition: strong established 30m trend that we shouldn't fight
+    const has30mStrongTrend = adx30m > MO.BLOCK_IF_30M_ADX_ABOVE && adxSlope > MO.BLOCK_IF_ADX_SLOPE_ABOVE;
+    
+    // For LONG: block if 30m is strongly bearish and confirmed
+    const block30mBearish = has30mStrongTrend && trend30m === "bearish";
+    // For SHORT: block if 30m is strongly bullish and confirmed
+    const block30mBullish = has30mStrongTrend && trend30m === "bullish";
+    
+    // Evaluate LONG override
+    if (longMomentumOk && longOrderFlowOk && longStochOk && !block30mBearish) {
+      // Calculate confidence
+      let confidence: number = MO.BASE_CONFIDENCE;
+      let positionMultiplier: number = MO.BASE_POSITION_MULTIPLIER;
+      
+      // Strong momentum bonus
+      if (momentumScore >= MO.STRONG_MOMENTUM_SCORE) {
+        confidence += 5;
+      }
+      
+      // Strong order flow bonus
+      if (ofScore >= MO.STRONG_ORDER_FLOW_SCORE) {
+        confidence += 5;
+        positionMultiplier = MO.STRONG_POSITION_MULTIPLIER;
+      }
+      
+      // Very oversold StochRSI bonus (mean reversion setup)
+      if (stochK <= 15) {
+        confidence += 5;
+      }
+      
+      // 4h alignment bonus
+      if (trend4h === "bullish" && conf4h >= 50) {
+        confidence += 5;
+        positionMultiplier = Math.min(0.80, positionMultiplier + 0.05);
+      }
+      
+      confidence = Math.min(confidence, MO.MAX_CONFIDENCE);
+      
+      reasons.push(`MOMENTUM OVERRIDE → LONG: score=${momentumScore.toFixed(0)}, slope=${momentumSlope.toFixed(2)}`);
+      reasons.push(`Order flow: ${ofSignal} (${ofScore.toFixed(0)}), StochRSI K=${stochK.toFixed(0)} (oversold)`);
+      reasons.push(`30m trend=${trend30m} overridden by bullish momentum + order flow`);
+      reasons.push(`ADX 30m=${adx30m.toFixed(1)}, slope=${adxSlope.toFixed(2)} | Conf=${confidence.toFixed(0)}% | Pos=${(positionMultiplier * 100).toFixed(0)}%`);
+      
+      return {
+        direction: "long",
+        confidence,
+        source: "momentum-override",
+        reasons,
+        positionSizeMultiplier: positionMultiplier,
+        isMomentumOverride: true,
+      };
+    }
+    
+    // Evaluate SHORT override
+    if (shortMomentumOk && shortOrderFlowOk && shortStochOk && !block30mBullish) {
+      // Calculate confidence
+      let confidence: number = MO.BASE_CONFIDENCE;
+      let positionMultiplier: number = MO.BASE_POSITION_MULTIPLIER;
+      
+      // Strong momentum bonus
+      if (Math.abs(momentumScore) >= MO.STRONG_MOMENTUM_SCORE) {
+        confidence += 5;
+      }
+      
+      // Strong order flow bonus
+      if (ofScore >= MO.STRONG_ORDER_FLOW_SCORE) {
+        confidence += 5;
+        positionMultiplier = MO.STRONG_POSITION_MULTIPLIER;
+      }
+      
+      // Very overbought StochRSI bonus (mean reversion setup)
+      if (stochK >= 85) {
+        confidence += 5;
+      }
+      
+      // 4h alignment bonus
+      if (trend4h === "bearish" && conf4h >= 50) {
+        confidence += 5;
+        positionMultiplier = Math.min(0.80, positionMultiplier + 0.05);
+      }
+      
+      confidence = Math.min(confidence, MO.MAX_CONFIDENCE);
+      
+      reasons.push(`MOMENTUM OVERRIDE → SHORT: score=${momentumScore.toFixed(0)}, slope=${momentumSlope.toFixed(2)}`);
+      reasons.push(`Order flow: ${ofSignal} (${ofScore.toFixed(0)}), StochRSI K=${stochK.toFixed(0)} (overbought)`);
+      reasons.push(`30m trend=${trend30m} overridden by bearish momentum + order flow`);
+      reasons.push(`ADX 30m=${adx30m.toFixed(1)}, slope=${adxSlope.toFixed(2)} | Conf=${confidence.toFixed(0)}% | Pos=${(positionMultiplier * 100).toFixed(0)}%`);
+      
+      return {
+        direction: "short",
+        confidence,
+        source: "momentum-override",
+        reasons,
+        positionSizeMultiplier: positionMultiplier,
+        isMomentumOverride: true,
+      };
+    }
+    
+    // Log why override didn't trigger (for debugging)
+    if (momentumScore > MO.MIN_MOMENTUM_SCORE || momentumScore < -MO.MIN_MOMENTUM_SCORE) {
+      const dir = momentumScore > 0 ? "LONG" : "SHORT";
+      const slopeOk = momentumScore > 0 ? momentumSlope > MO.MIN_MOMENTUM_SLOPE : momentumSlope < -MO.MIN_MOMENTUM_SLOPE;
+      const stochOk = momentumScore > 0 ? longStochOk : shortStochOk;
+      const ofOk = momentumScore > 0 ? longOrderFlowOk : shortOrderFlowOk;
+      const blocked = momentumScore > 0 ? block30mBearish : block30mBullish;
+      
+      reasons.push(`MOMENTUM OVERRIDE SKIPPED (${dir}): slopeOk=${slopeOk}, stochOk=${stochOk}, ofOk=${ofOk}, blocked30m=${blocked}`);
     }
   }
   
