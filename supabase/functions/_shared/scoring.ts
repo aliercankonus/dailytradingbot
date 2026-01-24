@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, MOMENTUM_FALLBACK_DIRECTION_PARAMS, type AdxPhase, type ExceptionType, type MasterMarketRegime } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, MOMENTUM_FALLBACK_DIRECTION_PARAMS, DIRECTION_REGIME_PARAMS, TIER2_WEIGHTED_CONFIRMATION, DIRECTIONAL_BIAS_ESCAPE_PARAMS, type AdxPhase, type ExceptionType, type MasterMarketRegime, type DirectionRegime } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -1957,10 +1957,46 @@ export interface DirectionResult {
   positionSizeMultiplier?: number;     // Recommended position size
   isMomentumFallback?: boolean;        // Used momentum + order flow fallback
   isMomentumOverride?: boolean;        // Used momentum override (higher priority than 30m trend)
+  regime?: DirectionRegime;            // Market regime used for direction derivation
+  tier2Score?: number;                 // Tier 2 weighted confirmation score
+  isEscapeHatch?: boolean;             // Used directional bias escape hatch
 }
 
 // Import direction params
 import { GATE_RELAXATION_FLAGS, DIRECTION_DERIVATION_PARAMS, MOMENTUM_OVERRIDE_DIRECTION_PARAMS } from "./constants.ts";
+
+// ============= PHASE 1: DIRECTION REGIME CLASSIFIER =============
+// Classifies market into regime BEFORE direction derivation
+interface RegimeConfig {
+  relaxTier1Threshold: number;
+  suppressStochImportance: boolean;
+  momentumOverrideEnabled: boolean;
+}
+
+export const classifyDirectionRegime = (
+  adx: number,
+  adxSlope: number = 0
+): { regime: DirectionRegime; config: RegimeConfig } => {
+  const P = DIRECTION_REGIME_PARAMS;
+  
+  // Check for exhaustion first (high ADX + not accelerating)
+  if (adx >= P.EXHAUSTION_ADX && adxSlope <= P.EXHAUSTION_SLOPE_THRESHOLD) {
+    return { regime: 'EXHAUSTION', config: P.EXHAUSTION as RegimeConfig };
+  }
+  
+  // Strong trend
+  if (adx >= P.STRONG_TREND_ADX) {
+    return { regime: 'STRONG_TREND', config: P.STRONG_TREND as RegimeConfig };
+  }
+  
+  // Early trend
+  if (adx >= P.EARLY_TREND_ADX) {
+    return { regime: 'EARLY_TREND', config: P.EARLY_TREND as RegimeConfig };
+  }
+  
+  // Range
+  return { regime: 'RANGE', config: P.RANGE as RegimeConfig };
+};
 
 export const deriveTradeDirection = (
   trendData: any,
@@ -1985,6 +2021,19 @@ export const deriveTradeDirection = (
   
   // Get ADX for price action override check
   const adx = trendData.volatility?.adx || trendData.momentum?.adx || 0;
+  const adxSlope = trendData.volatility?.adxSlope || trendData.momentum?.adxSlope || 0;
+  
+  // ============= PHASE 1: REGIME CLASSIFICATION =============
+  // Classify market regime BEFORE direction derivation to adjust gate behavior
+  const { regime, config: regimeConfig } = DIRECTION_REGIME_PARAMS.ENABLED 
+    ? classifyDirectionRegime(adx, adxSlope)
+    : { regime: 'EARLY_TREND' as DirectionRegime, config: DIRECTION_REGIME_PARAMS.EARLY_TREND };
+  
+  reasons.push(`REGIME: ${regime} (ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)})`);
+  
+  // Get regime-adjusted Tier 1 threshold
+  const regimeTier1Threshold = regimeConfig.relaxTier1Threshold;
+  const suppressStochRSI = regimeConfig.suppressStochImportance;
   
   // ============= NEW: PHASE 1 WEIGHTED DIRECTION DERIVATION =============
   // Instead of requiring one strong timeframe, use weighted sum of all timeframes
@@ -2020,8 +2069,10 @@ export const deriveTradeDirection = (
       }
     }
     
-    // Adjusted threshold with persistence bonus
-    const effectiveThreshold = P.WEIGHTED_SUM_THRESHOLD - persistenceBonus;
+    // Adjusted threshold with persistence bonus AND regime adjustment
+    // PHASE 1: Use regime-adjusted threshold instead of hardcoded 0.55
+    const baseThreshold = DIRECTION_REGIME_PARAMS.ENABLED ? regimeTier1Threshold : P.WEIGHTED_SUM_THRESHOLD;
+    const effectiveThreshold = baseThreshold - persistenceBonus;
     
     // If weighted sum exceeds threshold, derive direction
     if (Math.abs(weightedSum) >= effectiveThreshold) {
@@ -2073,13 +2124,12 @@ export const deriveTradeDirection = (
     }
   }
   
-  // ============= PRIORITY 0.5: MOMENTUM-AWARE DIRECTION OVERRIDE =============
-  // When momentum conditions are met, OVERRIDE the 30m trend to derive direction
-  // This prevents missing LONG signals when momentum is bullish but 30m is bearish
-  // Logic: momentumScore > 20 AND momentumSlope > 0 AND orderFlow = bullish 
-  //        AND StochRSI < oversold_threshold AND NOT (ADX_30m > 30 AND ADX_slope > 0)
-  if (MOMENTUM_OVERRIDE_DIRECTION_PARAMS.ENABLED) {
+  // ============= PRIORITY 0.5: MOMENTUM-AWARE DIRECTION OVERRIDE (WEIGHTED) =============
+  // PHASE 2: Converted from 5-factor AND gate to weighted scoring system
+  // This mirrors human decision-making which uses 2-3 factors, not all 5
+  if (MOMENTUM_OVERRIDE_DIRECTION_PARAMS.ENABLED && regimeConfig.momentumOverrideEnabled) {
     const MO = MOMENTUM_OVERRIDE_DIRECTION_PARAMS;
+    const T2 = TIER2_WEIGHTED_CONFIRMATION;
     
     // Get momentum data
     const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
@@ -2088,7 +2138,6 @@ export const deriveTradeDirection = (
     
     // Get 30m ADX data for blocking condition
     const adx30m = timeframes['30m']?.adx ?? trendData.volatility?.adx ?? 0;
-    const adxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
     
     // Get order flow data
     const ofScore = orderFlowData?.score ?? 0;
@@ -2096,123 +2145,117 @@ export const deriveTradeDirection = (
     const orderFlowBullish = ofSignal.includes("buy") || ofSignal === "bullish" || ofSignal === "strong_buy";
     const orderFlowBearish = ofSignal.includes("sell") || ofSignal === "bearish" || ofSignal === "strong_sell";
     
-    // Check for LONG override conditions
-    const longMomentumOk = momentumScore > MO.MIN_MOMENTUM_SCORE && momentumSlope > MO.MIN_MOMENTUM_SLOPE;
-    const longStochOk = stochK <= MO.STOCHRSI_OVERSOLD_THRESHOLD;
-    const longOrderFlowOk = orderFlowBullish && ofScore >= MO.MIN_ORDER_FLOW_SCORE;
-    
-    // Check for SHORT override conditions  
-    const shortMomentumOk = momentumScore < -MO.MIN_MOMENTUM_SCORE && momentumSlope < -MO.MIN_MOMENTUM_SLOPE;
-    const shortStochOk = stochK >= MO.STOCHRSI_OVERBOUGHT_THRESHOLD;
-    const shortOrderFlowOk = orderFlowBearish && ofScore >= MO.MIN_ORDER_FLOW_SCORE;
+    // Determine direction based on momentum
+    const attemptLong = momentumScore > 0;
+    const absMomentum = Math.abs(momentumScore);
     
     // Blocking condition: strong established 30m trend that we shouldn't fight
     const has30mStrongTrend = adx30m > MO.BLOCK_IF_30M_ADX_ABOVE && adxSlope > MO.BLOCK_IF_ADX_SLOPE_ABOVE;
-    
-    // For LONG: block if 30m is strongly bearish and confirmed
     const block30mBearish = has30mStrongTrend && trend30m === "bearish";
-    // For SHORT: block if 30m is strongly bullish and confirmed
     const block30mBullish = has30mStrongTrend && trend30m === "bullish";
+    const blocked = attemptLong ? block30mBearish : block30mBullish;
     
-    // Evaluate LONG override
-    if (longMomentumOk && longOrderFlowOk && longStochOk && !block30mBearish) {
-      // Calculate confidence
-      let confidence: number = MO.BASE_CONFIDENCE;
-      let positionMultiplier: number = MO.BASE_POSITION_MULTIPLIER;
+    if (!blocked && absMomentum > 0) {
+      // ============= PHASE 2: WEIGHTED TIER 2 SCORING =============
+      let tier2Score = 0;
+      const tier2Reasons: string[] = [];
       
-      // Strong momentum bonus
-      if (momentumScore >= MO.STRONG_MOMENTUM_SCORE) {
-        confidence += 5;
+      // Point 1-2: Momentum strength
+      if (absMomentum >= MO.STRONG_MOMENTUM_SCORE) {
+        tier2Score += T2.MOMENTUM_STRONG_POINTS;
+        tier2Reasons.push(`momentum_strong(${absMomentum.toFixed(0)})+${T2.MOMENTUM_STRONG_POINTS}`);
+      } else if (absMomentum >= MO.MIN_MOMENTUM_SCORE) {
+        tier2Score += T2.MOMENTUM_WEAK_POINTS;
+        tier2Reasons.push(`momentum_weak(${absMomentum.toFixed(0)})+${T2.MOMENTUM_WEAK_POINTS}`);
       }
       
-      // Strong order flow bonus
-      if (ofScore >= MO.STRONG_ORDER_FLOW_SCORE) {
-        confidence += 5;
-        positionMultiplier = MO.STRONG_POSITION_MULTIPLIER;
+      // Point 3-4: Order flow alignment
+      const orderFlowAligned = attemptLong ? orderFlowBullish : orderFlowBearish;
+      if (orderFlowAligned && ofScore >= MO.MIN_ORDER_FLOW_SCORE) {
+        tier2Score += T2.ORDER_FLOW_ALIGNED_POINTS;
+        tier2Reasons.push(`orderFlow(${ofScore.toFixed(0)})+${T2.ORDER_FLOW_ALIGNED_POINTS}`);
       }
       
-      // Very oversold StochRSI bonus (mean reversion setup)
-      if (stochK <= 15) {
-        confidence += 5;
+      // Point 5: StochRSI extreme (REGIME-GATED)
+      // PHASE 3: In trending regimes, StochRSI is a BONUS not a requirement
+      const stochExtremeLong = stochK <= MO.STOCHRSI_OVERSOLD_THRESHOLD;
+      const stochExtremeShort = stochK >= MO.STOCHRSI_OVERBOUGHT_THRESHOLD;
+      const stochExtreme = attemptLong ? stochExtremeLong : stochExtremeShort;
+      
+      // Check if StochRSI is required in this regime
+      const stochRequired = (MO.STOCHRSI_REQUIRED_IN_REGIME as readonly string[]).includes(regime);
+      const stochIsBonus = suppressStochRSI || (MO.STOCHRSI_BONUS_IN_REGIME as readonly string[]).includes(regime);
+      
+      if (stochExtreme) {
+        tier2Score += T2.STOCH_EXTREME_POINTS;
+        tier2Reasons.push(`stochExtreme(${stochK.toFixed(0)})+${T2.STOCH_EXTREME_POINTS}`);
       }
       
-      // 4h alignment bonus
-      if (trend4h === "bullish" && conf4h >= 50) {
-        confidence += 5;
-        positionMultiplier = Math.min(0.80, positionMultiplier + 0.05);
+      // Point 6: Momentum slope positive
+      const slopePositive = attemptLong ? momentumSlope > MO.MIN_MOMENTUM_SLOPE : momentumSlope < -MO.MIN_MOMENTUM_SLOPE;
+      if (slopePositive) {
+        tier2Score += T2.SLOPE_POSITIVE_POINTS;
+        tier2Reasons.push(`slope(${momentumSlope.toFixed(2)})+${T2.SLOPE_POSITIVE_POINTS}`);
       }
       
-      confidence = Math.min(confidence, MO.MAX_CONFIDENCE);
-      
-      reasons.push(`MOMENTUM OVERRIDE → LONG: score=${momentumScore.toFixed(0)}, slope=${momentumSlope.toFixed(2)}`);
-      reasons.push(`Order flow: ${ofSignal} (${ofScore.toFixed(0)}), StochRSI K=${stochK.toFixed(0)} (oversold)`);
-      reasons.push(`30m trend=${trend30m} overridden by bullish momentum + order flow`);
-      reasons.push(`ADX 30m=${adx30m.toFixed(1)}, slope=${adxSlope.toFixed(2)} | Conf=${confidence.toFixed(0)}% | Pos=${(positionMultiplier * 100).toFixed(0)}%`);
-      
-      return {
-        direction: "long",
-        confidence,
-        source: "momentum-override",
-        reasons,
-        positionSizeMultiplier: positionMultiplier,
-        isMomentumOverride: true,
-      };
-    }
-    
-    // Evaluate SHORT override
-    if (shortMomentumOk && shortOrderFlowOk && shortStochOk && !block30mBullish) {
-      // Calculate confidence
-      let confidence: number = MO.BASE_CONFIDENCE;
-      let positionMultiplier: number = MO.BASE_POSITION_MULTIPLIER;
-      
-      // Strong momentum bonus
-      if (Math.abs(momentumScore) >= MO.STRONG_MOMENTUM_SCORE) {
-        confidence += 5;
+      // Point 7: HTF alignment bonus
+      const htfAligned = (attemptLong && trend4h === "bullish" && conf4h >= 50) ||
+                         (!attemptLong && trend4h === "bearish" && conf4h >= 50);
+      if (htfAligned) {
+        tier2Score += T2.HTF_ALIGNED_POINTS;
+        tier2Reasons.push(`htf(${trend4h})+${T2.HTF_ALIGNED_POINTS}`);
       }
       
-      // Strong order flow bonus
-      if (ofScore >= MO.STRONG_ORDER_FLOW_SCORE) {
-        confidence += 5;
-        positionMultiplier = MO.STRONG_POSITION_MULTIPLIER;
+      // Get regime-specific minimum score
+      const minScore = regime === 'RANGE' ? T2.RANGE_MIN_SCORE :
+                       regime === 'STRONG_TREND' ? T2.STRONG_TREND_MIN_SCORE :
+                       regime === 'EARLY_TREND' ? T2.EARLY_TREND_MIN_SCORE :
+                       T2.NORMAL_MIN_SCORE;
+      
+      // Check if StochRSI is REQUIRED but not met (only in RANGE regime)
+      const stochBlocking = stochRequired && !stochExtreme;
+      
+      // Evaluate if score meets threshold
+      if (tier2Score >= minScore && !stochBlocking) {
+        const direction: TradeDirection = attemptLong ? "long" : "short";
+        
+        // Calculate position multiplier based on score
+        const positionMultiplier = tier2Score >= 7 ? T2.SCORE_7_POSITION_MULT :
+                                   tier2Score >= 6 ? T2.SCORE_6_POSITION_MULT :
+                                   tier2Score >= 5 ? T2.SCORE_5_POSITION_MULT :
+                                   tier2Score >= 4 ? T2.SCORE_4_POSITION_MULT :
+                                   T2.SCORE_3_POSITION_MULT;
+        
+        // Calculate confidence
+        let confidence = T2.BASE_CONFIDENCE + (tier2Score * T2.CONFIDENCE_PER_POINT);
+        // StochRSI bonus in non-required regimes
+        if (stochIsBonus && stochExtreme) {
+          confidence += MO.STOCHRSI_BONUS_CONFIDENCE;
+        }
+        confidence = Math.min(confidence, T2.MAX_CONFIDENCE);
+        
+        reasons.push(`WEIGHTED MOMENTUM OVERRIDE → ${direction.toUpperCase()}: Tier2 score=${tier2Score}/${minScore} (${regime})`);
+        reasons.push(`Scoring: ${tier2Reasons.join(', ')}`);
+        reasons.push(`StochRSI K=${stochK.toFixed(0)} (${stochIsBonus ? 'bonus' : 'required'} in ${regime})`);
+        reasons.push(`Conf=${confidence.toFixed(0)}% | Pos=${(positionMultiplier * 100).toFixed(0)}%`);
+        
+        return {
+          direction,
+          confidence,
+          source: "weighted-momentum-override",
+          reasons,
+          positionSizeMultiplier: positionMultiplier,
+          isMomentumOverride: true,
+          regime,
+          tier2Score,
+        };
+      } else {
+        // Log why weighted override didn't trigger
+        reasons.push(`WEIGHTED OVERRIDE SKIPPED: score=${tier2Score} < ${minScore} (${regime})${stochBlocking ? ' | StochRSI required but not extreme' : ''}`);
+        reasons.push(`Factors: ${tier2Reasons.join(', ')}`);
       }
-      
-      // Very overbought StochRSI bonus (mean reversion setup)
-      if (stochK >= 85) {
-        confidence += 5;
-      }
-      
-      // 4h alignment bonus
-      if (trend4h === "bearish" && conf4h >= 50) {
-        confidence += 5;
-        positionMultiplier = Math.min(0.80, positionMultiplier + 0.05);
-      }
-      
-      confidence = Math.min(confidence, MO.MAX_CONFIDENCE);
-      
-      reasons.push(`MOMENTUM OVERRIDE → SHORT: score=${momentumScore.toFixed(0)}, slope=${momentumSlope.toFixed(2)}`);
-      reasons.push(`Order flow: ${ofSignal} (${ofScore.toFixed(0)}), StochRSI K=${stochK.toFixed(0)} (overbought)`);
-      reasons.push(`30m trend=${trend30m} overridden by bearish momentum + order flow`);
-      reasons.push(`ADX 30m=${adx30m.toFixed(1)}, slope=${adxSlope.toFixed(2)} | Conf=${confidence.toFixed(0)}% | Pos=${(positionMultiplier * 100).toFixed(0)}%`);
-      
-      return {
-        direction: "short",
-        confidence,
-        source: "momentum-override",
-        reasons,
-        positionSizeMultiplier: positionMultiplier,
-        isMomentumOverride: true,
-      };
-    }
-    
-    // Log why override didn't trigger (for debugging)
-    if (momentumScore > MO.MIN_MOMENTUM_SCORE || momentumScore < -MO.MIN_MOMENTUM_SCORE) {
-      const dir = momentumScore > 0 ? "LONG" : "SHORT";
-      const slopeOk = momentumScore > 0 ? momentumSlope > MO.MIN_MOMENTUM_SLOPE : momentumSlope < -MO.MIN_MOMENTUM_SLOPE;
-      const stochOk = momentumScore > 0 ? longStochOk : shortStochOk;
-      const ofOk = momentumScore > 0 ? longOrderFlowOk : shortOrderFlowOk;
-      const blocked = momentumScore > 0 ? block30mBearish : block30mBullish;
-      
-      reasons.push(`MOMENTUM OVERRIDE SKIPPED (${dir}): slopeOk=${slopeOk}, stochOk=${stochOk}, ofOk=${ofOk}, blocked30m=${blocked}`);
+    } else if (blocked) {
+      reasons.push(`MOMENTUM OVERRIDE BLOCKED: 30m ADX=${adx30m.toFixed(1)} > ${MO.BLOCK_IF_30M_ADX_ABOVE} with slope=${adxSlope.toFixed(2)} > 0`);
     }
   }
   

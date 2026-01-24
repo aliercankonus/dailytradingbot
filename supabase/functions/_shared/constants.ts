@@ -4000,11 +4000,105 @@ export const MICRO_TREND_MOMENTUM_SAFETY = {
   LOG_DENIALS: true,
 } as const;
 
+// ============= PHASE 1: DIRECTION REGIME CLASSIFIER =============
+// Determines market regime BEFORE direction derivation to adjust gate behavior
+// IMPROVEMENT: Explicitly labels market state to avoid implicit regime inference
+export const DIRECTION_REGIME_PARAMS = {
+  ENABLED: true,
+  
+  // ===== REGIME DETECTION THRESHOLDS =====
+  STRONG_TREND_ADX: 30,         // ADX >= 30 = STRONG_TREND
+  EARLY_TREND_ADX: 18,          // ADX 18-30 = EARLY_TREND
+  RANGE_ADX_MAX: 18,            // ADX < 18 = RANGE
+  EXHAUSTION_ADX: 45,           // ADX > 45 = check for exhaustion
+  EXHAUSTION_SLOPE_THRESHOLD: 0, // ADX slope <= 0 = exhausted (not accelerating)
+  
+  // ===== REGIME-SPECIFIC TIER 1 THRESHOLD RELAXATION =====
+  // Lower weighted sum threshold for specific regimes
+  STRONG_TREND: {
+    relaxTier1Threshold: 0.40,     // Lower from 0.55 to 0.40
+    suppressStochImportance: true, // StochRSI becomes bonus, not requirement
+    momentumOverrideEnabled: true,
+  },
+  EARLY_TREND: {
+    relaxTier1Threshold: 0.45,     // Lower from 0.55 to 0.45
+    suppressStochImportance: false,
+    momentumOverrideEnabled: true,
+  },
+  RANGE: {
+    relaxTier1Threshold: 0.55,     // Standard threshold
+    suppressStochImportance: false,
+    momentumOverrideEnabled: false,
+  },
+  EXHAUSTION: {
+    relaxTier1Threshold: 0.45,     // Allow counter-trend
+    suppressStochImportance: true, // StochRSI extremes expected
+    momentumOverrideEnabled: false,// Don't override exhausted trends
+  },
+} as const;
+
+export type DirectionRegime = 'STRONG_TREND' | 'EARLY_TREND' | 'RANGE' | 'EXHAUSTION';
+
+// ============= PHASE 2: TIER 2 WEIGHTED CONFIRMATION =============
+// Converts Tier 2 (Momentum Override) from 5-factor AND gate to weighted scoring
+// IMPROVEMENT: Human traders use 2-3 factors, not all 5
+export const TIER2_WEIGHTED_CONFIRMATION = {
+  ENABLED: true,
+  
+  // ===== POINT VALUES =====
+  MOMENTUM_STRONG_POINTS: 2,    // score > 35 = +2
+  MOMENTUM_WEAK_POINTS: 1,      // score > 20 = +1
+  ORDER_FLOW_ALIGNED_POINTS: 2, // Order flow aligns with momentum = +2
+  STOCH_EXTREME_POINTS: 1,      // StochRSI at extreme (bonus, not required) = +1
+  SLOPE_POSITIVE_POINTS: 1,     // Momentum slope positive = +1
+  HTF_ALIGNED_POINTS: 1,        // 4h trend aligns = +1 (bonus)
+  
+  // ===== THRESHOLDS PER REGIME =====
+  STRONG_TREND_MIN_SCORE: 3,    // Relaxed: only 3 of 7 points needed
+  EARLY_TREND_MIN_SCORE: 3,     // Relaxed: only 3 of 7 points needed
+  NORMAL_MIN_SCORE: 4,          // Standard: 4 of 7 points needed
+  RANGE_MIN_SCORE: 5,           // Stricter: 5 of 7 for ranging markets
+  
+  // ===== POSITION SIZING BASED ON SCORE =====
+  SCORE_3_POSITION_MULT: 0.55,  // Just met threshold
+  SCORE_4_POSITION_MULT: 0.65,  // Moderate confirmation
+  SCORE_5_POSITION_MULT: 0.75,  // Good confirmation
+  SCORE_6_POSITION_MULT: 0.85,  // Strong confirmation
+  SCORE_7_POSITION_MULT: 0.90,  // Full confirmation
+  
+  // ===== CONFIDENCE CALCULATION =====
+  BASE_CONFIDENCE: 50,
+  MAX_CONFIDENCE: 70,
+  CONFIDENCE_PER_POINT: 3,      // +3 confidence per point
+} as const;
+
+// ============= PHASE 4: DIRECTIONAL BIAS ESCAPE HATCH =============
+// Final safety valve when all tiers fail but momentum is clearly building
+// IMPROVEMENT: Prevents paralysis during regime transitions
+export const DIRECTIONAL_BIAS_ESCAPE_PARAMS = {
+  ENABLED: true,
+  
+  // ===== CONDITIONS (all must be true) =====
+  HTF_NEUTRAL_REQUIRED: true,           // 4h must be neutral
+  MOMENTUM_RISING_BARS: 3,              // Momentum score rising for 3+ bars
+  ORDER_FLOW_NOT_OPPOSING: true,        // Order flow NOT in opposite direction
+  
+  // ===== MOMENTUM MAGNITUDE REQUIREMENT =====
+  MIN_MOMENTUM_MAGNITUDE: 15,           // |score| >= 15 (lower than fallback)
+  MOMENTUM_RISING_THRESHOLD: 5,         // Score must have increased by 5+ over bars
+  
+  // ===== POSITION SIZING (very conservative) =====
+  ESCAPE_POSITION_MULTIPLIER: 0.45,     // 45% position size max
+  
+  // ===== CONFIDENCE =====
+  ESCAPE_BASE_CONFIDENCE: 45,
+  ESCAPE_MAX_CONFIDENCE: 55,
+} as const;
+
 // ============= MOMENTUM OVERRIDE DIRECTION PARAMS =============
 // HIGH PRIORITY: When momentum conditions are met, OVERRIDE the 30m trend direction
 // This allows LONG signals when momentum is bullish even if 30m trend is bearish
-// Logic: momentumScore > 20 AND momentumSlope > 0 AND orderFlow = bullish 
-//        AND StochRSI < oversold AND NOT (ADX_30m > 30 AND ADX_slope > 0)
+// UPDATED: Now uses weighted confirmation in trending regimes
 export const MOMENTUM_OVERRIDE_DIRECTION_PARAMS = {
   // Enable this momentum override mechanism
   ENABLED: true,
@@ -4025,10 +4119,14 @@ export const MOMENTUM_OVERRIDE_DIRECTION_PARAMS = {
   STRONG_ORDER_FLOW_SCORE: 60,      // >= 60 = strong confirmation
   
   // ===== STOCHRSI OVERSOLD/OVERBOUGHT =====
-  // For LONG override: StochRSI should be oversold (favor mean reversion)
-  // For SHORT override: StochRSI should be overbought
+  // PHASE 3 UPDATE: StochRSI is regime-gated (bonus in trends, required in ranges)
   STOCHRSI_OVERSOLD_THRESHOLD: 25,  // K <= 25 favors LONG override
   STOCHRSI_OVERBOUGHT_THRESHOLD: 75, // K >= 75 favors SHORT override
+  // Regimes where StochRSI is a REQUIREMENT
+  STOCHRSI_REQUIRED_IN_REGIME: ['RANGE'] as DirectionRegime[],
+  // Regimes where StochRSI is just a BONUS
+  STOCHRSI_BONUS_IN_REGIME: ['STRONG_TREND', 'EARLY_TREND', 'EXHAUSTION'] as DirectionRegime[],
+  STOCHRSI_BONUS_CONFIDENCE: 5,     // +5 confidence if StochRSI confirms in bonus mode
   
   // ===== ADX BLOCKING CONDITION =====
   // Block override if 30m has established strong trend (ADX > 30 AND rising)
