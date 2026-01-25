@@ -4143,6 +4143,61 @@ export const MOMENTUM_OVERRIDE_DIRECTION_PARAMS = {
   MAX_CONFIDENCE: 70,
 } as const;
 
+// ============= EXHAUSTION REVERSAL OVERRIDE PARAMS =============
+// HIGH PRIORITY (0.25): Detects extreme exhaustion (deep oversold/overbought) and overrides direction
+// This captures bounce setups that lagging HTF trend labels miss
+// Runs BEFORE Tier 2 Momentum Override to catch mean-reversion opportunities
+export const EXHAUSTION_REVERSAL_OVERRIDE_PARAMS = {
+  ENABLED: true,
+  
+  // ===== STOCHRSI THRESHOLDS =====
+  // StochRSI 4h K thresholds for exhaustion detection
+  LONG_K_THRESHOLD: 10,           // K <= 10 for LONG override (deep oversold)
+  SHORT_K_THRESHOLD: 90,          // K >= 90 for SHORT override (deep overbought)
+  
+  // ===== BOLLINGER %B THRESHOLDS =====
+  // Price position relative to Bollinger Bands
+  LONG_PERCENT_B_THRESHOLD: 20,   // %B <= 20 (at/below lower band)
+  SHORT_PERCENT_B_THRESHOLD: 80,  // %B >= 80 (at/near upper band)
+  
+  // ===== MOMENTUM REQUIREMENTS =====
+  // At least ONE of these must be true for direction confirmation
+  // For LONG: score > 0 OR slope > 0 OR MACD improving
+  // For SHORT: score < 0 OR slope < 0 OR MACD declining
+  REQUIRE_MOMENTUM_CONFIRMATION: true,
+  MACD_IMPROVING_COUNTS: true,    // MACD histogram improving counts as confirmation
+  
+  // ===== ADX REQUIREMENTS =====
+  // ADX must NOT be accelerating (prevents catching falling knives)
+  MAX_ADX_SLOPE: 0.05,            // ADX slope must be <= 0.05
+  
+  // ===== EXPANSION/BREAKOUT BLOCKING =====
+  // Block override during active expansion (volume spike or squeeze release)
+  BLOCK_ON_EXPANSION: true,
+  MAX_VOLUME_RATIO: 1.8,          // Block if volume ratio > 1.8
+  BLOCK_ON_SQUEEZE_RELEASE: true, // Block if squeeze just released
+  
+  // ===== SHORT-SPECIFIC RESTRICTIONS =====
+  // Extra protection against shorting into strong uptrends
+  SHORT_BLOCK_IF_4H_BULLISH_CONF: 70, // Block SHORT if 4h bullish >= 70%
+  
+  // ===== POSITION SIZING =====
+  BASE_POSITION_MULTIPLIER: 0.40,      // 40% base
+  MOMENTUM_CONFIRMED_MULTIPLIER: 0.50, // 50% with momentum confirmation
+  STRONG_SETUP_MULTIPLIER: 0.55,       // 55% with momentum + order flow
+  
+  // ===== CONFIDENCE CALCULATION =====
+  BASE_CONFIDENCE: 55,
+  MOMENTUM_CONFIRMS_BONUS: 5,
+  ORDER_FLOW_ALIGNED_BONUS: 5,
+  MACD_IMPROVING_BONUS: 5,
+  MAX_CONFIDENCE: 70,
+  
+  // ===== LOGGING =====
+  LOG_OVERRIDES: true,
+  LOG_SKIPS: true,
+} as const;
+
 // ============= MOMENTUM FALLBACK DIRECTION PARAMS =============
 // LOWER PRIORITY: When timeframe trends conflict or are neutral, use momentum + order flow
 // This is the fallback after all other direction methods fail

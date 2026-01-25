@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, MOMENTUM_FALLBACK_DIRECTION_PARAMS, DIRECTION_REGIME_PARAMS, TIER2_WEIGHTED_CONFIRMATION, DIRECTIONAL_BIAS_ESCAPE_PARAMS, type AdxPhase, type ExceptionType, type MasterMarketRegime, type DirectionRegime } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, MOMENTUM_FALLBACK_DIRECTION_PARAMS, DIRECTION_REGIME_PARAMS, TIER2_WEIGHTED_CONFIRMATION, DIRECTIONAL_BIAS_ESCAPE_PARAMS, EXHAUSTION_REVERSAL_OVERRIDE_PARAMS, type AdxPhase, type ExceptionType, type MasterMarketRegime, type DirectionRegime } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -1960,6 +1960,7 @@ export interface DirectionResult {
   regime?: DirectionRegime;            // Market regime used for direction derivation
   tier2Score?: number;                 // Tier 2 weighted confirmation score
   isEscapeHatch?: boolean;             // Used directional bias escape hatch
+  isExhaustionReversal?: boolean;      // Used exhaustion reversal override (Priority 0.25)
 }
 
 // Import direction params
@@ -2119,6 +2120,157 @@ export const deriveTradeDirection = (
             orderFlowTiebreaker: true,
             positionSizeMultiplier: P.ORDER_FLOW_POSITION_MULTIPLIER,
           };
+        }
+      }
+    }
+  }
+  
+  // ============= PRIORITY 0.25: EXHAUSTION REVERSAL OVERRIDE =============
+  // When market is at extreme exhaustion (deep oversold/overbought), override direction
+  // This captures bounce setups that lagging trend labels miss
+  if (EXHAUSTION_REVERSAL_OVERRIDE_PARAMS.ENABLED) {
+    const ER = EXHAUSTION_REVERSAL_OVERRIDE_PARAMS;
+    
+    // Get 4h StochRSI K value
+    const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 
+                     trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
+    
+    // Get Bollinger %B (4h preferred, fall back to 1h)
+    const percentB4h = trendData.bollingerBands?.['4h']?.percentB ?? 50;
+    const percentB1h = trendData.bollingerBands?.['1h']?.percentB ?? 50;
+    const percentB = percentB4h !== 50 ? percentB4h : percentB1h;
+    
+    // Get momentum data
+    const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+    const momentumSlope = trendData.smartMomentum?.components?.macdSlope ?? 
+                          trendData.momentum?.macdSlope ?? 0;
+    const macdHist = trendData.momentum?.macdHistogram ?? 0;
+    const prevMacdHist = trendData.momentum?.prevMacdHistogram ?? macdHist;
+    const macdImproving = macdHist > prevMacdHist;
+    const macdDeclining = macdHist < prevMacdHist;
+    
+    // Get ADX slope for acceleration check
+    const erAdxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
+    
+    // Get volume/expansion data
+    const volumeRatio = trendData.volume?.ratio ?? trendData.volatility?.volumeRatio ?? 1.0;
+    const squeezeJustReleased = trendData.squeeze?.justReleased ?? false;
+    const isExpansion = (volumeRatio > ER.MAX_VOLUME_RATIO) || 
+                        (ER.BLOCK_ON_SQUEEZE_RELEASE && squeezeJustReleased);
+    
+    // Get order flow data
+    const ofScore = orderFlowData?.score ?? 0;
+    const ofSignal = orderFlowData?.signal?.toLowerCase() ?? "";
+    const ofBullish = ofSignal.includes("buy") || ofSignal === "bullish";
+    const ofBearish = ofSignal.includes("sell") || ofSignal === "bearish";
+    
+    // ===== CHECK FOR LONG EXHAUSTION REVERSAL =====
+    const isDeepOversold = stochK4h <= ER.LONG_K_THRESHOLD;
+    const belowLowerBand = percentB <= ER.LONG_PERCENT_B_THRESHOLD;
+    const momentumConfirmsLong = momentumScore > 0 || momentumSlope > 0 || 
+                                 (ER.MACD_IMPROVING_COUNTS && macdImproving);
+    const adxNotAccelerating = erAdxSlope <= ER.MAX_ADX_SLOPE;
+    
+    if (isDeepOversold && belowLowerBand && !isExpansion && adxNotAccelerating) {
+      // Check if momentum confirms (or we don't require it)
+      if (!ER.REQUIRE_MOMENTUM_CONFIRMATION || momentumConfirmsLong) {
+        // Calculate confidence and position size
+        let erConfidence: number = ER.BASE_CONFIDENCE;
+        let positionMult: number = ER.BASE_POSITION_MULTIPLIER;
+        const erReasons: string[] = [];
+        
+        if (momentumScore > 0) {
+          erConfidence += ER.MOMENTUM_CONFIRMS_BONUS;
+          positionMult = ER.MOMENTUM_CONFIRMED_MULTIPLIER;
+          erReasons.push(`momentum_positive(${momentumScore.toFixed(0)})`);
+        }
+        if (ofBullish && ofScore >= 50) {
+          erConfidence += ER.ORDER_FLOW_ALIGNED_BONUS;
+          positionMult = Math.max(positionMult, ER.STRONG_SETUP_MULTIPLIER);
+          erReasons.push(`orderFlow_bullish(${ofScore.toFixed(0)})`);
+        }
+        if (macdImproving) {
+          erConfidence += ER.MACD_IMPROVING_BONUS;
+          erReasons.push("macd_improving");
+        }
+        
+        erConfidence = Math.min(erConfidence, ER.MAX_CONFIDENCE);
+        
+        reasons.push(`EXHAUSTION REVERSAL OVERRIDE → LONG`);
+        reasons.push(`StochRSI 4h K=${stochK4h.toFixed(1)} <= ${ER.LONG_K_THRESHOLD} (deep oversold)`);
+        reasons.push(`Bollinger %B=${percentB.toFixed(1)} <= ${ER.LONG_PERCENT_B_THRESHOLD} (below lower band)`);
+        reasons.push(`ADX slope=${erAdxSlope.toFixed(2)} <= ${ER.MAX_ADX_SLOPE} (not accelerating)`);
+        reasons.push(`Confirmations: ${erReasons.length > 0 ? erReasons.join(", ") : "base setup only"}`);
+        reasons.push(`Conf=${erConfidence.toFixed(0)}% | Pos=${(positionMult * 100).toFixed(0)}%`);
+        
+        return {
+          direction: "long",
+          confidence: erConfidence,
+          source: "exhaustion-reversal",
+          reasons,
+          positionSizeMultiplier: positionMult,
+          isExhaustionReversal: true,
+          regime,
+        };
+      } else {
+        if (ER.LOG_SKIPS) {
+          reasons.push(`EXHAUSTION LONG SKIPPED: K=${stochK4h.toFixed(1)}, %B=${percentB.toFixed(1)} but momentum not confirming (score=${momentumScore.toFixed(0)}, slope=${momentumSlope.toFixed(2)}, macdImproving=${macdImproving})`);
+        }
+      }
+    }
+    
+    // ===== CHECK FOR SHORT EXHAUSTION REVERSAL =====
+    const isDeepOverbought = stochK4h >= ER.SHORT_K_THRESHOLD;
+    const aboveUpperBand = percentB >= ER.SHORT_PERCENT_B_THRESHOLD;
+    const momentumConfirmsShort = momentumScore < 0 || momentumSlope < 0 || 
+                                  (ER.MACD_IMPROVING_COUNTS && macdDeclining);
+    
+    // Additional SHORT protection: block if 4h is strongly bullish
+    const is4hStrongBullish = trend4h === "bullish" && conf4h >= ER.SHORT_BLOCK_IF_4H_BULLISH_CONF;
+    
+    if (isDeepOverbought && aboveUpperBand && !isExpansion && adxNotAccelerating && !is4hStrongBullish) {
+      if (!ER.REQUIRE_MOMENTUM_CONFIRMATION || momentumConfirmsShort) {
+        let erConfidence: number = ER.BASE_CONFIDENCE;
+        let positionMult: number = ER.BASE_POSITION_MULTIPLIER;
+        const erReasons: string[] = [];
+        
+        if (momentumScore < 0) {
+          erConfidence += ER.MOMENTUM_CONFIRMS_BONUS;
+          positionMult = ER.MOMENTUM_CONFIRMED_MULTIPLIER;
+          erReasons.push(`momentum_negative(${momentumScore.toFixed(0)})`);
+        }
+        if (ofBearish && ofScore >= 50) {
+          erConfidence += ER.ORDER_FLOW_ALIGNED_BONUS;
+          positionMult = Math.max(positionMult, ER.STRONG_SETUP_MULTIPLIER);
+          erReasons.push(`orderFlow_bearish(${ofScore.toFixed(0)})`);
+        }
+        if (macdDeclining) {
+          erConfidence += ER.MACD_IMPROVING_BONUS;
+          erReasons.push("macd_declining");
+        }
+        
+        erConfidence = Math.min(erConfidence, ER.MAX_CONFIDENCE);
+        
+        reasons.push(`EXHAUSTION REVERSAL OVERRIDE → SHORT`);
+        reasons.push(`StochRSI 4h K=${stochK4h.toFixed(1)} >= ${ER.SHORT_K_THRESHOLD} (deep overbought)`);
+        reasons.push(`Bollinger %B=${percentB.toFixed(1)} >= ${ER.SHORT_PERCENT_B_THRESHOLD} (above upper band)`);
+        reasons.push(`ADX slope=${erAdxSlope.toFixed(2)} <= ${ER.MAX_ADX_SLOPE} (not accelerating)`);
+        reasons.push(`4h trend: ${trend4h} (${conf4h.toFixed(0)}%) - not blocking`);
+        reasons.push(`Confirmations: ${erReasons.length > 0 ? erReasons.join(", ") : "base setup only"}`);
+        reasons.push(`Conf=${erConfidence.toFixed(0)}% | Pos=${(positionMult * 100).toFixed(0)}%`);
+        
+        return {
+          direction: "short",
+          confidence: erConfidence,
+          source: "exhaustion-reversal",
+          reasons,
+          positionSizeMultiplier: positionMult,
+          isExhaustionReversal: true,
+          regime,
+        };
+      } else {
+        if (ER.LOG_SKIPS) {
+          reasons.push(`EXHAUSTION SHORT SKIPPED: K=${stochK4h.toFixed(1)}, %B=${percentB.toFixed(1)} but momentum not confirming (score=${momentumScore.toFixed(0)}, slope=${momentumSlope.toFixed(2)}, macdDeclining=${macdDeclining})`);
         }
       }
     }
