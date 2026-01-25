@@ -1,222 +1,345 @@
 
+# Plan: Add Exhaustion Reversal Override to deriveTradeDirection
 
-# Plan: Add Momentum & Order Flow Fallback in deriveTradeDirection
+## Problem Statement
+The current `deriveTradeDirection` function lacks a high-priority mechanism to detect and respond to **extreme exhaustion reversal setups**. When:
+- StochRSI 4h K < 10 (deep oversold)
+- Price is below the Bollinger lower band (%B < 20)
+- Momentum has turned positive (or is improving)
 
-## Problem Summary
-The current `deriveTradeDirection` function relies heavily on timeframe trend analysis (4h, 1h, 30m) to determine trade direction. When these trends conflict or are neutral, the function returns `direction: null`, causing a deadlock where:
-- Momentum score indicates bullish (e.g., +27)
-- Order flow shows "buy" signal
-- StochRSI is oversold (K=5)
-- Yet **no signal is generated** because timeframe trends don't agree
+The system should override the derived direction to **LONG** regardless of HTF trend labels, since these conditions represent a statistically high-probability bounce setup.
 
-This is why the system has generated **zero LONG signals** despite bullish market conditions.
+Currently, the mean-reversion module in `mean-reversion.ts` handles exhaustion detection separately, but it does not integrate with the direction derivation flow. The direction derivation still returns SHORT or null based on lagging HTF trend labels, causing the paradox identified in the market conditions analysis.
 
-## Solution Overview
-Add a new fallback mechanism at the end of `deriveTradeDirection` that uses **momentum score** and **order flow** to determine direction when:
-1. All timeframes are neutral OR
-2. Timeframes are conflicting with no clear winner
+## Solution Architecture
 
-## Technical Implementation
+### New Priority Level: EXHAUSTION REVERSAL OVERRIDE (Priority 0.25)
+Insert a new direction override that runs **before** the weighted momentum override (Priority 0.5). This ensures exhaustion reversal detection takes precedence over trend-following logic.
 
-### File: `supabase/functions/_shared/constants.ts`
+### Detection Criteria (AND gate with relaxed requirements)
+For **LONG** override:
+1. **StochRSI 4h K ≤ 10** (extreme oversold)
+2. **Bollinger %B ≤ 20** (at or below lower band)
+3. **Momentum positive OR improving** (score > 0 OR slope > 0 OR MACD histogram improving)
+4. **ADX not accelerating** (slope ≤ 0) - prevents catching falling knives
+5. **NOT in breakout/expansion** (volume ratio < 1.8 or no squeeze release)
 
-Add new configuration parameters:
+For **SHORT** override (symmetric, but stricter):
+1. **StochRSI 4h K ≥ 90** (extreme overbought)
+2. **Bollinger %B ≥ 80** (at or near upper band)
+3. **Momentum negative OR declining** (score < 0 OR slope < 0 OR MACD histogram declining)
+4. **ADX not accelerating** (slope ≤ 0)
+5. **4h trend not bullish with high confidence** (prevents shorting into strong uptrends)
 
-```typescript
-// ============= MOMENTUM FALLBACK DIRECTION PARAMS =============
-// When timeframe trends conflict or are neutral, use momentum + order flow
-export const MOMENTUM_FALLBACK_DIRECTION_PARAMS = {
-  // Enable this fallback mechanism
+### Position Sizing (Conservative)
+- **Base**: 40% of normal position
+- **With momentum confirmation**: 50% of normal position
+- **With strong momentum + order flow alignment**: 55% of normal position
+
+### Confidence Calculation
+- Base: 55% confidence
+- +5% if momentum confirms direction
+- +5% if order flow aligns
+- +5% if MACD histogram improving in direction
+- Maximum: 70%
+
+---
+
+## Implementation Details
+
+### File 1: `supabase/functions/_shared/constants.ts`
+
+Add new configuration block after `MOMENTUM_OVERRIDE_DIRECTION_PARAMS`:
+
+```text
+EXHAUSTION_REVERSAL_OVERRIDE_PARAMS = {
   ENABLED: true,
   
-  // ===== MOMENTUM SCORE THRESHOLDS =====
-  // Minimum absolute momentum score to derive direction
-  MIN_MOMENTUM_SCORE: 20,           // |score| >= 20 to derive direction
-  // Strong momentum threshold for higher confidence
-  STRONG_MOMENTUM_SCORE: 35,        // |score| >= 35 = strong signal
+  // ===== STOCHRSI THRESHOLDS =====
+  // StochRSI 4h K thresholds for exhaustion detection
+  LONG_K_THRESHOLD: 10,           // K <= 10 for LONG override
+  SHORT_K_THRESHOLD: 90,          // K >= 90 for SHORT override
   
-  // ===== ORDER FLOW REQUIREMENTS =====
-  // Minimum order flow score to support momentum direction
-  MIN_ORDER_FLOW_SCORE: 50,         // Order flow must be >= 50
-  // Strong order flow for confirmation
-  STRONG_ORDER_FLOW_SCORE: 65,      // >= 65 = strong confirmation
+  // ===== BOLLINGER %B THRESHOLDS =====
+  // Price position relative to Bollinger Bands
+  LONG_PERCENT_B_THRESHOLD: 20,   // %B <= 20 (at/below lower band)
+  SHORT_PERCENT_B_THRESHOLD: 80,  // %B >= 80 (at/near upper band)
   
-  // ===== STOCHRSI CONTEXT =====
-  // If StochRSI is extreme AND momentum confirms, boost confidence
-  STOCHRSI_EXTREME_OVERSOLD: 15,    // K <= 15 = oversold context for LONG
-  STOCHRSI_EXTREME_OVERBOUGHT: 85,  // K >= 85 = overbought context for SHORT (mean reversion)
+  // ===== MOMENTUM REQUIREMENTS =====
+  // At least ONE of these must be true for direction confirmation
+  // For LONG: score > 0 OR slope > 0 OR MACD improving
+  // For SHORT: score < 0 OR slope < 0 OR MACD declining
+  REQUIRE_MOMENTUM_CONFIRMATION: true,
+  MACD_IMPROVING_COUNTS: true,    // MACD histogram improving counts as confirmation
   
   // ===== ADX REQUIREMENTS =====
-  // Minimum ADX for momentum fallback (still need some trend structure)
-  MIN_ADX: 18,
+  // ADX must NOT be accelerating (prevents catching falling knives)
+  MAX_ADX_SLOPE: 0.05,            // ADX slope must be <= 0.05
+  
+  // ===== EXPANSION/BREAKOUT BLOCKING =====
+  // Block override during active expansion (volume spike or squeeze release)
+  BLOCK_ON_EXPANSION: true,
+  MAX_VOLUME_RATIO: 1.8,          // Block if volume ratio > 1.8
+  BLOCK_ON_SQUEEZE_RELEASE: true, // Block if squeeze just released
+  
+  // ===== SHORT-SPECIFIC RESTRICTIONS =====
+  // Extra protection against shorting into strong uptrends
+  SHORT_BLOCK_IF_4H_BULLISH_CONF: 70, // Block SHORT if 4h bullish >= 70%
   
   // ===== POSITION SIZING =====
-  // Reduced position for momentum-derived entries
-  BASE_POSITION_MULTIPLIER: 0.55,   // 55% of normal
-  STRONG_POSITION_MULTIPLIER: 0.70, // 70% when both momentum + order flow are strong
+  BASE_POSITION_MULTIPLIER: 0.40,      // 40% base
+  MOMENTUM_CONFIRMED_MULTIPLIER: 0.50, // 50% with momentum
+  STRONG_SETUP_MULTIPLIER: 0.55,       // 55% with momentum + order flow
   
   // ===== CONFIDENCE CALCULATION =====
-  // Base confidence for momentum fallback
-  BASE_CONFIDENCE: 50,
-  // Maximum confidence achievable
-  MAX_CONFIDENCE: 65,
-} as const;
+  BASE_CONFIDENCE: 55,
+  MOMENTUM_CONFIRMS_BONUS: 5,
+  ORDER_FLOW_ALIGNED_BONUS: 5,
+  MACD_IMPROVING_BONUS: 5,
+  MAX_CONFIDENCE: 70,
+  
+  // ===== LOGGING =====
+  LOG_OVERRIDES: true,
+  LOG_SKIPS: true,
+}
 ```
 
-### File: `supabase/functions/_shared/scoring.ts`
+### File 2: `supabase/functions/_shared/scoring.ts`
 
-Modify the `deriveTradeDirection` function to add a new fallback before the final "no direction" return:
+#### 2.1 Update DirectionResult Interface
 
-**Location**: Insert before line 2352 (the final "No clear direction" return)
+Add new field:
 
 ```typescript
-// ============= PRIORITY 7: MOMENTUM + ORDER FLOW FALLBACK =============
-// When all other methods fail, use momentum score + order flow to derive direction
-// This prevents the "deadlock" where bullish momentum + buy order flow = no signal
-if (MOMENTUM_FALLBACK_DIRECTION_PARAMS.ENABLED) {
-  const P = MOMENTUM_FALLBACK_DIRECTION_PARAMS;
+interface DirectionResult {
+  // ... existing fields ...
+  isExhaustionReversal?: boolean;  // NEW: Used exhaustion reversal override
+}
+```
+
+#### 2.2 Add Import
+
+Update the import statement to include the new params:
+
+```typescript
+import { 
+  // ... existing imports ...
+  EXHAUSTION_REVERSAL_OVERRIDE_PARAMS 
+} from "./constants.ts";
+```
+
+#### 2.3 Add Exhaustion Reversal Override Logic
+
+Insert new priority block **BEFORE** the weighted momentum override (Priority 0.5), at approximately line 2127 in `deriveTradeDirection`:
+
+```text
+// ============= PRIORITY 0.25: EXHAUSTION REVERSAL OVERRIDE =============
+// When market is at extreme exhaustion (deep oversold/overbought), override direction
+// This captures bounce setups that lagging trend labels miss
+if (EXHAUSTION_REVERSAL_OVERRIDE_PARAMS.ENABLED) {
+  const ER = EXHAUSTION_REVERSAL_OVERRIDE_PARAMS;
   
-  // Get momentum data from trendData
+  // Get 4h StochRSI K value
+  const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 
+                   trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
+  
+  // Get Bollinger %B (4h preferred, fall back to 1h)
+  const percentB4h = trendData.bollingerBands?.['4h']?.percentB ?? 50;
+  const percentB1h = trendData.bollingerBands?.['1h']?.percentB ?? 50;
+  const percentB = percentB4h !== 50 ? percentB4h : percentB1h;
+  
+  // Get momentum data
   const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
-  const stochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? 50;
+  const momentumSlope = trendData.smartMomentum?.components?.macdSlope ?? 
+                        trendData.momentum?.macdSlope ?? 0;
+  const macdHist = trendData.momentum?.macdHistogram ?? 0;
+  const prevMacdHist = trendData.momentum?.prevMacdHistogram ?? macdHist;
+  const macdImproving = macdHist > prevMacdHist;
+  const macdDeclining = macdHist < prevMacdHist;
   
-  // Check if we have strong enough momentum signal
-  const absMomentum = Math.abs(momentumScore);
-  if (absMomentum >= P.MIN_MOMENTUM_SCORE && adx >= P.MIN_ADX) {
-    const momentumDirection: TradeDirection = momentumScore > 0 ? "long" : "short";
-    
-    // Check order flow alignment
-    const ofScore = orderFlowData?.score ?? 0;
-    const ofSignal = orderFlowData?.signal?.toLowerCase() ?? "";
-    const orderFlowDirection = 
-      (ofSignal.includes("buy") || ofSignal === "bullish") ? "long" :
-      (ofSignal.includes("sell") || ofSignal === "bearish") ? "short" : null;
-    
-    const orderFlowAligned = orderFlowDirection === momentumDirection;
-    const orderFlowStrong = ofScore >= P.STRONG_ORDER_FLOW_SCORE && orderFlowAligned;
-    const orderFlowSupports = ofScore >= P.MIN_ORDER_FLOW_SCORE && orderFlowAligned;
-    
-    // Check StochRSI context (oversold favors LONG, overbought favors SHORT for mean reversion)
-    const stochOversold = stochK <= P.STOCHRSI_EXTREME_OVERSOLD;
-    const stochOverbought = stochK >= P.STOCHRSI_EXTREME_OVERBOUGHT;
-    const stochConfirmsLong = momentumDirection === "long" && stochOversold;
-    const stochConfirmsShort = momentumDirection === "short" && stochOverbought;
-    const stochConfirms = stochConfirmsLong || stochConfirmsShort;
-    
-    // Calculate confidence based on signal strength
-    let confidence = P.BASE_CONFIDENCE;
-    let positionMultiplier = P.BASE_POSITION_MULTIPLIER;
-    
-    // Strong momentum bonus
-    if (absMomentum >= P.STRONG_MOMENTUM_SCORE) {
-      confidence += 5;
-    }
-    
-    // Order flow confirmation bonus
-    if (orderFlowStrong) {
-      confidence += 8;
-      positionMultiplier = P.STRONG_POSITION_MULTIPLIER;
-    } else if (orderFlowSupports) {
-      confidence += 4;
-      positionMultiplier = 0.60;
-    }
-    
-    // StochRSI extreme context bonus (mean reversion setup)
-    if (stochConfirms) {
-      confidence += 5;
-    }
-    
-    confidence = Math.min(confidence, P.MAX_CONFIDENCE);
-    
-    // Only proceed if we have at least one confirmation (order flow OR stochRSI)
-    const hasConfirmation = orderFlowSupports || stochConfirms;
-    
-    if (hasConfirmation) {
-      reasons.push(`MOMENTUM FALLBACK: score=${momentumScore.toFixed(0)} → ${momentumDirection.toUpperCase()}`);
-      reasons.push(`Order flow: score=${ofScore.toFixed(0)}, signal=${ofSignal}, aligned=${orderFlowAligned}`);
-      reasons.push(`StochRSI K=${stochK.toFixed(0)} (${stochOversold ? 'oversold' : stochOverbought ? 'overbought' : 'normal'})`);
-      reasons.push(`ADX=${adx.toFixed(1)} | Confidence=${confidence.toFixed(0)}% | Position=${(positionMultiplier * 100).toFixed(0)}%`);
-      reasons.push("Timeframes neutral/conflicting - momentum + order flow determining direction");
+  // Get ADX data
+  const adxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
+  
+  // Get volume/expansion data
+  const volumeRatio = trendData.volume?.ratio ?? trendData.volatility?.volumeRatio ?? 1.0;
+  const squeezeJustReleased = trendData.squeeze?.justReleased ?? false;
+  const isExpansion = (volumeRatio > ER.MAX_VOLUME_RATIO) || 
+                      (ER.BLOCK_ON_SQUEEZE_RELEASE && squeezeJustReleased);
+  
+  // Get order flow data
+  const ofScore = orderFlowData?.score ?? 0;
+  const ofSignal = orderFlowData?.signal?.toLowerCase() ?? "";
+  const ofBullish = ofSignal.includes("buy") || ofSignal === "bullish";
+  const ofBearish = ofSignal.includes("sell") || ofSignal === "bearish";
+  
+  // ===== CHECK FOR LONG EXHAUSTION REVERSAL =====
+  const isDeepOversold = stochK4h <= ER.LONG_K_THRESHOLD;
+  const belowLowerBand = percentB <= ER.LONG_PERCENT_B_THRESHOLD;
+  const momentumConfirmsLong = momentumScore > 0 || momentumSlope > 0 || 
+                               (ER.MACD_IMPROVING_COUNTS && macdImproving);
+  const adxNotAccelerating = adxSlope <= ER.MAX_ADX_SLOPE;
+  
+  if (isDeepOversold && belowLowerBand && !isExpansion && adxNotAccelerating) {
+    // Check if momentum confirms (or we don't require it)
+    if (!ER.REQUIRE_MOMENTUM_CONFIRMATION || momentumConfirmsLong) {
+      // Calculate confidence and position size
+      let confidence = ER.BASE_CONFIDENCE;
+      let positionMult = ER.BASE_POSITION_MULTIPLIER;
+      const erReasons: string[] = [];
+      
+      if (momentumScore > 0) {
+        confidence += ER.MOMENTUM_CONFIRMS_BONUS;
+        positionMult = ER.MOMENTUM_CONFIRMED_MULTIPLIER;
+        erReasons.push(`momentum_positive(${momentumScore.toFixed(0)})`);
+      }
+      if (ofBullish && ofScore >= 50) {
+        confidence += ER.ORDER_FLOW_ALIGNED_BONUS;
+        positionMult = Math.max(positionMult, ER.STRONG_SETUP_MULTIPLIER);
+        erReasons.push(`orderFlow_bullish(${ofScore.toFixed(0)})`);
+      }
+      if (macdImproving) {
+        confidence += ER.MACD_IMPROVING_BONUS;
+        erReasons.push("macd_improving");
+      }
+      
+      confidence = Math.min(confidence, ER.MAX_CONFIDENCE);
+      
+      reasons.push(`EXHAUSTION REVERSAL OVERRIDE → LONG`);
+      reasons.push(`StochRSI 4h K=${stochK4h.toFixed(1)} <= ${ER.LONG_K_THRESHOLD} (deep oversold)`);
+      reasons.push(`Bollinger %B=${percentB.toFixed(1)} <= ${ER.LONG_PERCENT_B_THRESHOLD} (below lower band)`);
+      reasons.push(`ADX slope=${adxSlope.toFixed(2)} <= ${ER.MAX_ADX_SLOPE} (not accelerating)`);
+      reasons.push(`Confirmations: ${erReasons.length > 0 ? erReasons.join(", ") : "base setup only"}`);
+      reasons.push(`Conf=${confidence.toFixed(0)}% | Pos=${(positionMult * 100).toFixed(0)}%`);
       
       return {
-        direction: momentumDirection,
+        direction: "long",
         confidence,
-        source: "momentum-fallback",
+        source: "exhaustion-reversal",
         reasons,
-        positionSizeMultiplier: positionMultiplier,
-        isMomentumFallback: true,
+        positionSizeMultiplier: positionMult,
+        isExhaustionReversal: true,
+        regime,
       };
     } else {
-      // Log why we didn't use the fallback (for debugging)
-      reasons.push(`MOMENTUM FALLBACK SKIPPED: momentum=${momentumScore.toFixed(0)} but no confirmation (OF aligned=${orderFlowAligned}, stochConfirms=${stochConfirms})`);
+      if (ER.LOG_SKIPS) {
+        reasons.push(`EXHAUSTION LONG SKIPPED: K=${stochK4h.toFixed(1)}, %B=${percentB.toFixed(1)} but momentum not confirming (score=${momentumScore.toFixed(0)}, slope=${momentumSlope.toFixed(2)}, macdImproving=${macdImproving})`);
+      }
+    }
+  }
+  
+  // ===== CHECK FOR SHORT EXHAUSTION REVERSAL =====
+  const isDeepOverbought = stochK4h >= ER.SHORT_K_THRESHOLD;
+  const aboveUpperBand = percentB >= ER.SHORT_PERCENT_B_THRESHOLD;
+  const momentumConfirmsShort = momentumScore < 0 || momentumSlope < 0 || 
+                                (ER.MACD_IMPROVING_COUNTS && macdDeclining);
+  
+  // Additional SHORT protection: block if 4h is strongly bullish
+  const is4hStrongBullish = trend4h === "bullish" && conf4h >= ER.SHORT_BLOCK_IF_4H_BULLISH_CONF;
+  
+  if (isDeepOverbought && aboveUpperBand && !isExpansion && adxNotAccelerating && !is4hStrongBullish) {
+    if (!ER.REQUIRE_MOMENTUM_CONFIRMATION || momentumConfirmsShort) {
+      let confidence = ER.BASE_CONFIDENCE;
+      let positionMult = ER.BASE_POSITION_MULTIPLIER;
+      const erReasons: string[] = [];
+      
+      if (momentumScore < 0) {
+        confidence += ER.MOMENTUM_CONFIRMS_BONUS;
+        positionMult = ER.MOMENTUM_CONFIRMED_MULTIPLIER;
+        erReasons.push(`momentum_negative(${momentumScore.toFixed(0)})`);
+      }
+      if (ofBearish && ofScore >= 50) {
+        confidence += ER.ORDER_FLOW_ALIGNED_BONUS;
+        positionMult = Math.max(positionMult, ER.STRONG_SETUP_MULTIPLIER);
+        erReasons.push(`orderFlow_bearish(${ofScore.toFixed(0)})`);
+      }
+      if (macdDeclining) {
+        confidence += ER.MACD_IMPROVING_BONUS;
+        erReasons.push("macd_declining");
+      }
+      
+      confidence = Math.min(confidence, ER.MAX_CONFIDENCE);
+      
+      reasons.push(`EXHAUSTION REVERSAL OVERRIDE → SHORT`);
+      reasons.push(`StochRSI 4h K=${stochK4h.toFixed(1)} >= ${ER.SHORT_K_THRESHOLD} (deep overbought)`);
+      reasons.push(`Bollinger %B=${percentB.toFixed(1)} >= ${ER.SHORT_PERCENT_B_THRESHOLD} (above upper band)`);
+      reasons.push(`ADX slope=${adxSlope.toFixed(2)} <= ${ER.MAX_ADX_SLOPE} (not accelerating)`);
+      reasons.push(`4h trend: ${trend4h} (${conf4h.toFixed(0)}%) - not blocking`);
+      reasons.push(`Confirmations: ${erReasons.length > 0 ? erReasons.join(", ") : "base setup only"}`);
+      reasons.push(`Conf=${confidence.toFixed(0)}% | Pos=${(positionMult * 100).toFixed(0)}%`);
+      
+      return {
+        direction: "short",
+        confidence,
+        source: "exhaustion-reversal",
+        reasons,
+        positionSizeMultiplier: positionMult,
+        isExhaustionReversal: true,
+        regime,
+      };
+    } else {
+      if (ER.LOG_SKIPS) {
+        reasons.push(`EXHAUSTION SHORT SKIPPED: K=${stochK4h.toFixed(1)}, %B=${percentB.toFixed(1)} but momentum not confirming (score=${momentumScore.toFixed(0)}, slope=${momentumSlope.toFixed(2)}, macdDeclining=${macdDeclining})`);
+      }
     }
   }
 }
 ```
 
-### Update DirectionResult Interface
+---
 
-Also need to update the `DirectionResult` interface to include the new field:
-
-```typescript
-interface DirectionResult {
-  direction: TradeDirection;
-  confidence: number;
-  source: string;
-  reasons: string[];
-  positionSizeMultiplier?: number;
-  isWeightedDerivation?: boolean;
-  hasPersistenceBonus?: boolean;
-  orderFlowTiebreaker?: boolean;
-  isMomentumFallback?: boolean;  // NEW: Added for momentum fallback
-}
-```
-
-## Logic Flow After Implementation
+## Priority Order After Implementation
 
 ```text
 deriveTradeDirection():
-  1. WEIGHTED DIRECTION (weighted sum of 4h/1h/30m)
-     └─ If passes: Return direction
+  0. REGIME CLASSIFICATION (STRONG_TREND, EARLY_TREND, RANGE, EXHAUSTION)
+  
+  0.25 NEW: EXHAUSTION REVERSAL OVERRIDE  ← Added here
+       └─ If deep oversold + below BB + momentum confirms: LONG
+       └─ If deep overbought + above BB + momentum confirms: SHORT
      
-  2. ORDER FLOW TIEBREAKER (when weighted sum is marginal)
-     └─ If passes: Return direction
+  0.5  WEIGHTED MOMENTUM OVERRIDE (Tier 2 scoring)
+       └─ Regime-aware weighted confirmation system
      
-  3. PRICE ACTION MOMENTUM OVERRIDE
-     └─ If strong price move: Return direction
-     
-  4. INDIVIDUAL TIMEFRAME CHECKS (4h → 1h → 30m)
-     └─ If any strong enough: Return direction
-     
-  5. CONSECUTIVE CANDLE OVERRIDE
-     └─ If 5+ consecutive bars: Return direction
-     
-  6. EARLY TREND / 2-OF-3 / PRIMARY TREND fallbacks
-     └─ Various legacy fallbacks
-     
-  7. **NEW: MOMENTUM + ORDER FLOW FALLBACK** ← Added here
-     └─ If momentum >= 20 AND (order flow aligned OR StochRSI extreme):
-        Return direction with reduced position
-     
-  8. Return { direction: null } - No clear direction
+  1.0  WEIGHTED DIRECTION (weighted sum of 4h/1h/30m)
+  
+  ... rest of existing priorities ...
 ```
 
-## Expected Impact
+---
 
-After implementation, the system will:
-1. **Generate LONG signals** when momentum is bullish (+20) and order flow is "buy", even when timeframes are neutral/conflicting
-2. **Break the deadlock** that caused zero LONG signals in the past 48+ hours
-3. **Use conservative position sizing** (55-70%) for momentum-derived entries
-4. **Require at least one confirmation** (order flow OR StochRSI extreme) to prevent false signals
+## Expected Behavior
+
+### Scenario: BTC 4h K=6, %B=12, momentum=+27
+**Current**: Returns SHORT or null (lagging HTF labels)
+**After**: Returns LONG with 60-65% confidence, 50% position size
+
+### Scenario: ETH 4h K=4, %B=8, momentum=+15, order flow=buy
+**Current**: Returns null (no clear direction)
+**After**: Returns LONG with 70% confidence, 55% position size
+
+### Scenario: AVAX 4h K=8, %B=15, momentum=-5 (declining), ADX slope=0.5
+**Current**: Could still try LONG from exhaustion
+**After**: SKIPPED - ADX accelerating (slope > 0.05), momentum negative
+
+---
 
 ## Files to Modify
-1. `supabase/functions/_shared/constants.ts` - Add `MOMENTUM_FALLBACK_DIRECTION_PARAMS`
-2. `supabase/functions/_shared/scoring.ts` - Add momentum fallback logic in `deriveTradeDirection` and update `DirectionResult` interface
+
+1. **`supabase/functions/_shared/constants.ts`**
+   - Add `EXHAUSTION_REVERSAL_OVERRIDE_PARAMS` configuration block
+
+2. **`supabase/functions/_shared/scoring.ts`**
+   - Update `DirectionResult` interface with `isExhaustionReversal` field
+   - Add import for new params
+   - Insert exhaustion reversal override logic at Priority 0.25
+
+---
 
 ## Testing Criteria
-After deployment, verify:
-- Rejection logs show "MOMENTUM FALLBACK" entries being considered
-- LONG signals are generated when momentum > 20 and order flow is bullish
-- Position sizes are correctly reduced (55-70%)
-- No false signals in strongly bearish markets (gate checks still apply downstream)
 
+After deployment, verify in rejection logs:
+1. **"EXHAUSTION REVERSAL OVERRIDE → LONG"** appears when K ≤ 10 AND %B ≤ 20 AND momentum positive
+2. **Position sizes are 40-55%** of normal for exhaustion reversal entries
+3. **Skips are logged** when conditions are met but momentum doesn't confirm
+4. **No exhaustion reversals** during expansion (high volume or squeeze release)
+5. **SHORT exhaustion blocked** when 4h is strongly bullish (≥70% confidence)
