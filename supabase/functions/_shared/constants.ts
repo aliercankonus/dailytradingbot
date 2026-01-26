@@ -2898,6 +2898,59 @@ export const STOCHRSI_DYNAMIC_PARAMS = {
 export const MARKET_REGIME_CLASSIFIER = {
   STRONG_TREND_ADX: 30,
   RANGING_ADX_MAX: 18,
+  
+  // Regime thresholds
+  PARABOLIC: { minADX: 45 },
+  STRONG_TREND: { minADX: 30, maxADX: 45 },
+  STEALTH_DRIFT: { maxADX: 22, minDriftPercent: 1.5 },
+  
+  // Gate overrides by regime
+  GATE_OVERRIDES: {
+    PARABOLIC: {
+      bollingerMaxPercentB: 150,
+      bollingerMinPercentB: -50,
+      stochRsiMaxK: 98,
+      stochRsiMinK: 2,
+      momentumScoreMinimum: 0,
+      qualityBoost: 15,
+      positionMultiplier: 0.70,
+    },
+    STRONG_TREND: {
+      bollingerMaxPercentB: 120,
+      bollingerMinPercentB: -20,
+      stochRsiMaxK: 92,
+      stochRsiMinK: 8,
+      momentumScoreMinimum: 0,
+      qualityBoost: 10,
+      positionMultiplier: 0.80,
+    },
+    STEALTH_DRIFT: {
+      bollingerMaxPercentB: 95,
+      bollingerMinPercentB: 5,
+      stochRsiMaxK: 85,
+      stochRsiMinK: 15,
+      momentumScoreMinimum: 2,
+      qualityBoost: 5,
+      positionMultiplier: 0.50,
+    },
+    NORMAL: {
+      bollingerMaxPercentB: 75,
+      bollingerMinPercentB: 25,
+      stochRsiMaxK: 80,
+      stochRsiMinK: 20,
+      momentumScoreMinimum: 5,
+      qualityBoost: 0,
+      positionMultiplier: 1.0,
+    },
+  },
+  
+  // HTF alignment requirements by regime
+  REQUIRE_HTF_ALIGNMENT_BY_REGIME: {
+    PARABOLIC: false,
+    STRONG_TREND: false,
+    STEALTH_DRIFT: true,
+    NORMAL: true,
+  },
 } as const;
 
 // ============= STRONG ADX UNIVERSAL OVERRIDE PARAMS =============
@@ -2905,6 +2958,11 @@ export const STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS = {
   ENABLED: true,
   MIN_ADX: 35,
   POSITION_MULTIPLIER: 0.70,
+  // Tier 1 override for very strong ADX
+  TIER1_MIN_ADX: 40,
+  TIER1_REQUIRE_SLOPE_POSITIVE: true,
+  TIER1_MIN_SLOPE: 0.02,
+  TIER1_POSITION_SIZE: 0.75,
 } as const;
 
 // ============= MOMENTUM SCORE BEHAVIOR PARAMS =============
@@ -2912,6 +2970,13 @@ export const MOMENTUM_SCORE_BEHAVIOR_PARAMS = {
   ENABLED: true,
   NEUTRAL_ZONE_LOW: -10,
   NEUTRAL_ZONE_HIGH: 10,
+  // ADX-aware momentum thresholds
+  DEFAULT_MIN_SCORE: 5,
+  CANNOT_BLOCK_ABOVE_ADX: 45,
+  ADX_40_MIN_SCORE: 0,
+  ADX_35_MIN_SCORE: 2,
+  ADX_30_MIN_SCORE: 3,
+  ADX_25_MIN_SCORE: 4,
 } as const;
 
 // ============= QUALITY NEAR MISS BOOST PARAMS =============
@@ -2921,6 +2986,13 @@ export const QUALITY_NEAR_MISS_BOOST_PARAMS = {
   SCORE_RANGE_HIGH: 59,
   BOOST_POINTS: 5,
   MIN_ADX: 22,
+  // ADX-based boosts
+  NEAR_MISS_RANGE: 5,
+  ADX_45_BOOST: 8,
+  ADX_40_BOOST: 6,
+  ADX_35_BOOST: 4,
+  HTF_ALIGNED_BOOST: 3,
+  MAX_BOOSTED_SCORE: 75,
 } as const;
 
 // ============= TREND CONTINUATION REENTRY PARAMS =============
@@ -2935,8 +3007,17 @@ export const TREND_CONTINUATION_REENTRY_PARAMS = {
 export const IMPULSE_CONTINUATION_PARAMS = {
   ENABLED: true,
   MIN_PRICE_MOVE: 1.5,
+  MIN_PRICE_MOVE_PERCENT: 1.5,
   MIN_ADX: 25,
   POSITION_MULTIPLIER: 0.65,
+  POSITION_SIZE: 0.65,
+  BLOCK_IF_EXHAUSTED: true,
+  MAX_REVERSAL_SCORE: 45,
+  REQUIRE_HTF_ALIGNMENT: true,
+  BOLLINGER_BECOMES_CONTEXT: true,
+  STOCHRSI_BECOMES_CONTEXT: true,
+  MOMENTUM_SCORE_BECOMES_CONTEXT: true,
+  STOP_MULTIPLIER: 0.80,
 } as const;
 
 // ============= PRICE ACTION PULLBACK PARAMS =============
@@ -2945,6 +3026,12 @@ export const PRICE_ACTION_PULLBACK_PARAMS = {
   MIN_PULLBACK_PERCENT: 0.8,
   MAX_PULLBACK_PERCENT: 2.5,
   POSITION_MULTIPLIER: 0.60,
+  // Additional properties for scoring.ts
+  MIN_HTF_CONFIDENCE: 60,
+  MAX_CONFIDENCE: 75,
+  CONFIDENCE_MULTIPLIER: 0.85,
+  POSITION_SIZE_MULTIPLIER: 0.60,
+  LOG_ENTRIES: true,
 } as const;
 
 // ============= MOMENTUM FALLBACK DIRECTION PARAMS =============
@@ -3069,7 +3156,7 @@ export const EXHAUSTION_REVERSAL_OVERRIDE_PARAMS = {
 } as const;
 
 // ============= MASTER MARKET REGIME =============
-export type MasterMarketRegime = 'STRONG_TREND' | 'MODERATE_TREND' | 'WEAK_TREND' | 'RANGING' | 'PARABOLIC';
+export type MasterMarketRegime = 'STRONG_TREND' | 'MODERATE_TREND' | 'WEAK_TREND' | 'RANGING' | 'PARABOLIC' | 'STEALTH_DRIFT' | 'NORMAL';
 
 // ============= MOMENTUM OVERRIDE DIRECTION PARAMS =============
 export const MOMENTUM_OVERRIDE_DIRECTION_PARAMS = {
@@ -3270,6 +3357,15 @@ export const ADX_EXHAUSTION_REFINED_PARAMS = {
   ENABLED: true,
   MIN_ADX: 45,
   MAX_SLOPE: 0,
+  // Additional exhaustion detection fields
+  MIN_ADX_DECLINE_FOR_ROLLOVER: 5,
+  MAX_ADX_FOR_EXHAUSTION: 60,
+  MIN_TREND_AGE_FOR_EXHAUSTION: 4,
+  SCORE_ADX_ROLLOVER: 35,
+  SCORE_HIDDEN_WEAKNESS: 20,
+  SCORE_DI_COMPRESSION: 25,
+  SCORE_VOLUME_DIVERGENCE: 15,
+  EXHAUSTION_THRESHOLD: 50,
 } as const;
 
 // ============= MOMENTUM DIRECTION HARD GATE =============
@@ -3339,39 +3435,8 @@ export const MOVE_EXHAUSTED_REVERSAL_GATE = {
   LOG_BLOCKS: true,
 } as const;
 
-// ============= STRATEGY TYPE HELPERS =============
-export const isMomentumStrategy = (name: string): boolean => 
-  name?.toLowerCase().includes('momentum') || name?.toLowerCase().includes('macd');
-
-export const isNeutralStrategy = (name: string): boolean => 
-  name?.toLowerCase().includes('neutral');
-
-export const isTrendFollowingStrategy = (name: string): boolean => 
-  name?.toLowerCase().includes('trend') || name?.toLowerCase().includes('ema');
-
-export const isMeanReversionStrategy = (name: string): boolean => 
-  name?.toLowerCase().includes('reversion') || name?.toLowerCase().includes('bounce');
-
-export const detectStrategyType = (name: string): string => {
-  if (isMomentumStrategy(name)) return 'momentum';
-  if (isTrendFollowingStrategy(name)) return 'trend';
-  if (isMeanReversionStrategy(name)) return 'mean_reversion';
-  return 'unknown';
-};
-
-// ============= EXCEPTION TYPE =============
-export type ExceptionType = 'REVERSAL_OVERRIDE' | 'STRONG_TREND' | 'MICRO_TREND' | 'NONE';
-
-// ============= MARKET CONTEXT INTERFACE =============
-export interface MarketContext {
-  regime: DirectionRegime;
-  adx: number;
-  adxSlope: number;
-  trend4h: string;
-  trend1h: string;
-}
-
 // ============= DIRECTION CONTEXT ARCHITECTURE (PHASE 1) =============
+// Centralizes direction rationale for improved traceability and conflict resolution
 export const DIRECTION_CONTEXT_PARAMS = {
   ENABLED: true,
   EVIDENCE_TYPES: ['HTF_CONSENSUS', 'MOMENTUM', 'ORDER_FLOW', 'STOCHRSI', 'PRICE_ACTION', 'EXHAUSTION'] as const,
