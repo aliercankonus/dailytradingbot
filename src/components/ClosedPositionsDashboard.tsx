@@ -210,7 +210,7 @@ export const ClosedPositionsDashboard = () => {
 
   // Calculate stats for full closes only (more accurate win rate)
   const fullCloseStats = useMemo(() => {
-    if (!positions) return { total: 0, profitable: 0, losses: 0, winRate: 0, totalPnL: 0 };
+    if (!positions) return { total: 0, profitable: 0, losses: 0, breakeven: 0, winRate: 0, totalPnL: 0 };
     
     const fullCloses = positions.filter(p => {
       const reason = p.close_reason;
@@ -219,14 +219,20 @@ export const ClosedPositionsDashboard = () => {
     });
     
     const profitable = fullCloses.filter(p => (p.realized_pnl || 0) > 0).length;
-    const losses = fullCloses.filter(p => (p.realized_pnl || 0) <= 0).length;
+    // Exclude breakeven trades (pnl = 0) from losses - they should be counted separately
+    const losses = fullCloses.filter(p => (p.realized_pnl || 0) < 0).length;
+    const breakeven = fullCloses.filter(p => (p.realized_pnl || 0) === 0).length;
     const totalPnL = fullCloses.reduce((sum, p) => sum + (p.realized_pnl || 0), 0);
+    
+    // Win rate calculation: wins / (wins + losses), excluding breakeven trades
+    const decisiveTrades = profitable + losses;
     
     return {
       total: fullCloses.length,
       profitable,
       losses,
-      winRate: fullCloses.length > 0 ? (profitable / fullCloses.length) * 100 : 0,
+      breakeven,
+      winRate: decisiveTrades > 0 ? (profitable / decisiveTrades) * 100 : 0,
       totalPnL,
     };
   }, [positions]);
