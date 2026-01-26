@@ -209,26 +209,22 @@ export const ClosedPositionsDashboard = () => {
   }, [positions, activeTab, symbolFilter, sideFilter, strategyFilter, closeReasonFilter, hidePartialCloses]);
 
   // Calculate stats for full closes only (more accurate win rate)
+  // Win rate stats - include ALL closed trades (including partial closes)
+  // Only exclude breakeven trades (PnL = 0) from win/loss calculation
   const fullCloseStats = useMemo(() => {
     if (!positions) return { total: 0, profitable: 0, losses: 0, breakeven: 0, winRate: 0, totalPnL: 0 };
     
-    const fullCloses = positions.filter(p => {
-      const reason = p.close_reason;
-      return reason !== 'partial_loss' && reason !== 'partial_tp_close' && 
-             reason !== 'partial_tp_1' && reason !== 'partial_tp_2' && reason !== 'partial_tp_3';
-    });
+    // Include ALL positions (including partial closes)
+    const profitable = positions.filter(p => (p.realized_pnl || 0) > 0).length;
+    const losses = positions.filter(p => (p.realized_pnl || 0) < 0).length;
+    const breakeven = positions.filter(p => (p.realized_pnl || 0) === 0).length;
+    const totalPnL = positions.reduce((sum, p) => sum + (p.realized_pnl || 0), 0);
     
-    const profitable = fullCloses.filter(p => (p.realized_pnl || 0) > 0).length;
-    // Exclude breakeven trades (pnl = 0) from losses - they should be counted separately
-    const losses = fullCloses.filter(p => (p.realized_pnl || 0) < 0).length;
-    const breakeven = fullCloses.filter(p => (p.realized_pnl || 0) === 0).length;
-    const totalPnL = fullCloses.reduce((sum, p) => sum + (p.realized_pnl || 0), 0);
-    
-    // Win rate calculation: wins / (wins + losses), excluding breakeven trades
+    // Win rate calculation: wins / (wins + losses), excluding only breakeven trades
     const decisiveTrades = profitable + losses;
     
     return {
-      total: fullCloses.length,
+      total: positions.length,
       profitable,
       losses,
       breakeven,
