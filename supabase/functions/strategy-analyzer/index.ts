@@ -3623,21 +3623,16 @@ serve(async (req) => {
             }
             // ===== SOFT GATE: Check StochRSI alignment =====
             else if (distanceFromHigh >= MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_PERCENT) {
-              // For late shorts: StochRSI must NOT be already oversold
+              // For late shorts: StochRSI must NOT be already oversold (K < 35)
               if (MOVE_EXHAUSTION_FILTER_PARAMS.REQUIRE_STOCHRSI_ALIGNMENT && 
                   stochRsiK4h < MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERSOLD_FOR_SHORT) {
                 moveExhaustionBlocked = true;
-                moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} < ${MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERSOLD_FOR_SHORT} (already oversold), too late to SHORT`;
-              } else if (stochRsiK4h < MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_SHORT_MIN_STOCHRSI) {
-                // Soft StochRSI gate - reduce position instead of block
-                moveExhaustionSoftGate = true;
-                moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_POSITION_SIZE;
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION SOFT: Price dropped ${distanceFromHigh.toFixed(1)}% with StochRSI K=${stochRsiK4h.toFixed(0)}, reducing position to ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+                moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} < ${MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERSOLD_FOR_SHORT} (oversold), too late to SHORT`;
               } else {
-                // Allow with reduced position since move is extended
+                // Allow with reduced position since move is extended but StochRSI not oversold
                 moveExhaustionSoftGate = true;
                 moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_POSITION_SIZE;
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION SOFT: Price dropped ${distanceFromHigh.toFixed(1)}%, reducing position to ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION SOFT: Price dropped ${distanceFromHigh.toFixed(1)}% with StochRSI K=${stochRsiK4h.toFixed(0)} >= 35, reducing position to ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
               }
             }
           } else if (derivedDirection === 'long' && priceDistance) {
@@ -3660,21 +3655,16 @@ serve(async (req) => {
             }
             // ===== SOFT GATE: Check StochRSI alignment =====
             else if (distanceFromLow >= MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_PERCENT) {
-              // For late longs: StochRSI must NOT be already overbought
+              // For late longs: StochRSI must NOT be already overbought (K > 65)
               if (MOVE_EXHAUSTION_FILTER_PARAMS.REQUIRE_STOCHRSI_ALIGNMENT && 
                   stochRsiK4h > MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG) {
                 moveExhaustionBlocked = true;
-                moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} > ${MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG} (already overbought), too late to LONG`;
-              } else if (stochRsiK4h > MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_LONG_MAX_STOCHRSI) {
-                // Soft StochRSI gate - reduce position instead of block
-                moveExhaustionSoftGate = true;
-                moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_POSITION_SIZE;
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION SOFT: Price rallied ${distanceFromLow.toFixed(1)}% with StochRSI K=${stochRsiK4h.toFixed(0)}, reducing position to ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+                moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} > ${MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG} (overbought), too late to LONG`;
               } else {
-                // Allow with reduced position since move is extended
+                // Allow with reduced position since move is extended but StochRSI not overbought
                 moveExhaustionSoftGate = true;
                 moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_POSITION_SIZE;
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION SOFT: Price rallied ${distanceFromLow.toFixed(1)}%, reducing position to ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION SOFT: Price rallied ${distanceFromLow.toFixed(1)}% with StochRSI K=${stochRsiK4h.toFixed(0)} <= 65, reducing position to ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
               }
             }
           }
