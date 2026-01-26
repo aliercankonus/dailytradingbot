@@ -1946,6 +1946,22 @@ export const isValidSqueezeBreakout = (
 // PHASE 1 OPTIMIZATION: Now uses weighted direction derivation + persistence bonus
 export type TradeDirection = "long" | "short";
 
+// ============= DIRECTION CONTEXT OBJECT =============
+// Centralizes direction rationale for each tier to improve traceability,
+// conflict resolution, and post-trade analytics
+export interface DirectionContext {
+  proposedDirection: TradeDirection | null;
+  evidenceType: 'HTF_CONSENSUS' | 'MOMENTUM' | 'ORDER_FLOW' | 'PRICE_ACTION' | 'STOCHRSI' | 'EXHAUSTION' | 'WEIGHTED_SUM' | 'NONE';
+  tier: number;
+  tierSource: string;
+  confidence: number;
+  positionMultiplier: number;
+  isCounterTrend: boolean;
+  riskClass: 'LOW' | 'MEDIUM' | 'HIGH' | 'EXTREME';
+  evidenceStrength: 'WEAK' | 'MODERATE' | 'STRONG' | 'VERY_STRONG';
+  conflictsWith: string[];  // List of conflicting tiers/sources
+}
+
 export interface DirectionResult {
   direction: TradeDirection | null;
   confidence: number;
@@ -1966,6 +1982,8 @@ export interface DirectionResult {
   is4hWeak?: boolean;                  // 4H confidence was below threshold
   trend30mAligned?: boolean;           // 30m trend aligned with order flow direction
   alignmentStatus?: "blocked" | "neutral" | "full";  // 30m alignment status for analytics
+  // ===== DIRECTION CONTEXT (Orchestration) =====
+  directionContext?: DirectionContext; // Centralized direction rationale for traceability
 }
 
 // Import direction params
@@ -2214,63 +2232,90 @@ export const deriveTradeDirection = (
   // ============= PRIORITY 0.25: EXHAUSTION REVERSAL OVERRIDE =============
   // When market is at extreme exhaustion (deep oversold/overbought), override direction
   // This captures bounce setups that lagging trend labels miss
+  // TIGHTENED: Now requires regime ∈ {EXHAUSTION, RANGE} AND HTF weakening (conf4h < 60% AND conf1h < 55%)
   if (EXHAUSTION_REVERSAL_OVERRIDE_PARAMS.ENABLED) {
     const ER = EXHAUSTION_REVERSAL_OVERRIDE_PARAMS;
     
-    // Get 4h StochRSI K value
-    const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 
-                     trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
+    // ===== TIER 0.25 TIGHTENING: REGIME GATE =====
+    // Only allow exhaustion reversal in EXHAUSTION or RANGE regimes
+    // This prevents premature exhaustion entries in strong trends
+    const regimeAllowsExhaustionReversal = regime === 'EXHAUSTION' || regime === 'RANGE';
     
-    // Get Bollinger %B (4h preferred, fall back to 1h)
-    const percentB4h = trendData.bollingerBands?.['4h']?.percentB ?? 50;
-    const percentB1h = trendData.bollingerBands?.['1h']?.percentB ?? 50;
-    const percentB = percentB4h !== 50 ? percentB4h : percentB1h;
+    // ===== TIER 0.25 TIGHTENING: HTF WEAKENING GATE =====
+    // Require evidence of higher-timeframe trend weakening before proposing reversal
+    // conf4h < 60% AND conf1h < 55%
+    const TIER025_HTF_WEAKENING_4H = 60;  // 4h confidence must be below this
+    const TIER025_HTF_WEAKENING_1H = 55;  // 1h confidence must be below this
+    const htfIsWeakening = conf4h < TIER025_HTF_WEAKENING_4H && conf1h < TIER025_HTF_WEAKENING_1H;
     
-    // Get momentum data
-    const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
-    const momentumSlope = trendData.smartMomentum?.components?.macdSlope ?? 
-                          trendData.momentum?.macdSlope ?? 0;
-    const macdHist = trendData.momentum?.macdHistogram ?? 0;
-    const prevMacdHist = trendData.momentum?.prevMacdHistogram ?? macdHist;
-    const macdImproving = macdHist > prevMacdHist;
-    const macdDeclining = macdHist < prevMacdHist;
+    // Combined gate: both regime and HTF weakening must pass
+    const tier025GatePasses = regimeAllowsExhaustionReversal && htfIsWeakening;
     
-    // Get ADX slope for acceleration check
-    const erAdxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
+    if (!tier025GatePasses) {
+      // Log skip reason for debugging
+      if (!regimeAllowsExhaustionReversal) {
+        reasons.push(`TIER 0.25 BLOCKED: regime=${regime} ∉ {EXHAUSTION, RANGE} - exhaustion reversal requires weak regime`);
+      } else if (!htfIsWeakening) {
+        reasons.push(`TIER 0.25 BLOCKED: HTF not weakening (4h=${conf4h.toFixed(0)}% >= ${TIER025_HTF_WEAKENING_4H} OR 1h=${conf1h.toFixed(0)}% >= ${TIER025_HTF_WEAKENING_1H})`);
+      }
+    }
     
-    // Get volume/expansion data
-    const volumeRatio = trendData.volume?.ratio ?? trendData.volatility?.volumeRatio ?? 1.0;
-    const squeezeJustReleased = trendData.squeeze?.justReleased ?? false;
-    const isExpansion = (volumeRatio > ER.MAX_VOLUME_RATIO) || 
-                        (ER.BLOCK_ON_SQUEEZE_RELEASE && squeezeJustReleased);
-    
-    // Get order flow data
-    const ofScore = orderFlowData?.score ?? 0;
-    const ofSignal = orderFlowData?.signal?.toLowerCase() ?? "";
-    const ofBullish = ofSignal.includes("buy") || ofSignal === "bullish";
-    const ofBearish = ofSignal.includes("sell") || ofSignal === "bearish";
-    
-    // Get ADX value for high ADX + declining check
-    const adxValue = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 25;
-    
-    // ===== CHECK FOR LONG EXHAUSTION REVERSAL =====
-    // Path 1: Deep oversold (StochRSI K <= 10 AND %B <= 20)
-    // Path 2: High ADX declining (ADX > 45 AND slope < 0)
-    const isDeepOversold = stochK4h <= ER.LONG_K_THRESHOLD;
-    const belowLowerBand = percentB <= ER.LONG_PERCENT_B_THRESHOLD;
-    const isHighAdxDeclining = ER.ADX_HIGH_EXHAUSTION_ENABLED && 
-                               adxValue > ER.ADX_HIGH_THRESHOLD && 
-                               erAdxSlope < ER.ADX_DECLINING_SLOPE;
-    
-    // Momentum confirmation: score > 20 OR MACD improving
-    const momentumConfirmsLong = momentumScore > ER.MIN_MOMENTUM_SCORE || 
-                                 (ER.MACD_IMPROVING_COUNTS && macdImproving);
-    const adxNotAccelerating = erAdxSlope <= ER.MAX_ADX_SLOPE;
-    
-    // Exhaustion detected via EITHER path (deep oversold OR high ADX declining)
-    const exhaustionDetectedLong = (isDeepOversold && belowLowerBand) || isHighAdxDeclining;
-    
-    if (exhaustionDetectedLong && !isExpansion && adxNotAccelerating) {
+    // Only proceed with exhaustion reversal if tightened gates pass
+    if (tier025GatePasses) {
+      // Get 4h StochRSI K value
+      const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 
+                       trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
+      
+      // Get Bollinger %B (4h preferred, fall back to 1h)
+      const percentB4h = trendData.bollingerBands?.['4h']?.percentB ?? 50;
+      const percentB1h = trendData.bollingerBands?.['1h']?.percentB ?? 50;
+      const percentB = percentB4h !== 50 ? percentB4h : percentB1h;
+      
+      // Get momentum data
+      const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+      const momentumSlope = trendData.smartMomentum?.components?.macdSlope ?? 
+                            trendData.momentum?.macdSlope ?? 0;
+      const macdHist = trendData.momentum?.macdHistogram ?? 0;
+      const prevMacdHist = trendData.momentum?.prevMacdHistogram ?? macdHist;
+      const macdImproving = macdHist > prevMacdHist;
+      const macdDeclining = macdHist < prevMacdHist;
+      
+      // Get ADX slope for acceleration check
+      const erAdxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
+      
+      // Get volume/expansion data
+      const volumeRatio = trendData.volume?.ratio ?? trendData.volatility?.volumeRatio ?? 1.0;
+      const squeezeJustReleased = trendData.squeeze?.justReleased ?? false;
+      const isExpansion = (volumeRatio > ER.MAX_VOLUME_RATIO) || 
+                          (ER.BLOCK_ON_SQUEEZE_RELEASE && squeezeJustReleased);
+      
+      // Get order flow data
+      const ofScore = orderFlowData?.score ?? 0;
+      const ofSignal = orderFlowData?.signal?.toLowerCase() ?? "";
+      const ofBullish = ofSignal.includes("buy") || ofSignal === "bullish";
+      const ofBearish = ofSignal.includes("sell") || ofSignal === "bearish";
+      
+      // Get ADX value for high ADX + declining check
+      const adxValue = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 25;
+      
+      // ===== CHECK FOR LONG EXHAUSTION REVERSAL =====
+      // Path 1: Deep oversold (StochRSI K <= 10 AND %B <= 20)
+      // Path 2: High ADX declining (ADX > 45 AND slope < 0)
+      const isDeepOversold = stochK4h <= ER.LONG_K_THRESHOLD;
+      const belowLowerBand = percentB <= ER.LONG_PERCENT_B_THRESHOLD;
+      const isHighAdxDeclining = ER.ADX_HIGH_EXHAUSTION_ENABLED && 
+                                 adxValue > ER.ADX_HIGH_THRESHOLD && 
+                                 erAdxSlope < ER.ADX_DECLINING_SLOPE;
+      
+      // Momentum confirmation: score > 20 OR MACD improving
+      const momentumConfirmsLong = momentumScore > ER.MIN_MOMENTUM_SCORE || 
+                                   (ER.MACD_IMPROVING_COUNTS && macdImproving);
+      const adxNotAccelerating = erAdxSlope <= ER.MAX_ADX_SLOPE;
+      
+      // Exhaustion detected via EITHER path (deep oversold OR high ADX declining)
+      const exhaustionDetectedLong = (isDeepOversold && belowLowerBand) || isHighAdxDeclining;
+      
+      if (exhaustionDetectedLong && !isExpansion && adxNotAccelerating) {
       // Check if momentum confirms (or we don't require it)
       if (!ER.REQUIRE_MOMENTUM_CONFIRMATION || momentumConfirmsLong) {
         // Calculate confidence and position size
@@ -2329,84 +2374,85 @@ export const deriveTradeDirection = (
       }
     }
     
-    // ===== CHECK FOR SHORT EXHAUSTION REVERSAL =====
-    // Path 1: Deep overbought (StochRSI K >= 90 AND %B >= 80)
-    // Path 2: High ADX declining (ADX > 45 AND slope < 0) - same for SHORT
-    const isDeepOverbought = stochK4h >= ER.SHORT_K_THRESHOLD;
-    const aboveUpperBand = percentB >= ER.SHORT_PERCENT_B_THRESHOLD;
-    
-    // For SHORT, high ADX declining also applies (trend exhausting regardless of direction)
-    const isHighAdxDecliningShort = ER.ADX_HIGH_EXHAUSTION_ENABLED && 
-                                    adxValue > ER.ADX_HIGH_THRESHOLD && 
-                                    erAdxSlope < ER.ADX_DECLINING_SLOPE;
-    
-    // Momentum confirmation: score < -20 OR MACD declining
-    const momentumConfirmsShort = momentumScore < -ER.MIN_MOMENTUM_SCORE || 
-                                  (ER.MACD_IMPROVING_COUNTS && macdDeclining);
-    
-    // Additional SHORT protection: block if 4h is strongly bullish
-    const is4hStrongBullish = trend4h === "bullish" && conf4h >= ER.SHORT_BLOCK_IF_4H_BULLISH_CONF;
-    
-    // Exhaustion detected via EITHER path
-    const exhaustionDetectedShort = (isDeepOverbought && aboveUpperBand) || isHighAdxDecliningShort;
-    
-    if (exhaustionDetectedShort && !isExpansion && adxNotAccelerating && !is4hStrongBullish) {
-      if (!ER.REQUIRE_MOMENTUM_CONFIRMATION || momentumConfirmsShort) {
-        let erConfidence: number = ER.BASE_CONFIDENCE;
-        let positionMult: number = ER.BASE_POSITION_MULTIPLIER;
-        const erReasons: string[] = [];
-        
-        // Determine which exhaustion path triggered
-        const exhaustionPath = isHighAdxDecliningShort ? 
-          `ADX_HIGH_DECLINING(${adxValue.toFixed(0)}, slope=${erAdxSlope.toFixed(2)})` :
-          `DEEP_OVERBOUGHT(K=${stochK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`;
-        erReasons.push(exhaustionPath);
-        
-        if (momentumScore < -ER.MIN_MOMENTUM_SCORE) {
-          erConfidence += ER.MOMENTUM_CONFIRMS_BONUS;
-          positionMult = ER.MOMENTUM_CONFIRMED_MULTIPLIER;
-          erReasons.push(`momentum_strong(${momentumScore.toFixed(0)}<-${ER.MIN_MOMENTUM_SCORE})`);
-        }
-        if (ofBearish && ofScore >= ER.MIN_ORDER_FLOW_SCORE) {
-          erConfidence += ER.ORDER_FLOW_ALIGNED_BONUS;
-          positionMult = Math.max(positionMult, ER.STRONG_SETUP_MULTIPLIER);
-          erReasons.push(`orderFlow_bearish(${ofScore.toFixed(0)}>=${ER.MIN_ORDER_FLOW_SCORE})`);
-        }
-        if (macdDeclining) {
-          erConfidence += ER.MACD_IMPROVING_BONUS;
-          erReasons.push("macd_declining");
-        }
-        
-        erConfidence = Math.min(erConfidence, ER.MAX_CONFIDENCE);
-        
-        reasons.push(`EXHAUSTION REVERSAL OVERRIDE → SHORT`);
-        reasons.push(`Exhaustion Path: ${exhaustionPath}`);
-        if (isDeepOverbought && aboveUpperBand) {
-          reasons.push(`StochRSI 4h K=${stochK4h.toFixed(1)} >= ${ER.SHORT_K_THRESHOLD} (deep overbought)`);
-          reasons.push(`Bollinger %B=${percentB.toFixed(1)} >= ${ER.SHORT_PERCENT_B_THRESHOLD} (above upper band)`);
-        }
-        if (isHighAdxDecliningShort) {
-          reasons.push(`ADX=${adxValue.toFixed(0)} > ${ER.ADX_HIGH_THRESHOLD} with slope=${erAdxSlope.toFixed(2)} < 0 (high ADX declining)`);
-        }
-        reasons.push(`4h trend: ${trend4h} (${conf4h.toFixed(0)}%) - not blocking`);
-        reasons.push(`Confirmations: ${erReasons.join(", ")}`);
-        reasons.push(`Conf=${erConfidence.toFixed(0)}% | Pos=${(positionMult * 100).toFixed(0)}%`);
-        
-        return {
-          direction: "short",
-          confidence: erConfidence,
-          source: "exhaustion-reversal",
-          reasons,
-          positionSizeMultiplier: positionMult,
-          isExhaustionReversal: true,
-          regime,
-        };
-      } else {
-        if (ER.LOG_SKIPS) {
-          reasons.push(`EXHAUSTION SHORT SKIPPED: exhaustion detected but momentum not confirming (score=${momentumScore.toFixed(0)} >= -${ER.MIN_MOMENTUM_SCORE}, macdDeclining=${macdDeclining})`);
+      // ===== CHECK FOR SHORT EXHAUSTION REVERSAL =====
+      // Path 1: Deep overbought (StochRSI K >= 90 AND %B >= 80)
+      // Path 2: High ADX declining (ADX > 45 AND slope < 0) - same for SHORT
+      const isDeepOverbought = stochK4h >= ER.SHORT_K_THRESHOLD;
+      const aboveUpperBand = percentB >= ER.SHORT_PERCENT_B_THRESHOLD;
+      
+      // For SHORT, high ADX declining also applies (trend exhausting regardless of direction)
+      const isHighAdxDecliningShort = ER.ADX_HIGH_EXHAUSTION_ENABLED && 
+                                      adxValue > ER.ADX_HIGH_THRESHOLD && 
+                                      erAdxSlope < ER.ADX_DECLINING_SLOPE;
+      
+      // Momentum confirmation: score < -20 OR MACD declining
+      const momentumConfirmsShort = momentumScore < -ER.MIN_MOMENTUM_SCORE || 
+                                    (ER.MACD_IMPROVING_COUNTS && macdDeclining);
+      
+      // Additional SHORT protection: block if 4h is strongly bullish
+      const is4hStrongBullish = trend4h === "bullish" && conf4h >= ER.SHORT_BLOCK_IF_4H_BULLISH_CONF;
+      
+      // Exhaustion detected via EITHER path
+      const exhaustionDetectedShort = (isDeepOverbought && aboveUpperBand) || isHighAdxDecliningShort;
+      
+      if (exhaustionDetectedShort && !isExpansion && adxNotAccelerating && !is4hStrongBullish) {
+        if (!ER.REQUIRE_MOMENTUM_CONFIRMATION || momentumConfirmsShort) {
+          let erConfidence: number = ER.BASE_CONFIDENCE;
+          let positionMult: number = ER.BASE_POSITION_MULTIPLIER;
+          const erReasons: string[] = [];
+          
+          // Determine which exhaustion path triggered
+          const exhaustionPath = isHighAdxDecliningShort ? 
+            `ADX_HIGH_DECLINING(${adxValue.toFixed(0)}, slope=${erAdxSlope.toFixed(2)})` :
+            `DEEP_OVERBOUGHT(K=${stochK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`;
+          erReasons.push(exhaustionPath);
+          
+          if (momentumScore < -ER.MIN_MOMENTUM_SCORE) {
+            erConfidence += ER.MOMENTUM_CONFIRMS_BONUS;
+            positionMult = ER.MOMENTUM_CONFIRMED_MULTIPLIER;
+            erReasons.push(`momentum_strong(${momentumScore.toFixed(0)}<-${ER.MIN_MOMENTUM_SCORE})`);
+          }
+          if (ofBearish && ofScore >= ER.MIN_ORDER_FLOW_SCORE) {
+            erConfidence += ER.ORDER_FLOW_ALIGNED_BONUS;
+            positionMult = Math.max(positionMult, ER.STRONG_SETUP_MULTIPLIER);
+            erReasons.push(`orderFlow_bearish(${ofScore.toFixed(0)}>=${ER.MIN_ORDER_FLOW_SCORE})`);
+          }
+          if (macdDeclining) {
+            erConfidence += ER.MACD_IMPROVING_BONUS;
+            erReasons.push("macd_declining");
+          }
+          
+          erConfidence = Math.min(erConfidence, ER.MAX_CONFIDENCE);
+          
+          reasons.push(`EXHAUSTION REVERSAL OVERRIDE → SHORT`);
+          reasons.push(`Exhaustion Path: ${exhaustionPath}`);
+          if (isDeepOverbought && aboveUpperBand) {
+            reasons.push(`StochRSI 4h K=${stochK4h.toFixed(1)} >= ${ER.SHORT_K_THRESHOLD} (deep overbought)`);
+            reasons.push(`Bollinger %B=${percentB.toFixed(1)} >= ${ER.SHORT_PERCENT_B_THRESHOLD} (above upper band)`);
+          }
+          if (isHighAdxDecliningShort) {
+            reasons.push(`ADX=${adxValue.toFixed(0)} > ${ER.ADX_HIGH_THRESHOLD} with slope=${erAdxSlope.toFixed(2)} < 0 (high ADX declining)`);
+          }
+          reasons.push(`4h trend: ${trend4h} (${conf4h.toFixed(0)}%) - not blocking`);
+          reasons.push(`Confirmations: ${erReasons.join(", ")}`);
+          reasons.push(`Conf=${erConfidence.toFixed(0)}% | Pos=${(positionMult * 100).toFixed(0)}%`);
+          
+          return {
+            direction: "short",
+            confidence: erConfidence,
+            source: "exhaustion-reversal",
+            reasons,
+            positionSizeMultiplier: positionMult,
+            isExhaustionReversal: true,
+            regime,
+          };
+        } else {
+          if (ER.LOG_SKIPS) {
+            reasons.push(`EXHAUSTION SHORT SKIPPED: exhaustion detected but momentum not confirming (score=${momentumScore.toFixed(0)} >= -${ER.MIN_MOMENTUM_SCORE}, macdDeclining=${macdDeclining})`);
+          }
         }
       }
-    }
+    } // End tier025GatePasses if block
   }
   
   // ============= PRIORITY 0.5: MOMENTUM-AWARE DIRECTION OVERRIDE (WEIGHTED) =============
@@ -2822,9 +2868,13 @@ export const deriveTradeDirection = (
     return { direction, confidence: primaryConf * 0.8, source: "primary", reasons };
   }
   
-  // ============= PRIORITY 7: MOMENTUM + ORDER FLOW FALLBACK =============
+  // ============= PRIORITY 7 (TIER 10): MOMENTUM + ORDER FLOW FALLBACK =============
   // When all other methods fail, use momentum score + order flow to derive direction
   // This prevents the "deadlock" where bullish momentum + buy order flow = no signal
+  // NOTE: Tier 10 is for TREND CONTINUATION without strong TF structure
+  // NOTE: Tier 10 and Tier 11 (Exhaustion Escape) are MUTUALLY EXCLUSIVE
+  let tier10Fired = false;  // Flag to track if Tier 10 fires (blocks Tier 11)
+  
   if (MOMENTUM_FALLBACK_DIRECTION_PARAMS.ENABLED) {
     const P = MOMENTUM_FALLBACK_DIRECTION_PARAMS;
     
@@ -2855,6 +2905,35 @@ export const deriveTradeDirection = (
       const stochConfirmsShort = momentumDirection === "short" && stochOverbought;
       const stochConfirms = stochConfirmsLong || stochConfirmsShort;
       
+      // ===== EPISTEMIC FLOOR FOR LATE TIERS (Tier >= 8) =====
+      // In RANGE regime, require at least 2 independent evidence types
+      // Evidence types: Momentum, Order Flow, StochRSI, Price Action
+      let evidenceCount = 0;
+      const evidenceTypes: string[] = [];
+      
+      if (absMomentum >= P.MIN_MOMENTUM_SCORE) {
+        evidenceCount++;
+        evidenceTypes.push('MOMENTUM');
+      }
+      if (orderFlowAligned && ofScore >= P.MIN_ORDER_FLOW_SCORE) {
+        evidenceCount++;
+        evidenceTypes.push('ORDER_FLOW');
+      }
+      if (stochConfirms) {
+        evidenceCount++;
+        evidenceTypes.push('STOCHRSI');
+      }
+      
+      // Check epistemic floor: in RANGE regime, require 2+ evidence types
+      const EPISTEMIC_FLOOR_TIER = 8;  // This is Tier 10 in our naming (Priority 7 = Tier 10)
+      const EPISTEMIC_FLOOR_MIN_EVIDENCE = 2;
+      const requiresEpistemicFloor = regime === 'RANGE';
+      const epistemicFloorMet = !requiresEpistemicFloor || evidenceCount >= EPISTEMIC_FLOOR_MIN_EVIDENCE;
+      
+      if (!epistemicFloorMet) {
+        reasons.push(`TIER 10 EPISTEMIC FLOOR BLOCKED: RANGE regime requires ${EPISTEMIC_FLOOR_MIN_EVIDENCE}+ evidence types, got ${evidenceCount} (${evidenceTypes.join(', ')})`);
+      }
+      
       // Calculate confidence based on signal strength
       let confidence: number = P.BASE_CONFIDENCE;
       let positionMultiplier: number = P.BASE_POSITION_MULTIPLIER;
@@ -2881,10 +2960,14 @@ export const deriveTradeDirection = (
       confidence = Math.min(confidence, P.MAX_CONFIDENCE);
       
       // Only proceed if we have at least one confirmation (order flow OR stochRSI)
+      // AND epistemic floor is met
       const hasConfirmation = orderFlowSupports || stochConfirms;
       
-      if (hasConfirmation) {
-        reasons.push(`MOMENTUM FALLBACK: score=${momentumScore.toFixed(0)} → ${momentumDirection.toUpperCase()}`);
+      if (hasConfirmation && epistemicFloorMet) {
+        tier10Fired = true;  // Mark Tier 10 as fired to block Tier 11
+        
+        reasons.push(`MOMENTUM FALLBACK (TIER 10): score=${momentumScore.toFixed(0)} → ${momentumDirection.toUpperCase()}`);
+        reasons.push(`Evidence types: ${evidenceTypes.join(', ')} (${evidenceCount} sources)`);
         reasons.push(`Order flow: score=${ofScore.toFixed(0)}, signal=${ofSignal}, aligned=${orderFlowAligned}`);
         reasons.push(`StochRSI K=${stochK.toFixed(0)} (${stochOversold ? 'oversold' : stochOverbought ? 'overbought' : 'normal'})`);
         reasons.push(`ADX=${adx.toFixed(1)} | Confidence=${confidence.toFixed(0)}% | Position=${(positionMultiplier * 100).toFixed(0)}%`);
@@ -2900,15 +2983,21 @@ export const deriveTradeDirection = (
         };
       } else {
         // Log why we didn't use the fallback (for debugging)
-        reasons.push(`MOMENTUM FALLBACK SKIPPED: momentum=${momentumScore.toFixed(0)} but no confirmation (OF aligned=${orderFlowAligned}, stochConfirms=${stochConfirms})`);
+        if (!epistemicFloorMet) {
+          // Already logged above
+        } else {
+          reasons.push(`MOMENTUM FALLBACK SKIPPED: momentum=${momentumScore.toFixed(0)} but no confirmation (OF aligned=${orderFlowAligned}, stochConfirms=${stochConfirms})`);
+        }
       }
     }
   }
   
-  // ============= PRIORITY 8: EXHAUSTION ESCAPE (PHASE 1 FIX) =============
+  // ============= PRIORITY 8 (TIER 11): EXHAUSTION ESCAPE (PHASE 1 FIX) =============
   // Final escape valve before hard rejection when neutral 4H + extreme exhaustion
   // Captures mean reversion opportunities that would otherwise be blocked
-  if (EXHAUSTION_ESCAPE_PARAMS.ENABLED) {
+  // NOTE: Tier 11 is for MEAN REVERSION ONLY (not trend continuation)
+  // NOTE: Tier 10 and Tier 11 are MUTUALLY EXCLUSIVE - if Tier 10 fired, skip Tier 11
+  if (EXHAUSTION_ESCAPE_PARAMS.ENABLED && !tier10Fired) {
     const EE = EXHAUSTION_ESCAPE_PARAMS;
     
     // Only apply in EXHAUSTION regime (or skip regime check if disabled)
@@ -3002,11 +3091,15 @@ export const deriveTradeDirection = (
         };
       }
     }
+  } else if (tier10Fired) {
+    // Log that Tier 11 was skipped due to mutual exclusivity
+    reasons.push(`TIER 11 (EXHAUSTION ESCAPE) SKIPPED: Tier 10 (Momentum Fallback) already fired - mutually exclusive`);
   }
   
   // No clear direction - but log what we tried
-  reasons.push("All timeframes neutral or conflicting after weighted derivation + exhaustion escape check");
+  reasons.push("NO_CLEAR_DIRECTION: All timeframes neutral or conflicting after exhausting all 12 tiered reasoning paths");
   reasons.push(`4h: ${trend4h} (${conf4h}%), 1h: ${trend1h} (${conf1h}%), 30m: ${trend30m} (${conf30m}%)`);
+  reasons.push(`Regime: ${regime} | tier10Fired: ${tier10Fired}`);
   return { direction: null, confidence: 0, source: "none", reasons };
 };
 
