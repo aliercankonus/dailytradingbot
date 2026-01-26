@@ -17,6 +17,7 @@ interface Trade {
   status: string;
   executed_at: string;
   closed_at: string | null;
+  close_reason: string | null;
   strategy_name: string | null;
 }
 
