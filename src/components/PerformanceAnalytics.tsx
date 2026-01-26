@@ -169,17 +169,11 @@ export const PerformanceAnalytics = () => {
     .filter(t => t.closed_at)
     .reduce((sum, t) => sum + (t.realized_pnl || 0), 0);
   
-  // Partial close reasons to exclude from win rate calculation (focus on full trade cycles only)
-  const partialCloseReasons = ['partial_loss', 'partial_tp_close', 'partial_tp_1', 'partial_tp_2', 'partial_tp_3'];
-  
-  // Filter for full closes only (exclude partial closes)
-  const isFullClose = (t: typeof trades[0]) => 
-    t.closed_at && !partialCloseReasons.includes(t.close_reason || '');
-  
-  // Exclude breakeven and partial closes from win rate calculation
-  const winningTrades = trades.filter(t => isFullClose(t) && (t.realized_pnl || 0) > 0).length;
-  const losingTrades = trades.filter(t => isFullClose(t) && (t.realized_pnl || 0) < 0).length;
-  const breakEvenTrades = trades.filter(t => isFullClose(t) && (t.realized_pnl || 0) === 0).length;
+  // Include ALL closed trades (including partial closes) in win rate calculation
+  // Exclude only breakeven trades (PnL = 0)
+  const winningTrades = trades.filter(t => t.closed_at && (t.realized_pnl || 0) > 0).length;
+  const losingTrades = trades.filter(t => t.closed_at && (t.realized_pnl || 0) < 0).length;
+  const breakEvenTrades = trades.filter(t => t.closed_at && (t.realized_pnl || 0) === 0).length;
   const decisiveTrades = winningTrades + losingTrades;
   const totalClosedTrades = winningTrades + losingTrades + breakEvenTrades;
   const winRate = decisiveTrades > 0 ? (winningTrades / decisiveTrades) * 100 : 0;
