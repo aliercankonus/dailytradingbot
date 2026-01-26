@@ -94,6 +94,9 @@ import {
   STOCHRSI_ADX_ALIGNMENT_PARAMS,
   // NEW: Relaxed Order Flow when 1h directional
   RELAXED_ORDER_FLOW_PARAMS,
+  // NEW: NO_MOMENTUM_CONFIRMATION gate parameters (ADX floor, exception budget)
+  NO_MOMENTUM_GATE_PARAMS,
+  type NoMomentumExceptionType,
   // PHASE 2: MACD Gate Optimization - duration and magnitude checks
   MACD_GATE_PARAMS,
   // NEW: Pre-Signal Validity Gate for semantic consistency
@@ -2110,6 +2113,7 @@ serve(async (req) => {
       | 'CONFIDENCE_BELOW_THRESHOLD'
       | 'ADX_TOO_LOW'
       | 'ADX_TOO_LOW_NO_SQUEEZE'
+      | 'NO_MOMENTUM_CONFIRMATION'
       | 'MOMENTUM_DIRECTION_OPPOSING'
       | 'NEUTRAL_4H_LOW_CONFIDENCE'
       | 'MACD_MISALIGNED'
@@ -7755,12 +7759,29 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🎯 Low ADX trend exception - position size capped at ${(lowAdxTrendPositionMultiplier * 100).toFixed(0)}%`);
         }
 
+        // ============= NO_MOMENTUM_CONFIRMATION HARD GATE =============
         // RELAXED: Allow entry when momentum.state is "none" IF ADX >= 28 (strong trend exception)
         // This enables early entries when trend strength itself provides conviction
         // NEW: Also allow if trend acceleration detected (strong price move with ADX rising)
         // NEW: StochRSI-ADX alignment reduces threshold from 28 to 22 when indicators align
+        // 
+        // EXPERT REVIEW IMPROVEMENTS:
+        // 1. Path 2 ADX Floor - "building"/"mixed" state requires ADX >= 20
+        // 2. Exception Budget - Only first qualifying exception path is used (prevents stacking)
+        // 3. Direction Bias - Premium overrides suggest direction, don't override centralized derivation
         const momentumState = momentum?.state || "none";
         const momentumConfirms = momentum?.confirms ?? false;
+        
+        // ============= EXCEPTION BUDGET TRACKING =============
+        // Track which exception path is used (max 1 per signal to prevent stacking)
+        let noMomentumExceptionUsed: NoMomentumExceptionType = null;
+        let noMomentumExceptionMultiplier = 1.0;
+        
+        // ============= PREMIUM OVERRIDE DIRECTION BIAS =============
+        // Instead of directly setting direction, premium overrides set a "bias"
+        // This bias informs direction derivation but doesn't override it
+        let premiumOverrideBias: "bullish" | "bearish" | null = null;
+        let premiumOverrideSource: string | null = null;
         
         // ============= DYNAMIC ADX THRESHOLD WITH STOCHRSI ALIGNMENT =============
         // When 1h bearish AND StochRSI < 20, OR 1h bullish AND StochRSI > 80,
@@ -7777,36 +7798,190 @@ serve(async (req) => {
           if (stochRsiAlignsWithBearish || stochRsiAlignsWithBullish) {
             effectiveStrongTrendADX = STOCHRSI_ADX_ALIGNMENT_PARAMS.REDUCED_ADX_THRESHOLD as number;
             stochRsiAdxAlignmentActive = true;
+            
+            // Mark as first exception if exception budget enabled
+            if (NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET && !noMomentumExceptionUsed) {
+              noMomentumExceptionUsed = "STOCHRSI_ADX_ALIGNMENT";
+              if (NO_MOMENTUM_GATE_PARAMS.LOG_EXCEPTION_USAGE) {
+                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using STOCHRSI_ADX_ALIGNMENT as first exception`);
+              }
+            }
+            
             logger.forSymbol(symbol).debug(`📊 STOCHRSI-ADX ALIGNMENT: 1h=${htfTrend1h}, StochK=${stochK1h.toFixed(1)} → ADX threshold reduced to ${effectiveStrongTrendADX}`);
           }
         }
         
         const isStrongTrendException = adx >= effectiveStrongTrendADX;
         
-        // Momentum passes if:
-        // 1. State is confirmed/building/mixed AND confirms is true, OR
-        // 2. State is "none" BUT ADX >= threshold (strong trend exception for early entries), OR
-        // 3. Trend acceleration detected (2.5%+ price move with ADX >= 20 and rising), OR
-        // 4. Pre-momentum StochRSI extreme detected, OR
-        // 5. Short-term alignment override detected
-        const hasPremiumOverride = preMomentumStochRsiOverrideApplied || shortTermAlignmentOverrideApplied;
-        const momentumPasses = momentumConfirms || (momentumState !== "none") || isStrongTrendException || qualifiesForTrendAcceleration || hasPremiumOverride;
+        // ============= PATH 2: STATE PRESENCE WITH ADX FLOOR =============
+        // EXPERT REVIEW FIX: Path 2 (momentumState != "none") now requires ADX floor
+        // This prevents "building" or "mixed" momentum from passing in dead markets (ADX < 20)
+        let statePresencePasses = false;
+        let statePresenceSkippedDueToADX = false;
+        
+        if (momentumState !== "none") {
+          if (NO_MOMENTUM_GATE_PARAMS.ENABLE_PATH_2_ADX_FLOOR) {
+            // NEW: Require ADX >= minimum for state presence path
+            if (adx >= NO_MOMENTUM_GATE_PARAMS.STATE_PRESENCE_MIN_ADX) {
+              statePresencePasses = true;
+            } else {
+              statePresenceSkippedDueToADX = true;
+              if (NO_MOMENTUM_GATE_PARAMS.LOG_ADX_FLOOR_SKIPS) {
+                logger.forSymbol(symbol).debug(`📊 PATH_2_ADX_FLOOR: momentumState="${momentumState}" but ADX=${adx.toFixed(1)} < ${NO_MOMENTUM_GATE_PARAMS.STATE_PRESENCE_MIN_ADX}, skipping to Path 3+`);
+              }
+            }
+          } else {
+            // Legacy behavior: state presence always passes
+            statePresencePasses = true;
+          }
+        }
+        
+        // ============= PATH 3: STRONG TREND EXCEPTION =============
+        // Check if ADX provides structural conviction (with exception budget)
+        let strongTrendExceptionApplied = false;
+        if (isStrongTrendException && !statePresencePasses && !momentumConfirms) {
+          // Check exception budget
+          if (!NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET || !noMomentumExceptionUsed) {
+            strongTrendExceptionApplied = true;
+            if (NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET && !noMomentumExceptionUsed) {
+              noMomentumExceptionUsed = "STRONG_TREND";
+              if (NO_MOMENTUM_GATE_PARAMS.LOG_EXCEPTION_USAGE) {
+                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using STRONG_TREND as first exception (ADX=${adx.toFixed(1)})`);
+              }
+            }
+          } else {
+            logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Skipping STRONG_TREND - ${noMomentumExceptionUsed} already applied`);
+          }
+        }
+        
+        // ============= PATH 4: TREND ACCELERATION =============
+        // Check if trend acceleration qualifies (with exception budget)
+        let trendAccelerationApplied = false;
+        if (qualifiesForTrendAcceleration && !statePresencePasses && !momentumConfirms && !strongTrendExceptionApplied) {
+          // Check exception budget
+          if (!NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET || !noMomentumExceptionUsed) {
+            trendAccelerationApplied = true;
+            noMomentumExceptionMultiplier = 0.70;  // Standard acceleration position size
+            if (NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET && !noMomentumExceptionUsed) {
+              noMomentumExceptionUsed = "TREND_ACCELERATION";
+              if (NO_MOMENTUM_GATE_PARAMS.LOG_EXCEPTION_USAGE) {
+                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using TREND_ACCELERATION as first exception (${priceMove.toFixed(1)}% move)`);
+              }
+            }
+          } else {
+            logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Skipping TREND_ACCELERATION - ${noMomentumExceptionUsed} already applied`);
+          }
+        }
+        
+        // ============= PATH 5A: PRE-MOMENTUM STOCHRSI =============
+        // Set directional bias (not override) with exception budget
+        let preMomentumApplied = false;
+        if (preMomentumStochRsiOverrideApplied && !statePresencePasses && !momentumConfirms && !strongTrendExceptionApplied && !trendAccelerationApplied) {
+          // Check exception budget
+          if (!NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET || !noMomentumExceptionUsed) {
+            preMomentumApplied = true;
+            noMomentumExceptionMultiplier = preMomentumPositionMultiplier;
+            
+            // Set directional BIAS (not override) - this informs direction derivation
+            premiumOverrideBias = preMomentumDirection === "long" ? "bullish" : "bearish";
+            premiumOverrideSource = "PRE_MOMENTUM_STOCHRSI";
+            
+            if (NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET && !noMomentumExceptionUsed) {
+              noMomentumExceptionUsed = "PRE_MOMENTUM_STOCHRSI";
+              if (NO_MOMENTUM_GATE_PARAMS.LOG_EXCEPTION_USAGE) {
+                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using PRE_MOMENTUM_STOCHRSI as first exception (bias=${premiumOverrideBias})`);
+              }
+            }
+          } else {
+            logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Skipping PRE_MOMENTUM_STOCHRSI - ${noMomentumExceptionUsed} already applied`);
+          }
+        }
+        
+        // ============= PATH 5B: SHORT-TERM ALIGNMENT =============
+        // Set directional bias (not override) with exception budget
+        let shortTermAlignmentApplied = false;
+        if (shortTermAlignmentOverrideApplied && !statePresencePasses && !momentumConfirms && !strongTrendExceptionApplied && !trendAccelerationApplied && !preMomentumApplied) {
+          // Check exception budget
+          if (!NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET || !noMomentumExceptionUsed) {
+            shortTermAlignmentApplied = true;
+            noMomentumExceptionMultiplier = shortTermAlignmentPositionMultiplier;
+            
+            // Set directional BIAS (not override)
+            premiumOverrideBias = shortTermAlignmentDirection === "long" ? "bullish" : "bearish";
+            premiumOverrideSource = "SHORT_TERM_ALIGNMENT";
+            
+            if (NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET && !noMomentumExceptionUsed) {
+              noMomentumExceptionUsed = "SHORT_TERM_ALIGNMENT";
+              if (NO_MOMENTUM_GATE_PARAMS.LOG_EXCEPTION_USAGE) {
+                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using SHORT_TERM_ALIGNMENT as first exception (bias=${premiumOverrideBias})`);
+              }
+            }
+          } else {
+            logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Skipping SHORT_TERM_ALIGNMENT - ${noMomentumExceptionUsed} already applied`);
+          }
+        }
+        
+        // ============= DIRECTION BIAS CONFLICT CHECK =============
+        // If premium override set a bias but derived direction conflicts, apply position reduction
+        let directionBiasConflict = false;
+        if (premiumOverrideBias && derivedDirection) {
+          const expectedDirection = premiumOverrideBias === "bullish" ? "long" : "short";
+          if (derivedDirection !== expectedDirection) {
+            directionBiasConflict = true;
+            noMomentumExceptionMultiplier *= NO_MOMENTUM_GATE_PARAMS.DIRECTION_CONFLICT_POSITION_REDUCTION;
+            logger.forSymbol(symbol).warn(`⚠️ DIRECTION_BIAS_CONFLICT: Premium bias suggests ${premiumOverrideBias} (${expectedDirection}) but derived=${derivedDirection} → position reduced to ${(noMomentumExceptionMultiplier * 100).toFixed(0)}%`);
+          }
+        }
+        
+        // ============= FINAL MOMENTUM PASSES CHECK =============
+        // Momentum passes if any path succeeds:
+        // 1. Standard confirmation (momentumConfirms)
+        // 2. State presence with ADX floor (statePresencePasses)
+        // 3. Strong trend exception (strongTrendExceptionApplied)
+        // 4. Trend acceleration (trendAccelerationApplied)
+        // 5. Premium overrides (preMomentumApplied OR shortTermAlignmentApplied)
+        const hasPremiumOverride = preMomentumApplied || shortTermAlignmentApplied;
+        const momentumPasses = momentumConfirms || statePresencePasses || strongTrendExceptionApplied || trendAccelerationApplied || hasPremiumOverride;
         
         if (!momentumPasses) {
           rejectedByHardGates++;
-          perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW', details: `Momentum=${momentumState}, ADX=${adx.toFixed(1)}<28, PriceMove=${priceMove.toFixed(1)}%` });
+          perSymbolGateAttribution.set(symbol, { gate: 'NO_MOMENTUM_CONFIRMATION', details: `Momentum=${momentumState}, ADX=${adx.toFixed(1)}<${effectiveStrongTrendADX}, PriceMove=${priceMove.toFixed(1)}%` });
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE: No momentum confirmation (state=${momentumState}, confirms=${momentumConfirms}, ADX=${adx.toFixed(1)} < 28, priceMove=${priceMove.toFixed(1)}%)`,
+            `HARD GATE: No momentum confirmation (state=${momentumState}, confirms=${momentumConfirms}, ADX=${adx.toFixed(1)} < ${effectiveStrongTrendADX}, priceMove=${priceMove.toFixed(1)}%)`,
             { 
               gate: "NO_MOMENTUM_CONFIRMATION",
               momentumState,
               momentumConfirms,
               adx: adx.toFixed(1),
+              effectiveADXThreshold: effectiveStrongTrendADX,
+              // Path 2 ADX floor diagnostics
+              path2: {
+                statePresencePasses,
+                statePresenceSkippedDueToADX,
+                adxFloorEnabled: NO_MOMENTUM_GATE_PARAMS.ENABLE_PATH_2_ADX_FLOOR,
+                adxFloorRequired: NO_MOMENTUM_GATE_PARAMS.STATE_PRESENCE_MIN_ADX,
+              },
+              // Exception budget diagnostics
+              exceptionBudget: {
+                enabled: NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET,
+                exceptionUsed: noMomentumExceptionUsed,
+                maxDepth: NO_MOMENTUM_GATE_PARAMS.MAX_EXCEPTION_DEPTH,
+              },
+              // Path status
+              paths: {
+                path1_standardConfirmation: momentumConfirms,
+                path2_statePresence: statePresencePasses,
+                path3_strongTrend: strongTrendExceptionApplied,
+                path4_acceleration: trendAccelerationApplied,
+                path5a_preMomentum: preMomentumApplied,
+                path5b_shortTermAlignment: shortTermAlignmentApplied,
+              },
               isStrongTrendException,
+              stochRsiAdxAlignmentActive,
               trend,
               confidence,
-              // NEW: Trend acceleration diagnostics
+              // Trend acceleration diagnostics
               trendAcceleration: {
                 priceMove: priceMove.toFixed(1),
                 priceDirection,
@@ -7817,7 +7992,7 @@ serve(async (req) => {
                 stochRsiSafe: stochRsiSafeForAcceleration,
                 htfMatches: htfMatchesDirection
               },
-              // Detailed momentum analysis - INCLUDE ALL FIELDS FOR DEBUGGING
+              // Detailed momentum analysis
               momentum: {
                 state: momentumState,
                 confirms: momentumConfirms,
@@ -7826,7 +8001,6 @@ serve(async (req) => {
                 macdExpanding: momentum?.macdExpanding,
                 lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend,
                 hasDivergence: momentum?.hasDivergence,
-                // Consecutive bar counts for price action confirmation
                 consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
                 consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
                 consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
@@ -7845,14 +8019,20 @@ serve(async (req) => {
           continue;
         }
         
+        // Apply exception position multiplier to reversal multiplier
+        if (noMomentumExceptionUsed && noMomentumExceptionMultiplier < 1.0) {
+          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, noMomentumExceptionMultiplier);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} NO_MOMENTUM_CONFIRMATION exception (${noMomentumExceptionUsed}) - position capped at ${(noMomentumExceptionMultiplier * 100).toFixed(0)}%`);
+        }
+        
         // Log when using strong trend exception for early entry
-        if (isStrongTrendException && momentumState === "none" && !momentumConfirms) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} EARLY ENTRY via strong trend exception (ADX=${adx.toFixed(1)} >= 28, momentum=${momentumState})`);
+        if (strongTrendExceptionApplied && momentumState === "none" && !momentumConfirms) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} EARLY ENTRY via strong trend exception (ADX=${adx.toFixed(1)} >= ${effectiveStrongTrendADX}, momentum=${momentumState}, exception=${noMomentumExceptionUsed})`);
         }
         
         // Log when using trend acceleration exception
-        if (qualifiesForTrendAcceleration && momentumState === "none" && !momentumConfirms && !isStrongTrendException) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🚀 TREND ACCELERATION BYPASS: Allowing entry despite no momentum confirmation (${priceMove.toFixed(1)}% move, ADX=${adx.toFixed(1)} rising=${adxRisingForAcceleration})`);
+        if (trendAccelerationApplied && momentumState === "none" && !momentumConfirms) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} 🚀 TREND ACCELERATION BYPASS: Allowing entry despite no momentum confirmation (${priceMove.toFixed(1)}% move, ADX=${adx.toFixed(1)} rising=${adxRisingForAcceleration}, exception=${noMomentumExceptionUsed})`);
         }
         
         // ============= CONTEXT-AWARE MOMENTUM GATE FOR PULLBACK ENTRIES =============

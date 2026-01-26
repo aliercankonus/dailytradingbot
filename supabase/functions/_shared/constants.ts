@@ -2630,6 +2630,61 @@ export const SHORT_TERM_ALIGNMENT_PARAMS = {
   EXCEPTION_TYPE: "SHORT_TERM_ALIGNMENT_OVERRIDE" as const,
 } as const;
 
+// ============= NO_MOMENTUM_CONFIRMATION GATE PARAMETERS =============
+// Controls the behavior of the NO_MOMENTUM_CONFIRMATION hard gate
+// This gate ensures signals have directional conviction before entry
+// 
+// KEY IMPROVEMENTS (Expert Review):
+// 1. Path 2 ADX Floor - Prevents weak "building" state from passing without ADX minimum
+// 2. Exception Budget - Prevents multiple weak justifications from stacking
+// 3. Direction Bias Model - Premium overrides suggest direction, don't override it
+export const NO_MOMENTUM_GATE_PARAMS = {
+  // ===== FEATURE FLAGS =====
+  // Enable Path 2 ADX floor requirement
+  ENABLE_PATH_2_ADX_FLOOR: true,
+  // Enable exception budget (max 1 exception per signal)
+  ENABLE_EXCEPTION_BUDGET: true,
+  
+  // ===== PATH 2: STATE PRESENCE ADX FLOOR =====
+  // When momentumState is "building" or "mixed", require minimum ADX
+  // This prevents weak momentum states from passing in dead markets
+  STATE_PRESENCE_MIN_ADX: 20,  // ADX_THRESHOLDS.MINIMUM
+  
+  // ===== EXCEPTION BUDGET =====
+  // Maximum exception paths that can be combined for a single signal
+  // Setting to 1 means only the FIRST qualifying exception is used
+  MAX_EXCEPTION_DEPTH: 1,
+  
+  // ===== EXCEPTION PRIORITY ORDER =====
+  // Lower number = higher priority, evaluated first
+  // If priority 1 qualifies, priorities 2+ are skipped
+  EXCEPTION_PRIORITIES: {
+    STOCHRSI_ADX_ALIGNMENT: 1,  // StochRSI-ADX threshold reduction
+    STRONG_TREND: 2,            // ADX >= 28 (or 22 if aligned)
+    TREND_ACCELERATION: 3,      // 2.5%+ price move with ADX rising
+    PRE_MOMENTUM_STOCHRSI: 4,   // Deep StochRSI extreme + 1h directional
+    SHORT_TERM_ALIGNMENT: 5,    // 1h+30m+micro all agree
+  } as const,
+  
+  // ===== DIRECTION BIAS VS OVERRIDE =====
+  // When premium overrides (5A/5B) set direction, it's a "bias" not an override
+  // If centralized deriveTradeDirection conflicts, apply position reduction
+  DIRECTION_CONFLICT_POSITION_REDUCTION: 0.70,  // 30% reduction on conflict
+  
+  // ===== LOGGING =====
+  LOG_EXCEPTION_USAGE: true,
+  LOG_ADX_FLOOR_SKIPS: true,
+} as const;
+
+// Exception types for the NO_MOMENTUM_CONFIRMATION gate
+export type NoMomentumExceptionType = 
+  | "STOCHRSI_ADX_ALIGNMENT"
+  | "STRONG_TREND"
+  | "TREND_ACCELERATION"
+  | "PRE_MOMENTUM_STOCHRSI"
+  | "SHORT_TERM_ALIGNMENT"
+  | null;
+
 // ============= STOCHRSI DECLINE MOMENTUM BONUS =============
 // When StochRSI K is already low and declining (K < D), indicates building bearish momentum
 // Add momentum score bonus for scoring purposes
