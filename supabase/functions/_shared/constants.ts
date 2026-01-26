@@ -3898,42 +3898,45 @@ export const SQUEEZE_BREAKOUT_SIGNAL_PARAMS = {
 export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   ENABLED: true,
   
-  // ===== GRADUATED RESPONSE =====
-  // Soft threshold: reduce position size instead of hard block
-  SOFT_THRESHOLD_PERCENT: 5.0,        // 5% move = reduce position
-  SOFT_THRESHOLD_POSITION_SIZE: 0.35, // 35% position for late entries
+  // ===== STRICTER THRESHOLDS (Phase 1 Fix) =====
+  // LONG entries blocked if price already moved this much from 24h low
+  LONG_SOFT_THRESHOLD_PERCENT: 3.5,   // Reduce position at 3.5%+ move
+  LONG_HARD_THRESHOLD_PERCENT: 5.0,   // Hard block at 5%+ move
   
-  // Hard threshold: complete block
-  HARD_THRESHOLD_PERCENT: 10.0,       // 10% move = hard block
+  // SHORT entries blocked if price already moved this much from 24h high
+  SHORT_SOFT_THRESHOLD_PERCENT: 3.5,
+  SHORT_HARD_THRESHOLD_PERCENT: 5.0,
+  
+  // Legacy unified thresholds (for backward compatibility)
+  SOFT_THRESHOLD_PERCENT: 3.5,        // Use direction-specific thresholds above
+  SOFT_THRESHOLD_POSITION_SIZE: 0.35, // 35% position for late entries
+  HARD_THRESHOLD_PERCENT: 5.0,        // Use direction-specific thresholds above
   
   // ===== STOCHRSI ALIGNMENT REQUIRED =====
-  // For late shorts: StochRSI must be > 35 (not deeply oversold)
-  // For late longs: StochRSI must be < 65 (not overbought)
+  // In soft zone, block if StochRSI indicates exhaustion
+  // For late shorts: StochRSI K must be > 35 (not deeply oversold)
+  // For late longs: StochRSI K must be < 50 (tighter than before - was 65)
   REQUIRE_STOCHRSI_ALIGNMENT: true,
   STOCHRSI_NOT_OVERSOLD_FOR_SHORT: 35,  // K must be > 35 for late short
-  STOCHRSI_NOT_OVERBOUGHT_FOR_LONG: 65, // K must be < 65 for late long
+  STOCHRSI_NOT_OVERBOUGHT_FOR_LONG: 50, // K must be < 50 for late long (tightened from 65)
   
   // ===== EXCEPTION: STRONG TREND CONTINUATION =====
-  // Allow entry despite exhaustion if ADX is very strong and rising
+  // Allow entry despite exhaustion ONLY if ADX is VERY strong (>=40) and clearly rising
   ALLOW_STRONG_TREND_EXCEPTION: true,
-  EXCEPTION_MIN_ADX: 40,              // Very strong trend
+  EXCEPTION_MIN_ADX: 40,              // Very strong trend required
   EXCEPTION_MIN_ADX_SLOPE: 0.2,       // ADX must be rising
   EXCEPTION_POSITION_SIZE: 0.40,      // 40% position for exception entries
   
   // ===== ADDITIONAL ENTRY QUALITY GATES =====
-  // For short entries at soft threshold: require StochRSI K > this
   SOFT_SHORT_MIN_STOCHRSI: 35,
-  // For long entries at soft threshold: require StochRSI K < this
-  SOFT_LONG_MAX_STOCHRSI: 65,
+  SOFT_LONG_MAX_STOCHRSI: 50,         // Tightened from 65
   
   // ===== LOOKBACK PERIOD =====
-  // Hours to look back for swing high/low calculation
   SWING_LOOKBACK_HOURS: 24,
   
   // ===== ATR-BASED ALTERNATIVE =====
-  // Block if price moved more than X ATRs from swing (optional)
   USE_ATR_BASED_THRESHOLD: false,
-  MAX_ATR_DISTANCE_FOR_ENTRY: 4.0,    // 4 ATRs from swing = overextended
+  MAX_ATR_DISTANCE_FOR_ENTRY: 4.0,
   
   // ===== LOGGING =====
   LOG_EXHAUSTION_CHECKS: true,

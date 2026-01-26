@@ -146,24 +146,45 @@ Deno.serve(async (req) => {
       console.log(`Rejection logs count (${totalCount}) is within limit of ${MAX_REJECTION_LOGS}`);
     }
 
-    // Get all expired signals (expires_at < NOW)
+    // ============================================================
+    // PHASE 3: PRESERVE EXECUTED SIGNALS, ONLY DELETE EXPIRED ACTIVE ONES
+    // Signals with status='executed' are kept for 30 days for traceability
+    // ============================================================
+    
+    // Get all expired signals that are NOT executed (status != 'executed' or status is null/active)
     const { data: expiredSignals, error: fetchError } = await supabase
       .from('trading_signals')
-      .select('id, symbol, signal_type, created_at, expires_at')
-      .lt('expires_at', new Date().toISOString());
+      .select('id, symbol, signal_type, created_at, expires_at, status')
+      .lt('expires_at', new Date().toISOString())
+      .or('status.is.null,status.eq.active');  // Only get non-executed signals
 
     if (fetchError) {
       console.error('Error fetching expired signals:', fetchError);
       throw fetchError;
     }
 
+    // Clean up old executed signals (older than 30 days) - separate cleanup
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { error: oldExecutedError, count: oldExecutedDeleted } = await supabase
+      .from('trading_signals')
+      .delete({ count: 'exact' })
+      .eq('status', 'executed')
+      .lt('executed_at', thirtyDaysAgo);
+
+    if (oldExecutedError) {
+      console.error('Error deleting old executed signals:', oldExecutedError);
+    } else {
+      console.log(`Deleted ${oldExecutedDeleted || 0} executed signals older than 30 days`);
+    }
+
     if (!expiredSignals || expiredSignals.length === 0) {
-      console.log('No expired signals to clean up');
+      console.log('No expired active signals to clean up');
       return new Response(
         JSON.stringify({ 
           success: true, 
           deleted: 0,
-          message: 'No expired signals found'
+          oldExecutedDeleted: oldExecutedDeleted || 0,
+          message: 'No expired active signals found'
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -187,6 +208,7 @@ Deno.serve(async (req) => {
           success: true, 
           deleted: 0,
           skipped: expiredSignals.length,
+          oldExecutedDeleted: oldExecutedDeleted || 0,
           rejectionLogsDeleted,
           message: 'All expired signals are referenced by trades (cannot delete due to foreign key constraint)'
         }),
@@ -194,7 +216,18 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Delete expired signals
+    // Mark expired signals as 'expired' status instead of deleting (for audit trail)
+    // Then delete only those that are truly orphaned
+    const { error: updateExpiredError } = await supabase
+      .from('trading_signals')
+      .update({ status: 'expired' })
+      .in('id', signalsToDelete.map(s => s.id));
+
+    if (updateExpiredError) {
+      console.error('Error marking signals as expired:', updateExpiredError);
+    }
+
+    // Delete expired signals that are not referenced
     const { error: deleteError } = await supabase
       .from('trading_signals')
       .delete()
@@ -214,6 +247,7 @@ Deno.serve(async (req) => {
         success: true, 
         deleted: signalsToDelete.length,
         skipped: expiredSignals.length - signalsToDelete.length,
+        oldExecutedDeleted: oldExecutedDeleted || 0,
         rejectionLogsDeleted,
         marketRegimeDeleted: regimeDeleted || 0,
         momentumAnalysisDeleted: momentumDeleted || 0,

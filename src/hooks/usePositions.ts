@@ -21,6 +21,8 @@ interface Position {
   is_hedge?: boolean;
   parent_position_id?: string;
   peak_pnl_percent?: number;
+  // NEW: Entry snapshot for forensics (can be JSON object or string)
+  entry_snapshot?: unknown;
 }
 
 const fetchPositions = async (): Promise<Position[]> => {

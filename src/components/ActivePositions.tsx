@@ -10,6 +10,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useMemo } from 'react';
 import { formatPrice, formatPercent, formatQuantity } from '@/lib/utils';
+import { TradeForensicsPanel } from './TradeForensicsPanel';
 
 export const ActivePositions = () => {
   const { positions, loading, refetch } = usePositions();
@@ -325,6 +326,18 @@ export const ActivePositions = () => {
                 )}
               </div>
             )}
+            
+            {/* Trade Forensics Panel */}
+            <div className="mt-3 pt-3 border-t">
+              <TradeForensicsPanel 
+                position={{
+                  ...position,
+                  live_unrealized_pnl_percent: position.live_unrealized_pnl_percent,
+                  peak_pnl_percent: position.peak_pnl,
+                  entry_snapshot: position.entry_snapshot,
+                }} 
+              />
+            </div>
                   </Card>
                 ))}
               </div>
@@ -479,6 +492,18 @@ export const ActivePositions = () => {
                   )}
                 </div>
               )}
+              
+              {/* Trade Forensics Panel */}
+              <div className="mt-3 pt-3 border-t">
+                <TradeForensicsPanel 
+                  position={{
+                    ...position,
+                    live_unrealized_pnl_percent: position.live_unrealized_pnl_percent,
+                    peak_pnl_percent: position.peak_pnl,
+                    entry_snapshot: position.entry_snapshot,
+                  }} 
+                />
+              </div>
             </Card>
           ))}
         </div>
