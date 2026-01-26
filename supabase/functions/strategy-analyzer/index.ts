@@ -7926,8 +7926,10 @@ serve(async (req) => {
         }
         
         // ===== CONTEXT-AWARE MOMENTUM THRESHOLD =====
-        // Use reduced threshold for valid pullback setups (they lack momentum by definition)
-        let baseMomentumThreshold: number = isPullbackValid 
+        // ISSUE 4 FIX: Only use pullback threshold if pullback is VALID (includes ADX check)
+        // AND ADX is genuinely in trending territory (>= 22)
+        // This is a defensive double-check that makes the logic more explicit
+        let baseMomentumThreshold: number = (isPullbackValid && adx >= PULLBACK_DETECTION_PARAMS.MIN_ADX)
           ? MOMENTUM_THRESHOLDS.PULLBACK_MIN_SCORE  // 3 for pullbacks
           : MOMENTUM_THRESHOLDS.MIN_SCORE;          // 5 for normal entries
         
@@ -7991,6 +7993,35 @@ serve(async (req) => {
         // Use the lower of pullback threshold and regime-aware threshold
         let effectiveMomentumThreshold = Math.min(baseMomentumThreshold, regimeAwareMomentumThreshold);
         
+        // ============= MOMENTUM STATE THRESHOLD ADJUSTMENT (ISSUE 3 FIX) =============
+        // Tightly couple momentum state classification with gate threshold
+        // This ensures consistent behavior between Momentum Status Details UI and signal generation
+        const momentumStateForGate = momentum?.state || "none";
+        let stateAdjustedThreshold = effectiveMomentumThreshold;
+        let momentumStateAdjustmentApplied = false;
+        let momentumStateAdjustmentDelta = 0;
+        
+        if (momentumStateForGate === "confirmed") {
+          // Confirmed momentum = strong follow-through, relax threshold by 1
+          stateAdjustedThreshold = Math.max(0, effectiveMomentumThreshold - 1);
+          momentumStateAdjustmentApplied = true;
+          momentumStateAdjustmentDelta = -1;
+          logger.forSymbol(symbol).info(
+            `${LOG_CATEGORIES.MOMENTUM} MOMENTUM STATE BONUS: state=confirmed, threshold reduced ${effectiveMomentumThreshold} → ${stateAdjustedThreshold}`
+          );
+        } else if (momentumStateForGate === "exhausted") {
+          // Exhausted momentum = reversal risk, increase threshold by 1
+          stateAdjustedThreshold = effectiveMomentumThreshold + 1;
+          momentumStateAdjustmentApplied = true;
+          momentumStateAdjustmentDelta = 1;
+          logger.forSymbol(symbol).info(
+            `${LOG_CATEGORIES.MOMENTUM} MOMENTUM STATE PENALTY: state=exhausted, threshold increased ${effectiveMomentumThreshold} → ${stateAdjustedThreshold}`
+          );
+        }
+        
+        // Apply state adjustment
+        effectiveMomentumThreshold = stateAdjustedThreshold;
+        
         // ============= STRONG ADX OVERRIDE FOR MOMENTUM SCORE GATE =============
         // When ADX confirms strong trend, allow complete bypass of momentum score requirement
         // Scoped to trend-following entries only with exhaustion checks
@@ -8029,27 +8060,40 @@ serve(async (req) => {
             strongAdxOverrideApplied = true;
             effectiveMomentumThreshold = STRONG_ADX_OVERRIDE_PARAMS.OVERRIDE_MOMENTUM_THRESHOLD;
             
+            // GAP 1 FIX: Calculate graduated position multiplier based on score deficit
+            const scoreDeficit = baseMomentumThreshold - earlyMomentumScore;
+            const graduatedMultiplier = Math.max(0.5, Math.min(0.9, 1.0 - (scoreDeficit * 0.1)));
+            
             // Determine which tier applied and set position multiplier accordingly
             if (isVeryStrongAdxForOverride) {
               strongAdxOverrideTier = 'very-strong';
               // Reduce position size if ADX indicates exhaustion risk
               if (adx > STRONG_ADX_OVERRIDE_PARAMS.EXHAUSTION_ADX) {
-                strongAdxPositionMultiplier = STRONG_ADX_OVERRIDE_PARAMS.EXHAUSTION_POSITION_MULTIPLIER;
+                const tierMultiplier = STRONG_ADX_OVERRIDE_PARAMS.EXHAUSTION_POSITION_MULTIPLIER;
+                // Apply the more conservative of graduated and tier-specific multiplier
+                strongAdxPositionMultiplier = Math.min(graduatedMultiplier, tierMultiplier);
                 logger.forSymbol(symbol).info(
                   `${LOG_CATEGORIES.MOMENTUM} STRONG ADX OVERRIDE: ADX=${adx.toFixed(1)} > ${STRONG_ADX_OVERRIDE_PARAMS.EXHAUSTION_ADX}, ` +
-                  `reducing position to ${(strongAdxPositionMultiplier * 100).toFixed(0)}%`
+                  `graduated=${(graduatedMultiplier * 100).toFixed(0)}%, tier=${(tierMultiplier * 100).toFixed(0)}%, ` +
+                  `using ${(strongAdxPositionMultiplier * 100).toFixed(0)}%`
                 );
+              } else {
+                strongAdxPositionMultiplier = graduatedMultiplier;
               }
             } else if (isNearVeryStrongAdxForOverride) {
-              // NEW: Near very strong tier - apply 80% position size for safety
+              // Near very strong tier - apply 80% position size for safety
               strongAdxOverrideTier = 'near-very-strong';
-              strongAdxPositionMultiplier = STRONG_ADX_OVERRIDE_PARAMS.NEAR_VERY_STRONG_POSITION_MULTIPLIER ?? 0.80;
+              const tierMultiplier = STRONG_ADX_OVERRIDE_PARAMS.NEAR_VERY_STRONG_POSITION_MULTIPLIER ?? 0.80;
+              // Apply the more conservative of graduated and tier-specific multiplier
+              strongAdxPositionMultiplier = Math.min(graduatedMultiplier, tierMultiplier);
               logger.forSymbol(symbol).info(
                 `${LOG_CATEGORIES.MOMENTUM} NEAR-VERY-STRONG ADX OVERRIDE: ADX=${adx.toFixed(1)} (33-35 range), slope=${adxSlopeForOverride.toFixed(2)}, ` +
-                `reducing position to ${(strongAdxPositionMultiplier * 100).toFixed(0)}%`
+                `graduated=${(graduatedMultiplier * 100).toFixed(0)}%, tier=${(tierMultiplier * 100).toFixed(0)}%, ` +
+                `using ${(strongAdxPositionMultiplier * 100).toFixed(0)}%`
               );
             } else {
               strongAdxOverrideTier = 'strong';
+              strongAdxPositionMultiplier = graduatedMultiplier;
             }
             
             logger.forSymbol(symbol).info(
@@ -8072,57 +8116,96 @@ serve(async (req) => {
           }
         }
         
+        // ============= ACCELERATING TREND EXCEPTION (ISSUE 1 FIX) =============
+        // If ADX is strong AND rising, allow reduced-size entry even with low momentum
+        // In accelerating trends, price leads momentum - this prevents blocking valid entries
+        const acceleratingTrendException = (
+          adx >= 30 &&
+          adxSlopeForOverride > 0 &&
+          !adxExhaustion.isExhausted &&
+          !isReversalEntry
+        );
+        let acceleratingTrendPositionMultiplier = 1.0;
+        let acceleratingTrendExceptionApplied = false;
+        
         if (earlyMomentumScore < effectiveMomentumThreshold) {
-          rejectedByHardGates++;
-          perSymbolGateAttribution.set(symbol, { 
-            gate: 'MOMENTUM_WEAKENING', 
-            details: `score=${earlyMomentumScore}, need=${effectiveMomentumThreshold}, adx=${adx.toFixed(1)}, slope=${adxSlopeForOverride.toFixed(2)}` 
-          });
-          await logRejectionWithAI(
-            supabase, userId, symbol,
-            `HARD GATE: Momentum score too low (${earlyMomentumScore} < ${effectiveMomentumThreshold}${isPullbackSetupDetected ? ' [pullback threshold]' : ''}${regimeAwareApplied ? ` [regime-aware:${regimeAwareTier}]` : ''}) - insufficient momentum confirmation`,
-            { 
-              gate: "MOMENTUM_SCORE_TOO_LOW",
-              derivedDirection,
-              direction: derivedDirection,
-              momentumScore: earlyMomentumScore,
-              momentumRequired: effectiveMomentumThreshold,
-              baseMomentumThreshold,
-              regimeAwareApplied,
-              regimeAwareTier,
-              regimeAwareMomentumThreshold,
-              strongAdxOverrideAttempted: STRONG_ADX_OVERRIDE_PARAMS.ENABLED,
-              strongAdxOverrideApplied,
-              strongAdxOverrideTier,
-              isPullbackSetup: isPullbackSetupDetected,
-              isPullbackValid,
-              momentumState: momentum?.state || "none",
-              momentumConfirms: momentum?.confirms ?? false,
-              macdExpanding: momentum?.macdExpanding ?? false,
-              volumeConfirms: momentum?.volumeConfirms ?? false,
-              stochRsiK1h: stochRsiK1h.toFixed(1),
-              stochRsiD1h: stochRsiD1h.toFixed(1),
-              stochFilterTrend4h,
-              stochFilterConf4h,
-              adx: adx.toFixed(1),
-              adxSlope: adxSlopeForOverride.toFixed(2),
-              adxRising: smartAdxRising,
-              exhausted: adxExhaustion.isExhausted,
-              continuation: adxExhaustion.isContinuation,
-              reversalScore: unifiedReversal.score,
-              isReversalEntry,
-              trend,
-              confidence
-            },
-            trendData,
-            riskParams.ai_analysis_enabled !== false,
-            earlyOrderFlowAnalysis
-          );
-          continue;
+          if (acceleratingTrendException) {
+            // Allow with 70% position size instead of blocking
+            acceleratingTrendPositionMultiplier = 0.70;
+            acceleratingTrendExceptionApplied = true;
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.MOMENTUM} ✓ ACCELERATING TREND EXCEPTION: ADX=${adx.toFixed(1)} slope=${adxSlopeForOverride.toFixed(2)} > 0, ` +
+              `allowing entry with ${(acceleratingTrendPositionMultiplier * 100).toFixed(0)}% size despite low momentum (${earlyMomentumScore} < ${effectiveMomentumThreshold})`
+            );
+            // Continue to next gate (don't reject) - but we need to track this for position sizing
+          } else {
+            // Normal rejection path
+            rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'MOMENTUM_WEAKENING', 
+              details: `score=${earlyMomentumScore}, need=${effectiveMomentumThreshold}, adx=${adx.toFixed(1)}, slope=${adxSlopeForOverride.toFixed(2)}` 
+            });
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `HARD GATE: Momentum score too low (${earlyMomentumScore} < ${effectiveMomentumThreshold}${isPullbackSetupDetected ? ' [pullback threshold]' : ''}${regimeAwareApplied ? ` [regime-aware:${regimeAwareTier}]` : ''}${momentumStateAdjustmentApplied ? ` [state:${momentumStateForGate}]` : ''}) - insufficient momentum confirmation`,
+              { 
+                gate: "MOMENTUM_SCORE_TOO_LOW",
+                derivedDirection,
+                direction: derivedDirection,
+                momentumScore: earlyMomentumScore,
+                momentumRequired: effectiveMomentumThreshold,
+                baseMomentumThreshold,
+                regimeAwareApplied,
+                regimeAwareTier,
+                regimeAwareMomentumThreshold,
+                momentumStateAdjustmentApplied,
+                momentumStateForGate,
+                momentumStateAdjustmentDelta,
+                strongAdxOverrideAttempted: STRONG_ADX_OVERRIDE_PARAMS.ENABLED,
+                strongAdxOverrideApplied,
+                strongAdxOverrideTier,
+                acceleratingTrendExceptionAttempted: acceleratingTrendException,
+                acceleratingTrendExceptionApplied: false,
+                acceleratingTrendExceptionReason: !acceleratingTrendException ? 
+                  (adx < 30 ? `ADX=${adx.toFixed(1)} < 30` : 
+                   adxSlopeForOverride <= 0 ? `slope=${adxSlopeForOverride.toFixed(2)} <= 0` :
+                   adxExhaustion.isExhausted ? 'exhausted' :
+                   isReversalEntry ? 'reversal entry' : 'unknown') : null,
+                isPullbackSetup: isPullbackSetupDetected,
+                isPullbackValid,
+                momentumState: momentum?.state || "none",
+                momentumConfirms: momentum?.confirms ?? false,
+                macdExpanding: momentum?.macdExpanding ?? false,
+                volumeConfirms: momentum?.volumeConfirms ?? false,
+                stochRsiK1h: stochRsiK1h.toFixed(1),
+                stochRsiD1h: stochRsiD1h.toFixed(1),
+                stochFilterTrend4h,
+                stochFilterConf4h,
+                adx: adx.toFixed(1),
+                adxSlope: adxSlopeForOverride.toFixed(2),
+                adxRising: smartAdxRising,
+                exhausted: adxExhaustion.isExhausted,
+                continuation: adxExhaustion.isContinuation,
+                reversalScore: unifiedReversal.score,
+                isReversalEntry,
+                trend,
+                confidence
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
         }
         
         // Log success with context
-        if (strongAdxOverrideApplied) {
+        if (acceleratingTrendExceptionApplied) {
+          logger.forSymbol(symbol).info(
+            `${LOG_CATEGORIES.SUCCESS} ✓ ACCELERATING TREND EXCEPTION: Momentum gate bypassed (ADX=${adx.toFixed(1)} rising, slope=${adxSlopeForOverride.toFixed(2)}) - ` +
+            `position size ${(acceleratingTrendPositionMultiplier * 100).toFixed(0)}%`
+          );
+        } else if (strongAdxOverrideApplied) {
           logger.forSymbol(symbol).info(
             `${LOG_CATEGORIES.SUCCESS} ✓ STRONG ADX OVERRIDE [${strongAdxOverrideTier}]: Momentum gate bypassed (ADX=${adx.toFixed(1)}, slope=${adxSlopeForOverride.toFixed(2)}) - ` +
             `position size ${(strongAdxPositionMultiplier * 100).toFixed(0)}%`
@@ -8131,6 +8214,8 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} PULLBACK ENTRY: Momentum gate passed with reduced threshold (${earlyMomentumScore} >= ${effectiveMomentumThreshold}) - position size ${(pullbackPositionMultiplier * 100).toFixed(0)}%`);
         } else if (regimeAwareApplied) {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} REGIME-AWARE [${regimeAwareTier}]: Momentum gate passed with relaxed threshold (${earlyMomentumScore} >= ${effectiveMomentumThreshold})`);
+        } else if (momentumStateAdjustmentApplied) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} MOMENTUM STATE [${momentumStateForGate}]: Momentum gate passed with adjusted threshold (${earlyMomentumScore} >= ${effectiveMomentumThreshold})`);
         } else {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Momentum score gate passed (${earlyMomentumScore} >= ${effectiveMomentumThreshold})`);
         }

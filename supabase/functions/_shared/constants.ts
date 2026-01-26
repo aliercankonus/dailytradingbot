@@ -1101,6 +1101,35 @@ export const MOMENTUM_THRESHOLDS = {
   PULLBACK_MIN_SCORE: 3,
 } as const;
 
+// ============= MOMENTUM GATE THRESHOLD ADJUSTMENT ORDER =============
+// CRITICAL: The order of threshold adjustments affects final behavior
+// This order must be preserved in strategy-analyzer implementation:
+//
+// 1. BASE THRESHOLD
+//    - Normal entries: MIN_SCORE (5)
+//    - Valid pullbacks (ADX >= 22): PULLBACK_MIN_SCORE (3)
+//
+// 2. REGIME-AWARE ADJUSTMENT
+//    - Very Strong ADX (>=35): threshold → 0
+//    - Near Very Strong (33-35, slope >= -0.3): threshold → 1
+//    - Strong ADX (>=30, rising): threshold → 2
+//
+// 3. MOMENTUM STATE ADJUSTMENT
+//    - confirmed: threshold -= 1 (reward strong follow-through)
+//    - exhausted: threshold += 1 (penalize reversal risk)
+//
+// 4. STRONG ADX OVERRIDE
+//    - If still failing threshold AND ADX qualifies: threshold → 0
+//    - Position size reduced based on tier AND graduated by score deficit
+//    - Score deficit multiplier: 1.0 - (deficit * 0.1), clamped to [0.5, 0.9]
+//
+// 5. ACCELERATING TREND EXCEPTION
+//    - If ADX >= 30 AND slope > 0 AND not exhausted: allow with 70% size
+//    - This catches strong trends where price leads momentum
+//
+// Final threshold = result after all adjustments
+// Rejection occurs if score < final threshold AND no exceptions apply
+
 // ============= STRONG ADX OVERRIDE PARAMETERS =============
 // Allows momentum score gate bypass when ADX confirms strong trend
 // Scoped to trend-following entries only with exhaustion checks

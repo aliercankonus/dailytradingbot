@@ -2405,10 +2405,32 @@ const HardGateDivergenceDisplay = ({ filtersStatus, trendData }: { filtersStatus
 const HardGateMomentumScoreDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const momentumScore = coerceNumeric(filtersStatus?.momentumScore, 0);
   const momentumRequired = coerceNumeric(filtersStatus?.momentumRequired, 5);
-  const momentumState = filtersStatus?.momentumState || trendData?.momentum?.state || "unknown";
+  const baseMomentumThreshold = coerceNumeric(filtersStatus?.baseMomentumThreshold, 5);
+  const momentumState = filtersStatus?.momentumState || filtersStatus?.momentumStateForGate || trendData?.momentum?.state || "unknown";
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const adxSlope = coerceNumeric(filtersStatus?.adxSlope, 0);
+  
+  // Threshold adjustment tracking
+  const regimeAwareApplied = filtersStatus?.regimeAwareApplied ?? false;
+  const regimeAwareTier = filtersStatus?.regimeAwareTier || 'none';
+  const regimeAwareMomentumThreshold = coerceNumeric(filtersStatus?.regimeAwareMomentumThreshold, baseMomentumThreshold);
+  const momentumStateAdjustmentApplied = filtersStatus?.momentumStateAdjustmentApplied ?? false;
+  const momentumStateAdjustmentDelta = coerceNumeric(filtersStatus?.momentumStateAdjustmentDelta, 0);
+  
+  // Override tracking
+  const strongAdxOverrideAttempted = filtersStatus?.strongAdxOverrideAttempted ?? false;
+  const strongAdxOverrideApplied = filtersStatus?.strongAdxOverrideApplied ?? false;
+  const strongAdxOverrideTier = filtersStatus?.strongAdxOverrideTier || 'none';
+  
+  // Accelerating trend exception tracking
+  const acceleratingTrendExceptionAttempted = filtersStatus?.acceleratingTrendExceptionAttempted ?? false;
+  const acceleratingTrendExceptionApplied = filtersStatus?.acceleratingTrendExceptionApplied ?? false;
+  const acceleratingTrendExceptionReason = filtersStatus?.acceleratingTrendExceptionReason;
   
   const scorePercent = (momentumScore / 20) * 100; // Assuming max momentum score of 20
+  
+  // Calculate threshold adjustment chain for display
+  const hasThresholdAdjustments = regimeAwareApplied || momentumStateAdjustmentApplied;
   
   return (
     <div className="space-y-3 p-3 bg-orange-500/10 rounded-md border border-orange-500/30">
@@ -2417,9 +2439,26 @@ const HardGateMomentumScoreDisplay = ({ filtersStatus, trendData }: { filtersSta
           <Zap className="h-4 w-4 text-orange-500" />
           <span className="text-xs font-semibold text-orange-400">HARD GATE: Momentum Score Too Low</span>
         </div>
-        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-orange-400 border-orange-500/30">
-          Need +{Math.max(0, momentumRequired - momentumScore)}
-        </Badge>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-orange-400 border-orange-500/30 cursor-help">
+                Need +{Math.max(0, momentumRequired - momentumScore)}
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent side="left" className="max-w-[280px] text-xs">
+              <p className="font-medium mb-1">Threshold adjusts based on trend strength:</p>
+              <ul className="space-y-0.5 text-[10px]">
+                <li>• ADX ≥35: Threshold = 0 (very strong trend)</li>
+                <li>• ADX 33-35: Threshold = 1 (near very strong)</li>
+                <li>• ADX ≥30 rising: Threshold = 2 (strong trend)</li>
+                <li>• Otherwise: Threshold = 5 (normal)</li>
+                <li className="pt-1 border-t border-border/50">• Confirmed state: -1</li>
+                <li>• Exhausted state: +1</li>
+              </ul>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
       
       {/* Momentum Score Visual */}
@@ -2445,8 +2484,39 @@ const HardGateMomentumScoreDisplay = ({ filtersStatus, trendData }: { filtersSta
         </div>
       </div>
       
+      {/* Threshold Adjustment Breakdown */}
+      {hasThresholdAdjustments && (
+        <div className="space-y-1 text-[10px] p-2 bg-muted/20 rounded border border-border/30">
+          <div className="text-muted-foreground font-medium">Threshold Adjustments:</div>
+          <div className="flex items-center gap-1">
+            <span className="text-muted-foreground">Base:</span>
+            <span className="font-mono">{baseMomentumThreshold}</span>
+          </div>
+          {regimeAwareApplied && (
+            <div className="flex items-center gap-1">
+              <span className="text-blue-400">→ Regime [{regimeAwareTier}]:</span>
+              <span className="font-mono text-blue-400">{regimeAwareMomentumThreshold}</span>
+            </div>
+          )}
+          {momentumStateAdjustmentApplied && (
+            <div className="flex items-center gap-1">
+              <span className={momentumStateAdjustmentDelta < 0 ? "text-green-400" : "text-red-400"}>
+                → State [{momentumState}]:
+              </span>
+              <span className={`font-mono ${momentumStateAdjustmentDelta < 0 ? "text-green-400" : "text-red-400"}`}>
+                {momentumStateAdjustmentDelta > 0 ? '+' : ''}{momentumStateAdjustmentDelta}
+              </span>
+            </div>
+          )}
+          <div className="flex items-center gap-1 pt-1 border-t border-border/30">
+            <span className="font-medium text-orange-400">Final required:</span>
+            <span className="font-mono font-bold text-orange-400">{momentumRequired}</span>
+          </div>
+        </div>
+      )}
+      
       {/* Context Grid */}
-      <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+      <div className="grid grid-cols-4 gap-1.5 text-[10px]">
         <div className="p-1.5 bg-muted/30 rounded text-center">
           <div className="text-muted-foreground">Score</div>
           <div className={`font-bold ${momentumScore >= momentumRequired ? 'text-green-400' : 'text-orange-400'}`}>
@@ -2455,13 +2525,39 @@ const HardGateMomentumScoreDisplay = ({ filtersStatus, trendData }: { filtersSta
         </div>
         <div className="p-1.5 bg-muted/30 rounded text-center">
           <div className="text-muted-foreground">State</div>
-          <div className="font-medium capitalize">{momentumState}</div>
+          <div className={`font-medium capitalize ${
+            momentumState === 'confirmed' ? 'text-green-400' : 
+            momentumState === 'exhausted' ? 'text-red-400' : 
+            momentumState === 'building' ? 'text-blue-400' : ''
+          }`}>{momentumState}</div>
         </div>
         <div className="p-1.5 bg-muted/30 rounded text-center">
           <div className="text-muted-foreground">ADX</div>
           <div className="font-medium">{adx.toFixed(1)}</div>
         </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Slope</div>
+          <div className={`font-medium ${adxSlope > 0 ? 'text-green-400' : adxSlope < 0 ? 'text-red-400' : ''}`}>
+            {adxSlope > 0 ? '+' : ''}{adxSlope.toFixed(2)}
+          </div>
+        </div>
       </div>
+      
+      {/* Override Attempts Info */}
+      {strongAdxOverrideAttempted && !strongAdxOverrideApplied && (
+        <div className="text-[9px] text-yellow-400 p-1.5 bg-yellow-500/10 rounded border border-yellow-500/20">
+          <span className="font-medium">⚠️ Strong ADX Override attempted but failed</span>
+          {adx < 30 && <div className="text-muted-foreground">• ADX {adx.toFixed(1)} {"<"} 30 required</div>}
+          {adx >= 30 && adxSlope <= 0 && <div className="text-muted-foreground">• ADX slope {adxSlope.toFixed(2)} ≤ 0 (not rising)</div>}
+        </div>
+      )}
+      
+      {acceleratingTrendExceptionReason && (
+        <div className="text-[9px] text-yellow-400 p-1.5 bg-yellow-500/10 rounded border border-yellow-500/20">
+          <span className="font-medium">⚠️ Accelerating Trend Exception not eligible</span>
+          <div className="text-muted-foreground">• {acceleratingTrendExceptionReason}</div>
+        </div>
+      )}
       
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
         <span className="text-orange-400">⚠️ Why blocked:</span> Trades with momentum score below {momentumRequired} have 
