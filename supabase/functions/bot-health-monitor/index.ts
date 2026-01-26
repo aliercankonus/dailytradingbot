@@ -17,6 +17,10 @@ const HEALTH_CHECK_CONFIG = {
   CHECK_POSITIONS: true,            // Check positions table for opens/closes
   CHECK_REJECTIONS: true,           // Check signal_rejection_log
   
+  // Notification settings
+  SEND_CRITICAL_ALERTS: true,       // Send email alerts on critical status
+  ALERT_COOLDOWN_MINUTES: 60,       // Don't send alerts more often than this
+  
   // Logging
   LOG_HEALTHY: true,                // Log even when healthy
   LOG_DETAILS: true,                // Log detailed activity counts
@@ -31,6 +35,97 @@ interface HealthStatus {
   rejectionsLogged: number;
   botEnabled: boolean;
   message: string;
+  alertSent?: boolean;
+}
+
+// Track last alert time to prevent spam (in-memory, resets on cold start)
+const lastAlertSent: Record<string, number> = {};
+
+async function sendCriticalAlert(
+  supabaseUrl: string,
+  supabaseKey: string,
+  userId: string,
+  healthStatus: HealthStatus
+): Promise<boolean> {
+  const now = Date.now();
+  const lastSent = lastAlertSent[userId] || 0;
+  const cooldownMs = HEALTH_CHECK_CONFIG.ALERT_COOLDOWN_MINUTES * 60 * 1000;
+  
+  // Check cooldown
+  if (now - lastSent < cooldownMs) {
+    console.log(`[BOT_HEALTH] Alert cooldown active for user ${userId.substring(0, 8)}, skipping notification`);
+    return false;
+  }
+
+  try {
+    // Get user's notification email from risk_parameters or profiles
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    const { data: riskParams } = await supabase
+      .from('risk_parameters')
+      .select('notification_email, email_notifications_enabled')
+      .eq('user_id', userId)
+      .single();
+
+    // Only send if email notifications are enabled
+    if (!riskParams?.email_notifications_enabled) {
+      console.log(`[BOT_HEALTH] Email notifications disabled for user ${userId.substring(0, 8)}`);
+      return false;
+    }
+
+    let email = riskParams?.notification_email;
+    
+    // Fall back to profile email if no notification email set
+    if (!email) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('email')
+        .eq('id', userId)
+        .single();
+      email = profile?.email;
+    }
+
+    if (!email) {
+      console.warn(`[BOT_HEALTH] No email found for user ${userId.substring(0, 8)}, cannot send alert`);
+      return false;
+    }
+
+    // Call send-notification function
+    const notificationPayload = {
+      type: 'bot_health_critical',
+      userId,
+      email,
+      lastActivityMinutesAgo: healthStatus.lastActivityMinutesAgo,
+      signalsGenerated: healthStatus.signalsGenerated,
+      positionsOpened: healthStatus.positionsOpened,
+      positionsClosed: healthStatus.positionsClosed,
+      rejectionsLogged: healthStatus.rejectionsLogged,
+    };
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/send-notification`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseKey}`,
+      },
+      body: JSON.stringify(notificationPayload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[BOT_HEALTH] Failed to send notification: ${errorText}`);
+      return false;
+    }
+
+    // Update cooldown tracker
+    lastAlertSent[userId] = now;
+    console.log(`[BOT_HEALTH] ✅ Critical alert sent to ${email} for user ${userId.substring(0, 8)}`);
+    return true;
+
+  } catch (error) {
+    console.error(`[BOT_HEALTH] Error sending critical alert:`, error);
+    return false;
+  }
 }
 
 serve(async (req) => {
@@ -179,7 +274,7 @@ serve(async (req) => {
       }
 
       // Store result
-      healthResults[userId] = {
+      const healthResult: HealthStatus = {
         status,
         lastActivityMinutesAgo,
         signalsGenerated: signalsCount,
@@ -195,8 +290,11 @@ serve(async (req) => {
         console.error(`[BOT_HEALTH user=${userIdShort}] ${message}`);
         console.error(`[BOT_HEALTH user=${userIdShort}]    Activity in last ${HEALTH_CHECK_CONFIG.CRITICAL_THRESHOLD_MINUTES}min: signals=${signalsCount}, opens=${opensCount}, closes=${closesCount}, rejections=${rejectionsCount}`);
         
-        // TODO: Send notification (email, SMS, etc.) for critical status
-        // Could integrate with send-notification edge function here
+        // Send critical alert notification
+        if (HEALTH_CHECK_CONFIG.SEND_CRITICAL_ALERTS) {
+          const alertSent = await sendCriticalAlert(supabaseUrl, supabaseKey, userId, healthResult);
+          healthResult.alertSent = alertSent;
+        }
         
       } else if (status === 'warning') {
         console.warn(`[BOT_HEALTH user=${userIdShort}] ${message}`);
@@ -209,16 +307,19 @@ serve(async (req) => {
           console.log(`[BOT_HEALTH user=${userIdShort}]    Activity: signals=${signalsCount}, opens=${opensCount}, closes=${closesCount}, rejections=${rejectionsCount}`);
         }
       }
+
+      healthResults[userId] = healthResult;
     }
 
     // Summary
     const criticalCount = Object.values(healthResults).filter(r => r.status === 'critical').length;
     const warningCount = Object.values(healthResults).filter(r => r.status === 'warning').length;
     const healthyCount = Object.values(healthResults).filter(r => r.status === 'healthy').length;
+    const alertsSentCount = Object.values(healthResults).filter(r => r.alertSent === true).length;
 
     const overallStatus = criticalCount > 0 ? 'critical' : warningCount > 0 ? 'warning' : 'healthy';
 
-    console.log(`[BOT_HEALTH] Summary: ${healthyCount} healthy, ${warningCount} warning, ${criticalCount} critical`);
+    console.log(`[BOT_HEALTH] Summary: ${healthyCount} healthy, ${warningCount} warning, ${criticalCount} critical, ${alertsSentCount} alerts sent`);
 
     return new Response(
       JSON.stringify({
@@ -228,6 +329,7 @@ serve(async (req) => {
           healthy: healthyCount,
           warning: warningCount,
           critical: criticalCount,
+          alertsSent: alertsSentCount,
         },
         thresholds: {
           warningMinutes: HEALTH_CHECK_CONFIG.WARNING_THRESHOLD_MINUTES,
