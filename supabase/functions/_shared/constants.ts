@@ -4160,16 +4160,26 @@ export const EXHAUSTION_REVERSAL_OVERRIDE_PARAMS = {
   LONG_PERCENT_B_THRESHOLD: 20,   // %B <= 20 (at/below lower band)
   SHORT_PERCENT_B_THRESHOLD: 80,  // %B >= 80 (at/near upper band)
   
+  // ===== ADX HIGH + DECLINING (ALTERNATIVE EXHAUSTION PATH) =====
+  // ADX > 45 with declining slope indicates trend exhaustion even without extreme StochRSI
+  ADX_HIGH_EXHAUSTION_ENABLED: true,
+  ADX_HIGH_THRESHOLD: 45,         // ADX > 45 = high (potential exhaustion)
+  ADX_DECLINING_SLOPE: 0,         // Slope < 0 = declining (trend losing steam)
+  
   // ===== MOMENTUM REQUIREMENTS =====
-  // At least ONE of these must be true for direction confirmation
-  // For LONG: score > 0 OR slope > 0 OR MACD improving
-  // For SHORT: score < 0 OR slope < 0 OR MACD declining
+  // For LONG: score > 20 OR MACD improving
+  // For SHORT: score < -20 OR MACD declining
   REQUIRE_MOMENTUM_CONFIRMATION: true,
+  MIN_MOMENTUM_SCORE: 20,         // Minimum |momentum| for confirmation (tightened from 0)
   MACD_IMPROVING_COUNTS: true,    // MACD histogram improving counts as confirmation
   
   // ===== ADX REQUIREMENTS =====
   // ADX must NOT be accelerating (prevents catching falling knives)
   MAX_ADX_SLOPE: 0.05,            // ADX slope must be <= 0.05
+  
+  // ===== ORDER FLOW REQUIREMENTS =====
+  // Order flow must align with direction
+  MIN_ORDER_FLOW_SCORE: 60,       // Minimum score for order flow bonus (tightened from 50)
   
   // ===== EXPANSION/BREAKOUT BLOCKING =====
   // Block override during active expansion (volume spike or squeeze release)
