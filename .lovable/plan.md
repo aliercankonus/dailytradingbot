@@ -64,15 +64,61 @@ Implemented Phase 1 fixes for Neutral 4H - Low Confidence handling to reduce fal
 
 ---
 
-## Remaining Phases (Not Yet Implemented)
+## Phase 2 Implementation Completed
 
-### Phase 2: Medium-Priority Gaps
-- **GAP 1**: Contextualize order flow tiebreaker (require 30m trend alignment)
-- **GAP 2**: Fix confidence blending (use max(1h, 30m) when 4H weak)
+### GAP 1: Contextualized Order Flow Tiebreaker
+**Problem**: Order flow used as binary check without 30m trend alignment, causing noise injection.
 
-### Phase 3: Documentation
-- **DOC 1**: Strong 4H - High Confidence case
-- **DOC 2**: Timeframe Conflict Resolution rules
+**Solution**: Order flow tiebreaker now requires 30m trend alignment:
+- For LONG: 30m must NOT be bearish
+- For SHORT: 30m must NOT be bullish
+- Full alignment (30m same direction) adds +5% confidence bonus
+
+**Files Modified**:
+1. **`supabase/functions/_shared/constants.ts`**
+   - Added to `DIRECTION_DERIVATION_PARAMS`:
+     - `REQUIRE_30M_ALIGNMENT: true`
+     - `ORDER_FLOW_30M_BONUS: 0.05`
+
+2. **`supabase/functions/_shared/scoring.ts`**
+   - Updated order flow tiebreaker logic (lines 2116-2170)
+   - Added 30m trend conflict detection and logging
+   - Added `trend30mAligned` to DirectionResult interface
+
+### GAP 2: Fixed Confidence Blending
+**Problem**: Weak 4H confidence (<50%) was being blended with lower timeframes, suppressing valid 1H/30m signals.
+
+**Solution**: When 4H is weak, use `max(conf1h, conf30m)` instead of blending:
+- If `conf4h < WEAK_4H_CONFIDENCE_THRESHOLD` (50%), skip blending
+- Use 95% of max(1h, 30m) confidence instead
+- Position size slightly reduced (0.70x) when weights are reallocated
+
+**Files Modified**:
+1. **`supabase/functions/_shared/constants.ts`**
+   - Added to `DIRECTION_DERIVATION_PARAMS`:
+     - `WEAK_4H_CONFIDENCE_THRESHOLD: 50`
+     - `USE_MAX_LOWER_TF_CONFIDENCE: true`
+
+2. **`supabase/functions/_shared/scoring.ts`**
+   - Updated weighted direction derivation (lines 2096-2132)
+   - Added confidence source logging
+   - Added `is4hWeak` to DirectionResult interface
+
+---
+
+## Remaining Phase 3: Documentation (Not Yet Implemented)
+
+### DOC 1: Strong 4H - High Confidence Case
+Should document:
+- 4H ≥75% dominates all lower TFs
+- Lower TF conflicts only affect entry timing, not direction
+- Position sizing = full or near-full
+
+### DOC 2: Timeframe Conflict Resolution Rules
+Should document canonical rules for:
+- 4H bullish / 1H bearish
+- 1H bullish / 30m bearish
+- Neutral vs directional precedence
 
 ---
 
