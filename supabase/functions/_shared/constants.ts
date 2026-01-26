@@ -3859,11 +3859,11 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   HARD_THRESHOLD_PERCENT: 10.0,       // 10% move = hard block
   
   // ===== STOCHRSI ALIGNMENT REQUIRED =====
-  // For late shorts: StochRSI must be > 50 (not already oversold)
-  // For late longs: StochRSI must be < 50 (not already overbought)
+  // For late shorts: StochRSI must be > 35 (not deeply oversold)
+  // For late longs: StochRSI must be < 65 (not overbought)
   REQUIRE_STOCHRSI_ALIGNMENT: true,
-  STOCHRSI_NOT_OVERSOLD_FOR_SHORT: 50,  // K must be > 50 for late short
-  STOCHRSI_NOT_OVERBOUGHT_FOR_LONG: 50, // K must be < 50 for late long
+  STOCHRSI_NOT_OVERSOLD_FOR_SHORT: 35,  // K must be > 35 for late short
+  STOCHRSI_NOT_OVERBOUGHT_FOR_LONG: 65, // K must be < 65 for late long
   
   // ===== EXCEPTION: STRONG TREND CONTINUATION =====
   // Allow entry despite exhaustion if ADX is very strong and rising
