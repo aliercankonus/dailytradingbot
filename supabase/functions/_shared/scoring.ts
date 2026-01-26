@@ -1965,6 +1965,7 @@ export interface DirectionResult {
   // ===== PHASE 2 ADDITIONS =====
   is4hWeak?: boolean;                  // 4H confidence was below threshold
   trend30mAligned?: boolean;           // 30m trend aligned with order flow direction
+  alignmentStatus?: "blocked" | "neutral" | "full";  // 30m alignment status for analytics
 }
 
 // Import direction params
@@ -2152,22 +2153,34 @@ export const deriveTradeDirection = (
         // Order flow must not conflict with 30m trend to prevent noise injection
         let trend30mAligns = true;
         let alignmentBonus = 0;
+        let alignmentStatus: "blocked" | "neutral" | "full" = "neutral";
         
         if (P.REQUIRE_30M_ALIGNMENT) {
           // For LONG: 30m must NOT be bearish
           // For SHORT: 30m must NOT be bullish
           if (direction === "long" && trend30m === "bearish") {
             trend30mAligns = false;
+            alignmentStatus = "blocked";
             reasons.push(`ORDER FLOW TIEBREAKER BLOCKED: 30m bearish conflicts with LONG order flow`);
+            
+            // ===== ANALYTICS LOG: 30M ALIGNMENT BLOCKED =====
+            console.log(`📊 [30M_ALIGNMENT_ANALYTICS] BLOCKED | dir=${direction} | 30m=${trend30m} | OF=${ofScore} ${ofSignal} | weightedSum=${weightedSum.toFixed(2)}`);
+            
           } else if (direction === "short" && trend30m === "bullish") {
             trend30mAligns = false;
+            alignmentStatus = "blocked";
             reasons.push(`ORDER FLOW TIEBREAKER BLOCKED: 30m bullish conflicts with SHORT order flow`);
+            
+            // ===== ANALYTICS LOG: 30M ALIGNMENT BLOCKED =====
+            console.log(`📊 [30M_ALIGNMENT_ANALYTICS] BLOCKED | dir=${direction} | 30m=${trend30m} | OF=${ofScore} ${ofSignal} | weightedSum=${weightedSum.toFixed(2)}`);
+            
           } else if (
             (direction === "long" && trend30m === "bullish") ||
             (direction === "short" && trend30m === "bearish")
           ) {
             // Full alignment - add bonus
             alignmentBonus = P.ORDER_FLOW_30M_BONUS || 0.05;
+            alignmentStatus = "full";
           }
         }
         
@@ -2179,6 +2192,9 @@ export const deriveTradeDirection = (
             reasons.push(`30m fully aligned → +${(alignmentBonus * 100).toFixed(0)}% confidence bonus`);
           }
           
+          // ===== ANALYTICS LOG: 30M ALIGNMENT ALLOWED =====
+          console.log(`📊 [30M_ALIGNMENT_ANALYTICS] ALLOWED | dir=${direction} | 30m=${trend30m} | status=${alignmentStatus} | bonus=${(alignmentBonus * 100).toFixed(0)}% | OF=${ofScore} ${ofSignal} | conf=${derivedConf.toFixed(0)}%`);
+          
           return {
             direction,
             confidence: derivedConf,
@@ -2188,6 +2204,7 @@ export const deriveTradeDirection = (
             orderFlowTiebreaker: true,
             positionSizeMultiplier: P.ORDER_FLOW_POSITION_MULTIPLIER,
             trend30mAligned: trend30mAligns,
+            alignmentStatus,
           };
         }
       }
