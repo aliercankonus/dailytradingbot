@@ -391,8 +391,11 @@ export const ClosedPositionsDashboard = () => {
           <CardHeader className="pb-2">
             <CardDescription>Win Rate</CardDescription>
             <CardTitle className="text-3xl">
-              {formatPercent(stats.total > 0 ? (stats.profitable / stats.total) * 100 : 0, 1)}
+              {formatPercent(fullCloseStats.winRate, 1)}
             </CardTitle>
+            <div className="text-xs text-muted-foreground mt-1">
+              {fullCloseStats.profitable}W / {fullCloseStats.losses}L{fullCloseStats.breakeven > 0 ? ` / ${fullCloseStats.breakeven}BE` : ''}
+            </div>
           </CardHeader>
         </Card>
 
