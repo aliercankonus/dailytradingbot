@@ -1,271 +1,244 @@
 
-# Momentum Status Details - Critical Fixes Implementation Plan
+# Momentum Score Hard Gate - Implementation Plan
 
 ## Overview
 
-This plan addresses four critical issues and two medium-risk design gaps identified in the external review of the Momentum Status Details subsystem. The fixes will improve logical consistency, prevent nondeterministic behavior, and enhance decision-making quality.
+This plan addresses the valid findings from the system-level review of the "HARD GATE: Momentum Score Too Low" logic. After thorough code analysis, I've identified which issues are valid, which are false positives, and the specific changes needed.
 
 ---
 
-## Issue Summary
+## Issue Analysis Summary
 
-| Priority | Issue | Status | Impact |
-|----------|-------|--------|--------|
-| Critical | ISSUE 1: `momentumConfirms` undefined bug | **FALSE POSITIVE** | Verified defined at line 1430 |
-| Critical | ISSUE 2: MACD Direction Alignment not enforced | **VALID** | Can allow misaligned entries |
-| Critical | ISSUE 3: Volume is observational only | **PARTIALLY VALID** | Has soft impact but not in momentum state |
-| Medium | ISSUE 4: ADX threshold drift | **VALID** | UI vs engine mismatch |
-| Medium | GAP 1: No explicit "exhausted" state | **VALID** | Limits interpretability |
-| Medium | GAP 2: Last-close alignment overweighted | **VALID** | Noise-sensitive in compression |
+| Issue | Status | Action Required |
+|-------|--------|-----------------|
+| ISSUE 1: ADX Slope not used in canBlock | **PARTIALLY VALID** | Add accelerating trend bypass |
+| ISSUE 2: Threshold range 6-7 underspecified | **FALSE POSITIVE** | No action - code uses explicit constants |
+| ISSUE 3: Momentum State not used | **VALID** | Add state-based threshold adjustment |
+| ISSUE 4: Pullback over-relaxation | **PARTIALLY ADDRESSED** | Strengthen ADX guard |
+| GAP 1: Position multiplier vague | **VALID** | Add graduated calculation |
+| GAP 2: Order undocumented | **VALID** | Add documentation to constants |
 
 ---
 
 ## Phase 1: Critical Fixes
 
-### 1.1 ISSUE 1 Resolution: Verify `momentumConfirms` Definition
+### 1.1 Add ADX Slope to canBlock Logic (ISSUE 1)
 
-**Finding**: After thorough code review, this is a **FALSE POSITIVE**.
+**Problem**: In accelerating trends (ADX >= 30 AND adxSlope > 0), low momentum score can still block entries. This is incorrect because in accelerating trends, price leads momentum.
 
-The variable `momentumConfirms` is explicitly defined at line 1430 of `calculate-trend/index.ts`:
+**File**: `supabase/functions/strategy-analyzer/index.ts`
 
-```
-const momentumConfirms = fullMomentumConfirms || alignedMomentumConfirms;
-```
-
-And returned in the response object at line 1498:
-
-```
-confirms: momentumConfirms,
-```
-
-**Action**: No code change required. Documentation update to confirm this is correctly implemented.
-
----
-
-### 1.2 ISSUE 2: Enforce MACD Direction Alignment in Momentum Confirmation
-
-**Problem**: `macdDirectionAligned` is calculated but not required for `fullMomentumConfirms`.
-
-**Current Logic (line 1425)**:
-```
-fullMomentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= MODERATE && adxRising
-```
-
-**Issue**: `macdExpanding` only checks that |histogram| > 0.05 AND histogram sign matches trend. However, if `macdDirectionAligned` is false, we could still have expanding MACD in the wrong direction.
-
-**Fix**: Add `macdDirectionAligned` as an explicit requirement.
-
-**File**: `supabase/functions/calculate-trend/index.ts`
-
-**Changes**:
-```
-Line ~1411: Modify macdExpanding to require direction alignment explicitly
-Line ~1425: Add macdDirectionAligned to fullMomentumConfirms
-Line ~1428: Add macdDirectionAligned to alignedMomentumConfirms
-```
-
-**Updated Logic**:
+**Current Logic** (around line 8004):
 ```text
-fullMomentumConfirms = macdExpanding && macdDirectionAligned && lastCloseAlignsWithTrend && !hasDivergence && adx >= MODERATE && adxRising
-
-alignedMomentumConfirms = strongAlignment && macdExpanding && macdDirectionAligned && !hasDivergence && adx >= WEAK
+IF earlyMomentumScore < effectiveMomentumThreshold:
+    reject signal
 ```
 
----
-
-### 1.3 ISSUE 3: Make Volume a Decision Factor (Soft Booster)
-
-**Problem**: `volumeConfirms` is calculated and returned but has no impact on momentum state.
-
-**Current State**: Volume affects quality scoring and position sizing downstream, but NOT momentum state classification.
-
-**Recommended Fix**: Option A - Make Volume a Soft Booster for state promotion.
-
-**File**: `supabase/functions/calculate-trend/index.ts`
-
-**Changes**:
-```
-Lines ~1431-1442: Update momentum state logic to allow volume-confirmed upgrades
-```
-
-**New Logic**:
+**Proposed Logic**:
 ```text
-IF fullMomentumConfirms:
-    momentumState = "confirmed"
-ELSE IF alignedMomentumConfirms:
-    IF volumeConfirmsDirection THEN
-        momentumState = "confirmed"  // Volume promotes building → confirmed
-    ELSE
-        momentumState = "building"
-ELSE IF fakeBreakoutRisk:
-    momentumState = "mixed"
-```
-
-This makes volume actionable without creating hard gates.
-
----
-
-### 1.4 ISSUE 4: Unify ADX Thresholds Between UI and Engine
-
-**Problem**: UI displays ADX >= 20 as "passing" while engine logic uses:
-- ADX >= 22 for `fullMomentumConfirms` (MODERATE threshold)
-- ADX >= 15 for `alignedMomentumConfirms` (WEAK threshold)
-
-**Files to Update**:
-1. `src/components/MomentumStatusDetails.tsx` - Update display threshold
-2. Document the actual thresholds in UI tooltip
-
-**Changes**:
-
-**File**: `src/components/MomentumStatusDetails.tsx`
-```
-Line 78: Change adxOK threshold to match engine logic
-```
-
-**Updated Logic**:
-```text
-// For "Confirmed" state: ADX >= 22 (MODERATE)
-// For "Building" state: ADX >= 15 (WEAK)
-// Display should show tiered status, not binary pass/fail
-
-const adxConfirmed = (momentum?.adx ?? 0) >= 22;  // For confirmed
-const adxBuilding = (momentum?.adx ?? 0) >= 15;   // For building
-const adxOK = momentumState === "confirmed" ? adxConfirmed : adxBuilding;
-```
-
-**Also add tooltip** explaining:
-- ADX >= 22: Strong trend (required for Confirmed)
-- ADX 15-21: Early trend (allows Building state)
-- ADX < 15: Range (blocks entry)
-
----
-
-## Phase 2: Medium Priority Fixes
-
-### 2.1 GAP 1: Add Explicit "exhausted" Momentum State
-
-**Problem**: Exhaustion conditions fall into "mixed" state, reducing interpretability.
-
-**Proposal**: Add `"exhausted"` as a fifth momentum state.
-
-**Files to Update**:
-1. `supabase/functions/calculate-trend/index.ts` - Add exhaustion detection
-2. `src/hooks/useMomentumStatus.ts` - Update interface
-3. `src/components/MomentumStatusDetails.tsx` - Add UI rendering
-
-**Exhaustion Detection Logic**:
-```text
-isExhausted = (
-    ADX >= 45 AND adxRising == false AND
-    (macdSlope < 0 OR hasDivergence) AND
-    (stochRsi4h.k > 90 OR stochRsi4h.k < 10)
+// NEW: Accelerating trend exception
+// If ADX is strong AND rising, allow reduced-size entry even with low momentum
+acceleratingTrendException = (
+    adx >= 30 AND
+    adxSlopeForOverride > 0 AND
+    !adxExhaustion.isExhausted AND
+    !isReversalEntry
 )
+
+IF earlyMomentumScore < effectiveMomentumThreshold:
+    IF acceleratingTrendException:
+        // Allow with 70% position size instead of blocking
+        acceleratingTrendPositionMultiplier = 0.70
+        log "ACCELERATING TREND EXCEPTION: Allowing entry with reduced size"
+        // Continue to next gate (don't reject)
+    ELSE:
+        reject signal
 ```
-
-**State Machine Update**:
-```text
-let momentumState: "none" | "mixed" | "confirmed" | "building" | "exhausted" = "none";
-
-IF isExhausted:
-    momentumState = "exhausted"
-ELSE IF fullMomentumConfirms:
-    momentumState = "confirmed"
-... (existing logic)
-```
-
-**UI Changes**: Add orange/red "Exhausted" badge with warning icon.
 
 ---
 
-### 2.2 GAP 2: Reduce Last-Close Alignment Weight in Low-Volatility Markets
+### 1.2 Add Momentum State to Threshold Adjustment (ISSUE 3)
 
-**Problem**: 2/3 candle alignment is noise-sensitive during compression.
+**Problem**: The `momentumState` from the Momentum Status Details system is logged but not used to influence the threshold. This is a missed opportunity for tighter integration.
 
-**Proposal**: Relax the requirement when ATR percentile is low OR require volume confirmation instead.
+**File**: `supabase/functions/strategy-analyzer/index.ts`
 
-**File**: `supabase/functions/calculate-trend/index.ts`
+**Location**: After line 7992 (after regime-aware threshold is calculated)
 
-**Changes** (around line 1377-1393):
+**Proposed Addition**:
 ```text
-// Relaxed alignment during compression
-const isCompressed = relativeATR < 0.7;  // ATR below 70% of historical average
+// ============= MOMENTUM STATE THRESHOLD ADJUSTMENT =============
+// Tightly couple momentum state classification with gate threshold
+// This ensures consistent behavior between Momentum Status Details UI and signal generation
 
-IF isCompressed:
-    // In compression, require only 1/3 alignment OR volume confirmation
-    lastCloseAlignsWithTrend = effectiveTrend == "neutral" 
-        OR alignedCandles >= 1 
-        OR volumeConfirmsDirection
-ELSE:
-    // Standard 2/3 majority rule
-    lastCloseAlignsWithTrend = effectiveTrend == "neutral" 
-        OR alignedCandles >= ceil(candleCount * 0.67)
+const momentumStateForGate = momentum?.state || "none";
+let stateAdjustedThreshold = effectiveMomentumThreshold;
+let momentumStateAdjustmentApplied = false;
+
+IF momentumStateForGate == "confirmed":
+    // Confirmed momentum = strong follow-through, relax threshold by 1
+    stateAdjustedThreshold = MAX(0, effectiveMomentumThreshold - 1)
+    momentumStateAdjustmentApplied = true
+    log "MOMENTUM STATE BONUS: state=confirmed, threshold reduced by 1"
+
+ELSE IF momentumStateForGate == "exhausted":
+    // Exhausted momentum = reversal risk, increase threshold by 1
+    stateAdjustedThreshold = effectiveMomentumThreshold + 1
+    momentumStateAdjustmentApplied = true
+    log "MOMENTUM STATE PENALTY: state=exhausted, threshold increased by 1"
+
+effectiveMomentumThreshold = stateAdjustedThreshold
 ```
 
-This prevents false negatives during range compression while maintaining signal quality in trending conditions.
+**Also update rejection log** (line 8088-8116):
+Add `momentumStateAdjustmentApplied` to the logged filters_status.
 
 ---
 
-## Phase 3: Documentation Updates
+### 1.3 Strengthen Pullback ADX Guard (ISSUE 4)
 
-### 3.1 Update Constants Documentation
+**Problem**: The pullback threshold relaxation (5 → 3) applies before the ADX check, which can allow pullback logic in weak trends.
+
+**File**: `supabase/functions/strategy-analyzer/index.ts`
+
+**Current Logic** (line 7930-7932):
+```text
+let baseMomentumThreshold = isPullbackValid 
+    ? PULLBACK_MIN_SCORE  // 3
+    : MIN_SCORE;          // 5
+```
+
+**Problem**: `isPullbackValid` already checks `adx >= 22`, but the threshold is set based on `isPullbackSetupDetected` earlier.
+
+**Proposed Fix**: Make the guard explicit in the threshold logic:
+```text
+// Only use pullback threshold if pullback is VALID (includes ADX check)
+// AND ADX is genuinely in trending territory (>= 22)
+let baseMomentumThreshold = (isPullbackValid AND adx >= PULLBACK_DETECTION_PARAMS.MIN_ADX)
+    ? PULLBACK_MIN_SCORE  // 3
+    : MIN_SCORE;          // 5
+```
+
+This is a defensive double-check that makes the logic more explicit and prevents future regressions.
+
+---
+
+## Phase 2: Medium Priority Enhancements
+
+### 2.1 Graduated Position Multiplier Based on Threshold Distance (GAP 1)
+
+**Problem**: Current position multipliers are fixed values (0.65, 0.80). A graduated approach based on how far the score is from the threshold would be more precise.
+
+**File**: `supabase/functions/strategy-analyzer/index.ts`
+
+**Location**: In the Strong ADX Override section (around line 8028)
+
+**Proposed Logic**:
+```text
+// Calculate graduated position multiplier based on score deficit
+const scoreDeficit = effectiveMomentumThreshold - earlyMomentumScore;
+const graduatedMultiplier = clamp(0.5, 0.9, 1.0 - (scoreDeficit * 0.1));
+
+// Apply the more conservative of graduated and tier-specific multiplier
+strongAdxPositionMultiplier = MIN(graduatedMultiplier, tierSpecificMultiplier);
+```
+
+**Helper function to add**:
+```text
+function clamp(min: number, max: number, value: number): number {
+    return Math.max(min, Math.min(max, value));
+}
+```
+
+**Example outcomes**:
+- Score deficit 1 → multiplier = 0.90
+- Score deficit 2 → multiplier = 0.80
+- Score deficit 3 → multiplier = 0.70
+- Score deficit 5+ → multiplier = 0.50 (floor)
+
+---
+
+### 2.2 Document Threshold Adjustment Order (GAP 2)
 
 **File**: `supabase/functions/_shared/constants.ts`
 
-Add a new section documenting momentum thresholds:
+**Location**: After MOMENTUM_THRESHOLDS section (around line 1102)
+
+**Proposed Addition**:
 ```text
-// ============= MOMENTUM STATE THRESHOLDS =============
-// Used by calculate-trend for momentum state classification
-export const MOMENTUM_STATE_THRESHOLDS = {
-    // ADX required for "confirmed" state
-    CONFIRMED_MIN_ADX: 22,  // Matches ADX_THRESHOLDS.MODERATE
-    
-    // ADX required for "building" state  
-    BUILDING_MIN_ADX: 15,   // Matches ADX_THRESHOLDS.WEAK
-    
-    // ADX required for "exhausted" state
-    EXHAUSTED_MIN_ADX: 45,  // Matches ADX_THRESHOLDS.EXHAUSTION
-    
-    // MACD histogram minimum for "expanding"
-    MACD_EXPANDING_MIN: 0.05,
-    
-    // Candle alignment majority (67% = 2 of 3)
-    CANDLE_ALIGNMENT_RATIO: 0.67,
-    
-    // Relaxed alignment in compression (33% = 1 of 3)
-    CANDLE_ALIGNMENT_RATIO_COMPRESSED: 0.33,
-} as const;
+// ============= MOMENTUM GATE THRESHOLD ADJUSTMENT ORDER =============
+// CRITICAL: The order of threshold adjustments affects final behavior
+// This order must be preserved in strategy-analyzer implementation:
+//
+// 1. BASE THRESHOLD
+//    - Normal entries: MIN_SCORE (5)
+//    - Valid pullbacks: PULLBACK_MIN_SCORE (3)
+//
+// 2. REGIME-AWARE ADJUSTMENT
+//    - Very Strong ADX (>=35): threshold → 0
+//    - Near Very Strong (33-35, slope >= -0.3): threshold → 1
+//    - Strong ADX (>=30, rising): threshold → 2
+//
+// 3. MOMENTUM STATE ADJUSTMENT (NEW)
+//    - confirmed: threshold -= 1
+//    - exhausted: threshold += 1
+//
+// 4. STRONG ADX OVERRIDE
+//    - If still failing threshold AND ADX qualifies: threshold → 0
+//    - Position size reduced based on tier
+//
+// 5. ACCELERATING TREND EXCEPTION (NEW)
+//    - If ADX >= 30 AND slope > 0: allow with 70% size
+//
+// Final threshold = result after all adjustments
+// Rejection occurs if score < final threshold AND no exceptions apply
 ```
-
-### 3.2 Update Memory Documentation
-
-Create/update memory entries for the momentum subsystem architecture to reflect the fixes.
 
 ---
 
-## Implementation Sequence
+## Phase 3: UI Enhancements
 
+### 3.1 Enhance HardGateMomentumScoreDisplay Component
+
+**File**: `src/components/SignalRejectionReasons.tsx`
+
+**Current Display**: Shows score, state, and ADX in a grid.
+
+**Proposed Enhancements**:
+
+1. **Show threshold adjustment breakdown**:
 ```text
-┌─────────────────────────────────────────────────────────┐
-│                    PHASE 1 (Critical)                   │
-├─────────────────────────────────────────────────────────┤
-│ 1. Add macdDirectionAligned to momentum confirms        │
-│ 2. Add volume as soft booster for state promotion       │
-│ 3. Fix ADX threshold display in UI                      │
-└─────────────────────────────────────────────────────────┘
-                           ↓
-┌─────────────────────────────────────────────────────────┐
-│                  PHASE 2 (Medium Priority)              │
-├─────────────────────────────────────────────────────────┤
-│ 4. Add "exhausted" momentum state                       │
-│ 5. Relax candle alignment in compression                │
-└─────────────────────────────────────────────────────────┘
-                           ↓
-┌─────────────────────────────────────────────────────────┐
-│                    PHASE 3 (Documentation)              │
-├─────────────────────────────────────────────────────────┤
-│ 6. Update constants.ts with MOMENTUM_STATE_THRESHOLDS   │
-│ 7. Add tooltips to MomentumStatusDetails UI             │
-└─────────────────────────────────────────────────────────┘
+<div className="space-y-1 text-[10px]">
+    <div>Base threshold: {baseMomentumThreshold}</div>
+    {regimeAwareApplied && (
+        <div>→ Regime [{regimeAwareTier}]: {regimeAwareMomentumThreshold}</div>
+    )}
+    {momentumStateAdjustmentApplied && (
+        <div>→ State [{momentumState}]: {stateAdjustedThreshold}</div>
+    )}
+    <div className="font-medium">Final required: {momentumRequired}</div>
+</div>
+```
+
+2. **Show why override didn't apply**:
+```text
+{strongAdxOverrideAttempted && !strongAdxOverrideApplied && (
+    <div className="text-[9px] text-yellow-400 mt-2">
+        ⚠️ Strong ADX Override attempted but failed:
+        {/* Show specific failure reasons */}
+    </div>
+)}
+```
+
+3. **Add tooltip explaining threshold tiers**:
+```text
+<TooltipContent>
+    Threshold adjusts based on trend strength:
+    • ADX ≥35: Threshold = 0 (very strong trend)
+    • ADX 33-35: Threshold = 1 (near very strong)
+    • ADX ≥30 rising: Threshold = 2 (strong trend)
+    • Otherwise: Threshold = 5 (normal)
+</TooltipContent>
 ```
 
 ---
@@ -274,18 +247,52 @@ Create/update memory entries for the momentum subsystem architecture to reflect 
 
 | File | Changes |
 |------|---------|
-| `supabase/functions/calculate-trend/index.ts` | MACD alignment enforcement, volume booster, exhausted state, compression logic |
-| `supabase/functions/_shared/constants.ts` | New MOMENTUM_STATE_THRESHOLDS section |
-| `src/hooks/useMomentumStatus.ts` | Add "exhausted" to state type |
-| `src/components/MomentumStatusDetails.tsx` | Fix ADX display, add exhausted badge, add tooltips |
+| `supabase/functions/strategy-analyzer/index.ts` | Add accelerating trend exception, momentum state adjustment, strengthen pullback guard, graduated multiplier |
+| `supabase/functions/_shared/constants.ts` | Add threshold adjustment order documentation |
+| `src/components/SignalRejectionReasons.tsx` | Enhanced HardGateMomentumScoreDisplay with adjustment breakdown |
+
+---
+
+## Implementation Sequence
+
+```text
+Phase 1 (Critical)
+├── 1.1 Add accelerating trend exception (adxSlope > 0)
+├── 1.2 Add momentum state threshold adjustment
+└── 1.3 Strengthen pullback ADX guard
+
+Phase 2 (Medium Priority)
+├── 2.1 Implement graduated position multiplier
+└── 2.2 Document threshold adjustment order
+
+Phase 3 (UI)
+└── 3.1 Enhance rejection display with adjustment breakdown
+```
 
 ---
 
 ## Expected Outcomes
 
-1. **Reduced false continuation entries** - MACD direction now enforced
-2. **Volume becomes actionable** - Can promote building → confirmed
-3. **UI matches engine** - ADX thresholds aligned
-4. **Better interpretability** - Explicit "exhausted" state
-5. **Fewer false negatives in compression** - Relaxed candle alignment
-6. **Cleaner integration with mean-reversion** - Exhausted state maps directly
+1. **Fewer missed entries in accelerating trends** - ADX slope now prevents blocking when trend is actively strengthening
+2. **Tighter integration with Momentum Status Details** - `confirmed` state rewards, `exhausted` state penalizes
+3. **Cleaner pullback logic** - Explicit ADX guard prevents weak-trend pullback entries
+4. **More predictable position sizing** - Graduated multiplier based on threshold distance
+5. **Better debuggability** - UI shows full threshold adjustment chain
+
+---
+
+## Technical Notes
+
+### Clamp Function
+A utility `clamp` function should be added to the shared utilities if not already present:
+```typescript
+export function clamp(min: number, max: number, value: number): number {
+    return Math.max(min, Math.min(max, value));
+}
+```
+
+### Logging Enhancement
+All new logic paths should use the existing `Logger` infrastructure with appropriate categories (`LOG_CATEGORIES.MOMENTUM`, `LOG_CATEGORIES.GATE`).
+
+### Backward Compatibility
+All changes are additive - existing behavior is preserved unless the new conditions trigger. No breaking changes to existing signal generation.
