@@ -2735,6 +2735,16 @@ export const DIRECTION_DERIVATION_PARAMS = {
   // When weighted sum is marginal (0.35-0.54), use order flow if strong
   ORDER_FLOW_MIN_SCORE: 60,         // Minimum order flow score to use as tiebreaker
   ORDER_FLOW_POSITION_MULTIPLIER: 0.60,  // 60% position when using order flow direction
+  
+  // ===== PHASE 2 GAP 1: CONTEXTUALIZED ORDER FLOW =====
+  // Require 30m trend alignment to prevent order flow noise injection
+  REQUIRE_30M_ALIGNMENT: true,      // Order flow must align with 30m trend
+  ORDER_FLOW_30M_BONUS: 0.05,       // Extra confidence when 30m fully aligned
+  
+  // ===== PHASE 2 GAP 2: CONFIDENCE BLENDING FIX =====
+  // When 4H is weak, use max(1h, 30m) instead of blending weak confidence
+  WEAK_4H_CONFIDENCE_THRESHOLD: 50, // 4H confidence below this = "weak"
+  USE_MAX_LOWER_TF_CONFIDENCE: true, // Use max(1h, 30m) when 4H weak
 } as const;
 
 // ============= EXHAUSTION ESCAPE PARAMS =============

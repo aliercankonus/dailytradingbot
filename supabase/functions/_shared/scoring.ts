@@ -1962,6 +1962,9 @@ export interface DirectionResult {
   isEscapeHatch?: boolean;             // Used directional bias escape hatch
   isExhaustionReversal?: boolean;      // Used exhaustion reversal override (Priority 0.25)
   isExhaustionEscape?: boolean;        // Used exhaustion escape (Priority 8 - final escape valve)
+  // ===== PHASE 2 ADDITIONS =====
+  is4hWeak?: boolean;                  // 4H confidence was below threshold
+  trend30mAligned?: boolean;           // 30m trend aligned with order flow direction
 }
 
 // Import direction params
@@ -2096,11 +2099,29 @@ export const deriveTradeDirection = (
     // If weighted sum exceeds threshold, derive direction
     if (Math.abs(weightedSum) >= effectiveThreshold) {
       const direction: TradeDirection = weightedSum > 0 ? "long" : "short";
-      // Calculate confidence from weighted sum magnitude
-      const derivedConf = Math.min(70, 50 + Math.abs(weightedSum) * 30);
+      
+      // ===== PHASE 2 GAP 2: CONFIDENCE BLENDING FIX =====
+      // When 4H is weak, use max(1h, 30m) instead of blending weak confidence
+      let derivedConf: number;
+      let confSource: string = "weighted-sum";
+      
+      const is4hWeak = conf4h < (P.WEAK_4H_CONFIDENCE_THRESHOLD || 50);
+      
+      if (P.USE_MAX_LOWER_TF_CONFIDENCE && is4hWeak) {
+        // Don't blend weak 4H confidence - use max of lower timeframes
+        const maxLowerTfConf = Math.max(conf1h, conf30m);
+        derivedConf = Math.min(75, maxLowerTfConf * 0.95); // 95% of max lower TF conf
+        confSource = `max(1h,30m)=${maxLowerTfConf.toFixed(0)}%`;
+        reasons.push(`CONFIDENCE FIX: 4H weak (${conf4h.toFixed(0)}% < ${P.WEAK_4H_CONFIDENCE_THRESHOLD}%) → using max(1h=${conf1h.toFixed(0)}%, 30m=${conf30m.toFixed(0)}%)=${maxLowerTfConf.toFixed(0)}%`);
+      } else {
+        // Normal: Calculate confidence from weighted sum magnitude
+        derivedConf = Math.min(70, 50 + Math.abs(weightedSum) * 30);
+        confSource = "weighted-sum";
+      }
       
       reasons.push(`WEIGHTED DIRECTION: Sum=${weightedSum.toFixed(2)} (threshold=${effectiveThreshold.toFixed(2)})`);
-      reasons.push(`TF values: 4h=${val4h.toFixed(2)}*${P.WEIGHT_4H}, 1h=${val1h.toFixed(2)}*${P.WEIGHT_1H}, 30m=${val30m.toFixed(2)}*${P.WEIGHT_30M}`);
+      reasons.push(`TF values: 4h=${val4h.toFixed(2)}*${w4h.toFixed(2)}, 1h=${val1h.toFixed(2)}*${w1h.toFixed(2)}, 30m=${val30m.toFixed(2)}*${w30m.toFixed(2)}`);
+      reasons.push(`Confidence source: ${confSource}`);
       
       return { 
         direction, 
@@ -2109,12 +2130,14 @@ export const deriveTradeDirection = (
         reasons,
         isWeightedDerivation: true,
         hasPersistenceBonus: persistenceBonus > 0,
-        positionSizeMultiplier: 0.75,  // Reduced position for weighted signals
+        positionSizeMultiplier: weightReallocated ? 0.70 : 0.75,  // Slightly more conservative when weights reallocated
+        is4hWeak,
       };
     }
     
-    // ============= ORDER FLOW TIEBREAKER =============
+    // ============= ORDER FLOW TIEBREAKER (PHASE 2 FIX: CONTEXTUALIZED) =============
     // When weighted sum is marginal (0.35-0.54), use order flow if strong
+    // PHASE 2 GAP 1: Now requires 30m trend alignment to prevent noise injection
     if (Math.abs(weightedSum) >= 0.35 && Math.abs(weightedSum) < effectiveThreshold && orderFlowData) {
       const ofScore = orderFlowData.score;
       const ofSignal = orderFlowData.signal?.toLowerCase() || "";
@@ -2124,10 +2147,37 @@ export const deriveTradeDirection = (
         
         // Verify order flow agrees with weighted direction tendency
         const weightedDirection = weightedSum > 0 ? "long" : "short";
-        if (direction === weightedDirection) {
-          const derivedConf = Math.min(65, 50 + ofScore * 0.2);
+        
+        // ===== PHASE 2 GAP 1: 30M TREND ALIGNMENT CHECK =====
+        // Order flow must not conflict with 30m trend to prevent noise injection
+        let trend30mAligns = true;
+        let alignmentBonus = 0;
+        
+        if (P.REQUIRE_30M_ALIGNMENT) {
+          // For LONG: 30m must NOT be bearish
+          // For SHORT: 30m must NOT be bullish
+          if (direction === "long" && trend30m === "bearish") {
+            trend30mAligns = false;
+            reasons.push(`ORDER FLOW TIEBREAKER BLOCKED: 30m bearish conflicts with LONG order flow`);
+          } else if (direction === "short" && trend30m === "bullish") {
+            trend30mAligns = false;
+            reasons.push(`ORDER FLOW TIEBREAKER BLOCKED: 30m bullish conflicts with SHORT order flow`);
+          } else if (
+            (direction === "long" && trend30m === "bullish") ||
+            (direction === "short" && trend30m === "bearish")
+          ) {
+            // Full alignment - add bonus
+            alignmentBonus = P.ORDER_FLOW_30M_BONUS || 0.05;
+          }
+        }
+        
+        if (direction === weightedDirection && trend30mAligns) {
+          const derivedConf = Math.min(70, 50 + ofScore * 0.2 + (alignmentBonus * 100));
           reasons.push(`ORDER FLOW TIEBREAKER: weightedSum=${weightedSum.toFixed(2)} marginal, orderFlow=${ofScore} ${ofSignal}`);
-          reasons.push(`Order flow confirms weighted direction → allowing entry with reduced size`);
+          reasons.push(`Order flow confirms weighted direction, 30m=${trend30m} (aligned=${trend30mAligns})`);
+          if (alignmentBonus > 0) {
+            reasons.push(`30m fully aligned → +${(alignmentBonus * 100).toFixed(0)}% confidence bonus`);
+          }
           
           return {
             direction,
@@ -2137,6 +2187,7 @@ export const deriveTradeDirection = (
             isWeightedDerivation: true,
             orderFlowTiebreaker: true,
             positionSizeMultiplier: P.ORDER_FLOW_POSITION_MULTIPLIER,
+            trend30mAligned: trend30mAligns,
           };
         }
       }
