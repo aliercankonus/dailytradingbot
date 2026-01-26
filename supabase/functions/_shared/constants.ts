@@ -2831,1121 +2831,302 @@ export const DIRECTION_DERIVATION_PARAMS = {
   USE_MAX_LOWER_TF_CONFIDENCE: true, // Use max(1h, 30m) when 4H weak
 } as const;
 
-// ============= EXHAUSTION ESCAPE PARAMS =============
-// Final escape valve before hard rejection when neutral 4H + extreme exhaustion
-// Captures mean reversion opportunities that would otherwise be blocked
+
+// ============= EXHAUSTION ESCAPE PARAMS (TIER 11) =============
+// Final escape valve for mean reversion at extremes after all else fails
+// 
+// PHASE 3: MINIMUM EPISTEMIC FLOOR
+// For late tiers (>= 8) in RANGE regime, require 2+ independent evidence types
+// 
+// PHASE 4: MUTUAL EXCLUSIVITY
+// Tier 11 only fires if Tier 10 did NOT fire (mutually exclusive)
 export const EXHAUSTION_ESCAPE_PARAMS = {
   ENABLED: true,
   
+  // ===== MUTUAL EXCLUSIVITY (PHASE 4) =====
+  REQUIRE_TIER_10_NOT_FIRED: true,
+  REQUIRE_MOMENTUM_OPPOSING: true,
+  
   // ===== REGIME REQUIREMENT =====
-  // Only trigger in EXHAUSTION regime (prevents noise in other regimes)
   REQUIRE_EXHAUSTION_REGIME: true,
   
-  // ===== MOMENTUM REQUIREMENT =====
-  // Minimum momentum score for exhaustion escape
-  MIN_MOMENTUM_SCORE: 20,
+  // ===== PHASE 3: EPISTEMIC FLOOR =====
+  REQUIRE_EPISTEMIC_FLOOR: true,
+  MIN_EVIDENCE_TYPES_FOR_LATE_TIERS: 2,
+  EPISTEMIC_FLOOR_APPLIES_TO_TIER: 8,
+  EPISTEMIC_FLOOR_REGIMES: ['RANGE'] as const,
   
-  // ===== STOCHRSI THRESHOLDS =====
-  // Oversold for LONG escape
-  OVERSOLD_K_THRESHOLD: 20,
+  // ===== STOCHRSI + BOLLINGER THRESHOLDS =====
+  OVERSOLD_K_THRESHOLD: 15,
   OVERSOLD_PERCENT_B_THRESHOLD: 25,
-  // Overbought for SHORT escape
-  OVERBOUGHT_K_THRESHOLD: 80,
+  OVERBOUGHT_K_THRESHOLD: 85,
   OVERBOUGHT_PERCENT_B_THRESHOLD: 75,
   
-  // ===== ORDER FLOW ALIGNMENT BONUS =====
-  // Order flow alignment boosts confidence
+  // ===== MOMENTUM =====
+  MIN_MOMENTUM_SCORE: 15,
+  
+  // ===== ORDER FLOW =====
+  MIN_ORDER_FLOW_SCORE: 40,
   ORDER_FLOW_ALIGNED_BONUS: 5,
-  MIN_ORDER_FLOW_SCORE: 50,
   
   // ===== POSITION SIZING =====
-  BASE_POSITION_MULTIPLIER: 0.50,   // 50% base for mean reversion
-  STRONG_POSITION_MULTIPLIER: 0.60, // 60% with order flow alignment
+  BASE_POSITION_MULTIPLIER: 0.45,
+  STRONG_POSITION_MULTIPLIER: 0.55,
   
   // ===== CONFIDENCE =====
-  BASE_CONFIDENCE: 50,
-  MAX_CONFIDENCE: 60,
+  BASE_CONFIDENCE: 45,
+  MAX_CONFIDENCE: 55,
   
   // ===== LOGGING =====
   LOG_ESCAPES: true,
 } as const;
 
-// ============= MACD GATE PARAMS =============
-// Phase 2: Softened MACD gate with duration and magnitude checks
-// Converts hard block to score multiplier in most cases
-export const MACD_GATE_PARAMS = {
-  ENABLED: true,
-  
-  // ADX override thresholds (lowered from 35)
-  ADX_OVERRIDE_WITH_RISING: 25,       // Allow override if ADX >= 25 AND rising
-  ADX_OVERRIDE_UNCONDITIONAL: 28,     // Allow override if ADX >= 28 regardless of slope
-  
-  // MACD opposition duration check (NEW)
-  // Only block if MACD has opposed for N+ consecutive bars
-  MIN_OPPOSITION_BARS: 3,             // Require 3 bars of opposing MACD
-  
-  // MACD magnitude check (NEW)
-  // Small divergences don't warrant blocking
-  MIN_HISTOGRAM_FOR_BLOCK: 0.0002,    // Only block if |histogram| > this
-  NEUTRAL_HISTOGRAM_THRESHOLD: 0.00005, // Below this = treat as neutral
-  
-  // Position sizing for soft blocks (instead of hard block)
-  POSITION_MULTIPLIER_SOFT: 0.75,     // 75% position when not blocking
-  POSITION_MULTIPLIER_WEAK: 0.85,     // 85% when misalignment is weak
-  
-  // Reclassify to score multiplier below this ADX
-  SCORE_MULTIPLIER_BELOW_ADX: 25,     // Below ADX 25, use score multiplier not block
-} as const;
-
-// ============= ADX EXHAUSTION REFINED PARAMS =============
-// Phase 3: More nuanced exhaustion detection with time context
-// Prevents blocking strong trends incorrectly
-export const ADX_EXHAUSTION_REFINED_PARAMS = {
-  // Minimum ADX decline for rollover (NEW)
-  // ADX must decline by at least this many points from peak
-  MIN_ADX_DECLINE_FOR_ROLLOVER: 3,    // 3 point minimum decline
-  
-  // Current ADX must also be below this
-  MAX_ADX_FOR_EXHAUSTION: 40,         // Only exhaustion if ADX < 40
-  
-  // Time-in-trend context (NEW from expert review)
-  // Short trends rolling over != exhaustion
-  MIN_TREND_AGE_BARS: 40,             // Minimum 40 bars (40 1h candles) for exhaustion
-  MIN_TREND_AGE_FOR_EXHAUSTION: 40,   // Alias for clarity in smart-momentum.ts
-  
-  // ===== SCORING (Reduced weights for score multiplier approach) =====
-  SCORE_ADX_ROLLOVER: 35,             // Was 60, now 35 (allows with reduced position)
-  SCORE_HIDDEN_WEAKNESS: 12,          // Reduced from 15
-  SCORE_DI_COMPRESSION: 20,           // Reduced from 25
-  SCORE_MOMENTUM_DIVERGENCE: 20,      // Reduced from 25
-  SCORE_PRICE_ACTION_CONFIRM: 15,     // NEW: Bonus when reversal candle confirms
-  SCORE_SLOPE_NEGATIVE: 10,           // Reduced from 15
-  
-  // ===== EXHAUSTION THRESHOLDS =====
-  EXHAUSTION_THRESHOLD: 70,           // Was 50, now 70 (requires multiple signals)
-  SOFT_EXHAUSTION_THRESHOLD: 35,      // Score 35-49: use POSITION_MULTIPLIER_SOFT
-  HARD_EXHAUSTION_THRESHOLD: 50,      // Score 50-69: use POSITION_MULTIPLIER_HARD
-  
-  // ===== POSITION SIZING (Score-based instead of hard block) =====
-  POSITION_MULTIPLIER_35_49: 0.80,    // Score 35-49: 80% position
-  POSITION_MULTIPLIER_50_69: 0.65,    // Score 50-69: 65% position
-  POSITION_MULTIPLIER_SOFT: 0.80,     // Alias: Score 35-49
-  POSITION_MULTIPLIER_HARD: 0.65,     // Alias: Score 50-69
-  // Score >= 70: BLOCK (multiple signals confirm exhaustion)
-} as const;
-
 // ============= STOCHRSI DYNAMIC PARAMS =============
-// Phase 4: Dynamic thresholds and capped penalty contribution
-// Prevents StochRSI from alone blocking strong momentum moves
 export const STOCHRSI_DYNAMIC_PARAMS = {
-  // Dynamic extreme thresholds based on ADX
-  // Stronger trends allow more room at extremes
-  EXTREME_THRESHOLDS: {
-    ADX_LOW: { adxMax: 20, oversold: 10, overbought: 90 },      // Standard
-    ADX_MODERATE: { adxMax: 30, oversold: 8, overbought: 92 },  // Tighter
-    ADX_HIGH: { adxMax: 100, oversold: 5, overbought: 95 },     // Tightest
-  },
-  
-  // Time-in-extreme penalty adjustments
-  // Raised thresholds to allow more room for trend continuation
+  MAX_STOCHRSI_PENALTY: 20,
   BARS_FOR_PENALTY_BY_ADX: {
-    ADX_BELOW_25: 5,    // Standard: 5 bars before penalty
-    ADX_25_35: 7,       // Moderate trend: 7 bars before penalty
-    ADX_ABOVE_35: 10,   // Strong trend: 10 bars before penalty
+    ADX_ABOVE_35: 10,
+    ADX_25_35: 7,
+    ADX_BELOW_25: 5,
   },
-  
-  // Penalty score adjustments (reduced from original)
-  PENALTY_MODERATE: 12,   // Was 15
-  PENALTY_HIGH: 18,       // Was 25
-  PENALTY_EXTREME: 25,    // Was 35
-  
-  // CAP: Maximum StochRSI contribution to reversal score (NEW)
-  // StochRSI alone can NEVER push exhaustion over block threshold
-  MAX_STOCHRSI_PENALTY: 20,  // Capped at 20 points
+  PENALTY_MODERATE: 12,
+  PENALTY_HIGH: 18,
+  PENALTY_EXTREME: 25,
 } as const;
 
-// ============= PRE-SIGNAL VALIDITY GATE PARAMS =============
-// Phase 1: Semantic consistency checks for signal types
-// Blocks signals that don't meet fundamental requirements for their type
-export const SIGNAL_TYPE_VALIDITY_PARAMS = {
-  // Enable the pre-signal validity gate
-  ENABLED: true,
-  
-  // ===== MOMENTUM BREAKOUT REQUIREMENTS =====
-  // Momentum Breakout signals MUST satisfy ALL of:
-  MOMENTUM_BREAKOUT: {
-    MIN_ADX: 25,              // Trend must be confirmed (ADX >= 25)
-    REQUIRE_ADX_NOT_FALLING: true,  // ADX slope must be >= 0
-    REQUIRE_POSITIVE_MOMENTUM: true, // Momentum score must be > 0
-    REQUIRE_MACD_ALIGNED: true,      // MACD slope must align with direction
-    BLOCK_IF_RANGING: true,          // Block if regime is RANGING (unless squeeze)
-  },
-  
-  // ===== MEAN REVERSION REQUIREMENTS =====
-  // Mean Reversion signals should only trigger at extremes, NOT during strong trends
-  MEAN_REVERSION: {
-    MAX_ADX: 35,                        // Block if ADX > 35 (trend too strong for reversal)
-    BLOCK_IF_ADX_EXPANDING: true,       // Block if ADX slope is positive and high
-    ADX_EXPANSION_THRESHOLD: 1.5,       // ADX slope threshold for "expanding"
-    REQUIRE_EXTREME_READING: true,      // Require RSI/StochRSI at extremes
-    RSI_OVERSOLD: 35,                   // RSI threshold for oversold (long signals)
-    RSI_OVERBOUGHT: 65,                 // RSI threshold for overbought (short signals)
-    STOCH_OVERSOLD: 25,                 // StochRSI threshold for oversold
-    STOCH_OVERBOUGHT: 75,               // StochRSI threshold for overbought
-    BLOCK_IF_MOMENTUM_CONFIRMS_TREND: true,  // Block if momentum strongly supports opposite
-    MOMENTUM_TREND_THRESHOLD: 15,       // Block if momentum > 15 (or < -15) confirms trend
-  },
-  
-  // ===== TREND FOLLOWING REQUIREMENTS =====
-  // Trend Following signals need a confirmed trend, NOT ranging markets
-  TREND_FOLLOWING: {
-    MIN_ADX: 20,                        // Require ADX >= 20 (trend must exist)
-    REQUIRE_MOMENTUM_ALIGNED: true,     // Momentum must match signal direction
-    MIN_ALIGNED_MOMENTUM: 5,            // Minimum momentum score in signal direction
-    BLOCK_IF_EXHAUSTED: true,           // Block at trend exhaustion
-    EXHAUSTION_ADX: 50,                 // ADX level considered potentially exhausted
-    EXHAUSTION_SLOPE: -0.5,             // Negative slope threshold for exhaustion
-    BLOCK_IF_RANGING: true,             // Block in RANGING regime
-  },
-  
-  // ===== HARD CONTRADICTION BLOCKS =====
-  // These block signals regardless of quality score
-  HARD_CONTRADICTIONS: {
-    // Block if momentum score strongly contradicts direction
-    // e.g., momentum score -15 for a LONG signal
-    MOMENTUM_CONTRADICTION_THRESHOLD: -10,  // Block long if momentum < -10
-    MOMENTUM_CONTRADICTION_ENABLED: true,
-    
-    // Block if MACD slope opposes direction at low ADX
-    // Strong trends (ADX >= 30) can tolerate MACD divergence
-    MACD_CONTRADICTION_MIN_ADX: 30,
-    MACD_CONTRADICTION_MIN_SLOPE: 0.1,  // MACD slope must oppose by at least this
-    MACD_CONTRADICTION_ENABLED: true,
-  },
-  
-  // ===== VOLUME MINIMUM REQUIREMENTS =====
-  VOLUME_MIN_THRESHOLD: 5,  // Volume score must be >= 5/10
-  VOLUME_PENALTY_PER_POINT: 3,  // -3 quality per point below threshold
-  
-  // ===== SQUEEZE STATE HANDLING =====
-  // Delay breakout classification during squeeze with low ADX
-  SQUEEZE_RECLASSIFICATION: {
-    ENABLED: true,
-    MAX_ADX_FOR_RECLASSIFICATION: 25,  // Reclassify if ADX < 25 during squeeze
-    RECLASSIFY_TO: 'WATCHLIST',        // Mark as watchlist instead of generating signal
-    BLOCK_BREAKOUT_STRATEGIES: true,   // Block breakout strategies during low-ADX squeeze
-  },
-} as const;
-
-// ============= PRICE ACTION EARLY ENTRY OVERRIDE =============
-// PHASE 2: When ADX is below threshold BUT price action shows clear direction,
-// allow early entry with conservative sizing. This catches moves before lagging indicators confirm.
-// CRITICAL: This addresses the "confirmation trap" where ADX lags behind breakout initiation
-export const PRICE_ACTION_EARLY_ENTRY_PARAMS = {
-  ENABLED: true,
-  
-  // Minimum price move in last 6 hours to trigger override
-  MIN_PRICE_MOVE_PERCENT: 0.8,
-  
-  // ADX range where this applies (below normal threshold but not dead)
-  MIN_ADX: 12,
-  MAX_ADX: 18,  // Above this, normal gates apply
-  
-  // REFINEMENT (per technical review): Require ADX slope >= 0 (momentum building, not decaying)
-  // Changed from false/-0.2 to true/0.0 to avoid fake spikes during low-energy ranges
-  REQUIRE_ADX_RISING: true,
-  MIN_ADX_SLOPE: 0.0,  // Slope must be non-negative (momentum building)
-  
-  // Require price direction to match derived direction
-  REQUIRE_DIRECTION_MATCH: true,
-  
-  // StochRSI limits - don't enter at extremes even with price action
-  MAX_STOCHRSI_FOR_LONG: 85,  // Still some room before extreme
-  MIN_STOCHRSI_FOR_SHORT: 15,
-  
-  // Position sizing for early entries (conservative)
-  POSITION_SIZE_MULTIPLIER: 0.50,  // 50% position
-  
-  // Tighter risk management for early entries
-  STOP_LOSS_MULTIPLIER: 0.7,       // 70% of normal ATR stop
-  TAKE_PROFIT_MULTIPLIER: 1.2,     // Tighter TP target
-  BREAK_EVEN_ACTIVATION_PERCENT: 0.3,  // Move to BE at 0.3%
-} as const;
-
-// ============= ADX RISING DIRECTIONAL BYPASS FOR HTF EXTREME =============
-// PHASE 4: When ADX is rising strongly AND 1h trend matches direction,
-// allow bypass of HTF extreme gates even without other conditions.
-// This prevents blocking valid longs during trending markets.
-export const ADX_RISING_DIRECTIONAL_BYPASS_PARAMS = {
-  ENABLED: true,
-  
-  // ADX requirements
-  MIN_ADX: 15,                    // Minimum ADX for bypass
-  MIN_ADX_SLOPE: 0.5,             // ADX must be rising strongly (slope >= 0.5)
-  
-  // Reversal check
-  MAX_REVERSAL_SCORE: 45,         // No significant reversal signals
-  
-  // REFINEMENT (per technical review): Require directional confirmation
-  // 1h trend direction must match derived direction
-  REQUIRE_DIRECTIONAL_CONFIRMATION: true,
-  
-  // Position sizing for bypass
-  POSITION_SIZE_MULTIPLIER: 0.60,  // 60% position for this bypass path
-} as const;
-
-// ============= PHASE 0: MASTER MARKET REGIME CLASSIFIER =============
-// Critical foundation: ADX defines regime, all other gates change meaning based on regime
-// This formalizes the insight that "indicators are treated as peers instead of regime-dependent authorities"
+// ============= MARKET REGIME CLASSIFIER =============
 export const MARKET_REGIME_CLASSIFIER = {
-  // Regime definitions with ADX thresholds
-  NORMAL: { minADX: 15, maxADX: 30 },
-  STRONG_TREND: { minADX: 30, maxADX: 45 },
-  PARABOLIC: { minADX: 45, maxADX: 100 },
-  STEALTH_DRIFT: { maxADX: 28, minDriftPercent: 1.5 },  // Low ADX but consistent drift
-  
-  // Gate behavior by regime - when in STRONG_TREND or PARABOLIC, gates downgrade to "context"
-  GATE_OVERRIDES: {
-    PARABOLIC: {
-      bollingerMaxPercentB: 115,         // Allow 115% B (price 15% above upper band)
-      bollingerMinPercentB: -15,         // Allow -15% B for shorts
-      stochRsiMaxK: 98,                  // Nearly no StochRSI limit
-      stochRsiMinK: 2,
-      momentumScoreMinimum: 0,           // Momentum score cannot block
-      qualityBoost: 10,                  // +10 to quality score
-      positionMultiplier: 0.45,          // 45% position for safety
-    },
-    STRONG_TREND: {
-      bollingerMaxPercentB: 105,         // Allow 105% B
-      bollingerMinPercentB: -5,
-      stochRsiMaxK: 95,
-      stochRsiMinK: 5,
-      momentumScoreMinimum: 0,           // Momentum score cannot block at strong trend
-      qualityBoost: 5,                   // +5 to quality score
-      positionMultiplier: 0.55,          // 55% position
-    },
-    NORMAL: {
-      bollingerMaxPercentB: 90,
-      bollingerMinPercentB: 10,
-      stochRsiMaxK: 85,
-      stochRsiMinK: 15,
-      momentumScoreMinimum: 5,           // Standard momentum requirement
-      qualityBoost: 0,
-      positionMultiplier: 1.0,
-    },
-    STEALTH_DRIFT: {
-      bollingerMaxPercentB: 85,
-      bollingerMinPercentB: 15,
-      stochRsiMaxK: 80,
-      stochRsiMinK: 20,
-      momentumScoreMinimum: 3,
-      qualityBoost: 3,
-      positionMultiplier: 0.50,
-    }
-  },
-  
-  // Additional requirements per regime
-  REQUIRE_HTF_ALIGNMENT_BY_REGIME: {
-    PARABOLIC: false,        // In parabolic, ADX IS the confirmation
-    STRONG_TREND: true,      // Need 4h aligned
-    NORMAL: true,            // Need 4h aligned
-    STEALTH_DRIFT: true,     // Need 1h aligned
-  }
+  STRONG_TREND_ADX: 30,
+  RANGING_ADX_MAX: 18,
 } as const;
 
-// Market regime type
-export type MasterMarketRegime = 'PARABOLIC' | 'STRONG_TREND' | 'NORMAL' | 'STEALTH_DRIFT';
-
-// ============= PHASE 1: STRONG ADX UNIVERSAL OVERRIDE =============
-// When ADX confirms regime, gates downgrade from "hard block" to "context adjustment"
-// Key insight: "Bollinger should downgrade from 'gate' to 'context'"
+// ============= STRONG ADX UNIVERSAL OVERRIDE PARAMS =============
 export const STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS = {
   ENABLED: true,
-  
-  // Tier 1: Strong trend override (ADX 40+)
-  TIER1_MIN_ADX: 40,
-  TIER1_REQUIRE_SLOPE_POSITIVE: true,
-  TIER1_MIN_SLOPE: 0,              // Slope must be non-negative
-  TIER1_BOLLINGER_BECOMES_CONTEXT: true,
-  TIER1_STOCHRSI_BECOMES_CONTEXT: true,
-  TIER1_MOMENTUM_BECOMES_CONTEXT: true,
-  TIER1_POSITION_SIZE: 0.55,       // 55% of normal position
-  
-  // Tier 2: Parabolic override (ADX 50+)
-  TIER2_MIN_ADX: 50,
-  TIER2_SLOPE_TOLERANCE: -0.5,     // Allow slight decline (trend cruising)
-  TIER2_ALL_GATES_CONTEXT: true,   // All gates become context, not blockers
-  TIER2_POSITION_SIZE: 0.40,       // 40% position (late entry, higher risk)
-  TIER2_TIGHTER_STOP: 1.2,         // 1.2x ATR instead of 2x
-  
-  // Safety: Still respect behavioral exhaustion
-  RESPECT_BEHAVIORAL_EXHAUSTION: true,
-  MAX_REVERSAL_SCORE: 50,
+  MIN_ADX: 35,
+  POSITION_MULTIPLIER: 0.70,
 } as const;
 
-// ============= PHASE 2: MOMENTUM SCORE BEHAVIOR CHANGE =============
-// At high ADX, momentum score cannot BLOCK - it can only adjust position size and stops
-// Key insight: "At ADX ≥ 40: Momentum score cannot block. It can only reduce position size or increase stop tightness."
+// ============= MOMENTUM SCORE BEHAVIOR PARAMS =============
 export const MOMENTUM_SCORE_BEHAVIOR_PARAMS = {
   ENABLED: true,
-  
-  // ADX threshold above which momentum score cannot block signals
-  CANNOT_BLOCK_ABOVE_ADX: 40,
-  
-  // Instead of blocking, low momentum score adjusts these:
-  LOW_SCORE_POSITION_REDUCTION: 0.30,    // 30% smaller position
-  LOW_SCORE_STOP_TIGHTENING: 0.75,       // 25% tighter stop (0.75 multiplier)
-  
-  // Momentum divergence detection (replacing binary "confirms")
-  // "Is momentum diverging or confirming?" replaces binary check
-  DIVERGING_POSITION_PENALTY: 0.40,      // 40% reduction if diverging
-  CONFIRMING_POSITION_BONUS: 0.10,       // 10% bonus if confirming
-  
-  // Graduated ADX-based momentum thresholds
-  // Replaces flat MIN_MOMENTUM_SCORE with ADX-aware thresholds
-  ADX_40_MIN_SCORE: 0,    // At ADX ≥ 40, no minimum momentum score
-  ADX_35_MIN_SCORE: 2,    // At ADX ≥ 35, minimum 2
-  ADX_30_MIN_SCORE: 3,    // At ADX ≥ 30, minimum 3
-  ADX_25_MIN_SCORE: 4,    // At ADX ≥ 25, minimum 4
-  DEFAULT_MIN_SCORE: 5,   // Below ADX 25, standard threshold
-  
-  // Require price action confirmation when bypassing momentum
-  REQUIRE_PRICE_ACTION_CONFIRMATION: true,
+  NEUTRAL_ZONE_LOW: -10,
+  NEUTRAL_ZONE_HIGH: 10,
 } as const;
 
-// ============= PHASE 3: TREND CONTINUATION RE-ENTRY (ENHANCED) =============
-// "Exit logic is 'stateful', Entry logic is 'stateless' - This is one of the most expensive bugs in trend systems"
-// This enhancement makes entry logic stateful by remembering recent profitable exits
-export const TREND_CONTINUATION_REENTRY_PARAMS = {
-  ENABLED: true,
-  
-  // ===== RECENT PROFITABLE EXIT DETECTION =====
-  LOOKBACK_HOURS: 4,              // Extended from 2 to catch more opportunities
-  MIN_PROFIT_PERCENT: 1.0,        // Reduced from 2.0 to capture smaller wins
-  ALLOW_SAME_CANDLE_REENTRY: true, // Don't wait if trend still valid
-  POSITION_SIZE_MULTIPLIER: 0.50, // 50% position for re-entries
-  
-  // ===== THRESHOLD RELAXATION FOR RE-ENTRY =====
-  QUALITY_THRESHOLD_REDUCTION: 15,  // -15 points from normal threshold
-  STOCHRSI_RELAXATION: 10,          // Allow +10 higher K for LONG re-entry
-  BOLLINGER_RELAXATION: 10,         // Allow +10% higher %B for LONG
-  
-  // ===== ADX REQUIREMENTS =====
-  MIN_ADX: 25,                    // Lowered from 30 to catch more re-entries
-  MIN_ADX_SLOPE: -0.5,            // Allow slightly declining (cruising trend)
-  
-  // ===== DIRECTION AND HTF =====
-  REQUIRE_SAME_DIRECTION: true,
-  MIN_HTF_4H_CONFIDENCE: 55,      // Lowered from 60
-  
-  // ===== STOP LOSS =====
-  TIGHT_STOP_PERCENT: 1.5,        // Tighter stop for re-entries
-} as const;
-
-// ============= PHASE 4: QUALITY SCORE NEAR-MISS BOOST =============
-// Boost quality scores that are within range of threshold when ADX is strong
-// Key insight: "Cap the boost so quality score cannot exceed 'normal max'"
+// ============= QUALITY NEAR MISS BOOST PARAMS =============
 export const QUALITY_NEAR_MISS_BOOST_PARAMS = {
   ENABLED: true,
-  
-  // Range within threshold to be considered "near miss"
-  NEAR_MISS_RANGE: 5,
-  
-  // Boosts by ADX level
-  ADX_35_BOOST: 3,              // +3 points if ADX ≥ 35
-  ADX_40_BOOST: 5,              // +5 points if ADX ≥ 40
-  ADX_45_BOOST: 7,              // +7 points if ADX ≥ 45
-  
-  // HTF alignment boost
-  HTF_ALIGNED_BOOST: 2,         // +2 if 4H+1H aligned
-  
-  // Critical: Cap to prevent artificial inflation
-  MAX_BOOSTED_SCORE: 75,        // Never boost above 75 regardless of conditions
+  SCORE_RANGE_LOW: 55,
+  SCORE_RANGE_HIGH: 59,
+  BOOST_POINTS: 5,
+  MIN_ADX: 22,
 } as const;
 
-// ============= PHASE 5: STEALTH TREND ADX + SLOPE LOGGING =============
-// "Log ADX slope more aggressively. Flat ADX at 28 ≠ rising ADX at 28."
-export const STEALTH_TREND_ENHANCED_PARAMS = {
-  // Extended ADX thresholds
-  MAX_ADX_FOR_STEALTH: 30,       // Raised from 25 to catch more opportunities
-  STRONG_DRIFT_ADX_EXTENSION: 32, // For 2.5%+ drift, allow up to ADX 32
-  
-  // Slope-aware detection
-  REQUIRE_SLOPE_LOG: true,
-  FLAT_SLOPE_THRESHOLD: 0.1,     // |slope| < 0.1 = flat
-  RISING_SLOPE_BONUS: 5,         // +5 quality for rising ADX
-  FALLING_SLOPE_PENALTY: 10,     // -10 quality for falling ADX
+// ============= TREND CONTINUATION REENTRY PARAMS =============
+export const TREND_CONTINUATION_REENTRY_PARAMS = {
+  ENABLED: true,
+  LOOKBACK_HOURS: 2,
+  MIN_PROFIT_PERCENT: 2.0,
+  POSITION_MULTIPLIER: 0.50,
 } as const;
 
-// ============= PHASE 6: LATE GRIND RELAXATION (CONSOLIDATION PAUSE) =============
-// "Many strong trends do not pull back - they pause, compress, resume."
-export const LATE_GRIND_ENHANCED_PARAMS = {
-  REQUIRE_FAILED_PULLBACK: false,    // Make optional
-  MIN_PRIOR_DRIFT_PERCENT: 2.0,      // Reduced from 3%
-  
-  // Alternative entry condition: consolidation pause
-  ALLOW_CONSOLIDATION_PAUSE: true,
-  CONSOLIDATION_MIN_CANDLES: 3,      // 3+ small candles in a row
-  CONSOLIDATION_MAX_CANDLE_ATR: 0.5, // Each candle < 0.5 ATR
-  CONSOLIDATION_POSITION_SIZE: 0.45, // 45% position for pause entries
-} as const;
-
-// ============= PHASE 7: IMPULSE CONTINUATION EXCEPTION =============
-// New exception type for catching moves mid-impulse
+// ============= IMPULSE CONTINUATION PARAMS =============
 export const IMPULSE_CONTINUATION_PARAMS = {
   ENABLED: true,
-  
-  // Trigger conditions
-  MIN_ADX: 35,
-  MIN_PRICE_MOVE_PERCENT: 2.0,
-  PRICE_MOVE_LOOKBACK_HOURS: 4,
-  REQUIRE_HTF_ALIGNMENT: true,      // 1h+4h must match
-  
-  // Gate bypasses (becomes context, not gate)
-  BOLLINGER_BECOMES_CONTEXT: true,
-  STOCHRSI_BECOMES_CONTEXT: true,
-  MOMENTUM_SCORE_BECOMES_CONTEXT: true,
-  
-  // Risk controls
-  POSITION_SIZE: 0.45,              // 45% position for late impulse entry
-  STOP_MULTIPLIER: 1.5,             // Tighter stop for late entry
-  
-  // Safety gates
-  MAX_REVERSAL_SCORE: 50,
-  BLOCK_IF_EXHAUSTED: true,
+  MIN_PRICE_MOVE: 1.5,
+  MIN_ADX: 25,
+  POSITION_MULTIPLIER: 0.65,
 } as const;
 
-// ============= PHASE 8: COUNTER-TREND PROTECTION GATE (CRITICAL) =============
-// PREVENTS: Trading LONG when trend is strongly bearish, or SHORT when strongly bullish
-// ROOT CAUSE: These 5 losses were all counter-trend entries blocked by this gate
-export const COUNTER_TREND_PROTECTION = {
-  ENABLED: true,
-  
-  // ===== ADX THRESHOLD FOR BLOCK =====
-  // Block LONG when ADX > threshold AND trend is bearish (and vice versa)
-  ADX_THRESHOLD_FOR_BLOCK: 35,
-  
-  // ===== MOMENTUM OPPOSITION THRESHOLDS (TIGHTLY BOUNDED) =====
-  // Block when momentum is strongly opposite to intended direction
-  MOMENTUM: {
-    // Block LONG if momentum < -20
-    STRONG_OPPOSITE_LONG: -20,
-    // Block SHORT if momentum > +20
-    STRONG_OPPOSITE_SHORT: 20,
-    // "Neutral" momentum zone (neither confirms nor opposes)
-    NEUTRAL_MIN: -10,
-    NEUTRAL_MAX: 10,
-  },
-  
-  // ===== TREND DIRECTION CONFIDENCE =====
-  // Use trend direction confidence, not just label
-  USE_DIRECTION_CONFIDENCE: true,
-  // If trend confidence < this, fall back to momentum-only logic
-  DIRECTION_CONFIDENCE_FALLBACK: 50,
-  
-  // ===== LOGGING =====
-  LOG_BLOCKS: true,
-  
-  // ===== PHASE 2 FIX: FALLBACK TO TREND-ALIGNED DIRECTION =====
-  // DISABLED: This was causing 100% SHORT bias by flipping valid LONG signals into SHORTs
-  // ROOT CAUSE OF 30% WIN RATE: Signals were being flipped to SHORT during bullish reversals
-  // When counter-trend is blocked, attempt to derive the opposite (trend-aligned) direction
-  // This prevents missing SHORT opportunities when LONG is blocked against bearish trend
-  FALLBACK_TO_TREND_ALIGNED: false,  // DISABLED - was causing directional bias
-  
-  // Position multiplier for fallback entries (reduced for safety)
-  FALLBACK_POSITION_MULTIPLIER: 0.50,
-  
-  // Only allow fallback if regime is not RANGING
-  REQUIRE_TRENDING_REGIME: true,
-  
-  // Log fallback entries
-  LOG_FALLBACKS: true,
-} as const;
-
-// ============= PHASE 9: ADX EXHAUSTION / LATE TREND PROTECTION (NEW) =============
-// Expert insight: "ADX > 45 with declining slope often signals trend maturity, not opportunity"
-// Prevents entries during late-stage trend exhaustion
-export const ADX_EXHAUSTION_LATE_ENTRY_PROTECTION = {
-  ENABLED: true,
-  
-  // ===== MATURE TREND DETECTION =====
-  // When ADX >= this AND slope < 0: trend is mature/exhausting
-  MIN_ADX_FOR_CHECK: 45,
-  DECLINING_SLOPE_THRESHOLD: 0,  // Slope < 0 = declining
-  
-  // ===== ACTION WHEN MATURE TREND DETECTED =====
-  // Option A: Block new entries entirely (conservative)
-  BLOCK_NEW_ENTRIES: false,
-  
-  // Option B: Require pullback confirmation (recommended)
-  REQUIRE_PULLBACK_CONFIRMATION: true,
-  PULLBACK_MIN_PERCENT: 0.5,  // At least 0.5% pullback from recent high/low
-  
-  // ===== ALTERNATIVE: REDUCED POSITION + TIGHTER STOP =====
-  // If not blocking, apply these risk reductions
-  ALTERNATIVE_POSITION_REDUCTION: 0.25,  // 25% of normal position
-  TIGHTER_STOP_MULTIPLIER: 0.75,         // 75% of normal stop (tighter)
-} as const;
-
-// ============= PHASE 10: STRATEGY-SPECIFIC ADX RESTRICTIONS =============
-// Expert insight: "HTF Neutral Breakout strategy must be explicitly disabled when ADX ≥ 35"
-// Certain strategies are only valid in specific ADX ranges
-export const STRATEGY_ADX_RESTRICTIONS: Record<string, {
-  MAX_ADX?: number;
-  MIN_ADX?: number;
-  REASON: string;
-}> = {
-  'HTF Neutral Breakout': {
-    MAX_ADX: 35,              // Disable when ADX >= 35 (not designed for strong trends)
-    MIN_ADX: 15,              // Require some trend (not dead market)
-    REASON: 'Strategy designed for HTF neutral conditions, not strong trends'
-  },
-  'Mean Reversion': {
-    MAX_ADX: 40,
-    REASON: 'Mean reversion fails in strong trends'
-  },
-  'Bollinger Band Breakout': {
-    MAX_ADX: 50,              // Allow in most conditions
-    MIN_ADX: 18,              // Require some volatility
-    REASON: 'Breakout needs volatility but not parabolic moves'
-  },
-  // Trend-following strategies have MIN requirements instead
-  'Momentum Breakout': {
-    MIN_ADX: 22,
-    REASON: 'Requires established momentum'
-  },
-  'EMA Golden Cross': {
-    MIN_ADX: 20,
-    REASON: 'EMA crossovers need trend development'
-  },
-  'EMA Death Cross': {
-    MIN_ADX: 20,
-    REASON: 'EMA crossovers need trend development'
-  },
-} as const;
-
-// ============= PHASE 11: MOMENTUM-DIRECTION ALIGNMENT (TIGHTLY BOUNDED) =============
-// Expert insight: "Neutral" must be tightly bounded (-10 to +10), not loosely defined
-// Ensures momentum score aligns with intended trade direction
-// 
-// ARCHITECTURE FIX (Phase 1): Aligned ALLOW_NEUTRAL_ABOVE_ADX with ADX_THRESHOLDS.EXCEPTIONAL (35)
-// This eliminates the "fuzzy boundary" between 35-40 where different gates had inconsistent behavior
-// 
-// MOMENTUM STATE INFLUENCE: Thresholds are adjusted by ±5 based on momentum state:
-// - "confirmed" state: tighter thresholds (harder to bypass)
-// - "mixed" state: looser thresholds (easier to allow)
-export const MOMENTUM_DIRECTION_ALIGNMENT = {
-  ENABLED: true,
-  
-  // ===== TIGHTLY BOUNDED "NEUTRAL" ZONE =====
-  NEUTRAL_MIN: -10,
-  NEUTRAL_MAX: 10,
-  
-  // ===== STRONG OPPOSITE THRESHOLDS =====
-  // Block LONG if momentum < this (adjusted by momentum state)
-  STRONG_OPPOSITE_LONG: -20,
-  // Block SHORT if momentum > this (adjusted by momentum state)
-  STRONG_OPPOSITE_SHORT: 20,
-  
-  // ===== MOMENTUM STATE INFLUENCE =====
-  // "confirmed" momentum = tighten opposite thresholds (make override harder)
-  // "mixed" momentum = loosen opposite thresholds (allow more flexibility)
-  CONFIRMED_STATE_ADJUSTMENT: -5,  // -20 becomes -25 for LONG, +20 becomes +15 for SHORT
-  MIXED_STATE_ADJUSTMENT: 5,       // -20 becomes -15 for LONG, +20 becomes +25 for SHORT
-  
-  // ===== ADX-AWARE BEHAVIOR =====
-  // UNIFIED: Now aligned with ADX_THRESHOLDS.EXCEPTIONAL (35) - no more 35 vs 40 inconsistency
-  // In strong ADX (>= 35), allow neutral momentum but never opposite
-  // In weaker ADX (< 35), require aligned momentum
-  ALLOW_NEUTRAL_ABOVE_ADX: 35,
-  
-  // ===== PHASE 2 SUBORDINATION =====
-  // When Phase 1 determines momentum is in neutral zone, Phase 2 (MACD-based check) is SKIPPED
-  // This prevents double-penalizing neutral momentum scenarios
-  SKIP_PHASE2_FOR_NEUTRAL: true,
-  
-  // ===== NORMALIZED WEAK MOMENTUM CHECK =====
-  // Phase 2 uses ATR-normalized MACD threshold instead of absolute 0.0001
-  // macdHistogramAbs < (ATR * WEAK_MACD_ATR_MULTIPLIER) = weak momentum
-  WEAK_MACD_ATR_MULTIPLIER: 0.0001,
-} as const;
-
-// ============= PHASE 12: STRUCTURED LOGGING FOR BLOCK DECISIONS =============
-// Expert insight: Log block_reason_code (enum), primary_gate_failed, and rule IDs
-// Enables post-mortem analysis and system iteration
-export const BLOCK_DECISION_LOGGING = {
-  ENABLED: true,
-  
-  // Block reason codes (for structured logging)
-  REASON_CODES: {
-    COUNTER_TREND: 'COUNTER_TREND',
-    STRATEGY_ADX_LIMIT: 'STRATEGY_ADX_LIMIT',
-    MOMENTUM_DIRECTION_MISMATCH: 'MOMENTUM_DIRECTION_MISMATCH',
-    MATURE_TREND_NO_PULLBACK: 'MATURE_TREND_NO_PULLBACK',
-    QUALITY_THRESHOLD: 'QUALITY_THRESHOLD',
-    BOLLINGER_GATE: 'BOLLINGER_GATE',
-    STOCHRSI_GATE: 'STOCHRSI_GATE',
-    EXHAUSTION: 'EXHAUSTION',
-    DEDUPLICATION: 'DEDUPLICATION',
-  } as const,
-  
-  // Include timeframe labels in logs
-  INCLUDE_TIMEFRAME_LABELS: true,
-  // ADX timeframe (for clarity)
-  ADX_TIMEFRAME: '1h',
-  // Regime timeframe (for clarity)
-  REGIME_TIMEFRAME: '4h',
-  // Signal timeframe (for clarity)
-  SIGNAL_TIMEFRAME: '15m',
-} as const;
-
-// Type for block reason codes
-export type BlockReasonCode = typeof BLOCK_DECISION_LOGGING.REASON_CODES[keyof typeof BLOCK_DECISION_LOGGING.REASON_CODES];
-
-// ============= PHASE 13: STRATEGY-SPECIFIC HTF ALIGNMENT REQUIREMENTS =============
-// Expert insight: "EMA Death Cross generated SELL signals during neutral trend"
-// Solution: Crossover-based strategies require HTF confirmation in the trade direction
-// This prevents trading EMA crossovers when higher timeframes don't support the direction
-export const STRATEGY_DIRECTION_REQUIREMENTS: Record<string, {
-  side: 'BUY' | 'SELL';
-  require1hDirectional?: boolean;
-  requireMinADX?: number;
-  requireMomentumAligned?: boolean;
-  minMomentumScore?: number;  // Positive for BUY, negative for SELL
-  allowNeutral4h?: boolean;   // Allow if 1h is directional
-  REASON: string;
-}> = {
-  'EMA Death Cross': {
-    side: 'SELL',
-    require1hDirectional: true,
-    requireMinADX: 22,
-    requireMomentumAligned: true,
-    minMomentumScore: -10,  // Must be negative for SHORT
-    allowNeutral4h: true,   // Allow if 1h is bearish
-    REASON: 'EMA Death Cross requires 1h bearish confirmation and negative momentum'
-  },
-  'EMA Golden Cross': {
-    side: 'BUY',
-    require1hDirectional: true,
-    requireMinADX: 22,
-    requireMomentumAligned: true,
-    minMomentumScore: 10,   // Must be positive for LONG
-    allowNeutral4h: true,   // Allow if 1h is bullish
-    REASON: 'EMA Golden Cross requires 1h bullish confirmation and positive momentum'
-  },
-  'MACD Bearish Cross': {
-    side: 'SELL',
-    require1hDirectional: true,
-    requireMinADX: 20,
-    requireMomentumAligned: true,
-    minMomentumScore: -5,
-    allowNeutral4h: true,
-    REASON: 'MACD Bearish Cross requires bearish momentum confirmation'
-  },
-  'MACD Crossover': {
-    side: 'BUY',
-    require1hDirectional: true,
-    requireMinADX: 20,
-    requireMomentumAligned: true,
-    minMomentumScore: 5,
-    allowNeutral4h: true,
-    REASON: 'MACD Crossover requires bullish momentum confirmation'
-  },
-} as const;
-
-// ============= PHASE 14: RANGING MARKET PROTECTION =============
-// Expert insight: System keeps checking for signals in ranging markets, potentially allowing low-quality entries
-// Solution: Pause most strategies when all timeframes are neutral for extended periods
-export const RANGING_MARKET_PROTECTION = {
-  ENABLED: true,
-  
-  // ===== NEUTRAL STREAK DETECTION =====
-  // How many consecutive neutral readings before pausing
-  // Each check is ~5 minutes, so 6 = ~30 minutes of all-neutral
-  NEUTRAL_STREAK_THRESHOLD: 6,
-  
-  // Minimum confidence for any timeframe to break ranging mode
-  MIN_CONFIDENCE_TO_BREAK_RANGE: 60,
-  
-  // ===== STRATEGY ALLOWLISTING =====
-  // When in ranging mode, ONLY allow these strategies (designed for range trading)
-  ALLOWED_STRATEGIES_IN_RANGE: [
-    'Mean Reversion',
-    'Mean Reversion Scalp',
-    'Bollinger Band Breakout',  // Can detect range expansion
-    'RSI Oversold/Overbought',  // Mean reversion
-    'RSI Overbought Short',     // Mean reversion
-  ] as readonly string[],
-  
-  // ===== POSITION SIZING IN RANGING MARKET =====
-  // Reduce position size when in ranging market
-  RANGING_POSITION_MULTIPLIER: 0.25,  // 25% of normal position
-  
-  // ===== QUALITY GATE TIGHTENING =====
-  // Require higher quality score when primary trend is neutral AND ADX < 30
-  NEUTRAL_TREND_QUALITY_BOOST: 10,  // Add +10 to quality threshold
-  NEUTRAL_ADX_THRESHOLD: 30,        // ADX must be below this for the boost
-  
-  // ===== LOGGING =====
-  LOG_BLOCKS: true,
-} as const;
-
-// ============= PHASE 15: NEUTRAL TREND + LOW ADX QUALITY GATE =============
-// Expert insight: Trades allowed with ADX < 35 and neutral trend led to losses
-// Solution: Require higher confidence when ADX is low and trend is neutral
-export const NEUTRAL_LOW_ADX_QUALITY_GATE = {
-  ENABLED: true,
-  
-  // ===== THRESHOLDS =====
-  // Apply extra quality requirement when:
-  // 1. Primary trend is neutral
-  // 2. ADX is below this threshold
-  ADX_THRESHOLD: 30,
-  
-  // ===== QUALITY BOOST =====
-  // Add this many points to the minimum quality threshold
-  QUALITY_THRESHOLD_BOOST: 10,  // Minimum quality becomes 70 instead of 60
-  
-  // ===== LOGGING =====
-  LOG_APPLICATION: true,
-} as const;
-
-// ============= ADAPTIVE SIGNAL GENERATION MODE =============
-// PHASE 16: Strategy-Independent Signal Generation
-// When enabled, signals are generated purely from technical indicators
-// without relying on named strategies or templates.
-//
-// This is a phased migration:
-// - DISABLED (0): Use traditional strategy loop (12+ strategies)
-// - SHADOW (1): Run adaptive in shadow mode, compare with strategy-based
-// - HYBRID (2): Use adaptive for symbols with no strategy match
-// - FULL (3): Replace strategy loop entirely with adaptive generation
-export const ADAPTIVE_SIGNAL_MODE = {
-  // Current mode - FULL: replace strategy loop entirely with adaptive generation
-  MODE: 'FULL' as 'DISABLED' | 'SHADOW' | 'HYBRID' | 'FULL',
-  
-  // ===== SHADOW MODE SETTINGS =====
-  // When MODE='SHADOW', log adaptive signals without executing
-  // This allows comparing adaptive vs strategy-based signals
-  SHADOW_LOG_ENABLED: true,
-  SHADOW_COMPARE_DIRECTION: true,  // Compare direction match %
-  SHADOW_COMPARE_QUALITY: true,    // Compare quality score deltas
-  
-  // ===== HYBRID MODE SETTINGS =====
-  // When MODE='HYBRID', use adaptive as fallback
-  HYBRID_FALLBACK_ONLY: true,       // Only use adaptive if no strategy matches
-  HYBRID_MIN_QUALITY: 65,           // Higher quality threshold for adaptive
-  HYBRID_POSITION_MULTIPLIER: 0.6,  // Reduced position for adaptive signals
-  
-  // ===== FULL MODE SETTINGS =====
-  // When MODE='FULL', only use adaptive generation
-  FULL_MIN_QUALITY: 60,             // Standard quality threshold
-  FULL_POSITION_MULTIPLIER: 1.0,    // Full position sizing
-  
-  // ===== LOGGING =====
-  LOG_ADAPTIVE_SIGNALS: true,
-  LOG_COMPARISON_RESULTS: true,
-} as const;
-
-export type AdaptiveSignalModeType = typeof ADAPTIVE_SIGNAL_MODE.MODE;
-
-// ============= PHASE 10: SAME-DIRECTION RE-ENTRY PROTECTION =============
-// Prevents same-direction re-entry after timeout/trailing stop closes
-// Expert insight: "When a trade closes due to timeout or trailing stop, the trend often pauses"
-// This cooldown prevents entering same direction before trend confirms continuation
-export const SAME_DIRECTION_REENTRY_PROTECTION = {
-  ENABLED: true,
-  
-  // Cooldown minutes after these close reasons
-  COOLDOWN_MINUTES: 45,
-  
-  // Close reasons that trigger cooldown (non-loss exits that indicate trend pause)
-  TRIGGER_CLOSE_REASONS: [
-    'trailing_stop_loss',
-    'micro_trend_timeout', 
-    'volume_relaxation_timeout',
-    'break_even',
-  ] as readonly string[],
-  
-  // Allow opposite direction entries during cooldown
-  ALLOW_OPPOSITE_DIRECTION: true,
-  
-  // Logging
-  LOG_BLOCKS: true,
-} as const;
-
-// ============= PRICE ACTION PULLBACK PARAMETERS =============
-// Expert insight: "A bounce against a strong HTF trend is a pullback, not momentum"
-// When price action derives counter-trend direction, check if it's a pullback for HTF-aligned entry
+// ============= PRICE ACTION PULLBACK PARAMS =============
 export const PRICE_ACTION_PULLBACK_PARAMS = {
   ENABLED: true,
-  
-  // Maximum move % to consider a pullback (larger moves = breakout, not pullback)
+  MIN_PULLBACK_PERCENT: 0.8,
   MAX_PULLBACK_PERCENT: 2.5,
-  
-  // Minimum 4h confidence for pullback entry
-  MIN_HTF_CONFIDENCE: 65,
-  
-  // Position size multiplier for pullback entries (reduced for safety)
-  POSITION_SIZE_MULTIPLIER: 0.50,
-  
-  // Confidence reduction for pullback-derived direction (safety)
-  CONFIDENCE_MULTIPLIER: 0.85,
-  
-  // Max confidence for pullback entries
+  POSITION_MULTIPLIER: 0.60,
+} as const;
+
+// ============= MOMENTUM FALLBACK DIRECTION PARAMS =============
+export const MOMENTUM_FALLBACK_DIRECTION_PARAMS = {
+  ENABLED: true,
+  TIER_10_11_MUTUALLY_EXCLUSIVE: true,
+  MIN_MOMENTUM_SCORE: 20,
+  STRONG_MOMENTUM_SCORE: 35,
+  MIN_ORDER_FLOW_SCORE: 50,
+  STRONG_ORDER_FLOW_SCORE: 65,
+  STOCHRSI_EXTREME_OVERSOLD: 15,
+  STOCHRSI_EXTREME_OVERBOUGHT: 85,
+  MIN_ADX: 18,
+  BASE_POSITION_MULTIPLIER: 0.55,
+  STRONG_POSITION_MULTIPLIER: 0.70,
+  BASE_CONFIDENCE: 50,
+  MAX_CONFIDENCE: 65,
+} as const;
+
+// ============= DIRECTION REGIME PARAMS =============
+export const DIRECTION_REGIME_PARAMS = {
+  ENABLED: true,
+  STRONG_TREND_ADX: 30,
+  EARLY_TREND_ADX: 18,
+  RANGE_ADX_MAX: 18,
+  EXHAUSTION_ADX: 45,
+  EXHAUSTION_SLOPE_THRESHOLD: 0,
+  STRONG_TREND: {
+    relaxTier1Threshold: 0.40,
+    suppressStochImportance: true,
+    momentumOverrideEnabled: true,
+  },
+  EARLY_TREND: {
+    relaxTier1Threshold: 0.45,
+    suppressStochImportance: false,
+    momentumOverrideEnabled: true,
+  },
+  RANGE: {
+    relaxTier1Threshold: 0.55,
+    suppressStochImportance: false,
+    momentumOverrideEnabled: false,
+  },
+  EXHAUSTION: {
+    relaxTier1Threshold: 0.45,
+    suppressStochImportance: true,
+    momentumOverrideEnabled: false,
+  },
+} as const;
+
+export type DirectionRegime = 'STRONG_TREND' | 'EARLY_TREND' | 'RANGE' | 'EXHAUSTION';
+
+// ============= TIER2 WEIGHTED CONFIRMATION =============
+export const TIER2_WEIGHTED_CONFIRMATION = {
+  ENABLED: true,
+  MOMENTUM_STRONG_POINTS: 2,
+  MOMENTUM_WEAK_POINTS: 1,
+  ORDER_FLOW_ALIGNED_POINTS: 2,
+  STOCH_EXTREME_POINTS: 1,
+  SLOPE_POSITIVE_POINTS: 1,
+  HTF_ALIGNED_POINTS: 1,
+  STRONG_TREND_MIN_SCORE: 3,
+  EARLY_TREND_MIN_SCORE: 3,
+  NORMAL_MIN_SCORE: 4,
+  RANGE_MIN_SCORE: 5,
+  SCORE_3_POSITION_MULT: 0.55,
+  SCORE_4_POSITION_MULT: 0.65,
+  SCORE_5_POSITION_MULT: 0.75,
+  SCORE_6_POSITION_MULT: 0.85,
+  SCORE_7_POSITION_MULT: 0.90,
+  BASE_CONFIDENCE: 50,
   MAX_CONFIDENCE: 70,
-  
-  // Logging
-  LOG_ENTRIES: true,
+  CONFIDENCE_PER_POINT: 3,
 } as const;
 
-// ============= PHASE 11: TREND EXHAUSTION DETECTION (ADX SLOPE + TREND STRENGTH) =============
-// Expert insight: "ADX > 40 declining with weak trend strength = trend exhaustion"
-// This blocks entries when trend is running out of steam
-export const TREND_EXHAUSTION_PROTECTION = {
+// ============= DIRECTIONAL BIAS ESCAPE PARAMS =============
+export const DIRECTIONAL_BIAS_ESCAPE_PARAMS = {
   ENABLED: true,
-  
-  // Block when ADX slope < 0 AND trend strength < this threshold
-  TREND_STRENGTH_THRESHOLD: 40,
-  
-  // Only check when ADX is above this (trend was meaningful)
-  MIN_ADX_FOR_CHECK: 25,
-  
-  // ADX slope considered "declining"
-  ADX_SLOPE_DECLINE_THRESHOLD: 0,
-  
-  // Optional: reduce position instead of blocking
-  REDUCE_POSITION_INSTEAD_OF_BLOCK: false,
-  EXHAUSTION_POSITION_MULTIPLIER: 0.25,
-  
-  // Logging
-  LOG_BLOCKS: true,
+  HTF_NEUTRAL_REQUIRED: true,
+  MOMENTUM_RISING_BARS: 3,
+  ORDER_FLOW_NOT_OPPOSING: true,
+  MIN_MOMENTUM_MAGNITUDE: 15,
+  MOMENTUM_RISING_THRESHOLD: 5,
+  ESCAPE_POSITION_MULTIPLIER: 0.45,
+  ESCAPE_BASE_CONFIDENCE: 45,
+  ESCAPE_MAX_CONFIDENCE: 55,
 } as const;
 
-// ============= PHASE 12: REGIME TRANSITION PROTECTION =============
-// Expert insight: "When regime weakens, require stronger confirmation"
-// Transitions from PARABOLIC → NORMAL or STRONG_TREND → RANGING need higher quality
-export const REGIME_TRANSITION_PROTECTION = {
+// ============= EXHAUSTION REVERSAL OVERRIDE PARAMS =============
+export const EXHAUSTION_REVERSAL_OVERRIDE_PARAMS = {
   ENABLED: true,
-  
-  // Additional quality score required after regime weakening
-  QUALITY_BOOST_ON_WEAKENING: 20,
-  
-  // Time window to consider regime transition (minutes)
-  TRANSITION_WINDOW_MINUTES: 30,
-  
-  // Regime weakening transitions that trigger boost
-  WEAKENING_TRANSITIONS: {
-    FROM_PARABOLIC: ['STRONG_TREND', 'NORMAL', 'STEALTH_DRIFT', 'RANGE'],
-    FROM_STRONG_TREND: ['NORMAL', 'STEALTH_DRIFT', 'RANGE'],
-    FROM_NORMAL: ['RANGE'],
-  } as const,
-  
-  // Logging
-  LOG_BLOCKS: true,
+  REQUIRE_REGIME_GATE: true,
+  ALLOWED_REGIMES: ['EXHAUSTION', 'RANGE'] as const,
+  REQUIRE_HTF_WEAKENING: true,
+  HTF_4H_WEAK_CONF_THRESHOLD: 60,
+  HTF_1H_WEAK_CONF_THRESHOLD: 55,
+  LONG_K_THRESHOLD: 10,
+  SHORT_K_THRESHOLD: 90,
+  LONG_PERCENT_B_THRESHOLD: 20,
+  SHORT_PERCENT_B_THRESHOLD: 80,
+  ADX_HIGH_EXHAUSTION_ENABLED: true,
+  ADX_HIGH_THRESHOLD: 45,
+  ADX_DECLINING_SLOPE: 0,
+  REQUIRE_MOMENTUM_CONFIRMATION: true,
+  MIN_MOMENTUM_SCORE: 20,
+  MACD_IMPROVING_COUNTS: true,
+  MAX_ADX_SLOPE: 0.05,
+  MIN_ORDER_FLOW_SCORE: 60,
+  BLOCK_ON_EXPANSION: true,
+  MAX_VOLUME_RATIO: 1.8,
+  BLOCK_ON_SQUEEZE_RELEASE: true,
+  SHORT_BLOCK_IF_4H_BULLISH_CONF: 70,
+  BASE_POSITION_MULTIPLIER: 0.40,
+  MOMENTUM_CONFIRMED_MULTIPLIER: 0.50,
+  STRONG_SETUP_MULTIPLIER: 0.55,
+  BASE_CONFIDENCE: 55,
+  MOMENTUM_CONFIRMS_BONUS: 5,
+  ORDER_FLOW_ALIGNED_BONUS: 5,
+  MACD_IMPROVING_BONUS: 5,
+  MAX_CONFIDENCE: 70,
+  LOG_OVERRIDES: true,
+  LOG_SKIPS: true,
 } as const;
 
-// ============= PHASE 13: MOMENTUM REVERSAL PROTECTION =============
-// Expert insight: "Momentum flipping from strongly directional to neutral = reversal risk"
-// This blocks same-direction entries when momentum has reversed
-export const MOMENTUM_REVERSAL_PROTECTION = {
+// ============= MASTER MARKET REGIME =============
+export type MasterMarketRegime = 'STRONG_TREND' | 'MODERATE_TREND' | 'WEAK_TREND' | 'RANGING' | 'PARABOLIC';
+
+// ============= MOMENTUM OVERRIDE DIRECTION PARAMS =============
+export const MOMENTUM_OVERRIDE_DIRECTION_PARAMS = {
   ENABLED: true,
-  
-  // Was strongly directional at > |this value|
-  STRONG_MOMENTUM_THRESHOLD: 25,
-  
-  // Now in neutral zone at |< this value|
-  NEUTRAL_ZONE_THRESHOLD: 10,
-  
-  // Lookback window for checking previous momentum (minutes)
-  LOOKBACK_MINUTES: 30,
-  
-  // Block same-direction entry on momentum reversal
-  BLOCK_SAME_DIRECTION: true,
-  
-  // Allow opposite direction entries (momentum reversal may signal new direction)
-  ALLOW_OPPOSITE_DIRECTION: true,
-  
-  // Logging
-  LOG_BLOCKS: true,
+  MIN_MOMENTUM_SCORE: 20,
+  STRONG_MOMENTUM_SCORE: 35,
+  MIN_MOMENTUM_SLOPE: 0,
+  MIN_ORDER_FLOW_SCORE: 45,
+  STRONG_ORDER_FLOW_SCORE: 60,
+  STOCHRSI_OVERSOLD_THRESHOLD: 25,
+  STOCHRSI_OVERBOUGHT_THRESHOLD: 75,
+  STOCHRSI_REQUIRED_IN_REGIME: ['RANGE'] as DirectionRegime[],
+  STOCHRSI_BONUS_IN_REGIME: ['STRONG_TREND', 'EARLY_TREND', 'EXHAUSTION'] as DirectionRegime[],
+  STOCHRSI_BONUS_CONFIDENCE: 5,
+  BLOCK_IF_30M_ADX_ABOVE: 30,
+  BLOCK_IF_ADX_SLOPE_ABOVE: 0,
+  BASE_POSITION_MULTIPLIER: 0.60,
+  STRONG_POSITION_MULTIPLIER: 0.75,
+  BASE_CONFIDENCE: 55,
+  MAX_CONFIDENCE: 70,
 } as const;
 
-// ============= SQUEEZE MOMENTUM BYPASS PARAMETERS =============
-// NEW: Regime-aware gate system - allows entries during Bollinger squeeze when momentum is confirmed
-// In squeeze regimes, neutral trends are EXPECTED - use momentum for direction instead of trend confidence
-// This addresses the NEUTRAL_4H_LOW_CONFIDENCE gate blocking valid entries during compression phases
-export const SQUEEZE_MOMENTUM_BYPASS_PARAMS = {
-  ENABLED: true,
-  
-  // ===== SQUEEZE DETECTION REQUIREMENTS =====
-  // Use existing detectBollingerSqueeze() output
-  MIN_SQUEEZE_INTENSITY: 60,           // squeezeIntensity >= 60 (tight squeeze)
-  MAX_BB_WIDTH_PERCENTILE: 25,         // bbWidthPercentile <= 25 (bottom 25%)
-  
-  // ===== MOMENTUM REQUIREMENTS FOR BYPASS =====
-  // Much lower ADX threshold during squeeze (ADX naturally low in compression)
-  MIN_ADX: 18,                         // Down from 25 - squeeze environments have low ADX
-  REQUIRE_MOMENTUM_CONFIRMED: true,    // momentum.state === "confirmed"
-  REQUIRE_GENUINE_MOMENTUM: true,      // momentum.genuineMomentum === true
-  
-  // ===== MACD REQUIREMENTS =====
-  REQUIRE_MACD_EXPANDING: true,        // MACD histogram must be expanding
-  MIN_MACD_MAGNITUDE: 1.5,             // Reduced from 2.0 to catch early squeeze momentum (ETH had 1.78)
-  
-  // ===== STOCHRSI LOADING ZONE =====
-  // For LONG: StochRSI should be in lower half (not overbought)
-  // For SHORT: StochRSI should be in upper half (not oversold)
-  LONG_MAX_STOCHRSI_K: 55,             // K <= 55 for long entries during squeeze
-  SHORT_MIN_STOCHRSI_K: 45,            // K >= 45 for short entries during squeeze
-  
-  // ===== ORDER FLOW CONFIRMATION (OPTIONAL BUT STRENGTHENS) =====
-  USE_ORDER_FLOW_CONFIRMATION: true,
-  MIN_ORDER_FLOW_SCORE: 55,            // Order flow score >= 55
-  
-  // ===== POSITION SIZING =====
-  POSITION_SIZE_MULTIPLIER: 0.60,      // 60% position for squeeze entries (moderate risk)
-  
-  // ===== MULTI-TIMEFRAME SQUEEZE BONUS =====
-  // If order flow confirms, increase position size slightly
-  ORDER_FLOW_CONFIRMED_MULTIPLIER: 0.75,  // 75% position if order flow confirms
-  
-  // ===== LOGGING =====
-  LOG_BYPASS_DETAILS: true,
-} as const;
-
-// ============= SQUEEZE BREAKOUT SIGNAL PARAMETERS =============
-// Defines squeeze breakout as a primary signal type with specific confidence and risk parameters
-// Triggered when price crosses Bollinger band during or just after squeeze
-export const SQUEEZE_BREAKOUT_SIGNAL_PARAMS = {
-  ENABLED: true,
-  
-  // ===== BREAKOUT DETECTION =====
-  // Triggered when price crosses band during or just after squeeze
-  DETECT_BREAKOUT_DURING_SQUEEZE: true,
-  DETECT_BREAKOUT_POST_SQUEEZE: true,
-  POST_SQUEEZE_LOOKBACK_BARS: 3,       // Check last 3 bars for recent squeeze exit
-  
-  // ===== SIGNAL GENERATION =====
-  GENERATE_SIGNAL_ON_BREAKOUT: true,
-  SIGNAL_CONFIDENCE_BASE: 65,          // Base confidence for squeeze breakout signals
-  SIGNAL_CONFIDENCE_BONUS_PER_TF: 5,   // +5% confidence per additional TF indicator alignment
-  
-  // ===== CONFIRMATION REQUIREMENTS =====
-  REQUIRE_VOLUME_CONFIRMATION: true,
-  MIN_VOLUME_RATIO: 1.2,               // 20% above average volume
-  REQUIRE_MACD_ALIGNMENT: true,        // MACD must agree with breakout direction
-  
-  // ===== RISK PARAMETERS =====
-  STOP_LOSS_ATR_MULTIPLIER: 1.5,       // Tighter stop for breakouts
-  TAKE_PROFIT_ATR_MULTIPLIER: 3.0,     // Higher R:R for breakouts
-  
-  // ===== POSITION SIZING =====
-  POSITION_SIZE_MULTIPLIER: 0.70,      // 70% position for breakout entries
-} as const;
-
-// ============= MOVE EXHAUSTION FILTER =============
-// Prevents entries when price has already moved significantly from swing points
-// Addresses: Late entries into exhausted trends (e.g., shorting after 10% drop)
-export const MOVE_EXHAUSTION_FILTER_PARAMS = {
-  ENABLED: true,
-  
-  // ===== GRADUATED RESPONSE =====
-  // Soft threshold: reduce position size instead of hard block
-  SOFT_THRESHOLD_PERCENT: 5.0,        // 5% move = reduce position
-  SOFT_THRESHOLD_POSITION_SIZE: 0.35, // 35% position for late entries
-  
-  // Hard threshold: complete block
-  HARD_THRESHOLD_PERCENT: 10.0,       // 10% move = hard block
-  
-  // ===== STOCHRSI ALIGNMENT REQUIRED =====
-  // For late shorts: StochRSI must be > 50 (not already oversold)
-  // For late longs: StochRSI must be < 50 (not already overbought)
-  REQUIRE_STOCHRSI_ALIGNMENT: true,
-  STOCHRSI_NOT_OVERSOLD_FOR_SHORT: 50,  // K must be > 50 for late short
-  STOCHRSI_NOT_OVERBOUGHT_FOR_LONG: 50, // K must be < 50 for late long
-  
-  // ===== EXCEPTION: STRONG TREND CONTINUATION =====
-  // Allow entry despite exhaustion if ADX is very strong and rising
-  ALLOW_STRONG_TREND_EXCEPTION: true,
-  EXCEPTION_MIN_ADX: 40,              // Very strong trend
-  EXCEPTION_MIN_ADX_SLOPE: 0.2,       // ADX must be rising
-  EXCEPTION_POSITION_SIZE: 0.40,      // 40% position for exception entries
-  
-  // ===== ADDITIONAL ENTRY QUALITY GATES =====
-  // For short entries at soft threshold: require StochRSI K > this
-  SOFT_SHORT_MIN_STOCHRSI: 35,
-  // For long entries at soft threshold: require StochRSI K < this
-  SOFT_LONG_MAX_STOCHRSI: 65,
-  
-  // ===== LOOKBACK PERIOD =====
-  // Hours to look back for swing high/low calculation
-  SWING_LOOKBACK_HOURS: 24,
-  
-  // ===== ATR-BASED ALTERNATIVE =====
-  // Block if price moved more than X ATRs from swing (optional)
-  USE_ATR_BASED_THRESHOLD: false,
-  MAX_ATR_DISTANCE_FOR_ENTRY: 4.0,    // 4 ATRs from swing = overextended
-  
-  // ===== LOGGING =====
-  LOG_EXHAUSTION_CHECKS: true,
-} as const;
-
-// ============= MEAN REVERSION STRATEGY CONFIGURATION =============
-// Asymmetric thresholds for LONG (Bounce) vs SHORT (Reversal)
-// SHORTs have stricter requirements due to crypto's upward bias
-
+// ============= MEAN REVERSION CONFIG =============
 export const MEAN_REVERSION_CONFIG = {
   ENABLED: true,
-  
-  // LONG (Bounce) - More Aggressive
   LONG: {
-    K_THRESHOLD: 5,               // K < 5 triggers bounce detection
-    PERCENT_B_THRESHOLD: 15,      // %B < 15 (below lower Bollinger)
-    POSITION_SIZE: 0.40,          // 40% of normal position
-    STOP_LOSS_PERCENT: 1.8,       // Wider stop for reversals
-    TAKE_PROFIT_PERCENT: 2.5,     // Target mean reversion to middle
-    MAX_ADX: 30,                  // Normal max ADX (informational at extremes)
+    K_THRESHOLD: 5,
+    PERCENT_B_THRESHOLD: 15,
+    POSITION_SIZE: 0.40,
+    STOP_LOSS_PERCENT: 1.8,
+    TAKE_PROFIT_PERCENT: 2.5,
+    MAX_ADX: 30,
     REQUIRE_MOMENTUM_SHIFT: true,
     MIN_BARS_AT_EXTREME: 3,
   },
-  
-  // SHORT (Reversal) - More Conservative
   SHORT: {
-    K_THRESHOLD: 97,              // K > 97 (stricter than LONG's 5)
-    PERCENT_B_THRESHOLD: 90,      // %B > 90 (well above upper Bollinger)
-    POSITION_SIZE: 0.25,          // Only 25% of normal position
-    STOP_LOSS_PERCENT: 2.2,       // Even wider stop
-    TAKE_PROFIT_PERCENT: 2.0,     // Modest target
-    MAX_ADX: 25,                  // Normal max ADX (informational at extremes)
+    K_THRESHOLD: 97,
+    PERCENT_B_THRESHOLD: 90,
+    POSITION_SIZE: 0.25,
+    STOP_LOSS_PERCENT: 2.2,
+    TAKE_PROFIT_PERCENT: 2.0,
+    MAX_ADX: 25,
     REQUIRE_HTF_NOT_BULLISH: true,
     REQUIRE_BEARISH_DIVERGENCE: true,
     MIN_BARS_AT_EXTREME: 4,
   },
-  
-  // Quality Score Capping - prevents outranking trend trades
   MAX_QUALITY_SCORE: 78,
-  
-  // ===== EXTREME EXHAUSTION OVERRIDE =====
-  // When exhaustion is extreme, ADX becomes informational, not blocking
-  // This addresses late-stage moves where ADX peaks near local exhaustion
   EXTREME_EXHAUSTION: {
-    // Thresholds where ADX veto is lifted
-    LONG_K_EXTREME: 5,            // K <= 5 = deep statistical exhaustion
-    SHORT_K_EXTREME: 95,          // K >= 95 = deep statistical exhaustion
-    
-    // Safety requirements when overriding ADX
-    MAX_ADX_SLOPE: 0,             // ADX must be flat/declining (not accelerating)
-    MIN_ATR_DISTANCE_FROM_VWAP: 1.5,  // Price must be extended from VWAP
-    
-    // Risk adjustments for high-ADX mean reversion
-    POSITION_SIZE_MULTIPLIER: 0.50,   // 50% of normal MR size
-    FASTER_STOP_MULTIPLIER: 0.75,     // Tighter stop (volatility-based)
-    NO_REENTRY: true,                 // No averaging or re-entries
-    TARGET_PARTIAL_REVERSION: true,   // Only target VWAP/mid-BB, not full reversion
+    LONG_K_EXTREME: 5,
+    SHORT_K_EXTREME: 95,
+    MAX_ADX_SLOPE: 0,
+    MIN_ATR_DISTANCE_FROM_VWAP: 1.5,
+    POSITION_SIZE_MULTIPLIER: 0.50,
+    FASTER_STOP_MULTIPLIER: 0.75,
+    NO_REENTRY: true,
+    TARGET_PARTIAL_REVERSION: true,
   },
-  
-  // Volatility-Adjusted Exit
   EXIT: {
     BASE_TIMEOUT_ATR_MULTIPLE: 1.5,
     MAX_HOLD_HOURS: 4,
@@ -3957,458 +3138,263 @@ export const MEAN_REVERSION_CONFIG = {
   },
 } as const;
 
-// ============= TREND PHASE GATE (Orthogonal to Expansion) =============
-// Classifies trend phase independently for clean regime separation
-
+// ============= TREND PHASE GATE =============
 export const TREND_PHASE_GATE = {
-  EARLY_TREND: {
-    ADX_MIN: 20,
-    ADX_MAX: 35,
-    ADX_SLOPE_MIN: 0.3,           // Rising ADX = early trend
-  },
-  LATE_TREND: {
-    ADX_MIN: 35,
-    ADX_SLOPE_MAX: 0,             // Flat/declining ADX = late trend
-    DI_COMPRESSION: true,
-  },
-  RANGE: {
-    ADX_MAX: 20,
-  },
+  EARLY_TREND: { ADX_MIN: 20, ADX_MAX: 35, ADX_SLOPE_MIN: 0.3 },
+  LATE_TREND: { ADX_MIN: 35, ADX_SLOPE_MAX: 0, DI_COMPRESSION: true },
+  RANGE: { ADX_MAX: 20 },
 } as const;
 
-// ============= EXPANSION GATE (Orthogonal to Trend Phase) =============
-// Classifies expansion state independently for clean regime separation
-
+// ============= EXPANSION GATE =============
 export const EXPANSION_GATE = {
-  NORMAL: {
-    VOLUME_RATIO_MAX: 1.5,
-    NO_SQUEEZE_RELEASE: true,
-  },
-  EXPANSION: {
-    VOLUME_SPIKE_MIN: 2.0,
-    OR_SQUEEZE_RELEASE: true,
-    ADX_SLOPE_MIN: 0.5,
-  },
-  BREAKOUT: {
-    VOLUME_SPIKE_MIN: 2.5,
-    ADX_SPIKE: true,
-    PRICE_RANGE_EXPANSION: true,
-  },
+  NORMAL: { VOLUME_RATIO_MAX: 1.5, NO_SQUEEZE_RELEASE: true },
+  EXPANSION: { VOLUME_SPIKE_MIN: 2.0, OR_SQUEEZE_RELEASE: true, ADX_SLOPE_MIN: 0.5 },
+  BREAKOUT: { VOLUME_SPIKE_MIN: 2.5, ADX_SPIKE: true, PRICE_RANGE_EXPANSION: true },
 } as const;
 
 // ============= MEAN REVERSION REGIME REQUIREMENTS =============
-// Mean reversion requires BOTH favorable trend phase AND expansion state
-
 export const MEAN_REVERSION_REGIME_REQUIREMENTS = {
   ALLOWED_TREND_PHASES: ['RANGE', 'LATE_TREND'] as const,
-  ALLOWED_EXPANSION_STATES: ['NORMAL'] as const,  // Never in expansion
-  
-  // Position adjustments by phase
-  POSITION_MULTIPLIERS: {
-    'RANGE': 1.0,
-    'LATE_TREND': 0.70,
-  } as const,
+  ALLOWED_EXPANSION_STATES: ['NORMAL'] as const,
+  POSITION_MULTIPLIERS: { 'RANGE': 1.0, 'LATE_TREND': 0.70 } as const,
 } as const;
 
-// ============= PHASE: MOMENTUM DIRECTION HARD GATE =============
-// CRITICAL FIX: Prevents counter-trend entries when momentum has flipped
-// This gate runs BEFORE any exception overrides (MICRO_TREND, STRONG_TREND, etc.)
-// Root cause: System entered SHORT just as momentum flipped bullish (from -64 to +36)
+// ============= PRICE ACTION EARLY ENTRY PARAMS =============
+export const PRICE_ACTION_EARLY_ENTRY_PARAMS = {
+  ENABLED: true,
+  MIN_MOVE_PERCENT: 0.8,
+  MIN_ADX: 18,
+  POSITION_MULTIPLIER: 0.65,
+} as const;
+
+// ============= ADX RISING DIRECTIONAL BYPASS PARAMS =============
+export const ADX_RISING_DIRECTIONAL_BYPASS_PARAMS = {
+  ENABLED: true,
+  MIN_ADX: 20,
+  MIN_ADX_SLOPE: 0.1,
+  POSITION_MULTIPLIER: 0.70,
+} as const;
+
+// ============= MACD GATE PARAMS =============
+export const MACD_GATE_PARAMS = {
+  ENABLED: true,
+  MIN_OPPOSING_BARS: 3,
+  MIN_MAGNITUDE: 0.1,
+} as const;
+
+// ============= SIGNAL TYPE VALIDITY PARAMS =============
+export const SIGNAL_TYPE_VALIDITY_PARAMS = {
+  ENABLED: true,
+  REQUIRE_DIRECTION_MATCH: true,
+} as const;
+
+// ============= COUNTER TREND PROTECTION =============
+export const COUNTER_TREND_PROTECTION = {
+  ENABLED: true,
+  BLOCK_COUNTER_TREND: true,
+  EXCEPTION_MIN_ADX: 35,
+} as const;
+
+// ============= STRATEGY ADX RESTRICTIONS =============
+export const STRATEGY_ADX_RESTRICTIONS = {
+  ENABLED: true,
+  EMA_DEATH_CROSS_MIN_ADX: 25,
+  MACD_REVERSAL_MIN_ADX: 22,
+} as const;
+
+// ============= MOMENTUM DIRECTION ALIGNMENT =============
+export const MOMENTUM_DIRECTION_ALIGNMENT = {
+  ENABLED: true,
+  REQUIRE_ALIGNMENT: true,
+} as const;
+
+// ============= STRATEGY DIRECTION REQUIREMENTS =============
+export const STRATEGY_DIRECTION_REQUIREMENTS = {
+  ENABLED: true,
+  EMA_DEATH_CROSS_REQUIRE_BEARISH_4H: true,
+} as const;
+
+// ============= RANGING MARKET PROTECTION =============
+export const RANGING_MARKET_PROTECTION = {
+  ENABLED: true,
+  MAX_ADX: 18,
+  BLOCK_IN_RANGE: true,
+} as const;
+
+// ============= NEUTRAL LOW ADX QUALITY GATE =============
+export const NEUTRAL_LOW_ADX_QUALITY_GATE = {
+  ENABLED: true,
+  MAX_ADX: 20,
+  MIN_QUALITY: 65,
+} as const;
+
+// ============= ADAPTIVE SIGNAL MODE =============
+export const ADAPTIVE_SIGNAL_MODE = {
+  ENABLED: true,
+  USE_ADAPTIVE_ENTRY: true,
+} as const;
+
+// ============= SAME DIRECTION REENTRY PROTECTION =============
+export const SAME_DIRECTION_REENTRY_PROTECTION = {
+  ENABLED: true,
+  MIN_WAIT_HOURS: 1,
+} as const;
+
+// ============= TREND EXHAUSTION PROTECTION =============
+export const TREND_EXHAUSTION_PROTECTION = {
+  ENABLED: true,
+  MAX_MOVE_PERCENT: 8,
+} as const;
+
+// ============= REGIME TRANSITION PROTECTION =============
+export const REGIME_TRANSITION_PROTECTION = {
+  ENABLED: true,
+  COOLDOWN_MINUTES: 30,
+} as const;
+
+// ============= MOMENTUM REVERSAL PROTECTION =============
+export const MOMENTUM_REVERSAL_PROTECTION = {
+  ENABLED: true,
+  BLOCK_ON_FLIP: true,
+} as const;
+
+// ============= SQUEEZE MOMENTUM BYPASS PARAMS =============
+export const SQUEEZE_MOMENTUM_BYPASS_PARAMS = {
+  ENABLED: true,
+  MIN_SQUEEZE_PERCENT: 60,
+  POSITION_MULTIPLIER: 0.60,
+} as const;
+
+// ============= ADX EXHAUSTION REFINED PARAMS =============
+export const ADX_EXHAUSTION_REFINED_PARAMS = {
+  ENABLED: true,
+  MIN_ADX: 45,
+  MAX_SLOPE: 0,
+} as const;
+
+// ============= MOMENTUM DIRECTION HARD GATE =============
 export const MOMENTUM_DIRECTION_HARD_GATE = {
   ENABLED: true,
-  
-  // ===== CORE BLOCKING THRESHOLDS =====
-  // Block SHORT when momentum score is above this (positive = bullish momentum)
-  BLOCK_SHORT_ABOVE_SCORE: 15,  // Tightened from 20 - block SHORT earlier when momentum is bullish
-  // Block LONG when momentum score is below this (negative = bearish momentum)
-  BLOCK_LONG_BELOW_SCORE: -15,  // Tightened from -20 - block LONG earlier when momentum is bearish
-  
-  // ===== EXCEPTION CONDITIONS =====
-  // Only allow override if ADX is extremely high (trend is undeniable)
+  BLOCK_SHORT_ABOVE_SCORE: 15,
+  BLOCK_LONG_BELOW_SCORE: -15,
   EXCEPTION_MIN_ADX: 55,
-  // Even with high ADX, require 4h trend to match
   EXCEPTION_REQUIRE_HTF_ALIGNMENT: true,
-  // Position size if exception applied
-  EXCEPTION_POSITION_MULTIPLIER: 0.30,  // 30% position for risky override
-  
-  // ===== LOGGING =====
+  EXCEPTION_POSITION_MULTIPLIER: 0.30,
   LOG_ALL_CHECKS: true,
   LOG_BLOCKS: true,
 } as const;
 
-// ============= PHASE: TREND REVERSAL DETECTION GATE =============
-// Detects when price action indicates a trend is reversing
-// Blocks entries in the OLD direction when reversal signals are present
-export const TREND_REVERSAL_DETECTION_GATE = {
-  ENABLED: true,
-  
-  // ===== STOCHRSI REVERSAL SIGNALS =====
-  // Detect StochRSI crossing up from oversold (bullish reversal)
-  STOCH_CROSSING_UP_THRESHOLD: 30,  // K was below this
-  STOCH_CROSSING_UP_MIN_K: 20,      // K is now above this
-  // Detect StochRSI crossing down from overbought (bearish reversal)
-  STOCH_CROSSING_DOWN_THRESHOLD: 70, // K was above this
-  STOCH_CROSSING_DOWN_MAX_K: 80,     // K is now below this
-  
-  // ===== MACD REVERSAL SIGNALS =====
-  // Detect MACD histogram flipping positive (bullish reversal) or negative (bearish reversal)
-  MACD_FLIP_DETECTION: true,
-  
-  // ===== PRICE ACTION REVERSAL SIGNALS =====
-  // Detect recent price direction change
-  PRICE_REVERSAL_LOOKBACK_HOURS: 4,
-  MIN_PRICE_CHANGE_PERCENT: 1.0,  // Price must have moved at least 1% in new direction
-  
-  // ===== BLOCK BEHAVIOR =====
-  // Block SHORT when bullish reversal detected
-  BLOCK_SHORT_ON_BULLISH_REVERSAL: true,
-  // Block LONG when bearish reversal detected
-  BLOCK_LONG_ON_BEARISH_REVERSAL: true,
-  
-  // ===== POSITION SIZE FOR NEW DIRECTION =====
-  // When entering in new direction after reversal detection
-  NEW_DIRECTION_POSITION_MULTIPLIER: 0.60,
-  
-  // ===== EXCEPTION: STRONG TREND CONTINUATION =====
-  // Allow entry against reversal signals if ADX is very high AND 4h confirms
-  EXCEPTION_MIN_ADX: 50,
-  EXCEPTION_REQUIRE_HTF_ALIGNMENT: true,
-  
-  // ===== LOGGING =====
-  LOG_BLOCKS: true,
-} as const;
-
-// ============= PHASE: MOVE EXHAUSTED REVERSAL GATE (SHORT SYMMETRY) =============
-// CRITICAL: Adds symmetric protection for SHORTs that LONGs already have
-// Prevents shorting when price is RALLYING (just like we block LONGs when price is dumping)
-export const MOVE_EXHAUSTED_REVERSAL_GATE = {
-  ENABLED: true,
-  
-  // ===== PRICE RALLY DETECTION FOR SHORT BLOCK =====
-  // Block SHORT if price ROSE more than this in last 4 hours
-  BLOCK_SHORT_IF_PRICE_ROSE_PERCENT: 1.5,
-  // Lookback period for price move detection
-  LOOKBACK_HOURS: 4,
-  
-  // ===== STOCHRSI ALIGNMENT FOR LATE SHORTS =====
-  // For shorts during price rally: StochRSI K must be ABOVE this (not oversold)
-  MIN_STOCHRSI_K_FOR_LATE_SHORT: 40,
-  
-  // ===== EXCEPTION: STRONG DOWNTREND =====
-  // Allow SHORT despite rally if ADX >= this AND 4h is bearish
-  EXCEPTION_MIN_ADX: 35,
-  EXCEPTION_REQUIRE_BEARISH_4H: true,
-  EXCEPTION_POSITION_SIZE: 0.40,
-  
-  // ===== LOGGING =====
-  LOG_BLOCKS: true,
-} as const;
-
-// ============= PHASE: MOMENTUM FLIP DETECTION =============
-// Detects when momentum recently changed direction (e.g., bearish to bullish)
-// Implements a cooldown period after flip to avoid "catching falling knives" or "shorting breakouts"
+// ============= MOMENTUM FLIP DETECTION =============
 export const MOMENTUM_FLIP_DETECTION = {
   ENABLED: true,
-  
-  // ===== FLIP DETECTION THRESHOLDS =====
-  // Minimum score magnitude to be considered "directional" (not neutral)
   DIRECTIONAL_THRESHOLD: 25,
-  // Minimum score change to be considered a "flip"
-  MIN_FLIP_DELTA: 40,  // e.g., from -30 to +10 = 40 point swing
-  
-  // ===== COOLDOWN AFTER FLIP =====
-  // Number of minutes to wait after a momentum flip before allowing same-direction entries
+  MIN_FLIP_DELTA: 40,
   COOLDOWN_MINUTES: 30,
-  // Block entries that go WITH the old direction immediately after flip
-  // e.g., if momentum just flipped from -50 to +20, block SHORT entries
   BLOCK_OLD_DIRECTION_ENTRIES: true,
-  
-  // ===== POSITION SIZE DURING COOLDOWN =====
-  // If allowing entries during cooldown (in new direction), reduce position
-  NEW_DIRECTION_POSITION_MULTIPLIER: 0.50,  // 50% position for new direction during cooldown
-  
-  // ===== EXCEPTION: STRONG CONFIRMATION =====
-  // Allow entry if new direction has very strong confirmation
+  NEW_DIRECTION_POSITION_MULTIPLIER: 0.50,
   BYPASS_COOLDOWN_MIN_ADX: 45,
-  BYPASS_COOLDOWN_MIN_SCORE: 50,  // New direction must be strongly confirmed
-  BYPASS_COOLDOWN_REQUIRE_HTF: true,  // 4h must align with new direction
+  BYPASS_COOLDOWN_MIN_SCORE: 50,
+  BYPASS_COOLDOWN_REQUIRE_HTF: true,
 } as const;
 
-// ============= MICRO_TREND MOMENTUM ALIGNMENT REQUIREMENT =============
-// Strengthens MICRO_TREND exception to require momentum alignment
-// Prevents MICRO_TREND from allowing entries against momentum direction
-// ROOT CAUSE FIX: MICRO_TREND was bypassing momentum checks and entering SHORTs against bullish momentum
+// ============= MICRO TREND MOMENTUM SAFETY =============
 export const MICRO_TREND_MOMENTUM_SAFETY = {
   ENABLED: true,
-  
-  // ===== MOMENTUM ALIGNMENT REQUIREMENT (TIGHTENED) =====
-  // For bullish micro-trend: momentum score must be > this (not bearish)
-  MIN_MOMENTUM_FOR_BULLISH: 0,    // TIGHTENED from -10 - no negative momentum for LONG
-  // For bearish micro-trend: momentum score must be < this (not bullish)
-  MAX_MOMENTUM_FOR_BEARISH: 0,    // TIGHTENED from 10 - no positive momentum for SHORT
-  
-  // ===== 4H TREND REQUIREMENT =====
-  // Block SHORT micro-trend if 4h is bullish
+  MIN_MOMENTUM_FOR_BULLISH: 0,
+  MAX_MOMENTUM_FOR_BEARISH: 0,
   BLOCK_SHORT_IF_4H_BULLISH: true,
-  // Block LONG micro-trend if 4h is bearish  
   BLOCK_LONG_IF_4H_BEARISH: true,
-  
-  // ===== MINIMUM CANDLE PERSISTENCE =====
-  // Require micro-trend to persist for at least this many candles
   MIN_PERSISTENCE_CANDLES: 3,
-  
-  // ===== MINIMUM ADX FOR MICRO_TREND =====
-  MIN_ADX_FOR_MICRO_TREND: 20,  // Some trend strength required
-  
-  // ===== LOGGING =====
+  MIN_ADX_FOR_MICRO_TREND: 20,
   LOG_DENIALS: true,
 } as const;
 
-// ============= PHASE 1: DIRECTION REGIME CLASSIFIER =============
-// Determines market regime BEFORE direction derivation to adjust gate behavior
-// IMPROVEMENT: Explicitly labels market state to avoid implicit regime inference
-export const DIRECTION_REGIME_PARAMS = {
+// ============= TREND REVERSAL DETECTION GATE =============
+export const TREND_REVERSAL_DETECTION_GATE = {
   ENABLED: true,
-  
-  // ===== REGIME DETECTION THRESHOLDS =====
-  STRONG_TREND_ADX: 30,         // ADX >= 30 = STRONG_TREND
-  EARLY_TREND_ADX: 18,          // ADX 18-30 = EARLY_TREND
-  RANGE_ADX_MAX: 18,            // ADX < 18 = RANGE
-  EXHAUSTION_ADX: 45,           // ADX > 45 = check for exhaustion
-  EXHAUSTION_SLOPE_THRESHOLD: 0, // ADX slope <= 0 = exhausted (not accelerating)
-  
-  // ===== REGIME-SPECIFIC TIER 1 THRESHOLD RELAXATION =====
-  // Lower weighted sum threshold for specific regimes
-  STRONG_TREND: {
-    relaxTier1Threshold: 0.40,     // Lower from 0.55 to 0.40
-    suppressStochImportance: true, // StochRSI becomes bonus, not requirement
-    momentumOverrideEnabled: true,
-  },
-  EARLY_TREND: {
-    relaxTier1Threshold: 0.45,     // Lower from 0.55 to 0.45
-    suppressStochImportance: false,
-    momentumOverrideEnabled: true,
-  },
-  RANGE: {
-    relaxTier1Threshold: 0.55,     // Standard threshold
-    suppressStochImportance: false,
-    momentumOverrideEnabled: false,
-  },
-  EXHAUSTION: {
-    relaxTier1Threshold: 0.45,     // Allow counter-trend
-    suppressStochImportance: true, // StochRSI extremes expected
-    momentumOverrideEnabled: false,// Don't override exhausted trends
-  },
+  STOCH_CROSSING_UP_THRESHOLD: 30,
+  STOCH_CROSSING_UP_MIN_K: 20,
+  STOCH_CROSSING_DOWN_THRESHOLD: 70,
+  STOCH_CROSSING_DOWN_MAX_K: 80,
+  MACD_FLIP_DETECTION: true,
+  PRICE_REVERSAL_LOOKBACK_HOURS: 4,
+  MIN_PRICE_CHANGE_PERCENT: 1.0,
+  BLOCK_SHORT_ON_BULLISH_REVERSAL: true,
+  BLOCK_LONG_ON_BEARISH_REVERSAL: true,
+  NEW_DIRECTION_POSITION_MULTIPLIER: 0.60,
+  EXCEPTION_MIN_ADX: 50,
+  EXCEPTION_REQUIRE_HTF_ALIGNMENT: true,
+  LOG_BLOCKS: true,
 } as const;
 
-export type DirectionRegime = 'STRONG_TREND' | 'EARLY_TREND' | 'RANGE' | 'EXHAUSTION';
-
-// ============= PHASE 2: TIER 2 WEIGHTED CONFIRMATION =============
-// Converts Tier 2 (Momentum Override) from 5-factor AND gate to weighted scoring
-// IMPROVEMENT: Human traders use 2-3 factors, not all 5
-export const TIER2_WEIGHTED_CONFIRMATION = {
+// ============= MOVE EXHAUSTED REVERSAL GATE =============
+export const MOVE_EXHAUSTED_REVERSAL_GATE = {
   ENABLED: true,
-  
-  // ===== POINT VALUES =====
-  MOMENTUM_STRONG_POINTS: 2,    // score > 35 = +2
-  MOMENTUM_WEAK_POINTS: 1,      // score > 20 = +1
-  ORDER_FLOW_ALIGNED_POINTS: 2, // Order flow aligns with momentum = +2
-  STOCH_EXTREME_POINTS: 1,      // StochRSI at extreme (bonus, not required) = +1
-  SLOPE_POSITIVE_POINTS: 1,     // Momentum slope positive = +1
-  HTF_ALIGNED_POINTS: 1,        // 4h trend aligns = +1 (bonus)
-  
-  // ===== THRESHOLDS PER REGIME =====
-  STRONG_TREND_MIN_SCORE: 3,    // Relaxed: only 3 of 7 points needed
-  EARLY_TREND_MIN_SCORE: 3,     // Relaxed: only 3 of 7 points needed
-  NORMAL_MIN_SCORE: 4,          // Standard: 4 of 7 points needed
-  RANGE_MIN_SCORE: 5,           // Stricter: 5 of 7 for ranging markets
-  
-  // ===== POSITION SIZING BASED ON SCORE =====
-  SCORE_3_POSITION_MULT: 0.55,  // Just met threshold
-  SCORE_4_POSITION_MULT: 0.65,  // Moderate confirmation
-  SCORE_5_POSITION_MULT: 0.75,  // Good confirmation
-  SCORE_6_POSITION_MULT: 0.85,  // Strong confirmation
-  SCORE_7_POSITION_MULT: 0.90,  // Full confirmation
-  
-  // ===== CONFIDENCE CALCULATION =====
-  BASE_CONFIDENCE: 50,
-  MAX_CONFIDENCE: 70,
-  CONFIDENCE_PER_POINT: 3,      // +3 confidence per point
+  BLOCK_SHORT_IF_PRICE_ROSE_PERCENT: 1.5,
+  LOOKBACK_HOURS: 4,
+  MIN_STOCHRSI_K_FOR_LATE_SHORT: 40,
+  EXCEPTION_MIN_ADX: 35,
+  EXCEPTION_REQUIRE_BEARISH_4H: true,
+  EXCEPTION_POSITION_SIZE: 0.40,
+  LOG_BLOCKS: true,
 } as const;
 
-// ============= PHASE 4: DIRECTIONAL BIAS ESCAPE HATCH =============
-// Final safety valve when all tiers fail but momentum is clearly building
-// IMPROVEMENT: Prevents paralysis during regime transitions
-export const DIRECTIONAL_BIAS_ESCAPE_PARAMS = {
+// ============= STRATEGY TYPE HELPERS =============
+export const isMomentumStrategy = (name: string): boolean => 
+  name?.toLowerCase().includes('momentum') || name?.toLowerCase().includes('macd');
+
+export const isNeutralStrategy = (name: string): boolean => 
+  name?.toLowerCase().includes('neutral');
+
+export const isTrendFollowingStrategy = (name: string): boolean => 
+  name?.toLowerCase().includes('trend') || name?.toLowerCase().includes('ema');
+
+export const isMeanReversionStrategy = (name: string): boolean => 
+  name?.toLowerCase().includes('reversion') || name?.toLowerCase().includes('bounce');
+
+export const detectStrategyType = (name: string): string => {
+  if (isMomentumStrategy(name)) return 'momentum';
+  if (isTrendFollowingStrategy(name)) return 'trend';
+  if (isMeanReversionStrategy(name)) return 'mean_reversion';
+  return 'unknown';
+};
+
+// ============= EXCEPTION TYPE =============
+export type ExceptionType = 'REVERSAL_OVERRIDE' | 'STRONG_TREND' | 'MICRO_TREND' | 'NONE';
+
+// ============= MARKET CONTEXT INTERFACE =============
+export interface MarketContext {
+  regime: DirectionRegime;
+  adx: number;
+  adxSlope: number;
+  trend4h: string;
+  trend1h: string;
+}
+
+// ============= DIRECTION CONTEXT ARCHITECTURE (PHASE 1) =============
+export const DIRECTION_CONTEXT_PARAMS = {
   ENABLED: true,
-  
-  // ===== CONDITIONS (all must be true) =====
-  HTF_NEUTRAL_REQUIRED: true,           // 4h must be neutral
-  MOMENTUM_RISING_BARS: 3,              // Momentum score rising for 3+ bars
-  ORDER_FLOW_NOT_OPPOSING: true,        // Order flow NOT in opposite direction
-  
-  // ===== MOMENTUM MAGNITUDE REQUIREMENT =====
-  MIN_MOMENTUM_MAGNITUDE: 15,           // |score| >= 15 (lower than fallback)
-  MOMENTUM_RISING_THRESHOLD: 5,         // Score must have increased by 5+ over bars
-  
-  // ===== POSITION SIZING (very conservative) =====
-  ESCAPE_POSITION_MULTIPLIER: 0.45,     // 45% position size max
-  
-  // ===== CONFIDENCE =====
-  ESCAPE_BASE_CONFIDENCE: 45,
-  ESCAPE_MAX_CONFIDENCE: 55,
+  EVIDENCE_TYPES: ['HTF_CONSENSUS', 'MOMENTUM', 'ORDER_FLOW', 'STOCHRSI', 'PRICE_ACTION', 'EXHAUSTION'] as const,
+  HIGH_CONFIDENCE_TIERS: [0, 2, 3] as const,
+  MEDIUM_CONFIDENCE_TIERS: [0.25, 0.5, 1, 4, 5, 6, 7] as const,
+  LOW_CONFIDENCE_TIERS: [8, 9, 10, 11] as const,
+  LOG_DIRECTION_CONTEXT: true,
+  LOG_TIER_TRANSITIONS: true,
 } as const;
 
-// ============= MOMENTUM OVERRIDE DIRECTION PARAMS =============
-// HIGH PRIORITY: When momentum conditions are met, OVERRIDE the 30m trend direction
-// This allows LONG signals when momentum is bullish even if 30m trend is bearish
-// UPDATED: Now uses weighted confirmation in trending regimes
-export const MOMENTUM_OVERRIDE_DIRECTION_PARAMS = {
-  // Enable this momentum override mechanism
-  ENABLED: true,
-  
-  // ===== MOMENTUM SCORE THRESHOLDS =====
-  // Minimum momentum score to trigger override (positive for LONG)
-  MIN_MOMENTUM_SCORE: 20,           // score > 20 for LONG override
-  // Strong momentum for enhanced confidence
-  STRONG_MOMENTUM_SCORE: 35,        // score >= 35 = strong signal
-  
-  // ===== MOMENTUM SLOPE REQUIREMENT =====
-  // Momentum must be INCREASING (slope > 0) to confirm direction
-  MIN_MOMENTUM_SLOPE: 0,            // macdSlope > 0 = momentum accelerating
-  
-  // ===== ORDER FLOW REQUIREMENTS =====
-  // Order flow must align with momentum direction
-  MIN_ORDER_FLOW_SCORE: 45,         // Order flow must be >= 45
-  STRONG_ORDER_FLOW_SCORE: 60,      // >= 60 = strong confirmation
-  
-  // ===== STOCHRSI OVERSOLD/OVERBOUGHT =====
-  // PHASE 3 UPDATE: StochRSI is regime-gated (bonus in trends, required in ranges)
-  STOCHRSI_OVERSOLD_THRESHOLD: 25,  // K <= 25 favors LONG override
-  STOCHRSI_OVERBOUGHT_THRESHOLD: 75, // K >= 75 favors SHORT override
-  // Regimes where StochRSI is a REQUIREMENT
-  STOCHRSI_REQUIRED_IN_REGIME: ['RANGE'] as DirectionRegime[],
-  // Regimes where StochRSI is just a BONUS
-  STOCHRSI_BONUS_IN_REGIME: ['STRONG_TREND', 'EARLY_TREND', 'EXHAUSTION'] as DirectionRegime[],
-  STOCHRSI_BONUS_CONFIDENCE: 5,     // +5 confidence if StochRSI confirms in bonus mode
-  
-  // ===== ADX BLOCKING CONDITION =====
-  // Block override if 30m has established strong trend (ADX > 30 AND rising)
-  // This prevents fighting a confirmed 30m trend
-  BLOCK_IF_30M_ADX_ABOVE: 30,       // If 30m ADX > 30...
-  BLOCK_IF_ADX_SLOPE_ABOVE: 0,      // ...AND slope > 0, BLOCK override
-  
-  // ===== POSITION SIZING =====
-  BASE_POSITION_MULTIPLIER: 0.60,   // 60% of normal for override entries
-  STRONG_POSITION_MULTIPLIER: 0.75, // 75% when all conditions strongly met
-  
-  // ===== CONFIDENCE CALCULATION =====
-  BASE_CONFIDENCE: 55,
-  MAX_CONFIDENCE: 70,
-} as const;
+export type EvidenceType = typeof DIRECTION_CONTEXT_PARAMS.EVIDENCE_TYPES[number];
+export type RiskClass = 'HIGH' | 'MEDIUM' | 'LOW';
 
-// ============= EXHAUSTION REVERSAL OVERRIDE PARAMS =============
-// HIGH PRIORITY (0.25): Detects extreme exhaustion (deep oversold/overbought) and overrides direction
-// This captures bounce setups that lagging HTF trend labels miss
-// Runs BEFORE Tier 2 Momentum Override to catch mean-reversion opportunities
-export const EXHAUSTION_REVERSAL_OVERRIDE_PARAMS = {
-  ENABLED: true,
-  
-  // ===== STOCHRSI THRESHOLDS =====
-  // StochRSI 4h K thresholds for exhaustion detection
-  LONG_K_THRESHOLD: 10,           // K <= 10 for LONG override (deep oversold)
-  SHORT_K_THRESHOLD: 90,          // K >= 90 for SHORT override (deep overbought)
-  
-  // ===== BOLLINGER %B THRESHOLDS =====
-  // Price position relative to Bollinger Bands
-  LONG_PERCENT_B_THRESHOLD: 20,   // %B <= 20 (at/below lower band)
-  SHORT_PERCENT_B_THRESHOLD: 80,  // %B >= 80 (at/near upper band)
-  
-  // ===== ADX HIGH + DECLINING (ALTERNATIVE EXHAUSTION PATH) =====
-  // ADX > 45 with declining slope indicates trend exhaustion even without extreme StochRSI
-  ADX_HIGH_EXHAUSTION_ENABLED: true,
-  ADX_HIGH_THRESHOLD: 45,         // ADX > 45 = high (potential exhaustion)
-  ADX_DECLINING_SLOPE: 0,         // Slope < 0 = declining (trend losing steam)
-  
-  // ===== MOMENTUM REQUIREMENTS =====
-  // For LONG: score > 20 OR MACD improving
-  // For SHORT: score < -20 OR MACD declining
-  REQUIRE_MOMENTUM_CONFIRMATION: true,
-  MIN_MOMENTUM_SCORE: 20,         // Minimum |momentum| for confirmation (tightened from 0)
-  MACD_IMPROVING_COUNTS: true,    // MACD histogram improving counts as confirmation
-  
-  // ===== ADX REQUIREMENTS =====
-  // ADX must NOT be accelerating (prevents catching falling knives)
-  MAX_ADX_SLOPE: 0.05,            // ADX slope must be <= 0.05
-  
-  // ===== ORDER FLOW REQUIREMENTS =====
-  // Order flow must align with direction
-  MIN_ORDER_FLOW_SCORE: 60,       // Minimum score for order flow bonus (tightened from 50)
-  
-  // ===== EXPANSION/BREAKOUT BLOCKING =====
-  // Block override during active expansion (volume spike or squeeze release)
-  BLOCK_ON_EXPANSION: true,
-  MAX_VOLUME_RATIO: 1.8,          // Block if volume ratio > 1.8
-  BLOCK_ON_SQUEEZE_RELEASE: true, // Block if squeeze just released
-  
-  // ===== SHORT-SPECIFIC RESTRICTIONS =====
-  // Extra protection against shorting into strong uptrends
-  SHORT_BLOCK_IF_4H_BULLISH_CONF: 70, // Block SHORT if 4h bullish >= 70%
-  
-  // ===== POSITION SIZING =====
-  BASE_POSITION_MULTIPLIER: 0.40,      // 40% base
-  MOMENTUM_CONFIRMED_MULTIPLIER: 0.50, // 50% with momentum confirmation
-  STRONG_SETUP_MULTIPLIER: 0.55,       // 55% with momentum + order flow
-  
-  // ===== CONFIDENCE CALCULATION =====
-  BASE_CONFIDENCE: 55,
-  MOMENTUM_CONFIRMS_BONUS: 5,
-  ORDER_FLOW_ALIGNED_BONUS: 5,
-  MACD_IMPROVING_BONUS: 5,
-  MAX_CONFIDENCE: 70,
-  
-  // ===== LOGGING =====
-  LOG_OVERRIDES: true,
-  LOG_SKIPS: true,
-} as const;
-
-// ============= MOMENTUM FALLBACK DIRECTION PARAMS =============
-// LOWER PRIORITY: When timeframe trends conflict or are neutral, use momentum + order flow
-// This is the fallback after all other direction methods fail
-export const MOMENTUM_FALLBACK_DIRECTION_PARAMS = {
-  // Enable this fallback mechanism
-  ENABLED: true,
-  
-  // ===== MOMENTUM SCORE THRESHOLDS =====
-  // Minimum absolute momentum score to derive direction
-  MIN_MOMENTUM_SCORE: 20,           // |score| >= 20 to derive direction
-  // Strong momentum threshold for higher confidence
-  STRONG_MOMENTUM_SCORE: 35,        // |score| >= 35 = strong signal
-  
-  // ===== ORDER FLOW REQUIREMENTS =====
-  // Minimum order flow score to support momentum direction
-  MIN_ORDER_FLOW_SCORE: 50,         // Order flow must be >= 50
-  // Strong order flow for confirmation
-  STRONG_ORDER_FLOW_SCORE: 65,      // >= 65 = strong confirmation
-  
-  // ===== STOCHRSI CONTEXT =====
-  // If StochRSI is extreme AND momentum confirms, boost confidence
-  STOCHRSI_EXTREME_OVERSOLD: 15,    // K <= 15 = oversold context for LONG
-  STOCHRSI_EXTREME_OVERBOUGHT: 85,  // K >= 85 = overbought context for SHORT (mean reversion)
-  
-  // ===== ADX REQUIREMENTS =====
-  // Minimum ADX for momentum fallback (still need some trend structure)
-  MIN_ADX: 18,
-  
-  // ===== POSITION SIZING =====
-  // Reduced position for momentum-derived entries
-  BASE_POSITION_MULTIPLIER: 0.55,   // 55% of normal
-  STRONG_POSITION_MULTIPLIER: 0.70, // 70% when both momentum + order flow are strong
-  
-  // ===== CONFIDENCE CALCULATION =====
-  // Base confidence for momentum fallback
-  BASE_CONFIDENCE: 50,
-  // Maximum confidence achievable
-  MAX_CONFIDENCE: 65,
-} as const;
+export interface DirectionContext {
+  proposedDirection: 'long' | 'short' | null;
+  evidenceType: EvidenceType;
+  tier: number;
+  confidence: number;
+  positionMultiplier: number;
+  isCounterTrend: boolean;
+  riskClass: RiskClass;
+  evidenceStrength: 'weak' | 'moderate' | 'strong';
+  conflictsWith: string[];
+  tierSource: string;
+}
 
