@@ -1962,6 +1962,49 @@ export interface DirectionContext {
   conflictsWith: string[];  // List of conflicting tiers/sources
 }
 
+// Helper function to create DirectionContext with consistent defaults
+const createDirectionContext = (
+  direction: TradeDirection | null,
+  params: {
+    evidenceType: DirectionContext['evidenceType'];
+    tier: number;
+    tierSource: string;
+    confidence: number;
+    positionMultiplier: number;
+    isCounterTrend?: boolean;
+    riskClass?: DirectionContext['riskClass'];
+    evidenceStrength?: DirectionContext['evidenceStrength'];
+    conflictsWith?: string[];
+  }
+): DirectionContext => {
+  // Derive riskClass from tier and position multiplier if not provided
+  const inferredRiskClass = params.riskClass || (
+    params.tier <= 1 ? 'LOW' :
+    params.tier <= 4 ? 'MEDIUM' :
+    params.tier <= 8 ? 'HIGH' : 'EXTREME'
+  );
+  
+  // Derive evidenceStrength from confidence if not provided
+  const inferredEvidenceStrength = params.evidenceStrength || (
+    params.confidence >= 75 ? 'VERY_STRONG' :
+    params.confidence >= 60 ? 'STRONG' :
+    params.confidence >= 45 ? 'MODERATE' : 'WEAK'
+  );
+
+  return {
+    proposedDirection: direction,
+    evidenceType: params.evidenceType,
+    tier: params.tier,
+    tierSource: params.tierSource,
+    confidence: params.confidence,
+    positionMultiplier: params.positionMultiplier,
+    isCounterTrend: params.isCounterTrend ?? false,
+    riskClass: inferredRiskClass,
+    evidenceStrength: inferredEvidenceStrength,
+    conflictsWith: params.conflictsWith ?? [],
+  };
+};
+
 export interface DirectionResult {
   direction: TradeDirection | null;
   confidence: number;
@@ -2142,6 +2185,7 @@ export const deriveTradeDirection = (
       reasons.push(`TF values: 4h=${val4h.toFixed(2)}*${w4h.toFixed(2)}, 1h=${val1h.toFixed(2)}*${w1h.toFixed(2)}, 30m=${val30m.toFixed(2)}*${w30m.toFixed(2)}`);
       reasons.push(`Confidence source: ${confSource}`);
       
+      const posMult = weightReallocated ? 0.70 : 0.75;
       return { 
         direction, 
         confidence: derivedConf, 
@@ -2149,8 +2193,19 @@ export const deriveTradeDirection = (
         reasons,
         isWeightedDerivation: true,
         hasPersistenceBonus: persistenceBonus > 0,
-        positionSizeMultiplier: weightReallocated ? 0.70 : 0.75,  // Slightly more conservative when weights reallocated
+        positionSizeMultiplier: posMult,
         is4hWeak,
+        regime,
+        directionContext: createDirectionContext(direction, {
+          evidenceType: 'WEIGHTED_SUM',
+          tier: 0,
+          tierSource: 'TIER_0_WEIGHTED_HTF_CONSENSUS',
+          confidence: derivedConf,
+          positionMultiplier: posMult,
+          isCounterTrend: false,
+          riskClass: 'LOW',
+          evidenceStrength: persistenceBonus > 0 ? 'VERY_STRONG' : 'STRONG',
+        }),
       };
     }
     
@@ -2223,6 +2278,17 @@ export const deriveTradeDirection = (
             positionSizeMultiplier: P.ORDER_FLOW_POSITION_MULTIPLIER,
             trend30mAligned: trend30mAligns,
             alignmentStatus,
+            regime,
+            directionContext: createDirectionContext(direction, {
+              evidenceType: 'ORDER_FLOW',
+              tier: 0.5,
+              tierSource: 'TIER_0.5_ORDER_FLOW_TIEBREAKER',
+              confidence: derivedConf,
+              positionMultiplier: P.ORDER_FLOW_POSITION_MULTIPLIER,
+              isCounterTrend: false,
+              riskClass: 'MEDIUM',
+              evidenceStrength: alignmentStatus === 'full' ? 'STRONG' : 'MODERATE',
+            }),
           };
         }
       }
@@ -2366,6 +2432,16 @@ export const deriveTradeDirection = (
           positionSizeMultiplier: positionMult,
           isExhaustionReversal: true,
           regime,
+          directionContext: createDirectionContext("long", {
+            evidenceType: 'EXHAUSTION',
+            tier: 0.25,
+            tierSource: 'TIER_0.25_EXHAUSTION_REVERSAL_LONG',
+            confidence: erConfidence,
+            positionMultiplier: positionMult,
+            isCounterTrend: true,
+            riskClass: 'HIGH',
+            evidenceStrength: erConfidence >= 70 ? 'STRONG' : 'MODERATE',
+          }),
         };
       } else {
         if (ER.LOG_SKIPS) {
@@ -2445,6 +2521,16 @@ export const deriveTradeDirection = (
             positionSizeMultiplier: positionMult,
             isExhaustionReversal: true,
             regime,
+            directionContext: createDirectionContext("short", {
+              evidenceType: 'EXHAUSTION',
+              tier: 0.25,
+              tierSource: 'TIER_0.25_EXHAUSTION_REVERSAL_SHORT',
+              confidence: erConfidence,
+              positionMultiplier: positionMult,
+              isCounterTrend: true,
+              riskClass: 'HIGH',
+              evidenceStrength: erConfidence >= 70 ? 'STRONG' : 'MODERATE',
+            }),
           };
         } else {
           if (ER.LOG_SKIPS) {
@@ -2579,6 +2665,16 @@ export const deriveTradeDirection = (
           isMomentumOverride: true,
           regime,
           tier2Score,
+          directionContext: createDirectionContext(direction, {
+            evidenceType: 'MOMENTUM',
+            tier: 0.5,
+            tierSource: 'TIER_0.5_WEIGHTED_MOMENTUM_OVERRIDE',
+            confidence,
+            positionMultiplier: positionMultiplier,
+            isCounterTrend: false,
+            riskClass: tier2Score >= 6 ? 'LOW' : 'MEDIUM',
+            evidenceStrength: tier2Score >= 6 ? 'STRONG' : 'MODERATE',
+          }),
         };
       } else {
         // Log why weighted override didn't trigger
@@ -2640,6 +2736,17 @@ export const deriveTradeDirection = (
               source: "price-action-pullback", 
               reasons,
               positionSizeMultiplier: PRICE_ACTION_PULLBACK_PARAMS.POSITION_SIZE_MULTIPLIER,
+              regime,
+              directionContext: createDirectionContext(pullbackDirection, {
+                evidenceType: 'PRICE_ACTION',
+                tier: 1,
+                tierSource: 'TIER_1_PRICE_ACTION_PULLBACK',
+                confidence: pullbackConf,
+                positionMultiplier: PRICE_ACTION_PULLBACK_PARAMS.POSITION_SIZE_MULTIPLIER,
+                isCounterTrend: true,
+                riskClass: 'MEDIUM',
+                evidenceStrength: 'MODERATE',
+              }),
             };
           } else {
             // Strong counter-trend move OR HTF confidence too low - skip price action override entirely
@@ -2664,6 +2771,17 @@ export const deriveTradeDirection = (
             source: "price-action-momentum-aligned", 
             reasons,
             positionSizeMultiplier: 0.75,
+            regime,
+            directionContext: createDirectionContext(direction, {
+              evidenceType: 'PRICE_ACTION',
+              tier: 1,
+              tierSource: 'TIER_1_PRICE_ACTION_HTF_ALIGNED',
+              confidence: finalConf,
+              positionMultiplier: 0.75,
+              isCounterTrend: false,
+              riskClass: 'LOW',
+              evidenceStrength: isStrongMove ? 'STRONG' : 'MODERATE',
+            }),
           };
         }
       } else {
@@ -2683,6 +2801,17 @@ export const deriveTradeDirection = (
           source: "price-action-momentum", 
           reasons,
           positionSizeMultiplier: 0.75,
+          regime,
+          directionContext: createDirectionContext(direction, {
+            evidenceType: 'PRICE_ACTION',
+            tier: 1,
+            tierSource: 'TIER_1_PRICE_ACTION_MOMENTUM',
+            confidence: finalConf,
+            positionMultiplier: 0.75,
+            isCounterTrend: false,
+            riskClass: 'MEDIUM',
+            evidenceStrength: isStrongMove ? 'STRONG' : 'MODERATE',
+          }),
         };
       }
     }
@@ -2692,7 +2821,23 @@ export const deriveTradeDirection = (
   if (trend4h !== "neutral" && conf4h >= 55) {
     const direction: TradeDirection = trend4h === "bullish" ? "long" : "short";
     reasons.push(`4h trend ${trend4h} (${conf4h.toFixed(0)}% confidence)`);
-    return { direction, confidence: conf4h, source: "4h", reasons };
+    return { 
+      direction, 
+      confidence: conf4h, 
+      source: "4h", 
+      reasons,
+      regime,
+      directionContext: createDirectionContext(direction, {
+        evidenceType: 'HTF_CONSENSUS',
+        tier: 2,
+        tierSource: 'TIER_2_4H_TREND',
+        confidence: conf4h,
+        positionMultiplier: 1.0,
+        isCounterTrend: false,
+        riskClass: 'LOW',
+        evidenceStrength: conf4h >= 70 ? 'VERY_STRONG' : 'STRONG',
+      }),
+    };
   }
   
   // Priority 2: Use 1h trend if strong and directional
@@ -2701,11 +2846,29 @@ export const deriveTradeDirection = (
     reasons.push(`1h trend ${trend1h} (${conf1h.toFixed(0)}% confidence)`);
     
     // Warn if 4h is opposing
-    if (trend4h !== "neutral" && trend4h !== trend1h) {
+    const is4hOpposing = trend4h !== "neutral" && trend4h !== trend1h;
+    if (is4hOpposing) {
       reasons.push(`Warning: 4h trend ${trend4h} opposes 1h`);
     }
     
-    return { direction, confidence: conf1h, source: "1h", reasons };
+    return { 
+      direction, 
+      confidence: conf1h, 
+      source: "1h", 
+      reasons,
+      regime,
+      directionContext: createDirectionContext(direction, {
+        evidenceType: 'HTF_CONSENSUS',
+        tier: 3,
+        tierSource: 'TIER_3_1H_TREND',
+        confidence: conf1h,
+        positionMultiplier: is4hOpposing ? 0.75 : 0.90,
+        isCounterTrend: is4hOpposing,
+        riskClass: is4hOpposing ? 'MEDIUM' : 'LOW',
+        evidenceStrength: conf1h >= 70 ? 'STRONG' : 'MODERATE',
+        conflictsWith: is4hOpposing ? ['4h'] : [],
+      }),
+    };
   }
   
   // ============= PRIORITY 2.3: CONSECUTIVE CANDLE MOMENTUM OVERRIDE =============
@@ -2742,6 +2905,17 @@ export const deriveTradeDirection = (
         source: "consecutive-candle-momentum", 
         reasons,
         positionSizeMultiplier: 0.65,
+        regime,
+        directionContext: createDirectionContext(direction, {
+          evidenceType: 'MOMENTUM',
+          tier: 4,
+          tierSource: 'TIER_4_CONSECUTIVE_CANDLE_MOMENTUM',
+          confidence: finalConf,
+          positionMultiplier: 0.65,
+          isCounterTrend: false,
+          riskClass: 'MEDIUM',
+          evidenceStrength: consecutiveBars1h >= 7 ? 'STRONG' : 'MODERATE',
+        }),
       } as DirectionResult;
     }
   }
@@ -2775,6 +2949,17 @@ export const deriveTradeDirection = (
         source: "1h-building-override", 
         reasons,
         positionSizeMultiplier: 0.75,
+        regime,
+        directionContext: createDirectionContext(direction, {
+          evidenceType: 'MOMENTUM',
+          tier: 5,
+          tierSource: 'TIER_5_BUILDING_TREND_DETECTION',
+          confidence: earlyConf,
+          positionMultiplier: 0.75,
+          isCounterTrend: false,
+          riskClass: 'MEDIUM',
+          evidenceStrength: 'MODERATE',
+        }),
       } as DirectionResult;
     }
   }
@@ -2785,7 +2970,23 @@ export const deriveTradeDirection = (
     const avgConf = (conf1h + conf30m) / 2;
     reasons.push(`1h+30m aligned ${trend1h} (avg ${avgConf.toFixed(0)}% confidence)`);
     reasons.push("4h neutral - lower timeframes determining direction");
-    return { direction, confidence: avgConf, source: "1h+30m", reasons };
+    return { 
+      direction, 
+      confidence: avgConf, 
+      source: "1h+30m", 
+      reasons,
+      regime,
+      directionContext: createDirectionContext(direction, {
+        evidenceType: 'HTF_CONSENSUS',
+        tier: 6,
+        tierSource: 'TIER_6_1H_30M_ALIGNED',
+        confidence: avgConf,
+        positionMultiplier: 0.80,
+        isCounterTrend: false,
+        riskClass: 'MEDIUM',
+        evidenceStrength: avgConf >= 60 ? 'STRONG' : 'MODERATE',
+      }),
+    };
   }
   
   // Priority 4: 2 out of 3 timeframes agree WITH 4h included
@@ -2802,16 +3003,50 @@ export const deriveTradeDirection = (
     
     if (has4h && bullishTfs.length >= 2) {
       const avgConf = bullishTfs.reduce((sum, t) => sum + t.conf, 0) / bullishTfs.length;
+      const finalConf = avgConf * 0.9;
       reasons.push(`2+ of 3 TFs bullish (${bullishTfs.map(t => t.tf).join('+')}) with 4h included`);
       reasons.push(`Avg confidence: ${avgConf.toFixed(0)}%`);
-      return { direction: "long", confidence: avgConf * 0.9, source: "2-of-3", reasons };
+      return { 
+        direction: "long", 
+        confidence: finalConf, 
+        source: "2-of-3", 
+        reasons,
+        regime,
+        directionContext: createDirectionContext("long", {
+          evidenceType: 'HTF_CONSENSUS',
+          tier: 7,
+          tierSource: 'TIER_7_2_OF_3_CONSENSUS_LONG',
+          confidence: finalConf,
+          positionMultiplier: 0.85,
+          isCounterTrend: false,
+          riskClass: 'LOW',
+          evidenceStrength: bullishTfs.length >= 3 ? 'VERY_STRONG' : 'STRONG',
+        }),
+      };
     }
     
     if (has4h && bearishTfs.length >= 2) {
       const avgConf = bearishTfs.reduce((sum, t) => sum + t.conf, 0) / bearishTfs.length;
+      const finalConf = avgConf * 0.9;
       reasons.push(`2+ of 3 TFs bearish (${bearishTfs.map(t => t.tf).join('+')}) with 4h included`);
       reasons.push(`Avg confidence: ${avgConf.toFixed(0)}%`);
-      return { direction: "short", confidence: avgConf * 0.9, source: "2-of-3", reasons };
+      return { 
+        direction: "short", 
+        confidence: finalConf, 
+        source: "2-of-3", 
+        reasons,
+        regime,
+        directionContext: createDirectionContext("short", {
+          evidenceType: 'HTF_CONSENSUS',
+          tier: 7,
+          tierSource: 'TIER_7_2_OF_3_CONSENSUS_SHORT',
+          confidence: finalConf,
+          positionMultiplier: 0.85,
+          isCounterTrend: false,
+          riskClass: 'LOW',
+          evidenceStrength: bearishTfs.length >= 3 ? 'VERY_STRONG' : 'STRONG',
+        }),
+      };
     }
     
     if (trend4h !== "neutral" && conf4h >= 50) {
@@ -2819,8 +3054,25 @@ export const deriveTradeDirection = (
       if (agreeing.length >= 2) {
         const direction: TradeDirection = trend4h === "bullish" ? "long" : "short";
         const avgConf = agreeing.reduce((sum, t) => sum + t.conf, 0) / agreeing.length;
+        const finalConf = avgConf * 0.85;
         reasons.push(`4h ${trend4h} with ${agreeing.length - 1} supporting TFs`);
-        return { direction, confidence: avgConf * 0.85, source: "4h+support", reasons };
+        return { 
+          direction, 
+          confidence: finalConf, 
+          source: "4h+support", 
+          reasons,
+          regime,
+          directionContext: createDirectionContext(direction, {
+            evidenceType: 'HTF_CONSENSUS',
+            tier: 7,
+            tierSource: 'TIER_7_4H_WITH_SUPPORT',
+            confidence: finalConf,
+            positionMultiplier: 0.80,
+            isCounterTrend: false,
+            riskClass: 'MEDIUM',
+            evidenceStrength: agreeing.length >= 3 ? 'STRONG' : 'MODERATE',
+          }),
+        };
       }
     }
   }
@@ -2855,6 +3107,17 @@ export const deriveTradeDirection = (
         source: "early-momentum-30m+1h", 
         reasons,
         positionSizeMultiplier: 0.50,
+        regime,
+        directionContext: createDirectionContext(direction, {
+          evidenceType: 'MOMENTUM',
+          tier: 8,
+          tierSource: 'TIER_8_EARLY_MOMENTUM_30M',
+          confidence: reducedConf,
+          positionMultiplier: 0.50,
+          isCounterTrend: false,
+          riskClass: 'HIGH',
+          evidenceStrength: conf30m >= 70 ? 'MODERATE' : 'WEAK',
+        }),
       };
     }
   }
@@ -2863,9 +3126,26 @@ export const deriveTradeDirection = (
   if (primaryTrend === "bullish" || primaryTrend === "bearish") {
     const direction: TradeDirection = primaryTrend === "bullish" ? "long" : "short";
     const primaryConf = trendData.confidence || 50;
+    const finalConf = primaryConf * 0.8;
     reasons.push(`Primary trend ${primaryTrend} (${primaryConf.toFixed(0)}% confidence)`);
     reasons.push("Warning: Using primary trend as fallback - lower conviction");
-    return { direction, confidence: primaryConf * 0.8, source: "primary", reasons };
+    return { 
+      direction, 
+      confidence: finalConf, 
+      source: "primary", 
+      reasons,
+      regime,
+      directionContext: createDirectionContext(direction, {
+        evidenceType: 'HTF_CONSENSUS',
+        tier: 9,
+        tierSource: 'TIER_9_PRIMARY_TREND_FALLBACK',
+        confidence: finalConf,
+        positionMultiplier: 0.50,
+        isCounterTrend: false,
+        riskClass: 'HIGH',
+        evidenceStrength: 'WEAK',
+      }),
+    };
   }
   
   // ============= PRIORITY 7 (TIER 10): MOMENTUM + ORDER FLOW FALLBACK =============
@@ -2980,6 +3260,17 @@ export const deriveTradeDirection = (
           reasons,
           positionSizeMultiplier: positionMultiplier,
           isMomentumFallback: true,
+          regime,
+          directionContext: createDirectionContext(momentumDirection, {
+            evidenceType: evidenceTypes.includes('ORDER_FLOW') ? 'ORDER_FLOW' : 'MOMENTUM',
+            tier: 10,
+            tierSource: 'TIER_10_MOMENTUM_ORDER_FLOW_FALLBACK',
+            confidence,
+            positionMultiplier: positionMultiplier,
+            isCounterTrend: false,
+            riskClass: 'HIGH',
+            evidenceStrength: evidenceCount >= 3 ? 'MODERATE' : 'WEAK',
+          }),
         };
       } else {
         // Log why we didn't use the fallback (for debugging)
@@ -3051,6 +3342,16 @@ export const deriveTradeDirection = (
           positionSizeMultiplier: positionMult,
           isExhaustionEscape: true,
           regime,
+          directionContext: createDirectionContext("long", {
+            evidenceType: 'EXHAUSTION',
+            tier: 11,
+            tierSource: 'TIER_11_EXHAUSTION_ESCAPE_LONG',
+            confidence,
+            positionMultiplier: positionMult,
+            isCounterTrend: true,
+            riskClass: 'EXTREME',
+            evidenceStrength: stochK4h <= 10 ? 'MODERATE' : 'WEAK',
+          }),
         };
       }
       
@@ -3088,6 +3389,16 @@ export const deriveTradeDirection = (
           positionSizeMultiplier: positionMult,
           isExhaustionEscape: true,
           regime,
+          directionContext: createDirectionContext("short", {
+            evidenceType: 'EXHAUSTION',
+            tier: 11,
+            tierSource: 'TIER_11_EXHAUSTION_ESCAPE_SHORT',
+            confidence,
+            positionMultiplier: positionMult,
+            isCounterTrend: true,
+            riskClass: 'EXTREME',
+            evidenceStrength: stochK4h >= 90 ? 'MODERATE' : 'WEAK',
+          }),
         };
       }
     }
@@ -3100,7 +3411,23 @@ export const deriveTradeDirection = (
   reasons.push("NO_CLEAR_DIRECTION: All timeframes neutral or conflicting after exhausting all 12 tiered reasoning paths");
   reasons.push(`4h: ${trend4h} (${conf4h}%), 1h: ${trend1h} (${conf1h}%), 30m: ${trend30m} (${conf30m}%)`);
   reasons.push(`Regime: ${regime} | tier10Fired: ${tier10Fired}`);
-  return { direction: null, confidence: 0, source: "none", reasons };
+  return { 
+    direction: null, 
+    confidence: 0, 
+    source: "none", 
+    reasons,
+    regime,
+    directionContext: createDirectionContext(null, {
+      evidenceType: 'NONE',
+      tier: 12,
+      tierSource: 'TIER_12_NO_CLEAR_DIRECTION',
+      confidence: 0,
+      positionMultiplier: 0,
+      isCounterTrend: false,
+      riskClass: 'EXTREME',
+      evidenceStrength: 'WEAK',
+    }),
+  };
 };
 
 // ============= CALCULATE QUALITY SCORE =============
