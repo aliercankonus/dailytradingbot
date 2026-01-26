@@ -117,6 +117,8 @@ import {
   NEUTRAL_LOW_ADX_QUALITY_GATE,
   // PHASE 16: Strategy-independent adaptive signal generation
   ADAPTIVE_SIGNAL_MODE,
+  // PHASE 17: Disable legacy strategies without exhaustion protection
+  DISABLED_LEGACY_STRATEGIES,
   // PHASE 10-13: Trend exhaustion protection gates
   SAME_DIRECTION_REENTRY_PROTECTION,
   TREND_EXHAUSTION_PROTECTION,
@@ -1854,10 +1856,39 @@ serve(async (req) => {
       logger.info(`${LOG_CATEGORIES.SUMMARY} Manually paused strategies: ${Array.from(pausedStrategyNames).join(', ')}`);
     }
 
-    // Use only built-in templates that are not paused
-    const allStrategies = BUILT_IN_TEMPLATES.filter(t => 
-      !pausedStrategyNames.has(t.name.toLowerCase())
+    // Use only built-in templates that are not paused AND not in disabled legacy list
+    // PHASE 17: Disable legacy strategies that lack exhaustion protection
+    const disabledLegacySet = new Set(
+      DISABLED_LEGACY_STRATEGIES.ENABLED 
+        ? DISABLED_LEGACY_STRATEGIES.DISABLED_NAMES.map(n => n.toLowerCase())
+        : []
     );
+    
+    const allStrategies = BUILT_IN_TEMPLATES.filter(t => {
+      const nameLower = t.name.toLowerCase();
+      
+      // Check if manually paused
+      if (pausedStrategyNames.has(nameLower)) {
+        return false;
+      }
+      
+      // Check if in disabled legacy list
+      if (disabledLegacySet.has(nameLower)) {
+        if (DISABLED_LEGACY_STRATEGIES.LOG_DISABLED) {
+          logger.debug(`[LEGACY_DISABLED] Strategy "${t.name}" disabled - lacks exhaustion protection`);
+        }
+        return false;
+      }
+      
+      return true;
+    });
+    
+    // Log what strategies remain active
+    if (DISABLED_LEGACY_STRATEGIES.ENABLED && DISABLED_LEGACY_STRATEGIES.LOG_DISABLED) {
+      const disabledCount = DISABLED_LEGACY_STRATEGIES.DISABLED_NAMES.length;
+      const activeNames = allStrategies.map(s => s.name).join(', ');
+      logger.info(`${LOG_CATEGORIES.SUMMARY} PHASE 17: ${disabledCount} legacy strategies disabled. Active: ${activeNames || 'Adaptive Trend Entry only'}`);
+    }
     
     // Helper: Check if strategy is disabled for a given regime
     const isStrategyDisabledForRegime = (strategyName: string, regime: RegimeType): boolean => {
@@ -10906,16 +10937,26 @@ serve(async (req) => {
           }
         }
         
-        // ============= PHASE 3: ADAPTIVE TREND ENTRY FALLBACK =============
-        // When quality passes base threshold (55+) but no strategy matched
-        // This captures BNB-type scenarios where everything looks good but no template fits
-        // Uses derivedDirection with conservative position sizing
-        const ADAPTIVE_FALLBACK_MIN_QUALITY = 55;  // Lowered from 70
-        const ADAPTIVE_FALLBACK_MIN_HTF_CONF = 55; // Lowered from 60
-        const ADAPTIVE_FALLBACK_MAX_REVERSAL = 45; // Slightly higher tolerance
-        const ADAPTIVE_FALLBACK_POSITION_MULT = 0.35; // Conservative position
+        // ============= PHASE 3: ADAPTIVE TREND ENTRY - PRIMARY STRATEGY =============
+        // PHASE 17: This is now the PRIMARY signal source after legacy strategies disabled
+        // Uses comprehensive direction derivation with full gate protection
+        // Position sizing based on quality score and market conditions
         
-        if (candidates.length === 0 && qualityScore >= ADAPTIVE_FALLBACK_MIN_QUALITY) {
+        // Adaptive thresholds - more permissive since all gates already passed
+        const ADAPTIVE_MIN_QUALITY = 55;
+        const ADAPTIVE_MIN_HTF_CONF = 55;
+        const ADAPTIVE_MAX_REVERSAL = 45;
+        
+        // PHASE 17: Graduated position sizing based on quality (no longer conservative fallback)
+        const getAdaptivePositionMultiplier = (quality: number, adxValue: number): number => {
+          if (quality >= 75 && adxValue >= 30) return 0.85;  // High quality + strong trend
+          if (quality >= 70) return 0.75;  // High quality
+          if (quality >= 65) return 0.65;  // Good quality
+          if (quality >= 60) return 0.55;  // Above average
+          return 0.45;  // Baseline for Q55-59
+        };
+        
+        if (candidates.length === 0 && qualityScore >= ADAPTIVE_MIN_QUALITY) {
           const conf4h = stochFilterConf4h || 0;
           const conf1h = stochFilterConf1h || 0;
           const htf4hDir = htfTrend4h;
@@ -10923,18 +10964,18 @@ serve(async (req) => {
           const reversalScore = unifiedReversal.score;
           
           // Use derivedDirection if available, otherwise derive from HTF
-          let adaptiveFallbackDirection: "long" | "short" | null = null;
+          let adaptiveDirection: "long" | "short" | null = null;
           
           if (derivedDirection === "long" || derivedDirection === "short") {
-            adaptiveFallbackDirection = derivedDirection;
-          } else if (htf4hDir === 'bullish' && conf4h >= ADAPTIVE_FALLBACK_MIN_HTF_CONF) {
-            adaptiveFallbackDirection = 'long';
-          } else if (htf4hDir === 'bearish' && conf4h >= ADAPTIVE_FALLBACK_MIN_HTF_CONF) {
-            adaptiveFallbackDirection = 'short';
+            adaptiveDirection = derivedDirection;
+          } else if (htf4hDir === 'bullish' && conf4h >= ADAPTIVE_MIN_HTF_CONF) {
+            adaptiveDirection = 'long';
+          } else if (htf4hDir === 'bearish' && conf4h >= ADAPTIVE_MIN_HTF_CONF) {
+            adaptiveDirection = 'short';
           } else if (htf1hDir === 'bullish' && conf1h >= 60) {
-            adaptiveFallbackDirection = 'long';
+            adaptiveDirection = 'long';
           } else if (htf1hDir === 'bearish' && conf1h >= 60) {
-            adaptiveFallbackDirection = 'short';
+            adaptiveDirection = 'short';
           }
           
           // Momentum check - require at least one momentum signal
@@ -10944,46 +10985,49 @@ serve(async (req) => {
             smartMomentum.score >= 10 ||
             (momentum?.macdExpanding === true && adx >= 18);
           
-          const canUseAdaptiveFallback = 
-            adaptiveFallbackDirection !== null &&
+          const canUseAdaptive = 
+            adaptiveDirection !== null &&
             hasMomentumEvidence &&
-            reversalScore < ADAPTIVE_FALLBACK_MAX_REVERSAL;
+            reversalScore < ADAPTIVE_MAX_REVERSAL;
           
-          if (canUseAdaptiveFallback && adaptiveFallbackDirection) {
-            // Create adaptive fallback candidate
-            const adaptiveFallbackStrategy = {
+          if (canUseAdaptive && adaptiveDirection) {
+            // PHASE 17: Calculate graduated position size based on quality
+            const adaptivePositionMult = getAdaptivePositionMultiplier(qualityScore, adx);
+            
+            // Create adaptive trend entry candidate
+            const adaptiveStrategy = {
               id: 'adaptive-trend-entry',
-              name: `Adaptive Trend Entry (Q=${qualityScore}, dir=${adaptiveFallbackDirection})`,
+              name: 'Adaptive Trend Entry',  // Clean name without parameters
               risk_settings: {
-                stopLossPercent: 2.0,  // Tighter stops for adaptive
+                stopLossPercent: 2.0,
                 takeProfitPercent: 3.5,
                 positionSizePercent: 1,
-                priority: 2
+                priority: 1  // Highest priority since it's now the primary strategy
               }
             };
             
-            const adaptiveFallbackIndicators = new Map<string, number>();
-            adaptiveFallbackIndicators.set("Price", currentPrice);
+            const adaptiveIndicators = new Map<string, number>();
+            adaptiveIndicators.set("Price", currentPrice);
             
             candidates.push({
-              strategy: adaptiveFallbackStrategy,
+              strategy: adaptiveStrategy,
               score: qualityScore,
-              indicatorValues: adaptiveFallbackIndicators,
-              signalType: adaptiveFallbackDirection,
-              positionSizeMultiplier: ADAPTIVE_FALLBACK_POSITION_MULT,
+              indicatorValues: adaptiveIndicators,
+              signalType: adaptiveDirection,
+              positionSizeMultiplier: adaptivePositionMult,
               convergenceEntry: false
             });
             
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 ADAPTIVE TREND ENTRY: No strategy matched but conditions good`);
-            logger.forSymbol(symbol).info(`   → Quality=${qualityScore}, Direction=${adaptiveFallbackDirection}, Momentum=${momentum?.state}/${smartMomentum.score}`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🎯 ADAPTIVE TREND ENTRY [PRIMARY]: Quality=${qualityScore}, Direction=${adaptiveDirection}`);
+            logger.forSymbol(symbol).info(`   → Momentum: ${momentum?.state}/${smartMomentum.score}, ADX=${adx.toFixed(1)}`);
             logger.forSymbol(symbol).info(`   → HTF: 4h=${htf4hDir} (${conf4h}%), 1h=${htf1hDir} (${conf1h}%), Reversal=${reversalScore}`);
-            logger.forSymbol(symbol).info(`   → Position size reduced to ${ADAPTIVE_FALLBACK_POSITION_MULT * 100}% for adaptive entry`);
+            logger.forSymbol(symbol).info(`   → Position size: ${(adaptivePositionMult * 100).toFixed(0)}% (quality-based sizing)`);
           } else {
-            // Log why adaptive fallback didn't apply for debugging
+            // Log why adaptive entry didn't apply for debugging
             const blockReasons: string[] = [];
-            if (!adaptiveFallbackDirection) blockReasons.push('no direction');
+            if (!adaptiveDirection) blockReasons.push('no direction');
             if (!hasMomentumEvidence) blockReasons.push(`no momentum (state=${momentum?.state}, smart=${smartMomentum.score})`);
-            if (reversalScore >= ADAPTIVE_FALLBACK_MAX_REVERSAL) blockReasons.push(`reversal=${reversalScore}>=${ADAPTIVE_FALLBACK_MAX_REVERSAL}`);
+            if (reversalScore >= ADAPTIVE_MAX_REVERSAL) blockReasons.push(`reversal=${reversalScore}>=${ADAPTIVE_MAX_REVERSAL}`);
             
             logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} ADAPTIVE TREND ENTRY blocked: ${blockReasons.join(', ')}`);
           }
