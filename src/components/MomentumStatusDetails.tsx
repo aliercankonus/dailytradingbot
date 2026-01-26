@@ -30,7 +30,7 @@ export const MomentumStatusDetails = () => {
           Momentum Status Details
         </CardTitle>
         <CardDescription>
-          <strong>Confirmed:</strong> Full conditions met. <strong>Building:</strong> Aligned 4h+1h trends (allows signals). <strong>Mixed/None:</strong> Insufficient.
+          <strong>Confirmed:</strong> Full conditions met (ADX≥22). <strong>Building:</strong> Aligned 4h+1h (ADX≥15). <strong>Exhausted:</strong> Late-trend warning. <strong>Mixed/None:</strong> Insufficient.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -75,7 +75,14 @@ export const MomentumStatusDetails = () => {
                       const macdDirectionOK = momentum?.macdDirectionAligned ?? false;
                       const macdExpandingOK = momentum?.macdExpanding ?? false;
                       const macdOK = macdDirectionOK && macdExpandingOK;
-                      const adxOK = (momentum?.adx ?? 0) >= 20;
+                      // ISSUE 4 FIX: Tiered ADX display matching engine thresholds
+                      // Confirmed requires ADX >= 22 (MODERATE), Building requires ADX >= 15 (WEAK)
+                      const adxValue = momentum?.adx ?? 0;
+                      const adxConfirmed = adxValue >= 22;  // For confirmed state
+                      const adxBuilding = adxValue >= 15;   // For building state
+                      const adxOK = momentumState === "confirmed" || momentumState === "exhausted" 
+                        ? adxConfirmed 
+                        : adxBuilding;
                       const volumeConfirms = momentum?.volumeConfirms ?? false;
 
                       return (
@@ -96,6 +103,11 @@ export const MomentumStatusDetails = () => {
                               <Badge className="bg-green-500 hover:bg-green-600">
                                 <CheckCircle className="h-3 w-3 mr-1" />
                                 Confirmed
+                              </Badge>
+                            ) : momentumState === "exhausted" ? (
+                              <Badge className="bg-orange-600 hover:bg-orange-700">
+                                <AlertTriangle className="h-3 w-3 mr-1" />
+                                Exhausted
                               </Badge>
                             ) : momentumState === "building" ? (
                               <Badge className="bg-blue-500 hover:bg-blue-600">
@@ -317,6 +329,15 @@ export const MomentumStatusDetails = () => {
                                 <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
                                 <span className="text-xs text-green-700 dark:text-green-300 font-medium">
                                   Genuine Momentum: MACD expanding + ADX rising
+                                </span>
+                              </div>
+                            )}
+
+                            {momentumState === "exhausted" && (
+                              <div className="flex items-center gap-2 p-2 rounded bg-orange-100 dark:bg-orange-950 border border-orange-300 dark:border-orange-700">
+                                <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                                <span className="text-xs text-orange-700 dark:text-orange-300 font-medium">
+                                  Trend Exhaustion: ADX≥45 falling + StochRSI extreme — mean-reversion candidate
                                 </span>
                               </div>
                             )}

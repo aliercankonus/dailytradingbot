@@ -1376,6 +1376,8 @@ serve(async (req) => {
 
     // IMPROVED: Check last 3 candles instead of just last candle (2/3 majority rule)
     // This allows occasional bounces in strong trends without failing momentum confirmation
+    // GAP 2 FIX: Relax alignment requirement during low-volatility compression
+    const isCompressed = relativeATR < 0.7;  // ATR below 70% of historical average
     const candleCount = Math.min(3, prices1h.length - 1);
     let alignedCandles = 0;
     for (let i = 0; i < candleCount; i++) {
@@ -1389,8 +1391,12 @@ serve(async (req) => {
         else if (effectiveTrendForMomentum === "neutral") alignedCandles++;
       }
     }
-    // Require 2/3 majority (2 of 3 candles aligned) OR neutral trend
-    const lastCloseAlignsWithTrend = effectiveTrendForMomentum === "neutral" || alignedCandles >= Math.ceil(candleCount * 0.67);
+    // GAP 2: In compression, relax to 1/3 alignment OR volume confirmation
+    // Standard: Require 2/3 majority (2 of 3 candles aligned) OR neutral trend
+    const alignmentThreshold = isCompressed ? 0.34 : 0.67;  // 1/3 vs 2/3 majority
+    const lastCloseAlignsWithTrend = effectiveTrendForMomentum === "neutral" || 
+      alignedCandles >= Math.ceil(candleCount * alignmentThreshold) ||
+      (isCompressed && volumeConfirmsDirection);  // Volume can substitute in compression
 
     // Divergence detection
     let hasDivergence = false;
@@ -1428,12 +1434,36 @@ serve(async (req) => {
     const alignedMomentumConfirms = strongAlignment && macdExpanding && !hasDivergence && adx >= ADX_THRESHOLDS.WEAK;
     
     const momentumConfirms = fullMomentumConfirms || alignedMomentumConfirms;
-    let momentumState: "none" | "mixed" | "confirmed" | "building" = "none";
-    if (fullMomentumConfirms) {
+    
+    // GAP 1: Exhaustion detection - explicit state for late-trend exhaustion
+    const isExhausted = (
+      adx >= ADX_THRESHOLDS.EXHAUSTION &&  // ADX >= 45
+      !adxRising &&  // ADX falling = trend decelerating
+      (hasDivergence || !macdExpanding) &&  // Momentum diverging or contracting
+      (stochRsi4h.k > 90 || stochRsi4h.k < 10)  // At StochRSI extremes
+    );
+    
+    // ISSUE 3 FIX: Volume as soft booster - can promote building → confirmed
+    // Requires both volumeConfirms AND adxRising to prevent false promotions
+    const volumeCanPromote = volumeConfirmsDirection && adxRising && adx >= ADX_THRESHOLDS.MODERATE;
+    
+    let momentumState: "none" | "mixed" | "confirmed" | "building" | "exhausted" = "none";
+    
+    // GAP 1: Exhaustion takes priority (catches late-trend warnings)
+    if (isExhausted) {
+      momentumState = "exhausted";
+      symLog.warn(`${LOG_CATEGORIES.MOMENTUM} EXHAUSTED - ADX=${adx.toFixed(1)} falling, StochRSI 4h K=${stochRsi4h.k.toFixed(1)}, divergence=${hasDivergence}`);
+    } else if (fullMomentumConfirms) {
       momentumState = "confirmed";
     } else if (alignedMomentumConfirms) {
-      momentumState = "building"; // New state: aligned but not full confirmation
-      symLog.info(`${LOG_CATEGORIES.MOMENTUM} BUILDING MOMENTUM - aligned trends (4h+1h ${trend4h.trend}) allow entry despite lastCloseAligns=${lastCloseAlignsWithTrend}`);
+      // ISSUE 3: Volume can promote building → confirmed
+      if (volumeCanPromote) {
+        momentumState = "confirmed";
+        symLog.info(`${LOG_CATEGORIES.MOMENTUM} VOLUME PROMOTED - building → confirmed (volume confirms + ADX rising)`);
+      } else {
+        momentumState = "building"; // New state: aligned but not full confirmation
+        symLog.info(`${LOG_CATEGORIES.MOMENTUM} BUILDING MOMENTUM - aligned trends (4h+1h ${trend4h.trend}) allow entry despite lastCloseAligns=${lastCloseAlignsWithTrend}`);
+      }
     } else if (macdExpanding && adxRising && (hasDivergence || !lastCloseAlignsWithTrend)) {
       momentumState = adx >= ADX_THRESHOLDS.WEAK ? "mixed" : "none";
     } else if (fakeBreakoutRisk && adx >= ADX_THRESHOLDS.MODERATE) {
