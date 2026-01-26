@@ -1904,6 +1904,45 @@ serve(async (req) => {
     const entryAtr = (entryAtrPercent / 100) * executedPrice;  // Convert percent to absolute ATR
     logger.info(`📊 Entry ATR stored: ${entryAtr.toFixed(4)} (${entryAtrPercent.toFixed(2)}% of entry price)`);
 
+    // ============================================================
+    // PHASE 2: BUILD ENTRY SNAPSHOT FOR FORENSICS
+    // Captures complete entry context for later analysis
+    // ============================================================
+    const entrySnapshot = {
+      signal_id: signalId,
+      signal_created_at: signal.created_at,
+      strategy_name: signal.strategy_name,
+      quality_score: signal.indicators?.qualityScore,
+      confidence_score: signal.confidence_score,
+      // Trend data at entry
+      adx: trendData?.volatility?.adx ?? null,
+      adx_slope: trendData?.volatility?.adxSlope ?? null,
+      stoch_rsi_4h_k: trendData?.stochasticRsi?.['4h']?.k ?? null,
+      stoch_rsi_4h_d: trendData?.stochasticRsi?.['4h']?.d ?? null,
+      regime: trendData?.marketRegime ?? null,
+      primary_trend: trendData?.primaryTrend ?? null,
+      // Move exhaustion context
+      move_from_24h_low_percent: trendData?.priceDistanceFromSwing?.distanceFromLowPercent ?? null,
+      move_from_24h_high_percent: trendData?.priceDistanceFromSwing?.distanceFromHighPercent ?? null,
+      price_24h_low: trendData?.priceDistanceFromSwing?.low24h ?? null,
+      price_24h_high: trendData?.priceDistanceFromSwing?.high24h ?? null,
+      // Entry context
+      entry_exception_type: entryExceptionType,
+      reversal_decision: reversalDecision,
+      reversal_score: reversalScore,
+      // Gate information
+      entry_gates_passed: signal.indicators?.gatesPassed ?? [],
+      position_size_multiplier: signal.indicators?.positionSizePercent ?? null,
+      // Timeframe alignment
+      tf_4h_trend: trendData?.timeframes?.['4h']?.trend ?? null,
+      tf_1h_trend: trendData?.timeframes?.['1h']?.trend ?? null,
+      tf_30m_trend: trendData?.timeframes?.['30m']?.trend ?? null,
+      // Timestamp
+      snapshot_created_at: new Date().toISOString(),
+    };
+    
+    logger.info(`📸 Entry snapshot created for ${signal.symbol}: quality=${entrySnapshot.quality_score}, ADX=${entrySnapshot.adx?.toFixed(1)}, move=${signal.signal_type === 'long' ? entrySnapshot.move_from_24h_low_percent?.toFixed(2) : entrySnapshot.move_from_24h_high_percent?.toFixed(2)}%`);
+
     // Create position record with all trade data including reversal tracking
     const { data: position, error: positionError } = await supabase
       .from('positions')
@@ -1939,6 +1978,8 @@ serve(async (req) => {
         entry_atr_percent: entryAtrPercent,
         execution_slippage_percent: postExecutionSlippage,
         volume_relaxation_applied: volumeRelaxationApplied,
+        // PHASE 2: Entry snapshot for forensics
+        entry_snapshot: entrySnapshot,
       })
       .select()
       .single();
@@ -1993,14 +2034,31 @@ serve(async (req) => {
       }
     }
 
-    // Delete the signal after trade execution (non-critical - don't fail if this fails)
-    const { error: deleteSignalError } = await supabase
+    // ============================================================
+    // PHASE 3: MARK SIGNAL AS EXECUTED (instead of deleting)
+    // Preserves signal for traceability and post-trade analysis
+    // ============================================================
+    const { error: updateSignalError } = await supabase
       .from('trading_signals')
-      .delete()
+      .update({
+        status: 'executed',
+        executed_at: new Date().toISOString(),
+        position_id: position.id,
+      })
       .eq('id', signalId);
     
-    if (deleteSignalError) {
-      logger.warn('Failed to delete signal ' + signalId + ' after execution: ' + deleteSignalError.message);
+    if (updateSignalError) {
+      logger.warn('Failed to mark signal ' + signalId + ' as executed: ' + updateSignalError.message);
+      // Fallback: try to delete if update fails (backward compatibility)
+      const { error: deleteSignalError } = await supabase
+        .from('trading_signals')
+        .delete()
+        .eq('id', signalId);
+      if (deleteSignalError) {
+        logger.warn('Failed to delete signal ' + signalId + ' after execution: ' + deleteSignalError.message);
+      }
+    } else {
+      logger.info(`✓ Signal ${signalId} marked as executed, linked to position ${position.id}`);
     }
 
     // Update risk parameters - sync with actual active positions count

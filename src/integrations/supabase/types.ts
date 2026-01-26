@@ -441,6 +441,7 @@ export type Database = {
           entry_atr_percent: number | null
           entry_exception_type: string | null
           entry_price: number
+          entry_snapshot: Json | null
           executed_at: string | null
           execution_slippage_percent: number | null
           exit_price: number | null
@@ -492,6 +493,7 @@ export type Database = {
           entry_atr_percent?: number | null
           entry_exception_type?: string | null
           entry_price: number
+          entry_snapshot?: Json | null
           executed_at?: string | null
           execution_slippage_percent?: number | null
           exit_price?: number | null
@@ -543,6 +545,7 @@ export type Database = {
           entry_atr_percent?: number | null
           entry_exception_type?: string | null
           entry_price?: number
+          entry_snapshot?: Json | null
           executed_at?: string | null
           execution_slippage_percent?: number | null
           exit_price?: number | null
@@ -620,6 +623,7 @@ export type Database = {
           entry_atr_percent: number | null
           entry_exception_type: string | null
           entry_price: number
+          entry_snapshot: Json | null
           executed_at: string | null
           execution_slippage_percent: number | null
           exit_price: number | null
@@ -668,6 +672,7 @@ export type Database = {
           entry_atr_percent?: number | null
           entry_exception_type?: string | null
           entry_price: number
+          entry_snapshot?: Json | null
           executed_at?: string | null
           execution_slippage_percent?: number | null
           exit_price?: number | null
@@ -716,6 +721,7 @@ export type Database = {
           entry_atr_percent?: number | null
           entry_exception_type?: string | null
           entry_price?: number
+          entry_snapshot?: Json | null
           executed_at?: string | null
           execution_slippage_percent?: number | null
           exit_price?: number | null
@@ -1389,12 +1395,15 @@ export type Database = {
           created_at: string | null
           created_by_rebalancer: boolean | null
           entry_price: number | null
+          executed_at: string | null
           expires_at: string | null
           id: string
           indicators: Json | null
+          position_id: string | null
           reason: string | null
           risk_reward_ratio: number | null
           signal_type: Database["public"]["Enums"]["signal_type"]
+          status: string | null
           stop_loss: number | null
           strategy_name: string | null
           symbol: string
@@ -1407,12 +1416,15 @@ export type Database = {
           created_at?: string | null
           created_by_rebalancer?: boolean | null
           entry_price?: number | null
+          executed_at?: string | null
           expires_at?: string | null
           id?: string
           indicators?: Json | null
+          position_id?: string | null
           reason?: string | null
           risk_reward_ratio?: number | null
           signal_type: Database["public"]["Enums"]["signal_type"]
+          status?: string | null
           stop_loss?: number | null
           strategy_name?: string | null
           symbol: string
@@ -1425,12 +1437,15 @@ export type Database = {
           created_at?: string | null
           created_by_rebalancer?: boolean | null
           entry_price?: number | null
+          executed_at?: string | null
           expires_at?: string | null
           id?: string
           indicators?: Json | null
+          position_id?: string | null
           reason?: string | null
           risk_reward_ratio?: number | null
           signal_type?: Database["public"]["Enums"]["signal_type"]
+          status?: string | null
           stop_loss?: number | null
           strategy_name?: string | null
           symbol?: string
@@ -1438,7 +1453,15 @@ export type Database = {
           trend?: Database["public"]["Enums"]["market_trend"]
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "trading_signals_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       trading_symbols_config: {
         Row: {
