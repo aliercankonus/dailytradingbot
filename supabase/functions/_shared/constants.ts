@@ -2719,6 +2719,13 @@ export const DIRECTION_DERIVATION_PARAMS = {
   WEIGHT_1H: 0.40,
   WEIGHT_30M: 0.20,
   
+  // ===== DYNAMIC WEIGHT REALLOCATION (PHASE 1 FIX) =====
+  // When 4H is neutral and contributes nothing, redistribute its weight to lower TFs
+  // This prevents wasting 40% of the weighted sum when 4H is indecisive
+  ENABLE_WEIGHT_REALLOCATION: true,
+  REALLOCATED_WEIGHT_1H: 0.65,      // 1H gets 65% when 4H neutral
+  REALLOCATED_WEIGHT_30M: 0.35,     // 30M gets 35% when 4H neutral
+  
   // Direction persistence bonus
   // If direction remains stable for N bars, reduce confidence threshold
   PERSISTENCE_BARS: 4,              // 4 bars of consistent direction
@@ -2728,6 +2735,45 @@ export const DIRECTION_DERIVATION_PARAMS = {
   // When weighted sum is marginal (0.35-0.54), use order flow if strong
   ORDER_FLOW_MIN_SCORE: 60,         // Minimum order flow score to use as tiebreaker
   ORDER_FLOW_POSITION_MULTIPLIER: 0.60,  // 60% position when using order flow direction
+} as const;
+
+// ============= EXHAUSTION ESCAPE PARAMS =============
+// Final escape valve before hard rejection when neutral 4H + extreme exhaustion
+// Captures mean reversion opportunities that would otherwise be blocked
+export const EXHAUSTION_ESCAPE_PARAMS = {
+  ENABLED: true,
+  
+  // ===== REGIME REQUIREMENT =====
+  // Only trigger in EXHAUSTION regime (prevents noise in other regimes)
+  REQUIRE_EXHAUSTION_REGIME: true,
+  
+  // ===== MOMENTUM REQUIREMENT =====
+  // Minimum momentum score for exhaustion escape
+  MIN_MOMENTUM_SCORE: 20,
+  
+  // ===== STOCHRSI THRESHOLDS =====
+  // Oversold for LONG escape
+  OVERSOLD_K_THRESHOLD: 20,
+  OVERSOLD_PERCENT_B_THRESHOLD: 25,
+  // Overbought for SHORT escape
+  OVERBOUGHT_K_THRESHOLD: 80,
+  OVERBOUGHT_PERCENT_B_THRESHOLD: 75,
+  
+  // ===== ORDER FLOW ALIGNMENT BONUS =====
+  // Order flow alignment boosts confidence
+  ORDER_FLOW_ALIGNED_BONUS: 5,
+  MIN_ORDER_FLOW_SCORE: 50,
+  
+  // ===== POSITION SIZING =====
+  BASE_POSITION_MULTIPLIER: 0.50,   // 50% base for mean reversion
+  STRONG_POSITION_MULTIPLIER: 0.60, // 60% with order flow alignment
+  
+  // ===== CONFIDENCE =====
+  BASE_CONFIDENCE: 50,
+  MAX_CONFIDENCE: 60,
+  
+  // ===== LOGGING =====
+  LOG_ESCAPES: true,
 } as const;
 
 // ============= MACD GATE PARAMS =============
