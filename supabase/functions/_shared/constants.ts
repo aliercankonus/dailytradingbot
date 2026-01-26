@@ -1522,8 +1522,17 @@ export const EMERGENCY_EXIT_PARAMS = {
   FLASH_CRASH_MAX_CANDLES: 2,
   // Volatility spike: ATR ratio above normal requiring caution
   VOLATILITY_SPIKE_THRESHOLD: 2.0,
-  // Extreme volatility: ATR ratio requiring immediate exit
+  // Extreme volatility: ATR ratio requiring immediate exit (base threshold)
   EXTREME_VOLATILITY_THRESHOLD: 3.0,
+  // ADAPTIVE VOLATILITY: Higher threshold for strong trends (ADX >= 30)
+  // Strong trends can sustain higher volatility without indicating reversal
+  EXTREME_VOLATILITY_THRESHOLD_STRONG_TREND: 4.5,
+  // Moderate trend threshold (ADX >= 25)
+  EXTREME_VOLATILITY_THRESHOLD_MODERATE_TREND: 3.75,
+  // ADX threshold for "strong trend" - volatility is expected in strong trends
+  ADAPTIVE_VOLATILITY_ADX_STRONG: 30,
+  // ADX threshold for "moderate trend"
+  ADAPTIVE_VOLATILITY_ADX_MODERATE: 25,
   // Volume spike: unusual volume indicating potential reversal
   VOLUME_SPIKE_THRESHOLD: 3.0,
   // Decay velocity: rapid profit loss per minute triggering exit
