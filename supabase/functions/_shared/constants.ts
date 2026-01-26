@@ -3611,6 +3611,45 @@ export const NEUTRAL_LOW_ADX_QUALITY_GATE = {
   LOG_APPLICATION: true,
 } as const;
 
+// ============= DISABLED LEGACY STRATEGIES =============
+// PHASE 17: Strategy Deprecation
+// These legacy built-in strategies use simple indicator checks without:
+// - Exhaustion protection (enter at tops/bottoms)
+// - HTF alignment requirements
+// - Momentum confirmation gates
+// - Quality score thresholds
+//
+// They are DEPRECATED in favor of Adaptive Trend Entry which includes
+// all necessary protections and is the PRIMARY signal source.
+export const DISABLED_LEGACY_STRATEGIES = {
+  ENABLED: true,  // Set to false to re-enable legacy strategies
+  
+  // List of strategy names (case-insensitive) to disable
+  // These are the simple indicator-based strategies that lack exhaustion protection
+  DISABLED_NAMES: [
+    'MACD Crossover',
+    'MACD Bearish Cross',
+    'EMA Golden Cross',
+    'EMA Death Cross',
+    'RSI Oversold/Overbought',
+    'RSI Overbought Short',
+    'Momentum Breakout',
+    'Bollinger Band Breakout',
+    'Bollinger Band Reversal',
+    'Grid Trading',
+    'Aggressive Momentum',
+  ] as readonly string[],
+  
+  // Strategies that remain ACTIVE (have proper protections built-in)
+  ALLOWED_STRATEGIES: [
+    'Adaptive Trend Entry',
+    'Mean Reversion',  // Has extreme oversold/overbought requirements
+  ] as readonly string[],
+  
+  // Logging
+  LOG_DISABLED: true,
+} as const;
+
 // ============= ADAPTIVE SIGNAL GENERATION MODE =============
 // PHASE 16: Strategy-Independent Signal Generation
 // When enabled, signals are generated purely from technical indicators
