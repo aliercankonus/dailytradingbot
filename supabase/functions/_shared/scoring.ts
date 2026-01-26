@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, MOMENTUM_FALLBACK_DIRECTION_PARAMS, DIRECTION_REGIME_PARAMS, TIER2_WEIGHTED_CONFIRMATION, DIRECTIONAL_BIAS_ESCAPE_PARAMS, EXHAUSTION_REVERSAL_OVERRIDE_PARAMS, type AdxPhase, type ExceptionType, type MasterMarketRegime, type DirectionRegime } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, MOMENTUM_FALLBACK_DIRECTION_PARAMS, DIRECTION_REGIME_PARAMS, TIER2_WEIGHTED_CONFIRMATION, DIRECTIONAL_BIAS_ESCAPE_PARAMS, EXHAUSTION_REVERSAL_OVERRIDE_PARAMS, EXHAUSTION_ESCAPE_PARAMS, type AdxPhase, type ExceptionType, type MasterMarketRegime, type DirectionRegime } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -1961,6 +1961,7 @@ export interface DirectionResult {
   tier2Score?: number;                 // Tier 2 weighted confirmation score
   isEscapeHatch?: boolean;             // Used directional bias escape hatch
   isExhaustionReversal?: boolean;      // Used exhaustion reversal override (Priority 0.25)
+  isExhaustionEscape?: boolean;        // Used exhaustion escape (Priority 8 - final escape valve)
 }
 
 // Import direction params
@@ -2056,8 +2057,25 @@ export const deriveTradeDirection = (
     const val1h = trendToValue(trend1h, conf1h);
     const val30m = trendToValue(trend30m, conf30m);
     
-    // Calculate weighted sum
-    const weightedSum = (val4h * P.WEIGHT_4H) + (val1h * P.WEIGHT_1H) + (val30m * P.WEIGHT_30M);
+    // ============= PHASE 1 FIX: DYNAMIC WEIGHT REALLOCATION =============
+    // When 4H is neutral and contributes nothing (val4h = 0), redistribute its weight
+    // This prevents wasting 40% of the weighted sum when 4H is indecisive
+    let w4h: number = P.WEIGHT_4H;
+    let w1h: number = P.WEIGHT_1H;
+    let w30m: number = P.WEIGHT_30M;
+    let weightReallocated = false;
+    
+    if (P.ENABLE_WEIGHT_REALLOCATION && trend4h === "neutral" && conf4h < P.NEUTRAL_THRESHOLD) {
+      // 4H won't contribute meaningful signal - redistribute to lower TFs
+      w4h = 0;
+      w1h = P.REALLOCATED_WEIGHT_1H;   // 0.65
+      w30m = P.REALLOCATED_WEIGHT_30M; // 0.35
+      weightReallocated = true;
+      reasons.push(`WEIGHT REALLOCATION: 4H neutral (${conf4h.toFixed(0)}% < ${P.NEUTRAL_THRESHOLD}%) → 1H=${(w1h * 100).toFixed(0)}%, 30M=${(w30m * 100).toFixed(0)}%`);
+    }
+    
+    // Calculate weighted sum with potentially reallocated weights
+    const weightedSum = (val4h * w4h) + (val1h * w1h) + (val30m * w30m);
     
     // Check for direction persistence bonus
     let persistenceBonus = 0;
@@ -2819,8 +2837,107 @@ export const deriveTradeDirection = (
     }
   }
   
+  // ============= PRIORITY 8: EXHAUSTION ESCAPE (PHASE 1 FIX) =============
+  // Final escape valve before hard rejection when neutral 4H + extreme exhaustion
+  // Captures mean reversion opportunities that would otherwise be blocked
+  if (EXHAUSTION_ESCAPE_PARAMS.ENABLED) {
+    const EE = EXHAUSTION_ESCAPE_PARAMS;
+    
+    // Only apply in EXHAUSTION regime (or skip regime check if disabled)
+    const regimeAllows = !EE.REQUIRE_EXHAUSTION_REGIME || regime === 'EXHAUSTION';
+    
+    if (regimeAllows) {
+      // Get StochRSI and Bollinger data
+      const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 
+                       trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
+      const percentB = trendData.bollingerBands?.['4h']?.percentB ?? 
+                       trendData.bollingerBands?.['1h']?.percentB ?? 50;
+      
+      // Get momentum score
+      const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+      const absMomentum = Math.abs(momentumScore);
+      
+      // Get order flow data
+      const ofScore = orderFlowData?.score ?? 0;
+      const ofSignal = orderFlowData?.signal?.toLowerCase() ?? "";
+      const ofBullish = ofSignal.includes("buy") || ofSignal === "bullish";
+      const ofBearish = ofSignal.includes("sell") || ofSignal === "bearish";
+      
+      // Check for oversold escape (LONG)
+      const isOversold = stochK4h <= EE.OVERSOLD_K_THRESHOLD && percentB <= EE.OVERSOLD_PERCENT_B_THRESHOLD;
+      const momentumAllowsLong = absMomentum >= EE.MIN_MOMENTUM_SCORE || momentumScore > 0;
+      
+      if (isOversold && momentumAllowsLong) {
+        let confidence: number = EE.BASE_CONFIDENCE;
+        let positionMult: number = EE.BASE_POSITION_MULTIPLIER;
+        
+        // Order flow alignment bonus
+        if (ofBullish && ofScore >= EE.MIN_ORDER_FLOW_SCORE) {
+          confidence += EE.ORDER_FLOW_ALIGNED_BONUS;
+          positionMult = EE.STRONG_POSITION_MULTIPLIER;
+        }
+        
+        confidence = Math.min(confidence, EE.MAX_CONFIDENCE);
+        
+        if (EE.LOG_ESCAPES) {
+          reasons.push(`EXHAUSTION ESCAPE → LONG: All derivation methods failed, but extreme oversold detected`);
+          reasons.push(`StochRSI K=${stochK4h.toFixed(1)} <= ${EE.OVERSOLD_K_THRESHOLD}, %B=${percentB.toFixed(1)} <= ${EE.OVERSOLD_PERCENT_B_THRESHOLD}`);
+          reasons.push(`Momentum=${momentumScore.toFixed(0)}, OrderFlow=${ofScore.toFixed(0)} (${ofSignal})`);
+          reasons.push(`Regime=${regime} | Conf=${confidence.toFixed(0)}% | Pos=${(positionMult * 100).toFixed(0)}%`);
+        }
+        
+        return {
+          direction: "long",
+          confidence,
+          source: "exhaustion-escape",
+          reasons,
+          positionSizeMultiplier: positionMult,
+          isExhaustionEscape: true,
+          regime,
+        };
+      }
+      
+      // Check for overbought escape (SHORT)
+      const isOverbought = stochK4h >= EE.OVERBOUGHT_K_THRESHOLD && percentB >= EE.OVERBOUGHT_PERCENT_B_THRESHOLD;
+      const momentumAllowsShort = absMomentum >= EE.MIN_MOMENTUM_SCORE || momentumScore < 0;
+      
+      // Additional protection: don't SHORT if 4h is strongly bullish
+      const is4hStrongBullish = trend4h === "bullish" && conf4h >= 70;
+      
+      if (isOverbought && momentumAllowsShort && !is4hStrongBullish) {
+        let confidence: number = EE.BASE_CONFIDENCE;
+        let positionMult: number = EE.BASE_POSITION_MULTIPLIER;
+        
+        // Order flow alignment bonus
+        if (ofBearish && ofScore >= EE.MIN_ORDER_FLOW_SCORE) {
+          confidence += EE.ORDER_FLOW_ALIGNED_BONUS;
+          positionMult = EE.STRONG_POSITION_MULTIPLIER;
+        }
+        
+        confidence = Math.min(confidence, EE.MAX_CONFIDENCE);
+        
+        if (EE.LOG_ESCAPES) {
+          reasons.push(`EXHAUSTION ESCAPE → SHORT: All derivation methods failed, but extreme overbought detected`);
+          reasons.push(`StochRSI K=${stochK4h.toFixed(1)} >= ${EE.OVERBOUGHT_K_THRESHOLD}, %B=${percentB.toFixed(1)} >= ${EE.OVERBOUGHT_PERCENT_B_THRESHOLD}`);
+          reasons.push(`Momentum=${momentumScore.toFixed(0)}, OrderFlow=${ofScore.toFixed(0)} (${ofSignal})`);
+          reasons.push(`Regime=${regime} | Conf=${confidence.toFixed(0)}% | Pos=${(positionMult * 100).toFixed(0)}%`);
+        }
+        
+        return {
+          direction: "short",
+          confidence,
+          source: "exhaustion-escape",
+          reasons,
+          positionSizeMultiplier: positionMult,
+          isExhaustionEscape: true,
+          regime,
+        };
+      }
+    }
+  }
+  
   // No clear direction - but log what we tried
-  reasons.push("All timeframes neutral or conflicting after weighted derivation");
+  reasons.push("All timeframes neutral or conflicting after weighted derivation + exhaustion escape check");
   reasons.push(`4h: ${trend4h} (${conf4h}%), 1h: ${trend1h} (${conf1h}%), 30m: ${trend30m} (${conf30m}%)`);
   return { direction: null, confidence: 0, source: "none", reasons };
 };
