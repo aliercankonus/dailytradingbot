@@ -1,140 +1,291 @@
-# Neutral 4H - Low Confidence Improvements - IMPLEMENTED
 
-## Summary
-Implemented Phase 1 fixes for Neutral 4H - Low Confidence handling to reduce false rejections and capture mean reversion opportunities.
+# Momentum Status Details - Critical Fixes Implementation Plan
 
-## Phase 1 Implementation Completed
+## Overview
 
-### Fix 1: Dynamic Weight Reallocation (ISSUE 2)
-**Problem**: When 4H is neutral, `trendToValue()` returns 0, meaning 40% of the weighted sum contributes nothing. This forced over-reliance on order flow.
-
-**Solution**: When 4H is neutral with confidence below threshold, redistribute its weight to lower timeframes:
-- 4H: 0% (from 40%)
-- 1H: 65% (from 40%)
-- 30M: 35% (from 20%)
-
-**Files Modified**:
-1. **`supabase/functions/_shared/constants.ts`**
-   - Added to `DIRECTION_DERIVATION_PARAMS`:
-     - `ENABLE_WEIGHT_REALLOCATION: true`
-     - `REALLOCATED_WEIGHT_1H: 0.65`
-     - `REALLOCATED_WEIGHT_30M: 0.35`
-
-2. **`supabase/functions/_shared/scoring.ts`**
-   - Updated `deriveTradeDirection()` weighted sum calculation (lines 2062-2080)
-   - Dynamically adjusts weights when 4H is neutral
-
-### Fix 2: Exhaustion Escape (ISSUE 3)
-**Problem**: Mean reversion opportunities blocked when neutral structure + deep oversold/overbought.
-
-**Solution**: Added Priority 8 exhaustion escape as final valve before hard rejection.
-
-**Files Modified**:
-1. **`supabase/functions/_shared/constants.ts`**
-   - Added new `EXHAUSTION_ESCAPE_PARAMS` configuration block
-
-2. **`supabase/functions/_shared/scoring.ts`**
-   - Added `isExhaustionEscape` to `DirectionResult` interface
-   - Added import for `EXHAUSTION_ESCAPE_PARAMS`
-   - Inserted Priority 8 exhaustion escape logic before final rejection (lines 2838-2936)
-
-### Detection Criteria
-
-**LONG Escape**:
-- Regime = EXHAUSTION (or any if disabled)
-- StochRSI 4h K ≤ 20
-- Bollinger %B ≤ 25
-- Momentum positive OR |score| >= 20
-
-**SHORT Escape**:
-- Same regime requirement
-- StochRSI 4h K ≥ 80
-- Bollinger %B ≥ 75
-- Momentum negative OR |score| >= 20
-- 4H NOT strongly bullish (≥70%)
-
-### Position Sizing
-- Base: 50% of normal position
-- With order flow alignment: 60%
-
-### Confidence
-- Base: 50%
-- +5% for order flow alignment
-- Maximum: 60%
+This plan addresses four critical issues and two medium-risk design gaps identified in the external review of the Momentum Status Details subsystem. The fixes will improve logical consistency, prevent nondeterministic behavior, and enhance decision-making quality.
 
 ---
 
-## Phase 2 Implementation Completed
+## Issue Summary
 
-### GAP 1: Contextualized Order Flow Tiebreaker
-**Problem**: Order flow used as binary check without 30m trend alignment, causing noise injection.
-
-**Solution**: Order flow tiebreaker now requires 30m trend alignment:
-- For LONG: 30m must NOT be bearish
-- For SHORT: 30m must NOT be bullish
-- Full alignment (30m same direction) adds +5% confidence bonus
-
-**Files Modified**:
-1. **`supabase/functions/_shared/constants.ts`**
-   - Added to `DIRECTION_DERIVATION_PARAMS`:
-     - `REQUIRE_30M_ALIGNMENT: true`
-     - `ORDER_FLOW_30M_BONUS: 0.05`
-
-2. **`supabase/functions/_shared/scoring.ts`**
-   - Updated order flow tiebreaker logic (lines 2116-2170)
-   - Added 30m trend conflict detection and logging
-   - Added `trend30mAligned` to DirectionResult interface
-
-### GAP 2: Fixed Confidence Blending
-**Problem**: Weak 4H confidence (<50%) was being blended with lower timeframes, suppressing valid 1H/30m signals.
-
-**Solution**: When 4H is weak, use `max(conf1h, conf30m)` instead of blending:
-- If `conf4h < WEAK_4H_CONFIDENCE_THRESHOLD` (50%), skip blending
-- Use 95% of max(1h, 30m) confidence instead
-- Position size slightly reduced (0.70x) when weights are reallocated
-
-**Files Modified**:
-1. **`supabase/functions/_shared/constants.ts`**
-   - Added to `DIRECTION_DERIVATION_PARAMS`:
-     - `WEAK_4H_CONFIDENCE_THRESHOLD: 50`
-     - `USE_MAX_LOWER_TF_CONFIDENCE: true`
-
-2. **`supabase/functions/_shared/scoring.ts`**
-   - Updated weighted direction derivation (lines 2096-2132)
-   - Added confidence source logging
-   - Added `is4hWeak` to DirectionResult interface
+| Priority | Issue | Status | Impact |
+|----------|-------|--------|--------|
+| Critical | ISSUE 1: `momentumConfirms` undefined bug | **FALSE POSITIVE** | Verified defined at line 1430 |
+| Critical | ISSUE 2: MACD Direction Alignment not enforced | **VALID** | Can allow misaligned entries |
+| Critical | ISSUE 3: Volume is observational only | **PARTIALLY VALID** | Has soft impact but not in momentum state |
+| Medium | ISSUE 4: ADX threshold drift | **VALID** | UI vs engine mismatch |
+| Medium | GAP 1: No explicit "exhausted" state | **VALID** | Limits interpretability |
+| Medium | GAP 2: Last-close alignment overweighted | **VALID** | Noise-sensitive in compression |
 
 ---
 
-## Remaining Phase 3: Documentation (Not Yet Implemented)
+## Phase 1: Critical Fixes
 
-### DOC 1: Strong 4H - High Confidence Case
-Should document:
-- 4H ≥75% dominates all lower TFs
-- Lower TF conflicts only affect entry timing, not direction
-- Position sizing = full or near-full
+### 1.1 ISSUE 1 Resolution: Verify `momentumConfirms` Definition
 
-### DOC 2: Timeframe Conflict Resolution Rules
-Should document canonical rules for:
-- 4H bullish / 1H bearish
-- 1H bullish / 30m bearish
-- Neutral vs directional precedence
+**Finding**: After thorough code review, this is a **FALSE POSITIVE**.
+
+The variable `momentumConfirms` is explicitly defined at line 1430 of `calculate-trend/index.ts`:
+
+```
+const momentumConfirms = fullMomentumConfirms || alignedMomentumConfirms;
+```
+
+And returned in the response object at line 1498:
+
+```
+confirms: momentumConfirms,
+```
+
+**Action**: No code change required. Documentation update to confirm this is correctly implemented.
 
 ---
 
-## Analysis Review (Post-Implementation)
+### 1.2 ISSUE 2: Enforce MACD Direction Alignment in Momentum Confirmation
 
-### ISSUE 1: Logical Contradiction ✅ NOT AN ISSUE
-The code does NOT have a conf4h >= 70 check inside the Neutral 4H handler. The weighted derivation handles all cases uniformly with regime-adjusted thresholds.
+**Problem**: `macdDirectionAligned` is calculated but not required for `fullMomentumConfirms`.
 
-### ISSUE 2: Weight Wasted ✅ FIXED
-Dynamic weight reallocation now redistributes 4H weight when it contributes nothing.
+**Current Logic (line 1425)**:
+```
+fullMomentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= MODERATE && adxRising
+```
 
-### ISSUE 3: No Exhaustion Check ✅ FIXED
-Exhaustion escape added as Priority 8 final valve before rejection.
+**Issue**: `macdExpanding` only checks that |histogram| > 0.05 AND histogram sign matches trend. However, if `macdDirectionAligned` is false, we could still have expanding MACD in the wrong direction.
 
-### GAP 1: Binary Order Flow ⚠️ PENDING
-Order flow still used as binary check. Phase 2 will add 30m trend alignment requirement.
+**Fix**: Add `macdDirectionAligned` as an explicit requirement.
 
-### GAP 2: Arbitrary Confidence Blend ⚠️ PENDING
-Still blending weak 4H confidence. Phase 2 will use max(1h, 30m) instead.
+**File**: `supabase/functions/calculate-trend/index.ts`
+
+**Changes**:
+```
+Line ~1411: Modify macdExpanding to require direction alignment explicitly
+Line ~1425: Add macdDirectionAligned to fullMomentumConfirms
+Line ~1428: Add macdDirectionAligned to alignedMomentumConfirms
+```
+
+**Updated Logic**:
+```text
+fullMomentumConfirms = macdExpanding && macdDirectionAligned && lastCloseAlignsWithTrend && !hasDivergence && adx >= MODERATE && adxRising
+
+alignedMomentumConfirms = strongAlignment && macdExpanding && macdDirectionAligned && !hasDivergence && adx >= WEAK
+```
+
+---
+
+### 1.3 ISSUE 3: Make Volume a Decision Factor (Soft Booster)
+
+**Problem**: `volumeConfirms` is calculated and returned but has no impact on momentum state.
+
+**Current State**: Volume affects quality scoring and position sizing downstream, but NOT momentum state classification.
+
+**Recommended Fix**: Option A - Make Volume a Soft Booster for state promotion.
+
+**File**: `supabase/functions/calculate-trend/index.ts`
+
+**Changes**:
+```
+Lines ~1431-1442: Update momentum state logic to allow volume-confirmed upgrades
+```
+
+**New Logic**:
+```text
+IF fullMomentumConfirms:
+    momentumState = "confirmed"
+ELSE IF alignedMomentumConfirms:
+    IF volumeConfirmsDirection THEN
+        momentumState = "confirmed"  // Volume promotes building → confirmed
+    ELSE
+        momentumState = "building"
+ELSE IF fakeBreakoutRisk:
+    momentumState = "mixed"
+```
+
+This makes volume actionable without creating hard gates.
+
+---
+
+### 1.4 ISSUE 4: Unify ADX Thresholds Between UI and Engine
+
+**Problem**: UI displays ADX >= 20 as "passing" while engine logic uses:
+- ADX >= 22 for `fullMomentumConfirms` (MODERATE threshold)
+- ADX >= 15 for `alignedMomentumConfirms` (WEAK threshold)
+
+**Files to Update**:
+1. `src/components/MomentumStatusDetails.tsx` - Update display threshold
+2. Document the actual thresholds in UI tooltip
+
+**Changes**:
+
+**File**: `src/components/MomentumStatusDetails.tsx`
+```
+Line 78: Change adxOK threshold to match engine logic
+```
+
+**Updated Logic**:
+```text
+// For "Confirmed" state: ADX >= 22 (MODERATE)
+// For "Building" state: ADX >= 15 (WEAK)
+// Display should show tiered status, not binary pass/fail
+
+const adxConfirmed = (momentum?.adx ?? 0) >= 22;  // For confirmed
+const adxBuilding = (momentum?.adx ?? 0) >= 15;   // For building
+const adxOK = momentumState === "confirmed" ? adxConfirmed : adxBuilding;
+```
+
+**Also add tooltip** explaining:
+- ADX >= 22: Strong trend (required for Confirmed)
+- ADX 15-21: Early trend (allows Building state)
+- ADX < 15: Range (blocks entry)
+
+---
+
+## Phase 2: Medium Priority Fixes
+
+### 2.1 GAP 1: Add Explicit "exhausted" Momentum State
+
+**Problem**: Exhaustion conditions fall into "mixed" state, reducing interpretability.
+
+**Proposal**: Add `"exhausted"` as a fifth momentum state.
+
+**Files to Update**:
+1. `supabase/functions/calculate-trend/index.ts` - Add exhaustion detection
+2. `src/hooks/useMomentumStatus.ts` - Update interface
+3. `src/components/MomentumStatusDetails.tsx` - Add UI rendering
+
+**Exhaustion Detection Logic**:
+```text
+isExhausted = (
+    ADX >= 45 AND adxRising == false AND
+    (macdSlope < 0 OR hasDivergence) AND
+    (stochRsi4h.k > 90 OR stochRsi4h.k < 10)
+)
+```
+
+**State Machine Update**:
+```text
+let momentumState: "none" | "mixed" | "confirmed" | "building" | "exhausted" = "none";
+
+IF isExhausted:
+    momentumState = "exhausted"
+ELSE IF fullMomentumConfirms:
+    momentumState = "confirmed"
+... (existing logic)
+```
+
+**UI Changes**: Add orange/red "Exhausted" badge with warning icon.
+
+---
+
+### 2.2 GAP 2: Reduce Last-Close Alignment Weight in Low-Volatility Markets
+
+**Problem**: 2/3 candle alignment is noise-sensitive during compression.
+
+**Proposal**: Relax the requirement when ATR percentile is low OR require volume confirmation instead.
+
+**File**: `supabase/functions/calculate-trend/index.ts`
+
+**Changes** (around line 1377-1393):
+```text
+// Relaxed alignment during compression
+const isCompressed = relativeATR < 0.7;  // ATR below 70% of historical average
+
+IF isCompressed:
+    // In compression, require only 1/3 alignment OR volume confirmation
+    lastCloseAlignsWithTrend = effectiveTrend == "neutral" 
+        OR alignedCandles >= 1 
+        OR volumeConfirmsDirection
+ELSE:
+    // Standard 2/3 majority rule
+    lastCloseAlignsWithTrend = effectiveTrend == "neutral" 
+        OR alignedCandles >= ceil(candleCount * 0.67)
+```
+
+This prevents false negatives during range compression while maintaining signal quality in trending conditions.
+
+---
+
+## Phase 3: Documentation Updates
+
+### 3.1 Update Constants Documentation
+
+**File**: `supabase/functions/_shared/constants.ts`
+
+Add a new section documenting momentum thresholds:
+```text
+// ============= MOMENTUM STATE THRESHOLDS =============
+// Used by calculate-trend for momentum state classification
+export const MOMENTUM_STATE_THRESHOLDS = {
+    // ADX required for "confirmed" state
+    CONFIRMED_MIN_ADX: 22,  // Matches ADX_THRESHOLDS.MODERATE
+    
+    // ADX required for "building" state  
+    BUILDING_MIN_ADX: 15,   // Matches ADX_THRESHOLDS.WEAK
+    
+    // ADX required for "exhausted" state
+    EXHAUSTED_MIN_ADX: 45,  // Matches ADX_THRESHOLDS.EXHAUSTION
+    
+    // MACD histogram minimum for "expanding"
+    MACD_EXPANDING_MIN: 0.05,
+    
+    // Candle alignment majority (67% = 2 of 3)
+    CANDLE_ALIGNMENT_RATIO: 0.67,
+    
+    // Relaxed alignment in compression (33% = 1 of 3)
+    CANDLE_ALIGNMENT_RATIO_COMPRESSED: 0.33,
+} as const;
+```
+
+### 3.2 Update Memory Documentation
+
+Create/update memory entries for the momentum subsystem architecture to reflect the fixes.
+
+---
+
+## Implementation Sequence
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│                    PHASE 1 (Critical)                   │
+├─────────────────────────────────────────────────────────┤
+│ 1. Add macdDirectionAligned to momentum confirms        │
+│ 2. Add volume as soft booster for state promotion       │
+│ 3. Fix ADX threshold display in UI                      │
+└─────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────┐
+│                  PHASE 2 (Medium Priority)              │
+├─────────────────────────────────────────────────────────┤
+│ 4. Add "exhausted" momentum state                       │
+│ 5. Relax candle alignment in compression                │
+└─────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────┐
+│                    PHASE 3 (Documentation)              │
+├─────────────────────────────────────────────────────────┤
+│ 6. Update constants.ts with MOMENTUM_STATE_THRESHOLDS   │
+│ 7. Add tooltips to MomentumStatusDetails UI             │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Files Modified Summary
+
+| File | Changes |
+|------|---------|
+| `supabase/functions/calculate-trend/index.ts` | MACD alignment enforcement, volume booster, exhausted state, compression logic |
+| `supabase/functions/_shared/constants.ts` | New MOMENTUM_STATE_THRESHOLDS section |
+| `src/hooks/useMomentumStatus.ts` | Add "exhausted" to state type |
+| `src/components/MomentumStatusDetails.tsx` | Fix ADX display, add exhausted badge, add tooltips |
+
+---
+
+## Expected Outcomes
+
+1. **Reduced false continuation entries** - MACD direction now enforced
+2. **Volume becomes actionable** - Can promote building → confirmed
+3. **UI matches engine** - ADX thresholds aligned
+4. **Better interpretability** - Explicit "exhausted" state
+5. **Fewer false negatives in compression** - Relaxed candle alignment
+6. **Cleaner integration with mean-reversion** - Exhausted state maps directly
