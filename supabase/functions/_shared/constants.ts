@@ -3373,6 +3373,13 @@ export const STRATEGY_ADX_RESTRICTIONS: Record<string, {
 // ============= PHASE 11: MOMENTUM-DIRECTION ALIGNMENT (TIGHTLY BOUNDED) =============
 // Expert insight: "Neutral" must be tightly bounded (-10 to +10), not loosely defined
 // Ensures momentum score aligns with intended trade direction
+// 
+// ARCHITECTURE FIX (Phase 1): Aligned ALLOW_NEUTRAL_ABOVE_ADX with ADX_THRESHOLDS.EXCEPTIONAL (35)
+// This eliminates the "fuzzy boundary" between 35-40 where different gates had inconsistent behavior
+// 
+// MOMENTUM STATE INFLUENCE: Thresholds are adjusted by ±5 based on momentum state:
+// - "confirmed" state: tighter thresholds (harder to bypass)
+// - "mixed" state: looser thresholds (easier to allow)
 export const MOMENTUM_DIRECTION_ALIGNMENT = {
   ENABLED: true,
   
@@ -3381,15 +3388,32 @@ export const MOMENTUM_DIRECTION_ALIGNMENT = {
   NEUTRAL_MAX: 10,
   
   // ===== STRONG OPPOSITE THRESHOLDS =====
-  // Block LONG if momentum < this
+  // Block LONG if momentum < this (adjusted by momentum state)
   STRONG_OPPOSITE_LONG: -20,
-  // Block SHORT if momentum > this
+  // Block SHORT if momentum > this (adjusted by momentum state)
   STRONG_OPPOSITE_SHORT: 20,
   
+  // ===== MOMENTUM STATE INFLUENCE =====
+  // "confirmed" momentum = tighten opposite thresholds (make override harder)
+  // "mixed" momentum = loosen opposite thresholds (allow more flexibility)
+  CONFIRMED_STATE_ADJUSTMENT: -5,  // -20 becomes -25 for LONG, +20 becomes +15 for SHORT
+  MIXED_STATE_ADJUSTMENT: 5,       // -20 becomes -15 for LONG, +20 becomes +25 for SHORT
+  
   // ===== ADX-AWARE BEHAVIOR =====
-  // In strong ADX (>= 40), allow neutral momentum but never opposite
-  // In weaker ADX (< 40), require aligned momentum
-  ALLOW_NEUTRAL_ABOVE_ADX: 40,
+  // UNIFIED: Now aligned with ADX_THRESHOLDS.EXCEPTIONAL (35) - no more 35 vs 40 inconsistency
+  // In strong ADX (>= 35), allow neutral momentum but never opposite
+  // In weaker ADX (< 35), require aligned momentum
+  ALLOW_NEUTRAL_ABOVE_ADX: 35,
+  
+  // ===== PHASE 2 SUBORDINATION =====
+  // When Phase 1 determines momentum is in neutral zone, Phase 2 (MACD-based check) is SKIPPED
+  // This prevents double-penalizing neutral momentum scenarios
+  SKIP_PHASE2_FOR_NEUTRAL: true,
+  
+  // ===== NORMALIZED WEAK MOMENTUM CHECK =====
+  // Phase 2 uses ATR-normalized MACD threshold instead of absolute 0.0001
+  // macdHistogramAbs < (ATR * WEAK_MACD_ATR_MULTIPLIER) = weak momentum
+  WEAK_MACD_ATR_MULTIPLIER: 0.0001,
 } as const;
 
 // ============= PHASE 12: STRUCTURED LOGGING FOR BLOCK DECISIONS =============

@@ -3859,6 +3859,27 @@ serve(async (req) => {
                                     momentumScore <= MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MAX;
           const isStrongADX = adx >= MOMENTUM_DIRECTION_ALIGNMENT.ALLOW_NEUTRAL_ABOVE_ADX;
           
+          // ===== MOMENTUM STATE INFLUENCE (PHASE 2 FIX) =====
+          // Adjust opposite thresholds based on momentum state:
+          // - "confirmed" state: tighter thresholds (make bypass harder)
+          // - "mixed" state: looser thresholds (allow more flexibility)
+          const momentumState = trendData?.momentum?.state || "none";
+          let strongOppositeLongThreshold = MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_LONG;
+          let strongOppositeShortThreshold = MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_SHORT;
+          
+          if (momentumState === "confirmed") {
+            // Tighter thresholds when momentum is confirmed
+            strongOppositeLongThreshold += MOMENTUM_DIRECTION_ALIGNMENT.CONFIRMED_STATE_ADJUSTMENT;  // -20 + (-5) = -25
+            strongOppositeShortThreshold -= MOMENTUM_DIRECTION_ALIGNMENT.CONFIRMED_STATE_ADJUSTMENT; // +20 - (-5) = +15
+          } else if (momentumState === "mixed") {
+            // Looser thresholds when momentum is mixed (allow more flexibility)
+            strongOppositeLongThreshold += MOMENTUM_DIRECTION_ALIGNMENT.MIXED_STATE_ADJUSTMENT;      // -20 + 5 = -15
+            strongOppositeShortThreshold -= MOMENTUM_DIRECTION_ALIGNMENT.MIXED_STATE_ADJUSTMENT;     // +20 - 5 = +25
+          }
+          
+          // Store neutral state for Phase 2 subordination
+          (trendData as any).phase1NeutralMomentum = isNeutralMomentum;
+          
           // Check for momentum-direction mismatch
           let momentumDirectionMismatch = false;
           let mismatchReason = '';
@@ -3866,14 +3887,15 @@ serve(async (req) => {
           let earlyTrendPositionMultiplier = 1.0;
           
           // EARLY TREND DETECTION: If regime direction agrees, allow lagging momentum
+          // NOTE: regimeTrendDirection is from masterRegime.trendDirection (1h structural bias)
           const trendDirectionAgrees = (
             (derivedDirection === 'long' && regimeTrendDirection === 'bullish') ||
             (derivedDirection === 'short' && regimeTrendDirection === 'bearish')
           );
           
           if (derivedDirection === 'long') {
-            // For LONG: block if momentum strongly negative
-            if (momentumScore < MOMENTUM_DIRECTION_ALIGNMENT.STRONG_OPPOSITE_LONG) {
+            // For LONG: block if momentum strongly negative (using state-adjusted threshold)
+            if (momentumScore < strongOppositeLongThreshold) {
               // Check for early trend detection exception with graduated position scaling
               // When 1h trend is bullish, allow LONG entries even with lagging momentum
               if (trendDirectionAgrees) {
@@ -8223,50 +8245,75 @@ serve(async (req) => {
         // ============= PHASE 2 IMPROVEMENT: MOMENTUM DIRECTIONAL SYMMETRY =============
         // Verify that momentum direction agrees with the derived trade direction
         // This prevents entries where overall momentum is moving opposite to trade side
-        const momentumDirection = momentum?.direction || null;  // "bullish", "bearish", or null
+        // 
+        // ARCHITECTURE FIX: Phase 2 is now SUBORDINATE to Phase 1
+        // If Phase 1 determined momentum is in neutral zone, SKIP Phase 2 entirely
+        // This prevents double-penalizing neutral momentum scenarios
+        const phase1NeutralMomentum = (trendData as any).phase1NeutralMomentum ?? false;
+        
+        // Hoist macdHistogramValue to outer scope (used later in MACD alignment gate)
         const macdHistogramValue = momentum?.macdHistogram ?? 0;
         
-        // Determine momentum direction from MACD histogram if not explicitly set
-        const effectiveMomentumDirection = momentumDirection || 
-          (macdHistogramValue > 0 ? "bullish" : macdHistogramValue < 0 ? "bearish" : null);
-        
-        // Check if momentum direction opposes trade direction
-        const momentumOpposesDirection = (
-          (derivedDirection === "long" && effectiveMomentumDirection === "bearish") ||
-          (derivedDirection === "short" && effectiveMomentumDirection === "bullish")
-        );
-        
-        if (momentumOpposesDirection && effectiveMomentumDirection !== null) {
-          // Allow if momentum is weak (close to zero) or ADX is very strong
-          const macdHistogramAbs = Math.abs(macdHistogramValue);
-          const isWeakMomentum = macdHistogramAbs < 0.0001;  // Very small MACD histogram
-          const allowMomentumOverride = isWeakMomentum || adx >= ADX_THRESHOLDS.EXCEPTIONAL;
+        if (MOMENTUM_DIRECTION_ALIGNMENT.SKIP_PHASE2_FOR_NEUTRAL && phase1NeutralMomentum) {
+          // Phase 1 already classified momentum as neutral - skip Phase 2 MACD check
+          logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.MOMENTUM} Phase 2 MACD check skipped: momentum in neutral zone (Phase 1 passed)`);
+        } else {
+          // Phase 2: Check MACD-based momentum direction
+          const momentumDirection = momentum?.direction || null;  // "bullish", "bearish", or null
           
-          if (!allowMomentumOverride) {
-            rejectedByHardGates++;
-            await logRejectionWithAI(
-              supabase, userId, symbol,
-              `HARD GATE: Momentum direction (${effectiveMomentumDirection}) opposes ${derivedDirection} trade`,
-              { 
-                gate: "MOMENTUM_DIRECTION_OPPOSING",
-                derivedDirection,
-                momentumDirection: effectiveMomentumDirection,
-                macdHistogram: macdHistogramValue.toFixed(6),
-                momentumState: momentum?.state,
-                adx: adx.toFixed(1),
-                adxRequiredForOverride: ADX_THRESHOLDS.EXCEPTIONAL,
-                trend,
-                confidence
-              },
-              trendData,
-              riskParams.ai_analysis_enabled !== false
-            );
-            continue;
-          }
-          if (isWeakMomentum) {
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} Momentum direction opposes but weak (MACD histogram ${macdHistogramValue.toFixed(6)}) - allowing`);
-          } else {
-            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.MOMENTUM} Momentum direction opposes but ADX strong (${adx.toFixed(1)}) - allowing with caution`);
+          // Determine momentum direction from MACD histogram if not explicitly set
+          const effectiveMomentumDirection = momentumDirection || 
+            (macdHistogramValue > 0 ? "bullish" : macdHistogramValue < 0 ? "bearish" : null);
+          
+          // Check if momentum direction opposes trade direction
+          const momentumOpposesDirection = (
+            (derivedDirection === "long" && effectiveMomentumDirection === "bearish") ||
+            (derivedDirection === "short" && effectiveMomentumDirection === "bullish")
+          );
+          
+          if (momentumOpposesDirection && effectiveMomentumDirection !== null) {
+            // ===== NORMALIZED WEAK MOMENTUM CHECK (PHASE 2 FIX) =====
+            // Use ATR-normalized threshold instead of absolute 0.0001
+            // This ensures consistent behavior across high-priced (BTC) and low-priced assets
+            const macdHistogramAbs = Math.abs(macdHistogramValue);
+            const atrForNormalization = trendData?.atr || trendData?.atrValue || 0;
+            const weakMomentumThreshold = atrForNormalization > 0 
+              ? atrForNormalization * MOMENTUM_DIRECTION_ALIGNMENT.WEAK_MACD_ATR_MULTIPLIER 
+              : 0.0001;  // Fallback to absolute if no ATR available
+            const isWeakMomentum = macdHistogramAbs < weakMomentumThreshold;
+            const allowMomentumOverride = isWeakMomentum || adx >= ADX_THRESHOLDS.EXCEPTIONAL;
+            
+            if (!allowMomentumOverride) {
+              rejectedByHardGates++;
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `HARD GATE: Momentum direction (${effectiveMomentumDirection}) opposes ${derivedDirection} trade`,
+                { 
+                  gate: "MOMENTUM_DIRECTION_OPPOSING",
+                  phase: 2,
+                  phase1NeutralMomentum,
+                  derivedDirection,
+                  momentumDirection: effectiveMomentumDirection,
+                  macdHistogram: macdHistogramValue.toFixed(6),
+                  macdHistogramAbs: macdHistogramAbs.toFixed(6),
+                  weakMomentumThreshold: weakMomentumThreshold.toFixed(6),
+                  atrForNormalization: atrForNormalization.toFixed(4),
+                  momentumState: momentum?.state,
+                  adx: adx.toFixed(1),
+                  adxRequiredForOverride: ADX_THRESHOLDS.EXCEPTIONAL,
+                  trend,
+                  confidence
+                },
+                trendData,
+                riskParams.ai_analysis_enabled !== false
+              );
+              continue;
+            }
+            if (isWeakMomentum) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} Phase 2: Momentum opposes but weak (|MACD| ${macdHistogramAbs.toFixed(6)} < threshold ${weakMomentumThreshold.toFixed(6)}) - allowing`);
+            } else {
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.MOMENTUM} Phase 2: Momentum opposes but ADX exceptional (${adx.toFixed(1)} >= ${ADX_THRESHOLDS.EXCEPTIONAL}) - allowing with caution`);
+            }
           }
         }
         
