@@ -18,7 +18,7 @@ const corsHeaders = {
 };
 
 interface NotificationRequest {
-  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated';
+  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated' | 'bot_health_critical';
   userId?: string;
   tradeId?: string;
   symbol?: string;
@@ -52,6 +52,12 @@ interface NotificationRequest {
   oldStopLoss?: number;
   newStopLoss?: number;
   pnlPercent?: number;
+  // Bot health critical fields
+  lastActivityMinutesAgo?: number | null;
+  signalsGenerated?: number;
+  positionsOpened?: number;
+  positionsClosed?: number;
+  rejectionsLogged?: number;
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -181,6 +187,42 @@ const handler = async (req: Request): Promise<Response> => {
         `;
         smsMessage = `🛡️ TRAILING STOP: ${payload.symbol} ${payload.side} stop moved to $${payload.newStopLoss!.toFixed(2)} (was $${payload.oldStopLoss!.toFixed(2)}). P&L: +${payload.pnlPercent!.toFixed(2)}%`;
         break;
+
+      case 'bot_health_critical':
+        subject = `🚨 CRITICAL: Trading Bot Inactive for ${payload.lastActivityMinutesAgo || 60}+ Minutes`;
+        const activityDetails = payload.lastActivityMinutesAgo 
+          ? `Last activity was ${payload.lastActivityMinutesAgo} minutes ago.`
+          : 'No activity detected in the last 60+ minutes.';
+        
+        message = `
+          <h2>🚨 Bot Health Critical Alert</h2>
+          <p style="color: #ef4444; font-size: 1.1em;"><strong>${activityDetails}</strong></p>
+          <p>Your trading bot may have stopped processing or encountered an issue.</p>
+          
+          <div style="background: #fef2f2; padding: 15px; border-radius: 8px; border-left: 4px solid #ef4444; margin: 20px 0;">
+            <h3 style="margin-top: 0; color: #991b1b;">Activity in Last 60 Minutes</h3>
+            <p><strong>Signals Generated:</strong> ${payload.signalsGenerated ?? 0}</p>
+            <p><strong>Positions Opened:</strong> ${payload.positionsOpened ?? 0}</p>
+            <p><strong>Positions Closed:</strong> ${payload.positionsClosed ?? 0}</p>
+            <p><strong>Rejections Logged:</strong> ${payload.rejectionsLogged ?? 0}</p>
+          </div>
+          
+          <div style="background: #fffbeb; padding: 15px; border-radius: 8px; margin-top: 15px;">
+            <h3 style="margin-top: 0; color: #92400e;">Recommended Actions</h3>
+            <ol>
+              <li>Check your dashboard for any error indicators</li>
+              <li>Verify your API keys are still valid</li>
+              <li>Check if trading is still enabled in your settings</li>
+              <li>Review the market conditions - the bot may be waiting for better opportunities</li>
+            </ol>
+          </div>
+          
+          <p style="margin-top: 20px; color: #6b7280; font-size: 0.9em;">
+            This alert is sent when no bot activity (signals, trades, or rejections) is detected for more than 60 minutes while trading is enabled.
+          </p>
+        `;
+        smsMessage = `🚨 CRITICAL: Trading bot inactive for ${payload.lastActivityMinutesAgo || 60}+ min. Check your dashboard immediately!`;
+        break;
     }
 
     // Default email if not provided
@@ -216,7 +258,7 @@ const handler = async (req: Request): Promise<Response> => {
 
     console.log('Email sent:', emailResponse);
 
-    // Send SMS notification for critical events (stop loss, take profit, and strategy rotation)
+    // Send SMS notification for critical events (stop loss, take profit, strategy rotation, bot health critical)
     let smsResponse;
     if (
       riskParams?.sms_notifications_enabled &&
@@ -224,7 +266,7 @@ const handler = async (req: Request): Promise<Response> => {
       twilioAccountSid &&
       twilioAuthToken &&
       twilioPhoneNumber &&
-      (payload.type === 'stop_loss_hit' || payload.type === 'take_profit_hit' || payload.type === 'strategy_rotation')
+      (payload.type === 'stop_loss_hit' || payload.type === 'take_profit_hit' || payload.type === 'strategy_rotation' || payload.type === 'bot_health_critical')
     ) {
       try {
         const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`;
