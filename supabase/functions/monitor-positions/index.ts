@@ -681,25 +681,59 @@ serve(async (req) => {
       // If P&L > 0 AND trendConfidence >= 55: reduce 50% instead of full exit
       // If P&L < 0 OR confidence < 55: full exit
       // FIX: Add 5-minute grace period before extreme_volatility can trigger
-      else if (atrRatio >= EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD) {
-        const positionAgeForVolatility = position.opened_at 
-          ? (Date.now() - new Date(position.opened_at).getTime()) / (1000 * 60) 
-          : 999;
-        const VOLATILITY_GRACE_PERIOD_MINUTES = 5;
+      // ADAPTIVE VOLATILITY: Use higher threshold for strong trends (ADX >= 30)
+      else {
+        // ============================================================
+        // ADAPTIVE VOLATILITY THRESHOLD based on ADX trend strength
+        // Strong trends can sustain higher volatility without indicating reversal
+        // This prevents premature exits like the ETHUSDT $2,859 entry that was closed too early
+        // ============================================================
+        const positionAdxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 20;
+        const adxSlope = trendData?.volatility?.adxSlope || trendData?.momentum?.adxSlope || 0;
+        const isAdxRising = adxSlope > 0;
         
-        // FIX: Skip extreme volatility exit for positions younger than 5 minutes
-        // This prevents killing trades before they have time to develop
-        if (positionAgeForVolatility < VOLATILITY_GRACE_PERIOD_MINUTES) {
-          positionLogger.info(`VOLATILITY GRACE: Position age ${positionAgeForVolatility.toFixed(1)}min < ${VOLATILITY_GRACE_PERIOD_MINUTES}min grace period - skipping extreme volatility check (ATR ${atrRatio.toFixed(2)}x)`);
-        } else if (earlyPnlPercent > 0 && positionConfidence >= 55) {
-          // SCENARIO 5: Conditional - profitable position in confident trend should reduce, not exit
-          positionLogger.info(`CONDITIONAL VOLATILITY: ATR ${atrRatio.toFixed(2)}x extreme but P&L ${earlyPnlPercent.toFixed(2)}% > 0 and confidence ${positionConfidence}% >= 55 - would reduce 50% (logging only, full reduction requires position management)`);
-          // Note: Full position reduction requires execute-trade integration, for now we log and skip exit
-          // A future improvement could implement partial close here
-        } else {
-          emergencyClose = true;
-          emergencyReason = "extreme_volatility";
-          positionLogger.risk(`EXTREME VOLATILITY EXIT: ATR ${atrRatio.toFixed(2)}x with P&L ${earlyPnlPercent.toFixed(2)}% or confidence ${positionConfidence}% < 55 - full exit triggered (age: ${positionAgeForVolatility.toFixed(0)}min)`);
+        // Determine adaptive threshold based on ADX and trend confirmation
+        let adaptiveVolatilityThreshold: number = EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD; // Default: 3.0x
+        let volatilityMode = "STANDARD";
+        
+        if (positionAdxValue >= EMERGENCY_EXIT_PARAMS.ADAPTIVE_VOLATILITY_ADX_STRONG && isAdxRising) {
+          // STRONG TREND + RISING ADX: Maximum tolerance (4.5x)
+          // The trend is accelerating - volatility is expected and healthy
+          adaptiveVolatilityThreshold = EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD_STRONG_TREND as number;
+          volatilityMode = "STRONG_TREND_RISING";
+        } else if (positionAdxValue >= EMERGENCY_EXIT_PARAMS.ADAPTIVE_VOLATILITY_ADX_STRONG) {
+          // STRONG TREND (ADX >= 30): Higher tolerance (4.0x) - between strong and moderate
+          adaptiveVolatilityThreshold = ((EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD_STRONG_TREND as number) + (EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD_MODERATE_TREND as number)) / 2;
+          volatilityMode = "STRONG_TREND";
+        } else if (positionAdxValue >= EMERGENCY_EXIT_PARAMS.ADAPTIVE_VOLATILITY_ADX_MODERATE) {
+          // MODERATE TREND (ADX >= 25): Slightly higher tolerance (3.75x)
+          adaptiveVolatilityThreshold = EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD_MODERATE_TREND as number;
+          volatilityMode = "MODERATE_TREND";
+        }
+        // else: Standard threshold (3.0x) for weak trends (ADX < 25)
+        
+        // Now check if ATR exceeds the adaptive threshold
+        if (atrRatio >= adaptiveVolatilityThreshold) {
+          const positionAgeForVolatility = position.opened_at 
+            ? (Date.now() - new Date(position.opened_at).getTime()) / (1000 * 60) 
+            : 999;
+          const VOLATILITY_GRACE_PERIOD_MINUTES = 5;
+          
+          // FIX: Skip extreme volatility exit for positions younger than 5 minutes
+          // This prevents killing trades before they have time to develop
+          if (positionAgeForVolatility < VOLATILITY_GRACE_PERIOD_MINUTES) {
+            positionLogger.info(`VOLATILITY GRACE: Position age ${positionAgeForVolatility.toFixed(1)}min < ${VOLATILITY_GRACE_PERIOD_MINUTES}min grace period - skipping extreme volatility check (ATR ${atrRatio.toFixed(2)}x, threshold ${adaptiveVolatilityThreshold.toFixed(2)}x, mode=${volatilityMode})`);
+          } else if (earlyPnlPercent > 0 && positionConfidence >= 55) {
+            // SCENARIO 5: Conditional - profitable position in confident trend should reduce, not exit
+            positionLogger.info(`CONDITIONAL VOLATILITY: ATR ${atrRatio.toFixed(2)}x >= ${adaptiveVolatilityThreshold.toFixed(2)}x but P&L ${earlyPnlPercent.toFixed(2)}% > 0 and confidence ${positionConfidence}% >= 55 - skipping exit (mode=${volatilityMode}, ADX=${positionAdxValue.toFixed(1)})`);
+          } else {
+            emergencyClose = true;
+            emergencyReason = "extreme_volatility";
+            positionLogger.risk(`EXTREME VOLATILITY EXIT: ATR ${atrRatio.toFixed(2)}x >= adaptive threshold ${adaptiveVolatilityThreshold.toFixed(2)}x (mode=${volatilityMode}, ADX=${positionAdxValue.toFixed(1)}) with P&L ${earlyPnlPercent.toFixed(2)}% or confidence ${positionConfidence}% < 55 - full exit triggered (age: ${positionAgeForVolatility.toFixed(0)}min)`);
+          }
+        } else if (atrRatio >= EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD && volatilityMode !== "STANDARD") {
+          // Log when adaptive threshold saved the position from premature exit
+          positionLogger.info(`ADAPTIVE VOLATILITY PROTECTION: ATR ${atrRatio.toFixed(2)}x would trigger exit at base 3.0x but allowed due to ${volatilityMode} mode (adaptive threshold: ${adaptiveVolatilityThreshold.toFixed(2)}x, ADX=${positionAdxValue.toFixed(1)}, slope=${adxSlope.toFixed(3)})`);
         }
       }
 
