@@ -1,298 +1,291 @@
 
-# Momentum Score Hard Gate - Implementation Plan
 
-## Overview
+# Implementation Plan: NO_MOMENTUM_CONFIRMATION Gate Improvements
 
-This plan addresses the valid findings from the system-level review of the "HARD GATE: Momentum Score Too Low" logic. After thorough code analysis, I've identified which issues are valid, which are false positives, and the specific changes needed.
+## Problem Summary
 
----
+The expert review identified three critical issues in the NO_MOMENTUM_CONFIRMATION hard gate:
 
-## Issue Analysis Summary
-
-| Issue | Status | Action Required |
-|-------|--------|-----------------|
-| ISSUE 1: ADX Slope not used in canBlock | **PARTIALLY VALID** | Add accelerating trend bypass |
-| ISSUE 2: Threshold range 6-7 underspecified | **FALSE POSITIVE** | No action - code uses explicit constants |
-| ISSUE 3: Momentum State not used | **VALID** | Add state-based threshold adjustment |
-| ISSUE 4: Pullback over-relaxation | **PARTIALLY ADDRESSED** | Strengthen ADX guard |
-| GAP 1: Position multiplier vague | **VALID** | Add graduated calculation |
-| GAP 2: Order undocumented | **VALID** | Add documentation to constants |
+1. **Path Priority Leakage** - Path 2 (`momentumState != "none"`) passes too easily without ADX floor
+2. **Direction Derivation Inside the Gate** - Paths 5A/5B derive and return direction, conflicting with centralized `deriveTradeDirection()`
+3. **Exception Stacking Risk** - Multiple weak justifications can stack to allow entries
 
 ---
 
-## Phase 1: Critical Fixes
+## Phase 1: Path Priority Fix (ADX Floor for State Presence)
 
-### 1.1 Add ADX Slope to canBlock Logic (ISSUE 1)
-
-**Problem**: In accelerating trends (ADX >= 30 AND adxSlope > 0), low momentum score can still block entries. This is incorrect because in accelerating trends, price leads momentum.
-
-**File**: `supabase/functions/strategy-analyzer/index.ts`
-
-**Current Logic** (around line 8004):
-```text
-IF earlyMomentumScore < effectiveMomentumThreshold:
-    reject signal
+### Current Behavior
+```
+IF momentumState != "none":
+    RETURN PASS  // No ADX check!
 ```
 
-**Proposed Logic**:
-```text
-// NEW: Accelerating trend exception
-// If ADX is strong AND rising, allow reduced-size entry even with low momentum
-acceleratingTrendException = (
-    adx >= 30 AND
-    adxSlopeForOverride > 0 AND
-    !adxExhaustion.isExhausted AND
-    !isReversalEntry
-)
+Path 2 immediately passes when `momentumState` is "building" or "mixed", even if:
+- ADX is critically weak (< 18)
+- HTF is opposing
+- Momentum is actually decaying
 
-IF earlyMomentumScore < effectiveMomentumThreshold:
-    IF acceleratingTrendException:
-        // Allow with 70% position size instead of blocking
-        acceleratingTrendPositionMultiplier = 0.70
-        log "ACCELERATING TREND EXCEPTION: Allowing entry with reduced size"
-        // Continue to next gate (don't reject)
-    ELSE:
-        reject signal
+### Proposed Fix
+
+Add minimum ADX floor to Path 2:
+
 ```
+// Path 2: State Presence - requires ADX floor
+IF momentumState != "none" AND adx >= ADX_THRESHOLDS.MINIMUM:
+    RETURN PASS
+// Continue to Path 3+ if ADX below minimum
+```
+
+**Files to modify:**
+- `supabase/functions/strategy-analyzer/index.ts` (line ~7793)
+
+**Changes:**
+1. Add ADX check to state presence condition
+2. Log when Path 2 is skipped due to low ADX
+3. Update rejection diagnostics to show Path 2 failure reason
+
+**Position Sizing:**
+- No change (still 100% when state presence + ADX floor passes)
 
 ---
 
-### 1.2 Add Momentum State to Threshold Adjustment (ISSUE 3)
+## Phase 2: Refactor Direction Derivation (Validate, Don't Originate)
 
-**Problem**: The `momentumState` from the Momentum Status Details system is logged but not used to influence the threshold. This is a missed opportunity for tighter integration.
+### Current Problem
 
-**File**: `supabase/functions/strategy-analyzer/index.ts`
-
-**Location**: After line 7992 (after regime-aware threshold is calculated)
-
-**Proposed Addition**:
-```text
-// ============= MOMENTUM STATE THRESHOLD ADJUSTMENT =============
-// Tightly couple momentum state classification with gate threshold
-// This ensures consistent behavior between Momentum Status Details UI and signal generation
-
-const momentumStateForGate = momentum?.state || "none";
-let stateAdjustedThreshold = effectiveMomentumThreshold;
-let momentumStateAdjustmentApplied = false;
-
-IF momentumStateForGate == "confirmed":
-    // Confirmed momentum = strong follow-through, relax threshold by 1
-    stateAdjustedThreshold = MAX(0, effectiveMomentumThreshold - 1)
-    momentumStateAdjustmentApplied = true
-    log "MOMENTUM STATE BONUS: state=confirmed, threshold reduced by 1"
-
-ELSE IF momentumStateForGate == "exhausted":
-    // Exhausted momentum = reversal risk, increase threshold by 1
-    stateAdjustedThreshold = effectiveMomentumThreshold + 1
-    momentumStateAdjustmentApplied = true
-    log "MOMENTUM STATE PENALTY: state=exhausted, threshold increased by 1"
-
-effectiveMomentumThreshold = stateAdjustedThreshold
+Paths 5A (Pre-Momentum StochRSI) and 5B (Short-Term Alignment) return direction:
+```typescript
+preMomentumDirection = "short";
+// This direction can conflict with deriveTradeDirection()
 ```
 
-**Also update rejection log** (line 8088-8116):
-Add `momentumStateAdjustmentApplied` to the logged filters_status.
+This gate should **validate** momentum presence, not **originate** trade direction.
 
----
+### Proposed Refactor
 
-### 1.3 Strengthen Pullback ADX Guard (ISSUE 4)
+Change paths 5A/5B to return **directional bias** instead of **direction override**:
 
-**Problem**: The pullback threshold relaxation (5 → 3) applies before the ADX check, which can allow pullback logic in weak trends.
+```typescript
+// Before: Returns direction
+RETURN PASS with direction="short", positionMultiplier
 
-**File**: `supabase/functions/strategy-analyzer/index.ts`
-
-**Current Logic** (line 7930-7932):
-```text
-let baseMomentumThreshold = isPullbackValid 
-    ? PULLBACK_MIN_SCORE  // 3
-    : MIN_SCORE;          // 5
-```
-
-**Problem**: `isPullbackValid` already checks `adx >= 22`, but the threshold is set based on `isPullbackSetupDetected` earlier.
-
-**Proposed Fix**: Make the guard explicit in the threshold logic:
-```text
-// Only use pullback threshold if pullback is VALID (includes ADX check)
-// AND ADX is genuinely in trending territory (>= 22)
-let baseMomentumThreshold = (isPullbackValid AND adx >= PULLBACK_DETECTION_PARAMS.MIN_ADX)
-    ? PULLBACK_MIN_SCORE  // 3
-    : MIN_SCORE;          // 5
-```
-
-This is a defensive double-check that makes the logic more explicit and prevents future regressions.
-
----
-
-## Phase 2: Medium Priority Enhancements
-
-### 2.1 Graduated Position Multiplier Based on Threshold Distance (GAP 1)
-
-**Problem**: Current position multipliers are fixed values (0.65, 0.80). A graduated approach based on how far the score is from the threshold would be more precise.
-
-**File**: `supabase/functions/strategy-analyzer/index.ts`
-
-**Location**: In the Strong ADX Override section (around line 8028)
-
-**Proposed Logic**:
-```text
-// Calculate graduated position multiplier based on score deficit
-const scoreDeficit = effectiveMomentumThreshold - earlyMomentumScore;
-const graduatedMultiplier = clamp(0.5, 0.9, 1.0 - (scoreDeficit * 0.1));
-
-// Apply the more conservative of graduated and tier-specific multiplier
-strongAdxPositionMultiplier = MIN(graduatedMultiplier, tierSpecificMultiplier);
-```
-
-**Helper function to add**:
-```text
-function clamp(min: number, max: number, value: number): number {
-    return Math.max(min, Math.min(max, value));
+// After: Returns validation result with bias
+RETURN { 
+  passes: true, 
+  directionBias: "bearish",  // Suggestion, not override
+  positionMultiplier: 0.50,
+  source: "PRE_MOMENTUM_STOCHRSI"
 }
 ```
 
-**Example outcomes**:
-- Score deficit 1 → multiplier = 0.90
-- Score deficit 2 → multiplier = 0.80
-- Score deficit 3 → multiplier = 0.70
-- Score deficit 5+ → multiplier = 0.50 (floor)
+**Files to modify:**
+- `supabase/functions/strategy-analyzer/index.ts` (lines ~2740-2823)
 
----
+**Changes:**
+1. Refactor `preMomentumStochRsiOverrideApplied` to set a `premiumOverrideBias` flag
+2. Pass bias to centralized `deriveTradeDirection()` as weighted input
+3. `deriveTradeDirection()` uses bias as tie-breaker, not override
+4. If derived direction conflicts with bias, log warning and reduce position size
 
-### 2.2 Document Threshold Adjustment Order (GAP 2)
-
-**File**: `supabase/functions/_shared/constants.ts`
-
-**Location**: After MOMENTUM_THRESHOLDS section (around line 1102)
-
-**Proposed Addition**:
-```text
-// ============= MOMENTUM GATE THRESHOLD ADJUSTMENT ORDER =============
-// CRITICAL: The order of threshold adjustments affects final behavior
-// This order must be preserved in strategy-analyzer implementation:
-//
-// 1. BASE THRESHOLD
-//    - Normal entries: MIN_SCORE (5)
-//    - Valid pullbacks: PULLBACK_MIN_SCORE (3)
-//
-// 2. REGIME-AWARE ADJUSTMENT
-//    - Very Strong ADX (>=35): threshold → 0
-//    - Near Very Strong (33-35, slope >= -0.3): threshold → 1
-//    - Strong ADX (>=30, rising): threshold → 2
-//
-// 3. MOMENTUM STATE ADJUSTMENT (NEW)
-//    - confirmed: threshold -= 1
-//    - exhausted: threshold += 1
-//
-// 4. STRONG ADX OVERRIDE
-//    - If still failing threshold AND ADX qualifies: threshold → 0
-//    - Position size reduced based on tier
-//
-// 5. ACCELERATING TREND EXCEPTION (NEW)
-//    - If ADX >= 30 AND slope > 0: allow with 70% size
-//
-// Final threshold = result after all adjustments
-// Rejection occurs if score < final threshold AND no exceptions apply
+**Integration with deriveTradeDirection():**
+```typescript
+// In deriveTradeDirection:
+if (premiumOverrideBias && premiumOverrideBias !== derivedDirection) {
+  logger.warn("Direction conflict: premium bias suggests ${premiumOverrideBias} but HTF derives ${derivedDirection}");
+  positionMultiplier *= 0.7;  // Reduce confidence
+}
 ```
 
 ---
 
-## Phase 3: UI Enhancements
+## Phase 3: Exception Budget Integration (Stacking Prevention)
 
-### 3.1 Enhance HardGateMomentumScoreDisplay Component
+### Current Problem
 
-**File**: `src/components/SignalRejectionReasons.tsx`
+The gate allows multiple weak exceptions to stack:
+- Reduced ADX threshold via StochRSI alignment
+- Acceleration bypass
+- Pre-momentum override
+- Short-term alignment override
 
-**Current Display**: Shows score, state, and ADX in a grid.
+Each individually weak justification can collectively allow entries.
 
-**Proposed Enhancements**:
+### Proposed Fix
 
-1. **Show threshold adjustment breakdown**:
-```text
-<div className="space-y-1 text-[10px]">
-    <div>Base threshold: {baseMomentumThreshold}</div>
-    {regimeAwareApplied && (
-        <div>→ Regime [{regimeAwareTier}]: {regimeAwareMomentumThreshold}</div>
-    )}
-    {momentumStateAdjustmentApplied && (
-        <div>→ State [{momentumState}]: {stateAdjustedThreshold}</div>
-    )}
-    <div className="font-medium">Final required: {momentumRequired}</div>
-</div>
+Implement `maxExceptionDepth = 1` for this gate's internal paths:
+
+```typescript
+// Track which exception path was used
+let noMomentumExceptionUsed: "STOCHRSI_ADX_ALIGNMENT" | "TREND_ACCELERATION" | "PRE_MOMENTUM" | "SHORT_TERM_ALIGNMENT" | null = null;
+
+// Once an exception is used, block additional exceptions
+if (noMomentumExceptionUsed !== null && currentPath !== noMomentumExceptionUsed) {
+  logger.info("Exception already used: ${noMomentumExceptionUsed}, skipping ${currentPath}");
+  continue;  // Skip this exception path
+}
 ```
 
-2. **Show why override didn't apply**:
-```text
-{strongAdxOverrideAttempted && !strongAdxOverrideApplied && (
-    <div className="text-[9px] text-yellow-400 mt-2">
-        ⚠️ Strong ADX Override attempted but failed:
-        {/* Show specific failure reasons */}
-    </div>
-)}
+**Files to modify:**
+- `supabase/functions/strategy-analyzer/index.ts`
+- `supabase/functions/_shared/constants.ts`
+
+**New Constant:**
+```typescript
+// In constants.ts
+export const NO_MOMENTUM_GATE_PARAMS = {
+  // Maximum exception paths that can be combined
+  MAX_EXCEPTION_DEPTH: 1,
+  
+  // Minimum ADX floor for Path 2 (state presence)
+  STATE_PRESENCE_MIN_ADX: 20,  // ADX_THRESHOLDS.MINIMUM
+  
+  // Enable/disable individual paths
+  ENABLE_PATH_2_ADX_FLOOR: true,
+  ENABLE_EXCEPTION_BUDGET: true,
+};
 ```
 
-3. **Add tooltip explaining threshold tiers**:
-```text
-<TooltipContent>
-    Threshold adjusts based on trend strength:
-    • ADX ≥35: Threshold = 0 (very strong trend)
-    • ADX 33-35: Threshold = 1 (near very strong)
-    • ADX ≥30 rising: Threshold = 2 (strong trend)
-    • Otherwise: Threshold = 5 (normal)
-</TooltipContent>
-```
+**Behavior:**
+1. First exception path that qualifies is used
+2. Subsequent paths are skipped (logged but not applied)
+3. Position size from first exception is used
+4. `exceptionType` logged for downstream monitoring
 
 ---
 
-## Files Modified Summary
+## Phase 4: Documentation Update
+
+Update `docs/gates/NO_MOMENTUM_CONFIRMATION.md` with:
+
+1. **ADX Floor Clarification:**
+   - Path 2 now requires `ADX >= 20`
+   - Document why (prevents "building" momentum in dead markets)
+
+2. **Direction Derivation Model:**
+   - Clarify that this gate validates, does not originate
+   - Document `directionBias` vs `direction` distinction
+
+3. **Exception Budget Section:**
+   - Add section on `MAX_EXCEPTION_DEPTH = 1`
+   - Document exception priority order
+
+4. **Updated Decision Matrix:**
+   | Path | Condition | ADX Floor | Position Size |
+   |------|-----------|-----------|---------------|
+   | Standard Confirmation | `momentumConfirms == true` | None | 100% |
+   | State Presence | `momentumState != "none"` | >= 20 | 100% |
+   | Strong Trend Exception | `adx >= 28` (or 22 if aligned) | Built-in | 100% |
+   | Trend Acceleration | Price move + ADX rising | >= 20 | 70% |
+   | Pre-Momentum StochRSI | Deep extreme + 1h directional | >= 18 | 50-60% |
+   | Short-Term Alignment | 1h+30m+micro agree | >= 18 | 55% |
+
+---
+
+## Implementation Order
+
+1. **Phase 1** - Add ADX floor to Path 2 (lowest risk, immediate improvement)
+2. **Phase 3** - Implement exception budget (prevents stacking)
+3. **Phase 2** - Refactor direction derivation (more complex, needs careful testing)
+4. **Phase 4** - Update documentation
+
+---
+
+## Testing Strategy
+
+1. **Regression Test:** Run strategy-analyzer on recent signals to verify:
+   - "building" momentum with ADX < 20 now blocked
+   - Existing valid signals still pass
+
+2. **Exception Budget Test:** Simulate scenarios where multiple exceptions would apply:
+   - Verify only first exception is used
+   - Verify position size from first exception applies
+
+3. **Direction Conflict Test:** Trigger pre-momentum override with opposing HTF:
+   - Verify warning logged
+   - Verify position reduction applied
+
+---
+
+## Expected Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Weak "building" state entries | Allowed at ADX 15 | Blocked below ADX 20 |
+| Exception stacking | Unlimited | Max 1 per signal |
+| Direction conflicts | Silently overridden | Logged with position reduction |
+| False positive rate | Higher | Lower |
+| Legitimate early entries | May be blocked | Preserved via exception paths |
+
+---
+
+## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `supabase/functions/strategy-analyzer/index.ts` | Add accelerating trend exception, momentum state adjustment, strengthen pullback guard, graduated multiplier |
-| `supabase/functions/_shared/constants.ts` | Add threshold adjustment order documentation |
-| `src/components/SignalRejectionReasons.tsx` | Enhanced HardGateMomentumScoreDisplay with adjustment breakdown |
+| `supabase/functions/strategy-analyzer/index.ts` | ADX floor, exception budget, direction bias refactor |
+| `supabase/functions/_shared/constants.ts` | New `NO_MOMENTUM_GATE_PARAMS` constant |
+| `docs/gates/NO_MOMENTUM_CONFIRMATION.md` | Updated documentation |
 
 ---
 
-## Implementation Sequence
+## Technical Details
 
-```text
-Phase 1 (Critical)
-├── 1.1 Add accelerating trend exception (adxSlope > 0)
-├── 1.2 Add momentum state threshold adjustment
-└── 1.3 Strengthen pullback ADX guard
+### Path 2 ADX Floor Implementation
+```typescript
+// Line ~7793 in strategy-analyzer/index.ts
+const statePresencePassesWithFloor = 
+  (momentumState !== "none") && 
+  (adx >= ADX_THRESHOLDS.MINIMUM);  // NEW: ADX floor
 
-Phase 2 (Medium Priority)
-├── 2.1 Implement graduated position multiplier
-└── 2.2 Document threshold adjustment order
-
-Phase 3 (UI)
-└── 3.1 Enhance rejection display with adjustment breakdown
+const momentumPasses = 
+  momentumConfirms || 
+  statePresencePassesWithFloor ||  // UPDATED: With floor
+  isStrongTrendException || 
+  qualifiesForTrendAcceleration || 
+  hasPremiumOverride;
 ```
 
----
-
-## Expected Outcomes
-
-1. **Fewer missed entries in accelerating trends** - ADX slope now prevents blocking when trend is actively strengthening
-2. **Tighter integration with Momentum Status Details** - `confirmed` state rewards, `exhausted` state penalizes
-3. **Cleaner pullback logic** - Explicit ADX guard prevents weak-trend pullback entries
-4. **More predictable position sizing** - Graduated multiplier based on threshold distance
-5. **Better debuggability** - UI shows full threshold adjustment chain
-
----
-
-## Technical Notes
-
-### Clamp Function
-A utility `clamp` function should be added to the shared utilities if not already present:
+### Exception Budget Implementation
 ```typescript
-export function clamp(min: number, max: number, value: number): number {
-    return Math.max(min, Math.min(max, value));
+// Track exception usage
+let noMomentumExceptionPath: string | null = null;
+let noMomentumExceptionMultiplier = 1.0;
+
+// In Path 3 (Strong Trend Exception):
+if (isStrongTrendException && !noMomentumExceptionPath) {
+  noMomentumExceptionPath = "STRONG_TREND";
+  // ... existing logic
+}
+
+// In Path 4 (Trend Acceleration):
+if (qualifiesForTrendAcceleration && !noMomentumExceptionPath) {
+  noMomentumExceptionPath = "TREND_ACCELERATION";
+  noMomentumExceptionMultiplier = 0.70;
+  // ... existing logic
+} else if (qualifiesForTrendAcceleration && noMomentumExceptionPath) {
+  logger.info(`Skipping TREND_ACCELERATION - ${noMomentumExceptionPath} already applied`);
 }
 ```
 
-### Logging Enhancement
-All new logic paths should use the existing `Logger` infrastructure with appropriate categories (`LOG_CATEGORIES.MOMENTUM`, `LOG_CATEGORIES.GATE`).
+### Direction Bias Refactor
+```typescript
+// Before (current):
+preMomentumDirection = "short";
+preMomentumStochRsiOverrideApplied = true;
 
-### Backward Compatibility
-All changes are additive - existing behavior is preserved unless the new conditions trigger. No breaking changes to existing signal generation.
+// After (proposed):
+premiumOverrideBias = "bearish";  // Not "short" - this is a bias, not direction
+premiumOverrideSource = "PRE_MOMENTUM_STOCHRSI";
+premiumOverrideApplied = true;
+
+// In direction resolution:
+if (premiumOverrideBias && !directionResult.direction) {
+  // Use bias to inform direction derivation, not override it
+  directionResult = deriveTradeDirection({
+    ...inputs,
+    biasHint: premiumOverrideBias,
+    biasSource: premiumOverrideSource
+  });
+}
+```
+
