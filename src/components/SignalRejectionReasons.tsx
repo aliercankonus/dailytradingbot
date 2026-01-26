@@ -36,6 +36,7 @@ import { useRiskParameters } from "@/hooks/useRiskParameters";
 import { formatDistanceToNow } from "date-fns";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from "react";
+import { DirectionContextDisplay } from "@/components/DirectionContextDisplay";
 
 // Helper component to display complex JSON values with tooltip
 const JsonValueTooltip = ({ label, value, maxPreviewLength = 50 }: { label: string; value: unknown; maxPreviewLength?: number }) => {
@@ -4004,10 +4005,17 @@ const NoDirectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
   const confidence1h = coerceNumeric(filtersStatus?.confidence1h ?? trendData?.timeframes?.['1h']?.confidence, 0);
   const primaryTrendRaw = filtersStatus?.primaryTrend || trendData?.primaryTrend || "unknown";
   
+  // Extract directionContext from the DirectionResult
+  const directionContext = filtersStatus?.directionContext;
+  
   // Use smart trend labeling for primary trend
   const primaryTrendInfo = getTrendDisplayLabel(primaryTrendRaw, trendData, trend4h, trend1h);
   const source = filtersStatus?.source || "direction_check";
   const reason = filtersStatus?.reason || "Could not determine clear trade direction from available signals";
+  
+  // Extract tier-related info from reasons array if directionContext not available
+  const reasons = filtersStatus?.reasons || [];
+  const failedTiers = reasons.filter((r: string) => r.includes("Tier") || r.includes("tier"));
   
   const is4hNeutral = trend4h === "neutral" || trend4h === "ranging";
   const is1hNeutral = trend1h === "neutral" || trend1h === "ranging";
@@ -4024,6 +4032,11 @@ const NoDirectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
           {bothNeutral ? "Both Neutral" : is4hNeutral ? "4H Neutral" : is1hNeutral ? "1H Neutral" : "Conflicting"}
         </Badge>
       </div>
+      
+      {/* NEW: Direction Context Visualization */}
+      {directionContext && (
+        <DirectionContextDisplay directionContext={directionContext} />
+      )}
       
       {/* Trend Overview */}
       <div className="grid grid-cols-2 gap-2">
@@ -4092,6 +4105,25 @@ const NoDirectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
           </Tooltip>
         </TooltipProvider>
       </div>
+      
+      {/* Failed Tiers Summary (when directionContext not available) */}
+      {!directionContext && failedTiers.length > 0 && (
+        <div className="p-2 bg-muted/30 rounded border border-border/50">
+          <div className="text-[9px] text-muted-foreground mb-1">Tiers Checked:</div>
+          <div className="flex flex-wrap gap-1">
+            {failedTiers.slice(0, 6).map((tier: string, idx: number) => (
+              <Badge key={idx} variant="outline" className="text-[8px] px-1 py-0 text-muted-foreground">
+                {tier.replace(/^Tier \d+:?\s*/, "").slice(0, 25)}
+              </Badge>
+            ))}
+            {failedTiers.length > 6 && (
+              <Badge variant="outline" className="text-[8px] px-1 py-0 text-muted-foreground">
+                +{failedTiers.length - 6} more
+              </Badge>
+            )}
+          </div>
+        </div>
+      )}
       
       {/* NEW: Multi-TF StochRSI Panel */}
       <MultiTimeframeStochRSIPanel filtersStatus={filtersStatus} trendData={trendData} />

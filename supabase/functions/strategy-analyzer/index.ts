@@ -2842,6 +2842,8 @@ serve(async (req) => {
               direction: directionResult.direction || null,
               source: directionResult.source,
               reasons: directionResult.reasons,
+              // Include DirectionContext for UI visualization
+              directionContext: directionResult.directionContext || null,
               trend4h: htfTrend4h,
               trend1h: htfTrend1h,
               primaryTrend: trend,
