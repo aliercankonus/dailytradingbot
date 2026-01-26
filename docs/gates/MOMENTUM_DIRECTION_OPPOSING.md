@@ -19,6 +19,19 @@ This gate enforces **directional symmetry** between the derived trade direction 
 
 ---
 
+## Architecture Notes
+
+### Phase 1 vs Phase 2 Relationship
+- **Phase 1** (Momentum Score Polarity): Checks `momentumScore` from smart momentum
+- **Phase 2** (MACD Direction): Uses MACD histogram for secondary validation
+
+**CRITICAL:** Phase 2 is **subordinate** to Phase 1. If Phase 1 determines momentum is in the neutral zone (-10 to +10), Phase 2 is SKIPPED entirely. This prevents double-penalizing neutral momentum scenarios.
+
+### Trend Source Clarification
+`regimeTrendDirection` is sourced from `masterRegime.trendDirection`, which represents the **1h structural trend bias** (not momentum-derived or raw timeframe trends). This ensures the Early Trend Detection exception uses structural context, not momentum, to avoid circular logic.
+
+---
+
 ## Thresholds (from constants.ts)
 
 ```typescript
@@ -29,16 +42,26 @@ MOMENTUM_DIRECTION_ALIGNMENT = {
   NEUTRAL_MIN: -10,
   NEUTRAL_MAX: 10,
   
-  // Strong opposite thresholds
+  // Strong opposite thresholds (adjusted by momentum state)
   STRONG_OPPOSITE_LONG: -20,   // Block LONG if momentum < -20
   STRONG_OPPOSITE_SHORT: 20,   // Block SHORT if momentum > +20
   
-  // ADX-aware behavior
-  ALLOW_NEUTRAL_ABOVE_ADX: 40, // Strong ADX allows neutral momentum
+  // Momentum state influence (±5 threshold adjustment)
+  CONFIRMED_STATE_ADJUSTMENT: -5,  // Tighter thresholds for confirmed momentum
+  MIXED_STATE_ADJUSTMENT: 5,       // Looser thresholds for mixed momentum
+  
+  // ADX-aware behavior (UNIFIED: aligned with ADX_THRESHOLDS.EXCEPTIONAL)
+  ALLOW_NEUTRAL_ABOVE_ADX: 35,     // Strong ADX allows neutral momentum
+  
+  // Phase 2 subordination
+  SKIP_PHASE2_FOR_NEUTRAL: true,   // Skip MACD check if Phase 1 is neutral
+  
+  // Normalized weak MACD check (ATR-based, not absolute)
+  WEAK_MACD_ATR_MULTIPLIER: 0.0001  // |MACD| < ATR * 0.0001 = weak
 }
 
 ADX_THRESHOLDS = {
-  EXCEPTIONAL: 35,  // Override for very strong trends
+  EXCEPTIONAL: 35,  // Override for very strong trends (unified with ALLOW_NEUTRAL_ABOVE_ADX)
 }
 ```
 
@@ -49,16 +72,33 @@ ADX_THRESHOLDS = {
 ```text
 // ============= MOMENTUM DIRECTION OPPOSING GATE =============
 // INPUT: derivedDirection (long/short), momentumScore (-100 to +100), 
-//        adx, regimeTrendDirection (1h trend), macdHistogram
+//        adx, regimeTrendDirection (1h structural trend), macdHistogram, momentumState
 
-FUNCTION checkMomentumDirectionGate(derivedDirection, momentumScore, adx, regimeTrendDirection, macdHistogram):
+FUNCTION checkMomentumDirectionGate(derivedDirection, momentumScore, adx, regimeTrendDirection, macdHistogram, momentumState):
     
     // ===== STEP 1: DEFINE ZONES =====
     isNeutralMomentum = (momentumScore >= -10 AND momentumScore <= 10)
-    isStrongADX = (adx >= 40)
+    isStrongADX = (adx >= 35)  // UNIFIED: aligned with ADX_THRESHOLDS.EXCEPTIONAL
+    
+    // ===== STEP 1B: MOMENTUM STATE INFLUENCE (NEW) =====
+    // Adjust thresholds based on momentum state quality
+    strongOppositeLongThreshold = -20
+    strongOppositeShortThreshold = +20
+    
+    IF momentumState == "confirmed":
+        // Tighter thresholds (make bypass harder)
+        strongOppositeLongThreshold = -25   // -20 + (-5)
+        strongOppositeShortThreshold = +15  // +20 - 5
+    ELSE IF momentumState == "mixed":
+        // Looser thresholds (allow more flexibility)
+        strongOppositeLongThreshold = -15   // -20 + 5
+        strongOppositeShortThreshold = +25  // +20 + 5
+    
+    // Store neutral flag for Phase 2 subordination
+    phase1NeutralMomentum = isNeutralMomentum
     
     // ===== STEP 2: CHECK DIRECTION AGREEMENT =====
-    // For early trend detection exception
+    // NOTE: regimeTrendDirection is from masterRegime.trendDirection (1h STRUCTURAL bias)
     trendDirectionAgrees = (
         (derivedDirection == 'long' AND regimeTrendDirection == 'bullish') OR
         (derivedDirection == 'short' AND regimeTrendDirection == 'bearish')
@@ -72,8 +112,8 @@ FUNCTION checkMomentumDirectionGate(derivedDirection, momentumScore, adx, regime
     
     IF derivedDirection == 'long':
         
-        // CASE A: Strong opposing momentum (score < -20)
-        IF momentumScore < STRONG_OPPOSITE_LONG (-20):
+        // CASE A: Strong opposing momentum (using state-adjusted threshold)
+        IF momentumScore < strongOppositeLongThreshold:
             
             IF trendDirectionAgrees:
                 // EARLY TREND EXCEPTION: 1h bullish allows lagging momentum
@@ -146,10 +186,18 @@ FUNCTION checkMomentumDirectionGate(derivedDirection, momentumScore, adx, regime
     
     RETURN PASS
 
-// ============= SECONDARY CHECK (Phase 2 after Momentum Score Gate) =============
+// ============= PHASE 2: SECONDARY CHECK (SUBORDINATE TO PHASE 1) =============
 // Uses MACD histogram direction for additional validation
+// CRITICAL: This phase is SKIPPED if Phase 1 determined momentum is in neutral zone
 
-FUNCTION checkMomentumDirectionalSymmetry(derivedDirection, momentum, adx):
+FUNCTION checkMomentumDirectionalSymmetry(derivedDirection, momentum, adx, atr, phase1NeutralMomentum):
+    
+    // ===== SUBORDINATION CHECK (ARCHITECTURE FIX) =====
+    // If Phase 1 already classified momentum as neutral, skip Phase 2 entirely
+    // This prevents double-penalizing neutral momentum scenarios
+    IF SKIP_PHASE2_FOR_NEUTRAL AND phase1NeutralMomentum:
+        LOG "Phase 2 MACD check skipped: momentum in neutral zone (Phase 1 passed)"
+        RETURN PASS
     
     momentumDirection = momentum.direction OR derive_from_macd(momentum.macdHistogram)
     macdHistogramValue = momentum.macdHistogram OR 0
@@ -166,25 +214,21 @@ FUNCTION checkMomentumDirectionalSymmetry(derivedDirection, momentum, adx):
     
     IF momentumOpposesDirection AND effectiveMomentumDirection != NULL:
         
-        // ===== EXCEPTION 1: Very weak momentum (negligible MACD) =====
+        // ===== EXCEPTION 1: Very weak momentum (NORMALIZED with ATR) =====
+        // ARCHITECTURE FIX: Use ATR-normalized threshold instead of absolute 0.0001
+        // This ensures consistent behavior across high-priced (BTC) and low-priced assets
         macdHistogramAbs = ABS(macdHistogramValue)
-        isWeakMomentum = (macdHistogramAbs < 0.0001)
+        weakMomentumThreshold = (atr > 0) ? (atr * 0.0001) : 0.0001
+        isWeakMomentum = (macdHistogramAbs < weakMomentumThreshold)
         
-        // ===== EXCEPTION 2: Exceptional ADX overrides =====
-        allowMomentumOverride = isWeakMomentum OR (adx >= ADX_THRESHOLDS.EXCEPTIONAL)
+        // ===== EXCEPTION 2: Exceptional ADX overrides (UNIFIED: 35) =====
+        allowMomentumOverride = isWeakMomentum OR (adx >= 35)
         
         IF NOT allowMomentumOverride:
-            REJECT with "MOMENTUM_DIRECTION_OPPOSING"
-            LOG derivedDirection, effectiveMomentumDirection, macdHistogram, adx
+            REJECT with "MOMENTUM_DIRECTION_OPPOSING" (Phase 2)
+            LOG phase, derivedDirection, effectiveMomentumDirection, macdHistogram, atr, threshold, adx
             RETURN BLOCKED
         
-        // Log why we allowed
-        IF isWeakMomentum:
-            LOG "Momentum opposes but weak (MACD ~0) - allowing"
-        ELSE:
-            LOG "Momentum opposes but ADX exceptional (>= 35) - allowing with caution"
-    
-    RETURN PASS
 ```
 
 ---
