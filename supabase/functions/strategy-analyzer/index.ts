@@ -9053,40 +9053,52 @@ serve(async (req) => {
         // ===== PHASE 3: PRICE ACTION DIRECTION OVERRIDE =====
         // When all timeframes show neutral/low confidence, derive direction from price action
         // This allows entries based on significant price moves even without HTF confirmation
+        // FIX #3 (Audit): Disable in RANGE regime to prevent chop losses at range extremes
         let priceActionOverrideActive = false;
         let priceActionOverrideDirection: "bullish" | "bearish" | "neutral" = "neutral";
         let priceActionOverridePositionMultiplier = 1.0;
+        let priceActionBlockedByRangeRegime = false;
+        
+        // FIX #3: Check if regime is RANGE - block price action override in ranging markets
+        const currentRegimeForPAO = regime?.regime?.toUpperCase() || 'UNKNOWN';
+        const isRangeRegime = currentRegimeForPAO === 'RANGE' || currentRegimeForPAO === 'RANGING';
         
         if (PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.ENABLED) {
-          const priceActionMomentum = trendData.priceActionMomentum;
-          const priceMovePercent = Math.abs(priceActionMomentum?.movePercent || 0);
-          const priceDirection = priceActionMomentum?.direction || "neutral";
-          const macdExpandingForOverride = momentum?.macdExpanding === true;
-          const macdHistogramForOverride = momentum?.macdHistogram || 0;
-          const macdMatchesDirection = (priceDirection === "bullish" && macdHistogramForOverride > 0) ||
-                                       (priceDirection === "bearish" && macdHistogramForOverride < 0);
-          
-          // Check if conditions for price action override are met
-          const meetsMinMove = priceMovePercent >= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.MIN_PRICE_MOVE_PERCENT;
-          const isStrongMove = priceMovePercent >= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.STRONG_PRICE_MOVE_PERCENT;
-          const macdOk = !PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.REQUIRE_MACD_EXPANDING || macdExpandingForOverride;
-          const macdDirectionOk = !PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.REQUIRE_MACD_DIRECTION_MATCH || macdMatchesDirection;
-          const adxInRange = adx >= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.MIN_ADX && 
-                            adx <= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.MAX_ADX;
-          const reversalScoreOk = unifiedReversal.score <= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.MAX_REVERSAL_SCORE;
-          
-          if (meetsMinMove && macdOk && macdDirectionOk && adxInRange && reversalScoreOk && 
-              (priceDirection === "bullish" || priceDirection === "bearish")) {
-            priceActionOverrideActive = true;
-            priceActionOverrideDirection = priceDirection;
-            priceActionOverridePositionMultiplier = isStrongMove 
-              ? PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.STRONG_POSITION_REDUCTION
-              : PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.STANDARD_POSITION_REDUCTION;
+          // FIX #3: Block price action override in RANGE regime
+          if (isRangeRegime) {
+            priceActionBlockedByRangeRegime = true;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 PRICE ACTION OVERRIDE BLOCKED: Regime=${currentRegimeForPAO} - disabled in RANGE to prevent chop losses`);
+          } else {
+            const priceActionMomentum = trendData.priceActionMomentum;
+            const priceMovePercent = Math.abs(priceActionMomentum?.movePercent || 0);
+            const priceDirection = priceActionMomentum?.direction || "neutral";
+            const macdExpandingForOverride = momentum?.macdExpanding === true;
+            const macdHistogramForOverride = momentum?.macdHistogram || 0;
+            const macdMatchesDirection = (priceDirection === "bullish" && macdHistogramForOverride > 0) ||
+                                         (priceDirection === "bearish" && macdHistogramForOverride < 0);
             
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🚀 PRICE ACTION OVERRIDE ACTIVE: ${priceMovePercent.toFixed(2)}% ${priceDirection.toUpperCase()} move`);
-            logger.forSymbol(symbol).info(`   → MACD expanding=${macdExpandingForOverride}, direction match=${macdMatchesDirection}`);
-            logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, reversal score=${unifiedReversal.score}`);
-            logger.forSymbol(symbol).info(`   → Position size: ${(priceActionOverridePositionMultiplier * 100).toFixed(0)}%`);
+            // Check if conditions for price action override are met
+            const meetsMinMove = priceMovePercent >= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.MIN_PRICE_MOVE_PERCENT;
+            const isStrongMove = priceMovePercent >= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.STRONG_PRICE_MOVE_PERCENT;
+            const macdOk = !PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.REQUIRE_MACD_EXPANDING || macdExpandingForOverride;
+            const macdDirectionOk = !PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.REQUIRE_MACD_DIRECTION_MATCH || macdMatchesDirection;
+            const adxInRange = adx >= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.MIN_ADX && 
+                              adx <= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.MAX_ADX;
+            const reversalScoreOk = unifiedReversal.score <= PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.MAX_REVERSAL_SCORE;
+            
+            if (meetsMinMove && macdOk && macdDirectionOk && adxInRange && reversalScoreOk && 
+                (priceDirection === "bullish" || priceDirection === "bearish")) {
+              priceActionOverrideActive = true;
+              priceActionOverrideDirection = priceDirection;
+              priceActionOverridePositionMultiplier = isStrongMove 
+                ? PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.STRONG_POSITION_REDUCTION
+                : PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS.STANDARD_POSITION_REDUCTION;
+              
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🚀 PRICE ACTION OVERRIDE ACTIVE: ${priceMovePercent.toFixed(2)}% ${priceDirection.toUpperCase()} move (regime=${currentRegimeForPAO})`);
+              logger.forSymbol(symbol).info(`   → MACD expanding=${macdExpandingForOverride}, direction match=${macdMatchesDirection}`);
+              logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)}, reversal score=${unifiedReversal.score}`);
+              logger.forSymbol(symbol).info(`   → Position size: ${(priceActionOverridePositionMultiplier * 100).toFixed(0)}%`);
+            }
           }
         }
         
@@ -9225,6 +9237,8 @@ serve(async (req) => {
                 needs4hAligned: !htfAligned,
                 is1hBlockedByCounterTrend: is1hCounterTrendTo4h,
                 microTrendBlocked: is4hCounterTrend,
+                priceActionBlockedByRangeRegime,  // FIX #3: Track RANGE regime blocking
+                currentRegime: currentRegimeForPAO,
               },
               momentum: {
                 confirms: momentum?.confirms ?? false,
