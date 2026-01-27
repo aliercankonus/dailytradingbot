@@ -2970,7 +2970,11 @@ export const STOCHRSI_DYNAMIC_PARAMS = {
   
   // CAP: Maximum StochRSI contribution to reversal score (NEW)
   // StochRSI alone can NEVER push exhaustion over block threshold
-  MAX_STOCHRSI_PENALTY: 20,  // Capped at 20 points
+  MAX_STOCHRSI_PENALTY: 20,  // Capped at 20 points (default)
+  
+  // FIX #2 (Audit): Stricter cap when Tier 2 was already bypassed
+  // Prevents "double punishment" where StochRSI penalizes both at gate AND in reversal score
+  TIER2_BYPASSED_STOCHRSI_CAP: 10,  // Reduced cap when Tier 2 bypass was applied
 } as const;
 
 // ============= PRE-SIGNAL VALIDITY GATE PARAMS =============
