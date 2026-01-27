@@ -53,12 +53,13 @@ Score components:
 - 1h trend opposing entry direction: +20
 - Volume confirming reversal: +15
 
-ADX-ADAPTIVE WEIGHTING (reduces reversal impact in strong trends):
-- ADX >= 40: weight = 0.4
-- ADX >= 35: weight = 0.5
-- ADX >= 30: weight = 0.6
-- ADX >= 25: weight = 0.7
-- ADX < 25: weight = 1.0
+ADX-SCALED REVERSAL WEIGHTING (Issue #6 Fix - graduated reduction):
+- ADX >= 40: weight = 0.40 (60% reduction - extreme trend)
+- ADX >= 35: weight = 0.50 (50% reduction - exceptional trend)
+- ADX >= 30: weight = 0.60 (40% reduction - very strong trend)
+- ADX >= 25: weight = 0.75 (25% reduction - strong trend)
+- ADX >= 20: weight = 0.85 (15% reduction - moderate trend)
+- ADX < 20:  weight = 1.00 (no reduction - weak/no trend)
 
 Final reversal score = raw_score × ADX_weight
 
