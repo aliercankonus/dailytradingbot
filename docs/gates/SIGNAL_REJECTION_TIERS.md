@@ -424,14 +424,20 @@ FUNCTION checkMomentumConfirmation(momentumConfirms, momentumState, adx, adxSlop
   
   // ===== PATH 5: Premium Overrides (Direction Bias) =====
   // Pre-momentum StochRSI or Short-term alignment
+  // FIX #4 (Audit): Path 5 now increments exceptionDepth like Paths 3-4
   IF hasPreMomentumStochRSI OR hasShortTermAlignment:
-    directionBias = inferDirectionBias()
+    exceptionDepth++  // <-- NEW: Prevents silent exception stacking
     
-    IF directionBias != derivedDirection:
-      LOG "Premium override: Direction bias conflicts, applying 0.70x"
-      RETURN PASS with positionMultiplier = 0.70
+    IF exceptionDepth > MAX_EXCEPTION_DEPTH:
+      LOG "Premium override blocked: Max exception depth exceeded"
     ELSE:
-      RETURN PASS with positionMultiplier = 0.85
+      directionBias = inferDirectionBias()
+      
+      IF directionBias != derivedDirection:
+        LOG "Premium override: Direction bias conflicts, applying 0.70x"
+        RETURN PASS with positionMultiplier = 0.70
+      ELSE:
+        RETURN PASS with positionMultiplier = 0.85
   
   // ===== REJECT =====
   REJECT {
