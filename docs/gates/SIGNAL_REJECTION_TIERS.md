@@ -70,11 +70,25 @@ CONSTANTS:
   SEVERE_OVERBOUGHT_MIN = 85 // K > 85
   SEVERE_OVERBOUGHT_MAX = 95 // K <= 95 → TIER 1 SEVERE
 
-FUNCTION checkTier1SevereStochRSI(stochK4h, derivedDirection, meanReversionActive):
+// FIX #1 (Audit): Formal isExtremeMeanReversion definition
+// All three conditions must be met for Tier 1 bypass:
+TIER1_BYPASS_CRITERIA:
+  ALLOWED_REGIMES = ['RANGE', 'LATE_TREND', 'EXHAUSTION']  // NOT EARLY_TREND or STRONG_TREND
+  MIN_REVERSAL_SCORE = 55                                   // Strong reversal signal required
+  DISALLOWED_MOMENTUM_STATES = ['confirmed']               // No active trend-following momentum
+
+FUNCTION isExtremeMeanReversion(regime, reversalScore, momentumState):
+  regimeAllowed = regime IN TIER1_BYPASS_CRITERIA.ALLOWED_REGIMES
+  reversalScoreMet = reversalScore >= TIER1_BYPASS_CRITERIA.MIN_REVERSAL_SCORE
+  momentumAllowed = momentumState NOT IN TIER1_BYPASS_CRITERIA.DISALLOWED_MOMENTUM_STATES
   
-  // Skip if mean reversion override is active
-  IF meanReversionActive AND isExtremeMeanReversion:
-    LOG "TIER 1 bypassed by Mean Reversion Override"
+  RETURN regimeAllowed AND reversalScoreMet AND momentumAllowed
+
+FUNCTION checkTier1SevereStochRSI(stochK4h, derivedDirection, meanReversionActive, regime, reversalScore, momentumState):
+  
+  // Skip if mean reversion override is active AND formal criteria met (FIX #1)
+  IF meanReversionActive AND isExtremeMeanReversion(regime, reversalScore, momentumState):
+    LOG "TIER 1 bypassed by Mean Reversion Override (FIX#1: regime={regime}, revScore={reversalScore}, momState={momentumState})"
     RETURN PASS with positionMultiplier = 0.50
   
   // ===== TIER 1 LONG BLOCK =====
@@ -856,6 +870,7 @@ FUNCTION calculateUnifiedReversalScore(indicators):
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.3 | 2025-01-27 | **FIX #1 (Audit)**: Added formal `isExtremeMeanReversion` definition for Tier 1 bypass. Requires: regime IN [RANGE, LATE_TREND, EXHAUSTION], reversalScore >= 55, momentumState != 'confirmed'. Prevents trend-continuation logic from leaking into Tier 1 bypasses. |
 | 1.2 | 2025-01-27 | **FIX #2 (Audit)**: Added `stochRSITier2Bypassed` flag to `calculateUnifiedReversalScore`. When Tier 2 bypass is applied, StochRSI contribution capped at +10 (vs default +20) to prevent double punishment. |
 | 1.1 | 2025-01-27 | **FIX #4 (Audit)**: Added exception depth tracking to Path 5 (Premium Overrides) in NO_MOMENTUM_CONFIRMATION gate. |
 | 1.0 | 2025-01-27 | Initial comprehensive pseudocode documentation |

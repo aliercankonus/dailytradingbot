@@ -4024,6 +4024,20 @@ export const MEAN_REVERSION_CONFIG = {
     TARGET_PARTIAL_REVERSION: true,   // Only target VWAP/mid-BB, not full reversion
   },
   
+  // ===== FIX #1 (Audit): FORMAL isExtremeMeanReversion DEFINITION =====
+  // This defines the criteria for Tier 1 SEVERE bypass via mean reversion
+  // All conditions must be met for the bypass to be valid
+  TIER1_BYPASS_CRITERIA: {
+    // Regime must be RANGE or EXHAUSTION (not EARLY_TREND or STRONG_TREND)
+    ALLOWED_REGIMES: ['RANGE', 'LATE_TREND', 'EXHAUSTION'] as readonly string[],
+    // Reversal score must be >= this threshold (strong reversal signal)
+    MIN_REVERSAL_SCORE: 55,
+    // Momentum state must NOT be "confirmed" (no strong trend-following momentum)
+    DISALLOWED_MOMENTUM_STATES: ['confirmed'] as readonly string[],
+    // Position size when Tier 1 bypass is applied
+    BYPASS_POSITION_MULTIPLIER: 0.50,
+  },
+  
   // Volatility-Adjusted Exit
   EXIT: {
     BASE_TIMEOUT_ATR_MULTIPLE: 1.5,

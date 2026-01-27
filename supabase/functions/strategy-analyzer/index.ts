@@ -231,6 +231,7 @@ import {
   checkSignalPrecedence,
   calculateMeanReversionStop,
   calculateMeanReversionTP,
+  isExtremeMeanReversion,  // FIX #1 (Audit): Formal definition for Tier 1 bypass
   type ExhaustionSignal,
   type GateBypass
 } from "../_shared/mean-reversion.ts";
@@ -5907,13 +5908,25 @@ serve(async (req) => {
         // This catches K values between Deep Gate (5/95) and Severe threshold (15/85)
         // Unlike Tier 2, this gate has NO bypass - if K is in severe zone, block the trade
         // EXCEPTION: Mean reversion trades CAN bypass Tier 1 if detection confidence is high
+        // FIX #1 (Audit): Added formal isExtremeMeanReversion check for bypass validation
         if (!severeGateAllowsBypass) {
           // Check for mean reversion Tier 1 bypasses
           const tier1OversoldBypass = shouldBypassForMeanReversion('TIER_1_SEVERE_OVERSOLD', 'long');
           const tier1OverboughtBypass = shouldBypassForMeanReversion('TIER_1_SEVERE_OVERBOUGHT', 'short');
           
+          // FIX #1 (Audit): Formal isExtremeMeanReversion check requires:
+          // 1. Regime must be RANGE, LATE_TREND, or EXHAUSTION
+          // 2. Reversal score >= 55
+          // 3. Momentum state != "confirmed"
+          const currentRegime = directionResult?.regime || 'UNKNOWN';
+          const momentumState = momentum?.state || 'none';
+          const tier1MRValidForLong = tier1OversoldBypass && 
+            isExtremeMeanReversion(currentRegime, unifiedReversal.score, momentumState);
+          const tier1MRValidForShort = tier1OverboughtBypass && 
+            isExtremeMeanReversion(currentRegime, unifiedReversal.score, momentumState);
+          
           // Block SHORT when K is in severe oversold zone (5 <= K < 15)
-          // BUT allow LONG if mean reversion detected (that's the entry opportunity)
+          // BUT allow LONG if mean reversion detected AND formal criteria met
           if (intendedTradeDirection === "short" && isSevereOversold) {
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { gate: 'SEVERE_HTF_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} in severe zone [${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}-${severeOversoldThreshold})` });
@@ -5943,8 +5956,9 @@ serve(async (req) => {
           }
           
           // Log if mean reversion bypass allowed a LONG in severe oversold zone
-          if (tier1OversoldBypass && isSevereOversold && intendedTradeDirection === 'long') {
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔄 TIER 1 BYPASSED for MEAN_REVERSION_LONG at K=${stochRsiK4h.toFixed(1)}`);
+          // FIX #1: Now includes formal criteria validation
+          if (tier1MRValidForLong && isSevereOversold && intendedTradeDirection === 'long') {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔄 TIER 1 BYPASSED for MEAN_REVERSION_LONG at K=${stochRsiK4h.toFixed(1)} (FIX#1: regime=${currentRegime}, revScore=${unifiedReversal.score}, momState=${momentumState})`);
           }
           
           // Block LONG when K is in severe overbought zone (85 < K <= 95)
@@ -5978,8 +5992,9 @@ serve(async (req) => {
           }
           
           // Log if mean reversion bypass allowed a SHORT in severe overbought zone
-          if (tier1OverboughtBypass && isSevereOverbought && intendedTradeDirection === 'short') {
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔄 TIER 1 BYPASSED for MEAN_REVERSION_SHORT at K=${stochRsiK4h.toFixed(1)}`);
+          // FIX #1: Now includes formal criteria validation
+          if (tier1MRValidForShort && isSevereOverbought && intendedTradeDirection === 'short') {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔄 TIER 1 BYPASSED for MEAN_REVERSION_SHORT at K=${stochRsiK4h.toFixed(1)} (FIX#1: regime=${currentRegime}, revScore=${unifiedReversal.score}, momState=${momentumState})`);
           }
         }
         

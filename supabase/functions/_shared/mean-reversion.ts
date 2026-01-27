@@ -116,6 +116,39 @@ export function isMeanReversionAllowed(trendPhase: string, expansionState: strin
 }
 
 /**
+ * FIX #1 (Audit): Formal isExtremeMeanReversion definition for Tier 1 bypass
+ * 
+ * Determines if a mean reversion signal qualifies for Tier 1 SEVERE StochRSI bypass.
+ * All three conditions must be met:
+ * 1. Regime must be RANGE, LATE_TREND, or EXHAUSTION (not EARLY_TREND or STRONG_TREND)
+ * 2. Reversal score must be >= 55 (strong reversal signal)
+ * 3. Momentum state must NOT be "confirmed" (no strong trend-following momentum)
+ * 
+ * @param regime - Current market regime classification
+ * @param reversalScore - Unified reversal score (0-100)
+ * @param momentumState - Current momentum state from trend engine
+ * @returns Boolean indicating if Tier 1 mean reversion bypass is allowed
+ */
+export function isExtremeMeanReversion(
+  regime: string,
+  reversalScore: number,
+  momentumState: string
+): boolean {
+  const criteria = MEAN_REVERSION_CONFIG.TIER1_BYPASS_CRITERIA;
+  
+  // Condition 1: Regime must be in allowed list
+  const regimeAllowed = criteria.ALLOWED_REGIMES.includes(regime);
+  
+  // Condition 2: Reversal score must meet minimum threshold
+  const reversalScoreMet = reversalScore >= criteria.MIN_REVERSAL_SCORE;
+  
+  // Condition 3: Momentum state must NOT be in disallowed list
+  const momentumAllowed = !criteria.DISALLOWED_MOMENTUM_STATES.includes(momentumState);
+  
+  return regimeAllowed && reversalScoreMet && momentumAllowed;
+}
+
+/**
  * Gets position multiplier adjustment based on trend phase
  */
 export function getPhasePositionMultiplier(trendPhase: string): number {
