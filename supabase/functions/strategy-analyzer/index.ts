@@ -68,9 +68,11 @@ import {
   MOMENTUM_EXHAUSTION_OVERRIDE_PARAMS,
   // NEW: Neutral persistence modeling for confidence bonus
   NEUTRAL_PERSISTENCE_PARAMS,
-  // NEW: Phase 1 - Low ADX trend exception for strong HTF setups
+  // v1.1: ADX Gate minimal spec - single responsibility gate
+  ADX_GATE_V1_1,
+  // LEGACY (preserved for fallback): Low ADX trend exception for strong HTF setups
   LOW_ADX_TREND_EXCEPTION_PARAMS,
-  // NEW: Phase 2 - Regime-adaptive ADX thresholds
+  // LEGACY: Phase 2 - Regime-adaptive ADX thresholds (now superseded by ADX_GATE_V1_1)
   REGIME_ADAPTIVE_ADX_PARAMS,
   // NEW: Phase 3 - Price Action Direction Override
   PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS,
@@ -188,6 +190,7 @@ import {
   detectMarketRegime,
   detectMarketRegimeEnhanced,
   isValidSqueezeBreakout,
+  checkEarlyIgnitionException,
   deriveTradeDirection,
   getAdxPhase,
   getAdxPhaseInfo,
@@ -204,6 +207,7 @@ import {
   type MarketRegime,
   type MarketRegimeEnhancedResult,
   type SqueezeBreakoutResult,
+  type EarlyIgnitionResult,
   type DirectionResult,
   type BreakoutModeResult,
   type TrendStrengthResult,
