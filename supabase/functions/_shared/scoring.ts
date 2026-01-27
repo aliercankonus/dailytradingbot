@@ -1833,15 +1833,26 @@ export const detectMarketRegimeEnhanced = (trendData: any): MarketRegimeEnhanced
   };
 };
 
-// ============= SQUEEZE BREAKOUT VALIDATION =============
+// ============= SQUEEZE BREAKOUT VALIDATION (v1.1) =============
 // Validates if a potential squeeze breakout setup is present
-// Allows ADX gate bypass when conditions are met (ADX 18-20 range)
+// Allows ADX gate bypass when conditions are met (ADX 18-22 range)
+// v1.1 CHANGES: Added ADX slope requirement (≥ 0.05) to prevent fake squeezes
 export interface SqueezeBreakoutResult {
   isValid: boolean;
   confidence: number;  // 0-100
   direction: "long" | "short" | null;
   positionSizeMultiplier: number;  // Reduced size for squeeze entries
   reasons: string[];
+  // v1.1: Detailed check results for UI display
+  checkDetails: {
+    bbCompressed: boolean;
+    atBandEdge: boolean;
+    percentB: number;
+    momentumState: string;
+    slopeOk: boolean;
+    adxSlope: number;
+    hasDivergence: boolean;
+  };
 }
 
 export const isValidSqueezeBreakout = (
@@ -1851,15 +1862,32 @@ export const isValidSqueezeBreakout = (
   const reasons: string[] = [];
   let confidence = 0;
   
+  // v1.1: Initialize check details
+  const checkDetails = {
+    bbCompressed: false,
+    atBandEdge: false,
+    percentB: 50,
+    momentumState: 'none',
+    slopeOk: false,
+    adxSlope: 0,
+    hasDivergence: false,
+  };
+  
   if (!trendData || !intendedDirection) {
-    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["No trend data or direction"] };
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["No trend data or direction"], checkDetails };
   }
   
   const adx = trendData?.volatility?.adx || 0;
+  const adxSlope = trendData?.volatility?.adxSlope ?? 0;
   const bollinger = trendData?.bollingerBands || {};
   const momentum = trendData?.momentum || {};
   const stochRsi = trendData?.stochasticRsi || {};
   const timeframes = trendData?.timeframes || {};
+  
+  // v1.1: Update check details
+  checkDetails.adxSlope = adxSlope;
+  checkDetails.momentumState = momentum.state || 'none';
+  checkDetails.hasDivergence = momentum.hasDivergence ?? false;
   
   // Get 4H data for HTF confirmation
   const bb4h = bollinger['4h'] || bollinger;
@@ -1872,35 +1900,44 @@ export const isValidSqueezeBreakout = (
   const squeeze1h = bb1h.squeeze || bb1h.squeezeActive || false;
   const percentB1h = bb1h.percentB ?? 50;
   
-  // Condition 1: HTF squeeze active (4h preferred, 1h acceptable)
+  // Condition 1: HTF squeeze active (4h preferred, 1h acceptable) - BB compressed
   const hasHTFSqueeze = squeeze4h || squeeze1h;
+  checkDetails.bbCompressed = hasHTFSqueeze;
+  
   if (!hasHTFSqueeze) {
-    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["No HTF squeeze detected"] };
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["No HTF squeeze detected (BB not compressed)"], checkDetails };
   }
   
   if (squeeze4h) {
     confidence += 30;
-    reasons.push("4h Bollinger squeeze active");
+    reasons.push("4h Bollinger squeeze active (BB compressed)");
   } else if (squeeze1h) {
     confidence += 20;
     reasons.push("1h Bollinger squeeze active");
   }
   
   // Condition 2: Price at band edge (confirming breakout direction)
+  // v1.1: Stricter band edge check (≤20% for short, ≥80% for long)
   const isLong = intendedDirection === "long";
+  const effectivePercentB = squeeze4h ? percentB4h : percentB1h;
+  checkDetails.percentB = effectivePercentB;
+  
   const priceAtCorrectEdge = isLong 
-    ? (percentB4h > 70 || percentB1h > 70)  // Breaking upward
-    : (percentB4h < 30 || percentB1h < 30);  // Breaking downward
+    ? (percentB4h >= 80 || percentB1h >= 80)  // v1.1: ≥80% for longs
+    : (percentB4h <= 20 || percentB1h <= 20);  // v1.1: ≤20% for shorts
+  
+  checkDetails.atBandEdge = priceAtCorrectEdge;
   
   if (!priceAtCorrectEdge) {
-    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["Price not at band edge for breakout direction"] };
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: [`Price not at band edge (%B=${effectivePercentB.toFixed(0)}%, need ${isLong ? '≥80' : '≤20'}%)`], checkDetails };
   }
   confidence += 25;
   reasons.push(`Price at ${isLong ? "upper" : "lower"} band edge (%B4h=${percentB4h.toFixed(0)}, %B1h=${percentB1h.toFixed(0)})`);
   
-  // Condition 3: Momentum building (MACD expanding or StochRSI crossing)
+  // Condition 3: Momentum building or confirmed (not 'none' or 'mixed')
   const macdExpanding = momentum.macdExpanding ?? false;
-  const momentumBuilding = momentum.state === "building" || momentum.state === "confirmed";
+  const momentumState = momentum.state || 'none';
+  const momentumBuilding = momentumState === "building" || momentumState === "confirmed";
   const stoch4h = stochRsi['4h'] || {};
   const stoch1h = stochRsi['1h'] || {};
   const stochK4h = stoch4h.k ?? 50;
@@ -1908,11 +1945,11 @@ export const isValidSqueezeBreakout = (
   
   // StochRSI should be moving in trade direction
   const stochDirectionOk = isLong 
-    ? (stochK1h > 30 && stochK1h < 80)  // Not oversold, not extreme overbought
-    : (stochK1h < 70 && stochK1h > 20);  // Not overbought, not extreme oversold
+    ? (stochK1h > 30 && stochK1h < 80)
+    : (stochK1h < 70 && stochK1h > 20);
   
   if (!macdExpanding && !momentumBuilding && !stochDirectionOk) {
-    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["No momentum building for squeeze breakout"] };
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: [`Momentum not building (state=${momentumState})`], checkDetails };
   }
   
   if (macdExpanding) {
@@ -1924,10 +1961,28 @@ export const isValidSqueezeBreakout = (
     reasons.push(`Momentum ${momentum.state}`);
   }
   
+  // v1.1 NEW: Condition 3.5 - ADX slope must be rising (≥ 0.05)
+  // This prevents fake squeezes that never expand
+  const MIN_ADX_SLOPE_FOR_SQUEEZE = 0.05;
+  checkDetails.slopeOk = adxSlope >= MIN_ADX_SLOPE_FOR_SQUEEZE;
+  
+  if (adxSlope < MIN_ADX_SLOPE_FOR_SQUEEZE) {
+    return { 
+      isValid: false, 
+      confidence: 0, 
+      direction: null, 
+      positionSizeMultiplier: 1.0, 
+      reasons: [`ADX slope too flat (${adxSlope.toFixed(3)} < ${MIN_ADX_SLOPE_FOR_SQUEEZE}) - squeeze may not expand`], 
+      checkDetails 
+    };
+  }
+  confidence += 10;
+  reasons.push(`ADX slope rising (${adxSlope.toFixed(3)} ≥ ${MIN_ADX_SLOPE_FOR_SQUEEZE})`);
+  
   // Condition 4: No reversal divergence (critical for squeeze entries)
   const hasDivergence = momentum.hasDivergence ?? false;
   if (hasDivergence) {
-    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["Divergence detected - not safe for squeeze entry"] };
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["MACD divergence detected - not safe for squeeze entry"], checkDetails };
   }
   confidence += 10;
   reasons.push("No reversal divergence");
@@ -1941,7 +1996,7 @@ export const isValidSqueezeBreakout = (
     : trend4h === "bullish";
   
   if (htfOpposing) {
-    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: [`4h trend (${trend4h}) opposes ${intendedDirection} direction`] };
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: [`4h trend (${trend4h}) opposes ${intendedDirection} direction`], checkDetails };
   }
   
   // Bonus: 1h trend aligned
@@ -1954,7 +2009,7 @@ export const isValidSqueezeBreakout = (
   // Final validation: confidence must be >= 60 for squeeze breakout
   const isValid = confidence >= 60;
   
-  // Squeeze breakout entries get 60-70% position size (reduced risk for ADX < 20 entries)
+  // v1.1: Squeeze breakout entries get 0.65x position size
   const positionSizeMultiplier = isValid ? 0.65 : 1.0;
   
   if (isValid) {
@@ -1966,7 +2021,119 @@ export const isValidSqueezeBreakout = (
     confidence,
     direction: isValid ? intendedDirection : null,
     positionSizeMultiplier,
-    reasons
+    reasons,
+    checkDetails,
+  };
+};
+
+// ============= EARLY IGNITION EXCEPTION (v1.1) =============
+// Purpose: Allow entries in emerging trends before ADX fully registers the move
+// Conditions: EARLY_TREND regime + ADX slope > 0 + 4H ≥ 55% + 1H aligned with 4H
+export interface EarlyIgnitionResult {
+  isValid: boolean;
+  positionSizeMultiplier: number;
+  reasons: string[];
+  checkDetails: {
+    isEarlyTrendRegime: boolean;
+    regime: string;
+    slopeRising: boolean;
+    adxSlope: number;
+    htfConfidence: number;
+    is1hAligned: boolean;
+    trend4h: string;
+    trend1h: string;
+  };
+}
+
+export const checkEarlyIgnitionException = (
+  trendData: any,
+  intendedDirection: "long" | "short" | null,
+  regime: string
+): EarlyIgnitionResult => {
+  const reasons: string[] = [];
+  
+  // Initialize check details
+  const checkDetails = {
+    isEarlyTrendRegime: false,
+    regime: regime || 'UNKNOWN',
+    slopeRising: false,
+    adxSlope: 0,
+    htfConfidence: 0,
+    is1hAligned: false,
+    trend4h: 'neutral',
+    trend1h: 'neutral',
+  };
+  
+  if (!trendData || !intendedDirection) {
+    return { isValid: false, positionSizeMultiplier: 1.0, reasons: ["No trend data or direction"], checkDetails };
+  }
+  
+  const adxSlope = trendData?.volatility?.adxSlope ?? 0;
+  const timeframes = trendData?.timeframes || {};
+  const stochFilter4h = trendData?.stochFilter?.['4h'] || {};
+  const stochFilter1h = trendData?.stochFilter?.['1h'] || {};
+  
+  const trend4h = stochFilter4h.trend || timeframes['4h']?.trend || "neutral";
+  const conf4h = stochFilter4h.confidence || timeframes['4h']?.confidence || 0;
+  const trend1h = stochFilter1h.trend || timeframes['1h']?.trend || "neutral";
+  
+  // Update check details
+  checkDetails.adxSlope = adxSlope;
+  checkDetails.htfConfidence = conf4h;
+  checkDetails.trend4h = trend4h;
+  checkDetails.trend1h = trend1h;
+  
+  // Condition 1: Must be EARLY_TREND regime
+  const isEarlyTrendRegime = regime === 'EARLY_TREND';
+  checkDetails.isEarlyTrendRegime = isEarlyTrendRegime;
+  
+  if (!isEarlyTrendRegime) {
+    return { isValid: false, positionSizeMultiplier: 1.0, reasons: [`Regime is ${regime}, not EARLY_TREND`], checkDetails };
+  }
+  reasons.push(`Regime is EARLY_TREND (structural shift detected)`);
+  
+  // Condition 2: ADX slope must be rising (> 0)
+  const slopeRising = adxSlope > 0;
+  checkDetails.slopeRising = slopeRising;
+  
+  if (!slopeRising) {
+    return { isValid: false, positionSizeMultiplier: 1.0, reasons: [`ADX slope not rising (${adxSlope.toFixed(3)} ≤ 0)`], checkDetails };
+  }
+  reasons.push(`ADX slope rising (${adxSlope.toFixed(3)} > 0)`);
+  
+  // Condition 3: 4H confidence ≥ 55%
+  const MIN_4H_CONFIDENCE = 55;
+  if (conf4h < MIN_4H_CONFIDENCE) {
+    return { isValid: false, positionSizeMultiplier: 1.0, reasons: [`4H confidence ${conf4h.toFixed(0)}% < ${MIN_4H_CONFIDENCE}%`], checkDetails };
+  }
+  reasons.push(`4H confidence ${conf4h.toFixed(0)}% ≥ ${MIN_4H_CONFIDENCE}%`);
+  
+  // Condition 4: 1H must align with 4H direction
+  const isLong = intendedDirection === 'long';
+  const is1hAligned = isLong
+    ? (trend4h === 'bullish' && trend1h === 'bullish')
+    : (trend4h === 'bearish' && trend1h === 'bearish');
+  
+  checkDetails.is1hAligned = is1hAligned;
+  
+  if (!is1hAligned) {
+    return { 
+      isValid: false, 
+      positionSizeMultiplier: 1.0, 
+      reasons: [`1H (${trend1h}) not aligned with 4H (${trend4h}) for ${intendedDirection}`], 
+      checkDetails 
+    };
+  }
+  reasons.push(`1H aligned with 4H (both ${trend4h})`);
+  
+  // All conditions passed - Early Ignition allowed
+  reasons.push("Early Ignition exception approved");
+  
+  return {
+    isValid: true,
+    positionSizeMultiplier: 0.70,  // v1.1: 0.70x position size
+    reasons,
+    checkDetails,
   };
 };
 

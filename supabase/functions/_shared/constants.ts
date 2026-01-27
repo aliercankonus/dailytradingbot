@@ -25,6 +25,73 @@ export const ADX_THRESHOLDS = {
   EXHAUSTION: 45,  // ADX > 45 = exhaustion risk, increase reversal sensitivity
   // PHASE 1 FIX: Reversal override block threshold
   REVERSAL_BLOCK: 30,  // No reversals allowed when ADX >= 30 (strong trend)
+  // V1.1: Absolute floor for ADX gate - no exceptions below this
+  ABSOLUTE_FLOOR: 18,
+} as const;
+
+// ============= ADX GATE V1.1 PARAMETERS =============
+// v1.1 Minimal Gate: Role discipline - only answers "Is there market energy?"
+// REMOVED in v1.1: 1H Fallback, Neutral 4H Handling, Mean Reversion Override, 
+// Quiet Trend Bypass, Low ADX Trend Exception (moved to dedicated handlers)
+export const ADX_GATE_V1_1 = {
+  ENABLED: true,
+  
+  // ===== TIER 0: ABSOLUTE FLOOR (NO EXCEPTIONS) =====
+  // ADX < 18 = structural no-trend, hard block
+  HARD_FLOOR: 18,
+  
+  // ===== TRANSITIONAL ZONE (18-22) =====
+  // Only 2 exception paths allowed: Squeeze Expansion + Early Ignition
+  TRANSITIONAL_MIN: 18,
+  TRANSITIONAL_MAX: 22,
+  
+  // ===== SQUEEZE EXPANSION EXCEPTION (Tier 2) =====
+  // Purpose: Allow entries during BB compression breakouts where ADX hasn't yet responded
+  SQUEEZE_EXPANSION: {
+    ENABLED: true,
+    // BB Width must be compressed (< 20th percentile - checked via squeeze flag)
+    REQUIRE_BB_COMPRESSED: true,
+    // %B must be at band edge (≤20% for short, ≥80% for long)
+    LONG_MIN_PERCENT_B: 80,
+    SHORT_MAX_PERCENT_B: 20,
+    // Momentum state must be 'building' or 'confirmed'
+    VALID_MOMENTUM_STATES: ['building', 'confirmed'] as string[],
+    // ADX slope must be rising (not flat or falling) - key v1.1 addition
+    MIN_ADX_SLOPE: 0.05,
+    // No MACD divergence allowed
+    BLOCK_ON_DIVERGENCE: true,
+    // Position size multiplier for squeeze expansion entries
+    POSITION_MULTIPLIER: 0.65,
+  },
+  
+  // ===== EARLY IGNITION EXCEPTION (Tier 3) =====
+  // Purpose: Allow entries in emerging trends before ADX fully registers the move
+  EARLY_IGNITION: {
+    ENABLED: true,
+    // Regime must be EARLY_TREND (structural shift detected)
+    REQUIRE_EARLY_TREND_REGIME: true,
+    // ADX slope must be rising (> 0, not just flat)
+    MIN_ADX_SLOPE: 0,
+    // 4H confidence must show emerging structure
+    MIN_4H_CONFIDENCE: 55,
+    // 1H must align with 4H direction
+    REQUIRE_1H_4H_ALIGNMENT: true,
+    // Position size multiplier for early ignition entries
+    POSITION_MULTIPLIER: 0.70,
+  },
+  
+  // ===== ADAPTIVE THRESHOLDS BY REGIME =====
+  // ADX must be >= this threshold for regime to allow normal entry
+  ADAPTIVE_THRESHOLDS: {
+    RANGE: 22,        // Ranging markets need higher ADX to confirm trend
+    EARLY_TREND: 20,  // Emerging trends can enter earlier
+    STRONG_TREND: 18, // Strong trends are self-confirming
+    EXHAUSTION: 20,   // Exhaustion requires caution
+  } as Record<string, number>,
+  
+  // ===== LOGGING =====
+  LOG_GATE_CHECKS: true,
+  LOG_EXCEPTION_DETAILS: true,
 } as const;
 
 // ============= ADX PHASE STATE MACHINE =============
