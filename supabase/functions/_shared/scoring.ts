@@ -1207,10 +1207,16 @@ const countOpposingStochSignals = (trendData: any, intendedDirection: string): {
   return { opposingCrossCount, extremeCount, crossTimeframes, extremeTimeframes };
 };
 
+// Options for calculateUnifiedReversalScore
+interface ReversalScoreOptions {
+  stochRSITier2Bypassed?: boolean;  // FIX #2: If true, cap StochRSI contribution at 10 instead of 20
+}
+
 export const calculateUnifiedReversalScore = (
   trendData: any, 
   signalType: string,
-  symbol: string = "unknown"
+  symbol: string = "unknown",
+  options: ReversalScoreOptions = {}
 ): UnifiedReversalResult => {
   const reasons: string[] = [];
   let totalScore = 0;
@@ -1489,8 +1495,15 @@ export const calculateUnifiedReversalScore = (
   // PHASE 4: Apply overall StochRSI contribution cap
   // Sum all StochRSI-related components and cap at MAX_STOCHRSI_PENALTY (20)
   // This ensures StochRSI alone can NEVER push exhaustion over block threshold
+  // FIX #2 (Audit): Use stricter cap (10) when Tier 2 was already bypassed to prevent double punishment
   const rawTotalStochRSI = breakdown.stochRsiScore + breakdown.stochRsiZoneScore + breakdown.timeInExtremeScore;
-  const cappedTotalStochRSI = Math.min(rawTotalStochRSI, STOCHRSI_DYNAMIC_PARAMS.MAX_STOCHRSI_PENALTY);
+  
+  // Determine which cap to use based on Tier 2 bypass status
+  const effectiveStochRSICap = options.stochRSITier2Bypassed 
+    ? STOCHRSI_DYNAMIC_PARAMS.TIER2_BYPASSED_STOCHRSI_CAP  // 10 - stricter cap
+    : STOCHRSI_DYNAMIC_PARAMS.MAX_STOCHRSI_PENALTY;        // 20 - default cap
+  
+  const cappedTotalStochRSI = Math.min(rawTotalStochRSI, effectiveStochRSICap);
   
   // Calculate how much to reduce each component proportionally if cap is hit
   if (rawTotalStochRSI > cappedTotalStochRSI) {
@@ -1498,7 +1511,12 @@ export const calculateUnifiedReversalScore = (
     breakdown.stochRsiScore = Math.round(breakdown.stochRsiScore * reductionRatio);
     breakdown.stochRsiZoneScore = Math.round(breakdown.stochRsiZoneScore * reductionRatio);
     breakdown.timeInExtremeScore = Math.round(breakdown.timeInExtremeScore * reductionRatio);
-    reasons.push(`PHASE 4 CAP: Total StochRSI ${rawTotalStochRSI} → ${cappedTotalStochRSI} (MAX=${STOCHRSI_DYNAMIC_PARAMS.MAX_STOCHRSI_PENALTY})`);
+    
+    if (options.stochRSITier2Bypassed) {
+      reasons.push(`FIX #2: StochRSI capped at ${effectiveStochRSICap} (Tier 2 bypassed) - ${rawTotalStochRSI} → ${cappedTotalStochRSI}`);
+    } else {
+      reasons.push(`PHASE 4 CAP: Total StochRSI ${rawTotalStochRSI} → ${cappedTotalStochRSI} (MAX=${effectiveStochRSICap})`);
+    }
   }
   
   // Calculate total with ADX weight - PHASE 3/4: Include time-in-extreme (now capped)

@@ -139,8 +139,11 @@ FUNCTION checkTier2StandardStochRSI(stochK4h, percentB, derivedDirection, adx, r
       canBypass = adx >= BYPASS_MIN_ADX AND reversalScore < BYPASS_MAX_REVERSAL_SCORE
       
       IF canBypass:
-        LOG "TIER 2 bypassed: ADX={adx} >= 35, reversalScore={reversalScore} < 45"
-        RETURN PASS with positionMultiplier = BYPASS_POSITION_CAP
+        // FIX #2 (Audit): Re-calculate reversal score with stochRSITier2Bypassed=true
+        // This caps StochRSI contribution at +10 instead of +20 to prevent double punishment
+        bypassedReversalScore = calculateUnifiedReversalScore(trendData, "long", symbol, { stochRSITier2Bypassed: true })
+        LOG "TIER 2 bypassed: ADX={adx} >= 35, reversalScore={reversalScore}→{bypassedReversalScore} (FIX#2)"
+        RETURN PASS with positionMultiplier = BYPASS_POSITION_CAP, reversalMultiplier = bypassedReversalScore.positionSizeMultiplier
       
       REJECT {
         gate: "TIER 2: STANDARD_HTF_OVERBOUGHT",
@@ -164,8 +167,11 @@ FUNCTION checkTier2StandardStochRSI(stochK4h, percentB, derivedDirection, adx, r
       canBypass = adx >= BYPASS_MIN_ADX AND reversalScore < BYPASS_MAX_REVERSAL_SCORE
       
       IF canBypass:
-        LOG "TIER 2 bypassed: ADX={adx} >= 35, reversalScore={reversalScore} < 45"
-        RETURN PASS with positionMultiplier = BYPASS_POSITION_CAP
+        // FIX #2 (Audit): Re-calculate reversal score with stochRSITier2Bypassed=true
+        // This caps StochRSI contribution at +10 instead of +20 to prevent double punishment
+        bypassedReversalScore = calculateUnifiedReversalScore(trendData, "short", symbol, { stochRSITier2Bypassed: true })
+        LOG "TIER 2 bypassed: ADX={adx} >= 35, reversalScore={reversalScore}→{bypassedReversalScore} (FIX#2)"
+        RETURN PASS with positionMultiplier = BYPASS_POSITION_CAP, reversalMultiplier = bypassedReversalScore.positionSizeMultiplier
       
       REJECT {
         gate: "TIER 2: STANDARD_HTF_OVERSOLD",
@@ -850,4 +856,6 @@ FUNCTION calculateUnifiedReversalScore(indicators):
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2 | 2025-01-27 | **FIX #2 (Audit)**: Added `stochRSITier2Bypassed` flag to `calculateUnifiedReversalScore`. When Tier 2 bypass is applied, StochRSI contribution capped at +10 (vs default +20) to prevent double punishment. |
+| 1.1 | 2025-01-27 | **FIX #4 (Audit)**: Added exception depth tracking to Path 5 (Premium Overrides) in NO_MOMENTUM_CONFIRMATION gate. |
 | 1.0 | 2025-01-27 | Initial comprehensive pseudocode documentation |

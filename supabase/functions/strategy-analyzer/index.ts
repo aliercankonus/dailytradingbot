@@ -6012,8 +6012,13 @@ serve(async (req) => {
             strongTrendHTFBypassApplied = true;
             trendContinuationPositionMultiplier = getBypassPositionMultiplier();
             const bypassType = stealthHTFBypassPath ? 'STEALTH_TREND' : isParabolicMode ? 'PARABOLIC' : highADXBypassPath ? 'HIGH_ADX' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
+            
+            // FIX #2 (Audit): Re-calculate reversal score with stricter StochRSI cap to prevent double punishment
+            const bypassedReversalScore = calculateUnifiedReversalScore(trendData, trend, symbol, { stochRSITier2Bypassed: true });
+            reversalPositionMultiplier = bypassedReversalScore.positionSizeMultiplier;
+            
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ${stealthHTFBypassPath ? '🕵️' : ''} HTF BYPASS [${bypassType}]: Allowing SHORT at 4h oversold`);
-            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}, exhausted=${isExhausted}${stealthHTFBypassPath ? `, stealth_drift=${stealthTrendHTF.driftPercent?.toFixed(2) || 0}%, stealth_score=${stealthTrendHTF.stealthScore}` : ''}`);
+            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}→${bypassedReversalScore.score} (FIX#2), exhausted=${isExhausted}${stealthHTFBypassPath ? `, stealth_drift=${stealthTrendHTF.driftPercent?.toFixed(2) || 0}%, stealth_score=${stealthTrendHTF.stealthScore}` : ''}`);
             logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
           } else {
             rejectedByHardGates++;
@@ -6072,8 +6077,13 @@ serve(async (req) => {
             strongTrendHTFBypassApplied = true;
             trendContinuationPositionMultiplier = getBypassPositionMultiplier();
             const bypassType = stealthHTFBypassPath ? 'STEALTH_TREND' : isParabolicMode ? 'PARABOLIC' : highADXBypassPath ? 'HIGH_ADX' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
+            
+            // FIX #2 (Audit): Re-calculate reversal score with stricter StochRSI cap to prevent double punishment
+            const bypassedReversalScore = calculateUnifiedReversalScore(trendData, trend, symbol, { stochRSITier2Bypassed: true });
+            reversalPositionMultiplier = bypassedReversalScore.positionSizeMultiplier;
+            
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ${stealthHTFBypassPath ? '🕵️' : ''} HTF BYPASS [${bypassType}]: Allowing LONG at 4h overbought`);
-            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}, exhausted=${isExhausted}${stealthHTFBypassPath ? `, stealth_drift=${stealthTrendHTF.driftPercent?.toFixed(2) || 0}%, stealth_score=${stealthTrendHTF.stealthScore}` : ''}`);
+            logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}→${bypassedReversalScore.score} (FIX#2), exhausted=${isExhausted}${stealthHTFBypassPath ? `, stealth_drift=${stealthTrendHTF.driftPercent?.toFixed(2) || 0}%, stealth_score=${stealthTrendHTF.stealthScore}` : ''}`);
             logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
           } else {
             rejectedByHardGates++;
