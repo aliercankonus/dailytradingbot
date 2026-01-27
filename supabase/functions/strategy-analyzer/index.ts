@@ -7885,8 +7885,10 @@ serve(async (req) => {
         
         // ============= EXCEPTION BUDGET TRACKING =============
         // Track which exception path is used (max 1 per signal to prevent stacking)
+        // FIX #4 (Audit): Add exceptionDepth counter to ALL paths including Path 5
         let noMomentumExceptionUsed: NoMomentumExceptionType = null;
         let noMomentumExceptionMultiplier = 1.0;
+        let noMomentumExceptionDepth = 0;  // Tracks total exceptions consumed
         
         // ============= PREMIUM OVERRIDE DIRECTION BIAS =============
         // Instead of directly setting direction, premium overrides set a "bias"
@@ -7913,8 +7915,9 @@ serve(async (req) => {
             // Mark as first exception if exception budget enabled
             if (NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET && !noMomentumExceptionUsed) {
               noMomentumExceptionUsed = "STOCHRSI_ADX_ALIGNMENT";
+              noMomentumExceptionDepth++;  // FIX #4: Increment exception depth
               if (NO_MOMENTUM_GATE_PARAMS.LOG_EXCEPTION_USAGE) {
-                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using STOCHRSI_ADX_ALIGNMENT as first exception`);
+                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using STOCHRSI_ADX_ALIGNMENT as exception #${noMomentumExceptionDepth}`);
               }
             }
             
@@ -7956,8 +7959,9 @@ serve(async (req) => {
             strongTrendExceptionApplied = true;
             if (NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET && !noMomentumExceptionUsed) {
               noMomentumExceptionUsed = "STRONG_TREND";
+              noMomentumExceptionDepth++;  // FIX #4: Increment exception depth
               if (NO_MOMENTUM_GATE_PARAMS.LOG_EXCEPTION_USAGE) {
-                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using STRONG_TREND as first exception (ADX=${adx.toFixed(1)})`);
+                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using STRONG_TREND as exception #${noMomentumExceptionDepth} (ADX=${adx.toFixed(1)})`);
               }
             }
           } else {
@@ -7975,8 +7979,9 @@ serve(async (req) => {
             noMomentumExceptionMultiplier = 0.70;  // Standard acceleration position size
             if (NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET && !noMomentumExceptionUsed) {
               noMomentumExceptionUsed = "TREND_ACCELERATION";
+              noMomentumExceptionDepth++;  // FIX #4: Increment exception depth
               if (NO_MOMENTUM_GATE_PARAMS.LOG_EXCEPTION_USAGE) {
-                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using TREND_ACCELERATION as first exception (${priceMove.toFixed(1)}% move)`);
+                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using TREND_ACCELERATION as exception #${noMomentumExceptionDepth} (${priceMove.toFixed(1)}% move)`);
               }
             }
           } else {
@@ -7999,8 +8004,9 @@ serve(async (req) => {
             
             if (NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET && !noMomentumExceptionUsed) {
               noMomentumExceptionUsed = "PRE_MOMENTUM_STOCHRSI";
+              noMomentumExceptionDepth++;  // FIX #4: Path 5A now increments exception depth
               if (NO_MOMENTUM_GATE_PARAMS.LOG_EXCEPTION_USAGE) {
-                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using PRE_MOMENTUM_STOCHRSI as first exception (bias=${premiumOverrideBias})`);
+                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using PRE_MOMENTUM_STOCHRSI as exception #${noMomentumExceptionDepth} (bias=${premiumOverrideBias})`);
               }
             }
           } else {
@@ -8023,8 +8029,9 @@ serve(async (req) => {
             
             if (NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET && !noMomentumExceptionUsed) {
               noMomentumExceptionUsed = "SHORT_TERM_ALIGNMENT";
+              noMomentumExceptionDepth++;  // FIX #4: Path 5B now increments exception depth
               if (NO_MOMENTUM_GATE_PARAMS.LOG_EXCEPTION_USAGE) {
-                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using SHORT_TERM_ALIGNMENT as first exception (bias=${premiumOverrideBias})`);
+                logger.forSymbol(symbol).debug(`📊 EXCEPTION_BUDGET: Using SHORT_TERM_ALIGNMENT as exception #${noMomentumExceptionDepth} (bias=${premiumOverrideBias})`);
               }
             }
           } else {
@@ -8073,10 +8080,11 @@ serve(async (req) => {
                 adxFloorEnabled: NO_MOMENTUM_GATE_PARAMS.ENABLE_PATH_2_ADX_FLOOR,
                 adxFloorRequired: NO_MOMENTUM_GATE_PARAMS.STATE_PRESENCE_MIN_ADX,
               },
-              // Exception budget diagnostics
+              // Exception budget diagnostics (FIX #4: Now tracks depth)
               exceptionBudget: {
                 enabled: NO_MOMENTUM_GATE_PARAMS.ENABLE_EXCEPTION_BUDGET,
                 exceptionUsed: noMomentumExceptionUsed,
+                exceptionDepth: noMomentumExceptionDepth,
                 maxDepth: NO_MOMENTUM_GATE_PARAMS.MAX_EXCEPTION_DEPTH,
               },
               // Path status
