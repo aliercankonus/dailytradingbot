@@ -2224,7 +2224,10 @@ serve(async (req) => {
       | 'MOMENTUM_FLIP_COOLDOWN'
       // NEW: Trend reversal and move exhausted reversal gates
       | 'MOVE_EXHAUSTED_REVERSAL'
-      | 'TREND_REVERSAL_DETECTION';
+      | 'TREND_REVERSAL_DETECTION'
+      // v1.1: ADX Gate minimal spec exceptions
+      | 'SQUEEZE_EXPANSION_V11'
+      | 'EARLY_IGNITION_V11';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -7325,579 +7328,199 @@ serve(async (req) => {
           continue;
         }
         
-        // ============= NEW: QUIET TREND DETECTION EXCEPTION =============
-        // Allows entries when ADX is low but price is grinding consistently in one direction
-        // Phase 1: BTC/ETH only, 50% position size, strict safety gates
-        let qualifiesForQuietTrend = false;
-        let quietTrendPositionMultiplier = 1.0;
-        let quietTrendReason = "";
+        // ============= ADX GATE v1.1: MINIMAL SPEC =============
+        // v1.1 Role Discipline: Only answers "Is there enough market energy to trade?"
+        // REMOVED in v1.1: QUIET_TREND, STEALTH_TREND, LOW_ADX_TREND_EXCEPTION
+        // Only 2 exception paths allowed: Squeeze Expansion + Early Ignition
         
-        if (QUIET_TREND_PARAMS.ENABLED && adx < ADX_THRESHOLDS.MINIMUM) {
-          // Check symbol allowed (Phase 1: BTC/ETH only)
-          const isSymbolAllowed = QUIET_TREND_PARAMS.ALLOWED_SYMBOLS.includes(symbol);
-          
-          // Check ADX in quiet range (15-22)
-          const isADXInQuietRange = adx >= QUIET_TREND_PARAMS.MIN_ADX && adx <= QUIET_TREND_PARAMS.MAX_ADX;
-          
-          // Check ADX not falling sharply (block end-of-move entries)
-          const adxSlopeForQuiet = fullAdxResult.adxSlope ?? 0;
-          const prevAdxApprox = adx - (adxSlopeForQuiet * 5); // Approximate previous ADX
-          const adxDrop = prevAdxApprox - adx;
-          const isADXStable = !QUIET_TREND_PARAMS.REQUIRE_ADX_NOT_FALLING || adxDrop <= QUIET_TREND_PARAMS.MAX_ADX_DROP;
-          
-          // Check price move threshold (1.5%+ in 6 hours)
-          const priceActionForQuiet = trendData.priceActionMomentum;
-          const priceMoveForQuiet = Math.abs(priceActionForQuiet?.movePercent || 0);
-          const hasSufficientMove = priceMoveForQuiet >= QUIET_TREND_PARAMS.MIN_PRICE_MOVE_PERCENT;
-          
-          // Check slope (move per hour) - ensures sustained move, not single bar
-          const movePerHour = priceMoveForQuiet / QUIET_TREND_PARAMS.LOOKBACK_HOURS;
-          const hasSufficientSlope = movePerHour >= QUIET_TREND_PARAMS.MIN_AVG_MOVE_PER_HOUR;
-          
-          // Check micro-trend direction aligns with intended trade
-          const microTrendDir = trendData.microTrend?.direction || "neutral";
-          const microTrendAligns = (intendedTradeDirection === "long" && microTrendDir === "bullish") ||
-                                   (intendedTradeDirection === "short" && microTrendDir === "bearish");
-          
-          // Check micro-trend persistence (3+ consecutive readings)
-          // Using existing persistence data from calculate-trend (persistence is a number, not object)
-          const microTrendPersistence = trendData.microTrend?.persistence ?? 0;
-          const hasSufficientPersistence = microTrendPersistence >= QUIET_TREND_PARAMS.MIN_CONSECUTIVE_READINGS;
-          
-          // Check 4H not opposing
-          const trend4hForQuiet = stochFilterTrend4h;
-          const is4hOpposing = (intendedTradeDirection === "long" && trend4hForQuiet === "bearish") ||
-                               (intendedTradeDirection === "short" && trend4hForQuiet === "bullish");
-          const htfGatePasses = !QUIET_TREND_PARAMS.BLOCK_4H_OPPOSING || !is4hOpposing;
-          
-          // Check StochRSI not at extremes (don't chase)
-          let stochRsiSafeForQuiet = true;
-          if (QUIET_TREND_PARAMS.BLOCK_IF_STOCHRSI_EXTREME) {
-            if (intendedTradeDirection === "long" && stochRsiK4h > QUIET_TREND_PARAMS.MAX_STOCHRSI_K_LONG) {
-              stochRsiSafeForQuiet = false;
-            }
-            if (intendedTradeDirection === "short" && stochRsiK4h < QUIET_TREND_PARAMS.MIN_STOCHRSI_K_SHORT) {
-              stochRsiSafeForQuiet = false;
-            }
-          }
-          
-          // Check volume confirmation if required
-          const volume1h = trendData.volume?.["1h"];
-          const volumeRatioForQuiet = volume1h?.volumeRatio ?? 1.0;
-          const volumeConfirms = !QUIET_TREND_PARAMS.REQUIRE_VOLUME_CONFIRM || volumeRatioForQuiet >= 0.8;
-          
-          // Build debug info for logging
-          const quietTrendChecks = {
-            symbol: isSymbolAllowed,
-            adxRange: isADXInQuietRange,
-            adxStable: isADXStable,
-            priceMove: hasSufficientMove,
-            slope: hasSufficientSlope,
-            microTrendAligns,
-            persistence: hasSufficientPersistence,
-            htfOK: htfGatePasses,
-            stochRsiSafe: stochRsiSafeForQuiet,
-            volumeOK: volumeConfirms,
-          };
-          
-          // All conditions must pass for quiet trend exception
-          if (isSymbolAllowed && isADXInQuietRange && isADXStable && hasSufficientMove && 
-              hasSufficientSlope && microTrendAligns && hasSufficientPersistence && 
-              htfGatePasses && stochRsiSafeForQuiet && volumeConfirms) {
-            qualifiesForQuietTrend = true;
-            quietTrendPositionMultiplier = QUIET_TREND_PARAMS.POSITION_SIZE_MULTIPLIER;
-            quietTrendReason = `Quiet ${intendedTradeDirection} trend: ${priceMoveForQuiet.toFixed(1)}% move, ADX=${adx.toFixed(1)}, slope=${movePerHour.toFixed(2)}%/hr, persistence=${microTrendPersistence}`;
-            
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🌊 QUIET TREND EXCEPTION: ${quietTrendReason}`);
-            logger.forSymbol(symbol).info(`   Checks: ${JSON.stringify(quietTrendChecks)}`);
-            logger.forSymbol(symbol).info(`   Position size reduced to ${(quietTrendPositionMultiplier * 100).toFixed(0)}%`);
-          } else {
-            // Log why quiet trend was not allowed (for debugging)
-            const failedChecks = Object.entries(quietTrendChecks)
-              .filter(([_, v]) => !v)
-              .map(([k, _]) => k);
-            logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} Quiet trend check failed: ${failedChecks.join(", ")}`);
-            logger.forSymbol(symbol).debug(`   Details: ADX=${adx.toFixed(1)}, move=${priceMoveForQuiet.toFixed(1)}%, slope=${movePerHour.toFixed(2)}%/hr, microTrend=${microTrendDir}/${microTrendPersistence}, 4h=${trend4hForQuiet}, K=${stochRsiK4h.toFixed(1)}`);
-          }
-        }
+        // v1.1: Track ADX gate results
+        let adxGateV11Passed = false;
+        let adxGateV11Exception: 'SQUEEZE_EXPANSION' | 'EARLY_IGNITION' | 'ADAPTIVE_PASS' | null = null;
+        let adxGateV11PositionMultiplier = 1.0;
+        let adxGateV11Reason = "";
         
-        // GATE 1: ADX must be >= threshold for any trade (trend strength required)
-        // PHASE 2: Use regime-adaptive ADX threshold instead of fixed MINIMUM
-        // EXCEPTION 1: Squeeze breakout allows ADX 18-20 if strict conditions are met
-        // EXCEPTION 2: Quiet trend allows ADX 15-22 if price is grinding consistently
-        // EXCEPTION 3: Stealth trend allows ADX 12-22 if cumulative drift is significant
-        // EXCEPTION 4: LOW_ADX_TREND_EXCEPTION allows ADX 15-20 with strong HTF + structure
+        const adxGateEnabled = ADX_GATE_V1_1.ENABLED;
+        // v1.1: ADX slope for exception checks
+        const adxSlopeV11 = fullAdxResult.adxSlope ?? 0;
+        
+        // ============= ADX GATE v1.1: MINIMAL SPEC IMPLEMENTATION =============
+        // Role Discipline: Only answers "Is there enough market energy to trade?"
+        // Only 2 exception paths allowed: Squeeze Expansion + Early Ignition
+        // REMOVED in v1.1: QUIET_TREND, STEALTH_TREND, LOW_ADX_TREND_EXCEPTION
+        
         let squeezeBreakoutActive = false;
         let squeezePositionMultiplier = 1.0;
-        let stealthTrendBypassActive = false;
-        let stealthTrendPositionMultiplier = 1.0;
-        let lowAdxTrendExceptionActive = false;
-        let lowAdxTrendPositionMultiplier = 1.0;
-        // PHASE 2: Price action early entry tracking
-        let priceActionEarlyEntryActive = false;
-        let priceActionEarlyPositionMultiplier = 1.0;
+        let earlyIgnitionActive = false;
+        let earlyIgnitionPositionMultiplier = 1.0;
         
-        // PHASE 2: Get regime-adaptive ADX threshold
-        const effectiveAdxThreshold = getAdaptiveAdxThreshold(regime.regime);
-        // Always log at INFO level to verify regime-adaptive threshold is working
-        logger.forSymbol(symbol).info(
-          `${LOG_CATEGORIES.GATE} REGIME_ADAPTIVE: threshold=${effectiveAdxThreshold} (regime=${regime.regime}), ADX=${adx.toFixed(1)}, fixed=${ADX_THRESHOLDS.MINIMUM}`
-        );
+        // Get the v1.1 adaptive threshold based on regime
+        const v11AdaptiveThreshold = ADX_GATE_V1_1.ADAPTIVE_THRESHOLDS[regime.regime] ?? 
+          ADX_GATE_V1_1.ADAPTIVE_THRESHOLDS.RANGE;
         
-        // Extract stealth trend data from trend analysis
-        const stealthTrend = trendData.stealthTrend || { 
-          detected: false, 
-          adxBypassAllowed: false,
-          htfBypassAllowed: false,
-          direction: 'neutral',
-          driftPercent: 0,
-          stealthScore: 0,
-          positionMultiplier: 1.0,
-          stopMultiplier: 1.0,
-          reason: 'No stealth trend data'
-        };
+        // Log v1.1 gate check
+        if (ADX_GATE_V1_1.LOG_GATE_CHECKS) {
+          logger.forSymbol(symbol).info(
+            `${LOG_CATEGORIES.GATE} ADX_GATE_v1.1: ADX=${adx.toFixed(1)}, slope=${adxSlopeV11.toFixed(3)}, ` +
+            `regime=${regime.regime}, adaptiveThreshold=${v11AdaptiveThreshold}, hardFloor=${ADX_GATE_V1_1.HARD_FLOOR}`
+          );
+        }
         
-        // Check if stealth trend direction matches intended trade direction
-        const stealthDirectionMatches = (
-          (intendedTradeDirection === "short" && stealthTrend.direction === "bearish") ||
-          (intendedTradeDirection === "long" && stealthTrend.direction === "bullish")
-        );
-        
-        // Use regime-adaptive threshold instead of fixed MINIMUM
-        if (adx < effectiveAdxThreshold) {
-          // ============= PHASE 1: LOW ADX TREND EXCEPTION =============
-          // Check if HTF is strong AND structure confirms direction (not just indicators)
-          let lowAdxExceptionAllowed = false;
-          let lowAdxExceptionReason = "";
-          let lowAdxPositionMultiplier: number = LOW_ADX_TREND_EXCEPTION_PARAMS.POSITION_SIZE_MULTIPLIER;
-          
-          if (LOW_ADX_TREND_EXCEPTION_PARAMS.ENABLED && 
-              adx >= LOW_ADX_TREND_EXCEPTION_PARAMS.MIN_ADX && 
-              adx < LOW_ADX_TREND_EXCEPTION_PARAMS.MAX_ADX) {
-            
-            const htfConfidence = trendData?.timeframes?.['4h']?.confidence || 0;
-            const tf1hConfidence = trendData?.timeframes?.['1h']?.confidence || 0;
-            const trend4h = trendData?.timeframes?.['4h']?.trend || "neutral";
-            const trend1h = trendData?.timeframes?.['1h']?.trend || "neutral";
-            
-            // Check HTF requirements
-            const htfStrong = htfConfidence >= LOW_ADX_TREND_EXCEPTION_PARAMS.MIN_HTF_CONFIDENCE;
-            const tf1hStrong = tf1hConfidence >= LOW_ADX_TREND_EXCEPTION_PARAMS.MIN_1H_CONFIDENCE;
-            
-            // CRITICAL FIX: Allow neutral 4h if 1h is strongly directional
-            const allowNeutral4h = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).ALLOW_NEUTRAL_4H || false;
-            const neutral4hMin1h = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).NEUTRAL_4H_MIN_1H_CONFIDENCE || 65;
-            
-            // Standard alignment: both agree and both directional
-            const standardTrendsAligned = trend4h === trend1h && trend4h !== "neutral";
-            // NEW: Neutral 4h fallback - 4h is neutral but 1h is strongly directional
-            const neutral4hFallbackAligned = allowNeutral4h && 
-              trend4h === "neutral" && 
-              trend1h !== "neutral" && 
-              tf1hConfidence >= neutral4hMin1h;
-            const trendsAligned = standardTrendsAligned || neutral4hFallbackAligned;
-            const alignReason = standardTrendsAligned ? 'standard' : (neutral4hFallbackAligned ? 'neutral-4h-fallback' : 'failed');
-            
-            // CRITICAL FIX: Allow direction match from 1h when 4h is neutral
-            const standardDirectionMatch = (
-              (derivedDirection === "long" && trend4h === "bullish") ||
-              (derivedDirection === "short" && trend4h === "bearish")
-            );
-            const neutral4hDirectionMatch = trend4h === "neutral" && (
-              (derivedDirection === "long" && trend1h === "bullish") ||
-              (derivedDirection === "short" && trend1h === "bearish")
-            );
-            const htfMatchesDirection = standardDirectionMatch || neutral4hDirectionMatch;
-            const dirMatchReason = standardDirectionMatch ? '4h-match' : (neutral4hDirectionMatch ? '1h-match' : 'none');
-            
-            // 1h fallback - if 4h is moderate but 1h is very strong, still allow
-            const allow1hFallback = LOW_ADX_TREND_EXCEPTION_PARAMS.ALLOW_1H_FALLBACK || false;
-            const fallbackMin4h = LOW_ADX_TREND_EXCEPTION_PARAMS.FALLBACK_MIN_4H_CONFIDENCE || 60;
-            const fallbackMin1h = LOW_ADX_TREND_EXCEPTION_PARAMS.FALLBACK_MIN_1H_CONFIDENCE || 70;
-            
-            const htfOkViaFallback = allow1hFallback && 
-              htfConfidence >= fallbackMin4h && 
-              tf1hConfidence >= fallbackMin1h;
-            
-            // Either standard htfStrong OR fallback qualifies
-            const htfQualifies = htfStrong || htfOkViaFallback;
-            const htfQualifyReason = htfStrong ? 'standard' : (htfOkViaFallback ? '1h-fallback' : 'failed');
-            
-            // Check structure confirmation (HH/HL for LONG, LL/LH for SHORT)
-            const prices15m = trendData?.prices?.['15m'] || [];
-            const closePrices = prices15m.map((k: any) => parseFloat(k[4]));
-            const hasStructure = LOW_ADX_TREND_EXCEPTION_PARAMS.REQUIRE_STRUCTURE_CONFIRMATION
-              ? (derivedDirection === "long"
-                ? detectHigherHighLow(closePrices, LOW_ADX_TREND_EXCEPTION_PARAMS.STRUCTURE_LOOKBACK_BARS)
-                : detectLowerLowHigh(closePrices, LOW_ADX_TREND_EXCEPTION_PARAMS.STRUCTURE_LOOKBACK_BARS))
-              : true;
-            
-            // NEW: Structure fallback - if 1h is very strong + good price momentum, bypass structure
-            const allowStructureFallback = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).ALLOW_STRUCTURE_FALLBACK || false;
-            const structureFallbackMin1h = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).STRUCTURE_FALLBACK_MIN_1H || 70;
-            const structureFallbackMinMove = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).STRUCTURE_FALLBACK_MIN_MOVE || 0.5;
-            const priceMove = Math.abs(momentum?.priceChange || 0);
-            
-            const structureFallbackOk = allowStructureFallback && 
-              !hasStructure && 
-              tf1hConfidence >= structureFallbackMin1h && 
-              priceMove >= structureFallbackMinMove;
-            const structurePasses = hasStructure || structureFallbackOk;
-            const structureReason = hasStructure ? 'confirmed' : (structureFallbackOk ? 'fallback-1h-strong' : 'failed');
-            
-            // Check momentum not opposing
-            const momentumState = momentum?.state || "none";
-            const momentumNotOpposing = LOW_ADX_TREND_EXCEPTION_PARAMS.REQUIRE_MOMENTUM_NOT_OPPOSING
-              ? (momentumState !== "exhausted" && 
-                 !(momentumState === "confirmed" && !momentum?.confirms))
-              : true;
-            
-            // Check reversal score not elevated
-            const reversalScoreOk = unifiedReversal.score < LOW_ADX_TREND_EXCEPTION_PARAMS.MAX_REVERSAL_SCORE;
-            
-            // Apply extra position reduction if using neutral 4h fallback
-            if (neutral4hFallbackAligned) {
-              const neutral4hReduction = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).NEUTRAL_4H_POSITION_REDUCTION || 0.40;
-              lowAdxPositionMultiplier = Math.min(lowAdxPositionMultiplier, neutral4hReduction);
-            }
-            
-            // ============= TIERED ADX ZONE CHECK =============
-            // Transitional Zone (ADX 20-25) requires ADDITIONAL momentum confirmation
-            const coreZoneMaxAdx = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).CORE_ZONE_MAX_ADX || 20;
-            const transitionalMinAdx = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_ZONE_MIN_ADX || 20;
-            const transitionalMaxAdx = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_ZONE_MAX_ADX || 25;
-            
-            const isInTransitionalZone = adx >= transitionalMinAdx && adx < transitionalMaxAdx;
-            const isInCoreZone = adx < coreZoneMaxAdx;
-            
-            let transitionalZonePasses = true;
-            let transitionalReason = "";
-            
-            if (isInTransitionalZone) {
-              // Transitional zone requires additional confirmation
-              const requireMomentumExpanding = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_REQUIRE_MOMENTUM_EXPANDING ?? true;
-              const requireDirectionConsistent = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_REQUIRE_DIRECTION_CONSISTENT ?? true;
-              const requireNoHtfConflict = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_REQUIRE_NO_HTF_CONFLICT ?? true;
-              const transitionalMin1h = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_MIN_1H_CONFIDENCE || 60;
-              const transitionalPositionReduction = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_POSITION_REDUCTION || 0.45;
-              
-              // Check MACD expanding
-              const macdExpanding = trendData?.timeframes?.['1h']?.indicators?.macdExpanding === true;
-              const momentumExpandingOk = !requireMomentumExpanding || macdExpanding;
-              
-              // Check direction consistency - recent candles confirm direction
-              const consistentCandles = (LOW_ADX_TREND_EXCEPTION_PARAMS as any).TRANSITIONAL_CONSISTENT_CANDLES || 3;
-              const prices1h = trendData?.prices?.['1h'] || [];
-              const recentCloses = prices1h.slice(-5).map((k: any) => parseFloat(k[4]));
-              let directionConsistentCount = 0;
-              for (let i = 1; i < recentCloses.length; i++) {
-                const isUp = recentCloses[i] > recentCloses[i - 1];
-                if ((derivedDirection === "long" && isUp) || (derivedDirection === "short" && !isUp)) {
-                  directionConsistentCount++;
-                }
+        // ===== TIER 0: HARD FLOOR (NO EXCEPTIONS) =====
+        if (adx < ADX_GATE_V1_1.HARD_FLOOR) {
+          // Absolute block - no exceptions allowed below ADX 18
+          rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { 
+            gate: 'ADX_TOO_LOW', 
+            details: `ADX=${adx.toFixed(1)} < ${ADX_GATE_V1_1.HARD_FLOOR} (HARD FLOOR - no exceptions)` 
+          });
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `HARD GATE (v1.1): ADX ${adx.toFixed(1)} below absolute floor ${ADX_GATE_V1_1.HARD_FLOOR} - structural no-trend`,
+            { 
+              gate: "ADX_TOO_LOW",
+              tier: "TIER_0_HARD_FLOOR",
+              adx: adx.toFixed(1),
+              hardFloor: ADX_GATE_V1_1.HARD_FLOOR,
+              regime: regime.regime,
+              adxSlope: adxSlopeV11.toFixed(3),
+              derivedDirection,
+              // v1.1 bypass hints
+              bypassHints: {
+                needsADX: ADX_GATE_V1_1.HARD_FLOOR,
+                message: "No exceptions below ADX 18. Wait for market energy to build."
               }
-              const directionConsistentOk = !requireDirectionConsistent || directionConsistentCount >= consistentCandles;
-              
-              // Check no HTF conflict - 4h must not oppose 1h direction
-              const htfConflict = (
-                (trend1h === "bullish" && trend4h === "bearish") ||
-                (trend1h === "bearish" && trend4h === "bullish")
-              );
-              const noHtfConflictOk = !requireNoHtfConflict || !htfConflict;
-              
-              // Higher 1h confidence requirement for transitional zone
-              const tf1hStrongTransitional = tf1hConfidence >= transitionalMin1h;
-              
-              transitionalZonePasses = momentumExpandingOk && directionConsistentOk && noHtfConflictOk && tf1hStrongTransitional;
-              
-              if (transitionalZonePasses) {
-                // Apply transitional zone position reduction
-                lowAdxPositionMultiplier = Math.min(lowAdxPositionMultiplier, transitionalPositionReduction);
-                transitionalReason = `TRANSITIONAL_ZONE(ADX=${adx.toFixed(1)}): macdExp=${macdExpanding}, ` +
-                  `dirConsistent=${directionConsistentCount}/${consistentCandles}, noConflict=${!htfConflict}, 1h=${tf1hConfidence}%`;
-                logger.forSymbol(symbol).info(
-                  `${LOG_CATEGORIES.SUCCESS} 📊 TRANSITIONAL ZONE CONFIRMED: ${transitionalReason}`
-                );
-              } else {
-                transitionalReason = `TRANSITIONAL_ZONE FAILED: macdExp=${macdExpanding}(${momentumExpandingOk}), ` +
-                  `dirConsistent=${directionConsistentCount}/${consistentCandles}(${directionConsistentOk}), ` +
-                  `noConflict=${!htfConflict}(${noHtfConflictOk}), 1h=${tf1hConfidence}%(${tf1hStrongTransitional})`;
-                logger.forSymbol(symbol).info(
-                  `${LOG_CATEGORIES.GATE} 📊 ${transitionalReason}`
-                );
-              }
-            }
-            
-            // Final decision: base requirements + transitional zone requirements (if applicable)
-            const baseRequirementsMet = htfQualifies && tf1hStrong && trendsAligned && htfMatchesDirection && 
-                structurePasses && momentumNotOpposing && reversalScoreOk;
-            
-            if (baseRequirementsMet && transitionalZonePasses) {
-              lowAdxExceptionAllowed = true;
-              const zoneLabel = isInCoreZone ? "CORE" : "TRANSITIONAL";
-              lowAdxExceptionReason = `[${zoneLabel}] HTF=${htfConfidence}% (${htfQualifyReason}), 1h=${tf1hConfidence}%, ` +
-                `align=${alignReason}, dir=${dirMatchReason}, struct=${structureReason}` +
-                (isInTransitionalZone ? ` | ${transitionalReason}` : '');
-              
-              logger.forSymbol(symbol).info(
-                `${LOG_CATEGORIES.SUCCESS} 🎯 LOW_ADX_TREND_EXCEPTION: ADX=${adx.toFixed(1)} ` +
-                `allowed with HTF confirmation (${lowAdxExceptionReason})`
-              );
-              logger.forSymbol(symbol).debug(
-                `   → Direction=${derivedDirection}, 4h=${trend4h}/${htfConfidence}%, 1h=${trend1h}/${tf1hConfidence}%, ` +
-                `reversal=${unifiedReversal.score}, position=${(lowAdxPositionMultiplier * 100).toFixed(0)}%`
-              );
-              perSymbolGateAttribution.set(symbol, { gate: 'LOW_ADX_TREND_EXCEPTION', details: lowAdxExceptionReason });
-            } else {
-              // Log why exception didn't apply - INFO level for visibility
-              const failReason = !baseRequirementsMet 
-                ? `BASE FAILED: htf=${htfQualifies}(${htfConfidence}%/${htfQualifyReason}), ` +
-                  `1h=${tf1hStrong}(${tf1hConfidence}%), align=${trendsAligned}(${alignReason}), ` +
-                  `dir=${htfMatchesDirection}(${dirMatchReason}), struct=${structurePasses}(${structureReason}), ` +
-                  `momentum=${momentumNotOpposing}, reversal=${reversalScoreOk}(${unifiedReversal.score})`
-                : transitionalReason;
-              logger.forSymbol(symbol).info(
-                `${LOG_CATEGORIES.GATE} LOW_ADX_TREND_EXCEPTION check FAILED: ${failReason}`
-              );
-            }
-          }
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
+          );
+          continue;
+        }
+        
+        // ===== TRANSITIONAL ZONE (18-22): Only Squeeze or Early Ignition allowed =====
+        if (adx < v11AdaptiveThreshold) {
+          // ADX below adaptive threshold - check for v1.1 exceptions
+          const isInTransitionalZone = adx >= ADX_GATE_V1_1.TRANSITIONAL_MIN && adx < ADX_GATE_V1_1.TRANSITIONAL_MAX;
           
-          if (lowAdxExceptionAllowed) {
-            // Apply LOW_ADX_TREND_EXCEPTION - track position multiplier for later use
-            lowAdxTrendExceptionActive = true;
-            lowAdxTrendPositionMultiplier = lowAdxPositionMultiplier;
-          }
-          // NEW: Check if stealth trend exception applies (bypasses ADX gate for gradual grinds)
-          // Apply neutral persistence bonus to stealth score for evaluation
-          else {
-            const stealthScoreWithBonus = stealthTrend.stealthScore + 
-              (NEUTRAL_PERSISTENCE_PARAMS.APPLY_TO_STEALTH_TREND ? neutralPersistence.confidenceBonus : 0);
-            
-            // Allow bypass if original adxBypassAllowed OR if neutral bonus pushes score over threshold (50)
-            const stealthBypassAllowedWithBonus = stealthTrend.adxBypassAllowed || 
-              (stealthTrend.stealthScore < 50 && stealthScoreWithBonus >= 50 && adx >= 12);
-            
-            if (stealthTrend.detected && stealthBypassAllowedWithBonus && stealthDirectionMatches) {
-              // STEALTH TREND EXCEPTION - allow entry with reduced position size
-              stealthTrendBypassActive = true;
-              // If neutral bonus enabled the bypass, use more conservative position size
-              const neutralBonusEnabledBypass = !stealthTrend.adxBypassAllowed && stealthBypassAllowedWithBonus;
-              stealthTrendPositionMultiplier = neutralBonusEnabledBypass 
-                ? Math.min(stealthTrend.positionMultiplier, 0.35) // 35% max if neutral enabled it
-                : stealthTrend.positionMultiplier;
-              const neutralBonusMsg = neutralPersistence.confidenceBonus > 0 
-                ? `, neutralBonus=+${neutralPersistence.confidenceBonus}${neutralBonusEnabledBypass ? ' (ENABLED)' : ''}` 
-                : '';
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🕵️ STEALTH TREND BYPASS: ADX gate bypassed (ADX=${adx.toFixed(1)}, drift=${stealthTrend.driftPercent.toFixed(2)}%, score=${stealthScoreWithBonus}${neutralBonusMsg})`);
-              logger.forSymbol(symbol).info(`   → Direction=${stealthTrend.direction}, position=${(stealthTrendPositionMultiplier * 100).toFixed(0)}%, stopMultiplier=${stealthTrend.stopMultiplier}`);
-              perSymbolGateAttribution.set(symbol, { gate: 'STEALTH_TREND_ALLOWED', details: stealthTrend.reason });
-            }
-            // Check if quiet trend exception applies (bypasses ADX gate)
-            else if (qualifiesForQuietTrend) {
-              // QUIET TREND EXCEPTION - allow entry with reduced position size
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🌊 QUIET TREND BYPASS: Skipping ADX gate (ADX=${adx.toFixed(1)}) - ${quietTrendReason}`);
-              perSymbolGateAttribution.set(symbol, { gate: 'QUIET_TREND_ALLOWED', details: quietTrendReason });
-              // Position multiplier already set above
-            } else if (adx >= ADX_THRESHOLDS.SQUEEZE_MINIMUM) {
-            // Check for squeeze breakout exception (only if ADX >= 18)
+          // Check Squeeze Expansion Exception first
+          if (ADX_GATE_V1_1.SQUEEZE_EXPANSION.ENABLED && isInTransitionalZone) {
             const squeezeResult = isValidSqueezeBreakout(trendData, derivedDirection);
             
             if (squeezeResult.isValid) {
-              // SQUEEZE BREAKOUT EXCEPTION - allow entry with reduced position size
+              // Squeeze Expansion exception approved
               squeezeBreakoutActive = true;
-              squeezePositionMultiplier = squeezeResult.positionSizeMultiplier;
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} SQUEEZE BREAKOUT EXCEPTION - ADX ${adx.toFixed(1)} allowed (${squeezeResult.confidence}% confidence)`);
-              logger.forSymbol(symbol).debug(`   Squeeze reasons: ${squeezeResult.reasons.join(", ")}`);
-              logger.forSymbol(symbol).debug(`   Position size reduced to ${(squeezePositionMultiplier * 100).toFixed(0)}%`);
-            } else {
-              // Check if quiet trend exception was close but didn't qualify
-              const priceActionForQuiet = trendData.priceActionMomentum;
-              const priceMoveForQuiet = Math.abs(priceActionForQuiet?.movePercent || 0);
-              const quietTrendCloseMsg = priceMoveForQuiet >= 1.0 
-                ? `, quiet trend check: move=${priceMoveForQuiet.toFixed(1)}% (needs ${QUIET_TREND_PARAMS.MIN_PRICE_MOVE_PERCENT}%)`
-                : "";
+              squeezePositionMultiplier = ADX_GATE_V1_1.SQUEEZE_EXPANSION.POSITION_MULTIPLIER;
               
-              // Squeeze conditions not met - reject with ADX reason + squeeze failure reasons
-              rejectedByHardGates++;
-              perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW_NO_SQUEEZE', details: `ADX=${adx.toFixed(1)}, squeeze failed${quietTrendCloseMsg}` });
-              await logRejectionWithAI(
-                supabase, userId, symbol,
-                `HARD GATE: ADX too low (${adx.toFixed(1)} < ${effectiveAdxThreshold}) - squeeze breakout not valid: ${squeezeResult.reasons.join(", ")}${quietTrendCloseMsg}`,
-                { 
-                  gate: "ADX_TOO_LOW_NO_SQUEEZE",
-                  adx: adx.toFixed(1),
-                  adxRequired: effectiveAdxThreshold,
-                  adxFixedMinimum: ADX_THRESHOLDS.MINIMUM,
-                  regimeAdaptive: REGIME_ADAPTIVE_ADX_PARAMS.ENABLED,
-                  regime: regime.regime,
-                  squeezeMinimum: ADX_THRESHOLDS.SQUEEZE_MINIMUM,
-                  squeezeValid: false,
-                  squeezeReasons: squeezeResult.reasons,
-                  quietTrendCheck: {
-                    enabled: QUIET_TREND_PARAMS.ENABLED,
-                    symbolAllowed: QUIET_TREND_PARAMS.ALLOWED_SYMBOLS.includes(symbol),
-                    priceMove: priceMoveForQuiet.toFixed(1),
-                    microTrend: trendData.microTrend?.direction,
-                    persistence: trendData.microTrend?.persistence ?? 0,
-                  },
-                  trend,
-                  confidence,
-                  derivedDirection,
-                  trendConsistency: trendData.trueAlignment?.score?.toFixed(1),
-                  momentum: {
-                    state: momentum?.state || "none",
-                    confirms: momentum?.confirms ?? false,
-                    macdExpanding: momentum?.macdExpanding ?? false,
-                    macdHistogram: momentum?.macdHistogram?.toFixed(4) ?? '0.0000',
-                    consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
-                    consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
-                    consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
-                  },
-                  bollinger: {
-                    squeeze4h: trendData.bollingerBands?.['4h']?.squeeze,
-                    squeeze1h: trendData.bollingerBands?.['1h']?.squeeze,
-                    percentB4h: trendData.bollingerBands?.['4h']?.percentB,
-                    percentB1h: trendData.bollingerBands?.['1h']?.percentB
-                  }
-                },
-                trendData,
-                riskParams.ai_analysis_enabled !== false,
-                earlyOrderFlowAnalysis
-              );
-              continue;
-            }
-            } else {
-            // ADX < SQUEEZE_MINIMUM (now 15): Check for Price Action Early Entry Override (Phase 2)
-            // This catches moves before lagging ADX confirms - addresses the "confirmation trap"
-            const priceActionForEarly = trendData.priceActionMomentum;
-            const priceMoveForEarly = Math.abs(priceActionForEarly?.movePercent || 0);
-            const adxSlope = fullAdxResult.adxSlope ?? 0;
-            const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 50;
-            
-            // PHASE 2: Price Action Early Entry Override
-            const priceActionValid = 
-              PRICE_ACTION_EARLY_ENTRY_PARAMS.ENABLED &&
-              priceMoveForEarly >= PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_PRICE_MOVE_PERCENT &&
-              adx >= PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_ADX &&
-              adx < PRICE_ACTION_EARLY_ENTRY_PARAMS.MAX_ADX &&
-              (!PRICE_ACTION_EARLY_ENTRY_PARAMS.REQUIRE_ADX_RISING || adxSlope >= PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_ADX_SLOPE);
-            
-            const directionMatch = !PRICE_ACTION_EARLY_ENTRY_PARAMS.REQUIRE_DIRECTION_MATCH || (
-              (derivedDirection === 'long' && priceActionForEarly?.direction === 'bullish') ||
-              (derivedDirection === 'short' && priceActionForEarly?.direction === 'bearish')
-            );
-            
-            const stochRsiOkForEarly = derivedDirection === 'long' 
-              ? stochK4h < PRICE_ACTION_EARLY_ENTRY_PARAMS.MAX_STOCHRSI_FOR_LONG
-              : stochK4h > PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_STOCHRSI_FOR_SHORT;
-            
-            if (priceActionValid && directionMatch && stochRsiOkForEarly) {
-              // PRICE ACTION EARLY ENTRY ALLOWED
-              priceActionEarlyEntryActive = true;
-              priceActionEarlyPositionMultiplier = PRICE_ACTION_EARLY_ENTRY_PARAMS.POSITION_SIZE_MULTIPLIER;
-              logger.forSymbol(symbol).info(
-                `${LOG_CATEGORIES.SUCCESS} 📈 PRICE_ACTION_EARLY_ENTRY: Bypassing ADX ${adx.toFixed(1)} < ${ADX_THRESHOLDS.SQUEEZE_MINIMUM} ` +
-                `due to ${priceMoveForEarly.toFixed(2)}% price move, slope=${adxSlope.toFixed(3)}, stochK=${stochK4h.toFixed(1)}`
-              );
-              logger.forSymbol(symbol).info(
-                `   → Direction=${derivedDirection}, priceDir=${priceActionForEarly?.direction}, position=${(priceActionEarlyPositionMultiplier * 100).toFixed(0)}%`
-              );
+              if (ADX_GATE_V1_1.LOG_EXCEPTION_DETAILS) {
+                logger.forSymbol(symbol).info(
+                  `${LOG_CATEGORIES.SUCCESS} 🔄 SQUEEZE_EXPANSION (v1.1): ADX=${adx.toFixed(1)} allowed ` +
+                  `(${squeezeResult.confidence}% confidence, ${(squeezePositionMultiplier * 100).toFixed(0)}% size)`
+                );
+                logger.forSymbol(symbol).debug(`   Squeeze check: ${JSON.stringify(squeezeResult.checkDetails)}`);
+              }
               perSymbolGateAttribution.set(symbol, { 
-                gate: 'PRICE_ACTION_EARLY_ALLOWED', 
-                details: `move=${priceMoveForEarly.toFixed(1)}%, slope=${adxSlope.toFixed(2)}, adx=${adx.toFixed(1)}` 
+                gate: 'SQUEEZE_EXPANSION_V11', 
+                details: squeezeResult.reasons.join(", ") 
               });
-              // Continue to signal generation (don't reject)
-            } else {
-              // Normal ADX rejection - include price action diagnostic
-              const quietTrendDiag = QUIET_TREND_PARAMS.ENABLED && adx >= QUIET_TREND_PARAMS.MIN_ADX
-                ? ` | Quiet trend: ADX=${adx.toFixed(1)} in range, move=${priceMoveForEarly.toFixed(1)}%`
-                : "";
-              const earlyEntryDiag = ` | PriceAction: move=${priceMoveForEarly.toFixed(1)}%(need ${PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_PRICE_MOVE_PERCENT}%), ` +
-                `valid=${priceActionValid}, dirMatch=${directionMatch}, stochOk=${stochRsiOkForEarly}, slope=${adxSlope.toFixed(2)}`;
-            
-              rejectedByHardGates++;
-              perSymbolGateAttribution.set(symbol, { gate: 'ADX_TOO_LOW', details: `ADX=${adx.toFixed(1)}<${ADX_THRESHOLDS.SQUEEZE_MINIMUM}${quietTrendDiag}` });
-              await logRejectionWithAI(
-                supabase, userId, symbol,
-                `HARD GATE: ADX too low (${adx.toFixed(1)} < ${ADX_THRESHOLDS.SQUEEZE_MINIMUM}) - no trend strength, below squeeze minimum${quietTrendDiag}${earlyEntryDiag}`,
-                { 
-                  gate: "ADX_TOO_LOW",
-                  adx: adx.toFixed(1),
-                  adxRequired: effectiveAdxThreshold,
-                  adxFixedMinimum: ADX_THRESHOLDS.MINIMUM,
-                  regimeAdaptive: REGIME_ADAPTIVE_ADX_PARAMS.ENABLED,
-                  regime: regime.regime,
-                  squeezeMinimum: ADX_THRESHOLDS.SQUEEZE_MINIMUM,
-                  priceActionEarlyEntry: {
-                    enabled: PRICE_ACTION_EARLY_ENTRY_PARAMS.ENABLED,
-                    priceMove: priceMoveForEarly.toFixed(2),
-                    minRequired: PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_PRICE_MOVE_PERCENT,
-                    adxSlope: adxSlope.toFixed(3),
-                    minSlope: PRICE_ACTION_EARLY_ENTRY_PARAMS.MIN_ADX_SLOPE,
-                    priceActionValid,
-                    directionMatch,
-                    stochRsiOk: stochRsiOkForEarly,
-                    stochK4h: stochK4h.toFixed(1),
-                  },
-                  quietTrendCheck: {
-                    enabled: QUIET_TREND_PARAMS.ENABLED,
-                    symbolAllowed: QUIET_TREND_PARAMS.ALLOWED_SYMBOLS.includes(symbol),
-                    adxInRange: adx >= QUIET_TREND_PARAMS.MIN_ADX,
-                    priceMove: priceMoveForEarly.toFixed(1),
-                    microTrend: trendData.microTrend?.direction,
-                    persistence: trendData.microTrend?.persistence ?? 0,
-                  },
-                  trend,
-                  confidence,
-                  trendConsistency: trendData.trueAlignment?.score?.toFixed(1),
-                  momentum: {
-                    state: momentum?.state || "none",
-                    confirms: momentum?.confirms ?? false,
-                    macdHistogram: momentum?.macdHistogram?.toFixed(4),
-                    lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend,
-                    consecutiveBars1h: momentum?.consecutiveBars1h ?? 0,
-                    consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
-                    consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
-                  },
-                  stochRsi: trendData.stochasticRsi?.aggregated,
-                  volatility: {
-                    atrPercent: trendData.volatility?.atrPercent?.toFixed(2),
-                    isRanging: trendData.volatility?.isRanging
-                  }
-                },
-                trendData,
-                riskParams.ai_analysis_enabled !== false,
-                earlyOrderFlowAnalysis
-              );
-              continue;
             }
           }
+          
+          // Check Early Ignition Exception if squeeze didn't pass
+          if (!squeezeBreakoutActive && ADX_GATE_V1_1.EARLY_IGNITION.ENABLED && isInTransitionalZone) {
+            const ignitionResult = checkEarlyIgnitionException(trendData, derivedDirection, regime.regime);
+            
+            if (ignitionResult.isValid) {
+              // Early Ignition exception approved
+              earlyIgnitionActive = true;
+              earlyIgnitionPositionMultiplier = ADX_GATE_V1_1.EARLY_IGNITION.POSITION_MULTIPLIER;
+              
+              if (ADX_GATE_V1_1.LOG_EXCEPTION_DETAILS) {
+                logger.forSymbol(symbol).info(
+                  `${LOG_CATEGORIES.SUCCESS} 🚀 EARLY_IGNITION (v1.1): ADX=${adx.toFixed(1)} allowed ` +
+                  `(regime=${regime.regime}, slope=${adxSlopeV11.toFixed(3)}, ${(earlyIgnitionPositionMultiplier * 100).toFixed(0)}% size)`
+                );
+                logger.forSymbol(symbol).debug(`   Ignition check: ${JSON.stringify(ignitionResult.checkDetails)}`);
+              }
+              perSymbolGateAttribution.set(symbol, { 
+                gate: 'EARLY_IGNITION_V11', 
+                details: ignitionResult.reasons.join(", ") 
+              });
+            }
           }
+          
+          // If neither exception passed, block the signal
+          if (!squeezeBreakoutActive && !earlyIgnitionActive) {
+            // Get diagnostic info for squeeze and ignition checks
+            const squeezeCheck = isValidSqueezeBreakout(trendData, derivedDirection);
+            const ignitionCheck = checkEarlyIgnitionException(trendData, derivedDirection, regime.regime);
+            
+            rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'ADX_TOO_LOW', 
+              details: `ADX=${adx.toFixed(1)} < ${v11AdaptiveThreshold} (no v1.1 exception qualified)` 
+            });
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `HARD GATE (v1.1): ADX ${adx.toFixed(1)} below adaptive threshold ${v11AdaptiveThreshold} (${regime.regime}) - no exception qualified`,
+              { 
+                gate: "ADX_TOO_LOW",
+                tier: "TRANSITIONAL_ZONE",
+                adx: adx.toFixed(1),
+                adaptiveThreshold: v11AdaptiveThreshold,
+                hardFloor: ADX_GATE_V1_1.HARD_FLOOR,
+                regime: regime.regime,
+                adxSlope: adxSlopeV11.toFixed(3),
+                derivedDirection,
+                // v1.1 exception diagnostic
+                squeezeCheck: {
+                  wouldPass: squeezeCheck.isValid,
+                  ...squeezeCheck.checkDetails,
+                  failReasons: squeezeCheck.reasons
+                },
+                earlyIgnitionCheck: {
+                  wouldPass: ignitionCheck.isValid,
+                  ...ignitionCheck.checkDetails,
+                  failReasons: ignitionCheck.reasons
+                },
+                // v1.1 bypass hints
+                bypassHints: {
+                  needsADX: v11AdaptiveThreshold,
+                  needsSqueeze: squeezeCheck.reasons.filter(r => r.includes("not") || r.includes("No")),
+                  needsIgnition: ignitionCheck.reasons.filter(r => r.includes("not") || r.includes("No")),
+                }
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
+        } else {
+          // ADX >= adaptive threshold - normal pass (1.0x size)
+          logger.forSymbol(symbol).debug(
+            `${LOG_CATEGORIES.SUCCESS} ADX_GATE_v1.1 PASS: ADX=${adx.toFixed(1)} >= ${v11AdaptiveThreshold} (regime=${regime.regime})`
+          );
         }
         
+        // ============= v1.1 POSITION SIZE APPLICATION =============
         // Apply squeeze breakout position size reduction if active
         if (squeezeBreakoutActive && squeezePositionMultiplier < 1.0) {
           reversalPositionMultiplier = Math.min(reversalPositionMultiplier, squeezePositionMultiplier);
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Squeeze breakout - position size capped at ${(squeezePositionMultiplier * 100).toFixed(0)}%`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🔄 Squeeze Expansion (v1.1) - position size capped at ${(squeezePositionMultiplier * 100).toFixed(0)}%`);
         }
         
-        // Apply quiet trend position size reduction if active
-        if (qualifiesForQuietTrend && quietTrendPositionMultiplier < 1.0) {
-          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, quietTrendPositionMultiplier);
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🌊 Quiet trend - position size capped at ${(quietTrendPositionMultiplier * 100).toFixed(0)}%`);
+        // Apply early ignition position size reduction if active
+        if (earlyIgnitionActive && earlyIgnitionPositionMultiplier < 1.0) {
+          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, earlyIgnitionPositionMultiplier);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🚀 Early Ignition (v1.1) - position size capped at ${(earlyIgnitionPositionMultiplier * 100).toFixed(0)}%`);
         }
-        
-        // Apply stealth trend position size reduction if active
-        if (stealthTrendBypassActive && stealthTrendPositionMultiplier < 1.0) {
-          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, stealthTrendPositionMultiplier);
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🕵️ Stealth trend - position size capped at ${(stealthTrendPositionMultiplier * 100).toFixed(0)}%`);
-        }
-        
-        // Apply LOW_ADX_TREND_EXCEPTION position size reduction if active
-        if (lowAdxTrendExceptionActive && lowAdxTrendPositionMultiplier < 1.0) {
-          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, lowAdxTrendPositionMultiplier);
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🎯 Low ADX trend exception - position size capped at ${(lowAdxTrendPositionMultiplier * 100).toFixed(0)}%`);
-        }
+
+        // ============= LEGACY VARIABLE STUBS (v1.1 compatibility) =============
+        // These variables are referenced elsewhere but were removed in v1.1
+        // Set to false/1.0 to disable legacy exception paths
+        const lowAdxTrendExceptionActive = false;
+        const priceActionEarlyEntryActive = false;
+        const priceActionEarlyPositionMultiplier = 1.0;
 
         // ============= NO_MOMENTUM_CONFIRMATION HARD GATE =============
         // RELAXED: Allow entry when momentum.state is "none" IF ADX >= 28 (strong trend exception)
