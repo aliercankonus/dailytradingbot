@@ -1935,10 +1935,23 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
 const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const htfAligned = filtersStatus?.htfAligned ?? false;
   const confidence = extractConfidence(filtersStatus, trendData);
+  const confidenceLocal = coerceNumeric(filtersStatus?.confidenceLocal, 0);
   const trend4h = filtersStatus?.trend4h || extractTimeframeTrend(trendData, "4h");
   const trend1h = filtersStatus?.trend1h || extractTimeframeTrend(trendData, "1h");
   const conf4h = coerceNumeric(trendData?.timeframes?.['4h']?.confidence, 0);
   const conf1h = coerceNumeric(trendData?.timeframes?.['1h']?.confidence, 0);
+  const conf30m = coerceNumeric(trendData?.timeframes?.['30m']?.confidence, 0);
+  const conf15m = coerceNumeric(trendData?.timeframes?.['15m']?.confidence, 0);
+  const is1hCounterTrend = filtersStatus?.is1hCounterTrendTo4h ?? false;
+  
+  // Calculate local confidence if not provided
+  const calculatedLocalConf = confidenceLocal > 0 ? confidenceLocal : 
+    Math.round((conf1h * 0.5) + (conf30m * 0.3) + (conf15m * 0.2));
+  
+  // Bypass hints
+  const bypassHints = filtersStatus?.bypassHints;
+  const needsConfLocal = bypassHints?.needsConfidenceLocal ?? (65 - calculatedLocalConf);
+  const needs1hConf = bypassHints?.needs1hConfidence ?? (65 - conf1h);
   
   return (
     <div className="space-y-3 p-3 bg-yellow-500/10 rounded-md border border-yellow-500/30">
@@ -1947,13 +1960,18 @@ const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
           <Layers className="h-4 w-4 text-yellow-500" />
           <span className="text-xs font-semibold text-yellow-400">HARD GATE: HTF Not Aligned</span>
         </div>
-        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-yellow-400 border-yellow-500/30">
-          Conf: {confidence}%
-        </Badge>
+        <div className="flex gap-1">
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-yellow-400 border-yellow-500/30">
+            Global: {confidence}%
+          </Badge>
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-blue-400 border-blue-500/30">
+            Local: {calculatedLocalConf}%
+          </Badge>
+        </div>
       </div>
       
       <div className="text-[10px] text-muted-foreground">
-        Higher timeframes must align OR confidence must be ≥65%
+        Uses <span className="text-blue-400 font-medium">Local Confidence</span> (15m/30m/1h only) for bypass logic to avoid HTF double-counting
       </div>
       
       {/* Timeframe Grid */}
@@ -1963,10 +1981,13 @@ const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
           <div className="font-medium capitalize text-sm">{trend4h}</div>
           <div className="text-[9px] text-muted-foreground">Conf: {conf4h}%</div>
         </div>
-        <div className={`p-2 rounded border ${trend4h === trend1h ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+        <div className={`p-2 rounded border ${trend4h === trend1h ? 'bg-green-500/10 border-green-500/30' : is1hCounterTrend ? 'bg-orange-500/10 border-orange-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
           <div className="text-[10px] text-muted-foreground">1H Trend</div>
           <div className="font-medium capitalize text-sm">{trend1h}</div>
           <div className="text-[9px] text-muted-foreground">Conf: {conf1h}%</div>
+          {is1hCounterTrend && (
+            <div className="text-[9px] text-orange-400 mt-0.5">⚠️ Counter-trend to 4H</div>
+          )}
         </div>
       </div>
       
@@ -1976,15 +1997,33 @@ const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
           {htfAligned ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
           HTF Aligned: {htfAligned ? "Yes" : "No"}
         </div>
-        <div className={`flex items-center gap-1.5 text-[10px] ${confidence >= 65 ? 'text-green-400' : 'text-red-400'}`}>
-          {confidence >= 65 ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-          Confidence ≥ 65%: {confidence}%
+        <div className={`flex items-center gap-1.5 text-[10px] ${calculatedLocalConf >= 65 ? 'text-green-400' : 'text-red-400'}`}>
+          {calculatedLocalConf >= 65 ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+          Local Confidence ≥ 65%: {calculatedLocalConf}%
+        </div>
+        <div className={`flex items-center gap-1.5 text-[10px] ${conf1h >= 65 && !is1hCounterTrend ? 'text-green-400' : 'text-red-400'}`}>
+          {conf1h >= 65 && !is1hCounterTrend ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+          Strong 1H (≥65% + non-counter-trend): {conf1h}% {is1hCounterTrend ? '(blocked: counter-trend)' : ''}
         </div>
       </div>
       
+      {/* What Would Have Passed - FIX #4 */}
+      <div className="bg-blue-500/10 border border-blue-500/30 rounded p-2 space-y-1">
+        <div className="text-[10px] font-semibold text-blue-400 flex items-center gap-1">
+          <Info className="h-3 w-3" />
+          What would pass this gate:
+        </div>
+        <ul className="text-[10px] text-muted-foreground space-y-0.5 ml-4 list-disc">
+          <li>Local Confidence ≥ 65% <span className="text-blue-400">(need +{Math.max(0, needsConfLocal).toFixed(0)}%)</span></li>
+          <li>1H Confidence ≥ 65% + aligned with 4H <span className="text-blue-400">(need +{Math.max(0, needs1hConf).toFixed(0)}%)</span></li>
+          <li>Valid micro-trend (ADX ≥23, volume, 3+ bars, not counter-4H)</li>
+          <li>Active override aligned with trade direction</li>
+        </ul>
+      </div>
+      
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
-        <span className="text-yellow-400">⚠️ Why blocked:</span> 4H and 1H trends must agree, or overall 
-        confidence must be ≥65% to bypass alignment requirement.
+        <span className="text-yellow-400">⚠️ Why blocked:</span> 4H and 1H trends must agree, or local 
+        confidence must be ≥65% to bypass alignment requirement. 1H bypass is now blocked if counter-trend to 4H.
       </div>
     </div>
   );

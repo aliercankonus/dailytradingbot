@@ -8978,8 +8978,27 @@ serve(async (req) => {
         // NEW: Also allow if micro-trend is detected (15m/30m aligned) when 4h is neutral
         const htfAligned = isAligned ?? false;
         const confidence1h = timeframes?.['1h']?.confidence || 0;
+        const confidence30m = timeframes?.['30m']?.confidence || 0;
+        const confidence15m = timeframes?.['15m']?.confidence || 0;
         const trend1h = timeframes?.['1h']?.trend || "neutral";
-        const has1hStrongDirection = confidence1h >= 65 && (trend1h === "bullish" || trend1h === "bearish");
+        
+        // FIX #1: Calculate confidenceLocal (15m/30m/1h only) to avoid double-counting HTF in bypass logic
+        // This prevents the self-reinforcing rejection cycle where low confidence (which includes HTF) 
+        // blocks bypasses that are meant to compensate for HTF weakness
+        const confidenceLocal = Math.round(
+          (confidence1h * 0.5) + (confidence30m * 0.3) + (confidence15m * 0.2)
+        );
+        
+        // Get 4h trend for counter-trend validation
+        const trend4hForHTFGate = htfTrend4h || "neutral";
+        
+        // FIX #2: Strong 1H bypass now requires non-counter-trend to 4H
+        // This prevents unintentional counter-trend entries (e.g., LONG when 4H is bearish)
+        const is1hCounterTrendTo4h = (trend1h === "bullish" && trend4hForHTFGate === "bearish") ||
+                                     (trend1h === "bearish" && trend4hForHTFGate === "bullish");
+        const has1hStrongDirection = confidence1h >= 65 && 
+                                     (trend1h === "bullish" || trend1h === "bearish") &&
+                                     !is1hCounterTrendTo4h;  // FIX: Block counter-trend 1H bypass
         
         // ===== PHASE 2: HARDENED MICRO-TREND CHECK =====
         // Allows signals when 4h is neutral but lower TFs are aligned
@@ -9140,9 +9159,32 @@ serve(async (req) => {
         // CRITICAL FIX: Also bypass HTF gate if LOW_ADX_TREND_EXCEPTION is active
         // OR if PRICE_ACTION_OVERRIDE is active OR if STRONG_MOMENTUM_OVERRIDE is active
         // This allows transitional zone (ADX 20-25) entries when HTF confirmation exists via the exception
-        const anyOverrideActive = lowAdxTrendExceptionActive || priceActionOverrideActive || strongMomentumOverrideActive;
         
-        if (!htfAligned && confidence < 65 && !has1hStrongDirection && !hasMicroTrendBypass && !anyOverrideActive) {
+        // FIX #3: Make overrides directional - they must align with intended trade direction
+        // Prevents "override leakage" where a bearish override could bypass gates for a LONG entry
+        // Convert derivedDirection ("long"/"short") to market direction ("bullish"/"bearish")
+        const intendedMarketDirection: "bullish" | "bearish" | "neutral" = 
+          derivedDirection === "long" ? "bullish" : 
+          derivedDirection === "short" ? "bearish" : 
+          htfTrend4h || "neutral";
+        
+        const lowAdxOverrideAligned = lowAdxTrendExceptionActive; // Already direction-validated in its logic
+        const priceActionOverrideAligned = priceActionOverrideActive && 
+                                           (priceActionOverrideDirection === intendedMarketDirection || intendedMarketDirection === "neutral");
+        const momentumDirection = momentum?.direction as "bullish" | "bearish" | "neutral" | undefined;
+        const strongMomentumOverrideAligned = strongMomentumOverrideActive && 
+                                              (momentumDirection === intendedMarketDirection || intendedMarketDirection === "neutral");
+        
+        const anyOverrideActive = lowAdxOverrideAligned || priceActionOverrideAligned || strongMomentumOverrideAligned;
+        
+        // Log when override is blocked due to direction mismatch
+        if ((priceActionOverrideActive && !priceActionOverrideAligned) ||
+            (strongMomentumOverrideActive && !strongMomentumOverrideAligned)) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} OVERRIDE DIRECTION MISMATCH: price=${priceActionOverrideDirection}, momentum=${momentumDirection}, intended=${intendedMarketDirection}`);
+        }
+        
+        // FIX #1 APPLIED: Use confidenceLocal instead of global confidence for bypass logic
+        if (!htfAligned && confidenceLocal < 65 && !has1hStrongDirection && !hasMicroTrendBypass && !anyOverrideActive) {
           rejectedByHardGates++;
           const microTrendInfo = microTrend?.blocked 
             ? `blocked (${microTrend.blockReason})`
@@ -9150,21 +9192,36 @@ serve(async (req) => {
               ? "not detected"
               : `insufficient (align=${microTrend?.alignment}, persist=${microTrend?.persistence}, volOK=${microTrend?.volumeConfirmed})`;
           const lowAdxInfo = lowAdxTrendExceptionActive ? ` (LOW_ADX_EXCEPTION active)` : '';
-          perSymbolGateAttribution.set(symbol, { gate: 'HTF_NOT_ALIGNED', details: `conf=${confidence}%, 1h=${confidence1h}%${lowAdxInfo}` });
+          const counterTrendInfo = is1hCounterTrendTo4h ? ' (1h counter-trend to 4h)' : '';
+          perSymbolGateAttribution.set(symbol, { gate: 'HTF_NOT_ALIGNED', details: `confLocal=${confidenceLocal}%, 1h=${confidence1h}%${lowAdxInfo}${counterTrendInfo}` });
           await logRejectionWithAI(
             supabase, userId, symbol,
             `HARD GATE: HTF not aligned, confidence too low, 1h not strong, and micro-trend ${microTrendInfo}`,
             { 
               htfAligned, 
-              confidence, 
-              confidence1h, 
-              trend1h, 
+              confidence,  // Keep global for reference
+              confidenceLocal,  // FIX #1: Add local confidence for transparency
+              confidence1h,
+              confidence30m,
+              confidence15m,
+              trend1h,
+              trend4h: trend4hForHTFGate,
+              is1hCounterTrendTo4h,  // FIX #2: Log counter-trend status
               microTrend: microTrend || null,
               microTrendInfo,
               gate: "HTF_NOT_ALIGNED",
+              // FIX #4: Add "what would have passed" hints
+              bypassHints: {
+                needsConfidenceLocal: 65 - confidenceLocal,  // Points needed
+                needs1hConfidence: 65 - confidence1h,
+                needs4hAligned: !htfAligned,
+                is1hBlockedByCounterTrend: is1hCounterTrendTo4h,
+                microTrendBlocked: is4hCounterTrend,
+              },
               momentum: {
                 confirms: momentum?.confirms ?? false,
                 state: momentum?.state ?? 'none',
+                direction: momentumDirection ?? 'neutral',
                 hasDivergence: momentum?.hasDivergence ?? false,
                 lastCloseAlignsWithTrend: momentum?.lastCloseAlignsWithTrend ?? false,
                 macdDirectionAligned: momentum?.macdDirectionAligned ?? false,
@@ -9180,9 +9237,9 @@ serve(async (req) => {
           continue;
         }
         
-        // Log if using 1h strong direction exception
-        if (!htfAligned && confidence < 65 && has1hStrongDirection) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate passed via strong 1h (1h=${trend1h} ${confidence1h}%)`);
+        // Log if using 1h strong direction exception (now with counter-trend info)
+        if (!htfAligned && confidenceLocal < 65 && has1hStrongDirection) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate passed via strong 1h (1h=${trend1h} ${confidence1h}%, 4h=${trend4hForHTFGate}, non-counter-trend)`);
         }
         
         // Log if using LOW_ADX_TREND_EXCEPTION to bypass HTF gate
