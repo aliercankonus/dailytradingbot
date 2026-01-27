@@ -2562,6 +2562,11 @@ export const deriveTradeDirection = (
   // ============= PRIORITY 0.5: MOMENTUM-AWARE DIRECTION OVERRIDE (WEIGHTED) =============
   // PHASE 2: Converted from 5-factor AND gate to weighted scoring system
   // This mirrors human decision-making which uses 2-3 factors, not all 5
+  // FIX #5 (Audit): Track if Tier 0.5 evaluated to block Tier 10 from using same evidence
+  let tier05Evaluated = false;  // True if Tier 0.5 logic ran (regardless of outcome)
+  let tier05Blocked = false;    // True if Tier 0.5 would have fired but was blocked (e.g., 30m ADX)
+  let tier05Score = 0;          // Score from Tier 0.5 for transparency
+  
   if (MOMENTUM_OVERRIDE_DIRECTION_PARAMS.ENABLED && regimeConfig.momentumOverrideEnabled) {
     const MO = MOMENTUM_OVERRIDE_DIRECTION_PARAMS;
     const T2 = TIER2_WEIGHTED_CONFIRMATION;
@@ -2591,6 +2596,8 @@ export const deriveTradeDirection = (
     const blocked = attemptLong ? block30mBearish : block30mBullish;
     
     if (!blocked && absMomentum > 0) {
+      tier05Evaluated = true;  // FIX #5: Mark that Tier 0.5 logic ran
+      
       // ============= PHASE 2: WEIGHTED TIER 2 SCORING =============
       let tier2Score = 0;
       const tier2Reasons: string[] = [];
@@ -2640,6 +2647,9 @@ export const deriveTradeDirection = (
         tier2Score += T2.HTF_ALIGNED_POINTS;
         tier2Reasons.push(`htf(${trend4h})+${T2.HTF_ALIGNED_POINTS}`);
       }
+      
+      // FIX #5: Store score for transparency
+      tier05Score = tier2Score;
       
       // Get regime-specific minimum score
       const minScore = regime === 'RANGE' ? T2.RANGE_MIN_SCORE :
@@ -2700,6 +2710,8 @@ export const deriveTradeDirection = (
         reasons.push(`Factors: ${tier2Reasons.join(', ')}`);
       }
     } else if (blocked) {
+      tier05Evaluated = true;   // FIX #5: Mark that Tier 0.5 logic ran (but was blocked)
+      tier05Blocked = true;     // FIX #5: Mark as blocked by 30m ADX
       reasons.push(`MOMENTUM OVERRIDE BLOCKED: 30m ADX=${adx30m.toFixed(1)} > ${MO.BLOCK_IF_30M_ADX_ABOVE} with slope=${adxSlope.toFixed(2)} > 0`);
     }
   }
@@ -3171,9 +3183,15 @@ export const deriveTradeDirection = (
   // This prevents the "deadlock" where bullish momentum + buy order flow = no signal
   // NOTE: Tier 10 is for TREND CONTINUATION without strong TF structure
   // NOTE: Tier 10 and Tier 11 (Exhaustion Escape) are MUTUALLY EXCLUSIVE
+  // FIX #5 (Audit): Tier 10 is SKIPPED if Tier 0.5 already evaluated (prevents double-dipping evidence)
   let tier10Fired = false;  // Flag to track if Tier 10 fires (blocks Tier 11)
   
-  if (MOMENTUM_FALLBACK_DIRECTION_PARAMS.ENABLED) {
+  // FIX #5: Guard against Tier 10 firing when Tier 0.5 already processed the same momentum+OF evidence
+  // If Tier 0.5 evaluated but didn't fire (score too low or StochRSI blocking), we should NOT 
+  // let Tier 10 re-evaluate the same evidence with lower thresholds
+  const tier10BlockedByTier05 = tier05Evaluated && !tier05Blocked;  // Only block if 0.5 ran scoring (not if it was 30m-blocked)
+  
+  if (MOMENTUM_FALLBACK_DIRECTION_PARAMS.ENABLED && !tier10BlockedByTier05) {
     const P = MOMENTUM_FALLBACK_DIRECTION_PARAMS;
     
     // Get momentum data from trendData
@@ -3299,6 +3317,9 @@ export const deriveTradeDirection = (
         }
       }
     }
+  } else if (tier10BlockedByTier05) {
+    // FIX #5: Log that Tier 10 was skipped because Tier 0.5 already evaluated
+    reasons.push(`TIER 10 SKIPPED (FIX #5): Tier 0.5 already evaluated momentum+OF evidence (score=${tier05Score}) - preventing double-dip`);
   }
   
   // ============= PRIORITY 8 (TIER 11): EXHAUSTION ESCAPE (PHASE 1 FIX) =============

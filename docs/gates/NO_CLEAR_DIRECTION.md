@@ -96,6 +96,47 @@ IF tier11Applies:
 - **Tier 10**: Trend continuation when timeframe structure is weak
 - **Tier 11**: Mean reversion at extremes (never continuation)
 
+### 5. Tier 0.5 → Tier 10 Guard (FIX #5)
+
+Tier 10 is now explicitly blocked from firing if Tier 0.5 already evaluated the same momentum + order flow evidence:
+
+```
+// Track if Tier 0.5 ran its scoring logic (regardless of outcome)
+tier05Evaluated = false
+tier05Blocked = false   // True if blocked by 30m ADX
+tier05Score = 0
+
+// In Tier 0.5:
+IF momentum is present AND NOT blocked by 30m ADX:
+  tier05Evaluated = true
+  tier05Score = calculate weighted score
+  
+  IF score >= minScore AND NOT stochBlocking:
+    RETURN direction  // Tier 0.5 fires
+  ELSE:
+    LOG "WEIGHTED OVERRIDE SKIPPED: score < minScore"
+    
+ELSE IF blocked by 30m ADX:
+  tier05Evaluated = true
+  tier05Blocked = true
+  LOG "MOMENTUM OVERRIDE BLOCKED: 30m ADX"
+
+// In Tier 10 (much later):
+tier10BlockedByTier05 = tier05Evaluated AND NOT tier05Blocked
+
+IF MOMENTUM_FALLBACK_ENABLED AND NOT tier10BlockedByTier05:
+  // Tier 10 logic...
+ELSE IF tier10BlockedByTier05:
+  LOG "TIER 10 SKIPPED (FIX #5): Tier 0.5 already evaluated momentum+OF evidence"
+```
+
+**Rationale:**
+- Tier 0.5 and Tier 10 use the same core evidence (momentum score + order flow alignment)
+- If Tier 0.5 ran scoring but decided NOT to fire (score too low, StochRSI blocking), 
+  allowing Tier 10 to re-evaluate with lower thresholds is "evidence double-dipping"
+- Exception: If Tier 0.5 was blocked by 30m ADX (structural reason), Tier 10 can still run
+  since the blocking was about structure, not evidence quality
+
 ---
 
 ## Core Concept
