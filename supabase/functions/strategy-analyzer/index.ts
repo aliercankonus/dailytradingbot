@@ -2205,6 +2205,9 @@ serve(async (req) => {
       // TIER 0: Deep StochRSI extreme hard gate (no exceptions)
       | 'TIER_0_DEEP_OVERSOLD'
       | 'TIER_0_DEEP_OVERBOUGHT'
+      // EARLY TIER 0: Pre-strategy circuit breaker (runs before direction overrides)
+      | 'EARLY_TIER_0_DEEP_OVERSOLD'
+      | 'EARLY_TIER_0_DEEP_OVERBOUGHT'
       // Legacy aliases for backward compatibility
       | 'DEEP_STOCHRSI_OVERSOLD_HARD_GATE'
       | 'DEEP_STOCHRSI_OVERBOUGHT_HARD_GATE'
@@ -2584,6 +2587,91 @@ serve(async (req) => {
         // Derive trade direction early in the pipeline to prevent inconsistent direction evaluation
         // This ensures all downstream gates use the same direction logic
         const directionResult = deriveTradeDirection(trendData, trend);
+        
+        // ============= EARLY TIER 0: DEEP STOCHRSI CIRCUIT BREAKER (PRE-STRATEGY) =============
+        // CRITICAL: This gate runs BEFORE any direction overrides (late-grind, momentum, order-flow, etc.)
+        // This prevents legacy strategies from bypassing the unified pipeline gate by entering
+        // at extreme StochRSI levels where reversal probability is ~80%+
+        // 
+        // ROOT CAUSE FIX: BTCUSDT K=100 entries bypassed the later TIER 0 gate because
+        // the "MACD Signal Cross" strategy used a different code path. This early gate
+        // catches ALL entries regardless of strategy path.
+        if (DEEP_STOCHRSI_HARD_GATE.ENABLED) {
+          const earlyStochRsiK4h = trendData.stochasticRsi?.['4h']?.k ?? 50;
+          const earlyDirection = directionResult.direction;  // May be null if no clear direction yet
+          
+          // Only check if we have an early direction - otherwise let downstream gates handle it
+          if (earlyDirection) {
+            // TIER 0 DEEP OVERSOLD: Block SHORTs when K < 5
+            // EXCEPTION: Mean reversion strategies targeting bounce (LONG) are allowed at K < 5
+            if (earlyDirection === 'short' && earlyStochRsiK4h < DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD) {
+              rejectedByHardGates++;
+              perSymbolGateAttribution.set(symbol, { 
+                gate: 'EARLY_TIER_0_DEEP_OVERSOLD', 
+                details: `K=${earlyStochRsiK4h.toFixed(1)} < ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD} (pre-strategy)` 
+              });
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 EARLY TIER 0 (CIRCUIT BREAKER) - SHORT blocked at 4h K=${earlyStochRsiK4h.toFixed(1)} < ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}`);
+              logger.forSymbol(symbol).warn(`   → This runs BEFORE strategy evaluation to prevent legacy bypasses`);
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `EARLY TIER 0 CIRCUIT BREAKER: SHORT blocked - 4h StochRSI K=${earlyStochRsiK4h.toFixed(1)} is deeply oversold (< ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD})`,
+                { 
+                  gate: "EARLY_TIER_0_DEEP_OVERSOLD",
+                  tier: 0,
+                  direction: "short",
+                  earlyDirection,
+                  stochRsiK4h: earlyStochRsiK4h.toFixed(1),
+                  threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
+                  adx: adx.toFixed(1),
+                  isPreStrategy: true,
+                  message: `Bounce probability ~80%+ at K=${earlyStochRsiK4h.toFixed(1)}, circuit breaker activated BEFORE any strategy logic`
+                },
+                trendData,
+                riskParams.ai_analysis_enabled !== false,
+                earlyOrderFlowAnalysis
+              );
+              continue;
+            }
+            
+            // TIER 0 DEEP OVERBOUGHT: Block LONGs when K > 95
+            // EXCEPTION: Mean reversion strategies targeting reversal (SHORT) are allowed at K > 95
+            if (earlyDirection === 'long' && earlyStochRsiK4h > DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD) {
+              rejectedByHardGates++;
+              perSymbolGateAttribution.set(symbol, { 
+                gate: 'EARLY_TIER_0_DEEP_OVERBOUGHT', 
+                details: `K=${earlyStochRsiK4h.toFixed(1)} > ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD} (pre-strategy)` 
+              });
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 EARLY TIER 0 (CIRCUIT BREAKER) - LONG blocked at 4h K=${earlyStochRsiK4h.toFixed(1)} > ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}`);
+              logger.forSymbol(symbol).warn(`   → This runs BEFORE strategy evaluation to prevent legacy bypasses`);
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `EARLY TIER 0 CIRCUIT BREAKER: LONG blocked - 4h StochRSI K=${earlyStochRsiK4h.toFixed(1)} is deeply overbought (> ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD})`,
+                { 
+                  gate: "EARLY_TIER_0_DEEP_OVERBOUGHT",
+                  tier: 0,
+                  direction: "long",
+                  earlyDirection,
+                  stochRsiK4h: earlyStochRsiK4h.toFixed(1),
+                  threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
+                  adx: adx.toFixed(1),
+                  isPreStrategy: true,
+                  message: `Pullback probability ~80%+ at K=${earlyStochRsiK4h.toFixed(1)}, circuit breaker activated BEFORE any strategy logic`
+                },
+                trendData,
+                riskParams.ai_analysis_enabled !== false,
+                earlyOrderFlowAnalysis
+              );
+              continue;
+            }
+            
+            // Log if at extreme but direction is compatible (mean reversion allowed)
+            if (earlyStochRsiK4h > DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD && earlyDirection === 'short') {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ EARLY TIER 0: SHORT at K=${earlyStochRsiK4h.toFixed(1)} allowed (mean reversion direction)`);
+            } else if (earlyStochRsiK4h < DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD && earlyDirection === 'long') {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ EARLY TIER 0: LONG at K=${earlyStochRsiK4h.toFixed(1)} allowed (mean reversion direction)`);
+            }
+          }
+        }
         
         // ============= LATE GRIND ACCEPTANCE MODE =============
         // Allows entry AFTER 1.5%+ drift has occurred, ONLY if pullback fails (continuation proven)
