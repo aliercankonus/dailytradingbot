@@ -3630,6 +3630,25 @@ export const NEUTRAL_LOW_ADX_QUALITY_GATE = {
 //
 // They are DEPRECATED in favor of Adaptive Trend Entry which includes
 // all necessary protections and is the PRIMARY signal source.
+//
+// ============= STRATEGY INVENTORY =============
+// DISABLED (legacy, no protections):
+//   - MACD Crossover: Zero-line cross, no exhaustion check
+//   - MACD Signal Cross: Signal line cross, no exhaustion check (ADDED: was missing)
+//   - MACD Bearish Cross: Bearish crossover, no exhaustion check
+//   - EMA Golden Cross / Death Cross: Simple MA crossovers
+//   - RSI Oversold/Overbought / RSI Overbought Short: Simple RSI thresholds
+//   - Momentum Breakout / Aggressive Momentum: Simple momentum without gates
+//   - Bollinger Band Breakout / Reversal: BB-based without exhaustion
+//   - Grid Trading: Grid-based, no trend alignment
+//   - Conservative Swing: Simple RSI < 35, no ADX/HTF validation (ADDED: was missing)
+//
+// ALLOWED (have proper protections):
+//   - Adaptive Trend Entry: Primary strategy, full gate pipeline
+//   - Mean Reversion: Extreme StochRSI requirements, VWAP distance check
+//   - Ranging Mean Reversion: Regime-aware with ADX gating
+//   - HTF Neutral Breakout: Has HTF alignment gates
+//   - Strong 1h Trend Follower: Has 1h momentum confirmation
 export const DISABLED_LEGACY_STRATEGIES = {
   ENABLED: true,  // Set to false to re-enable legacy strategies
   
@@ -3637,6 +3656,7 @@ export const DISABLED_LEGACY_STRATEGIES = {
   // These are the simple indicator-based strategies that lack exhaustion protection
   DISABLED_NAMES: [
     'MACD Crossover',
+    'MACD Signal Cross',       // ADDED: Signal line cross (was missing - caused BTCUSDT K=100 entries)
     'MACD Bearish Cross',
     'EMA Golden Cross',
     'EMA Death Cross',
@@ -3647,12 +3667,16 @@ export const DISABLED_LEGACY_STRATEGIES = {
     'Bollinger Band Reversal',
     'Grid Trading',
     'Aggressive Momentum',
+    'Conservative Swing',      // ADDED: Simple RSI < 35 without StochRSI/ADX/HTF gates
   ] as readonly string[],
   
   // Strategies that remain ACTIVE (have proper protections built-in)
   ALLOWED_STRATEGIES: [
     'Adaptive Trend Entry',
-    'Mean Reversion',  // Has extreme oversold/overbought requirements
+    'Mean Reversion',           // Has extreme oversold/overbought requirements
+    'Ranging Mean Reversion',   // Regime-aware with ADX gating
+    'HTF Neutral Breakout',     // Has HTF alignment gates
+    'Strong 1h Trend Follower', // Has 1h momentum confirmation
   ] as readonly string[],
   
   // Logging
