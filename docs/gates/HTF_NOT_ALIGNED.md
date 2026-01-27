@@ -51,7 +51,7 @@ START
   │
   ├─ Override Active & Directionally Aligned?
   │   ├─ LOW_ADX_TREND_EXCEPTION
-  │   ├─ PRICE_ACTION_OVERRIDE (direction match)
+  │   ├─ PRICE_ACTION_OVERRIDE (direction match, NOT RANGE regime) ← FIX #3
   │   └─ STRONG_MOMENTUM_OVERRIDE (direction match)
   │   ─────────────────────────────────────── YES → PASS (override size)
   │
@@ -125,6 +125,12 @@ The `HardGateHtfDisplay` component shows:
 ---
 
 ## Changelog
+
+### v5 (2025-01-27)
+- **FIX #3 (Audit)**: Disabled PRICE_ACTION_OVERRIDE bypass when regime == RANGE
+- Prevents chop losses at range extremes where price moves are mean-reverting
+- Added `priceActionBlockedByRangeRegime` to rejection log bypassHints
+- Added `currentRegime` to rejection log for transparency
 
 ### v4 (2025-01-27)
 - Decoupled `confidenceLocal` from HTF components
