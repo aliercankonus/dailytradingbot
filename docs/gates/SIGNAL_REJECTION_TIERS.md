@@ -788,7 +788,18 @@ FUNCTION deriveTradeDirection(trendData, orderFlowData):
 CONSTANTS:
   BLOCK_THRESHOLD = 60
   REDUCE_THRESHOLD = 40
-  STRONG_TREND_REDUCTION = 0.5  // 50% impact reduction
+  
+  // ===== ADX-SCALED REVERSAL REDUCTION (Issue #6 Fix) =====
+  // Graduated reduction based on trend strength instead of flat 50%
+  // Stronger trends = more aggressive reduction of reversal signals
+  ADX_REVERSAL_WEIGHTS = {
+    ADX >= 40: 0.40 (60% reduction - extreme trend),
+    ADX >= 35: 0.50 (50% reduction - exceptional trend),
+    ADX >= 30: 0.60 (40% reduction - very strong trend),
+    ADX >= 25: 0.75 (25% reduction - strong trend),
+    ADX >= 20: 0.85 (15% reduction - moderate trend),
+    ADX < 20:  1.00 (no reduction - weak/no trend)
+  }
 
 FUNCTION calculateUnifiedReversalScore(indicators):
   
@@ -819,9 +830,10 @@ FUNCTION calculateUnifiedReversalScore(indicators):
   IF barsAtExtreme >= 8: score += 15
   IF barsAtExtreme >= 12: score += 10  // Additional
   
-  // ===== STRONG TREND REDUCTION =====
-  IF adx >= 30:
-    score = score * (1 - STRONG_TREND_REDUCTION)  // 50% reduction
+  // ===== ADX-SCALED REVERSAL REDUCTION (Issue #6) =====
+  // Apply graduated weight based on ADX instead of flat 50%
+  adxWeight = getAdxWeight(adx)  // Returns 0.4 to 1.0 based on ADX tier
+  score = score * adxWeight
   
   score = MIN(score, 100)
   
@@ -870,6 +882,7 @@ FUNCTION calculateUnifiedReversalScore(indicators):
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.5 | 2025-01-27 | **FIX #6 (Audit)**: Replaced flat 50% strong-trend reversal reduction with ADX-scaled graduated weights: ADX>=40 → 0.40 (60% reduction), ADX>=35 → 0.50, ADX>=30 → 0.60, ADX>=25 → 0.75, ADX>=20 → 0.85, ADX<20 → 1.00 (no reduction). Added `ADX_REVERSAL_WEIGHTS` constant for maintainability. |
 | 1.4 | 2025-01-27 | **FIX #5 (Audit)**: Added explicit guard to skip Tier 10 (Momentum Fallback) if Tier 0.5 (Momentum Override) already evaluated. Prevents "evidence double-dipping" where same momentum+OF evidence is re-used at lower thresholds. Exception: If Tier 0.5 was blocked by 30m ADX (structural reason), Tier 10 can still run. |
 | 1.3 | 2025-01-27 | **FIX #1 (Audit)**: Added formal `isExtremeMeanReversion` definition for Tier 1 bypass. Requires: regime IN [RANGE, LATE_TREND, EXHAUSTION], reversalScore >= 55, momentumState != 'confirmed'. Prevents trend-continuation logic from leaking into Tier 1 bypasses. |
 | 1.2 | 2025-01-27 | **FIX #2 (Audit)**: Added `stochRSITier2Bypassed` flag to `calculateUnifiedReversalScore`. When Tier 2 bypass is applied, StochRSI contribution capped at +10 (vs default +20) to prevent double punishment. |

@@ -4050,6 +4050,35 @@ export const MEAN_REVERSION_CONFIG = {
   },
 } as const;
 
+// ============= ADX REVERSAL WEIGHTS (Issue #6 Fix) =============
+// Graduated ADX-based reduction of reversal score impact
+// Stronger trends get more aggressive reduction of reversal signals
+// This replaces the flat 50% reduction previously documented
+export const ADX_REVERSAL_WEIGHTS = {
+  // ADX >= 40 = Extreme trend = 60% reduction (weight 0.40)
+  EXTREME_WEIGHT: 0.40,
+  EXTREME_THRESHOLD: ADX_THRESHOLDS.EXTREME,  // 40
+  
+  // ADX >= 35 = Exceptional trend = 50% reduction (weight 0.50)
+  EXCEPTIONAL_WEIGHT: 0.50,
+  EXCEPTIONAL_THRESHOLD: ADX_THRESHOLDS.EXCEPTIONAL,  // 35
+  
+  // ADX >= 30 = Very strong trend = 40% reduction (weight 0.60)
+  VERY_STRONG_WEIGHT: 0.60,
+  VERY_STRONG_THRESHOLD: ADX_THRESHOLDS.VERY_STRONG,  // 30
+  
+  // ADX >= 25 = Strong trend = 25% reduction (weight 0.75)
+  STRONG_WEIGHT: 0.75,
+  STRONG_THRESHOLD: ADX_THRESHOLDS.STRONG,  // 25
+  
+  // ADX >= 20 = Moderate trend = 15% reduction (weight 0.85)
+  MODERATE_WEIGHT: 0.85,
+  MODERATE_THRESHOLD: ADX_THRESHOLDS.MINIMUM,  // 20
+  
+  // ADX < 20 = Weak/no trend = no reduction (weight 1.00)
+  WEAK_WEIGHT: 1.00,
+} as const;
+
 // ============= TREND PHASE GATE (Orthogonal to Expansion) =============
 // Classifies trend phase independently for clean regime separation
 

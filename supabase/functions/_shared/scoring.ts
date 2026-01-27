@@ -496,14 +496,26 @@ export const getStochRsiWeightedRsiScore = (
 };
 
 // ============= ADX-BASED WEIGHT =============
-// Strong trends reduce reversal impact
+// ============= ADX-SCALED REVERSAL WEIGHT (Issue #6 Fix) =============
+// Graduated ADX-based reduction of reversal score impact
+// Stronger trends get more aggressive reduction of reversal signals
+// REPLACES the flat 50% reduction previously documented
+// 
+// WEIGHT TABLE (see also: ADX_REVERSAL_WEIGHTS in constants.ts):
+//   ADX >= 40: 0.40 (60% reduction - extreme trend)
+//   ADX >= 35: 0.50 (50% reduction - exceptional trend)
+//   ADX >= 30: 0.60 (40% reduction - very strong trend)
+//   ADX >= 25: 0.75 (25% reduction - strong trend)
+//   ADX >= 20: 0.85 (15% reduction - moderate trend)
+//   ADX < 20:  1.00 (no reduction - weak/no trend)
+//
 export const getAdxWeight = (adxValue: number): number => {
-  if (adxValue >= ADX_THRESHOLDS.EXTREME) return 0.4;      // Extreme trend
-  if (adxValue >= ADX_THRESHOLDS.EXCEPTIONAL) return 0.5;  // Exceptional trend
-  if (adxValue >= ADX_THRESHOLDS.VERY_STRONG) return 0.6;  // Very strong trend
-  if (adxValue >= ADX_THRESHOLDS.STRONG) return 0.75;      // Strong trend
-  if (adxValue >= ADX_THRESHOLDS.MINIMUM) return 0.85;     // Moderate trend
-  return 1.0;  // Weak trend = full weight
+  if (adxValue >= ADX_THRESHOLDS.EXTREME) return 0.40;      // 60% reduction
+  if (adxValue >= ADX_THRESHOLDS.EXCEPTIONAL) return 0.50;  // 50% reduction
+  if (adxValue >= ADX_THRESHOLDS.VERY_STRONG) return 0.60;  // 40% reduction
+  if (adxValue >= ADX_THRESHOLDS.STRONG) return 0.75;       // 25% reduction
+  if (adxValue >= ADX_THRESHOLDS.MINIMUM) return 0.85;      // 15% reduction
+  return 1.00;  // No reduction - weak trend
 };
 
 // ============= VOLUME SCORE (0-10 points) =============
