@@ -870,6 +870,7 @@ FUNCTION calculateUnifiedReversalScore(indicators):
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.4 | 2025-01-27 | **FIX #5 (Audit)**: Added explicit guard to skip Tier 10 (Momentum Fallback) if Tier 0.5 (Momentum Override) already evaluated. Prevents "evidence double-dipping" where same momentum+OF evidence is re-used at lower thresholds. Exception: If Tier 0.5 was blocked by 30m ADX (structural reason), Tier 10 can still run. |
 | 1.3 | 2025-01-27 | **FIX #1 (Audit)**: Added formal `isExtremeMeanReversion` definition for Tier 1 bypass. Requires: regime IN [RANGE, LATE_TREND, EXHAUSTION], reversalScore >= 55, momentumState != 'confirmed'. Prevents trend-continuation logic from leaking into Tier 1 bypasses. |
 | 1.2 | 2025-01-27 | **FIX #2 (Audit)**: Added `stochRSITier2Bypassed` flag to `calculateUnifiedReversalScore`. When Tier 2 bypass is applied, StochRSI contribution capped at +10 (vs default +20) to prevent double punishment. |
 | 1.1 | 2025-01-27 | **FIX #4 (Audit)**: Added exception depth tracking to Path 5 (Premium Overrides) in NO_MOMENTUM_CONFIRMATION gate. |
