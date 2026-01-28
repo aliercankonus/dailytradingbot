@@ -2148,38 +2148,31 @@ export interface EarlyIgnitionEntryResult {
   positionSizeMultiplier: number;
   stopMultiplier: number;
   reasons: string[];
+  // v1.1: Near-miss tracking for Phase A (pre-ignition watch)
+  isNearMiss: boolean;  // True when squeeze active but ADX slope still negative
+  nearMissReason?: string;
   checkDetails: {
-    // Condition 1: BB Squeeze (compression)
     hadRecentSqueeze: boolean;
     squeezeTimeframe: string;
-    
-    // Condition 2: BB Width Expanding
     widthExpanding: boolean;
     widthExpansionPercent: number;
-    
-    // Condition 3: ADX Slope
     adxSlope: number;
     adxSlopeOk: boolean;
+    adxSlopeRising: boolean;  // v1.1: Track if slope is clearly rising (> 0.05)
     adxValue: number;
-    
-    // Condition 4: Volume Surge
     volumeSurge: boolean;
     volumeRatio: number;
     volumeZScore: number;
-    
-    // Condition 5: Range Break
     rangeBreakDetected: boolean;
     rangeBreakDirection: "long" | "short" | null;
     rangeBreakPercent: number;
-    
-    // Condition 6: StochRSI Safety
     stochRsiSafe: boolean;
     stochRsiK: number;
-    
-    // HTF Check
     htfOpposing: boolean;
     htfSupporting: boolean;
     htfNeutral: boolean;
+    // v1.1: Phase tracking
+    phase: 'A_PRE_IGNITION' | 'B_IGNITION_TRIGGER' | 'C_EXPANSION' | 'NONE';
   };
 }
 
@@ -2190,9 +2183,11 @@ export const detectEarlyIgnitionEntry = (
 ): EarlyIgnitionEntryResult => {
   const reasons: string[] = [];
   
-  // Import constants (assume available from module scope)
+  // v1.1 REFINED: Allow ADX slope >= 0 (flattening) for earlier entry
+  // Key insight: ADX slope crossing from negative → flat is the signal (step 3-4, not step 5)
   const P = {
-    MIN_ADX_SLOPE: 0.05,
+    MIN_ADX_SLOPE: 0,           // v1.1: Allow flat (>= 0) for Phase B trigger
+    MIN_ADX_SLOPE_RISING: 0.05, // Clearly rising slope = bonus sizing
     MIN_ADX_FLOOR: 15,
     MIN_VOLUME_ZSCORE: 1.5,
     MIN_VOLUME_RATIO: 1.5,
@@ -2203,12 +2198,13 @@ export const detectEarlyIgnitionEntry = (
     TIER_0_BLOCK_K_CEILING: 98,
     HTF_OPPOSING_CONFIDENCE_THRESHOLD: 60,
     POSITION_SIZE_BASE: 0.35,
+    POSITION_SIZE_SLOPE_RISING: 0.40,  // v1.1: Bonus when slope clearly rising
     POSITION_SIZE_WITH_HTF_SUPPORT: 0.45,
     POSITION_SIZE_WEAK_VOLUME: 0.30,
     STOP_LOSS_ATR_MULTIPLIER: 1.0,
   };
   
-  // Initialize check details
+  // Initialize check details with v1.1 fields
   const checkDetails = {
     hadRecentSqueeze: false,
     squeezeTimeframe: '',
@@ -2216,6 +2212,7 @@ export const detectEarlyIgnitionEntry = (
     widthExpansionPercent: 0,
     adxSlope: 0,
     adxSlopeOk: false,
+    adxSlopeRising: false,  // v1.1: Track if clearly rising (> 0.05)
     adxValue: 0,
     volumeSurge: false,
     volumeRatio: 0,
@@ -2228,17 +2225,31 @@ export const detectEarlyIgnitionEntry = (
     htfOpposing: false,
     htfSupporting: false,
     htfNeutral: true,
+    phase: 'NONE' as 'A_PRE_IGNITION' | 'B_IGNITION_TRIGGER' | 'C_EXPANSION' | 'NONE',
   };
   
+  // Helper to create consistent return result
+  const createResult = (
+    isValid: boolean,
+    direction: "long" | "short" | null,
+    positionSizeMultiplier: number,
+    stopMultiplier: number,
+    resultReasons: string[],
+    isNearMiss: boolean = false,
+    nearMissReason?: string
+  ): EarlyIgnitionEntryResult => ({
+    isValid,
+    direction,
+    positionSizeMultiplier,
+    stopMultiplier,
+    reasons: resultReasons,
+    isNearMiss,
+    nearMissReason,
+    checkDetails,
+  });
+  
   if (!trendData) {
-    return { 
-      isValid: false, 
-      direction: null, 
-      positionSizeMultiplier: 1.0, 
-      stopMultiplier: 1.0,
-      reasons: ["No trend data"], 
-      checkDetails 
-    };
+    return createResult(false, null, 1.0, 1.0, ["No trend data"]);
   }
   
   const bollinger = trendData?.bollingerBands || {};
@@ -2250,6 +2261,7 @@ export const detectEarlyIgnitionEntry = (
   const adxSlope = volatility.adxSlope ?? 0;
   checkDetails.adxValue = adx;
   checkDetails.adxSlope = adxSlope;
+  checkDetails.adxSlopeRising = adxSlope >= P.MIN_ADX_SLOPE_RISING;
   
   // ===== CONDITION 1: BB Squeeze (compression detected) =====
   const bb4h = bollinger['4h'] || {};
@@ -2262,19 +2274,11 @@ export const detectEarlyIgnitionEntry = (
   checkDetails.squeezeTimeframe = squeeze4h ? '4h' : (squeeze1h ? '1h' : 'none');
   
   if (!hadRecentSqueeze) {
-    return { 
-      isValid: false, 
-      direction: null, 
-      positionSizeMultiplier: 1.0, 
-      stopMultiplier: 1.0,
-      reasons: ["No recent BB squeeze (compression required)"], 
-      checkDetails 
-    };
+    return createResult(false, null, 1.0, 1.0, ["No recent BB squeeze (compression required)"]);
   }
   reasons.push(`BB squeeze detected on ${checkDetails.squeezeTimeframe}`);
   
   // ===== CONDITION 2: BB Width Expanding (breakout starting) =====
-  // Check if bandwidth is expanding (current > average of recent bars)
   const currentWidth = bb1h.bandwidth || bb4h.bandwidth || 0;
   const widthHistory = volatility.bandwidthHistory || [];
   let widthExpanding = false;
@@ -2284,78 +2288,68 @@ export const detectEarlyIgnitionEntry = (
     const avgPriorWidth = widthHistory.slice(0, 3).reduce((a: number, b: number) => a + b, 0) / 3;
     if (avgPriorWidth > 0 && currentWidth > avgPriorWidth) {
       widthExpansionPercent = ((currentWidth - avgPriorWidth) / avgPriorWidth) * 100;
-      widthExpanding = widthExpansionPercent >= 10;  // 10% expansion minimum
+      widthExpanding = widthExpansionPercent >= 10;
     }
   } else if (bb1h.widthExpanding || volatility.widthExpanding) {
-    // Fallback to existing flag if history not available
     widthExpanding = true;
-    widthExpansionPercent = 15;  // Assume moderate expansion
+    widthExpansionPercent = 15;
   }
   
   checkDetails.widthExpanding = widthExpanding;
   checkDetails.widthExpansionPercent = widthExpansionPercent;
   
   if (!widthExpanding) {
-    return { 
-      isValid: false, 
-      direction: null, 
-      positionSizeMultiplier: 1.0, 
-      stopMultiplier: 1.0,
-      reasons: [`BB width not expanding (${widthExpansionPercent.toFixed(1)}% < 10% required)`], 
-      checkDetails 
-    };
+    return createResult(false, null, 1.0, 1.0, 
+      [`BB width not expanding (${widthExpansionPercent.toFixed(1)}% < 10% required)`]);
   }
   reasons.push(`BB width expanding ${widthExpansionPercent.toFixed(1)}%`);
   
-  // ===== CONDITION 3: ADX Slope positive (energy building) =====
+  // ===== CONDITION 3: ADX Slope (v1.1 REFINED) =====
+  // v1.1: ADX slope >= 0 (flat or rising) triggers Phase B
+  // ADX slope < 0 with squeeze = Phase A (pre-ignition watch, near-miss)
   checkDetails.adxSlopeOk = adxSlope >= P.MIN_ADX_SLOPE;
   
+  // Check if we're in Phase A (pre-ignition): squeeze active but ADX slope still negative
   if (adxSlope < P.MIN_ADX_SLOPE) {
-    return { 
-      isValid: false, 
-      direction: null, 
-      positionSizeMultiplier: 1.0, 
-      stopMultiplier: 1.0,
-      reasons: [`ADX slope ${adxSlope.toFixed(3)} < ${P.MIN_ADX_SLOPE} (energy not building)`], 
-      checkDetails 
-    };
+    checkDetails.phase = 'A_PRE_IGNITION';
+    const nearMissReason = `IGNITION_FORMING: Squeeze active but ADX slope ${adxSlope.toFixed(3)} < 0 (energy still decaying)`;
+    return createResult(
+      false, 
+      null, 
+      1.0, 
+      1.0,
+      [`ADX slope ${adxSlope.toFixed(3)} < ${P.MIN_ADX_SLOPE} (Phase A: pre-ignition watch)`], 
+      true,  // isNearMiss = true for Phase A
+      nearMissReason
+    );
   }
   
-  // Also check ADX floor
+  // Check ADX floor
   if (adx < P.MIN_ADX_FLOOR) {
-    return { 
-      isValid: false, 
-      direction: null, 
-      positionSizeMultiplier: 1.0, 
-      stopMultiplier: 1.0,
-      reasons: [`ADX ${adx.toFixed(1)} < ${P.MIN_ADX_FLOOR} (below floor)`], 
-      checkDetails 
-    };
+    return createResult(false, null, 1.0, 1.0,
+      [`ADX ${adx.toFixed(1)} < ${P.MIN_ADX_FLOOR} (below floor)`]);
   }
-  reasons.push(`ADX slope ${adxSlope.toFixed(3)} rising, ADX=${adx.toFixed(1)}`);
+  
+  // ADX slope is flat or rising - Phase B confirmed
+  checkDetails.phase = 'B_IGNITION_TRIGGER';
+  const slopeDesc = checkDetails.adxSlopeRising ? 'rising' : 'flat (flattening from negative)';
+  reasons.push(`ADX slope ${adxSlope.toFixed(3)} ${slopeDesc}, ADX=${adx.toFixed(1)}`);
   
   // ===== CONDITION 4: Volume Surge =====
   const volumeRatio = volumeData.ratio || 1.0;
-  const volumeZScore = volumeData.zScore ?? (volumeRatio > 1.5 ? 1.6 : 0.8);  // Estimate if not provided
+  const volumeZScore = volumeData.zScore ?? (volumeRatio > 1.5 ? 1.6 : 0.8);
   
   checkDetails.volumeRatio = volumeRatio;
   checkDetails.volumeZScore = volumeZScore;
   checkDetails.volumeSurge = volumeZScore >= P.MIN_VOLUME_ZSCORE || volumeRatio >= P.MIN_VOLUME_RATIO;
   
   if (!checkDetails.volumeSurge) {
-    return { 
-      isValid: false, 
-      direction: null, 
-      positionSizeMultiplier: 1.0, 
-      stopMultiplier: 1.0,
-      reasons: [`Volume not surging (ratio=${volumeRatio.toFixed(2)}, zScore=${volumeZScore.toFixed(2)})`], 
-      checkDetails 
-    };
+    return createResult(false, null, 1.0, 1.0,
+      [`Volume not surging (ratio=${volumeRatio.toFixed(2)}, zScore=${volumeZScore.toFixed(2)})`]);
   }
   reasons.push(`Volume surge: ratio=${volumeRatio.toFixed(2)}, zScore=${volumeZScore.toFixed(2)}`);
   
   // ===== CONDITION 5: Micro Range Break =====
-  // Detect if price has broken above/below recent consolidation range
   let rangeBreakDirection: "long" | "short" | null = null;
   let rangeBreakPercent = 0;
   
@@ -2366,7 +2360,6 @@ export const detectEarlyIgnitionEntry = (
     const currentClose = parseFloat(recentCandles[recentCandles.length - 1]?.[4]) || 0;
     
     if (highs.length >= 10 && currentClose > 0) {
-      // Exclude last 2 candles from range calculation (they're the breakout)
       const rangeHigh = Math.max(...highs.slice(0, -2));
       const rangeLow = Math.min(...lows.slice(0, -2));
       
@@ -2384,14 +2377,13 @@ export const detectEarlyIgnitionEntry = (
       }
     }
   } else {
-    // Fallback: use Bollinger %B as proxy for range break
     const percentB1h = bb1h.percentB ?? 50;
     if (percentB1h >= 85) {
       rangeBreakDirection = "long";
-      rangeBreakPercent = (percentB1h - 80) / 20 * 0.5;  // Estimate
+      rangeBreakPercent = (percentB1h - 80) / 20 * 0.5;
     } else if (percentB1h <= 15) {
       rangeBreakDirection = "short";
-      rangeBreakPercent = (20 - percentB1h) / 20 * 0.5;  // Estimate
+      rangeBreakPercent = (20 - percentB1h) / 20 * 0.5;
     }
   }
   
@@ -2400,53 +2392,26 @@ export const detectEarlyIgnitionEntry = (
   checkDetails.rangeBreakPercent = rangeBreakPercent;
   
   if (!rangeBreakDirection) {
-    return { 
-      isValid: false, 
-      direction: null, 
-      positionSizeMultiplier: 1.0, 
-      stopMultiplier: 1.0,
-      reasons: ["No micro range break detected"], 
-      checkDetails 
-    };
+    return createResult(false, null, 1.0, 1.0, ["No micro range break detected"]);
   }
   reasons.push(`Range break ${rangeBreakDirection.toUpperCase()}: ${rangeBreakPercent.toFixed(2)}%`);
   
-  // ===== CONDITION 6: StochRSI Safety (NOT at Tier 0 extremes) =====
+  // ===== CONDITION 6: StochRSI Safety =====
   const stochK4h = stochRsi['4h']?.k ?? 50;
   checkDetails.stochRsiK = stochK4h;
   
-  // Tier 0 blocks (absolute extremes)
   if (stochK4h <= P.TIER_0_BLOCK_K_FLOOR || stochK4h >= P.TIER_0_BLOCK_K_CEILING) {
-    return { 
-      isValid: false, 
-      direction: null, 
-      positionSizeMultiplier: 1.0, 
-      stopMultiplier: 1.0,
-      reasons: [`StochRSI K=${stochK4h.toFixed(1)} at Tier 0 extreme (blocked)`], 
-      checkDetails 
-    };
+    return createResult(false, null, 1.0, 1.0,
+      [`StochRSI K=${stochK4h.toFixed(1)} at Tier 0 extreme (blocked)`]);
   }
   
-  // Direction-specific safety
   if (rangeBreakDirection === "long" && stochK4h > P.MAX_STOCHRSI_K_FOR_LONG) {
-    return { 
-      isValid: false, 
-      direction: null, 
-      positionSizeMultiplier: 1.0, 
-      stopMultiplier: 1.0,
-      reasons: [`StochRSI K=${stochK4h.toFixed(1)} > ${P.MAX_STOCHRSI_K_FOR_LONG} for LONG`], 
-      checkDetails 
-    };
+    return createResult(false, null, 1.0, 1.0,
+      [`StochRSI K=${stochK4h.toFixed(1)} > ${P.MAX_STOCHRSI_K_FOR_LONG} for LONG`]);
   }
   if (rangeBreakDirection === "short" && stochK4h < P.MIN_STOCHRSI_K_FOR_SHORT) {
-    return { 
-      isValid: false, 
-      direction: null, 
-      positionSizeMultiplier: 1.0, 
-      stopMultiplier: 1.0,
-      reasons: [`StochRSI K=${stochK4h.toFixed(1)} < ${P.MIN_STOCHRSI_K_FOR_SHORT} for SHORT`], 
-      checkDetails 
-    };
+    return createResult(false, null, 1.0, 1.0,
+      [`StochRSI K=${stochK4h.toFixed(1)} < ${P.MIN_STOCHRSI_K_FOR_SHORT} for SHORT`]);
   }
   
   checkDetails.stochRsiSafe = true;
@@ -2469,36 +2434,32 @@ export const detectEarlyIgnitionEntry = (
   checkDetails.htfNeutral = htfNeutral;
   
   if (htfOpposing) {
-    return { 
-      isValid: false, 
-      direction: null, 
-      positionSizeMultiplier: 1.0, 
-      stopMultiplier: 1.0,
-      reasons: [`HTF (4h=${trend4h}, ${conf4h.toFixed(0)}%) opposes ${rangeBreakDirection}`], 
-      checkDetails 
-    };
+    return createResult(false, null, 1.0, 1.0,
+      [`HTF (4h=${trend4h}, ${conf4h.toFixed(0)}%) opposes ${rangeBreakDirection}`]);
   }
   reasons.push(`HTF not opposing (4h=${trend4h}, ${conf4h.toFixed(0)}%)`);
   
-  // ===== ALL CONDITIONS PASSED - EARLY IGNITION ENTRY VALID =====
-  reasons.push("✅ EARLY IGNITION ENTRY: All conditions met");
+  // ===== ALL CONDITIONS PASSED - PHASE B IGNITION ENTRY VALID =====
+  reasons.push("✅ EARLY IGNITION ENTRY v1.1: All conditions met (Phase B trigger)");
   
-  // Determine position size
-  let positionSizeMultiplier = P.POSITION_SIZE_BASE;  // 0.35 base
+  // v1.1: Graduated position sizing based on ADX slope
+  let positionSizeMultiplier = P.POSITION_SIZE_BASE;  // 0.35 for flat slope
+  
   if (htfSupporting) {
     positionSizeMultiplier = P.POSITION_SIZE_WITH_HTF_SUPPORT;  // 0.45 with HTF support
+  } else if (checkDetails.adxSlopeRising) {
+    positionSizeMultiplier = P.POSITION_SIZE_SLOPE_RISING;  // 0.40 for clearly rising slope
   } else if (volumeZScore < 2.0) {
     positionSizeMultiplier = P.POSITION_SIZE_WEAK_VOLUME;  // 0.30 for weak volume
   }
   
-  return {
-    isValid: true,
-    direction: rangeBreakDirection,
+  return createResult(
+    true,
+    rangeBreakDirection,
     positionSizeMultiplier,
-    stopMultiplier: P.STOP_LOSS_ATR_MULTIPLIER,  // 1.0x ATR (tight)
-    reasons,
-    checkDetails,
-  };
+    P.STOP_LOSS_ATR_MULTIPLIER,
+    reasons
+  );
 };
 
 // ============= DERIVE TRADE DIRECTION =============
