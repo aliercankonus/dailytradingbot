@@ -94,6 +94,102 @@ export const ADX_GATE_V1_1 = {
   LOG_EXCEPTION_DETAILS: true,
 } as const;
 
+// ============= EARLY IGNITION ENTRY MODULE =============
+// NEW MODULE: Captures the 30-90 minute window between compression and expansion
+// Purpose: Address the "pre-move blind spot" - system catches moves AFTER they happen
+// Key insight: This is VOLATILITY IGNITION entry, not trend following or mean reversion
+//
+// STRICT CONDITIONS (all must be true):
+// 1. bb_squeeze == TRUE (recent compression)
+// 2. bb_width expanding (breakout starting)
+// 3. adxSlope > 0 (energy building)
+// 4. volume_zscore >= +1.5 (volume surge)
+// 5. price breaks micro range high/low
+// 6. NOT stochRSI in Tier 0 (K < 2 or K > 98)
+//
+// BEHAVIOR:
+// - Direction: Derived from breakout, NOT from HTF
+// - HTF: Must NOT oppose (but may be neutral)
+// - Position Size: 0.30x-0.45x (conservative)
+// - Stop: Tight, structure-based
+// - Gate Bypass: Only NO_CLEAR_DIRECTION
+//
+// DOES NOT BYPASS:
+// - MOVE_EXHAUSTED
+// - EXTREME StochRSI (Tier 0)
+// - HARD ADX floor (<18)
+export const EARLY_IGNITION_ENTRY = {
+  ENABLED: true,
+  
+  // ===== COMPRESSION DETECTION (Condition 1) =====
+  // BB squeeze must have been active recently
+  REQUIRE_BB_SQUEEZE: true,
+  SQUEEZE_LOOKBACK_BARS: 6,  // Squeeze in last 6 bars on 1h = 6 hours
+  
+  // ===== EXPANSION DETECTION (Condition 2) =====
+  // Bollinger width must be expanding (breakout starting)
+  REQUIRE_BB_WIDTH_EXPANDING: true,
+  MIN_WIDTH_EXPANSION_PERCENT: 10,  // Width expanding by at least 10%
+  EXPANSION_LOOKBACK_BARS: 3,       // Compare width over 3 bars
+  
+  // ===== ADX SLOPE (Condition 3) =====
+  // Energy must be building, not decaying
+  MIN_ADX_SLOPE: 0.05,  // ADX slope must be clearly positive
+  // Minimum ADX floor - still respect the absolute floor
+  MIN_ADX_FLOOR: 15,    // Below this, no ignition (pre-trend too weak)
+  
+  // ===== VOLUME SURGE (Condition 4) =====
+  // Volume must spike to confirm breakout
+  REQUIRE_VOLUME_SURGE: true,
+  MIN_VOLUME_ZSCORE: 1.5,     // Volume must be 1.5 std above average
+  MIN_VOLUME_RATIO: 1.5,      // Alternative: 1.5x average volume
+  
+  // ===== MICRO RANGE BREAK (Condition 5) =====
+  // Price must break recent consolidation high/low
+  REQUIRE_RANGE_BREAK: true,
+  RANGE_LOOKBACK_BARS: 12,    // Look back 12 bars for range high/low
+  MIN_BREAK_PERCENT: 0.15,    // Must break range by at least 0.15%
+  
+  // ===== STOCHRSI SAFETY (Condition 6) =====
+  // Never enter at absolute extremes
+  MAX_STOCHRSI_K_FOR_LONG: 95,   // Block LONG if K > 95
+  MIN_STOCHRSI_K_FOR_SHORT: 5,   // Block SHORT if K < 5
+  TIER_0_BLOCK_K_FLOOR: 2,       // Absolute block below K=2
+  TIER_0_BLOCK_K_CEILING: 98,    // Absolute block above K=98
+  
+  // ===== HTF ALIGNMENT (Not opposing) =====
+  // HTF may be neutral, but must NOT oppose
+  BLOCK_IF_HTF_OPPOSING: true,
+  // 4h confidence threshold for "opposing" determination
+  HTF_OPPOSING_CONFIDENCE_THRESHOLD: 60,
+  
+  // ===== POSITION SIZING =====
+  // Conservative sizing for ignition entries
+  POSITION_SIZE_BASE: 0.35,         // Base: 35% of normal position
+  POSITION_SIZE_WITH_HTF_SUPPORT: 0.45,  // If HTF aligned: 45%
+  POSITION_SIZE_WEAK_VOLUME: 0.30,  // If volume zscore < 2.0: 30%
+  
+  // ===== STOP LOSS =====
+  // Tight, structure-based stops
+  STOP_LOSS_ATR_MULTIPLIER: 1.0,    // 1x ATR (tight)
+  USE_RANGE_LOW_AS_STOP: true,      // Use recent range low/high as stop
+  
+  // ===== WHAT THIS BYPASSES =====
+  // ONLY bypasses direction paralysis
+  BYPASSES_NO_CLEAR_DIRECTION: true,
+  // Does NOT bypass these critical gates
+  DOES_NOT_BYPASS_MOVE_EXHAUSTED: true,
+  DOES_NOT_BYPASS_TIER_0_STOCHRSI: true,
+  DOES_NOT_BYPASS_ADX_FLOOR: true,
+  
+  // ===== LOGGING =====
+  LOG_IGNITION_CHECKS: true,
+  LOG_DETAILED_CONDITIONS: true,
+  
+  // ===== GATE TYPE LABEL =====
+  GATE_TYPE: 'EARLY_IGNITION_ENTRY' as const,
+} as const;
+
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Replace raw thresholds with phase classification
 // Each phase has different behavior for signal generation
