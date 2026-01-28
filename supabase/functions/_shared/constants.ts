@@ -94,15 +94,28 @@ export const ADX_GATE_V1_1 = {
   LOG_EXCEPTION_DETAILS: true,
 } as const;
 
-// ============= EARLY IGNITION ENTRY MODULE =============
+// ============= EARLY IGNITION ENTRY MODULE v1.1 =============
 // NEW MODULE: Captures the 30-90 minute window between compression and expansion
 // Purpose: Address the "pre-move blind spot" - system catches moves AFTER they happen
 // Key insight: This is VOLATILITY IGNITION entry, not trend following or mean reversion
 //
-// STRICT CONDITIONS (all must be true):
+// v1.1 REFINEMENT: ADX slope crossing from negative → flat is the signal
+// The sequence is: Squeeze → ADX slope flattens → Volume spike → Range break → Expansion
+// Original v1.0 required adxSlope > 0 (step 5), but optimal entry is step 3-4
+//
+// PHASE A (Pre-Ignition Watch - NO ENTRY):
+//   bb_squeeze = true AND adxSlope < 0 → tag as IGNITION_FORMING, log near-miss
+//
+// PHASE B (Ignition Trigger - ENTRY):
+//   bb_squeeze = true AND adxSlope >= 0 (flattening allowed) AND volume surge AND range break
+//
+// PHASE C (Expansion Confirmation - NORMAL SYSTEM):
+//   adxSlope > 0 AND ADX rising → normal trend logic resumes
+//
+// STRICT CONDITIONS (all must be true for Phase B):
 // 1. bb_squeeze == TRUE (recent compression)
 // 2. bb_width expanding (breakout starting)
-// 3. adxSlope > 0 (energy building)
+// 3. adxSlope >= 0 (flattening OR rising - key v1.1 change)
 // 4. volume_zscore >= +1.5 (volume surge)
 // 5. price breaks micro range high/low
 // 6. NOT stochRSI in Tier 0 (K < 2 or K > 98)
@@ -132,11 +145,21 @@ export const EARLY_IGNITION_ENTRY = {
   MIN_WIDTH_EXPANSION_PERCENT: 10,  // Width expanding by at least 10%
   EXPANSION_LOOKBACK_BARS: 3,       // Compare width over 3 bars
   
-  // ===== ADX SLOPE (Condition 3) =====
-  // Energy must be building, not decaying
-  MIN_ADX_SLOPE: 0.05,  // ADX slope must be clearly positive
+  // ===== ADX SLOPE (Condition 3) - v1.1 REFINED =====
+  // v1.0: Required adxSlope > 0.05 (too late - step 5)
+  // v1.1: Allow adxSlope >= 0 (flattening = step 3-4 entry)
+  // Key insight: ADX slope crossing from negative → flat is the signal
+  MIN_ADX_SLOPE: 0,           // v1.1: Allow flat (>= 0), not just rising
+  MIN_ADX_SLOPE_RISING: 0.05, // Threshold for "clearly rising" (bonus sizing)
   // Minimum ADX floor - still respect the absolute floor
   MIN_ADX_FLOOR: 15,    // Below this, no ignition (pre-trend too weak)
+  
+  // ===== PRE-IGNITION WATCH (Phase A) =====
+  // When squeeze is active but ADX slope still negative, log as "forming"
+  ENABLE_PRE_IGNITION_WATCH: true,
+  PRE_IGNITION_TAG: 'IGNITION_FORMING' as const,
+  // Threshold for "still decaying" - below this, log as near-miss
+  PRE_IGNITION_ADX_SLOPE_THRESHOLD: 0,
   
   // ===== VOLUME SURGE (Condition 4) =====
   // Volume must spike to confirm breakout
@@ -165,7 +188,8 @@ export const EARLY_IGNITION_ENTRY = {
   
   // ===== POSITION SIZING =====
   // Conservative sizing for ignition entries
-  POSITION_SIZE_BASE: 0.35,         // Base: 35% of normal position
+  POSITION_SIZE_BASE: 0.35,         // Base: 35% of normal position (slope flat)
+  POSITION_SIZE_SLOPE_RISING: 0.40, // Bonus if ADX slope clearly rising
   POSITION_SIZE_WITH_HTF_SUPPORT: 0.45,  // If HTF aligned: 45%
   POSITION_SIZE_WEAK_VOLUME: 0.30,  // If volume zscore < 2.0: 30%
   
@@ -185,9 +209,11 @@ export const EARLY_IGNITION_ENTRY = {
   // ===== LOGGING =====
   LOG_IGNITION_CHECKS: true,
   LOG_DETAILED_CONDITIONS: true,
+  LOG_NEAR_MISS: true,  // Log Phase A near-misses for diagnostics
   
-  // ===== GATE TYPE LABEL =====
+  // ===== GATE TYPE LABELS =====
   GATE_TYPE: 'EARLY_IGNITION_ENTRY' as const,
+  NEAR_MISS_GATE_TYPE: 'IGNITION_FORMING' as const,
 } as const;
 
 // ============= ADX PHASE STATE MACHINE =============
