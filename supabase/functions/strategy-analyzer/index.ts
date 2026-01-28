@@ -191,6 +191,7 @@ import {
   detectMarketRegimeEnhanced,
   isValidSqueezeBreakout,
   checkEarlyIgnitionException,
+  detectEarlyIgnitionEntry,
   deriveTradeDirection,
   getAdxPhase,
   getAdxPhaseInfo,
@@ -208,6 +209,7 @@ import {
   type MarketRegimeEnhancedResult,
   type SqueezeBreakoutResult,
   type EarlyIgnitionResult,
+  type EarlyIgnitionEntryResult,
   type DirectionResult,
   type BreakoutModeResult,
   type TrendStrengthResult,
@@ -2227,7 +2229,9 @@ serve(async (req) => {
       | 'TREND_REVERSAL_DETECTION'
       // v1.1: ADX Gate minimal spec exceptions
       | 'SQUEEZE_EXPANSION_V11'
-      | 'EARLY_IGNITION_V11';
+      | 'EARLY_IGNITION_V11'
+      // NEW: Early Ignition Entry module (pre-expansion detection)
+      | 'EARLY_IGNITION_ENTRY';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -2955,15 +2959,68 @@ serve(async (req) => {
           }
         }
         
-        // REJECT EARLY: If no clear trade direction can be determined AND no overrides applied
+        // ============= NEW: EARLY IGNITION ENTRY MODULE =============
+        // Captures the 30-90 minute pre-expansion window when all direction tiers fail
+        // This is VOLATILITY IGNITION entry, not trend following or mean reversion
+        // ONLY bypasses NO_CLEAR_DIRECTION - all other hard gates remain active
+        let earlyIgnitionEntryApplied = false;
+        let earlyIgnitionEntryDirection: "long" | "short" | null = null;
+        let earlyIgnitionEntryPositionMultiplier = 0.35;
+        let earlyIgnitionEntryStopMultiplier = 1.0;
+        
         const hasDirectionOverride = momentumDirectionOverrideApplied || orderFlowDirectionOverrideApplied || 
                                      preMomentumStochRsiOverrideApplied || shortTermAlignmentOverrideApplied;
+        
+        // Only check Early Ignition if no direction determined and no other overrides
         if (!directionResult.direction && !lateGrindAccepted && !hasDirectionOverride) {
+          // Get kline data from historical data map (already fetched earlier)
+          const earlyIgnitionHistData = historicalDataMap.get(symbol);
+          
+          // Check for early ignition entry conditions
+          const volumeInfo = {
+            ratio: trendData.volatility?.volumeRatio || 1.0,
+            zScore: trendData.volatility?.volumeZScore || 0,
+            spike: trendData.volatility?.volumeSpike || false,
+          };
+          
+          const earlyIgnitionResult = detectEarlyIgnitionEntry(
+            trendData,
+            earlyIgnitionHistData?.klines || [],
+            volumeInfo
+          );
+          
+          if (earlyIgnitionResult.isValid && earlyIgnitionResult.direction) {
+            // CRITICAL: Early Ignition ONLY bypasses NO_CLEAR_DIRECTION
+            // It does NOT bypass other hard gates - those are checked later
+            earlyIgnitionEntryApplied = true;
+            earlyIgnitionEntryDirection = earlyIgnitionResult.direction;
+            earlyIgnitionEntryPositionMultiplier = earlyIgnitionResult.positionSizeMultiplier;
+            earlyIgnitionEntryStopMultiplier = earlyIgnitionResult.stopMultiplier;
+            
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔥 EARLY IGNITION ENTRY: ${earlyIgnitionEntryDirection.toUpperCase()} detected`);
+            logger.forSymbol(symbol).info(`   → ${earlyIgnitionResult.reasons.join(", ")}`);
+            logger.forSymbol(symbol).info(`   → Position: ${(earlyIgnitionEntryPositionMultiplier * 100).toFixed(0)}%, Stop: ${earlyIgnitionEntryStopMultiplier.toFixed(1)}x ATR`);
+            logger.forSymbol(symbol).debug(`   → Details: squeeze=${earlyIgnitionResult.checkDetails.squeezeTimeframe}, widthExp=${earlyIgnitionResult.checkDetails.widthExpansionPercent.toFixed(1)}%, adxSlope=${earlyIgnitionResult.checkDetails.adxSlope.toFixed(3)}, volRatio=${earlyIgnitionResult.checkDetails.volumeRatio.toFixed(2)}`);
+            
+            // Track for gate attribution
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'EARLY_IGNITION_ENTRY', 
+              details: `Early ignition ${earlyIgnitionEntryDirection} at ${(earlyIgnitionEntryPositionMultiplier * 100).toFixed(0)}% size` 
+            });
+          } else if (earlyIgnitionResult.reasons.length > 0) {
+            // Log why early ignition didn't apply (for debugging)
+            logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} Early Ignition not applicable: ${earlyIgnitionResult.reasons[0]}`);
+          }
+        }
+        
+        // REJECT EARLY: If no clear trade direction can be determined AND no overrides applied (including early ignition)
+        const hasAnyDirectionSource = hasDirectionOverride || earlyIgnitionEntryApplied;
+        if (!directionResult.direction && !lateGrindAccepted && !hasAnyDirectionSource) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
             `No clear trade direction: ${directionResult.reasons.join(", ")}`,
-            { 
+            {
               gate: "NO_CLEAR_DIRECTION",
               derivedDirection: directionResult.direction || null,
               direction: directionResult.direction || null,

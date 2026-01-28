@@ -2137,6 +2137,370 @@ export const checkEarlyIgnitionException = (
   };
 };
 
+// ============= EARLY IGNITION ENTRY DETECTION =============
+// NEW MODULE: Captures the 30-90 minute pre-expansion window
+// This is VOLATILITY IGNITION entry, not trend following or mean reversion
+// Detects: compression → expansion transition with volume surge
+// ONLY bypasses NO_CLEAR_DIRECTION - all other hard gates remain active
+export interface EarlyIgnitionEntryResult {
+  isValid: boolean;
+  direction: "long" | "short" | null;
+  positionSizeMultiplier: number;
+  stopMultiplier: number;
+  reasons: string[];
+  checkDetails: {
+    // Condition 1: BB Squeeze (compression)
+    hadRecentSqueeze: boolean;
+    squeezeTimeframe: string;
+    
+    // Condition 2: BB Width Expanding
+    widthExpanding: boolean;
+    widthExpansionPercent: number;
+    
+    // Condition 3: ADX Slope
+    adxSlope: number;
+    adxSlopeOk: boolean;
+    adxValue: number;
+    
+    // Condition 4: Volume Surge
+    volumeSurge: boolean;
+    volumeRatio: number;
+    volumeZScore: number;
+    
+    // Condition 5: Range Break
+    rangeBreakDetected: boolean;
+    rangeBreakDirection: "long" | "short" | null;
+    rangeBreakPercent: number;
+    
+    // Condition 6: StochRSI Safety
+    stochRsiSafe: boolean;
+    stochRsiK: number;
+    
+    // HTF Check
+    htfOpposing: boolean;
+    htfSupporting: boolean;
+    htfNeutral: boolean;
+  };
+}
+
+export const detectEarlyIgnitionEntry = (
+  trendData: any,
+  klineData: any[],  // Recent klines for range detection
+  volumeData: { ratio: number; zScore?: number; spike?: boolean }
+): EarlyIgnitionEntryResult => {
+  const reasons: string[] = [];
+  
+  // Import constants (assume available from module scope)
+  const P = {
+    MIN_ADX_SLOPE: 0.05,
+    MIN_ADX_FLOOR: 15,
+    MIN_VOLUME_ZSCORE: 1.5,
+    MIN_VOLUME_RATIO: 1.5,
+    MIN_BREAK_PERCENT: 0.15,
+    MAX_STOCHRSI_K_FOR_LONG: 95,
+    MIN_STOCHRSI_K_FOR_SHORT: 5,
+    TIER_0_BLOCK_K_FLOOR: 2,
+    TIER_0_BLOCK_K_CEILING: 98,
+    HTF_OPPOSING_CONFIDENCE_THRESHOLD: 60,
+    POSITION_SIZE_BASE: 0.35,
+    POSITION_SIZE_WITH_HTF_SUPPORT: 0.45,
+    POSITION_SIZE_WEAK_VOLUME: 0.30,
+    STOP_LOSS_ATR_MULTIPLIER: 1.0,
+  };
+  
+  // Initialize check details
+  const checkDetails = {
+    hadRecentSqueeze: false,
+    squeezeTimeframe: '',
+    widthExpanding: false,
+    widthExpansionPercent: 0,
+    adxSlope: 0,
+    adxSlopeOk: false,
+    adxValue: 0,
+    volumeSurge: false,
+    volumeRatio: 0,
+    volumeZScore: 0,
+    rangeBreakDetected: false,
+    rangeBreakDirection: null as "long" | "short" | null,
+    rangeBreakPercent: 0,
+    stochRsiSafe: false,
+    stochRsiK: 50,
+    htfOpposing: false,
+    htfSupporting: false,
+    htfNeutral: true,
+  };
+  
+  if (!trendData) {
+    return { 
+      isValid: false, 
+      direction: null, 
+      positionSizeMultiplier: 1.0, 
+      stopMultiplier: 1.0,
+      reasons: ["No trend data"], 
+      checkDetails 
+    };
+  }
+  
+  const bollinger = trendData?.bollingerBands || {};
+  const volatility = trendData?.volatility || {};
+  const timeframes = trendData?.timeframes || {};
+  const stochRsi = trendData?.stochasticRsi || {};
+  
+  const adx = volatility.adx || 0;
+  const adxSlope = volatility.adxSlope ?? 0;
+  checkDetails.adxValue = adx;
+  checkDetails.adxSlope = adxSlope;
+  
+  // ===== CONDITION 1: BB Squeeze (compression detected) =====
+  const bb4h = bollinger['4h'] || {};
+  const bb1h = bollinger['1h'] || {};
+  const squeeze4h = bb4h.squeeze || bb4h.squeezeActive || false;
+  const squeeze1h = bb1h.squeeze || bb1h.squeezeActive || false;
+  const hadRecentSqueeze = squeeze4h || squeeze1h;
+  
+  checkDetails.hadRecentSqueeze = hadRecentSqueeze;
+  checkDetails.squeezeTimeframe = squeeze4h ? '4h' : (squeeze1h ? '1h' : 'none');
+  
+  if (!hadRecentSqueeze) {
+    return { 
+      isValid: false, 
+      direction: null, 
+      positionSizeMultiplier: 1.0, 
+      stopMultiplier: 1.0,
+      reasons: ["No recent BB squeeze (compression required)"], 
+      checkDetails 
+    };
+  }
+  reasons.push(`BB squeeze detected on ${checkDetails.squeezeTimeframe}`);
+  
+  // ===== CONDITION 2: BB Width Expanding (breakout starting) =====
+  // Check if bandwidth is expanding (current > average of recent bars)
+  const currentWidth = bb1h.bandwidth || bb4h.bandwidth || 0;
+  const widthHistory = volatility.bandwidthHistory || [];
+  let widthExpanding = false;
+  let widthExpansionPercent = 0;
+  
+  if (widthHistory.length >= 3) {
+    const avgPriorWidth = widthHistory.slice(0, 3).reduce((a: number, b: number) => a + b, 0) / 3;
+    if (avgPriorWidth > 0 && currentWidth > avgPriorWidth) {
+      widthExpansionPercent = ((currentWidth - avgPriorWidth) / avgPriorWidth) * 100;
+      widthExpanding = widthExpansionPercent >= 10;  // 10% expansion minimum
+    }
+  } else if (bb1h.widthExpanding || volatility.widthExpanding) {
+    // Fallback to existing flag if history not available
+    widthExpanding = true;
+    widthExpansionPercent = 15;  // Assume moderate expansion
+  }
+  
+  checkDetails.widthExpanding = widthExpanding;
+  checkDetails.widthExpansionPercent = widthExpansionPercent;
+  
+  if (!widthExpanding) {
+    return { 
+      isValid: false, 
+      direction: null, 
+      positionSizeMultiplier: 1.0, 
+      stopMultiplier: 1.0,
+      reasons: [`BB width not expanding (${widthExpansionPercent.toFixed(1)}% < 10% required)`], 
+      checkDetails 
+    };
+  }
+  reasons.push(`BB width expanding ${widthExpansionPercent.toFixed(1)}%`);
+  
+  // ===== CONDITION 3: ADX Slope positive (energy building) =====
+  checkDetails.adxSlopeOk = adxSlope >= P.MIN_ADX_SLOPE;
+  
+  if (adxSlope < P.MIN_ADX_SLOPE) {
+    return { 
+      isValid: false, 
+      direction: null, 
+      positionSizeMultiplier: 1.0, 
+      stopMultiplier: 1.0,
+      reasons: [`ADX slope ${adxSlope.toFixed(3)} < ${P.MIN_ADX_SLOPE} (energy not building)`], 
+      checkDetails 
+    };
+  }
+  
+  // Also check ADX floor
+  if (adx < P.MIN_ADX_FLOOR) {
+    return { 
+      isValid: false, 
+      direction: null, 
+      positionSizeMultiplier: 1.0, 
+      stopMultiplier: 1.0,
+      reasons: [`ADX ${adx.toFixed(1)} < ${P.MIN_ADX_FLOOR} (below floor)`], 
+      checkDetails 
+    };
+  }
+  reasons.push(`ADX slope ${adxSlope.toFixed(3)} rising, ADX=${adx.toFixed(1)}`);
+  
+  // ===== CONDITION 4: Volume Surge =====
+  const volumeRatio = volumeData.ratio || 1.0;
+  const volumeZScore = volumeData.zScore ?? (volumeRatio > 1.5 ? 1.6 : 0.8);  // Estimate if not provided
+  
+  checkDetails.volumeRatio = volumeRatio;
+  checkDetails.volumeZScore = volumeZScore;
+  checkDetails.volumeSurge = volumeZScore >= P.MIN_VOLUME_ZSCORE || volumeRatio >= P.MIN_VOLUME_RATIO;
+  
+  if (!checkDetails.volumeSurge) {
+    return { 
+      isValid: false, 
+      direction: null, 
+      positionSizeMultiplier: 1.0, 
+      stopMultiplier: 1.0,
+      reasons: [`Volume not surging (ratio=${volumeRatio.toFixed(2)}, zScore=${volumeZScore.toFixed(2)})`], 
+      checkDetails 
+    };
+  }
+  reasons.push(`Volume surge: ratio=${volumeRatio.toFixed(2)}, zScore=${volumeZScore.toFixed(2)}`);
+  
+  // ===== CONDITION 5: Micro Range Break =====
+  // Detect if price has broken above/below recent consolidation range
+  let rangeBreakDirection: "long" | "short" | null = null;
+  let rangeBreakPercent = 0;
+  
+  if (klineData && klineData.length >= 12) {
+    const recentCandles = klineData.slice(-12);
+    const highs = recentCandles.map((k: any) => parseFloat(k[2]) || k.high || 0).filter(Number.isFinite);
+    const lows = recentCandles.map((k: any) => parseFloat(k[3]) || k.low || 0).filter(Number.isFinite);
+    const currentClose = parseFloat(recentCandles[recentCandles.length - 1]?.[4]) || 0;
+    
+    if (highs.length >= 10 && currentClose > 0) {
+      // Exclude last 2 candles from range calculation (they're the breakout)
+      const rangeHigh = Math.max(...highs.slice(0, -2));
+      const rangeLow = Math.min(...lows.slice(0, -2));
+      
+      if (rangeHigh > 0 && rangeLow > 0) {
+        const breakAbove = ((currentClose - rangeHigh) / rangeHigh) * 100;
+        const breakBelow = ((rangeLow - currentClose) / rangeLow) * 100;
+        
+        if (breakAbove >= P.MIN_BREAK_PERCENT) {
+          rangeBreakDirection = "long";
+          rangeBreakPercent = breakAbove;
+        } else if (breakBelow >= P.MIN_BREAK_PERCENT) {
+          rangeBreakDirection = "short";
+          rangeBreakPercent = breakBelow;
+        }
+      }
+    }
+  } else {
+    // Fallback: use Bollinger %B as proxy for range break
+    const percentB1h = bb1h.percentB ?? 50;
+    if (percentB1h >= 85) {
+      rangeBreakDirection = "long";
+      rangeBreakPercent = (percentB1h - 80) / 20 * 0.5;  // Estimate
+    } else if (percentB1h <= 15) {
+      rangeBreakDirection = "short";
+      rangeBreakPercent = (20 - percentB1h) / 20 * 0.5;  // Estimate
+    }
+  }
+  
+  checkDetails.rangeBreakDetected = rangeBreakDirection !== null;
+  checkDetails.rangeBreakDirection = rangeBreakDirection;
+  checkDetails.rangeBreakPercent = rangeBreakPercent;
+  
+  if (!rangeBreakDirection) {
+    return { 
+      isValid: false, 
+      direction: null, 
+      positionSizeMultiplier: 1.0, 
+      stopMultiplier: 1.0,
+      reasons: ["No micro range break detected"], 
+      checkDetails 
+    };
+  }
+  reasons.push(`Range break ${rangeBreakDirection.toUpperCase()}: ${rangeBreakPercent.toFixed(2)}%`);
+  
+  // ===== CONDITION 6: StochRSI Safety (NOT at Tier 0 extremes) =====
+  const stochK4h = stochRsi['4h']?.k ?? 50;
+  checkDetails.stochRsiK = stochK4h;
+  
+  // Tier 0 blocks (absolute extremes)
+  if (stochK4h <= P.TIER_0_BLOCK_K_FLOOR || stochK4h >= P.TIER_0_BLOCK_K_CEILING) {
+    return { 
+      isValid: false, 
+      direction: null, 
+      positionSizeMultiplier: 1.0, 
+      stopMultiplier: 1.0,
+      reasons: [`StochRSI K=${stochK4h.toFixed(1)} at Tier 0 extreme (blocked)`], 
+      checkDetails 
+    };
+  }
+  
+  // Direction-specific safety
+  if (rangeBreakDirection === "long" && stochK4h > P.MAX_STOCHRSI_K_FOR_LONG) {
+    return { 
+      isValid: false, 
+      direction: null, 
+      positionSizeMultiplier: 1.0, 
+      stopMultiplier: 1.0,
+      reasons: [`StochRSI K=${stochK4h.toFixed(1)} > ${P.MAX_STOCHRSI_K_FOR_LONG} for LONG`], 
+      checkDetails 
+    };
+  }
+  if (rangeBreakDirection === "short" && stochK4h < P.MIN_STOCHRSI_K_FOR_SHORT) {
+    return { 
+      isValid: false, 
+      direction: null, 
+      positionSizeMultiplier: 1.0, 
+      stopMultiplier: 1.0,
+      reasons: [`StochRSI K=${stochK4h.toFixed(1)} < ${P.MIN_STOCHRSI_K_FOR_SHORT} for SHORT`], 
+      checkDetails 
+    };
+  }
+  
+  checkDetails.stochRsiSafe = true;
+  reasons.push(`StochRSI K=${stochK4h.toFixed(1)} safe for ${rangeBreakDirection}`);
+  
+  // ===== HTF CHECK: Must NOT oppose =====
+  const trend4h = timeframes['4h']?.trend || "neutral";
+  const conf4h = timeframes['4h']?.confidence || 50;
+  
+  const htfOpposing = (rangeBreakDirection === "long" && trend4h === "bearish" && conf4h >= P.HTF_OPPOSING_CONFIDENCE_THRESHOLD) ||
+                      (rangeBreakDirection === "short" && trend4h === "bullish" && conf4h >= P.HTF_OPPOSING_CONFIDENCE_THRESHOLD);
+  
+  const htfSupporting = (rangeBreakDirection === "long" && trend4h === "bullish") ||
+                        (rangeBreakDirection === "short" && trend4h === "bearish");
+  
+  const htfNeutral = trend4h === "neutral";
+  
+  checkDetails.htfOpposing = htfOpposing;
+  checkDetails.htfSupporting = htfSupporting;
+  checkDetails.htfNeutral = htfNeutral;
+  
+  if (htfOpposing) {
+    return { 
+      isValid: false, 
+      direction: null, 
+      positionSizeMultiplier: 1.0, 
+      stopMultiplier: 1.0,
+      reasons: [`HTF (4h=${trend4h}, ${conf4h.toFixed(0)}%) opposes ${rangeBreakDirection}`], 
+      checkDetails 
+    };
+  }
+  reasons.push(`HTF not opposing (4h=${trend4h}, ${conf4h.toFixed(0)}%)`);
+  
+  // ===== ALL CONDITIONS PASSED - EARLY IGNITION ENTRY VALID =====
+  reasons.push("✅ EARLY IGNITION ENTRY: All conditions met");
+  
+  // Determine position size
+  let positionSizeMultiplier = P.POSITION_SIZE_BASE;  // 0.35 base
+  if (htfSupporting) {
+    positionSizeMultiplier = P.POSITION_SIZE_WITH_HTF_SUPPORT;  // 0.45 with HTF support
+  } else if (volumeZScore < 2.0) {
+    positionSizeMultiplier = P.POSITION_SIZE_WEAK_VOLUME;  // 0.30 for weak volume
+  }
+  
+  return {
+    isValid: true,
+    direction: rangeBreakDirection,
+    positionSizeMultiplier,
+    stopMultiplier: P.STOP_LOSS_ATR_MULTIPLIER,  // 1.0x ATR (tight)
+    reasons,
+    checkDetails,
+  };
+};
+
 // ============= DERIVE TRADE DIRECTION =============
 // Explicitly derives trade direction from multi-timeframe trend data
 // Returns null if no clear direction can be determined
