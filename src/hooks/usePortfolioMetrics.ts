@@ -26,9 +26,16 @@ const DEFAULT_METRICS: PortfolioMetrics = {
 };
 
 export const fetchPortfolioMetrics = async (): Promise<PortfolioMetrics> => {
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return DEFAULT_METRICS;
+  }
+
   const { data, error } = await supabase
     .from('portfolio_metrics_view')
     .select('*')
+    .eq('user_id', user.id)
     .single();
   
   if (error) {
