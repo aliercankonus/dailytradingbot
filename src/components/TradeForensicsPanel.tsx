@@ -237,7 +237,7 @@ export const TradeForensicsPanel = ({ position }: TradeForensicsPanelProps) => {
                   )}
 
                   {/* ADX Slope */}
-                  {snapshot.adx_slope !== undefined && (
+                  {snapshot.adx_slope != null && (
                     <div className="flex items-center gap-2">
                       {snapshot.adx_slope > 0 ? (
                         <TrendingUp className="h-3 w-3 text-green-500" />
