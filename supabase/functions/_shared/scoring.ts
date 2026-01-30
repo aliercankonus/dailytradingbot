@@ -4380,3 +4380,127 @@ export const checkImpulseContinuation = (
     reason: `IMPULSE_CONTINUATION: ADX=${adx.toFixed(1)}, move=${priceMovePct.toFixed(2)}%`,
   };
 };
+
+// ============= SHARED DATA EXTRACTION HELPERS =============
+// IMPROVEMENT: Centralized extraction to ensure consistency across all edge functions
+// Used by: strategy-analyzer, execute-trade, monitor-positions
+
+/**
+ * Extract ADX value from trend data with support for both number and object formats.
+ * Provides consistent extraction pattern across all edge functions.
+ */
+export const extractADX = (trendData: any, defaultValue: number = 20): number => {
+  // Primary path: volatility.adx
+  const volatilityAdx = trendData?.volatility?.adx;
+  if (typeof volatilityAdx === 'number' && !isNaN(volatilityAdx)) {
+    return volatilityAdx;
+  }
+  // Handle object format (some responses may have {value: number})
+  if (typeof volatilityAdx === 'object' && volatilityAdx !== null) {
+    const objValue = volatilityAdx.value;
+    if (typeof objValue === 'number' && !isNaN(objValue)) {
+      return objValue;
+    }
+  }
+  
+  // Fallback path: momentum.adx
+  const momentumAdx = trendData?.momentum?.adx;
+  if (typeof momentumAdx === 'number' && !isNaN(momentumAdx)) {
+    return momentumAdx;
+  }
+  
+  return defaultValue;
+};
+
+/**
+ * Extract ADX slope and rising status from trend data.
+ * Returns { slope, isRising } for momentum calculations.
+ */
+export const extractADXSlope = (trendData: any): { slope: number; isRising: boolean } => {
+  const slope = trendData?.volatility?.adxSlope ?? trendData?.momentum?.adxSlope ?? 0;
+  const isRising = slope > 0 || trendData?.momentum?.adxRising === true;
+  return { slope, isRising };
+};
+
+/**
+ * Extract StochRSI K value from trend data with consistent fallback chain.
+ * Supports multiple extraction paths and timeframes.
+ */
+export const extractStochRsiK = (
+  trendData: any, 
+  timeframe: '4h' | '1h' | '30m' | '15m' = '4h',
+  defaultValue: number = 50
+): number => {
+  // Path 1: stochasticRsi.[timeframe].k
+  const stochRsiPath = trendData?.stochasticRsi?.[timeframe]?.k;
+  if (typeof stochRsiPath === 'number' && !isNaN(stochRsiPath)) {
+    return stochRsiPath;
+  }
+  
+  // Path 2: timeframes.[timeframe].indicators.stochRsi.k
+  const indicatorsPath = trendData?.timeframes?.[timeframe]?.indicators?.stochRsi?.k;
+  if (typeof indicatorsPath === 'number' && !isNaN(indicatorsPath)) {
+    return indicatorsPath;
+  }
+  
+  // Path 3: Aggregated fallback (for 4h primarily)
+  if (timeframe === '4h') {
+    const aggregatedPath = trendData?.stochasticRsi?.aggregated?.k;
+    if (typeof aggregatedPath === 'number' && !isNaN(aggregatedPath)) {
+      return aggregatedPath;
+    }
+  }
+  
+  return defaultValue;
+};
+
+/**
+ * Extract StochRSI D value from trend data with consistent fallback chain.
+ */
+export const extractStochRsiD = (
+  trendData: any, 
+  timeframe: '4h' | '1h' | '30m' | '15m' = '4h',
+  defaultValue: number = 50
+): number => {
+  const stochRsiPath = trendData?.stochasticRsi?.[timeframe]?.d;
+  if (typeof stochRsiPath === 'number' && !isNaN(stochRsiPath)) {
+    return stochRsiPath;
+  }
+  
+  const indicatorsPath = trendData?.timeframes?.[timeframe]?.indicators?.stochRsi?.d;
+  if (typeof indicatorsPath === 'number' && !isNaN(indicatorsPath)) {
+    return indicatorsPath;
+  }
+  
+  if (timeframe === '4h') {
+    const aggregatedPath = trendData?.stochasticRsi?.aggregated?.d;
+    if (typeof aggregatedPath === 'number' && !isNaN(aggregatedPath)) {
+      return aggregatedPath;
+    }
+  }
+  
+  return defaultValue;
+};
+
+/**
+ * Extract ATR percent from trend data with consistent fallback.
+ * Uses unified default of 1.5 (aligned across all functions).
+ */
+export const extractAtrPercent = (trendData: any, defaultValue: number = 1.5): number => {
+  const atrPercent = trendData?.volatility?.atrPercent;
+  if (typeof atrPercent === 'number' && !isNaN(atrPercent)) {
+    return atrPercent;
+  }
+  return defaultValue;
+};
+
+/**
+ * Extract price change percent for a specific timeframe.
+ * Used for move exhaustion and flash crash detection.
+ */
+export const extractPriceChange = (trendData: any, timeframe: '4h' | '24h' = '4h'): number => {
+  if (timeframe === '4h') {
+    return trendData?.priceChange?.percent4h ?? 0;
+  }
+  return trendData?.priceChange?.percent24h ?? 0;
+};
