@@ -2,6 +2,22 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
+// Zone analytics types for MOVE_EXHAUSTION gate
+export type MoveZone = 'FRESH' | 'SOFT' | 'HARD' | 'EXCEPTION';
+export type MoveZoneOutcome = 'ALLOWED' | 'REDUCED' | 'BLOCKED' | 'EXCEPTION_ALLOWED';
+
+export interface MoveZoneDetails {
+  zone: MoveZone;
+  distancePercent: number;
+  direction: 'short' | 'long' | null;
+  stochRsiK: number;
+  adx: number;
+  adxSlope: number;
+  outcome: MoveZoneOutcome;
+  positionMultiplier: number;
+  overrideReason?: string;
+}
+
 export interface BlockedSignal {
   id: string;
   symbol: string;
@@ -28,6 +44,9 @@ export interface BlockedSignal {
     // NEW: Break-even and partial win tracking for fairer win rate
     breakEvenCount?: number;
     partialWinCount?: number;
+    // NEW: Zone analytics for MOVE_EXHAUSTION gate
+    moveZone?: MoveZone;
+    moveZoneDetails?: MoveZoneDetails;
   } | null;
   trend_data: {
     direction?: string;
