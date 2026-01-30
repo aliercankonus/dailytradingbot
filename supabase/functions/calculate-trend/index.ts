@@ -475,7 +475,9 @@ function calculateNeutralPersistence(
     const open = parseFloat(klines15m[i][1]);
     const prevClose = parseFloat(klines15m[i-1][4]);
     
-    if (!Number.isFinite(close) || !Number.isFinite(open) || !Number.isFinite(prevClose) || open === 0 || prevClose === 0) {
+    // FIX: Enhanced zero-check to prevent division by zero
+    if (!Number.isFinite(close) || !Number.isFinite(open) || !Number.isFinite(prevClose) || 
+        open === 0 || prevClose === 0 || Math.abs(open) < 0.00001 || Math.abs(prevClose) < 0.00001) {
       continue;
     }
     
@@ -679,8 +681,26 @@ function calculateTrueAlignmentScore(
   trend15m: { trend: string; confidence: number; indicators: any },
   dominantTrend: string,
   adx: number = 25,
-  volumeConfirms: boolean = false
-): { score: number; breakdown: { directionScore: number; indicatorScore: number; penaltyScore: number }; neutralCapped: boolean } {
+  volumeConfirms: boolean = false,
+  volumeRatio: number = 1.0
+): { 
+  score: number; 
+  breakdown: { directionScore: number; indicatorScore: number; penaltyScore: number }; 
+  neutralCapped: boolean;
+  tf4hConfidence: number;
+  tf1hConfidence: number;
+  volumeRatio: number;
+  volumeBoost: number;
+  adxStrength: number;
+  adxContribution: number;
+  totalWeightedConfidence: number;
+  weightedComponents: {
+    tf4hWeighted: number;
+    tf1hWeighted: number;
+    volumeWeighted: number;
+    adxWeighted: number;
+  };
+} {
   let directionScore = 0, indicatorScore = 0, penaltyScore = 0;
   
   const trends = [
@@ -750,6 +770,15 @@ function calculateTrueAlignmentScore(
     }
   }
   
+  // Calculate enhanced alignment components for transparency
+  const volumeBoost = volumeConfirms ? 0.10 : 0;
+  const adxContribution = Math.min(10, (adx - 15) * 0.5);  // ADX contribution scaled
+  const tf4hWeighted = trend4h.confidence * 0.35;
+  const tf1hWeighted = trend1h.confidence * 0.30;
+  const volumeWeighted = volumeRatio * 5;  // Volume ratio contribution
+  const adxWeighted = adxContribution;
+  const totalWeightedConfidence = tf4hWeighted + tf1hWeighted + volumeWeighted + adxWeighted;
+  
   return {
     score: normalizedScore,
     breakdown: {
@@ -758,6 +787,19 @@ function calculateTrueAlignmentScore(
       penaltyScore: Math.round(penaltyScore),
     },
     neutralCapped,
+    tf4hConfidence: trend4h.confidence,
+    tf1hConfidence: trend1h.confidence,
+    volumeRatio,
+    volumeBoost,
+    adxStrength: adx,
+    adxContribution: Math.round(adxContribution * 10) / 10,
+    totalWeightedConfidence: Math.round(totalWeightedConfidence * 10) / 10,
+    weightedComponents: {
+      tf4hWeighted: Math.round(tf4hWeighted * 10) / 10,
+      tf1hWeighted: Math.round(tf1hWeighted * 10) / 10,
+      volumeWeighted: Math.round(volumeWeighted * 10) / 10,
+      adxWeighted: Math.round(adxWeighted * 10) / 10,
+    },
   };
 }
 
@@ -1109,11 +1151,12 @@ serve(async (req) => {
       trend4h.confidence, adx4h, volume4h.volumeSpike || volume4h.volumeTrend === "increasing", volume4h.volumeRatio, false
     );
 
-    // True alignment score
+    // True alignment score - now includes full component breakdown for transparency
     const volumeConfirmsAny = (volume1h.volumeSpike && hasRangeExpansion1h) || volume4h.volumeSpike || 
                                volume1h.volumeTrend === "increasing" || volume4h.volumeTrend === "increasing";
+    const avgVolumeRatio = ((volume1h.volumeRatio ?? 1.0) + (volume4h.volumeRatio ?? 1.0)) / 2;
     const trueAlignment = calculateTrueAlignmentScore(
-      trend4h, trend1h, trend30m, trend15m, dominantTrend, adx, volumeConfirmsAny
+      trend4h, trend1h, trend30m, trend15m, dominantTrend, adx, volumeConfirmsAny, avgVolumeRatio
     );
     
     // ============= MICRO-TREND DETECTION =============
@@ -1519,11 +1562,8 @@ serve(async (req) => {
         macdStrong,
         // IMPORTANT: Include actual MACD histogram value for UI display
         macdHistogram: trend1h.indicators?.macdHistogram ?? 0,
-        macdDirectionAligned: (trend1h.indicators?.macdHistogram ?? 0) > 0 
-          ? (dominantTrend === "bullish") 
-          : (trend1h.indicators?.macdHistogram ?? 0) < 0 
-            ? (dominantTrend === "bearish") 
-            : false,
+        // FIX: Use consistent macdDirectionAligned calculated earlier with effectiveTrendForMomentum
+        macdDirectionAligned,
         lastCloseAlignsWithTrend,
         hasDivergence,
         confirms: momentumConfirms,
@@ -1546,6 +1586,9 @@ serve(async (req) => {
         adx15m: Math.round(adx15m * 10) / 10,
         adx30m: Math.round(adx30m * 10) / 10,
         adx4h: Math.round(adx4h * 10) / 10,
+        // NEW: Include ADX slope for graduated exit decisions
+        adxSlope: adxResult.adxSlope ?? (adx - (adxResult.prevAdx ?? adx)),
+        adxRising,
         volatilityNormal,
         isRanging,
       },
