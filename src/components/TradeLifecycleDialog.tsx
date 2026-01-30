@@ -169,7 +169,7 @@ export const TradeLifecycleDialog = ({ positionId, open, onOpenChange }: TradeLi
           type: 'close',
           timestamp: finalClose.closed_at || finalClose.updated_at,
           position: finalClose as RelatedPosition,
-          description: `Position closed: ${getCloseReasonLabel(finalClose.close_reason)}`
+          description: `Position closed at ${formatPrice(finalClose.exit_price || 0, 4, '$')} (${getCloseReasonLabel(finalClose.close_reason)})`
         });
       }
       
@@ -186,7 +186,7 @@ export const TradeLifecycleDialog = ({ positionId, open, onOpenChange }: TradeLi
             type: 'close',
             timestamp: clickedPosition.closed_at,
             position: clickedPosition as RelatedPosition,
-            description: `Closed: ${getCloseReasonLabel(clickedPosition.close_reason)}`
+            description: `Closed at ${formatPrice(clickedPosition.exit_price || 0, 4, '$')} (${getCloseReasonLabel(clickedPosition.close_reason)})`
           });
         }
       }
