@@ -15,6 +15,58 @@ import {
   extractAtrPercent,
   type UnifiedReversalResult
 } from "../_shared/scoring.ts";
+
+// ============================================================
+// TRUE ALIGNMENT v2.0 EXTRACTION HELPER
+// For consistent HTF context awareness across exit decisions
+// ============================================================
+interface TrueAlignmentData {
+  score: number;
+  tf4hConfidence: number;
+  tf1hConfidence: number;
+  adxContribution: number;
+  totalWeightedConfidence: number;
+  weightedComponents: {
+    tf4hWeighted: number;
+    tf1hWeighted: number;
+    adxWeighted: number;
+    volumeWeighted: number;
+  };
+  neutralCapped: boolean;
+  isPremium: boolean;  // Strong HTF alignment
+  isWeak: boolean;     // Weak/neutral alignment
+}
+
+function extractTrueAlignment(trendData: any): TrueAlignmentData | null {
+  const alignment = trendData?.trueAlignment;
+  if (!alignment) return null;
+  
+  const weighted = alignment.weightedComponents || {};
+  const tf4hWeighted = weighted.tf4hWeighted ?? 0;
+  const tf1hWeighted = weighted.tf1hWeighted ?? 0;
+  const adxContribution = alignment.adxContribution ?? 0;
+  const tf4hConfidence = alignment.tf4hConfidence ?? 0;
+  const neutralCapped = alignment.neutralCapped === true;
+  
+  return {
+    score: alignment.score ?? alignment.totalWeightedConfidence ?? 0,
+    tf4hConfidence,
+    tf1hConfidence: alignment.tf1hConfidence ?? 0,
+    adxContribution,
+    totalWeightedConfidence: alignment.totalWeightedConfidence ?? 0,
+    weightedComponents: {
+      tf4hWeighted,
+      tf1hWeighted,
+      adxWeighted: weighted.adxWeighted ?? 0,
+      volumeWeighted: weighted.volumeWeighted ?? 0,
+    },
+    neutralCapped,
+    // Premium: Strong 4H AND 1H alignment with good ADX contribution
+    isPremium: tf4hWeighted >= 30 && tf1hWeighted >= 15 && adxContribution >= 15,
+    // Weak: Neutral capped OR very low 4H confidence
+    isWeak: neutralCapped || tf4hConfidence < 40,
+  };
+}
 import type { TrendDataResponse, PartialTrendData } from "../_shared/trend-types.ts";
 // Phase 3: Smart Momentum for context-aware exit management
 import {
@@ -470,6 +522,68 @@ serve(async (req) => {
       // Apply strategy adjustment to dynamic threshold
       dynamicReversalThreshold += strategyExitAdjustment;
       
+      // ============================================================
+      // TRUE ALIGNMENT v2.0 EXIT ADJUSTMENTS
+      // Use HTF weighted components for smarter exit timing
+      // Premium alignment = more patience, Weak alignment = exit sooner
+      // ============================================================
+      const trueAlignment = extractTrueAlignment(trendDataForPosition);
+      let alignmentExitAdjustment = 0;
+      let alignmentExitNote = "";
+      let htfAlignmentMultiplier = 1.0; // Used for trailing stop distance adjustment
+      
+      if (trueAlignment) {
+        const { tf4hWeighted, tf1hWeighted, adxWeighted, volumeWeighted } = trueAlignment.weightedComponents;
+        
+        // Check if position is aligned with HTF trend
+        const primaryTrend = trendDataForPosition?.trend || 'ranging';
+        const isPositionAlignedWithHTF = 
+          (position.side === 'BUY' && primaryTrend === 'bullish') ||
+          (position.side === 'SELL' && primaryTrend === 'bearish');
+        
+        if (trueAlignment.isPremium && isPositionAlignedWithHTF) {
+          // PREMIUM ALIGNMENT: Strong HTF support - be very patient
+          // Position is in line with strong 4H and 1H trends
+          alignmentExitAdjustment = +8; // Higher threshold = more tolerance for pullbacks
+          htfAlignmentMultiplier = 1.15; // Wider trailing stop distance
+          alignmentExitNote = `Premium HTF alignment (4h=${tf4hWeighted.toFixed(1)}, 1h=${tf1hWeighted.toFixed(1)}, ADX=${adxWeighted.toFixed(1)})`;
+        } else if (trueAlignment.isPremium && !isPositionAlignedWithHTF) {
+          // PREMIUM but COUNTER-TREND: Strong HTF against us - exit faster!
+          alignmentExitAdjustment = -10; // Much tighter exit
+          htfAlignmentMultiplier = 0.85; // Tighter trailing stop
+          alignmentExitNote = `COUNTER-TREND: Premium HTF opposes position (4h=${tf4hWeighted.toFixed(1)}, 1h=${tf1hWeighted.toFixed(1)})`;
+        } else if (trueAlignment.isWeak) {
+          // WEAK ALIGNMENT: No clear HTF direction - exit sooner on any warning
+          alignmentExitAdjustment = -5;
+          htfAlignmentMultiplier = 0.90; // Slightly tighter trailing
+          alignmentExitNote = trueAlignment.neutralCapped 
+            ? `Neutral-capped HTF alignment (4h conf=${trueAlignment.tf4hConfidence.toFixed(0)}%)`
+            : `Weak HTF alignment (4h conf=${trueAlignment.tf4hConfidence.toFixed(0)}%)`;
+        } else if (isPositionAlignedWithHTF && tf4hWeighted >= 20) {
+          // SOLID ALIGNMENT: Good 4H support
+          alignmentExitAdjustment = +3;
+          htfAlignmentMultiplier = 1.05; // Slightly wider trailing
+          alignmentExitNote = `Solid HTF alignment (4h=${tf4hWeighted.toFixed(1)}, 1h=${tf1hWeighted.toFixed(1)})`;
+        }
+        
+        // Volume confirmation bonus/penalty
+        if (volumeWeighted >= 4 && isPositionAlignedWithHTF) {
+          alignmentExitAdjustment += 2; // Volume confirms direction - more patience
+          alignmentExitNote += " +vol_confirm";
+        } else if (volumeWeighted < 1.5 && !isPositionAlignedWithHTF) {
+          alignmentExitAdjustment -= 2; // Low volume counter-trend - exit faster
+          alignmentExitNote += " -vol_weak";
+        }
+        
+        // Apply alignment adjustment to dynamic threshold
+        dynamicReversalThreshold += alignmentExitAdjustment;
+        
+        // Log alignment impact
+        if (alignmentExitAdjustment !== 0) {
+          positionLogger.info(`🎯 HTF ALIGNMENT: ${alignmentExitNote} | Exit adj: ${alignmentExitAdjustment > 0 ? '+' : ''}${alignmentExitAdjustment} | Trailing mult: ${htfAlignmentMultiplier.toFixed(2)}x`);
+        }
+      }
+      
       // Clamp to reasonable bounds (50-85)
       dynamicReversalThreshold = Math.max(50, Math.min(85, dynamicReversalThreshold));
       
@@ -477,8 +591,9 @@ serve(async (req) => {
         positionLogger.info(`Strategy-aware exit: ${strategyType} | Adj: ${strategyExitAdjustment > 0 ? '+' : ''}${strategyExitAdjustment} | ${strategyExitNote}`);
       }
       
-      // Log dynamic threshold calculation
-      positionLogger.debug(`Dynamic exit threshold=${dynamicReversalThreshold} (ADX=${positionAdx.toFixed(1)}, Vol=${positionVolumeScore}, Conf=${positionConfidence}%, Strategy=${strategyType})`);
+      // Log dynamic threshold calculation with alignment context
+      const alignmentInfo = trueAlignment ? `Align=${alignmentExitAdjustment > 0 ? '+' : ''}${alignmentExitAdjustment}` : 'Align=N/A';
+      positionLogger.debug(`Dynamic exit threshold=${dynamicReversalThreshold} (ADX=${positionAdx.toFixed(1)}, Vol=${positionVolumeScore}, Conf=${positionConfidence}%, Strategy=${strategyType}, ${alignmentInfo})`);
 
       
       // ============================================================
@@ -1433,7 +1548,18 @@ serve(async (req) => {
       if (userSettings.enabled && shouldActivateTrailing) {
         // Calculate ATR-based minimum distance (for volatility buffer)
         const atrAbsolute = (currentPrice * atrPercent) / 100;
-        const minTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * 0.015); // Min 1.5% of current price
+        
+        // ============================================================
+        // HTF ALIGNMENT-ADJUSTED TRAILING DISTANCE
+        // Premium alignment = wider trailing (more room for pullbacks)
+        // Weak/counter-trend = tighter trailing (lock profits faster)
+        // ============================================================
+        const baseTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * 0.015); // Min 1.5% of current price
+        const minTrailingDistance = baseTrailingDistance * htfAlignmentMultiplier; // Apply HTF multiplier
+        
+        if (htfAlignmentMultiplier !== 1.0) {
+          positionLogger.debug(`HTF-adjusted trailing: base=${baseTrailingDistance.toFixed(2)} × ${htfAlignmentMultiplier.toFixed(2)} = ${minTrailingDistance.toFixed(2)}`);
+        }
         
         // ============= PHASE 3: TIGHTENING SPEED CAP =============
         // Prevent death by a thousand cuts by limiting how fast stop can tighten
