@@ -204,6 +204,13 @@ import {
   getEffectiveMomentumThreshold,
   applyQualityNearMissBoost,
   checkImpulseContinuation,
+  // CENTRALIZED EXTRACTION HELPERS (consistency across all edge functions)
+  extractADX,
+  extractADXSlope,
+  extractStochRsiK,
+  extractStochRsiD,
+  extractAtrPercent,
+  extractPriceChange,
   type UnifiedReversalResult,
   type MarketRegime,
   type MarketRegimeEnhancedResult,
@@ -2540,7 +2547,9 @@ serve(async (req) => {
       try {
         const { primaryTrend: trend, confidence, trueAlignment, isAligned, timeframes } = trendData;
         const trendConsistency = trueAlignment?.score || 0;
-        const adx = trendData.volatility?.adx || 0;
+        // CENTRALIZED: Use shared extractors for consistency across edge functions
+        const adx = extractADX(trendData);
+        const { slope: adxSlope, isRising: adxRising } = extractADXSlope(trendData);
         const momentum = trendData.momentum;
         
         // ============= NEUTRAL PERSISTENCE BONUS =============
@@ -2609,7 +2618,8 @@ serve(async (req) => {
         // the "MACD Signal Cross" strategy used a different code path. This early gate
         // catches ALL entries regardless of strategy path.
         if (DEEP_STOCHRSI_HARD_GATE.ENABLED) {
-          const earlyStochRsiK4h = trendData.stochasticRsi?.['4h']?.k ?? 50;
+          // CENTRALIZED: Use shared extractor for StochRSI K
+          const earlyStochRsiK4h = extractStochRsiK(trendData, '4h');
           const earlyDirection = directionResult.direction;  // May be null if no clear direction yet
           
           // Only check if we have an early direction - otherwise let downstream gates handle it
@@ -3361,8 +3371,9 @@ serve(async (req) => {
         // ROOT CAUSE FIX: SHORTs have no equivalent gate to block entries during rallies
         // LONGs are blocked by "MOVE_EXHAUSTED: Price rallied 5%" but SHORTs were missing this
         if (MOVE_EXHAUSTED_REVERSAL_GATE.ENABLED && derivedDirection === 'short') {
-          const priceChange4h = trendData.priceChange?.percent4h ?? 0;
-          const stochRsiK4h = trendData.stochasticRsi?.['4h']?.k ?? 50;
+          // CENTRALIZED: Use shared extractors
+          const priceChange4h = extractPriceChange(trendData, '4h');
+          const stochRsiK4h = extractStochRsiK(trendData, '4h');
           
           // Block SHORT if price ROSE significantly in last hours
           if (priceChange4h > MOVE_EXHAUSTED_REVERSAL_GATE.BLOCK_SHORT_IF_PRICE_ROSE_PERCENT) {
@@ -5091,7 +5102,8 @@ serve(async (req) => {
         
         // Check tiered parabolic bypass conditions (strong trend + no exhaustion)
         const diGap = fullAdxResult?.diGap ?? 0;
-        const adxSlope = fullAdxResult?.adxSlope ?? 0;
+        // CENTRALIZED: Use previously extracted adxSlope from extractADXSlope (line 2552)
+        // Fallback to fullAdxResult if we're in a different scope (safety)
         
         // ============= PHASE 2: TREND CONTINUATION AFTER EXIT =============
         // Check for recent profitable exits to allow relaxed re-entry thresholds
@@ -5652,8 +5664,8 @@ serve(async (req) => {
         // - Near-very-strong (ADX 33-35, slope >= -0.3): threshold 130
         // - Strong (ADX 30+, rising, HTF aligned): threshold 120
         // - Default: threshold 110
-        const adxRising = trendData.momentum?.adxRising === true || 
-          (trendData.volatility?.adxSlope && trendData.volatility.adxSlope > 0);
+        // CENTRALIZED: Use previously extracted adxRising from extractADXSlope (line 2552)
+        // No need to re-extract - adxRising was already set at symbol scope start
         const htf4hAligned = htfTrend4h === (derivedDirection === "long" ? "bullish" : "bearish");
         const htf1hAligned = htfTrend1h === (derivedDirection === "long" ? "bullish" : "bearish");
         
