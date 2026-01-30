@@ -429,11 +429,23 @@ const logRejectionWithAI = async (
     }
   };
   
-  // Merge Order Flow data, StochRSI data, and Bollinger data into filters_status
+  // Extract ADX and ADX slope for mean reversion diagnostics
+  const adxData = {
+    adx: trendData?.volatility?.adx ?? trendData?.adx ?? null,
+    adxSlope: trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? null,
+    adxRising: trendData?.volatility?.adxRising ?? trendData?.momentum?.adxRising ?? null,
+    // Also include ADX from other timeframes if available
+    adx15m: trendData?.volatility?.adx15m ?? null,
+    adx30m: trendData?.volatility?.adx30m ?? null,
+    adx4h: trendData?.volatility?.adx4h ?? null,
+  };
+  
+  // Merge Order Flow data, StochRSI data, Bollinger data, and ADX data into filters_status
   let enrichedFiltersStatus = {
     ...filtersStatus,
     ...stochRsiData, // Always include StochRSI K/D values
     ...bollingerData, // Always include Bollinger %B values
+    ...adxData, // Always include ADX and ADX slope for mean reversion diagnostics
   };
   
   // Add Order Flow data if provided
