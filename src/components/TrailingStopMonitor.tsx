@@ -1,11 +1,49 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TrendingUp, Shield, Brain, Clock, Zap, AlertTriangle } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { TrendingUp, Shield, Brain, Clock, Zap, AlertTriangle, Layers, ArrowUp, ArrowDown } from "lucide-react";
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
 import { formatPrice, formatPercent } from "@/lib/utils";
 
+// Extract HTF alignment data from position entry_snapshot
+const extractHtfAlignment = (entrySnapshot: any) => {
+  if (!entrySnapshot) return null;
+  
+  // Parse if string
+  const snapshot = typeof entrySnapshot === 'string' ? JSON.parse(entrySnapshot) : entrySnapshot;
+  
+  // Look for trueAlignment in multiple locations
+  const alignment = snapshot?.trueAlignmentV2 || snapshot?.trueAlignment || 
+                    snapshot?.indicators?.trueAlignmentV2 || snapshot?.indicators?.trueAlignment ||
+                    snapshot?.trendData?.trueAlignment;
+  
+  if (!alignment) return null;
+  
+  const weighted = alignment.weightedComponents || {};
+  const tf4h = weighted.tf4hWeighted ?? 0;
+  const tf1h = weighted.tf1hWeighted ?? 0;
+  const adx = weighted.adxWeighted ?? alignment.adxContribution ?? 0;
+  const volume = weighted.volumeWeighted ?? 0;
+  const score = alignment.score ?? alignment.totalWeightedConfidence ?? (tf4h + tf1h + adx + volume);
+  
+  // Determine alignment quality
+  const isPremium = tf4h >= 30 && tf1h >= 15;
+  const isWeak = tf4h < 15 || tf1h < 10;
+  const neutralCapped = alignment.neutralCapped ?? false;
+  
+  return {
+    score: Math.round(score),
+    tf4h: Math.round(tf4h * 10) / 10,
+    tf1h: Math.round(tf1h * 10) / 10,
+    adx: Math.round(adx * 10) / 10,
+    volume: Math.round(volume * 10) / 10,
+    isPremium,
+    isWeak,
+    neutralCapped,
+  };
+};
 export const TrailingStopMonitor = () => {
   const [positions, setPositions] = useState<any[]>([]);
   const [settings, setSettings] = useState({
@@ -171,6 +209,9 @@ export const TrailingStopMonitor = () => {
         const isDecayWarning = decayVelocity > 0.02;
         const isDecayCritical = decayVelocity > 0.03;
 
+        // Extract HTF alignment from entry snapshot
+        const htfAlignment = extractHtfAlignment(position.entry_snapshot);
+
         return {
           ...position,
           currentPrice,
@@ -186,6 +227,7 @@ export const TrailingStopMonitor = () => {
           isDecayCritical,
           tier: getTierLabel(peakPnl),
           tierColor: getTierColor(peakPnl),
+          htfAlignment,
         };
       });
   }, [positions, priceMap, settings]);
@@ -292,8 +334,64 @@ export const TrailingStopMonitor = () => {
                           <Badge variant="outline" className="text-[10px] text-amber-500">
                             High Decay - 80% Lock
                           </Badge>
-                        )}
-                      </div>
+                      )}
+                      
+                      {/* HTF Alignment Context */}
+                      {position.htfAlignment && (
+                        <div className="mt-2 border-t border-border/50 pt-2">
+                          <div className="mb-1.5 flex items-center gap-2">
+                            <Layers className="h-3 w-3 text-blue-500" />
+                            <span className="font-medium">HTF Alignment:</span>
+                            <span className="text-muted-foreground">Score {position.htfAlignment.score}</span>
+                            {position.htfAlignment.isPremium && (
+                              <Badge variant="default" className="gap-0.5 bg-green-500/20 text-[10px] text-green-400">
+                                <ArrowUp className="h-2.5 w-2.5" /> PREMIUM
+                              </Badge>
+                            )}
+                            {position.htfAlignment.isWeak && (
+                              <Badge variant="destructive" className="gap-0.5 text-[10px]">
+                                <ArrowDown className="h-2.5 w-2.5" /> WEAK
+                              </Badge>
+                            )}
+                            {position.htfAlignment.neutralCapped && (
+                              <Badge variant="outline" className="text-[10px] text-amber-500">
+                                Neutral Capped
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-4 gap-2">
+                            <div>
+                              <div className="mb-0.5 flex items-center justify-between text-[10px]">
+                                <span className="text-muted-foreground">4H</span>
+                                <span className="font-medium">{position.htfAlignment.tf4h}</span>
+                              </div>
+                              <Progress value={Math.min(100, (position.htfAlignment.tf4h / 35) * 100)} className="h-1" />
+                            </div>
+                            <div>
+                              <div className="mb-0.5 flex items-center justify-between text-[10px]">
+                                <span className="text-muted-foreground">1H</span>
+                                <span className="font-medium">{position.htfAlignment.tf1h}</span>
+                              </div>
+                              <Progress value={Math.min(100, (position.htfAlignment.tf1h / 30) * 100)} className="h-1" />
+                            </div>
+                            <div>
+                              <div className="mb-0.5 flex items-center justify-between text-[10px]">
+                                <span className="text-muted-foreground">ADX</span>
+                                <span className="font-medium">{position.htfAlignment.adx}</span>
+                              </div>
+                              <Progress value={Math.min(100, (position.htfAlignment.adx / 15) * 100)} className="h-1" />
+                            </div>
+                            <div>
+                              <div className="mb-0.5 flex items-center justify-between text-[10px]">
+                                <span className="text-muted-foreground">Vol</span>
+                                <span className="font-medium">{position.htfAlignment.volume}</span>
+                              </div>
+                              <Progress value={Math.min(100, (position.htfAlignment.volume / 10) * 100)} className="h-1" />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     </div>
                   </div>
                 </div>
