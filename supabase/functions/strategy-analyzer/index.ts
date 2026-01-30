@@ -3268,18 +3268,71 @@ serve(async (req) => {
               if (derivedDirection === 'short' && latestPrice > 0) {
                 // For SHORT: Check if price dropped significantly from 24h high
                 const dropFromHigh = ((priceHigh24h - latestPrice) / priceHigh24h) * 100;
+                
                 if (dropFromHigh >= priceActionOverride.MIN_PRICE_MOVE_PERCENT) {
-                  priceActionOverrideAllowed = true;
-                  priceActionPositionMultiplier = priceActionOverride.POSITION_SIZE_MULTIPLIER;
-                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📉 PRICE_ACTION_OVERRIDE: Price dropped ${dropFromHigh.toFixed(1)}% from 24h high, overriding bullish momentum lag`);
+                  // FIX: Check persistence requirement (move must not be single-candle impulse)
+                  let persistenceOk = true;
+                  if (priceActionOverride.REQUIRE_PERSISTENCE && priceActionOverride.MIN_BARS_SINCE_EXTREME) {
+                    // Find bar index where high was made (simplified: check last N bars)
+                    const recentHighBars = klineData.slice(-12); // Last 12 bars (3h on 15m)
+                    const highPrices = recentHighBars.map(k => parseFloat(k[2])); // k[2] = high
+                    const maxHighPrice = Math.max(...highPrices);
+                    const barsAgoMax = highPrices.length - 1 - highPrices.lastIndexOf(maxHighPrice);
+                    persistenceOk = barsAgoMax >= priceActionOverride.MIN_BARS_SINCE_EXTREME;
+                    
+                    if (!persistenceOk) {
+                      logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} 📉 PRICE_ACTION_OVERRIDE blocked: High was ${barsAgoMax} bars ago (need ${priceActionOverride.MIN_BARS_SINCE_EXTREME})`);
+                    }
+                  }
+                  
+                  // FIX: Hard zone protection - require higher ADX when in exhausted zone
+                  let hardZoneOk = true;
+                  const hardZoneThreshold = priceActionOverride.HARD_ZONE_THRESHOLD_PERCENT ?? 5.0;
+                  const hardZoneMinAdx = priceActionOverride.HARD_ZONE_MIN_ADX ?? 35;
+                  if (dropFromHigh >= hardZoneThreshold && adx < hardZoneMinAdx) {
+                    hardZoneOk = false;
+                    logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} 📉 PRICE_ACTION_OVERRIDE blocked: In HARD_ZONE (${dropFromHigh.toFixed(1)}% >= ${hardZoneThreshold}%) but ADX=${adx.toFixed(1)} < ${hardZoneMinAdx}`);
+                  }
+                  
+                  if (persistenceOk && hardZoneOk) {
+                    priceActionOverrideAllowed = true;
+                    priceActionPositionMultiplier = priceActionOverride.POSITION_SIZE_MULTIPLIER;
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📉 PRICE_ACTION_OVERRIDE: Price dropped ${dropFromHigh.toFixed(1)}% from 24h high, overriding bullish momentum lag`);
+                  }
                 }
               } else if (derivedDirection === 'long' && latestPrice > 0) {
                 // For LONG: Check if price rallied significantly from 24h low
                 const riseFromLow = ((latestPrice - priceLow24h) / priceLow24h) * 100;
+                
                 if (riseFromLow >= priceActionOverride.MIN_PRICE_MOVE_PERCENT) {
-                  priceActionOverrideAllowed = true;
-                  priceActionPositionMultiplier = priceActionOverride.POSITION_SIZE_MULTIPLIER;
-                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 PRICE_ACTION_OVERRIDE: Price rallied ${riseFromLow.toFixed(1)}% from 24h low, overriding bearish momentum lag`);
+                  // FIX: Check persistence requirement
+                  let persistenceOk = true;
+                  if (priceActionOverride.REQUIRE_PERSISTENCE && priceActionOverride.MIN_BARS_SINCE_EXTREME) {
+                    const recentLowBars = klineData.slice(-12);
+                    const lowPrices = recentLowBars.map(k => parseFloat(k[3])); // k[3] = low
+                    const minLowPrice = Math.min(...lowPrices);
+                    const barsAgoMin = lowPrices.length - 1 - lowPrices.lastIndexOf(minLowPrice);
+                    persistenceOk = barsAgoMin >= priceActionOverride.MIN_BARS_SINCE_EXTREME;
+                    
+                    if (!persistenceOk) {
+                      logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} 📈 PRICE_ACTION_OVERRIDE blocked: Low was ${barsAgoMin} bars ago (need ${priceActionOverride.MIN_BARS_SINCE_EXTREME})`);
+                    }
+                  }
+                  
+                  // FIX: Hard zone protection
+                  let hardZoneOk = true;
+                  const hardZoneThreshold = priceActionOverride.HARD_ZONE_THRESHOLD_PERCENT ?? 5.0;
+                  const hardZoneMinAdx = priceActionOverride.HARD_ZONE_MIN_ADX ?? 35;
+                  if (riseFromLow >= hardZoneThreshold && adx < hardZoneMinAdx) {
+                    hardZoneOk = false;
+                    logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} 📈 PRICE_ACTION_OVERRIDE blocked: In HARD_ZONE (${riseFromLow.toFixed(1)}% >= ${hardZoneThreshold}%) but ADX=${adx.toFixed(1)} < ${hardZoneMinAdx}`);
+                  }
+                  
+                  if (persistenceOk && hardZoneOk) {
+                    priceActionOverrideAllowed = true;
+                    priceActionPositionMultiplier = priceActionOverride.POSITION_SIZE_MULTIPLIER;
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 PRICE_ACTION_OVERRIDE: Price rallied ${riseFromLow.toFixed(1)}% from 24h low, overriding bearish momentum lag`);
+                  }
                 }
               }
             }
@@ -3846,16 +3899,20 @@ serve(async (req) => {
             }
             // ===== SOFT GATE: Check StochRSI alignment =====
             else if (distanceFromHigh >= MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_PERCENT) {
-              // For late shorts: StochRSI must NOT be already oversold (K < 35)
+              // FIX: For late shorts - only block at EXTREME oversold (K < 20), not moderate (K < 35)
+              // Logic: In a falling market, K = 15-40 is normal continuation territory
+              // We only block if K < 20 (extreme exhaustion = bounce imminent)
+              const stochRsiMinForShort = MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_MIN_FOR_SHORT ?? 
+                                           MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERSOLD_FOR_SHORT ?? 20;
               if (MOVE_EXHAUSTION_FILTER_PARAMS.REQUIRE_STOCHRSI_ALIGNMENT && 
-                  stochRsiK4h < MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERSOLD_FOR_SHORT) {
+                  stochRsiK4h < stochRsiMinForShort) {
                 moveExhaustionBlocked = true;
-                moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} < ${MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERSOLD_FOR_SHORT} (oversold), too late to SHORT`;
+                moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} < ${stochRsiMinForShort} (extreme oversold), too late to SHORT`;
               } else {
-                // Allow with reduced position since move is extended but StochRSI not oversold
+                // Allow with reduced position since move is extended but StochRSI not at extreme oversold
                 moveExhaustionSoftGate = true;
                 moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_POSITION_SIZE;
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION SOFT: Price dropped ${distanceFromHigh.toFixed(1)}% with StochRSI K=${stochRsiK4h.toFixed(0)} >= 35, reducing position to ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION SOFT: Price dropped ${distanceFromHigh.toFixed(1)}% with StochRSI K=${stochRsiK4h.toFixed(0)} >= ${stochRsiMinForShort}, reducing position to ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
               }
             }
           } else if (derivedDirection === 'long' && priceDistance) {
