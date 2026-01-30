@@ -261,6 +261,7 @@ export interface TrendDataResponse {
   
   // Raw klines for downstream analysis
   klines15m?: any[];
+  klines30m?: any[];
 }
 
 // ============= HELPER TYPE FOR PARTIAL DATA =============

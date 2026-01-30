@@ -1989,8 +1989,9 @@ serve(async (req) => {
         confidenceBonus: neutralPersistence.confidenceBonus,
         reason: neutralPersistence.reason,
       },
-      // NEW: Include 15m klines for Late Grind Acceptance pullback detection
-      klines15m: klines15m.slice(-20),  // Last 20 candles for pullback analysis
+      // Raw klines for downstream pullback analysis
+      klines15m: klines15m.slice(-20),  // Last 20 candles for 15m pullback analysis
+      klines30m: klines30m.slice(-20),  // Last 20 candles for 30m pullback analysis
     };
 
     return new Response(
