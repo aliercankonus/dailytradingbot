@@ -507,6 +507,24 @@ serve(async (req) => {
     // Fix: atrPercent is under volatility object in calculate-trend response
     const atrPercent = trendData?.volatility?.atrPercent || trendData?.ranging?.atrPercent || 1.5;
     
+    // ============================================================
+    // ENHANCED TRUE ALIGNMENT FIELDS (v2.0)
+    // Extract weighted components for smarter position sizing and validation
+    // ============================================================
+    const trueAlignment = trendData?.trueAlignment || {};
+    const tf4hConfidence = trueAlignment.tf4hConfidence ?? 0;
+    const tf1hConfidence = trueAlignment.tf1hConfidence ?? 0;
+    const adxContribution = trueAlignment.adxContribution ?? 0;
+    const totalWeightedConfidence = trueAlignment.totalWeightedConfidence ?? 0;
+    const weightedComponents = trueAlignment.weightedComponents || {};
+    const neutralCapped = trueAlignment.neutralCapped === true;
+    
+    // Log enhanced alignment data for visibility
+    if (Object.keys(weightedComponents).length > 0) {
+      logger.info(`📊 TrueAlignment v2.0: score=${trendConsistency}, tf4h=${tf4hConfidence.toFixed(0)}, tf1h=${tf1hConfidence.toFixed(0)}, adxContrib=${adxContribution.toFixed(1)}, totalWeighted=${totalWeightedConfidence.toFixed(1)}${neutralCapped ? ' [NEUTRAL CAPPED]' : ''}`);
+      logger.info(`   → Weighted: 4h=${weightedComponents.tf4hWeighted?.toFixed(1) ?? 0}, 1h=${weightedComponents.tf1hWeighted?.toFixed(1) ?? 0}, vol=${weightedComponents.volumeWeighted?.toFixed(1) ?? 0}, adx=${weightedComponents.adxWeighted?.toFixed(1) ?? 0}`);
+    }
+    
     // Extract Bollinger Bands data from trend analysis
     const bollingerData = trendData?.bollingerBands || {};
     const bb1h = bollingerData['1h'] || {};
@@ -787,6 +805,36 @@ serve(async (req) => {
     if (genuineMomentum && momentumState === 'confirmed') {
       momentumPositionMultiplier = Math.min(1.05, momentumPositionMultiplier * 1.05);
       logger.info(`✅ GENUINE MOMENTUM: MACD expanding + ADX rising → position size boost to ${(momentumPositionMultiplier * 100).toFixed(0)}%`);
+    }
+    
+    // ============================================================
+    // ENHANCED TRUE ALIGNMENT POSITION SIZING (v2.0)
+    // Use weighted components for smarter position sizing decisions
+    // ============================================================
+    let alignmentPositionMultiplier = 1.0;
+    
+    // Strong HTF alignment bonus: Both 4h and 1h weighted contributions are high
+    const tf4hWeighted = weightedComponents.tf4hWeighted ?? 0;
+    const tf1hWeighted = weightedComponents.tf1hWeighted ?? 0;
+    const adxWeighted = weightedComponents.adxWeighted ?? 0;
+    
+    if (tf4hWeighted >= 30 && tf1hWeighted >= 15 && adxContribution >= 15) {
+      // Very strong alignment: 4h confidence high, 1h confirms, ADX contributes
+      alignmentPositionMultiplier = 1.10; // +10% size for premium setups
+      logger.info(`✅ PREMIUM ALIGNMENT: tf4h=${tf4hWeighted.toFixed(1)}, tf1h=${tf1hWeighted.toFixed(1)}, adx=${adxContribution.toFixed(1)} → +10% position size`);
+    } else if (tf4hWeighted >= 25 && tf1hWeighted >= 10) {
+      // Good alignment: 4h and 1h both contribute meaningfully
+      alignmentPositionMultiplier = 1.05; // +5% size for solid setups
+      logger.info(`✅ SOLID ALIGNMENT: tf4h=${tf4hWeighted.toFixed(1)}, tf1h=${tf1hWeighted.toFixed(1)} → +5% position size`);
+    } else if (neutralCapped || tf4hConfidence < 40) {
+      // Weak alignment: Neutral capped or low 4h confidence
+      alignmentPositionMultiplier = 0.90; // -10% size for uncertain direction
+      logger.warn(`⚠️ WEAK ALIGNMENT: neutralCapped=${neutralCapped}, tf4h=${tf4hConfidence.toFixed(0)} → -10% position size`);
+    }
+    
+    // Log final alignment impact
+    if (alignmentPositionMultiplier !== 1.0) {
+      logger.info(`📊 Alignment position adjustment: ${(alignmentPositionMultiplier * 100).toFixed(0)}%`);
     }
     
     // Log final momentum impact
@@ -1645,6 +1693,16 @@ serve(async (req) => {
       const prevQuantity = quantity;
       quantity *= momentumPositionMultiplier;
       logger.info(`📊 Momentum adjustment: ${prevQuantity.toFixed(4)} × ${momentumPositionMultiplier.toFixed(2)} = ${quantity.toFixed(4)}`);
+    }
+
+    // ============================================================
+    // ENHANCED TRUE ALIGNMENT POSITION MULTIPLIER (v2.0)
+    // Apply alignment-based sizing from weighted component analysis
+    // ============================================================
+    if (alignmentPositionMultiplier !== 1.0) {
+      const prevQuantity = quantity;
+      quantity *= alignmentPositionMultiplier;
+      logger.info(`📊 Alignment adjustment: ${prevQuantity.toFixed(4)} × ${alignmentPositionMultiplier.toFixed(2)} = ${quantity.toFixed(4)}`);
     }
 
     // ============================================================
