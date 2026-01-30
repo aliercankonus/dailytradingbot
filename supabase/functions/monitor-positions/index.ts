@@ -1072,6 +1072,30 @@ serve(async (req) => {
           positionLogger.risk(`MEAN REVERSION TREND FAILURE: ADX ${positionAdx.toFixed(1)} >= ${MEAN_REVERSION_CONFIG.LONG.MAX_ADX} with rising slope ${mrAdxSlope.toFixed(2)} - trend continuing, thesis failed`);
         }
         
+        // ============= MODERATE EXHAUSTION MOMENTUM INVALIDATION =============
+        // MR_MODERATE_EXHAUSTION positions are momentum-gated - invalidate if momentum deteriorates
+        const isModerateExhaustionPosition = position.strategy_name?.includes('MR_MODERATE_EXHAUSTION');
+        if (!meanReversionExitTriggered && isModerateExhaustionPosition) {
+          const momentumScore = trendDataForPosition?.momentum?.score ?? 0;
+          const momentumFloor = MEAN_REVERSION_CONFIG.MODERATE_EXHAUSTION?.INVALIDATION_MOMENTUM_FLOOR ?? 30;
+          
+          // For LONG: momentum score must remain >= floor (positive)
+          // For SHORT: momentum score must remain <= -floor (negative)
+          const isLong = position.side === "BUY";
+          const momentumInvalidated = isLong 
+            ? momentumScore < momentumFloor 
+            : momentumScore > -momentumFloor;
+          
+          if (momentumInvalidated && pnlPercent < 0.5) {
+            meanReversionExitTriggered = true;
+            meanReversionExitReason = "moderate_exhaustion_momentum_invalidated";
+            positionLogger.risk(
+              `MODERATE EXHAUSTION INVALIDATED: ${isLong ? 'LONG' : 'SHORT'} momentum=${momentumScore.toFixed(0)} ` +
+              `${isLong ? '<' : '>'} ${isLong ? '' : '-'}${momentumFloor} (floor), P&L=${pnlPercent.toFixed(2)}% - momentum confirmation lost`
+            );
+          }
+        }
+        
         // Apply mean reversion exit to emergency close
         if (meanReversionExitTriggered) {
           emergencyClose = true;

@@ -4234,6 +4234,43 @@ export const MEAN_REVERSION_CONFIG = {
     BYPASS_POSITION_MULTIPLIER: 0.50,
   },
   
+  // ===== MODERATE EXHAUSTION TIER (K 10-15) =====
+  // Fills gap between Extreme tier (≤10) and noise zone (15-25)
+  // Probabilistic probe for early bounce detection, NOT conviction trade
+  // Requires momentum confirmation to avoid knife-catching
+  MODERATE_EXHAUSTION: {
+    ENABLED: true,
+    
+    // ===== K RANGE (Non-overlapping with Extreme tier) =====
+    LONG_K_MIN: 10,               // Must be > Extreme tier threshold
+    LONG_K_MAX: 15,               // Upper bound before noise zone
+    SHORT_K_MIN: 85,              // Symmetric for shorts
+    SHORT_K_MAX: 90,              // Must be < Extreme tier threshold
+    
+    // ===== MOMENTUM GATING (Critical safety) =====
+    // Prevents entries when momentum is still bearish/opposing
+    MIN_MOMENTUM_SCORE: 40,       // Must have positive momentum tilt
+    REQUIRE_ALIGNED_MOMENTUM: true, // Momentum direction must match trade direction
+    
+    // ===== ADX CONDITIONS (Dual-path) =====
+    // Path 1: ADX is moderate (not in strong trend)
+    MAX_ADX: 35,
+    // Path 2: Any ADX allowed if slope is flat/declining (trend exhausting)
+    ALLOW_ADX_SLOPE_OVERRIDE: true,
+    MAX_ADX_SLOPE_FOR_OVERRIDE: 0, // ADX slope must be <= 0
+    
+    // ===== POSITION SIZING =====
+    POSITION_SIZE: 0.35,          // 35% of normal - below Extreme tier's 0.40x
+    
+    // ===== TAGGING =====
+    TAG: 'MR_MODERATE_EXHAUSTION' as const,
+    
+    // ===== INVALIDATION RULES (Risk containment) =====
+    // If momentum deteriorates, position should be exited
+    INVALIDATION_MOMENTUM_FLOOR: 30,  // Exit if momentum drops below this
+    INVALIDATION_TIME_BARS: 8,        // Max bars without favorable move (2 candles on 4h = 8h)
+  },
+  
   // Volatility-Adjusted Exit
   EXIT: {
     BASE_TIMEOUT_ATR_MULTIPLE: 1.5,
