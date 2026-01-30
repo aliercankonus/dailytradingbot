@@ -4335,12 +4335,28 @@ export const MOMENTUM_DIRECTION_HARD_GATE = {
   BLOCK_LONG_BELOW_SCORE: -15,  // Tightened from -20 - block LONG earlier when momentum is bearish
   
   // ===== EXCEPTION CONDITIONS =====
-  // Only allow override if ADX is extremely high (trend is undeniable)
-  EXCEPTION_MIN_ADX: 55,
+  // Only allow override if ADX is high (trend is undeniable)
+  // UPDATED: Lowered from 55 to 50 - ADX 54 missed exception by 0.7 during 7% drop
+  EXCEPTION_MIN_ADX: 50,
   // Even with high ADX, require 4h trend to match
   EXCEPTION_REQUIRE_HTF_ALIGNMENT: true,
   // Position size if exception applied
   EXCEPTION_POSITION_MULTIPLIER: 0.30,  // 30% position for risky override
+  
+  // ===== PRICE ACTION OVERRIDE =====
+  // When price moved significantly in trade direction, override momentum lag
+  // Root cause: Momentum score lagged 7% price drop (still showed +16 to +25 bullish)
+  PRICE_ACTION_OVERRIDE: {
+    ENABLED: true,
+    // Minimum price move percent to trigger override (3%+ move in direction overrides momentum reading)
+    MIN_PRICE_MOVE_PERCENT: 3.0,
+    // Lookback period in hours for price move detection
+    LOOKBACK_HOURS: 6,
+    // Position size multiplier for price action override entries (conservative)
+    POSITION_SIZE_MULTIPLIER: 0.50,
+    // Minimum ADX required for override (still need some trend strength)
+    MIN_ADX: 25,
+  },
   
   // ===== LOGGING =====
   LOG_ALL_CHECKS: true,
