@@ -1075,16 +1075,25 @@ interface PullbackAnalysis {
 
 const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis => {
   const indicators1h = trendData?.timeframes?.['1h']?.indicators || {};
+  const indicators30m = trendData?.timeframes?.['30m']?.indicators || {};
   // CENTRALIZED: Use shared extractors for StochRSI K values
   const k4h = extractStochRsiK(trendData, '4h');
+  const k30m = extractStochRsiK(trendData, '30m');
   const stochRsi = trendData.stochasticRsi?.aggregated || {};
   const bollingerBands = trendData.bollingerBands || {};
   const bb1h = bollingerBands["1h"] || {};
-  const rsi = indicators1h.rsi ?? 50;
+  const bb30m = bollingerBands["30m"] || {};
+  const rsi1h = indicators1h.rsi ?? 50;
+  const rsi30m = indicators30m.rsi ?? 50;
   const adx = extractADX(trendData);
   const momentum = trendData?.momentum || {};
-  const percentB = bb1h.percentB || 50;
+  const percentB1h = bb1h.percentB || 50;
+  const percentB30m = bb30m.percentB || 50;
   const timeframes = trendData?.timeframes || {};
+  
+  // Use 1h RSI as primary, 30m for confirmation
+  const rsi = rsi1h;
+  const percentB = percentB1h;
   
   // Strong ADX = momentum continuation is valid strategy
   const isStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG;
@@ -1098,8 +1107,14 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
   // Strong Trend Continuation Check: 4h + 1h aligned + momentum active
   const trend4h = timeframes['4h']?.trend || timeframes['4h']?.indicators?.emaSignal || "neutral";
   const trend1h = timeframes['1h']?.trend || timeframes['1h']?.indicators?.emaSignal || "neutral";
+  const trend30m = timeframes['30m']?.trend || timeframes['30m']?.indicators?.emaSignal || "neutral";
   const isBullishAligned = trend4h === "bullish" && trend1h === "bullish";
   const isBearishAligned = trend4h === "bearish" && trend1h === "bearish";
+  
+  // NEW: 30m pullback confirmation - pullback visible on 30m timeframe too
+  const has30mPullbackConfirm = trend === "bullish" 
+    ? (percentB30m < 40 || rsi30m < 45 || k30m < 40)  // Bullish: 30m showing oversold/pullback
+    : (percentB30m > 60 || rsi30m > 55 || k30m > 60); // Bearish: 30m showing overbought/rally
   
   const hasStrongTrendContinuation = isMinTrend && isActiveMomentum && (
     (trend === "bullish" && isBullishAligned) ||
@@ -1133,9 +1148,14 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
   
   // For bullish trend, look for pullback entries
   if (trend === "bullish") {
+    // 30m confirmation bonus: +3 points when 30m also shows pullback structure
+    const mtfBonus = has30mPullbackConfirm ? 3 : 0;
+    const mtfSuffix = has30mPullbackConfirm ? " [30m confirmed +3]" : "";
+    
     // BEST ENTRY: Both RSI oversold AND near lower Bollinger
     if ((rsi < RSI_THRESHOLDS.BULLISH_PULLBACK || stochRsi.oversoldCount >= 1) && bollingerPullbackBullish) {
-      const weighted = applyStochRsiWeight(25, "OPTIMAL: RSI oversold + near lower Bollinger band");
+      const baseScore = 25 + mtfBonus;
+      const weighted = applyStochRsiWeight(baseScore, "OPTIMAL: RSI oversold + near lower Bollinger band" + mtfSuffix);
       return {
         isPullback: true,
         hasBothConditions: true,
@@ -1147,7 +1167,8 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     
     // GOOD ENTRY: RSI pullback only
     if (rsi < RSI_THRESHOLDS.BULLISH_PULLBACK || stochRsi.oversoldCount >= 1) {
-      const weighted = applyStochRsiWeight(18, "Bullish pullback: RSI oversold in uptrend");
+      const baseScore = 18 + mtfBonus;
+      const weighted = applyStochRsiWeight(baseScore, "Bullish pullback: RSI oversold in uptrend" + mtfSuffix);
       return {
         isPullback: true,
         hasBothConditions: false,
@@ -1159,7 +1180,8 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     
     // GOOD ENTRY: Bollinger pullback only
     if (bollingerPullbackBullish) {
-      const weighted = applyStochRsiWeight(15, "Bullish pullback: Price near lower Bollinger band");
+      const baseScore = 15 + mtfBonus;
+      const weighted = applyStochRsiWeight(baseScore, "Bullish pullback: Price near lower Bollinger band" + mtfSuffix);
       return {
         isPullback: true,
         hasBothConditions: false,
@@ -1171,7 +1193,8 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     
     // ACCEPTABLE: StochRSI bullish cross = reversal from pullback
     if (stochRsi.bullishCrossCount >= 1) {
-      const weighted = applyStochRsiWeight(12, "Bullish pullback: StochRSI bullish cross");
+      const baseScore = 12 + mtfBonus;
+      const weighted = applyStochRsiWeight(baseScore, "Bullish pullback: StochRSI bullish cross" + mtfSuffix);
       return {
         isPullback: true,
         hasBothConditions: false,
@@ -1271,9 +1294,14 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
   
   // For bearish trend, look for rally (price spiked but downtrend intact)
   if (trend === "bearish") {
+    // 30m confirmation bonus: +3 points when 30m also shows rally structure
+    const mtfBonus = has30mPullbackConfirm ? 3 : 0;
+    const mtfSuffix = has30mPullbackConfirm ? " [30m confirmed +3]" : "";
+    
     // BEST ENTRY: Both RSI overbought AND near upper Bollinger
     if ((rsi > RSI_THRESHOLDS.BEARISH_RALLY || stochRsi.overboughtCount >= 1) && bollingerPullbackBearish) {
-      const weighted = applyStochRsiWeight(25, "OPTIMAL: RSI overbought + near upper Bollinger band");
+      const baseScore = 25 + mtfBonus;
+      const weighted = applyStochRsiWeight(baseScore, "OPTIMAL: RSI overbought + near upper Bollinger band" + mtfSuffix);
       return {
         isPullback: true,
         hasBothConditions: true,
@@ -1285,7 +1313,8 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     
     // GOOD ENTRY: RSI rally only
     if (rsi > RSI_THRESHOLDS.BEARISH_RALLY || stochRsi.overboughtCount >= 1) {
-      const weighted = applyStochRsiWeight(18, "Bearish rally: RSI overbought in downtrend");
+      const baseScore = 18 + mtfBonus;
+      const weighted = applyStochRsiWeight(baseScore, "Bearish rally: RSI overbought in downtrend" + mtfSuffix);
       return {
         isPullback: true,
         hasBothConditions: false,
@@ -1297,7 +1326,8 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     
     // GOOD ENTRY: Bollinger rally only
     if (bollingerPullbackBearish) {
-      const weighted = applyStochRsiWeight(15, "Bearish rally: Price near upper Bollinger band");
+      const baseScore = 15 + mtfBonus;
+      const weighted = applyStochRsiWeight(baseScore, "Bearish rally: Price near upper Bollinger band" + mtfSuffix);
       return {
         isPullback: true,
         hasBothConditions: false,
@@ -1309,7 +1339,8 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     
     // ACCEPTABLE: StochRSI bearish cross
     if (stochRsi.bearishCrossCount >= 1) {
-      const weighted = applyStochRsiWeight(12, "Bearish rally: StochRSI bearish cross");
+      const baseScore = 12 + mtfBonus;
+      const weighted = applyStochRsiWeight(baseScore, "Bearish rally: StochRSI bearish cross" + mtfSuffix);
       return {
         isPullback: true,
         hasBothConditions: false,
@@ -2739,12 +2770,15 @@ serve(async (req) => {
               }
             }
             
-            // Detect failed pullback using recent price action
+            // Detect failed pullback using recent price action (multi-timeframe: 15m + 30m)
             // Failed pullback = price retraced 15-38.2% of prior move but couldn't continue reversal
             const klines15m = trendData.klines15m || [];
+            const klines30m = trendData.klines30m || [];
             let failedPullbackDetected = false;
             let pullbackDepth = 0;
+            let pullbackConfirmed30m = false;
             
+            // ===== 15m PULLBACK DETECTION (Primary) =====
             if (klines15m.length >= LATE_GRIND_ACCEPTANCE_PARAMS.MAX_PULLBACK_BARS + 2) {
               const recentCandles = klines15m.slice(-LATE_GRIND_ACCEPTANCE_PARAMS.MAX_PULLBACK_BARS);
               const closes = recentCandles.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
@@ -2786,6 +2820,34 @@ serve(async (req) => {
               }
             }
             
+            // ===== 30m PULLBACK CONFIRMATION (Secondary - Multi-Timeframe Validation) =====
+            // Use 30m klines to confirm the pullback structure is visible on higher timeframe
+            if (failedPullbackDetected && klines30m.length >= 4) {
+              const recent30mCandles = klines30m.slice(-4); // Last 2 hours on 30m
+              const closes30m = recent30mCandles.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+              const highs30m = recent30mCandles.map((k: any) => parseFloat(k[2])).filter(Number.isFinite);
+              const lows30m = recent30mCandles.map((k: any) => parseFloat(k[3])).filter(Number.isFinite);
+              
+              if (closes30m.length >= 3) {
+                if (driftDirection === "bearish") {
+                  // 30m should also show pullback high being rejected
+                  const high30m = Math.max(...highs30m);
+                  const current30m = closes30m[closes30m.length - 1];
+                  pullbackConfirmed30m = current30m < high30m * 0.998;
+                } else if (driftDirection === "bullish") {
+                  // 30m should also show pullback low being defended
+                  const low30m = Math.min(...lows30m);
+                  const current30m = closes30m[closes30m.length - 1];
+                  pullbackConfirmed30m = current30m > low30m * 1.002;
+                }
+              }
+              
+              // Log 30m confirmation status
+              if (pullbackConfirmed30m) {
+                logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.TREND} [30M_PULLBACK_CONFIRM] Pullback structure confirmed on 30m timeframe`);
+              }
+            }
+            
             // Skip pullback check if not required
             const pullbackCheckPassed = !LATE_GRIND_ACCEPTANCE_PARAMS.REQUIRE_FAILED_PULLBACK || failedPullbackDetected;
             
@@ -2795,18 +2857,24 @@ serve(async (req) => {
               lateGrindDirection = intendedDirection;
               lateGrindExceptionType = LATE_GRIND_ACCEPTANCE_PARAMS.EXCEPTION_TYPE;
               
-              // Determine position size (40% normal, 50% for strong grind)
+              // Determine position size (40% normal, 50% for strong grind, +5% bonus for 30m confirmation)
               const isStrongGrind = stealthDrift >= LATE_GRIND_ACCEPTANCE_PARAMS.STRONG_PRIOR_DRIFT_PERCENT;
-              lateGrindPositionMultiplier = isStrongGrind 
+              let baseMultiplier = isStrongGrind 
                 ? LATE_GRIND_ACCEPTANCE_PARAMS.STRONG_GRIND_POSITION_SIZE_MULTIPLIER 
                 : LATE_GRIND_ACCEPTANCE_PARAMS.POSITION_SIZE_MULTIPLIER;
+              
+              // NEW: 30m confirmation bonus - pullback structure visible on both 15m AND 30m = higher conviction
+              const multiTimeframeBonus = pullbackConfirmed30m ? 0.05 : 0;
+              lateGrindPositionMultiplier = Math.min(0.60, baseMultiplier + multiTimeframeBonus);
+              
               lateGrindStopMultiplier = LATE_GRIND_ACCEPTANCE_PARAMS.STOP_MULTIPLIER;
               // Neutral bonus was already applied to thresholds above
               const bonusAppliedMsg = lateGrindNeutralBonus > 0 
                 ? `, neutralBonus=+${lateGrindNeutralBonus} (minDrift=${effectiveMinDrift.toFixed(1)}%, minHTF=${effectiveHTFConfidence}%)` 
                 : '';
+              const mtfMsg = pullbackConfirmed30m ? ', 30m confirmed (+5%)' : '';
               
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🐌 LATE GRIND ACCEPTANCE: drift=${stealthDrift.toFixed(2)}%, pullback ${failedPullbackDetected ? 'failed' : 'skipped'} (depth=${pullbackDepth.toFixed(1)}%), allowing ${intendedDirection} at ${(lateGrindPositionMultiplier * 100).toFixed(0)}% size`);
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🐌 LATE GRIND ACCEPTANCE: drift=${stealthDrift.toFixed(2)}%, pullback ${failedPullbackDetected ? 'failed' : 'skipped'} (depth=${pullbackDepth.toFixed(1)}%), allowing ${intendedDirection} at ${(lateGrindPositionMultiplier * 100).toFixed(0)}% size${mtfMsg}`);
               logger.forSymbol(symbol).info(`   HTF bias=${htf4hConfidence.toFixed(0)}%, ADX slope=${adxSlope.toFixed(2)}, StochK4h=${stochK4h.toFixed(1)}${bonusAppliedMsg}`);
             }
           }
