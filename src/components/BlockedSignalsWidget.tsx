@@ -3,9 +3,25 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useBlockedSignals } from "@/hooks/useBlockedSignals";
-import { AlertTriangle, TrendingDown, TrendingUp, Clock, Activity, Ban } from "lucide-react";
+import { useBlockedSignals, type MoveZone } from "@/hooks/useBlockedSignals";
+import { AlertTriangle, TrendingDown, TrendingUp, Clock, Activity, Ban, Target } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+
+// Zone color mapping for MOVE_EXHAUSTION gate
+const getZoneBadge = (zone: MoveZone): { color: string; label: string } => {
+  switch (zone) {
+    case 'FRESH':
+      return { color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', label: 'FRESH' };
+    case 'SOFT':
+      return { color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', label: 'SOFT' };
+    case 'HARD':
+      return { color: 'bg-red-500/20 text-red-400 border-red-500/30', label: 'HARD' };
+    case 'EXCEPTION':
+      return { color: 'bg-blue-500/20 text-blue-400 border-blue-500/30', label: 'EXCEPTION' };
+    default:
+      return { color: 'bg-muted text-muted-foreground', label: zone };
+  }
+};
 
 const LIMIT_OPTIONS = [15, 30, 50, 100] as const;
 
@@ -167,6 +183,18 @@ export function BlockedSignalsWidget() {
                           </>
                         ) : (
                           <>
+                            {/* Zone Analytics Badge for MOVE_EXHAUSTION */}
+                            {filters.moveZone && (
+                              <Badge variant="outline" className={`text-xs ${getZoneBadge(filters.moveZone).color} flex items-center gap-1`}>
+                                <Target className="h-3 w-3" />
+                                {getZoneBadge(filters.moveZone).label}
+                              </Badge>
+                            )}
+                            {filters.moveZoneDetails && (
+                              <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
+                                {filters.moveZoneDetails.distancePercent?.toFixed(1)}% {filters.moveZoneDetails.direction?.toUpperCase()}
+                              </span>
+                            )}
                             {typeof filters.adx === 'number' && (
                               <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
                                 ADX:{filters.adx.toFixed(1)}
