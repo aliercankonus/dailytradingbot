@@ -16,6 +16,7 @@ import {
   type UnifiedReversalResult,
   type MarketRegime
 } from "../_shared/scoring.ts";
+import type { TrendDataResponse, PartialTrendData } from "../_shared/trend-types.ts";
 import { createLogger, logError } from "../_shared/logging.ts";
 import { 
   getSymbolFilters, 
@@ -42,8 +43,8 @@ async function logExecutionRejection(
   symbol: string,
   reason: string,
   signal: any,
-  trendData: any,
-  additionalData?: any
+  trendData: PartialTrendData | null,
+  additionalData?: Record<string, unknown>
 ) {
   const symbolLogger = logger.forSymbol(symbol);
   try {

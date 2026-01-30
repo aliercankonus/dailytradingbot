@@ -9,6 +9,7 @@ import {
   calculateUnifiedReversalScore,
   type UnifiedReversalResult
 } from "../_shared/scoring.ts";
+import type { TrendDataResponse, PartialTrendData } from "../_shared/trend-types.ts";
 // Phase 3: Smart Momentum for context-aware exit management
 import {
   calculateMomentumScore,
