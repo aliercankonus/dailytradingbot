@@ -829,6 +829,7 @@ serve(async (req) => {
     const { symbol, historicalKlines, backtestMode, batchKlines } = body;
     
     // ============= BATCH MODE FOR BACKTESTING =============
+    // PHASE 3: Fully aligned with single mode - all fields included
     if (batchKlines && batchKlines.length > 0 && symbol) {
       logger.forSymbol(symbol).info(`${LOG_CATEGORIES.START} BATCH MODE: Processing ${batchKlines.length} candles`);
       
@@ -836,14 +837,18 @@ serve(async (req) => {
       
       for (const batch of batchKlines) {
         try {
+          const bKlines15m = batch.klines['15m'] || [];
+          const bKlines30m = batch.klines['30m'] || [];
           const bKlines1h = batch.klines['1h'] || [];
           const bKlines4h = batch.klines['4h'] || [];
           
-          if (bKlines1h.length < 50 || bKlines4h.length < 20) {
+          if (bKlines1h.length < 35 || bKlines4h.length < 20) {
             results.push({ timestamp: batch.timestamp, data: null, error: 'insufficient_data' });
             continue;
           }
           
+          const bPrices15m = bKlines15m.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+          const bPrices30m = bKlines30m.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
           const bPrices1h = bKlines1h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
           const bPrices4h = bKlines4h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
           
@@ -853,72 +858,389 @@ serve(async (req) => {
           }
           
           const bCurrentPrice = bPrices1h[bPrices1h.length - 1];
+          
+          // Calculate trends for all timeframes (aligned with single mode)
+          const bTrend15m = bPrices15m.length >= 20 ? calculateTrend(bPrices15m) : null;
+          const bTrend30m = bPrices30m.length >= 20 ? calculateTrend(bPrices30m) : null;
           const bTrend1h = calculateTrend(bPrices1h);
           const bTrend4h = calculateTrend(bPrices4h);
           
+          // StochRSI for all timeframes
+          const bStochRsi15m = bTrend15m ? calculateStochasticRSI(bPrices15m, 14, 14, 3, 3, bTrend15m.indicators.rsiArray) : null;
+          const bStochRsi30m = bTrend30m ? calculateStochasticRSI(bPrices30m, 14, 14, 3, 3, bTrend30m.indicators.rsiArray) : null;
           const bStochRsi1h = calculateStochasticRSI(bPrices1h, 14, 14, 3, 3, bTrend1h.indicators.rsiArray);
           const bStochRsi4h = calculateStochasticRSI(bPrices4h, 14, 14, 3, 3, bTrend4h.indicators.rsiArray);
           
+          // ADX calculations
           const bAdxResult = calculateADXWithDirection(bKlines1h, 14);
           const bAdx = bAdxResult.adx;
+          const bAdxRising = bAdxResult.adxRising;
+          const bAdxSlope = bAdxResult.adxSlope ?? (bAdx - (bAdxResult.prevAdx ?? bAdx));
+          
+          // Multi-timeframe ADX
+          const bAdx15m = bKlines15m.length >= 14 ? calculateADX(bKlines15m, 14) : 0;
+          const bAdx30m = bKlines30m.length >= 14 ? calculateADX(bKlines30m, 14) : 0;
+          const bAdx4h = calculateADX(bKlines4h, 14);
+          
+          // ATR calculations
           const bCurrentATR = calculateATR(bKlines1h, 14);
           const bAtrPercent = bCurrentPrice !== 0 ? (bCurrentATR / bCurrentPrice) * 100 : 0;
           const bHistoricalATRAvg = calculateHistoricalATRAvg(bKlines1h, 14, 30, bCurrentATR);
-          const bRelativeATR = bHistoricalATRAvg !== 0 ? bCurrentATR / bHistoricalATRAvg : 0;
+          const bRelativeATR = bHistoricalATRAvg !== 0 ? bCurrentATR / bHistoricalATRAvg : 1;
+          const bAtrCompressed = bRelativeATR < 0.6;
+          const bIsRanging = bAtrCompressed && bAdx < ADX_THRESHOLDS.WEAK;
           
-          const bIsAligned = bTrend4h.trend !== "neutral" && 
-            (bTrend1h.trend === bTrend4h.trend || bTrend1h.trend === "neutral");
-          
+          // Volume analysis for all timeframes
+          const bVolume15m = bKlines15m.length > 0 ? calculateVolumeAnalysis(bKlines15m) : null;
+          const bVolume30m = bKlines30m.length > 0 ? calculateVolumeAnalysis(bKlines30m) : null;
           const bVolume1h = calculateVolumeAnalysis(bKlines1h);
+          const bVolume4h = calculateVolumeAnalysis(bKlines4h);
           
-          // PHASE 2: Aligned batch mode with single mode - include adxRising, barsAtExtreme, bollingerBands
-          const bAdxRising = bAdxResult.adxRising;
-          const bMacdExpanding = Math.abs(bTrend1h.indicators.macdHistogram) > 
-            Math.abs(bTrend1h.indicators.macdHistogramArray?.[bTrend1h.indicators.macdHistogramArray.length - 2] || 0);
-          const bLastClose = bPrices1h[bPrices1h.length - 1] || 0;
-          const bPrevClose = bPrices1h[bPrices1h.length - 2] || bLastClose;
-          const bLastCloseAligns = bTrend4h.trend === "bullish" ? bLastClose > bPrevClose : 
-            bTrend4h.trend === "bearish" ? bLastClose < bPrevClose : true;
-          const bMomentumConfirms = bMacdExpanding && bLastCloseAligns && bAdx >= ADX_THRESHOLDS.MINIMUM && bAdxRising;
+          // Bollinger Bands for all timeframes
+          const bBB15m = bPrices15m.length >= 20 ? calculateBollingerBands(bPrices15m, 20, 2) : null;
+          const bBB30m = bPrices30m.length >= 20 ? calculateBollingerBands(bPrices30m, 20, 2) : null;
+          const bBB1h = calculateBollingerBands(bPrices1h, 20, 2);
+          const bBB4h = calculateBollingerBands(bPrices4h, 20, 2);
           
-          // Calculate barsAtExtreme for StochRSI (aligned with single mode)
+          const bSqueezeActive = bBB1h.squeeze || bBB4h.squeeze;
+          const bSqueezeBreakoutPotential = bSqueezeActive && bAdx >= ADX_THRESHOLDS.MODERATE;
+          
+          // BarsAtExtreme calculations
           const bBarsAtExtreme1h = calculateBarsAtExtreme(
             bStochRsi1h.kArray,
             TIME_IN_EXTREME_PARAMS.OVERBOUGHT_EXTREME,
             TIME_IN_EXTREME_PARAMS.OVERSOLD_EXTREME
           );
+          const bBarsAtExtreme4h = calculateBarsAtExtreme(
+            bStochRsi4h.kArray,
+            TIME_IN_EXTREME_PARAMS.OVERBOUGHT_EXTREME,
+            TIME_IN_EXTREME_PARAMS.OVERSOLD_EXTREME
+          );
           
-          // Calculate Bollinger Bands for batch mode (aligned with single mode)
-          const bBollingerBands = calculateBollingerBands(bPrices1h, 20, 2);
+          // Alignment and divergence analysis
+          const bIsAligned = bTrend4h.trend !== "neutral" && 
+            (bTrend1h.trend === bTrend4h.trend || bTrend1h.trend === "neutral");
           
-          // Fake breakout detection (aligned with single mode)
+          // Divergence type detection (aligned with single mode)
+          let bDivergenceType: "aligned" | "pullback" | "early_reversal" | "ranging_conflict" | "opposing" = "aligned";
+          let bDivergenceConfidence = Math.round((bTrend4h.confidence * 0.6 + bTrend1h.confidence * 0.4));
+          let bAllowDivergenceSignal = true;
+          
+          if (bTrend4h.trend !== bTrend1h.trend) {
+            if (bTrend4h.trend === "neutral" || bTrend1h.trend === "neutral") {
+              bDivergenceType = "ranging_conflict";
+              bDivergenceConfidence = Math.round((bTrend4h.confidence + bTrend1h.confidence) / 2);
+            } else {
+              bDivergenceType = "opposing";
+              bAllowDivergenceSignal = false;
+            }
+          }
+          
+          // Calculate bDominantTrend first (needed for subsequent calculations)
+          const bDominantTrend = bTrend4h.trend !== "neutral" ? bTrend4h.trend : bTrend1h.trend;
+          const bVolumeConfirms = bVolume1h.volumeTrend === 'increasing' || bVolume1h.volumeSpike;
+          
+          // True alignment score (correct parameter order: 4h, 1h, 30m, 15m, dominantTrend, adx, volumeConfirms, volumeRatio)
+          const bTrueAlignment = calculateTrueAlignmentScore(
+            { trend: bTrend4h.trend, confidence: bTrend4h.confidence, indicators: bTrend4h.indicators },
+            { trend: bTrend1h.trend, confidence: bTrend1h.confidence, indicators: bTrend1h.indicators },
+            bTrend30m ? { trend: bTrend30m.trend, confidence: bTrend30m.confidence, indicators: bTrend30m.indicators } : { trend: "neutral", confidence: 50, indicators: bTrend1h.indicators },
+            bTrend15m ? { trend: bTrend15m.trend, confidence: bTrend15m.confidence, indicators: bTrend15m.indicators } : { trend: "neutral", confidence: 50, indicators: bTrend1h.indicators },
+            bDominantTrend,
+            bAdx,
+            bVolumeConfirms,
+            bVolume1h.volumeRatio
+          );
+          
+          // Momentum analysis
+          const bMacdExpanding = Math.abs(bTrend1h.indicators.macdHistogram) > 
+            Math.abs(bTrend1h.indicators.macdHistogramArray?.[bTrend1h.indicators.macdHistogramArray.length - 2] || 0);
+          const bMacdStrong = Math.abs(bTrend1h.indicators.macd - bTrend1h.indicators.macdSignal) > 0.001 * bCurrentPrice;
+          
+          const bLastClose = bPrices1h[bPrices1h.length - 1] || 0;
+          const bPrevClose = bPrices1h[bPrices1h.length - 2] || bLastClose;
+          const bLastCloseAligns = bDominantTrend === "bullish" ? bLastClose > bPrevClose : 
+            bDominantTrend === "bearish" ? bLastClose < bPrevClose : true;
+          
+          const bMacdDirectionAligned = (bTrend1h.indicators.macdHistogram > 0 && bDominantTrend === "bullish") ||
+            (bTrend1h.indicators.macdHistogram < 0 && bDominantTrend === "bearish");
+          
           const bFakeBreakoutRisk = bMacdExpanding && !bAdxRising;
           const bGenuineMomentum = bMacdExpanding && bAdxRising;
+          
+          const bMomentumConfirms = bMacdExpanding && bLastCloseAligns && bMacdDirectionAligned && 
+            bAdx >= ADX_THRESHOLDS.MINIMUM && bAdxRising;
+          
+          // Determine momentum state (aligned with single mode logic)
+          let bMomentumState: "none" | "mixed" | "confirmed" | "building" | "exhausted" = "none";
+          const bHasDivergence = (bStochRsi4h.k > 80 && bTrend4h.trend === "bearish") ||
+            (bStochRsi4h.k < 20 && bTrend4h.trend === "bullish");
+          
+          if (bAdx >= 45 && !bAdxRising && (bHasDivergence || !bMacdExpanding)) {
+            bMomentumState = "exhausted";
+          } else if (bMomentumConfirms) {
+            bMomentumState = "confirmed";
+          } else if (bMacdExpanding && bMacdDirectionAligned && bAdx >= ADX_THRESHOLDS.WEAK) {
+            bMomentumState = bVolumeConfirms ? "confirmed" : "building";
+          } else if (bFakeBreakoutRisk) {
+            bMomentumState = "mixed";
+          }
+          
+          // Market structure validation
+          const bMarketStructure = validateMarketStructure(bKlines1h, bDominantTrend);
+          
+          // Pullback detection
+          const bEma12 = bTrend1h.indicators.ema12;
+          const bEma26 = bTrend1h.indicators.ema26;
+          let bInPullback = false;
+          let bPullbackPercent = 0;
+          
+          if (bDominantTrend === "bullish" && bCurrentPrice < bEma12 && bCurrentPrice > bEma26) {
+            bInPullback = true;
+            bPullbackPercent = ((bEma12 - bCurrentPrice) / bEma12) * 100;
+          } else if (bDominantTrend === "bearish" && bCurrentPrice > bEma12 && bCurrentPrice < bEma26) {
+            bInPullback = true;
+            bPullbackPercent = ((bCurrentPrice - bEma12) / bEma12) * 100;
+          }
+          
+          // Price distance from swing (24h high/low)
+          const recent24hCandles = bKlines1h.slice(-24);
+          const bSwingHigh24h = Math.max(...recent24hCandles.map((k: any) => parseFloat(k[2])).filter(Number.isFinite));
+          const bSwingLow24h = Math.min(...recent24hCandles.map((k: any) => parseFloat(k[3])).filter(Number.isFinite));
+          const bDistanceFromHighPercent = bSwingHigh24h > 0 ? ((bSwingHigh24h - bCurrentPrice) / bSwingHigh24h) * 100 : 0;
+          const bDistanceFromLowPercent = bSwingLow24h > 0 ? ((bCurrentPrice - bSwingLow24h) / bSwingLow24h) * 100 : 0;
+          const bAtrNormalizedFromHigh = bCurrentATR > 0 ? (bSwingHigh24h - bCurrentPrice) / bCurrentATR : 0;
+          const bAtrNormalizedFromLow = bCurrentATR > 0 ? (bCurrentPrice - bSwingLow24h) / bCurrentATR : 0;
+          
+          // Calculate consecutive bars for micro-trend
+          const bBarsAligned15m = bTrend15m ? countConsecutiveBarsInDirection(bTrend15m.indicators?.macdHistogramArray) : 0;
+          const bBarsAligned30m = bTrend30m ? countConsecutiveBarsInDirection(bTrend30m.indicators?.macdHistogramArray) : 0;
+          const bVolumeAboveMA = bVolume1h.volumeRatio >= 1.0;
+          
+          // Micro-trend detection (aligned with single mode)
+          const bMicroTrend = detectMicroTrend(
+            bTrend15m || { trend: "neutral", confidence: 50, indicators: bTrend1h.indicators },
+            bTrend30m || { trend: "neutral", confidence: 50, indicators: bTrend1h.indicators },
+            { trend: bTrend1h.trend, confidence: bTrend1h.confidence, indicators: bTrend1h.indicators },
+            bAdx,
+            bVolume1h.volumeRatio,
+            bVolumeAboveMA,
+            bBarsAligned15m,
+            bBarsAligned30m
+          );
+          
+          // Price action momentum (inline calculation - aligned with single mode)
+          const lookbackCandles = MOMENTUM_CONTINUATION_PARAMS.PRICE_MOVE_LOOKBACK_HOURS || 6;
+          let bPriceActionMomentum: {
+            hasStrongMove: boolean;
+            direction: "bullish" | "bearish" | "neutral";
+            movePercent: number;
+            isStrongMove: boolean;
+            canOverrideNeutralAlignment: boolean;
+          } = {
+            hasStrongMove: false,
+            direction: "neutral",
+            movePercent: 0,
+            isStrongMove: false,
+            canOverrideNeutralAlignment: false,
+          };
+          
+          if (bPrices1h.length >= lookbackCandles + 1 && MOMENTUM_CONTINUATION_PARAMS.ENABLED) {
+            const currentClose = bPrices1h[bPrices1h.length - 1];
+            const lookbackClose = bPrices1h[bPrices1h.length - 1 - lookbackCandles];
+            const priceChange = currentClose - lookbackClose;
+            const priceChangePercent = (priceChange / lookbackClose) * 100;
+            const absMovePercent = Math.abs(priceChangePercent);
+            
+            const meetsThreshold = absMovePercent >= MOMENTUM_CONTINUATION_PARAMS.PRICE_MOVE_THRESHOLD_PERCENT;
+            const meetsStrongThreshold = absMovePercent >= MOMENTUM_CONTINUATION_PARAMS.STRONG_MOVE_THRESHOLD_PERCENT;
+            const priceDirection: "bullish" | "bearish" | "neutral" = priceChange > 0 ? "bullish" : priceChange < 0 ? "bearish" : "neutral";
+            
+            const adxThreshold = meetsStrongThreshold 
+              ? MOMENTUM_CONTINUATION_PARAMS.MIN_ADX_FOR_PRICE_ACTION
+              : (MOMENTUM_CONTINUATION_PARAMS.MIN_ADX_FOR_MODERATE_MOVE || MOMENTUM_CONTINUATION_PARAMS.MIN_ADX_FOR_PRICE_ACTION);
+            
+            const canOverride = MOMENTUM_CONTINUATION_PARAMS.OVERRIDE_NEUTRAL_ALIGNMENT &&
+              meetsThreshold &&
+              bAdx >= adxThreshold;
+            
+            bPriceActionMomentum = {
+              hasStrongMove: meetsThreshold,
+              direction: priceDirection,
+              movePercent: Math.round(priceChangePercent * 100) / 100,
+              isStrongMove: meetsStrongThreshold,
+              canOverrideNeutralAlignment: canOverride,
+            };
+          }
+          
+          // Stealth trend detection
+          const bStealthTrend = calculateStealthTrend(
+            bKlines15m.length > 0 ? bKlines15m : bKlines1h,
+            bAdx,
+            bTrend1h,
+            bTrend30m || { trend: "neutral", confidence: 50 },
+            bStochRsi4h.k
+          );
+          
+          // Neutral persistence
+          const bNeutralPersistence = calculateNeutralPersistence(
+            bKlines15m.length > 0 ? bKlines15m : bKlines1h,
+            bTrend4h,
+            bTrend1h,
+            bTrend30m || { trend: "neutral", confidence: 50 },
+            bTrend1h.indicators.macdHistogram
+          );
+          
+          // Consecutive bars counting
+          const bConsecutiveBars1h = countConsecutiveBarsInDirection(bTrend1h.indicators.macdHistogramArray);
+          const bConsecutiveBars30m = bTrend30m ? countConsecutiveBarsInDirection(bTrend30m.indicators.macdHistogramArray) : 0;
+          
+          // Primary trend calculation
+          const bPrimaryTrend = calculateTradeDirection(bDivergenceType, bDominantTrend, bTrend1h.trend, 
+            bTrend4h.trend === "neutral" && bTrend1h.trend === "neutral" ? "ranging" : bTrend4h.trend);
           
           results.push({
             timestamp: batch.timestamp,
             data: {
-              trend4h: { trend: bTrend4h.trend, confidence: bTrend4h.confidence },
-              trend1h: { trend: bTrend1h.trend, confidence: bTrend1h.confidence },
-              stochRsi4h: { k: bStochRsi4h.k, d: bStochRsi4h.d, signal: bStochRsi4h.signal },
-              stochRsi1h: { k: bStochRsi1h.k, d: bStochRsi1h.d, signal: bStochRsi1h.signal, barsAtExtreme: bBarsAtExtreme1h },
-              volatility: { adx: bAdx, atrPercent: bAtrPercent, adxRising: bAdxRising },
-              momentum: { 
-                confirms: bMomentumConfirms, 
-                state: bMomentumConfirms ? 'confirmed' : 'mixed',
+              symbol,
+              currentPrice: bCurrentPrice,
+              primaryTrend: bPrimaryTrend,
+              confidence: bDivergenceType !== "aligned" ? bDivergenceConfidence : bTrueAlignment.score,
+              isAligned: bIsAligned || bAllowDivergenceSignal,
+              
+              divergence: {
+                type: bDivergenceType,
+                confidence: bDivergenceConfidence,
+                allowSignal: bAllowDivergenceSignal,
+                recommendedPositionSize: calculateRecommendedPositionSize(bDivergenceType),
+              },
+              
+              trueAlignment: bTrueAlignment,
+              
+              timeframes: {
+                "15m": bTrend15m ? { trend: bTrend15m.trend, confidence: bTrend15m.confidence, indicators: bTrend15m.indicators } : null,
+                "30m": bTrend30m ? { trend: bTrend30m.trend, confidence: bTrend30m.confidence, indicators: bTrend30m.indicators } : null,
+                "1h": { trend: bTrend1h.trend, confidence: bTrend1h.confidence, indicators: bTrend1h.indicators },
+                "4h": { trend: bTrend4h.trend, confidence: bTrend4h.confidence, indicators: bTrend4h.indicators },
+              },
+              
+              stochasticRsi: {
+                "15m": bStochRsi15m ? { k: bStochRsi15m.k, d: bStochRsi15m.d, signal: bStochRsi15m.signal } : null,
+                "30m": bStochRsi30m ? { k: bStochRsi30m.k, d: bStochRsi30m.d, signal: bStochRsi30m.signal } : null,
+                "1h": { k: bStochRsi1h.k, d: bStochRsi1h.d, signal: bStochRsi1h.signal, barsAtExtreme: bBarsAtExtreme1h },
+                "4h": { k: bStochRsi4h.k, d: bStochRsi4h.d, signal: bStochRsi4h.signal, barsAtExtreme: bBarsAtExtreme4h },
+                barsAtExtreme: { "1h": bBarsAtExtreme1h, "4h": bBarsAtExtreme4h },
+              },
+              
+              momentum: {
+                state: bMomentumState,
+                macdExpanding: bMacdExpanding,
+                macdStrong: bMacdStrong,
+                macdHistogram: bTrend1h.indicators.macdHistogram,
+                macdDirectionAligned: bMacdDirectionAligned,
+                lastCloseAlignsWithTrend: bLastCloseAligns,
+                hasDivergence: bHasDivergence,
+                confirms: bMomentumConfirms,
+                volumeConfirms: bVolumeConfirms,
+                adxRising: bAdxRising,
                 fakeBreakoutRisk: bFakeBreakoutRisk,
                 genuineMomentum: bGenuineMomentum,
-                adxRising: bAdxRising
+                consecutiveBars1h: bConsecutiveBars1h,
+                consecutiveBars30m: bConsecutiveBars30m,
               },
+              
+              volatility: {
+                atr: Math.round(bCurrentATR * 100) / 100,
+                atrPercent: Math.round(bAtrPercent * 100) / 100,
+                relativeATR: Math.round(bRelativeATR * 100) / 100,
+                historicalATRAvg: Math.round(bHistoricalATRAvg * 100) / 100,
+                isCompressed: bAtrCompressed,
+                adx: Math.round(bAdx * 10) / 10,
+                adx15m: Math.round(bAdx15m * 10) / 10,
+                adx30m: Math.round(bAdx30m * 10) / 10,
+                adx4h: Math.round(bAdx4h * 10) / 10,
+                adxSlope: bAdxSlope,
+                adxRising: bAdxRising,
+                volatilityNormal: bAtrPercent >= 0.3 && bAtrPercent <= 3.0,
+                isRanging: bIsRanging,
+              },
+              
+              volume: {
+                "15m": bVolume15m,
+                "30m": bVolume30m,
+                "1h": bVolume1h,
+                "4h": bVolume4h,
+                confirmsDirection: bVolumeConfirms,
+                hasRangeExpansion1h: bVolume1h.volumeRatio > 1.3 && bMacdExpanding,
+              },
+              
               bollingerBands: {
-                squeeze: bBollingerBands.squeeze,
-                squeezeIntensity: bBollingerBands.squeezeIntensity,
-                percentB: bBollingerBands.percentB,
-                pricePosition: bBollingerBands.pricePosition
+                "15m": bBB15m,
+                "30m": bBB30m,
+                "1h": bBB1h,
+                "4h": bBB4h,
+                squeezeActive: bSqueezeActive,
+                squeezeBreakoutPotential: bSqueezeBreakoutPotential,
               },
-              isAligned: bIsAligned,
-              volumeConfirms: bVolume1h.volumeTrend === 'increasing' || bVolume1h.volumeSpike,
-              currentPrice: bCurrentPrice,
+              
+              pullback: {
+                inPullback: bInPullback,
+                pullbackPercent: Math.round(bPullbackPercent * 10) / 10,
+                pullbackConditionsMet: bInPullback && rsiInPullbackZone(bTrend1h.indicators.rsi, bDominantTrend),
+              },
+              
+              priceDistanceFromSwing: {
+                high24h: Math.round(bSwingHigh24h * 100) / 100,
+                low24h: Math.round(bSwingLow24h * 100) / 100,
+                distanceFromHighPercent: Math.round(bDistanceFromHighPercent * 100) / 100,
+                distanceFromLowPercent: Math.round(bDistanceFromLowPercent * 100) / 100,
+                atrNormalizedFromHigh: Math.round(bAtrNormalizedFromHigh * 100) / 100,
+                atrNormalizedFromLow: Math.round(bAtrNormalizedFromLow * 100) / 100,
+              },
+              
+              marketStructure: bMarketStructure,
+              
+              microTrend: {
+                hasMicroTrend: bMicroTrend.hasMicroTrend,
+                direction: bMicroTrend.direction,
+                confidence: bMicroTrend.confidence,
+                alignment: bMicroTrend.alignment,
+                reason: bMicroTrend.reason,
+                persistence: bMicroTrend.persistence,
+                volumeConfirmed: bMicroTrend.volumeConfirmed,
+                validForCandles: bMicroTrend.validForCandles,
+                adxSufficient: bMicroTrend.adxSufficient,
+                blocked: bMicroTrend.blocked,
+                blockReason: bMicroTrend.blockReason,
+              },
+              
+              priceActionMomentum: {
+                hasStrongMove: bPriceActionMomentum.hasStrongMove,
+                direction: bPriceActionMomentum.direction,
+                movePercent: bPriceActionMomentum.movePercent,
+                isStrongMove: bPriceActionMomentum.isStrongMove,
+                canOverrideNeutralAlignment: bPriceActionMomentum.canOverrideNeutralAlignment,
+              },
+              
+              stealthTrend: {
+                detected: bStealthTrend.detected,
+                direction: bStealthTrend.direction,
+                driftPercent: bStealthTrend.driftPercent,
+                driftDuration: bStealthTrend.driftDuration,
+                adxBypassAllowed: bStealthTrend.adxBypassAllowed,
+                htfBypassAllowed: bStealthTrend.htfBypassAllowed,
+                stealthScore: bStealthTrend.stealthScore,
+                positionMultiplier: bStealthTrend.positionMultiplier,
+                stopMultiplier: bStealthTrend.stopMultiplier,
+                reason: bStealthTrend.reason,
+              },
+              
+              neutralPersistence: {
+                isCurrentlyNeutral: bNeutralPersistence.isCurrentlyNeutral,
+                durationMinutes: bNeutralPersistence.neutralDurationMinutes,
+                confidenceBonus: bNeutralPersistence.confidenceBonus,
+                reason: bNeutralPersistence.reason,
+              },
             }
           });
         } catch (err) {
