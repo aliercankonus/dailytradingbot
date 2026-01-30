@@ -419,6 +419,8 @@ const ScoreBar = ({
 // Market Regime Details component for early rejections
 const MarketRegimeDetails = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, undefined as any);
+  const adxSlope = coerceNumeric(filtersStatus?.adxSlope ?? trendData?.volatility?.adxSlope, undefined as any);
+  const adxRising = filtersStatus?.adxRising ?? trendData?.volatility?.adxRising ?? trendData?.momentum?.adxRising;
   const confidence = extractConfidence(filtersStatus, trendData);
   const consistency = coerceNumeric(filtersStatus?.consistency ?? trendData?.trueAlignment?.score, undefined as any);
   const regime = filtersStatus?.regime;
@@ -444,6 +446,21 @@ const MarketRegimeDetails = ({ filtersStatus, trendData }: { filtersStatus: any;
       default: return Activity;
     }
   };
+  
+  // ADX slope status for mean reversion diagnostics
+  const getAdxSlopeStatus = () => {
+    if (adxSlope === undefined || typeof adxSlope !== 'number') return null;
+    const isRising = adxRising === true || adxSlope > 0;
+    const isFlat = Math.abs(adxSlope) < 0.05;
+    const isDeclining = adxSlope < 0;
+    
+    if (isFlat) return { label: 'Flat', color: 'text-yellow-400', icon: Minus };
+    if (isRising) return { label: 'Rising', color: 'text-green-400', icon: TrendingUp };
+    if (isDeclining) return { label: 'Declining', color: 'text-red-400', icon: TrendingDown };
+    return null;
+  };
+  
+  const adxSlopeStatus = getAdxSlopeStatus();
   
   const RegimeIcon = getRegimeIcon(regime);
   
@@ -488,6 +505,29 @@ const MarketRegimeDetails = ({ filtersStatus, trendData }: { filtersStatus: any;
           </div>
         )}
       </div>
+      
+      {/* ADX Slope indicator for mean reversion diagnostics */}
+      {adxSlope !== undefined && typeof adxSlope === 'number' && (
+        <div className="flex items-center justify-between pt-1 border-t border-border/30">
+          <div className="flex items-center gap-1.5">
+            <Activity className="h-3 w-3 text-muted-foreground" />
+            <span className="text-[10px] text-muted-foreground">ADX Slope</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {adxSlopeStatus && (
+              <>
+                <adxSlopeStatus.icon className={`h-3 w-3 ${adxSlopeStatus.color}`} />
+                <span className={`text-[10px] font-medium ${adxSlopeStatus.color}`}>
+                  {adxSlopeStatus.label}
+                </span>
+              </>
+            )}
+            <span className="text-[10px] font-mono text-muted-foreground">
+              ({adxSlope >= 0 ? '+' : ''}{adxSlope.toFixed(3)})
+            </span>
+          </div>
+        </div>
+      )}
       
       {filtersStatus?.reason && (
         <div className="text-[10px] text-muted-foreground pt-1 border-t border-border/30">

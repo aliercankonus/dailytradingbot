@@ -26,6 +26,12 @@ export interface BlockedSignal {
   filters_status: {
     adx?: number;
     adxPhase?: string;
+    // NEW: ADX slope tracking for mean reversion diagnostics
+    adxSlope?: number;
+    adxRising?: boolean;
+    adx15m?: number;
+    adx30m?: number;
+    adx4h?: number;
     stochRsiK?: number;
     stochRsiK4h?: number;
     trend4h?: string;
