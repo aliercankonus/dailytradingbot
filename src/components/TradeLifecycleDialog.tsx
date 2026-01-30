@@ -102,12 +102,15 @@ export const TradeLifecycleDialog = ({ positionId, open, onOpenChange }: TradeLi
         p.is_hedge || 
         p.parent_position_id === rootPositionId && p.strategy_name?.startsWith('Hedge:')
       );
-      const finalClose = allPositions.find(p => 
-        (p.id === rootPositionId || p.parent_position_id === rootPositionId) && 
-        p.status === 'closed' && 
-        !p.close_reason?.includes('partial') &&
-        !p.is_hedge
-      );
+      // Final close: either the root position closed (not a partial), or if clicking a partial TP directly
+      // we should show its close event as well
+      const rootIsClosed = rootPosition?.status === 'closed' && !rootPosition?.close_reason?.includes('partial');
+      const finalClose = rootIsClosed ? rootPosition : null;
+      
+      // For the clicked position itself, if it's a partial and closed, ensure we show it in timeline
+      const clickedPosition = allPositions.find(p => p.id === positionId);
+      const isClickedPartialClosed = clickedPosition?.status === 'closed' && 
+        clickedPosition?.close_reason?.includes('partial');
 
       // Build timeline events
       const events: Array<{
@@ -160,7 +163,7 @@ export const TradeLifecycleDialog = ({ positionId, open, onOpenChange }: TradeLi
         }
       });
 
-      // Add final close event
+      // Add final close event for root position
       if (finalClose && finalClose.status === 'closed') {
         events.push({
           type: 'close',
@@ -168,6 +171,24 @@ export const TradeLifecycleDialog = ({ positionId, open, onOpenChange }: TradeLi
           position: finalClose as RelatedPosition,
           description: `Position closed: ${getCloseReasonLabel(finalClose.close_reason)}`
         });
+      }
+      
+      // If clicked position is a partial close and we haven't added its close event yet,
+      // add it to ensure user sees the full lifecycle for the item they clicked
+      if (isClickedPartialClosed && clickedPosition && clickedPosition.closed_at) {
+        const alreadyHasCloseEvent = events.some(e => 
+          (e.type === 'partial_tp' || e.type === 'partial_loss') && 
+          e.position.id === clickedPosition.id
+        );
+        // If not already in partialCloses events, add as a close event
+        if (!alreadyHasCloseEvent) {
+          events.push({
+            type: 'close',
+            timestamp: clickedPosition.closed_at,
+            position: clickedPosition as RelatedPosition,
+            description: `Closed: ${getCloseReasonLabel(clickedPosition.close_reason)}`
+          });
+        }
       }
 
       // Sort events by timestamp
