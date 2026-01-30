@@ -377,27 +377,23 @@ const logRejectionWithAI = async (
   enableAI: boolean = false,  // Default to false, controlled by ai_analysis_enabled
   orderFlow?: OrderFlowAnalysis | null  // Optional Order Flow data
 ) => {
-  // Extract StochRSI K/D values from trendData for consistent logging (all timeframes)
-  const stochRsi4h = trendData?.stochasticRsi?.["4h"] || trendData?.stochasticRsi?.aggregated;
-  const stochRsi1h = trendData?.stochasticRsi?.["1h"];
-  const stochRsi30m = trendData?.stochasticRsi?.["30m"];
-  const stochRsi15m = trendData?.stochasticRsi?.["15m"];
+  // CENTRALIZED: Use shared extractors for consistent StochRSI extraction across all edge functions
   const stochRsiData = {
     stochRsi4h: {
-      k: stochRsi4h?.k ?? null,
-      d: stochRsi4h?.d ?? null,
+      k: extractStochRsiK(trendData, '4h'),
+      d: extractStochRsiD(trendData, '4h'),
     },
     stochRsi1h: {
-      k: stochRsi1h?.k ?? null,
-      d: stochRsi1h?.d ?? null,
+      k: extractStochRsiK(trendData, '1h'),
+      d: extractStochRsiD(trendData, '1h'),
     },
     stochRsi30m: {
-      k: stochRsi30m?.k ?? null,
-      d: stochRsi30m?.d ?? null,
+      k: extractStochRsiK(trendData, '30m'),
+      d: extractStochRsiD(trendData, '30m'),
     },
     stochRsi15m: {
-      k: stochRsi15m?.k ?? null,
-      d: stochRsi15m?.d ?? null,
+      k: extractStochRsiK(trendData, '15m'),
+      d: extractStochRsiD(trendData, '15m'),
     }
   };
   
@@ -1079,13 +1075,13 @@ interface PullbackAnalysis {
 
 const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis => {
   const indicators1h = trendData?.timeframes?.['1h']?.indicators || {};
+  // CENTRALIZED: Use shared extractors for StochRSI K values
+  const k4h = extractStochRsiK(trendData, '4h');
   const stochRsi = trendData.stochasticRsi?.aggregated || {};
-  const stoch4h = trendData.stochasticRsi?.['4h'] || {};
-  const k4h = stoch4h.k ?? 50;
   const bollingerBands = trendData.bollingerBands || {};
   const bb1h = bollingerBands["1h"] || {};
   const rsi = indicators1h.rsi ?? 50;
-  const adx = trendData?.volatility?.adx || 0;
+  const adx = extractADX(trendData);
   const momentum = trendData?.momentum || {};
   const percentB = bb1h.percentB || 50;
   const timeframes = trendData?.timeframes || {};
@@ -2709,7 +2705,7 @@ serve(async (req) => {
           const stealthDrift = Math.abs(stealthTrend.driftPercent || 0);
           const driftDirection = stealthTrend.direction;
           const adxSlope = trendData.volatility?.adxSlope ?? 0;
-          const stochK4h = trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
+          const stochK4h = extractStochRsiK(trendData, '4h');
           const htf4hConfidence = timeframes?.['4h']?.confidence ?? 0;
           
           // Check if sufficient drift has occurred
@@ -2886,8 +2882,9 @@ serve(async (req) => {
         let preMomentumDirection: "long" | "short" | null = null;
         let preMomentumPositionMultiplier = 1.0;
         
-        const stochK1h = trendData.stochasticRsi?.['1h']?.k ?? 50;
-        const stochD1h = trendData.stochasticRsi?.['1h']?.d ?? 50;
+        // CENTRALIZED: Use shared extractors for StochRSI K/D values
+        const stochK1h = extractStochRsiK(trendData, '1h');
+        const stochD1h = extractStochRsiD(trendData, '1h');
         const conf1hForPreMomentum = timeframes?.['1h']?.confidence ?? 50;
         
         if (!directionResult.direction && !lateGrindAccepted && !momentumDirectionOverrideApplied && !orderFlowDirectionOverrideApplied && PRE_MOMENTUM_STOCHRSI_PARAMS.ENABLED) {
@@ -3427,7 +3424,8 @@ serve(async (req) => {
         // ============= CRITICAL: TREND REVERSAL DETECTION GATE =============
         // Detects when indicators show a trend is reversing and blocks entries in OLD direction
         if (TREND_REVERSAL_DETECTION_GATE.ENABLED) {
-          const stochK = trendData.stochasticRsi?.['4h']?.k ?? 50;
+          // CENTRALIZED: Use shared extractors for StochRSI K values
+          const stochK = extractStochRsiK(trendData, '4h');
           const stochKPrev = trendData.stochasticRsi?.['4h']?.prevK ?? stochK;
           const macdHist = trendData.momentum?.macdHistogram ?? 0;
           const macdHistPrev = trendData.momentum?.macdHistogramPrevious ?? macdHist;
@@ -3898,7 +3896,8 @@ serve(async (req) => {
         
         if (MOVE_EXHAUSTION_FILTER_PARAMS.ENABLED) {
           const priceDistance = trendData.priceDistanceFromSwing;
-          const stochRsiK4h = trendData.stochasticRsi?.['4h']?.k ?? 50;
+          // CENTRALIZED: Use shared extractor for StochRSI K
+          const stochRsiK4h = extractStochRsiK(trendData, '4h');
           const adxSlope = fullAdxResult.adxSlope ?? 0;
           
           let moveExhaustionBlocked = false;
@@ -4514,8 +4513,8 @@ serve(async (req) => {
           const candleSize = lastCandle ? Math.abs(parseFloat(lastCandle[4]) - parseFloat(lastCandle[1])) : 0;
           const candleSizeATR = currentATR > 0 ? candleSize / currentATR : 0;
           
-          // Get StochRSI K
-          const stochRsiK = trendData.stochasticRsi?.["1h"]?.k ?? trendData.stochasticRsi?.aggregated?.k ?? 50;
+          // CENTRALIZED: Use shared extractor for StochRSI K
+          const stochRsiK = extractStochRsiK(trendData, '1h');
           
           continuationModeResult = detectContinuationMode(
             adx,
@@ -4656,7 +4655,8 @@ serve(async (req) => {
           if (overrideParams.ENABLED) {
             const adxValue = adx || 0;
             const momentumState = trendData.momentum?.state || "none";
-            const stoch4h = trendData.stochasticRsi?.['4h']?.k ?? 50;
+            // CENTRALIZED: Use shared extractor for StochRSI K
+            const stoch4h = extractStochRsiK(trendData, '4h');
             const trend1h = trendData.timeframes?.['1h'];
             const trend30m = trendData.timeframes?.['30m'];
             
@@ -4813,9 +4813,8 @@ serve(async (req) => {
         let preRecoveryMRPositionMultiplier = 1.0;
         
         // DIAGNOSTIC: Always log raw MR detection values for debugging
-        const stochK4h = trendData?.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 
-                         trendData?.stochasticRsi?.['4h']?.k ?? 
-                         trendData?.stochasticRsi?.aggregated?.k ?? null;
+        // CENTRALIZED: Use shared extractor for StochRSI K
+        const stochK4h = extractStochRsiK(trendData, '4h');
         const rsi4h = trendData?.timeframes?.['4h']?.indicators?.rsi ?? 
                       trendData?.rsi?.['4h'] ?? null;
         logger.forSymbol(symbol).debug(
@@ -5055,12 +5054,13 @@ serve(async (req) => {
         if (skipStochRSIGate) {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ADAPTIVE FULL MODE: Skipping StochRSI gate - adaptive engine will handle extremes`);
         }
-        const stochRsi4h = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi?.aggregated;
+        // CENTRALIZED: Use shared extractors for StochRSI K/D values
+        const stochRsiK4h = extractStochRsiK(trendData, '4h');
+        const stochRsiD4h = extractStochRsiD(trendData, '4h');
+        const stochRsiK1h = extractStochRsiK(trendData, '1h');
+        const stochRsiD1h = extractStochRsiD(trendData, '1h');  // Added for pullback K/D turn detection
+        // Keep raw object reference for signal property access (bullish_cross, bearish_cross)
         const stochRsi1h = trendData.stochasticRsi?.["1h"];
-        const stochRsiK4h = stochRsi4h?.k ?? 50;
-        const stochRsiD4h = stochRsi4h?.d ?? 50;
-        const stochRsiK1h = stochRsi1h?.k ?? 50;
-        const stochRsiD1h = stochRsi1h?.d ?? 50;  // Added for pullback K/D turn detection
         // CRITICAL FIX: Using shared thresholds for consistency across all edge functions
         // Smart exception still allows legitimate continuation in strong trends
         const STOCHRSI_OVERSOLD_THRESHOLD = STOCHRSI_THRESHOLDS.OVERSOLD;  // 20 - bounce risk for shorts
@@ -8604,9 +8604,9 @@ serve(async (req) => {
           const squeezeDirection: "long" | "short" = (momentum?.macdHistogram || 0) > 0 ? "long" : "short";
           
           // StochRSI loading zone check - extended zones for extreme conditions
-          // FIXED: Use stochasticRsi (not stochRsi) to match calculate-trend output
-          const stochRsiK1hForSqueeze = trendData.stochasticRsi?.["1h"]?.k ?? 50;
-          const stochRsiK4h = trendData.stochasticRsi?.["4h"]?.k ?? 50;
+          // CENTRALIZED: Use shared extractors for StochRSI K values
+          const stochRsiK1hForSqueeze = extractStochRsiK(trendData, '1h');
+          const stochRsiK4h = extractStochRsiK(trendData, '4h');
           
           // Standard loading zone check
           const stochRsiInStandardLoadingZone = squeezeDirection === "long"
