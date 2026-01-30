@@ -5146,7 +5146,36 @@ export const SignalRejectionReasons = () => {
     if (filtersStatus?.inPullback === false && filtersStatus.pullbackPercent !== undefined) {
       details.push(`Pullback: ${filtersStatus.pullbackPercent.toFixed(1)}%`);
     }
-    return details.length > 0 ? details.join(" | ") : filtersStatus?.required || "No details available";
+
+    // If Order Flow analytics were logged, never fall back to an opaque placeholder.
+    if (details.length === 0 && filtersStatus?.order_flow) {
+      const of = filtersStatus.order_flow;
+
+      const score = coerceNumeric(of?.score, 0);
+      details.push(`OF: ${Math.round(score)}/100`);
+
+      if (of?.signal) {
+        details.push(`Sig: ${String(of.signal)}`);
+      }
+
+      const volumeLabel = of?.volumeSpike?.detected
+        ? `${coerceNumeric(of?.volumeSpike?.magnitude, 0).toFixed(1)}x ${String(of?.volumeSpike?.type ?? "?")}`
+        : "Normal";
+      details.push(`Vol: ${volumeLabel}`);
+
+      if (of?.priceRejection?.detected) {
+        const rejType = String(of?.priceRejection?.type ?? "rejection");
+        const strength = of?.priceRejection?.strength;
+        details.push(`Rej: ${rejType}${strength !== undefined ? ` (${String(strength)})` : ""}`);
+      }
+
+      if (of?.pressure?.trend) {
+        details.push(`Press: ${String(of.pressure.trend)}`);
+      }
+    }
+
+    // Last resort: still avoid the opaque "No details available" message.
+    return details.length > 0 ? details.join(" | ") : (filtersStatus?.required ?? (filtersStatus ? "See details" : "No data"));
   };
 
   const getRejectionDetails = (rejection: SignalRejection) => {
