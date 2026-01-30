@@ -561,10 +561,8 @@ serve(async (req) => {
     }
 
     // FILTER 2: Require trend consistency (dynamic threshold based on ADX and 1h confidence)
-    // Extract ADX early for dynamic consistency calculation
-    const adxValueForConsistency = typeof trendData?.volatility?.adx === 'number' 
-      ? trendData.volatility.adx 
-      : (typeof trendData?.volatility?.adx === 'object' ? trendData.volatility.adx?.value : 0);
+    // CENTRALIZED: Use shared extractor for consistent ADX access
+    const adxValueForConsistency = extractADX(trendData);
     
     // Extract 1h confidence for dynamic threshold
     const confidence1hForConsistency = trendData?.timeframes?.['1h']?.confidence || 
@@ -618,9 +616,8 @@ serve(async (req) => {
     }
 
     // FILTER 5: ADX HARD GATE - Require minimum trend strength (uses centralized ADX_THRESHOLDS)
-    const adxValue = typeof trendData?.volatility?.adx === 'number' 
-      ? trendData.volatility.adx 
-      : (typeof trendData?.volatility?.adx === 'object' ? trendData.volatility.adx?.value : 0);
+    // CENTRALIZED: Use shared extractor for consistent ADX access
+    const adxValue = extractADX(trendData);
     
     if (adxValue < ADX_THRESHOLDS.MINIMUM) {
       logger.gate(`❌ ADX HARD GATE: ADX ${adxValue?.toFixed(1) || 0} < ${ADX_THRESHOLDS.MINIMUM} - trade cancelled`, false);

@@ -7,6 +7,12 @@ import {
   getConfidencePenalty, 
   getAdxWeight,
   calculateUnifiedReversalScore,
+  // CENTRALIZED EXTRACTION HELPERS (consistency across all edge functions)
+  extractADX,
+  extractADXSlope,
+  extractStochRsiK,
+  extractStochRsiD,
+  extractAtrPercent,
   type UnifiedReversalResult
 } from "../_shared/scoring.ts";
 import type { TrendDataResponse, PartialTrendData } from "../_shared/trend-types.ts";
@@ -368,7 +374,8 @@ serve(async (req) => {
       // Use ADX and volume to determine exit sensitivity
       // ============================================================
       const trendDataForPosition = trendDataMap.get(position.symbol);
-      const positionAdx = trendDataForPosition?.volatility?.adx || trendDataForPosition?.momentum?.adx || 20;
+      // CENTRALIZED: Use shared extractors for consistent ADX access across all edge functions
+      const positionAdx = extractADX(trendDataForPosition);
       const positionVolumeScore = trendDataForPosition?.volumeScore ?? 0;
       const positionConfidence = trendDataForPosition?.confidence ?? 50;
       
@@ -686,9 +693,9 @@ serve(async (req) => {
         // Strong trends can sustain higher volatility without indicating reversal
         // This prevents premature exits like the ETHUSDT $2,859 entry that was closed too early
         // ============================================================
-        const positionAdxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 20;
-        const adxSlope = trendData?.volatility?.adxSlope || trendData?.momentum?.adxSlope || 0;
-        const isAdxRising = adxSlope > 0;
+        // CENTRALIZED: Use shared extractors for consistent ADX access
+        const positionAdxValue = extractADX(trendData);
+        const { slope: adxSlope, isRising: isAdxRising } = extractADXSlope(trendData);
         
         // Determine adaptive threshold based on ADX and trend confirmation
         let adaptiveVolatilityThreshold: number = EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD; // Default: 3.0x
@@ -942,7 +949,8 @@ serve(async (req) => {
         
         // ============= TREND CONTINUATION FAILURE =============
         // If ADX starts rising strongly, our mean reversion thesis is wrong
-        const mrAdxSlope = trendDataForPosition?.volatility?.adxSlope ?? trendDataForPosition?.momentum?.adxSlope ?? 0;
+        // CENTRALIZED: Use shared extractor for ADX slope
+        const { slope: mrAdxSlope } = extractADXSlope(trendDataForPosition);
         if (!meanReversionExitTriggered && positionAdx >= MEAN_REVERSION_CONFIG.LONG.MAX_ADX && mrAdxSlope > 0.5 && pnlPercent < 0) {
           meanReversionExitTriggered = true;
           meanReversionExitReason = "mean_reversion_trend_continuation";
@@ -976,8 +984,9 @@ serve(async (req) => {
         const decayVelocity = decayPercent / minutesSincePeak; // % per minute
         
         // Get trend data for tiered threshold determination
-        const positionAdx = trendDataForPosition?.volatility?.adx || trendDataForPosition?.momentum?.adx || 20;
-        const adxSlope = trendDataForPosition?.volatility?.adxSlope ?? trendDataForPosition?.momentum?.adxSlope ?? 0;
+        // CENTRALIZED: Use shared extractors for consistent access
+        const tieredPositionAdx = extractADX(trendDataForPosition);
+        const { slope: tieredAdxSlope } = extractADXSlope(trendDataForPosition);
         const primaryTrend = trendDataForPosition?.primaryTrend || 'ranging';
         const isAlignedWithPosition = (position.side === 'BUY' && primaryTrend === 'bullish') || 
                                        (position.side === 'SELL' && primaryTrend === 'bearish');
@@ -989,19 +998,19 @@ serve(async (req) => {
         
         // Only apply strong trend exception if trend aligns with position
         if (isAlignedWithPosition) {
-          if (positionAdx >= DECAY_VELOCITY_TIERS.TIER4_MIN_ADX && adxSlope >= DECAY_VELOCITY_TIERS.TIER4_MIN_ADX_SLOPE) {
+          if (tieredPositionAdx >= DECAY_VELOCITY_TIERS.TIER4_MIN_ADX && tieredAdxSlope >= DECAY_VELOCITY_TIERS.TIER4_MIN_ADX_SLOPE) {
             decayTier = 'tier4';
             decayThreshold = DECAY_VELOCITY_TIERS.TIER4_EXIT_PER_MINUTE;
             maxDecayMinutes = DECAY_VELOCITY_TIERS.TIER4_MAX_DECAY_MINUTES;
-          } else if (positionAdx >= DECAY_VELOCITY_TIERS.TIER3_MIN_ADX && adxSlope >= DECAY_VELOCITY_TIERS.TIER3_MIN_ADX_SLOPE) {
+          } else if (tieredPositionAdx >= DECAY_VELOCITY_TIERS.TIER3_MIN_ADX && tieredAdxSlope >= DECAY_VELOCITY_TIERS.TIER3_MIN_ADX_SLOPE) {
             decayTier = 'tier3';
             decayThreshold = DECAY_VELOCITY_TIERS.TIER3_EXIT_PER_MINUTE;
             maxDecayMinutes = DECAY_VELOCITY_TIERS.TIER3_MAX_DECAY_MINUTES;
-          } else if (positionAdx >= DECAY_VELOCITY_TIERS.TIER2_MIN_ADX && adxSlope >= DECAY_VELOCITY_TIERS.TIER2_MIN_ADX_SLOPE) {
+          } else if (tieredPositionAdx >= DECAY_VELOCITY_TIERS.TIER2_MIN_ADX && tieredAdxSlope >= DECAY_VELOCITY_TIERS.TIER2_MIN_ADX_SLOPE) {
             decayTier = 'tier2';
             decayThreshold = DECAY_VELOCITY_TIERS.TIER2_EXIT_PER_MINUTE;
             maxDecayMinutes = DECAY_VELOCITY_TIERS.TIER2_MAX_DECAY_MINUTES;
-          } else if (positionAdx >= DECAY_VELOCITY_TIERS.TIER1_MIN_ADX && adxSlope >= DECAY_VELOCITY_TIERS.TIER1_MIN_ADX_SLOPE) {
+          } else if (tieredPositionAdx >= DECAY_VELOCITY_TIERS.TIER1_MIN_ADX && tieredAdxSlope >= DECAY_VELOCITY_TIERS.TIER1_MIN_ADX_SLOPE) {
             decayTier = 'tier1';
             decayThreshold = DECAY_VELOCITY_TIERS.TIER1_EXIT_PER_MINUTE;
             maxDecayMinutes = DECAY_VELOCITY_TIERS.TIER1_MAX_DECAY_MINUTES;
@@ -1014,7 +1023,7 @@ serve(async (req) => {
         // Emergency exit if decay exceeds tier threshold OR time safety triggered
         if ((decayVelocity > decayThreshold || forceExitByTime) && pnlPercent > 0) {
           const exitReason = forceExitByTime ? 'smart_aits_prolonged_decay' : 'smart_aits_rapid_decay';
-          positionLogger.risk(`SMART AITS [${decayTier.toUpperCase()}]: ${forceExitByTime ? 'Prolonged' : 'Rapid'} decay detected ${position.side} - velocity ${(decayVelocity * 100).toFixed(2)}%/min (threshold ${(decayThreshold * 100).toFixed(2)}%/min), ADX=${positionAdx.toFixed(1)}, slope=${adxSlope.toFixed(3)}, aligned=${isAlignedWithPosition}`);
+          positionLogger.risk(`SMART AITS [${decayTier.toUpperCase()}]: ${forceExitByTime ? 'Prolonged' : 'Rapid'} decay detected ${position.side} - velocity ${(decayVelocity * 100).toFixed(2)}%/min (threshold ${(decayThreshold * 100).toFixed(2)}%/min), ADX=${tieredPositionAdx.toFixed(1)}, slope=${tieredAdxSlope.toFixed(3)}, aligned=${isAlignedWithPosition}`);
           
           emergencyExits.push({
             symbol: position.symbol,
@@ -1025,8 +1034,8 @@ serve(async (req) => {
             decayVelocity: decayVelocity * 100,
             minutesSincePeak,
             decayTier,
-            adx: positionAdx,
-            adxSlope,
+            adx: tieredPositionAdx,
+            adxSlope: tieredAdxSlope,
           });
           
           // Close position immediately
@@ -1061,7 +1070,7 @@ serve(async (req) => {
           continue; // Skip to next position
         } else if (decayVelocity > DECAY_VELOCITY_TIERS.BASE_EXIT_PER_MINUTE && decayTier !== 'base') {
           // Log when decay exceeds base but is allowed by tier exception
-          positionLogger.info(`SMART AITS [${decayTier.toUpperCase()}]: Decay ${(decayVelocity * 100).toFixed(2)}%/min tolerated (threshold ${(decayThreshold * 100).toFixed(2)}%/min) - ADX=${positionAdx.toFixed(1)}, slope=${adxSlope.toFixed(3)}, aligned=${isAlignedWithPosition}, mins=${minutesSincePeak.toFixed(0)}/${maxDecayMinutes}`);
+          positionLogger.info(`SMART AITS [${decayTier.toUpperCase()}]: Decay ${(decayVelocity * 100).toFixed(2)}%/min tolerated (threshold ${(decayThreshold * 100).toFixed(2)}%/min) - ADX=${tieredPositionAdx.toFixed(1)}, slope=${tieredAdxSlope.toFixed(3)}, aligned=${isAlignedWithPosition}, mins=${minutesSincePeak.toFixed(0)}/${maxDecayMinutes}`);
         }
       }
       
@@ -1163,10 +1172,10 @@ serve(async (req) => {
       // ============= PHASE 3: DYNAMIC R-MULTIPLE TRAILING =============
       // Use ADX-aware activation and momentum-based trailing distance
       // FIXED: Calculate momentum with ACTUAL ADX values from trend data (not hardcoded 20)
+      // CENTRALIZED: Use shared extractors for consistent ADX access
       const trendDataForMomentum = trendDataMap.get(position.symbol);
-      const adxForMomentum = trendDataForMomentum?.volatility?.adx || trendDataForMomentum?.momentum?.adx || 20;
-      const adxSlope = trendDataForMomentum?.volatility?.adxSlope || trendDataForMomentum?.momentum?.adxSlope || 0;
-      const adxRisingForMomentum = adxSlope > 0 || trendDataForMomentum?.momentum?.adxRising === true;
+      const adxForMomentum = extractADX(trendDataForMomentum);
+      const { slope: momentumAdxSlope, isRising: adxRisingForMomentum } = extractADXSlope(trendDataForMomentum);
       const currentAtrForMomentum = atrData?.atr || 0;
       const closesForMomentum = atrData?.closes || [];
       const klinesForMomentum = atrData?.klines || [];
@@ -1314,8 +1323,9 @@ serve(async (req) => {
         // EXIT TRIGGER 2: ADX flattening + opposing candle
         // ADX slope near zero or negative AND current candle closes against position
         if (!continuationModeExitTriggered && CONTINUATION_MODE_PARAMS.EXIT_ON_ADX_FLATTEN_PLUS_BEARISH_CANDLE) {
-          const adxSlope = trendDataForPosition?.volatility?.adxSlope ?? trendDataForPosition?.momentum?.adxSlope ?? 0;
-          const adxFlattening = adxSlope <= 0.5; // ADX not rising anymore
+          // CENTRALIZED: Use shared extractor for ADX slope
+          const { slope: contAdxSlope } = extractADXSlope(trendDataForPosition);
+          const adxFlattening = contAdxSlope <= 0.5; // ADX not rising anymore
           
           // Check if latest candle closed against position
           const klines = atrData?.klines;
@@ -1333,7 +1343,7 @@ serve(async (req) => {
             if (opposingCandle && pnlPercent > 0) {
               continuationModeExitTriggered = true;
               continuationModeExitReason = "adx_flatten_opposing_candle";
-              positionLogger.risk(`CONTINUATION EXIT: ADX flattening (slope=${adxSlope.toFixed(2)}) + ${bearishCandle ? 'bearish' : 'bullish'} candle against ${position.side}`);
+              positionLogger.risk(`CONTINUATION EXIT: ADX flattening (slope=${contAdxSlope.toFixed(2)}) + ${bearishCandle ? 'bearish' : 'bullish'} candle against ${position.side}`);
             }
           }
         }
