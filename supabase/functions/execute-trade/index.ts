@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, STRONG_TREND_HTF_BYPASS_PARAMS, TREND_CONTINUATION_TIGHT_STOPS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, STRONG_TREND_HTF_BYPASS_PARAMS, TREND_CONTINUATION_TIGHT_STOPS, DEEP_STOCHRSI_HARD_GATE, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { checkPositionCorrelation, getKnownCorrelation } from "../_shared/correlation.ts";
 import { calculateATR, calculateHistoricalATRAvg } from "../_shared/indicators.ts";
 import { 
@@ -9,6 +9,10 @@ import {
   getAdxWeight,
   calculateUnifiedReversalScore,
   detectMarketRegime,
+  extractADX,
+  extractADXSlope,
+  extractStochRsiK,
+  extractAtrPercent,
   type UnifiedReversalResult,
   type MarketRegime
 } from "../_shared/scoring.ts";
@@ -623,6 +627,42 @@ serve(async (req) => {
       throw new Error(`Trend strength too weak (ADX: ${adxValue?.toFixed(1) || 0}) - minimum required: ${ADX_THRESHOLDS.MINIMUM}`);
     }
     logger.gate(`✓ ADX hard gate passed: ${adxValue?.toFixed(1)} >= ${ADX_THRESHOLDS.MINIMUM}`, true);
+
+    // ============================================================
+    // FILTER 6: TIER 0 DEEP_STOCHRSI_HARD_GATE (Backup/Defense-in-Depth)
+    // This is a BACKUP check in case a signal slips through strategy-analyzer
+    // Blocks entries at extreme oscillator exhaustion to prevent late entries
+    // ============================================================
+    if (DEEP_STOCHRSI_HARD_GATE.ENABLED) {
+      const stochRsiK4h = extractStochRsiK(trendData, '4h', 50);
+      const signalDirection = signal.signal_type;
+      
+      // Block LONG at extreme high (K >= 95) - overbought exhaustion
+      if (stochRsiK4h >= DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD && signalDirection === 'long') {
+        logger.gate(`❌ TIER 0 BACKUP GATE: StochRSI K=${stochRsiK4h.toFixed(1)} >= ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD} blocks LONG entry`, false);
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'TIER 0 (DEEP): StochRSI HARD GATE', signal, trendData, {
+          stochRsiK4h,
+          threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
+          direction: signalDirection,
+          reason: 'Extreme overbought exhaustion - BACKUP gate in execute-trade'
+        });
+        throw new Error(`TIER 0 BACKUP: StochRSI K (${stochRsiK4h.toFixed(1)}) at extreme high - LONG blocked`);
+      }
+      
+      // Block SHORT at extreme low (K <= 5) - oversold exhaustion
+      if (stochRsiK4h <= DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD && signalDirection === 'short') {
+        logger.gate(`❌ TIER 0 BACKUP GATE: StochRSI K=${stochRsiK4h.toFixed(1)} <= ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD} blocks SHORT entry`, false);
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'TIER 0 (DEEP): StochRSI HARD GATE', signal, trendData, {
+          stochRsiK4h,
+          threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
+          direction: signalDirection,
+          reason: 'Extreme oversold exhaustion - BACKUP gate in execute-trade'
+        });
+        throw new Error(`TIER 0 BACKUP: StochRSI K (${stochRsiK4h.toFixed(1)}) at extreme low - SHORT blocked`);
+      }
+      
+      logger.gate(`✓ TIER 0 backup gate passed: StochRSI K=${stochRsiK4h.toFixed(1)} not in extreme zone for ${signalDirection}`, true);
+    }
 
     // ============================================================
     // DYNAMIC QUALITY THRESHOLD (aligned with strategy-analyzer)
