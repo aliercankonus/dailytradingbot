@@ -1,14 +1,14 @@
 // ============= TREND DATA RESPONSE TYPES =============
 // Single source of truth for calculate-trend response structure
-// Used by: strategy-analyzer, execute-trade, monitor-positions, auto-trader
+// Used by: strategy-analyzer, execute-trade, monitor-positions
 
 // ============= BASIC ENUMS & TYPES =============
 export type TrendDirection = "bullish" | "bearish" | "neutral";
 export type PrimaryTrendDirection = "bullish" | "bearish" | "neutral" | "ranging";
 export type MomentumState = "none" | "mixed" | "confirmed" | "building" | "exhausted";
-export type StochRsiSignal = "bullish_cross" | "bearish_cross" | "overbought" | "oversold" | "neutral" | "rising" | "falling";
+export type StochRsiSignal = "bullish_cross" | "bearish_cross" | "overbought" | "oversold" | "neutral" | "rising" | "falling" | string;
 export type BollingerPricePosition = "above_upper" | "upper_zone" | "middle" | "lower_zone" | "below_lower";
-export type VolumeTrend = "increasing" | "decreasing" | "stable";
+export type VolumeTrend = "increasing" | "decreasing" | "stable" | "neutral";
 export type DivergenceType = "aligned" | "pullback" | "early_reversal" | "ranging_conflict" | "opposing";
 
 // ============= INDICATOR INTERFACES =============
@@ -33,11 +33,22 @@ export interface TimeframeTrend {
   indicators: TrendIndicators;
 }
 
+export interface BarsAtExtremeData {
+  barsOverbought: number;
+  barsOversold: number;
+}
+
 export interface StochRsiData {
   k: number;
   d: number;
-  signal: StochRsiSignal;
-  barsAtExtreme?: number;
+  signal: string;
+  strength?: number;
+  prevK?: number;
+  prevD?: number;
+  kRising?: boolean;
+  kCrossedAboveD?: boolean;
+  kCrossedBelowD?: boolean;
+  barsAtExtreme?: BarsAtExtremeData;
   kArray?: number[];
 }
 
@@ -71,14 +82,20 @@ export interface DivergenceData {
 
 export interface TrueAlignmentData {
   score: number;
-  tf4hConfidence: number;
-  tf1hConfidence: number;
-  volumeRatio: number;
-  volumeBoost: number;
-  adxStrength: number;
-  adxContribution: number;
-  totalWeightedConfidence: number;
-  weightedComponents: {
+  breakdown?: {
+    directionScore: number;
+    indicatorScore: number;
+    penaltyScore: number;
+  };
+  neutralCapped?: boolean;
+  tf4hConfidence?: number;
+  tf1hConfidence?: number;
+  volumeRatio?: number;
+  volumeBoost?: number;
+  adxStrength?: number;
+  adxContribution?: number;
+  totalWeightedConfidence?: number;
+  weightedComponents?: {
     tf4hWeighted: number;
     tf1hWeighted: number;
     volumeWeighted: number;
@@ -142,7 +159,7 @@ export interface MicroTrendData {
   hasMicroTrend: boolean;
   direction: TrendDirection;
   confidence: number;
-  alignment: string;
+  alignment: number | string;
   reason: string;
   persistence?: number;
   volumeConfirmed?: boolean;
@@ -205,8 +222,8 @@ export interface TrendDataResponse {
     "1h": StochRsiData;
     "4h": StochRsiData;
     barsAtExtreme: {
-      "1h": number;
-      "4h": number;
+      "1h": BarsAtExtremeData;
+      "4h": BarsAtExtremeData;
     };
   };
   
@@ -264,7 +281,7 @@ export interface ADXExtractionResult {
 export interface ADXSlopeResult {
   slope: number;
   isRising: boolean;
-  source: 'momentum' | 'adxSlope' | 'default';
+  source: string;
 }
 
 export interface StochRsiExtractionResult {
