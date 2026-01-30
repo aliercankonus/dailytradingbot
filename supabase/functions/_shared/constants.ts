@@ -4204,8 +4204,10 @@ export const MEAN_REVERSION_CONFIG = {
   // This addresses late-stage moves where ADX peaks near local exhaustion
   EXTREME_EXHAUSTION: {
     // Thresholds where ADX veto is lifted
-    LONG_K_EXTREME: 5,            // K <= 5 = deep statistical exhaustion
-    SHORT_K_EXTREME: 95,          // K >= 95 = deep statistical exhaustion
+    // UPDATED: Relaxed from K<=5 to K<=10 to capture more oversold bounce opportunities
+    // Safety maintained via ADX slope requirement (must be flat/declining)
+    LONG_K_EXTREME: 10,           // K <= 10 = oversold exhaustion (was 5)
+    SHORT_K_EXTREME: 90,          // K >= 90 = overbought exhaustion (was 95)
     
     // Safety requirements when overriding ADX
     MAX_ADX_SLOPE: 0,             // ADX must be flat/declining (not accelerating)
