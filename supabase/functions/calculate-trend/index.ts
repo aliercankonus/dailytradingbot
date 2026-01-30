@@ -9,6 +9,7 @@ import {
 } from "../_shared/indicators.ts";
 import { calculateTrend, enhanceConfidenceWithIndicators, TrendResult } from "../_shared/trend-core.ts";
 import { createLogger, logMetrics, logError, LOG_CATEGORIES } from "../_shared/logging.ts";
+import type { TrendDataResponse } from "../_shared/trend-types.ts";
 import { getKlines, parseKlinePrices } from "../_shared/binance.ts";
 
 // Create logger for this function
@@ -1476,8 +1477,8 @@ serve(async (req) => {
     // Market structure validation
     const marketStructure = validateMarketStructure(klines1h, dominantTrend);
 
-    // Build response
-    const response = {
+    // Build response with full type safety
+    const response: TrendDataResponse = {
       symbol,
       timestamp: new Date().toISOString(),
       currentPrice,
