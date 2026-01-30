@@ -4906,6 +4906,7 @@ export const SignalRejectionReasons = () => {
   const renderFilterDetails = (rejection: SignalRejection) => {
     const fs = rejection.filters_status;
     const reason = rejection.rejection_reason || "";
+    const reasonLower = reason.toLowerCase();
     
     // Execution rejections - signals blocked during trade execution
     if (reason.startsWith("EXECUTION:")) {
@@ -4983,9 +4984,9 @@ export const SignalRejectionReasons = () => {
     // HARD GATE: MACD Misaligned / Order Flow Not Aligned
     if (fs?.gate === "MACD_MISALIGNED" || fs?.gate === "ORDER_FLOW_NOT_ALIGNED" || 
         fs?.gate === "ORDER_FLOW_MACD_NOT_ALIGNED" || fs?.gate === "PRICE_NOT_ALIGNED" ||
-        (reason.includes("MACD") && (reason.includes("misaligned") || reason.includes("not aligned"))) ||
-        reason.includes("Order flow") || reason.includes("ORDER_FLOW") ||
-        reason.includes("Price not aligned") || reason.includes("price not aligned")) {
+        (reasonLower.includes("macd") && (reasonLower.includes("misaligned") || reasonLower.includes("not aligned"))) ||
+        reasonLower.includes("order flow") || reasonLower.includes("order_flow") ||
+        reasonLower.includes("price not aligned")) {
       return <HardGateMacdMisalignedDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
