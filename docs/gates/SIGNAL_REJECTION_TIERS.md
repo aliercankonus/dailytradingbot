@@ -878,10 +878,118 @@ FUNCTION calculateUnifiedReversalScore(indicators):
 
 ---
 
+## 🟠 SECTION 6: Mean Reversion Exhaustion Tiers
+
+### Overview
+
+Mean Reversion detection uses a tiered approach based on StochRSI 4h K levels:
+
+| Tier | K Range (LONG) | K Range (SHORT) | Position Size | Requirements |
+|------|---------------|-----------------|---------------|--------------|
+| **EXTREME** | K ≤ 10 | K ≥ 90 | 0.40x × 0.50x = 0.20x | ADX slope ≤ 0, VWAP distance ≥ 1.5 ATR |
+| **STRONG** | K ≤ 5 | K ≥ 97 | 0.40x (LONG) / 0.25x (SHORT) | Standard MR criteria |
+| **MODERATE** | 10 < K ≤ 15 | 85 ≤ K < 90 | 0.35x | Momentum confirmation |
+| **NONE** | K > 15 | K < 85 | N/A | Not in exhaustion zone |
+
+### MODERATE EXHAUSTION TIER (NEW)
+
+```
+// ============= MODERATE EXHAUSTION (K 10-15) =============
+// Probabilistic probe - NOT conviction trade
+// Fills gap between EXTREME (≤10) and noise zone (>15)
+// Requires momentum confirmation to prevent knife-catching
+
+CONSTANTS:
+  LONG_K_MIN = 10          // Must be > Extreme tier
+  LONG_K_MAX = 15          // Upper bound before noise zone
+  SHORT_K_MIN = 85         // Symmetric for shorts
+  SHORT_K_MAX = 90         // Must be < Extreme tier
+  MIN_MOMENTUM_SCORE = 40  // Momentum must be positive
+  REQUIRE_ALIGNED_MOMENTUM = true  // Direction must match trade
+  MAX_ADX = 35             // Path 1: ADX ceiling
+  MAX_ADX_SLOPE = 0        // Path 2: ADX slope override
+  POSITION_SIZE = 0.35     // Conservative sizing
+  TAG = "MR_MODERATE_EXHAUSTION"
+  
+  // Invalidation Rules
+  INVALIDATION_MOMENTUM_FLOOR = 30  // Exit if momentum drops below
+  INVALIDATION_TIME_BARS = 8        // Max bars without favorable move
+
+FUNCTION checkModerateExhaustion(stochK4h, momentumScore, momentumDirection, adx, adxSlope, side):
+  
+  // ===== RANGE CHECK =====
+  IF side == "long":
+    IF NOT (stochK4h > LONG_K_MIN AND stochK4h <= LONG_K_MAX):
+      RETURN false
+  ELSE:  // short
+    IF NOT (stochK4h >= SHORT_K_MIN AND stochK4h < SHORT_K_MAX):
+      RETURN false
+  
+  // ===== MOMENTUM GATING (Critical Safety) =====
+  IF side == "long":
+    IF momentumScore < MIN_MOMENTUM_SCORE:
+      LOG "MODERATE_EXHAUSTION_REJECTED: momentum {momentumScore} < {MIN_MOMENTUM_SCORE}"
+      RETURN false
+    IF REQUIRE_ALIGNED_MOMENTUM AND momentumDirection != "bullish":
+      LOG "MODERATE_EXHAUSTION_REJECTED: direction {momentumDirection} != bullish"
+      RETURN false
+  ELSE:  // short
+    IF momentumScore > -MIN_MOMENTUM_SCORE:
+      LOG "MODERATE_EXHAUSTION_REJECTED: momentum {momentumScore} > -{MIN_MOMENTUM_SCORE}"
+      RETURN false
+    IF REQUIRE_ALIGNED_MOMENTUM AND momentumDirection != "bearish":
+      LOG "MODERATE_EXHAUSTION_REJECTED: direction {momentumDirection} != bearish"
+      RETURN false
+  
+  // ===== ADX CHECK (Dual-path) =====
+  // Path 1: ADX is moderate (not in strong trend)
+  adxInRange = adx <= MAX_ADX
+  // Path 2: Any ADX allowed if slope is flat/declining (trend exhausting)
+  adxSlopeOverride = adxSlope <= MAX_ADX_SLOPE
+  
+  IF NOT adxInRange AND NOT adxSlopeOverride:
+    LOG "MODERATE_EXHAUSTION_REJECTED: ADX {adx} > {MAX_ADX} and slope {adxSlope} > 0"
+    RETURN false
+  
+  // ===== SIGNAL QUALIFIED =====
+  RETURN {
+    detected: true,
+    tier: "MODERATE",
+    positionSize: POSITION_SIZE,
+    tag: TAG,
+    triggers: ["MODERATE EXHAUSTION: K={stochK4h}, momentum={momentumScore}, ADX={adx}"]
+  }
+```
+
+### INVALIDATION LOGIC (monitor-positions)
+
+```
+// ============= MODERATE EXHAUSTION MOMENTUM INVALIDATION =============
+// Applied during position monitoring - not at entry
+
+IF position.strategy_name CONTAINS "MR_MODERATE_EXHAUSTION":
+  currentMomentumScore = trendData.momentum.score
+  
+  // For LONG: momentum must remain positive
+  IF position.side == "BUY":
+    IF currentMomentumScore < INVALIDATION_MOMENTUM_FLOOR:
+      IF pnlPercent < 0.5:  // Only exit if not already profitable
+        CLOSE position, reason="moderate_exhaustion_momentum_invalidated"
+  
+  // For SHORT: momentum must remain negative
+  ELSE:  // SELL
+    IF currentMomentumScore > -INVALIDATION_MOMENTUM_FLOOR:
+      IF pnlPercent < 0.5:
+        CLOSE position, reason="moderate_exhaustion_momentum_invalidated"
+```
+
+---
+
 ## Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.6 | 2025-01-30 | Added **MODERATE EXHAUSTION TIER** (K 10-15 @ 0.35x) with momentum gating and invalidation rules. Fills gap between EXTREME tier and noise zone for earlier bounce detection. |
 | 1.5 | 2025-01-27 | **FIX #6 (Audit)**: Replaced flat 50% strong-trend reversal reduction with ADX-scaled graduated weights: ADX>=40 → 0.40 (60% reduction), ADX>=35 → 0.50, ADX>=30 → 0.60, ADX>=25 → 0.75, ADX>=20 → 0.85, ADX<20 → 1.00 (no reduction). Added `ADX_REVERSAL_WEIGHTS` constant for maintainability. |
 | 1.4 | 2025-01-27 | **FIX #5 (Audit)**: Added explicit guard to skip Tier 10 (Momentum Fallback) if Tier 0.5 (Momentum Override) already evaluated. Prevents "evidence double-dipping" where same momentum+OF evidence is re-used at lower thresholds. Exception: If Tier 0.5 was blocked by 30m ADX (structural reason), Tier 10 can still run. |
 | 1.3 | 2025-01-27 | **FIX #1 (Audit)**: Added formal `isExtremeMeanReversion` definition for Tier 1 bypass. Requires: regime IN [RANGE, LATE_TREND, EXHAUSTION], reversalScore >= 55, momentumState != 'confirmed'. Prevents trend-continuation logic from leaking into Tier 1 bypasses. |
