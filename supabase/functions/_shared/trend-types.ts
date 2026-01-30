@@ -131,6 +131,9 @@ export interface VolatilityData {
   adx15m?: number;
   adx30m?: number;
   adx4h?: number;
+  // NEW: ADX slope for graduated decision making
+  adxSlope?: number;
+  adxRising?: boolean;
   volatilityNormal: boolean;
   isRanging: boolean;
 }
