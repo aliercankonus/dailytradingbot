@@ -4131,11 +4131,16 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   
   // ===== STOCHRSI ALIGNMENT REQUIRED =====
   // In soft zone, block if StochRSI indicates exhaustion
-  // For late shorts: StochRSI K must be > 35 (not deeply oversold)
-  // For late longs: StochRSI K must be < 50 (tighter than before - was 65)
+  // FIX: For SHORTs - K <= 65 was WRONG (blocked good continuation shorts)
+  // Now using K >= 20: avoid ONLY extreme oversold exhaustion, not moderate oversold
+  // Logic: In a falling market, K can be 15-40 (oversold) but trend still has room
+  // We only block if K < 20 (extreme exhaustion = bounce imminent)
   REQUIRE_STOCHRSI_ALIGNMENT: true,
-  STOCHRSI_NOT_OVERSOLD_FOR_SHORT: 35,  // K must be > 35 for late short
+  STOCHRSI_MIN_FOR_SHORT: 20,           // K must be >= 20 for late short (avoid extreme oversold only)
   STOCHRSI_NOT_OVERBOUGHT_FOR_LONG: 50, // K must be < 50 for late long (tightened from 65)
+  
+  // Legacy alias (backward compatibility)
+  STOCHRSI_NOT_OVERSOLD_FOR_SHORT: 20,  // Renamed - now means MIN K for short entry
   
   // ===== EXCEPTION: STRONG TREND CONTINUATION =====
   // Allow entry despite exhaustion ONLY if ADX is VERY strong (>=40) and clearly rising
@@ -4356,6 +4361,17 @@ export const MOMENTUM_DIRECTION_HARD_GATE = {
     POSITION_SIZE_MULTIPLIER: 0.50,
     // Minimum ADX required for override (still need some trend strength)
     MIN_ADX: 25,
+    
+    // ===== FIX: PERSISTENCE REQUIREMENT =====
+    // Prevents single impulse candle / news wick from triggering override
+    // Move must have persisted for N bars (on 15m timeframe)
+    REQUIRE_PERSISTENCE: true,
+    MIN_BARS_SINCE_EXTREME: 3,  // At least 3 bars (45min on 15m) since high/low
+    
+    // ===== FIX: HARD ZONE PROTECTION =====
+    // When in HARD_ZONE (>=5% move), require higher ADX to prevent nullifying MOVE_EXHAUSTED
+    HARD_ZONE_MIN_ADX: 35,  // Higher ADX required when move >= 5%
+    HARD_ZONE_THRESHOLD_PERCENT: 5.0,  // Matches MOVE_EXHAUSTION_FILTER_PARAMS.HARD_THRESHOLD_PERCENT
   },
   
   // ===== LOGGING =====
