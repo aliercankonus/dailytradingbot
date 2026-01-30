@@ -264,14 +264,11 @@ serve(async (req) => {
       // Only declare divergence if movements are significant AND directions oppose
       const hasDivergence = significantPriceMove && significantMacdMove && macdTrending !== priceTrending;
 
-      // PHASE 3: Calculate smart momentum for context-aware exits
-      const adxForMomentum = 20; // Will be overridden by trend data
-      const adxRisingForMomentum = false;
-      const momentumResult = calculateMomentumScore(klines, closes, adxForMomentum, adxRisingForMomentum, currentAtr);
-      
       // PHASE 3: Find swing points for structure-based stops
       const swingPointsResult = findSwingPoints(klines, 20);
 
+      // NOTE: Momentum calculation is deferred to position loop where we have actual trend data
+      // Storing closes array for later momentum calculation with real ADX values
       return { 
         symbol, 
         price, 
@@ -288,10 +285,10 @@ serve(async (req) => {
         priceChangePercent, // For debugging divergence magnitude
         macdChangePercent, // For debugging divergence magnitude
         flashCrashCandles: candlesToCheck, // Track how many candles used
-        // PHASE 3: Smart momentum data
-        momentumScore: momentumResult,
+        // PHASE 3: Smart momentum data - deferred until trend data available
         swingPoints: swingPointsResult,
         klines, // Include for dynamic trailing calculations
+        closes, // Include for deferred momentum calculation
       };
     } catch (error) {
       symbolLogger.error(`Error fetching data: ${error}`);
@@ -315,10 +312,10 @@ serve(async (req) => {
         priceChangePercent: d.priceChangePercent,
         macdChangePercent: d.macdChangePercent,
         flashCrashCandles: d.flashCrashCandles,
-        // PHASE 3: Smart momentum data
-        momentumScore: d.momentumScore,
+        // PHASE 3: Smart momentum data - momentum calculated dynamically with real ADX
         swingPoints: d.swingPoints,
         klines: d.klines,
+        closes: d.closes, // For deferred momentum calculation with real ADX
       }]),
     );
     const updates = [];
@@ -1164,7 +1161,19 @@ serve(async (req) => {
       
       // ============= PHASE 3: DYNAMIC R-MULTIPLE TRAILING =============
       // Use ADX-aware activation and momentum-based trailing distance
-      const momentumData = atrData?.momentumScore as MomentumScoreResult | null;
+      // FIXED: Calculate momentum with ACTUAL ADX values from trend data (not hardcoded 20)
+      const trendDataForMomentum = trendDataMap.get(position.symbol);
+      const adxForMomentum = trendDataForMomentum?.volatility?.adx || trendDataForMomentum?.momentum?.adx || 20;
+      const adxSlope = trendDataForMomentum?.volatility?.adxSlope || trendDataForMomentum?.momentum?.adxSlope || 0;
+      const adxRisingForMomentum = adxSlope > 0 || trendDataForMomentum?.momentum?.adxRising === true;
+      const currentAtrForMomentum = atrData?.atr || 0;
+      const closesForMomentum = atrData?.closes || [];
+      const klinesForMomentum = atrData?.klines || [];
+      
+      // Calculate momentum score with real ADX values
+      const momentumData = klinesForMomentum.length > 0 && closesForMomentum.length > 0
+        ? calculateMomentumScore(klinesForMomentum, closesForMomentum, adxForMomentum, adxRisingForMomentum, currentAtrForMomentum)
+        : null;
       const swingData = atrData?.swingPoints as SwingPointResult | null;
       let phase3TrailingApplied = false;
       let dynamicTrailingResult: DynamicTrailingResult | null = null;
