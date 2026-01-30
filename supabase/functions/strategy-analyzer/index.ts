@@ -2579,6 +2579,21 @@ serve(async (req) => {
         const { slope: adxSlope, isRising: adxRising } = extractADXSlope(trendData);
         const momentum = trendData.momentum;
         
+        // ============= ENHANCED TRUE ALIGNMENT FIELDS (v2.0) =============
+        // Extract weighted components for smarter quality scoring and gate decisions
+        const tf4hConfidence = trueAlignment?.tf4hConfidence ?? 0;
+        const tf1hConfidence = trueAlignment?.tf1hConfidence ?? 0;
+        const adxContribution = trueAlignment?.adxContribution ?? 0;
+        const totalWeightedConfidence = trueAlignment?.totalWeightedConfidence ?? 0;
+        const weightedComponents = trueAlignment?.weightedComponents || {};
+        const neutralCapped = trueAlignment?.neutralCapped === true;
+        const alignmentBreakdown = trueAlignment?.breakdown || {};
+        
+        // Log enhanced alignment data for visibility
+        if (Object.keys(weightedComponents).length > 0) {
+          logger.forSymbol(symbol).debug(`📊 TrueAlignment v2.0: score=${trendConsistency}, tf4h=${tf4hConfidence.toFixed(0)}, tf1h=${tf1hConfidence.toFixed(0)}, adxContrib=${adxContribution.toFixed(1)}${neutralCapped ? ' [CAPPED]' : ''}`);
+        }
+        
         // ============= NEUTRAL PERSISTENCE BONUS =============
         // Extract neutral persistence data for confidence bonuses on stealth/grind entries
         const neutralPersistence = trendData.neutralPersistence || {
@@ -9728,6 +9743,27 @@ serve(async (req) => {
         // ============= PHASE 4: Apply Fake Breakout Penalty, Genuine Momentum Bonus, Continuation Bonus, AND Regime Quality Boost =============
         let qualityScore = Math.max(0, Math.min(100, rawQualityScore + fakeBreakoutPenalty + genuineMomentumBonus + momentumContinuationBonus));
         
+        // ============= ENHANCED TRUE ALIGNMENT QUALITY BOOST (v2.0) =============
+        // Use weighted components for smarter quality adjustments
+        let alignmentQualityBoost = 0;
+        const tf4hWeighted = weightedComponents.tf4hWeighted ?? 0;
+        const tf1hWeighted = weightedComponents.tf1hWeighted ?? 0;
+        const adxWeighted = weightedComponents.adxWeighted ?? 0;
+        
+        // Premium alignment: Both timeframes strongly contribute + ADX contributes
+        if (tf4hWeighted >= 30 && tf1hWeighted >= 15 && adxContribution >= 15) {
+          alignmentQualityBoost = 5; // +5 pts for premium aligned entries
+        } else if (tf4hWeighted >= 25 && tf1hWeighted >= 10) {
+          alignmentQualityBoost = 3; // +3 pts for solid alignment
+        } else if (neutralCapped || tf4hConfidence < 40) {
+          alignmentQualityBoost = -3; // -3 pts for weak/uncertain direction
+        }
+        
+        if (alignmentQualityBoost !== 0) {
+          qualityScore = Math.max(0, Math.min(100, qualityScore + alignmentQualityBoost));
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} TrueAlignment v2.0 boost: ${alignmentQualityBoost > 0 ? '+' : ''}${alignmentQualityBoost} pts (tf4h=${tf4hWeighted.toFixed(1)}, tf1h=${tf1hWeighted.toFixed(1)}, adx=${adxContribution.toFixed(1)}${neutralCapped ? ', CAPPED' : ''})`);
+        }
+        
         // Apply regime-aware quality boost for strong trend/parabolic regimes
         let regimeQualityBoostApplied = 0;
         if (isRegimeOverrideActive && regimeQualityBoost > 0) {
@@ -9748,14 +9784,18 @@ serve(async (req) => {
         if (momentumContinuationBonus !== 0) {
           breakdown += ` MCONT:+${momentumContinuationBonus}`;
         }
+        if (alignmentQualityBoost !== 0) {
+          breakdown += ` ALIGN2:${alignmentQualityBoost > 0 ? '+' : ''}${alignmentQualityBoost}`;
+        }
         if (regimeQualityBoostApplied > 0) {
           breakdown += ` REGIME:+${regimeQualityBoostApplied}`;
         }
         
         // Log if adjustments were applied
-        if (fakeBreakoutPenalty !== 0 || genuineMomentumBonus !== 0 || momentumContinuationBonus !== 0 || regimeQualityBoostApplied > 0) {
+        if (fakeBreakoutPenalty !== 0 || genuineMomentumBonus !== 0 || momentumContinuationBonus !== 0 || alignmentQualityBoost !== 0 || regimeQualityBoostApplied > 0) {
+          const alignNote = alignmentQualityBoost !== 0 ? `, ALIGN2:${alignmentQualityBoost > 0 ? '+' : ''}${alignmentQualityBoost}` : '';
           const regimeNote = regimeQualityBoostApplied > 0 ? `, REGIME:+${regimeQualityBoostApplied}` : '';
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Quality adjusted: ${rawQualityScore}→${qualityScore} (FAKE:${fakeBreakoutPenalty}, GMOM:+${genuineMomentumBonus}, MCONT:+${momentumContinuationBonus}${regimeNote})`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.QUALITY} Quality adjusted: ${rawQualityScore}→${qualityScore} (FAKE:${fakeBreakoutPenalty}, GMOM:+${genuineMomentumBonus}, MCONT:+${momentumContinuationBonus}${alignNote}${regimeNote})`);
         }
         
         // ===== SCENARIO 6 FINDING 7: DYNAMIC POSITION SIZE =====
@@ -12154,6 +12194,23 @@ serve(async (req) => {
               allowed: false,
               direction: null,
               isMeanReversionSignal: false,
+            },
+            // NEW: TrueAlignment v2.0 tracking for enhanced downstream decision making
+            trueAlignmentV2: {
+              score: trendConsistency,
+              tf4hConfidence: tf4hConfidence,
+              tf1hConfidence: tf1hConfidence,
+              adxContribution: adxContribution,
+              totalWeightedConfidence: totalWeightedConfidence,
+              neutralCapped: neutralCapped,
+              qualityBoost: alignmentQualityBoost,
+              breakdown: alignmentBreakdown,
+              weightedComponents: {
+                tf4h: weightedComponents.tf4hWeighted ?? 0,
+                tf1h: weightedComponents.tf1hWeighted ?? 0,
+                volume: weightedComponents.volumeWeighted ?? 0,
+                adx: weightedComponents.adxWeighted ?? 0,
+              },
             },
           },
           expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minute TTL for actionable signals
