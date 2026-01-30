@@ -2607,7 +2607,7 @@ const HardGateMomentumScoreDisplay = ({ filtersStatus, trendData }: { filtersSta
   );
 };
 
-// HARD GATE: MACD Misaligned
+// HARD GATE: MACD Misaligned / Order Flow Not Aligned - COMPREHENSIVE DISPLAY
 const HardGateMacdMisalignedDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const macdDirectionAligned = filtersStatus?.macdDirectionAligned ?? false;
   const hasMacdDivergence = filtersStatus?.hasMacdDivergence ?? false;
@@ -2616,7 +2616,32 @@ const HardGateMacdMisalignedDisplay = ({ filtersStatus, trendData }: { filtersSt
   const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend;
   const trendInfo = getTrendDisplayLabel(trendRaw, trendData, trendRaw, trend1h);
   const momentum = filtersStatus?.momentum || trendData?.momentum;
+  const derivedDirection = filtersStatus?.derivedDirection || filtersStatus?.direction;
+  const regime = filtersStatus?.regime || filtersStatus?.adxPhase || trendData?.marketRegime;
   
+  // Order Flow data
+  const orderFlow = filtersStatus?.orderFlow || filtersStatus?.order_flow || trendData?.orderFlow;
+  const orderFlowScore = orderFlow?.score ?? filtersStatus?.orderFlowScore;
+  const orderFlowSignal = orderFlow?.signal ?? filtersStatus?.orderFlowSignal;
+  const orderFlowConfirms = filtersStatus?.orderFlowConfirms ?? (orderFlowSignal === derivedDirection);
+  
+  // Fallback logic data - KEY FIX for user's finding #2
+  const fallbackDirection = filtersStatus?.fallbackDirection;
+  const fallbackAttempted = filtersStatus?.fallbackAttempted;
+  const fallbackReason = filtersStatus?.fallbackReason;
+  const fallbackEvaluated = filtersStatus?.fallbackEvaluated ?? false;
+  
+  // StochRSI data for context
+  const stochK4h = coerceNumeric(filtersStatus?.stochRsiK4h ?? trendData?.stochasticRsi?.['4h']?.k, 50);
+  const stochK1h = coerceNumeric(filtersStatus?.stochRsiK1h ?? trendData?.stochasticRsi?.['1h']?.k, 50);
+  const isOversold = stochK4h <= 20;
+  const isOverbought = stochK4h >= 80;
+  
+  // Momentum direction data
+  const momentumDirection = filtersStatus?.momentumDirection || momentum?.direction;
+  const momentumState = momentum?.state || filtersStatus?.momentumState || 'unknown';
+  
+  // MACD values
   const macdHistogram = momentum?.macdHistogram ?? trendData?.timeframes?.['1h']?.indicators?.macdHistogram;
   const macdDisplay = typeof macdHistogram === 'number' 
     ? macdHistogram.toFixed(4) 
@@ -2624,39 +2649,178 @@ const HardGateMacdMisalignedDisplay = ({ filtersStatus, trendData }: { filtersSt
       ? macdHistogram 
       : "N/A";
   
+  // Blocking reasons reconstruction
+  const blockingReasons: string[] = [];
+  if (!macdDirectionAligned) blockingReasons.push("MACD direction not aligned");
+  if (hasMacdDivergence) blockingReasons.push("MACD divergence detected");
+  if (!orderFlowConfirms && orderFlowScore !== undefined) blockingReasons.push("Order flow not confirming");
+  if (regime === 'PARABOLIC' || regime === 'EXHAUSTION') blockingReasons.push(`Counter-trend in ${regime} regime`);
+  if (momentumDirection && momentumDirection !== derivedDirection) blockingReasons.push(`Momentum ${momentumDirection} vs ${derivedDirection} entry`);
+  if (isOversold && derivedDirection === 'short') blockingReasons.push("HTF StochRSI oversold (bounce risk)");
+  if (isOverbought && derivedDirection === 'long') blockingReasons.push("HTF StochRSI overbought (pullback risk)");
+  
+  // If no specific reasons found, use generic
+  if (blockingReasons.length === 0) {
+    blockingReasons.push("Price/momentum indicators not aligned with entry direction");
+  }
+  
+  // Determine if this is a fallback logic issue
+  const hasFallbackIssue = fallbackDirection && fallbackReason && !fallbackEvaluated;
+  const fallbackRegimeMismatch = fallbackReason === 'regime_ranging' && regime && regime !== 'RANGING' && regime !== 'ranging';
+  
   return (
     <div className="space-y-3 p-3 bg-yellow-500/10 rounded-md border border-yellow-500/30">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <BarChart3 className="h-4 w-4 text-yellow-500" />
-          <span className="text-xs font-semibold text-yellow-400">HARD GATE: MACD Misaligned</span>
+          <span className="text-xs font-semibold text-yellow-400">
+            {orderFlowScore !== undefined ? "Order Flow / MACD Not Aligned" : "HARD GATE: MACD Misaligned"}
+          </span>
         </div>
         <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-yellow-400 border-yellow-500/30">
-          ADX: {adx.toFixed(1)}
+          ADX: {adx.toFixed(1)} | {regime || 'Unknown'} Regime
         </Badge>
       </div>
       
-      <div className="text-[10px] text-muted-foreground">
-        MACD must align with trade direction OR ADX ≥35 to override
+      {/* Blocking Reasons - KEY FIX for user's finding #1 */}
+      <div className="space-y-1.5 p-2 bg-red-500/10 rounded border border-red-500/20">
+        <div className="text-[10px] text-red-400 font-medium flex items-center gap-1">
+          <XCircle className="h-3 w-3" />
+          Blocking Reasons:
+        </div>
+        <div className="space-y-0.5">
+          {blockingReasons.map((reason, idx) => (
+            <div key={idx} className="flex items-center gap-1.5 text-[10px]">
+              <XCircle className="h-2.5 w-2.5 text-red-400 shrink-0" />
+              <span className="text-muted-foreground">{reason}</span>
+            </div>
+          ))}
+        </div>
       </div>
       
-      {/* MACD Checks */}
+      {/* Direction Context */}
+      <div className="grid grid-cols-3 gap-1.5">
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-[9px] text-muted-foreground">Derived</div>
+          <Badge 
+            variant="outline" 
+            className={`text-[10px] px-1.5 py-0 ${
+              derivedDirection === 'long' ? 'text-green-400 border-green-500/30' : 
+              derivedDirection === 'short' ? 'text-red-400 border-red-500/30' : ''
+            }`}
+          >
+            {derivedDirection?.toUpperCase() || 'N/A'}
+          </Badge>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-[9px] text-muted-foreground">Momentum</div>
+          <Badge 
+            variant="outline" 
+            className={`text-[10px] px-1.5 py-0 ${
+              momentumDirection === 'bullish' ? 'text-green-400 border-green-500/30' : 
+              momentumDirection === 'bearish' ? 'text-red-400 border-red-500/30' : ''
+            }`}
+          >
+            {momentumDirection || 'Neutral'}
+          </Badge>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-[9px] text-muted-foreground">Order Flow</div>
+          <Badge 
+            variant="outline" 
+            className={`text-[10px] px-1.5 py-0 ${
+              orderFlowSignal === 'bullish' ? 'text-green-400 border-green-500/30' : 
+              orderFlowSignal === 'bearish' ? 'text-red-400 border-red-500/30' : ''
+            }`}
+          >
+            {orderFlowSignal || orderFlowScore !== undefined ? `${orderFlowScore}/100` : 'N/A'}
+          </Badge>
+        </div>
+      </div>
+      
+      {/* MACD & Momentum Checks */}
       <div className="space-y-1.5">
         <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${macdDirectionAligned ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
           {macdDirectionAligned ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
           <span>MACD Direction: {macdDirectionAligned ? "Aligned" : "Not Aligned"}</span>
+          <span className="ml-auto font-mono text-[9px] text-muted-foreground">{macdDisplay}</span>
         </div>
         <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${!hasMacdDivergence ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
           {!hasMacdDivergence ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
           <span>MACD Divergence: {hasMacdDivergence ? "Detected" : "None"}</span>
         </div>
+        {orderFlowScore !== undefined && (
+          <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${orderFlowConfirms ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+            {orderFlowConfirms ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+            <span>Order Flow Confirms: {orderFlowConfirms ? "Yes" : "No"} ({orderFlowScore}/100)</span>
+          </div>
+        )}
         <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${adx >= 35 ? 'bg-green-500/10' : 'bg-muted/30'}`}>
           {adx >= 35 ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-muted-foreground" />}
           <span>ADX Override (≥35): {adx.toFixed(1)}</span>
         </div>
       </div>
       
-      {/* Context */}
+      {/* StochRSI Context */}
+      <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+        <div className={`p-1.5 rounded border text-center ${isOversold ? 'bg-blue-500/10 border-blue-500/30' : isOverbought ? 'bg-red-500/10 border-red-500/30' : 'bg-muted/30 border-border/50'}`}>
+          <div className="text-muted-foreground">4H StochRSI</div>
+          <div className={`font-mono font-bold ${isOversold ? 'text-blue-400' : isOverbought ? 'text-red-400' : ''}`}>
+            K: {stochK4h.toFixed(1)}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {isOversold ? "Oversold (bounce risk)" : isOverbought ? "Overbought (pullback risk)" : "Normal"}
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded border border-border/50 text-center">
+          <div className="text-muted-foreground">1H StochRSI</div>
+          <div className="font-mono font-bold">K: {stochK1h.toFixed(1)}</div>
+          <div className="text-[9px] text-muted-foreground">Mom: {momentumState}</div>
+        </div>
+      </div>
+      
+      {/* Fallback Logic Analysis - KEY FIX for user's finding #2 */}
+      {(fallbackDirection || fallbackReason) && (
+        <div className={`p-2 rounded border ${fallbackRegimeMismatch ? 'bg-orange-500/10 border-orange-500/30' : 'bg-muted/30 border-border/50'}`}>
+          <div className="text-[10px] font-medium text-muted-foreground mb-1 flex items-center gap-1">
+            <AlertTriangle className={`h-3 w-3 ${fallbackRegimeMismatch ? 'text-orange-400' : 'text-muted-foreground'}`} />
+            Fallback Evaluation:
+          </div>
+          <div className="grid grid-cols-2 gap-1 text-[9px]">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Fallback Dir:</span>
+              <span className={`font-mono ${fallbackDirection === 'long' ? 'text-green-400' : fallbackDirection === 'short' ? 'text-red-400' : ''}`}>
+                {fallbackDirection || 'none'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Attempted:</span>
+              <span className={fallbackAttempted ? 'text-green-400' : 'text-red-400'}>
+                {fallbackAttempted ? 'Yes' : 'No'}
+              </span>
+            </div>
+            <div className="flex justify-between col-span-2">
+              <span className="text-muted-foreground">Reason:</span>
+              <span className={`font-mono ${fallbackRegimeMismatch ? 'text-orange-400' : ''}`}>
+                {fallbackReason || 'N/A'}
+                {fallbackRegimeMismatch && ` (actual: ${regime})`}
+              </span>
+            </div>
+          </div>
+          {fallbackRegimeMismatch && (
+            <div className="text-[9px] text-orange-400 mt-1 pt-1 border-t border-orange-500/20">
+              ⚠️ Fallback reason mismatch: logged "{fallbackReason}" but actual regime is "{regime}"
+            </div>
+          )}
+          {!fallbackAttempted && fallbackDirection && (
+            <div className="text-[9px] text-yellow-400 mt-1 pt-1 border-t border-yellow-500/20">
+              💡 Design note: {derivedDirection?.toUpperCase()} blocked → {fallbackDirection?.toUpperCase()} not evaluated
+            </div>
+          )}
+        </div>
+      )}
+      
+      {/* Trend Context */}
       <div className="grid grid-cols-3 gap-1.5 text-[10px]">
         <TooltipProvider>
           <Tooltip>
@@ -2687,15 +2851,21 @@ const HardGateMacdMisalignedDisplay = ({ filtersStatus, trendData }: { filtersSt
         </div>
         <div className="p-1.5 bg-muted/30 rounded text-center">
           <div className="text-muted-foreground">Momentum</div>
-          <div className="font-medium capitalize">{momentum?.state || "N/A"}</div>
+          <div className={`font-medium capitalize ${
+            momentumState === 'confirmed' ? 'text-green-400' :
+            momentumState === 'building' ? 'text-blue-400' :
+            momentumState === 'exhausted' ? 'text-red-400' : ''
+          }`}>{momentumState}</div>
         </div>
       </div>
       
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
-        <span className="text-yellow-400">⚠️ Why blocked:</span> MACD histogram must confirm trade direction. 
+        <span className="text-yellow-400">⚠️ Why blocked:</span> {blockingReasons[0]}.{' '}
         {hasMacdDivergence 
-          ? " Divergence detected between price and MACD, indicating weakening momentum."
-          : " MACD direction does not match intended trade. Wait for MACD to align or for ADX to exceed 35 for override."
+          ? "Divergence detected between price and MACD, indicating weakening momentum."
+          : adx < 35 
+            ? "Wait for MACD to align with entry direction or for ADX to exceed 35 for override."
+            : "Multiple alignment issues detected. Review the checks above."
         }
       </div>
     </div>
@@ -4810,8 +4980,12 @@ export const SignalRejectionReasons = () => {
       return <HardGateMomentumScoreDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
-    // HARD GATE: MACD Misaligned
-    if (fs?.gate === "MACD_MISALIGNED" || reason.includes("MACD") && (reason.includes("misaligned") || reason.includes("not aligned"))) {
+    // HARD GATE: MACD Misaligned / Order Flow Not Aligned
+    if (fs?.gate === "MACD_MISALIGNED" || fs?.gate === "ORDER_FLOW_NOT_ALIGNED" || 
+        fs?.gate === "ORDER_FLOW_MACD_NOT_ALIGNED" || fs?.gate === "PRICE_NOT_ALIGNED" ||
+        (reason.includes("MACD") && (reason.includes("misaligned") || reason.includes("not aligned"))) ||
+        reason.includes("Order flow") || reason.includes("ORDER_FLOW") ||
+        reason.includes("Price not aligned") || reason.includes("price not aligned")) {
       return <HardGateMacdMisalignedDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
