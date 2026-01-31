@@ -2547,6 +2547,9 @@ export interface DirectionResult {
   is4hWeak?: boolean;                  // 4H confidence was below threshold
   trend30mAligned?: boolean;           // 30m trend aligned with order flow direction
   alignmentStatus?: "blocked" | "neutral" | "full";  // 30m alignment status for analytics
+  // ===== PHASE 3 ADDITIONS: MOMENTUM WEIGHT =====
+  momentumImpact?: 'aligned' | 'weak_opposing' | 'strong_opposing' | 'neutral';  // How momentum affected derivation
+  momentumScore?: number;              // Raw momentum score at derivation time
   // ===== DIRECTION CONTEXT (Orchestration) =====
   directionContext?: DirectionContext; // Centralized direction rationale for traceability
 }
@@ -2661,8 +2664,69 @@ export const deriveTradeDirection = (
       reasons.push(`WEIGHT REALLOCATION: 4H neutral (${conf4h.toFixed(0)}% < ${P.NEUTRAL_THRESHOLD}%) → 1H=${(w1h * 100).toFixed(0)}%, 30M=${(w30m * 100).toFixed(0)}%`);
     }
     
-    // Calculate weighted sum with potentially reallocated weights
-    const weightedSum = (val4h * w4h) + (val1h * w1h) + (val30m * w30m);
+    // Calculate base weighted sum with potentially reallocated weights
+    const baseWeightedSum = (val4h * w4h) + (val1h * w1h) + (val30m * w30m);
+    
+    // ===== PHASE 3: MOMENTUM WEIGHT IN DIRECTION DERIVATION =====
+    // Factor momentum score into direction confidence - opposing momentum reduces certainty
+    // This prevents deriving LONG when momentum is strongly bearish (-22)
+    const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+    let momentumAdjustment = 0;
+    let momentumImpact: 'aligned' | 'weak_opposing' | 'strong_opposing' | 'neutral' = 'neutral';
+    let momentumConfidenceReduction = 0;
+    let momentumPositionMultiplier = 1.0;
+    
+    if (P.MOMENTUM_WEIGHT_ENABLED) {
+      // Determine if momentum opposes or aligns with the tentative direction
+      const tentativeDirection = baseWeightedSum > 0 ? 'long' : 'short';
+      
+      if (tentativeDirection === 'long') {
+        // For LONG: positive momentum = aligned, negative = opposing
+        if (momentumScore >= Math.abs(P.MOMENTUM_STRONG_OPPOSING_THRESHOLD)) {
+          // Strongly aligned momentum - bonus
+          momentumAdjustment = P.MOMENTUM_ALIGNMENT_BONUS;
+          momentumImpact = 'aligned';
+        } else if (momentumScore <= P.MOMENTUM_STRONG_OPPOSING_THRESHOLD) {
+          // Strongly opposing momentum (e.g., -22 < -15)
+          momentumAdjustment = -P.MOMENTUM_STRONG_OPPOSING_PENALTY;
+          momentumImpact = 'strong_opposing';
+          momentumConfidenceReduction = P.MOMENTUM_CONFIDENCE_REDUCTION_STRONG;
+          momentumPositionMultiplier = P.MOMENTUM_POSITION_REDUCTION_STRONG;
+        } else if (momentumScore <= P.MOMENTUM_WEAK_OPPOSING_THRESHOLD) {
+          // Weakly opposing momentum (e.g., -8 < -5)
+          momentumAdjustment = -P.MOMENTUM_WEAK_OPPOSING_PENALTY;
+          momentumImpact = 'weak_opposing';
+          momentumConfidenceReduction = P.MOMENTUM_CONFIDENCE_REDUCTION_WEAK;
+          momentumPositionMultiplier = P.MOMENTUM_POSITION_REDUCTION_WEAK;
+        }
+      } else {
+        // For SHORT: negative momentum = aligned, positive = opposing
+        if (momentumScore <= -Math.abs(P.MOMENTUM_STRONG_OPPOSING_THRESHOLD)) {
+          // Strongly aligned momentum (bearish) - bonus
+          momentumAdjustment = P.MOMENTUM_ALIGNMENT_BONUS;
+          momentumImpact = 'aligned';
+        } else if (momentumScore >= -P.MOMENTUM_STRONG_OPPOSING_THRESHOLD) {
+          // Strongly opposing momentum for SHORT (positive momentum)
+          momentumAdjustment = -P.MOMENTUM_STRONG_OPPOSING_PENALTY;
+          momentumImpact = 'strong_opposing';
+          momentumConfidenceReduction = P.MOMENTUM_CONFIDENCE_REDUCTION_STRONG;
+          momentumPositionMultiplier = P.MOMENTUM_POSITION_REDUCTION_STRONG;
+        } else if (momentumScore >= -P.MOMENTUM_WEAK_OPPOSING_THRESHOLD) {
+          // Weakly opposing momentum for SHORT
+          momentumAdjustment = -P.MOMENTUM_WEAK_OPPOSING_PENALTY;
+          momentumImpact = 'weak_opposing';
+          momentumConfidenceReduction = P.MOMENTUM_CONFIDENCE_REDUCTION_WEAK;
+          momentumPositionMultiplier = P.MOMENTUM_POSITION_REDUCTION_WEAK;
+        }
+      }
+      
+      if (momentumAdjustment !== 0) {
+        reasons.push(`MOMENTUM WEIGHT: score=${momentumScore.toFixed(0)} → ${momentumImpact} (adj=${momentumAdjustment >= 0 ? '+' : ''}${(momentumAdjustment * 100).toFixed(0)}%)`);
+      }
+    }
+    
+    // Apply momentum adjustment to weighted sum
+    const weightedSum = baseWeightedSum + momentumAdjustment;
     
     // Check for direction persistence bonus
     let persistenceBonus = 0;
@@ -2703,11 +2767,23 @@ export const deriveTradeDirection = (
         confSource = "weighted-sum";
       }
       
-      reasons.push(`WEIGHTED DIRECTION: Sum=${weightedSum.toFixed(2)} (threshold=${effectiveThreshold.toFixed(2)})`);
+      // ===== PHASE 3: Apply momentum confidence reduction =====
+      if (momentumConfidenceReduction > 0) {
+        derivedConf = Math.max(40, derivedConf - momentumConfidenceReduction);
+        reasons.push(`MOMENTUM CONFIDENCE PENALTY: -${momentumConfidenceReduction}% (${momentumImpact})`);
+      }
+      
+      reasons.push(`WEIGHTED DIRECTION: Sum=${weightedSum.toFixed(2)} (base=${baseWeightedSum.toFixed(2)}, momAdj=${momentumAdjustment >= 0 ? '+' : ''}${momentumAdjustment.toFixed(2)}, threshold=${effectiveThreshold.toFixed(2)})`);
       reasons.push(`TF values: 4h=${val4h.toFixed(2)}*${w4h.toFixed(2)}, 1h=${val1h.toFixed(2)}*${w1h.toFixed(2)}, 30m=${val30m.toFixed(2)}*${w30m.toFixed(2)}`);
       reasons.push(`Confidence source: ${confSource}`);
       
-      const posMult = weightReallocated ? 0.70 : 0.75;
+      // Apply momentum position multiplier on top of other reductions
+      let posMult = weightReallocated ? 0.70 : 0.75;
+      if (momentumPositionMultiplier < 1.0) {
+        posMult = Math.min(posMult, momentumPositionMultiplier);
+        reasons.push(`MOMENTUM POSITION REDUCTION: ${(momentumPositionMultiplier * 100).toFixed(0)}%`);
+      }
+      
       return { 
         direction, 
         confidence: derivedConf, 
@@ -2718,15 +2794,17 @@ export const deriveTradeDirection = (
         positionSizeMultiplier: posMult,
         is4hWeak,
         regime,
+        momentumImpact,
+        momentumScore,
         directionContext: createDirectionContext(direction, {
           evidenceType: 'WEIGHTED_SUM',
           tier: 0,
           tierSource: 'TIER_0_WEIGHTED_HTF_CONSENSUS',
           confidence: derivedConf,
           positionMultiplier: posMult,
-          isCounterTrend: false,
-          riskClass: 'LOW',
-          evidenceStrength: persistenceBonus > 0 ? 'VERY_STRONG' : 'STRONG',
+          isCounterTrend: momentumImpact === 'strong_opposing' || momentumImpact === 'weak_opposing',
+          riskClass: momentumImpact === 'strong_opposing' ? 'HIGH' : (momentumImpact === 'weak_opposing' ? 'MEDIUM' : 'LOW'),
+          evidenceStrength: momentumImpact === 'aligned' ? 'VERY_STRONG' : (momentumImpact === 'neutral' ? 'STRONG' : 'WEAK'),
         }),
       };
     }
