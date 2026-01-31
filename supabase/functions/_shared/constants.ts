@@ -3027,6 +3027,21 @@ export const DIRECTION_DERIVATION_PARAMS = {
   // When 4H is weak, use max(1h, 30m) instead of blending weak confidence
   WEAK_4H_CONFIDENCE_THRESHOLD: 50, // 4H confidence below this = "weak"
   USE_MAX_LOWER_TF_CONFIDENCE: true, // Use max(1h, 30m) when 4H weak
+  
+  // ===== PHASE 3: MOMENTUM WEIGHT IN DIRECTION DERIVATION =====
+  // Factor momentum score into weighted sum - strongly opposing momentum reduces confidence
+  // This prevents deriving LONG when momentum is -22 (strongly bearish)
+  MOMENTUM_WEIGHT_ENABLED: true,
+  MOMENTUM_WEIGHT_FACTOR: 0.15,       // 15% weight allocated to momentum alignment
+  MOMENTUM_STRONG_OPPOSING_THRESHOLD: -15, // For LONG: momentum below this = strongly opposing
+  MOMENTUM_WEAK_OPPOSING_THRESHOLD: -5,    // For LONG: momentum below this = weakly opposing
+  MOMENTUM_ALIGNMENT_BONUS: 0.10,     // Bonus to weighted sum when momentum aligns
+  MOMENTUM_WEAK_OPPOSING_PENALTY: 0.08, // Penalty when momentum weakly opposes
+  MOMENTUM_STRONG_OPPOSING_PENALTY: 0.15, // Penalty when momentum strongly opposes
+  MOMENTUM_CONFIDENCE_REDUCTION_STRONG: 15, // Reduce confidence by 15% when strongly opposing
+  MOMENTUM_CONFIDENCE_REDUCTION_WEAK: 8,   // Reduce confidence by 8% when weakly opposing
+  MOMENTUM_POSITION_REDUCTION_STRONG: 0.70, // 70% position when momentum strongly opposes
+  MOMENTUM_POSITION_REDUCTION_WEAK: 0.85,   // 85% position when momentum weakly opposes
 } as const;
 
 // ============= EXHAUSTION ESCAPE PARAMS =============

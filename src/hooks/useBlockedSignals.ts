@@ -53,6 +53,10 @@ export interface BlockedSignal {
     // NEW: Zone analytics for MOVE_EXHAUSTION gate
     moveZone?: MoveZone;
     moveZoneDetails?: MoveZoneDetails;
+    // NEW: Momentum weight in direction derivation
+    momentumImpact?: 'aligned' | 'weak_opposing' | 'strong_opposing' | 'neutral';
+    momentumScore?: number;
+    momentumConfidenceReduction?: number;
   } | null;
   trend_data: {
     direction?: string;
