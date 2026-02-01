@@ -1428,6 +1428,13 @@ export const PULLBACK_DETECTION_PARAMS = {
   KD_TURN_TOLERANCE: 0.9,
   // Position size multiplier for pullback entries (default 50%)
   DEFAULT_POSITION_SIZE_PERCENT: 50,
+  // ===== ADX SLOPE GATE (NEW) =====
+  // Minimum ADX slope for momentum continuation entries
+  // Negative slope indicates trend weakening/exhaustion - high risk for continuation
+  // Block continuation entries when slope is strongly negative (< -0.5)
+  MIN_ADX_SLOPE: -0.5,
+  // Stricter threshold for short continuation (more sensitive to bounce risk)
+  MIN_ADX_SLOPE_SHORT: -0.3,
 } as const;
 
 // ============= PHASE 2: SMARTER ENTRY TIMING PARAMETERS =============

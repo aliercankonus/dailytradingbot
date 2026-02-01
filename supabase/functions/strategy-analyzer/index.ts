@@ -8278,6 +8278,15 @@ serve(async (req) => {
           const kTurningUp = stochRsiK1h >= stochRsiD1h * PULLBACK_DETECTION_PARAMS.KD_TURN_TOLERANCE;
           const kTurningDown = stochRsiK1h <= stochRsiD1h * (2 - PULLBACK_DETECTION_PARAMS.KD_TURN_TOLERANCE);
           
+          // ===== ADX SLOPE GATE (NEW) =====
+          // Block momentum continuation when ADX slope is strongly negative (trend exhausting)
+          // Use stricter threshold for SHORTs as they're more vulnerable to bounce risk
+          const adxSlopeThreshold = derivedDirection === "short" 
+            ? PULLBACK_DETECTION_PARAMS.MIN_ADX_SLOPE_SHORT  // -0.3 for shorts (stricter)
+            : PULLBACK_DETECTION_PARAMS.MIN_ADX_SLOPE;       // -0.5 for longs
+          
+          const adxSlopeOk = adxSlope >= adxSlopeThreshold;
+          
           isPullbackValid = (
             // StochRSI starting to turn in trade direction
             (derivedDirection === "long" && kTurningUp) ||
@@ -8285,12 +8294,17 @@ serve(async (req) => {
           ) && (
             // ADX still strong enough (trend intact, just pulled back)
             adx >= PULLBACK_DETECTION_PARAMS.MIN_ADX
+          ) && (
+            // ADX slope not strongly negative (trend not exhausting)
+            adxSlopeOk
           );
           
           if (isPullbackValid) {
             // Apply pullback position size reduction (50% default)
             pullbackPositionMultiplier = (riskParams.pullback_position_size_percent ?? PULLBACK_DETECTION_PARAMS.DEFAULT_POSITION_SIZE_PERCENT) / 100;
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} PULLBACK SETUP DETECTED & VALID: 4h ${stochFilterTrend4h} (${stochFilterConf4h}%), 1h K=${stochRsiK1h.toFixed(1)} D=${stochRsiD1h.toFixed(1)}, ADX=${adx.toFixed(1)} - using reduced momentum threshold (${MOMENTUM_THRESHOLDS.PULLBACK_MIN_SCORE})`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} PULLBACK SETUP DETECTED & VALID: 4h ${stochFilterTrend4h} (${stochFilterConf4h}%), 1h K=${stochRsiK1h.toFixed(1)} D=${stochRsiD1h.toFixed(1)}, ADX=${adx.toFixed(1)}, ADX_slope=${adxSlope.toFixed(2)} - using reduced momentum threshold (${MOMENTUM_THRESHOLDS.PULLBACK_MIN_SCORE})`);
+          } else if (!adxSlopeOk) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} PULLBACK BLOCKED: ADX slope ${adxSlope.toFixed(2)} < ${adxSlopeThreshold} (trend exhausting) - direction: ${derivedDirection.toUpperCase()}`);
           } else {
             logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.MOMENTUM} Pullback detected but not valid: K_turn=${derivedDirection === "long" ? kTurningUp : kTurningDown}, ADX=${adx.toFixed(1)} >= ${PULLBACK_DETECTION_PARAMS.MIN_ADX}`);
           }
