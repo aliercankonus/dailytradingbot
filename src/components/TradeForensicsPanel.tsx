@@ -92,7 +92,7 @@ export const TradeForensicsPanel = ({ position }: TradeForensicsPanelProps) => {
     }
     
     // Check weak ADX
-    if (snapshot?.adx && snapshot.adx < 20) {
+    if (typeof snapshot?.adx === 'number' && snapshot.adx < 20) {
       reasons.push(`Weak ADX at entry: ${snapshot.adx.toFixed(1)} (< 20)`);
     }
     
@@ -163,8 +163,8 @@ export const TradeForensicsPanel = ({ position }: TradeForensicsPanelProps) => {
               </div>
               <div>
                 <div className="text-muted-foreground">ADX</div>
-                <div className={`font-medium ${summary.adx >= 25 ? 'text-green-500' : summary.adx >= 20 ? 'text-yellow-500' : 'text-red-500'}`}>
-                  {summary.adx.toFixed(1)}
+                <div className={`font-medium ${typeof summary.adx === 'number' && summary.adx >= 25 ? 'text-green-500' : typeof summary.adx === 'number' && summary.adx >= 20 ? 'text-yellow-500' : 'text-red-500'}`}>
+                  {typeof summary.adx === 'number' ? summary.adx.toFixed(1) : 'N/A'}
                 </div>
               </div>
               <div>
