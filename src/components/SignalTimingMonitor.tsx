@@ -61,7 +61,7 @@ export const SignalTimingMonitor = () => {
       }
     }
     // Fallback to direct adx field if exists
-    if (indicators?.adx !== undefined) {
+    if (typeof indicators?.adx === 'number') {
       return indicators.adx.toFixed(1);
     }
     return 'N/A';
@@ -291,10 +291,10 @@ export const SignalTimingMonitor = () => {
                             <div className="space-y-1">
                               <div className="flex justify-between text-xs">
                                 <span className="text-muted-foreground">ADX Contrib</span>
-                                <span className="font-medium">{alignment.adx.toFixed(1)}</span>
+                                <span className="font-medium">{typeof alignment.adx === 'number' ? alignment.adx.toFixed(1) : 'N/A'}</span>
                               </div>
                               <Progress 
-                                value={Math.min(100, (alignment.adx / 15) * 100)} 
+                                value={Math.min(100, ((typeof alignment.adx === 'number' ? alignment.adx : 0) / 15) * 100)} 
                                 className="h-1.5"
                               />
                               <div className="text-[10px] text-muted-foreground">

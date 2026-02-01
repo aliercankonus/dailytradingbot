@@ -166,7 +166,7 @@ export const TrendAccelerationIndicator = () => {
                   </div>
 
                   {/* ADX Value */}
-                  {indicators?.adx && (
+                  {typeof indicators?.adx === 'number' && (
                     <div className="flex items-center gap-1">
                       <span className="text-muted-foreground">ADX:</span>
                       <span className="font-medium">{indicators.adx.toFixed(1)}</span>

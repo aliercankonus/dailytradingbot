@@ -303,7 +303,7 @@ export const MarketConditionsDashboard = () => {
                             {sym.trendDirection}
                           </Badge>
                         )}
-                        {sym.adx !== null && (
+                        {typeof sym.adx === 'number' && (
                           <Badge variant="outline" className="text-xs">
                             ADX: {sym.adx.toFixed(1)}
                           </Badge>
