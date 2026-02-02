@@ -27,7 +27,18 @@ interface EntrySnapshot {
   tf_4h_trend?: string;
   tf_1h_trend?: string;
   tf_30m_trend?: string;
+  tf_15m_trend?: string;
   snapshot_created_at?: string;
+  // MOMENTUM FORENSICS: New fields for complete traceability
+  smart_momentum_score?: number;
+  smart_momentum_direction?: string;
+  smart_momentum_accelerating?: boolean;
+  smart_momentum_weakening?: boolean;
+  smart_momentum_exhausted?: boolean;
+  momentum_macd_slope?: number;
+  momentum_overextension_atr?: number;
+  momentum_state?: string;
+  momentum_confirms?: boolean;
 }
 
 interface Position {
@@ -108,6 +119,26 @@ export const TradeForensicsPanel = ({ position }: TradeForensicsPanelProps) => {
       } else if (position.side === 'SELL' && snapshot.stoch_rsi_4h_k < 20) {
         reasons.push(`Oversold at entry: StochRSI K=${snapshot.stoch_rsi_4h_k.toFixed(0)}`);
       }
+    }
+    
+    // NEW: Check momentum opposition at entry
+    if (snapshot?.smart_momentum_score !== undefined && snapshot?.smart_momentum_score !== null) {
+      const momentumScore = snapshot.smart_momentum_score;
+      if (position.side === 'BUY' && momentumScore < -15) {
+        reasons.push(`Opposing momentum at entry: Score=${momentumScore.toFixed(0)} (bearish)`);
+      } else if (position.side === 'SELL' && momentumScore > 15) {
+        reasons.push(`Opposing momentum at entry: Score=${momentumScore.toFixed(0)} (bullish)`);
+      }
+    }
+    
+    // NEW: Check momentum exhaustion at entry
+    if (snapshot?.smart_momentum_exhausted) {
+      reasons.push('Momentum was exhausted at entry');
+    }
+    
+    // NEW: Check momentum weakening at entry
+    if (snapshot?.smart_momentum_weakening) {
+      reasons.push('Momentum was weakening at entry');
     }
     
     return reasons.length > 0 ? reasons : ['Market moved against position'];
@@ -251,8 +282,82 @@ export const TradeForensicsPanel = ({ position }: TradeForensicsPanelProps) => {
                     </div>
                   )}
 
+                  {/* Smart Momentum Score */}
+                  {snapshot.smart_momentum_score != null && (
+                    <div className="flex items-center gap-2">
+                      {snapshot.smart_momentum_score > 0 ? (
+                        <TrendingUp className="h-3 w-3 text-green-500" />
+                      ) : snapshot.smart_momentum_score < 0 ? (
+                        <TrendingDown className="h-3 w-3 text-red-500" />
+                      ) : (
+                        <Activity className="h-3 w-3 text-muted-foreground" />
+                      )}
+                      <span className="text-muted-foreground">Momentum:</span>
+                      <span className={`font-medium ${
+                        snapshot.smart_momentum_score > 15 ? 'text-green-500' : 
+                        snapshot.smart_momentum_score < -15 ? 'text-red-500' : 'text-muted-foreground'
+                      }`}>
+                        {snapshot.smart_momentum_score > 0 ? '+' : ''}{snapshot.smart_momentum_score.toFixed(0)}
+                      </span>
+                      <Badge variant="outline" className={`text-xs ${
+                        snapshot.smart_momentum_direction === 'bullish' ? 'text-green-500' :
+                        snapshot.smart_momentum_direction === 'bearish' ? 'text-red-500' : 'text-muted-foreground'
+                      }`}>
+                        {snapshot.smart_momentum_direction || 'neutral'}
+                      </Badge>
+                      {snapshot.smart_momentum_accelerating && (
+                        <Badge variant="outline" className="text-xs bg-green-500/10 text-green-500">
+                          Accelerating
+                        </Badge>
+                      )}
+                      {snapshot.smart_momentum_weakening && (
+                        <Badge variant="outline" className="text-xs bg-yellow-500/10 text-yellow-500">
+                          Weakening
+                        </Badge>
+                      )}
+                      {snapshot.smart_momentum_exhausted && (
+                        <Badge variant="outline" className="text-xs bg-red-500/10 text-red-500">
+                          Exhausted
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+
+                  {/* MACD Slope at Entry */}
+                  {snapshot.momentum_macd_slope != null && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">MACD Slope:</span>
+                      <span className={`font-medium ${
+                        snapshot.momentum_macd_slope > 0 ? 'text-green-500' : 
+                        snapshot.momentum_macd_slope < 0 ? 'text-red-500' : 'text-muted-foreground'
+                      }`}>
+                        {snapshot.momentum_macd_slope > 0 ? '+' : ''}{snapshot.momentum_macd_slope.toFixed(4)}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Momentum State at Entry */}
+                  {snapshot.momentum_state && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Momentum State:</span>
+                      <Badge variant="outline" className={`text-xs ${
+                        snapshot.momentum_state === 'confirmed' ? 'bg-green-500/10 text-green-500' :
+                        snapshot.momentum_state === 'building' ? 'bg-blue-500/10 text-blue-500' :
+                        snapshot.momentum_state === 'exhausted' ? 'bg-red-500/10 text-red-500' :
+                        snapshot.momentum_state === 'mixed' ? 'bg-yellow-500/10 text-yellow-500' : ''
+                      }`}>
+                        {snapshot.momentum_state}
+                      </Badge>
+                      {snapshot.momentum_confirms !== undefined && (
+                        <span className={`text-xs ${snapshot.momentum_confirms ? 'text-green-500' : 'text-red-500'}`}>
+                          {snapshot.momentum_confirms ? '✓ Confirms' : '✗ No Confirm'}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   {/* Timeframe Alignment */}
-                  {(snapshot.tf_4h_trend || snapshot.tf_1h_trend || snapshot.tf_30m_trend) && (
+                  {(snapshot.tf_4h_trend || snapshot.tf_1h_trend || snapshot.tf_30m_trend || snapshot.tf_15m_trend) && (
                     <div className="flex items-center gap-2 flex-wrap">
                       <Clock className="h-3 w-3 text-muted-foreground" />
                       <span className="text-muted-foreground">TF Alignment:</span>
@@ -264,6 +369,9 @@ export const TradeForensicsPanel = ({ position }: TradeForensicsPanelProps) => {
                       )}
                       {snapshot.tf_30m_trend && (
                         <Badge variant="outline" className="text-xs">30m: {snapshot.tf_30m_trend}</Badge>
+                      )}
+                      {snapshot.tf_15m_trend && (
+                        <Badge variant="outline" className="text-xs">15m: {snapshot.tf_15m_trend}</Badge>
                       )}
                     </div>
                   )}

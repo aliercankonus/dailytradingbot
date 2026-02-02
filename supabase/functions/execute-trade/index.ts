@@ -2033,6 +2033,17 @@ serve(async (req) => {
       tf_4h_trend: trendData?.timeframes?.['4h']?.trend ?? null,
       tf_1h_trend: trendData?.timeframes?.['1h']?.trend ?? null,
       tf_30m_trend: trendData?.timeframes?.['30m']?.trend ?? null,
+      tf_15m_trend: trendData?.timeframes?.['15m']?.trend ?? null,
+      // MOMENTUM FORENSICS: Complete momentum state for post-trade analysis
+      smart_momentum_score: signal.indicators?.smartMomentum?.score ?? null,
+      smart_momentum_direction: signal.indicators?.smartMomentum?.direction ?? null,
+      smart_momentum_accelerating: signal.indicators?.smartMomentum?.isAccelerating ?? null,
+      smart_momentum_weakening: signal.indicators?.smartMomentum?.isWeakening ?? null,
+      smart_momentum_exhausted: signal.indicators?.smartMomentum?.isExhausted ?? null,
+      momentum_macd_slope: signal.indicators?.smartMomentum?.components?.macdSlope ?? trendData?.momentum?.macdSlope ?? null,
+      momentum_overextension_atr: signal.indicators?.smartMomentum?.overextensionATR ?? null,
+      momentum_state: signal.indicators?.momentumState ?? trendData?.momentum?.state ?? null,
+      momentum_confirms: signal.indicators?.momentumConfirms ?? trendData?.momentum?.confirms ?? null,
       // Timestamp
       snapshot_created_at: new Date().toISOString(),
     };
