@@ -3404,11 +3404,40 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
   const isHardBlock = priceDistancePercent >= 10;
   const isSoftBlock = priceDistancePercent >= 5 && priceDistancePercent < 10;
   
+  // TERMINOLOGY FIX: Differentiate between hard block and soft reduction
   const getExhaustionLevel = () => {
-    if (priceDistancePercent >= 10) return { label: "HARD BLOCK (>10%)", color: "text-red-400", bg: "bg-red-500/20", border: "border-red-500/30" };
-    if (priceDistancePercent >= 7) return { label: "High Exhaustion (7-10%)", color: "text-orange-400", bg: "bg-orange-500/20", border: "border-orange-500/30" };
-    if (priceDistancePercent >= 5) return { label: "Soft Block (5-7%)", color: "text-yellow-400", bg: "bg-yellow-500/20", border: "border-yellow-500/30" };
-    return { label: "Normal", color: "text-muted-foreground", bg: "bg-muted/30", border: "border-muted/50" };
+    if (priceDistancePercent >= 10) return { 
+      label: "HARD BLOCK (≥10%)", 
+      color: "text-red-400", 
+      bg: "bg-red-500/20", 
+      border: "border-red-500/30",
+      outcome: "BLOCKED",
+      outcomeLabel: "Entry Rejected"
+    };
+    if (priceDistancePercent >= 7) return { 
+      label: "High Exhaustion (7-10%)", 
+      color: "text-orange-400", 
+      bg: "bg-orange-500/20", 
+      border: "border-orange-500/30",
+      outcome: "SIZE_REDUCED",
+      outcomeLabel: "0.35x Size"
+    };
+    if (priceDistancePercent >= 5) return { 
+      label: "Soft Exhaustion (5-7%)", 
+      color: "text-yellow-400", 
+      bg: "bg-yellow-500/20", 
+      border: "border-yellow-500/30",
+      outcome: "SIZE_REDUCED",
+      outcomeLabel: "0.35x Size"
+    };
+    return { 
+      label: "Fresh Zone", 
+      color: "text-green-400", 
+      bg: "bg-green-500/10", 
+      border: "border-green-500/30",
+      outcome: "ALLOWED",
+      outcomeLabel: "Full Size"
+    };
   };
   
   const exhaustionLevel = getExhaustionLevel();
@@ -3421,17 +3450,35 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
         <div className="flex items-center gap-1.5">
           <TrendingDown className={`h-4 w-4 ${exhaustionLevel.color}`} />
           <span className={`text-xs font-semibold ${exhaustionLevel.color}`}>
-            MOVE EXHAUSTED: {direction.toUpperCase()}
+            MOVE EXHAUSTION: {direction.toUpperCase()}
           </span>
         </div>
-        <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${exhaustionLevel.color}`}>
-          {exhaustionLevel.label}
-        </Badge>
+        <div className="flex items-center gap-1.5">
+          {/* Outcome Badge - clearly shows if blocked vs size reduced */}
+          <Badge 
+            variant="outline" 
+            className={`text-[9px] px-1.5 py-0 ${
+              isHardBlock ? 'bg-red-500/20 text-red-400 border-red-500/40' : 
+              isSoftBlock ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40' :
+              'bg-green-500/20 text-green-400 border-green-500/40'
+            }`}
+          >
+            {isHardBlock ? '🚫 BLOCKED' : isSoftBlock ? '📉 SIZE REDUCED' : '✓ ALLOWED'}
+          </Badge>
+          <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${exhaustionLevel.color}`}>
+            {exhaustionLevel.label}
+          </Badge>
+        </div>
       </div>
       
       <div className="text-[10px] text-muted-foreground">
         Price has moved {priceDistancePercent.toFixed(1)}% from {swingLabel}. 
-        {isHardBlock ? " Entry is blocked due to extreme exhaustion." : " Entry size reduced due to late-cycle risk."}
+        {isHardBlock 
+          ? " Entry is rejected due to extreme move exhaustion." 
+          : isSoftBlock 
+            ? " Entry allowed at reduced size (0.35x) due to late-cycle risk."
+            : " Move within acceptable range for full position."
+        }
       </div>
       
       {/* Exhaustion Progress */}
@@ -3454,10 +3501,9 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
           <div className="absolute top-0 h-full w-0.5 bg-red-400/60" style={{ left: '80%' }} title="10% Hard" />
         </div>
         <div className="flex justify-between text-[8px] text-muted-foreground">
-          <span>0%</span>
-          <span className="text-yellow-400">5% (0.35x)</span>
-          <span className="text-red-400">10% (Block)</span>
-          <span>12.5%+</span>
+          <span className="text-green-400">0-5% (1.0x)</span>
+          <span className="text-yellow-400">5-10% (0.35x)</span>
+          <span className="text-red-400">≥10% (Block)</span>
         </div>
       </div>
       
@@ -3487,12 +3533,18 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
         </div>
       </div>
       
+      {/* TERMINOLOGY FIX: Dynamic label based on outcome */}
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
-        <span className={exhaustionLevel.color}>⚠️ Why blocked:</span> Price has already moved {priceDistancePercent.toFixed(1)}% 
-        from {swingLabel}{swingPrice > 0 ? ` ($${swingPrice.toFixed(2)})` : ''}. 
+        <span className={exhaustionLevel.color}>
+          {isHardBlock ? '🚫 Why rejected:' : isSoftBlock ? '📉 Why size reduced:' : 'ℹ️ Assessment:'}
+        </span>{' '}
+        Price has already moved {priceDistancePercent.toFixed(1)}% from {swingLabel}
+        {swingPrice > 0 ? ` ($${swingPrice.toFixed(2)})` : ''}.
         {isHardBlock 
-          ? ` Moves >10% indicate extreme exhaustion. Entry blocked to avoid late chase.`
-          : ` Moves >5% combined with overextended StochRSI suggest reduced position sizing (0.35x).`
+          ? ` Moves ≥10% indicate extreme exhaustion with minimal remaining runway. Entry rejected to prevent late chase.`
+          : isSoftBlock
+            ? ` Moves 5-10% indicate late-cycle risk. Entry allowed at 0.35x position size to limit exposure while capturing potential continuation.`
+            : ` Move is within fresh zone. Full position size permitted.`
         }
       </div>
       
