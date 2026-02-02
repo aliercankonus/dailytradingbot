@@ -4851,6 +4851,70 @@ export const MOMENTUM_FALLBACK_DIRECTION_PARAMS = {
   MAX_CONFIDENCE: 65,
 } as const;
 
+// ============= MOMENTUM SLOPE GATE (PRIORITY 1 - NO ADX OVERRIDE) =============
+// CRITICAL ARCHITECTURE FIX: Prevents entries when momentum is ACCELERATING in opposing direction
+// This gate addresses the fundamental bug where ADX strength was used to override directional momentum
+// ADX answers "Is there trend strength?" - NOT "Should we enter?"
+// High ADX + accelerating opposing momentum = STRONGER block, not weaker
+export const MOMENTUM_SLOPE_GATE = {
+  ENABLED: true,
+  
+  // ===== BLOCK THRESHOLDS =====
+  // Block counter-momentum entries when momentum is ACCELERATING
+  // Momentum slope > 0 = bullish acceleration, < 0 = bearish acceleration
+  
+  // For SHORT: block if momentum slope > this (bullish acceleration)
+  BLOCK_SHORT_IF_SLOPE_ABOVE: 0,
+  // For LONG: block if momentum slope < this (bearish acceleration)  
+  BLOCK_LONG_IF_SLOPE_BELOW: 0,
+  
+  // ===== MINIMUM OPPOSING SCORE TO TRIGGER =====
+  // Only check slope when momentum is already opposing
+  // Below this threshold, momentum is considered neutral (slope check not needed)
+  MIN_OPPOSING_SCORE_FOR_SLOPE_CHECK: 15,
+  
+  // ===== ARCHITECTURAL FIX =====
+  // ADX does NOT override this gate (this is the key architectural fix)
+  // High ADX with accelerating opposing momentum = STRONGER block, not weaker
+  ADX_AMPLIFIES_NOT_OVERRIDES: true,
+  
+  // ===== DECELERATION EXCEPTION =====
+  // If momentum is DECELERATING (slope opposite to score direction), allow entry with reduced size
+  // e.g., Score = +30 (bullish) but slope = -0.05 (decelerating) - momentum is losing steam
+  DECELERATING_MOMENTUM_POSITION_MULTIPLIER: 0.50,
+  
+  LOG_GATE_CHECKS: true,
+} as const;
+
+// ============= LTF SPIKE PROTECTION GATE (PRIORITY 2 - NO ADX OVERRIDE) =============
+// Prevents entering at momentum climax candles (15m StochRSI extremes)
+// When 15m StochRSI > 95 and momentum aligns with spike, this is a climax candle, not early exhaustion
+export const LTF_SPIKE_PROTECTION_GATE = {
+  ENABLED: true,
+  
+  // ===== 15M STOCHRSI THRESHOLDS =====
+  // Block SHORT if 15m K > this (bullish momentum spike, not exhaustion)
+  BLOCK_SHORT_IF_15M_K_ABOVE: 95,
+  // Block LONG if 15m K < this (bearish momentum spike)
+  BLOCK_LONG_IF_15M_K_BELOW: 5,
+  
+  // ===== EXCEPTION CONDITIONS =====
+  // Only block if momentum is aligned with spike direction (not a valid reversal setup)
+  // This prevents blocking valid exhaustion reversals where we WANT to fade the spike
+  REQUIRE_MOMENTUM_ALIGNED_WITH_SPIKE: true,
+  
+  // ADX slope must be rising (trend still accelerating, not exhausted)
+  REQUIRE_ADX_SLOPE_RISING: true,
+  MIN_ADX_SLOPE_FOR_BLOCK: 0,
+  
+  // ===== REDUCED POSITION ALTERNATIVE =====
+  // For now, use hard block. Set to true to allow reduced position instead.
+  ALLOW_REDUCED_POSITION: false,
+  REDUCED_POSITION_MULTIPLIER: 0.25,
+  
+  LOG_GATE_CHECKS: true,
+} as const;
+
 // ============= LTF CONFIRMATION GATE =============
 // Requires lower timeframe (1h or 30m) confirmation for continuation entries
 // Prevents entries where HTF (4h) is directional but LTF shows exhaustion/neutrality
@@ -4869,15 +4933,15 @@ export const LTF_CONFIRMATION_GATE = {
   // Block or reduce position for continuation entries
   BLOCK_IF_BOTH_LTF_NEUTRAL: true,
   
-  // ===== GRADUATED POSITION SIZING =====
+  // ===== GRADUATED POSITION SIZING (TIGHTENED) =====
   // Instead of binary block, use graduated sizing based on LTF alignment
   SIZING: {
     // 4h bearish + 1h/30m bearish = full size
     FULL_ALIGNMENT: 1.0,
     // 4h bearish + 1h neutral + 30m bearish = 70%
     PARTIAL_ALIGNMENT: 0.70,
-    // 4h bearish + 1h neutral + 30m neutral = 35% (probe only)
-    NO_ALIGNMENT: 0.35,
+    // 4h bearish + 1h neutral + 30m neutral = 25% (was 35%, tightened)
+    NO_ALIGNMENT: 0.25,
     // 4h bearish + 1h/30m bullish = BLOCK
     COUNTER_ALIGNMENT_BLOCK: true,
   },
@@ -4887,6 +4951,12 @@ export const LTF_CONFIRMATION_GATE = {
   MIN_ADX_FOR_CHECK: 25,
   // Above this ADX, require stricter LTF alignment
   STRICT_ADX_THRESHOLD: 45,
+  
+  // ===== NEW: BLOCK WHEN BOTH LTF NEUTRAL + MOMENTUM OPPOSING =====
+  // If both 1h/30m are neutral AND momentum is opposing, BLOCK entirely (not just reduce)
+  // This is the double-warning signal that was missed in BNBUSDT
+  BLOCK_WHEN_MOMENTUM_ALSO_OPPOSING: true,
+  MOMENTUM_OPPOSING_THRESHOLD: 15,  // |score| > 15 in opposing direction
   
   // ===== LOGGING =====
   LOG_GATE_CHECKS: true,
