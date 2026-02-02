@@ -12605,6 +12605,20 @@ serve(async (req) => {
               qualityBonus: orderFlowScore, // The -15 to +15 impact
               reasons: orderFlowAnalysis.reasons,
             },
+            // NEW: Smart Momentum tracking for complete forensic traceability
+            smartMomentum: {
+              score: smartMomentum.score,
+              direction: smartMomentum.direction,
+              isAccelerating: smartMomentum.isAccelerating,
+              isWeakening: smartMomentum.isWeakening,
+              isExhausted: smartMomentum.isExhausted,
+              components: smartMomentum.components,
+              overextensionATR: smartMomentum.overextensionATR,
+              reasons: smartMomentum.reasons?.slice(0, 3), // Top 3 reasons for brevity
+            },
+            // Momentum state from trendData for dual-source verification
+            momentumState: trendData.momentum?.state || 'none',
+            momentumConfirms: trendData.momentum?.confirms || false,
             // NEW: Mean Reversion tracking for dashboard analytics
             meanReversion: meanReversionSignal ? {
               detected: meanReversionSignal.detected,
