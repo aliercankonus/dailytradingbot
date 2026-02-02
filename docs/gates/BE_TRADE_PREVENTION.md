@@ -4,21 +4,47 @@
 
 Based on analysis of 23 BE positions, we identified that **BE trades are late entries, not bad trades**. The protection system correctly prevented losses, but the entries lacked sufficient follow-through momentum to reach profit targets.
 
+**Critical Insight (Validated):** This is NOT a trade management problem or protection failure. It is a **systematic late-entry pattern** where moves are statistically already consumed at entry.
+
 ## Root Cause Analysis
 
 ### Key Findings from Data
 
 | Metric | Highly Profitable | BE Trades | Insight |
 |--------|------------------|-----------|---------|
-| Avg ADX | 56.3 | 51.1 | ADX VALUE matters more than slope |
-| Avg ADX Slope | -0.12 | -0.11 | Slope alone not discriminative |
+| Avg ADX | 56.3 | 51.1 | **ADX VALUE (energy reservoir) dominates slope direction** |
+| Avg ADX Slope | -0.12 | -0.11 | Slope alone NOT discriminative |
 | Avg Peak PnL | 2.16% | 0.42% | BE trades peaked shallow |
 | Both LTF Neutral % | 66.7% | 40.9% | Surprisingly, profitable had MORE neutral! |
 | 1h = Neutral (high ADX) | ~30% | 83% (10/12) | **KEY DIFFERENTIATOR** |
 
-### The TRUE Pattern
+### Important Correction: ADX Slope is NOT the Root Cause
 
-> "BE trades occur when HIGH ADX (≥55) lacks 1h confirmation"
+Original hypothesis disproved by data:
+- **Strong-declining (ADX ≥ 50, slope < -0.2)**: 9 profitable vs 9 BE
+- **Strong-stable (ADX ≥ 50, slope ≥ -0.2)**: Similar profitability
+
+**Conclusion:** ADX value (energy reservoir) dominates over slope direction. ADX ≥ 55 means impulse can still expand even if slope is negative.
+
+### The TRUE Pattern (Two Distinct BE Regimes)
+
+#### A. Weak-Energy BE (Structural)
+- ADX < 50
+- Any slope direction
+- Low peak (< 0.5%)
+- **Should not be traded aggressively**
+
+#### B. High-ADX, No-LTF-Confirmation BE (Timing) — **CRITICAL**
+
+| Metric | BE (High ADX) | Profitable (High ADX) |
+|--------|---------------|----------------------|
+| ADX | ≥55 | ≥55 |
+| ADX slope | similar | similar |
+| 1h trend | **Neutral (10/12)** | **Directional** |
+| Avg peak | 0.38% | 1.94% |
+| Avg hold | 36 min | 50 min |
+
+> "The issue is NOT exhaustion. It's **premature HTF-only entries before LTF ignition**."
 
 Specifically:
 - 12 BE trades had ADX ≥ 55 (should have worked)
@@ -127,16 +153,62 @@ Based on data patterns:
 
 **Combined**: Up to 60-70% reduction in BE trades when multiple conditions overlap.
 
+## Triple Stack Monitoring
+
+### Risk: Multiple Gate Stacking
+
+In rare cases, all three gates may apply simultaneously, resulting in very small positions:
+
+```
+0.50 × 0.40 × 0.35 ≈ 7% position
+```
+
+This is not necessarily wrong, but creates "probe trades" that may not add value.
+
+### Monitoring Implementation
+
+A warning is logged when:
+- Final multiplier < 15%
+- 2+ BE prevention gates are active
+
+```
+🛡️ TRIPLE STACK REDUCTION: Final multiplier 7.0% - effectively a probe trade.
+Gates: ADX_SLOPE(50%) × HIGH_ADX_1H(40%) × STOCHRSI_RUNWAY(35%)
+ADX=56.2, Slope=-0.45, StochK=28, 1h=neutral, 30m=bearish
+```
+
+### Action Items (Post 1-2 Week Review)
+1. Query positions with final_multiplier < 0.15
+2. Analyze: Do these add signal value?
+3. Decide: Should they be skipped entirely?
+
+## Quality Score Insight
+
+From analysis:
+- BE trades: avg quality 77.25
+- Profitable trades: avg quality 75.41
+
+**Conclusion:** Quality score is NOT predictive of follow-through. It overweights static structure (HTF alignment) and underweights dynamic timing (energy, slope, runway).
+
+**Do NOT tighten quality thresholds** - that won't fix BE clustering.
+
 ## Monitoring
 
-New rejection reasons in logs:
+New log entries:
 - `ADX_SLOPE_GRADUATED`: Declining energy with low ADX
 - `HIGH_ADX_1H_CONFIRMATION`: High ADX lacking 1h confirmation  
 - `STOCHRSI_RUNWAY`: Limited directional runway
+- `TRIPLE STACK REDUCTION`: Multiple BE gates stacking (<15% position)
 
 ## Changelog
 
-### v1.0 (2025-02-02)
+### v1.1 (2026-02-02)
+- Added triple stack monitoring for positions <15%
+- Updated documentation with validated insights from technical review
+- Clarified that ADX VALUE dominates slope direction
+- Added quality score insight (not predictive of follow-through)
+
+### v1.0 (2026-02-02)
 - Initial implementation based on 23 BE trade analysis
 - Three graduated gates instead of binary blocks
 - Data-driven thresholds validated against profitable trades
