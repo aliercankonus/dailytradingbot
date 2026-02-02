@@ -869,8 +869,32 @@ export const DECAY_VELOCITY_TIERS = {
   FORCE_EXIT_MIN_VELOCITY: 0.02,     // 2%/min - any decay above this can trigger time cap
 } as const;
 
+// ============= MICRO-PROFIT LOCK PARAMETERS =============
+// NEW: Fill the gap between 0% and break-even activation (0.30%)
+// Prevents profitable excursions from fully retracing to entry
+// Key insight: Any favorable movement is signal confirmation worth monetizing
+export const MICRO_PROFIT_LOCK_PARAMS = {
+  ENABLED: true,
+  // Micro tiers: below break-even activation but above 0
+  // Uses FIXED locks (not trailing) to prevent stop ping-pong
+  // Each tier only moves stop UP - monotonic, never regresses
+  TIERS: [
+    { peakThreshold: 0.15, lockTarget: 0.0 },    // At 0.15% peak → move to entry (break-even)
+    { peakThreshold: 0.20, lockTarget: 0.03 },   // At 0.20% peak → lock +0.03%
+    { peakThreshold: 0.25, lockTarget: 0.07 },   // At 0.25% peak → lock +0.07%
+    { peakThreshold: 0.30, lockTarget: 0.10 },   // At 0.30% peak → lock +0.10%
+    { peakThreshold: 0.35, lockTarget: 0.15 },   // At 0.35% peak → lock +0.15%
+    { peakThreshold: 0.40, lockTarget: 0.20 },   // At 0.40% peak → lock +0.20%
+    { peakThreshold: 0.45, lockTarget: 0.25 },   // At 0.45% peak → lock +0.25%
+  ],
+  // Handoff to progressive/break-even logic at this threshold
+  HANDOFF_THRESHOLD: 0.50,
+  // Slippage buffer: ensures locked profit survives execution
+  SLIPPAGE_BUFFER_PERCENT: 0.02,
+} as const;
+
 // ============= PROGRESSIVE PROFIT LOCK PARAMETERS =============
-// Bridge the gap between break-even (0.5%) and trailing activation (0.7%)
+// Bridge the gap between break-even (0.5%) and trailing activation (0.8%)
 // Positions that peak between these levels should lock partial profits, not just break-even
 export const PROGRESSIVE_PROFIT_LOCK_PARAMS = {
   // Enable progressive profit locking (works between break-even and trailing activation)
@@ -879,18 +903,16 @@ export const PROGRESSIVE_PROFIT_LOCK_PARAMS = {
   // These tiers fill the gap between break-even (0.5%) and trailing activation (0.8%)
   // Extended tiers provide better profit protection in 0.70-0.80% peak range
   TIERS: [
-    { peakThreshold: 0.5, lockTarget: 0.0 },   // Break-even tier (existing behavior)
-    { peakThreshold: 0.55, lockTarget: 0.10 }, // Lock +0.10% at +0.55% peak
-    { peakThreshold: 0.60, lockTarget: 0.15 }, // Lock +0.15% at +0.60% peak
-    { peakThreshold: 0.65, lockTarget: 0.20 }, // Lock +0.20% at +0.65% peak
-    { peakThreshold: 0.70, lockTarget: 0.25 }, // Lock +0.25% at +0.70% peak
-    { peakThreshold: 0.72, lockTarget: 0.30 }, // Lock +0.30% at +0.72% peak (NEW)
-    { peakThreshold: 0.75, lockTarget: 0.35 }, // Lock +0.35% at +0.75% peak (NEW)
-    { peakThreshold: 0.78, lockTarget: 0.40 }, // Lock +0.40% at +0.78% peak (NEW)
+    { peakThreshold: 0.50, lockTarget: 0.30 },  // At 0.50% peak → lock +0.30% (was 0.0)
+    { peakThreshold: 0.55, lockTarget: 0.35 },  // Lock +0.35% at +0.55% peak
+    { peakThreshold: 0.60, lockTarget: 0.40 },  // Lock +0.40% at +0.60% peak
+    { peakThreshold: 0.65, lockTarget: 0.45 },  // Lock +0.45% at +0.65% peak
+    { peakThreshold: 0.70, lockTarget: 0.50 },  // Lock +0.50% at +0.70% peak
+    { peakThreshold: 0.75, lockTarget: 0.55 },  // Lock +0.55% at +0.75% peak
+    { peakThreshold: 0.80, lockTarget: 0.60 },  // Lock +0.60% at +0.80% peak
   ],
   // Once trailing stop activates, it takes full control (no more progressive locks)
-  // Raised from 0.7 to 0.8 to allow extended progressive lock coverage
-  DEFER_TO_TRAILING_AT: 0.8,
+  DEFER_TO_TRAILING_AT: 0.85,
 } as const;
 
 // Slippage buffer constants for stop loss calculations
