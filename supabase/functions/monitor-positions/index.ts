@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore, 
@@ -1241,43 +1241,136 @@ serve(async (req) => {
         return 0;
       };
       
-      // ============= PRE-ACTIVATION PROTECTION: EARLY PROFIT LOCK =============
-      // For positions that haven't reached trailing activation but had some profit
-      // Move stop to break-even to prevent "almost winners" from becoming losers
-      let earlyProfitLockApplied = false;
-      if (userSettings.earlyProfitLockEnabled && 
-          pnlPercent < userSettings.activationPercent && 
-          newPeakPnl >= userSettings.earlyProfitLockThreshold &&
+      // ============= MICRO-PROFIT LOCK: TIERED PROTECTION (0.15%-0.50%) =============
+      // NEW: Fill the gap between 0% and break-even activation
+      // Key insight: Any favorable movement is signal confirmation worth monetizing
+      // Order: micro_profit_lock → break_even → progressive_lock → trailing_stop
+      // CRITICAL: Stops only ever move in one direction (monotonic)
+      let microProfitLockApplied = false;
+      let microLockStopPrice: number | null = null;
+      
+      if (MICRO_PROFIT_LOCK_PARAMS.ENABLED && 
+          newPeakPnl > 0 && 
+          newPeakPnl < MICRO_PROFIT_LOCK_PARAMS.HANDOFF_THRESHOLD &&
           position.stop_loss !== null) {
         
-        // Position reached threshold profit but hasn't hit activation
-        // Move stop to break-even (entry price)
-        const breakEvenStop = position.entry_price;
+        // Find the highest applicable micro-lock tier based on peak P&L
+        // Sort descending so we find the highest tier first
+        const sortedTiers = [...MICRO_PROFIT_LOCK_PARAMS.TIERS].sort((a, b) => b.peakThreshold - a.peakThreshold);
+        let matchedTier: { peakThreshold: number; lockTarget: number } | null = null;
         
-        if (position.side === "BUY" && breakEvenStop > position.stop_loss) {
-          // For LONG: move stop up to entry
-          newStopLoss = breakEvenStop;
-          earlyProfitLockApplied = true;
-          positionLogger.trade(`EARLY PROFIT LOCK for BUY: Moving stop to break-even ${breakEvenStop.toFixed(2)} (peak was ${newPeakPnl.toFixed(2)}%, current ${pnlPercent.toFixed(2)}%)`);
-        } else if (position.side === "SELL" && breakEvenStop < position.stop_loss) {
-          // For SHORT: move stop down to entry
-          newStopLoss = breakEvenStop;
-          earlyProfitLockApplied = true;
-          positionLogger.trade(`EARLY PROFIT LOCK for SHORT: Moving stop to break-even ${breakEvenStop.toFixed(2)} (peak was ${newPeakPnl.toFixed(2)}%, current ${pnlPercent.toFixed(2)}%)`);
+        for (const tier of sortedTiers) {
+          if (newPeakPnl >= tier.peakThreshold) {
+            matchedTier = tier;
+            break;
+          }
         }
         
-        if (earlyProfitLockApplied) {
-          // Update stop loss in database
-          const { error: earlyLockError } = await supabase
-            .from("positions")
-            .update({ stop_loss: newStopLoss })
-            .eq("id", position.id)
-            .eq("status", "active");
+        if (matchedTier) {
+          // Calculate the lock stop price based on tier's lockTarget
+          const lockTargetPercent = matchedTier.lockTarget;
+          const slippageBuffer = position.entry_price * (MICRO_PROFIT_LOCK_PARAMS.SLIPPAGE_BUFFER_PERCENT / 100);
           
-          if (earlyLockError) {
-            positionLogger.error(`Error applying early profit lock for ${position.id}: ${earlyLockError}`);
+          if (position.side === "BUY") {
+            // For LONG: stop = entry + (lockTarget% of entry) - slippage buffer
+            const lockProfit = position.entry_price * (lockTargetPercent / 100);
+            microLockStopPrice = position.entry_price + lockProfit - slippageBuffer;
+            
+            // Only apply if this moves stop UP (monotonic)
+            if (microLockStopPrice > position.stop_loss) {
+              microProfitLockApplied = true;
+              newStopLoss = microLockStopPrice;
+              positionLogger.trade(`MICRO_PROFIT_LOCK_APPLIED for BUY: Peak ${newPeakPnl.toFixed(3)}% → Tier ${matchedTier.peakThreshold}% → Lock +${lockTargetPercent.toFixed(2)}% → Stop ${microLockStopPrice.toFixed(2)} (was ${position.stop_loss.toFixed(2)})`);
+            }
           } else {
-            updatedStopLossMap.set(position.id, newStopLoss);
+            // For SHORT: stop = entry - (lockTarget% of entry) + slippage buffer
+            const lockProfit = position.entry_price * (lockTargetPercent / 100);
+            microLockStopPrice = position.entry_price - lockProfit + slippageBuffer;
+            
+            // Only apply if this moves stop DOWN (monotonic for SHORT)
+            if (microLockStopPrice < position.stop_loss) {
+              microProfitLockApplied = true;
+              newStopLoss = microLockStopPrice;
+              positionLogger.trade(`MICRO_PROFIT_LOCK_APPLIED for SHORT: Peak ${newPeakPnl.toFixed(3)}% → Tier ${matchedTier.peakThreshold}% → Lock +${lockTargetPercent.toFixed(2)}% → Stop ${microLockStopPrice.toFixed(2)} (was ${position.stop_loss.toFixed(2)})`);
+            }
+          }
+          
+          if (microProfitLockApplied) {
+            // Update stop loss in database
+            const { error: microLockError } = await supabase
+              .from("positions")
+              .update({ stop_loss: newStopLoss })
+              .eq("id", position.id)
+              .eq("status", "active");
+            
+            if (microLockError) {
+              positionLogger.error(`Error applying micro profit lock for ${position.id}: ${microLockError}`);
+            } else {
+              updatedStopLossMap.set(position.id, newStopLoss!);
+            }
+          }
+        }
+      }
+      
+      // ============= PROGRESSIVE PROFIT LOCK (0.50%+) =============
+      // For peaks between 0.50% and trailing activation threshold
+      // Takes over from micro-lock at HANDOFF_THRESHOLD
+      let progressiveLockApplied = false;
+      let progressiveLockStopPrice: number | null = null;
+      
+      if (PROGRESSIVE_PROFIT_LOCK_PARAMS.ENABLED && 
+          !microProfitLockApplied &&
+          newPeakPnl >= MICRO_PROFIT_LOCK_PARAMS.HANDOFF_THRESHOLD && 
+          newPeakPnl < PROGRESSIVE_PROFIT_LOCK_PARAMS.DEFER_TO_TRAILING_AT &&
+          position.stop_loss !== null) {
+        
+        // Find highest applicable progressive tier
+        const sortedProgTiers = [...PROGRESSIVE_PROFIT_LOCK_PARAMS.TIERS].sort((a, b) => b.peakThreshold - a.peakThreshold);
+        let matchedProgTier: { peakThreshold: number; lockTarget: number } | null = null;
+        
+        for (const tier of sortedProgTiers) {
+          if (newPeakPnl >= tier.peakThreshold) {
+            matchedProgTier = tier;
+            break;
+          }
+        }
+        
+        if (matchedProgTier) {
+          const lockTargetPercent = matchedProgTier.lockTarget;
+          const slippageBuffer = position.entry_price * (SLIPPAGE_PARAMS.BREAK_EVEN_BUFFER_PERCENT / 100);
+          
+          if (position.side === "BUY") {
+            const lockProfit = position.entry_price * (lockTargetPercent / 100);
+            progressiveLockStopPrice = position.entry_price + lockProfit - slippageBuffer;
+            
+            if (progressiveLockStopPrice > position.stop_loss) {
+              progressiveLockApplied = true;
+              newStopLoss = progressiveLockStopPrice;
+              positionLogger.trade(`PROGRESSIVE_LOCK_APPLIED for BUY: Peak ${newPeakPnl.toFixed(3)}% → Tier ${matchedProgTier.peakThreshold}% → Lock +${lockTargetPercent.toFixed(2)}% → Stop ${progressiveLockStopPrice.toFixed(2)}`);
+            }
+          } else {
+            const lockProfit = position.entry_price * (lockTargetPercent / 100);
+            progressiveLockStopPrice = position.entry_price - lockProfit + slippageBuffer;
+            
+            if (progressiveLockStopPrice < position.stop_loss) {
+              progressiveLockApplied = true;
+              newStopLoss = progressiveLockStopPrice;
+              positionLogger.trade(`PROGRESSIVE_LOCK_APPLIED for SHORT: Peak ${newPeakPnl.toFixed(3)}% → Tier ${matchedProgTier.peakThreshold}% → Lock +${lockTargetPercent.toFixed(2)}% → Stop ${progressiveLockStopPrice.toFixed(2)}`);
+            }
+          }
+          
+          if (progressiveLockApplied) {
+            const { error: progLockError } = await supabase
+              .from("positions")
+              .update({ stop_loss: newStopLoss })
+              .eq("id", position.id)
+              .eq("status", "active");
+            
+            if (progLockError) {
+              positionLogger.error(`Error applying progressive profit lock for ${position.id}: ${progLockError}`);
+            } else {
+              updatedStopLossMap.set(position.id, newStopLoss!);
+            }
           }
         }
       }
@@ -1830,11 +1923,14 @@ serve(async (req) => {
         : userSettings.breakEvenActivationPercent;
       
       // Break-even activation uses context-aware threshold
-      // The 1% minimum distance is only checked when placing the stop, not for eligibility
-      // This allows break-even to activate at 0.5% profit as configured, protecting profits earlier
+      // DEPRECATED: Break-even now handled by micro-profit and progressive locks
+      // This section only runs as a fallback for positions that somehow missed tiered protection
+      // Skip if micro-profit or progressive lock already applied (tiered protection is superior)
       const isBreakEvenEligible = userSettings.breakEvenEnabled && 
                                   pnlPercent >= effectiveBreakEvenActivation &&
-                                  !trailingActivated; // Don't apply if trailing stop already moved
+                                  !trailingActivated && // Don't apply if trailing stop already moved
+                                  !microProfitLockApplied && // Don't override micro-profit lock
+                                  !progressiveLockApplied;   // Don't override progressive lock
 
       if (isBreakEvenEligible) {
         const entryPrice = position.entry_price;
