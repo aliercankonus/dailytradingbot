@@ -57,6 +57,15 @@ export interface BlockedSignal {
     momentumImpact?: 'aligned' | 'weak_opposing' | 'strong_opposing' | 'neutral';
     momentumScore?: number;
     momentumConfidenceReduction?: number;
+    // NEW: Triple-stack reduction tracking (BE prevention gates)
+    adxSlopeMultiplier?: number;
+    highAdx1hMultiplier?: number;
+    stochRsiRunwayMultiplier?: number;
+    ltfConfirmationMultiplier?: number;
+    moveExhaustionMultiplier?: number;
+    momentumMultiplier?: number;
+    combinedMultiplier?: number;
+    activeGateCount?: number;
   } | null;
   trend_data: {
     direction?: string;
