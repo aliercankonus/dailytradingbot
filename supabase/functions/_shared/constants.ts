@@ -4998,3 +4998,83 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
   LOG_GATE_CHECKS: true,
 } as const;
 
+// ============= ADX SLOPE GRADUATED GATE =============
+// Based on BE trade analysis: ADX slope < 0 isn't always bad, but needs graduated handling
+// Key insight: Profitable trades with declining ADX had HIGH ADX (>=55), BE trades didn't
+export const ADX_SLOPE_GRADUATED_GATE = {
+  ENABLED: true,
+  
+  // ===== GRADUATED THRESHOLDS =====
+  // Hard block when ADX slope is severely declining
+  HARD_BLOCK_SLOPE_THRESHOLD: -0.5,
+  // Reduce position when slope is moderately declining
+  REDUCE_POSITION_SLOPE_THRESHOLD: -0.2,
+  // Position multiplier for moderate decline
+  MODERATE_DECLINE_MULTIPLIER: 0.50,
+  
+  // ===== ADX VALUE EXCEPTION =====
+  // High ADX can still work with declining slope (data shows ADX >= 55 profitable even with slope < -1.0)
+  HIGH_ADX_EXCEPTION_THRESHOLD: 55,
+  HIGH_ADX_DECLINE_MULTIPLIER: 0.70,
+  
+  // ===== DIRECTION-SPECIFIC THRESHOLDS =====
+  // Shorts are more sensitive to momentum decay
+  SHORT_HARD_BLOCK_SLOPE: -0.5,
+  LONG_HARD_BLOCK_SLOPE: -0.7,  // Longs can tolerate more decline
+  
+  LOG_GATE_CHECKS: true,
+} as const;
+
+// ============= 1H CONFIRMATION GATE FOR HIGH ADX =============
+// Data shows: 12 BE trades had ADX >= 55 but 10/12 had 1h = neutral
+// Key differentiator: Profitable high-ADX trades had 1h confirmation
+export const HIGH_ADX_1H_CONFIRMATION_GATE = {
+  ENABLED: true,
+  
+  // Only apply when ADX is in the "should work" zone
+  MIN_ADX_FOR_CHECK: 55,
+  
+  // Require 1h to NOT be neutral for full position
+  // If 1h is neutral at high ADX, we're entering when momentum hasn't reached LTF yet
+  REQUIRE_1H_NON_NEUTRAL: true,
+  
+  // Position sizing when 1h is neutral despite high ADX
+  NEUTRAL_1H_POSITION_MULTIPLIER: 0.40,
+  
+  // Exception: If 30m is strongly aligned, allow partial size
+  ALLOW_30M_EXCEPTION: true,
+  EXCEPTION_30M_MULTIPLIER: 0.60,
+  
+  LOG_GATE_CHECKS: true,
+} as const;
+
+// ============= STOCHRSI RUNWAY FILTER =============
+// Data shows: 75% of BE shorts entered with StochRSI < 40 (limited downside runway)
+// Apply conditionally: only when ADX slope declining OR LTF neutral
+export const STOCHRSI_RUNWAY_GATE = {
+  ENABLED: true,
+  
+  // ===== RUNWAY THRESHOLDS =====
+  // For SHORTs: require StochRSI above this to ensure downside runway
+  SHORT_MIN_STOCHRSI_FOR_RUNWAY: 30,
+  // For LONGs: require StochRSI below this to ensure upside runway
+  LONG_MAX_STOCHRSI_FOR_RUNWAY: 70,
+  
+  // ===== CONDITIONAL APPLICATION =====
+  // Only apply when one of these conditions is true:
+  // 1. ADX slope is declining (< 0)
+  // 2. BOTH LTF (1h and 30m) are neutral
+  REQUIRE_DECLINING_ADX_OR_LTF_NEUTRAL: true,
+  ADX_SLOPE_DECLINING_THRESHOLD: 0,
+  
+  // ===== POSITION SIZING =====
+  // Instead of hard block, reduce position when runway is limited
+  LIMITED_RUNWAY_MULTIPLIER: 0.35,
+  
+  // ===== EXCEPTION =====
+  // Very high ADX can override (momentum continuation)
+  HIGH_ADX_EXCEPTION_THRESHOLD: 60,
+  
+  LOG_GATE_CHECKS: true,
+} as const;
+
