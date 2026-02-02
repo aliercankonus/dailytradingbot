@@ -5,12 +5,113 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { usePositions } from '@/hooks/usePositions';
 import { useRealtimePricesContext } from '@/contexts/RealtimePricesContext';
 import { useRealtimePositionSync } from '@/hooks/useRealtimePositionSync';
-import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw, Filter, Lock, ArrowUp, Layers, RefreshCw, AlertTriangle } from 'lucide-react';
+import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw, Filter, Lock, ArrowUp, Layers, RefreshCw, AlertTriangle, Target, Crosshair, Zap } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useMemo } from 'react';
 import { formatPrice, formatPercent, formatQuantity } from '@/lib/utils';
 import { TradeForensicsPanel } from './TradeForensicsPanel';
+
+// Profit protection tier thresholds (matching constants.ts)
+const MICRO_LOCK_MAX = 0.50;      // Micro locks: 0.15% - 0.50%
+const PROGRESSIVE_LOCK_MAX = 2.75; // Progressive locks: 0.50% - 2.75%
+// Above 2.75% = Trailing stop
+
+type ProtectionTier = 'none' | 'micro' | 'progressive' | 'trailing';
+
+interface ProtectionInfo {
+  tier: ProtectionTier;
+  label: string;
+  lockTarget?: number; // The locked profit % if applicable
+}
+
+// Determine which profit protection tier is active based on peak P&L
+const getProtectionTier = (peakPnlPercent: number, currentPnlPercent: number): ProtectionInfo => {
+  // If position never reached profit, no protection active
+  if (peakPnlPercent < 0.15) {
+    return { tier: 'none', label: 'Unprotected' };
+  }
+  
+  // Micro-profit lock (0.15% - 0.50% peak)
+  if (peakPnlPercent < MICRO_LOCK_MAX) {
+    // Find applicable micro tier
+    const microTiers = [
+      { peakThreshold: 0.15, lockTarget: 0.0 },
+      { peakThreshold: 0.20, lockTarget: 0.03 },
+      { peakThreshold: 0.25, lockTarget: 0.07 },
+      { peakThreshold: 0.30, lockTarget: 0.10 },
+      { peakThreshold: 0.35, lockTarget: 0.15 },
+      { peakThreshold: 0.40, lockTarget: 0.20 },
+      { peakThreshold: 0.45, lockTarget: 0.25 },
+    ];
+    const applicable = microTiers.filter(t => peakPnlPercent >= t.peakThreshold).pop();
+    return { 
+      tier: 'micro', 
+      label: 'Micro Lock',
+      lockTarget: applicable?.lockTarget ?? 0
+    };
+  }
+  
+  // Progressive profit lock (0.50% - 2.75% peak)
+  if (peakPnlPercent < PROGRESSIVE_LOCK_MAX) {
+    // Find applicable progressive tier
+    const progressiveTiers = [
+      { peakThreshold: 0.50, lockTarget: 0.30 },
+      { peakThreshold: 0.55, lockTarget: 0.35 },
+      { peakThreshold: 0.60, lockTarget: 0.40 },
+      { peakThreshold: 0.65, lockTarget: 0.45 },
+      { peakThreshold: 0.70, lockTarget: 0.50 },
+      { peakThreshold: 0.75, lockTarget: 0.55 },
+      { peakThreshold: 0.80, lockTarget: 0.60 },
+      { peakThreshold: 0.90, lockTarget: 0.70 },
+      { peakThreshold: 1.00, lockTarget: 0.75 },
+      { peakThreshold: 1.25, lockTarget: 0.95 },
+      { peakThreshold: 1.50, lockTarget: 1.15 },
+      { peakThreshold: 1.75, lockTarget: 1.35 },
+      { peakThreshold: 2.00, lockTarget: 1.55 },
+      { peakThreshold: 2.50, lockTarget: 2.00 },
+    ];
+    const applicable = progressiveTiers.filter(t => peakPnlPercent >= t.peakThreshold).pop();
+    return { 
+      tier: 'progressive', 
+      label: 'Progressive Lock',
+      lockTarget: applicable?.lockTarget ?? 0.30
+    };
+  }
+  
+  // Trailing stop (above 2.75% peak)
+  return { 
+    tier: 'trailing', 
+    label: 'Trailing Stop',
+    lockTarget: undefined // Dynamic, ATR-based
+  };
+};
+
+// Protection tier badge styling
+const getProtectionBadgeStyle = (tier: ProtectionTier) => {
+  switch (tier) {
+    case 'micro':
+      return {
+        className: 'bg-violet-500/10 text-violet-500 border-violet-500/20',
+        Icon: Crosshair,
+      };
+    case 'progressive':
+      return {
+        className: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+        Icon: Target,
+      };
+    case 'trailing':
+      return {
+        className: 'bg-sky-500/10 text-sky-500 border-sky-500/20',
+        Icon: Zap,
+      };
+    default:
+      return {
+        className: 'bg-muted/50 text-muted-foreground border-muted',
+        Icon: Shield,
+      };
+  }
+};
 
 export const ActivePositions = () => {
   const { positions, loading, refetch } = usePositions();
@@ -80,6 +181,9 @@ export const ActivePositions = () => {
       const isInPullback = pnlPercent < 0 && peakPnl > 0.1;
       const isActualLoss = pnlPercent < 0 && peakPnl <= 0.1;
 
+      // Get protection tier based on peak P&L
+      const protectionInfo = getProtectionTier(peakPnl, pnlPercent);
+
       return {
         ...position,
         live_current_price: currentPrice,
@@ -90,7 +194,8 @@ export const ActivePositions = () => {
         trailing_eligible: isTrailingEligible,
         is_in_pullback: isInPullback,
         is_actual_loss: isActualLoss,
-        peak_pnl: peakPnl
+        peak_pnl: peakPnl,
+        protection_info: protectionInfo,
       };
     });
   }, [filteredPositions, priceMap]);
@@ -234,6 +339,25 @@ export const ActivePositions = () => {
                           Loss
                         </Badge>
                       )}
+                      {/* Protection Tier Badge */}
+                      {(() => {
+                        const style = getProtectionBadgeStyle(position.protection_info.tier);
+                        return (
+                          <Badge 
+                            variant="outline" 
+                            className={`text-xs flex items-center gap-1 ${style.className}`}
+                            title={position.protection_info.lockTarget !== undefined 
+                              ? `Locked at +${position.protection_info.lockTarget.toFixed(2)}%` 
+                              : 'Dynamic ATR-based trailing'}
+                          >
+                            <style.Icon className="h-3 w-3" />
+                            {position.protection_info.label}
+                            {position.protection_info.lockTarget !== undefined && (
+                              <span className="font-mono">+{position.protection_info.lockTarget.toFixed(2)}%</span>
+                            )}
+                          </Badge>
+                        );
+                      })()}
                     </div>
                   <Badge className={`text-xs ${position.side === 'BUY' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'}`}>
                     {position.side}
@@ -400,6 +524,25 @@ export const ActivePositions = () => {
                           Loss
                         </Badge>
                       )}
+                      {/* Protection Tier Badge */}
+                      {(() => {
+                        const style = getProtectionBadgeStyle(position.protection_info.tier);
+                        return (
+                          <Badge 
+                            variant="outline" 
+                            className={`text-xs flex items-center gap-1 ${style.className}`}
+                            title={position.protection_info.lockTarget !== undefined 
+                              ? `Locked at +${position.protection_info.lockTarget.toFixed(2)}%` 
+                              : 'Dynamic ATR-based trailing'}
+                          >
+                            <style.Icon className="h-3 w-3" />
+                            {position.protection_info.label}
+                            {position.protection_info.lockTarget !== undefined && (
+                              <span className="font-mono">+{position.protection_info.lockTarget.toFixed(2)}%</span>
+                            )}
+                          </Badge>
+                        );
+                      })()}
                     </div>
                     <Badge className={`text-xs ${position.side === 'BUY' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'}`}>
                       {position.side}
