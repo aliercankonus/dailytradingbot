@@ -147,6 +147,9 @@ import {
   // NEW: LTF Confirmation Gate and Near-Extreme Protection
   LTF_CONFIRMATION_GATE,
   NEAR_EXTREME_PROTECTION_GATE,
+  // NEW: Priority 1-2 Gates (no ADX override)
+  MOMENTUM_SLOPE_GATE,
+  LTF_SPIKE_PROTECTION_GATE,
   type ExceptionType,
   type MarketContext
 } from "../_shared/constants.ts";
@@ -2284,10 +2287,14 @@ serve(async (req) => {
       // NEW: LTF Confirmation and Near-Extreme Protection Gates
       | 'LTF_COUNTER_ALIGNED'
       | 'LTF_BOTH_NEUTRAL'
+      | 'LTF_BOTH_NEUTRAL_PLUS_MOMENTUM'
       | 'NEAR_24H_LOW_HARD'
       | 'NEAR_24H_LOW_SOFT'
       | 'NEAR_24H_HIGH_HARD'
-      | 'NEAR_24H_HIGH_SOFT';
+      | 'NEAR_24H_HIGH_SOFT'
+      // NEW: Priority 1-2 Gates (no ADX override)
+      | 'MOMENTUM_SLOPE_GATE'
+      | 'LTF_SPIKE_PROTECTION';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -3979,6 +3986,123 @@ serve(async (req) => {
           }
         }
         
+        // ============= CRITICAL: MOMENTUM SLOPE GATE (PRIORITY 1) =============
+        // ADX must NEVER override this - accelerating opposing momentum is a hard block
+        // This gate prevents the BNBUSDT bug where ADX=57.7 allowed SHORT into bullish momentum
+        if (MOMENTUM_SLOPE_GATE.ENABLED) {
+          const momentumScore = smartMomentum.score;
+          const momentumSlope = trendData?.momentum?.macdSlope ?? (fullAdxResult.adxSlope ?? 0);
+          
+          // Check for accelerating opposing momentum
+          const isOpposingMomentum = 
+            (derivedDirection === 'long' && momentumScore < -MOMENTUM_SLOPE_GATE.MIN_OPPOSING_SCORE_FOR_SLOPE_CHECK) ||
+            (derivedDirection === 'short' && momentumScore > MOMENTUM_SLOPE_GATE.MIN_OPPOSING_SCORE_FOR_SLOPE_CHECK);
+          
+          if (isOpposingMomentum) {
+            const isAccelerating = 
+              (derivedDirection === 'short' && momentumSlope > MOMENTUM_SLOPE_GATE.BLOCK_SHORT_IF_SLOPE_ABOVE) ||
+              (derivedDirection === 'long' && momentumSlope < MOMENTUM_SLOPE_GATE.BLOCK_LONG_IF_SLOPE_BELOW);
+            
+            if (isAccelerating) {
+              // HARD BLOCK - NO ADX EXCEPTION (architectural fix)
+              rejectedByHardGates++;
+              const blockReason = `MOMENTUM_SLOPE_GATE: ${derivedDirection.toUpperCase()} blocked - opposing momentum (${momentumScore.toFixed(0)}) is ACCELERATING (slope=${momentumSlope.toFixed(3)})`;
+              perSymbolGateAttribution.set(symbol, { gate: 'MOMENTUM_SLOPE_GATE', details: blockReason });
+              
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+              logger.forSymbol(symbol).warn(`   → ADX=${adx.toFixed(1)} does NOT override accelerating opposing momentum`);
+              
+              await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                gate: "MOMENTUM_SLOPE_GATE",
+                derivedDirection,
+                momentumScore,
+                momentumSlope: momentumSlope.toFixed(3),
+                adx: adx.toFixed(1),
+                adxDoesNotOverride: true,
+                architecture: "Priority 1 gate - no ADX exception",
+                thresholds: {
+                  minOpposingScore: MOMENTUM_SLOPE_GATE.MIN_OPPOSING_SCORE_FOR_SLOPE_CHECK,
+                  blockShortIfSlopeAbove: MOMENTUM_SLOPE_GATE.BLOCK_SHORT_IF_SLOPE_ABOVE,
+                  blockLongIfSlopeBelow: MOMENTUM_SLOPE_GATE.BLOCK_LONG_IF_SLOPE_BELOW,
+                }
+              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              continue;
+            }
+          }
+        }
+        
+        // ============= CRITICAL: 15M SPIKE PROTECTION GATE (PRIORITY 2) =============
+        // Prevents entering at momentum climax candles (15m StochRSI extremes)
+        // At K=98.3 with bullish momentum - this is a spike TOP, not early exhaustion
+        if (LTF_SPIKE_PROTECTION_GATE.ENABLED) {
+          const stochRsiK15m = extractStochRsiK(trendData, '15m');
+          const adxSlope = fullAdxResult.adxSlope ?? 0;
+          const momentumScore = smartMomentum.score;
+          
+          // Check for spike condition
+          const is15mBullishSpike = stochRsiK15m > LTF_SPIKE_PROTECTION_GATE.BLOCK_SHORT_IF_15M_K_ABOVE;
+          const is15mBearishSpike = stochRsiK15m < LTF_SPIKE_PROTECTION_GATE.BLOCK_LONG_IF_15M_K_BELOW;
+          
+          // Check if momentum aligns with spike (not a valid reversal setup)
+          const momentumAlignsWithBullishSpike = momentumScore > 0;
+          const momentumAlignsWithBearishSpike = momentumScore < 0;
+          
+          // Check if ADX is still rising (spike hasn't exhausted)
+          const adxStillRising = adxSlope >= LTF_SPIKE_PROTECTION_GATE.MIN_ADX_SLOPE_FOR_BLOCK;
+          
+          // Block SHORT at bullish spike
+          if (derivedDirection === 'short' && is15mBullishSpike) {
+            const shouldBlock = (!LTF_SPIKE_PROTECTION_GATE.REQUIRE_MOMENTUM_ALIGNED_WITH_SPIKE || momentumAlignsWithBullishSpike) &&
+                                (!LTF_SPIKE_PROTECTION_GATE.REQUIRE_ADX_SLOPE_RISING || adxStillRising);
+            
+            if (shouldBlock) {
+              rejectedByHardGates++;
+              const blockReason = `LTF_SPIKE_PROTECTION: SHORT blocked - 15m StochRSI K=${stochRsiK15m.toFixed(0)} > ${LTF_SPIKE_PROTECTION_GATE.BLOCK_SHORT_IF_15M_K_ABOVE} (bullish momentum spike)`;
+              perSymbolGateAttribution.set(symbol, { gate: 'LTF_SPIKE_PROTECTION', details: blockReason });
+              
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+              logger.forSymbol(symbol).warn(`   → Momentum=${momentumScore.toFixed(0)} aligns with spike, ADX slope=${adxSlope.toFixed(2)} rising`);
+              
+              await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                gate: "LTF_SPIKE_PROTECTION",
+                derivedDirection,
+                stochRsiK15m: stochRsiK15m.toFixed(1),
+                momentumScore,
+                adxSlope: adxSlope.toFixed(2),
+                adx: adx.toFixed(1),
+                architecture: "Priority 2 gate - no ADX exception",
+              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              continue;
+            }
+          }
+          
+          // Block LONG at bearish spike (symmetric)
+          if (derivedDirection === 'long' && is15mBearishSpike) {
+            const shouldBlock = (!LTF_SPIKE_PROTECTION_GATE.REQUIRE_MOMENTUM_ALIGNED_WITH_SPIKE || momentumAlignsWithBearishSpike) &&
+                                (!LTF_SPIKE_PROTECTION_GATE.REQUIRE_ADX_SLOPE_RISING || adxStillRising);
+            
+            if (shouldBlock) {
+              rejectedByHardGates++;
+              const blockReason = `LTF_SPIKE_PROTECTION: LONG blocked - 15m StochRSI K=${stochRsiK15m.toFixed(0)} < ${LTF_SPIKE_PROTECTION_GATE.BLOCK_LONG_IF_15M_K_BELOW} (bearish momentum spike)`;
+              perSymbolGateAttribution.set(symbol, { gate: 'LTF_SPIKE_PROTECTION', details: blockReason });
+              
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+              logger.forSymbol(symbol).warn(`   → Momentum=${momentumScore.toFixed(0)} aligns with spike, ADX slope=${adxSlope.toFixed(2)} rising`);
+              
+              await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                gate: "LTF_SPIKE_PROTECTION",
+                derivedDirection,
+                stochRsiK15m: stochRsiK15m.toFixed(1),
+                momentumScore,
+                adxSlope: adxSlope.toFixed(2),
+                adx: adx.toFixed(1),
+                architecture: "Priority 2 gate - no ADX exception",
+              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              continue;
+            }
+          }
+        }
+        
         // ============= NEW: MOVE EXHAUSTION FILTER =============
         // Prevents late entries when price has already moved significantly from swing points
         // Example: AVAX dropped 10%+ from swing high - too late to SHORT
@@ -4328,7 +4452,44 @@ serve(async (req) => {
                 continue;
               }
             } else if (is1hNeutral && is30mNeutral) {
-              // BOTH LTF neutral - reduce to probe size only
+              // BOTH LTF neutral - check if momentum is also opposing (double-warning signal)
+              const momentumOpposing = 
+                (derivedDirection === 'long' && smartMomentum.score < -LTF_CONFIRMATION_GATE.MOMENTUM_OPPOSING_THRESHOLD) ||
+                (derivedDirection === 'short' && smartMomentum.score > LTF_CONFIRMATION_GATE.MOMENTUM_OPPOSING_THRESHOLD);
+              
+              if (LTF_CONFIRMATION_GATE.BLOCK_WHEN_MOMENTUM_ALSO_OPPOSING && momentumOpposing) {
+                // Double-warning: LTF neutral + momentum opposing = BLOCK (not just reduce)
+                rejectedByHardGates++;
+                const blockReason = `LTF_CONFIRMATION_BLOCK: ${derivedDirection.toUpperCase()} blocked - BOTH 1h/30m neutral AND momentum opposing (${smartMomentum.score.toFixed(0)})`;
+                perSymbolGateAttribution.set(symbol, { 
+                  gate: 'LTF_BOTH_NEUTRAL_PLUS_MOMENTUM',
+                  details: blockReason 
+                });
+                
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                logger.forSymbol(symbol).warn(`   → 4h=${tf4hDir} at ${conf4h}% but LTF and momentum both unfavorable`);
+                
+                await logRejectionWithAI(
+                  supabase, userId, symbol,
+                  blockReason,
+                  {
+                    gate: "LTF_BOTH_NEUTRAL_PLUS_MOMENTUM",
+                    derivedDirection,
+                    tf4hDir, tf1hDir, tf30mDir,
+                    conf4h,
+                    momentumScore: smartMomentum.score,
+                    adx: adx.toFixed(1),
+                    ltfConfirmationRequired: true,
+                    wouldPassWith: `Either 1h or 30m must align with direction, OR momentum must not oppose (|score| <= ${LTF_CONFIRMATION_GATE.MOMENTUM_OPPOSING_THRESHOLD})`,
+                  },
+                  trendData,
+                  riskParams.ai_analysis_enabled !== false,
+                  earlyOrderFlowAnalysis
+                );
+                continue;
+              }
+              
+              // Otherwise, reduce to probe size (no momentum opposition)
               ltfConfirmationPositionMultiplier = LTF_CONFIRMATION_GATE.SIZING.NO_ALIGNMENT;
               ltfConfirmationApplied = true;
               
@@ -4598,7 +4759,16 @@ serve(async (req) => {
           const momentumScore = smartMomentum.score;
           const isNeutralMomentum = momentumScore >= MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MIN && 
                                     momentumScore <= MOMENTUM_DIRECTION_ALIGNMENT.NEUTRAL_MAX;
-          const isStrongADX = adx >= MOMENTUM_DIRECTION_ALIGNMENT.ALLOW_NEUTRAL_ABOVE_ADX;
+          
+          // ===== ARCHITECTURAL FIX: ADX can override NEUTRAL momentum, but NOT accelerating opposing momentum =====
+          // This fixes the BNBUSDT bug where ADX=57.7 allowed SHORT into bullish accelerating momentum
+          const momentumSlope = trendData?.momentum?.macdSlope ?? (fullAdxResult.adxSlope ?? 0);
+          const isMomentumAccelerating = 
+            (derivedDirection === 'short' && momentumSlope > 0 && momentumScore > MOMENTUM_SLOPE_GATE.MIN_OPPOSING_SCORE_FOR_SLOPE_CHECK) ||
+            (derivedDirection === 'long' && momentumSlope < 0 && momentumScore < -MOMENTUM_SLOPE_GATE.MIN_OPPOSING_SCORE_FOR_SLOPE_CHECK);
+          
+          // ADX can only override neutral momentum, not accelerating opposing momentum
+          const isStrongADX = adx >= MOMENTUM_DIRECTION_ALIGNMENT.ALLOW_NEUTRAL_ABOVE_ADX && !isMomentumAccelerating;
           
           // ===== MOMENTUM STATE INFLUENCE (PHASE 2 FIX) =====
           // Adjust opposite thresholds based on momentum state:
