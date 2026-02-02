@@ -12575,6 +12575,21 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ STOCHRSI RUNWAY - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (limited directional runway)`);
         }
         
+        // ===== TRIPLE STACK MONITORING (BE Prevention Analysis) =====
+        // Log when multiple BE gates stack to create very small positions (<15%)
+        // This helps identify if these probe trades add value or should be skipped
+        const beGatesApplied = [
+          adxSlopeGraduatedMultiplier < 1.0 ? `ADX_SLOPE(${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}%)` : null,
+          highAdx1hConfirmationMultiplier < 1.0 ? `HIGH_ADX_1H(${(highAdx1hConfirmationMultiplier * 100).toFixed(0)}%)` : null,
+          stochRsiRunwayMultiplier < 1.0 ? `STOCHRSI_RUNWAY(${(stochRsiRunwayMultiplier * 100).toFixed(0)}%)` : null,
+        ].filter(Boolean);
+        
+        if (positionSizeMultiplier < 0.15 && beGatesApplied.length >= 2) {
+          const tf1hDir = trendData.timeframes?.['1h']?.direction || 'N/A';
+          const tf30mDir = trendData.timeframes?.['30m']?.direction || 'N/A';
+          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.RISK} 🛡️ TRIPLE STACK REDUCTION: Final multiplier ${(positionSizeMultiplier * 100).toFixed(1)}% - effectively a probe trade. Gates: ${beGatesApplied.join(' × ')}. ADX=${trendData.adx?.toFixed(1)}, Slope=${trendData.adxSlope?.toFixed(2)}, StochK=${trendData.stochrsiK?.toFixed(0)}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
+        }
+        
         // Apply tighter stops for late grind acceptance entries (50% of normal = 50% tighter)
         if (lateGrindAccepted && lateGrindStopMultiplier < 1.0) {
           stopLossPercent *= lateGrindStopMultiplier;
