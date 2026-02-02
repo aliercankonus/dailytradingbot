@@ -4816,3 +4816,80 @@ export const MOMENTUM_FALLBACK_DIRECTION_PARAMS = {
   MAX_CONFIDENCE: 65,
 } as const;
 
+// ============= LTF CONFIRMATION GATE =============
+// Requires lower timeframe (1h or 30m) confirmation for continuation entries
+// Prevents entries where HTF (4h) is directional but LTF shows exhaustion/neutrality
+// This addresses the "trend continuation misclassification" problem at 24h extremes
+export const LTF_CONFIRMATION_GATE = {
+  // Enable this gate
+  ENABLED: true,
+  
+  // ===== WHEN TO APPLY =====
+  // Only apply when 4h is strongly directional (not neutral)
+  REQUIRE_STRONG_4H: true,
+  MIN_4H_CONFIDENCE: 55,
+  
+  // ===== LTF NEUTRALITY CHECK =====
+  // If BOTH 1h and 30m are neutral, this is a warning sign
+  // Block or reduce position for continuation entries
+  BLOCK_IF_BOTH_LTF_NEUTRAL: true,
+  
+  // ===== GRADUATED POSITION SIZING =====
+  // Instead of binary block, use graduated sizing based on LTF alignment
+  SIZING: {
+    // 4h bearish + 1h/30m bearish = full size
+    FULL_ALIGNMENT: 1.0,
+    // 4h bearish + 1h neutral + 30m bearish = 70%
+    PARTIAL_ALIGNMENT: 0.70,
+    // 4h bearish + 1h neutral + 30m neutral = 35% (probe only)
+    NO_ALIGNMENT: 0.35,
+    // 4h bearish + 1h/30m bullish = BLOCK
+    COUNTER_ALIGNMENT_BLOCK: true,
+  },
+  
+  // ===== ADX THRESHOLDS =====
+  // Only apply LTF check when 4h ADX is above this (strong trend context)
+  MIN_ADX_FOR_CHECK: 25,
+  // Above this ADX, require stricter LTF alignment
+  STRICT_ADX_THRESHOLD: 45,
+  
+  // ===== LOGGING =====
+  LOG_GATE_CHECKS: true,
+} as const;
+
+// ============= NEAR-LOW/HIGH PROTECTION GATE =============
+// Prevents continuation entries when price is too close to 24h extremes
+// Shorts near 24h low have poor R:R and high bounce probability
+// Longs near 24h high have poor R:R and high pullback probability
+export const NEAR_EXTREME_PROTECTION_GATE = {
+  // Enable this gate
+  ENABLED: true,
+  
+  // ===== PROXIMITY THRESHOLDS =====
+  // Block/reduce SHORTs when price is within this % of 24h low
+  SHORT_NEAR_LOW_THRESHOLD_PERCENT: 2.5,
+  // Block/reduce LONGs when price is within this % of 24h high
+  LONG_NEAR_HIGH_THRESHOLD_PERCENT: 2.5,
+  
+  // ===== LTF OVERRIDE =====
+  // Only apply protection if LTF is NOT aligned with trade direction
+  // If 1h or 30m strongly supports direction, allow entry (reduced size)
+  REQUIRE_LTF_MISALIGNMENT: true,
+  LTF_ALIGNMENT_MIN_CONFIDENCE: 60,
+  
+  // ===== POSITION SIZING =====
+  // When in proximity zone without LTF support
+  PROXIMITY_POSITION_MULTIPLIER: 0.25,
+  // Full block if in hard zone (even closer to extreme)
+  HARD_ZONE_THRESHOLD_PERCENT: 1.5,
+  BLOCK_IN_HARD_ZONE: true,
+  
+  // ===== ADX EXCEPTION =====
+  // Very high ADX can override (parabolic moves)
+  ADX_OVERRIDE_THRESHOLD: 50,
+  ADX_OVERRIDE_MULTIPLIER: 0.40,
+  
+  // ===== LOGGING =====
+  LOG_GATE_CHECKS: true,
+} as const;
+

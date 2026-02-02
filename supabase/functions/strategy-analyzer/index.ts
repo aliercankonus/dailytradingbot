@@ -144,6 +144,9 @@ import {
   isMeanReversionStrategy,
   detectStrategyType,
   MEAN_REVERSION_CONFIG,
+  // NEW: LTF Confirmation Gate and Near-Extreme Protection
+  LTF_CONFIRMATION_GATE,
+  NEAR_EXTREME_PROTECTION_GATE,
   type ExceptionType,
   type MarketContext
 } from "../_shared/constants.ts";
@@ -2277,7 +2280,14 @@ serve(async (req) => {
       | 'SQUEEZE_EXPANSION_V11'
       | 'EARLY_IGNITION_V11'
       // NEW: Early Ignition Entry module (pre-expansion detection)
-      | 'EARLY_IGNITION_ENTRY';
+      | 'EARLY_IGNITION_ENTRY'
+      // NEW: LTF Confirmation and Near-Extreme Protection Gates
+      | 'LTF_COUNTER_ALIGNED'
+      | 'LTF_BOTH_NEUTRAL'
+      | 'NEAR_24H_LOW_HARD'
+      | 'NEAR_24H_LOW_SOFT'
+      | 'NEAR_24H_HIGH_HARD'
+      | 'NEAR_24H_HIGH_SOFT';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -4237,6 +4247,218 @@ serve(async (req) => {
               earlyOrderFlowAnalysis
             );
             continue;
+          }
+        }
+        
+        // ============= LTF CONFIRMATION GATE =============
+        // Prevents continuation entries when HTF (4h) is directional but LTF (1h/30m) shows exhaustion/neutrality
+        // This addresses the "trend continuation misclassification" problem
+        let ltfConfirmationPositionMultiplier = 1.0;
+        let ltfConfirmationApplied = false;
+        
+        if (LTF_CONFIRMATION_GATE.ENABLED) {
+          const priceDistance = trendData.priceDistanceFromSwing;
+          const tf30m = trendData.timeframes?.['30m'];
+          const tf30mDir = tf30m?.trend || tf30m?.indicators?.emaSignal || "neutral";
+          // Extract directly from trendData instead of using later-declared variables
+          const tf1hDir = trendData.timeframes?.['1h']?.trend || trendData.timeframes?.['1h']?.indicators?.emaSignal || "neutral";
+          const tf4hDir = trendData.timeframes?.['4h']?.trend || trendData.timeframes?.['4h']?.indicators?.emaSignal || "neutral";
+          const conf4h = trendData.timeframes?.['4h']?.confidence || 50;
+          
+          // Only apply when 4h is strongly directional
+          const is4hStronglyDirectional = (tf4hDir === 'bullish' || tf4hDir === 'bearish') && 
+            conf4h >= LTF_CONFIRMATION_GATE.MIN_4H_CONFIDENCE;
+          
+          // Check if ADX is above threshold for this check
+          const shouldApplyLtfCheck = adx >= LTF_CONFIRMATION_GATE.MIN_ADX_FOR_CHECK;
+          
+          if (is4hStronglyDirectional && shouldApplyLtfCheck) {
+            const expectedLtfTrend = derivedDirection === 'long' ? 'bullish' : 'bearish';
+            const expectedOppositeTrend = derivedDirection === 'long' ? 'bearish' : 'bullish';
+            
+            // Check LTF alignment
+            const is1hAligned = tf1hDir === expectedLtfTrend;
+            const is30mAligned = tf30mDir === expectedLtfTrend;
+            const is1hNeutral = tf1hDir === 'neutral';
+            const is30mNeutral = tf30mDir === 'neutral';
+            const is1hOpposing = tf1hDir === expectedOppositeTrend;
+            const is30mOpposing = tf30mDir === expectedOppositeTrend;
+            
+            // Determine position sizing based on alignment
+            if (is1hAligned || is30mAligned) {
+              // At least one LTF is aligned - full or partial size
+              if (is1hAligned && is30mAligned) {
+                ltfConfirmationPositionMultiplier = LTF_CONFIRMATION_GATE.SIZING.FULL_ALIGNMENT;
+              } else if (is1hAligned) {
+                ltfConfirmationPositionMultiplier = LTF_CONFIRMATION_GATE.SIZING.PARTIAL_ALIGNMENT;
+                ltfConfirmationApplied = true;
+              } else {
+                // Only 30m aligned, 1h neutral
+                ltfConfirmationPositionMultiplier = LTF_CONFIRMATION_GATE.SIZING.PARTIAL_ALIGNMENT;
+                ltfConfirmationApplied = true;
+              }
+            } else if (is1hOpposing || is30mOpposing) {
+              // LTF is opposing - BLOCK
+              if (LTF_CONFIRMATION_GATE.SIZING.COUNTER_ALIGNMENT_BLOCK) {
+                rejectedByHardGates++;
+                perSymbolGateAttribution.set(symbol, { 
+                  gate: 'LTF_COUNTER_ALIGNED', 
+                  details: `${derivedDirection.toUpperCase()} blocked: 4h=${tf4hDir} but 1h=${tf1hDir}, 30m=${tf30mDir}` 
+                });
+                
+                const blockReason = `LTF_COUNTER_ALIGNED: ${derivedDirection.toUpperCase()} blocked - 4h is ${tf4hDir} (${conf4h}%) but 1h=${tf1hDir}, 30m=${tf30mDir} (LTF shows counter-trend)`;
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                
+                await logRejectionWithAI(
+                  supabase, userId, symbol,
+                  blockReason,
+                  {
+                    gate: 'LTF_COUNTER_ALIGNED',
+                    derivedDirection,
+                    tf4hDir, tf1hDir, tf30mDir,
+                    conf4h,
+                    adx: adx.toFixed(1),
+                    ltfConfirmationRequired: true,
+                    wouldPassWith: `1h or 30m trend must be ${expectedLtfTrend} or neutral`,
+                  },
+                  trendData,
+                  riskParams.ai_analysis_enabled !== false,
+                  earlyOrderFlowAnalysis
+                );
+                continue;
+              }
+            } else if (is1hNeutral && is30mNeutral) {
+              // BOTH LTF neutral - reduce to probe size only
+              ltfConfirmationPositionMultiplier = LTF_CONFIRMATION_GATE.SIZING.NO_ALIGNMENT;
+              ltfConfirmationApplied = true;
+              
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ LTF_NEUTRAL: ${derivedDirection.toUpperCase()} at 4h=${tf4hDir} but 1h/30m both neutral - reducing to ${(LTF_CONFIRMATION_GATE.SIZING.NO_ALIGNMENT * 100).toFixed(0)}% position`);
+            }
+            
+            if (ltfConfirmationApplied && ltfConfirmationPositionMultiplier < 1.0) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} LTF_CONFIRMATION: Position reduced to ${(ltfConfirmationPositionMultiplier * 100).toFixed(0)}% (4h=${tf4hDir}, 1h=${tf1hDir}, 30m=${tf30mDir})`);
+            }
+          }
+        }
+        
+        // ============= NEAR-EXTREME PROTECTION GATE =============
+        // Prevents continuation entries when price is too close to 24h lows/highs
+        // Shorts near 24h low have poor R:R, Longs near 24h high have high reversal probability
+        let nearExtremePositionMultiplier = 1.0;
+        let nearExtremeBlocked = false;
+        
+        if (NEAR_EXTREME_PROTECTION_GATE.ENABLED) {
+          const priceDistance = trendData.priceDistanceFromSwing;
+          
+          if (priceDistance) {
+            const distanceFromLow = priceDistance.distanceFromLowPercent ?? 0;
+            const distanceFromHigh = priceDistance.distanceFromHighPercent ?? 0;
+            
+            // Check for shorts near 24h low
+            if (derivedDirection === 'short' && distanceFromLow <= NEAR_EXTREME_PROTECTION_GATE.SHORT_NEAR_LOW_THRESHOLD_PERCENT) {
+              // Get LTF alignment check
+              const tf1hDir = trendData.timeframes?.['1h']?.trend || trendData.timeframes?.['1h']?.indicators?.emaSignal || "neutral";
+              const tf30mDir = trendData.timeframes?.['30m']?.trend || 'neutral';
+              const ltfSupportsShort = tf1hDir === 'bearish' || tf30mDir === 'bearish';
+              
+              // Check for hard zone (very close to low)
+              const inHardZone = distanceFromLow <= NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_THRESHOLD_PERCENT;
+              
+              // ADX exception check
+              const adxOverrideAllowed = adx >= NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD;
+              
+              if (inHardZone && NEAR_EXTREME_PROTECTION_GATE.BLOCK_IN_HARD_ZONE && !adxOverrideAllowed && !ltfSupportsShort) {
+                // Hard block - too close to 24h low with no LTF support
+                nearExtremeBlocked = true;
+                rejectedByHardGates++;
+                perSymbolGateAttribution.set(symbol, { 
+                  gate: 'NEAR_24H_LOW_HARD', 
+                  details: `SHORT blocked: ${distanceFromLow.toFixed(1)}% from 24h low, LTF not bearish` 
+                });
+                
+                const blockReason = `NEAR_24H_LOW_HARD: SHORT blocked - only ${distanceFromLow.toFixed(1)}% above 24h low ($${priceDistance.low24h.toFixed(2)}), 1h=${tf1hDir}, 30m=${tf30mDir} (need LTF bearish for near-low shorts)`;
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                
+                await logRejectionWithAI(
+                  supabase, userId, symbol,
+                  blockReason,
+                  {
+                    gate: 'NEAR_24H_LOW_HARD',
+                    derivedDirection,
+                    distanceFromLow: distanceFromLow.toFixed(2),
+                    low24h: priceDistance.low24h,
+                    tf1hDir, tf30mDir,
+                    adx: adx.toFixed(1),
+                    ltfSupportsShort,
+                    hardZoneThreshold: NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_THRESHOLD_PERCENT,
+                    wouldPassWith: `LTF (1h or 30m) must be bearish, or ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
+                  },
+                  trendData,
+                  riskParams.ai_analysis_enabled !== false,
+                  earlyOrderFlowAnalysis
+                );
+                continue;
+              } else if (!ltfSupportsShort) {
+                // Soft gate - reduce position for near-low shorts without LTF support
+                if (adxOverrideAllowed) {
+                  nearExtremePositionMultiplier = NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_MULTIPLIER;
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_LOW ADX OVERRIDE: SHORT ${distanceFromLow.toFixed(1)}% from low, ADX=${adx.toFixed(1)} >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
+                } else {
+                  nearExtremePositionMultiplier = NEAR_EXTREME_PROTECTION_GATE.PROXIMITY_POSITION_MULTIPLIER;
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_LOW: SHORT ${distanceFromLow.toFixed(1)}% from low, LTF not bearish - position reduced to ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
+                }
+              }
+            }
+            
+            // Check for longs near 24h high
+            if (derivedDirection === 'long' && distanceFromHigh <= NEAR_EXTREME_PROTECTION_GATE.LONG_NEAR_HIGH_THRESHOLD_PERCENT) {
+              const tf1hDir = trendData.timeframes?.['1h']?.trend || trendData.timeframes?.['1h']?.indicators?.emaSignal || "neutral";
+              const tf30mDir = trendData.timeframes?.['30m']?.trend || 'neutral';
+              const ltfSupportsLong = tf1hDir === 'bullish' || tf30mDir === 'bullish';
+              
+              const inHardZone = distanceFromHigh <= NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_THRESHOLD_PERCENT;
+              const adxOverrideAllowed = adx >= NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD;
+              
+              if (inHardZone && NEAR_EXTREME_PROTECTION_GATE.BLOCK_IN_HARD_ZONE && !adxOverrideAllowed && !ltfSupportsLong) {
+                nearExtremeBlocked = true;
+                rejectedByHardGates++;
+                perSymbolGateAttribution.set(symbol, { 
+                  gate: 'NEAR_24H_HIGH_HARD', 
+                  details: `LONG blocked: ${distanceFromHigh.toFixed(1)}% from 24h high, LTF not bullish` 
+                });
+                
+                const blockReason = `NEAR_24H_HIGH_HARD: LONG blocked - only ${distanceFromHigh.toFixed(1)}% below 24h high ($${priceDistance.high24h.toFixed(2)}), 1h=${tf1hDir}, 30m=${tf30mDir} (need LTF bullish for near-high longs)`;
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                
+                await logRejectionWithAI(
+                  supabase, userId, symbol,
+                  blockReason,
+                  {
+                    gate: 'NEAR_24H_HIGH_HARD',
+                    derivedDirection,
+                    distanceFromHigh: distanceFromHigh.toFixed(2),
+                    high24h: priceDistance.high24h,
+                    tf1hDir, tf30mDir,
+                    adx: adx.toFixed(1),
+                    ltfSupportsLong,
+                    hardZoneThreshold: NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_THRESHOLD_PERCENT,
+                    wouldPassWith: `LTF (1h or 30m) must be bullish, or ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
+                  },
+                  trendData,
+                  riskParams.ai_analysis_enabled !== false,
+                  earlyOrderFlowAnalysis
+                );
+                continue;
+              } else if (!ltfSupportsLong) {
+                if (adxOverrideAllowed) {
+                  nearExtremePositionMultiplier = NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_MULTIPLIER;
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_HIGH ADX OVERRIDE: LONG ${distanceFromHigh.toFixed(1)}% from high, ADX=${adx.toFixed(1)} >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
+                } else {
+                  nearExtremePositionMultiplier = NEAR_EXTREME_PROTECTION_GATE.PROXIMITY_POSITION_MULTIPLIER;
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_HIGH: LONG ${distanceFromHigh.toFixed(1)}% from high, LTF not bullish - position reduced to ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
+                }
+              }
+            }
           }
         }
         
@@ -12005,6 +12227,18 @@ serve(async (req) => {
         if (moveExhaustionPositionMultiplier < 1.0) {
           positionSizeMultiplier *= moveExhaustionPositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⛔ MOVE EXHAUSTION entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Apply position reduction for LTF Confirmation Gate (when 1h/30m neutral with 4h directional)
+        if (ltfConfirmationPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= ltfConfirmationPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🔻 LTF CONFIRMATION - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (lower timeframes not aligned)`);
+        }
+        
+        // Apply position reduction for Near-Extreme Protection (shorts near 24h low, longs near 24h high)
+        if (nearExtremePositionMultiplier < 1.0) {
+          positionSizeMultiplier *= nearExtremePositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ NEAR 24H EXTREME - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (near price extreme)`);
         }
         
         // Apply tighter stops for late grind acceptance entries (50% of normal = 50% tighter)
