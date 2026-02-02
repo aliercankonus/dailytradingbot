@@ -2733,6 +2733,7 @@ serve(async (req) => {
               positionLogger.error(`Error executing partial loss for ${position.id}: ${partialLossError}`);
             } else if (updatedPartialLossPos) {
               // Create a closed position record for the partial close (for history tracking)
+              // CRITICAL: Copy entry_snapshot and forensic fields from parent position
               const { error: partialCloseRecordError } = await supabase
                 .from("positions")
                 .insert({
@@ -2753,6 +2754,16 @@ serve(async (req) => {
                   strategy_name: position.strategy_name,
                   trend: position.trend,
                   confidence_score: position.confidence_score,
+                  // FORENSIC FIELDS: Copy from parent for complete traceability
+                  trend_consistency: position.trend_consistency,
+                  entry_snapshot: position.entry_snapshot,
+                  entry_atr: position.entry_atr,
+                  entry_atr_percent: position.entry_atr_percent,
+                  peak_pnl_percent: position.peak_pnl_percent,
+                  entry_exception_type: position.entry_exception_type,
+                  reversal_decision: position.reversal_decision,
+                  reversal_score: position.reversal_score,
+                  signal_id: position.signal_id,
                 });
               
               if (partialCloseRecordError) {
@@ -2924,6 +2935,7 @@ serve(async (req) => {
           positionLogger.error(`Error executing partial TP for ${position.id}: ${partialUpdateError}`);
         } else if (updatedPartialPos) {
           // Create a closed position record for the partial close (for history tracking)
+          // CRITICAL: Copy entry_snapshot and forensic fields from parent position
           const { error: partialTpRecordError } = await supabase
             .from("positions")
             .insert({
@@ -2944,6 +2956,16 @@ serve(async (req) => {
               strategy_name: position.strategy_name,
               trend: position.trend,
               confidence_score: position.confidence_score,
+              // FORENSIC FIELDS: Copy from parent for complete traceability
+              trend_consistency: position.trend_consistency,
+              entry_snapshot: position.entry_snapshot,
+              entry_atr: position.entry_atr,
+              entry_atr_percent: position.entry_atr_percent,
+              peak_pnl_percent: position.peak_pnl_percent,
+              entry_exception_type: position.entry_exception_type,
+              reversal_decision: position.reversal_decision,
+              reversal_score: position.reversal_score,
+              signal_id: position.signal_id,
             });
           
           if (partialTpRecordError) {
