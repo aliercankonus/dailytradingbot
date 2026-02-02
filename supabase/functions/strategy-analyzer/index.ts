@@ -150,6 +150,10 @@ import {
   // NEW: Priority 1-2 Gates (no ADX override)
   MOMENTUM_SLOPE_GATE,
   LTF_SPIKE_PROTECTION_GATE,
+  // NEW: BE Analysis Gates (ADX slope graduated, 1h confirmation, StochRSI runway)
+  ADX_SLOPE_GRADUATED_GATE,
+  HIGH_ADX_1H_CONFIRMATION_GATE,
+  STOCHRSI_RUNWAY_GATE,
   type ExceptionType,
   type MarketContext
 } from "../_shared/constants.ts";
@@ -2294,7 +2298,11 @@ serve(async (req) => {
       | 'NEAR_24H_HIGH_SOFT'
       // NEW: Priority 1-2 Gates (no ADX override)
       | 'MOMENTUM_SLOPE_GATE'
-      | 'LTF_SPIKE_PROTECTION';
+      | 'LTF_SPIKE_PROTECTION'
+      // NEW: BE Analysis Gates
+      | 'ADX_SLOPE_GRADUATED'
+      | 'HIGH_ADX_1H_CONFIRMATION'
+      | 'STOCHRSI_RUNWAY';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -4099,6 +4107,143 @@ serve(async (req) => {
                 architecture: "Priority 2 gate - no ADX exception",
               }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
+            }
+          }
+        }
+        
+        // ============= NEW: ADX SLOPE GRADUATED GATE =============
+        // Data-driven insight: BE trades had declining ADX slope but KEY differentiator is ADX VALUE
+        // ADX >= 55 with declining slope still profitable; ADX < 50 with declining slope = BE cluster
+        let adxSlopeGraduatedMultiplier = 1.0;
+        let adxSlopeGateApplied = false;
+        
+        if (ADX_SLOPE_GRADUATED_GATE.ENABLED) {
+          const adxSlope = fullAdxResult.adxSlope ?? 0;
+          const directionSpecificThreshold = derivedDirection === 'short' 
+            ? ADX_SLOPE_GRADUATED_GATE.SHORT_HARD_BLOCK_SLOPE 
+            : ADX_SLOPE_GRADUATED_GATE.LONG_HARD_BLOCK_SLOPE;
+          
+          // Check for severe decline
+          if (adxSlope < directionSpecificThreshold) {
+            // Exception: High ADX (>= 55) can still work with declining slope
+            if (adx >= ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD) {
+              adxSlopeGraduatedMultiplier = ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_DECLINE_MULTIPLIER;
+              adxSlopeGateApplied = true;
+              
+              if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_GRADUATED: Slope=${adxSlope.toFixed(2)} severely declining but ADX=${adx.toFixed(1)} >= ${ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD} - allowing with ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% position`);
+              }
+            } else {
+              // Hard block for low-ADX with severe decline
+              rejectedByHardGates++;
+              const blockReason = `ADX_SLOPE_GRADUATED: ${derivedDirection.toUpperCase()} blocked - ADX slope=${adxSlope.toFixed(2)} severely declining AND ADX=${adx.toFixed(1)} < ${ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD} (BE zone)`;
+              perSymbolGateAttribution.set(symbol, { gate: 'ADX_SLOPE_GRADUATED', details: blockReason });
+              
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+              
+              await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                gate: "ADX_SLOPE_GRADUATED",
+                derivedDirection,
+                adx: adx.toFixed(1),
+                adxSlope: adxSlope.toFixed(2),
+                thresholds: {
+                  hardBlockSlope: directionSpecificThreshold,
+                  highAdxException: ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD,
+                },
+                analysis: "BE trades cluster when ADX < 50 with declining slope"
+              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              continue;
+            }
+          } else if (adxSlope < ADX_SLOPE_GRADUATED_GATE.REDUCE_POSITION_SLOPE_THRESHOLD && adxSlope >= directionSpecificThreshold) {
+            // Moderate decline: reduce position unless high ADX
+            if (adx < ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD) {
+              adxSlopeGraduatedMultiplier = ADX_SLOPE_GRADUATED_GATE.MODERATE_DECLINE_MULTIPLIER;
+              adxSlopeGateApplied = true;
+              
+              if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_GRADUATED: Slope=${adxSlope.toFixed(2)} moderately declining, ADX=${adx.toFixed(1)} - reducing to ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}%`);
+              }
+            }
+          }
+        }
+        
+        // ============= NEW: HIGH ADX 1H CONFIRMATION GATE =============
+        // Key finding: 10/12 BE trades with ADX >= 55 had 1h = neutral
+        // Profitable high-ADX trades had 1h confirmation
+        let highAdx1hConfirmationMultiplier = 1.0;
+        let highAdx1hGateApplied = false;
+        
+        if (HIGH_ADX_1H_CONFIRMATION_GATE.ENABLED && adx >= HIGH_ADX_1H_CONFIRMATION_GATE.MIN_ADX_FOR_CHECK) {
+          const tf1hDir = trendData.timeframes?.['1h']?.direction?.toLowerCase() || 'neutral';
+          const tf30mDir = trendData.timeframes?.['30m']?.direction?.toLowerCase() || 'neutral';
+          const is1hNeutral = tf1hDir === 'neutral';
+          const expectedDir = derivedDirection === 'long' ? 'bullish' : 'bearish';
+          const is30mAligned = tf30mDir === expectedDir;
+          
+          if (is1hNeutral && HIGH_ADX_1H_CONFIRMATION_GATE.REQUIRE_1H_NON_NEUTRAL) {
+            // 1h is neutral at high ADX - this is the BE pattern
+            if (HIGH_ADX_1H_CONFIRMATION_GATE.ALLOW_30M_EXCEPTION && is30mAligned) {
+              // 30m aligned can partially compensate
+              highAdx1hConfirmationMultiplier = HIGH_ADX_1H_CONFIRMATION_GATE.EXCEPTION_30M_MULTIPLIER;
+              highAdx1hGateApplied = true;
+              
+              if (HIGH_ADX_1H_CONFIRMATION_GATE.LOG_GATE_CHECKS) {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ HIGH_ADX_1H: ADX=${adx.toFixed(1)} but 1h=${tf1hDir} (neutral) - 30m=${tf30mDir} aligned, allowing ${(highAdx1hConfirmationMultiplier * 100).toFixed(0)}%`);
+              }
+            } else {
+              // No LTF confirmation at high ADX - significant reduction
+              highAdx1hConfirmationMultiplier = HIGH_ADX_1H_CONFIRMATION_GATE.NEUTRAL_1H_POSITION_MULTIPLIER;
+              highAdx1hGateApplied = true;
+              
+              if (HIGH_ADX_1H_CONFIRMATION_GATE.LOG_GATE_CHECKS) {
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ HIGH_ADX_1H: ADX=${adx.toFixed(1)} (high) but 1h=${tf1hDir}, 30m=${tf30mDir} (no LTF confirmation) - BE pattern detected, reducing to ${(highAdx1hConfirmationMultiplier * 100).toFixed(0)}%`);
+              }
+            }
+          }
+        }
+        
+        // ============= NEW: STOCHRSI RUNWAY GATE =============
+        // Data: 75% of BE shorts entered with StochRSI < 40 (limited downside runway)
+        // Apply only when ADX slope declining OR both LTF neutral
+        let stochRsiRunwayMultiplier = 1.0;
+        let stochRsiRunwayGateApplied = false;
+        
+        if (STOCHRSI_RUNWAY_GATE.ENABLED) {
+          const stochRsiK4h = extractStochRsiK(trendData, '4h');
+          const adxSlope = fullAdxResult.adxSlope ?? 0;
+          const tf1hDir = trendData.timeframes?.['1h']?.direction?.toLowerCase() || 'neutral';
+          const tf30mDir = trendData.timeframes?.['30m']?.direction?.toLowerCase() || 'neutral';
+          const bothLtfNeutral = tf1hDir === 'neutral' && tf30mDir === 'neutral';
+          
+          // Conditional application: only when ADX slope declining OR both LTF neutral
+          const shouldApplyRunwayGate = STOCHRSI_RUNWAY_GATE.REQUIRE_DECLINING_ADX_OR_LTF_NEUTRAL
+            ? (adxSlope < STOCHRSI_RUNWAY_GATE.ADX_SLOPE_DECLINING_THRESHOLD || bothLtfNeutral)
+            : true;
+          
+          if (shouldApplyRunwayGate) {
+            // Check runway for direction
+            const limitedRunway = 
+              (derivedDirection === 'short' && stochRsiK4h < STOCHRSI_RUNWAY_GATE.SHORT_MIN_STOCHRSI_FOR_RUNWAY) ||
+              (derivedDirection === 'long' && stochRsiK4h > STOCHRSI_RUNWAY_GATE.LONG_MAX_STOCHRSI_FOR_RUNWAY);
+            
+            if (limitedRunway) {
+              // Exception: Very high ADX can override
+              if (adx >= STOCHRSI_RUNWAY_GATE.HIGH_ADX_EXCEPTION_THRESHOLD) {
+                if (STOCHRSI_RUNWAY_GATE.LOG_GATE_CHECKS) {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✓ STOCHRSI_RUNWAY: Limited runway (K=${stochRsiK4h.toFixed(0)}) but ADX=${adx.toFixed(1)} >= ${STOCHRSI_RUNWAY_GATE.HIGH_ADX_EXCEPTION_THRESHOLD} - exception applied`);
+                }
+              } else {
+                stochRsiRunwayMultiplier = STOCHRSI_RUNWAY_GATE.LIMITED_RUNWAY_MULTIPLIER;
+                stochRsiRunwayGateApplied = true;
+                
+                const reason = derivedDirection === 'short' 
+                  ? `StochRSI K=${stochRsiK4h.toFixed(0)} < ${STOCHRSI_RUNWAY_GATE.SHORT_MIN_STOCHRSI_FOR_RUNWAY} (limited downside runway)`
+                  : `StochRSI K=${stochRsiK4h.toFixed(0)} > ${STOCHRSI_RUNWAY_GATE.LONG_MAX_STOCHRSI_FOR_RUNWAY} (limited upside runway)`;
+                
+                if (STOCHRSI_RUNWAY_GATE.LOG_GATE_CHECKS) {
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ STOCHRSI_RUNWAY: ${reason}, ADX slope=${adxSlope.toFixed(2)}, LTF neutral=${bothLtfNeutral} - reducing to ${(stochRsiRunwayMultiplier * 100).toFixed(0)}%`);
+                }
+              }
             }
           }
         }
@@ -12409,6 +12554,25 @@ serve(async (req) => {
         if (nearExtremePositionMultiplier < 1.0) {
           positionSizeMultiplier *= nearExtremePositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ NEAR 24H EXTREME - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (near price extreme)`);
+        }
+        
+        // ===== NEW: BE ANALYSIS GATES =====
+        // Apply ADX slope graduated gate multiplier (BE trade prevention)
+        if (adxSlopeGraduatedMultiplier < 1.0) {
+          positionSizeMultiplier *= adxSlopeGraduatedMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ ADX SLOPE GRADUATED - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (declining trend energy)`);
+        }
+        
+        // Apply high ADX 1h confirmation gate multiplier
+        if (highAdx1hConfirmationMultiplier < 1.0) {
+          positionSizeMultiplier *= highAdx1hConfirmationMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ HIGH_ADX_1H - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (1h not confirming high ADX)`);
+        }
+        
+        // Apply StochRSI runway gate multiplier
+        if (stochRsiRunwayMultiplier < 1.0) {
+          positionSizeMultiplier *= stochRsiRunwayMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ STOCHRSI RUNWAY - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (limited directional runway)`);
         }
         
         // Apply tighter stops for late grind acceptance entries (50% of normal = 50% tighter)
