@@ -3196,6 +3196,273 @@ const SqueezeContextGateDisplay = ({ filtersStatus, trendData }: { filtersStatus
   );
 };
 
+// ============= BE PREVENTION GATES =============
+// These gates focus on preventing break-even trades through graduated position sizing
+
+// ADX Slope Graduated Gate - blocks/reduces when ADX is declining with low energy
+const AdxSlopeGraduatedDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const adxSlope = coerceNumeric(filtersStatus?.adxSlope ?? trendData?.volatility?.adxSlope, 0);
+  const positionMultiplier = coerceNumeric(filtersStatus?.positionMultiplier ?? filtersStatus?.multiplier, 1);
+  const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
+  
+  // Determine if this is a hard block or size reduction
+  const isHardBlock = positionMultiplier <= 0 || filtersStatus?.blocked === true;
+  const isSizeReduced = !isHardBlock && positionMultiplier < 1;
+  
+  // Threshold checks
+  const highAdxThreshold = 55;
+  const hasHighAdxException = adx >= highAdxThreshold;
+  const slopeStatus = adxSlope < -0.5 ? "Severely Declining" : adxSlope < -0.2 ? "Moderately Declining" : adxSlope < 0 ? "Slightly Declining" : "Stable/Rising";
+  
+  return (
+    <div className={`space-y-3 p-3 rounded-md border ${isHardBlock ? 'bg-red-500/10 border-red-500/30' : 'bg-amber-500/10 border-amber-500/30'}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <TrendingDown className={`h-4 w-4 ${isHardBlock ? 'text-red-500' : 'text-amber-500'}`} />
+          <span className={`text-xs font-semibold ${isHardBlock ? 'text-red-400' : 'text-amber-400'}`}>
+            ADX SLOPE GRADUATED GATE
+          </span>
+          <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30">
+            BE Prevention
+          </Badge>
+        </div>
+        <Badge variant={isHardBlock ? "destructive" : "secondary"} className="text-[10px] px-1.5 py-0">
+          {isHardBlock ? "🚫 BLOCKED" : `📉 ${(positionMultiplier * 100).toFixed(0)}% Size`}
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        ADX slope is declining while energy reservoir is {adx >= 55 ? "still high (exception applied)" : "too low for reliable continuation"}.
+      </div>
+      
+      {/* ADX & Slope Gauges */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className={`p-2 rounded border text-center ${adx >= 55 ? 'bg-green-500/20 border-green-500/30' : adx >= 50 ? 'bg-yellow-500/20 border-yellow-500/30' : 'bg-red-500/20 border-red-500/30'}`}>
+          <div className="text-[10px] text-muted-foreground">ADX (Energy)</div>
+          <div className={`text-lg font-bold ${adx >= 55 ? 'text-green-400' : adx >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
+            {adx.toFixed(1)}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {adx >= 55 ? "High (Exception)" : adx >= 50 ? "Moderate" : "Low Risk"}
+          </div>
+        </div>
+        <div className={`p-2 rounded border text-center ${adxSlope >= 0 ? 'bg-green-500/20 border-green-500/30' : adxSlope >= -0.2 ? 'bg-yellow-500/20 border-yellow-500/30' : 'bg-red-500/20 border-red-500/30'}`}>
+          <div className="text-[10px] text-muted-foreground">ADX Slope</div>
+          <div className={`text-lg font-bold ${adxSlope >= 0 ? 'text-green-400' : adxSlope >= -0.2 ? 'text-yellow-400' : 'text-red-400'}`}>
+            {adxSlope.toFixed(2)}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {slopeStatus}
+          </div>
+        </div>
+      </div>
+      
+      {/* Exception Check */}
+      {hasHighAdxException && (
+        <div className="flex items-center gap-1.5 p-1.5 bg-green-500/20 rounded text-[10px] text-green-400">
+          <CheckCircle2 className="h-3 w-3" />
+          <span>High ADX Exception: Energy reservoir ≥{highAdxThreshold} allows reduced entry at {(positionMultiplier * 100).toFixed(0)}%</span>
+        </div>
+      )}
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className={isHardBlock ? 'text-red-400' : 'text-amber-400'}>
+          {isHardBlock ? '🚫 Why rejected:' : '📉 Why size reduced:'}
+        </span>
+        {isHardBlock 
+          ? ` ADX < 50 with severely declining slope (< -0.5) indicates exhausted trend energy. Entry blocked to prevent BE outcome.`
+          : ` Declining ADX slope suggests fading momentum. Position sized at ${(positionMultiplier * 100).toFixed(0)}% to manage late-entry risk.`
+        }
+      </div>
+    </div>
+  );
+};
+
+// High ADX 1h Confirmation Gate - requires LTF confirmation when HTF is strong
+const HighAdx1hConfirmationDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend || "neutral";
+  const trend30m = filtersStatus?.trend30m || trendData?.timeframes?.['30m']?.trend || "unknown";
+  const positionMultiplier = coerceNumeric(filtersStatus?.positionMultiplier ?? filtersStatus?.multiplier, 1);
+  const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
+  
+  const is1hNeutral = trend1h.toLowerCase() === "neutral" || trend1h.toLowerCase() === "ranging";
+  const is30mAligned = trend30m.toLowerCase() === direction.toLowerCase() || 
+                       (direction === "long" && trend30m.toLowerCase() === "bullish") ||
+                       (direction === "short" && trend30m.toLowerCase() === "bearish");
+  const has30mException = is1hNeutral && is30mAligned;
+  
+  return (
+    <div className="space-y-3 p-3 rounded-md border bg-amber-500/10 border-amber-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Timer className={`h-4 w-4 text-amber-500`} />
+          <span className="text-xs font-semibold text-amber-400">
+            HIGH ADX 1H CONFIRMATION GATE
+          </span>
+          <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30">
+            BE Prevention
+          </Badge>
+        </div>
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+          📉 {(positionMultiplier * 100).toFixed(0)}% Size
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        ADX is strong (≥55) but 1h timeframe hasn't confirmed the move yet - a key BE pattern.
+      </div>
+      
+      {/* Confirmation Status */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className={`p-2 rounded border text-center ${adx >= 55 ? 'bg-green-500/20 border-green-500/30' : 'bg-muted/30 border-muted/50'}`}>
+          <div className="text-[10px] text-muted-foreground">ADX</div>
+          <div className={`text-lg font-bold ${adx >= 55 ? 'text-green-400' : 'text-muted-foreground'}`}>
+            {adx.toFixed(1)}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {adx >= 55 ? "Strong" : "Below Threshold"}
+          </div>
+        </div>
+        <div className={`p-2 rounded border text-center ${is1hNeutral ? 'bg-yellow-500/20 border-yellow-500/30' : 'bg-green-500/20 border-green-500/30'}`}>
+          <div className="text-[10px] text-muted-foreground">1h Trend</div>
+          <div className={`text-sm font-bold ${is1hNeutral ? 'text-yellow-400' : 'text-green-400'}`}>
+            {trend1h}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {is1hNeutral ? "⚠️ Not Confirmed" : "✓ Confirmed"}
+          </div>
+        </div>
+        <div className={`p-2 rounded border text-center ${is30mAligned ? 'bg-green-500/20 border-green-500/30' : 'bg-muted/30 border-muted/50'}`}>
+          <div className="text-[10px] text-muted-foreground">30m Trend</div>
+          <div className={`text-sm font-bold ${is30mAligned ? 'text-green-400' : 'text-muted-foreground'}`}>
+            {trend30m}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {is30mAligned ? "✓ Aligned" : "Not Aligned"}
+          </div>
+        </div>
+      </div>
+      
+      {/* Exception Note */}
+      {has30mException && (
+        <div className="flex items-center gap-1.5 p-1.5 bg-blue-500/20 rounded text-[10px] text-blue-400">
+          <Info className="h-3 w-3" />
+          <span>30m Exception: 30m trend aligned → position allowed at 60% instead of 40%</span>
+        </div>
+      )}
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-amber-400">📉 Why size reduced:</span>
+        {` 83% of BE trades with high ADX had 1h = neutral. This is an HTF-only entry before LTF ignition. Position sized at ${(positionMultiplier * 100).toFixed(0)}% to reduce BE risk.`}
+      </div>
+    </div>
+  );
+};
+
+// StochRSI Runway Gate - prevents entries with limited directional room
+const StochRsiRunwayDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const stochRsiK = coerceNumeric(filtersStatus?.stochRsiK ?? filtersStatus?.stochK ?? trendData?.stochasticRsi?.['4h']?.k, 50);
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const adxSlope = coerceNumeric(filtersStatus?.adxSlope ?? trendData?.volatility?.adxSlope, 0);
+  const positionMultiplier = coerceNumeric(filtersStatus?.positionMultiplier ?? filtersStatus?.multiplier, 1);
+  const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
+  const bothLtfNeutral = filtersStatus?.bothLtfNeutral ?? false;
+  
+  const isShort = direction.toLowerCase() === "short" || direction.toLowerCase() === "bearish";
+  const limitedRunway = isShort ? stochRsiK < 30 : stochRsiK > 70;
+  const hasHighAdxException = adx >= 60;
+  
+  // Runway calculation
+  const runwayPercent = isShort ? stochRsiK : (100 - stochRsiK);
+  const runwayThreshold = isShort ? 30 : 30; // Both need 30% runway
+  
+  return (
+    <div className="space-y-3 p-3 rounded-md border bg-amber-500/10 border-amber-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Gauge className={`h-4 w-4 text-amber-500`} />
+          <span className="text-xs font-semibold text-amber-400">
+            STOCHRSI RUNWAY GATE
+          </span>
+          <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30">
+            BE Prevention
+          </Badge>
+        </div>
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+          📉 {(positionMultiplier * 100).toFixed(0)}% Size
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground">
+        Limited directional runway detected for {direction.toUpperCase()} entry - StochRSI already {isShort ? "near oversold" : "near overbought"}.
+      </div>
+      
+      {/* Runway Visualization */}
+      <div className="space-y-2">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Directional Runway</span>
+          <span className={`font-mono ${runwayPercent < runwayThreshold ? 'text-red-400' : 'text-green-400'}`}>
+            {runwayPercent.toFixed(0)}% {runwayPercent < runwayThreshold ? '(Limited)' : '(Sufficient)'}
+          </span>
+        </div>
+        <div className="relative h-3 bg-muted/50 rounded-full overflow-hidden">
+          {isShort ? (
+            <>
+              {/* For shorts: green on right (high StochRSI = room to fall), red on left */}
+              <div className="absolute left-0 h-full bg-red-500/30" style={{ width: '30%' }} />
+              <div className="absolute h-full bg-green-500/30" style={{ left: '30%', right: 0 }} />
+              <div 
+                className="absolute h-full w-1 bg-amber-500 rounded-full"
+                style={{ left: `${Math.min(Math.max(stochRsiK, 0), 100)}%` }}
+              />
+            </>
+          ) : (
+            <>
+              {/* For longs: green on left (low StochRSI = room to rise), red on right */}
+              <div className="absolute left-0 h-full bg-green-500/30" style={{ width: '70%' }} />
+              <div className="absolute h-full bg-red-500/30" style={{ left: '70%', right: 0 }} />
+              <div 
+                className="absolute h-full w-1 bg-amber-500 rounded-full"
+                style={{ left: `${Math.min(Math.max(stochRsiK, 0), 100)}%` }}
+              />
+            </>
+          )}
+        </div>
+        <div className="flex justify-between text-[9px] text-muted-foreground">
+          <span>{isShort ? "Limited (Oversold)" : "Room (Oversold)"}</span>
+          <span>StochRSI K: {stochRsiK.toFixed(1)}</span>
+          <span>{isShort ? "Room (Overbought)" : "Limited (Overbought)"}</span>
+        </div>
+      </div>
+      
+      {/* Context Indicators */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className={`p-1.5 rounded border text-center text-[10px] ${adxSlope < 0 ? 'bg-yellow-500/20 border-yellow-500/30 text-yellow-400' : 'bg-muted/30 border-muted/50 text-muted-foreground'}`}>
+          ADX Slope: {adxSlope.toFixed(2)} {adxSlope < 0 ? '(Declining)' : ''}
+        </div>
+        <div className={`p-1.5 rounded border text-center text-[10px] ${bothLtfNeutral ? 'bg-yellow-500/20 border-yellow-500/30 text-yellow-400' : 'bg-muted/30 border-muted/50 text-muted-foreground'}`}>
+          LTF Status: {bothLtfNeutral ? 'Both Neutral' : 'Active'}
+        </div>
+      </div>
+      
+      {/* Exception Note */}
+      {hasHighAdxException && (
+        <div className="flex items-center gap-1.5 p-1.5 bg-green-500/20 rounded text-[10px] text-green-400">
+          <CheckCircle2 className="h-3 w-3" />
+          <span>ADX ≥60 Exception: Strong momentum continuation overrides runway concern</span>
+        </div>
+      )}
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-amber-400">📉 Why size reduced:</span>
+        {` 75% of BE ${isShort ? 'shorts' : 'longs'} entered with StochRSI ${isShort ? '< 40' : '> 60'} (limited runway). Position sized at ${(positionMultiplier * 100).toFixed(0)}% to reduce late-entry risk.`}
+      </div>
+    </div>
+  );
+};
+
 // Strategy Constraint Gate Display - for strategy-specific validation failures
 const StrategyConstraintGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const strategyName = filtersStatus?.strategyName || "Unknown Strategy";
@@ -4986,6 +5253,10 @@ export const SignalRejectionReasons = () => {
     if (gate === "HTF_NOT_ALIGNED") return "medium";
     if (gate === "MACD_MISALIGNED") return "medium";
     if (gate === "MOMENTUM_SCORE_TOO_LOW") return "medium";
+    // BE Prevention gates (soft blocks / size reductions)
+    if (gate === "ADX_SLOPE_GRADUATED" || gate === "ADX_SLOPE_GRADUATED_GATE") return "medium";
+    if (gate === "HIGH_ADX_1H_CONFIRMATION" || gate === "HIGH_ADX_1H_CONFIRMATION_GATE") return "medium";
+    if (gate === "STOCHRSI_RUNWAY" || gate === "STOCHRSI_RUNWAY_GATE") return "medium";
     if (reason.includes("Quality score")) return "medium";
     
     // LOW - Informational blocks
@@ -5229,6 +5500,24 @@ export const SignalRejectionReasons = () => {
     if (fs?.gate === "STRATEGY_CONSTRAINT" || reason.includes("STRATEGY CONSTRAINT") || 
         reason.includes("IMPROVEMENT 4")) {
       return <StrategyConstraintGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // BE Prevention: ADX Slope Graduated Gate
+    if (fs?.gate === "ADX_SLOPE_GRADUATED" || fs?.gate === "ADX_SLOPE_GRADUATED_GATE" ||
+        reason.includes("ADX_SLOPE_GRADUATED") || reason.includes("ADX slope graduated")) {
+      return <AdxSlopeGraduatedDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // BE Prevention: High ADX 1h Confirmation Gate
+    if (fs?.gate === "HIGH_ADX_1H_CONFIRMATION" || fs?.gate === "HIGH_ADX_1H_CONFIRMATION_GATE" ||
+        reason.includes("HIGH_ADX_1H_CONFIRMATION") || reason.includes("High ADX 1h confirmation")) {
+      return <HighAdx1hConfirmationDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // BE Prevention: StochRSI Runway Gate  
+    if (fs?.gate === "STOCHRSI_RUNWAY" || fs?.gate === "STOCHRSI_RUNWAY_GATE" ||
+        reason.includes("STOCHRSI_RUNWAY") || reason.includes("StochRSI runway")) {
+      return <StochRsiRunwayDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // Reversal risk rejection
