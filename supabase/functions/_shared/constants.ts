@@ -836,9 +836,11 @@ export const DECAY_VELOCITY_TIERS = {
   // Prevents false positives from brief sub-minute pullbacks
   MIN_OBSERVATION_MINUTES: 2,
   
-  // Base tier (current behavior - for weak/misaligned trends)
-  BASE_EXIT_PER_MINUTE: 0.03,        // 3%/min decay triggers exit
-  BASE_MAX_DECAY_MINUTES: 10,        // Max 10 minutes of decay before forced exit
+  // Base tier (tightened for weak/misaligned trends)
+  // Reduced from 0.03 → 0.025 (~17% tighter) to capture peaks faster in BASE tier
+  // This only affects positions in weak/misaligned conditions (ADX < 25)
+  BASE_EXIT_PER_MINUTE: 0.025,       // 2.5%/min decay triggers exit (was 3%)
+  BASE_MAX_DECAY_MINUTES: 8,         // Max 8 minutes of decay before forced exit (was 10)
   
   // Tier 1: Moderate trend (ADX 25-30)
   TIER1_MIN_ADX: 25,
@@ -894,25 +896,36 @@ export const MICRO_PROFIT_LOCK_PARAMS = {
 } as const;
 
 // ============= PROGRESSIVE PROFIT LOCK PARAMETERS =============
-// Bridge the gap between break-even (0.5%) and trailing activation (0.8%)
-// Positions that peak between these levels should lock partial profits, not just break-even
+// Bridge the gap between break-even (0.5%) and trailing activation (2.75%)
+// Progressive locks are the PRIMARY profit capture mechanism up to 2.5% peak
+// Decay velocity exits remain a FAILSAFE, not the main TP logic
 export const PROGRESSIVE_PROFIT_LOCK_PARAMS = {
   // Enable progressive profit locking (works between break-even and trailing activation)
   ENABLED: true,
   // Define profit lock tiers: when peak P&L reaches threshold, lock to target
-  // These tiers fill the gap between break-even (0.5%) and trailing activation (0.8%)
-  // Extended tiers provide better profit protection in 0.70-0.80% peak range
+  // Extended tiers provide continuous profit protection from 0.50% to 2.50% peak
+  // This ensures price-based locks are primary, decay exits are failsafe only
   TIERS: [
-    { peakThreshold: 0.50, lockTarget: 0.30 },  // At 0.50% peak → lock +0.30% (was 0.0)
+    // Standard tiers (0.50% - 0.80%)
+    { peakThreshold: 0.50, lockTarget: 0.30 },  // At 0.50% peak → lock +0.30%
     { peakThreshold: 0.55, lockTarget: 0.35 },  // Lock +0.35% at +0.55% peak
     { peakThreshold: 0.60, lockTarget: 0.40 },  // Lock +0.40% at +0.60% peak
     { peakThreshold: 0.65, lockTarget: 0.45 },  // Lock +0.45% at +0.65% peak
     { peakThreshold: 0.70, lockTarget: 0.50 },  // Lock +0.50% at +0.70% peak
     { peakThreshold: 0.75, lockTarget: 0.55 },  // Lock +0.55% at +0.75% peak
     { peakThreshold: 0.80, lockTarget: 0.60 },  // Lock +0.60% at +0.80% peak
+    // Extended tiers (0.90% - 2.50%) - NEW: Prevent over-reliance on decay exits
+    { peakThreshold: 0.90, lockTarget: 0.70 },  // Lock +0.70% at +0.90% peak
+    { peakThreshold: 1.00, lockTarget: 0.75 },  // Lock +0.75% at +1.00% peak
+    { peakThreshold: 1.25, lockTarget: 0.95 },  // Lock +0.95% at +1.25% peak
+    { peakThreshold: 1.50, lockTarget: 1.15 },  // Lock +1.15% at +1.50% peak
+    { peakThreshold: 1.75, lockTarget: 1.35 },  // Lock +1.35% at +1.75% peak
+    { peakThreshold: 2.00, lockTarget: 1.55 },  // Lock +1.55% at +2.00% peak
+    { peakThreshold: 2.50, lockTarget: 2.00 },  // Lock +2.00% at +2.50% peak
   ],
-  // Once trailing stop activates, it takes full control (no more progressive locks)
-  DEFER_TO_TRAILING_AT: 0.85,
+  // Raised from 0.85 to 2.75 - progressive locks now control 0.50-2.50% range
+  // Trailing stop takes over only for exceptional moves above 2.75%
+  DEFER_TO_TRAILING_AT: 2.75,
 } as const;
 
 // Slippage buffer constants for stop loss calculations
