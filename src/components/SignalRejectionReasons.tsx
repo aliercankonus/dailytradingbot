@@ -3463,6 +3463,152 @@ const StochRsiRunwayDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
   );
 };
 
+// ============= TRIPLE-STACK REDUCTION MONITOR =============
+// Warns when multiple BE gates combine to create dangerously small positions
+
+interface ActiveGateInfo {
+  name: string;
+  multiplier: number;
+  reason: string;
+}
+
+const TripleStackReductionMonitor = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  // Extract all gate multipliers from filters_status
+  const gates: ActiveGateInfo[] = [];
+  
+  // Check each BE prevention gate
+  const adxSlopeMultiplier = coerceNumeric(filtersStatus?.adxSlopeMultiplier, 1);
+  const highAdx1hMultiplier = coerceNumeric(filtersStatus?.highAdx1hMultiplier, 1);
+  const stochRsiRunwayMultiplier = coerceNumeric(filtersStatus?.stochRsiRunwayMultiplier, 1);
+  const ltfConfirmationMultiplier = coerceNumeric(filtersStatus?.ltfConfirmationMultiplier, 1);
+  const moveExhaustionMultiplier = coerceNumeric(filtersStatus?.moveExhaustionMultiplier ?? filtersStatus?.moveZoneDetails?.positionMultiplier, 1);
+  const momentumMultiplier = coerceNumeric(filtersStatus?.momentumMultiplier, 1);
+  
+  // Add active gates (multiplier < 1)
+  if (adxSlopeMultiplier < 1) {
+    gates.push({ name: "ADX_SLOPE_GRADUATED", multiplier: adxSlopeMultiplier, reason: "Declining ADX slope" });
+  }
+  if (highAdx1hMultiplier < 1) {
+    gates.push({ name: "HIGH_ADX_1H_CONFIRMATION", multiplier: highAdx1hMultiplier, reason: "1h not confirmed" });
+  }
+  if (stochRsiRunwayMultiplier < 1) {
+    gates.push({ name: "STOCHRSI_RUNWAY", multiplier: stochRsiRunwayMultiplier, reason: "Limited directional runway" });
+  }
+  if (ltfConfirmationMultiplier < 1) {
+    gates.push({ name: "LTF_CONFIRMATION", multiplier: ltfConfirmationMultiplier, reason: "LTF not aligned" });
+  }
+  if (moveExhaustionMultiplier < 1) {
+    gates.push({ name: "MOVE_EXHAUSTION", multiplier: moveExhaustionMultiplier, reason: "Late-cycle exhaustion" });
+  }
+  if (momentumMultiplier < 1) {
+    gates.push({ name: "MOMENTUM", multiplier: momentumMultiplier, reason: "Weak/opposing momentum" });
+  }
+  
+  // Calculate combined multiplier
+  const combinedMultiplier = gates.reduce((acc, gate) => acc * gate.multiplier, 1);
+  const finalPositionPercent = combinedMultiplier * 100;
+  
+  // Determine severity
+  const isTripleStack = gates.length >= 3;
+  const isDoubleStack = gates.length >= 2;
+  const isDangerouslySmall = finalPositionPercent < 15;
+  const isVerySmall = finalPositionPercent < 25;
+  
+  // Don't show if no stacking or position is reasonable
+  if (gates.length < 2) return null;
+  
+  const getSeverityColor = () => {
+    if (isDangerouslySmall) return { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', icon: 'text-red-500' };
+    if (isVerySmall) return { bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-400', icon: 'text-orange-500' };
+    return { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', icon: 'text-amber-500' };
+  };
+  
+  const colors = getSeverityColor();
+  
+  return (
+    <div className={`space-y-3 p-3 rounded-md border ${colors.bg} ${colors.border}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Layers className={`h-4 w-4 ${colors.icon}`} />
+          <span className={`text-xs font-semibold ${colors.text}`}>
+            {isTripleStack ? "TRIPLE-STACK" : "DOUBLE-STACK"} REDUCTION
+          </span>
+          <Badge variant="outline" className={`text-[9px] px-1 py-0 ${colors.bg} ${colors.text} ${colors.border}`}>
+            {gates.length} Gates Active
+          </Badge>
+        </div>
+        <Badge 
+          variant={isDangerouslySmall ? "destructive" : "secondary"} 
+          className="text-[10px] px-1.5 py-0"
+        >
+          ⚠️ {finalPositionPercent.toFixed(1)}% Final Size
+        </Badge>
+      </div>
+      
+      <div className={`text-[10px] ${colors.text}`}>
+        {isDangerouslySmall 
+          ? "⚠️ CRITICAL: Multiple BE prevention gates have combined to reduce position to dangerously small size."
+          : isVerySmall
+            ? "Warning: Multiple gates are stacking to significantly reduce position size."
+            : "Notice: Multiple size reduction gates are active simultaneously."
+        }
+      </div>
+      
+      {/* Gate Breakdown */}
+      <div className="space-y-1.5">
+        <div className="text-[10px] text-muted-foreground font-medium">Active Gates:</div>
+        {gates.map((gate, idx) => (
+          <div key={gate.name} className="flex items-center justify-between p-1.5 bg-muted/30 rounded text-[10px]">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">{idx + 1}.</span>
+              <span className="font-mono text-xs">{gate.name}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">{gate.reason}</span>
+              <Badge variant="outline" className="text-[9px] px-1 py-0">
+                {(gate.multiplier * 100).toFixed(0)}%
+              </Badge>
+            </div>
+          </div>
+        ))}
+      </div>
+      
+      {/* Multiplication Breakdown */}
+      <div className="p-2 bg-muted/50 rounded">
+        <div className="text-[10px] text-muted-foreground mb-1">Size Calculation:</div>
+        <div className="flex items-center gap-1 text-[10px] font-mono flex-wrap">
+          <span>100%</span>
+          {gates.map((gate, idx) => (
+            <span key={idx} className="flex items-center gap-1">
+              <span className="text-muted-foreground">×</span>
+              <span className={gate.multiplier < 0.5 ? 'text-red-400' : 'text-amber-400'}>
+                {(gate.multiplier * 100).toFixed(0)}%
+              </span>
+            </span>
+          ))}
+          <span className="text-muted-foreground">=</span>
+          <span className={`font-bold ${isDangerouslySmall ? 'text-red-400' : isVerySmall ? 'text-orange-400' : 'text-amber-400'}`}>
+            {finalPositionPercent.toFixed(1)}%
+          </span>
+        </div>
+      </div>
+      
+      {/* Critical Warning */}
+      {isDangerouslySmall && (
+        <div className="flex items-center gap-1.5 p-1.5 bg-red-500/20 rounded text-[10px] text-red-400">
+          <AlertTriangle className="h-3 w-3" />
+          <span>Position size below 15% threshold. Consider whether this trade is worth the risk.</span>
+        </div>
+      )}
+      
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className={colors.text}>ℹ️ Context:</span>
+        {` Each BE prevention gate applies its own size reduction. When ${gates.length} gates activate simultaneously, the multiplicative effect results in a ${finalPositionPercent.toFixed(1)}% position size.`}
+      </div>
+    </div>
+  );
+};
+
 // Strategy Constraint Gate Display - for strategy-specific validation failures
 const StrategyConstraintGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const strategyName = filtersStatus?.strategyName || "Unknown Strategy";
@@ -5518,6 +5664,31 @@ export const SignalRejectionReasons = () => {
     if (fs?.gate === "STOCHRSI_RUNWAY" || fs?.gate === "STOCHRSI_RUNWAY_GATE" ||
         reason.includes("STOCHRSI_RUNWAY") || reason.includes("StochRSI runway")) {
       return <StochRsiRunwayDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // Triple-Stack Reduction Monitor (multiple BE gates combining)
+    if (fs?.gate === "TRIPLE_STACK_REDUCTION" || fs?.gate === "MULTI_GATE_REDUCTION" ||
+        reason.includes("TRIPLE_STACK") || reason.includes("MULTI_GATE") ||
+        reason.includes("stacked reductions") || reason.includes("multiple gates")) {
+      return <TripleStackReductionMonitor filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // Check for stacked reductions even if not explicitly tagged
+    // This shows the monitor when multiple gate multipliers are present
+    const hasStackedGates = () => {
+      let activeGates = 0;
+      if (fs?.adxSlopeMultiplier !== undefined && fs.adxSlopeMultiplier < 1) activeGates++;
+      if (fs?.highAdx1hMultiplier !== undefined && fs.highAdx1hMultiplier < 1) activeGates++;
+      if (fs?.stochRsiRunwayMultiplier !== undefined && fs.stochRsiRunwayMultiplier < 1) activeGates++;
+      if (fs?.ltfConfirmationMultiplier !== undefined && fs.ltfConfirmationMultiplier < 1) activeGates++;
+      if (fs?.moveExhaustionMultiplier !== undefined && fs.moveExhaustionMultiplier < 1) activeGates++;
+      if (fs?.momentumMultiplier !== undefined && fs.momentumMultiplier < 1) activeGates++;
+      if (fs?.moveZoneDetails?.positionMultiplier !== undefined && fs.moveZoneDetails.positionMultiplier < 1) activeGates++;
+      return activeGates >= 2;
+    };
+    
+    if (hasStackedGates()) {
+      return <TripleStackReductionMonitor filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // Reversal risk rejection
