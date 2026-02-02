@@ -3663,6 +3663,10 @@ const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
 
 // ============= MOMENTUM DIRECTION OPPOSING DISPLAY =============
 // For MOMENTUM_DIRECTION_OPPOSING gate
+// ARCHITECTURE FIX: Correctly differentiate Phase 1 (momentum score polarity) vs Phase 2 (MACD direction)
+// Phase 1 Extreme (score < -50 or > +50): NO bypasses available - absolute block
+// Phase 1 Moderate (score -50 to -20 or +20 to +50): Bypass via 1h Trend Agreement only
+// Phase 2 (MACD direction): Bypass via weak MACD OR exceptional ADX
 const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const signalDirection = filtersStatus?.signalDirection || filtersStatus?.derivedDirection || filtersStatus?.direction || "long";
   const momentumScore = coerceNumeric(filtersStatus?.momentumScore ?? trendData?.momentum?.score, 0);
@@ -3672,15 +3676,25 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
   const momentumState = filtersStatus?.momentumState || trendData?.momentum?.state || "unknown";
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   const macdHistogram = coerceNumeric(filtersStatus?.macdHistogram ?? trendData?.macd?.histogram, 0);
-  const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.trend || "unknown";
+  const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.direction || trendData?.timeframes?.['1h']?.trend || "unknown";
+  const regimeTrendDirection = filtersStatus?.regimeTrendDirection || trendData?.masterRegime?.trendDirection || trend1h;
   
   const isLong = signalDirection.toLowerCase() === "long";
   const opposingDirection = isLong ? "bearish" : "bullish";
   
-  // Check bypass conditions
+  // ===== PHASE DETECTION =====
+  // Determine which phase this rejection belongs to based on momentum score extremity
+  const isPhase1Extreme = Math.abs(momentumScore) > 50; // Below -50 or above +50 = absolute block
+  const isPhase1Moderate = !isPhase1Extreme && Math.abs(momentumScore) > 20; // Between ±20 and ±50
+  const isPhase2 = !isPhase1Extreme && !isPhase1Moderate; // Score in ±20 range = MACD-based check
+  
+  // ===== PHASE 1 BYPASS: Early Trend Detection (1h Trend Agreement) =====
+  const expectedTrendDir = isLong ? "bullish" : "bearish";
+  const is1hTrendAligned = regimeTrendDirection?.toLowerCase() === expectedTrendDir;
+  
+  // ===== PHASE 2 BYPASS: MACD Weak OR Exceptional ADX =====
   const isWeakMomentum = Math.abs(macdHistogram) < 0.0001;
   const isExceptionalADX = adx >= 35;
-  const canBypass = isWeakMomentum || isExceptionalADX;
   
   // Momentum state styling
   const getMomentumStateColor = (state: string) => {
@@ -3693,6 +3707,19 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
     }
   };
   
+  // Phase badge color
+  const getPhaseColor = () => {
+    if (isPhase1Extreme) return 'bg-red-500/20 text-red-400 border-red-500/40';
+    if (isPhase1Moderate) return 'bg-orange-500/20 text-orange-400 border-orange-500/40';
+    return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40';
+  };
+  
+  const getPhaseName = () => {
+    if (isPhase1Extreme) return 'Phase 1: EXTREME';
+    if (isPhase1Moderate) return 'Phase 1: MODERATE';
+    return 'Phase 2: MACD Direction';
+  };
+  
   return (
     <div className="space-y-3 p-3 rounded-md border bg-orange-500/10 border-orange-500/30">
       <div className="flex items-center justify-between">
@@ -3702,14 +3729,21 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
             MOMENTUM DIRECTION OPPOSING
           </span>
         </div>
-        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-orange-500/20 text-orange-400">
-          {signalDirection.toUpperCase()} vs {opposingDirection.toUpperCase()} momentum
-        </Badge>
+        <div className="flex items-center gap-1.5">
+          <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${getPhaseColor()}`}>
+            {getPhaseName()}
+          </Badge>
+          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-orange-500/20 text-orange-400">
+            {signalDirection.toUpperCase()} vs {opposingDirection.toUpperCase()}
+          </Badge>
+        </div>
       </div>
       
       <div className="text-[10px] text-muted-foreground">
         Signal direction ({signalDirection.toUpperCase()}) conflicts with momentum direction ({momentumDirection}).
-        {canBypass ? " Bypass conditions may apply." : " Entry blocked."}
+        {isPhase1Extreme && " Extreme momentum score blocks all bypasses."}
+        {isPhase1Moderate && " Only 1h trend agreement can bypass this block."}
+        {isPhase2 && " MACD weakness or exceptional ADX may bypass."}
       </div>
       
       {/* Momentum Gauge */}
@@ -3732,18 +3766,24 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
           />
           {/* Center line */}
           <div className="absolute top-0 h-full w-0.5 bg-foreground/30" style={{ left: '50%' }} />
-          {/* Threshold lines */}
-          <div className="absolute top-0 h-full w-0.5 bg-yellow-400/40" style={{ left: '25%' }} title="-50" />
-          <div className="absolute top-0 h-full w-0.5 bg-yellow-400/40" style={{ left: '75%' }} title="+50" />
+          {/* Threshold lines: ±20 (moderate) and ±50 (extreme) */}
+          <div className="absolute top-0 h-full w-0.5 bg-orange-400/50" style={{ left: '40%' }} title="-20 (moderate)" />
+          <div className="absolute top-0 h-full w-0.5 bg-orange-400/50" style={{ left: '60%' }} title="+20 (moderate)" />
+          <div className="absolute top-0 h-full w-0.5 bg-red-400/60" style={{ left: '25%' }} title="-50 (extreme)" />
+          <div className="absolute top-0 h-full w-0.5 bg-red-400/60" style={{ left: '75%' }} title="+50 (extreme)" />
         </div>
         <div className="flex justify-between text-[8px] text-muted-foreground">
-          <span className="text-red-400">-100 (Bearish)</span>
-          <span>0 (Neutral)</span>
-          <span className="text-green-400">+100 (Bullish)</span>
+          <span className="text-red-400">-100</span>
+          <span className="text-red-400/70">-50</span>
+          <span className="text-orange-400/70">-20</span>
+          <span>0</span>
+          <span className="text-orange-400/70">+20</span>
+          <span className="text-green-400/70">+50</span>
+          <span className="text-green-400">+100</span>
         </div>
       </div>
       
-      {/* Context Grid - 4 columns now including Momentum State */}
+      {/* Context Grid - 4 columns including Momentum State */}
       <div className="grid grid-cols-4 gap-2 text-[10px]">
         <div className="p-2 rounded border bg-muted/30 text-center">
           <div className="text-muted-foreground">Direction</div>
@@ -3774,25 +3814,72 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
         </div>
       </div>
       
-      {/* Bypass conditions */}
-      <div className="space-y-1">
-        <div className="text-[10px] text-muted-foreground font-medium">Bypass Conditions:</div>
-        <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${isWeakMomentum ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-          {isWeakMomentum ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
-          <span>Very Weak MACD (|histogram| {"<"} 0.0001): </span>
-          <span className="font-mono">{Math.abs(macdHistogram).toFixed(5)}</span>
+      {/* Phase-Specific Bypass Conditions */}
+      <div className="space-y-1.5">
+        <div className="text-[10px] text-muted-foreground font-medium flex items-center gap-1.5">
+          Applicable Bypass Conditions
+          <Badge variant="outline" className={`text-[8px] px-1 py-0 ${getPhaseColor()}`}>
+            {getPhaseName()}
+          </Badge>
         </div>
-        <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${isExceptionalADX ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-          {isExceptionalADX ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
-          <span>Exceptional ADX (≥35): </span>
-          <span className="font-mono">{adx.toFixed(1)}</span>
-        </div>
+        
+        {isPhase1Extreme && (
+          <div className="p-2 rounded bg-red-500/10 border border-red-500/30">
+            <div className="flex items-center gap-1.5 text-[10px] text-red-400">
+              <Ban className="h-3.5 w-3.5" />
+              <span className="font-semibold">ABSOLUTE BLOCK - No Bypasses Available</span>
+            </div>
+            <div className="text-[9px] text-red-300/80 mt-1">
+              Momentum score {momentumScore > 0 ? '>' : '<'} {momentumScore > 0 ? '+50' : '-50'} is too extreme.
+              Even 1h trend agreement cannot override this level of opposing momentum.
+            </div>
+          </div>
+        )}
+        
+        {isPhase1Moderate && (
+          <div className="space-y-1">
+            <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${is1hTrendAligned ? 'bg-green-500/10 border border-green-500/30' : 'bg-red-500/10 border border-red-500/30'}`}>
+              {is1hTrendAligned ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+              <span>1H Trend Agreement ({expectedTrendDir}): </span>
+              <span className={`font-mono font-semibold ${is1hTrendAligned ? 'text-green-400' : 'text-red-400'}`}>
+                {regimeTrendDirection || 'neutral'}
+              </span>
+            </div>
+            {!is1hTrendAligned && (
+              <div className="text-[9px] text-muted-foreground pl-5">
+                If 1h trend were {expectedTrendDir}, entry would be allowed with 50-70% position size (Early Trend Detection).
+              </div>
+            )}
+            <div className="p-1.5 rounded bg-muted/20 text-[9px] text-muted-foreground border border-muted/30">
+              <span className="text-yellow-400">ℹ️</span> Phase 1 bypasses only check 1h trend alignment. 
+              MACD weakness and ADX strength do NOT apply at this momentum level.
+            </div>
+          </div>
+        )}
+        
+        {isPhase2 && (
+          <div className="space-y-1">
+            <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${isWeakMomentum ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+              {isWeakMomentum ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+              <span>Very Weak MACD (|histogram| {"<"} 0.0001): </span>
+              <span className="font-mono">{Math.abs(macdHistogram).toFixed(5)}</span>
+            </div>
+            <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${isExceptionalADX ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+              {isExceptionalADX ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+              <span>Exceptional ADX (≥35): </span>
+              <span className="font-mono">{adx.toFixed(1)}</span>
+            </div>
+          </div>
+        )}
       </div>
       
+      {/* Explanation Footer */}
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
         <span className="text-orange-400">⚠️ Why blocked:</span> Attempting {signalDirection.toUpperCase()} entry 
-        while momentum is {momentumDirection}. This gate prevents entries against the current momentum direction 
-        unless momentum is very weak or ADX is exceptionally strong (≥35).
+        while momentum score is {momentumScore.toFixed(0)} ({momentumDirection}).
+        {isPhase1Extreme && " Score beyond ±50 threshold cannot be bypassed by any condition."}
+        {isPhase1Moderate && ` Only 1h trend agreement (currently ${regimeTrendDirection || 'neutral'}) could allow entry with reduced position.`}
+        {isPhase2 && " Neither MACD weakness nor exceptional ADX conditions were met."}
       </div>
     </div>
   );

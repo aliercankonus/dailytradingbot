@@ -254,22 +254,45 @@ FUNCTION checkMomentumDirectionalSymmetry(derivedDirection, momentum, adx, atr, 
 
 ---
 
-## Exceptions
+## Exceptions (Phase-Specific)
 
-### Exception 1: Early Trend Detection
+### CRITICAL: Bypasses Are Phase-Specific
+
+The gate operates in two distinct phases with **different bypass conditions**:
+
+| Phase | Momentum Score | Available Bypasses |
+|-------|----------------|-------------------|
+| **Phase 1 Extreme** | < -50 or > +50 | **NONE** (absolute block) |
+| **Phase 1 Moderate** | -50 to -20 or +20 to +50 | 1h Trend Agreement only |
+| **Phase 2** | -20 to +20 (not neutral) | MACD weak OR ADX ≥ 35 |
+
+### Phase 1 Bypasses (Momentum Score Polarity)
+
+#### Exception 1: Early Trend Detection (Phase 1 Moderate ONLY)
+- **Applies to:** Momentum score between ±20 and ±50
 - **Trigger:** 1h trend direction agrees with trade direction
 - **Effect:** Allows entry with graduated position sizing (50%-70%)
-- **Limit:** Still blocks if momentum is extremely opposite (< -50 for LONG, > +50 for SHORT)
+- **Limit:** Does NOT apply if momentum < -50 or > +50 (absolute block)
 
-### Exception 2: Very Weak Momentum (MACD-based)
-- **Trigger:** |MACD histogram| < 0.0001
+> ⚠️ **IMPORTANT:** Phase 1 bypasses do NOT include MACD weakness or ADX strength.
+
+### Phase 2 Bypasses (MACD Direction Symmetry)
+
+These bypasses ONLY apply when momentum score is in the ±20 range but MACD direction opposes the trade.
+
+#### Exception 2: Very Weak Momentum (MACD-based)
+- **Applies to:** Phase 2 only (score between -20 and +20)
+- **Trigger:** |MACD histogram| < ATR × 0.0001 (normalized)
 - **Effect:** Allows entry (momentum too weak to matter)
 - **Rationale:** Near-zero MACD means no directional force
 
-### Exception 3: Exceptional ADX Override
-- **Trigger:** ADX >= 35
-- **Effect:** Allows entry despite opposing momentum
-- **Rationale:** Very strong trends override momentum direction
+#### Exception 3: Exceptional ADX Override  
+- **Applies to:** Phase 2 only (score between -20 and +20)
+- **Trigger:** ADX >= 35 AND momentum is NOT accelerating
+- **Effect:** Allows entry despite MACD direction conflict
+- **Rationale:** Very strong trends override weak directional conflicts
+
+> ⚠️ **ADX Override Restriction:** ADX >= 35 can override **neutral** momentum or **Phase 2 MACD conflicts**, but it CANNOT override **Phase 1 extreme momentum** (score beyond ±50).
 
 ---
 
