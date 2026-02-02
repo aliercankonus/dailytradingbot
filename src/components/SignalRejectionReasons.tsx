@@ -3814,18 +3814,79 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
   const stochRsiK = coerceNumeric(filtersStatus?.stochRsiK4h ?? filtersStatus?.stochRsiK ?? trendData?.stochasticRsi?.['4h']?.k, 50);
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   const adxSlope = coerceNumeric(filtersStatus?.adxSlope ?? trendData?.volatility?.adxSlope, 0);
-  const isHardBlock = priceDistancePercent >= 10;
-  const isSoftBlock = priceDistancePercent >= 5 && priceDistancePercent < 10;
   
-  // TERMINOLOGY FIX: Differentiate between hard block and soft reduction
+  // CRITICAL FIX: Use backend's moveZoneDetails for authoritative outcome
+  // The backend may block/reduce based on StochRSI and other factors, not just distance
+  const moveZoneDetails = filtersStatus?.moveZoneDetails;
+  const backendOutcome = moveZoneDetails?.outcome;
+  const backendZone = moveZoneDetails?.zone;
+  const backendMultiplier = coerceNumeric(moveZoneDetails?.positionMultiplier, 1);
+  const overrideReason = moveZoneDetails?.overrideReason;
+  
+  // Determine actual outcome from backend data (authoritative) or fallback to distance-based calculation
   const getExhaustionLevel = () => {
+    // If we have backend outcome, use it
+    if (backendOutcome) {
+      if (backendOutcome === 'BLOCKED') {
+        return { 
+          label: backendZone === 'HARD' ? "HARD BLOCK (≥10%)" : `${backendZone || 'SOFT'} ZONE - Override Blocked`, 
+          color: "text-red-400", 
+          bg: "bg-red-500/20", 
+          border: "border-red-500/30",
+          outcome: "BLOCKED",
+          outcomeLabel: "Entry Rejected",
+          isBlocked: true,
+          isReduced: false
+        };
+      }
+      if (backendOutcome === 'REDUCED' || backendMultiplier < 1) {
+        return { 
+          label: `${backendZone || 'SOFT'} ZONE (${(backendMultiplier * 100).toFixed(0)}% size)`, 
+          color: "text-yellow-400", 
+          bg: "bg-yellow-500/20", 
+          border: "border-yellow-500/30",
+          outcome: "SIZE_REDUCED",
+          outcomeLabel: `${(backendMultiplier * 100).toFixed(0)}% Size`,
+          isBlocked: false,
+          isReduced: true
+        };
+      }
+      if (backendOutcome === 'EXCEPTION_ALLOWED') {
+        return { 
+          label: "Exception Allowed", 
+          color: "text-blue-400", 
+          bg: "bg-blue-500/20", 
+          border: "border-blue-500/30",
+          outcome: "EXCEPTION",
+          outcomeLabel: `${(backendMultiplier * 100).toFixed(0)}% Size`,
+          isBlocked: false,
+          isReduced: backendMultiplier < 1
+        };
+      }
+      if (backendOutcome === 'ALLOWED') {
+        return { 
+          label: "Fresh Zone", 
+          color: "text-green-400", 
+          bg: "bg-green-500/10", 
+          border: "border-green-500/30",
+          outcome: "ALLOWED",
+          outcomeLabel: "Full Size",
+          isBlocked: false,
+          isReduced: false
+        };
+      }
+    }
+    
+    // Fallback: distance-based calculation (legacy compatibility)
     if (priceDistancePercent >= 10) return { 
       label: "HARD BLOCK (≥10%)", 
       color: "text-red-400", 
       bg: "bg-red-500/20", 
       border: "border-red-500/30",
       outcome: "BLOCKED",
-      outcomeLabel: "Entry Rejected"
+      outcomeLabel: "Entry Rejected",
+      isBlocked: true,
+      isReduced: false
     };
     if (priceDistancePercent >= 7) return { 
       label: "High Exhaustion (7-10%)", 
@@ -3833,7 +3894,9 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
       bg: "bg-orange-500/20", 
       border: "border-orange-500/30",
       outcome: "SIZE_REDUCED",
-      outcomeLabel: "0.35x Size"
+      outcomeLabel: "0.35x Size",
+      isBlocked: false,
+      isReduced: true
     };
     if (priceDistancePercent >= 5) return { 
       label: "Soft Exhaustion (5-7%)", 
@@ -3841,7 +3904,9 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
       bg: "bg-yellow-500/20", 
       border: "border-yellow-500/30",
       outcome: "SIZE_REDUCED",
-      outcomeLabel: "0.35x Size"
+      outcomeLabel: "0.35x Size",
+      isBlocked: false,
+      isReduced: true
     };
     return { 
       label: "Fresh Zone", 
@@ -3849,7 +3914,9 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
       bg: "bg-green-500/10", 
       border: "border-green-500/30",
       outcome: "ALLOWED",
-      outcomeLabel: "Full Size"
+      outcomeLabel: "Full Size",
+      isBlocked: false,
+      isReduced: false
     };
   };
   
@@ -3867,16 +3934,16 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
           </span>
         </div>
         <div className="flex items-center gap-1.5">
-          {/* Outcome Badge - clearly shows if blocked vs size reduced */}
+          {/* Outcome Badge - uses backend's authoritative outcome */}
           <Badge 
             variant="outline" 
             className={`text-[9px] px-1.5 py-0 ${
-              isHardBlock ? 'bg-red-500/20 text-red-400 border-red-500/40' : 
-              isSoftBlock ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40' :
+              exhaustionLevel.isBlocked ? 'bg-red-500/20 text-red-400 border-red-500/40' : 
+              exhaustionLevel.isReduced ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40' :
               'bg-green-500/20 text-green-400 border-green-500/40'
             }`}
           >
-            {isHardBlock ? '🚫 BLOCKED' : isSoftBlock ? '📉 SIZE REDUCED' : '✓ ALLOWED'}
+            {exhaustionLevel.isBlocked ? '🚫 BLOCKED' : exhaustionLevel.isReduced ? '📉 SIZE REDUCED' : '✓ ALLOWED'}
           </Badge>
           <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${exhaustionLevel.color}`}>
             {exhaustionLevel.label}
@@ -3886,13 +3953,21 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
       
       <div className="text-[10px] text-muted-foreground">
         Price has moved {priceDistancePercent.toFixed(1)}% from {swingLabel}. 
-        {isHardBlock 
+        {exhaustionLevel.isBlocked 
           ? " Entry is rejected due to extreme move exhaustion." 
-          : isSoftBlock 
-            ? " Entry allowed at reduced size (0.35x) due to late-cycle risk."
+          : exhaustionLevel.isReduced 
+            ? ` Entry allowed at reduced size (${exhaustionLevel.outcomeLabel}) due to late-cycle risk.`
             : " Move within acceptable range for full position."
         }
       </div>
+      
+      {/* Override Reason Display - Shows StochRSI or other blocking factors */}
+      {overrideReason && (
+        <div className="text-[10px] p-2 rounded border bg-amber-500/10 border-amber-500/30 text-amber-400">
+          <AlertTriangle className="h-3 w-3 inline mr-1" />
+          <span className="font-medium">Override blocked:</span> {overrideReason}
+        </div>
+      )}
       
       {/* Exhaustion Progress */}
       <div className="space-y-1.5">
@@ -3946,17 +4021,19 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
         </div>
       </div>
       
-      {/* TERMINOLOGY FIX: Dynamic label based on outcome */}
+      {/* Dynamic assessment based on backend outcome */}
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
         <span className={exhaustionLevel.color}>
-          {isHardBlock ? '🚫 Why rejected:' : isSoftBlock ? '📉 Why size reduced:' : 'ℹ️ Assessment:'}
+          {exhaustionLevel.isBlocked ? '🚫 Why rejected:' : exhaustionLevel.isReduced ? '📉 Why size reduced:' : 'ℹ️ Assessment:'}
         </span>{' '}
         Price has already moved {priceDistancePercent.toFixed(1)}% from {swingLabel}
         {swingPrice > 0 ? ` ($${swingPrice.toFixed(2)})` : ''}.
-        {isHardBlock 
-          ? ` Moves ≥10% indicate extreme exhaustion with minimal remaining runway. Entry rejected to prevent late chase.`
-          : isSoftBlock
-            ? ` Moves 5-10% indicate late-cycle risk. Entry allowed at 0.35x position size to limit exposure while capturing potential continuation.`
+        {exhaustionLevel.isBlocked 
+          ? overrideReason 
+            ? ` ${overrideReason}. Entry rejected despite distance being within fresh zone.`
+            : ` Moves ≥10% indicate extreme exhaustion with minimal remaining runway. Entry rejected to prevent late chase.`
+          : exhaustionLevel.isReduced
+            ? ` Moves in soft zone indicate late-cycle risk. Entry allowed at ${exhaustionLevel.outcomeLabel} to limit exposure while capturing potential continuation.`
             : ` Move is within fresh zone. Full position size permitted.`
         }
       </div>
