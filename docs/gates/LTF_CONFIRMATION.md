@@ -45,7 +45,8 @@ START
 |--------------|---------------|--------|
 | Both aligned | 100% | Normal entry |
 | One aligned, one neutral | 70% | Reduced position |
-| Both neutral | 35% | Probe only |
+| Both neutral | 25% | Probe only (tightened from 35%) |
+| Both neutral + momentum opposing | 0% | Block entry |
 | Either counter-aligned | 0% | Block entry |
 
 ## Configuration
@@ -59,9 +60,12 @@ LTF_CONFIRMATION_GATE = {
   SIZING: {
     FULL_ALIGNMENT: 1.0,      // Both LTF aligned
     PARTIAL_ALIGNMENT: 0.70,  // One LTF aligned
-    NO_ALIGNMENT: 0.35,       // Both neutral = probe only
+    NO_ALIGNMENT: 0.25,       // Both neutral = probe only (TIGHTENED from 0.35)
     COUNTER_ALIGNMENT_BLOCK: true, // Block if LTF opposes
-  }
+  },
+  // NEW: Block entirely when both LTF neutral AND momentum opposing
+  BLOCK_WHEN_MOMENTUM_ALSO_OPPOSING: true,
+  MOMENTUM_OPPOSING_THRESHOLD: 15,  // |score| > 15 = opposing
 }
 ```
 
