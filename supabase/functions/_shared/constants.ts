@@ -3125,6 +3125,14 @@ export const BIAS_RESOLUTION_TIER = {
   STOCHRSI_EXTREME_K_LOW: 10,         // K <= 10 = bullish bias
   STOCHRSI_EXTREME_SCORE: 1,
   
+  // ===== ABSOLUTE STOCHRSI EXTREME (K >= 98 or K <= 2) =====
+  // Counts as 2 evidence points instead of 1 when ADX is not in strong trend
+  // This allows single-evidence resolution during impulse extremes
+  STOCHRSI_ABSOLUTE_EXTREME_K_HIGH: 98,   // K >= 98 = absolute overbought
+  STOCHRSI_ABSOLUTE_EXTREME_K_LOW: 2,     // K <= 2 = absolute oversold
+  STOCHRSI_ABSOLUTE_EXTREME_SCORE: 2,     // Counts as 2 evidence points
+  STOCHRSI_ABSOLUTE_EXTREME_MAX_ADX: 30,  // Only boost if ADX < this (not strong trend)
+  
   // ===== ORDER FLOW EVIDENCE =====
   ORDER_FLOW_MIN_SCORE: 60,           // Order flow score >= 60 = valid evidence
   ORDER_FLOW_EVIDENCE_SCORE: 1,
@@ -4823,6 +4831,17 @@ export const EXHAUSTION_REVERSAL_OVERRIDE_PARAMS = {
   // StochRSI 4h K thresholds for exhaustion detection
   LONG_K_THRESHOLD: 10,           // K <= 10 for LONG override (deep oversold)
   SHORT_K_THRESHOLD: 90,          // K >= 90 for SHORT override (deep overbought)
+  
+  // ===== ABSOLUTE EXTREME STOCHRSI (K >= 98 or K <= 2) =====
+  // When K is at absolute statistical extreme, allow exhaustion override in EARLY_TREND regime
+  // This addresses the regime-exhaustion coupling error where exhaustion can occur BEFORE
+  // ADX reaches full EXHAUSTION classification
+  ABSOLUTE_EXTREME_ENABLED: true,
+  ABSOLUTE_EXTREME_K_HIGH: 98,    // K >= 98 = absolute overbought (SHORT)
+  ABSOLUTE_EXTREME_K_LOW: 2,      // K <= 2 = absolute oversold (LONG)
+  ABSOLUTE_EXTREME_MAX_ADX: 22,   // Only in early trend (ADX < 22)
+  ABSOLUTE_EXTREME_MAX_SLOPE: 0.15, // Momentum slope must be flattening (< 0.15)
+  ABSOLUTE_EXTREME_POSITION_MULT: 0.30, // 30% position for early-trend exhaustion
   
   // ===== BOLLINGER %B THRESHOLDS =====
   // Price position relative to Bollinger Bands

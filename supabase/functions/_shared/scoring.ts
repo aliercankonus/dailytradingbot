@@ -2952,12 +2952,36 @@ export const deriveTradeDirection = (
   // When market is at extreme exhaustion (deep oversold/overbought), override direction
   // This captures bounce setups that lagging trend labels miss
   // TIGHTENED: Now requires regime ∈ {EXHAUSTION, RANGE} AND HTF weakening (conf4h < 60% AND conf1h < 55%)
+  // EXCEPTION: Absolute extreme StochRSI (K >= 98 or K <= 2) can bypass regime gate in EARLY_TREND
   if (EXHAUSTION_REVERSAL_OVERRIDE_PARAMS.ENABLED) {
     const ER = EXHAUSTION_REVERSAL_OVERRIDE_PARAMS;
     
+    // Get 4h StochRSI K value early for absolute extreme check
+    const stochK4hEarly = trendData.stochasticRsi?.['4h']?.k ?? 
+                     trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
+    const adxValueEarly = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 25;
+    const momentumSlopeEarly = trendData.smartMomentum?.components?.macdSlope ?? 
+                               trendData.momentum?.macdSlope ?? 0;
+    
+    // ===== NEW: ABSOLUTE EXTREME STOCHRSI BYPASS =====
+    // When K is at absolute statistical extreme (K >= 98 or K <= 2), 
+    // allow exhaustion override even in EARLY_TREND regime
+    // This addresses the regime-exhaustion coupling error
+    const isAbsoluteOverbought = stochK4hEarly >= (ER.ABSOLUTE_EXTREME_K_HIGH ?? 98);
+    const isAbsoluteOversold = stochK4hEarly <= (ER.ABSOLUTE_EXTREME_K_LOW ?? 2);
+    const isAbsoluteExtreme = isAbsoluteOverbought || isAbsoluteOversold;
+    const adxAllowsAbsoluteExtreme = adxValueEarly < (ER.ABSOLUTE_EXTREME_MAX_ADX ?? 22);
+    const slopeAllowsAbsoluteExtreme = Math.abs(momentumSlopeEarly) < (ER.ABSOLUTE_EXTREME_MAX_SLOPE ?? 0.15);
+    
+    const absoluteExtremeBypass = (ER.ABSOLUTE_EXTREME_ENABLED ?? true) && 
+                                   isAbsoluteExtreme && 
+                                   adxAllowsAbsoluteExtreme && 
+                                   slopeAllowsAbsoluteExtreme &&
+                                   regime === 'EARLY_TREND';
+    
     // ===== TIER 0.25 TIGHTENING: REGIME GATE =====
     // Only allow exhaustion reversal in EXHAUSTION or RANGE regimes
-    // This prevents premature exhaustion entries in strong trends
+    // EXCEPTION: Absolute extreme can bypass in EARLY_TREND
     const regimeAllowsExhaustionReversal = regime === 'EXHAUSTION' || regime === 'RANGE';
     
     // ===== TIER 0.25 TIGHTENING: HTF WEAKENING GATE =====
@@ -2967,20 +2991,35 @@ export const deriveTradeDirection = (
     const TIER025_HTF_WEAKENING_1H = 55;  // 1h confidence must be below this
     const htfIsWeakening = conf4h < TIER025_HTF_WEAKENING_4H && conf1h < TIER025_HTF_WEAKENING_1H;
     
-    // Combined gate: both regime and HTF weakening must pass
-    const tier025GatePasses = regimeAllowsExhaustionReversal && htfIsWeakening;
+    // Combined gate: (regime AND HTF weakening) OR absolute extreme bypass
+    const tier025GatePasses = (regimeAllowsExhaustionReversal && htfIsWeakening) || absoluteExtremeBypass;
     
     if (!tier025GatePasses) {
       // Log skip reason for debugging
-      if (!regimeAllowsExhaustionReversal) {
-        reasons.push(`TIER 0.25 BLOCKED: regime=${regime} ∉ {EXHAUSTION, RANGE} - exhaustion reversal requires weak regime`);
-      } else if (!htfIsWeakening) {
+      if (!regimeAllowsExhaustionReversal && !absoluteExtremeBypass) {
+        if (isAbsoluteExtreme) {
+          // Explain why absolute extreme bypass didn't work
+          const bypassBlockReasons: string[] = [];
+          if (!adxAllowsAbsoluteExtreme) bypassBlockReasons.push(`ADX=${adxValueEarly.toFixed(1)} >= ${ER.ABSOLUTE_EXTREME_MAX_ADX ?? 22}`);
+          if (!slopeAllowsAbsoluteExtreme) bypassBlockReasons.push(`slope=${Math.abs(momentumSlopeEarly).toFixed(2)} >= ${ER.ABSOLUTE_EXTREME_MAX_SLOPE ?? 0.15}`);
+          reasons.push(`TIER 0.25 BLOCKED: regime=${regime} ∉ {EXHAUSTION, RANGE}, absolute extreme bypass failed (${bypassBlockReasons.join(', ')})`);
+        } else {
+          reasons.push(`TIER 0.25 BLOCKED: regime=${regime} ∉ {EXHAUSTION, RANGE} - exhaustion reversal requires weak regime`);
+        }
+      } else if (!htfIsWeakening && !absoluteExtremeBypass) {
         reasons.push(`TIER 0.25 BLOCKED: HTF not weakening (4h=${conf4h.toFixed(0)}% >= ${TIER025_HTF_WEAKENING_4H} OR 1h=${conf1h.toFixed(0)}% >= ${TIER025_HTF_WEAKENING_1H})`);
       }
     }
     
+    // Log absolute extreme bypass activation
+    if (absoluteExtremeBypass) {
+      reasons.push(`TIER 0.25 ABSOLUTE EXTREME BYPASS: K=${stochK4hEarly.toFixed(0)} (${isAbsoluteOverbought ? 'overbought' : 'oversold'}), ADX=${adxValueEarly.toFixed(1)}, slope=${momentumSlopeEarly.toFixed(2)} in ${regime}`);
+    }
+    
     // Only proceed with exhaustion reversal if tightened gates pass
     if (tier025GatePasses) {
+      // Position size modifier for absolute extreme bypass (more conservative)
+      const absoluteExtremePositionMult = ER.ABSOLUTE_EXTREME_POSITION_MULT ?? 0.30;
       // Get 4h StochRSI K value
       const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 
                        trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
@@ -3824,6 +3863,9 @@ export const deriveTradeDirection = (
     let biasDirection: TradeDirection | null = null;
     let biasScore = 0;
     
+    // Get ADX for absolute extreme gating
+    const tier95Adx = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 25;
+    
     // Evidence 1: Micro-direction (8+ consecutive bars)
     const consecutiveBars = trendData.momentum?.consecutiveBars || 
                            trendData.priceActionMomentum?.consecutiveBars || 0;
@@ -3838,12 +3880,32 @@ export const deriveTradeDirection = (
     }
     
     // Evidence 2: StochRSI extreme (K >= 90 or K <= 10)
+    // NEW: Absolute extreme (K >= 98 or K <= 2) counts as 2 points when ADX < strong trend
     const stochK4h = extractStochRsiK(trendData, '4h');
-    if (stochK4h >= (BR.STOCHRSI_EXTREME_K_HIGH || 90)) {
+    const absoluteExtremeHigh = BR.STOCHRSI_ABSOLUTE_EXTREME_K_HIGH ?? 98;
+    const absoluteExtremeLow = BR.STOCHRSI_ABSOLUTE_EXTREME_K_LOW ?? 2;
+    const absoluteExtremeMaxAdx = BR.STOCHRSI_ABSOLUTE_EXTREME_MAX_ADX ?? 30;
+    const absoluteExtremeScore = BR.STOCHRSI_ABSOLUTE_EXTREME_SCORE ?? 2;
+    
+    // Check for absolute extreme (K >= 98 or K <= 2 with ADX check)
+    const isAbsoluteOverbought = stochK4h >= absoluteExtremeHigh && tier95Adx < absoluteExtremeMaxAdx;
+    const isAbsoluteOversold = stochK4h <= absoluteExtremeLow && tier95Adx < absoluteExtremeMaxAdx;
+    
+    if (isAbsoluteOverbought) {
+      biasScore += absoluteExtremeScore;  // 2 points for absolute extreme
+      if (!biasDirection) biasDirection = "short";
+      biasEvidence.push(`STOCHRSI_ABSOLUTE_OVERBOUGHT(K=${stochK4h.toFixed(0)} >= ${absoluteExtremeHigh}, ADX=${tier95Adx.toFixed(1)} < ${absoluteExtremeMaxAdx})`);
+    } else if (isAbsoluteOversold) {
+      biasScore += absoluteExtremeScore;  // 2 points for absolute extreme
+      if (!biasDirection) biasDirection = "long";
+      biasEvidence.push(`STOCHRSI_ABSOLUTE_OVERSOLD(K=${stochK4h.toFixed(0)} <= ${absoluteExtremeLow}, ADX=${tier95Adx.toFixed(1)} < ${absoluteExtremeMaxAdx})`);
+    } else if (stochK4h >= (BR.STOCHRSI_EXTREME_K_HIGH || 90)) {
+      // Standard overbought (K >= 90 but < 98) = 1 point
       biasScore += BR.STOCHRSI_EXTREME_SCORE || 1;
       if (!biasDirection) biasDirection = "short";
       biasEvidence.push(`STOCHRSI_OVERBOUGHT(K=${stochK4h.toFixed(0)})`);
     } else if (stochK4h <= (BR.STOCHRSI_EXTREME_K_LOW || 10)) {
+      // Standard oversold (K <= 10 but > 2) = 1 point
       biasScore += BR.STOCHRSI_EXTREME_SCORE || 1;
       if (!biasDirection) biasDirection = "long";
       biasEvidence.push(`STOCHRSI_OVERSOLD(K=${stochK4h.toFixed(0)})`);
