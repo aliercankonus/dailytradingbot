@@ -2549,7 +2549,7 @@ export interface DirectionResult {
   trend30mAligned?: boolean;           // 30m trend aligned with order flow direction
   alignmentStatus?: "blocked" | "neutral" | "full";  // 30m alignment status for analytics
   // ===== PHASE 3 ADDITIONS: MOMENTUM WEIGHT =====
-  momentumImpact?: 'aligned' | 'weak_opposing' | 'strong_opposing' | 'neutral';  // How momentum affected derivation
+  momentumImpact?: 'aligned' | 'weak_opposing' | 'strong_opposing' | 'very_strong_opposing' | 'extreme_opposing' | 'neutral';  // How momentum affected derivation
   momentumScore?: number;              // Raw momentum score at derivation time
   // ===== DIRECTION CONTEXT (Orchestration) =====
   directionContext?: DirectionContext; // Centralized direction rationale for traceability
@@ -2589,6 +2589,64 @@ export const classifyDirectionRegime = (
   
   // Range
   return { regime: 'RANGE', config: P.RANGE as RegimeConfig };
+};
+
+// ============= GRADUATED MOMENTUM PENALTY HELPER =============
+// Scales penalty with momentum magnitude: extreme (+100) gets 4x penalty vs strong (+15)
+type MomentumTier = 'aligned' | 'weak_opposing' | 'strong_opposing' | 'very_strong_opposing' | 'extreme_opposing' | 'neutral';
+
+interface GraduatedPenaltyResult {
+  penalty: number;
+  confidenceReduction: number;
+  positionMultiplier: number;
+  tier: MomentumTier;
+}
+
+const calculateGraduatedMomentumPenalty = (
+  absMomentum: number,
+  P: typeof DIRECTION_DERIVATION_PARAMS
+): GraduatedPenaltyResult => {
+  const basePenalty = P.MOMENTUM_STRONG_OPPOSING_PENALTY;
+  const baseConfReduction = P.MOMENTUM_CONFIDENCE_REDUCTION_STRONG;
+  const basePosMult = P.MOMENTUM_POSITION_REDUCTION_STRONG;
+  
+  // Check if graduated penalty is enabled
+  if (!P.GRADUATED_MOMENTUM_PENALTY_ENABLED) {
+    return {
+      penalty: basePenalty,
+      confidenceReduction: baseConfReduction,
+      positionMultiplier: basePosMult,
+      tier: 'strong_opposing'
+    };
+  }
+  
+  // EXTREME: |momentum| >= 50 (e.g., +100 during 5% bounce)
+  if (absMomentum >= (P.MOMENTUM_EXTREME_THRESHOLD || 50)) {
+    return {
+      penalty: basePenalty * (P.MOMENTUM_EXTREME_PENALTY_MULTIPLIER || 4.0),
+      confidenceReduction: Math.min(50, baseConfReduction * (P.MOMENTUM_EXTREME_CONFIDENCE_MULTIPLIER || 3.0)),
+      positionMultiplier: P.MOMENTUM_EXTREME_POSITION_MULTIPLIER || 0.30,
+      tier: 'extreme_opposing'
+    };
+  }
+  
+  // VERY STRONG: |momentum| >= 30
+  if (absMomentum >= (P.MOMENTUM_VERY_STRONG_THRESHOLD || 30)) {
+    return {
+      penalty: basePenalty * (P.MOMENTUM_VERY_STRONG_PENALTY_MULTIPLIER || 2.5),
+      confidenceReduction: Math.min(40, baseConfReduction * (P.MOMENTUM_VERY_STRONG_CONFIDENCE_MULTIPLIER || 2.0)),
+      positionMultiplier: P.MOMENTUM_VERY_STRONG_POSITION_MULTIPLIER || 0.50,
+      tier: 'very_strong_opposing'
+    };
+  }
+  
+  // STRONG: |momentum| >= 15 (base level, with 1.5x multiplier for safety margin)
+  return {
+    penalty: basePenalty * (P.MOMENTUM_STRONG_PENALTY_MULTIPLIER || 1.5),
+    confidenceReduction: baseConfReduction,
+    positionMultiplier: basePosMult,
+    tier: 'strong_opposing'
+  };
 };
 
 export const deriveTradeDirection = (
@@ -2725,7 +2783,7 @@ export const deriveTradeDirection = (
     // This prevents deriving LONG when momentum is strongly bearish (-22)
     const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
     let momentumAdjustment = 0;
-    let momentumImpact: 'aligned' | 'weak_opposing' | 'strong_opposing' | 'neutral' = 'neutral';
+    let momentumImpact: MomentumTier = 'neutral';
     let momentumConfidenceReduction = 0;
     let momentumPositionMultiplier = 1.0;
     
@@ -2740,11 +2798,16 @@ export const deriveTradeDirection = (
           momentumAdjustment = P.MOMENTUM_ALIGNMENT_BONUS;
           momentumImpact = 'aligned';
         } else if (momentumScore <= P.MOMENTUM_STRONG_OPPOSING_THRESHOLD) {
-          // Strongly opposing momentum (e.g., -22 < -15)
-          momentumAdjustment = -P.MOMENTUM_STRONG_OPPOSING_PENALTY;
-          momentumImpact = 'strong_opposing';
-          momentumConfidenceReduction = P.MOMENTUM_CONFIDENCE_REDUCTION_STRONG;
-          momentumPositionMultiplier = P.MOMENTUM_POSITION_REDUCTION_STRONG;
+          // Strongly opposing momentum - apply GRADUATED penalty based on magnitude
+          const absMomentum = Math.abs(momentumScore);
+          const graduatedResult = calculateGraduatedMomentumPenalty(absMomentum, P);
+          
+          momentumAdjustment = -graduatedResult.penalty;
+          momentumImpact = graduatedResult.tier;
+          momentumConfidenceReduction = graduatedResult.confidenceReduction;
+          momentumPositionMultiplier = graduatedResult.positionMultiplier;
+          
+          reasons.push(`GRADUATED MOMENTUM: |${momentumScore.toFixed(0)}| → ${graduatedResult.tier} (penalty=${graduatedResult.penalty.toFixed(2)}, conf-${graduatedResult.confidenceReduction}%, pos=${(graduatedResult.positionMultiplier * 100).toFixed(0)}%)`);
         } else if (momentumScore <= P.MOMENTUM_WEAK_OPPOSING_THRESHOLD) {
           // Weakly opposing momentum (e.g., -8 < -5)
           momentumAdjustment = -P.MOMENTUM_WEAK_OPPOSING_PENALTY;
@@ -2759,11 +2822,16 @@ export const deriveTradeDirection = (
           momentumAdjustment = P.MOMENTUM_ALIGNMENT_BONUS;
           momentumImpact = 'aligned';
         } else if (momentumScore >= -P.MOMENTUM_STRONG_OPPOSING_THRESHOLD) {
-          // Strongly opposing momentum for SHORT (positive momentum)
-          momentumAdjustment = -P.MOMENTUM_STRONG_OPPOSING_PENALTY;
-          momentumImpact = 'strong_opposing';
-          momentumConfidenceReduction = P.MOMENTUM_CONFIDENCE_REDUCTION_STRONG;
-          momentumPositionMultiplier = P.MOMENTUM_POSITION_REDUCTION_STRONG;
+          // Strongly opposing momentum for SHORT - apply GRADUATED penalty
+          const absMomentum = Math.abs(momentumScore);
+          const graduatedResult = calculateGraduatedMomentumPenalty(absMomentum, P);
+          
+          momentumAdjustment = -graduatedResult.penalty;
+          momentumImpact = graduatedResult.tier;
+          momentumConfidenceReduction = graduatedResult.confidenceReduction;
+          momentumPositionMultiplier = graduatedResult.positionMultiplier;
+          
+          reasons.push(`GRADUATED MOMENTUM: |${momentumScore.toFixed(0)}| → ${graduatedResult.tier} (penalty=${graduatedResult.penalty.toFixed(2)}, conf-${graduatedResult.confidenceReduction}%, pos=${(graduatedResult.positionMultiplier * 100).toFixed(0)}%)`);
         } else if (momentumScore >= -P.MOMENTUM_WEAK_OPPOSING_THRESHOLD) {
           // Weakly opposing momentum for SHORT
           momentumAdjustment = -P.MOMENTUM_WEAK_OPPOSING_PENALTY;
