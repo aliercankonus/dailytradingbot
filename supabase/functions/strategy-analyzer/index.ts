@@ -3180,6 +3180,10 @@ serve(async (req) => {
               reasons: directionResult.reasons,
               // Include DirectionContext for UI visualization
               directionContext: directionResult.directionContext || null,
+              // ===== GRADUATED MOMENTUM PENALTY DIAGNOSTICS =====
+              graduatedMomentumEffect: directionResult.graduatedMomentumEffect || null,
+              momentumImpact: directionResult.momentumImpact || null,
+              momentumScore: directionResult.momentumScore ?? null,
               trend4h: htfTrend4h,
               trend1h: htfTrend1h,
               primaryTrend: trend,

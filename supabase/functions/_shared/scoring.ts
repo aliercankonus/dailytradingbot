@@ -2697,6 +2697,20 @@ export const deriveTradeDirection = (
   const regimeTier1Threshold = regimeConfig.relaxTier1Threshold;
   const suppressStochRSI = regimeConfig.suppressStochImportance;
   
+  // ============= OUTER SCOPE: GRADUATED MOMENTUM EFFECT TRACKING =============
+  // These are populated inside weighted derivation but used in final NO_CLEAR_DIRECTION return
+  let outerGraduatedMomentumEffect: {
+    directionFlipped: boolean;
+    directionNullified: boolean;
+    baseDirection: 'long' | 'short' | null;
+    adjustedDirection: 'long' | 'short' | null;
+    baseWeightedSum: number;
+    adjustedWeightedSum: number;
+    penaltyApplied: number;
+  } | undefined = undefined;
+  let outerMomentumImpact: 'aligned' | 'weak_opposing' | 'strong_opposing' | 'very_strong_opposing' | 'extreme_opposing' | 'neutral' | undefined = undefined;
+  let outerMomentumScore: number | undefined = undefined;
+  
   // ============= NEW: PHASE 1 WEIGHTED DIRECTION DERIVATION =============
   // Instead of requiring one strong timeframe, use weighted sum of all timeframes
   // This relaxes the NO_CLEAR_DIRECTION gate significantly
@@ -2900,6 +2914,20 @@ export const deriveTradeDirection = (
       reasons.push(`🚫 GRADUATED MOMENTUM NULLIFIED DIRECTION: |${baseWeightedSum.toFixed(2)}| → |${weightedSum.toFixed(2)}| < threshold ${effectiveThreshold.toFixed(2)}`);
       reasons.push(`   ⚠️ Counter-momentum score |${momentumScore.toFixed(0)}| prevented ${baseDirection?.toUpperCase() || 'unknown'} derivation`);
     }
+    
+    // ============= STORE GRADUATED MOMENTUM EFFECT FOR OUTER SCOPE =============
+    // This enables NO_CLEAR_DIRECTION returns to include momentum penalty diagnostics
+    outerGraduatedMomentumEffect = {
+      directionFlipped,
+      directionNullified,
+      baseDirection,
+      adjustedDirection,
+      baseWeightedSum,
+      adjustedWeightedSum: weightedSum,
+      penaltyApplied: momentumAdjustment,
+    };
+    outerMomentumImpact = momentumImpact;
+    outerMomentumScore = momentumScore;
     
     // If weighted sum exceeds threshold, derive direction
     if (Math.abs(weightedSum) >= effectiveThreshold) {
@@ -4420,6 +4448,10 @@ export const deriveTradeDirection = (
     source: "none", 
     reasons,
     regime,
+    // ===== INCLUDE GRADUATED MOMENTUM EFFECT DIAGNOSTICS =====
+    graduatedMomentumEffect: outerGraduatedMomentumEffect,
+    momentumImpact: outerMomentumImpact,
+    momentumScore: outerMomentumScore,
     directionContext: createDirectionContext(null, {
       evidenceType: 'NONE',
       tier: 12,
