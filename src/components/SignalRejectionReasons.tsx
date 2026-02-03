@@ -3360,31 +3360,75 @@ const HighAdx1hConfirmationDisplay = ({ filtersStatus, trendData }: { filtersSta
   const positionMultiplier = coerceNumeric(filtersStatus?.positionMultiplier ?? filtersStatus?.multiplier, 1);
   const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
   
+  // Determine actual outcome
+  const isHardBlock = positionMultiplier <= 0 || filtersStatus?.blocked === true;
+  const isSizeReduced = !isHardBlock && positionMultiplier < 1;
+  const isAllowed = !isHardBlock && positionMultiplier >= 1;
+  
   const is1hNeutral = trend1h.toLowerCase() === "neutral" || trend1h.toLowerCase() === "ranging";
+  const is1hAligned = (direction.toLowerCase() === "long" && trend1h.toLowerCase() === "bullish") ||
+                      (direction.toLowerCase() === "short" && trend1h.toLowerCase() === "bearish");
   const is30mAligned = trend30m.toLowerCase() === direction.toLowerCase() || 
                        (direction === "long" && trend30m.toLowerCase() === "bullish") ||
                        (direction === "short" && trend30m.toLowerCase() === "bearish");
   const has30mException = is1hNeutral && is30mAligned;
   
+  // Gate only relevant when ADX >= 55 AND 1h is neutral
+  const gateConditionsMet = adx >= 55 && is1hNeutral;
+  
+  // Color scheme based on outcome
+  const outcomeColors = isHardBlock 
+    ? { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', icon: 'text-red-500' }
+    : isSizeReduced
+    ? { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', icon: 'text-amber-500' }
+    : { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', icon: 'text-green-500' };
+  
+  // Header description based on actual conditions
+  const getHeaderDescription = () => {
+    if (isAllowed) {
+      if (is1hAligned) {
+        return "1h timeframe confirms the trade direction. Full position size permitted.";
+      }
+      if (adx < 55) {
+        return "ADX below high threshold (55). Standard confirmation rules apply.";
+      }
+      return "LTF confirmation conditions met. Full position size permitted.";
+    }
+    if (isSizeReduced) {
+      if (gateConditionsMet) {
+        return "ADX is strong (≥55) but 1h timeframe hasn't confirmed the move yet - a key BE pattern.";
+      }
+      return "Position size reduced based on confirmation status.";
+    }
+    return "Entry blocked due to missing LTF confirmation with high ADX.";
+  };
+  
   return (
-    <div className="space-y-3 p-3 rounded-md border bg-amber-500/10 border-amber-500/30">
+    <div className={`space-y-3 p-3 rounded-md border ${outcomeColors.bg} ${outcomeColors.border}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <Timer className={`h-4 w-4 text-amber-500`} />
-          <span className="text-xs font-semibold text-amber-400">
-            HIGH ADX 1H CONFIRMATION GATE
+          {isAllowed ? (
+            <CheckCircle2 className={`h-4 w-4 ${outcomeColors.icon}`} />
+          ) : (
+            <Timer className={`h-4 w-4 ${outcomeColors.icon}`} />
+          )}
+          <span className={`text-xs font-semibold ${outcomeColors.text}`}>
+            HIGH ADX 1H CONFIRMATION {isAllowed ? "– ALLOWED" : "GATE"}
           </span>
           <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30">
             BE Prevention
           </Badge>
         </div>
-        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-          📉 {(positionMultiplier * 100).toFixed(0)}% Size
+        <Badge 
+          variant={isHardBlock ? "destructive" : "secondary"} 
+          className={`text-[10px] px-1.5 py-0 ${isAllowed ? 'bg-green-500/20 text-green-400' : ''}`}
+        >
+          {isHardBlock ? "🚫 BLOCKED" : isAllowed ? "✓ 100% Size" : `📉 ${(positionMultiplier * 100).toFixed(0)}% Size`}
         </Badge>
       </div>
       
       <div className="text-[10px] text-muted-foreground">
-        ADX is strong (≥55) but 1h timeframe hasn't confirmed the move yet - a key BE pattern.
+        {getHeaderDescription()}
       </div>
       
       {/* Confirmation Status */}
@@ -3398,13 +3442,13 @@ const HighAdx1hConfirmationDisplay = ({ filtersStatus, trendData }: { filtersSta
             {adx >= 55 ? "Strong" : "Below Threshold"}
           </div>
         </div>
-        <div className={`p-2 rounded border text-center ${is1hNeutral ? 'bg-yellow-500/20 border-yellow-500/30' : 'bg-green-500/20 border-green-500/30'}`}>
+        <div className={`p-2 rounded border text-center ${is1hAligned ? 'bg-green-500/20 border-green-500/30' : is1hNeutral ? 'bg-yellow-500/20 border-yellow-500/30' : 'bg-red-500/20 border-red-500/30'}`}>
           <div className="text-[10px] text-muted-foreground">1h Trend</div>
-          <div className={`text-sm font-bold ${is1hNeutral ? 'text-yellow-400' : 'text-green-400'}`}>
+          <div className={`text-sm font-bold ${is1hAligned ? 'text-green-400' : is1hNeutral ? 'text-yellow-400' : 'text-red-400'}`}>
             {trend1h}
           </div>
           <div className="text-[9px] text-muted-foreground">
-            {is1hNeutral ? "⚠️ Not Confirmed" : "✓ Confirmed"}
+            {is1hAligned ? "✓ Confirmed" : is1hNeutral ? "⚠️ Neutral" : "✗ Opposing"}
           </div>
         </div>
         <div className={`p-2 rounded border text-center ${is30mAligned ? 'bg-green-500/20 border-green-500/30' : 'bg-muted/30 border-muted/50'}`}>
@@ -3418,17 +3462,37 @@ const HighAdx1hConfirmationDisplay = ({ filtersStatus, trendData }: { filtersSta
         </div>
       </div>
       
-      {/* Exception Note */}
-      {has30mException && (
+      {/* Exception Note - only when applicable */}
+      {has30mException && isSizeReduced && (
         <div className="flex items-center gap-1.5 p-1.5 bg-blue-500/20 rounded text-[10px] text-blue-400">
           <Info className="h-3 w-3" />
           <span>30m Exception: 30m trend aligned → position allowed at 60% instead of 40%</span>
         </div>
       )}
       
+      {/* Contextual Assessment */}
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
-        <span className="text-amber-400">📉 Why size reduced:</span>
-        {` 83% of BE trades with high ADX had 1h = neutral. This is an HTF-only entry before LTF ignition. Position sized at ${(positionMultiplier * 100).toFixed(0)}% to reduce BE risk.`}
+        {isHardBlock ? (
+          <>
+            <span className="text-red-400">🚫 Why rejected: </span>
+            High ADX with no LTF confirmation indicates elevated BE risk. Entry blocked.
+          </>
+        ) : isSizeReduced ? (
+          <>
+            <span className="text-amber-400">📉 Why size reduced: </span>
+            {`83% of BE trades with high ADX had 1h = neutral. This is an HTF-only entry before LTF ignition. Position sized at ${(positionMultiplier * 100).toFixed(0)}% to reduce BE risk.`}
+          </>
+        ) : (
+          <>
+            <span className="text-green-400">ℹ️ Assessment: </span>
+            {is1hAligned 
+              ? "1h trend confirms trade direction. LTF ignition complete - full position size permitted."
+              : adx < 55
+              ? "ADX below high threshold. Standard entry criteria apply - full position size permitted."
+              : "Confirmation conditions satisfied. Full position size permitted."
+            }
+          </>
+        )}
       </div>
     </div>
   );
@@ -3443,41 +3507,78 @@ const StochRsiRunwayDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
   const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
   const bothLtfNeutral = filtersStatus?.bothLtfNeutral ?? false;
   
+  // Determine actual outcome
+  const isHardBlock = positionMultiplier <= 0 || filtersStatus?.blocked === true;
+  const isSizeReduced = !isHardBlock && positionMultiplier < 1;
+  const isAllowed = !isHardBlock && positionMultiplier >= 1;
+  
   const isShort = direction.toLowerCase() === "short" || direction.toLowerCase() === "bearish";
-  const limitedRunway = isShort ? stochRsiK < 30 : stochRsiK > 70;
-  const hasHighAdxException = adx >= 60;
+  const isLong = direction.toLowerCase() === "long" || direction.toLowerCase() === "bullish";
   
   // Runway calculation
   const runwayPercent = isShort ? stochRsiK : (100 - stochRsiK);
-  const runwayThreshold = isShort ? 30 : 30; // Both need 30% runway
+  const runwayThreshold = 30; // Need 30% runway
+  const hasLimitedRunway = runwayPercent < runwayThreshold;
+  const hasHighAdxException = adx >= 60;
+  
+  // Color scheme based on outcome
+  const outcomeColors = isHardBlock 
+    ? { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', icon: 'text-red-500' }
+    : isSizeReduced
+    ? { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', icon: 'text-amber-500' }
+    : { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', icon: 'text-green-500' };
+  
+  // Header description based on actual conditions
+  const getHeaderDescription = () => {
+    if (isAllowed) {
+      if (!hasLimitedRunway) {
+        return `Sufficient directional runway for ${direction.toUpperCase()} entry (${runwayPercent.toFixed(0)}% available). Full position size permitted.`;
+      }
+      if (hasHighAdxException) {
+        return `Limited runway but ADX ≥60 provides strong momentum exception. Full position size permitted.`;
+      }
+      return "Runway conditions acceptable. Full position size permitted.";
+    }
+    if (isSizeReduced) {
+      return `Limited directional runway detected for ${direction.toUpperCase()} entry - StochRSI already ${isShort ? "near oversold" : "near overbought"}.`;
+    }
+    return `Critically limited runway for ${direction.toUpperCase()} entry. Entry blocked.`;
+  };
   
   return (
-    <div className="space-y-3 p-3 rounded-md border bg-amber-500/10 border-amber-500/30">
+    <div className={`space-y-3 p-3 rounded-md border ${outcomeColors.bg} ${outcomeColors.border}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <Gauge className={`h-4 w-4 text-amber-500`} />
-          <span className="text-xs font-semibold text-amber-400">
-            STOCHRSI RUNWAY GATE
+          {isAllowed ? (
+            <CheckCircle2 className={`h-4 w-4 ${outcomeColors.icon}`} />
+          ) : (
+            <Gauge className={`h-4 w-4 ${outcomeColors.icon}`} />
+          )}
+          <span className={`text-xs font-semibold ${outcomeColors.text}`}>
+            STOCHRSI RUNWAY {isAllowed ? "– ALLOWED" : "GATE"}
           </span>
           <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30">
             BE Prevention
           </Badge>
         </div>
-        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-          📉 {(positionMultiplier * 100).toFixed(0)}% Size
+        <Badge 
+          variant={isHardBlock ? "destructive" : "secondary"} 
+          className={`text-[10px] px-1.5 py-0 ${isAllowed ? 'bg-green-500/20 text-green-400' : ''}`}
+        >
+          {isHardBlock ? "🚫 BLOCKED" : isAllowed ? "✓ 100% Size" : `📉 ${(positionMultiplier * 100).toFixed(0)}% Size`}
         </Badge>
       </div>
       
       <div className="text-[10px] text-muted-foreground">
-        Limited directional runway detected for {direction.toUpperCase()} entry - StochRSI already {isShort ? "near oversold" : "near overbought"}.
+        {getHeaderDescription()}
       </div>
       
       {/* Runway Visualization */}
       <div className="space-y-2">
         <div className="flex justify-between text-[10px]">
           <span className="text-muted-foreground">Directional Runway</span>
-          <span className={`font-mono ${runwayPercent < runwayThreshold ? 'text-red-400' : 'text-green-400'}`}>
-            {runwayPercent.toFixed(0)}% {runwayPercent < runwayThreshold ? '(Limited)' : '(Sufficient)'}
+          <span className={`font-mono ${hasLimitedRunway ? 'text-red-400' : 'text-green-400'}`}>
+            {runwayPercent.toFixed(0)}% {hasLimitedRunway ? '(Limited)' : '(Sufficient)'}
           </span>
         </div>
         <div className="relative h-3 bg-muted/50 rounded-full overflow-hidden">
@@ -3513,24 +3614,44 @@ const StochRsiRunwayDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
       {/* Context Indicators */}
       <div className="grid grid-cols-2 gap-2">
         <div className={`p-1.5 rounded border text-center text-[10px] ${adxSlope < 0 ? 'bg-yellow-500/20 border-yellow-500/30 text-yellow-400' : 'bg-muted/30 border-muted/50 text-muted-foreground'}`}>
-          ADX Slope: {adxSlope.toFixed(2)} {adxSlope < 0 ? '(Declining)' : ''}
+          ADX Slope: {adxSlope >= 0 ? '+' : ''}{adxSlope.toFixed(2)} {adxSlope < 0 ? '(Declining)' : adxSlope > 0.1 ? '(Rising)' : '(Stable)'}
         </div>
         <div className={`p-1.5 rounded border text-center text-[10px] ${bothLtfNeutral ? 'bg-yellow-500/20 border-yellow-500/30 text-yellow-400' : 'bg-muted/30 border-muted/50 text-muted-foreground'}`}>
           LTF Status: {bothLtfNeutral ? 'Both Neutral' : 'Active'}
         </div>
       </div>
       
-      {/* Exception Note */}
-      {hasHighAdxException && (
+      {/* Exception Note - only when applicable */}
+      {hasHighAdxException && hasLimitedRunway && (
         <div className="flex items-center gap-1.5 p-1.5 bg-green-500/20 rounded text-[10px] text-green-400">
           <CheckCircle2 className="h-3 w-3" />
           <span>ADX ≥60 Exception: Strong momentum continuation overrides runway concern</span>
         </div>
       )}
       
+      {/* Contextual Assessment */}
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
-        <span className="text-amber-400">📉 Why size reduced:</span>
-        {` 75% of BE ${isShort ? 'shorts' : 'longs'} entered with StochRSI ${isShort ? '< 40' : '> 60'} (limited runway). Position sized at ${(positionMultiplier * 100).toFixed(0)}% to reduce late-entry risk.`}
+        {isHardBlock ? (
+          <>
+            <span className="text-red-400">🚫 Why rejected: </span>
+            {`Critically limited runway (${runwayPercent.toFixed(0)}%) for ${direction.toUpperCase()} entry. Entry blocked to prevent late-entry loss.`}
+          </>
+        ) : isSizeReduced ? (
+          <>
+            <span className="text-amber-400">📉 Why size reduced: </span>
+            {`75% of BE ${isShort ? 'shorts' : 'longs'} entered with StochRSI ${isShort ? '< 40' : '> 60'} (limited runway). Position sized at ${(positionMultiplier * 100).toFixed(0)}% to reduce late-entry risk.`}
+          </>
+        ) : (
+          <>
+            <span className="text-green-400">ℹ️ Assessment: </span>
+            {!hasLimitedRunway 
+              ? `Directional runway of ${runwayPercent.toFixed(0)}% provides sufficient room for ${direction.toUpperCase()} continuation. Full position size permitted.`
+              : hasHighAdxException
+              ? "Strong ADX momentum (≥60) provides exception to limited runway. Full position size permitted."
+              : "Runway conditions acceptable for entry. Full position size permitted."
+            }
+          </>
+        )}
       </div>
     </div>
   );
