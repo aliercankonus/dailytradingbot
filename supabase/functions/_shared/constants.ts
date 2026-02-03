@@ -4304,10 +4304,10 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
     BB_BREAKDOWN_PERCENT_B_LONG: 85,    // %B >= 85 = long breakdown
     
     // ===== RELAXED THRESHOLDS =====
-    // Soft zone: 3.5% → 6.0%
-    // Hard zone: 5.0% → 8.0%
-    RELAXED_SOFT_THRESHOLD_PERCENT: 6.0,
-    RELAXED_HARD_THRESHOLD_PERCENT: 8.0,
+    // Soft zone: 3.5% → 5.0%
+    // Hard zone: 5.0% → 6.0% (reduced from 8% to catch LONGs earlier when ADX slope turns positive)
+    RELAXED_SOFT_THRESHOLD_PERCENT: 5.0,
+    RELAXED_HARD_THRESHOLD_PERCENT: 6.0,
     
     // Position sizing for relaxed zone entries (between original soft and relaxed hard)
     // Original soft (3.5-5%): 35% → Relaxed soft (5-6%): 45% → Relaxed transition (6-8%): 35%
