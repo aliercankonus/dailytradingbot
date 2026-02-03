@@ -5409,6 +5409,134 @@ const GraduatedMomentumEffectDisplay = ({ filtersStatus }: { filtersStatus: any 
   );
 };
 
+// ============= EXTREME MOMENTUM VETO DISPLAY (v3.0) =============
+// Dedicated display for hard veto when momentum >= ±50 blocks direction derivation
+const ExtremeMomentumVetoDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const momentumScore = filtersStatus?.momentumScore ?? 0;
+  const effect = filtersStatus?.graduatedMomentumEffect;
+  const vetoedDirection = effect?.baseDirection;
+  const source = filtersStatus?.source;
+  
+  // Only show for extreme momentum veto rejections
+  if (source !== 'extreme_momentum_veto' && !filtersStatus?.extremeMomentumVeto) {
+    return null;
+  }
+  
+  const isBlockingShort = momentumScore >= 50;
+  const isBlockingLong = momentumScore <= -50;
+  
+  return (
+    <div className="space-y-3">
+      {/* Header with Veto Badge */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Ban className="h-4 w-4 text-red-400" />
+          <span className="text-sm font-medium text-red-400">Extreme Momentum Veto</span>
+        </div>
+        <Badge variant="outline" className="text-red-400 border-red-500/40 text-[10px] px-2 py-0.5 font-semibold">
+          ⛔ HARD VETO
+        </Badge>
+      </div>
+      
+      {/* Critical Explanation */}
+      <div className="bg-red-500/10 border border-red-500/30 rounded-md p-3 space-y-2">
+        <div className="flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 text-red-400 flex-shrink-0" />
+          <span className="text-xs text-red-300 font-medium">
+            Cannot derive {vetoedDirection?.toUpperCase() || (isBlockingShort ? 'SHORT' : 'LONG')} into extreme opposing momentum
+          </span>
+        </div>
+        
+        <div className="text-[11px] text-muted-foreground">
+          Direction derivation is fundamentally invalid when momentum magnitude dominates market structure.
+          This is a safety rail — not a filter to be bypassed.
+        </div>
+      </div>
+      
+      {/* Momentum Score Visualization */}
+      <div className="space-y-2 p-2 bg-muted/20 rounded-md border border-border/50">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">Momentum Score</span>
+          <span className={`font-mono font-bold ${momentumScore > 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {momentumScore > 0 ? '+' : ''}{momentumScore.toFixed(0)}
+          </span>
+        </div>
+        
+        {/* Visual bar showing momentum intensity */}
+        <div className="relative h-3 bg-muted/50 rounded-full overflow-hidden">
+          {/* Center marker */}
+          <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-foreground/40 z-10" />
+          {/* Veto threshold markers at ±50 */}
+          <div className="absolute left-[25%] top-0 bottom-0 w-px bg-red-500/50 z-10" />
+          <div className="absolute left-[75%] top-0 bottom-0 w-px bg-red-500/50 z-10" />
+          {/* Score bar */}
+          <div 
+            className={`absolute top-0 bottom-0 ${momentumScore > 0 ? 'bg-green-500' : 'bg-red-500'}`}
+            style={{
+              left: momentumScore >= 0 ? '50%' : `${50 + (momentumScore / 2)}%`,
+              width: `${Math.min(50, Math.abs(momentumScore) / 2)}%`,
+            }}
+          />
+        </div>
+        
+        <div className="flex justify-between text-[9px] text-muted-foreground">
+          <span>-100</span>
+          <span className="text-red-400/60">-50 (veto)</span>
+          <span>0</span>
+          <span className="text-red-400/60">+50 (veto)</span>
+          <span>+100</span>
+        </div>
+      </div>
+      
+      {/* Direction Flow */}
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="space-y-1">
+          <span className="text-[9px] text-muted-foreground uppercase">Structure Bias</span>
+          <div className="flex items-center justify-center gap-1">
+            {vetoedDirection === 'long' ? (
+              <TrendingUp className="h-3.5 w-3.5 text-green-400" />
+            ) : (
+              <TrendingDown className="h-3.5 w-3.5 text-red-400" />
+            )}
+            <span className="text-xs font-medium">{vetoedDirection?.toUpperCase() || '?'}</span>
+          </div>
+        </div>
+        
+        <div className="space-y-1">
+          <span className="text-[9px] text-muted-foreground uppercase">Veto</span>
+          <div className="flex items-center justify-center">
+            <Ban className="h-4 w-4 text-red-400" />
+          </div>
+        </div>
+        
+        <div className="space-y-1">
+          <span className="text-[9px] text-muted-foreground uppercase">Result</span>
+          <div className="flex items-center justify-center gap-1">
+            <Minus className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-xs font-medium text-muted-foreground">BLOCKED</span>
+          </div>
+        </div>
+      </div>
+      
+      {/* Thresholds Explanation */}
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2 space-y-1">
+        <div className="flex items-center gap-1">
+          <span className="font-medium">Veto Thresholds:</span>
+          <span>|momentum| ≥ 50 blocks opposing direction</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <CheckCircle2 className="h-3 w-3 text-green-400" />
+          <span>Momentum ≥ +50 → Cannot derive SHORT</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <CheckCircle2 className="h-3 w-3 text-green-400" />
+          <span>Momentum ≤ -50 → Cannot derive LONG</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // No Direction Display - for NO_CLEAR_DIRECTION rejections
 const NoDirectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const trend4h = filtersStatus?.trend4h || trendData?.primaryTrend || "unknown";
@@ -6126,6 +6254,13 @@ export const SignalRejectionReasons = () => {
     // Already has active signal
     if (reason.includes("active signal")) {
       return <ActiveSignalDisplay />;
+    }
+    
+    // EXTREME MOMENTUM VETO - hard block when |momentum| >= 50
+    if (fs?.source === 'extreme_momentum_veto' || 
+        reason.includes("EXTREME MOMENTUM VETO") || 
+        fs?.gate === "EXTREME_MOMENTUM_VETO") {
+      return <ExtremeMomentumVetoDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // Unified Reversal BLOCK/REDUCE
