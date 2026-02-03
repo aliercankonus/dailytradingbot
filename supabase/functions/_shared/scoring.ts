@@ -2473,7 +2473,7 @@ export type TradeDirection = "long" | "short";
 // conflict resolution, and post-trade analytics
 export interface DirectionContext {
   proposedDirection: TradeDirection | null;
-  evidenceType: 'HTF_CONSENSUS' | 'MOMENTUM' | 'ORDER_FLOW' | 'PRICE_ACTION' | 'STOCHRSI' | 'EXHAUSTION' | 'WEIGHTED_SUM' | 'NONE';
+  evidenceType: 'HTF_CONSENSUS' | 'MOMENTUM' | 'ORDER_FLOW' | 'PRICE_ACTION' | 'STOCHRSI' | 'EXHAUSTION' | 'WEIGHTED_SUM' | 'MICRO_STRUCTURE' | 'NONE';
   tier: number;
   tierSource: string;
   confidence: number;
@@ -2541,8 +2541,9 @@ export interface DirectionResult {
   regime?: DirectionRegime;            // Market regime used for direction derivation
   tier2Score?: number;                 // Tier 2 weighted confirmation score
   isEscapeHatch?: boolean;             // Used directional bias escape hatch
-  isExhaustionReversal?: boolean;      // Used exhaustion reversal override (Priority 0.25)
-  isExhaustionEscape?: boolean;        // Used exhaustion escape (Priority 8 - final escape valve)
+  isExhaustionReversal?: boolean;       // Used exhaustion reversal override (Priority 0.25)
+  isExhaustionEscape?: boolean;         // Used exhaustion escape (Priority 8 - final escape valve)
+  isBiasResolution?: boolean;           // Used Tier 9.5 bias resolution (micro-structure evidence)
   // ===== PHASE 2 ADDITIONS =====
   is4hWeak?: boolean;                  // 4H confidence was below threshold
   trend30mAligned?: boolean;           // 30m trend aligned with order flow direction
@@ -2555,7 +2556,7 @@ export interface DirectionResult {
 }
 
 // Import direction params
-import { GATE_RELAXATION_FLAGS, DIRECTION_DERIVATION_PARAMS, MOMENTUM_OVERRIDE_DIRECTION_PARAMS } from "./constants.ts";
+import { GATE_RELAXATION_FLAGS, DIRECTION_DERIVATION_PARAMS, MOMENTUM_OVERRIDE_DIRECTION_PARAMS, BIAS_RESOLUTION_TIER, NET_SIGNAL_THRESHOLDS } from "./constants.ts";
 
 // ============= PHASE 1: DIRECTION REGIME CLASSIFIER =============
 // Classifies market into regime BEFORE direction derivation
@@ -2631,15 +2632,52 @@ export const deriveTradeDirection = (
   // Instead of requiring one strong timeframe, use weighted sum of all timeframes
   // This relaxes the NO_CLEAR_DIRECTION gate significantly
   if (GATE_RELAXATION_FLAGS.DIRECTION_WEIGHTED) {
-    // Convert trend to directional value: bullish=+1, neutral=0, bearish=-1
+    // ============= NEUTRAL-BIAS AMPLIFICATION FIX: ENHANCED trendToValue =============
+    // Instead of returning 0 for neutral trends, return scaled partial contribution
+    // This preserves directional pressure even when trend labels are conservative
+    const getMomentumDirectionHint = (): number => {
+      // Use MACD/RSI to infer direction when trend is neutral
+      const macdHistogram = trendData.momentum?.macdHistogram ?? trendData.indicators?.macdHistogram ?? 0;
+      const rsi = trendData.indicators?.rsi ?? trendData.momentum?.rsi ?? 50;
+      
+      if (macdHistogram > 0 && rsi > 50) return 1;  // Bullish hint
+      if (macdHistogram < 0 && rsi < 50) return -1; // Bearish hint
+      if (macdHistogram > 0 || rsi > 55) return 0.5;
+      if (macdHistogram < 0 || rsi < 45) return -0.5;
+      return 0;
+    };
+    
     const trendToValue = (trend: string, conf: number): number => {
       // Use lowered neutral threshold (45% instead of 55%)
-      if (trend === "neutral" && conf < P.NEUTRAL_THRESHOLD) return 0;
+      if (trend === "neutral" && conf < P.NEUTRAL_THRESHOLD) {
+        // ===== PARTIAL NEUTRAL CONTRIBUTION (PHASE 1 FIX) =====
+        // If enabled, neutral trends with meaningful confidence still contribute
+        if (P.ENABLE_PARTIAL_NEUTRAL_CONTRIBUTION && conf >= P.NEUTRAL_CONTRIBUTION_FLOOR) {
+          // Scale partial weight based on confidence: 40-60% → 0.0-0.6
+          const partialWeight = ((conf - P.NEUTRAL_CONTRIBUTION_FLOOR) / 
+            ((P.NEUTRAL_CONTRIBUTION_CEILING || 60) - P.NEUTRAL_CONTRIBUTION_FLOOR)) * 
+            (P.NEUTRAL_PARTIAL_MAX_WEIGHT || 0.6);
+          const hint = getMomentumDirectionHint();
+          const contribution = partialWeight * hint;
+          if (Math.abs(contribution) > 0.05) {
+            reasons.push(`PARTIAL NEUTRAL: conf=${conf.toFixed(0)}% → contrib=${(contribution * 100).toFixed(0)}% (hint=${hint > 0 ? 'bull' : hint < 0 ? 'bear' : 'none'})`);
+          }
+          return contribution;
+        }
+        return 0;
+      }
       // Trends with conf 45-54% contribute partial weight
       const confWeight = Math.min(1, conf / 65);  // Scale 0-65% to 0-1
-      if (trend === "bullish") return confWeight;
-      if (trend === "bearish") return -confWeight;
-      // For "neutral" but conf >= 45%, infer from nearby timeframes
+      if (trend === "bullish" || trend === "weak_bullish") return confWeight;
+      if (trend === "bearish" || trend === "weak_bearish") return -confWeight;
+      // For "neutral" but conf >= 45%, use partial contribution if enabled
+      if (P.ENABLE_PARTIAL_NEUTRAL_CONTRIBUTION && conf >= P.NEUTRAL_CONTRIBUTION_FLOOR) {
+        const partialWeight = ((conf - P.NEUTRAL_CONTRIBUTION_FLOOR) / 
+          ((P.NEUTRAL_CONTRIBUTION_CEILING || 60) - P.NEUTRAL_CONTRIBUTION_FLOOR)) * 
+          (P.NEUTRAL_PARTIAL_MAX_WEIGHT || 0.6);
+        const hint = getMomentumDirectionHint();
+        return partialWeight * hint;
+      }
       return 0;
     };
     
@@ -2665,7 +2703,22 @@ export const deriveTradeDirection = (
     }
     
     // Calculate base weighted sum with potentially reallocated weights
-    const baseWeightedSum = (val4h * w4h) + (val1h * w1h) + (val30m * w30m);
+    let baseWeightedSum = (val4h * w4h) + (val1h * w1h) + (val30m * w30m);
+    
+    // ===== STOCHRSI EXTREME AS DIRECTION BIAS (PHASE 5) =====
+    // Add StochRSI extremes as bias input to weighted sum
+    let stochBias = 0;
+    if (P.ENABLE_STOCHRSI_BIAS) {
+      const stochK4h = extractStochRsiK(trendData, '4h');
+      if (stochK4h >= (P.STOCHRSI_OVERBOUGHT_K || 90)) {
+        stochBias = -(P.STOCHRSI_BIAS_WEIGHT || 0.10);  // Overbought = bearish bias
+        reasons.push(`STOCHRSI BIAS: K=${stochK4h.toFixed(0)} >= ${P.STOCHRSI_OVERBOUGHT_K || 90} → ${(stochBias * 100).toFixed(0)}% bearish bias`);
+      } else if (stochK4h <= (P.STOCHRSI_OVERSOLD_K || 10)) {
+        stochBias = +(P.STOCHRSI_BIAS_WEIGHT || 0.10);  // Oversold = bullish bias
+        reasons.push(`STOCHRSI BIAS: K=${stochK4h.toFixed(0)} <= ${P.STOCHRSI_OVERSOLD_K || 10} → ${(stochBias * 100).toFixed(0)}% bullish bias`);
+      }
+    }
+    baseWeightedSum += stochBias;
     
     // ===== PHASE 3: MOMENTUM WEIGHT IN DIRECTION DERIVATION =====
     // Factor momentum score into direction confidence - opposing momentum reduces certainty
@@ -3760,12 +3813,105 @@ export const deriveTradeDirection = (
     };
   }
   
+  // ============= TIER 9.5: BIAS RESOLUTION BEFORE FALLBACK =============
+  // When timeframes are neutral but price action shows clear bias
+  // Prevents NO_CLEAR_DIRECTION during impulse phases
+  let tier95Fired = false;
+  
+  if (BIAS_RESOLUTION_TIER.ENABLED) {
+    const BR = BIAS_RESOLUTION_TIER;
+    const biasEvidence: string[] = [];
+    let biasDirection: TradeDirection | null = null;
+    let biasScore = 0;
+    
+    // Evidence 1: Micro-direction (8+ consecutive bars)
+    const consecutiveBars = trendData.momentum?.consecutiveBars || 
+                           trendData.priceActionMomentum?.consecutiveBars || 0;
+    const microDirection = trendData.momentum?.direction || 
+                          trendData.priceActionMomentum?.direction || null;
+    
+    if (consecutiveBars >= (BR.MICRO_DIRECTION_MIN_BARS || 8)) {
+      biasScore += BR.MICRO_DIRECTION_SCORE || 2;
+      biasDirection = microDirection === "bullish" ? "long" : 
+                     microDirection === "bearish" ? "short" : null;
+      biasEvidence.push(`MICRO_DIRECTION(${consecutiveBars} bars → ${microDirection})`);
+    }
+    
+    // Evidence 2: StochRSI extreme (K >= 90 or K <= 10)
+    const stochK4h = extractStochRsiK(trendData, '4h');
+    if (stochK4h >= (BR.STOCHRSI_EXTREME_K_HIGH || 90)) {
+      biasScore += BR.STOCHRSI_EXTREME_SCORE || 1;
+      if (!biasDirection) biasDirection = "short";
+      biasEvidence.push(`STOCHRSI_OVERBOUGHT(K=${stochK4h.toFixed(0)})`);
+    } else if (stochK4h <= (BR.STOCHRSI_EXTREME_K_LOW || 10)) {
+      biasScore += BR.STOCHRSI_EXTREME_SCORE || 1;
+      if (!biasDirection) biasDirection = "long";
+      biasEvidence.push(`STOCHRSI_OVERSOLD(K=${stochK4h.toFixed(0)})`);
+    }
+    
+    // Evidence 3: Order flow signal
+    const ofScore = orderFlowData?.score ?? 0;
+    const ofSignal = orderFlowData?.signal?.toLowerCase() ?? "";
+    if (ofScore >= (BR.ORDER_FLOW_MIN_SCORE || 60)) {
+      biasScore += BR.ORDER_FLOW_EVIDENCE_SCORE || 1;
+      const ofDir: TradeDirection = ofSignal.includes("buy") || ofSignal === "bullish" ? "long" : "short";
+      if (!biasDirection) biasDirection = ofDir;
+      biasEvidence.push(`ORDER_FLOW(score=${ofScore.toFixed(0)}, signal=${ofSignal})`);
+    }
+    
+    // Evidence 4: Price action momentum (significant move in one direction)
+    const priceMove = trendData.priceActionMomentum?.movePercent || 0;
+    if (Math.abs(priceMove) >= 1.5) {
+      biasScore += 1;
+      const priceDir: TradeDirection = priceMove > 0 ? "long" : "short";
+      if (!biasDirection) biasDirection = priceDir;
+      biasEvidence.push(`PRICE_ACTION(${priceMove > 0 ? '+' : ''}${priceMove.toFixed(2)}%)`);
+    }
+    
+    // Require at least MIN_EVIDENCE_SCORE sources
+    if (biasScore >= (BR.MIN_EVIDENCE_SCORE || 2) && biasDirection) {
+      tier95Fired = true;
+      
+      const confidence = BR.CONFIDENCE || 50;
+      const positionMult = BR.POSITION_SIZE || 0.25;
+      
+      if (BR.LOG_TIER_EVALUATION) {
+        reasons.push(`TIER 9.5 BIAS RESOLUTION: ${biasEvidence.join(' + ')} → ${biasDirection.toUpperCase()}`);
+        reasons.push(`Evidence score: ${biasScore}/${BR.MIN_EVIDENCE_SCORE} | Confidence: ${confidence}% | Position: ${(positionMult * 100).toFixed(0)}%`);
+        reasons.push(`Prevented NO_CLEAR_DIRECTION with micro-structure evidence`);
+      }
+      
+      return {
+        direction: biasDirection,
+        confidence,
+        source: "bias-resolution",
+        reasons,
+        positionSizeMultiplier: positionMult,
+        isBiasResolution: true,
+        regime,
+        directionContext: createDirectionContext(biasDirection, {
+          evidenceType: 'MICRO_STRUCTURE',
+          tier: 9.5,
+          tierSource: 'TIER_9.5_BIAS_RESOLUTION',
+          confidence,
+          positionMultiplier: positionMult,
+          isCounterTrend: false,
+          riskClass: 'HIGH',
+          evidenceStrength: biasScore >= 3 ? 'MODERATE' : 'WEAK',
+        }),
+      };
+    } else if (BR.LOG_TIER_EVALUATION && biasEvidence.length > 0) {
+      reasons.push(`TIER 9.5 SKIPPED: Evidence score ${biasScore} < ${BR.MIN_EVIDENCE_SCORE} (found: ${biasEvidence.join(', ')})`);
+    }
+  }
+  
   // ============= PRIORITY 7 (TIER 10): MOMENTUM + ORDER FLOW FALLBACK =============
   // When all other methods fail, use momentum score + order flow to derive direction
   // This prevents the "deadlock" where bullish momentum + buy order flow = no signal
   // NOTE: Tier 10 is for TREND CONTINUATION without strong TF structure
   // NOTE: Tier 10 and Tier 11 (Exhaustion Escape) are MUTUALLY EXCLUSIVE
   // FIX #5 (Audit): Tier 10 is SKIPPED if Tier 0.5 already evaluated (prevents double-dipping evidence)
+  // NEW: Also skip if Tier 9.5 already fired
   let tier10Fired = false;  // Flag to track if Tier 10 fires (blocks Tier 11)
   
   // FIX #5: Guard against Tier 10 firing when Tier 0.5 already processed the same momentum+OF evidence
