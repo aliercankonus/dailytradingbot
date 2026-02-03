@@ -4746,6 +4746,9 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
         )}
       </div>
       
+      {/* Graduated Momentum Effect Visualization (if direction was affected) */}
+      <GraduatedMomentumEffectDisplay filtersStatus={filtersStatus} />
+      
       {/* Explanation Footer */}
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
         <span className="text-orange-400">⚠️ Why blocked:</span> Attempting {signalDirection.toUpperCase()} entry 
