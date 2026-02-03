@@ -3085,12 +3085,25 @@ export const DIRECTION_DERIVATION_PARAMS = {
   MOMENTUM_POSITION_REDUCTION_STRONG: 0.70, // 70% position when momentum strongly opposes
   MOMENTUM_POSITION_REDUCTION_WEAK: 0.85,   // 85% position when momentum weakly opposes
   
-  // ===== GRADUATED MOMENTUM PENALTY (v2.0) =====
-  // Scale penalty with momentum magnitude: +100 = 4x penalty vs +15
+  // ===== EXTREME MOMENTUM VETO (v3.0) =====
+  // Hard veto BEFORE direction derivation - prevents nonsensical directions
+  // This is the primary safety rail: momentum magnitude should influence confidence non-linearly
+  EXTREME_MOMENTUM_VETO_ENABLED: true,
+  EXTREME_BULL_MOMENTUM_THRESHOLD: 50,  // Momentum >= +50 blocks SHORT derivation
+  EXTREME_BEAR_MOMENTUM_THRESHOLD: -50, // Momentum <= -50 blocks LONG derivation
+  
+  // ===== GRADUATED MOMENTUM PENALTY (v3.0) =====
+  // For non-extreme cases (15-50): scaled penalty based on magnitude
+  // Replaces flat penalty model - penalty = (score/100) * MAX_PENALTY
   GRADUATED_MOMENTUM_PENALTY_ENABLED: true,
-  MOMENTUM_EXTREME_THRESHOLD: 50,     // Score magnitude >= 50 = "extreme" momentum
-  MOMENTUM_VERY_STRONG_THRESHOLD: 30, // Score magnitude >= 30 = "very strong" momentum
-  MOMENTUM_EXTREME_PENALTY_MULTIPLIER: 4.0,      // 4x base penalty at extreme (e.g., 0.15 * 4 = 0.60)
+  GRADUATED_SCALING_ENABLED: true,      // NEW: Linear scaling instead of tier steps
+  GRADUATED_MAX_PENALTY: 0.60,          // Maximum penalty at |momentum| = 100
+  GRADUATED_MIN_PENALTY: 0.10,          // Minimum penalty at |momentum| = 15
+  
+  // Tier thresholds (used when GRADUATED_SCALING_ENABLED = false)
+  MOMENTUM_EXTREME_THRESHOLD: 50,       // Score magnitude >= 50 = "extreme" momentum
+  MOMENTUM_VERY_STRONG_THRESHOLD: 30,   // Score magnitude >= 30 = "very strong" momentum
+  MOMENTUM_EXTREME_PENALTY_MULTIPLIER: 4.0,      // 4x base penalty at extreme
   MOMENTUM_VERY_STRONG_PENALTY_MULTIPLIER: 2.5,  // 2.5x base penalty at very strong
   MOMENTUM_STRONG_PENALTY_MULTIPLIER: 1.5,       // 1.5x base penalty at strong (15-29)
   MOMENTUM_EXTREME_CONFIDENCE_MULTIPLIER: 3.0,   // 3x confidence reduction at extreme

@@ -2630,6 +2630,47 @@ const calculateGraduatedMomentumPenalty = (
     };
   }
   
+  // ===== v3.0: LINEAR SCALING MODE =====
+  // penalty = clamp((absMomentum / 100) * MAX_PENALTY, MIN_PENALTY, MAX_PENALTY)
+  // This replaces the discrete tier system for smoother penalty curves
+  if (P.GRADUATED_SCALING_ENABLED) {
+    const minPenalty = P.GRADUATED_MIN_PENALTY || 0.10;
+    const maxPenalty = P.GRADUATED_MAX_PENALTY || 0.60;
+    
+    // Linear interpolation: score 15 → min, score 100 → max
+    const range = 100 - 15; // 85
+    const normalizedScore = Math.max(0, absMomentum - 15) / range; // 0 at 15, 1 at 100
+    const scaledPenalty = minPenalty + (normalizedScore * (maxPenalty - minPenalty));
+    const clampedPenalty = Math.min(maxPenalty, Math.max(minPenalty, scaledPenalty));
+    
+    // Scale confidence reduction and position multiplier similarly
+    // At score 15: confReduction = 10%, posMult = 0.85
+    // At score 100: confReduction = 50%, posMult = 0.20
+    const minConfReduction = 10;
+    const maxConfReduction = 50;
+    const scaledConfReduction = Math.round(minConfReduction + (normalizedScore * (maxConfReduction - minConfReduction)));
+    
+    const minPosMult = 0.20;
+    const maxPosMult = 0.85;
+    const scaledPosMult = maxPosMult - (normalizedScore * (maxPosMult - minPosMult));
+    
+    // Determine tier for logging/UI purposes
+    let tier: MomentumTier = 'strong_opposing';
+    if (absMomentum >= (P.MOMENTUM_EXTREME_THRESHOLD || 50)) {
+      tier = 'extreme_opposing';
+    } else if (absMomentum >= (P.MOMENTUM_VERY_STRONG_THRESHOLD || 30)) {
+      tier = 'very_strong_opposing';
+    }
+    
+    return {
+      penalty: clampedPenalty,
+      confidenceReduction: scaledConfReduction,
+      positionMultiplier: Math.max(minPosMult, scaledPosMult),
+      tier
+    };
+  }
+  
+  // ===== LEGACY: DISCRETE TIER SYSTEM (when GRADUATED_SCALING_ENABLED = false) =====
   // EXTREME: |momentum| >= 50 (e.g., +100 during 5% bounce)
   if (absMomentum >= (P.MOMENTUM_EXTREME_THRESHOLD || 50)) {
     return {
@@ -2657,6 +2698,51 @@ const calculateGraduatedMomentumPenalty = (
     positionMultiplier: basePosMult,
     tier: 'strong_opposing'
   };
+};
+
+// ============= EXTREME MOMENTUM VETO v3.0 =============
+// Hard veto before direction derivation - prevents SHORT when momentum is +50+
+// and prevents LONG when momentum is -50 or below
+type ExtremeVetoResult = {
+  vetoed: boolean;
+  reason: string | null;
+  vetoedDirection: 'long' | 'short' | null;
+  momentumScore: number;
+};
+
+const checkExtremeMomentumVeto = (
+  momentumScore: number,
+  tentativeDirection: 'long' | 'short',
+  P: typeof DIRECTION_DERIVATION_PARAMS
+): ExtremeVetoResult => {
+  if (!P.EXTREME_MOMENTUM_VETO_ENABLED) {
+    return { vetoed: false, reason: null, vetoedDirection: null, momentumScore };
+  }
+  
+  const extremeBullThreshold = P.EXTREME_BULL_MOMENTUM_THRESHOLD || 50;
+  const extremeBearThreshold = P.EXTREME_BEAR_MOMENTUM_THRESHOLD || -50;
+  
+  // Veto SHORT when momentum is extremely bullish
+  if (tentativeDirection === 'short' && momentumScore >= extremeBullThreshold) {
+    return {
+      vetoed: true,
+      reason: `EXTREME MOMENTUM VETO: Cannot derive SHORT with momentum +${momentumScore.toFixed(0)} >= +${extremeBullThreshold}`,
+      vetoedDirection: 'short',
+      momentumScore
+    };
+  }
+  
+  // Veto LONG when momentum is extremely bearish
+  if (tentativeDirection === 'long' && momentumScore <= extremeBearThreshold) {
+    return {
+      vetoed: true,
+      reason: `EXTREME MOMENTUM VETO: Cannot derive LONG with momentum ${momentumScore.toFixed(0)} <= ${extremeBearThreshold}`,
+      vetoedDirection: 'long',
+      momentumScore
+    };
+  }
+  
+  return { vetoed: false, reason: null, vetoedDirection: null, momentumScore };
 };
 
 export const deriveTradeDirection = (
@@ -2812,9 +2898,45 @@ export const deriveTradeDirection = (
     let momentumConfidenceReduction = 0;
     let momentumPositionMultiplier = 1.0;
     
+    // ===== EXTREME MOMENTUM VETO CHECK (v3.0) =====
+    // Hard safety rail: extreme momentum completely blocks opposing direction derivation
+    // This check happens BEFORE graduated penalties are calculated
+    const tentativeDirection = baseWeightedSum > 0 ? 'long' : 'short';
+    const vetoCheck = checkExtremeMomentumVeto(momentumScore, tentativeDirection, P);
+    
+    if (vetoCheck.vetoed) {
+      // Return NO_CLEAR_DIRECTION with clear veto reason
+      reasons.push(vetoCheck.reason!);
+      reasons.push(`⛔ EXTREME MOMENTUM VETO ACTIVE: Cannot derive ${vetoCheck.vetoedDirection?.toUpperCase()} into |momentum| = ${Math.abs(momentumScore).toFixed(0)}`);
+      
+      // Track the veto in graduated momentum effect for UI
+      outerGraduatedMomentumEffect = {
+        directionFlipped: false,
+        directionNullified: true,  // Veto is a form of nullification
+        baseDirection: tentativeDirection,
+        adjustedDirection: null,
+        baseWeightedSum,
+        adjustedWeightedSum: 0,
+        penaltyApplied: 0,
+      };
+      outerMomentumImpact = 'extreme_opposing';
+      outerMomentumScore = momentumScore;
+      
+      return {
+        direction: null,
+        confidence: 0,
+        source: "extreme_momentum_veto",
+        reasons,
+        positionSizeMultiplier: 0,
+        momentumImpact: 'extreme_opposing',
+        momentumScore,
+        graduatedMomentumEffect: outerGraduatedMomentumEffect,
+      };
+    }
+    
     if (P.MOMENTUM_WEIGHT_ENABLED) {
       // Determine if momentum opposes or aligns with the tentative direction
-      const tentativeDirection = baseWeightedSum > 0 ? 'long' : 'short';
+      // (tentativeDirection already calculated above for veto check)
       
       if (tentativeDirection === 'long') {
         // For LONG: positive momentum = aligned, negative = opposing
