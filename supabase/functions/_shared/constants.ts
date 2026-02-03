@@ -3079,11 +3079,24 @@ export const DIRECTION_DERIVATION_PARAMS = {
   MOMENTUM_WEAK_OPPOSING_THRESHOLD: -5,    // For LONG: momentum below this = weakly opposing
   MOMENTUM_ALIGNMENT_BONUS: 0.10,     // Bonus to weighted sum when momentum aligns
   MOMENTUM_WEAK_OPPOSING_PENALTY: 0.08, // Penalty when momentum weakly opposes
-  MOMENTUM_STRONG_OPPOSING_PENALTY: 0.15, // Penalty when momentum strongly opposes
-  MOMENTUM_CONFIDENCE_REDUCTION_STRONG: 15, // Reduce confidence by 15% when strongly opposing
+  MOMENTUM_STRONG_OPPOSING_PENALTY: 0.15, // BASE penalty when momentum strongly opposes (scaled by magnitude)
+  MOMENTUM_CONFIDENCE_REDUCTION_STRONG: 15, // BASE confidence reduction when strongly opposing (scaled)
   MOMENTUM_CONFIDENCE_REDUCTION_WEAK: 8,   // Reduce confidence by 8% when weakly opposing
   MOMENTUM_POSITION_REDUCTION_STRONG: 0.70, // 70% position when momentum strongly opposes
   MOMENTUM_POSITION_REDUCTION_WEAK: 0.85,   // 85% position when momentum weakly opposes
+  
+  // ===== GRADUATED MOMENTUM PENALTY (v2.0) =====
+  // Scale penalty with momentum magnitude: +100 = 4x penalty vs +15
+  GRADUATED_MOMENTUM_PENALTY_ENABLED: true,
+  MOMENTUM_EXTREME_THRESHOLD: 50,     // Score magnitude >= 50 = "extreme" momentum
+  MOMENTUM_VERY_STRONG_THRESHOLD: 30, // Score magnitude >= 30 = "very strong" momentum
+  MOMENTUM_EXTREME_PENALTY_MULTIPLIER: 4.0,      // 4x base penalty at extreme (e.g., 0.15 * 4 = 0.60)
+  MOMENTUM_VERY_STRONG_PENALTY_MULTIPLIER: 2.5,  // 2.5x base penalty at very strong
+  MOMENTUM_STRONG_PENALTY_MULTIPLIER: 1.5,       // 1.5x base penalty at strong (15-29)
+  MOMENTUM_EXTREME_CONFIDENCE_MULTIPLIER: 3.0,   // 3x confidence reduction at extreme
+  MOMENTUM_VERY_STRONG_CONFIDENCE_MULTIPLIER: 2.0, // 2x confidence reduction at very strong
+  MOMENTUM_EXTREME_POSITION_MULTIPLIER: 0.30,    // Only 30% position at extreme momentum opposition
+  MOMENTUM_VERY_STRONG_POSITION_MULTIPLIER: 0.50, // Only 50% position at very strong opposition
   
   // ===== NEUTRAL-BIAS AMPLIFICATION FIX: PARTIAL NEUTRAL CONTRIBUTION =====
   // Instead of discarding neutral trends (contribution = 0), use partial weight based on confidence
