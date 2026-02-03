@@ -4518,6 +4518,23 @@ export const MOMENTUM_DIRECTION_HARD_GATE = {
   // Position size if exception applied
   EXCEPTION_POSITION_MULTIPLIER: 0.30,  // 30% position for risky override
   
+  // ===== 1H TREND AGREEMENT BYPASS (Phase 1 MODERATE) =====
+  // When 1h trend aligns with trade direction, allow lagging momentum bypass
+  // Root cause: SHORT with bullish momentum (+26) blocked despite 1h bearish trend
+  // This fixes the control flow bug where bypass was logged but not applied
+  HTF_1H_AGREEMENT_BYPASS: {
+    ENABLED: true,
+    // Allow bypass when momentum is between ±15 and ±50 (MODERATE zone)
+    // Scores beyond ±50 (EXTREME) are blocked regardless
+    MODERATE_MIN_SCORE: 15,
+    MODERATE_MAX_SCORE: 50,
+    // Position multipliers based on momentum severity
+    POSITION_MULT_MILD: 0.70,      // |score| 15-30: 70% position
+    POSITION_MULT_MODERATE: 0.50,  // |score| 30-50: 50% position
+    // Logging
+    LOG_BYPASSES: true,
+  },
+  
   // ===== PRICE ACTION OVERRIDE =====
   // When price moved significantly in trade direction, override momentum lag
   // Root cause: Momentum score lagged 7% price drop (still showed +16 to +25 bullish)

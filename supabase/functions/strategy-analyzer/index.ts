@@ -3464,13 +3464,77 @@ serve(async (req) => {
               }
             }
             
-            if (!adxExceptionAllowed && !priceActionOverrideAllowed) {
+            // ===== EXCEPTION #3: 1H TREND AGREEMENT BYPASS (Phase 1 MODERATE) =====
+            // When 1h trend aligns with trade direction, allow bypass with reduced position
+            // Root cause fix: SHORT with bullish momentum (+26) blocked despite 1h bearish trend
+            let htf1hAgreementBypassAllowed = false;
+            let htf1hAgreementPositionMultiplier = 1.0;
+            const htf1hBypass = MOMENTUM_DIRECTION_HARD_GATE.HTF_1H_AGREEMENT_BYPASS;
+            
+            if (htf1hBypass?.ENABLED) {
+              const absMomentumScore = Math.abs(smartMomentum.score);
+              const isInModerateZone = absMomentumScore >= htf1hBypass.MODERATE_MIN_SCORE && 
+                                        absMomentumScore <= htf1hBypass.MODERATE_MAX_SCORE;
+              
+              // Check if 1h trend agrees with trade direction
+              const htf1hAlignedWithDir = (derivedDirection === 'long' && htfTrend1h === 'bullish') ||
+                                           (derivedDirection === 'short' && htfTrend1h === 'bearish');
+              
+              if (isInModerateZone && htf1hAlignedWithDir) {
+                htf1hAgreementBypassAllowed = true;
+                // Graduate position sizing based on momentum severity
+                if (absMomentumScore <= 30) {
+                  htf1hAgreementPositionMultiplier = htf1hBypass.POSITION_MULT_MILD;  // 70%
+                } else {
+                  htf1hAgreementPositionMultiplier = htf1hBypass.POSITION_MULT_MODERATE;  // 50%
+                }
+                
+                if (htf1hBypass.LOG_BYPASSES) {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ 1H_TREND_AGREEMENT_BYPASS: ${derivedDirection.toUpperCase()} allowed despite opposing momentum`);
+                  logger.forSymbol(symbol).info(`   → 1h trend=${htfTrend1h} aligns with ${derivedDirection}, momentum=${smartMomentum.score.toFixed(0)}`);
+                  logger.forSymbol(symbol).info(`   → Position reduced to ${(htf1hAgreementPositionMultiplier * 100).toFixed(0)}%`);
+                }
+              }
+            }
+            
+            if (!adxExceptionAllowed && !priceActionOverrideAllowed && !htf1hAgreementBypassAllowed) {
+              // Determine phase for diagnostic transparency
+              const absMomentumScore = Math.abs(smartMomentum.score);
+              const phase = absMomentumScore > 50 ? 'EXTREME' : absMomentumScore >= 15 ? 'MODERATE' : 'MILD';
+              const htf1hAlignedWithDir = (derivedDirection === 'long' && htfTrend1h === 'bullish') ||
+                                           (derivedDirection === 'short' && htfTrend1h === 'bearish');
+              
               rejectedByHardGates++;
               perSymbolGateAttribution.set(symbol, { gate: 'MOMENTUM_DIRECTION_HARD_GATE', details: momentumCheck.reason });
               logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 MOMENTUM_DIRECTION_HARD_GATE: ${momentumCheck.reason}`);
-              logger.forSymbol(symbol).warn(`   → Momentum=${smartMomentum.score.toFixed(0)}, ADX=${adx.toFixed(1)}, 4h=${htfTrend4h}`);
+              logger.forSymbol(symbol).warn(`   → Momentum=${smartMomentum.score.toFixed(0)}, ADX=${adx.toFixed(1)}, 4h=${htfTrend4h}, 1h=${htfTrend1h}`);
+              logger.forSymbol(symbol).warn(`   → Phase=${phase}, 1hAligned=${htf1hAlignedWithDir}`);
+              
               await logRejectionWithAI(supabase, userId, symbol, `MOMENTUM_DIRECTION_HARD_GATE: ${momentumCheck.reason}`,
-                { gate: "MOMENTUM_DIRECTION_HARD_GATE", derivedDirection, momentumScore: smartMomentum.score, adx, htfTrend4h, severity: momentumCheck.severity },
+                { 
+                  gate: "MOMENTUM_DIRECTION_HARD_GATE", 
+                  derivedDirection, 
+                  momentumScore: smartMomentum.score, 
+                  momentumState: trendData?.momentum?.state || 'none',
+                  adx,
+                  adxSlope: fullAdxResult.adxSlope,
+                  htfTrend4h, 
+                  htfTrend1h,
+                  phase,
+                  htf1hAlignedWithDir,
+                  bypassConditions: {
+                    adxException: { met: adxExceptionAllowed, requiredAdx: MOMENTUM_DIRECTION_HARD_GATE.EXCEPTION_MIN_ADX },
+                    priceActionOverride: { met: priceActionOverrideAllowed },
+                    htf1hAgreement: { 
+                      met: false, 
+                      reason: absMomentumScore > 50 ? 'EXTREME_MOMENTUM_NO_BYPASS' : 
+                              !htf1hAlignedWithDir ? '1H_TREND_NOT_ALIGNED' : 'OTHER',
+                      htf1hTrend: htfTrend1h,
+                      expectedTrend: derivedDirection === 'long' ? 'bullish' : 'bearish'
+                    }
+                  },
+                  severity: momentumCheck.severity 
+                },
                 trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             } else if (adxExceptionAllowed) {
@@ -3478,8 +3542,11 @@ serve(async (req) => {
             } else if (priceActionOverrideAllowed) {
               // Apply position size reduction for price action override
               logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ MOMENTUM_HARD_GATE bypassed via PRICE_ACTION_OVERRIDE: position at ${(priceActionPositionMultiplier * 100).toFixed(0)}%`);
-              // Note: priceActionPositionMultiplier should be applied later in position sizing logic
-              // Store it for later use (this is handled by existing positionMultiplier logic)
+              // Store for later position sizing
+              (trendData as any).priceActionOverrideMultiplier = priceActionPositionMultiplier;
+            } else if (htf1hAgreementBypassAllowed) {
+              // Store for later position sizing
+              (trendData as any).htf1hAgreementMultiplier = htf1hAgreementPositionMultiplier;
             }
           }
         }
