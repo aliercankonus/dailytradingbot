@@ -5139,6 +5139,26 @@ export const ADX_SLOPE_GRADUATED_GATE = {
   SHORT_HARD_BLOCK_SLOPE: -0.5,
   LONG_HARD_BLOCK_SLOPE: -0.7,  // Longs can tolerate more decline
   
+  // ===== BOLLINGER BREAKDOWN OVERRIDE =====
+  // Allows continuation entries when price is outside Bollinger Bands with StochRSI runway
+  // Addresses: missed opportunities in structurally strong trends with lagging ADX
+  BOLLINGER_BREAKDOWN_OVERRIDE: {
+    ENABLED: true,
+    // %B threshold for SHORT breakdown (price below lower band)
+    SHORT_MAX_PERCENT_B: 20,
+    // %B threshold for LONG breakout (price above upper band)
+    LONG_MIN_PERCENT_B: 80,
+    // 4H StochRSI runway requirements (K not at extreme)
+    SHORT_MAX_STOCHRSI_K: 85,  // SHORT needs K not overbought (has room to fall)
+    SHORT_MIN_STOCHRSI_K: 15,  // SHORT blocked if already oversold (no runway)
+    LONG_MIN_STOCHRSI_K: 15,   // LONG needs K not oversold (has room to rise)
+    LONG_MAX_STOCHRSI_K: 85,   // LONG blocked if already overbought (no runway)
+    // Position sizing for breakdown override entries (reduced due to lagging ADX)
+    POSITION_MULTIPLIER: 0.55,
+    // Minimum ADX to even consider the override (some trend strength required)
+    MIN_ADX_FOR_OVERRIDE: 20,
+  },
+  
   LOG_GATE_CHECKS: true,
 } as const;
 

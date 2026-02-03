@@ -4203,8 +4203,75 @@ serve(async (req) => {
               if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_GRADUATED: Slope=${adxSlope.toFixed(2)} severely declining but ADX=${adx.toFixed(1)} >= ${ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD} - allowing with ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% position`);
               }
+            }
+            // Exception 2: Bollinger Breakdown Override - price outside bands with StochRSI runway
+            else if (ADX_SLOPE_GRADUATED_GATE.BOLLINGER_BREAKDOWN_OVERRIDE?.ENABLED) {
+              const bbOverride = ADX_SLOPE_GRADUATED_GATE.BOLLINGER_BREAKDOWN_OVERRIDE;
+              const bb4h = trendData?.bollingerBands?.["4h"];
+              const stochRsi4h = trendData?.stochasticRsi?.["4h"];
+              const percentB = bb4h?.percentB ?? 50;
+              const stochRsiK = stochRsi4h?.k ?? 50;
+              
+              let bollingerBreakdownAllowed = false;
+              let breakdownReason = '';
+              
+              // Check if ADX meets minimum for override
+              if (adx >= bbOverride.MIN_ADX_FOR_OVERRIDE) {
+                if (derivedDirection === 'short') {
+                  // SHORT breakdown: price below lower band (%B <= 20) AND StochRSI has runway (15 < K < 85)
+                  const isBelowLowerBand = percentB <= bbOverride.SHORT_MAX_PERCENT_B;
+                  const hasRunway = stochRsiK > bbOverride.SHORT_MIN_STOCHRSI_K && stochRsiK < bbOverride.SHORT_MAX_STOCHRSI_K;
+                  
+                  if (isBelowLowerBand && hasRunway) {
+                    bollingerBreakdownAllowed = true;
+                    breakdownReason = `SHORT breakdown: %B=${percentB.toFixed(1)}% (below lower band), StochRSI K=${stochRsiK.toFixed(1)} (has runway)`;
+                  }
+                } else {
+                  // LONG breakout: price above upper band (%B >= 80) AND StochRSI has runway (15 < K < 85)
+                  const isAboveUpperBand = percentB >= bbOverride.LONG_MIN_PERCENT_B;
+                  const hasRunway = stochRsiK > bbOverride.LONG_MIN_STOCHRSI_K && stochRsiK < bbOverride.LONG_MAX_STOCHRSI_K;
+                  
+                  if (isAboveUpperBand && hasRunway) {
+                    bollingerBreakdownAllowed = true;
+                    breakdownReason = `LONG breakout: %B=${percentB.toFixed(1)}% (above upper band), StochRSI K=${stochRsiK.toFixed(1)} (has runway)`;
+                  }
+                }
+              }
+              
+              if (bollingerBreakdownAllowed) {
+                adxSlopeGraduatedMultiplier = bbOverride.POSITION_MULTIPLIER;
+                adxSlopeGateApplied = true;
+                
+                if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ ADX_SLOPE_GRADUATED BOLLINGER OVERRIDE: Slope=${adxSlope.toFixed(2)} declining but ${breakdownReason} - allowing with ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% position`);
+                }
+              } else {
+                // No override applies - hard block
+                rejectedByHardGates++;
+                const blockReason = `ADX_SLOPE_GRADUATED: ${derivedDirection.toUpperCase()} blocked - ADX slope=${adxSlope.toFixed(2)} severely declining AND ADX=${adx.toFixed(1)} < ${ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD} (BE zone), Bollinger override not met (%B=${percentB.toFixed(1)}, StochRSI K=${stochRsiK.toFixed(1)})`;
+                perSymbolGateAttribution.set(symbol, { gate: 'ADX_SLOPE_GRADUATED', details: blockReason });
+                
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                
+                await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                  gate: "ADX_SLOPE_GRADUATED",
+                  derivedDirection,
+                  adx: adx.toFixed(1),
+                  adxSlope: adxSlope.toFixed(2),
+                  percentB: percentB.toFixed(1),
+                  stochRsiK4h: stochRsiK.toFixed(1),
+                  bollingerBreakdownChecked: true,
+                  thresholds: {
+                    hardBlockSlope: directionSpecificThreshold,
+                    highAdxException: ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD,
+                    bollingerOverride: bbOverride,
+                  },
+                  analysis: "BE trades cluster when ADX < 50 with declining slope, Bollinger breakdown override not satisfied"
+                }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                continue;
+              }
             } else {
-              // Hard block for low-ADX with severe decline
+              // Hard block for low-ADX with severe decline (no override configured)
               rejectedByHardGates++;
               const blockReason = `ADX_SLOPE_GRADUATED: ${derivedDirection.toUpperCase()} blocked - ADX slope=${adxSlope.toFixed(2)} severely declining AND ADX=${adx.toFixed(1)} < ${ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD} (BE zone)`;
               perSymbolGateAttribution.set(symbol, { gate: 'ADX_SLOPE_GRADUATED', details: blockReason });
