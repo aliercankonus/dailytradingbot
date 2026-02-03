@@ -1964,6 +1964,9 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
         </div>
       )}
       
+      {/* Graduated Momentum Effect Visualization (if direction was affected) */}
+      <GraduatedMomentumEffectDisplay filtersStatus={filtersStatus} />
+      
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
         <span className="text-orange-400">⚠️ Why blocked:</span> Momentum must be "confirmed" with MACD alignment 
         and no divergence. Current state "{momentumState}" doesn't meet entry requirements.
@@ -2677,6 +2680,9 @@ const HardGateMomentumScoreDisplay = ({ filtersStatus, trendData }: { filtersSta
           <div className="text-muted-foreground">• {acceleratingTrendExceptionReason}</div>
         </div>
       )}
+      
+      {/* Graduated Momentum Effect Visualization (if direction was affected) */}
+      <GraduatedMomentumEffectDisplay filtersStatus={filtersStatus} />
       
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
         <span className="text-orange-400">⚠️ Why blocked:</span> Trades with momentum score below {momentumRequired} have 
@@ -3442,6 +3448,9 @@ const AdxSlopeGraduatedDisplay = ({ filtersStatus, trendData }: { filtersStatus:
           </>
         )}
       </div>
+      
+      {/* Graduated Momentum Effect Visualization (if direction was affected) */}
+      <GraduatedMomentumEffectDisplay filtersStatus={filtersStatus} />
     </div>
   );
 };
@@ -3588,6 +3597,9 @@ const HighAdx1hConfirmationDisplay = ({ filtersStatus, trendData }: { filtersSta
           </>
         )}
       </div>
+      
+      {/* Graduated Momentum Effect Visualization (if direction was affected) */}
+      <GraduatedMomentumEffectDisplay filtersStatus={filtersStatus} />
     </div>
   );
 };
@@ -3747,6 +3759,9 @@ const StochRsiRunwayDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
           </>
         )}
       </div>
+      
+      {/* Graduated Momentum Effect Visualization (if direction was affected) */}
+      <GraduatedMomentumEffectDisplay filtersStatus={filtersStatus} />
     </div>
   );
 };
