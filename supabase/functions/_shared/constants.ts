@@ -4843,6 +4843,21 @@ export const EXHAUSTION_REVERSAL_OVERRIDE_PARAMS = {
   ABSOLUTE_EXTREME_MAX_SLOPE: 0.15, // Momentum slope must be flattening (< 0.15)
   ABSOLUTE_EXTREME_POSITION_MULT: 0.30, // 30% position for early-trend exhaustion
   
+  // ===== CONTEXTUAL EXHAUSTION (K 95-97 / K 3-5) =====
+  // K 95-97 is extreme extension but NOT absolute exhaustion
+  // Allow exhaustion override in EARLY_TREND only with stricter conditions:
+  // - K >= 95 (or K <= 5)
+  // - ADX < 22 (not strong trend)
+  // - Momentum slope flattening OR decelerating (evidence of impulse energy loss)
+  // This captures early impulse exhaustion WITHOUT misclassifying strong trends
+  CONTEXTUAL_EXTREME_ENABLED: true,
+  CONTEXTUAL_EXTREME_K_HIGH: 95,   // K >= 95 = contextual overbought (need extra evidence)
+  CONTEXTUAL_EXTREME_K_LOW: 5,     // K <= 5 = contextual oversold (need extra evidence)
+  CONTEXTUAL_EXTREME_MAX_ADX: 22,  // Only in early trend (ADX < 22)
+  CONTEXTUAL_EXTREME_MAX_SLOPE: 0.10, // Stricter slope requirement (must be clearly flattening)
+  CONTEXTUAL_EXTREME_REQUIRE_DECEL: true, // Require momentum deceleration evidence
+  CONTEXTUAL_EXTREME_POSITION_MULT: 0.25, // 25% position (more conservative than absolute)
+  
   // ===== BOLLINGER %B THRESHOLDS =====
   // Price position relative to Bollinger Bands
   LONG_PERCENT_B_THRESHOLD: 20,   // %B <= 20 (at/below lower band)

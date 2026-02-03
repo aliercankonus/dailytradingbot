@@ -2963,10 +2963,8 @@ export const deriveTradeDirection = (
     const momentumSlopeEarly = trendData.smartMomentum?.components?.macdSlope ?? 
                                trendData.momentum?.macdSlope ?? 0;
     
-    // ===== NEW: ABSOLUTE EXTREME STOCHRSI BYPASS =====
-    // When K is at absolute statistical extreme (K >= 98 or K <= 2), 
-    // allow exhaustion override even in EARLY_TREND regime
-    // This addresses the regime-exhaustion coupling error
+    // ===== ABSOLUTE EXTREME STOCHRSI BYPASS (K >= 98 or K <= 2) =====
+    // True statistical exhaustion - allow in EARLY_TREND with basic conditions
     const isAbsoluteOverbought = stochK4hEarly >= (ER.ABSOLUTE_EXTREME_K_HIGH ?? 98);
     const isAbsoluteOversold = stochK4hEarly <= (ER.ABSOLUTE_EXTREME_K_LOW ?? 2);
     const isAbsoluteExtreme = isAbsoluteOverbought || isAbsoluteOversold;
@@ -2979,9 +2977,40 @@ export const deriveTradeDirection = (
                                    slopeAllowsAbsoluteExtreme &&
                                    regime === 'EARLY_TREND';
     
+    // ===== NEW: CONTEXTUAL EXHAUSTION BYPASS (K 95-97 or K 3-5) =====
+    // Not absolute exhaustion, but extreme extension requiring momentum deceleration evidence
+    // Three zones: 90-95 (overbought bias only), 95-97 (contextual exhaustion), 98+ (absolute)
+    const contextualExtremeEnabled = (ER as any).CONTEXTUAL_EXTREME_ENABLED ?? true;
+    const contextualExtremeKHigh = (ER as any).CONTEXTUAL_EXTREME_K_HIGH ?? 95;
+    const contextualExtremeKLow = (ER as any).CONTEXTUAL_EXTREME_K_LOW ?? 5;
+    const contextualExtremeMaxAdx = (ER as any).CONTEXTUAL_EXTREME_MAX_ADX ?? 22;
+    const contextualExtremeMaxSlope = (ER as any).CONTEXTUAL_EXTREME_MAX_SLOPE ?? 0.10;
+    const contextualExtremeRequireDecel = (ER as any).CONTEXTUAL_EXTREME_REQUIRE_DECEL ?? true;
+    
+    // Check contextual extreme conditions
+    const isContextualOverbought = stochK4hEarly >= contextualExtremeKHigh && !isAbsoluteOverbought;
+    const isContextualOversold = stochK4hEarly <= contextualExtremeKLow && !isAbsoluteOversold;
+    const isContextualExtreme = isContextualOverbought || isContextualOversold;
+    const adxAllowsContextualExtreme = adxValueEarly < contextualExtremeMaxAdx;
+    
+    // Stricter slope requirement for contextual: must be flattening (low absolute value)
+    const slopeIsFlattening = Math.abs(momentumSlopeEarly) < contextualExtremeMaxSlope;
+    
+    // Additional deceleration evidence: ADX slope declining or flat, or momentum score weakening
+    const adxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
+    const momentumDecelerating = adxSlope <= 0 || momentumSlopeEarly <= 0;
+    const decelRequirementMet = !contextualExtremeRequireDecel || momentumDecelerating;
+    
+    const contextualExtremeBypass = contextualExtremeEnabled &&
+                                     isContextualExtreme &&
+                                     adxAllowsContextualExtreme &&
+                                     slopeIsFlattening &&
+                                     decelRequirementMet &&
+                                     regime === 'EARLY_TREND';
+    
     // ===== TIER 0.25 TIGHTENING: REGIME GATE =====
     // Only allow exhaustion reversal in EXHAUSTION or RANGE regimes
-    // EXCEPTION: Absolute extreme can bypass in EARLY_TREND
+    // EXCEPTION: Absolute or Contextual extreme can bypass in EARLY_TREND
     const regimeAllowsExhaustionReversal = regime === 'EXHAUSTION' || regime === 'RANGE';
     
     // ===== TIER 0.25 TIGHTENING: HTF WEAKENING GATE =====
@@ -2991,35 +3020,50 @@ export const deriveTradeDirection = (
     const TIER025_HTF_WEAKENING_1H = 55;  // 1h confidence must be below this
     const htfIsWeakening = conf4h < TIER025_HTF_WEAKENING_4H && conf1h < TIER025_HTF_WEAKENING_1H;
     
-    // Combined gate: (regime AND HTF weakening) OR absolute extreme bypass
-    const tier025GatePasses = (regimeAllowsExhaustionReversal && htfIsWeakening) || absoluteExtremeBypass;
+    // Combined gate: (regime AND HTF weakening) OR absolute extreme bypass OR contextual extreme bypass
+    const tier025GatePasses = (regimeAllowsExhaustionReversal && htfIsWeakening) || 
+                               absoluteExtremeBypass || 
+                               contextualExtremeBypass;
+    
+    // Track which bypass path is being used for position sizing
+    const usingAbsoluteBypass = absoluteExtremeBypass;
+    const usingContextualBypass = contextualExtremeBypass && !absoluteExtremeBypass;
     
     if (!tier025GatePasses) {
       // Log skip reason for debugging
-      if (!regimeAllowsExhaustionReversal && !absoluteExtremeBypass) {
+      if (!regimeAllowsExhaustionReversal && !absoluteExtremeBypass && !contextualExtremeBypass) {
         if (isAbsoluteExtreme) {
           // Explain why absolute extreme bypass didn't work
           const bypassBlockReasons: string[] = [];
           if (!adxAllowsAbsoluteExtreme) bypassBlockReasons.push(`ADX=${adxValueEarly.toFixed(1)} >= ${ER.ABSOLUTE_EXTREME_MAX_ADX ?? 22}`);
           if (!slopeAllowsAbsoluteExtreme) bypassBlockReasons.push(`slope=${Math.abs(momentumSlopeEarly).toFixed(2)} >= ${ER.ABSOLUTE_EXTREME_MAX_SLOPE ?? 0.15}`);
-          reasons.push(`TIER 0.25 BLOCKED: regime=${regime} ∉ {EXHAUSTION, RANGE}, absolute extreme bypass failed (${bypassBlockReasons.join(', ')})`);
+          reasons.push(`TIER 0.25 BLOCKED: regime=${regime}, absolute extreme bypass failed (${bypassBlockReasons.join(', ')})`);
+        } else if (isContextualExtreme) {
+          // Explain why contextual extreme bypass didn't work
+          const bypassBlockReasons: string[] = [];
+          if (!adxAllowsContextualExtreme) bypassBlockReasons.push(`ADX=${adxValueEarly.toFixed(1)} >= ${contextualExtremeMaxAdx}`);
+          if (!slopeIsFlattening) bypassBlockReasons.push(`slope=${Math.abs(momentumSlopeEarly).toFixed(2)} >= ${contextualExtremeMaxSlope}`);
+          if (!decelRequirementMet) bypassBlockReasons.push(`momentum not decelerating (adxSlope=${adxSlope.toFixed(2)})`);
+          reasons.push(`TIER 0.25 BLOCKED: regime=${regime}, contextual extreme K=${stochK4hEarly.toFixed(0)} bypass failed (${bypassBlockReasons.join(', ')})`);
         } else {
-          reasons.push(`TIER 0.25 BLOCKED: regime=${regime} ∉ {EXHAUSTION, RANGE} - exhaustion reversal requires weak regime`);
+          reasons.push(`TIER 0.25 BLOCKED: regime=${regime} ∉ {EXHAUSTION, RANGE} - exhaustion reversal requires weak regime or K >= ${contextualExtremeKHigh}/${contextualExtremeKLow} with deceleration`);
         }
-      } else if (!htfIsWeakening && !absoluteExtremeBypass) {
+      } else if (!htfIsWeakening && !absoluteExtremeBypass && !contextualExtremeBypass) {
         reasons.push(`TIER 0.25 BLOCKED: HTF not weakening (4h=${conf4h.toFixed(0)}% >= ${TIER025_HTF_WEAKENING_4H} OR 1h=${conf1h.toFixed(0)}% >= ${TIER025_HTF_WEAKENING_1H})`);
       }
     }
     
-    // Log absolute extreme bypass activation
-    if (absoluteExtremeBypass) {
+    // Log bypass activation
+    if (usingAbsoluteBypass) {
       reasons.push(`TIER 0.25 ABSOLUTE EXTREME BYPASS: K=${stochK4hEarly.toFixed(0)} (${isAbsoluteOverbought ? 'overbought' : 'oversold'}), ADX=${adxValueEarly.toFixed(1)}, slope=${momentumSlopeEarly.toFixed(2)} in ${regime}`);
+    } else if (usingContextualBypass) {
+      reasons.push(`TIER 0.25 CONTEXTUAL EXHAUSTION BYPASS: K=${stochK4hEarly.toFixed(0)} (${isContextualOverbought ? 'extreme overbought' : 'extreme oversold'}), ADX=${adxValueEarly.toFixed(1)}, slope=${momentumSlopeEarly.toFixed(2)}, adxSlope=${adxSlope.toFixed(2)} in ${regime}`);
     }
     
-    // Only proceed with exhaustion reversal if tightened gates pass
     if (tier025GatePasses) {
-      // Position size modifier for absolute extreme bypass (more conservative)
+      // Position size modifier based on bypass type (more conservative for contextual)
       const absoluteExtremePositionMult = ER.ABSOLUTE_EXTREME_POSITION_MULT ?? 0.30;
+      const contextualExtremePositionMult = (ER as any).CONTEXTUAL_EXTREME_POSITION_MULT ?? 0.25;
       // Get 4h StochRSI K value
       const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 
                        trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
@@ -3077,8 +3121,16 @@ export const deriveTradeDirection = (
       // Check if momentum confirms (or we don't require it)
       if (!ER.REQUIRE_MOMENTUM_CONFIRMATION || momentumConfirmsLong) {
         // Calculate confidence and position size
+        // Apply contextual/absolute bypass multiplier caps for early-trend entries
         let erConfidence: number = ER.BASE_CONFIDENCE;
         let positionMult: number = ER.BASE_POSITION_MULTIPLIER;
+        
+        // Cap position size for early-trend bypass entries (more conservative)
+        if (usingContextualBypass) {
+          positionMult = Math.min(positionMult, contextualExtremePositionMult);
+        } else if (usingAbsoluteBypass) {
+          positionMult = Math.min(positionMult, absoluteExtremePositionMult);
+        }
         const erReasons: string[] = [];
         
         // Determine which exhaustion path triggered
@@ -3165,8 +3217,17 @@ export const deriveTradeDirection = (
       
       if (exhaustionDetectedShort && !isExpansion && adxNotAccelerating && !is4hStrongBullish) {
         if (!ER.REQUIRE_MOMENTUM_CONFIRMATION || momentumConfirmsShort) {
+          // Calculate confidence and position size
+          // Apply contextual/absolute bypass multiplier caps for early-trend entries
           let erConfidence: number = ER.BASE_CONFIDENCE;
           let positionMult: number = ER.BASE_POSITION_MULTIPLIER;
+          
+          // Cap position size for early-trend bypass entries (more conservative)
+          if (usingContextualBypass) {
+            positionMult = Math.min(positionMult, contextualExtremePositionMult);
+          } else if (usingAbsoluteBypass) {
+            positionMult = Math.min(positionMult, absoluteExtremePositionMult);
+          }
           const erReasons: string[] = [];
           
           // Determine which exhaustion path triggered
