@@ -2551,6 +2551,16 @@ export interface DirectionResult {
   // ===== PHASE 3 ADDITIONS: MOMENTUM WEIGHT =====
   momentumImpact?: 'aligned' | 'weak_opposing' | 'strong_opposing' | 'very_strong_opposing' | 'extreme_opposing' | 'neutral';  // How momentum affected derivation
   momentumScore?: number;              // Raw momentum score at derivation time
+  // ===== GRADUATED MOMENTUM PENALTY DIAGNOSTICS =====
+  graduatedMomentumEffect?: {
+    directionFlipped: boolean;         // Momentum penalty caused direction to flip (LONG→SHORT or vice versa)
+    directionNullified: boolean;       // Momentum penalty pushed sum below threshold (no direction)
+    baseDirection: 'long' | 'short' | null;  // Direction before momentum adjustment
+    adjustedDirection: 'long' | 'short' | null;  // Direction after momentum adjustment
+    baseWeightedSum: number;           // Sum before momentum adjustment
+    adjustedWeightedSum: number;       // Sum after momentum adjustment
+    penaltyApplied: number;            // Actual penalty value applied
+  };
   // ===== DIRECTION CONTEXT (Orchestration) =====
   directionContext?: DirectionContext; // Centralized direction rationale for traceability
 }
@@ -2853,6 +2863,17 @@ export const deriveTradeDirection = (
     // Apply momentum adjustment to weighted sum
     const weightedSum = baseWeightedSum + momentumAdjustment;
     
+    // ============= GRADUATED MOMENTUM PENALTY IMPACT LOGGING =============
+    // Track when momentum penalty changes direction outcome
+    const baseDirection = baseWeightedSum > 0 ? 'long' : (baseWeightedSum < 0 ? 'short' : null);
+    const adjustedDirection = weightedSum > 0 ? 'long' : (weightedSum < 0 ? 'short' : null);
+    const directionFlipped = baseDirection !== null && adjustedDirection !== null && baseDirection !== adjustedDirection;
+    
+    if (directionFlipped) {
+      reasons.push(`🔄 GRADUATED MOMENTUM FLIPPED DIRECTION: ${baseDirection.toUpperCase()} → ${adjustedDirection.toUpperCase()} (base=${baseWeightedSum.toFixed(2)}, adj=${momentumAdjustment.toFixed(2)}, final=${weightedSum.toFixed(2)})`);
+      reasons.push(`   ⚠️ Counter-momentum score |${momentumScore.toFixed(0)}| caused direction reversal`);
+    }
+    
     // Check for direction persistence bonus
     let persistenceBonus = 0;
     if (GATE_RELAXATION_FLAGS.DIRECTION_PERSISTENCE) {
@@ -2868,6 +2889,17 @@ export const deriveTradeDirection = (
     // PHASE 1: Use regime-adjusted threshold instead of hardcoded 0.55
     const baseThreshold = DIRECTION_REGIME_PARAMS.ENABLED ? regimeTier1Threshold : P.WEIGHTED_SUM_THRESHOLD;
     const effectiveThreshold = baseThreshold - persistenceBonus;
+    
+    // ============= DIRECTION NULLIFICATION CHECK =============
+    // Track when momentum penalty pushes weighted sum below threshold
+    const baseExceedsThreshold = Math.abs(baseWeightedSum) >= effectiveThreshold;
+    const adjustedExceedsThreshold = Math.abs(weightedSum) >= effectiveThreshold;
+    const directionNullified = baseExceedsThreshold && !adjustedExceedsThreshold;
+    
+    if (directionNullified) {
+      reasons.push(`🚫 GRADUATED MOMENTUM NULLIFIED DIRECTION: |${baseWeightedSum.toFixed(2)}| → |${weightedSum.toFixed(2)}| < threshold ${effectiveThreshold.toFixed(2)}`);
+      reasons.push(`   ⚠️ Counter-momentum score |${momentumScore.toFixed(0)}| prevented ${baseDirection?.toUpperCase() || 'unknown'} derivation`);
+    }
     
     // If weighted sum exceeds threshold, derive direction
     if (Math.abs(weightedSum) >= effectiveThreshold) {
@@ -2921,6 +2953,15 @@ export const deriveTradeDirection = (
         regime,
         momentumImpact,
         momentumScore,
+        graduatedMomentumEffect: {
+          directionFlipped,
+          directionNullified,
+          baseDirection,
+          adjustedDirection,
+          baseWeightedSum,
+          adjustedWeightedSum: weightedSum,
+          penaltyApplied: momentumAdjustment,
+        },
         directionContext: createDirectionContext(direction, {
           evidenceType: 'WEIGHTED_SUM',
           tier: 0,
