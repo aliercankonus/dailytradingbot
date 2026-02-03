@@ -71,6 +71,11 @@ export interface BlockedSignal {
     // NEW: Bollinger Breakdown Override tracking
     percentB?: string | number;
     bollingerBreakdownChecked?: boolean;
+    // NEW: Near-Extreme Protection relaxation tracking
+    nearExtremeRelaxationApplied?: boolean;
+    nearExtremeRelaxationTrigger?: string;
+    softZoneThreshold?: number;
+    hardZoneThreshold?: number;
   } | null;
   trend_data: {
     direction?: string;

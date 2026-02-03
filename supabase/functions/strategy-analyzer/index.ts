@@ -4924,6 +4924,8 @@ serve(async (req) => {
         // Shorts near 24h low have poor R:R, Longs near 24h high have high reversal probability
         let nearExtremePositionMultiplier = 1.0;
         let nearExtremeBlocked = false;
+        let nearExtremeRelaxationApplied = false;
+        let nearExtremeRelaxationTrigger: string | null = null;
         
         if (NEAR_EXTREME_PROTECTION_GATE.ENABLED) {
           const priceDistance = trendData.priceDistanceFromSwing;
@@ -4932,15 +4934,59 @@ serve(async (req) => {
             const distanceFromLow = priceDistance.distanceFromLowPercent ?? 0;
             const distanceFromHigh = priceDistance.distanceFromHighPercent ?? 0;
             
+            // ===== STRONG TREND RELAXATION CHECK =====
+            const relaxConfig = NEAR_EXTREME_PROTECTION_GATE.STRONG_TREND_RELAXATION;
+            let useRelaxedThresholds = false;
+            let relaxationReason = '';
+            
+            if (relaxConfig.ENABLED) {
+              // Safety check: ADX slope must not be sharply declining
+              const slopeAllowsRelaxation = adxSlope >= relaxConfig.MAX_ADX_SLOPE_DECLINE;
+              
+              if (slopeAllowsRelaxation) {
+                // Check relaxation triggers
+                if (adx >= relaxConfig.MIN_ADX_FOR_RELAXATION) {
+                  useRelaxedThresholds = true;
+                  relaxationReason = `ADX ${adx.toFixed(1)} >= ${relaxConfig.MIN_ADX_FOR_RELAXATION}`;
+                } else if (relaxConfig.BOLLINGER_SQUEEZE_TRIGGER && trendData.volatility?.bbSqueeze) {
+                  useRelaxedThresholds = true;
+                  relaxationReason = 'BB Squeeze active';
+                } else if (relaxConfig.BOLLINGER_BREAKDOWN_TRIGGER) {
+                  const percentB = parseFloat(trendData.volatility?.percentB ?? '50');
+                  if (derivedDirection === 'short' && percentB <= relaxConfig.BOLLINGER_BREAKDOWN_SHORT_MAX_B) {
+                    useRelaxedThresholds = true;
+                    relaxationReason = `%B ${percentB.toFixed(1)} <= ${relaxConfig.BOLLINGER_BREAKDOWN_SHORT_MAX_B} (SHORT breakdown)`;
+                  } else if (derivedDirection === 'long' && percentB >= relaxConfig.BOLLINGER_BREAKDOWN_LONG_MIN_B) {
+                    useRelaxedThresholds = true;
+                    relaxationReason = `%B ${percentB.toFixed(1)} >= ${relaxConfig.BOLLINGER_BREAKDOWN_LONG_MIN_B} (LONG breakout)`;
+                  }
+                }
+              }
+              
+              if (useRelaxedThresholds) {
+                nearExtremeRelaxationApplied = true;
+                nearExtremeRelaxationTrigger = relaxationReason;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 NEAR_EXTREME_PROTECTION RELAXATION: ${relaxationReason}, thresholds expanded (soft: ${relaxConfig.RELAXED_SOFT_THRESHOLD_PERCENT}%, hard: ${relaxConfig.RELAXED_HARD_ZONE_PERCENT}%)`);
+              }
+            }
+            
+            // Determine effective thresholds
+            const effectiveSoftThreshold = useRelaxedThresholds 
+              ? relaxConfig.RELAXED_SOFT_THRESHOLD_PERCENT 
+              : NEAR_EXTREME_PROTECTION_GATE.SHORT_NEAR_LOW_THRESHOLD_PERCENT;
+            const effectiveHardThreshold = useRelaxedThresholds 
+              ? relaxConfig.RELAXED_HARD_ZONE_PERCENT 
+              : NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_THRESHOLD_PERCENT;
+            
             // Check for shorts near 24h low
-            if (derivedDirection === 'short' && distanceFromLow <= NEAR_EXTREME_PROTECTION_GATE.SHORT_NEAR_LOW_THRESHOLD_PERCENT) {
+            if (derivedDirection === 'short' && distanceFromLow <= effectiveSoftThreshold) {
               // Get LTF alignment check
               const tf1hDir = trendData.timeframes?.['1h']?.trend || trendData.timeframes?.['1h']?.indicators?.emaSignal || "neutral";
               const tf30mDir = trendData.timeframes?.['30m']?.trend || 'neutral';
               const ltfSupportsShort = tf1hDir === 'bearish' || tf30mDir === 'bearish';
               
               // Check for hard zone (very close to low)
-              const inHardZone = distanceFromLow <= NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_THRESHOLD_PERCENT;
+              const inHardZone = distanceFromLow <= effectiveHardThreshold;
               
               // ADX exception check
               const adxOverrideAllowed = adx >= NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD;
@@ -4967,8 +5013,12 @@ serve(async (req) => {
                     low24h: priceDistance.low24h,
                     tf1hDir, tf30mDir,
                     adx: adx.toFixed(1),
+                    adxSlope: adxSlope.toFixed(2),
                     ltfSupportsShort,
-                    hardZoneThreshold: NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_THRESHOLD_PERCENT,
+                    hardZoneThreshold: effectiveHardThreshold,
+                    softZoneThreshold: effectiveSoftThreshold,
+                    relaxationApplied: nearExtremeRelaxationApplied,
+                    relaxationTrigger: nearExtremeRelaxationTrigger,
                     wouldPassWith: `LTF (1h or 30m) must be bearish, or ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
                   },
                   trendData,
@@ -4981,6 +5031,14 @@ serve(async (req) => {
                 if (adxOverrideAllowed) {
                   nearExtremePositionMultiplier = NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_MULTIPLIER;
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_LOW ADX OVERRIDE: SHORT ${distanceFromLow.toFixed(1)}% from low, ADX=${adx.toFixed(1)} >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
+                } else if (useRelaxedThresholds && distanceFromLow > NEAR_EXTREME_PROTECTION_GATE.SHORT_NEAR_LOW_THRESHOLD_PERCENT) {
+                  // In relaxed zone but outside default soft zone - use relaxed multiplier
+                  nearExtremePositionMultiplier = relaxConfig.RELAXED_SOFT_MULTIPLIER;
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 NEAR_24H_LOW RELAXED: SHORT ${distanceFromLow.toFixed(1)}% from low (relaxed threshold: ${effectiveSoftThreshold}%), ${relaxationReason} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
+                } else if (useRelaxedThresholds && distanceFromLow <= NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_THRESHOLD_PERCENT) {
+                  // In original hard zone but relaxed to transition zone
+                  nearExtremePositionMultiplier = relaxConfig.RELAXED_TRANSITION_MULTIPLIER;
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 NEAR_24H_LOW RELAXED (transition): SHORT ${distanceFromLow.toFixed(1)}% from low, ${relaxationReason} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
                 } else {
                   nearExtremePositionMultiplier = NEAR_EXTREME_PROTECTION_GATE.PROXIMITY_POSITION_MULTIPLIER;
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_LOW: SHORT ${distanceFromLow.toFixed(1)}% from low, LTF not bearish - position reduced to ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
@@ -4989,12 +5047,12 @@ serve(async (req) => {
             }
             
             // Check for longs near 24h high
-            if (derivedDirection === 'long' && distanceFromHigh <= NEAR_EXTREME_PROTECTION_GATE.LONG_NEAR_HIGH_THRESHOLD_PERCENT) {
+            if (derivedDirection === 'long' && distanceFromHigh <= effectiveSoftThreshold) {
               const tf1hDir = trendData.timeframes?.['1h']?.trend || trendData.timeframes?.['1h']?.indicators?.emaSignal || "neutral";
               const tf30mDir = trendData.timeframes?.['30m']?.trend || 'neutral';
               const ltfSupportsLong = tf1hDir === 'bullish' || tf30mDir === 'bullish';
               
-              const inHardZone = distanceFromHigh <= NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_THRESHOLD_PERCENT;
+              const inHardZone = distanceFromHigh <= effectiveHardThreshold;
               const adxOverrideAllowed = adx >= NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD;
               
               if (inHardZone && NEAR_EXTREME_PROTECTION_GATE.BLOCK_IN_HARD_ZONE && !adxOverrideAllowed && !ltfSupportsLong) {
@@ -5018,8 +5076,12 @@ serve(async (req) => {
                     high24h: priceDistance.high24h,
                     tf1hDir, tf30mDir,
                     adx: adx.toFixed(1),
+                    adxSlope: adxSlope.toFixed(2),
                     ltfSupportsLong,
-                    hardZoneThreshold: NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_THRESHOLD_PERCENT,
+                    hardZoneThreshold: effectiveHardThreshold,
+                    softZoneThreshold: effectiveSoftThreshold,
+                    relaxationApplied: nearExtremeRelaxationApplied,
+                    relaxationTrigger: nearExtremeRelaxationTrigger,
                     wouldPassWith: `LTF (1h or 30m) must be bullish, or ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
                   },
                   trendData,
@@ -5031,6 +5093,14 @@ serve(async (req) => {
                 if (adxOverrideAllowed) {
                   nearExtremePositionMultiplier = NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_MULTIPLIER;
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_HIGH ADX OVERRIDE: LONG ${distanceFromHigh.toFixed(1)}% from high, ADX=${adx.toFixed(1)} >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
+                } else if (useRelaxedThresholds && distanceFromHigh > NEAR_EXTREME_PROTECTION_GATE.LONG_NEAR_HIGH_THRESHOLD_PERCENT) {
+                  // In relaxed zone but outside default soft zone
+                  nearExtremePositionMultiplier = relaxConfig.RELAXED_SOFT_MULTIPLIER;
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 NEAR_24H_HIGH RELAXED: LONG ${distanceFromHigh.toFixed(1)}% from high (relaxed threshold: ${effectiveSoftThreshold}%), ${relaxationReason} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
+                } else if (useRelaxedThresholds && distanceFromHigh <= NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_THRESHOLD_PERCENT) {
+                  // In original hard zone but relaxed to transition zone
+                  nearExtremePositionMultiplier = relaxConfig.RELAXED_TRANSITION_MULTIPLIER;
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 NEAR_24H_HIGH RELAXED (transition): LONG ${distanceFromHigh.toFixed(1)}% from high, ${relaxationReason} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
                 } else {
                   nearExtremePositionMultiplier = NEAR_EXTREME_PROTECTION_GATE.PROXIMITY_POSITION_MULTIPLIER;
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_HIGH: LONG ${distanceFromHigh.toFixed(1)}% from high, LTF not bullish - position reduced to ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
