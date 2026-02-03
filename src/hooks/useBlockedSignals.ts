@@ -66,6 +66,9 @@ export interface BlockedSignal {
     momentumMultiplier?: number;
     combinedMultiplier?: number;
     activeGateCount?: number;
+    // NEW: Bollinger Breakdown Override tracking
+    percentB?: string | number;
+    bollingerBreakdownChecked?: boolean;
   } | null;
   trend_data: {
     direction?: string;

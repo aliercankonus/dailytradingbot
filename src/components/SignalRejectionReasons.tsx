@@ -3245,10 +3245,21 @@ const AdxSlopeGraduatedDisplay = ({ filtersStatus, trendData }: { filtersStatus:
   const positionMultiplier = coerceNumeric(filtersStatus?.positionMultiplier ?? filtersStatus?.multiplier, 1);
   const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
   
+  // Bollinger Breakdown Override data
+  const percentB = coerceNumeric(filtersStatus?.percentB ?? trendData?.bollingerBands?.['4h']?.percentB, 50);
+  const stochRsiK4h = coerceNumeric(filtersStatus?.stochRsiK4h ?? trendData?.stochasticRsi?.['4h']?.k, 50);
+  const bollingerBreakdownChecked = filtersStatus?.bollingerBreakdownChecked === true;
+  
   // Determine actual outcome based on values - NOT assumptions
   const isHardBlock = positionMultiplier <= 0 || filtersStatus?.blocked === true;
   const isSizeReduced = !isHardBlock && positionMultiplier < 1;
   const isAllowed = !isHardBlock && positionMultiplier >= 1;
+  
+  // Check if this was allowed via Bollinger Breakdown Override
+  const isBollingerOverride = isSizeReduced && bollingerBreakdownChecked && (
+    (direction === 'short' && percentB <= 20 && stochRsiK4h > 15 && stochRsiK4h < 85) ||
+    (direction === 'long' && percentB >= 80 && stochRsiK4h > 15 && stochRsiK4h < 85)
+  );
   
   // ADX thresholds
   const highAdxThreshold = 55;
@@ -3287,6 +3298,9 @@ const AdxSlopeGraduatedDisplay = ({ filtersStatus, trendData }: { filtersStatus:
       return "ADX conditions sufficient for full position sizing.";
     }
     if (isSizeReduced) {
+      if (isBollingerOverride) {
+        return `Bollinger Breakdown Override: Price ${direction === 'short' ? 'below lower band' : 'above upper band'} with StochRSI runway allows reduced entry despite declining ADX slope.`;
+      }
       if (isDecliningSlope && isLowEnergy) {
         return "ADX slope is declining while energy reservoir is low for reliable continuation.";
       }
@@ -3312,11 +3326,16 @@ const AdxSlopeGraduatedDisplay = ({ filtersStatus, trendData }: { filtersStatus:
             <TrendingDown className={`h-4 w-4 ${outcomeColors.icon}`} />
           )}
           <span className={`text-xs font-semibold ${outcomeColors.text}`}>
-            ADX SLOPE GRADUATED {isAllowed ? "– ALLOWED" : "GATE"}
+            ADX SLOPE GRADUATED {isAllowed ? "– ALLOWED" : isBollingerOverride ? "– BB OVERRIDE" : "GATE"}
           </span>
           <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30">
             BE Prevention
           </Badge>
+          {isBollingerOverride && (
+            <Badge variant="outline" className="text-[9px] px-1 py-0 bg-blue-500/20 text-blue-400 border-blue-500/30">
+              Bollinger Override
+            </Badge>
+          )}
         </div>
         <Badge 
           variant={isHardBlock ? "destructive" : isAllowed ? "secondary" : "secondary"} 
@@ -3352,11 +3371,43 @@ const AdxSlopeGraduatedDisplay = ({ filtersStatus, trendData }: { filtersStatus:
         </div>
       </div>
       
+      {/* Bollinger Breakdown Override Details - show when applicable */}
+      {(isBollingerOverride || bollingerBreakdownChecked) && (
+        <div className={`grid grid-cols-2 gap-2 p-2 rounded border ${isBollingerOverride ? 'bg-blue-500/10 border-blue-500/30' : 'bg-muted/30 border-muted/30'}`}>
+          <div className="text-center">
+            <div className="text-[10px] text-muted-foreground">Bollinger %B (4H)</div>
+            <div className={`text-sm font-bold ${percentB <= 20 ? 'text-red-400' : percentB >= 80 ? 'text-green-400' : 'text-muted-foreground'}`}>
+              {percentB.toFixed(1)}%
+            </div>
+            <div className="text-[9px] text-muted-foreground">
+              {percentB <= 20 ? "Below Lower Band" : percentB >= 80 ? "Above Upper Band" : "Within Bands"}
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="text-[10px] text-muted-foreground">StochRSI K (4H)</div>
+            <div className={`text-sm font-bold ${stochRsiK4h <= 15 || stochRsiK4h >= 85 ? 'text-red-400' : 'text-green-400'}`}>
+              {stochRsiK4h.toFixed(1)}
+            </div>
+            <div className="text-[9px] text-muted-foreground">
+              {stochRsiK4h <= 15 ? "Oversold (No Runway)" : stochRsiK4h >= 85 ? "Overbought (No Runway)" : "Has Runway"}
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Exception Check - only show if applicable */}
-      {hasHighAdxException && isDecliningSlope && (
+      {hasHighAdxException && isDecliningSlope && !isBollingerOverride && (
         <div className="flex items-center gap-1.5 p-1.5 bg-green-500/20 rounded text-[10px] text-green-400">
           <CheckCircle2 className="h-3 w-3" />
           <span>High ADX Exception: Energy reservoir ≥{highAdxThreshold} allows reduced entry at {(positionMultiplier * 100).toFixed(0)}%</span>
+        </div>
+      )}
+      
+      {/* Bollinger Override Exception notice */}
+      {isBollingerOverride && (
+        <div className="flex items-center gap-1.5 p-1.5 bg-blue-500/20 rounded text-[10px] text-blue-400">
+          <CheckCircle2 className="h-3 w-3" />
+          <span>Bollinger Breakdown Override: {direction === 'short' ? 'Price below lower band' : 'Price above upper band'} (%B={percentB.toFixed(1)}) with StochRSI runway (K={stochRsiK4h.toFixed(1)}) bypasses declining ADX slope block</span>
         </div>
       )}
       
@@ -3365,12 +3416,16 @@ const AdxSlopeGraduatedDisplay = ({ filtersStatus, trendData }: { filtersStatus:
         {isHardBlock ? (
           <>
             <span className="text-red-400">🚫 Why rejected: </span>
-            ADX &lt; 50 with severely declining slope (&lt; -0.5) indicates exhausted trend energy. Entry blocked to prevent BE outcome.
+            ADX &lt; 50 with severely declining slope (&lt; -0.5) indicates exhausted trend energy. 
+            {bollingerBreakdownChecked && ` Bollinger override not satisfied (%B=${percentB.toFixed(1)}, K=${stochRsiK4h.toFixed(1)}).`}
+            {' '}Entry blocked to prevent BE outcome.
           </>
         ) : isSizeReduced ? (
           <>
             <span className="text-amber-400">📉 Why size reduced: </span>
-            {isDecliningSlope 
+            {isBollingerOverride 
+              ? `Bollinger breakdown override allows entry despite declining ADX slope (${adxSlope.toFixed(2)}). Position sized at ${(positionMultiplier * 100).toFixed(0)}% due to lagging ADX confirmation.`
+              : isDecliningSlope 
               ? `Declining ADX slope (${adxSlope.toFixed(2)}) suggests fading momentum. Position sized at ${(positionMultiplier * 100).toFixed(0)}% to manage late-entry risk.`
               : `ADX conditions warrant caution. Position sized at ${(positionMultiplier * 100).toFixed(0)}%.`
             }
