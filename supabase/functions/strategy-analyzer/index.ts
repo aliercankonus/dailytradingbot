@@ -440,6 +440,7 @@ const logRejectionWithAI = async (
   };
   
   // Extract ADX and ADX slope for mean reversion diagnostics
+  // IMPORTANT: Only use trendData values as FALLBACKS - never overwrite explicitly passed values
   const adxData = {
     adx: trendData?.volatility?.adx ?? trendData?.adx ?? null,
     adxSlope: trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? null,
@@ -451,11 +452,13 @@ const logRejectionWithAI = async (
   };
   
   // Merge Order Flow data, StochRSI data, Bollinger data, and ADX data into filters_status
+  // CRITICAL FIX: filtersStatus takes precedence for explicitly passed values (like adxSlope from gate checks)
+  // Spread order: base data first, then filtersStatus last to preserve gate-specific values
   let enrichedFiltersStatus = {
-    ...filtersStatus,
     ...stochRsiData, // Always include StochRSI K/D values
     ...bollingerData, // Always include Bollinger %B values
-    ...adxData, // Always include ADX and ADX slope for mean reversion diagnostics
+    ...adxData, // ADX and slope from trendData as fallback
+    ...filtersStatus, // LAST: Gate-specific values override defaults (e.g., adxSlope from ADX_SLOPE_GRADUATED)
   };
   
   // Add Order Flow data if provided
