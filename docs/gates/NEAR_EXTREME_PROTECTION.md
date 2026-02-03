@@ -15,30 +15,68 @@ Entry location matters. When price is only ~2% above 24h low:
 
 This gate blocks or reduces positions for structurally late entries.
 
+## Strong Trend Relaxation (v1.1)
+
+In strong trending regimes, the gate relaxes its thresholds to prevent over-rejection of high-conviction continuation moves.
+
+### Relaxation Triggers (any one of these)
+
+| Condition | Threshold |
+|-----------|-----------|
+| ADX Strength | ≥ 28 |
+| Bollinger Squeeze | Active |
+| Bollinger Breakdown (SHORT) | %B ≤ 15 |
+| Bollinger Breakout (LONG) | %B ≥ 85 |
+
+### Safety Check
+- **ADX Slope**: Must not be sharply declining (> -1.0)
+- If ADX slope < -1.0, relaxation is blocked
+
+### Relaxed Thresholds
+
+| Zone | Default | Relaxed |
+|------|---------|---------|
+| Soft Zone | 2.5% | 3.5% |
+| Hard Zone | 1.5% | 2.0% |
+
+### Position Sizing (Relaxed)
+
+| Zone | Multiplier |
+|------|------------|
+| Relaxed Soft (2.5-3.5%) | 45% |
+| Relaxed Transition (1.5-2.0%) | 35% |
+
 ## Gate Logic
 
 ```
 START
   │
+  ├─ Check for Strong Trend Relaxation
+  │   ├─ ADX >= 28? → RELAX thresholds
+  │   ├─ BB Squeeze active? → RELAX thresholds
+  │   ├─ %B <= 15 (SHORT) or >= 85 (LONG)? → RELAX thresholds
+  │   └─ ADX slope < -1.0? → BLOCK relaxation
+  │
   ├─ Is this a SHORT near 24h LOW?
   │   │
-  │   ├─ Distance from low < 1.5%?
+  │   ├─ Distance from low < hard zone?
   │   │   ├─ LTF bearish? → ALLOW (reduced: 40% if ADX ≥ 50, else 25%)
-  │   │   └─ LTF not bearish? → BLOCK (HARD ZONE)
+  │   │   └─ LTF not bearish? → BLOCK (unless relaxed)
   │   │
-  │   ├─ Distance from low < 2.5%?
+  │   ├─ Distance from low < soft zone?
   │   │   ├─ LTF bearish? → ALLOW (full size)
   │   │   ├─ ADX ≥ 50? → ALLOW (40% position)
+  │   │   ├─ Relaxed & > default soft? → ALLOW (45% position)
   │   │   └─ LTF not bearish? → REDUCE (25% position)
   │   │
-  │   └─ Distance ≥ 2.5%? → Skip gate
+  │   └─ Distance ≥ soft zone? → Skip gate
   │
   ├─ Is this a LONG near 24h HIGH? (symmetric logic)
 ```
 
 ## Position Sizing Table
 
-### Shorts Near 24h Low
+### Shorts Near 24h Low (Default Thresholds)
 
 | Distance from Low | LTF Bearish | ADX ≥ 50 | Action |
 |-------------------|-------------|----------|--------|
@@ -50,17 +88,13 @@ START
 | 1.5% - 2.5% | No | No | 25% position |
 | ≥ 2.5% | Any | Any | Skip gate |
 
-### Longs Near 24h High
+### With Strong Trend Relaxation
 
-| Distance from High | LTF Bullish | ADX ≥ 50 | Action |
-|--------------------|-------------|----------|--------|
-| < 1.5% | Yes | Any | 25-40% position |
-| < 1.5% | No | Yes | 40% position |
-| < 1.5% | No | No | **BLOCK** |
-| 1.5% - 2.5% | Yes | Any | Full position |
-| 1.5% - 2.5% | No | Yes | 40% position |
-| 1.5% - 2.5% | No | No | 25% position |
-| ≥ 2.5% | Any | Any | Skip gate |
+| Distance from Low | Relaxed | Action |
+|-------------------|---------|--------|
+| < 2.0% (was 1.5%) | Yes | 35% position (transition) |
+| 2.0% - 3.5% | Yes | 45% position (soft) |
+| 2.5% - 3.5% | No (default would block) | Now ALLOWED with 45% |
 
 ## Configuration
 
@@ -68,22 +102,35 @@ START
 NEAR_EXTREME_PROTECTION_GATE = {
   ENABLED: true,
   
-  // Proximity thresholds
+  // Default thresholds
   SHORT_NEAR_LOW_THRESHOLD_PERCENT: 2.5,
   LONG_NEAR_HIGH_THRESHOLD_PERCENT: 2.5,
-  
-  // Hard zone (stricter protection)
   HARD_ZONE_THRESHOLD_PERCENT: 1.5,
   BLOCK_IN_HARD_ZONE: true,
+  
+  // Strong Trend Relaxation
+  STRONG_TREND_RELAXATION: {
+    ENABLED: true,
+    MIN_ADX_FOR_RELAXATION: 28,
+    BOLLINGER_SQUEEZE_TRIGGER: true,
+    BOLLINGER_BREAKDOWN_TRIGGER: true,
+    BOLLINGER_BREAKDOWN_SHORT_MAX_B: 15,
+    BOLLINGER_BREAKDOWN_LONG_MIN_B: 85,
+    MAX_ADX_SLOPE_DECLINE: -1.0,
+    RELAXED_SOFT_THRESHOLD_PERCENT: 3.5,
+    RELAXED_HARD_ZONE_PERCENT: 2.0,
+    RELAXED_SOFT_MULTIPLIER: 0.45,
+    RELAXED_TRANSITION_MULTIPLIER: 0.35,
+  },
   
   // LTF override requirement
   REQUIRE_LTF_MISALIGNMENT: true,
   LTF_ALIGNMENT_MIN_CONFIDENCE: 60,
   
   // Position sizing
-  PROXIMITY_POSITION_MULTIPLIER: 0.25,  // Default for near-extreme
-  ADX_OVERRIDE_THRESHOLD: 50,           // Very high ADX can override
-  ADX_OVERRIDE_MULTIPLIER: 0.40,        // Position with ADX override
+  PROXIMITY_POSITION_MULTIPLIER: 0.25,
+  ADX_OVERRIDE_THRESHOLD: 50,
+  ADX_OVERRIDE_MULTIPLIER: 0.40,
 }
 ```
 
@@ -98,31 +145,44 @@ NEAR_EXTREME_PROTECTION_GATE = {
   tf1hDir: string,
   tf30mDir: string,
   adx: number,
+  adxSlope: number,
   ltfSupportsShort: boolean,  // or ltfSupportsLong
   hardZoneThreshold: number,
-  wouldPassWith: string  // Hint showing bypass conditions
+  softZoneThreshold: number,
+  relaxationApplied: boolean,
+  relaxationTrigger: string,  // e.g., "ADX 32.5 >= 28"
+  wouldPassWith: string
 }
 ```
 
-## Case Study: The BTC Shorts Problem
+## Case Study: BTC Shorts Problem (Updated)
 
-**Before (without gate):**
-- 4H bearish, ADX 59
-- 1H and 30M neutral (exhaustion signs)
-- Price only 2.2% above 24h low
-- Result: Two SHORT entries → immediate loss as price bounced
+**Before (without relaxation):**
+- 4H bearish, ADX 32
+- Price 2.8% above 24h low (would be blocked at 2.5% default)
+- Strong BB breakdown (%B = 8)
+- Result: Entry blocked despite strong structure
 
-**After (with gate):**
-- Gate detects: `distanceFromLow = 2.2%` < threshold
-- Gate checks: 1H = neutral, 30M = neutral (no LTF support)
-- Action: **BLOCK** entry OR reduce to 25% probe
+**After (with relaxation):**
+- Gate detects: ADX 32 >= 28 → relaxation triggered
+- Relaxed soft threshold: 3.5%
+- Distance 2.8% < 3.5% → soft zone entry allowed
+- Action: **ALLOW** with 45% position size
 
 ## Related Gates
 
 - `LTF_CONFIRMATION_GATE`: Requires LTF alignment for continuation
-- `MOVE_EXHAUSTED`: Blocks after large price moves
+- `MOVE_EXHAUSTED`: Blocks after large price moves (also has relaxation)
+- `ADX_SLOPE_GRADUATED`: Bollinger Breakdown Override
 
 ## Changelog
+
+### v1.1 (2025-02-03)
+- Added Strong Trend Relaxation
+- Triggers: ADX >= 28, BB Squeeze, Bollinger Breakdown
+- Relaxed thresholds: soft 3.5%, hard 2.0%
+- Safety check: ADX slope > -1.0
+- Position sizing: 45% (relaxed soft), 35% (transition)
 
 ### v1.0 (2025-02-02)
 - Initial implementation

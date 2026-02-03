@@ -5126,11 +5126,40 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
   // Enable this gate
   ENABLED: true,
   
-  // ===== PROXIMITY THRESHOLDS =====
+  // ===== PROXIMITY THRESHOLDS (DEFAULT) =====
   // Block/reduce SHORTs when price is within this % of 24h low
   SHORT_NEAR_LOW_THRESHOLD_PERCENT: 2.5,
   // Block/reduce LONGs when price is within this % of 24h high
   LONG_NEAR_HIGH_THRESHOLD_PERCENT: 2.5,
+  
+  // ===== HARD ZONE (DEFAULT) =====
+  // Full block if in hard zone (even closer to extreme)
+  HARD_ZONE_THRESHOLD_PERCENT: 1.5,
+  BLOCK_IN_HARD_ZONE: true,
+  
+  // ===== STRONG TREND RELAXATION =====
+  // Similar to MOVE_EXHAUSTION: relax thresholds during strong trending regimes
+  // Prevents over-rejection of high-conviction continuation moves
+  STRONG_TREND_RELAXATION: {
+    ENABLED: true,
+    // Conditions to trigger relaxation (any one of these)
+    MIN_ADX_FOR_RELAXATION: 28,           // Strong trend energy
+    BOLLINGER_SQUEEZE_TRIGGER: true,       // BB compression indicates breakout potential
+    BOLLINGER_BREAKDOWN_TRIGGER: true,     // Price outside bands
+    BOLLINGER_BREAKDOWN_SHORT_MAX_B: 15,   // %B <= 15 for SHORT breakdown
+    BOLLINGER_BREAKDOWN_LONG_MIN_B: 85,    // %B >= 85 for LONG breakout
+    
+    // Safety: Don't relax if ADX slope is sharply declining
+    MAX_ADX_SLOPE_DECLINE: -1.0,
+    
+    // Relaxed thresholds
+    RELAXED_SOFT_THRESHOLD_PERCENT: 3.5,   // Expanded from 2.5% to 3.5%
+    RELAXED_HARD_ZONE_PERCENT: 2.0,        // Expanded from 1.5% to 2.0%
+    
+    // Position sizing in relaxed zones
+    RELAXED_SOFT_MULTIPLIER: 0.45,         // Soft zone: 45% (vs 25% default)
+    RELAXED_TRANSITION_MULTIPLIER: 0.35,   // Between hard and soft: 35%
+  },
   
   // ===== LTF OVERRIDE =====
   // Only apply protection if LTF is NOT aligned with trade direction
@@ -5141,9 +5170,6 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
   // ===== POSITION SIZING =====
   // When in proximity zone without LTF support
   PROXIMITY_POSITION_MULTIPLIER: 0.25,
-  // Full block if in hard zone (even closer to extreme)
-  HARD_ZONE_THRESHOLD_PERCENT: 1.5,
-  BLOCK_IN_HARD_ZONE: true,
   
   // ===== ADX EXCEPTION =====
   // Very high ADX can override (parabolic moves)
