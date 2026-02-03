@@ -2658,6 +2658,28 @@ serve(async (req) => {
           logger.forSymbol(symbol).debug(`[EARLY_ORDER_FLOW] score=${earlyOrderFlowAnalysis.score}/100 signal=${earlyOrderFlowAnalysis.signal} | ${earlyOrderFlowAnalysis.reasons.slice(0, 2).join(' | ')}`);
         }
 
+        // ============= EARLY SMART MOMENTUM CALCULATION =============
+        // CRITICAL PIPELINE FIX: Calculate smartMomentum BEFORE deriveTradeDirection
+        // This allows the graduated momentum penalty to prevent counter-momentum direction derivation
+        // Previously: momentumScore was 0 during direction derivation, penalty ineffective
+        // Now: Full momentum score available → extreme momentum (+100) applies 4x penalty → blocks SHORT
+        const earlyPriceData = symbolHistoricalData?.prices || [];
+        const earlyATR = calculateATR(klines, 14);
+        
+        // Calculate full ADX result for accurate slope
+        const earlyFullAdxResult = calculateADXWithDirection(klines, 14);
+        const earlyAdxSlope = earlyFullAdxResult.adxSlope ?? 0;
+        const earlySmartAdxRising = earlyAdxSlope > 0 || (trendData.volatility?.adxRising === true);
+        
+        // Calculate momentum score (-100 to +100) EARLY in pipeline
+        const earlySmartMomentum = calculateMomentumScore(klines, earlyPriceData, adx, earlySmartAdxRising, earlyATR);
+        
+        // INJECT into trendData so deriveTradeDirection can access it
+        // This is critical: deriveTradeDirection reads trendData.smartMomentum?.score
+        trendData.smartMomentum = earlySmartMomentum;
+        
+        logger.forSymbol(symbol).debug(`📊 EARLY SMART MOMENTUM: score=${earlySmartMomentum.score.toFixed(0)} (${earlySmartMomentum.direction}) | ADX slope=${earlyAdxSlope.toFixed(3)}, rising=${earlySmartAdxRising}`);
+
         // ============= RANGING MARKET DETECTION =============
         // Log informational message when market is genuinely ranging (all timeframes neutral, low ADX, low volume)
         if (RANGING_MARKET_DETECTION_PARAMS.ENABLE_LOGGING) {
@@ -3341,26 +3363,22 @@ serve(async (req) => {
           continue;
         }
         
-        // ============= NEW: SMART MOMENTUM ANALYSIS =============
-        // Phase 1 & 2: Calculate momentum score, pullback detection, and entry quality
+        // ============= SMART MOMENTUM ANALYSIS (REUSE EARLY CALCULATION) =============
+        // CRITICAL: smartMomentum was calculated EARLY in pipeline (before deriveTradeDirection)
+        // This ensures graduated momentum penalty can prevent counter-momentum direction derivation
+        // Reuse the early values to avoid duplicate computation
         const symbolHistData = historicalDataMap.get(symbol);
         const klineData = symbolHistData?.klines || [];
         const priceData = symbolHistData?.prices || [];
-        const currentATR = calculateATR(klineData, 14);
+        const currentATR = earlyATR;  // Reuse early calculation
         
-        // NEW: Calculate full ADX result FIRST to get accurate slope for momentum calculation
-        const fullAdxResult = calculateADXWithDirection(klineData, 14);
+        // Reuse early calculations
+        const fullAdxResult = earlyFullAdxResult;
+        const adxSlopeForMomentum = earlyAdxSlope;
+        const smartAdxRising = earlySmartAdxRising;
         
-        // FIX: Use ADX slope from fullAdxResult for accurate rising detection
-        // Previously: smartAdxRising = trendData.volatility?.adxRising ?? false (unreliable)
-        // Now: Check ADX slope directly - slope > 0 means ADX is rising
-        const adxSlopeForMomentum = fullAdxResult.adxSlope ?? 0;
-        const smartAdxRising = adxSlopeForMomentum > 0 || (trendData.volatility?.adxRising === true);
-        
-        logger.forSymbol(symbol).debug(`📊 ADX slope check: slope=${adxSlopeForMomentum.toFixed(3)}, trendData.adxRising=${trendData.volatility?.adxRising}, final smartAdxRising=${smartAdxRising}`);
-        
-        // Calculate momentum score (-100 to +100) with CORRECT adxRising value
-        const smartMomentum = calculateMomentumScore(klineData, priceData, adx, smartAdxRising, currentATR);
+        // REUSE early momentum calculation (already injected into trendData.smartMomentum)
+        const smartMomentum = earlySmartMomentum;
         
         // ============= CRITICAL: MOMENTUM DIRECTION HARD GATE =============
         // This gate runs BEFORE any exception overrides (MICRO_TREND, STRONG_TREND, etc.)
