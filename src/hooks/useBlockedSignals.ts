@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
 // Zone analytics types for MOVE_EXHAUSTION gate
-export type MoveZone = 'FRESH' | 'SOFT' | 'HARD' | 'EXCEPTION';
+export type MoveZone = 'FRESH' | 'SOFT' | 'HARD' | 'EXCEPTION' | 'RELAXED_SOFT' | 'RELAXED_HARD';
 export type MoveZoneOutcome = 'ALLOWED' | 'REDUCED' | 'BLOCKED' | 'EXCEPTION_ALLOWED';
 
 export interface MoveZoneDetails {
@@ -16,6 +16,8 @@ export interface MoveZoneDetails {
   outcome: MoveZoneOutcome;
   positionMultiplier: number;
   overrideReason?: string;
+  relaxationApplied?: boolean;
+  relaxationCondition?: string;
 }
 
 export interface BlockedSignal {

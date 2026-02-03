@@ -4246,7 +4246,7 @@ export const SQUEEZE_BREAKOUT_SIGNAL_PARAMS = {
 export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   ENABLED: true,
   
-  // ===== STRICTER THRESHOLDS (Phase 1 Fix) =====
+  // ===== BASE THRESHOLDS (Default) =====
   // LONG entries blocked if price already moved this much from 24h low
   LONG_SOFT_THRESHOLD_PERCENT: 3.5,   // Reduce position at 3.5%+ move
   LONG_HARD_THRESHOLD_PERCENT: 5.0,   // Hard block at 5%+ move
@@ -4259,6 +4259,45 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   SOFT_THRESHOLD_PERCENT: 3.5,        // Use direction-specific thresholds above
   SOFT_THRESHOLD_POSITION_SIZE: 0.35, // 35% position for late entries
   HARD_THRESHOLD_PERCENT: 5.0,        // Use direction-specific thresholds above
+  
+  // ===== STRONG TREND THRESHOLD RELAXATION =====
+  // In strong trending regimes (high ADX, Bollinger squeeze/breakdown), relax thresholds
+  // to avoid systematically rejecting high-conviction continuation moves
+  STRONG_TREND_RELAXATION: {
+    ENABLED: true,
+    
+    // ===== CONDITIONS FOR RELAXATION =====
+    // Must meet at least one condition to activate relaxed thresholds:
+    // 1. ADX >= 28 (confirmed strong trend)
+    // 2. Bollinger squeeze active (BB width compressed)
+    // 3. Bollinger breakdown (price beyond bands - %B <= 15 or >= 85)
+    MIN_ADX_FOR_RELAXATION: 28,
+    BB_SQUEEZE_RELAXATION: true,        // Relax if BB squeeze active
+    BB_BREAKDOWN_RELAXATION: true,      // Relax if price at/beyond bands
+    BB_BREAKDOWN_PERCENT_B_SHORT: 15,   // %B <= 15 = short breakdown
+    BB_BREAKDOWN_PERCENT_B_LONG: 85,    // %B >= 85 = long breakdown
+    
+    // ===== RELAXED THRESHOLDS =====
+    // Soft zone: 3.5% → 6.0%
+    // Hard zone: 5.0% → 8.0%
+    RELAXED_SOFT_THRESHOLD_PERCENT: 6.0,
+    RELAXED_HARD_THRESHOLD_PERCENT: 8.0,
+    
+    // Position sizing for relaxed zone entries (between original soft and relaxed hard)
+    // Original soft (3.5-5%): 35% → Relaxed soft (5-6%): 45% → Relaxed transition (6-8%): 35%
+    RELAXED_SOFT_POSITION_SIZE: 0.45,   // Better R:R due to strong trend
+    RELAXED_TRANSITION_POSITION_SIZE: 0.35, // Between old hard and new hard
+    
+    // ===== ADDITIONAL SAFETY CHECKS =====
+    // Even with relaxation, require StochRSI runway
+    REQUIRE_STOCHRSI_RUNWAY: true,
+    STOCHRSI_RUNWAY_MIN_K_FOR_SHORT: 15,  // K must be >= 15 for continued short
+    STOCHRSI_RUNWAY_MAX_K_FOR_LONG: 85,   // K must be <= 85 for continued long
+    
+    // Block relaxation if ADX slope is sharply declining (trend exhausting)
+    BLOCK_IF_ADX_SLOPE_DECLINING: true,
+    ADX_SLOPE_DECLINE_THRESHOLD: -1.0,  // Block if slope < -1.0
+  },
   
   // ===== STOCHRSI ALIGNMENT REQUIRED =====
   // In soft zone, block if StochRSI indicates exhaustion

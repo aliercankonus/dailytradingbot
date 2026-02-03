@@ -4111,13 +4111,27 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
   const backendMultiplier = coerceNumeric(moveZoneDetails?.positionMultiplier, 1);
   const overrideReason = moveZoneDetails?.overrideReason;
   
+  // NEW: Relaxation tracking for strong trend threshold adjustments
+  const relaxationApplied = moveZoneDetails?.relaxationApplied ?? false;
+  const relaxationCondition = moveZoneDetails?.relaxationCondition ?? '';
+  
+  // Get thresholds from backend (with relaxation info)
+  const thresholds = filtersStatus?.thresholds ?? {};
+  const effectiveHardThreshold = coerceNumeric(thresholds.hardThresholdPercent, 5);
+  const effectiveSoftThreshold = coerceNumeric(thresholds.softThresholdPercent, 3.5);
+  const originalHardThreshold = coerceNumeric(thresholds.originalHardThreshold ?? 5, 5);
+  const originalSoftThreshold = coerceNumeric(thresholds.originalSoftThreshold ?? 3.5, 3.5);
+  
   // Determine actual outcome from backend data (authoritative) or fallback to distance-based calculation
   const getExhaustionLevel = () => {
     // If we have backend outcome, use it
     if (backendOutcome) {
       if (backendOutcome === 'BLOCKED') {
+        const isRelaxedZone = backendZone === 'RELAXED_HARD';
         return { 
-          label: backendZone === 'HARD' ? "HARD BLOCK (≥10%)" : `${backendZone || 'SOFT'} ZONE - Override Blocked`, 
+          label: isRelaxedZone 
+            ? `RELAXED HARD BLOCK (≥${effectiveHardThreshold}%)` 
+            : backendZone === 'HARD' ? `HARD BLOCK (≥${effectiveHardThreshold}%)` : `${backendZone || 'SOFT'} ZONE - Override Blocked`, 
           color: "text-red-400", 
           bg: "bg-red-500/20", 
           border: "border-red-500/30",
@@ -4128,8 +4142,11 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
         };
       }
       if (backendOutcome === 'REDUCED' || backendMultiplier < 1) {
+        const isRelaxedZone = backendZone === 'RELAXED_SOFT';
         return { 
-          label: `${backendZone || 'SOFT'} ZONE (${(backendMultiplier * 100).toFixed(0)}% size)`, 
+          label: isRelaxedZone 
+            ? `RELAXED SOFT (${(backendMultiplier * 100).toFixed(0)}% size)` 
+            : `${backendZone || 'SOFT'} ZONE (${(backendMultiplier * 100).toFixed(0)}% size)`, 
           color: "text-yellow-400", 
           bg: "bg-yellow-500/20", 
           border: "border-yellow-500/30",
@@ -4166,8 +4183,8 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
     }
     
     // Fallback: distance-based calculation (legacy compatibility)
-    if (priceDistancePercent >= 10) return { 
-      label: "HARD BLOCK (≥10%)", 
+    if (priceDistancePercent >= effectiveHardThreshold) return { 
+      label: `HARD BLOCK (≥${effectiveHardThreshold}%)`, 
       color: "text-red-400", 
       bg: "bg-red-500/20", 
       border: "border-red-500/30",
@@ -4176,18 +4193,8 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
       isBlocked: true,
       isReduced: false
     };
-    if (priceDistancePercent >= 7) return { 
-      label: "High Exhaustion (7-10%)", 
-      color: "text-orange-400", 
-      bg: "bg-orange-500/20", 
-      border: "border-orange-500/30",
-      outcome: "SIZE_REDUCED",
-      outcomeLabel: "0.35x Size",
-      isBlocked: false,
-      isReduced: true
-    };
-    if (priceDistancePercent >= 5) return { 
-      label: "Soft Exhaustion (5-7%)", 
+    if (priceDistancePercent >= effectiveSoftThreshold) return { 
+      label: `Soft Exhaustion (${effectiveSoftThreshold}-${effectiveHardThreshold}%)`, 
       color: "text-yellow-400", 
       bg: "bg-yellow-500/20", 
       border: "border-yellow-500/30",
@@ -4221,7 +4228,16 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
             MOVE EXHAUSTION: {direction.toUpperCase()}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Relaxation Badge - shows when strong trend thresholds apply */}
+          {relaxationApplied && (
+            <Badge 
+              variant="outline" 
+              className="text-[9px] px-1.5 py-0 bg-blue-500/20 text-blue-400 border-blue-500/40"
+            >
+              📈 RELAXED ({relaxationCondition})
+            </Badge>
+          )}
           {/* Outcome Badge - uses backend's authoritative outcome */}
           <Badge 
             variant="outline" 
@@ -4241,6 +4257,11 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
       
       <div className="text-[10px] text-muted-foreground">
         Price has moved {priceDistancePercent.toFixed(1)}% from {swingLabel}. 
+        {relaxationApplied && (
+          <span className="text-blue-400">
+            {` Strong trend detected (${relaxationCondition}) - thresholds relaxed to ${effectiveSoftThreshold}%/${effectiveHardThreshold}%. `}
+          </span>
+        )}
         {exhaustionLevel.isBlocked 
           ? " Entry is rejected due to extreme move exhaustion." 
           : exhaustionLevel.isReduced 
@@ -4257,7 +4278,7 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
         </div>
       )}
       
-      {/* Exhaustion Progress */}
+      {/* Exhaustion Progress - Dynamic thresholds based on relaxation */}
       <div className="space-y-1.5">
         <div className="flex justify-between text-[10px]">
           <span className="text-muted-foreground">Distance from {swingLabel}</span>
@@ -4266,20 +4287,42 @@ const MoveExhaustionDisplay = ({ filtersStatus, trendData }: { filtersStatus: an
         <div className="relative h-2.5 bg-muted/50 rounded-full overflow-hidden">
           <div 
             className={`h-full rounded-full transition-all ${
-              priceDistancePercent >= 10 ? 'bg-red-500' : 
-              priceDistancePercent >= 7 ? 'bg-orange-500' : 
-              priceDistancePercent >= 5 ? 'bg-yellow-500' : 'bg-green-500'
+              priceDistancePercent >= effectiveHardThreshold ? 'bg-red-500' : 
+              priceDistancePercent >= effectiveSoftThreshold ? 'bg-yellow-500' : 'bg-green-500'
             }`}
-            style={{ width: `${Math.min(priceDistancePercent * 8, 100)}%` }}
+            style={{ width: `${Math.min((priceDistancePercent / effectiveHardThreshold) * 80, 100)}%` }}
           />
-          {/* Threshold markers */}
-          <div className="absolute top-0 h-full w-0.5 bg-yellow-400/60" style={{ left: '40%' }} title="5% Soft" />
-          <div className="absolute top-0 h-full w-0.5 bg-red-400/60" style={{ left: '80%' }} title="10% Hard" />
+          {/* Threshold markers - dynamic based on relaxation */}
+          <div 
+            className="absolute top-0 h-full w-0.5 bg-yellow-400/60" 
+            style={{ left: `${(effectiveSoftThreshold / effectiveHardThreshold) * 80}%` }} 
+            title={`${effectiveSoftThreshold}% Soft`} 
+          />
+          <div 
+            className="absolute top-0 h-full w-0.5 bg-red-400/60" 
+            style={{ left: '80%' }} 
+            title={`${effectiveHardThreshold}% Hard`} 
+          />
+          {/* Show original thresholds as faded markers when relaxation is applied */}
+          {relaxationApplied && (
+            <>
+              <div 
+                className="absolute top-0 h-full w-0.5 bg-yellow-400/20" 
+                style={{ left: `${(originalSoftThreshold / effectiveHardThreshold) * 80}%` }} 
+                title={`Original ${originalSoftThreshold}%`} 
+              />
+              <div 
+                className="absolute top-0 h-full w-0.5 bg-red-400/20" 
+                style={{ left: `${(originalHardThreshold / effectiveHardThreshold) * 80}%` }} 
+                title={`Original ${originalHardThreshold}%`} 
+              />
+            </>
+          )}
         </div>
         <div className="flex justify-between text-[8px] text-muted-foreground">
-          <span className="text-green-400">0-5% (1.0x)</span>
-          <span className="text-yellow-400">5-10% (0.35x)</span>
-          <span className="text-red-400">≥10% (Block)</span>
+          <span className="text-green-400">0-{effectiveSoftThreshold}% (1.0x)</span>
+          <span className="text-yellow-400">{effectiveSoftThreshold}-{effectiveHardThreshold}% (0.35-0.45x)</span>
+          <span className="text-red-400">≥{effectiveHardThreshold}% (Block)</span>
         </div>
       </div>
       
