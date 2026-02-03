@@ -5212,7 +5212,7 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
 export const ADX_SLOPE_GRADUATED_GATE = {
   ENABLED: true,
   
-  // ===== GRADUATED THRESHOLDS =====
+  // ===== GRADUATED THRESHOLDS FOR DECLINING SLOPES =====
   // Hard block when ADX slope is severely declining
   HARD_BLOCK_SLOPE_THRESHOLD: -0.5,
   // Reduce position when slope is moderately declining
@@ -5229,6 +5229,20 @@ export const ADX_SLOPE_GRADUATED_GATE = {
   // Shorts are more sensitive to momentum decay
   SHORT_HARD_BLOCK_SLOPE: -0.5,
   LONG_HARD_BLOCK_SLOPE: -0.7,  // Longs can tolerate more decline
+  
+  // ===== GRADUATED POSITIVE SLOPE TIERING FOR LONGS =====
+  // Allows earlier continuation entries during stabilizing phases
+  // Gap identified: system blocked valid LONGs waiting for slope >= +0.3
+  LONG_POSITIVE_SLOPE_TIERS: {
+    ENABLED: true,
+    // Tier 1: Full size (trend strengthening) - slope >= +0.3
+    FULL_SIZE_MIN_SLOPE: 0.3,
+    FULL_SIZE_MULTIPLIER: 1.0,
+    // Tier 2: Reduced size (stabilizing/flat) - slope 0.0 to +0.3
+    STABILIZING_MIN_SLOPE: 0.0,
+    STABILIZING_MULTIPLIER: 0.60,
+    // Note: slopes < 0.0 handled by decline logic above
+  },
   
   // ===== BOLLINGER BREAKDOWN OVERRIDE =====
   // Allows continuation entries when price is outside Bollinger Bands with StochRSI runway

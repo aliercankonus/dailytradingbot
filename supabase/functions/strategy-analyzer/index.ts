@@ -4323,6 +4323,29 @@ serve(async (req) => {
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_GRADUATED: Slope=${adxSlope.toFixed(2)} moderately declining, ADX=${adx.toFixed(1)} - reducing to ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}%`);
               }
             }
+          } else if (derivedDirection === 'long' && ADX_SLOPE_GRADUATED_GATE.LONG_POSITIVE_SLOPE_TIERS?.ENABLED) {
+            // ===== NEW: GRADUATED POSITIVE SLOPE TIERING FOR LONGS =====
+            // Allows earlier continuation entries during stabilizing phases
+            const positiveTiers = ADX_SLOPE_GRADUATED_GATE.LONG_POSITIVE_SLOPE_TIERS;
+            
+            if (adxSlope >= positiveTiers.FULL_SIZE_MIN_SLOPE) {
+              // Tier 1: Trend strengthening - full size
+              adxSlopeGraduatedMultiplier = positiveTiers.FULL_SIZE_MULTIPLIER;
+              // Don't mark as "applied" for full size - no reduction needed
+              
+              if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ ADX_SLOPE_GRADUATED LONG: Slope=${adxSlope.toFixed(2)} >= ${positiveTiers.FULL_SIZE_MIN_SLOPE} (trend strengthening) - full ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% position`);
+              }
+            } else if (adxSlope >= positiveTiers.STABILIZING_MIN_SLOPE) {
+              // Tier 2: Stabilizing/flat slope (0.0 to +0.3) - reduced size for early continuation
+              adxSlopeGraduatedMultiplier = positiveTiers.STABILIZING_MULTIPLIER;
+              adxSlopeGateApplied = true;
+              
+              if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_GRADUATED LONG: Slope=${adxSlope.toFixed(2)} in stabilizing range [${positiveTiers.STABILIZING_MIN_SLOPE}, ${positiveTiers.FULL_SIZE_MIN_SLOPE}) - reducing to ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% (early continuation)`);
+              }
+            }
+            // Note: slopes < 0.0 are handled by the decline logic above
           }
         }
         
