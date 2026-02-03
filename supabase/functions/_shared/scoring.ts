@@ -2657,6 +2657,7 @@ export const deriveTradeDirection = (
   const reasons: string[] = [];
   const P = DIRECTION_DERIVATION_PARAMS;
   
+  
   if (!trendData) {
     return { direction: null, confidence: 0, source: "none", reasons: ["No trend data"] };
   }
@@ -2798,11 +2799,12 @@ export const deriveTradeDirection = (
           momentumAdjustment = P.MOMENTUM_ALIGNMENT_BONUS;
           momentumImpact = 'aligned';
         } else if (momentumScore <= P.MOMENTUM_STRONG_OPPOSING_THRESHOLD) {
-          // Strongly opposing momentum - apply GRADUATED penalty based on magnitude
+          // Strongly opposing momentum for LONG (negative momentum opposes bullish)
+          // Penalty should REDUCE the positive weighted sum → subtract penalty
           const absMomentum = Math.abs(momentumScore);
           const graduatedResult = calculateGraduatedMomentumPenalty(absMomentum, P);
           
-          momentumAdjustment = -graduatedResult.penalty;
+          momentumAdjustment = -graduatedResult.penalty; // Negative adjustment reduces positive sum
           momentumImpact = graduatedResult.tier;
           momentumConfidenceReduction = graduatedResult.confidenceReduction;
           momentumPositionMultiplier = graduatedResult.positionMultiplier;
@@ -2818,23 +2820,25 @@ export const deriveTradeDirection = (
       } else {
         // For SHORT: negative momentum = aligned, positive = opposing
         if (momentumScore <= -Math.abs(P.MOMENTUM_STRONG_OPPOSING_THRESHOLD)) {
-          // Strongly aligned momentum (bearish) - bonus
-          momentumAdjustment = P.MOMENTUM_ALIGNMENT_BONUS;
+          // Strongly aligned momentum (bearish) - bonus (makes sum more negative)
+          momentumAdjustment = -P.MOMENTUM_ALIGNMENT_BONUS;
           momentumImpact = 'aligned';
         } else if (momentumScore >= -P.MOMENTUM_STRONG_OPPOSING_THRESHOLD) {
-          // Strongly opposing momentum for SHORT - apply GRADUATED penalty
+          // Strongly opposing momentum for SHORT (positive momentum opposes bearish)
+          // Penalty should REDUCE the negative weighted sum magnitude → add penalty (positive)
           const absMomentum = Math.abs(momentumScore);
           const graduatedResult = calculateGraduatedMomentumPenalty(absMomentum, P);
           
-          momentumAdjustment = -graduatedResult.penalty;
+          momentumAdjustment = +graduatedResult.penalty; // Positive adjustment reduces negative sum magnitude
           momentumImpact = graduatedResult.tier;
           momentumConfidenceReduction = graduatedResult.confidenceReduction;
           momentumPositionMultiplier = graduatedResult.positionMultiplier;
           
-          reasons.push(`GRADUATED MOMENTUM: |${momentumScore.toFixed(0)}| → ${graduatedResult.tier} (penalty=${graduatedResult.penalty.toFixed(2)}, conf-${graduatedResult.confidenceReduction}%, pos=${(graduatedResult.positionMultiplier * 100).toFixed(0)}%)`);
+          
+          reasons.push(`GRADUATED MOMENTUM: |${momentumScore.toFixed(0)}| → ${graduatedResult.tier} (penalty=+${graduatedResult.penalty.toFixed(2)} to reduce SHORT, conf-${graduatedResult.confidenceReduction}%, pos=${(graduatedResult.positionMultiplier * 100).toFixed(0)}%)`);
         } else if (momentumScore >= -P.MOMENTUM_WEAK_OPPOSING_THRESHOLD) {
-          // Weakly opposing momentum for SHORT
-          momentumAdjustment = -P.MOMENTUM_WEAK_OPPOSING_PENALTY;
+          // Weakly opposing momentum for SHORT → positive adjustment
+          momentumAdjustment = +P.MOMENTUM_WEAK_OPPOSING_PENALTY;
           momentumImpact = 'weak_opposing';
           momentumConfidenceReduction = P.MOMENTUM_CONFIDENCE_REDUCTION_WEAK;
           momentumPositionMultiplier = P.MOMENTUM_POSITION_REDUCTION_WEAK;
