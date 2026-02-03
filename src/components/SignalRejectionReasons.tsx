@@ -3206,51 +3206,106 @@ const AdxSlopeGraduatedDisplay = ({ filtersStatus, trendData }: { filtersStatus:
   const positionMultiplier = coerceNumeric(filtersStatus?.positionMultiplier ?? filtersStatus?.multiplier, 1);
   const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
   
-  // Determine if this is a hard block or size reduction
+  // Determine actual outcome based on values - NOT assumptions
   const isHardBlock = positionMultiplier <= 0 || filtersStatus?.blocked === true;
   const isSizeReduced = !isHardBlock && positionMultiplier < 1;
+  const isAllowed = !isHardBlock && positionMultiplier >= 1;
   
-  // Threshold checks
+  // ADX thresholds
   const highAdxThreshold = 55;
+  const lowEnergyThreshold = 50;
   const hasHighAdxException = adx >= highAdxThreshold;
-  const slopeStatus = adxSlope < -0.5 ? "Severely Declining" : adxSlope < -0.2 ? "Moderately Declining" : adxSlope < 0 ? "Slightly Declining" : "Stable/Rising";
+  const isLowEnergy = adx < lowEnergyThreshold;
+  
+  // Slope classification - MUST match actual values
+  const isDecliningSlope = adxSlope < 0;
+  const isSeverelyDeclining = adxSlope < -0.5;
+  const isModeratelyDeclining = adxSlope >= -0.5 && adxSlope < -0.2;
+  const isSlightlyDeclining = adxSlope >= -0.2 && adxSlope < 0;
+  const isRisingOrStable = adxSlope >= 0;
+  
+  const slopeStatus = isSeverelyDeclining ? "Severely Declining" : 
+                     isModeratelyDeclining ? "Moderately Declining" : 
+                     isSlightlyDeclining ? "Slightly Declining" : 
+                     adxSlope > 0.1 ? "Rising" : "Stable";
+  
+  // Color scheme based on outcome
+  const outcomeColors = isHardBlock 
+    ? { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', icon: 'text-red-500' }
+    : isSizeReduced
+    ? { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', icon: 'text-amber-500' }
+    : { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', icon: 'text-green-500' };
+  
+  // Header description MUST match actual values
+  const getHeaderDescription = () => {
+    if (isAllowed) {
+      if (isRisingOrStable && adx >= 25) {
+        return "ADX strength and slope support continuation. No BE sizing applied.";
+      }
+      if (hasHighAdxException && isDecliningSlope) {
+        return "ADX slope is declining but high energy reservoir (≥55) provides exception.";
+      }
+      return "ADX conditions sufficient for full position sizing.";
+    }
+    if (isSizeReduced) {
+      if (isDecliningSlope && isLowEnergy) {
+        return "ADX slope is declining while energy reservoir is low for reliable continuation.";
+      }
+      if (isDecliningSlope) {
+        return "ADX slope is declining, reducing position size to manage late-entry risk.";
+      }
+      return "Position sized down based on ADX conditions.";
+    }
+    // Hard block
+    if (isSeverelyDeclining && isLowEnergy) {
+      return "ADX slope is severely declining with exhausted energy reservoir.";
+    }
+    return "ADX conditions indicate elevated BE risk.";
+  };
   
   return (
-    <div className={`space-y-3 p-3 rounded-md border ${isHardBlock ? 'bg-red-500/10 border-red-500/30' : 'bg-amber-500/10 border-amber-500/30'}`}>
+    <div className={`space-y-3 p-3 rounded-md border ${outcomeColors.bg} ${outcomeColors.border}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <TrendingDown className={`h-4 w-4 ${isHardBlock ? 'text-red-500' : 'text-amber-500'}`} />
-          <span className={`text-xs font-semibold ${isHardBlock ? 'text-red-400' : 'text-amber-400'}`}>
-            ADX SLOPE GRADUATED GATE
+          {isAllowed ? (
+            <CheckCircle2 className={`h-4 w-4 ${outcomeColors.icon}`} />
+          ) : (
+            <TrendingDown className={`h-4 w-4 ${outcomeColors.icon}`} />
+          )}
+          <span className={`text-xs font-semibold ${outcomeColors.text}`}>
+            ADX SLOPE GRADUATED {isAllowed ? "– ALLOWED" : "GATE"}
           </span>
           <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30">
             BE Prevention
           </Badge>
         </div>
-        <Badge variant={isHardBlock ? "destructive" : "secondary"} className="text-[10px] px-1.5 py-0">
-          {isHardBlock ? "🚫 BLOCKED" : `📉 ${(positionMultiplier * 100).toFixed(0)}% Size`}
+        <Badge 
+          variant={isHardBlock ? "destructive" : isAllowed ? "secondary" : "secondary"} 
+          className={`text-[10px] px-1.5 py-0 ${isAllowed ? 'bg-green-500/20 text-green-400' : ''}`}
+        >
+          {isHardBlock ? "🚫 BLOCKED" : isAllowed ? "✓ 100% Size" : `📉 ${(positionMultiplier * 100).toFixed(0)}% Size`}
         </Badge>
       </div>
       
       <div className="text-[10px] text-muted-foreground">
-        ADX slope is declining while energy reservoir is {adx >= 55 ? "still high (exception applied)" : "too low for reliable continuation"}.
+        {getHeaderDescription()}
       </div>
       
       {/* ADX & Slope Gauges */}
       <div className="grid grid-cols-2 gap-2">
-        <div className={`p-2 rounded border text-center ${adx >= 55 ? 'bg-green-500/20 border-green-500/30' : adx >= 50 ? 'bg-yellow-500/20 border-yellow-500/30' : 'bg-red-500/20 border-red-500/30'}`}>
+        <div className={`p-2 rounded border text-center ${adx >= 55 ? 'bg-green-500/20 border-green-500/30' : adx >= 50 ? 'bg-yellow-500/20 border-yellow-500/30' : adx >= 25 ? 'bg-blue-500/20 border-blue-500/30' : 'bg-red-500/20 border-red-500/30'}`}>
           <div className="text-[10px] text-muted-foreground">ADX (Energy)</div>
-          <div className={`text-lg font-bold ${adx >= 55 ? 'text-green-400' : adx >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
+          <div className={`text-lg font-bold ${adx >= 55 ? 'text-green-400' : adx >= 50 ? 'text-yellow-400' : adx >= 25 ? 'text-blue-400' : 'text-red-400'}`}>
             {adx.toFixed(1)}
           </div>
           <div className="text-[9px] text-muted-foreground">
-            {adx >= 55 ? "High (Exception)" : adx >= 50 ? "Moderate" : "Low Risk"}
+            {adx >= 55 ? "High (Exception)" : adx >= 50 ? "Moderate" : adx >= 25 ? "Healthy" : "Low Risk"}
           </div>
         </div>
-        <div className={`p-2 rounded border text-center ${adxSlope >= 0 ? 'bg-green-500/20 border-green-500/30' : adxSlope >= -0.2 ? 'bg-yellow-500/20 border-yellow-500/30' : 'bg-red-500/20 border-red-500/30'}`}>
+        <div className={`p-2 rounded border text-center ${isRisingOrStable ? 'bg-green-500/20 border-green-500/30' : isSlightlyDeclining ? 'bg-yellow-500/20 border-yellow-500/30' : 'bg-red-500/20 border-red-500/30'}`}>
           <div className="text-[10px] text-muted-foreground">ADX Slope</div>
-          <div className={`text-lg font-bold ${adxSlope >= 0 ? 'text-green-400' : adxSlope >= -0.2 ? 'text-yellow-400' : 'text-red-400'}`}>
-            {adxSlope.toFixed(2)}
+          <div className={`text-lg font-bold ${isRisingOrStable ? 'text-green-400' : isSlightlyDeclining ? 'text-yellow-400' : 'text-red-400'}`}>
+            {adxSlope >= 0 ? '+' : ''}{adxSlope.toFixed(2)}
           </div>
           <div className="text-[9px] text-muted-foreground">
             {slopeStatus}
@@ -3258,22 +3313,40 @@ const AdxSlopeGraduatedDisplay = ({ filtersStatus, trendData }: { filtersStatus:
         </div>
       </div>
       
-      {/* Exception Check */}
-      {hasHighAdxException && (
+      {/* Exception Check - only show if applicable */}
+      {hasHighAdxException && isDecliningSlope && (
         <div className="flex items-center gap-1.5 p-1.5 bg-green-500/20 rounded text-[10px] text-green-400">
           <CheckCircle2 className="h-3 w-3" />
           <span>High ADX Exception: Energy reservoir ≥{highAdxThreshold} allows reduced entry at {(positionMultiplier * 100).toFixed(0)}%</span>
         </div>
       )}
       
+      {/* Contextual Assessment - ONLY show relevant messaging */}
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
-        <span className={isHardBlock ? 'text-red-400' : 'text-amber-400'}>
-          {isHardBlock ? '🚫 Why rejected:' : '📉 Why size reduced:'}
-        </span>
-        {isHardBlock 
-          ? ` ADX < 50 with severely declining slope (< -0.5) indicates exhausted trend energy. Entry blocked to prevent BE outcome.`
-          : ` Declining ADX slope suggests fading momentum. Position sized at ${(positionMultiplier * 100).toFixed(0)}% to manage late-entry risk.`
-        }
+        {isHardBlock ? (
+          <>
+            <span className="text-red-400">🚫 Why rejected: </span>
+            ADX &lt; 50 with severely declining slope (&lt; -0.5) indicates exhausted trend energy. Entry blocked to prevent BE outcome.
+          </>
+        ) : isSizeReduced ? (
+          <>
+            <span className="text-amber-400">📉 Why size reduced: </span>
+            {isDecliningSlope 
+              ? `Declining ADX slope (${adxSlope.toFixed(2)}) suggests fading momentum. Position sized at ${(positionMultiplier * 100).toFixed(0)}% to manage late-entry risk.`
+              : `ADX conditions warrant caution. Position sized at ${(positionMultiplier * 100).toFixed(0)}%.`
+            }
+          </>
+        ) : (
+          <>
+            <span className="text-green-400">ℹ️ Assessment: </span>
+            {isRisingOrStable && adx >= 25 
+              ? "ADX strength and positive/stable slope support continuation. Full position size permitted."
+              : hasHighAdxException
+              ? "High energy reservoir provides sufficient buffer. Full position size permitted."
+              : "No BE risk factors detected. Full position size permitted."
+            }
+          </>
+        )}
       </div>
     </div>
   );
