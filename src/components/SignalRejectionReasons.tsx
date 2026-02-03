@@ -5206,6 +5206,191 @@ const MomentumIndicatorsPanel = ({ trendData, filtersStatus }: { trendData?: any
   );
 };
 
+// ============= GRADUATED MOMENTUM EFFECT DISPLAY =============
+// Visualizes when graduated momentum penalty flips or nullifies direction derivation
+const GraduatedMomentumEffectDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
+  const effect = filtersStatus?.graduatedMomentumEffect;
+  const momentumScore = filtersStatus?.momentumScore;
+  const momentumImpact = filtersStatus?.momentumImpact;
+  
+  // Only show if we have effect data and something interesting happened
+  if (!effect && momentumScore === undefined) return null;
+  
+  const directionFlipped = effect?.directionFlipped === true;
+  const directionNullified = effect?.directionNullified === true;
+  const hasEffect = directionFlipped || directionNullified;
+  
+  // Extract numeric values safely
+  const baseSum = typeof effect?.baseWeightedSum === 'number' ? effect.baseWeightedSum : null;
+  const adjustedSum = typeof effect?.adjustedWeightedSum === 'number' ? effect.adjustedWeightedSum : null;
+  const penaltyApplied = typeof effect?.penaltyApplied === 'number' ? effect.penaltyApplied : 0;
+  const baseDirection = effect?.baseDirection;
+  const adjustedDirection = effect?.adjustedDirection;
+  const score = typeof momentumScore === 'number' ? momentumScore : null;
+  
+  // Determine severity styling
+  const getBorderColor = () => {
+    if (directionFlipped) return 'border-red-500/40';
+    if (directionNullified) return 'border-orange-500/40';
+    if (score !== null && Math.abs(score) >= 30) return 'border-amber-500/30';
+    return 'border-border/50';
+  };
+  
+  const getBgColor = () => {
+    if (directionFlipped) return 'bg-red-500/10';
+    if (directionNullified) return 'bg-orange-500/10';
+    if (score !== null && Math.abs(score) >= 30) return 'bg-amber-500/10';
+    return 'bg-muted/30';
+  };
+  
+  const getIconColor = () => {
+    if (directionFlipped) return 'text-red-400';
+    if (directionNullified) return 'text-orange-400';
+    return 'text-amber-400';
+  };
+  
+  const getMomentumBarColor = () => {
+    if (score === null) return 'bg-muted';
+    if (score > 30) return 'bg-green-500';
+    if (score > 0) return 'bg-green-400/60';
+    if (score > -30) return 'bg-red-400/60';
+    return 'bg-red-500';
+  };
+  
+  const getDirectionIcon = (dir: string | null) => {
+    if (dir === 'long') return <TrendingUp className="h-3 w-3 text-green-400" />;
+    if (dir === 'short') return <TrendingDown className="h-3 w-3 text-red-400" />;
+    return <Minus className="h-3 w-3 text-muted-foreground" />;
+  };
+  
+  return (
+    <div className={`space-y-2 p-2 rounded-md border ${getBgColor()} ${getBorderColor()}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Activity className={`h-3.5 w-3.5 ${getIconColor()}`} />
+          <span className="text-xs font-medium">Graduated Momentum Penalty</span>
+        </div>
+        {hasEffect ? (
+          <Badge 
+            variant="outline" 
+            className={`text-[10px] px-1.5 py-0 ${
+              directionFlipped ? 'text-red-400 border-red-500/40' : 'text-orange-400 border-orange-500/40'
+            }`}
+          >
+            {directionFlipped ? '🔄 FLIPPED' : '🚫 NULLIFIED'}
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
+            {momentumImpact || 'evaluated'}
+          </Badge>
+        )}
+      </div>
+      
+      {/* Momentum Score Bar */}
+      {score !== null && (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="text-muted-foreground">Momentum Score</span>
+            <span className={`font-mono font-medium ${score > 0 ? 'text-green-400' : score < 0 ? 'text-red-400' : 'text-muted-foreground'}`}>
+              {score > 0 ? '+' : ''}{score.toFixed(0)}
+            </span>
+          </div>
+          <div className="relative h-2 bg-muted/50 rounded-full overflow-hidden">
+            {/* Center marker */}
+            <div className="absolute left-1/2 top-0 bottom-0 w-px bg-foreground/30" />
+            {/* Score bar */}
+            <div 
+              className={`absolute top-0 bottom-0 rounded-full transition-all ${getMomentumBarColor()}`}
+              style={{
+                left: score >= 0 ? '50%' : `${50 + (score / 2)}%`,
+                width: `${Math.min(Math.abs(score) / 2, 50)}%`,
+              }}
+            />
+          </div>
+          <div className="flex justify-between text-[8px] text-muted-foreground font-mono">
+            <span>-100</span>
+            <span>0</span>
+            <span>+100</span>
+          </div>
+        </div>
+      )}
+      
+      {/* Direction Flow Visualization (when flipped/nullified) */}
+      {hasEffect && (
+        <div className="p-2 bg-muted/20 rounded border border-border/30">
+          <div className="flex items-center justify-between gap-2">
+            {/* Base Direction */}
+            <div className="flex-1 text-center">
+              <div className="text-[9px] text-muted-foreground mb-1">Base Direction</div>
+              <div className="flex items-center justify-center gap-1">
+                {getDirectionIcon(baseDirection)}
+                <span className={`text-xs font-medium uppercase ${
+                  baseDirection === 'long' ? 'text-green-400' : 
+                  baseDirection === 'short' ? 'text-red-400' : 'text-muted-foreground'
+                }`}>
+                  {baseDirection || 'none'}
+                </span>
+              </div>
+              {baseSum !== null && (
+                <div className="text-[9px] font-mono text-muted-foreground mt-0.5">
+                  sum: {baseSum >= 0 ? '+' : ''}{baseSum.toFixed(2)}
+                </div>
+              )}
+            </div>
+            
+            {/* Arrow with Penalty */}
+            <div className="flex flex-col items-center px-2">
+              <div className={`text-lg ${directionFlipped ? 'text-red-400' : 'text-orange-400'}`}>
+                →
+              </div>
+              {penaltyApplied !== 0 && (
+                <div className="text-[8px] font-mono text-red-400">
+                  {penaltyApplied >= 0 ? '+' : ''}{penaltyApplied.toFixed(2)}
+                </div>
+              )}
+            </div>
+            
+            {/* Adjusted Direction */}
+            <div className="flex-1 text-center">
+              <div className="text-[9px] text-muted-foreground mb-1">After Penalty</div>
+              <div className="flex items-center justify-center gap-1">
+                {getDirectionIcon(directionNullified ? null : adjustedDirection)}
+                <span className={`text-xs font-medium uppercase ${
+                  directionNullified ? 'text-muted-foreground' :
+                  adjustedDirection === 'long' ? 'text-green-400' : 
+                  adjustedDirection === 'short' ? 'text-red-400' : 'text-muted-foreground'
+                }`}>
+                  {directionNullified ? 'blocked' : (adjustedDirection || 'none')}
+                </span>
+              </div>
+              {adjustedSum !== null && (
+                <div className="text-[9px] font-mono text-muted-foreground mt-0.5">
+                  sum: {adjustedSum >= 0 ? '+' : ''}{adjustedSum.toFixed(2)}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Impact Summary */}
+      <div className="text-[10px] text-muted-foreground">
+        {directionFlipped ? (
+          <span className="text-red-400">
+            ⚠️ Counter-momentum score |{score?.toFixed(0) || '?'}| caused direction to flip from {baseDirection?.toUpperCase()} → {adjustedDirection?.toUpperCase()}
+          </span>
+        ) : directionNullified ? (
+          <span className="text-orange-400">
+            ⚠️ Counter-momentum score |{score?.toFixed(0) || '?'}| pushed weighted sum below threshold, preventing {baseDirection?.toUpperCase()} derivation
+          </span>
+        ) : momentumImpact ? (
+          <span>Momentum impact: <span className="font-medium">{momentumImpact}</span></span>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
 // No Direction Display - for NO_CLEAR_DIRECTION rejections
 const NoDirectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const trend4h = filtersStatus?.trend4h || trendData?.primaryTrend || "unknown";
@@ -5246,6 +5431,9 @@ const NoDirectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
       {directionContext && (
         <DirectionContextDisplay directionContext={directionContext} />
       )}
+      
+      {/* NEW: Graduated Momentum Effect Visualization */}
+      <GraduatedMomentumEffectDisplay filtersStatus={filtersStatus} />
       
       {/* Trend Overview */}
       <div className="grid grid-cols-2 gap-2">
