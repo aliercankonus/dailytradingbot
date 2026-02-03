@@ -1984,6 +1984,10 @@ const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
   const conf15m = coerceNumeric(trendData?.timeframes?.['15m']?.confidence, 0);
   const is1hCounterTrend = filtersStatus?.is1hCounterTrendTo4h ?? false;
   
+  // Determine if 4H is neutral (no directional bias)
+  const is4hNeutral = trend4h?.toLowerCase() === 'neutral' || trend4h?.toLowerCase() === 'ranging';
+  const is1hDirectional = trend1h?.toLowerCase() !== 'neutral' && trend1h?.toLowerCase() !== 'ranging';
+  
   // Calculate local confidence if not provided
   const calculatedLocalConf = confidenceLocal > 0 ? confidenceLocal : 
     Math.round((conf1h * 0.5) + (conf30m * 0.3) + (conf15m * 0.2));
@@ -1992,6 +1996,25 @@ const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
   const bypassHints = filtersStatus?.bypassHints;
   const needsConfLocal = bypassHints?.needsConfidenceLocal ?? (65 - calculatedLocalConf);
   const needs1hConf = bypassHints?.needs1hConfidence ?? (65 - conf1h);
+  
+  // Strong 1H bypass logic: when 4H is neutral, 1H is NOT counter-trend
+  // Counter-trend only applies when 4H has a directional bias (bullish/bearish)
+  const is1hActuallyCounterTrend = !is4hNeutral && is1hCounterTrend;
+  const strong1hPasses = conf1h >= 65 && !is1hActuallyCounterTrend;
+  
+  // Determine 1H status text
+  const get1hStatusText = () => {
+    if (conf1h >= 65) {
+      if (is4hNeutral) {
+        return '(4H neutral - no counter-trend check)';
+      } else if (is1hActuallyCounterTrend) {
+        return '(blocked: counter-trend to 4H)';
+      } else {
+        return '(aligned with 4H)';
+      }
+    }
+    return '';
+  };
   
   return (
     <div className="space-y-3 p-3 bg-yellow-500/10 rounded-md border border-yellow-500/30">
@@ -2016,17 +2039,23 @@ const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
       
       {/* Timeframe Grid */}
       <div className="grid grid-cols-2 gap-2">
-        <div className={`p-2 rounded border ${trend4h === trend1h ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+        <div className={`p-2 rounded border ${htfAligned ? 'bg-green-500/10 border-green-500/30' : is4hNeutral ? 'bg-blue-500/10 border-blue-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
           <div className="text-[10px] text-muted-foreground">4H Trend</div>
           <div className="font-medium capitalize text-sm">{trend4h}</div>
           <div className="text-[9px] text-muted-foreground">Conf: {conf4h}%</div>
+          {is4hNeutral && (
+            <div className="text-[9px] text-blue-400 mt-0.5">ℹ️ No directional bias</div>
+          )}
         </div>
-        <div className={`p-2 rounded border ${trend4h === trend1h ? 'bg-green-500/10 border-green-500/30' : is1hCounterTrend ? 'bg-orange-500/10 border-orange-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+        <div className={`p-2 rounded border ${htfAligned ? 'bg-green-500/10 border-green-500/30' : is1hActuallyCounterTrend ? 'bg-orange-500/10 border-orange-500/30' : is1hDirectional ? 'bg-blue-500/10 border-blue-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
           <div className="text-[10px] text-muted-foreground">1H Trend</div>
           <div className="font-medium capitalize text-sm">{trend1h}</div>
           <div className="text-[9px] text-muted-foreground">Conf: {conf1h}%</div>
-          {is1hCounterTrend && (
+          {is1hActuallyCounterTrend && (
             <div className="text-[9px] text-orange-400 mt-0.5">⚠️ Counter-trend to 4H</div>
+          )}
+          {is4hNeutral && is1hDirectional && (
+            <div className="text-[9px] text-blue-400 mt-0.5">ℹ️ 4H neutral - not blocked</div>
           )}
         </div>
       </div>
@@ -2041,9 +2070,9 @@ const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
           {calculatedLocalConf >= 65 ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
           Local Confidence ≥ 65%: {calculatedLocalConf}%
         </div>
-        <div className={`flex items-center gap-1.5 text-[10px] ${conf1h >= 65 && !is1hCounterTrend ? 'text-green-400' : 'text-red-400'}`}>
-          {conf1h >= 65 && !is1hCounterTrend ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-          Strong 1H (≥65% + non-counter-trend): {conf1h}% {is1hCounterTrend ? '(blocked: counter-trend)' : ''}
+        <div className={`flex items-center gap-1.5 text-[10px] ${strong1hPasses ? 'text-green-400' : 'text-red-400'}`}>
+          {strong1hPasses ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+          Strong 1H (≥65%{!is4hNeutral ? ' + non-counter-trend' : ''}): {conf1h}% {get1hStatusText()}
         </div>
       </div>
       
@@ -2055,15 +2084,25 @@ const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
         </div>
         <ul className="text-[10px] text-muted-foreground space-y-0.5 ml-4 list-disc">
           <li>Local Confidence ≥ 65% <span className="text-blue-400">(need +{Math.max(0, needsConfLocal).toFixed(0)}%)</span></li>
-          <li>1H Confidence ≥ 65% + aligned with 4H <span className="text-blue-400">(need +{Math.max(0, needs1hConf).toFixed(0)}%)</span></li>
+          {is4hNeutral ? (
+            <li>1H Confidence ≥ 65% <span className="text-blue-400">(need +{Math.max(0, needs1hConf).toFixed(0)}%)</span> <span className="text-green-400">— 4H neutral, no alignment needed</span></li>
+          ) : (
+            <li>1H Confidence ≥ 65% + aligned with 4H <span className="text-blue-400">(need +{Math.max(0, needs1hConf).toFixed(0)}%)</span></li>
+          )}
           <li>Valid micro-trend (ADX ≥23, volume, 3+ bars, not counter-4H)</li>
           <li>Active override aligned with trade direction</li>
         </ul>
       </div>
       
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
-        <span className="text-yellow-400">⚠️ Why blocked:</span> 4H and 1H trends must agree, or local 
-        confidence must be ≥65% to bypass alignment requirement. 1H bypass is now blocked if counter-trend to 4H.
+        <span className="text-yellow-400">⚠️ Why blocked:</span>{' '}
+        {is4hNeutral ? (
+          <>4H is neutral (no directional bias). 1H needs ≥65% confidence to bypass, or local confidence must reach ≥65%.</>
+        ) : is1hActuallyCounterTrend ? (
+          <>1H trend ({trend1h}) is counter-trend to 4H ({trend4h}). Strong 1H bypass blocked. Need local confidence ≥65% or aligned override.</>
+        ) : (
+          <>4H and 1H trends don't agree ({trend4h} vs {trend1h}). Need local confidence ≥65% or strong 1H (≥65%) to bypass.</>
+        )}
       </div>
     </div>
   );
