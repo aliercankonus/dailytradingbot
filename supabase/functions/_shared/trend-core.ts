@@ -2,15 +2,20 @@
 // Single source of truth for trend calculations
 // Used by: calculate-trend (HTTP), backtest-strategy (inline)
 
-import { ADX_THRESHOLDS, RSI_THRESHOLDS, STOCHRSI_THRESHOLDS } from "./constants.ts";
+import { ADX_THRESHOLDS, RSI_THRESHOLDS, STOCHRSI_THRESHOLDS, NET_SIGNAL_THRESHOLDS } from "./constants.ts";
 import { 
   calculateEMA, calculateRSI, calculateRSIArray, calculateMACD, 
   calculateStochasticRSI, calculateATR, calculateHistoricalATRAvg,
   calculateADXWithDirection, calculateVolumeAnalysis, ADXResult 
 } from "./indicators.ts";
 
+// Extended trend type with weak intermediate states for early impulse detection
+export type ExtendedTrend = "bullish" | "bearish" | "neutral" | "weak_bullish" | "weak_bearish";
+
 export interface TrendResult {
   trend: "bullish" | "bearish" | "neutral";
+  extendedTrend: ExtendedTrend;  // NEW: Includes weak_bullish/weak_bearish for partial signals
+  netSignal: number;             // NEW: Raw netSignal value for diagnostics
   confidence: number;
   indicators: {
     ema12: number;
@@ -31,6 +36,8 @@ export function calculateTrend(prices: number[]): TrendResult {
   if (prices.length < 30) {
     return {
       trend: "neutral",
+      extendedTrend: "neutral",
+      netSignal: 0,
       confidence: 35,
       indicators: {
         ema12: 0, ema26: 0, emaSignal: "neutral",
@@ -93,12 +100,35 @@ export function calculateTrend(prices: number[]): TrendResult {
   let confidence = 30 + (Math.abs(netSignal) / totalWeight) * 100 * 0.65;
   confidence = Math.min(Math.max(confidence, 30), 95);
 
+  // NEUTRAL-BIAS FIX: Lower threshold from ±4.0 to ±3.0 and add weak intermediate states
+  // This captures early impulse phases that would previously be labeled "neutral"
+  const STRONG = NET_SIGNAL_THRESHOLDS?.STRONG_THRESHOLD ?? 4.0;
+  const WEAK = NET_SIGNAL_THRESHOLDS?.WEAK_THRESHOLD ?? 3.0;
+  const ENABLE_WEAK = NET_SIGNAL_THRESHOLDS?.ENABLE_WEAK_TRENDS ?? true;
+  
   let trend: "bullish" | "bearish" | "neutral" = "neutral";
-  if (netSignal >= 4.0) trend = "bullish";
-  else if (netSignal <= -4.0) trend = "bearish";
+  let extendedTrend: ExtendedTrend = "neutral";
+  
+  if (netSignal >= STRONG) {
+    trend = "bullish";
+    extendedTrend = "bullish";
+  } else if (netSignal <= -STRONG) {
+    trend = "bearish";
+    extendedTrend = "bearish";
+  } else if (ENABLE_WEAK && netSignal >= WEAK) {
+    // NEW: Weak bullish - signals directional bias without full confirmation
+    trend = "neutral";  // Backward compatible: main trend stays neutral
+    extendedTrend = "weak_bullish";
+  } else if (ENABLE_WEAK && netSignal <= -WEAK) {
+    // NEW: Weak bearish
+    trend = "neutral";
+    extendedTrend = "weak_bearish";
+  }
 
   return {
     trend,
+    extendedTrend,
+    netSignal: Math.round(netSignal * 100) / 100,
     confidence: Math.round(confidence),
     indicators: {
       ema12: Math.round(ema12 * 100) / 100,

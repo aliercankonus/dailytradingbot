@@ -3084,6 +3084,72 @@ export const DIRECTION_DERIVATION_PARAMS = {
   MOMENTUM_CONFIDENCE_REDUCTION_WEAK: 8,   // Reduce confidence by 8% when weakly opposing
   MOMENTUM_POSITION_REDUCTION_STRONG: 0.70, // 70% position when momentum strongly opposes
   MOMENTUM_POSITION_REDUCTION_WEAK: 0.85,   // 85% position when momentum weakly opposes
+  
+  // ===== NEUTRAL-BIAS AMPLIFICATION FIX: PARTIAL NEUTRAL CONTRIBUTION =====
+  // Instead of discarding neutral trends (contribution = 0), use partial weight based on confidence
+  // This preserves directional pressure even when trend labels are conservative
+  ENABLE_PARTIAL_NEUTRAL_CONTRIBUTION: true,
+  NEUTRAL_CONTRIBUTION_FLOOR: 40,     // Min confidence for neutral to contribute
+  NEUTRAL_CONTRIBUTION_CEILING: 60,   // Max confidence for partial scaling
+  NEUTRAL_PARTIAL_MAX_WEIGHT: 0.60,   // Maximum weight a neutral trend can contribute
+  
+  // ===== TIER-BASED DIRECTION THRESHOLDS =====
+  // Use confidence scores instead of string labels for tier eligibility
+  TIER_DIRECTIONAL_THRESHOLD: 50,     // Confidence >= 50 = directional (regardless of label)
+  
+  // ===== STOCHRSI EXTREME AS DIRECTION BIAS =====
+  // Add StochRSI extremes as bias input to weighted sum
+  ENABLE_STOCHRSI_BIAS: true,
+  STOCHRSI_OVERBOUGHT_K: 90,          // K >= 90 adds bearish bias
+  STOCHRSI_OVERSOLD_K: 10,            // K <= 10 adds bullish bias
+  STOCHRSI_BIAS_WEIGHT: 0.10,         // ±0.10 bias adjustment to weighted sum
+} as const;
+
+// ============= BIAS RESOLUTION TIER (TIER 9.5) PARAMETERS =============
+// Pre-terminal tier that resolves direction when all tiers fail but micro-evidence exists
+// Prevents NO_CLEAR_DIRECTION during impulse phases
+export const BIAS_RESOLUTION_TIER = {
+  ENABLED: true,
+  
+  // ===== EVIDENCE REQUIREMENTS =====
+  // Require at least 2 evidence sources to assign direction
+  MIN_EVIDENCE_SCORE: 2,
+  
+  // ===== MICRO-DIRECTION EVIDENCE =====
+  // Consecutive bars in same direction
+  MICRO_DIRECTION_MIN_BARS: 8,        // 8+ consecutive bars = +2 score
+  MICRO_DIRECTION_SCORE: 2,
+  
+  // ===== STOCHRSI EXTREME EVIDENCE =====
+  STOCHRSI_EXTREME_K_HIGH: 90,        // K >= 90 = bearish bias
+  STOCHRSI_EXTREME_K_LOW: 10,         // K <= 10 = bullish bias
+  STOCHRSI_EXTREME_SCORE: 1,
+  
+  // ===== ORDER FLOW EVIDENCE =====
+  ORDER_FLOW_MIN_SCORE: 60,           // Order flow score >= 60 = valid evidence
+  ORDER_FLOW_EVIDENCE_SCORE: 1,
+  
+  // ===== POSITION SIZING =====
+  // Minimal position for bias-resolution signals (WEAK_LONG/WEAK_SHORT)
+  POSITION_SIZE: 0.25,
+  
+  // ===== CONFIDENCE =====
+  CONFIDENCE: 50,
+  
+  // ===== LOGGING =====
+  LOG_TIER_EVALUATION: true,
+} as const;
+
+// ============= NET SIGNAL THRESHOLDS =============
+// Controls trend classification sensitivity in trend-core.ts
+export const NET_SIGNAL_THRESHOLDS = {
+  // Strong trend thresholds (±4.0 = definitive bullish/bearish)
+  STRONG_THRESHOLD: 4.0,
+  // Weak trend thresholds (±3.0 = weak_bullish/weak_bearish intermediate state)
+  // Lowered from ±4.0 to ±3.0 to capture early impulse phases
+  WEAK_THRESHOLD: 3.0,
+  // Enable weak trend intermediate states
+  ENABLE_WEAK_TRENDS: true,
 } as const;
 
 // ============= EXHAUSTION ESCAPE PARAMS =============
