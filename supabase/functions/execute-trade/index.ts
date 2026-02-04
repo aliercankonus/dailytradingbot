@@ -1148,6 +1148,12 @@ serve(async (req) => {
             const hasValidException = adxValue >= ADX_EXCEPTION_THRESHOLD && (adxRising || momentumDirectionAgrees);
             const hasWeakException = adxValue >= ADX_EXCEPTION_THRESHOLD && !adxRising && !momentumDirectionAgrees;
             
+            // Graduated exception: ADX 22-25 with ALL confirmations (rising + momentum + quality)
+            const ADX_GRADUATED_MIN = 22;
+            const qualityScore = (signal as any).qualityScore || trendData?.quality?.score || 0;
+            const hasGraduatedException = adxValue >= ADX_GRADUATED_MIN && adxValue < ADX_EXCEPTION_THRESHOLD && 
+              adxRising && momentumDirectionAgrees && qualityScore >= 65;
+            
             if (hasValidException) {
               const guardReason = adxRising ? 'ADX rising' : 'momentum direction agrees';
               vwapBoostMultiplier = 0.8;
@@ -1155,10 +1161,20 @@ serve(async (req) => {
             } else if (hasWeakException) {
               vwapBoostMultiplier = 0.7;
               logger.warn(`⚠️ VWAP WEAK EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band, ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} but no guard passed - allowing LONG with 70% size`);
+            } else if (hasGraduatedException) {
+              // Graduated exception: ADX 22-25 with full confirmation stack
+              vwapBoostMultiplier = 0.6;
+              logger.warn(`⚠️ VWAP GRADUATED EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band, ADX=${adxValue.toFixed(1)} in 22-25 zone with all confirmations (rising=${adxRising}, macd=${macdHistogram.toFixed(4)}, quality=${qualityScore}) - allowing LONG with 60% size`);
             } else {
               // Calculate band deviation for audit accuracy
               const vwapBandDeviationPct = vwapUpperBand > 0 ? ((currentPrice - vwapUpperBand) / vwapUpperBand) * 100 : 0;
-              logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} above upper VWAP band $${vwapUpperBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD}, adxRising=${adxRising}, macdHistogram=${macdHistogram.toFixed(4)})`);
+              
+              // Log why graduated exception failed if in the 22-25 zone
+              const graduatedFailReason = adxValue >= ADX_GRADUATED_MIN && adxValue < ADX_EXCEPTION_THRESHOLD 
+                ? ` (graduated failed: rising=${adxRising}, macdAligns=${momentumDirectionAgrees}, quality=${qualityScore}>=65?${qualityScore >= 65})`
+                : '';
+              
+              logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} above upper VWAP band $${vwapUpperBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD}, adxRising=${adxRising}, macdHistogram=${macdHistogram.toFixed(4)})${graduatedFailReason}`);
               await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (LONG)', signal, trendData, { 
                 currentPrice, 
                 vwapMid: currentVWAP,
@@ -1167,7 +1183,10 @@ serve(async (req) => {
                 vwapBandDeviationPct,
                 adx: adxValue, 
                 adxRising, 
-                macdHistogram 
+                macdHistogram,
+                qualityScore,
+                graduatedEligible: adxValue >= ADX_GRADUATED_MIN,
+                graduatedFailReason: !adxRising ? 'ADX not rising' : !momentumDirectionAgrees ? 'MACD not aligned' : qualityScore < 65 ? 'Quality < 65' : 'Unknown'
               });
               throw new Error(`Price above upper VWAP band - overextended LONG entry blocked (ADX < ${ADX_EXCEPTION_THRESHOLD} or no guard passed)`);
             }
@@ -1202,6 +1221,12 @@ serve(async (req) => {
             const hasValidException = adxValue >= ADX_EXCEPTION_THRESHOLD && (adxRising || momentumDirectionAgrees);
             const hasWeakException = adxValue >= ADX_EXCEPTION_THRESHOLD && !adxRising && !momentumDirectionAgrees;
             
+            // Graduated exception: ADX 22-25 with ALL confirmations (rising + momentum + quality)
+            const ADX_GRADUATED_MIN = 22;
+            const qualityScore = (signal as any).qualityScore || trendData?.quality?.score || 0;
+            const hasGraduatedException = adxValue >= ADX_GRADUATED_MIN && adxValue < ADX_EXCEPTION_THRESHOLD && 
+              adxRising && momentumDirectionAgrees && qualityScore >= 65;
+            
             if (hasValidException) {
               const guardReason = adxRising ? 'ADX rising' : 'momentum direction agrees';
               vwapBoostMultiplier = 0.8;
@@ -1209,10 +1234,20 @@ serve(async (req) => {
             } else if (hasWeakException) {
               vwapBoostMultiplier = 0.7;
               logger.warn(`⚠️ VWAP WEAK EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band, ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} but no guard passed - allowing SHORT with 70% size`);
+            } else if (hasGraduatedException) {
+              // Graduated exception: ADX 22-25 with full confirmation stack
+              vwapBoostMultiplier = 0.6;
+              logger.warn(`⚠️ VWAP GRADUATED EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band, ADX=${adxValue.toFixed(1)} in 22-25 zone with all confirmations (rising=${adxRising}, macd=${macdHistogram.toFixed(4)}, quality=${qualityScore}) - allowing SHORT with 60% size`);
             } else {
               // Calculate band deviation for audit accuracy
               const vwapBandDeviationPct = vwapLowerBand > 0 ? ((currentPrice - vwapLowerBand) / vwapLowerBand) * 100 : 0;
-              logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD}, adxRising=${adxRising}, macdHistogram=${macdHistogram.toFixed(4)})`);
+              
+              // Log why graduated exception failed if in the 22-25 zone
+              const graduatedFailReason = adxValue >= ADX_GRADUATED_MIN && adxValue < ADX_EXCEPTION_THRESHOLD 
+                ? ` (graduated failed: rising=${adxRising}, macdAligns=${momentumDirectionAgrees}, quality=${qualityScore}>=65?${qualityScore >= 65})`
+                : '';
+              
+              logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD}, adxRising=${adxRising}, macdHistogram=${macdHistogram.toFixed(4)})${graduatedFailReason}`);
               await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (SHORT)', signal, trendData, { 
                 currentPrice, 
                 vwapMid: currentVWAP,
@@ -1221,7 +1256,10 @@ serve(async (req) => {
                 vwapBandDeviationPct,
                 adx: adxValue, 
                 adxRising, 
-                macdHistogram 
+                macdHistogram,
+                qualityScore,
+                graduatedEligible: adxValue >= ADX_GRADUATED_MIN,
+                graduatedFailReason: !adxRising ? 'ADX not rising' : !momentumDirectionAgrees ? 'MACD not aligned' : qualityScore < 65 ? 'Quality < 65' : 'Unknown'
               });
               throw new Error(`Price below lower VWAP band - oversold SHORT entry blocked (ADX < ${ADX_EXCEPTION_THRESHOLD} or no guard passed)`);
             }

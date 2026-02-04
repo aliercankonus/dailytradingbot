@@ -226,13 +226,19 @@ export const TradingSignalsDashboard = () => {
                 const threshold = filters.threshold !== undefined ? Number(filters.threshold) : 10;
                 details.push(`Volume: ${Number(filters.volumeRatio).toFixed(1)}x (need ${threshold}x)`);
               }
-              // ADX context
+              // ADX context with graduated zone indication
               if (filters.adx !== undefined) {
-                details.push(`ADX: ${Number(filters.adx).toFixed(1)}`);
+                const adx = Number(filters.adx);
+                const adxLabel = adx >= 25 ? 'ADX' : adx >= 22 ? 'ADX (grad zone)' : 'ADX';
+                details.push(`${adxLabel}: ${adx.toFixed(1)}`);
               }
               // Quality score if available
               if (filters.qualityScore !== undefined) {
                 details.push(`Quality: ${Number(filters.qualityScore).toFixed(0)}`);
+              }
+              // Graduated exception failure reason if in 22-25 zone
+              if (filters.graduatedEligible === true && filters.graduatedFailReason) {
+                details.push(`Grad fail: ${String(filters.graduatedFailReason)}`);
               }
             }
             
