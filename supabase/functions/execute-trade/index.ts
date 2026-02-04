@@ -1150,7 +1150,7 @@ serve(async (req) => {
             
             // Graduated exception: ADX 22-25 with ALL confirmations (rising + momentum + quality)
             const ADX_GRADUATED_MIN = 22;
-            const qualityScore = (signal as any).qualityScore || trendData?.quality?.score || 0;
+            const qualityScore = signal.indicators?.qualityScore || signalQualityScore || 0;
             const hasGraduatedException = adxValue >= ADX_GRADUATED_MIN && adxValue < ADX_EXCEPTION_THRESHOLD && 
               adxRising && momentumDirectionAgrees && qualityScore >= 65;
             
@@ -1223,7 +1223,7 @@ serve(async (req) => {
             
             // Graduated exception: ADX 22-25 with ALL confirmations (rising + momentum + quality)
             const ADX_GRADUATED_MIN = 22;
-            const qualityScore = (signal as any).qualityScore || trendData?.quality?.score || 0;
+            const qualityScore = signal.indicators?.qualityScore || signalQualityScore || 0;
             const hasGraduatedException = adxValue >= ADX_GRADUATED_MIN && adxValue < ADX_EXCEPTION_THRESHOLD && 
               adxRising && momentumDirectionAgrees && qualityScore >= 65;
             
