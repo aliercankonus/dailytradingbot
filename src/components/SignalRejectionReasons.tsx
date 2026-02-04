@@ -4773,11 +4773,20 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
       
       {/* Explanation Footer */}
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
-        <span className="text-orange-400">⚠️ Why blocked:</span> Attempting {signalDirection.toUpperCase()} entry 
-        while momentum score is {momentumScore.toFixed(0)} ({momentumDirection}).
-        {isPhase1Extreme && " Score beyond ±50 threshold cannot be bypassed by any condition."}
-        {isPhase1Moderate && ` Only 1h trend agreement (currently ${regimeTrendDirection || 'neutral'}) could allow entry with reduced position.`}
-        {isPhase2 && " Neither MACD weakness nor exceptional ADX conditions were met."}
+        <span className="text-orange-400">⚠️ Why blocked:</span>{' '}
+        {isPhase2 ? (
+          <>
+            Attempting {signalDirection.toUpperCase()} entry while MACD direction is {momentumDirection} 
+            (histogram: {macdHistogram >= 0 ? '+' : ''}{macdHistogram.toFixed(2)}).
+            Neither MACD weakness (|hist| {'<'} threshold) nor exceptional ADX (≥35, current: {adx.toFixed(1)}) conditions were met.
+          </>
+        ) : (
+          <>
+            Attempting {signalDirection.toUpperCase()} entry while momentum score is {momentumScore.toFixed(0)} ({momentumDirection}).
+            {isPhase1Extreme && " Score beyond ±50 threshold cannot be bypassed by any condition."}
+            {isPhase1Moderate && ` Only 1h trend agreement (currently ${regimeTrendDirection || 'neutral'}) could allow entry with reduced position.`}
+          </>
+        )}
       </div>
     </div>
   );
