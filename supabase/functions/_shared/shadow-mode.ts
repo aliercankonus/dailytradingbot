@@ -52,12 +52,14 @@ export const OLD_GATE_THRESHOLDS = {
 };
 
 // New relaxed gate thresholds (current Phase 2/3/4)
+// NOTE: MACD thresholds are now ATR-NORMALIZED RATIOS (|MACD/ATR|)
+// This ensures consistent behavior across high-priced (BTC) and low-priced assets
 export const NEW_GATE_THRESHOLDS = {
-  // MACD divergence - relaxed
+  // MACD divergence - relaxed (thresholds are |MACD/ATR| ratios)
   MACD_MIN_OPPOSING_BARS: 3,
   MACD_HISTOGRAM_MAGNITUDE_CHECK: true,
-  MACD_NEUTRAL_HISTOGRAM_THRESHOLD: 0.0001,
-  MACD_MIN_HISTOGRAM_FOR_BLOCK: 0.001,
+  MACD_NEUTRAL_HISTOGRAM_THRESHOLD: 0.001,   // |MACD/ATR| < 0.1% = neutral (was 0.0001 absolute)
+  MACD_MIN_HISTOGRAM_FOR_BLOCK: 0.01,        // |MACD/ATR| >= 1% = significant (was 0.001 absolute)
   MACD_ADX_OVERRIDE_ENABLED: true,
   MACD_ADX_SOFT_OVERRIDE: 25,
   MACD_ADX_HARD_OVERRIDE: 28,
@@ -78,20 +80,23 @@ export const NEW_GATE_THRESHOLDS = {
 
 /**
  * Compares MACD divergence gate results between old and new thresholds
+ * NOTE: histogramNormalized should be |MACD histogram / ATR| (dimensionless ratio)
+ * for consistent behavior across assets with different price scales
  */
 export function compareMACDGate(
   opposingBars: number,
-  histogramValue: number,
+  histogramNormalized: number,  // Should be pre-normalized: |histogram| / ATR
   adx: number
 ): GateComparisonResult {
   // Old gate logic: blocked if >= 2 opposing bars
   const oldBlocked = opposingBars >= OLD_GATE_THRESHOLDS.MACD_MIN_OPPOSING_BARS;
   
-  // New gate logic: requires 3+ bars, magnitude check, ADX override
+  // New gate logic: requires 3+ bars, magnitude check (ATR-normalized), ADX override
   let newBlocked = opposingBars >= NEW_GATE_THRESHOLDS.MACD_MIN_OPPOSING_BARS;
   
-  // Magnitude filter - small histogram values don't count
-  if (newBlocked && Math.abs(histogramValue) < NEW_GATE_THRESHOLDS.MACD_MIN_HISTOGRAM_FOR_BLOCK) {
+  // Magnitude filter - small normalized histogram values don't count
+  // Thresholds are now dimensionless ratios (|MACD/ATR|)
+  if (newBlocked && histogramNormalized < NEW_GATE_THRESHOLDS.MACD_MIN_HISTOGRAM_FOR_BLOCK) {
     newBlocked = false;
   }
   
@@ -103,8 +108,8 @@ export function compareMACDGate(
   return {
     gateName: 'macd_divergence',
     oldThreshold: `${OLD_GATE_THRESHOLDS.MACD_MIN_OPPOSING_BARS} bars`,
-    newThreshold: `${NEW_GATE_THRESHOLDS.MACD_MIN_OPPOSING_BARS} bars + magnitude + ADX override`,
-    actualValue: `${opposingBars} bars, hist=${histogramValue.toFixed(6)}, ADX=${adx.toFixed(1)}`,
+    newThreshold: `${NEW_GATE_THRESHOLDS.MACD_MIN_OPPOSING_BARS} bars + normalized magnitude + ADX override`,
+    actualValue: `${opposingBars} bars, normalized=${histogramNormalized.toFixed(6)}, ADX=${adx.toFixed(1)}`,
     oldResult: oldBlocked ? 'blocked' : 'passed',
     newResult: newBlocked ? 'blocked' : 'passed',
     wouldHaveChanged: oldBlocked && !newBlocked,

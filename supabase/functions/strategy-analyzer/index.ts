@@ -9864,7 +9864,12 @@ serve(async (req) => {
         const macdDirectionAligned = momentum?.macdDirectionAligned ?? true;
         const hasMacdDivergence = momentum?.hasDivergence ?? false;
         // Use already-defined macdHistogramValue from line 5769
-        const macdHistMagnitude = Math.abs(macdHistogramValue);
+        // CRITICAL FIX: Normalize MACD histogram by ATR for consistent magnitude checks
+        // Raw MACD varies by asset price (BTC: ~36, low-cap: ~0.001)
+        const atrForMacdGate = trendData?.volatility?.atr || trendData?.atr || trendData?.atrValue || 0;
+        const macdHistNormalized = atrForMacdGate > 0 
+          ? Math.abs(macdHistogramValue) / atrForMacdGate 
+          : Math.abs(macdHistogramValue);  // Fallback to raw if no ATR
         const adxRisingForMacd = smartAdxRising || (trendData.volatility?.adxRising ?? false);
         
         // Get MACD histogram history for duration check (from trendData if available)
@@ -9901,8 +9906,9 @@ serve(async (req) => {
           // ===== NEW PHASE 2 LOGIC: Duration + Magnitude + ADX Checks =====
           
           // Check 1: Magnitude check - ignore if MACD is too small to matter
-          const isMacdNeutral = macdHistMagnitude < MACD_GATE_PARAMS.NEUTRAL_HISTOGRAM_THRESHOLD;
-          const isMacdSignificant = macdHistMagnitude >= MACD_GATE_PARAMS.MIN_HISTOGRAM_FOR_BLOCK;
+          // NOW USES ATR-NORMALIZED MACD for consistent behavior across assets
+          const isMacdNeutral = macdHistNormalized < MACD_GATE_PARAMS.NEUTRAL_HISTOGRAM_THRESHOLD;
+          const isMacdSignificant = macdHistNormalized >= MACD_GATE_PARAMS.MIN_HISTOGRAM_FOR_BLOCK;
           
           // Check 2: Duration check - only block if opposing for 3+ bars
           const hasOpposedLongEnough = consecutiveOpposingBars >= MACD_GATE_PARAMS.MIN_OPPOSITION_BARS;
@@ -9913,9 +9919,10 @@ serve(async (req) => {
           const hasAdxOverride = adxOverrideWithRising || adxOverrideUnconditional;
           
           // ===== SHADOW MODE: Compare old vs new MACD gate logic =====
+          // Pass normalized MACD value for consistent comparison
           const macdGateComparison = compareMACDGate(
             consecutiveOpposingBars,
-            macdHistogramValue,
+            macdHistNormalized,  // Now uses ATR-normalized value
             adx
           );
           
@@ -9931,7 +9938,9 @@ serve(async (req) => {
               newGateResult: 'passed',
               gateDetails: {
                 opposingBars: consecutiveOpposingBars,
-                histogramMagnitude: macdHistMagnitude,
+                histogramRaw: macdHistogramValue,
+                histogramNormalized: macdHistNormalized,
+                atrUsed: atrForMacdGate,
                 adx,
                 adxRising: adxRisingForMacd,
                 oldThreshold: macdGateComparison.oldThreshold,
@@ -9967,7 +9976,7 @@ serve(async (req) => {
             // MACD magnitude not significant enough for hard block - soft block
             macdGateAction = 'SOFT_BLOCK';
             macdPositionMultiplier = MACD_GATE_PARAMS.POSITION_MULTIPLIER_SOFT;
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} MACD MAGNITUDE CHECK: Histogram ${macdHistMagnitude.toFixed(6)} < ${MACD_GATE_PARAMS.MIN_HISTOGRAM_FOR_BLOCK} - soft block at ${(macdPositionMultiplier * 100).toFixed(0)}% position`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} MACD MAGNITUDE CHECK: Normalized ${macdHistNormalized.toFixed(6)} < ${MACD_GATE_PARAMS.MIN_HISTOGRAM_FOR_BLOCK} - soft block at ${(macdPositionMultiplier * 100).toFixed(0)}% position`);
           } else if (adx < MACD_GATE_PARAMS.SCORE_MULTIPLIER_BELOW_ADX) {
             // Below ADX 25, use score multiplier instead of hard block
             macdGateAction = 'SOFT_BLOCK';
@@ -9978,8 +9987,8 @@ serve(async (req) => {
             macdGateAction = 'HARD_BLOCK';
             rejectedByHardGates++;
             const macdReason = hasMacdDivergence 
-              ? `MACD divergence (${consecutiveOpposingBars} bars opposing, magnitude=${macdHistMagnitude.toFixed(6)})` 
-              : `MACD misaligned ${consecutiveOpposingBars} bars (magnitude=${macdHistMagnitude.toFixed(6)})`;
+              ? `MACD divergence (${consecutiveOpposingBars} bars opposing, normalized=${macdHistNormalized.toFixed(6)})` 
+              : `MACD misaligned ${consecutiveOpposingBars} bars (normalized=${macdHistNormalized.toFixed(6)})`;
             perSymbolGateAttribution.set(symbol, { gate: 'MACD_MISALIGNED', details: macdReason });
             await logRejectionWithAI(
               supabase, userId, symbol,
@@ -9988,8 +9997,9 @@ serve(async (req) => {
                 gate: "MACD_MISALIGNED",
                 macdDirectionAligned,
                 hasMacdDivergence,
-                macdHistogram: macdHistogramValue.toFixed(6),
-                macdHistogramMagnitude: macdHistMagnitude.toFixed(6),
+                macdHistogramRaw: macdHistogramValue.toFixed(6),
+                macdHistogramNormalized: macdHistNormalized.toFixed(6),
+                atrForNormalization: atrForMacdGate.toFixed(4),
                 consecutiveOpposingBars,
                 minOppositionBars: MACD_GATE_PARAMS.MIN_OPPOSITION_BARS,
                 minMagnitudeForBlock: MACD_GATE_PARAMS.MIN_HISTOGRAM_FOR_BLOCK,
