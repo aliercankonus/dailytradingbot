@@ -140,13 +140,22 @@ const StochRSIDisplay = ({ fs, td }: { fs: BlockedSignal["filters_status"]; td: 
   // Extract StochRSI values from multiple possible locations with proper typing
   const stochRsi4h = td?.stochasticRsi?.["4h"] as { k?: number } | undefined;
   const stochRsi1h = td?.stochasticRsi?.["1h"] as { k?: number } | undefined;
-  const k4h = fs?.stochRsiK4h ?? stochRsi4h?.k ?? null;
-  const k1h = fs?.stochRsiK ?? stochRsi1h?.k ?? null;
+  const fsStochRsi4h = fs?.stochRsi4h as { k?: number } | undefined;
+  const fsStochRsi1h = fs?.stochRsi1h as { k?: number } | undefined;
   
-  if (k4h === null && k1h === null) return <span className="text-muted-foreground">-</span>;
+  // Safely extract and coerce to number
+  const rawK4h = fs?.stochRsiK4h ?? fsStochRsi4h?.k ?? stochRsi4h?.k;
+  const rawK1h = fs?.stochRsiK ?? fsStochRsi1h?.k ?? stochRsi1h?.k;
   
-  const formatK = (k: number | null, tf: string) => {
-    if (k === null) return null;
+  const k4h = typeof rawK4h === 'number' ? rawK4h : typeof rawK4h === 'string' ? parseFloat(rawK4h) : null;
+  const k1h = typeof rawK1h === 'number' ? rawK1h : typeof rawK1h === 'string' ? parseFloat(rawK1h) : null;
+  
+  const validK4h = k4h !== null && !isNaN(k4h) ? k4h : null;
+  const validK1h = k1h !== null && !isNaN(k1h) ? k1h : null;
+  
+  if (validK4h === null && validK1h === null) return <span className="text-muted-foreground">-</span>;
+  
+  const formatK = (k: number, tf: string) => {
     const isExtreme = k <= 10 || k >= 90;
     const isWarning = k <= 20 || k >= 80;
     return (
@@ -158,8 +167,8 @@ const StochRSIDisplay = ({ fs, td }: { fs: BlockedSignal["filters_status"]; td: 
   
   return (
     <div className="flex flex-col text-[10px]">
-      {k4h !== null && formatK(k4h, "4H")}
-      {k1h !== null && formatK(k1h, "1H")}
+      {validK4h !== null && formatK(validK4h, "4H")}
+      {validK1h !== null && formatK(validK1h, "1H")}
     </div>
   );
 };
