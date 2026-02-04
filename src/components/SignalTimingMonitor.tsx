@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, memo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useSignalRefresh } from '@/contexts/SignalRefreshContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Clock, TrendingDown, TrendingUp, Layers, ChevronDown, ChevronUp } from 'lucide-react';
@@ -19,9 +20,10 @@ interface SignalTiming {
   strategy_name: string | null;
 }
 
-export const SignalTimingMonitor = () => {
+export const SignalTimingMonitor = memo(function SignalTimingMonitor() {
   const [signals, setSignals] = useState<SignalTiming[]>([]);
   const [loading, setLoading] = useState(true);
+  const { lastRefreshTime } = useSignalRefresh();
 
   useEffect(() => {
     const fetchSignals = async () => {
@@ -46,11 +48,8 @@ export const SignalTimingMonitor = () => {
     };
 
     fetchSignals();
-    // Increased from 30s to 120s to reduce UI refresh interruptions
-    const interval = setInterval(fetchSignals, 120000);
-
-    return () => clearInterval(interval);
-  }, []);
+    // No interval - refetch is triggered by lastRefreshTime change from central context
+  }, [lastRefreshTime]);
 
   const getADX = (indicators: any) => {
     // Extract ADX from qualityBreakdown like "ADX:25/25 MOM:0/25..."
@@ -350,4 +349,4 @@ export const SignalTimingMonitor = () => {
       </CardContent>
     </Card>
   );
-};
+});

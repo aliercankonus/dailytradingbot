@@ -29,11 +29,13 @@ import { MarketConditionsDashboard } from "@/components/MarketConditionsDashboar
 import LateGrindAnalyticsDashboard from "@/components/LateGrindAnalyticsDashboard";
 import { BlockedSignalsWidget } from "@/components/BlockedSignalsWidget";
 import { SignalRejectionMonitor } from "@/components/SignalRejectionMonitor";
+import { SignalRefreshProvider } from "@/contexts/SignalRefreshContext";
 
 const Index = () => {
   const navigate = useNavigate();
 
   return (
+    <SignalRefreshProvider>
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
@@ -164,6 +166,7 @@ const Index = () => {
         </Tabs>
       </main>
     </div>
+    </SignalRefreshProvider>
   );
 };
 

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useSignalRefresh } from '@/contexts/SignalRefreshContext';
 
 interface Signal {
   id: string;
@@ -22,6 +23,7 @@ export const useSignals = () => {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { lastRefreshTime } = useSignalRefresh();
 
   useEffect(() => {
     const fetchSignals = async () => {
@@ -64,11 +66,8 @@ export const useSignals = () => {
     };
 
     fetchSignals();
-    // Increased from 30s to 90s to reduce refresh frequency and prevent UI interruptions
-    const interval = setInterval(fetchSignals, 90000);
-
-    return () => clearInterval(interval);
-  }, []);
+    // No interval - refetch is triggered by lastRefreshTime change from central context
+  }, [lastRefreshTime]);
 
   return { signals, loading, error };
 };
