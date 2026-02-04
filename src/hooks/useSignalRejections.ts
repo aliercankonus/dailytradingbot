@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useSignalRefresh } from '@/contexts/SignalRefreshContext';
 
 interface AIValidationResult {
   isValid: boolean;
@@ -21,6 +22,7 @@ interface SignalRejection {
 export const useSignalRejections = () => {
   const [rejections, setRejections] = useState<SignalRejection[]>([]);
   const [loading, setLoading] = useState(true);
+  const { lastRefreshTime } = useSignalRefresh();
 
   useEffect(() => {
     const fetchRejections = async () => {
@@ -64,12 +66,8 @@ export const useSignalRejections = () => {
     };
 
     fetchRejections();
-    
-    // Refresh every 2 minutes to reduce UI interruptions (was 60s)
-    const interval = setInterval(fetchRejections, 120000);
-    
-    return () => clearInterval(interval);
-  }, []);
+    // No interval - refetch is triggered by lastRefreshTime change from central context
+  }, [lastRefreshTime]);
 
   return { rejections, loading };
 };
