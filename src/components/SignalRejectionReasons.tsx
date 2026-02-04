@@ -4730,7 +4730,14 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
   const momentumDirection = filtersStatus?.momentumDirection || trendData?.momentum?.direction || derivedMomentumDir;
   const momentumState = filtersStatus?.momentumState || trendData?.momentum?.state || "unknown";
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
-  const macdHistogram = coerceNumeric(filtersStatus?.macdHistogram ?? trendData?.macd?.histogram, 0);
+  // PREFER macdHistogramRaw from backend (full precision), fallback to other sources
+  const macdHistogramRaw = coerceNumeric(
+    filtersStatus?.macdHistogramRaw ?? 
+    filtersStatus?.macdHistogram ?? 
+    trendData?.macd?.histogram ?? 
+    trendData?.momentum?.macdHistogram,
+    0
+  );
   const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.direction || trendData?.timeframes?.['1h']?.trend || "unknown";
   const regimeTrendDirection = filtersStatus?.regimeTrendDirection || trendData?.masterRegime?.trendDirection || trend1h;
   
@@ -4742,10 +4749,10 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
   
   // ATR-normalized weak MACD threshold - PREFER backend-computed values
   const atr = coerceNumeric(filtersStatus?.atrForNormalization ?? filtersStatus?.atr ?? trendData?.volatility?.atr ?? trendData?.atr ?? trendData?.atrValue, 0);
-  // NEW: Use normalized MACD value from backend (MACD/ATR), fallback to calculating it
+  // PREFER normalized MACD value from backend (MACD/ATR), fallback to calculating it
   const macdHistogramNormalized = coerceNumeric(
     filtersStatus?.macdHistogramNormalized,
-    atr > 0 ? Math.abs(macdHistogram) / atr : Math.abs(macdHistogram)
+    atr > 0 ? Math.abs(macdHistogramRaw) / atr : Math.abs(macdHistogramRaw)
   );
   // Threshold is now a simple dimensionless ratio (0.0001 = 0.01% of ATR)
   const weakMacdThreshold = coerceNumeric(filtersStatus?.weakMomentumThreshold, 0.0001);
@@ -4969,7 +4976,7 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
             </div>
             {atr > 0 && (
               <div className="text-[9px] text-muted-foreground pl-5">
-                Calculation: |{macdHistogram >= 0 ? '+' : ''}{macdHistogram.toPrecision(4)}| ÷ {atr.toPrecision(4)} = {macdHistogramNormalized.toFixed(6)} (must be {'<'} {weakMacdThreshold.toFixed(6)} to bypass)
+                Calculation: |{macdHistogramRaw >= 0 ? '+' : ''}{Math.abs(macdHistogramRaw) >= 0.01 ? macdHistogramRaw.toFixed(4) : macdHistogramRaw.toPrecision(4)}| ÷ {atr >= 0.01 ? atr.toFixed(4) : atr.toPrecision(4)} = {macdHistogramNormalized.toFixed(6)} (must be {'<'} {weakMacdThreshold.toFixed(6)} to bypass)
               </div>
             )}
           </div>
