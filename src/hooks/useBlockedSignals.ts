@@ -146,6 +146,9 @@ export function useBlockedSignals(limit: number = 20) {
     enabled: !!user?.id,
     staleTime: 55000, // Data fresh for 55s (slightly less than 60s refresh interval)
     refetchOnWindowFocus: false, // Prevent refresh when clicking into window
-    // No refetchInterval - central context handles timing
+    // Keep previous data during refetch to prevent scroll position reset
+    placeholderData: (previousData) => previousData,
+    // Prevent component unmount/remount during refetch
+    structuralSharing: true,
   });
 }
