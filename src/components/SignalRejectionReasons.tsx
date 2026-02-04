@@ -4558,10 +4558,17 @@ const PreRecoveryGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: a
 
 // ============= MOMENTUM DIRECTION OPPOSING DISPLAY =============
 // For MOMENTUM_DIRECTION_OPPOSING gate
-// ARCHITECTURE FIX: Correctly differentiate Phase 1 (momentum score polarity) vs Phase 2 (MACD direction)
-// Phase 1 Extreme (score < -50 or > +50): NO bypasses available - absolute block
-// Phase 1 Moderate (score -50 to -20 or +20 to +50): Bypass via 1h Trend Agreement only
-// Phase 2 (MACD direction): Bypass via weak MACD OR exceptional ADX
+// ARCHITECTURE: Two-phase momentum gate with accurate threshold mapping from backend
+//
+// PHASE 1: MOMENTUM SCORE POLARITY (runs first, uses score thresholds)
+//   - Extreme: Score beyond ±50 → ABSOLUTE BLOCK (no bypasses)
+//   - Moderate: Score -50 to -20 (LONG) or +20 to +50 (SHORT) → 1h Trend Agreement bypass only (50-70% position)
+//   - Neutral zone: Score in ±10 range → Phase 1 passes, proceeds to Phase 2
+//
+// PHASE 2: MACD DIRECTION (only runs if Phase 1 passes with neutral momentum)
+//   - Checks if MACD histogram direction opposes trade direction
+//   - Bypass: Weak MACD (ATR-normalized threshold) OR Exceptional ADX (≥35)
+//
 const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const signalDirection = filtersStatus?.signalDirection || filtersStatus?.derivedDirection || filtersStatus?.direction || "long";
   const momentumScore = coerceNumeric(filtersStatus?.momentumScore ?? trendData?.momentum?.score, 0);
@@ -4574,22 +4581,46 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
   const trend1h = filtersStatus?.trend1h || trendData?.timeframes?.['1h']?.direction || trendData?.timeframes?.['1h']?.trend || "unknown";
   const regimeTrendDirection = filtersStatus?.regimeTrendDirection || trendData?.masterRegime?.trendDirection || trend1h;
   
+  // Backend thresholds (from constants.ts)
+  const STRONG_OPPOSITE_THRESHOLD = 20; // ±20 triggers Phase 1 Moderate
+  const EXTREME_THRESHOLD = 50; // ±50 is absolute block
+  const NEUTRAL_MAX = 10; // ±10 is neutral zone
+  const EXCEPTIONAL_ADX = 35;
+  
+  // ATR-normalized weak MACD threshold (backend uses ATR * 0.0001)
+  const atr = coerceNumeric(filtersStatus?.atr ?? trendData?.atr ?? trendData?.atrValue, 0);
+  const weakMacdThreshold = atr > 0 ? atr * 0.0001 : 0.0001; // Fallback if no ATR
+  
   const isLong = signalDirection.toLowerCase() === "long";
   const opposingDirection = isLong ? "bearish" : "bullish";
   
-  // ===== PHASE DETECTION =====
-  // Determine which phase this rejection belongs to based on momentum score extremity
-  const isPhase1Extreme = Math.abs(momentumScore) > 50; // Below -50 or above +50 = absolute block
-  const isPhase1Moderate = !isPhase1Extreme && Math.abs(momentumScore) > 20; // Between ±20 and ±50
-  const isPhase2 = !isPhase1Extreme && !isPhase1Moderate; // Score in ±20 range = MACD-based check
+  // ===== PHASE DETECTION (matches backend logic) =====
+  // Phase 1 triggers based on score vs direction
+  const scoreVsThreshold = isLong ? momentumScore : -momentumScore; // Normalize: negative = opposing for LONG, positive = opposing for SHORT
+  const absScore = Math.abs(momentumScore);
+  
+  // Phase 1 Extreme: Score beyond ±50 (absolute block)
+  const isPhase1Extreme = absScore > EXTREME_THRESHOLD;
+  
+  // Phase 1 Moderate: Score in opposing range but not extreme
+  // LONG: blocked when momentum < -20 (opposing) → check if -50 < score < -20
+  // SHORT: blocked when momentum > +20 (opposing) → check if +20 < score < +50
+  const isPhase1Moderate = !isPhase1Extreme && (
+    (isLong && momentumScore < -STRONG_OPPOSITE_THRESHOLD) ||
+    (!isLong && momentumScore > STRONG_OPPOSITE_THRESHOLD)
+  );
+  
+  // Phase 2: Momentum is in neutral zone (±10) but MACD direction opposes
+  // This only runs if Phase 1 passed (score not strongly opposing)
+  const isPhase2 = filtersStatus?.phase === 2 || (!isPhase1Extreme && !isPhase1Moderate && absScore <= NEUTRAL_MAX);
   
   // ===== PHASE 1 BYPASS: Early Trend Detection (1h Trend Agreement) =====
   const expectedTrendDir = isLong ? "bullish" : "bearish";
   const is1hTrendAligned = regimeTrendDirection?.toLowerCase() === expectedTrendDir;
   
   // ===== PHASE 2 BYPASS: MACD Weak OR Exceptional ADX =====
-  const isWeakMomentum = Math.abs(macdHistogram) < 0.0001;
-  const isExceptionalADX = adx >= 35;
+  const isWeakMomentum = Math.abs(macdHistogram) < weakMacdThreshold;
+  const isExceptionalADX = adx >= EXCEPTIONAL_ADX;
   
   // Momentum state styling
   const getMomentumStateColor = (state: string) => {
@@ -4615,6 +4646,12 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
     return 'Phase 2: MACD Direction';
   };
   
+  const getPhaseExplanation = () => {
+    if (isPhase1Extreme) return `Score ${momentumScore > 0 ? '>' : '<'} ±50 (absolute block)`;
+    if (isPhase1Moderate) return `Score ${isLong ? '< -20' : '> +20'} (opposing threshold)`;
+    return `Score in neutral zone (±10), MACD direction check`;
+  };
+  
   return (
     <div className="space-y-3 p-3 rounded-md border bg-orange-500/10 border-orange-500/30">
       <div className="flex items-center justify-between">
@@ -4635,10 +4672,10 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
       </div>
       
       <div className="text-[10px] text-muted-foreground">
-        Signal direction ({signalDirection.toUpperCase()}) conflicts with momentum direction ({momentumDirection}).
-        {isPhase1Extreme && " Extreme momentum score blocks all bypasses."}
-        {isPhase1Moderate && " Only 1h trend agreement can bypass this block."}
-        {isPhase2 && " MACD weakness or exceptional ADX may bypass."}
+        {getPhaseExplanation()}
+        {isPhase1Extreme && " — Extreme momentum score blocks all bypasses."}
+        {isPhase1Moderate && " — Only 1h trend agreement can bypass this block (50-70% position)."}
+        {isPhase2 && " — MACD weakness or exceptional ADX may bypass."}
       </div>
       
       {/* Momentum Gauge */}
@@ -4661,7 +4698,9 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
           />
           {/* Center line */}
           <div className="absolute top-0 h-full w-0.5 bg-foreground/30" style={{ left: '50%' }} />
-          {/* Threshold lines: ±20 (moderate) and ±50 (extreme) */}
+          {/* Threshold lines: ±10 (neutral), ±20 (moderate), ±50 (extreme) */}
+          <div className="absolute top-0 h-full w-0.5 bg-blue-400/50" style={{ left: '45%' }} title="-10 (neutral)" />
+          <div className="absolute top-0 h-full w-0.5 bg-blue-400/50" style={{ left: '55%' }} title="+10 (neutral)" />
           <div className="absolute top-0 h-full w-0.5 bg-orange-400/50" style={{ left: '40%' }} title="-20 (moderate)" />
           <div className="absolute top-0 h-full w-0.5 bg-orange-400/50" style={{ left: '60%' }} title="+20 (moderate)" />
           <div className="absolute top-0 h-full w-0.5 bg-red-400/60" style={{ left: '25%' }} title="-50 (extreme)" />
@@ -4671,7 +4710,9 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
           <span className="text-red-400">-100</span>
           <span className="text-red-400/70">-50</span>
           <span className="text-orange-400/70">-20</span>
+          <span className="text-blue-400/70">-10</span>
           <span>0</span>
+          <span className="text-blue-400/70">+10</span>
           <span className="text-orange-400/70">+20</span>
           <span className="text-green-400/70">+50</span>
           <span className="text-green-400">+100</span>
@@ -4695,10 +4736,10 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
         </div>
         <div className="p-2 rounded border bg-muted/30 text-center">
           <div className="text-muted-foreground">ADX</div>
-          <div className={`text-lg font-bold ${adx >= 35 ? 'text-green-400' : 'text-foreground'}`}>
+          <div className={`text-lg font-bold ${adx >= EXCEPTIONAL_ADX ? 'text-green-400' : 'text-foreground'}`}>
             {parseFloat(String(adx)).toFixed(1)}
           </div>
-          <div className="text-[8px] text-muted-foreground">{adx >= 35 ? "Exceptional" : "Normal"}</div>
+          <div className="text-[8px] text-muted-foreground">{adx >= EXCEPTIONAL_ADX ? "Exceptional" : "Normal"}</div>
         </div>
         <div className="p-2 rounded border bg-muted/30 text-center">
           <div className="text-muted-foreground">1H Trend</div>
@@ -4754,16 +4795,23 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
         
         {isPhase2 && (
           <div className="space-y-1">
-            <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${isWeakMomentum ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+            <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${isWeakMomentum ? 'bg-green-500/10 border border-green-500/30' : 'bg-red-500/10 border border-red-500/30'}`}>
               {isWeakMomentum ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
-              <span>Very Weak MACD (|histogram| {"<"} 0.0001): </span>
+              <span>Weak MACD (ATR-normalized): </span>
               <span className="font-mono">{Math.abs(macdHistogram).toFixed(5)}</span>
+              <span className="text-muted-foreground"> vs threshold </span>
+              <span className="font-mono text-muted-foreground">{weakMacdThreshold.toFixed(5)}</span>
             </div>
-            <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${isExceptionalADX ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+            <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${isExceptionalADX ? 'bg-green-500/10 border border-green-500/30' : 'bg-red-500/10 border border-red-500/30'}`}>
               {isExceptionalADX ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
-              <span>Exceptional ADX (≥35): </span>
+              <span>Exceptional ADX (≥{EXCEPTIONAL_ADX}): </span>
               <span className="font-mono">{adx.toFixed(1)}</span>
             </div>
+            {atr > 0 && (
+              <div className="text-[9px] text-muted-foreground pl-5">
+                ATR: {atr.toFixed(2)} → Weak MACD threshold: {weakMacdThreshold.toFixed(6)}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -4778,12 +4826,12 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
           <>
             Attempting {signalDirection.toUpperCase()} entry while MACD direction is {momentumDirection} 
             (histogram: {macdHistogram >= 0 ? '+' : ''}{macdHistogram.toFixed(2)}).
-            Neither MACD weakness (|hist| {'<'} threshold) nor exceptional ADX (≥35, current: {adx.toFixed(1)}) conditions were met.
+            Neither MACD weakness (|hist| {'<'} {weakMacdThreshold.toFixed(5)}) nor exceptional ADX (≥{EXCEPTIONAL_ADX}, current: {adx.toFixed(1)}) conditions were met.
           </>
         ) : (
           <>
             Attempting {signalDirection.toUpperCase()} entry while momentum score is {momentumScore.toFixed(0)} ({momentumDirection}).
-            {isPhase1Extreme && " Score beyond ±50 threshold cannot be bypassed by any condition."}
+            {isPhase1Extreme && ` Score beyond ±${EXTREME_THRESHOLD} threshold cannot be bypassed by any condition.`}
             {isPhase1Moderate && ` Only 1h trend agreement (currently ${regimeTrendDirection || 'neutral'}) could allow entry with reduced position.`}
           </>
         )}
