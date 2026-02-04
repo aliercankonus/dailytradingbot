@@ -32,6 +32,8 @@ import {
   STRATEGY_SPECIFIC_CONSTRAINTS,
   // NEW: Deep StochRSI extreme hard gate (universal block, no exceptions)
   DEEP_STOCHRSI_HARD_GATE,
+  // NEW: Strong Trend Override for Tier 0 gate (allows entries during capitulation moves)
+  STRONG_TREND_TIER0_OVERRIDE,
   LOW_VOLUME_DETECTION_PARAMS,
   RANGING_MARKET_DETECTION_PARAMS,
   EARLY_MOMENTUM_ENTRY_PARAMS,
@@ -2726,6 +2728,10 @@ serve(async (req) => {
         // This ensures all downstream gates use the same direction logic
         const directionResult = deriveTradeDirection(trendData, trend);
         
+        // Track if Strong Trend Tier 0 Override was applied (for position sizing)
+        let strongTrendTier0OverrideApplied = false;
+        let strongTrendTier0PositionMultiplier = 1.0;
+        
         // ============= EARLY TIER 0: DEEP STOCHRSI CIRCUIT BREAKER (PRE-STRATEGY) =============
         // CRITICAL: This gate runs BEFORE any direction overrides (late-grind, momentum, order-flow, etc.)
         // This prevents legacy strategies from bypassing the unified pipeline gate by entering
@@ -2741,66 +2747,162 @@ serve(async (req) => {
           
           // Only check if we have an early direction - otherwise let downstream gates handle it
           if (earlyDirection) {
+            // ===== STRONG TREND OVERRIDE PREPARATION =====
+            // Extract values needed to check if Strong Trend Override applies
+            const earlyAdxSlope = trendData?.volatility?.adxSlope ?? 0;
+            const earlyMomentumScore = trendData?.momentum?.smartMomentum?.score ?? 0;
+            const earlyMomentumDirection = trendData?.momentum?.smartMomentum?.direction ?? 'neutral';
+            const early1hTrend = timeframes?.['1h']?.trend ?? 'neutral';
+            const early1hConfidence = timeframes?.['1h']?.confidence ?? 0;
+            
+            // Helper: Check if Strong Trend Override conditions are met
+            const checkStrongTrendOverride = (direction: 'long' | 'short'): { allowed: boolean; reason: string } => {
+              if (!STRONG_TREND_TIER0_OVERRIDE.ENABLED || !DEEP_STOCHRSI_HARD_GATE.ALLOW_STRONG_TREND_OVERRIDE) {
+                return { allowed: false, reason: 'Strong Trend Override disabled' };
+              }
+              
+              // Check ADX minimum
+              if (adx < STRONG_TREND_TIER0_OVERRIDE.MIN_ADX) {
+                return { allowed: false, reason: `ADX ${adx.toFixed(1)} < ${STRONG_TREND_TIER0_OVERRIDE.MIN_ADX}` };
+              }
+              
+              // Check ADX slope (not falling sharply)
+              if (earlyAdxSlope < STRONG_TREND_TIER0_OVERRIDE.MIN_ADX_SLOPE) {
+                return { allowed: false, reason: `ADX slope ${earlyAdxSlope.toFixed(2)} < ${STRONG_TREND_TIER0_OVERRIDE.MIN_ADX_SLOPE}` };
+              }
+              
+              // Check momentum score (confirming direction)
+              const momentumRequirement = direction === 'short' 
+                ? earlyMomentumScore <= -STRONG_TREND_TIER0_OVERRIDE.MIN_MOMENTUM_SCORE  // Negative for shorts
+                : earlyMomentumScore >= STRONG_TREND_TIER0_OVERRIDE.MIN_MOMENTUM_SCORE;   // Positive for longs
+              if (STRONG_TREND_TIER0_OVERRIDE.REQUIRE_MOMENTUM_ALIGNMENT && !momentumRequirement) {
+                return { allowed: false, reason: `Momentum ${earlyMomentumScore.toFixed(0)} doesn't confirm ${direction}` };
+              }
+              
+              // Check momentum direction alignment
+              const momentumAligns = direction === 'short' 
+                ? earlyMomentumDirection === 'bearish' || earlyMomentumDirection === 'strongly_bearish'
+                : earlyMomentumDirection === 'bullish' || earlyMomentumDirection === 'strongly_bullish';
+              if (STRONG_TREND_TIER0_OVERRIDE.REQUIRE_MOMENTUM_ALIGNMENT && !momentumAligns) {
+                return { allowed: false, reason: `Momentum direction ${earlyMomentumDirection} doesn't align with ${direction}` };
+              }
+              
+              // Check 1H alignment (not counter-trend)
+              if (STRONG_TREND_TIER0_OVERRIDE.REQUIRE_1H_ALIGNMENT) {
+                const is1hOpposing = direction === 'short' 
+                  ? early1hTrend === 'bullish' && early1hConfidence >= 60
+                  : early1hTrend === 'bearish' && early1hConfidence >= 60;
+                if (is1hOpposing) {
+                  return { allowed: false, reason: `1H trend ${early1hTrend} (${early1hConfidence}%) opposes ${direction}` };
+                }
+              }
+              
+              return { 
+                allowed: true, 
+                reason: `ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)}, momentum=${earlyMomentumScore.toFixed(0)} ${earlyMomentumDirection}` 
+              };
+            };
+            
             // TIER 0 DEEP OVERSOLD: Block SHORTs when K < 5
-            // EXCEPTION: Mean reversion strategies targeting bounce (LONG) are allowed at K < 5
+            // EXCEPTION 1: Mean reversion strategies targeting bounce (LONG) are allowed at K < 5
+            // EXCEPTION 2: Strong Trend Override allows SHORT if ADX>40 and momentum confirms
             if (earlyDirection === 'short' && earlyStochRsiK4h < DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD) {
-              rejectedByHardGates++;
-              perSymbolGateAttribution.set(symbol, { 
-                gate: 'EARLY_TIER_0_DEEP_OVERSOLD', 
-                details: `K=${earlyStochRsiK4h.toFixed(1)} < ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD} (pre-strategy)` 
-              });
-              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 EARLY TIER 0 (CIRCUIT BREAKER) - SHORT blocked at 4h K=${earlyStochRsiK4h.toFixed(1)} < ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}`);
-              logger.forSymbol(symbol).warn(`   → This runs BEFORE strategy evaluation to prevent legacy bypasses`);
-              await logRejectionWithAI(
-                supabase, userId, symbol,
-                `EARLY TIER 0 CIRCUIT BREAKER: SHORT blocked - 4h StochRSI K=${earlyStochRsiK4h.toFixed(1)} is deeply oversold (< ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD})`,
-                { 
-                  gate: "EARLY_TIER_0_DEEP_OVERSOLD",
-                  tier: 0,
-                  direction: "short",
-                  earlyDirection,
-                  stochRsiK4h: earlyStochRsiK4h.toFixed(1),
-                  threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
-                  adx: adx.toFixed(1),
-                  isPreStrategy: true,
-                  message: `Bounce probability ~80%+ at K=${earlyStochRsiK4h.toFixed(1)}, circuit breaker activated BEFORE any strategy logic`
-                },
-                trendData,
-                riskParams.ai_analysis_enabled !== false,
-                earlyOrderFlowAnalysis
-              );
-              continue;
+              const overrideCheck = checkStrongTrendOverride('short');
+              
+              if (overrideCheck.allowed) {
+                // STRONG TREND OVERRIDE ACTIVATED - allow SHORT with reduced size
+                strongTrendTier0OverrideApplied = true;
+                strongTrendTier0PositionMultiplier = STRONG_TREND_TIER0_OVERRIDE.POSITION_SIZE_MULTIPLIER;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🚀 STRONG TREND OVERRIDE: SHORT allowed at K=${earlyStochRsiK4h.toFixed(1)} despite Tier 0 oversold`);
+                logger.forSymbol(symbol).info(`   → Override conditions met: ${overrideCheck.reason}`);
+                logger.forSymbol(symbol).info(`   → Position size reduced to ${(strongTrendTier0PositionMultiplier * 100).toFixed(0)}%`);
+                
+                // Continue processing instead of blocking
+              } else {
+                // Standard block - no override allowed
+                rejectedByHardGates++;
+                perSymbolGateAttribution.set(symbol, { 
+                  gate: 'EARLY_TIER_0_DEEP_OVERSOLD', 
+                  details: `K=${earlyStochRsiK4h.toFixed(1)} < ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD} (pre-strategy)` 
+                });
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 EARLY TIER 0 (CIRCUIT BREAKER) - SHORT blocked at 4h K=${earlyStochRsiK4h.toFixed(1)} < ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}`);
+                logger.forSymbol(symbol).warn(`   → Strong Trend Override check: ${overrideCheck.reason}`);
+                await logRejectionWithAI(
+                  supabase, userId, symbol,
+                  `EARLY TIER 0 CIRCUIT BREAKER: SHORT blocked - 4h StochRSI K=${earlyStochRsiK4h.toFixed(1)} is deeply oversold (< ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD})`,
+                  { 
+                    gate: "EARLY_TIER_0_DEEP_OVERSOLD",
+                    tier: 0,
+                    direction: "short",
+                    earlyDirection,
+                    stochRsiK4h: earlyStochRsiK4h.toFixed(1),
+                    threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
+                    adx: adx.toFixed(1),
+                    adxSlope: earlyAdxSlope.toFixed(2),
+                    momentumScore: earlyMomentumScore.toFixed(0),
+                    momentumDirection: earlyMomentumDirection,
+                    strongTrendOverrideAttempted: true,
+                    strongTrendOverrideReason: overrideCheck.reason,
+                    isPreStrategy: true,
+                    message: `Bounce probability ~80%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}`
+                  },
+                  trendData,
+                  riskParams.ai_analysis_enabled !== false,
+                  earlyOrderFlowAnalysis
+                );
+                continue;
+              }
             }
             
             // TIER 0 DEEP OVERBOUGHT: Block LONGs when K > 95
-            // EXCEPTION: Mean reversion strategies targeting reversal (SHORT) are allowed at K > 95
+            // EXCEPTION 1: Mean reversion strategies targeting reversal (SHORT) are allowed at K > 95
+            // EXCEPTION 2: Strong Trend Override allows LONG if ADX>40 and momentum confirms
             if (earlyDirection === 'long' && earlyStochRsiK4h > DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD) {
-              rejectedByHardGates++;
-              perSymbolGateAttribution.set(symbol, { 
-                gate: 'EARLY_TIER_0_DEEP_OVERBOUGHT', 
-                details: `K=${earlyStochRsiK4h.toFixed(1)} > ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD} (pre-strategy)` 
-              });
-              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 EARLY TIER 0 (CIRCUIT BREAKER) - LONG blocked at 4h K=${earlyStochRsiK4h.toFixed(1)} > ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}`);
-              logger.forSymbol(symbol).warn(`   → This runs BEFORE strategy evaluation to prevent legacy bypasses`);
-              await logRejectionWithAI(
-                supabase, userId, symbol,
-                `EARLY TIER 0 CIRCUIT BREAKER: LONG blocked - 4h StochRSI K=${earlyStochRsiK4h.toFixed(1)} is deeply overbought (> ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD})`,
-                { 
-                  gate: "EARLY_TIER_0_DEEP_OVERBOUGHT",
-                  tier: 0,
-                  direction: "long",
-                  earlyDirection,
-                  stochRsiK4h: earlyStochRsiK4h.toFixed(1),
-                  threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
-                  adx: adx.toFixed(1),
-                  isPreStrategy: true,
-                  message: `Pullback probability ~80%+ at K=${earlyStochRsiK4h.toFixed(1)}, circuit breaker activated BEFORE any strategy logic`
-                },
-                trendData,
-                riskParams.ai_analysis_enabled !== false,
-                earlyOrderFlowAnalysis
-              );
-              continue;
+              const overrideCheck = checkStrongTrendOverride('long');
+              
+              if (overrideCheck.allowed) {
+                // STRONG TREND OVERRIDE ACTIVATED - allow LONG with reduced size
+                strongTrendTier0OverrideApplied = true;
+                strongTrendTier0PositionMultiplier = STRONG_TREND_TIER0_OVERRIDE.POSITION_SIZE_MULTIPLIER;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🚀 STRONG TREND OVERRIDE: LONG allowed at K=${earlyStochRsiK4h.toFixed(1)} despite Tier 0 overbought`);
+                logger.forSymbol(symbol).info(`   → Override conditions met: ${overrideCheck.reason}`);
+                logger.forSymbol(symbol).info(`   → Position size reduced to ${(strongTrendTier0PositionMultiplier * 100).toFixed(0)}%`);
+                
+                // Continue processing instead of blocking
+              } else {
+                // Standard block - no override allowed
+                rejectedByHardGates++;
+                perSymbolGateAttribution.set(symbol, { 
+                  gate: 'EARLY_TIER_0_DEEP_OVERBOUGHT', 
+                  details: `K=${earlyStochRsiK4h.toFixed(1)} > ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD} (pre-strategy)` 
+                });
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 EARLY TIER 0 (CIRCUIT BREAKER) - LONG blocked at 4h K=${earlyStochRsiK4h.toFixed(1)} > ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}`);
+                logger.forSymbol(symbol).warn(`   → Strong Trend Override check: ${overrideCheck.reason}`);
+                await logRejectionWithAI(
+                  supabase, userId, symbol,
+                  `EARLY TIER 0 CIRCUIT BREAKER: LONG blocked - 4h StochRSI K=${earlyStochRsiK4h.toFixed(1)} is deeply overbought (> ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD})`,
+                  { 
+                    gate: "EARLY_TIER_0_DEEP_OVERBOUGHT",
+                    tier: 0,
+                    direction: "long",
+                    earlyDirection,
+                    stochRsiK4h: earlyStochRsiK4h.toFixed(1),
+                    threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
+                    adx: adx.toFixed(1),
+                    adxSlope: earlyAdxSlope.toFixed(2),
+                    momentumScore: earlyMomentumScore.toFixed(0),
+                    momentumDirection: earlyMomentumDirection,
+                    strongTrendOverrideAttempted: true,
+                    strongTrendOverrideReason: overrideCheck.reason,
+                    isPreStrategy: true,
+                    message: `Pullback probability ~80%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}`
+                  },
+                  trendData,
+                  riskParams.ai_analysis_enabled !== false,
+                  earlyOrderFlowAnalysis
+                );
+                continue;
+              }
             }
             
             // Log if at extreme but direction is compatible (mean reversion allowed)
@@ -7192,7 +7294,7 @@ serve(async (req) => {
                 threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
                 percentB: percentB.toFixed(1),
                 adx: adx.toFixed(1),
-                allowExceptions: DEEP_STOCHRSI_HARD_GATE.ALLOW_EXCEPTIONS,
+                allowStrongTrendOverride: DEEP_STOCHRSI_HARD_GATE.ALLOW_STRONG_TREND_OVERRIDE,
                 meanReversionBypass: false,
                 message: `Bounce probability extremely high (~80%+) at K=${stochRsiK4h.toFixed(1)}, blocking SHORT with NO EXCEPTIONS`
               },
@@ -7229,7 +7331,7 @@ serve(async (req) => {
                 threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
                 percentB: percentB.toFixed(1),
                 adx: adx.toFixed(1),
-                allowExceptions: DEEP_STOCHRSI_HARD_GATE.ALLOW_EXCEPTIONS,
+                allowStrongTrendOverride: DEEP_STOCHRSI_HARD_GATE.ALLOW_STRONG_TREND_OVERRIDE,
                 meanReversionBypass: false,
                 message: `Pullback probability extremely high (~80%+) at K=${stochRsiK4h.toFixed(1)}, blocking LONG with NO EXCEPTIONS`
               },
@@ -12963,6 +13065,13 @@ serve(async (req) => {
         if (isRegimeOverrideActive && regimePositionMultiplier < 1.0) {
           positionSizeMultiplier *= regimePositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🎯 MASTER REGIME (${masterRegime.regime}) - position size capped at ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 23: Apply Strong Trend Tier 0 Override position reduction (25%)
+        // Entries at extreme StochRSI (K<5 or K>95) via Strong Trend Override get heavily reduced position
+        if (strongTrendTier0OverrideApplied && strongTrendTier0PositionMultiplier < 1.0) {
+          positionSizeMultiplier *= strongTrendTier0PositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🚀 STRONG TREND TIER 0 OVERRIDE entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (late entry at extreme StochRSI)`);
         }
         
         // ============= UNIFIED RISK CALCULATION (NEW) =============

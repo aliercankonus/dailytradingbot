@@ -377,9 +377,53 @@ export const DEEP_STOCHRSI_HARD_GATE = {
   // At K > 95, pullback probability is ~80%+ (statistically poor long entry)
   DEEP_OVERBOUGHT_K_THRESHOLD: 95,
   
-  // NO EXCEPTIONS - not even strong ADX, momentum, or trend confirmation can override
-  // The probability of bounce/pullback at these extremes is too high to justify any entry
-  ALLOW_EXCEPTIONS: false,
+  // STRONG TREND OVERRIDE: Allow exceptions when ADX confirms powerful trend
+  // In capitulation events, StochRSI can remain pegged while price continues moving 5-10%+
+  ALLOW_STRONG_TREND_OVERRIDE: true,
+} as const;
+
+// ============= STRONG TREND TIER 0 OVERRIDE =============
+// Allows entries at Tier 0 extremes (K<5 or K>95) when ADX confirms powerful capitulation
+// This addresses missed opportunities during 8%+ moves where StochRSI remains pegged at extremes
+// 
+// RATIONALE:
+// - Standard Tier 0: 80% bounce probability at K<5 → block SHORT
+// - BUT: In capitulation events (ADX>40, strong momentum), price can continue 5-10%+ further
+// - The 80% statistic applies to NORMAL markets, not panic/capitulation moves
+//
+// SAFETY REQUIREMENTS (ALL must be true):
+// 1. ADX >= 40 (strong trend energy)
+// 2. ADX not falling sharply (slope > -1.0, trend not dying)
+// 3. Momentum score confirms direction (>= 30 for trend, no opposing momentum)
+// 4. 1H trend aligns with direction (not counter-trend)
+// 5. Position size reduced to 0.25x (conservative for late entry)
+export const STRONG_TREND_TIER0_OVERRIDE = {
+  ENABLED: true,
+  
+  // ===== ADX REQUIREMENTS =====
+  // Minimum ADX for override consideration
+  MIN_ADX: 40,
+  // ADX slope must not be sharply falling (trend still has energy)
+  MIN_ADX_SLOPE: -1.0,
+  
+  // ===== MOMENTUM REQUIREMENTS =====
+  // Momentum score must confirm trade direction
+  MIN_MOMENTUM_SCORE: 30,
+  // Smart momentum direction must align (not opposing)
+  REQUIRE_MOMENTUM_ALIGNMENT: true,
+  
+  // ===== TREND ALIGNMENT =====
+  // 1H timeframe must align with trade direction
+  REQUIRE_1H_ALIGNMENT: true,
+  // Minimum 1H confidence for alignment (neutral at 0 is OK if not opposing)
+  MIN_1H_CONFIDENCE: 0,
+  
+  // ===== POSITION SIZING =====
+  // Conservative position size for late-entry at extremes
+  POSITION_SIZE_MULTIPLIER: 0.25,
+  
+  // ===== LOGGING =====
+  LOG_OVERRIDE_DETAILS: true,
 } as const;
 
 // ============= PHASE 3: TIME-IN-EXTREME THRESHOLDS =============
