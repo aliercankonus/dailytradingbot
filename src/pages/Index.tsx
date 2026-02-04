@@ -29,6 +29,7 @@ import { MarketConditionsDashboard } from "@/components/MarketConditionsDashboar
 import LateGrindAnalyticsDashboard from "@/components/LateGrindAnalyticsDashboard";
 import { BlockedSignalsWidget } from "@/components/BlockedSignalsWidget";
 import { ShadowModeValidationWidget } from "@/components/ShadowModeValidationWidget";
+import { SignalRejectionMonitor } from "@/components/SignalRejectionMonitor";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -112,6 +113,7 @@ const Index = () => {
                 <BlockedSignalsWidget />
               </div>
             </div>
+            <SignalRejectionMonitor />
             <ShadowModeValidationWidget />
             <SignalTimingMonitor />
             <TradingSignalsDashboard />
