@@ -9583,7 +9583,8 @@ serve(async (req) => {
             // Use ATR-normalized threshold instead of absolute 0.0001
             // This ensures consistent behavior across high-priced (BTC) and low-priced assets
             const macdHistogramAbs = Math.abs(macdHistogramValue);
-            const atrForNormalization = trendData?.atr || trendData?.atrValue || 0;
+            // FIX: ATR is stored in volatility.atr, not directly in trendData.atr
+            const atrForNormalization = trendData?.volatility?.atr || trendData?.atr || trendData?.atrValue || 0;
             const weakMomentumThreshold = atrForNormalization > 0 
               ? atrForNormalization * MOMENTUM_DIRECTION_ALIGNMENT.WEAK_MACD_ATR_MULTIPLIER 
               : 0.0001;  // Fallback to absolute if no ATR available
