@@ -141,6 +141,8 @@ export function useBlockedSignals(limit: number = 20) {
       }));
     },
     enabled: !!user?.id,
-    refetchInterval: 30000, // Refresh every 30 seconds
+    staleTime: 60000, // Data considered fresh for 60 seconds (reduces unnecessary refetches)
+    refetchInterval: 90000, // Refresh every 90 seconds (was 30s - too aggressive)
+    refetchOnWindowFocus: false, // Prevent refresh when clicking into window
   });
 }

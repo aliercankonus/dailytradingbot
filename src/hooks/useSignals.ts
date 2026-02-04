@@ -64,7 +64,8 @@ export const useSignals = () => {
     };
 
     fetchSignals();
-    const interval = setInterval(fetchSignals, 30000);
+    // Increased from 30s to 90s to reduce refresh frequency and prevent UI interruptions
+    const interval = setInterval(fetchSignals, 90000);
 
     return () => clearInterval(interval);
   }, []);

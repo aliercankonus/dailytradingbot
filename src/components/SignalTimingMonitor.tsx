@@ -46,7 +46,8 @@ export const SignalTimingMonitor = () => {
     };
 
     fetchSignals();
-    const interval = setInterval(fetchSignals, 30000); // Refresh every 30s
+    // Increased from 30s to 120s to reduce UI refresh interruptions
+    const interval = setInterval(fetchSignals, 120000);
 
     return () => clearInterval(interval);
   }, []);
