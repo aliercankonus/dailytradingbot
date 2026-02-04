@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import { useBlockedSignals, BlockedSignal, MoveZoneDetails } from "@/hooks/useBlockedSignals";
 import { formatDistanceToNow } from "date-fns";
-import { useState, useMemo } from "react";
+import { useState, useMemo, memo } from "react";
 
 type PageSize = 10 | 25 | 50;
 type TimeRange = "15m" | "30m" | "1h";
@@ -231,7 +231,7 @@ const DirectionBadge = ({ direction }: { direction: string | undefined }) => {
   );
 };
 
-export const SignalRejectionMonitor = () => {
+export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
   const { data: blockedSignals, isLoading } = useBlockedSignals(100);
   const [timeRange, setTimeRange] = useState<TimeRange>("30m");
   const [gateFilter, setGateFilter] = useState<GateFilter>("all");
@@ -573,6 +573,6 @@ export const SignalRejectionMonitor = () => {
       </CardContent>
     </Card>
   );
-};
+});
 
 export default SignalRejectionMonitor;

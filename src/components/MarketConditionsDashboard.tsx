@@ -26,7 +26,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
 const VolumeStatusBadge = ({ ratio }: { ratio: number }) => {
@@ -70,7 +70,7 @@ const GateCountBadge = ({ count, label, color }: { count: number; label: string;
   );
 };
 
-export const MarketConditionsDashboard = () => {
+export const MarketConditionsDashboard = memo(function MarketConditionsDashboard() {
   const { conditions, loading, error, refresh } = useMarketConditions();
   const [isSymbolsOpen, setIsSymbolsOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -349,4 +349,4 @@ export const MarketConditionsDashboard = () => {
       </CardContent>
     </Card>
   );
-};
+});

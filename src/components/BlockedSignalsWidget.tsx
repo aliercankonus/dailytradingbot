@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, memo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -56,7 +56,7 @@ const getRejectionCategory = (reason: string): { label: string; color: string; i
   return { label: "Gate", color: "bg-muted text-muted-foreground border-border", icon: <Ban className="h-3 w-3" /> };
 };
 
-export function BlockedSignalsWidget() {
+export const BlockedSignalsWidget = memo(function BlockedSignalsWidget() {
   const [limit, setLimit] = useState<number>(50);
   const { data: blockedSignals, isLoading, error } = useBlockedSignals(limit);
 
@@ -233,4 +233,4 @@ export function BlockedSignalsWidget() {
       </CardContent>
     </Card>
   );
-}
+});
