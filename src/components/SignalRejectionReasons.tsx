@@ -6459,6 +6459,153 @@ export const SignalRejectionReasons = () => {
     return "destructive";
   };
 
+  // Convert technical rejection reasons to user-friendly messages
+  const formatUserFriendlyReason = (reason: string, filtersStatus?: any): string => {
+    if (!reason) return "Unknown rejection";
+    
+    // EXTREME MOMENTUM VETO
+    if (reason.includes("EXTREME MOMENTUM VETO") || filtersStatus?.source === 'extreme_momentum_veto') {
+      const score = filtersStatus?.momentumScore;
+      const direction = score && score < 0 ? "bearish" : "bullish";
+      const tradeDir = filtersStatus?.graduatedMomentumEffect?.baseDirection || 
+                       (score && score < 0 ? "long" : "short");
+      return `Strong ${direction} momentum blocks ${tradeDir?.toUpperCase()} entry`;
+    }
+    
+    // NO_CLEAR_DIRECTION
+    if (reason.includes("No clear trade direction") || filtersStatus?.gate === "NO_CLEAR_DIRECTION") {
+      const source = filtersStatus?.source;
+      if (source === 'extreme_momentum_veto') {
+        return "Extreme momentum prevents direction";
+      }
+      if (reason.includes("EXTREME MOMENTUM VETO")) {
+        return "Strong opposing momentum blocks trade";
+      }
+      if (reason.includes("timeframes disagree") || reason.includes("Conflicting")) {
+        return "Timeframes show conflicting trends";
+      }
+      return "Market direction unclear";
+    }
+    
+    // ADX TOO LOW
+    if (reason.includes("ADX too low") || filtersStatus?.gate === "ADX_TOO_LOW") {
+      const adx = filtersStatus?.adx;
+      return adx ? `Trend too weak (ADX ${adx.toFixed(0)})` : "Trend energy too weak";
+    }
+    
+    // NO MOMENTUM CONFIRMATION
+    if (reason.includes("No momentum") || filtersStatus?.gate === "NO_MOMENTUM_CONFIRMATION") {
+      return "Waiting for momentum confirmation";
+    }
+    
+    // HTF NOT ALIGNED
+    if (reason.includes("HTF not aligned") || filtersStatus?.gate === "HTF_NOT_ALIGNED") {
+      return "Higher timeframes not aligned";
+    }
+    
+    // MOMENTUM DIRECTION OPPOSING
+    if (reason.includes("MOMENTUM_DIRECTION") || filtersStatus?.gate === "MOMENTUM_DIRECTION_OPPOSING") {
+      return "Momentum opposes trade direction";
+    }
+    
+    // MOVE EXHAUSTED
+    if (reason.includes("MOVE_EXHAUSTED") || reason.includes("MOVE EXHAUSTED")) {
+      return "Price move already exhausted";
+    }
+    
+    // STOCHRSI extremes
+    if (reason.includes("HARD BLOCK") || reason.includes("StochRSI extreme")) {
+      const k = filtersStatus?.stochK1h ?? filtersStatus?.stochRsiK;
+      if (k !== undefined) {
+        return k > 90 ? "Overbought - waiting for pullback" : "Oversold - waiting for bounce";
+      }
+      return "StochRSI at extreme level";
+    }
+    
+    // TIER 0/TIER 1 blocks
+    if (reason.includes("TIER 0") || reason.includes("TIER 1") || reason.includes("SEVERE") || reason.includes("DEEP")) {
+      return "Extreme exhaustion - hard block";
+    }
+    
+    // PRE-RECOVERY
+    if (reason.includes("PRE-RECOVERY") || reason.includes("PRE_RECOVERY")) {
+      return "Recovery mode - stricter filters";
+    }
+    
+    // Bollinger gates
+    if (reason.includes("BOLLINGER") || reason.includes("overextended") || reason.includes("underextended")) {
+      return "Price at Bollinger Band extreme";
+    }
+    
+    // Active signal
+    if (reason.includes("active signal")) {
+      return "Signal already pending";
+    }
+    
+    // Max trades
+    if (reason.includes("Max trades")) {
+      return "Maximum trade limit reached";
+    }
+    
+    // Quality score
+    if (reason.includes("Quality score")) {
+      return "Signal quality below threshold";
+    }
+    
+    // No strategy match
+    if (reason.includes("No strategy")) {
+      return "No strategy conditions met";
+    }
+    
+    // Reversal risk
+    if (reason.includes("Reversal risk")) {
+      return "Reversal risk too high";
+    }
+    
+    // Unified Reversal
+    if (reason.includes("Unified Reversal")) {
+      return "Trend reversal detected";
+    }
+    
+    // Confidence dead zone
+    if (reason.includes("Confidence dead zone") || filtersStatus?.gate === "CONFIDENCE_DEAD_ZONE") {
+      return "Confidence in uncertain zone";
+    }
+    
+    // Divergence
+    if (reason.includes("divergence") && reason.includes("extreme")) {
+      return "Divergence at price extreme";
+    }
+    
+    // MACD / Order Flow
+    if (reason.includes("MACD") || reason.includes("order flow")) {
+      return "Order flow not confirming";
+    }
+    
+    // Execution rejection
+    if (reason.startsWith("EXECUTION:")) {
+      return "Execution-time rejection";
+    }
+    
+    // If nothing matched, return a cleaned up version
+    // Remove parenthetical content and technical prefixes
+    let cleaned = reason
+      .replace(/\s*\([^)]*\)/g, '') // Remove (parenthetical content)
+      .replace(/^HARD GATE:\s*/i, '')
+      .replace(/^EXECUTION:\s*/i, '')
+      .replace(/^REGIME:\s*/i, '')
+      .replace(/⛔\s*/g, '')
+      .replace(/_/g, ' ')
+      .trim();
+    
+    // Truncate if still too long
+    if (cleaned.length > 50) {
+      cleaned = cleaned.slice(0, 47) + "...";
+    }
+    
+    return cleaned || "Signal rejected";
+  };
+
   const renderFilterDetails = (rejection: SignalRejection) => {
     const fs = rejection.filters_status;
     const reason = rejection.rejection_reason || "";
@@ -6950,15 +7097,25 @@ export const SignalRejectionReasons = () => {
                     </div>
                   </TableCell>
                 <TableCell className="align-top">
-                  <div className="flex items-start gap-2">
-                    {getReasonIcon(rejection.rejection_reason ?? "")}
-                    <Badge 
-                      variant={getReasonBadgeVariant(rejection.rejection_reason ?? "")}
-                      className="text-[10px] font-normal whitespace-normal text-left leading-tight py-1"
-                    >
-                      {rejection.rejection_reason?.replace(/\s*\([^)]*\)/g, '')}
-                    </Badge>
-                  </div>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-start gap-2 cursor-help">
+                          {getReasonIcon(rejection.rejection_reason ?? "")}
+                          <Badge 
+                            variant={getReasonBadgeVariant(rejection.rejection_reason ?? "")}
+                            className="text-[10px] font-normal whitespace-normal text-left leading-tight py-1"
+                          >
+                            {formatUserFriendlyReason(rejection.rejection_reason ?? "", rejection.filters_status)}
+                          </Badge>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="max-w-[350px] text-xs">
+                        <p className="font-medium mb-1">Technical Details:</p>
+                        <p className="text-muted-foreground break-words">{rejection.rejection_reason}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </TableCell>
                 <TableCell>
                   {renderFilterDetails(rejection)}

@@ -3,8 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useBlockedSignals, type MoveZone } from "@/hooks/useBlockedSignals";
-import { AlertTriangle, TrendingDown, TrendingUp, Clock, Activity, Ban, Target } from "lucide-react";
+import { AlertTriangle, TrendingDown, TrendingUp, Clock, Activity, Ban, Target, Info } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 // Zone color mapping for MOVE_EXHAUSTION gate
@@ -54,6 +55,135 @@ const getRejectionCategory = (reason: string): { label: string; color: string; i
   }
   
   return { label: "Gate", color: "bg-muted text-muted-foreground border-border", icon: <Ban className="h-3 w-3" /> };
+};
+
+// Convert technical rejection reasons to user-friendly messages
+const formatUserFriendlyReason = (reason: string, filters?: any): string => {
+  if (!reason) return "Unknown rejection";
+  
+  const lowerReason = reason.toLowerCase();
+  
+  // EXTREME MOMENTUM VETO
+  if (lowerReason.includes("extreme momentum veto") || filters?.source === 'extreme_momentum_veto') {
+    const score = filters?.momentumScore;
+    const direction = score && score < 0 ? "bearish" : "bullish";
+    const tradeDir = filters?.graduatedMomentumEffect?.baseDirection || 
+                     (score && score < 0 ? "long" : "short");
+    return `Strong ${direction} momentum blocks ${tradeDir?.toUpperCase()} entry`;
+  }
+  
+  // NO_CLEAR_DIRECTION
+  if (lowerReason.includes("no clear trade direction") || filters?.gate === "NO_CLEAR_DIRECTION") {
+    if (lowerReason.includes("extreme momentum")) return "Strong opposing momentum blocks trade";
+    if (lowerReason.includes("conflicting")) return "Timeframes show conflicting trends";
+    return "Market direction unclear";
+  }
+  
+  // ADX TOO LOW
+  if (lowerReason.includes("adx too low") || filters?.gate === "ADX_TOO_LOW") {
+    const adx = filters?.adx;
+    return adx ? `Trend too weak (ADX ${adx.toFixed(0)})` : "Trend energy too weak";
+  }
+  
+  // Symbol disabled / performance filter
+  if (lowerReason.includes("symbol disabled")) {
+    const wr = filters?.winRate;
+    return wr !== undefined ? `Symbol disabled (${wr.toFixed(0)}% win rate)` : "Symbol disabled - poor performance";
+  }
+  
+  // NO MOMENTUM CONFIRMATION
+  if (lowerReason.includes("no momentum") || filters?.gate === "NO_MOMENTUM_CONFIRMATION") {
+    return "Waiting for momentum confirmation";
+  }
+  
+  // HTF NOT ALIGNED
+  if (lowerReason.includes("htf not aligned") || filters?.gate === "HTF_NOT_ALIGNED") {
+    return "Higher timeframes not aligned";
+  }
+  
+  // MOMENTUM DIRECTION OPPOSING
+  if (lowerReason.includes("momentum_direction") || filters?.gate === "MOMENTUM_DIRECTION_OPPOSING") {
+    return "Momentum opposes trade direction";
+  }
+  
+  // MOVE EXHAUSTED
+  if (lowerReason.includes("move_exhausted") || lowerReason.includes("move exhausted")) {
+    return "Price move already exhausted";
+  }
+  
+  // STOCHRSI extremes
+  if (lowerReason.includes("hard block") || lowerReason.includes("stochrsi extreme")) {
+    const k = filters?.stochK1h ?? filters?.stochRsiK;
+    if (k !== undefined) {
+      return k > 90 ? "Overbought - waiting for pullback" : "Oversold - waiting for bounce";
+    }
+    return "StochRSI at extreme level";
+  }
+  
+  // TIER 0/TIER 1 blocks
+  if (lowerReason.includes("tier 0") || lowerReason.includes("tier 1") || lowerReason.includes("severe") || lowerReason.includes("deep")) {
+    return "Extreme exhaustion - hard block";
+  }
+  
+  // PRE-RECOVERY
+  if (lowerReason.includes("pre-recovery") || lowerReason.includes("pre_recovery")) {
+    return "Recovery mode - stricter filters";
+  }
+  
+  // Bollinger gates
+  if (lowerReason.includes("bollinger") || lowerReason.includes("overextended") || lowerReason.includes("underextended")) {
+    return "Price at Bollinger Band extreme";
+  }
+  
+  // Active signal
+  if (lowerReason.includes("active signal")) {
+    return "Signal already pending";
+  }
+  
+  // Max trades
+  if (lowerReason.includes("max trades")) {
+    return "Maximum trade limit reached";
+  }
+  
+  // Quality score
+  if (lowerReason.includes("quality score")) {
+    return "Signal quality below threshold";
+  }
+  
+  // No strategy match
+  if (lowerReason.includes("no strategy")) {
+    return "No strategy conditions met";
+  }
+  
+  // Reversal risk
+  if (lowerReason.includes("reversal risk")) {
+    return "Reversal risk too high";
+  }
+  
+  // Regime
+  if (lowerReason.includes("regime") || lowerReason.includes("ranging")) {
+    return "Market regime unfavorable";
+  }
+  
+  // Squeeze
+  if (lowerReason.includes("squeeze")) {
+    return "Waiting for squeeze breakout";
+  }
+  
+  // If nothing matched, return a cleaned up version
+  let cleaned = reason
+    .replace(/\s*\([^)]*\)/g, '')
+    .replace(/^HARD GATE:\s*/i, '')
+    .replace(/^REGIME:\s*/i, '')
+    .replace(/⛔\s*/g, '')
+    .replace(/_/g, ' ')
+    .trim();
+  
+  if (cleaned.length > 45) {
+    cleaned = cleaned.slice(0, 42) + "...";
+  }
+  
+  return cleaned || "Signal rejected";
 };
 
 export const BlockedSignalsWidget = memo(function BlockedSignalsWidget() {
@@ -152,9 +282,20 @@ export const BlockedSignalsWidget = memo(function BlockedSignalsWidget() {
                       </span>
                     </div>
                     
-                    <p className="text-xs text-muted-foreground leading-relaxed mb-2">
-                      {signal.rejection_reason}
-                    </p>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <p className="text-xs text-muted-foreground leading-relaxed mb-2 cursor-help flex items-center gap-1">
+                            <span>{formatUserFriendlyReason(signal.rejection_reason, filters)}</span>
+                            <Info className="h-3 w-3 opacity-50" />
+                          </p>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-[320px] text-xs">
+                          <p className="font-medium mb-1">Technical Details:</p>
+                          <p className="text-muted-foreground break-words">{signal.rejection_reason}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                     
                     {filters && (
                       <div className="flex flex-wrap gap-1.5">
