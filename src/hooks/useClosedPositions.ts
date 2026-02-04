@@ -14,6 +14,7 @@ export interface ClosedPosition {
   realized_pnl_percent: number | null;
   opened_at: string;
   closed_at: string | null;
+  updated_at?: string;
   strategy_name: string | null;
   opened_by_rebalancer?: boolean;
   closed_by_rebalancer?: boolean;
@@ -23,6 +24,9 @@ export interface ClosedPosition {
   confidence_score?: number | null;
   trend_consistency?: number | null;
   peak_pnl_percent?: number | null;
+  // Fee tracking fields
+  trading_fee_amount?: number | null;
+  trading_fee_percent?: number | null;
 }
 
 export const useClosedPositions = (includeArchived: boolean = false) => {
