@@ -1,13 +1,15 @@
+import { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useSignals } from '@/hooks/useSignals';
 import { useSignalGenerator } from '@/hooks/useSignalGenerator';
 import { supabase } from '@/integrations/supabase/client';
-import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity, AlertCircle, Clock, Info, AlertTriangle, Sparkles } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity, AlertCircle, Clock, Info, AlertTriangle, Sparkles, ChevronDown, ChevronRight } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { getSignalPriorityTier, getSignalPriorityVariant } from '@/lib/utils';
@@ -80,6 +82,21 @@ export const TradingSignalsDashboard = () => {
   const { toast } = useToast();
   const { riskParams, loading: riskLoading, updateRiskParameters } = useRiskParameters();
   const autoExecEnabled = Boolean(riskParams?.auto_execute_signals);
+  
+  // Track which signal cards have expanded details
+  const [expandedSignals, setExpandedSignals] = useState<Set<string>>(new Set());
+  
+  const toggleExpanded = (signalId: string) => {
+    setExpandedSignals(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(signalId)) {
+        newSet.delete(signalId);
+      } else {
+        newSet.add(signalId);
+      }
+      return newSet;
+    });
+  };
 
   const toggleAutoExecution = async (enabled: boolean) => {
     try {
@@ -317,119 +334,145 @@ export const TradingSignalsDashboard = () => {
               </div>
             </div>
 
-            <div className="mb-4 p-3 bg-muted/50 rounded-lg">
-              <div className="text-sm font-medium mb-1">Analysis</div>
-              <p className="text-sm text-muted-foreground">{signal.reason}</p>
-            </div>
-
-            {signal.indicators && Object.keys(signal.indicators).length > 0 && (
-              <div className="mb-4 p-3 bg-accent/30 rounded-lg border border-border">
-                <div className="flex items-center gap-2 text-sm font-medium mb-3">
-                  <Activity className="h-4 w-4" />
-                  Indicator Values
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {Object.entries(signal.indicators).map(([key, value]) => {
-                    // Helper to format any value (handles nested objects)
-                    const formatValue = (val: unknown): string => {
-                      if (typeof val === 'number') {
-                        return val.toFixed(2);
-                      } else if (typeof val === 'boolean') {
-                        return val ? 'Yes' : 'No';
-                      } else if (val === null || val === undefined) {
-                        return '-';
-                      } else if (typeof val === 'object') {
-                        // Recursively format object values
-                        try {
-                          const entries = Object.entries(val as Record<string, unknown>);
-                          if (entries.length === 0) return '-';
-                          return entries
-                            .slice(0, 3)
-                            .map(([k, v]) => `${k}: ${formatValue(v)}`)
-                            .join(', ') + (entries.length > 3 ? ` (+${entries.length - 3})` : '');
-                        } catch {
-                          return '-';
-                        }
-                      }
-                      return String(val);
-                    };
-
-                    const displayValue = formatValue(value);
-                    const isComplexValue = typeof value === 'object' && value !== null;
-                    
-                    // Format JSON for tooltip display
-                    const getFullJson = (val: unknown): string => {
-                      try {
-                        return JSON.stringify(val, null, 2);
-                      } catch {
-                        return String(val);
-                      }
-                    };
-
-                    const cardContent = (
-                      <div className={`p-2 bg-background/60 rounded border border-border/50 ${isComplexValue ? 'cursor-help' : ''}`}>
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs text-muted-foreground font-medium">{key}</div>
-                          {isComplexValue && (
-                            <Info className="h-3 w-3 text-muted-foreground" />
-                          )}
-                        </div>
-                        <div className="text-sm font-bold mt-1 break-words">
-                          {displayValue}
-                        </div>
-                      </div>
-                    );
-                    
-                    return isComplexValue ? (
-                      <TooltipProvider key={key}>
-                        <Tooltip delayDuration={200}>
-                          <TooltipTrigger asChild>
-                            {cardContent}
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom" className="max-w-[400px] max-h-[300px] overflow-auto">
-                            <pre className="text-xs font-mono whitespace-pre-wrap">
-                              {getFullJson(value)}
-                            </pre>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
+            {/* Collapsible Analysis Section */}
+            <Collapsible 
+              open={expandedSignals.has(signal.id)} 
+              onOpenChange={() => toggleExpanded(signal.id)}
+            >
+              <CollapsibleTrigger asChild>
+                <button className="w-full mb-3 p-3 bg-muted/50 rounded-lg hover:bg-muted/70 transition-colors flex items-center justify-between text-left">
+                  <div className="flex items-center gap-2">
+                    {expandedSignals.has(signal.id) ? (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
                     ) : (
-                      <div key={key}>{cardContent}</div>
-                    );
-                  })}
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    )}
+                    <span className="text-sm font-medium">Analysis & Indicators</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {expandedSignals.has(signal.id) ? 'Click to collapse' : 'Click to expand'}
+                  </span>
+                </button>
+              </CollapsibleTrigger>
+              
+              <CollapsibleContent className="space-y-4">
+                {/* Analysis Reason */}
+                <div className="p-3 bg-muted/50 rounded-lg">
+                  <div className="text-sm font-medium mb-1">Analysis</div>
+                  <p className="text-sm text-muted-foreground">{signal.reason}</p>
                 </div>
-              </div>
-            )}
 
-            {/* Order Flow Display from Signal */}
-            {signal.indicators?.orderFlow && (
-              <div className="mb-4 p-3 bg-muted/50 rounded-lg border border-border/50">
-                <div className="flex items-center gap-2 text-sm font-medium mb-2">
-                  <Activity className="h-4 w-4" />
-                  Order Flow Analysis
-                </div>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <Badge variant="outline" className={
-                    (signal.indicators.orderFlow as any).qualityBonus > 0 
-                      ? "border-green-500/30 text-green-400" 
-                      : (signal.indicators.orderFlow as any).qualityBonus < 0 
-                        ? "border-red-500/30 text-red-400" 
-                        : ""
-                  }>
-                    {(signal.indicators.orderFlow as any).qualityBonus > 0 ? '+' : ''}{(signal.indicators.orderFlow as any).qualityBonus} pts
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    Score: {(signal.indicators.orderFlow as any).score}/100
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    Signal: {(signal.indicators.orderFlow as any).signal}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    Dir: {(signal.indicators.orderFlow as any).intendedDirection}
-                  </span>
-                </div>
-              </div>
-            )}
+                {/* Indicator Values */}
+                {signal.indicators && Object.keys(signal.indicators).length > 0 && (
+                  <div className="p-3 bg-accent/30 rounded-lg border border-border">
+                    <div className="flex items-center gap-2 text-sm font-medium mb-3">
+                      <Activity className="h-4 w-4" />
+                      Indicator Values
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      {Object.entries(signal.indicators).map(([key, value]) => {
+                        // Helper to format any value (handles nested objects)
+                        const formatValue = (val: unknown): string => {
+                          if (typeof val === 'number') {
+                            return val.toFixed(2);
+                          } else if (typeof val === 'boolean') {
+                            return val ? 'Yes' : 'No';
+                          } else if (val === null || val === undefined) {
+                            return '-';
+                          } else if (typeof val === 'object') {
+                            // Recursively format object values
+                            try {
+                              const entries = Object.entries(val as Record<string, unknown>);
+                              if (entries.length === 0) return '-';
+                              return entries
+                                .slice(0, 3)
+                                .map(([k, v]) => `${k}: ${formatValue(v)}`)
+                                .join(', ') + (entries.length > 3 ? ` (+${entries.length - 3})` : '');
+                            } catch {
+                              return '-';
+                            }
+                          }
+                          return String(val);
+                        };
+
+                        const displayValue = formatValue(value);
+                        const isComplexValue = typeof value === 'object' && value !== null;
+                        
+                        // Format JSON for tooltip display
+                        const getFullJson = (val: unknown): string => {
+                          try {
+                            return JSON.stringify(val, null, 2);
+                          } catch {
+                            return String(val);
+                          }
+                        };
+
+                        const cardContent = (
+                          <div className={`p-2 bg-background/60 rounded border border-border/50 ${isComplexValue ? 'cursor-help' : ''}`}>
+                            <div className="flex items-center justify-between">
+                              <div className="text-xs text-muted-foreground font-medium">{key}</div>
+                              {isComplexValue && (
+                                <Info className="h-3 w-3 text-muted-foreground" />
+                              )}
+                            </div>
+                            <div className="text-sm font-bold mt-1 break-words">
+                              {displayValue}
+                            </div>
+                          </div>
+                        );
+                        
+                        return isComplexValue ? (
+                          <TooltipProvider key={key}>
+                            <Tooltip delayDuration={200}>
+                              <TooltipTrigger asChild>
+                                {cardContent}
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" className="max-w-[400px] max-h-[300px] overflow-auto bg-popover text-popover-foreground">
+                                <pre className="text-xs font-mono whitespace-pre-wrap">
+                                  {getFullJson(value)}
+                                </pre>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          <div key={key}>{cardContent}</div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Order Flow Display from Signal */}
+                {signal.indicators?.orderFlow && (
+                  <div className="p-3 bg-muted/50 rounded-lg border border-border/50">
+                    <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                      <Activity className="h-4 w-4" />
+                      Order Flow Analysis
+                    </div>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <Badge variant="outline" className={
+                        (signal.indicators.orderFlow as any).qualityBonus > 0 
+                          ? "border-green-500/30 text-green-400" 
+                          : (signal.indicators.orderFlow as any).qualityBonus < 0 
+                            ? "border-red-500/30 text-red-400" 
+                            : ""
+                      }>
+                        {(signal.indicators.orderFlow as any).qualityBonus > 0 ? '+' : ''}{(signal.indicators.orderFlow as any).qualityBonus} pts
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        Score: {(signal.indicators.orderFlow as any).score}/100
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        Signal: {(signal.indicators.orderFlow as any).signal}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        Dir: {(signal.indicators.orderFlow as any).intendedDirection}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </CollapsibleContent>
+            </Collapsible>
 
             <div className="flex items-center justify-between">
               <div className="flex flex-col gap-1">
