@@ -4740,9 +4740,10 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
   const NEUTRAL_MAX = 10; // ±10 is neutral zone
   const EXCEPTIONAL_ADX = 35;
   
-  // ATR-normalized weak MACD threshold (backend uses ATR * 0.0001)
-  const atr = coerceNumeric(filtersStatus?.atr ?? trendData?.atr ?? trendData?.atrValue, 0);
-  const weakMacdThreshold = atr > 0 ? atr * 0.0001 : 0.0001; // Fallback if no ATR
+  // ATR-normalized weak MACD threshold - PREFER backend-computed values
+  const atr = coerceNumeric(filtersStatus?.atrForNormalization ?? filtersStatus?.atr ?? trendData?.volatility?.atr ?? trendData?.atr ?? trendData?.atrValue, 0);
+  // Use backend-provided threshold if available, else calculate
+  const weakMacdThreshold = coerceNumeric(filtersStatus?.weakMomentumThreshold, atr > 0 ? atr * 0.0001 : 0.0001);
   
   const isLong = signalDirection.toLowerCase() === "long";
   const opposingDirection = isLong ? "bearish" : "bullish";
