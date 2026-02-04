@@ -202,14 +202,22 @@ function checkOversoldExhaustion(trendData: any): ExhaustionCheck {
   
   // ===== EXTREME EXHAUSTION DETECTION (K <= 10) =====
   // When K is at statistical extremes, ADX becomes informational, not blocking
+  // NEW: Momentum floor prevents entries when momentum strongly opposes direction
   const isDeepExhaustion = stochK <= extremeConfig.LONG_K_EXTREME;
   const adxNotAccelerating = adxSlope <= extremeConfig.MAX_ADX_SLOPE;
   const sufficientDistance = atrDistanceFromVwap >= extremeConfig.MIN_ATR_DISTANCE_FROM_VWAP;
   
-  if (isDeepExhaustion && adxNotAccelerating && sufficientDistance) {
+  // Momentum floor: for LONG, momentum must not be strongly bearish (score > -threshold)
+  const extremeMomentumFloor = extremeConfig.MIN_MOMENTUM_SCORE ?? 20;
+  const momentumNotOpposing = momentumScore > -extremeMomentumFloor;
+  
+  if (isDeepExhaustion && adxNotAccelerating && sufficientDistance && momentumNotOpposing) {
     isExtremeExhaustion = true;
     exhaustionTier = 'EXTREME';
-    triggers.push(`EXTREME EXHAUSTION: K=${stochK.toFixed(1)} <= ${extremeConfig.LONG_K_EXTREME}, ADX slope=${adxSlope.toFixed(2)} <= ${extremeConfig.MAX_ADX_SLOPE}, VWAP distance=${atrDistanceFromVwap.toFixed(1)} ATRs`);
+    triggers.push(`EXTREME EXHAUSTION: K=${stochK.toFixed(1)} <= ${extremeConfig.LONG_K_EXTREME}, ADX slope=${adxSlope.toFixed(2)} <= ${extremeConfig.MAX_ADX_SLOPE}, VWAP distance=${atrDistanceFromVwap.toFixed(1)} ATRs, momentum=${momentumScore.toFixed(0)} > -${extremeMomentumFloor}`);
+  } else if (isDeepExhaustion && !momentumNotOpposing) {
+    // Log rejection due to momentum floor
+    triggers.push(`EXTREME_EXHAUSTION_REJECTED: K=${stochK.toFixed(1)} qualifies, but momentum=${momentumScore.toFixed(0)} <= -${extremeMomentumFloor} (opposing)`);
   }
   
   // ===== MODERATE EXHAUSTION DETECTION (K 10-15) =====
@@ -362,14 +370,22 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
   
   // ===== EXTREME EXHAUSTION DETECTION (K >= 90) =====
   // When K is at statistical extremes, ADX becomes informational, not blocking
+  // NEW: Momentum floor prevents entries when momentum strongly opposes direction
   const isDeepExhaustion = stochK >= extremeConfig.SHORT_K_EXTREME;
   const adxNotAccelerating = adxSlope <= extremeConfig.MAX_ADX_SLOPE;
   const sufficientDistance = atrDistanceFromVwap >= extremeConfig.MIN_ATR_DISTANCE_FROM_VWAP;
   
-  if (isDeepExhaustion && adxNotAccelerating && sufficientDistance) {
+  // Momentum floor: for SHORT, momentum must not be strongly bullish (score < threshold)
+  const extremeMomentumFloor = extremeConfig.MIN_MOMENTUM_SCORE ?? 20;
+  const momentumNotOpposing = momentumScore < extremeMomentumFloor;
+  
+  if (isDeepExhaustion && adxNotAccelerating && sufficientDistance && momentumNotOpposing) {
     isExtremeExhaustion = true;
     exhaustionTier = 'EXTREME';
-    triggers.push(`EXTREME EXHAUSTION: K=${stochK.toFixed(1)} >= ${extremeConfig.SHORT_K_EXTREME}, ADX slope=${adxSlope.toFixed(2)} <= ${extremeConfig.MAX_ADX_SLOPE}, VWAP distance=${atrDistanceFromVwap.toFixed(1)} ATRs`);
+    triggers.push(`EXTREME EXHAUSTION: K=${stochK.toFixed(1)} >= ${extremeConfig.SHORT_K_EXTREME}, ADX slope=${adxSlope.toFixed(2)} <= ${extremeConfig.MAX_ADX_SLOPE}, VWAP distance=${atrDistanceFromVwap.toFixed(1)} ATRs, momentum=${momentumScore.toFixed(0)} < ${extremeMomentumFloor}`);
+  } else if (isDeepExhaustion && !momentumNotOpposing) {
+    // Log rejection due to momentum floor
+    triggers.push(`EXTREME_EXHAUSTION_REJECTED: K=${stochK.toFixed(1)} qualifies, but momentum=${momentumScore.toFixed(0)} >= ${extremeMomentumFloor} (opposing)`);
   }
   
   // ===== MODERATE EXHAUSTION DETECTION (K 85-90) =====
