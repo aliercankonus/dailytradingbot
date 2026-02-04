@@ -2,6 +2,17 @@
 // CRITICAL: Single source of truth for all edge functions
 // Changes here automatically apply to: calculate-trend, backtest-strategy, strategy-analyzer, execute-trade, monitor-positions
 
+// ============= TRADING FEE PARAMETERS =============
+// Exchange trading fees for accurate P&L calculation
+export const TRADING_FEE_PARAMS = {
+  // Default fee rate per side (Binance taker = 0.1%, maker = 0.04%)
+  DEFAULT_FEE_RATE_PERCENT: 0.1,
+  // Minimum fee rate (for high-volume/VIP users)
+  MIN_FEE_RATE_PERCENT: 0.02,
+  // Maximum fee rate (safety cap)
+  MAX_FEE_RATE_PERCENT: 0.2,
+} as const;
+
 export const ADX_THRESHOLDS = {
   VERY_WEAK: 12,
   SEVERE_PENALTY: 15,

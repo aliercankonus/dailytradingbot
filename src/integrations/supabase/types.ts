@@ -476,6 +476,8 @@ export type Database = {
           tp1_price: number | null
           tp2_price: number | null
           tp3_price: number | null
+          trading_fee_amount: number | null
+          trading_fee_percent: number | null
           trend: string | null
           trend_consistency: number | null
           updated_at: string | null
@@ -528,6 +530,8 @@ export type Database = {
           tp1_price?: number | null
           tp2_price?: number | null
           tp3_price?: number | null
+          trading_fee_amount?: number | null
+          trading_fee_percent?: number | null
           trend?: string | null
           trend_consistency?: number | null
           updated_at?: string | null
@@ -580,6 +584,8 @@ export type Database = {
           tp1_price?: number | null
           tp2_price?: number | null
           tp3_price?: number | null
+          trading_fee_amount?: number | null
+          trading_fee_percent?: number | null
           trend?: string | null
           trend_consistency?: number | null
           updated_at?: string | null
@@ -654,6 +660,8 @@ export type Database = {
           tp1_price: number | null
           tp2_price: number | null
           tp3_price: number | null
+          trading_fee_amount: number | null
+          trading_fee_percent: number | null
           trend: string | null
           trend_consistency: number | null
           updated_at: string | null
@@ -703,6 +711,8 @@ export type Database = {
           tp1_price?: number | null
           tp2_price?: number | null
           tp3_price?: number | null
+          trading_fee_amount?: number | null
+          trading_fee_percent?: number | null
           trend?: string | null
           trend_consistency?: number | null
           updated_at?: string | null
@@ -752,6 +762,8 @@ export type Database = {
           tp1_price?: number | null
           tp2_price?: number | null
           tp3_price?: number | null
+          trading_fee_amount?: number | null
+          trading_fee_percent?: number | null
           trend?: string | null
           trend_consistency?: number | null
           updated_at?: string | null
@@ -889,6 +901,7 @@ export type Database = {
           standard_tp_multiplier: number | null
           time_based_stop_enabled: boolean | null
           time_based_stop_hours: number | null
+          trading_fee_rate_percent: number | null
           trailing_aggressiveness: number | null
           trailing_daily_limit_enabled: boolean | null
           trailing_stop_activation_percent: number | null
@@ -993,6 +1006,7 @@ export type Database = {
           standard_tp_multiplier?: number | null
           time_based_stop_enabled?: boolean | null
           time_based_stop_hours?: number | null
+          trading_fee_rate_percent?: number | null
           trailing_aggressiveness?: number | null
           trailing_daily_limit_enabled?: boolean | null
           trailing_stop_activation_percent?: number | null
@@ -1097,6 +1111,7 @@ export type Database = {
           standard_tp_multiplier?: number | null
           time_based_stop_enabled?: boolean | null
           time_based_stop_hours?: number | null
+          trading_fee_rate_percent?: number | null
           trailing_aggressiveness?: number | null
           trailing_daily_limit_enabled?: boolean | null
           trailing_stop_activation_percent?: number | null
