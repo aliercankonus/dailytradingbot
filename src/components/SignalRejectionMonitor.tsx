@@ -3,6 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Pagination,
   PaginationContent,
@@ -33,8 +34,7 @@ import { useBlockedSignals, BlockedSignal, MoveZoneDetails } from "@/hooks/useBl
 import { formatDistanceToNow } from "date-fns";
 import { useState, useMemo } from "react";
 
-const ITEMS_PER_PAGE = 10;
-
+type PageSize = 10 | 25 | 50;
 type TimeRange = "15m" | "30m" | "1h";
 type GateFilter = "all" | "momentum" | "regime" | "direction" | "htf" | "adx";
 
@@ -236,6 +236,7 @@ export const SignalRejectionMonitor = () => {
   const [timeRange, setTimeRange] = useState<TimeRange>("30m");
   const [gateFilter, setGateFilter] = useState<GateFilter>("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<PageSize>(10);
   
   // Filter signals by time range
   const filteredByTime = useMemo(() => {
@@ -261,20 +262,25 @@ export const SignalRejectionMonitor = () => {
   }, [filteredByTime, gateFilter]);
   
   // Pagination calculations
-  const totalPages = Math.max(1, Math.ceil(filteredSignals.length / ITEMS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(filteredSignals.length / pageSize));
   const safeCurrentPage = Math.min(currentPage, totalPages);
   
   const paginatedSignals = useMemo(() => {
-    const startIndex = (safeCurrentPage - 1) * ITEMS_PER_PAGE;
-    return filteredSignals.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-  }, [filteredSignals, safeCurrentPage]);
+    const startIndex = (safeCurrentPage - 1) * pageSize;
+    return filteredSignals.slice(startIndex, startIndex + pageSize);
+  }, [filteredSignals, safeCurrentPage, pageSize]);
   
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters or page size change
   useMemo(() => {
     if (currentPage > totalPages) {
       setCurrentPage(1);
     }
-  }, [filteredSignals.length, currentPage, totalPages]);
+  }, [filteredSignals.length, currentPage, totalPages, pageSize]);
+  
+  const handlePageSizeChange = (value: string) => {
+    setPageSize(Number(value) as PageSize);
+    setCurrentPage(1); // Reset to first page when changing page size
+  };
   
   const getPageNumbers = () => {
     const pages: (number | 'ellipsis')[] = [];
@@ -509,11 +515,26 @@ export const SignalRejectionMonitor = () => {
             </div>
             
             {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between pt-4 border-t border-border mt-4">
+            <div className="flex items-center justify-between pt-4 border-t border-border mt-4">
+              <div className="flex items-center gap-4">
                 <span className="text-xs text-muted-foreground">
-                  Showing {((safeCurrentPage - 1) * ITEMS_PER_PAGE) + 1}-{Math.min(safeCurrentPage * ITEMS_PER_PAGE, filteredSignals.length)} of {filteredSignals.length} rejections
+                  Showing {((safeCurrentPage - 1) * pageSize) + 1}-{Math.min(safeCurrentPage * pageSize, filteredSignals.length)} of {filteredSignals.length} rejections
                 </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Per page:</span>
+                  <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
+                    <SelectTrigger className="h-7 w-[70px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10</SelectItem>
+                      <SelectItem value="25">25</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {totalPages > 1 && (
                 <Pagination>
                   <PaginationContent>
                     <PaginationItem>
@@ -545,8 +566,8 @@ export const SignalRejectionMonitor = () => {
                     </PaginationItem>
                   </PaginationContent>
                 </Pagination>
-              </div>
-            )}
+              )}
+            </div>
           </>
         )}
       </CardContent>
