@@ -54,12 +54,17 @@ export const OLD_GATE_THRESHOLDS = {
 // New relaxed gate thresholds (current Phase 2/3/4)
 // NOTE: MACD thresholds are now ATR-NORMALIZED RATIOS (|MACD/ATR|)
 // This ensures consistent behavior across high-priced (BTC) and low-priced assets
+// 
+// CALIBRATION NOTE (2026-02-04):
+// - Aligned with MACD_GATE_PARAMS in constants.ts for consistency
+// - NEUTRAL_HISTOGRAM_THRESHOLD: 0.0005 (0.05% of ATR = genuinely flat)
+// - MIN_HISTOGRAM_FOR_BLOCK: 0.002 (0.2% of ATR = significant opposing momentum)
 export const NEW_GATE_THRESHOLDS = {
   // MACD divergence - relaxed (thresholds are |MACD/ATR| ratios)
   MACD_MIN_OPPOSING_BARS: 3,
   MACD_HISTOGRAM_MAGNITUDE_CHECK: true,
-  MACD_NEUTRAL_HISTOGRAM_THRESHOLD: 0.001,   // |MACD/ATR| < 0.1% = neutral (was 0.0001 absolute)
-  MACD_MIN_HISTOGRAM_FOR_BLOCK: 0.01,        // |MACD/ATR| >= 1% = significant (was 0.001 absolute)
+  MACD_NEUTRAL_HISTOGRAM_THRESHOLD: 0.0005,  // |MACD/ATR| < 0.05% = neutral (aligned with constants.ts)
+  MACD_MIN_HISTOGRAM_FOR_BLOCK: 0.002,       // |MACD/ATR| >= 0.2% = significant (aligned with constants.ts)
   MACD_ADX_OVERRIDE_ENABLED: true,
   MACD_ADX_SOFT_OVERRIDE: 25,
   MACD_ADX_HARD_OVERRIDE: 28,
