@@ -3245,10 +3245,9 @@ const SqueezeContextGateDisplay = ({ filtersStatus, trendData }: { filtersStatus
 // These gates focus on preventing break-even trades through graduated position sizing
 
 // ADX Slope Graduated Gate - blocks/reduces when ADX is declining with low energy
-const AdxSlopeGraduatedDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+const AdxSlopeGraduatedDisplay = ({ filtersStatus, trendData, rejectionReason }: { filtersStatus: any; trendData?: any; rejectionReason?: string }) => {
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   const adxSlope = coerceNumeric(filtersStatus?.adxSlope ?? trendData?.volatility?.adxSlope, 0);
-  const positionMultiplier = coerceNumeric(filtersStatus?.positionMultiplier ?? filtersStatus?.multiplier, 1);
   const direction = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
   
   // Bollinger Breakdown Override data
@@ -3256,8 +3255,16 @@ const AdxSlopeGraduatedDisplay = ({ filtersStatus, trendData }: { filtersStatus:
   const stochRsiK4h = coerceNumeric(filtersStatus?.stochRsiK4h ?? trendData?.stochasticRsi?.['4h']?.k, 50);
   const bollingerBreakdownChecked = filtersStatus?.bollingerBreakdownChecked === true;
   
-  // Determine actual outcome based on values - NOT assumptions
-  const isHardBlock = positionMultiplier <= 0 || filtersStatus?.blocked === true;
+  // Check if rejection reason indicates a block (fallback for missing positionMultiplier)
+  const reasonIndicatesBlock = rejectionReason?.toLowerCase().includes('blocked') ?? false;
+  
+  // Determine actual outcome - use positionMultiplier if present, otherwise infer from rejection reason
+  const hasExplicitMultiplier = filtersStatus?.positionMultiplier !== undefined || filtersStatus?.multiplier !== undefined;
+  const positionMultiplier = hasExplicitMultiplier 
+    ? coerceNumeric(filtersStatus?.positionMultiplier ?? filtersStatus?.multiplier, 1)
+    : (reasonIndicatesBlock ? 0 : 1);
+  
+  const isHardBlock = positionMultiplier <= 0 || filtersStatus?.blocked === true || reasonIndicatesBlock;
   const isSizeReduced = !isHardBlock && positionMultiplier < 1;
   const isAllowed = !isHardBlock && positionMultiplier >= 1;
   
@@ -6400,7 +6407,7 @@ export const SignalRejectionReasons = () => {
     // BE Prevention: ADX Slope Graduated Gate
     if (fs?.gate === "ADX_SLOPE_GRADUATED" || fs?.gate === "ADX_SLOPE_GRADUATED_GATE" ||
         reason.includes("ADX_SLOPE_GRADUATED") || reason.includes("ADX slope graduated")) {
-      return <AdxSlopeGraduatedDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+      return <AdxSlopeGraduatedDisplay filtersStatus={fs} trendData={rejection.trend_data} rejectionReason={reason} />;
     }
     
     // BE Prevention: High ADX 1h Confirmation Gate
