@@ -7160,8 +7160,18 @@ export const SignalRejectionReasons = () => {
                         <div className="flex items-start gap-2 cursor-help">
                           {getReasonIcon(rejection.rejection_reason ?? "")}
                           <Badge 
-                            variant={getReasonBadgeVariant(rejection.rejection_reason ?? "")}
-                            className="text-[10px] font-normal whitespace-normal text-left leading-tight py-1"
+                            variant="outline"
+                            className={`text-[10px] font-medium whitespace-normal text-left leading-tight py-1 px-2 ${
+                              severity === "critical" 
+                                ? "bg-red-500/20 text-red-400 border-red-500/40" 
+                                : severity === "high"
+                                ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
+                                : severity === "medium"
+                                ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/40"
+                                : severity === "low"
+                                ? "bg-blue-500/20 text-blue-400 border-blue-500/40"
+                                : "bg-muted text-muted-foreground border-muted-foreground/30"
+                            }`}
                           >
                             {formatUserFriendlyReason(rejection.rejection_reason ?? "", rejection.filters_status)}
                           </Badge>
