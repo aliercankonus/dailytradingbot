@@ -28,7 +28,6 @@ import { ExitManagementDashboard } from "@/components/ExitManagementDashboard";
 import { MarketConditionsDashboard } from "@/components/MarketConditionsDashboard";
 import LateGrindAnalyticsDashboard from "@/components/LateGrindAnalyticsDashboard";
 import { BlockedSignalsWidget } from "@/components/BlockedSignalsWidget";
-import { ShadowModeValidationWidget } from "@/components/ShadowModeValidationWidget";
 import { SignalRejectionMonitor } from "@/components/SignalRejectionMonitor";
 
 const Index = () => {
@@ -114,7 +113,6 @@ const Index = () => {
               </div>
             </div>
             <SignalRejectionMonitor />
-            <ShadowModeValidationWidget />
             <SignalTimingMonitor />
             <TradingSignalsDashboard />
             <AIAnalysisDashboard />
