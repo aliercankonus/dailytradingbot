@@ -4742,8 +4742,13 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
   
   // ATR-normalized weak MACD threshold - PREFER backend-computed values
   const atr = coerceNumeric(filtersStatus?.atrForNormalization ?? filtersStatus?.atr ?? trendData?.volatility?.atr ?? trendData?.atr ?? trendData?.atrValue, 0);
-  // Use backend-provided threshold if available, else calculate
-  const weakMacdThreshold = coerceNumeric(filtersStatus?.weakMomentumThreshold, atr > 0 ? atr * 0.0001 : 0.0001);
+  // NEW: Use normalized MACD value from backend (MACD/ATR), fallback to calculating it
+  const macdHistogramNormalized = coerceNumeric(
+    filtersStatus?.macdHistogramNormalized,
+    atr > 0 ? Math.abs(macdHistogram) / atr : Math.abs(macdHistogram)
+  );
+  // Threshold is now a simple dimensionless ratio (0.0001 = 0.01% of ATR)
+  const weakMacdThreshold = coerceNumeric(filtersStatus?.weakMomentumThreshold, 0.0001);
   
   const isLong = signalDirection.toLowerCase() === "long";
   const opposingDirection = isLong ? "bearish" : "bullish";
@@ -4773,7 +4778,8 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
   const is1hTrendAligned = regimeTrendDirection?.toLowerCase() === expectedTrendDir;
   
   // ===== PHASE 2 BYPASS: MACD Weak OR Exceptional ADX =====
-  const isWeakMomentum = Math.abs(macdHistogram) < weakMacdThreshold;
+  // Use normalized MACD value (MACD/ATR) for comparison, not raw MACD
+  const isWeakMomentum = macdHistogramNormalized < weakMacdThreshold;
   const isExceptionalADX = adx >= EXCEPTIONAL_ADX;
   
   // Momentum state styling
@@ -4951,10 +4957,10 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
           <div className="space-y-1">
             <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${isWeakMomentum ? 'bg-green-500/10 border border-green-500/30' : 'bg-red-500/10 border border-red-500/30'}`}>
               {isWeakMomentum ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
-              <span>Weak MACD (ATR-normalized): </span>
-              <span className="font-mono">{Math.abs(macdHistogram).toFixed(5)}</span>
+              <span>Weak MACD (normalized |MACD/ATR|): </span>
+              <span className="font-mono">{macdHistogramNormalized.toFixed(6)}</span>
               <span className="text-muted-foreground"> vs threshold </span>
-              <span className="font-mono text-muted-foreground">{weakMacdThreshold.toFixed(5)}</span>
+              <span className="font-mono text-muted-foreground">{weakMacdThreshold.toFixed(6)}</span>
             </div>
             <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${isExceptionalADX ? 'bg-green-500/10 border border-green-500/30' : 'bg-red-500/10 border border-red-500/30'}`}>
               {isExceptionalADX ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
@@ -4963,7 +4969,7 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
             </div>
             {atr > 0 && (
               <div className="text-[9px] text-muted-foreground pl-5">
-                ATR: {atr.toFixed(2)} → Weak MACD threshold: {weakMacdThreshold.toFixed(6)}
+                Raw MACD: {macdHistogram >= 0 ? '+' : ''}{macdHistogram.toFixed(4)} | ATR: {atr.toFixed(2)} | Normalized: {macdHistogramNormalized.toFixed(6)} (must be {'<'} {weakMacdThreshold.toFixed(6)} to bypass)
               </div>
             )}
           </div>
@@ -4979,8 +4985,8 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
         {isPhase2 ? (
           <>
             Attempting {signalDirection.toUpperCase()} entry while MACD direction is {momentumDirection} 
-            (histogram: {macdHistogram >= 0 ? '+' : ''}{macdHistogram.toFixed(2)}).
-            Neither MACD weakness (|hist| {'<'} {weakMacdThreshold.toFixed(5)}) nor exceptional ADX (≥{EXCEPTIONAL_ADX}, current: {adx.toFixed(1)}) conditions were met.
+            (histogram: {macdHistogram >= 0 ? '+' : ''}{macdHistogram.toFixed(2)}, normalized: {macdHistogramNormalized.toFixed(6)}).
+            Neither MACD weakness (normalized {'<'} {weakMacdThreshold.toFixed(6)}) nor exceptional ADX (≥{EXCEPTIONAL_ADX}, current: {adx.toFixed(1)}) conditions were met.
           </>
         ) : (
           <>
