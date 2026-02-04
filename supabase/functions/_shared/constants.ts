@@ -3239,10 +3239,12 @@ export const MACD_GATE_PARAMS = {
   // Only block if MACD has opposed for N+ consecutive bars
   MIN_OPPOSITION_BARS: 3,             // Require 3 bars of opposing MACD
   
-  // MACD magnitude check (NEW)
-  // Small divergences don't warrant blocking
-  MIN_HISTOGRAM_FOR_BLOCK: 0.0002,    // Only block if |histogram| > this
-  NEUTRAL_HISTOGRAM_THRESHOLD: 0.00005, // Below this = treat as neutral
+  // MACD magnitude check (NEW) - NOW ATR-NORMALIZED RATIOS
+  // Values represent |MACD histogram / ATR| thresholds (dimensionless)
+  // This ensures consistent behavior across high-priced (BTC: ~$95k) and low-priced assets
+  // Example: BTC MACD=36, ATR=585 → normalized=0.0615; threshold 0.002 → significant
+  MIN_HISTOGRAM_FOR_BLOCK: 0.002,       // Only block if |histogram/ATR| > this (was 0.0002 absolute)
+  NEUTRAL_HISTOGRAM_THRESHOLD: 0.0005,  // Below this = treat as neutral (was 0.00005 absolute)
   
   // Position sizing for soft blocks (instead of hard block)
   POSITION_MULTIPLIER_SOFT: 0.75,     // 75% position when not blocking

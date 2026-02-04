@@ -952,10 +952,13 @@ serve(async (req) => {
             bVolume1h.volumeRatio
           );
           
-          // Momentum analysis
-          const bMacdExpanding = Math.abs(bTrend1h.indicators.macdHistogram) > 
-            Math.abs(bTrend1h.indicators.macdHistogramArray?.[bTrend1h.indicators.macdHistogramArray.length - 2] || 0);
-          const bMacdStrong = Math.abs(bTrend1h.indicators.macd - bTrend1h.indicators.macdSignal) > 0.001 * bCurrentPrice;
+          // Momentum analysis - use ATR-normalized MACD for consistent comparison
+          const bMacdHistogram = bTrend1h.indicators.macdHistogram;
+          const bPrevMacdHistogram = bTrend1h.indicators.macdHistogramArray?.[bTrend1h.indicators.macdHistogramArray.length - 2] || 0;
+          const bMacdExpanding = Math.abs(bMacdHistogram) > Math.abs(bPrevMacdHistogram);
+          // Use ATR-normalized threshold: MACD-signal gap must be 0.1% of ATR to be "strong"
+          const bMacdNormalized = bCurrentATR > 0 ? Math.abs(bTrend1h.indicators.macd - bTrend1h.indicators.macdSignal) / bCurrentATR : 0;
+          const bMacdStrong = bMacdNormalized > 0.001;
           
           const bLastClose = bPrices1h[bPrices1h.length - 1] || 0;
           const bPrevClose = bPrices1h[bPrices1h.length - 2] || bLastClose;
@@ -1780,8 +1783,12 @@ serve(async (req) => {
       (effectiveTrendForMomentum === "bearish" && macdHistogram < 0) ||
       effectiveTrendForMomentum === "neutral";
 
-    const macdExpanding = Math.abs(macdHistogram) > 0.05 && macdDirectionAligned && adx >= ADX_THRESHOLDS.SEVERE_PENALTY;
-    const macdStrong = Math.abs(macdHistogram) > 0.5 && macdDirectionAligned && adx >= ADX_THRESHOLDS.SEVERE_PENALTY;
+    // Use ATR-normalized MACD thresholds for consistent behavior across assets
+    // 0.005 = MACD must be 0.5% of ATR to be "expanding"
+    // 0.05 = MACD must be 5% of ATR to be "strong"
+    const macdNormalized = currentATR > 0 ? Math.abs(macdHistogram) / currentATR : Math.abs(macdHistogram);
+    const macdExpanding = macdNormalized > 0.005 && macdDirectionAligned && adx >= ADX_THRESHOLDS.SEVERE_PENALTY;
+    const macdStrong = macdNormalized > 0.05 && macdDirectionAligned && adx >= ADX_THRESHOLDS.SEVERE_PENALTY;
 
     // Fake breakout detection
     const fakeBreakoutRisk = macdExpanding && !adxRising;

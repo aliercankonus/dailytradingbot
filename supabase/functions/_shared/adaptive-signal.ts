@@ -108,7 +108,8 @@ export const determineAdaptiveDirection = (
     htfTrend4h, htfTrend1h, htfConf4h, htfConf1h,
     adx, adxRising, momentumScore, momentumState, momentumConfirms,
     macdHistogram, macdExpanding, primaryTrend, trendConsistency,
-    stochRsiK, reversalScore, orderFlowScore, orderFlowSignal
+    stochRsiK, reversalScore, orderFlowScore, orderFlowSignal,
+    atr  // Added for ATR-normalized MACD threshold
   } = ctx;
 
   // ===== CASE 1: Strong 4h trend - follow it unambiguously =====
@@ -150,19 +151,24 @@ export const determineAdaptiveDirection = (
 
   // ===== CASE 2.5: Confirmed momentum with MACD direction ===== (NEW - Phase 1)
   // When HTF is neutral but momentum is confirmed and MACD shows clear direction
+  // NOTE: Use ATR-normalized MACD threshold for consistent behavior across assets
+  // Threshold 0.05 means MACD must be at least 5% of ATR to be considered significant
+  const macdNormalizedForDirection = atr > 0 ? macdHistogram / atr : macdHistogram;
+  const MACD_DIRECTION_THRESHOLD = 0.05;  // 5% of ATR
+  
   if (htfTrend4h === 'neutral' && momentumConfirms && macdExpanding) {
-    if (macdHistogram < -0.5 && adx >= ADX_THRESHOLDS.MINIMUM) {
+    if (macdNormalizedForDirection < -MACD_DIRECTION_THRESHOLD && adx >= ADX_THRESHOLDS.MINIMUM) {
       return {
         direction: 'short',
         confidence: 70,
-        reason: `Confirmed bearish momentum (MACD=${macdHistogram.toFixed(1)}, ADX=${adx.toFixed(1)}, expanding)`
+        reason: `Confirmed bearish momentum (MACD normalized=${macdNormalizedForDirection.toFixed(3)}, ADX=${adx.toFixed(1)}, expanding)`
       };
     }
-    if (macdHistogram > 0.5 && adx >= ADX_THRESHOLDS.MINIMUM) {
+    if (macdNormalizedForDirection > MACD_DIRECTION_THRESHOLD && adx >= ADX_THRESHOLDS.MINIMUM) {
       return {
         direction: 'long',
         confidence: 70,
-        reason: `Confirmed bullish momentum (MACD=${macdHistogram.toFixed(1)}, ADX=${adx.toFixed(1)}, expanding)`
+        reason: `Confirmed bullish momentum (MACD normalized=${macdNormalizedForDirection.toFixed(3)}, ADX=${adx.toFixed(1)}, expanding)`
       };
     }
   }
