@@ -4752,6 +4752,7 @@ export const MOMENTUM_FLIP_DETECTION = {
 // Strengthens MICRO_TREND exception to require momentum alignment
 // Prevents MICRO_TREND from allowing entries against momentum direction
 // ROOT CAUSE FIX: MICRO_TREND was bypassing momentum checks and entering SHORTs against bullish momentum
+// ENHANCED: Added momentum state validation and sizing tiers for probe trades
 export const MICRO_TREND_MOMENTUM_SAFETY = {
   ENABLED: true,
   
@@ -4760,6 +4761,16 @@ export const MICRO_TREND_MOMENTUM_SAFETY = {
   MIN_MOMENTUM_FOR_BULLISH: 0,    // TIGHTENED from -10 - no negative momentum for LONG
   // For bearish micro-trend: momentum score must be < this (not bullish)
   MAX_MOMENTUM_FOR_BEARISH: 0,    // TIGHTENED from 10 - no positive momentum for SHORT
+  
+  // ===== MOMENTUM STATE VALIDATION (NEW) =====
+  // Prevents probe trades when momentum is mixed/unconfirmed
+  REQUIRE_MOMENTUM_CONFIRMATION: true,
+  // Valid momentum states that allow full entry
+  CONFIRMED_MOMENTUM_STATES: ['confirmed', 'building'] as string[],
+  // Position multiplier when momentum is partially aligned (mixed state but confirms=true)
+  PARTIAL_ALIGNMENT_MULTIPLIER: 0.55,  // 55% size for partial confirmation
+  // Block entirely when momentum is mixed/opposing AND not confirmed
+  BLOCK_ON_MIXED_UNCONFIRMED: true,
   
   // ===== 4H TREND REQUIREMENT =====
   // Block SHORT micro-trend if 4h is bullish
@@ -4774,8 +4785,17 @@ export const MICRO_TREND_MOMENTUM_SAFETY = {
   // ===== MINIMUM ADX FOR MICRO_TREND =====
   MIN_ADX_FOR_MICRO_TREND: 20,  // Some trend strength required
   
+  // ===== SIZING TIERS =====
+  // Momentum confirmed + ADX rising + LTF alignment = full size
+  FULL_CONFIRMATION_MULTIPLIER: 1.0,
+  // Momentum partially aligned (one condition missing) = reduced
+  MODERATE_CONFIRMATION_MULTIPLIER: 0.55,
+  // Momentum state is 'none' but confirms=true = further reduced (probe only)
+  WEAK_CONFIRMATION_MULTIPLIER: 0.35,
+  
   // ===== LOGGING =====
   LOG_DENIALS: true,
+  LOG_SIZING_TIERS: true,
 } as const;
 
 // ============= PHASE 1: DIRECTION REGIME CLASSIFIER =============

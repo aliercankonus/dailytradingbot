@@ -10064,10 +10064,49 @@ serve(async (req) => {
         const is4hCounterTrend = (microTrendDirection === "bullish" && htfTrend4hForMicroTrend === "bearish") ||
                                   (microTrendDirection === "bearish" && htfTrend4hForMicroTrend === "bullish");
         
+        // ===== NEW: MICRO_TREND MOMENTUM CONFIRMATION GATE =====
+        // Prevents probe trades when momentum is mixed/unconfirmed
+        // Based on forensic analysis: both BE/loss trades had momentum_state='mixed' + momentum_confirms=false
+        const momentumStateForMicroTrend = momentum?.state || "none";
+        const momentumConfirmsForMicroTrend = momentum?.confirms === true;
+        const adxRisingForMicroTrend = momentum?.adxRising === true || trendData?.volatility?.adxRising === true;
+        
+        // Classify momentum confirmation level
+        const isFullMomentumConfirmation = MICRO_TREND_MOMENTUM_SAFETY.CONFIRMED_MOMENTUM_STATES.includes(momentumStateForMicroTrend);
+        const isPartialMomentumConfirmation = !isFullMomentumConfirmation && momentumConfirmsForMicroTrend;
+        const isMixedUnconfirmed = (momentumStateForMicroTrend === 'mixed' || momentumStateForMicroTrend === 'none') && !momentumConfirmsForMicroTrend;
+        
+        // Calculate momentum-based sizing tier
+        let microTrendMomentumMultiplier = 1.0;
+        let microTrendMomentumBlockReason = '';
+        let microTrendMomentumBlocked = false;
+        
+        if (MICRO_TREND_MOMENTUM_SAFETY.REQUIRE_MOMENTUM_CONFIRMATION && MICRO_TREND_MOMENTUM_SAFETY.ENABLED) {
+          if (isFullMomentumConfirmation && adxRisingForMicroTrend) {
+            // Full confirmation: momentum confirmed/building + ADX rising = 100% size
+            microTrendMomentumMultiplier = MICRO_TREND_MOMENTUM_SAFETY.FULL_CONFIRMATION_MULTIPLIER;
+          } else if (isFullMomentumConfirmation && !adxRisingForMicroTrend) {
+            // Momentum confirmed but ADX not rising = 55% (moderate)
+            microTrendMomentumMultiplier = MICRO_TREND_MOMENTUM_SAFETY.MODERATE_CONFIRMATION_MULTIPLIER;
+          } else if (isPartialMomentumConfirmation) {
+            // Partial confirmation: confirms=true but state is mixed/none = 55%
+            microTrendMomentumMultiplier = MICRO_TREND_MOMENTUM_SAFETY.PARTIAL_ALIGNMENT_MULTIPLIER;
+          } else if (isMixedUnconfirmed && MICRO_TREND_MOMENTUM_SAFETY.BLOCK_ON_MIXED_UNCONFIRMED) {
+            // HARD BLOCK: momentum_state mixed/none AND confirms=false
+            microTrendMomentumBlocked = true;
+            microTrendMomentumBlockReason = `Momentum unconfirmed (state=${momentumStateForMicroTrend}, confirms=false) - prevents low-conviction probe trades`;
+          } else {
+            // Fallback: weak confirmation = 35% probe size
+            microTrendMomentumMultiplier = MICRO_TREND_MOMENTUM_SAFETY.WEAK_CONFIRMATION_MULTIPLIER;
+          }
+        }
+        
         // FIX: Block micro-trend if 4h trend is strongly opposing (prevents counter-trend entries)
         // Allow if 4h is neutral or aligned with micro-trend direction
+        // NEW: Also block if momentum is unconfirmed
         const hasMicroTrendBypass = microTrend?.hasMicroTrend === true && 
           !microTrend?.blocked &&  // Must not be blocked by safety checks
+          !microTrendMomentumBlocked &&  // NEW: Must not be blocked by momentum confirmation gate
           microTrend?.alignment >= MICRO_TREND_PARAMS.MIN_ALIGNMENT_SCORE && 
           microTrend?.adxSufficient === true &&  // ADX >= 23 required (lowered from 25)
           microTrend?.volumeConfirmed === true &&  // Volume confirmation required
@@ -10075,15 +10114,28 @@ serve(async (req) => {
           (microTrend?.direction === "bullish" || microTrend?.direction === "bearish") &&
           !is4hCounterTrend;  // FIX: Block if 4h trend is opposing
         
-        // Position size reduction for micro-trend entries
+        // Position size reduction for micro-trend entries (now includes momentum tier)
         let microTrendPositionMultiplier = 1.0;
         if (hasMicroTrendBypass) {
-          microTrendPositionMultiplier = MICRO_TREND_PARAMS.MAX_POSITION_SIZE_PERCENT / 100; // 60% max
+          // Base micro-trend reduction (60%) combined with momentum tier
+          const baseMicroTrendMultiplier = MICRO_TREND_PARAMS.MAX_POSITION_SIZE_PERCENT / 100;
+          microTrendPositionMultiplier = baseMicroTrendMultiplier * microTrendMomentumMultiplier;
+          
+          // Log the tiered sizing
+          if (MICRO_TREND_MOMENTUM_SAFETY.LOG_SIZING_TIERS) {
+            const tierLabel = isFullMomentumConfirmation && adxRisingForMicroTrend ? 'FULL' :
+                             isFullMomentumConfirmation ? 'MODERATE' :
+                             isPartialMomentumConfirmation ? 'PARTIAL' : 'WEAK';
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} MICRO-TREND momentum tier: ${tierLabel} (state=${momentumStateForMicroTrend}, confirms=${momentumConfirmsForMicroTrend}, adxRising=${adxRisingForMicroTrend}) → ${(microTrendPositionMultiplier * 100).toFixed(0)}% size`);
+          }
         }
         
         // Log micro-trend bypass when used
         if (hasMicroTrendBypass && !htfAligned && confidence < 65) {
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate bypassed via MICRO-TREND (${microTrend.direction}, alignment=${microTrend.alignment}%, persist=${microTrend.persistence}, volOK=${microTrend.volumeConfirmed}, ADX=${adx.toFixed(1)}, 4h=${htfTrend4hForMicroTrend})`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate bypassed via MICRO-TREND (${microTrend.direction}, alignment=${microTrend.alignment}%, persist=${microTrend.persistence}, volOK=${microTrend.volumeConfirmed}, ADX=${adx.toFixed(1)}, 4h=${htfTrend4hForMicroTrend}, momState=${momentumStateForMicroTrend})`);
+        } else if (microTrendMomentumBlocked && microTrend?.hasMicroTrend && !htfAligned && confidence < 65) {
+          // NEW: Log when micro-trend is blocked due to momentum confirmation gate
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 MICRO-TREND BLOCKED (MOMENTUM): ${microTrendMomentumBlockReason}`);
         } else if (is4hCounterTrend && microTrend?.hasMicroTrend && !htfAligned && confidence < 65) {
           // FIX: Log when micro-trend is blocked due to counter-trend
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} MICRO-TREND BLOCKED: 4h trend (${htfTrend4hForMicroTrend}) opposes micro-trend (${microTrendDirection}) - preventing counter-trend entry`);
