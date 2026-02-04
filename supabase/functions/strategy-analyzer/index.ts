@@ -135,6 +135,8 @@ import {
   MOMENTUM_DIRECTION_HARD_GATE,
   MOMENTUM_FLIP_DETECTION,
   MICRO_TREND_MOMENTUM_SAFETY,
+  calculateMicroTrendScaling,
+  type MicroTrendScalingInput,
   // NEW: Trend reversal detection and move exhausted reversal gates
   TREND_REVERSAL_DETECTION_GATE,
   MOVE_EXHAUSTED_REVERSAL_GATE,
@@ -10064,49 +10066,48 @@ serve(async (req) => {
         const is4hCounterTrend = (microTrendDirection === "bullish" && htfTrend4hForMicroTrend === "bearish") ||
                                   (microTrendDirection === "bearish" && htfTrend4hForMicroTrend === "bullish");
         
-        // ===== NEW: MICRO_TREND MOMENTUM CONFIRMATION GATE =====
-        // Prevents probe trades when momentum is mixed/unconfirmed
-        // Based on forensic analysis: both BE/loss trades had momentum_state='mixed' + momentum_confirms=false
+        // ===== OPTIMIZED MICRO_TREND SCALING (NEW) =====
+        // Uses centralized scaling function with 6-step logic:
+        // 1. Momentum State, 2. Momentum Score, 3. HTF Alignment, 
+        // 4. Directional Runway, 5. ADX Rescue, 6. Minimum Floor
         const momentumStateForMicroTrend = momentum?.state || "none";
-        const momentumConfirmsForMicroTrend = momentum?.confirms === true;
-        const adxRisingForMicroTrend = momentum?.adxRising === true || trendData?.volatility?.adxRising === true;
+        const smartMomentumScore = smartMomentum?.score || 0;
         
-        // Classify momentum confirmation level
-        const isFullMomentumConfirmation = MICRO_TREND_MOMENTUM_SAFETY.CONFIRMED_MOMENTUM_STATES.includes(momentumStateForMicroTrend);
-        const isPartialMomentumConfirmation = !isFullMomentumConfirmation && momentumConfirmsForMicroTrend;
-        const isMixedUnconfirmed = (momentumStateForMicroTrend === 'mixed' || momentumStateForMicroTrend === 'none') && !momentumConfirmsForMicroTrend;
+        // Extract directional runway values
+        const priceDistanceData = trendData.priceDistanceFromSwing;
+        const moveFromLowPercent = priceDistanceData?.distanceFromLowPercent || 0;
+        const moveFromHighPercent = priceDistanceData?.distanceFromHighPercent || 0;
         
-        // Calculate momentum-based sizing tier
-        let microTrendMomentumMultiplier = 1.0;
-        let microTrendMomentumBlockReason = '';
-        let microTrendMomentumBlocked = false;
+        // Determine if this is a LONG (bullish) direction
+        const isLongDirection = microTrendDirection === "bullish";
         
-        if (MICRO_TREND_MOMENTUM_SAFETY.REQUIRE_MOMENTUM_CONFIRMATION && MICRO_TREND_MOMENTUM_SAFETY.ENABLED) {
-          if (isFullMomentumConfirmation && adxRisingForMicroTrend) {
-            // Full confirmation: momentum confirmed/building + ADX rising = 100% size
-            microTrendMomentumMultiplier = MICRO_TREND_MOMENTUM_SAFETY.FULL_CONFIRMATION_MULTIPLIER;
-          } else if (isFullMomentumConfirmation && !adxRisingForMicroTrend) {
-            // Momentum confirmed but ADX not rising = 55% (moderate)
-            microTrendMomentumMultiplier = MICRO_TREND_MOMENTUM_SAFETY.MODERATE_CONFIRMATION_MULTIPLIER;
-          } else if (isPartialMomentumConfirmation) {
-            // Partial confirmation: confirms=true but state is mixed/none = 55%
-            microTrendMomentumMultiplier = MICRO_TREND_MOMENTUM_SAFETY.PARTIAL_ALIGNMENT_MULTIPLIER;
-          } else if (isMixedUnconfirmed && MICRO_TREND_MOMENTUM_SAFETY.BLOCK_ON_MIXED_UNCONFIRMED) {
-            // HARD BLOCK: momentum_state mixed/none AND confirms=false
-            microTrendMomentumBlocked = true;
-            microTrendMomentumBlockReason = `Momentum unconfirmed (state=${momentumStateForMicroTrend}, confirms=false) - prevents low-conviction probe trades`;
-          } else {
-            // Fallback: weak confirmation = 35% probe size
-            microTrendMomentumMultiplier = MICRO_TREND_MOMENTUM_SAFETY.WEAK_CONFIRMATION_MULTIPLIER;
-          }
-        }
+        // Prepare input for scaling calculator
+        const microTrendScalingInput: MicroTrendScalingInput = {
+          smartMomentumScore,
+          momentumState: momentumStateForMicroTrend,
+          trend4h: htfTrend4hForMicroTrend,
+          isLong: isLongDirection,
+          moveFromLowPercent,
+          moveFromHighPercent,
+          adx,
+          adxSlope: extractADXSlope(trendData).slope,
+          qualityScore: 0, // Will be calculated later, use 0 for initial check
+        };
+        
+        // Calculate optimized scaling
+        const microTrendScaling = calculateMicroTrendScaling(microTrendScalingInput);
+        
+        // Calculate momentum-based sizing tier (using optimized result)
+        let microTrendMomentumMultiplier = microTrendScaling.sizeMultiplier;
+        let microTrendMomentumBlockReason = microTrendScaling.blockReason;
+        let microTrendMomentumBlocked = microTrendScaling.blocked;
         
         // FIX: Block micro-trend if 4h trend is strongly opposing (prevents counter-trend entries)
         // Allow if 4h is neutral or aligned with micro-trend direction
         // NEW: Also block if momentum is unconfirmed
         const hasMicroTrendBypass = microTrend?.hasMicroTrend === true && 
           !microTrend?.blocked &&  // Must not be blocked by safety checks
-          !microTrendMomentumBlocked &&  // NEW: Must not be blocked by momentum confirmation gate
+          !microTrendMomentumBlocked &&  // NEW: Must not be blocked by optimized scaling gate
           microTrend?.alignment >= MICRO_TREND_PARAMS.MIN_ALIGNMENT_SCORE && 
           microTrend?.adxSufficient === true &&  // ADX >= 23 required (lowered from 25)
           microTrend?.volumeConfirmed === true &&  // Volume confirmation required
@@ -10114,19 +10115,28 @@ serve(async (req) => {
           (microTrend?.direction === "bullish" || microTrend?.direction === "bearish") &&
           !is4hCounterTrend;  // FIX: Block if 4h trend is opposing
         
-        // Position size reduction for micro-trend entries (now includes momentum tier)
+        // Position size reduction for micro-trend entries (now includes optimized scaling)
         let microTrendPositionMultiplier = 1.0;
         if (hasMicroTrendBypass) {
-          // Base micro-trend reduction (60%) combined with momentum tier
+          // Base micro-trend reduction (60%) combined with optimized multiplier
           const baseMicroTrendMultiplier = MICRO_TREND_PARAMS.MAX_POSITION_SIZE_PERCENT / 100;
           microTrendPositionMultiplier = baseMicroTrendMultiplier * microTrendMomentumMultiplier;
           
-          // Log the tiered sizing
+          // Log the detailed scaling breakdown
           if (MICRO_TREND_MOMENTUM_SAFETY.LOG_SIZING_TIERS) {
-            const tierLabel = isFullMomentumConfirmation && adxRisingForMicroTrend ? 'FULL' :
-                             isFullMomentumConfirmation ? 'MODERATE' :
-                             isPartialMomentumConfirmation ? 'PARTIAL' : 'WEAK';
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} MICRO-TREND momentum tier: ${tierLabel} (state=${momentumStateForMicroTrend}, confirms=${momentumConfirmsForMicroTrend}, adxRising=${adxRisingForMicroTrend}) → ${(microTrendPositionMultiplier * 100).toFixed(0)}% size`);
+            const scalingSteps = microTrendScaling.appliedSteps;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} MICRO-TREND OPTIMIZED SCALING: ${microTrendScaling.scalingReasons.join('; ')}`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK}   → State: ${scalingSteps.momentumState.reason}`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK}   → Score: ${scalingSteps.momentumScore.reason}`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK}   → HTF: ${scalingSteps.htfAlignment.reason}`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK}   → Runway: ${scalingSteps.runway.reason}`);
+            if (scalingSteps.adxRescue.applied) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK}   → ADX Rescue: ${scalingSteps.adxRescue.reason}`);
+            }
+            if (scalingSteps.floor.applied) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK}   → Floor: ${scalingSteps.floor.reason}`);
+            }
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK}   → FINAL: ${(microTrendMomentumMultiplier * 100).toFixed(0)}% tier × ${(baseMicroTrendMultiplier * 100).toFixed(0)}% base = ${(microTrendPositionMultiplier * 100).toFixed(0)}% position`);
           }
         }
         
@@ -10134,8 +10144,8 @@ serve(async (req) => {
         if (hasMicroTrendBypass && !htfAligned && confidence < 65) {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate bypassed via MICRO-TREND (${microTrend.direction}, alignment=${microTrend.alignment}%, persist=${microTrend.persistence}, volOK=${microTrend.volumeConfirmed}, ADX=${adx.toFixed(1)}, 4h=${htfTrend4hForMicroTrend}, momState=${momentumStateForMicroTrend})`);
         } else if (microTrendMomentumBlocked && microTrend?.hasMicroTrend && !htfAligned && confidence < 65) {
-          // NEW: Log when micro-trend is blocked due to momentum confirmation gate
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 MICRO-TREND BLOCKED (MOMENTUM): ${microTrendMomentumBlockReason}`);
+          // NEW: Log when micro-trend is blocked due to optimized scaling gate
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 MICRO-TREND BLOCKED (OPTIMIZED): ${microTrendMomentumBlockReason}`);
         } else if (is4hCounterTrend && microTrend?.hasMicroTrend && !htfAligned && confidence < 65) {
           // FIX: Log when micro-trend is blocked due to counter-trend
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} MICRO-TREND BLOCKED: 4h trend (${htfTrend4hForMicroTrend}) opposes micro-trend (${microTrendDirection}) - preventing counter-trend entry`);
