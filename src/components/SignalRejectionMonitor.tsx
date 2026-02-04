@@ -4,6 +4,15 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { 
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+  PaginationEllipsis,
+} from "@/components/ui/pagination";
+import { 
   AlertCircle, 
   TrendingUp, 
   TrendingDown, 
@@ -23,6 +32,8 @@ import {
 import { useBlockedSignals, BlockedSignal, MoveZoneDetails } from "@/hooks/useBlockedSignals";
 import { formatDistanceToNow } from "date-fns";
 import { useState, useMemo } from "react";
+
+const ITEMS_PER_PAGE = 10;
 
 type TimeRange = "15m" | "30m" | "1h";
 type GateFilter = "all" | "momentum" | "regime" | "direction" | "htf" | "adx";
@@ -221,9 +232,10 @@ const DirectionBadge = ({ direction }: { direction: string | undefined }) => {
 };
 
 export const SignalRejectionMonitor = () => {
-  const { data: blockedSignals, isLoading } = useBlockedSignals(50);
+  const { data: blockedSignals, isLoading } = useBlockedSignals(100);
   const [timeRange, setTimeRange] = useState<TimeRange>("30m");
   const [gateFilter, setGateFilter] = useState<GateFilter>("all");
+  const [currentPage, setCurrentPage] = useState(1);
   
   // Filter signals by time range
   const filteredByTime = useMemo(() => {
@@ -247,6 +259,38 @@ export const SignalRejectionMonitor = () => {
     if (gateFilter === "all") return filteredByTime;
     return filteredByTime.filter(s => classifyGate(s.rejection_reason) === gateFilter);
   }, [filteredByTime, gateFilter]);
+  
+  // Pagination calculations
+  const totalPages = Math.max(1, Math.ceil(filteredSignals.length / ITEMS_PER_PAGE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  
+  const paginatedSignals = useMemo(() => {
+    const startIndex = (safeCurrentPage - 1) * ITEMS_PER_PAGE;
+    return filteredSignals.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredSignals, safeCurrentPage]);
+  
+  // Reset to page 1 when filters change
+  useMemo(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(1);
+    }
+  }, [filteredSignals.length, currentPage, totalPages]);
+  
+  const getPageNumbers = () => {
+    const pages: (number | 'ellipsis')[] = [];
+    if (totalPages <= 5) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      if (safeCurrentPage > 3) pages.push('ellipsis');
+      for (let i = Math.max(2, safeCurrentPage - 1); i <= Math.min(totalPages - 1, safeCurrentPage + 1); i++) {
+        pages.push(i);
+      }
+      if (safeCurrentPage < totalPages - 2) pages.push('ellipsis');
+      pages.push(totalPages);
+    }
+    return pages;
+  };
   
   // Statistics
   const stats = useMemo(() => {
@@ -367,101 +411,143 @@ export const SignalRejectionMonitor = () => {
             No rejections in the selected time range and filter.
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[80px]">Symbol</TableHead>
-                  <TableHead className="w-[180px]">Gate</TableHead>
-                  <TableHead className="w-[70px]">Direction</TableHead>
-                  <TableHead className="w-[60px]">ADX</TableHead>
-                  <TableHead className="w-[80px]">ADX Slope</TableHead>
-                  <TableHead className="w-[80px]">Momentum</TableHead>
-                  <TableHead className="w-[80px]">StochRSI</TableHead>
-                  <TableHead className="w-[70px]">MR Status</TableHead>
-                  <TableHead className="w-[50px] text-center">Bypass</TableHead>
-                  <TableHead className="w-[80px]">Checked</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredSignals.map((signal) => {
-                  const fs = signal.filters_status;
-                  const td = signal.trend_data;
-                  const severity = getGateSeverity(signal.rejection_reason, fs);
-                  const styles = getSeverityStyles(severity);
-                  const mrStatus = deriveMRStatus(fs);
-                  const bypassEligible = checkBypassEligible(fs);
-                  
-                  // Extract values with fallbacks
-                  const adx = fs?.adx ?? td?.volatility?.adx;
-                  const adxSlope = fs?.adxSlope ?? td?.volatility?.adxSlope;
-                  const momentumScore = fs?.momentumScore ?? 0;
-                  const momentumDirection = fs?.momentumDirection ?? td?.momentum?.direction;
-                  const direction = fs?.derivedDirection ?? fs?.direction ?? td?.direction;
-                  
-                  return (
-                    <TableRow key={signal.id} className={styles.row}>
-                      <TableCell className="font-medium">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-sm">{signal.symbol}</span>
-                          <Badge variant="outline" className={`text-[8px] px-1 py-0 w-fit ${styles.badge}`}>
-                            {severity.toUpperCase()}
-                          </Badge>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="text-xs truncate max-w-[170px] block cursor-help">
-                                {signal.rejection_reason?.replace(/\s*\([^)]*\)/g, '').slice(0, 50)}
-                                {signal.rejection_reason && signal.rejection_reason.length > 50 && "..."}
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom" className="max-w-[300px]">
-                              <p className="text-xs">{signal.rejection_reason}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </TableCell>
-                      <TableCell>
-                        <DirectionBadge direction={direction} />
-                      </TableCell>
-                      <TableCell>
-                        <span className={`font-mono text-xs ${
-                          adx && adx >= 25 ? "text-green-400" : 
-                          adx && adx >= 20 ? "text-yellow-400" : 
-                          "text-red-400"
-                        }`}>
-                          {extractNumeric(adx, 1)}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <ADXSlopeIndicator slope={adxSlope} />
-                      </TableCell>
-                      <TableCell>
-                        <MomentumIndicator score={momentumScore} direction={momentumDirection} />
-                      </TableCell>
-                      <TableCell>
-                        <StochRSIDisplay fs={fs} td={td} />
-                      </TableCell>
-                      <TableCell>
-                        <MRStatusBadge status={mrStatus} />
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <BypassBadge eligible={bypassEligible} />
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-[10px] text-muted-foreground">
-                          {formatDistanceToNow(new Date(signal.checked_at), { addSuffix: true })}
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+          <>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[80px]">Symbol</TableHead>
+                    <TableHead className="w-[180px]">Gate</TableHead>
+                    <TableHead className="w-[70px]">Direction</TableHead>
+                    <TableHead className="w-[60px]">ADX</TableHead>
+                    <TableHead className="w-[80px]">ADX Slope</TableHead>
+                    <TableHead className="w-[80px]">Momentum</TableHead>
+                    <TableHead className="w-[80px]">StochRSI</TableHead>
+                    <TableHead className="w-[70px]">MR Status</TableHead>
+                    <TableHead className="w-[50px] text-center">Bypass</TableHead>
+                    <TableHead className="w-[80px]">Checked</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {paginatedSignals.map((signal) => {
+                    const fs = signal.filters_status;
+                    const td = signal.trend_data;
+                    const severity = getGateSeverity(signal.rejection_reason, fs);
+                    const styles = getSeverityStyles(severity);
+                    const mrStatus = deriveMRStatus(fs);
+                    const bypassEligible = checkBypassEligible(fs);
+                    
+                    // Extract values with fallbacks
+                    const adx = fs?.adx ?? td?.volatility?.adx;
+                    const adxSlope = fs?.adxSlope ?? td?.volatility?.adxSlope;
+                    const momentumScore = fs?.momentumScore ?? 0;
+                    const momentumDirection = fs?.momentumDirection ?? td?.momentum?.direction;
+                    const direction = fs?.derivedDirection ?? fs?.direction ?? td?.direction;
+                    
+                    return (
+                      <TableRow key={signal.id} className={styles.row}>
+                        <TableCell className="font-medium">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-sm">{signal.symbol}</span>
+                            <Badge variant="outline" className={`text-[8px] px-1 py-0 w-fit ${styles.badge}`}>
+                              {severity.toUpperCase()}
+                            </Badge>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="text-xs truncate max-w-[170px] block cursor-help">
+                                  {signal.rejection_reason?.replace(/\s*\([^)]*\)/g, '').slice(0, 50)}
+                                  {signal.rejection_reason && signal.rejection_reason.length > 50 && "..."}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" className="max-w-[300px]">
+                                <p className="text-xs">{signal.rejection_reason}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </TableCell>
+                        <TableCell>
+                          <DirectionBadge direction={direction} />
+                        </TableCell>
+                        <TableCell>
+                          <span className={`font-mono text-xs ${
+                            adx && adx >= 25 ? "text-green-400" : 
+                            adx && adx >= 20 ? "text-yellow-400" : 
+                            "text-red-400"
+                          }`}>
+                            {extractNumeric(adx, 1)}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <ADXSlopeIndicator slope={adxSlope} />
+                        </TableCell>
+                        <TableCell>
+                          <MomentumIndicator score={momentumScore} direction={momentumDirection} />
+                        </TableCell>
+                        <TableCell>
+                          <StochRSIDisplay fs={fs} td={td} />
+                        </TableCell>
+                        <TableCell>
+                          <MRStatusBadge status={mrStatus} />
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <BypassBadge eligible={bypassEligible} />
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-[10px] text-muted-foreground">
+                            {formatDistanceToNow(new Date(signal.checked_at), { addSuffix: true })}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+            
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between pt-4 border-t border-border mt-4">
+                <span className="text-xs text-muted-foreground">
+                  Showing {((safeCurrentPage - 1) * ITEMS_PER_PAGE) + 1}-{Math.min(safeCurrentPage * ITEMS_PER_PAGE, filteredSignals.length)} of {filteredSignals.length} rejections
+                </span>
+                <Pagination>
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious 
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        className={safeCurrentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                      />
+                    </PaginationItem>
+                    {getPageNumbers().map((page, idx) => (
+                      <PaginationItem key={idx}>
+                        {page === 'ellipsis' ? (
+                          <PaginationEllipsis />
+                        ) : (
+                          <PaginationLink
+                            onClick={() => setCurrentPage(page)}
+                            isActive={safeCurrentPage === page}
+                            className="cursor-pointer"
+                          >
+                            {page}
+                          </PaginationLink>
+                        )}
+                      </PaginationItem>
+                    ))}
+                    <PaginationItem>
+                      <PaginationNext 
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        className={safeCurrentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              </div>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
