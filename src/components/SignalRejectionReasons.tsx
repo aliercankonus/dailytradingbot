@@ -4969,7 +4969,7 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
             </div>
             {atr > 0 && (
               <div className="text-[9px] text-muted-foreground pl-5">
-                Raw MACD: {macdHistogram >= 0 ? '+' : ''}{macdHistogram.toFixed(4)} | ATR: {atr.toFixed(2)} | Normalized: {macdHistogramNormalized.toFixed(6)} (must be {'<'} {weakMacdThreshold.toFixed(6)} to bypass)
+                Calculation: |{macdHistogram >= 0 ? '+' : ''}{macdHistogram.toPrecision(4)}| ÷ {atr.toPrecision(4)} = {macdHistogramNormalized.toFixed(6)} (must be {'<'} {weakMacdThreshold.toFixed(6)} to bypass)
               </div>
             )}
           </div>
@@ -4984,9 +4984,8 @@ const MomentumDirectionOpposingDisplay = ({ filtersStatus, trendData }: { filter
         <span className="text-orange-400">⚠️ Why blocked:</span>{' '}
         {isPhase2 ? (
           <>
-            Attempting {signalDirection.toUpperCase()} entry while MACD direction is {momentumDirection} 
-            (histogram: {macdHistogram >= 0 ? '+' : ''}{macdHistogram.toFixed(2)}, normalized: {macdHistogramNormalized.toFixed(6)}).
-            Neither MACD weakness (normalized {'<'} {weakMacdThreshold.toFixed(6)}) nor exceptional ADX (≥{EXCEPTIONAL_ADX}, current: {adx.toFixed(1)}) conditions were met.
+            Attempting {signalDirection.toUpperCase()} entry while MACD momentum remains {momentumDirection} (normalized: {macdHistogramNormalized.toFixed(6)}, threshold: {weakMacdThreshold.toFixed(6)}).
+            ADX is strong ({adx.toFixed(1)}) but not exceptional (≥{EXCEPTIONAL_ADX}).
           </>
         ) : (
           <>
@@ -5383,14 +5382,14 @@ const MomentumIndicatorsPanel = ({ trendData, filtersStatus }: { trendData?: any
       </div>
       
       <div className="grid grid-cols-2 gap-2">
-        {/* MACD Histogram */}
+        {/* MACD Histogram - use toPrecision to handle small values */}
         {macdHistogram !== null && (
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-muted-foreground">MACD Histogram</span>
             <span className={`text-[10px] font-mono font-medium ${
               macdHistogram > 0 ? 'text-green-400' : macdHistogram < 0 ? 'text-red-400' : 'text-muted-foreground'
             }`}>
-              {macdHistogram > 0 ? '+' : ''}{macdHistogram.toFixed(2)}
+              {macdHistogram > 0 ? '+' : ''}{Math.abs(macdHistogram) >= 0.01 ? macdHistogram.toFixed(4) : macdHistogram.toPrecision(4)}
             </span>
           </div>
         )}
