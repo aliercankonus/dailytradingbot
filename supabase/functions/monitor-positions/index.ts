@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore, 
@@ -1752,8 +1752,22 @@ serve(async (req) => {
           const lockStopPrice = position.entry_price + lockedProfit;
           const atrBasedStop = currentPrice - minTrailingDistance;
           
+          // CRITICAL FIX: TRUE_BE FLOOR INVARIANT
+          // Trailing stop MUST NEVER go below fee-adjusted break-even
+          // True BE = entry * (1 + round_trip_fee + buffer) for LONG
+          const roundTripFeePercent = TRADING_FEE_PARAMS.ROUND_TRIP_FEE_PERCENT || 0.2;
+          const trueBeBuffer = TRADING_FEE_PARAMS.TRUE_BE_SAFETY_BUFFER_PERCENT || 0.02;
+          const trueBE = position.entry_price * (1 + (roundTripFeePercent + trueBeBuffer) / 100);
+          
           // Use the HIGHER of the two (more protective)
           let calculatedStopLoss = Math.max(lockStopPrice, atrBasedStop);
+          
+          // TRAILING_INVARIANT: Enforce trailingStop >= trueBE ALWAYS
+          if (calculatedStopLoss < trueBE && newPeakPnl >= (MICRO_PROFIT_LOCK_PARAMS.TRUE_BE_FLOOR_PERCENT || 0.22)) {
+            const oldStop = calculatedStopLoss;
+            calculatedStopLoss = trueBE;
+            positionLogger.trade(`TRAILING_FEE_FLOOR: Stop ${oldStop.toFixed(2)} → ${trueBE.toFixed(2)} (true BE enforced, fees=${roundTripFeePercent}%)`);
+          }
           
           // ENFORCE MINIMUM 1% DISTANCE FROM CURRENT PRICE for trailing stops
           // For BUY: trailing stop should be BELOW current price by at least the ATR buffer
@@ -1802,8 +1816,22 @@ serve(async (req) => {
           const lockStopPrice = position.entry_price - lockedProfit;
           const atrBasedStop = currentPrice + minTrailingDistance;
           
+          // CRITICAL FIX: TRUE_BE FLOOR INVARIANT
+          // Trailing stop MUST NEVER go above fee-adjusted break-even (for SHORT)
+          // True BE = entry * (1 - round_trip_fee - buffer) for SHORT
+          const roundTripFeePercent = TRADING_FEE_PARAMS.ROUND_TRIP_FEE_PERCENT || 0.2;
+          const trueBeBuffer = TRADING_FEE_PARAMS.TRUE_BE_SAFETY_BUFFER_PERCENT || 0.02;
+          const trueBE = position.entry_price * (1 - (roundTripFeePercent + trueBeBuffer) / 100);
+          
           // Use the LOWER of the two (more protective for shorts)
           let calculatedStopLoss = Math.min(lockStopPrice, atrBasedStop);
+          
+          // TRAILING_INVARIANT: Enforce trailingStop <= trueBE ALWAYS (for SHORT)
+          if (calculatedStopLoss > trueBE && newPeakPnl >= MICRO_PROFIT_LOCK_PARAMS.TRUE_BE_FLOOR_PERCENT) {
+            const oldStop = calculatedStopLoss;
+            calculatedStopLoss = trueBE;
+            positionLogger.trade(`TRAILING_FEE_FLOOR: Stop ${oldStop.toFixed(2)} → ${trueBE.toFixed(2)} (true BE enforced, fees=${roundTripFeePercent}%)`);
+          }
           
           // ENFORCE MINIMUM 1% DISTANCE FROM CURRENT PRICE for trailing stops
           // For SHORT: trailing stop should be ABOVE current price by at least the ATR buffer
