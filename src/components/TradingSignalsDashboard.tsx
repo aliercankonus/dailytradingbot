@@ -14,7 +14,6 @@ import { getSignalPriorityTier, getSignalPriorityVariant } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { SignalRejectionReasons } from './SignalRejectionReasons';
 import { MomentumStatusDetails } from './MomentumStatusDetails';
-import { TrendAccelerationIndicator } from './TrendAccelerationIndicator';
 
 // Helper to detect exhaustion risk from signal indicators
 const getExhaustionStatus = (indicators: any): { isExhausted: boolean; reason: string } => {
@@ -464,7 +463,6 @@ export const TradingSignalsDashboard = () => {
         )}
       </div>
 
-      <TrendAccelerationIndicator />
       <SignalRejectionReasons />
       <MomentumStatusDetails />
     </div>
