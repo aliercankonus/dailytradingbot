@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 import { createLogger, logError } from "../_shared/logging.ts";
 import { getCurrentPrice } from "../_shared/binance.ts";
-import { LOSS_CLUSTERING_PARAMS } from "../_shared/constants.ts";
+import { LOSS_CLUSTERING_PARAMS, TRADING_FEE_PARAMS } from "../_shared/constants.ts";
 
 // Create logger instance
 const logger = createLogger("close-trade");
@@ -253,15 +253,33 @@ async function closePosition(
     }
     
     // Recalculate P&L from current price to ensure accuracy
-    const pnl = position.side === 'BUY'
+    // GROSS P&L (before fees)
+    const grossPnl = position.side === 'BUY'
       ? (currentPrice - entryPrice) * quantity
       : (entryPrice - currentPrice) * quantity;
     
-    const pnlPercent = position.side === 'BUY'
+    const grossPnlPercent = position.side === 'BUY'
       ? ((currentPrice - entryPrice) / entryPrice) * 100
       : ((entryPrice - currentPrice) / entryPrice) * 100;
     
-    posLogger.trade(`P&L calculation: entry=${entryPrice}, exit=${currentPrice}, qty=${quantity}, pnl=$${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)`);
+    // ===== FEE CALCULATION =====
+    // Get fee rate from position (if stored at entry) or use default
+    const feeRatePercent = position.trading_fee_percent ?? TRADING_FEE_PARAMS.DEFAULT_FEE_RATE_PERCENT;
+    const feeRate = feeRatePercent / 100;
+    
+    // Round-trip fee: entry fee + exit fee
+    const entryFee = entryPrice * quantity * feeRate;
+    const exitFee = currentPrice * quantity * feeRate;
+    const totalFee = entryFee + exitFee;
+    
+    // NET P&L (after fees) - this is the TRUE realized P&L
+    const pnl = grossPnl - totalFee;
+    const pnlPercent = grossPnlPercent - ((totalFee / (entryPrice * quantity)) * 100);
+    
+    posLogger.trade(`P&L calculation: entry=${entryPrice}, exit=${currentPrice}, qty=${quantity}`);
+    posLogger.trade(`   Gross P&L: $${grossPnl.toFixed(2)} (${grossPnlPercent.toFixed(2)}%)`);
+    posLogger.trade(`   Fees: $${totalFee.toFixed(4)} (${feeRatePercent}% × 2 sides)`);
+    posLogger.trade(`   Net P&L: $${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)`);
 
     // Determine close reason
     const closeReason = manualClose ? 'manual_close' : (closedByRebalancer ? 'rebalancer' : 'system');
@@ -279,6 +297,8 @@ async function closePosition(
         closed_at: new Date().toISOString(),
         closed_by_rebalancer: closedByRebalancer,
         close_reason: closeReason,
+        trading_fee_amount: totalFee, // Store actual fee paid
+        trading_fee_percent: feeRatePercent, // Store fee rate used
       })
       .eq('id', position.id)
       .eq('status', 'active') // RACE CONDITION FIX: Only update if still active
