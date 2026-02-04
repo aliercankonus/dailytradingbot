@@ -62,112 +62,170 @@ const formatUserFriendlyReason = (reason: string, filters?: any): string => {
   if (!reason) return "Unknown rejection";
   
   const lowerReason = reason.toLowerCase();
+  const score = filters?.momentumScore;
+  const adx = filters?.adx;
+  const graduatedEffect = filters?.graduatedMomentumEffect;
   
-  // EXTREME MOMENTUM VETO
+  // EXTREME MOMENTUM VETO - highest priority
   if (lowerReason.includes("extreme momentum veto") || filters?.source === 'extreme_momentum_veto') {
-    const score = filters?.momentumScore;
+    const absScore = Math.abs(score ?? 0);
     const direction = score && score < 0 ? "bearish" : "bullish";
-    const tradeDir = filters?.graduatedMomentumEffect?.baseDirection || 
-                     (score && score < 0 ? "long" : "short");
-    return `Strong ${direction} momentum blocks ${tradeDir?.toUpperCase()} entry`;
+    const tradeDir = graduatedEffect?.baseDirection || (score && score < 0 ? "LONG" : "SHORT");
+    return `⛔ ${direction.charAt(0).toUpperCase() + direction.slice(1)} momentum (${absScore}) blocks ${tradeDir.toUpperCase()}`;
   }
   
-  // NO_CLEAR_DIRECTION
+  // NO_CLEAR_DIRECTION with graduated momentum flip
   if (lowerReason.includes("no clear trade direction") || filters?.gate === "NO_CLEAR_DIRECTION") {
-    if (lowerReason.includes("extreme momentum")) return "Strong opposing momentum blocks trade";
-    if (lowerReason.includes("conflicting")) return "Timeframes show conflicting trends";
-    return "Market direction unclear";
+    // Check if graduated momentum flipped direction
+    if (graduatedEffect?.directionFlipped) {
+      const from = graduatedEffect.baseDirection?.toUpperCase() || "—";
+      const to = graduatedEffect.adjustedDirection?.toUpperCase() || "—";
+      return `🔄 Momentum flipped direction: ${from} → ${to}`;
+    }
+    
+    // Check if direction was nullified
+    if (graduatedEffect?.directionNullified || filters?.source === 'extreme_momentum_veto') {
+      const absScore = Math.abs(score ?? 0);
+      return `⛔ Momentum too strong (${absScore}) - no valid direction`;
+    }
+    
+    // Check for conflicting timeframes
+    if (lowerReason.includes("conflicting")) {
+      return "⚠️ Timeframes showing conflicting trends";
+    }
+    
+    return "🔍 Market direction unclear";
   }
   
   // ADX TOO LOW
   if (lowerReason.includes("adx too low") || filters?.gate === "ADX_TOO_LOW") {
-    const adx = filters?.adx;
-    return adx ? `Trend too weak (ADX ${adx.toFixed(0)})` : "Trend energy too weak";
+    const adxVal = adx?.toFixed?.(0) ?? adx;
+    if (adxVal !== undefined) {
+      if (adx < 18) return `⛔ Trend too weak (ADX ${adxVal} < 18)`;
+      return `⚠️ Low trend energy (ADX ${adxVal})`;
+    }
+    return "⚠️ Trend energy insufficient";
   }
   
   // Symbol disabled / performance filter
   if (lowerReason.includes("symbol disabled")) {
     const wr = filters?.winRate;
-    return wr !== undefined ? `Symbol disabled (${wr.toFixed(0)}% win rate)` : "Symbol disabled - poor performance";
+    return wr !== undefined ? `🚫 Symbol disabled (${wr.toFixed(0)}% win rate)` : "🚫 Symbol disabled - poor performance";
   }
   
   // NO MOMENTUM CONFIRMATION
   if (lowerReason.includes("no momentum") || filters?.gate === "NO_MOMENTUM_CONFIRMATION") {
-    return "Waiting for momentum confirmation";
+    const state = filters?.momentum?.state;
+    if (state === 'exhausted') return "💨 Momentum exhausted";
+    if (state === 'mixed') return "⚠️ Momentum mixed/uncertain";
+    return "⏳ Waiting for momentum confirmation";
   }
   
   // HTF NOT ALIGNED
   if (lowerReason.includes("htf not aligned") || filters?.gate === "HTF_NOT_ALIGNED") {
-    return "Higher timeframes not aligned";
+    const t4h = filters?.trend4h;
+    const t1h = filters?.trend1h;
+    if (t4h && t1h) return `📈 Timeframes misaligned: 4H ${t4h}, 1H ${t1h}`;
+    return "📈 Higher timeframes not aligned";
   }
   
   // MOMENTUM DIRECTION OPPOSING
   if (lowerReason.includes("momentum_direction") || filters?.gate === "MOMENTUM_DIRECTION_OPPOSING") {
-    return "Momentum opposes trade direction";
+    const absScore = Math.abs(score ?? 0);
+    if (absScore >= 50) return `⛔ Strong opposing momentum (${absScore})`;
+    if (absScore >= 25) return `⚠️ Moderate opposing momentum (${absScore})`;
+    return "↔️ Momentum opposes trade direction";
   }
   
   // MOVE EXHAUSTED
   if (lowerReason.includes("move_exhausted") || lowerReason.includes("move exhausted")) {
-    return "Price move already exhausted";
+    const zone = filters?.moveZone;
+    if (zone === 'HARD') return "🛑 Move exhausted - in hard zone";
+    if (zone === 'SOFT') return "⚠️ Move extended - in soft zone";
+    return "💨 Price move already exhausted";
   }
   
   // STOCHRSI extremes
   if (lowerReason.includes("hard block") || lowerReason.includes("stochrsi extreme")) {
     const k = filters?.stochK1h ?? filters?.stochRsiK;
     if (k !== undefined) {
-      return k > 90 ? "Overbought - waiting for pullback" : "Oversold - waiting for bounce";
+      if (k > 95) return `🔴 Overbought (K=${k.toFixed(0)}) - hard block`;
+      if (k > 80) return `🟠 Overbought (K=${k.toFixed(0)}) - wait for pullback`;
+      if (k < 5) return `🔴 Oversold (K=${k.toFixed(0)}) - hard block`;
+      if (k < 20) return `🟠 Oversold (K=${k.toFixed(0)}) - wait for bounce`;
     }
-    return "StochRSI at extreme level";
+    return "📊 StochRSI at extreme level";
   }
   
   // TIER 0/TIER 1 blocks
   if (lowerReason.includes("tier 0") || lowerReason.includes("tier 1") || lowerReason.includes("severe") || lowerReason.includes("deep")) {
-    return "Extreme exhaustion - hard block";
+    return "🛑 Extreme exhaustion - hard block";
   }
   
   // PRE-RECOVERY
   if (lowerReason.includes("pre-recovery") || lowerReason.includes("pre_recovery")) {
-    return "Recovery mode - stricter filters";
+    return "🔄 Recovery mode - tighter filters";
   }
   
   // Bollinger gates
   if (lowerReason.includes("bollinger") || lowerReason.includes("overextended") || lowerReason.includes("underextended")) {
-    return "Price at Bollinger Band extreme";
+    const pctB = filters?.percentB;
+    if (pctB !== undefined) {
+      const val = typeof pctB === 'number' ? pctB.toFixed(0) : pctB;
+      return `📉 Bollinger extreme (%B: ${val})`;
+    }
+    return "📉 Price at Bollinger Band extreme";
   }
   
   // Active signal
   if (lowerReason.includes("active signal")) {
-    return "Signal already pending";
+    return "⏸️ Signal already pending";
   }
   
   // Max trades
   if (lowerReason.includes("max trades")) {
-    return "Maximum trade limit reached";
+    return "🚫 Maximum trade limit reached";
   }
   
   // Quality score
   if (lowerReason.includes("quality score")) {
-    return "Signal quality below threshold";
+    const quality = filters?.qualityScore;
+    if (quality !== undefined) return `📊 Quality too low (${quality.toFixed?.(0) ?? quality})`;
+    return "📊 Signal quality below threshold";
   }
   
   // No strategy match
   if (lowerReason.includes("no strategy")) {
-    return "No strategy conditions met";
+    return "🔍 No strategy conditions met";
   }
   
   // Reversal risk
   if (lowerReason.includes("reversal risk")) {
-    return "Reversal risk too high";
+    return "⚠️ High reversal risk detected";
   }
   
   // Regime
   if (lowerReason.includes("regime") || lowerReason.includes("ranging")) {
-    return "Market regime unfavorable";
+    return "📊 Market regime unfavorable";
   }
   
   // Squeeze
   if (lowerReason.includes("squeeze")) {
-    return "Waiting for squeeze breakout";
+    return "⏳ Waiting for squeeze breakout";
+  }
+  
+  // LTF gates
+  if (lowerReason.includes("ltf_confirmation") || filters?.gate === "LTF_CONFIRMATION") {
+    return "⏱️ Lower timeframe not confirming";
+  }
+  
+  if (lowerReason.includes("ltf_spike") || filters?.gate === "LTF_SPIKE_PROTECTION") {
+    return "📊 Climax candle detected";
+  }
+  
+  // Momentum slope
+  if (lowerReason.includes("momentum_slope") || filters?.gate === "MOMENTUM_SLOPE_GATE") {
+    return "📉 Opposing momentum accelerating";
   }
   
   // If nothing matched, return a cleaned up version
@@ -179,8 +237,8 @@ const formatUserFriendlyReason = (reason: string, filters?: any): string => {
     .replace(/_/g, ' ')
     .trim();
   
-  if (cleaned.length > 45) {
-    cleaned = cleaned.slice(0, 42) + "...";
+  if (cleaned.length > 40) {
+    cleaned = cleaned.slice(0, 37) + "...";
   }
   
   return cleaned || "Signal rejected";
