@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useClosedPositions } from '@/hooks/useClosedPositions';
-import { Loader2, TrendingUp, TrendingDown, Target, ShieldAlert, Archive, Filter, X, Layers, History } from 'lucide-react';
+import { Loader2, TrendingUp, TrendingDown, Target, ShieldAlert, Archive, Filter, X, Layers, History, Receipt } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMemo, useState } from 'react';
@@ -99,7 +99,8 @@ export const ClosedPositionsDashboard = () => {
       return { 
         total: 0, profitable: 0, losses: 0, totalPnL: 0, avgPnL: 0, 
         takeProfitCount: 0, stopLossCount: 0, trailingStopCount: 0, trendExitCount: 0, 
-        emergencyExitCount: 0, hedgeCount: 0, manualCount: 0 
+        emergencyExitCount: 0, hedgeCount: 0, manualCount: 0,
+        totalFees: 0,
       };
     }
     
@@ -107,6 +108,7 @@ export const ClosedPositionsDashboard = () => {
     const profitable = positions.filter(p => (p.realized_pnl || 0) > 0).length;
     const losses = positions.filter(p => (p.realized_pnl || 0) <= 0).length;
     const totalPnL = positions.reduce((sum, p) => sum + (p.realized_pnl || 0), 0);
+    const totalFees = positions.reduce((sum, p) => sum + (p.trading_fee_amount || 0), 0);
     
     // Count closure reasons
     let takeProfitCount = 0;
@@ -146,6 +148,7 @@ export const ClosedPositionsDashboard = () => {
       emergencyExitCount,
       hedgeCount,
       manualCount,
+      totalFees,
     };
   }, [positions]);
 
@@ -391,6 +394,19 @@ export const ClosedPositionsDashboard = () => {
             </CardTitle>
             <div className="text-xs text-muted-foreground mt-1">
               {fullCloseStats.profitable}W / {fullCloseStats.losses}L{fullCloseStats.breakeven > 0 ? ` / ${fullCloseStats.breakeven}BE` : ''}
+            </div>
+          </CardHeader>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Total Fees Paid</CardDescription>
+            <CardTitle className="text-3xl text-amber-500">
+              {formatPrice(stats.totalFees, 2, '$')}
+            </CardTitle>
+            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+              <Receipt className="h-3 w-3" />
+              Net P&L after fees
             </div>
           </CardHeader>
         </Card>
@@ -643,6 +659,7 @@ const PositionsTable = ({ positions, getCloseReasonBadge, onPositionClick }: Pos
             <TableHead className="text-right">Quantity</TableHead>
             <TableHead className="text-right">P&L</TableHead>
             <TableHead className="text-right">P&L %</TableHead>
+            <TableHead className="text-right">Fees</TableHead>
             <TableHead>Close Reason</TableHead>
             <TableHead>Closed</TableHead>
             <TableHead className="w-10"></TableHead>
@@ -701,6 +718,15 @@ const PositionsTable = ({ positions, getCloseReasonBadge, onPositionClick }: Pos
                 <span className={(position.realized_pnl_percent || 0) >= 0 ? 'text-success' : 'text-destructive'}>
                   {formatPercent(position.realized_pnl_percent || 0)}
                 </span>
+              </TableCell>
+              <TableCell className="text-right">
+                {position.trading_fee_amount ? (
+                  <span className="text-amber-500 text-sm" title={`Fee rate: ${position.trading_fee_percent || 0.1}%`}>
+                    ${position.trading_fee_amount.toFixed(4)}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground text-sm">—</span>
+                )}
               </TableCell>
               <TableCell>{getCloseReasonBadge(position)}</TableCell>
               <TableCell>
