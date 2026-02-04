@@ -14,14 +14,18 @@ Forensic analysis of BE/loss trades identified a common pattern:
 
 ## Gate Logic
 
+**Note**: MICRO_TREND entries have a base position size of 60% (`MICRO_TREND_PARAMS.MAX_POSITION_SIZE_PERCENT`). The momentum confirmation gate applies an additional multiplier on top of this base.
+
 ### Sizing Tiers
 
-| Condition | Position Size | Rationale |
-|-----------|---------------|-----------|
-| Momentum confirmed/building + ADX rising + LTF alignment | 100% | Full confirmation - high probability |
-| Momentum confirmed/building but ADX not rising | 55% | Moderate confirmation - trend may be stalling |
-| Momentum partially aligned (confirms=true, state=mixed) | 55% | Partial confirmation - probe cautiously |
-| Momentum mixed AND confirms=false | **BLOCKED** | Low probability - prevents BE trades |
+| Condition | Tier Multiplier | Final Size* | Rationale |
+|-----------|-----------------|-------------|-----------|
+| Momentum confirmed/building + ADX rising | 100% | 60% | Full confirmation - high probability |
+| Momentum confirmed/building but ADX not rising | 55% | 33% | Moderate confirmation - trend may be stalling |
+| Momentum partially aligned (confirms=true, state=mixed/none) | 55% | 33% | Partial confirmation - probe cautiously |
+| Momentum mixed/none AND confirms=false | **BLOCKED** | 0% | Low probability - prevents BE trades |
+
+\* Final size = Base 60% × Tier Multiplier
 
 ### Configuration (`MICRO_TREND_MOMENTUM_SAFETY`)
 
@@ -76,7 +80,8 @@ When enabled (`LOG_SIZING_TIERS: true`), logs include:
 
 Example:
 ```
-[RISK] MICRO-TREND momentum tier: PARTIAL (state=mixed, confirms=true, adxRising=false) → 33% size
+[RISK] MICRO-TREND momentum tier: PARTIAL (state=mixed, confirms=true, adxRising=false) → 33% size (base 60% × 55% tier)
+[RISK] MICRO-TREND momentum tier: FULL (state=confirmed, confirms=true, adxRising=true) → 60% size (base 60% × 100% tier)
 ```
 
 ## Related Gates
