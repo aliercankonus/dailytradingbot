@@ -102,6 +102,56 @@ function calculateHistoricalATR(klines: any[], histStartIdx: number, histEndIdx:
   return { atr: count > 0 ? trSum / count : 0, count };
 }
 
+// ============= FEE-AWARE P&L CALCULATION =============
+// Centralized helper for consistent fee calculation across all close operations
+interface FeeAwarePnL {
+  grossPnl: number;
+  grossPnlPercent: number;
+  netPnl: number;
+  netPnlPercent: number;
+  totalFee: number;
+  feeRatePercent: number;
+}
+
+function calculateFeeAwarePnL(
+  side: string,
+  entryPrice: number,
+  exitPrice: number,
+  quantity: number,
+  storedFeePercent?: number | null
+): FeeAwarePnL {
+  // Get fee rate from position (if stored at entry) or use default
+  const feeRatePercent = storedFeePercent ?? TRADING_FEE_PARAMS.DEFAULT_FEE_RATE_PERCENT;
+  const feeRate = feeRatePercent / 100;
+  
+  // GROSS P&L (before fees)
+  const grossPnl = side === "BUY"
+    ? (exitPrice - entryPrice) * quantity
+    : (entryPrice - exitPrice) * quantity;
+  
+  const grossPnlPercent = side === "BUY"
+    ? ((exitPrice - entryPrice) / entryPrice) * 100
+    : ((entryPrice - exitPrice) / entryPrice) * 100;
+  
+  // Round-trip fee: entry fee + exit fee
+  const entryFee = entryPrice * quantity * feeRate;
+  const exitFee = exitPrice * quantity * feeRate;
+  const totalFee = entryFee + exitFee;
+  
+  // NET P&L (after fees) - this is the TRUE realized P&L
+  const netPnl = grossPnl - totalFee;
+  const netPnlPercent = grossPnlPercent - ((totalFee / (entryPrice * quantity)) * 100);
+  
+  return {
+    grossPnl,
+    grossPnlPercent,
+    netPnl,
+    netPnlPercent,
+    totalFee,
+    feeRatePercent,
+  };
+}
+
 // ============= StochRSI-RSI CONFLICT RESOLUTION =============
 // Imported from "../_shared/scoring.ts" - getStochRsiWeightedRsiScore
 
@@ -1177,10 +1227,14 @@ serve(async (req) => {
             adxSlope: tieredAdxSlope,
           });
           
-          // Close position immediately
-          const realizedPnl = position.side === "BUY"
-            ? (currentPrice - position.entry_price) * position.quantity
-            : (position.entry_price - currentPrice) * position.quantity;
+          // Close position immediately with fee-aware P&L
+          const feeAwarePnL = calculateFeeAwarePnL(
+            position.side,
+            position.entry_price,
+            currentPrice,
+            position.quantity,
+            position.trading_fee_percent
+          );
           
           const { error: closeError } = await supabase
             .from("positions")
@@ -1188,9 +1242,11 @@ serve(async (req) => {
               status: "closed",
               closed_at: new Date().toISOString(),
               exit_price: currentPrice,
-              realized_pnl: realizedPnl,
-              realized_pnl_percent: pnlPercent,
+              realized_pnl: feeAwarePnL.netPnl,
+              realized_pnl_percent: feeAwarePnL.netPnlPercent,
               close_reason: exitReason,
+              trading_fee_amount: feeAwarePnL.totalFee,
+              trading_fee_percent: feeAwarePnL.feeRatePercent,
             })
             .eq("id", position.id)
             .eq("status", "active");
@@ -1501,6 +1557,15 @@ serve(async (req) => {
               .eq("status", "active");
             
             if (!contPartialError) {
+              // Calculate fee-aware P&L for partial close
+              const partialFeeAwarePnL = calculateFeeAwarePnL(
+                position.side,
+                position.entry_price,
+                currentPrice,
+                closeQuantity,
+                position.trading_fee_percent
+              );
+              
               // Create closed position record for tracking
               await supabase.from("positions").insert({
                 user_id: position.user_id,
@@ -1513,8 +1578,10 @@ serve(async (req) => {
                 take_profit: position.take_profit,
                 status: "closed",
                 close_reason: "continuation_mode_partial_0.8R",
-                realized_pnl: partialPnl,
-                realized_pnl_percent: pnlPercent,
+                realized_pnl: partialFeeAwarePnL.netPnl,
+                realized_pnl_percent: partialFeeAwarePnL.netPnlPercent,
+                trading_fee_amount: partialFeeAwarePnL.totalFee,
+                trading_fee_percent: partialFeeAwarePnL.feeRatePercent,
                 opened_at: position.opened_at,
                 closed_at: new Date().toISOString(),
                 strategy_name: position.strategy_name,
@@ -2760,6 +2827,15 @@ serve(async (req) => {
             if (partialLossError) {
               positionLogger.error(`Error executing partial loss for ${position.id}: ${partialLossError}`);
             } else if (updatedPartialLossPos) {
+              // Calculate fee-aware P&L for partial loss
+              const partialLossFeeAwarePnL = calculateFeeAwarePnL(
+                position.side,
+                position.entry_price,
+                currentPrice,
+                closeQuantity,
+                position.trading_fee_percent
+              );
+              
               // Create a closed position record for the partial close (for history tracking)
               // CRITICAL: Copy entry_snapshot and forensic fields from parent position
               const { error: partialCloseRecordError } = await supabase
@@ -2775,8 +2851,10 @@ serve(async (req) => {
                   take_profit: position.take_profit,
                   status: "closed",
                   close_reason: "partial_loss",
-                  realized_pnl: partialLoss,
-                  realized_pnl_percent: partialLossPercent,
+                  realized_pnl: partialLossFeeAwarePnL.netPnl,
+                  realized_pnl_percent: partialLossFeeAwarePnL.netPnlPercent,
+                  trading_fee_amount: partialLossFeeAwarePnL.totalFee,
+                  trading_fee_percent: partialLossFeeAwarePnL.feeRatePercent,
                   opened_at: position.opened_at,
                   closed_at: new Date().toISOString(),
                   strategy_name: position.strategy_name,
@@ -2962,6 +3040,15 @@ serve(async (req) => {
         if (partialUpdateError) {
           positionLogger.error(`Error executing partial TP for ${position.id}: ${partialUpdateError}`);
         } else if (updatedPartialPos) {
+          // Calculate fee-aware P&L for partial TP
+          const partialTpFeeAwarePnL = calculateFeeAwarePnL(
+            position.side,
+            position.entry_price,
+            currentPrice,
+            closeQuantity,
+            position.trading_fee_percent
+          );
+          
           // Create a closed position record for the partial close (for history tracking)
           // CRITICAL: Copy entry_snapshot and forensic fields from parent position
           const { error: partialTpRecordError } = await supabase
@@ -2977,8 +3064,10 @@ serve(async (req) => {
               take_profit: position.take_profit,
               status: "closed",
               close_reason: partialCloseReason,
-              realized_pnl: partialPnl,
-              realized_pnl_percent: partialPnlPercent,
+              realized_pnl: partialTpFeeAwarePnL.netPnl,
+              realized_pnl_percent: partialTpFeeAwarePnL.netPnlPercent,
+              trading_fee_amount: partialTpFeeAwarePnL.totalFee,
+              trading_fee_percent: partialTpFeeAwarePnL.feeRatePercent,
               opened_at: position.opened_at,
               closed_at: new Date().toISOString(),
               strategy_name: position.strategy_name,
@@ -3122,6 +3211,8 @@ serve(async (req) => {
         let finalExitPrice = currentPrice;
         let finalPnl = pnl;
         let finalPnlPercent = pnlPercent;
+        let feeAmount: number = 0;
+        let feePercent: number = TRADING_FEE_PARAMS.DEFAULT_FEE_RATE_PERCENT;
         
         if (closeReason === "break_even") {
           // Use entry price to guarantee 0 P&L for break-even stops
@@ -3129,7 +3220,21 @@ serve(async (req) => {
           finalExitPrice = position.entry_price;
           finalPnl = 0;
           finalPnlPercent = 0;
+          feeAmount = 0;
           positionLogger.trade(`BREAK-EVEN: Using entry price ${finalExitPrice} for P&L (current: ${currentPrice})`);
+        } else {
+          // Calculate fee-aware P&L for non-break-even closes
+          const closeFeeAwarePnL = calculateFeeAwarePnL(
+            position.side,
+            position.entry_price,
+            finalExitPrice,
+            position.quantity,
+            position.trading_fee_percent
+          );
+          finalPnl = closeFeeAwarePnL.netPnl;
+          finalPnlPercent = closeFeeAwarePnL.netPnlPercent;
+          feeAmount = closeFeeAwarePnL.totalFee;
+          feePercent = closeFeeAwarePnL.feeRatePercent;
         }
         
         // Close the position with optimistic locking to prevent race conditions
@@ -3144,6 +3249,8 @@ serve(async (req) => {
             realized_pnl_percent: finalPnlPercent,
             closed_at: new Date().toISOString(),
             close_reason: closeReason,
+            trading_fee_amount: feeAmount,
+            trading_fee_percent: feePercent,
           })
           .eq("id", position.id)
           .eq("status", "active") // RACE CONDITION FIX: Only close if still active
@@ -3214,6 +3321,15 @@ serve(async (req) => {
                 : hedgePos.entry_price * 0.015;
               const hedgeRMultiple = hedgePnl / (hedgeRiskPerUnit * hedgePos.quantity);
               
+              // Calculate fee-aware P&L for hedge close
+              const hedgeFeeAwarePnL = calculateFeeAwarePnL(
+                hedgePos.side,
+                hedgePos.entry_price,
+                currentPrice,
+                hedgePos.quantity,
+                hedgePos.trading_fee_percent
+              );
+              
               // Use optimistic locking with status='active' to prevent double-closing
               const { data: closedHedge, error: closeHedgeError } = await supabase
                 .from("positions")
@@ -3221,10 +3337,12 @@ serve(async (req) => {
                   status: "closed",
                   current_price: currentPrice,
                   exit_price: currentPrice,
-                  realized_pnl: hedgePnl,
-                  realized_pnl_percent: hedgePnlPercent,
+                  realized_pnl: hedgeFeeAwarePnL.netPnl,
+                  realized_pnl_percent: hedgeFeeAwarePnL.netPnlPercent,
                   closed_at: new Date().toISOString(),
                   close_reason: "parent_closed",
+                  trading_fee_amount: hedgeFeeAwarePnL.totalFee,
+                  trading_fee_percent: hedgeFeeAwarePnL.feeRatePercent,
                 })
                 .eq("id", position.hedge_position_id)
                 .eq("status", "active")
