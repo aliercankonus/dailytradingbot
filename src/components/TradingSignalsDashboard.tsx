@@ -209,9 +209,17 @@ export const TradingSignalsDashboard = () => {
             // Extract key metrics for display based on rejection type
             let details: string[] = [];
             if (filters) {
-              // VWAP overextension details
-              if (filters.vwapDeviation !== undefined) {
+              // VWAP overextension details - use explicit values for accuracy
+              if (filters.vwapMidDeviationPct !== undefined) {
+                // New explicit field: deviation from VWAP mid
+                details.push(`VWAP mid: ${Number(filters.vwapMidDeviationPct).toFixed(2)}%`);
+              } else if (filters.vwapDeviation !== undefined) {
+                // Legacy fallback
                 details.push(`VWAP deviation: ${Number(filters.vwapDeviation).toFixed(2)}%`);
+              }
+              // Band breach percentage if available
+              if (filters.vwapBandDeviationPct !== undefined) {
+                details.push(`Band breach: ${Math.abs(Number(filters.vwapBandDeviationPct)).toFixed(2)}%`);
               }
               // Volume details with threshold comparison
               if (filters.volumeRatio !== undefined) {

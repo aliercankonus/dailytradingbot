@@ -1156,8 +1156,19 @@ serve(async (req) => {
               vwapBoostMultiplier = 0.7;
               logger.warn(`⚠️ VWAP WEAK EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band, ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} but no guard passed - allowing LONG with 70% size`);
             } else {
+              // Calculate band deviation for audit accuracy
+              const vwapBandDeviationPct = vwapUpperBand > 0 ? ((currentPrice - vwapUpperBand) / vwapUpperBand) * 100 : 0;
               logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} above upper VWAP band $${vwapUpperBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD}, adxRising=${adxRising}, macdHistogram=${macdHistogram.toFixed(4)})`);
-              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (LONG)', signal, trendData, { currentPrice, vwapUpperBand, adx: adxValue, vwapDeviation, adxRising, macdHistogram });
+              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (LONG)', signal, trendData, { 
+                currentPrice, 
+                vwapMid: currentVWAP,
+                vwapMidDeviationPct: vwapDeviation,
+                vwapUpperBand, 
+                vwapBandDeviationPct,
+                adx: adxValue, 
+                adxRising, 
+                macdHistogram 
+              });
               throw new Error(`Price above upper VWAP band - overextended LONG entry blocked (ADX < ${ADX_EXCEPTION_THRESHOLD} or no guard passed)`);
             }
           } else if (vwapDeviation > 1.0) {
@@ -1199,8 +1210,19 @@ serve(async (req) => {
               vwapBoostMultiplier = 0.7;
               logger.warn(`⚠️ VWAP WEAK EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band, ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} but no guard passed - allowing SHORT with 70% size`);
             } else {
+              // Calculate band deviation for audit accuracy
+              const vwapBandDeviationPct = vwapLowerBand > 0 ? ((currentPrice - vwapLowerBand) / vwapLowerBand) * 100 : 0;
               logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD}, adxRising=${adxRising}, macdHistogram=${macdHistogram.toFixed(4)})`);
-              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (SHORT)', signal, trendData, { currentPrice, vwapLowerBand, adx: adxValue, vwapDeviation, adxRising, macdHistogram });
+              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (SHORT)', signal, trendData, { 
+                currentPrice, 
+                vwapMid: currentVWAP,
+                vwapMidDeviationPct: vwapDeviation,
+                vwapLowerBand, 
+                vwapBandDeviationPct,
+                adx: adxValue, 
+                adxRising, 
+                macdHistogram 
+              });
               throw new Error(`Price below lower VWAP band - oversold SHORT entry blocked (ADX < ${ADX_EXCEPTION_THRESHOLD} or no guard passed)`);
             }
           } else if (vwapDeviation < -1.0) {
