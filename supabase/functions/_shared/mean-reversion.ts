@@ -39,6 +39,8 @@ export interface ExhaustionSignal {
   isModerateExhaustion: boolean;  // True when K in moderate zone with momentum confirmation
   exhaustionTier: 'EXTREME' | 'STRONG' | 'MODERATE' | 'NONE';  // Which tier triggered
   tag: string | null;             // Strategy tag for position tracking (e.g., 'MR_MODERATE_EXHAUSTION')
+  // Recommendation #3: Explicit override reason for post-mortem analysis
+  overrideReason: 'EXTREME_ADX_OVERRIDE' | 'EXTREME_REGIME_OVERRIDE' | 'MODERATE_ADX_SLOPE_OVERRIDE' | null;
 }
 
 interface ExhaustionCheck {
@@ -53,6 +55,8 @@ interface ExhaustionCheck {
   isModerateExhaustion: boolean; // Flags when moderate tier triggered (K 10-15)
   exhaustionTier: 'EXTREME' | 'STRONG' | 'MODERATE' | 'NONE';
   tag: string | null;
+  // Recommendation #3: Explicit override reason for post-mortem analysis
+  overrideReason: 'EXTREME_ADX_OVERRIDE' | 'EXTREME_REGIME_OVERRIDE' | 'MODERATE_ADX_SLOPE_OVERRIDE' | null;
 }
 
 // ============= REGIME CLASSIFICATION (ORTHOGONAL) =============
@@ -202,7 +206,8 @@ function checkOversoldExhaustion(trendData: any): ExhaustionCheck {
   
   // ===== EXTREME EXHAUSTION DETECTION (K <= 10) =====
   // When K is at statistical extremes, ADX becomes informational, not blocking
-  // NEW: Momentum floor prevents entries when momentum strongly opposes direction
+  // Momentum floor prevents entries when momentum strongly opposes direction
+  // Momentum delta check (Rec #1) confirms selling pressure is easing
   const isDeepExhaustion = stochK <= extremeConfig.LONG_K_EXTREME;
   const adxNotAccelerating = adxSlope <= extremeConfig.MAX_ADX_SLOPE;
   const sufficientDistance = atrDistanceFromVwap >= extremeConfig.MIN_ATR_DISTANCE_FROM_VWAP;
@@ -211,13 +216,29 @@ function checkOversoldExhaustion(trendData: any): ExhaustionCheck {
   const extremeMomentumFloor = extremeConfig.MIN_MOMENTUM_SCORE ?? 20;
   const momentumNotOpposing = momentumScore > -extremeMomentumFloor;
   
-  if (isDeepExhaustion && adxNotAccelerating && sufficientDistance && momentumNotOpposing) {
+  // Momentum delta check (Recommendation #1): Confirm selling pressure is easing
+  // Prevents catching first bounce failure during violent selloffs
+  const prevMomentumScore = trendData?.momentum?.prevScore ?? momentumScore;
+  const momentumDelta = momentumScore - prevMomentumScore;
+  const requireDelta = extremeConfig.REQUIRE_MOMENTUM_IMPROVING ?? true;
+  const minDelta = extremeConfig.MIN_MOMENTUM_DELTA ?? 15;
+  const momentumImproving = !requireDelta || momentumDelta >= minDelta;
+  
+  // Track override reason for diagnostics
+  let overrideReason: 'EXTREME_ADX_OVERRIDE' | 'EXTREME_REGIME_OVERRIDE' | 'MODERATE_ADX_SLOPE_OVERRIDE' | null = null;
+  
+  if (isDeepExhaustion && adxNotAccelerating && sufficientDistance && momentumNotOpposing && momentumImproving) {
     isExtremeExhaustion = true;
     exhaustionTier = 'EXTREME';
-    triggers.push(`EXTREME EXHAUSTION: K=${stochK.toFixed(1)} <= ${extremeConfig.LONG_K_EXTREME}, ADX slope=${adxSlope.toFixed(2)} <= ${extremeConfig.MAX_ADX_SLOPE}, VWAP distance=${atrDistanceFromVwap.toFixed(1)} ATRs, momentum=${momentumScore.toFixed(0)} > -${extremeMomentumFloor}`);
-  } else if (isDeepExhaustion && !momentumNotOpposing) {
-    // Log rejection due to momentum floor
-    triggers.push(`EXTREME_EXHAUSTION_REJECTED: K=${stochK.toFixed(1)} qualifies, but momentum=${momentumScore.toFixed(0)} <= -${extremeMomentumFloor} (opposing)`);
+    triggers.push(`EXTREME EXHAUSTION: K=${stochK.toFixed(1)} <= ${extremeConfig.LONG_K_EXTREME}, ADX slope=${adxSlope.toFixed(2)} <= ${extremeConfig.MAX_ADX_SLOPE}, VWAP distance=${atrDistanceFromVwap.toFixed(1)} ATRs, momentum=${momentumScore.toFixed(0)} > -${extremeMomentumFloor}, Δmomentum=${momentumDelta.toFixed(0)} >= ${minDelta}`);
+  } else if (isDeepExhaustion) {
+    // Log rejection with specific reason
+    const reasons: string[] = [];
+    if (!momentumNotOpposing) reasons.push(`momentum=${momentumScore.toFixed(0)} <= -${extremeMomentumFloor} (opposing)`);
+    if (!momentumImproving) reasons.push(`Δmomentum=${momentumDelta.toFixed(0)} < ${minDelta} (not improving)`);
+    if (!adxNotAccelerating) reasons.push(`adxSlope=${adxSlope.toFixed(2)} > ${extremeConfig.MAX_ADX_SLOPE} (accelerating)`);
+    if (!sufficientDistance) reasons.push(`VWAP dist=${atrDistanceFromVwap.toFixed(1)} < ${extremeConfig.MIN_ATR_DISTANCE_FROM_VWAP} ATRs`);
+    triggers.push(`EXTREME_EXHAUSTION_REJECTED: K=${stochK.toFixed(1)} qualifies, but ${reasons.join(', ')}`);
   }
   
   // ===== MODERATE EXHAUSTION DETECTION (K 10-15) =====
@@ -272,11 +293,13 @@ function checkOversoldExhaustion(trendData: any): ExhaustionCheck {
   } else if (isExtremeExhaustion) {
     // EXTREME EXHAUSTION OVERRIDE: ADX becomes informational, not blocking
     adxWasOverridden = true;
-    triggers.push(`ADX=${adx.toFixed(1)} > ${config.MAX_ADX} → OVERRIDDEN by extreme exhaustion (K=${stochK.toFixed(1)}, ADX slope=${adxSlope.toFixed(2)})`);
+    overrideReason = 'EXTREME_ADX_OVERRIDE';
+    triggers.push(`ADX=${adx.toFixed(1)} > ${config.MAX_ADX} → OVERRIDDEN by extreme exhaustion (K=${stochK.toFixed(1)}, ADX slope=${adxSlope.toFixed(2)}) [${overrideReason}]`);
     score += 5;
   } else if (isModerateExhaustion) {
     // MODERATE EXHAUSTION: ADX already validated via slope override
-    triggers.push(`ADX=${adx.toFixed(1)} validated for moderate exhaustion`);
+    overrideReason = 'MODERATE_ADX_SLOPE_OVERRIDE';
+    triggers.push(`ADX=${adx.toFixed(1)} validated for moderate exhaustion [${overrideReason}]`);
     score += 5;
   } else {
     // Normal case: high ADX without exhaustion = penalty
@@ -331,6 +354,7 @@ function checkOversoldExhaustion(trendData: any): ExhaustionCheck {
     isModerateExhaustion,
     exhaustionTier,
     tag,
+    overrideReason,
   };
 }
 
@@ -370,7 +394,8 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
   
   // ===== EXTREME EXHAUSTION DETECTION (K >= 90) =====
   // When K is at statistical extremes, ADX becomes informational, not blocking
-  // NEW: Momentum floor prevents entries when momentum strongly opposes direction
+  // Momentum floor prevents entries when momentum strongly opposes direction
+  // Momentum delta check (Rec #1) confirms buying pressure is easing
   const isDeepExhaustion = stochK >= extremeConfig.SHORT_K_EXTREME;
   const adxNotAccelerating = adxSlope <= extremeConfig.MAX_ADX_SLOPE;
   const sufficientDistance = atrDistanceFromVwap >= extremeConfig.MIN_ATR_DISTANCE_FROM_VWAP;
@@ -379,13 +404,29 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
   const extremeMomentumFloor = extremeConfig.MIN_MOMENTUM_SCORE ?? 20;
   const momentumNotOpposing = momentumScore < extremeMomentumFloor;
   
-  if (isDeepExhaustion && adxNotAccelerating && sufficientDistance && momentumNotOpposing) {
+  // Momentum delta check (Recommendation #1): Confirm buying pressure is easing
+  // For SHORTS: momentum should be declining (delta negative)
+  const prevMomentumScore = trendData?.momentum?.prevScore ?? momentumScore;
+  const momentumDelta = momentumScore - prevMomentumScore;
+  const requireDelta = extremeConfig.REQUIRE_MOMENTUM_IMPROVING ?? true;
+  const minDelta = extremeConfig.MIN_MOMENTUM_DELTA ?? 15;
+  const momentumImproving = !requireDelta || momentumDelta <= -minDelta; // For SHORT: delta must be negative
+  
+  // Track override reason for diagnostics
+  let overrideReason: 'EXTREME_ADX_OVERRIDE' | 'EXTREME_REGIME_OVERRIDE' | 'MODERATE_ADX_SLOPE_OVERRIDE' | null = null;
+  
+  if (isDeepExhaustion && adxNotAccelerating && sufficientDistance && momentumNotOpposing && momentumImproving) {
     isExtremeExhaustion = true;
     exhaustionTier = 'EXTREME';
-    triggers.push(`EXTREME EXHAUSTION: K=${stochK.toFixed(1)} >= ${extremeConfig.SHORT_K_EXTREME}, ADX slope=${adxSlope.toFixed(2)} <= ${extremeConfig.MAX_ADX_SLOPE}, VWAP distance=${atrDistanceFromVwap.toFixed(1)} ATRs, momentum=${momentumScore.toFixed(0)} < ${extremeMomentumFloor}`);
-  } else if (isDeepExhaustion && !momentumNotOpposing) {
-    // Log rejection due to momentum floor
-    triggers.push(`EXTREME_EXHAUSTION_REJECTED: K=${stochK.toFixed(1)} qualifies, but momentum=${momentumScore.toFixed(0)} >= ${extremeMomentumFloor} (opposing)`);
+    triggers.push(`EXTREME EXHAUSTION: K=${stochK.toFixed(1)} >= ${extremeConfig.SHORT_K_EXTREME}, ADX slope=${adxSlope.toFixed(2)} <= ${extremeConfig.MAX_ADX_SLOPE}, VWAP distance=${atrDistanceFromVwap.toFixed(1)} ATRs, momentum=${momentumScore.toFixed(0)} < ${extremeMomentumFloor}, Δmomentum=${momentumDelta.toFixed(0)} <= -${minDelta}`);
+  } else if (isDeepExhaustion) {
+    // Log rejection with specific reason
+    const reasons: string[] = [];
+    if (!momentumNotOpposing) reasons.push(`momentum=${momentumScore.toFixed(0)} >= ${extremeMomentumFloor} (opposing)`);
+    if (!momentumImproving) reasons.push(`Δmomentum=${momentumDelta.toFixed(0)} > -${minDelta} (not declining)`);
+    if (!adxNotAccelerating) reasons.push(`adxSlope=${adxSlope.toFixed(2)} > ${extremeConfig.MAX_ADX_SLOPE} (accelerating)`);
+    if (!sufficientDistance) reasons.push(`VWAP dist=${atrDistanceFromVwap.toFixed(1)} < ${extremeConfig.MIN_ATR_DISTANCE_FROM_VWAP} ATRs`);
+    triggers.push(`EXTREME_EXHAUSTION_REJECTED: K=${stochK.toFixed(1)} qualifies, but ${reasons.join(', ')}`);
   }
   
   // ===== MODERATE EXHAUSTION DETECTION (K 85-90) =====
@@ -440,11 +481,13 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
   } else if (isExtremeExhaustion) {
     // EXTREME EXHAUSTION OVERRIDE: ADX becomes informational, not blocking
     adxWasOverridden = true;
-    triggers.push(`ADX=${adx.toFixed(1)} > ${config.MAX_ADX} → OVERRIDDEN by extreme exhaustion (K=${stochK.toFixed(1)}, ADX slope=${adxSlope.toFixed(2)})`);
+    overrideReason = 'EXTREME_ADX_OVERRIDE';
+    triggers.push(`ADX=${adx.toFixed(1)} > ${config.MAX_ADX} → OVERRIDDEN by extreme exhaustion (K=${stochK.toFixed(1)}, ADX slope=${adxSlope.toFixed(2)}) [${overrideReason}]`);
     score += 5;
   } else if (isModerateExhaustion) {
     // MODERATE EXHAUSTION: ADX already validated via slope override
-    triggers.push(`ADX=${adx.toFixed(1)} validated for moderate exhaustion`);
+    overrideReason = 'MODERATE_ADX_SLOPE_OVERRIDE';
+    triggers.push(`ADX=${adx.toFixed(1)} validated for moderate exhaustion [${overrideReason}]`);
     score += 5;
   } else {
     // Normal case: high ADX without extreme exhaustion = even stronger penalty for shorts
@@ -503,6 +546,7 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
     isModerateExhaustion,
     exhaustionTier,
     tag,
+    overrideReason,
   };
 }
 
@@ -568,6 +612,7 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
       isModerateExhaustion: false,
       exhaustionTier: 'NONE' as const,
       tag: null,
+      overrideReason: null,
     };
   }
   
@@ -602,6 +647,7 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
       isModerateExhaustion: false,
       exhaustionTier: 'NONE' as const,
       tag: null,
+      overrideReason: null,
     };
   }
   
@@ -646,6 +692,13 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
     selectedSignal.isExtremeExhaustion && 
     selectedSignal.adxWasOverridden;
   
+  // 10. Determine final override reason (may include regime override)
+  let finalOverrideReason = selectedSignal.overrideReason;
+  if (extremeExhaustionDetected && !regimeAllowsMR && !finalOverrideReason) {
+    // Regime was overridden by extreme exhaustion
+    finalOverrideReason = 'EXTREME_REGIME_OVERRIDE';
+  }
+  
   return {
     detected: true,
     direction: selectedSignal.direction,
@@ -664,6 +717,7 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
     isModerateExhaustion: selectedSignal.isModerateExhaustion,
     exhaustionTier: selectedSignal.exhaustionTier,
     tag: selectedSignal.tag,
+    overrideReason: finalOverrideReason,
   };
 }
 

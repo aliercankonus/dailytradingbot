@@ -4409,10 +4409,16 @@ export const MEAN_REVERSION_CONFIG = {
     MAX_ADX_SLOPE: 0,             // ADX must be flat/declining (not accelerating)
     MIN_ATR_DISTANCE_FROM_VWAP: 1.5,  // Price must be extended from VWAP
     
-    // ===== MOMENTUM FLOOR (NEW - prevents counter-momentum extreme entries) =====
+    // ===== MOMENTUM FLOOR (prevents counter-momentum extreme entries) =====
     // Even at statistical extremes, require minimum momentum alignment
     // Prevents LONG when momentum is strongly bearish, SHORT when strongly bullish
     MIN_MOMENTUM_SCORE: 20,       // Momentum must not strongly oppose direction
+    
+    // ===== MOMENTUM DELTA CHECK (Recommendation #1) =====
+    // Confirms selling/buying pressure is EASING before entry
+    // Prevents catching first bounce failure during violent selloffs
+    REQUIRE_MOMENTUM_IMPROVING: true,
+    MIN_MOMENTUM_DELTA: 15,       // momentum - prevMomentum >= +15 for LONG, <= -15 for SHORT
     
     // Risk adjustments for high-ADX mean reversion
     POSITION_SIZE_MULTIPLIER: 0.50,   // 50% of normal MR size
