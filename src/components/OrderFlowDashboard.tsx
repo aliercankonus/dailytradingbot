@@ -1,58 +1,72 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { Activity, TrendingUp, TrendingDown, Zap, AlertTriangle, Grid3X3, ArrowUpDown } from 'lucide-react';
+import { Activity, TrendingUp, TrendingDown, Zap, AlertTriangle, Grid3X3, ArrowUpDown, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-// Known crypto correlations
-const KNOWN_CORRELATIONS: Record<string, Record<string, number>> = {
-  'BTCUSDT': {
-    'ETHUSDT': 0.85, 'BNBUSDT': 0.78, 'SOLUSDT': 0.82, 'ADAUSDT': 0.75,
-    'XRPUSDT': 0.70, 'DOGEUSDT': 0.72, 'DOTUSDT': 0.80, 'MATICUSDT': 0.77, 'AVAXUSDT': 0.81,
-  },
-  'ETHUSDT': {
-    'BTCUSDT': 0.85, 'BNBUSDT': 0.75, 'SOLUSDT': 0.88, 'ADAUSDT': 0.72,
-    'XRPUSDT': 0.65, 'DOGEUSDT': 0.68, 'DOTUSDT': 0.83, 'MATICUSDT': 0.85, 'AVAXUSDT': 0.86,
-  },
-  'SOLUSDT': {
-    'BTCUSDT': 0.82, 'ETHUSDT': 0.88, 'AVAXUSDT': 0.90, 'MATICUSDT': 0.84, 'DOTUSDT': 0.82,
-  },
-  'AVAXUSDT': {
-    'BTCUSDT': 0.81, 'ETHUSDT': 0.86, 'SOLUSDT': 0.90, 'MATICUSDT': 0.85,
-  },
-  'BNBUSDT': {
-    'BTCUSDT': 0.78, 'ETHUSDT': 0.75, 'SOLUSDT': 0.72, 'AVAXUSDT': 0.70,
-  },
-};
+// Store price data for correlation calculation
+interface SymbolPriceData {
+  symbol: string;
+  closes: number[];
+  lastUpdated: Date;
+}
 
-const getKnownCorrelation = (symbol1: string, symbol2: string): number => {
-  if (symbol1 === symbol2) return 1.0;
-  if (KNOWN_CORRELATIONS[symbol1]?.[symbol2] !== undefined) {
-    return KNOWN_CORRELATIONS[symbol1][symbol2];
+// Calculate Pearson correlation coefficient between two price series
+const calculatePearsonCorrelation = (prices1: number[], prices2: number[]): number => {
+  if (prices1.length !== prices2.length || prices1.length < 10) {
+    return 0;
   }
-  if (KNOWN_CORRELATIONS[symbol2]?.[symbol1] !== undefined) {
-    return KNOWN_CORRELATIONS[symbol2][symbol1];
+
+  const n = prices1.length;
+  
+  // Calculate returns (percent changes) for more accurate correlation
+  const returns1: number[] = [];
+  const returns2: number[] = [];
+  
+  for (let i = 1; i < n; i++) {
+    returns1.push((prices1[i] - prices1[i-1]) / prices1[i-1]);
+    returns2.push((prices2[i] - prices2[i-1]) / prices2[i-1]);
   }
-  return 0.6; // Default moderate correlation for unknown pairs
+
+  const mean1 = returns1.reduce((a, b) => a + b, 0) / returns1.length;
+  const mean2 = returns2.reduce((a, b) => a + b, 0) / returns2.length;
+
+  let numerator = 0;
+  let sum1Sq = 0;
+  let sum2Sq = 0;
+
+  for (let i = 0; i < returns1.length; i++) {
+    const diff1 = returns1[i] - mean1;
+    const diff2 = returns2[i] - mean2;
+    numerator += diff1 * diff2;
+    sum1Sq += diff1 * diff1;
+    sum2Sq += diff2 * diff2;
+  }
+
+  const denominator = Math.sqrt(sum1Sq * sum2Sq);
+  if (denominator === 0) return 0;
+
+  return numerator / denominator;
 };
 
 const getCorrelationColor = (correlation: number): string => {
-  if (correlation >= 0.85) return 'bg-red-500/80 text-white';
-  if (correlation >= 0.75) return 'bg-orange-500/70 text-white';
-  if (correlation >= 0.60) return 'bg-yellow-500/60 text-black';
-  if (correlation >= 0.40) return 'bg-blue-500/40 text-white';
+  const absCorr = Math.abs(correlation);
+  if (absCorr >= 0.85) return 'bg-red-500/80 text-white';
+  if (absCorr >= 0.75) return 'bg-orange-500/70 text-white';
+  if (absCorr >= 0.60) return 'bg-yellow-500/60 text-black';
+  if (absCorr >= 0.40) return 'bg-blue-500/40 text-white';
   return 'bg-muted text-muted-foreground';
 };
 
 const getCorrelationLabel = (correlation: number): string => {
-  if (correlation >= 0.85) return 'Very High';
-  if (correlation >= 0.75) return 'High';
-  if (correlation >= 0.60) return 'Moderate';
-  if (correlation >= 0.40) return 'Low';
+  const absCorr = Math.abs(correlation);
+  if (absCorr >= 0.85) return 'Very High';
+  if (absCorr >= 0.75) return 'High';
+  if (absCorr >= 0.60) return 'Moderate';
+  if (absCorr >= 0.40) return 'Low';
   return 'Very Low';
 };
 
@@ -82,18 +96,39 @@ interface OrderFlowData {
   confidence: number;
   reasons: string[];
   lastUpdated: Date;
-  intendedDirection: "long" | "short"; // NEW: Track direction used for analysis
+  intendedDirection: "long" | "short";
+  directionSource: "strategy-analyzer" | "sma20"; // Track where direction came from
 }
 
 export const OrderFlowDashboard = () => {
   const [orderFlowData, setOrderFlowData] = useState<OrderFlowData[]>([]);
+  const [priceData, setPriceData] = useState<Map<string, number[]>>(new Map());
+  const [correlationMatrix, setCorrelationMatrix] = useState<Map<string, Map<string, number>>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+
+  // Get correlation from live-calculated matrix, or calculate on-the-fly
+  const getCorrelation = (symbol1: string, symbol2: string): number => {
+    if (symbol1 === symbol2) return 1.0;
+    
+    // Check cached matrix first
+    const cached = correlationMatrix.get(symbol1)?.get(symbol2) ?? 
+                   correlationMatrix.get(symbol2)?.get(symbol1);
+    if (cached !== undefined) return cached;
+    
+    // Calculate from price data if available
+    const prices1 = priceData.get(symbol1);
+    const prices2 = priceData.get(symbol2);
+    if (prices1 && prices2) {
+      return calculatePearsonCorrelation(prices1, prices2);
+    }
+    
+    return 0; // No data available
+  };
 
   const fetchOrderFlowData = async () => {
     setIsLoading(true);
     try {
-      // Get active symbols
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         toast({ title: "Not authenticated", variant: "destructive" });
@@ -110,37 +145,93 @@ export const OrderFlowDashboard = () => {
         return;
       }
 
-      // Fetch order flow data for each symbol
+      // Fetch latest derived directions from signal_rejection_log
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const { data: rejectionData } = await supabase
+        .from('signal_rejection_log')
+        .select('symbol, filters_status, checked_at')
+        .gte('checked_at', tenMinutesAgo)
+        .order('checked_at', { ascending: false });
+
+      // Build map of latest derived direction per symbol
+      const derivedDirections = new Map<string, "long" | "short">();
+      rejectionData?.forEach((rejection) => {
+        if (!derivedDirections.has(rejection.symbol)) {
+          const filtersStatus = rejection.filters_status as any;
+          const derivedDir = filtersStatus?.derivedDirection;
+          if (derivedDir === 'long' || derivedDir === 'short') {
+            derivedDirections.set(rejection.symbol, derivedDir);
+          }
+        }
+      });
+
+      // Fetch kline data for all symbols in parallel
+      const klinePromises = symbols.map(({ symbol }) => 
+        fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=100`)
+          .then(res => res.json())
+          .then(klines => ({ symbol, klines }))
+          .catch(() => ({ symbol, klines: [] }))
+      );
+
+      const klineResults = await Promise.all(klinePromises);
+      
+      // Store price data for correlation calculation
+      const newPriceData = new Map<string, number[]>();
       const results: OrderFlowData[] = [];
       
-      for (const { symbol } of symbols) {
-        try {
-          // Fetch kline data from Binance
-          const response = await fetch(
-            `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=50`
-          );
-          const klines = await response.json();
-          
-          if (Array.isArray(klines) && klines.length >= 30) {
-            // Detect trend direction from price action (compare close to SMA20)
-            const closes = klines.map((k: any) => parseFloat(k[4]));
-            const sma20 = closes.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20;
-            const currentPrice = closes[closes.length - 1];
-            const intendedDirection: "long" | "short" = currentPrice > sma20 ? "long" : "short";
-            
-            const analysis = analyzeOrderFlowLocal(klines, intendedDirection);
-            results.push({
-              symbol,
-              ...analysis,
-              intendedDirection,
-              lastUpdated: new Date()
-            });
-          }
-        } catch (err) {
-          console.error(`Error fetching ${symbol}:`, err);
+      for (const { symbol, klines } of klineResults) {
+        if (!Array.isArray(klines) || klines.length < 30) continue;
+
+        // Extract closes for correlation calculation (using last 50 candles)
+        const closes = klines.slice(-50).map((k: any) => parseFloat(k[4]));
+        newPriceData.set(symbol, closes);
+
+        // Get direction from strategy-analyzer if available, fallback to SMA20
+        let intendedDirection: "long" | "short";
+        let directionSource: "strategy-analyzer" | "sma20" = "sma20";
+        
+        if (derivedDirections.has(symbol)) {
+          intendedDirection = derivedDirections.get(symbol)!;
+          directionSource = "strategy-analyzer";
+        } else {
+          // Fallback to SMA20
+          const recentCloses = klines.map((k: any) => parseFloat(k[4]));
+          const sma20 = recentCloses.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20;
+          const currentPrice = recentCloses[recentCloses.length - 1];
+          intendedDirection = currentPrice > sma20 ? "long" : "short";
         }
+        
+        const analysis = analyzeOrderFlowLocal(klines, intendedDirection);
+        results.push({
+          symbol,
+          ...analysis,
+          intendedDirection,
+          directionSource,
+          lastUpdated: new Date()
+        });
       }
 
+      // Calculate live correlation matrix
+      const symbolList = Array.from(newPriceData.keys());
+      const newCorrelationMatrix = new Map<string, Map<string, number>>();
+      
+      for (const symbol1 of symbolList) {
+        const row = new Map<string, number>();
+        for (const symbol2 of symbolList) {
+          if (symbol1 === symbol2) {
+            row.set(symbol2, 1.0);
+          } else {
+            const prices1 = newPriceData.get(symbol1)!;
+            const prices2 = newPriceData.get(symbol2)!;
+            const corr = calculatePearsonCorrelation(prices1, prices2);
+            row.set(symbol2, corr);
+          }
+        }
+        newCorrelationMatrix.set(symbol1, row);
+      }
+
+      setPriceData(newPriceData);
+      setCorrelationMatrix(newCorrelationMatrix);
       setOrderFlowData(results);
     } catch (error) {
       console.error('Error fetching order flow:', error);
@@ -389,6 +480,9 @@ export const OrderFlowDashboard = () => {
                           {data.intendedDirection === "long" ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
                           {data.intendedDirection.toUpperCase()}
                         </Badge>
+                        <Badge variant="secondary" className="text-xs">
+                          {data.directionSource === "strategy-analyzer" ? "📊 Strategy" : "📈 SMA20"}
+                        </Badge>
                       </div>
                       <div className="flex items-center gap-4">
                         <div className="text-right">
@@ -509,9 +603,15 @@ export const OrderFlowDashboard = () => {
               <Card className="bg-background/50 border-border/50">
                 <CardContent className="p-4">
                   <div className="mb-4">
-                    <h3 className="font-semibold text-lg mb-1">Symbol Correlation Matrix</h3>
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="font-semibold text-lg">Symbol Correlation Matrix</h3>
+                      <Badge variant="outline" className="text-xs border-emerald-500/30 text-emerald-400">
+                        <RefreshCw className="h-3 w-3 mr-1" />
+                        Live (100 candles)
+                      </Badge>
+                    </div>
                     <p className="text-sm text-muted-foreground">
-                      Higher correlation = more similar price movements. Avoid opening same-direction positions on highly correlated pairs.
+                      Real-time Pearson correlation from 1H kline returns. Higher = more similar price movements.
                     </p>
                   </div>
                   
@@ -559,7 +659,7 @@ export const OrderFlowDashboard = () => {
                               {row.symbol.replace('USDT', '')}
                             </td>
                             {orderFlowData.map((col, colIdx) => {
-                              const correlation = getKnownCorrelation(row.symbol, col.symbol);
+                              const correlation = getCorrelation(row.symbol, col.symbol);
                               const correlationPct = Math.round(correlation * 100);
                               const isDiagonal = rowIdx === colIdx;
                               
@@ -590,7 +690,7 @@ export const OrderFlowDashboard = () => {
                     const highRiskPairs: Array<{ pair: string; correlation: number }> = [];
                     for (let i = 0; i < orderFlowData.length; i++) {
                       for (let j = i + 1; j < orderFlowData.length; j++) {
-                        const corr = getKnownCorrelation(orderFlowData[i].symbol, orderFlowData[j].symbol);
+                        const corr = getCorrelation(orderFlowData[i].symbol, orderFlowData[j].symbol);
                         if (corr >= 0.80) {
                           highRiskPairs.push({
                             pair: `${orderFlowData[i].symbol.replace('USDT', '')}/${orderFlowData[j].symbol.replace('USDT', '')}`,
