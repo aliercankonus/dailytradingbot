@@ -19,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
 import { TradeCounterSync } from "@/components/TradeCounterSync";
 import { TrailingStopMonitor } from "@/components/TrailingStopMonitor";
-import { SignalTimingMonitor } from "@/components/SignalTimingMonitor";
+
 import { PositionsSummary } from "@/components/PositionsSummary";
 import { AIAnalysisDashboard } from "@/components/AIAnalysisDashboard";
 import { LossAttributionDashboard } from "@/components/LossAttributionDashboard";
@@ -115,7 +115,6 @@ const Index = () => {
               </div>
             </div>
             <SignalRejectionMonitor />
-            <SignalTimingMonitor />
             <TradingSignalsDashboard />
             <AIAnalysisDashboard />
           </TabsContent>
