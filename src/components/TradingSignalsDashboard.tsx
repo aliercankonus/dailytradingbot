@@ -8,8 +8,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useSignals } from '@/hooks/useSignals';
 import { useSignalGenerator } from '@/hooks/useSignalGenerator';
+import { useExecutionRejections } from '@/hooks/useExecutionRejections';
 import { supabase } from '@/integrations/supabase/client';
-import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity, AlertCircle, Clock, Info, AlertTriangle, Sparkles, ChevronDown, ChevronRight } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity, AlertCircle, Clock, Info, AlertTriangle, Sparkles, ChevronDown, ChevronRight, Ban } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { getSignalPriorityTier, getSignalPriorityVariant } from '@/lib/utils';
@@ -79,6 +80,7 @@ const getContinuationModeStatus = (indicators: any): { isContinuation: boolean; 
 export const TradingSignalsDashboard = () => {
   const { signals, loading } = useSignals();
   const { generateSignals, isGenerating } = useSignalGenerator();
+  const { data: executionRejections } = useExecutionRejections();
   const { toast } = useToast();
   const { riskParams, loading: riskLoading, updateRiskParameters } = useRiskParameters();
   const autoExecEnabled = Boolean(riskParams?.auto_execute_signals);
@@ -196,6 +198,35 @@ export const TradingSignalsDashboard = () => {
           const exhaustionStatus = getExhaustionStatus(signal.indicators);
           const earlySignalStatus = getEarlySignalStatus(signal.indicators);
           const continuationStatus = getContinuationModeStatus(signal.indicators);
+          const executionRejection = executionRejections?.get(signal.symbol);
+          
+          // Parse the execution rejection reason to make it user-friendly
+          const getExecutionBlockReason = () => {
+            if (!executionRejection) return null;
+            const reason = executionRejection.rejection_reason.replace('EXECUTION: ', '');
+            const filters = executionRejection.filters_status;
+            
+            // Extract key metrics for display
+            let details: string[] = [];
+            if (filters) {
+              if (filters.vwapDeviation !== undefined) {
+                details.push(`VWAP deviation: ${Number(filters.vwapDeviation).toFixed(2)}%`);
+              }
+              if (filters.volumeRatio !== undefined) {
+                details.push(`Volume ratio: ${Number(filters.volumeRatio).toFixed(1)}x`);
+              }
+              if (filters.adx !== undefined) {
+                details.push(`ADX: ${Number(filters.adx).toFixed(1)}`);
+              }
+              if (filters.stochRsiK !== undefined) {
+                details.push(`StochRSI: ${Number(filters.stochRsiK).toFixed(0)}`);
+              }
+            }
+            
+            return { reason, details };
+          };
+          
+          const blockInfo = getExecutionBlockReason();
           
           return (
           <Card key={signal.id} className="p-6 hover:shadow-lg transition-shadow">
@@ -229,6 +260,34 @@ export const TradingSignalsDashboard = () => {
                   <div className="text-sm font-medium text-purple-800 dark:text-purple-200">Continuation Mode</div>
                   <div className="text-xs text-purple-700 dark:text-purple-300">{continuationStatus.reason}</div>
                 </div>
+              </div>
+            )}
+            
+            {/* Execution Block Banner - Why signal is waiting */}
+            {blockInfo && autoExecEnabled && (
+              <div className="mb-4 p-3 bg-orange-100 dark:bg-orange-950 border border-orange-300 dark:border-orange-800 rounded-lg">
+                <div className="flex items-center gap-2 mb-1">
+                  <Ban className="h-5 w-5 text-orange-600 dark:text-orange-400 flex-shrink-0" />
+                  <div className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                    Waiting for Execution
+                  </div>
+                </div>
+                <div className="text-xs text-orange-700 dark:text-orange-300 mb-2">
+                  {blockInfo.reason}
+                </div>
+                {blockInfo.details.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {blockInfo.details.map((detail, idx) => (
+                      <Badge 
+                        key={idx} 
+                        variant="outline" 
+                        className="text-xs bg-orange-50 dark:bg-orange-900/30 border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-300"
+                      >
+                        {detail}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             
