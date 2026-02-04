@@ -3827,9 +3827,15 @@ export const MOMENTUM_DIRECTION_ALIGNMENT = {
   SKIP_PHASE2_FOR_NEUTRAL: true,
   
   // ===== NORMALIZED WEAK MOMENTUM CHECK =====
-  // Phase 2 uses ATR-normalized MACD threshold instead of absolute 0.0001
-  // macdHistogramAbs < (ATR * WEAK_MACD_ATR_MULTIPLIER) = weak momentum
-  WEAK_MACD_ATR_MULTIPLIER: 0.0001,
+  // Phase 2 uses ATR-normalized MACD threshold for bypass eligibility
+  // macdHistogramNormalized < WEAK_MACD_ATR_MULTIPLIER = weak momentum (bypass allowed)
+  // 
+  // CALIBRATION NOTE (2026-02-04):
+  // - Typical normalized MACD values: 0.001–0.04 (varies by volatility)
+  // - Using 0.0005 aligns with MACD_GATE_PARAMS.NEUTRAL_HISTOGRAM_THRESHOLD
+  // - Previous 0.0001 was 43x below typical values, making bypass nearly inert
+  // - 0.0005 allows bypass when MACD is genuinely flat (<0.05% of ATR)
+  WEAK_MACD_ATR_MULTIPLIER: 0.0005,
 } as const;
 
 // ============= PHASE 12: STRUCTURED LOGGING FOR BLOCK DECISIONS =============
