@@ -26,6 +26,97 @@ const getZoneBadge = (zone: MoveZone): { color: string; label: string } => {
 
 const LIMIT_OPTIONS = [15, 30, 50, 100] as const;
 
+// Severity classification for color-coded badges
+type SeverityLevel = "blocked" | "warning" | "reduced" | "info";
+
+const getSeverityLevel = (reason: string, filtersStatus: any): SeverityLevel => {
+  const lowerReason = reason.toLowerCase();
+  const gate = filtersStatus?.gate || "";
+  const positionMultiplier = filtersStatus?.positionMultiplier;
+  const graduatedEffect = filtersStatus?.graduatedMomentumEffect;
+  
+  // Critical blocks (red) - absolute blocks with no exceptions
+  if (
+    lowerReason.includes("extreme momentum veto") ||
+    filtersStatus?.source === 'extreme_momentum_veto' ||
+    graduatedEffect?.directionNullified ||
+    lowerReason.includes("hard block") ||
+    lowerReason.includes("tier 0") ||
+    lowerReason.includes("tier 1") ||
+    gate === "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK" ||
+    gate === "EXTREME_MOMENTUM_VETO" ||
+    lowerReason.includes("symbol disabled") ||
+    positionMultiplier === 0
+  ) {
+    return "blocked";
+  }
+  
+  // High severity (amber) - important gates that block trades
+  if (
+    lowerReason.includes("no clear trade direction") ||
+    gate === "NO_CLEAR_DIRECTION" ||
+    gate === "ADX_TOO_LOW" ||
+    gate === "NO_MOMENTUM_CONFIRMATION" ||
+    gate === "HTF_NOT_ALIGNED" ||
+    gate === "MOMENTUM_DIRECTION_OPPOSING" ||
+    gate === "MOMENTUM_SLOPE_GATE" ||
+    lowerReason.includes("adx too low") ||
+    lowerReason.includes("htf not aligned") ||
+    graduatedEffect?.directionFlipped
+  ) {
+    return "warning";
+  }
+  
+  // Size reduced (blue/cyan) - still allowed but with reduced size
+  if (
+    (positionMultiplier !== undefined && positionMultiplier > 0 && positionMultiplier < 1) ||
+    gate === "LTF_CONFIRMATION" ||
+    gate === "STOCHRSI_RUNWAY_GATE" ||
+    gate === "HIGH_ADX_1H_CONFIRMATION" ||
+    lowerReason.includes("size reduced") ||
+    lowerReason.includes("reduced")
+  ) {
+    return "reduced";
+  }
+  
+  // Informational (gray) - limits, pending signals, etc.
+  return "info";
+};
+
+const getSeverityStyles = (severity: SeverityLevel) => {
+  switch (severity) {
+    case "blocked":
+      return {
+        badge: "bg-red-500/20 text-red-400 border-red-500/40",
+        text: "text-red-400",
+        label: "⛔ BLOCKED",
+        row: "border-l-2 border-l-red-500/50"
+      };
+    case "warning":
+      return {
+        badge: "bg-amber-500/20 text-amber-400 border-amber-500/40",
+        text: "text-amber-400",
+        label: "⚠️ WARNING",
+        row: "border-l-2 border-l-amber-500/50"
+      };
+    case "reduced":
+      return {
+        badge: "bg-cyan-500/20 text-cyan-400 border-cyan-500/40",
+        text: "text-cyan-400",
+        label: "📉 REDUCED",
+        row: "border-l-2 border-l-cyan-500/50"
+      };
+    case "info":
+    default:
+      return {
+        badge: "bg-muted text-muted-foreground border-border",
+        text: "text-muted-foreground",
+        label: "ℹ️ INFO",
+        row: ""
+      };
+  }
+};
+
 const getRejectionCategory = (reason: string): { label: string; color: string; icon: React.ReactNode } => {
   const lowerReason = reason.toLowerCase();
   
@@ -321,14 +412,19 @@ export const BlockedSignalsWidget = memo(function BlockedSignalsWidget() {
                 const category = getRejectionCategory(signal.rejection_reason);
                 const timeAgo = formatDistanceToNow(new Date(signal.checked_at), { addSuffix: true });
                 const filters = signal.filters_status;
+                const severity = getSeverityLevel(signal.rejection_reason, filters);
+                const severityStyles = getSeverityStyles(severity);
                 
                 return (
-                  <div key={signal.id} className="px-4 py-3 hover:bg-muted/30 transition-colors">
+                  <div key={signal.id} className={`px-4 py-3 hover:bg-muted/30 transition-colors ${severityStyles.row}`}>
                     <div className="flex items-start justify-between gap-2 mb-1.5">
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-sm font-medium text-foreground">
                           {signal.symbol.replace("USDT", "")}
                         </span>
+                        <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${severityStyles.badge}`}>
+                          {severityStyles.label}
+                        </Badge>
                         <Badge variant="outline" className={`text-xs ${category.color} flex items-center gap-1`}>
                           {category.icon}
                           {category.label}
@@ -343,7 +439,7 @@ export const BlockedSignalsWidget = memo(function BlockedSignalsWidget() {
                     <TooltipProvider>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <p className="text-xs text-muted-foreground leading-relaxed mb-2 cursor-help flex items-center gap-1">
+                          <p className={`text-xs leading-relaxed mb-2 cursor-help flex items-center gap-1 ${severityStyles.text}`}>
                             <span>{formatUserFriendlyReason(signal.rejection_reason, filters)}</span>
                             <Info className="h-3 w-3 opacity-50" />
                           </p>
