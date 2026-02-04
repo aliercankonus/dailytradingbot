@@ -65,8 +65,8 @@ export const useSignalRejections = () => {
 
     fetchRejections();
     
-    // Refresh every minute
-    const interval = setInterval(fetchRejections, 60000);
+    // Refresh every 2 minutes to reduce UI interruptions (was 60s)
+    const interval = setInterval(fetchRejections, 120000);
     
     return () => clearInterval(interval);
   }, []);
