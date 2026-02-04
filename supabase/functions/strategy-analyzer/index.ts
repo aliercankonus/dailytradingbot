@@ -9581,6 +9581,7 @@ serve(async (req) => {
                   phase1NeutralMomentum,
                   derivedDirection,
                   momentumDirection: effectiveMomentumDirection,
+                  momentumScore: earlyMomentumScore?.toFixed(1) ?? "0",
                   macdHistogram: macdHistogramValue.toFixed(6),
                   macdHistogramAbs: macdHistogramAbs.toFixed(6),
                   weakMomentumThreshold: weakMomentumThreshold.toFixed(6),
