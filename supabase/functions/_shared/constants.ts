@@ -4748,55 +4748,288 @@ export const MOMENTUM_FLIP_DETECTION = {
   BYPASS_COOLDOWN_REQUIRE_HTF: true,  // 4h must align with new direction
 } as const;
 
-// ============= MICRO_TREND MOMENTUM ALIGNMENT REQUIREMENT =============
-// Strengthens MICRO_TREND exception to require momentum alignment
-// Prevents MICRO_TREND from allowing entries against momentum direction
-// ROOT CAUSE FIX: MICRO_TREND was bypassing momentum checks and entering SHORTs against bullish momentum
-// ENHANCED: Added momentum state validation and sizing tiers for probe trades
+// ============= OPTIMIZED MICRO_TREND SCALING SYSTEM =============
+// Comprehensive position sizing for MICRO_TREND entries based on:
+// 1. Momentum State + Score (primary filter)
+// 2. HTF (4h) Trend Alignment (counter-trend protection)
+// 3. Directional Runway (late entry protection)
+// 4. ADX Rescue (graduated exception)
+// 5. Minimum Floor (prevents insignificant positions)
+//
+// All multipliers are MULTIPLICATIVE and apply to the base 60% MICRO_TREND size
+// Worst case (not blocked): 0.5 × 0.6 × 0.5 × 0.6 = 9% → floor bumps to 20%
 export const MICRO_TREND_MOMENTUM_SAFETY = {
   ENABLED: true,
   
-  // ===== MOMENTUM ALIGNMENT REQUIREMENT (TIGHTENED) =====
-  // For bullish micro-trend: momentum score must be > this (not bearish)
-  MIN_MOMENTUM_FOR_BULLISH: 0,    // TIGHTENED from -10 - no negative momentum for LONG
-  // For bearish micro-trend: momentum score must be < this (not bullish)
-  MAX_MOMENTUM_FOR_BEARISH: 0,    // TIGHTENED from 10 - no positive momentum for SHORT
+  // ===== STEP 1: MOMENTUM STATE HANDLING =====
+  // Determines base eligibility and initial multiplier
+  MOMENTUM_STATE: {
+    // 'none' state = hard block (no directional energy detected)
+    BLOCK_ON_NONE: true,
+    // 'building' state = allow with reduced size (probe trade)
+    BUILDING_MULTIPLIER: 0.5,
+    // 'confirmed' or 'mixed' state = continue to score check
+    CONFIRMED_MULTIPLIER: 1.0,
+    MIXED_MULTIPLIER: 1.0,  // Will be evaluated in score step
+  },
   
-  // ===== MOMENTUM STATE VALIDATION (NEW) =====
-  // Prevents probe trades when momentum is mixed/unconfirmed
+  // ===== STEP 2: SMART MOMENTUM SCORE TIERS =====
+  // Uses |smart_momentum_score| for magnitude-based sizing
+  MOMENTUM_SCORE: {
+    // Block if score < 15 (insufficient directional conviction)
+    MIN_SCORE_THRESHOLD: 15,
+    // Partial size if score 15-30 (moderate conviction)
+    MODERATE_SCORE_THRESHOLD: 30,
+    MODERATE_MULTIPLIER: 0.6,
+    // Full size if score >= 30 (strong conviction)
+    FULL_MULTIPLIER: 1.0,
+  },
+  
+  // ===== STEP 3: HTF (4H) TREND ALIGNMENT =====
+  // Applies penalty when 4h trend is neutral or counter-trend
+  HTF_ALIGNMENT: {
+    ENABLED: true,
+    // 4h neutral + score >= 30 = moderate reduction
+    NEUTRAL_STRONG_MOMENTUM_MULTIPLIER: 0.7,
+    // 4h neutral + score < 30 = larger reduction
+    NEUTRAL_WEAK_MOMENTUM_MULTIPLIER: 0.5,
+    // Counter-trend (4h opposes direction) = soft protection
+    COUNTER_TREND_MULTIPLIER: 0.5,
+    // 4h aligned with direction = no adjustment
+    ALIGNED_MULTIPLIER: 1.0,
+  },
+  
+  // ===== STEP 4: DIRECTIONAL RUNWAY (Late Entry Scaling) =====
+  // Uses move_from_24h_low_percent for LONG, move_from_24h_high_percent for SHORT
+  RUNWAY: {
+    ENABLED: true,
+    // Block if < 1.5% runway remains (insufficient room)
+    MIN_RUNWAY_PERCENT: 1.5,
+    // 1.5-3% runway = partial size
+    SHORT_RUNWAY_MAX: 3.0,
+    SHORT_RUNWAY_MULTIPLIER: 0.6,
+    // 3-5% runway = moderate size
+    MEDIUM_RUNWAY_MAX: 5.0,
+    MEDIUM_RUNWAY_MULTIPLIER: 0.8,
+    // >= 5% runway = full size
+    LONG_RUNWAY_MULTIPLIER: 1.0,
+  },
+  
+  // ===== STEP 5: GRADUATED ADX EXCEPTION (Rescue) =====
+  // Allows recovery when ADX is in transition zone with confirmations
+  ADX_RESCUE: {
+    ENABLED: true,
+    // ADX range for rescue eligibility
+    MIN_ADX: 22,
+    MAX_ADX: 25,
+    // Requirements for rescue
+    REQUIRE_ADX_RISING: true,
+    MIN_MOMENTUM_SCORE: 15,
+    MIN_QUALITY_SCORE: 65,
+    // Rescue floor: Math.max(currentMultiplier, 0.6)
+    RESCUE_FLOOR: 0.6,
+  },
+  
+  // ===== STEP 6: MINIMUM FLOOR =====
+  // Prevents positions from becoming insignificantly small
+  MIN_SIZE_MULTIPLIER: 0.2,  // 20% minimum if not blocked
+  
+  // ===== LEGACY PARAMETERS (for backwards compatibility) =====
+  MIN_MOMENTUM_FOR_BULLISH: 0,
+  MAX_MOMENTUM_FOR_BEARISH: 0,
   REQUIRE_MOMENTUM_CONFIRMATION: true,
-  // Valid momentum states that allow full entry
   CONFIRMED_MOMENTUM_STATES: ['confirmed', 'building'] as string[],
-  // Position multiplier when momentum is partially aligned (mixed state but confirms=true)
-  PARTIAL_ALIGNMENT_MULTIPLIER: 0.55,  // 55% size for partial confirmation
-  // Block entirely when momentum is mixed/opposing AND not confirmed
+  PARTIAL_ALIGNMENT_MULTIPLIER: 0.55,
   BLOCK_ON_MIXED_UNCONFIRMED: true,
-  
-  // ===== 4H TREND REQUIREMENT =====
-  // Block SHORT micro-trend if 4h is bullish
   BLOCK_SHORT_IF_4H_BULLISH: true,
-  // Block LONG micro-trend if 4h is bearish  
   BLOCK_LONG_IF_4H_BEARISH: true,
-  
-  // ===== MINIMUM CANDLE PERSISTENCE =====
-  // Require micro-trend to persist for at least this many candles
   MIN_PERSISTENCE_CANDLES: 3,
-  
-  // ===== MINIMUM ADX FOR MICRO_TREND =====
-  MIN_ADX_FOR_MICRO_TREND: 20,  // Some trend strength required
-  
-  // ===== SIZING TIERS =====
-  // Momentum confirmed + ADX rising + LTF alignment = full size
+  MIN_ADX_FOR_MICRO_TREND: 20,
   FULL_CONFIRMATION_MULTIPLIER: 1.0,
-  // Momentum partially aligned (one condition missing) = reduced
   MODERATE_CONFIRMATION_MULTIPLIER: 0.55,
-  // Momentum state is 'none' but confirms=true = further reduced (probe only)
   WEAK_CONFIRMATION_MULTIPLIER: 0.35,
   
   // ===== LOGGING =====
   LOG_DENIALS: true,
   LOG_SIZING_TIERS: true,
+  LOG_DETAILED_SCALING: true,
 } as const;
+
+// ============= MICRO_TREND SCALING RESULT TYPE =============
+export interface MicroTrendScalingResult {
+  sizeMultiplier: number;
+  blocked: boolean;
+  blockReason: string;
+  scalingReasons: string[];
+  appliedSteps: {
+    momentumState: { multiplier: number; reason: string };
+    momentumScore: { multiplier: number; reason: string };
+    htfAlignment: { multiplier: number; reason: string };
+    runway: { multiplier: number; reason: string };
+    adxRescue: { applied: boolean; reason: string };
+    floor: { applied: boolean; reason: string };
+  };
+}
+
+// ============= MICRO_TREND SCALING INPUT TYPE =============
+export interface MicroTrendScalingInput {
+  smartMomentumScore: number;
+  momentumState: string;  // 'confirmed' | 'building' | 'mixed' | 'none'
+  trend4h: string;        // 'bullish' | 'bearish' | 'neutral'
+  isLong: boolean;
+  moveFromLowPercent: number;   // For LONG runway check
+  moveFromHighPercent: number;  // For SHORT runway check
+  adx: number;
+  adxSlope: number;
+  qualityScore: number;
+}
+
+// ============= MICRO_TREND SCALING CALCULATOR =============
+// Centralized function for calculating MICRO_TREND position sizing
+// Called by strategy-analyzer with pre-extracted values
+export function calculateMicroTrendScaling(input: MicroTrendScalingInput): MicroTrendScalingResult {
+  const config = MICRO_TREND_MOMENTUM_SAFETY;
+  let sizeMultiplier = 1.0;
+  const scalingReasons: string[] = [];
+  let blocked = false;
+  let blockReason = '';
+  
+  const appliedSteps = {
+    momentumState: { multiplier: 1.0, reason: '' },
+    momentumScore: { multiplier: 1.0, reason: '' },
+    htfAlignment: { multiplier: 1.0, reason: '' },
+    runway: { multiplier: 1.0, reason: '' },
+    adxRescue: { applied: false, reason: '' },
+    floor: { applied: false, reason: '' },
+  };
+  
+  // ===== STEP 1: MOMENTUM STATE CHECK =====
+  if (input.momentumState === 'none' && config.MOMENTUM_STATE.BLOCK_ON_NONE) {
+    blocked = true;
+    blockReason = `Blocked: momentum state 'none' (no directional energy)`;
+    appliedSteps.momentumState = { multiplier: 0, reason: blockReason };
+    return { sizeMultiplier: 0, blocked, blockReason, scalingReasons: [blockReason], appliedSteps };
+  } else if (input.momentumState === 'building') {
+    sizeMultiplier *= config.MOMENTUM_STATE.BUILDING_MULTIPLIER;
+    const reason = `Partial: momentum building (${config.MOMENTUM_STATE.BUILDING_MULTIPLIER * 100}%)`;
+    scalingReasons.push(reason);
+    appliedSteps.momentumState = { multiplier: config.MOMENTUM_STATE.BUILDING_MULTIPLIER, reason };
+  } else {
+    // 'confirmed' or 'mixed' - continue to score check
+    appliedSteps.momentumState = { multiplier: 1.0, reason: `State=${input.momentumState}, continue to score check` };
+  }
+  
+  // ===== STEP 2: MOMENTUM SCORE CHECK =====
+  const absScore = Math.abs(input.smartMomentumScore);
+  if (absScore < config.MOMENTUM_SCORE.MIN_SCORE_THRESHOLD) {
+    blocked = true;
+    blockReason = `Blocked: momentum score ${absScore.toFixed(0)} < ${config.MOMENTUM_SCORE.MIN_SCORE_THRESHOLD} required`;
+    appliedSteps.momentumScore = { multiplier: 0, reason: blockReason };
+    return { sizeMultiplier: 0, blocked, blockReason, scalingReasons: [...scalingReasons, blockReason], appliedSteps };
+  } else if (absScore < config.MOMENTUM_SCORE.MODERATE_SCORE_THRESHOLD) {
+    sizeMultiplier *= config.MOMENTUM_SCORE.MODERATE_MULTIPLIER;
+    const reason = `Partial: moderate momentum (score=${absScore.toFixed(0)}, ${config.MOMENTUM_SCORE.MODERATE_MULTIPLIER * 100}%)`;
+    scalingReasons.push(reason);
+    appliedSteps.momentumScore = { multiplier: config.MOMENTUM_SCORE.MODERATE_MULTIPLIER, reason };
+  } else {
+    const reason = `Full: strong momentum (score=${absScore.toFixed(0)})`;
+    scalingReasons.push(reason);
+    appliedSteps.momentumScore = { multiplier: config.MOMENTUM_SCORE.FULL_MULTIPLIER, reason };
+  }
+  
+  // ===== STEP 3: HTF (4H) TREND ALIGNMENT =====
+  if (config.HTF_ALIGNMENT.ENABLED) {
+    const isCounterTrend = (input.isLong && input.trend4h === 'bearish') || 
+                           (!input.isLong && input.trend4h === 'bullish');
+    const isNeutral = input.trend4h === 'neutral';
+    
+    if (isCounterTrend) {
+      sizeMultiplier *= config.HTF_ALIGNMENT.COUNTER_TREND_MULTIPLIER;
+      const reason = `Counter-trend 4h: size halved (${config.HTF_ALIGNMENT.COUNTER_TREND_MULTIPLIER * 100}%)`;
+      scalingReasons.push(reason);
+      appliedSteps.htfAlignment = { multiplier: config.HTF_ALIGNMENT.COUNTER_TREND_MULTIPLIER, reason };
+    } else if (isNeutral) {
+      const htfMultiplier = absScore >= config.MOMENTUM_SCORE.MODERATE_SCORE_THRESHOLD
+        ? config.HTF_ALIGNMENT.NEUTRAL_STRONG_MOMENTUM_MULTIPLIER
+        : config.HTF_ALIGNMENT.NEUTRAL_WEAK_MOMENTUM_MULTIPLIER;
+      sizeMultiplier *= htfMultiplier;
+      const reason = `4h neutral: ${htfMultiplier * 100}% (${absScore >= config.MOMENTUM_SCORE.MODERATE_SCORE_THRESHOLD ? 'strong' : 'moderate'} momentum)`;
+      scalingReasons.push(reason);
+      appliedSteps.htfAlignment = { multiplier: htfMultiplier, reason };
+    } else {
+      appliedSteps.htfAlignment = { multiplier: 1.0, reason: `4h aligned (${input.trend4h}), no adjustment` };
+    }
+  }
+  
+  // ===== STEP 4: DIRECTIONAL RUNWAY CHECK =====
+  if (config.RUNWAY.ENABLED) {
+    const movePercent = input.isLong ? input.moveFromLowPercent : input.moveFromHighPercent;
+    
+    if (movePercent < config.RUNWAY.MIN_RUNWAY_PERCENT) {
+      blocked = true;
+      blockReason = `Blocked: insufficient runway (${movePercent.toFixed(2)}% < ${config.RUNWAY.MIN_RUNWAY_PERCENT}% min)`;
+      appliedSteps.runway = { multiplier: 0, reason: blockReason };
+      return { sizeMultiplier: 0, blocked, blockReason, scalingReasons: [...scalingReasons, blockReason], appliedSteps };
+    } else if (movePercent < config.RUNWAY.SHORT_RUNWAY_MAX) {
+      sizeMultiplier *= config.RUNWAY.SHORT_RUNWAY_MULTIPLIER;
+      const reason = `Short runway: ${movePercent.toFixed(2)}% (${config.RUNWAY.SHORT_RUNWAY_MULTIPLIER * 100}%)`;
+      scalingReasons.push(reason);
+      appliedSteps.runway = { multiplier: config.RUNWAY.SHORT_RUNWAY_MULTIPLIER, reason };
+    } else if (movePercent < config.RUNWAY.MEDIUM_RUNWAY_MAX) {
+      sizeMultiplier *= config.RUNWAY.MEDIUM_RUNWAY_MULTIPLIER;
+      const reason = `Medium runway: ${movePercent.toFixed(2)}% (${config.RUNWAY.MEDIUM_RUNWAY_MULTIPLIER * 100}%)`;
+      scalingReasons.push(reason);
+      appliedSteps.runway = { multiplier: config.RUNWAY.MEDIUM_RUNWAY_MULTIPLIER, reason };
+    } else {
+      const reason = `Long runway: ${movePercent.toFixed(2)}% (full size)`;
+      scalingReasons.push(reason);
+      appliedSteps.runway = { multiplier: config.RUNWAY.LONG_RUNWAY_MULTIPLIER, reason };
+    }
+  }
+  
+  // ===== STEP 5: ADX RESCUE (Graduated Exception) =====
+  if (config.ADX_RESCUE.ENABLED) {
+    const inRescueRange = input.adx >= config.ADX_RESCUE.MIN_ADX && input.adx < config.ADX_RESCUE.MAX_ADX;
+    const adxRising = input.adxSlope > 0;
+    const meetsRequirements = inRescueRange && 
+                              (!config.ADX_RESCUE.REQUIRE_ADX_RISING || adxRising) &&
+                              absScore >= config.ADX_RESCUE.MIN_MOMENTUM_SCORE &&
+                              input.qualityScore >= config.ADX_RESCUE.MIN_QUALITY_SCORE;
+    
+    if (meetsRequirements && sizeMultiplier < config.ADX_RESCUE.RESCUE_FLOOR) {
+      const oldMultiplier = sizeMultiplier;
+      sizeMultiplier = config.ADX_RESCUE.RESCUE_FLOOR;
+      const reason = `ADX rescue: ${(oldMultiplier * 100).toFixed(0)}% → ${config.ADX_RESCUE.RESCUE_FLOOR * 100}% (ADX=${input.adx.toFixed(1)}, rising=${adxRising}, quality=${input.qualityScore})`;
+      scalingReasons.push(reason);
+      appliedSteps.adxRescue = { applied: true, reason };
+    } else if (inRescueRange && !meetsRequirements) {
+      const missingReqs: string[] = [];
+      if (config.ADX_RESCUE.REQUIRE_ADX_RISING && !adxRising) missingReqs.push('ADX not rising');
+      if (absScore < config.ADX_RESCUE.MIN_MOMENTUM_SCORE) missingReqs.push(`score ${absScore.toFixed(0)} < ${config.ADX_RESCUE.MIN_MOMENTUM_SCORE}`);
+      if (input.qualityScore < config.ADX_RESCUE.MIN_QUALITY_SCORE) missingReqs.push(`quality ${input.qualityScore} < ${config.ADX_RESCUE.MIN_QUALITY_SCORE}`);
+      appliedSteps.adxRescue = { applied: false, reason: `Not eligible: ${missingReqs.join(', ')}` };
+    } else {
+      appliedSteps.adxRescue = { applied: false, reason: 'ADX not in rescue range' };
+    }
+  }
+  
+  // ===== STEP 6: MINIMUM FLOOR =====
+  if (sizeMultiplier > 0 && sizeMultiplier < config.MIN_SIZE_MULTIPLIER) {
+    const oldMultiplier = sizeMultiplier;
+    sizeMultiplier = config.MIN_SIZE_MULTIPLIER;
+    const reason = `Floor applied: ${(oldMultiplier * 100).toFixed(0)}% → ${config.MIN_SIZE_MULTIPLIER * 100}% minimum`;
+    scalingReasons.push(reason);
+    appliedSteps.floor = { applied: true, reason };
+  }
+  
+  return {
+    sizeMultiplier,
+    blocked,
+    blockReason,
+    scalingReasons,
+    appliedSteps,
+  };
+}
 
 // ============= PHASE 1: DIRECTION REGIME CLASSIFIER =============
 // Determines market regime BEFORE direction derivation to adjust gate behavior
