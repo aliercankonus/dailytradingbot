@@ -1677,7 +1677,9 @@ const HardBlockStochRsiDisplay = ({ filtersStatus, trendData }: { filtersStatus:
 
 const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const adx = coerceNumeric(filtersStatus?.adx, 0);
-  const adxRequired = coerceNumeric(filtersStatus?.adxRequired, 20);
+  const adxRequired = coerceNumeric(filtersStatus?.adxRequired, 22); // Default per ADX_TOO_LOW doc
+  const adxSlope = coerceNumeric(filtersStatus?.adxSlope ?? trendData?.volatility?.adxSlope, 0);
+  const adxSlopeLabel = adxSlope > 0.05 ? "Rising" : adxSlope < -0.05 ? "Declining" : "Flat";
   const trendRaw =
     filtersStatus?.trend ||
     trendData?.primaryTrend ||
@@ -1710,25 +1712,48 @@ const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
   const stochRsi =
     filtersStatus?.stochRsi ||
     trendData?.stochasticRsi?.aggregated ||
-    trendData?.stochasticRsi?.["4h"]; // fallback: show 4h stoch
+    trendData?.stochasticRsi?.["4h"];
   const volatility = filtersStatus?.volatility || trendData?.volatility;
   
+  // NEW: Momentum context fields from enriched ADX logging
+  const momentumScore = coerceNumeric(filtersStatus?.momentumScore, null);
+  const momentumDirection = filtersStatus?.momentumDirection || filtersStatus?.momentum?.direction;
+  const momentumState = filtersStatus?.momentumState || filtersStatus?.momentum?.state;
+  const derivedDirection = filtersStatus?.derivedDirection || filtersStatus?.direction;
+  
+  // NEW: Mean reversion context
+  const meanReversionChecked = filtersStatus?.meanReversionChecked ?? false;
+  const meanReversionDetected = filtersStatus?.meanReversionDetected ?? false;
+  const meanReversionDirection = filtersStatus?.meanReversionDirection;
+  const meanReversionScore = coerceNumeric(filtersStatus?.meanReversionScore, null);
+  const meanReversionAllowed = filtersStatus?.meanReversionAllowed ?? false;
+  
+  // NEW: Bypass eligibility checks
+  const squeezeCheck = filtersStatus?.squeezeCheck;
+  const earlyIgnitionCheck = filtersStatus?.earlyIgnitionCheck;
+  
   const adxPercent = Math.min((adx / 40) * 100, 100);
-  const adxDeficit = adxRequired - adx;
+  const adxDeficit = Math.max(adxRequired - adx, 0);
+  
+  // Determine if this is transitional zone (18-22)
+  const isTransitionalZone = adx >= 18 && adx < 22;
+  const isHardFloor = adx < 18;
   
   return (
     <div className="space-y-3 p-3 bg-red-500/10 rounded-md border border-red-500/30">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <XCircle className="h-4 w-4 text-red-500" />
-          <span className="text-xs font-semibold text-red-400">HARD GATE: ADX Too Low</span>
+          <span className="text-xs font-semibold text-red-400">
+            HARD GATE: ADX Too Low {isHardFloor && "(Hard Floor)"}
+          </span>
         </div>
         <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-          Need +{adxDeficit.toFixed(1)}
+          {isHardFloor ? "< 18 Absolute" : `Need +${adxDeficit.toFixed(1)}`}
         </Badge>
       </div>
       
-      {/* ADX Visual Bar */}
+      {/* ADX Visual Bar with zones */}
       <div className="space-y-1">
         <div className="flex justify-between text-[10px]">
           <span className="text-muted-foreground">ADX Trend Strength</span>
@@ -1736,9 +1761,15 @@ const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
         </div>
         <div className="relative h-2 bg-muted/50 rounded-full overflow-hidden">
           <div 
-            className="h-full bg-red-500 rounded-full transition-all"
+            className={`h-full rounded-full transition-all ${isHardFloor ? 'bg-red-600' : isTransitionalZone ? 'bg-amber-500' : 'bg-red-500'}`}
             style={{ width: `${adxPercent}%` }}
           />
+          {/* Hard floor marker at 18 */}
+          <div 
+            className="absolute top-0 h-full w-0.5 bg-red-400"
+            style={{ left: `${(18 / 40) * 100}%` }}
+          />
+          {/* Required threshold marker */}
           <div 
             className="absolute top-0 h-full w-0.5 bg-yellow-400"
             style={{ left: `${(adxRequired / 40) * 100}%` }}
@@ -1746,12 +1777,28 @@ const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
         </div>
         <div className="flex justify-between text-[9px] text-muted-foreground">
           <span>Weak (0)</span>
-          <span>Required ({adxRequired})</span>
+          <span className="text-red-400">Floor (18)</span>
+          <span className="text-yellow-400">Req ({adxRequired})</span>
           <span>Strong (40+)</span>
         </div>
       </div>
       
-      {/* Context Grid */}
+      {/* ADX Slope indicator */}
+      <div className="flex items-center gap-2 text-[10px]">
+        <span className="text-muted-foreground">ADX Slope:</span>
+        <Badge variant="outline" className={`text-[9px] px-1 py-0 ${
+          adxSlope > 0.05 ? 'text-green-400 border-green-400/50' : 
+          adxSlope < -0.05 ? 'text-red-400 border-red-400/50' : 
+          'text-muted-foreground'
+        }`}>
+          {adxSlope > 0 ? '+' : ''}{adxSlope.toFixed(2)} ({adxSlopeLabel})
+        </Badge>
+        {isTransitionalZone && adxSlope < 0.05 && (
+          <span className="text-amber-400 text-[9px]">⚠️ Slope too low for Squeeze/Ignition bypass</span>
+        )}
+      </div>
+      
+      {/* Context Grid - Original 4 fields */}
       <div className="grid grid-cols-4 gap-1.5 text-[10px]">
         <TooltipProvider>
           <Tooltip>
@@ -1784,9 +1831,110 @@ const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
         </div>
         <div className="p-1.5 bg-muted/30 rounded text-center">
           <div className="text-muted-foreground">Momentum</div>
-          <div className="font-medium capitalize">{momentum?.state || "none"}</div>
+          <div className="font-medium capitalize">{momentumState || momentum?.state || "none"}</div>
         </div>
       </div>
+      
+      {/* NEW: Momentum Context Section */}
+      {(momentumScore !== null || momentumDirection || derivedDirection) && (
+        <div className="p-2 bg-blue-500/10 rounded border border-blue-500/20">
+          <div className="text-[10px] font-medium text-blue-400 mb-1.5">Momentum Context</div>
+          <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+            <div className="p-1 bg-muted/20 rounded text-center">
+              <div className="text-muted-foreground text-[9px]">Score</div>
+              <div className={`font-mono font-medium ${
+                momentumScore !== null && momentumScore > 20 ? 'text-green-400' :
+                momentumScore !== null && momentumScore < -20 ? 'text-red-400' :
+                'text-muted-foreground'
+              }`}>
+                {momentumScore !== null ? (momentumScore > 0 ? '+' : '') + momentumScore : '—'}
+              </div>
+            </div>
+            <div className="p-1 bg-muted/20 rounded text-center">
+              <div className="text-muted-foreground text-[9px]">Direction</div>
+              <div className={`font-medium capitalize ${
+                momentumDirection === 'bullish' ? 'text-green-400' :
+                momentumDirection === 'bearish' ? 'text-red-400' :
+                'text-muted-foreground'
+              }`}>
+                {momentumDirection || '—'}
+              </div>
+            </div>
+            <div className="p-1 bg-muted/20 rounded text-center">
+              <div className="text-muted-foreground text-[9px]">Derived</div>
+              <div className={`font-medium uppercase ${
+                derivedDirection === 'long' ? 'text-green-400' :
+                derivedDirection === 'short' ? 'text-red-400' :
+                'text-muted-foreground'
+              }`}>
+                {derivedDirection || '—'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* NEW: Mean Reversion Status */}
+      {meanReversionChecked && (
+        <div className={`p-2 rounded border ${
+          meanReversionDetected 
+            ? meanReversionAllowed 
+              ? 'bg-green-500/10 border-green-500/20' 
+              : 'bg-amber-500/10 border-amber-500/20'
+            : 'bg-muted/20 border-muted/30'
+        }`}>
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="font-medium">
+              MR Status: {meanReversionDetected ? (meanReversionAllowed ? '✅ Allowed' : '⚠️ Detected but blocked') : '❌ Not detected'}
+            </span>
+            {meanReversionScore !== null && (
+              <Badge variant="outline" className="text-[9px] px-1 py-0">
+                Score: {meanReversionScore}
+              </Badge>
+            )}
+          </div>
+          {meanReversionDirection && (
+            <div className="text-[9px] text-muted-foreground mt-1">
+              MR Direction: <span className="font-medium capitalize">{meanReversionDirection}</span>
+            </div>
+          )}
+        </div>
+      )}
+      
+      {/* Bypass Eligibility Checks (for transitional zone) */}
+      {isTransitionalZone && (squeezeCheck || earlyIgnitionCheck) && (
+        <div className="space-y-1.5 p-2 bg-muted/20 rounded border border-muted/30">
+          <div className="text-[10px] font-medium text-muted-foreground">Bypass Checks (18-22 Zone)</div>
+          
+          {squeezeCheck && (
+            <div className="flex items-center justify-between text-[9px]">
+              <span>Squeeze Expansion:</span>
+              <Badge variant="outline" className={`text-[9px] px-1 py-0 ${squeezeCheck.wouldPass ? 'text-green-400' : 'text-red-400'}`}>
+                {squeezeCheck.wouldPass ? '✓ Would Pass' : '✗ Failed'}
+              </Badge>
+            </div>
+          )}
+          {squeezeCheck?.failReasons && squeezeCheck.failReasons.length > 0 && (
+            <div className="text-[9px] text-muted-foreground pl-2">
+              Missing: {squeezeCheck.failReasons.join(', ')}
+            </div>
+          )}
+          
+          {earlyIgnitionCheck && (
+            <div className="flex items-center justify-between text-[9px]">
+              <span>Early Ignition:</span>
+              <Badge variant="outline" className={`text-[9px] px-1 py-0 ${earlyIgnitionCheck.wouldPass ? 'text-green-400' : 'text-red-400'}`}>
+                {earlyIgnitionCheck.wouldPass ? '✓ Would Pass' : '✗ Failed'}
+              </Badge>
+            </div>
+          )}
+          {earlyIgnitionCheck?.failReasons && earlyIgnitionCheck.failReasons.length > 0 && (
+            <div className="text-[9px] text-muted-foreground pl-2">
+              Missing: {earlyIgnitionCheck.failReasons.join(', ')}
+            </div>
+          )}
+        </div>
+      )}
       
       {/* Detailed Momentum Info */}
       {momentum && (
@@ -1811,8 +1959,13 @@ const HardGateAdxDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; 
       )}
       
       <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
-        <span className="text-red-400">⚠️ Why blocked:</span> ADX below 20 indicates no clear trend direction. 
-        Wait for trend strength to develop before entry.
+        <span className="text-red-400">⚠️ Why blocked:</span>{' '}
+        {isHardFloor 
+          ? "ADX below 18 is an absolute block (no exceptions). Market has no trend energy."
+          : isTransitionalZone
+            ? `ADX ${adx.toFixed(1)} in transitional zone (18-22). Requires Squeeze Expansion or Early Ignition bypass to proceed.`
+            : `ADX ${adx.toFixed(1)} below adaptive threshold of ${adxRequired}. Wait for trend strength to develop.`
+        }
       </div>
     </div>
   );
