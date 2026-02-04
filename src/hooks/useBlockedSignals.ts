@@ -76,12 +76,38 @@ export interface BlockedSignal {
     nearExtremeRelaxationTrigger?: string;
     softZoneThreshold?: number;
     hardZoneThreshold?: number;
+    // NEW: Momentum context for ADX gate cognitive completeness
+    momentumDirection?: string;
+    momentumState?: string;
+    // NEW: Mean reversion context
+    meanReversionChecked?: boolean;
+    meanReversionDetected?: boolean;
+    meanReversionDirection?: string | null;
+    meanReversionScore?: number;
+    meanReversionAllowed?: boolean;
+    // NEW: Bypass eligibility checks
+    squeezeCheck?: { wouldPass?: boolean; failReasons?: string[] };
+    earlyIgnitionCheck?: { wouldPass?: boolean; failReasons?: string[] };
+    overrideReason?: string;
+    // NEW: Position multiplier for size reduction tracking
+    positionMultiplier?: number;
+    // Direction derivation
+    derivedDirection?: string;
+    direction?: string;
+    // Allow additional dynamic properties
+    [key: string]: unknown;
   } | null;
   trend_data: {
     direction?: string;
     confidence4h?: number;
     confidence1h?: number;
     microTrendDirection?: string;
+    // Additional trend data properties
+    volatility?: { adx?: number; adxSlope?: number };
+    momentum?: { direction?: string };
+    stochasticRsi?: Record<string, { k?: number }>;
+    // Allow additional dynamic properties
+    [key: string]: unknown;
   } | null;
 }
 

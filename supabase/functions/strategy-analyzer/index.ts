@@ -8706,6 +8706,16 @@ serve(async (req) => {
               regime: regime.regime,
               adxSlope: adxSlopeV11.toFixed(3),
               derivedDirection,
+              // NEW: Momentum context for ADX gate cognitive completeness
+              momentumScore: smartMomentum?.score ?? 0,
+              momentumDirection: smartMomentum?.direction ?? 'neutral',
+              momentumState: momentum?.state ?? 'none',
+              // NEW: Mean reversion context - was it checked? Did it qualify?
+              meanReversionChecked: true,
+              meanReversionDetected: earlyMeanReversionSignal?.detected ?? false,
+              meanReversionDirection: earlyMeanReversionSignal?.direction ?? null,
+              meanReversionScore: earlyMeanReversionSignal?.exhaustionScore ?? 0,
+              meanReversionAllowed: earlyMeanReversionSignal?.allowed ?? false,
               // v1.1 bypass hints
               bypassHints: {
                 needsADX: ADX_GATE_V1_1.HARD_FLOOR,
@@ -8793,6 +8803,16 @@ serve(async (req) => {
                 regime: regime.regime,
                 adxSlope: adxSlopeV11.toFixed(3),
                 derivedDirection,
+                // NEW: Momentum context for ADX gate cognitive completeness
+                momentumScore: smartMomentum?.score ?? 0,
+                momentumDirection: smartMomentum?.direction ?? 'neutral',
+                momentumState: momentum?.state ?? 'none',
+                // NEW: Mean reversion context - was it checked? Did it qualify?
+                meanReversionChecked: true,
+                meanReversionDetected: earlyMeanReversionSignal?.detected ?? false,
+                meanReversionDirection: earlyMeanReversionSignal?.direction ?? null,
+                meanReversionScore: earlyMeanReversionSignal?.exhaustionScore ?? 0,
+                meanReversionAllowed: earlyMeanReversionSignal?.allowed ?? false,
                 // v1.1 exception diagnostic
                 squeezeCheck: {
                   wouldPass: squeezeCheck.isValid,
