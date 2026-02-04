@@ -9591,15 +9591,24 @@ serve(async (req) => {
           
           if (momentumOpposesDirection && effectiveMomentumDirection !== null) {
             // ===== NORMALIZED WEAK MOMENTUM CHECK (PHASE 2 FIX) =====
-            // Use ATR-normalized threshold instead of absolute 0.0001
-            // This ensures consistent behavior across high-priced (BTC) and low-priced assets
-            const macdHistogramAbs = Math.abs(macdHistogramValue);
+            // CRITICAL FIX: Both MACD histogram AND threshold must be in the SAME scale
+            // Raw MACD histogram varies wildly by asset price (BTC: ~36, low-cap: ~0.001)
+            // Solution: Normalize MACD histogram by ATR to get a dimensionless ratio
+            
             // FIX: ATR is stored in volatility.atr, not directly in trendData.atr
             const atrForNormalization = trendData?.volatility?.atr || trendData?.atr || trendData?.atrValue || 0;
-            const weakMomentumThreshold = atrForNormalization > 0 
-              ? atrForNormalization * MOMENTUM_DIRECTION_ALIGNMENT.WEAK_MACD_ATR_MULTIPLIER 
-              : 0.0001;  // Fallback to absolute if no ATR available
-            const isWeakMomentum = macdHistogramAbs < weakMomentumThreshold;
+            
+            // Normalize MACD histogram by ATR (both values now in same scale: ~0-2 typically)
+            // Raw MACD histogram = 36.56, ATR = 584.8 → normalized = 36.56/584.8 = 0.0625
+            const macdHistogramNormalized = atrForNormalization > 0 
+              ? Math.abs(macdHistogramValue) / atrForNormalization 
+              : Math.abs(macdHistogramValue);  // Fallback to raw if no ATR
+            
+            // Threshold is now a simple ratio (dimensionless), not ATR-scaled
+            // 0.0001 means MACD histogram must be less than 0.01% of ATR to be "weak"
+            const weakMomentumThreshold = MOMENTUM_DIRECTION_ALIGNMENT.WEAK_MACD_ATR_MULTIPLIER;
+            
+            const isWeakMomentum = macdHistogramNormalized < weakMomentumThreshold;
             const allowMomentumOverride = isWeakMomentum || adx >= ADX_THRESHOLDS.EXCEPTIONAL;
             
             if (!allowMomentumOverride) {
@@ -9614,8 +9623,9 @@ serve(async (req) => {
                   derivedDirection,
                   momentumDirection: effectiveMomentumDirection,
                   momentumScore: earlyMomentumScore?.toFixed(1) ?? "0",
-                  macdHistogram: macdHistogramValue.toFixed(6),
-                  macdHistogramAbs: macdHistogramAbs.toFixed(6),
+                  // Log both raw and normalized for full transparency
+                  macdHistogramRaw: macdHistogramValue.toFixed(6),
+                  macdHistogramNormalized: macdHistogramNormalized.toFixed(6),
                   weakMomentumThreshold: weakMomentumThreshold.toFixed(6),
                   atrForNormalization: atrForNormalization.toFixed(4),
                   momentumState: momentum?.state,
@@ -9630,7 +9640,7 @@ serve(async (req) => {
               continue;
             }
             if (isWeakMomentum) {
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} Phase 2: Momentum opposes but weak (|MACD| ${macdHistogramAbs.toFixed(6)} < threshold ${weakMomentumThreshold.toFixed(6)}) - allowing`);
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} Phase 2: Momentum opposes but weak (normalized |MACD/ATR| ${macdHistogramNormalized.toFixed(6)} < ${weakMomentumThreshold.toFixed(6)}) - allowing`);
             } else {
               logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.MOMENTUM} Phase 2: Momentum opposes but ADX exceptional (${adx.toFixed(1)} >= ${ADX_THRESHOLDS.EXCEPTIONAL}) - allowing with caution`);
             }
