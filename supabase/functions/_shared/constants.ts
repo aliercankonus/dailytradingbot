@@ -11,6 +11,10 @@ export const TRADING_FEE_PARAMS = {
   MIN_FEE_RATE_PERCENT: 0.02,
   // Maximum fee rate (safety cap)
   MAX_FEE_RATE_PERCENT: 0.2,
+  // Round-trip fee (entry + exit) - used for fee-aware calculations
+  ROUND_TRIP_FEE_PERCENT: 0.2,
+  // Safety buffer above round-trip fee for true break-even
+  TRUE_BE_SAFETY_BUFFER_PERCENT: 0.02,
 } as const;
 
 export const ADX_THRESHOLDS = {
@@ -44,6 +48,7 @@ export const ADX_THRESHOLDS = {
 // v1.1 Minimal Gate: Role discipline - only answers "Is there market energy?"
 // REMOVED in v1.1: 1H Fallback, Neutral 4H Handling, Mean Reversion Override, 
 // Quiet Trend Bypass, Low ADX Trend Exception (moved to dedicated handlers)
+// v1.2 FIX: Only ONE bypass allowed per signal in transitional zone
 export const ADX_GATE_V1_1 = {
   ENABLED: true,
   
@@ -53,8 +58,20 @@ export const ADX_GATE_V1_1 = {
   
   // ===== TRANSITIONAL ZONE (18-22) =====
   // Only 2 exception paths allowed: Squeeze Expansion + Early Ignition
+  // CRITICAL FIX v1.2: Only ONE bypass allowed per signal (prevents over-admission)
   TRANSITIONAL_MIN: 18,
   TRANSITIONAL_MAX: 22,
+  
+  // BYPASS PRIORITY ORDER (only highest-priority applicable bypass fires)
+  // 1 = highest priority, lower numbers win
+  BYPASS_PRIORITY_ORDER: {
+    SQUEEZE_EXPANSION: 1,    // Highest priority - structure-based
+    EARLY_IGNITION: 2,       // Second priority - regime-based
+    MEAN_REVERSION: 3,       // Lowest priority - counter-trend probe
+  } as Record<string, number>,
+  
+  // Log which bypass was selected
+  LOG_BYPASS_SELECTION: true,
   
   // ===== SQUEEZE EXPANSION EXCEPTION (Tier 2) =====
   // Purpose: Allow entries during BB compression breakouts where ADX hasn't yet responded
@@ -888,22 +905,27 @@ export const DECAY_VELOCITY_TIERS = {
 // Key insight: Any favorable movement is signal confirmation worth monetizing
 export const MICRO_PROFIT_LOCK_PARAMS = {
   ENABLED: true,
-  // Micro tiers: below break-even activation but above 0
-  // Uses FIXED locks (not trailing) to prevent stop ping-pong
+  // FEE-AWARE MICRO TIERS (v2.0):
+  // CRITICAL FIX: Remove tiers below fee coverage (~0.22% round-trip fees)
+  // Previous tiers at 0.15%, 0.20% locked in guaranteed losses after fees
+  // Now: Only lock BE once peak >= 0.22% (covers ~0.20% fees + 0.02% buffer)
   // Each tier only moves stop UP - monotonic, never regresses
   TIERS: [
-    { peakThreshold: 0.15, lockTarget: 0.0 },    // At 0.15% peak → move to entry (break-even)
-    { peakThreshold: 0.20, lockTarget: 0.03 },   // At 0.20% peak → lock +0.03%
-    { peakThreshold: 0.25, lockTarget: 0.07 },   // At 0.25% peak → lock +0.07%
-    { peakThreshold: 0.30, lockTarget: 0.10 },   // At 0.30% peak → lock +0.10%
-    { peakThreshold: 0.35, lockTarget: 0.15 },   // At 0.35% peak → lock +0.15%
-    { peakThreshold: 0.40, lockTarget: 0.20 },   // At 0.40% peak → lock +0.20%
-    { peakThreshold: 0.45, lockTarget: 0.25 },   // At 0.45% peak → lock +0.25%
+    // TRUE break-even: Only after fees are covered (0.22% = 0.20% fees + 0.02% buffer)
+    { peakThreshold: 0.22, lockTarget: 0.0 },    // At 0.22% peak → TRUE break-even (net $0)
+    { peakThreshold: 0.28, lockTarget: 0.05 },   // At 0.28% peak → lock +0.05% net
+    { peakThreshold: 0.33, lockTarget: 0.10 },   // At 0.33% peak → lock +0.10% net
+    { peakThreshold: 0.38, lockTarget: 0.15 },   // At 0.38% peak → lock +0.15% net
+    { peakThreshold: 0.43, lockTarget: 0.20 },   // At 0.43% peak → lock +0.20% net
+    { peakThreshold: 0.48, lockTarget: 0.25 },   // At 0.48% peak → lock +0.25% net
   ],
   // Handoff to progressive/break-even logic at this threshold
   HANDOFF_THRESHOLD: 0.50,
   // Slippage buffer: ensures locked profit survives execution
   SLIPPAGE_BUFFER_PERCENT: 0.02,
+  // TRUE_BE_FLOOR: Minimum peak required before ANY protection triggers
+  // Prevents "accept fee loss" scenarios that create artificial churn
+  TRUE_BE_FLOOR_PERCENT: 0.22,
 } as const;
 
 // ============= PROGRESSIVE PROFIT LOCK PARAMETERS =============
@@ -4778,6 +4800,7 @@ export const MICRO_TREND_MOMENTUM_SAFETY = {
     // 'none' state = hard block (no directional energy detected)
     BLOCK_ON_NONE: true,
     // 'building' state = allow with reduced size (probe trade)
+    // CRITICAL FIX: 'building' state requires score >= 30 (tighter coupling)
     BUILDING_MULTIPLIER: 0.5,
     // 'confirmed' or 'mixed' state = continue to score check
     CONFIRMED_MULTIPLIER: 1.0,
@@ -4786,10 +4809,13 @@ export const MICRO_TREND_MOMENTUM_SAFETY = {
   
   // ===== STEP 2: SMART MOMENTUM SCORE TIERS =====
   // Uses |smart_momentum_score| for magnitude-based sizing
+  // CRITICAL FIX: Non-confirmed states require score >= 30 (not just 15)
   MOMENTUM_SCORE: {
     // Block if score < 15 (insufficient directional conviction)
     MIN_SCORE_THRESHOLD: 15,
-    // Partial size if score 15-30 (moderate conviction)
+    // CRITICAL FIX: For non-confirmed states, require >= 30
+    MIN_SCORE_IF_NOT_CONFIRMED: 30,
+    // Partial size if score 15-30 (moderate conviction) - ONLY for 'confirmed' state
     MODERATE_SCORE_THRESHOLD: 30,
     MODERATE_MULTIPLIER: 0.6,
     // Full size if score >= 30 (strong conviction)
@@ -4931,19 +4957,28 @@ export function calculateMicroTrendScaling(input: MicroTrendScalingInput): Micro
   }
   
   // ===== STEP 2: MOMENTUM SCORE CHECK =====
+  // CRITICAL FIX: Non-confirmed states require score >= 30 (tighter admission)
   const absScore = Math.abs(input.smartMomentumScore);
-  if (absScore < config.MOMENTUM_SCORE.MIN_SCORE_THRESHOLD) {
+  const isConfirmedState = input.momentumState === 'confirmed';
+  const effectiveMinScore = isConfirmedState 
+    ? config.MOMENTUM_SCORE.MIN_SCORE_THRESHOLD 
+    : config.MOMENTUM_SCORE.MIN_SCORE_IF_NOT_CONFIRMED;
+  
+  if (absScore < effectiveMinScore) {
     blocked = true;
-    blockReason = `Blocked: momentum score ${absScore.toFixed(0)} < ${config.MOMENTUM_SCORE.MIN_SCORE_THRESHOLD} required`;
+    blockReason = isConfirmedState
+      ? `Blocked: momentum score ${absScore.toFixed(0)} < ${effectiveMinScore} required`
+      : `Blocked: non-confirmed state (${input.momentumState}) requires score >= ${effectiveMinScore}, got ${absScore.toFixed(0)}`;
     appliedSteps.momentumScore = { multiplier: 0, reason: blockReason };
     return { sizeMultiplier: 0, blocked, blockReason, scalingReasons: [...scalingReasons, blockReason], appliedSteps };
-  } else if (absScore < config.MOMENTUM_SCORE.MODERATE_SCORE_THRESHOLD) {
+  } else if (absScore < config.MOMENTUM_SCORE.MODERATE_SCORE_THRESHOLD && isConfirmedState) {
+    // Only allow moderate tier for confirmed state
     sizeMultiplier *= config.MOMENTUM_SCORE.MODERATE_MULTIPLIER;
-    const reason = `Partial: moderate momentum (score=${absScore.toFixed(0)}, ${config.MOMENTUM_SCORE.MODERATE_MULTIPLIER * 100}%)`;
+    const reason = `Partial: confirmed + moderate momentum (score=${absScore.toFixed(0)}, ${config.MOMENTUM_SCORE.MODERATE_MULTIPLIER * 100}%)`;
     scalingReasons.push(reason);
     appliedSteps.momentumScore = { multiplier: config.MOMENTUM_SCORE.MODERATE_MULTIPLIER, reason };
   } else {
-    const reason = `Full: strong momentum (score=${absScore.toFixed(0)})`;
+    const reason = `Full: strong momentum (score=${absScore.toFixed(0)}, state=${input.momentumState})`;
     scalingReasons.push(reason);
     appliedSteps.momentumScore = { multiplier: config.MOMENTUM_SCORE.FULL_MULTIPLIER, reason };
   }
