@@ -451,13 +451,24 @@ const logRejectionWithAI = async (
     adx4h: trendData?.volatility?.adx4h ?? null,
   };
   
-  // Merge Order Flow data, StochRSI data, Bollinger data, and ADX data into filters_status
+  // PHASE FIX: Always include volumeRatio unconditionally in rejection logs
+  // Contract: volumeRatio must always be present (null = not computed, number = actual value)
+  // This fixes the UI bug where missing volumeRatio defaulted to 1.0 ("100% Normal") incorrectly
+  const volumeData = {
+    volumeRatio: trendData?.volume?.ratio ?? null,  // null = not computed, DO NOT default to 1.0
+    volumeTrend: trendData?.volume?.trend ?? null,
+    volumeSpike: trendData?.volume?.spike ?? null,
+    volumeAboveMA: trendData?.volume?.aboveMA ?? null,
+  };
+  
+  // Merge Order Flow data, StochRSI data, Bollinger data, ADX data, and Volume data into filters_status
   // CRITICAL FIX: filtersStatus takes precedence for explicitly passed values (like adxSlope from gate checks)
   // Spread order: base data first, then filtersStatus last to preserve gate-specific values
   let enrichedFiltersStatus = {
     ...stochRsiData, // Always include StochRSI K/D values
     ...bollingerData, // Always include Bollinger %B values
     ...adxData, // ADX and slope from trendData as fallback
+    ...volumeData, // ALWAYS include volume data (null = unknown, not 1.0)
     ...filtersStatus, // LAST: Gate-specific values override defaults (e.g., adxSlope from ADX_SLOPE_GRADUATED)
   };
   

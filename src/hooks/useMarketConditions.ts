@@ -18,11 +18,12 @@ interface GateStatus {
 
 interface SymbolCondition {
   symbol: string;
-  volumeRatio: number;
+  volumeRatio: number | null;  // null = unknown, NOT defaulted to 1.0
   qualityScore: number | null;
   effectiveThreshold: number;
   isHolidayMode: boolean;
   isLowVolume: boolean;
+  isVolumeUnknown: boolean;  // NEW: explicit flag for unknown volume
   blockingGates: string[];
   rejectionReason: string;
   trendDirection: string;
@@ -33,8 +34,9 @@ interface SymbolCondition {
 
 export interface MarketConditions {
   symbols: SymbolCondition[];
-  averageVolumeRatio: number;
+  averageVolumeRatio: number | null;  // null = no valid volume data
   isGlobalHolidayMode: boolean;
+  isVolumeUnknown: boolean;  // NEW: true if no symbols have valid volume data
   gateStatus: GateStatus;
   effectiveThreshold: number;
   totalBlocked: number;
@@ -85,11 +87,17 @@ export const useMarketConditions = () => {
         const trendData = rejection.trend_data || {};
         const reason = rejection.rejection_reason || '';
 
-        // Extract volume ratio from filters_status
-        const volumeRatio = filtersStatus.volumeRatio ?? 
-                           filtersStatus.volume_ratio ?? 
-                           trendData.volumeRatio ?? 
-                           1.0;
+        // Extract volume ratio from filters_status - NEVER default to 1.0
+        // Contract: null = unknown (show N/A), number = actual value
+        const rawVolumeRatio = filtersStatus.volumeRatio ?? 
+                               filtersStatus.volume_ratio ?? 
+                               trendData?.volume?.ratio ?? 
+                               null;  // null = unknown, NOT 1.0
+        
+        // Only use valid volume ratio values, reject garbage data
+        const volumeRatio = typeof rawVolumeRatio === 'number' && rawVolumeRatio >= 0 
+          ? rawVolumeRatio 
+          : null;
         
         // Extract quality score
         const qualityScore = filtersStatus.qualityScore ?? 
@@ -124,8 +132,10 @@ export const useMarketConditions = () => {
           gateStatus.ranging++;
         }
 
-        const isLowVolume = volumeRatio < LOW_VOLUME_THRESHOLD;
-        const isHolidayMode = volumeRatio < HOLIDAY_MODE_THRESHOLD;
+        // Determine volume status - only calculate if volumeRatio is known
+        const isVolumeUnknown = volumeRatio === null;
+        const isLowVolume = !isVolumeUnknown && volumeRatio < LOW_VOLUME_THRESHOLD;
+        const isHolidayMode = !isVolumeUnknown && volumeRatio < HOLIDAY_MODE_THRESHOLD;
         const effectiveThreshold = isLowVolume 
           ? BASE_QUALITY_THRESHOLD + LOW_VOLUME_QUALITY_BOOST 
           : BASE_QUALITY_THRESHOLD;
@@ -142,6 +152,7 @@ export const useMarketConditions = () => {
           effectiveThreshold,
           isHolidayMode,
           isLowVolume,
+          isVolumeUnknown,
           blockingGates,
           rejectionReason: reason,
           trendDirection,
@@ -150,13 +161,18 @@ export const useMarketConditions = () => {
           checkedAt: rejection.checked_at,
         });
 
-        totalVolumeRatio += volumeRatio;
-        volumeCount++;
+        // Only add to total if volume is known
+        if (!isVolumeUnknown) {
+          totalVolumeRatio += volumeRatio;
+          volumeCount++;
+        }
       });
 
-      const averageVolumeRatio = volumeCount > 0 ? totalVolumeRatio / volumeCount : 1.0;
-      const isGlobalHolidayMode = averageVolumeRatio < HOLIDAY_MODE_THRESHOLD;
-      const effectiveThreshold = averageVolumeRatio < LOW_VOLUME_THRESHOLD 
+      // Calculate averages - null if no valid volume data
+      const averageVolumeRatio = volumeCount > 0 ? totalVolumeRatio / volumeCount : null;
+      const isGlobalVolumeUnknown = averageVolumeRatio === null;
+      const isGlobalHolidayMode = !isGlobalVolumeUnknown && averageVolumeRatio < HOLIDAY_MODE_THRESHOLD;
+      const effectiveThreshold = !isGlobalVolumeUnknown && averageVolumeRatio < LOW_VOLUME_THRESHOLD 
         ? BASE_QUALITY_THRESHOLD + LOW_VOLUME_QUALITY_BOOST 
         : BASE_QUALITY_THRESHOLD;
 
@@ -164,6 +180,7 @@ export const useMarketConditions = () => {
         symbols: symbols.sort((a, b) => a.symbol.localeCompare(b.symbol)),
         averageVolumeRatio,
         isGlobalHolidayMode,
+        isVolumeUnknown: isGlobalVolumeUnknown,
         gateStatus,
         effectiveThreshold,
         totalBlocked: symbols.length,
