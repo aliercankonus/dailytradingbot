@@ -29,7 +29,16 @@ import {
 import { useState, memo } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
-const VolumeStatusBadge = ({ ratio }: { ratio: number }) => {
+const VolumeStatusBadge = ({ ratio }: { ratio: number | null }) => {
+  // Handle unknown volume - don't show misleading data
+  if (ratio === null) {
+    return (
+      <Badge variant="outline" className="bg-muted/50 text-muted-foreground border-muted-foreground/30">
+        N/A
+      </Badge>
+    );
+  }
+  
   const percentage = Math.round(ratio * 100);
   
   if (ratio >= 0.7) {
@@ -168,16 +177,27 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
               </div>
               <VolumeStatusBadge ratio={conditions.averageVolumeRatio} />
             </div>
-            <Progress 
-              value={Math.min(conditions.averageVolumeRatio * 100, 100)} 
-              className="h-2"
-            />
-            <p className="text-xs text-muted-foreground">
-              {conditions.averageVolumeRatio >= 0.7 ? 'Normal trading conditions' : 
-               conditions.averageVolumeRatio >= 0.5 ? 'Reduced liquidity - caution advised' :
-               conditions.averageVolumeRatio >= 0.3 ? 'Very low volume - limited signals' :
-               'Holiday-like conditions - signals paused'}
-            </p>
+            {conditions.isVolumeUnknown ? (
+              <>
+                <Progress value={0} className="h-2 opacity-50" />
+                <p className="text-xs text-muted-foreground">
+                  Volume data not available - backend does not log volume ratio for this rejection type
+                </p>
+              </>
+            ) : (
+              <>
+                <Progress 
+                  value={Math.min((conditions.averageVolumeRatio ?? 0) * 100, 100)} 
+                  className="h-2"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {(conditions.averageVolumeRatio ?? 0) >= 0.7 ? 'Normal trading conditions' : 
+                   (conditions.averageVolumeRatio ?? 0) >= 0.5 ? 'Reduced liquidity - caution advised' :
+                   (conditions.averageVolumeRatio ?? 0) >= 0.3 ? 'Very low volume - limited signals' :
+                   'Holiday-like conditions - signals paused'}
+                </p>
+              </>
+            )}
           </div>
 
           {/* Quality Threshold */}
@@ -208,11 +228,11 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span>Base: 65</span>
-              {conditions.averageVolumeRatio < 0.5 && (
+              {!conditions.isVolumeUnknown && (conditions.averageVolumeRatio ?? 1) < 0.5 && (
                 <>
                   <span>+</span>
                   <Badge variant="outline" className="text-xs px-1 py-0 bg-yellow-500/10 text-yellow-500">
-                    +5 low volume
+                    +3 low volume
                   </Badge>
                 </>
               )}
