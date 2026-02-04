@@ -206,20 +206,25 @@ export const TradingSignalsDashboard = () => {
             const reason = executionRejection.rejection_reason.replace('EXECUTION: ', '');
             const filters = executionRejection.filters_status;
             
-            // Extract key metrics for display
+            // Extract key metrics for display based on rejection type
             let details: string[] = [];
             if (filters) {
+              // VWAP overextension details
               if (filters.vwapDeviation !== undefined) {
                 details.push(`VWAP deviation: ${Number(filters.vwapDeviation).toFixed(2)}%`);
               }
+              // Volume details with threshold comparison
               if (filters.volumeRatio !== undefined) {
-                details.push(`Volume ratio: ${Number(filters.volumeRatio).toFixed(1)}x`);
+                const threshold = filters.threshold !== undefined ? Number(filters.threshold) : 10;
+                details.push(`Volume: ${Number(filters.volumeRatio).toFixed(1)}x (need ${threshold}x)`);
               }
+              // ADX context
               if (filters.adx !== undefined) {
                 details.push(`ADX: ${Number(filters.adx).toFixed(1)}`);
               }
-              if (filters.stochRsiK !== undefined) {
-                details.push(`StochRSI: ${Number(filters.stochRsiK).toFixed(0)}`);
+              // Quality score if available
+              if (filters.qualityScore !== undefined) {
+                details.push(`Quality: ${Number(filters.qualityScore).toFixed(0)}`);
               }
             }
             
