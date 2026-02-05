@@ -2341,7 +2341,8 @@ serve(async (req) => {
       // Counter-Trend Admission Layer
       | 'COUNTER_TREND_ADMISSION'
       // NEW: MR Probe Momentum Tolerance
-      | 'MR_EXTREME_MOMENTUM_BLOCK';
+      | 'MR_EXTREME_MOMENTUM_BLOCK'
+      | 'MR_SAFETY_CHECK_FAILED';  // MR probe blocked by safety checks (ADX persistence, delta)
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -5244,7 +5245,38 @@ serve(async (req) => {
               // For Mean Reversion probes, opposing momentum is EXPECTED (we just flipped direction)
               // Use relaxed thresholds from COUNTER_TREND_ADMISSION.MOMENTUM_TOLERANCE
               const mrTolerance = COUNTER_TREND_ADMISSION.MOMENTUM_TOLERANCE;
-              const isMrProbe = moveZone === 'MEAN_REVERSION' && moveZoneDetails?.meanReversionAllowed && mrTolerance.ENABLED;
+              const baseMrProbeCheck = moveZone === 'MEAN_REVERSION' && moveZoneDetails?.meanReversionAllowed && mrTolerance.ENABLED;
+              
+              // ===== SAFETY #1: ADX PERSISTENCE GATING =====
+              // MR tolerance only applies when trend energy is CONFIRMED decaying
+              // Prevents early MR probes during shallow pullbacks
+              const mrAdxPersistence = counterTrendAdmissionResult?.adxSlopePersistence ?? 0;
+              const adxPersistenceMet = mrAdxPersistence >= mrTolerance.ADX_PERSISTENCE_BYPASS_THRESHOLD;
+              
+              // ===== SAFETY #2: MOMENTUM DELTA IMPROVEMENT =====
+              // For LONG MR probes: momentum delta should be >= 0 (not getting worse)
+              // For SHORT MR probes: momentum delta should be <= 0 (not getting worse)
+              const prevMomentumScore = trendData?.momentum?.prevScore ?? smartMomentum.score;
+              const momentumDelta = smartMomentum.score - prevMomentumScore;
+              const deltaMeetsCriteria = !mrTolerance.REQUIRE_IMPROVING_DELTA || (
+                (derivedDirection === 'long' && momentumDelta >= mrTolerance.IMPROVING_DELTA_THRESHOLD) ||
+                (derivedDirection === 'short' && momentumDelta <= -mrTolerance.IMPROVING_DELTA_THRESHOLD)
+              );
+              
+              // MR probe is ONLY eligible if both safety conditions are met
+              const isMrProbe = baseMrProbeCheck && adxPersistenceMet && deltaMeetsCriteria;
+              
+              // Log MR tolerance eligibility for diagnostics
+              if (baseMrProbeCheck && !isMrProbe) {
+                const failureReasons: string[] = [];
+                if (!adxPersistenceMet) failureReasons.push(`ADX persistence ${mrAdxPersistence} < ${mrTolerance.ADX_PERSISTENCE_BYPASS_THRESHOLD}`);
+                if (!deltaMeetsCriteria) failureReasons.push(`Momentum delta ${momentumDelta.toFixed(1)} not improving for ${derivedDirection.toUpperCase()}`);
+                
+                logger.forSymbol(symbol).info(
+                  `${LOG_CATEGORIES.GATE} ⚠️ MR_TOLERANCE_NOT_MET: ${failureReasons.join('; ')}\n` +
+                  `   → Will use standard momentum threshold instead of relaxed MR threshold`
+                );
+              }
               
               // Determine effective momentum opposing threshold
               const effectiveThreshold = isMrProbe 
@@ -5268,8 +5300,12 @@ serve(async (req) => {
               if (LTF_CONFIRMATION_GATE.BLOCK_WHEN_MOMENTUM_ALSO_OPPOSING && (momentumOpposing || extremeMomentumOpposing)) {
                 // Check for MR probe bypass
                 if (mrModerateOpposition) {
-                  // Allow MR probe with reduced position size for moderate opposition
-                  ltfConfirmationPositionMultiplier = mrTolerance.MODERATE_OPPOSITION_MULTIPLIER;
+                  // ===== SAFETY #3: POSITION MULTIPLIER STACKING =====
+                  // Ensure MR tolerance cannot INCREASE position size
+                  // Take the minimum of: base MR probe size, moderate opposition size
+                  const baseMrProbeMultiplier = COUNTER_TREND_ADMISSION.PROBE_POSITION_MULTIPLIER;
+                  const mrMomentumMultiplier = mrTolerance.MODERATE_OPPOSITION_MULTIPLIER;
+                  ltfConfirmationPositionMultiplier = Math.min(baseMrProbeMultiplier, mrMomentumMultiplier);
                   ltfConfirmationApplied = true;
                   
                   if (mrTolerance.LOG_TOLERANCE_APPLIED) {
@@ -5277,7 +5313,9 @@ serve(async (req) => {
                       `${LOG_CATEGORIES.GATE} 🔄 MR_MOMENTUM_TOLERANCE APPLIED:\n` +
                       `   → MR probe ${derivedDirection.toUpperCase()} allowed despite momentum=${smartMomentum.score.toFixed(0)}\n` +
                       `   → Standard threshold: ${LTF_CONFIRMATION_GATE.MOMENTUM_OPPOSING_THRESHOLD}, MR relaxed: ${mrTolerance.RELAXED_OPPOSING_THRESHOLD}\n` +
-                      `   → Position reduced to ${(ltfConfirmationPositionMultiplier * 100).toFixed(0)}%`
+                      `   → ADX persistence: ${mrAdxPersistence} >= ${mrTolerance.ADX_PERSISTENCE_BYPASS_THRESHOLD} ✓\n` +
+                      `   → Momentum delta: ${momentumDelta.toFixed(1)} (${deltaMeetsCriteria ? 'improving ✓' : 'not improving'})\n` +
+                      `   → Position: min(${(baseMrProbeMultiplier * 100).toFixed(0)}%, ${(mrMomentumMultiplier * 100).toFixed(0)}%) = ${(ltfConfirmationPositionMultiplier * 100).toFixed(0)}%`
                     );
                   }
                 } else if (extremeMomentumOpposing) {
@@ -5301,10 +5339,50 @@ serve(async (req) => {
                       tf4hDir, tf1hDir, tf30mDir,
                       conf4h,
                       momentumScore: smartMomentum.score,
+                      momentumDelta,
+                      adxPersistence: mrAdxPersistence,
                       extremeThreshold: mrTolerance.EXTREME_OPPOSING_THRESHOLD,
                       adx: adx.toFixed(1),
                       mrProbe: true,
                       wouldPassWith: `Momentum must be less extreme (|score| <= ${mrTolerance.EXTREME_OPPOSING_THRESHOLD})`,
+                    },
+                    trendData,
+                    riskParams.ai_analysis_enabled !== false,
+                    earlyOrderFlowAnalysis
+                  );
+                  continue;
+                } else if (baseMrProbeCheck && !isMrProbe) {
+                  // MR probe was detected but safety conditions not met - block with specific reason
+                  rejectedByHardGates++;
+                  const failureReasons: string[] = [];
+                  if (!adxPersistenceMet) failureReasons.push(`MR_ADX_PERSISTENCE_NOT_MET (${mrAdxPersistence} < ${mrTolerance.ADX_PERSISTENCE_BYPASS_THRESHOLD})`);
+                  if (!deltaMeetsCriteria) failureReasons.push(`MR_DELTA_NOT_IMPROVING (Δ=${momentumDelta.toFixed(1)})`);
+                  const blockReason = `MR_SAFETY_CHECK_FAILED: ${derivedDirection.toUpperCase()} MR probe blocked - ${failureReasons.join(', ')}`;
+                  perSymbolGateAttribution.set(symbol, { 
+                    gate: 'MR_SAFETY_CHECK_FAILED',
+                    details: blockReason 
+                  });
+                  
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                  
+                  await logRejectionWithAI(
+                    supabase, userId, symbol,
+                    blockReason,
+                    {
+                      gate: "MR_SAFETY_CHECK_FAILED",
+                      derivedDirection,
+                      meanReversionDirectionFlipped: true,
+                      tf4hDir, tf1hDir, tf30mDir,
+                      conf4h,
+                      momentumScore: smartMomentum.score,
+                      momentumDelta,
+                      adxPersistence: mrAdxPersistence,
+                      requiredAdxPersistence: mrTolerance.ADX_PERSISTENCE_BYPASS_THRESHOLD,
+                      deltaMeetsCriteria,
+                      adx: adx.toFixed(1),
+                      mrProbe: true,
+                      failureReasons,
+                      wouldPassWith: `ADX persistence >= ${mrTolerance.ADX_PERSISTENCE_BYPASS_THRESHOLD} AND momentum delta improving`,
                     },
                     trendData,
                     riskParams.ai_analysis_enabled !== false,
