@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, STRONG_TREND_HTF_BYPASS_PARAMS, TREND_CONTINUATION_TIGHT_STOPS, DEEP_STOCHRSI_HARD_GATE, CONTEXTUAL_TP_EXPANSION, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, STRONG_TREND_HTF_BYPASS_PARAMS, TREND_CONTINUATION_TIGHT_STOPS, DEEP_STOCHRSI_HARD_GATE, CONTEXTUAL_TP_EXPANSION, FLASH_CRASH_BOUNCE_PROBE, CAPITULATION_BOUNCE_PROBE, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { checkPositionCorrelation, getKnownCorrelation } from "../_shared/correlation.ts";
 import { calculateATR, calculateHistoricalATRAvg } from "../_shared/indicators.ts";
 import { 
@@ -1348,33 +1348,96 @@ serve(async (req) => {
     }
 
     // ============================================================
+    // FLASH CRASH BOUNCE PROBE / CAPITULATION BOUNCE - Ultra-tight SL/TP
+    // These probes use tighter stops and specific TP targets for flash reversals
+    // ============================================================
+    const flashCrashProbe = signal.indicators?.flashCrashBounceProbe;
+    const capitulationProbe = signal.indicators?.capitulationBounceProbe;
+    
+    // Calculate ATR percent for stop/TP calculations
+    const atrPercentForProbes = trendData?.volatility?.atrPercent ?? 1.5;
+    
+    if (flashCrashProbe?.active) {
+      // FLASH CRASH BOUNCE: Ultra-tight stop, wider TP
+      const flashCrashStop = Math.min(
+        atrPercentForProbes * FLASH_CRASH_BOUNCE_PROBE.STOP_LOSS_ATR_MULTIPLIER,
+        FLASH_CRASH_BOUNCE_PROBE.STOP_LOSS_MAX_PERCENT
+      );
+      
+      // Apply ultra-tight stop
+      stopLoss = currentPrice * (1 - flashCrashStop / 100);
+      
+      // Apply wider TP for bounce capture
+      const flashCrashTP = Math.max(
+        FLASH_CRASH_BOUNCE_PROBE.TAKE_PROFIT_MIN_PERCENT,
+        Math.min(
+          atrPercentForProbes * FLASH_CRASH_BOUNCE_PROBE.TAKE_PROFIT_ATR_MULTIPLIER,
+          FLASH_CRASH_BOUNCE_PROBE.TAKE_PROFIT_MAX_PERCENT
+        )
+      );
+      takeProfit = currentPrice * (1 + flashCrashTP / 100);
+      
+      logger.info(`🔥 FLASH CRASH BOUNCE PROBE SL/TP OVERRIDE:`);
+      logger.info(`   → Stop Loss: ${flashCrashStop.toFixed(2)}% (ultra-tight for flash crash)`);
+      logger.info(`   → Take Profit: ${flashCrashTP.toFixed(2)}% (wider for bounce capture)`);
+      logger.info(`   → Entry: $${currentPrice.toFixed(2)}, SL: $${stopLoss.toFixed(2)}, TP: $${takeProfit.toFixed(2)}`);
+    } else if (capitulationProbe?.active) {
+      // CAPITULATION BOUNCE: Tight stop, modest TP
+      const capStop = Math.min(
+        atrPercentForProbes * CAPITULATION_BOUNCE_PROBE.STOP_LOSS_ATR_MULTIPLIER,
+        CAPITULATION_BOUNCE_PROBE.STOP_LOSS_MAX_PERCENT
+      );
+      
+      stopLoss = currentPrice * (1 - capStop / 100);
+      
+      const capTP = Math.max(
+        CAPITULATION_BOUNCE_PROBE.TAKE_PROFIT_MIN_PERCENT,
+        Math.min(
+          atrPercentForProbes * CAPITULATION_BOUNCE_PROBE.TAKE_PROFIT_ATR_MULTIPLIER,
+          CAPITULATION_BOUNCE_PROBE.TAKE_PROFIT_MAX_PERCENT
+        )
+      );
+      takeProfit = currentPrice * (1 + capTP / 100);
+      
+      logger.info(`🔄 CAPITULATION BOUNCE PROBE SL/TP OVERRIDE:`);
+      logger.info(`   → Stop Loss: ${capStop.toFixed(2)}% (tight for capitulation)`);
+      logger.info(`   → Take Profit: ${capTP.toFixed(2)}% (modest for bounce)`);
+      logger.info(`   → Entry: $${currentPrice.toFixed(2)}, SL: $${stopLoss.toFixed(2)}, TP: $${takeProfit.toFixed(2)}`);
+    }
+
+    // ============================================================
     // MINIMUM STOP LOSS DISTANCE - Prevent premature exits from volatility
     // Enforce minimum distance from entry to prevent tight stops
     // Uses centralized RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT
+    // NOTE: Flash crash and capitulation probes intentionally use tighter stops
+    // Only apply this check if NOT a probe entry
     // ============================================================
     const signalSide = signal.signal_type === 'long' ? 'BUY' : 'SELL';
+    const isProbeEntry = flashCrashProbe?.active || capitulationProbe?.active;
     
-    if (signalSide === 'BUY') {
-      // For LONG: Stop loss must be at least MIN_STOP_DISTANCE_PERCENT below entry
-      const minStopLoss = currentPrice * (1 - RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT / 100);
-      if (stopLoss > minStopLoss) {
-        const originalDistance = ((currentPrice - stopLoss) / currentPrice) * 100;
-        logger.warn(`⚠️ STOP LOSS TOO TIGHT: Original SL ${stopLoss.toFixed(2)} is only ${originalDistance.toFixed(2)}% from entry`);
-        stopLoss = minStopLoss;
-        logger.info(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
-      }
-    } else {
-      // For SHORT: Stop loss must be at least MIN_STOP_DISTANCE_PERCENT above entry
-      const minStopLoss = currentPrice * (1 + RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT / 100);
-      if (stopLoss < minStopLoss) {
-        const originalDistance = ((stopLoss - currentPrice) / currentPrice) * 100;
-        logger.warn(`⚠️ STOP LOSS TOO TIGHT: Original SL ${stopLoss.toFixed(2)} is only ${originalDistance.toFixed(2)}% from entry`);
-        stopLoss = minStopLoss;
-        logger.info(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
+    if (!isProbeEntry) {
+      if (signalSide === 'BUY') {
+        // For LONG: Stop loss must be at least MIN_STOP_DISTANCE_PERCENT below entry
+        const minStopLoss = currentPrice * (1 - RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT / 100);
+        if (stopLoss > minStopLoss) {
+          const originalDistance = ((currentPrice - stopLoss) / currentPrice) * 100;
+          logger.warn(`⚠️ STOP LOSS TOO TIGHT: Original SL ${stopLoss.toFixed(2)} is only ${originalDistance.toFixed(2)}% from entry`);
+          stopLoss = minStopLoss;
+          logger.info(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
+        }
+      } else {
+        // For SHORT: Stop loss must be at least MIN_STOP_DISTANCE_PERCENT above entry
+        const minStopLoss = currentPrice * (1 + RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT / 100);
+        if (stopLoss < minStopLoss) {
+          const originalDistance = ((stopLoss - currentPrice) / currentPrice) * 100;
+          logger.warn(`⚠️ STOP LOSS TOO TIGHT: Original SL ${stopLoss.toFixed(2)} is only ${originalDistance.toFixed(2)}% from entry`);
+          stopLoss = minStopLoss;
+          logger.info(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
+        }
       }
     }
 
-    logger.info(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)} (minimum ${RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT}% distance enforced)`);
+    logger.info(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)}${isProbeEntry ? ' (probe entry - tighter stops allowed)' : ` (minimum ${RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT}% distance enforced)`}`);
 
     // ============================================================
     // CONTEXTUAL TP EXPANSION - Wider targets for high-conviction entries

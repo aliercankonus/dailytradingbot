@@ -597,6 +597,106 @@ export const CAPITULATION_BOUNCE_PROBE = {
   LOG_NEAR_MISS: true,  // Log when close but conditions not met
 } as const;
 
+// ============= FLASH CRASH BOUNCE PROBE =============
+// NEW MICRO-REGIME: V-shaped reversal capture after rapid market drops
+// 
+// RATIONALE:
+// Flash crashes (≥10% drops in ≤4h) violate both assumptions of the Capitulation Bounce Probe:
+// - ADX slope stays positive into the low (no exhaustion signal)
+// - The bounce begins on the same candle or next candle (no structure stabilization)
+//
+// This is a PARALLEL REGIME to Capitulation Bounce Probe, not a replacement:
+// - Capitulation Bounce: Gradual exhaustion, momentum collapsed, ADX slope ≤ 0
+// - Flash Crash Bounce: Rapid V-reversal, forced liquidation rebound, ADX slope > 0 allowed
+//
+// STRICT CONDITIONS (ALL REQUIRED):
+// 1. StochRSI 4H or 1H K ≤ 1 (pinned at absolute floor)
+// 2. Price dropped ≥ 10% within ≤ 4 hours (flash crash velocity)
+// 3. ADX ≥ 35 (high trend energy present)
+// 4. Momentum not extreme opposing (score >= -30)
+// 5. Direction: LONG only (bounce capture)
+//
+// KEY DIFFERENCES FROM CAPITULATION BOUNCE:
+// - ADX slope: IGNORED (allowed > 0)
+// - Candles since low: 0-1 allowed (immediate entry)
+// - Price drop: Stricter (≥10% vs ≥8%)
+// - Velocity: Required (≥2.5% per hour average)
+//
+// RISK CONTROLS (NON-NEGOTIABLE):
+// - Position size: 0.20-0.35x (conservative probe)
+// - Stop loss: Ultra-tight (≤0.5 ATR or 0.8% fixed)
+// - No pyramiding: One-shot attempt only
+// - Cooldown: 6 hours after failed probe
+// - Max probes: 1 per symbol per day
+export const FLASH_CRASH_BOUNCE_PROBE = {
+  ENABLED: true,
+  
+  // ===== DETECTION THRESHOLDS =====
+  MIN_DROP_PERCENT: 10,          // ≥10% drop (stricter than capitulation's 8%)
+  MAX_DROP_HOURS: 4,             // Within 4 hours (velocity check)
+  MAX_STOCHRSI_K: 1,             // K ≤ 1 (pinned at floor)
+  MIN_ADX: 35,                   // High trend energy present
+  
+  // ===== KEY DIFFERENCE: NO ADX SLOPE REQUIREMENT =====
+  // Flash crashes keep ADX slope positive until reversal
+  // Unlike Capitulation Bounce which requires slope ≤ 0
+  IGNORE_ADX_SLOPE: true,
+  
+  // ===== KEY DIFFERENCE: NO HTF STRUCTURE REQUIREMENT =====
+  // Flash crashes bounce on same candle as low
+  // Unlike Capitulation which requires MIN_CANDLES_SINCE_NEW_LOW ≥ 2
+  IGNORE_HTF_STRUCTURE: true,
+  
+  // ===== MOMENTUM REQUIREMENTS =====
+  // More lenient than capitulation - allow directional momentum
+  // Block only if momentum is extreme opposing
+  MOMENTUM_MAX_OPPOSING: 30,     // Block if momentum < -30 (extreme bearish)
+  
+  // ===== VELOCITY CONFIRMATION =====
+  // Confirm rapid decline via price action (not gradual drift)
+  REQUIRE_VELOCITY_CONFIRMATION: true,
+  MIN_HOURLY_DROP_RATE: 2.5,     // ≥2.5% per hour average
+  
+  // ===== POSITION SIZING =====
+  BASE_POSITION_SIZE: 0.20,      // 20% of normal (conservative probe)
+  WITH_VOLUME_SPIKE: 0.30,       // 30% if volume spike confirms bounce interest
+  WITH_REVERSAL_CANDLE: 0.35,    // 35% if bullish engulfing/hammer detected
+  VOLUME_SPIKE_THRESHOLD: 1.5,   // 1.5x average volume
+  
+  // ===== STOP LOSS (ULTRA-TIGHT) =====
+  STOP_LOSS_ATR_MULTIPLIER: 0.5, // 0.5x ATR (ultra-tight for flash crash)
+  STOP_LOSS_MAX_PERCENT: 0.8,    // Max 0.8% (flash crashes require tight stops)
+  
+  // ===== TAKE PROFIT =====
+  TAKE_PROFIT_MIN_PERCENT: 2.0,  // Minimum 2.0% target (flash bounces can be significant)
+  TAKE_PROFIT_MAX_PERCENT: 4.0,  // Maximum 4.0% target (don't overstay)
+  TAKE_PROFIT_ATR_MULTIPLIER: 2.0, // 2.0x ATR target
+  
+  // ===== PARTIAL TP =====
+  // Flash bounces often give fast impulse + stall - take profits quickly
+  PARTIAL_TP_ENABLED: true,
+  PARTIAL_TP_PERCENT: 1.0,       // First TP at 1.0%
+  PARTIAL_TP_SIZE: 0.50,         // Close 50% of position at first TP
+  
+  // ===== SAFETY LIMITS =====
+  MAX_PROBES_PER_SYMBOL_PER_DAY: 1,  // Only 1 probe per symbol per day
+  NO_PYRAMIDING: true,
+  COOLDOWN_HOURS_AFTER_FAILED: 6,    // 6 hour cooldown after failed probe
+  
+  // ===== HARD INVALIDATION =====
+  // If K rises above 5 without price moving 0.8%, probe is invalidated
+  INVALIDATION_K_THRESHOLD: 5,
+  INVALIDATION_REQUIRE_PRICE_MOVE: 0.8,  // 0.8% minimum move for K rise to be valid
+  
+  // ===== REGIME TAGGING =====
+  REGIME_TAG: 'FLASH_CRASH_BOUNCE' as const,
+  ENTRY_TYPE_TAG: 'FLASH_CRASH_BOUNCE_PROBE' as const,
+  
+  // ===== LOGGING =====
+  LOG_PROBE_DETAILS: true,
+  LOG_NEAR_MISS: true,
+} as const;
+
 // ============= PHASE 3: TIME-IN-EXTREME THRESHOLDS =============
 // Tracks consecutive bars at StochRSI extremes for exhaustion detection
 // UPDATED: Raised thresholds to allow more room for trend continuation
