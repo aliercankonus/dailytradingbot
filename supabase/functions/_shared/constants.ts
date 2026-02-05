@@ -537,6 +537,14 @@ export const CAPITULATION_BOUNCE_PROBE = {
   ATR_EXPANSION_THRESHOLD: 1.0,  // ATR slope must be < 1.0
   // OR BB width stabilizing
   BB_WIDTH_STABILIZING_THRESHOLD: 0.5,  // BB width change < 0.5%
+  // Log which volatility condition validated entry
+  LOG_VOLATILITY_CONDITION: true,
+  
+  // ===== HTF STRUCTURE GUARD =====
+  // Block if HTF structure still making new lows (4h close below prior low)
+  // This prevents entering during capitulation continuation
+  REQUIRE_HTF_STRUCTURE_STABLE: true,
+  MIN_CANDLES_SINCE_NEW_LOW: 2,  // At least 2 candles since last 4h low
   
   // ===== POSITION SIZING =====
   // Very conservative - this is a speculative probe
@@ -558,6 +566,13 @@ export const CAPITULATION_BOUNCE_PROBE = {
   TAKE_PROFIT_MAX_PERCENT: 2.5,  // Maximum 2.5% target
   TAKE_PROFIT_ATR_MULTIPLIER: 1.5, // 1.5x ATR target
   
+  // ===== PARTIAL TP (Fast Impulse Capture) =====
+  // Capitulation bounces often give fast impulse + stall
+  // Take 50% at 1.0% to lock in gains
+  PARTIAL_TP_ENABLED: true,
+  PARTIAL_TP_PERCENT: 1.0,       // First TP at 1.0%
+  PARTIAL_TP_SIZE: 0.50,         // Close 50% of position at first TP
+  
   // ===== SAFETY LIMITS =====
   // Prevent overexposure to this speculative setup
   MAX_PROBES_PER_SYMBOL_PER_DAY: 1,  // Only 1 probe per symbol per day
@@ -572,7 +587,9 @@ export const CAPITULATION_BOUNCE_PROBE = {
   INVALIDATION_K_THRESHOLD: 5,
   INVALIDATION_REQUIRE_PRICE_MOVE: 1.0,  // 1% minimum move for K rise to be valid
   
-  // ===== ENTRY TYPE TAGGING =====
+  // ===== REGIME TAGGING =====
+  // Explicit regime attribution for analytics and downstream pipeline
+  REGIME_TAG: 'TRANSITION_CAPITULATION' as const,
   ENTRY_TYPE_TAG: 'CAPITULATION_BOUNCE_PROBE' as const,
   
   // ===== LOGGING =====
