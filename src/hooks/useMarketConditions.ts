@@ -103,10 +103,32 @@ export const useMarketConditions = () => {
         const qualityScore = filtersStatus.qualityScore ?? 
                             filtersStatus.quality_score ?? 
                             null;
-
+        
+        // Extract trend direction - prioritize filters_status.derivedDirection
+        const trendDirection = filtersStatus.derivedDirection ?? 
+                               filtersStatus.derived_direction ??
+                               trendData?.trend ?? 
+                               trendData?.direction ?? 
+                               'unknown';
+        
+        // Extract ADX - check filters_status first (more reliable), then trend_data
+        const rawAdx = filtersStatus.adx ?? 
+                       filtersStatus.ADX ?? 
+                       trendData?.adx ?? 
+                       trendData?.ADX ?? 
+                       null;
+        const adx = typeof rawAdx === 'number' ? rawAdx : null;
+        
+        // Extract momentum state from filters_status
+        const momentumState = filtersStatus.momentumState ?? 
+                              filtersStatus.momentum_state ?? 
+                              filtersStatus.momentumDirection ??
+                              trendData?.momentumState ?? 
+                              'unknown';
+        
         // Determine blocking gates from rejection reason
         const blockingGates: string[] = [];
-        
+
         if (reason.includes('HTF_EXTREME') || reason.includes('overbought') || reason.includes('oversold')) {
           blockingGates.push('HTF Extreme');
           gateStatus.htfExtreme++;
@@ -132,18 +154,13 @@ export const useMarketConditions = () => {
           gateStatus.ranging++;
         }
 
-        // Determine volume status - only calculate if volumeRatio is known
+        // Determine volume status
         const isVolumeUnknown = volumeRatio === null;
         const isLowVolume = !isVolumeUnknown && volumeRatio < LOW_VOLUME_THRESHOLD;
         const isHolidayMode = !isVolumeUnknown && volumeRatio < HOLIDAY_MODE_THRESHOLD;
         const effectiveThreshold = isLowVolume 
           ? BASE_QUALITY_THRESHOLD + LOW_VOLUME_QUALITY_BOOST 
           : BASE_QUALITY_THRESHOLD;
-
-        // Extract trend info
-        const trendDirection = trendData.trend || trendData.direction || 'unknown';
-        const adx = trendData.adx ?? trendData.ADX ?? null;
-        const momentumState = trendData.momentumState || trendData.momentum_state || 'unknown';
 
         symbols.push({
           symbol,
