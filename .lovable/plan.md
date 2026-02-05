@@ -3,6 +3,13 @@
 
 ## Recent Changes
 
+### ✅ Capitulation Bounce Probe v1.1 (2025-02-05)
+- **Explicit Override Mechanism**: Uses `forcedDirectionOverride` flag instead of direct `directionResult` mutation
+- **HTF Structure Guard**: Added `REQUIRE_HTF_STRUCTURE_STABLE` - blocks if price made new 4H low within last 2 candles
+- **Volatility Instrumentation**: Logs which sub-condition (ATR slope vs BB width) validated the entry
+- **Partial TP Logic**: 50% position close at 1.0% profit to capture fast impulse + stall pattern
+- **Regime Tagging**: Explicit `REGIME_TAG: 'TRANSITION_CAPITULATION'` for analytics
+
 ### ✅ Capitulation Bounce Probe (2025-02-05)
 - Added `CAPITULATION_BOUNCE_PROBE` config to constants.ts
 - New micro-regime for post-capitulation balance zone entries

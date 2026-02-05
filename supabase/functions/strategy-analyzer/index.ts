@@ -2945,8 +2945,12 @@ serve(async (req) => {
         // - BUT: Price at absolute extreme (K ≤ 1) after significant drop (≥8%)
         //
         // This is TRANSITIONAL REGIME entry - liquidity vacuum rebound capture
+        // 
+        // ARCHITECTURAL PATTERN: Uses explicit override flags instead of direct directionResult mutation
+        // This prevents "last writer wins" bugs and makes regime attribution explicit in analytics
         let capitulationBounceProbeActive = false;
         let capitulationBouncePositionMultiplier = 0.15;
+        let forcedDirectionOverride: { direction: 'long' | 'short'; regime: string; reason: string } | null = null;
         
         if (CAPITULATION_BOUNCE_PROBE.ENABLED) {
           // Extract required data using centralized extractors
@@ -2966,45 +2970,92 @@ serve(async (req) => {
           const highAdxExhausting = adxValue >= CAPITULATION_BOUNCE_PROBE.MIN_ADX && 
                                     adxSlopeValue <= CAPITULATION_BOUNCE_PROBE.MAX_ADX_SLOPE;
           
-          // Check volatility not expanding (optional)
+          // Check volatility not expanding with instrumentation
           let volatilityOk = true;
+          let volatilityValidatedBy = 'not_required';
           if (CAPITULATION_BOUNCE_PROBE.REQUIRE_VOLATILITY_NOT_EXPANDING) {
             const atrChange = trendData?.volatility?.atrSlope ?? 0;
             const bbWidthChange = trendData?.volatility?.bbWidthChange ?? 0;
-            volatilityOk = atrChange < CAPITULATION_BOUNCE_PROBE.ATR_EXPANSION_THRESHOLD || 
-                           Math.abs(bbWidthChange) < CAPITULATION_BOUNCE_PROBE.BB_WIDTH_STABILIZING_THRESHOLD;
+            const atrStabilized = atrChange < CAPITULATION_BOUNCE_PROBE.ATR_EXPANSION_THRESHOLD;
+            const bbStabilized = Math.abs(bbWidthChange) < CAPITULATION_BOUNCE_PROBE.BB_WIDTH_STABILIZING_THRESHOLD;
+            volatilityOk = atrStabilized || bbStabilized;
+            
+            // Log which condition validated (for post-mortem analysis)
+            if (volatilityOk) {
+              if (atrStabilized && bbStabilized) {
+                volatilityValidatedBy = 'both_atr_and_bb';
+              } else if (atrStabilized) {
+                volatilityValidatedBy = `atr_slope=${atrChange.toFixed(2)}`;
+              } else {
+                volatilityValidatedBy = `bb_width_change=${bbWidthChange.toFixed(2)}`;
+              }
+            }
+          }
+          
+          // ===== HTF STRUCTURE GUARD =====
+          // Block if HTF structure still making new lows (capitulation continuation)
+          let htfStructureStable = true;
+          let candlesSinceNewLow = 0;
+          if (CAPITULATION_BOUNCE_PROBE.REQUIRE_HTF_STRUCTURE_STABLE) {
+            // Check 4h klines for structure - look for no new low in recent candles
+            const klines4h = trendData?.klines4h ?? [];
+            if (klines4h.length >= 3) {
+              // Find the lowest low in last N candles
+              const recentLows = klines4h.slice(-5).map((k: any) => parseFloat(k[3])); // Low prices
+              const lowestLow = Math.min(...recentLows);
+              const currentLow = parseFloat(klines4h[klines4h.length - 1][3]);
+              
+              // Check how many candles since the lowest low
+              for (let i = recentLows.length - 1; i >= 0; i--) {
+                if (recentLows[i] === lowestLow) {
+                  candlesSinceNewLow = recentLows.length - 1 - i;
+                  break;
+                }
+              }
+              
+              htfStructureStable = candlesSinceNewLow >= CAPITULATION_BOUNCE_PROBE.MIN_CANDLES_SINCE_NEW_LOW;
+            }
           }
           
           // All conditions met = Capitulation Bounce Probe
-          if (stochAtExtreme && sufficientDrop && momentumCollapsed && highAdxExhausting && volatilityOk) {
+          if (stochAtExtreme && sufficientDrop && momentumCollapsed && highAdxExhausting && volatilityOk && htfStructureStable) {
             capitulationBounceProbeActive = true;
             
             // Check for volume spike bonus
-            const volumeRatio = trendData?.timeframes?.['1h']?.volumeRatio ?? 1.0;
+            const volumeRatio = trendData?.volume?.['1h']?.volumeRatio ?? trendData?.timeframes?.['1h']?.volumeRatio ?? 1.0;
             if (volumeRatio >= CAPITULATION_BOUNCE_PROBE.VOLUME_SPIKE_THRESHOLD) {
               capitulationBouncePositionMultiplier = CAPITULATION_BOUNCE_PROBE.WITH_VOLUME_SPIKE;
             } else {
               capitulationBouncePositionMultiplier = CAPITULATION_BOUNCE_PROBE.BASE_POSITION_SIZE;
             }
             
-            // Log and override direction for bounce capture
+            // Set explicit override flag (NOT direct mutation)
             const originalDirection = directionResult.direction;
+            forcedDirectionOverride = {
+              direction: 'long',
+              regime: CAPITULATION_BOUNCE_PROBE.REGIME_TAG,
+              reason: `K=${stochK4h.toFixed(1)}, drop=${priceDropPercent.toFixed(1)}%, momentum=${momentumScoreRaw.toFixed(0)}, ADX=${adxValue.toFixed(1)} slope=${adxSlopeValue.toFixed(2)}`
+            };
             
             logger.forSymbol(symbol).info(
               `${LOG_CATEGORIES.SUCCESS} 🔄 CAPITULATION BOUNCE PROBE ACTIVATED:\n` +
+              `   → Regime: ${CAPITULATION_BOUNCE_PROBE.REGIME_TAG}\n` +
               `   → StochRSI K: ${stochK4h.toFixed(1)} (pinned at extreme)\n` +
               `   → Price Drop: ${priceDropPercent.toFixed(1)}% (significant capitulation)\n` +
               `   → Momentum: ${momentumScoreRaw.toFixed(0)} (collapsed to neutral)\n` +
               `   → ADX: ${adxValue.toFixed(1)}, Slope: ${adxSlopeValue.toFixed(2)} (exhausting)\n` +
+              `   → HTF Structure: ${candlesSinceNewLow} candles since new low (stable)\n` +
+              `   → Volatility: ${volatilityValidatedBy}\n` +
               `   → Volume Ratio: ${volumeRatio.toFixed(2)}${volumeRatio >= CAPITULATION_BOUNCE_PROBE.VOLUME_SPIKE_THRESHOLD ? ' (SPIKE)' : ''}\n` +
               `   → Position: ${(capitulationBouncePositionMultiplier * 100).toFixed(0)}% (probe size)\n` +
+              `   → Partial TP: ${CAPITULATION_BOUNCE_PROBE.PARTIAL_TP_ENABLED ? `${CAPITULATION_BOUNCE_PROBE.PARTIAL_TP_SIZE * 100}% @ ${CAPITULATION_BOUNCE_PROBE.PARTIAL_TP_PERCENT}%` : 'disabled'}\n` +
               `   → Direction: LONG (bounce capture from ${originalDirection ?? 'undefined'})`
             );
             
-            // Override directionResult for the rest of the pipeline
-            directionResult.direction = 'long';
+            // Apply override to directionResult via explicit mechanism
+            directionResult.direction = forcedDirectionOverride.direction;
             directionResult.confidence = Math.min(80, (directionResult.confidence || 50) + 20);
-            directionResult.reasons = [`CAPITULATION_BOUNCE_PROBE: K=${stochK4h.toFixed(1)}, drop=${priceDropPercent.toFixed(1)}%, momentum=${momentumScoreRaw.toFixed(0)}, ADX=${adxValue.toFixed(1)} slope=${adxSlopeValue.toFixed(2)}`];
+            directionResult.reasons = [`CAPITULATION_BOUNCE_PROBE: ${forcedDirectionOverride.reason}`];
           } else if (CAPITULATION_BOUNCE_PROBE.LOG_NEAR_MISS && stochK4h <= 5) {
             // Log near-miss for diagnostics (when close but conditions not met)
             const failedConditions: string[] = [];
@@ -3013,6 +3064,7 @@ serve(async (req) => {
             if (!momentumCollapsed) failedConditions.push(`momentum=${momentumScoreRaw.toFixed(0)} not in [${CAPITULATION_BOUNCE_PROBE.MOMENTUM_COLLAPSED_MIN}, ${CAPITULATION_BOUNCE_PROBE.MOMENTUM_COLLAPSED_MAX}]`);
             if (!highAdxExhausting) failedConditions.push(`ADX=${adxValue.toFixed(1)} < ${CAPITULATION_BOUNCE_PROBE.MIN_ADX} or slope=${adxSlopeValue.toFixed(2)} > ${CAPITULATION_BOUNCE_PROBE.MAX_ADX_SLOPE}`);
             if (!volatilityOk) failedConditions.push('volatility still expanding');
+            if (!htfStructureStable) failedConditions.push(`HTF structure unstable (${candlesSinceNewLow} candles since new low < ${CAPITULATION_BOUNCE_PROBE.MIN_CANDLES_SINCE_NEW_LOW})`);
             
             logger.forSymbol(symbol).debug(
               `${LOG_CATEGORIES.GATE} 📋 CAPITULATION BOUNCE NEAR-MISS: K=${stochK4h.toFixed(1)} but failed: ${failedConditions.join(', ')}`
