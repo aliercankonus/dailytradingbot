@@ -398,23 +398,33 @@ const logRejectionWithAI = async (
   orderFlow?: OrderFlowAnalysis | null  // Optional Order Flow data
 ) => {
   // CENTRALIZED: Use shared extractors for consistent StochRSI extraction across all edge functions
+  // Extract all timeframe K/D values for full diagnostic visibility
+  const stochK4h = extractStochRsiK(trendData, '4h');
+  const stochD4h = extractStochRsiD(trendData, '4h');
+  const stochK1h = extractStochRsiK(trendData, '1h');
+  const stochD1h = extractStochRsiD(trendData, '1h');
+  const stochK30m = extractStochRsiK(trendData, '30m');
+  const stochD30m = extractStochRsiD(trendData, '30m');
+  const stochK15m = extractStochRsiK(trendData, '15m');
+  const stochD15m = extractStochRsiD(trendData, '15m');
+  
   const stochRsiData = {
-    stochRsi4h: {
-      k: extractStochRsiK(trendData, '4h'),
-      d: extractStochRsiD(trendData, '4h'),
-    },
-    stochRsi1h: {
-      k: extractStochRsiK(trendData, '1h'),
-      d: extractStochRsiD(trendData, '1h'),
-    },
-    stochRsi30m: {
-      k: extractStochRsiK(trendData, '30m'),
-      d: extractStochRsiD(trendData, '30m'),
-    },
-    stochRsi15m: {
-      k: extractStochRsiK(trendData, '15m'),
-      d: extractStochRsiD(trendData, '15m'),
-    }
+    // FLAT FIELDS for UI compatibility (Issue #1 & #2 fix)
+    stochRsiK: stochK4h,      // Primary 4h K (legacy field)
+    stochRsiD: stochD4h,      // Primary 4h D (NEW - Issue #2)
+    stochRsiK4h: stochK4h,    // Explicit 4h K
+    stochRsiD4h: stochD4h,    // Explicit 4h D (NEW - Issue #2)
+    stochRsiK1h: stochK1h,    // 1h K (NEW - Issue #1)
+    stochRsiD1h: stochD1h,    // 1h D (NEW - Issue #1)
+    stochRsiK30m: stochK30m,  // 30m K
+    stochRsiD30m: stochD30m,  // 30m D
+    stochRsiK15m: stochK15m,  // 15m K
+    stochRsiD15m: stochD15m,  // 15m D
+    // NESTED OBJECTS for structured access
+    stochRsi4h: { k: stochK4h, d: stochD4h },
+    stochRsi1h: { k: stochK1h, d: stochD1h },
+    stochRsi30m: { k: stochK30m, d: stochD30m },
+    stochRsi15m: { k: stochK15m, d: stochD15m }
   };
   
   // Extract Bollinger Band %B and squeeze values from trendData for consistent logging (all timeframes)
