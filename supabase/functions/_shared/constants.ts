@@ -4670,6 +4670,64 @@ export const MEAN_REVERSION_REGIME_REQUIREMENTS = {
   } as const,
 } as const;
 
+// ============= COUNTER-TREND ADMISSION LAYER =============
+// Unified configuration for allowing counter-trend (reversal) entries
+// Single source of truth for all exhaustion/mean-reversion admission decisions
+// This module answers: "Is the dominant trend exhausted enough to allow a reversal probe?"
+
+export const COUNTER_TREND_ADMISSION = {
+  ENABLED: true,
+  
+  // ===== ADX EXHAUSTION REQUIREMENTS =====
+  // Trend energy must be decaying, not expanding
+  MAX_ADX_FOR_EXHAUSTION: 45,       // ADX must be below this (not in dominant trend)
+  MAX_ADX_SLOPE: 0.0,               // ADX slope must be flat/declining
+  MAX_ADX_SLOPE_STRONG: -0.5,       // Strong exhaustion: ADX clearly declining
+  MIN_ADX_SLOPE_PERSISTENCE: 2,     // Consecutive candles with non-positive slope
+  
+  // ===== VOLATILITY CONTRACTION REQUIREMENTS =====
+  // Confirms impulse is dying, not just oscillators resetting
+  REQUIRE_VOLATILITY_CONTRACTION: true,
+  BB_WIDTH_DECLINE_MIN_PERCENT: 5,  // BB width must decline by at least 5%
+  ATR_CHANGE_FLAT_THRESHOLD: 0.5,   // ATR change < 0.5% = flat (acceptable)
+  
+  // ===== LTF STRUCTURE FLIP (Optional Confirmation) =====
+  // Soft confirmation for counter-trend entry timing
+  LTF_STRUCTURE_ENABLED: true,
+  LTF_STRUCTURE_BONUS: 10,          // Confidence bonus when LTF structure confirms
+  LTF_LOOKBACK_BARS: 12,            // Bars to check for HH/HL or LH/LL
+  
+  // ===== POSITION SIZING =====
+  // Counter-trend entries are probes, not convictions
+  PROBE_POSITION_MULTIPLIER: 0.25,  // 25% of normal position
+  MAX_SCALE_IN: 1,                  // Maximum additional entries
+  
+  // ===== SCALE-IN REQUIREMENTS =====
+  SCALE_IN_REQUIREMENTS: {
+    MAX_ADX_FOR_SCALE: 35,          // ADX must drop further before scaling
+    REQUIRE_STRUCTURE_HOLD: true,   // LTF structure must maintain
+    REQUIRE_MOMENTUM_SUPPORT: true, // Momentum must turn supportive
+  },
+  
+  // ===== FAILURE REASON LOGGING =====
+  LOG_FAILURE_REASONS: true,        // Log exact failure cause for forensics
+  
+  // ===== FAILURE REASON CODES =====
+  // These codes are used for explicit failure logging
+  FAILURE_REASONS: {
+    ADX_STILL_EXPANDING: 'ADX slope > 0, trend energy not decaying',
+    ADX_NOT_EXHAUSTED: 'ADX >= 45, still in dominant trend',
+    MOMENTUM_NOT_DECAYING: 'Momentum magnitude not decreasing',
+    VOLATILITY_EXPANDING: 'BB width or ATR still increasing',
+    STOCHRSI_STILL_PEGGED: 'K stuck at extreme (< 5 or > 95)',
+    LTF_NO_STRUCTURE_FLIP: 'Lower timeframe shows no reversal structure',
+    ADX_PERSISTENCE_INSUFFICIENT: 'ADX slope not negative for required consecutive candles',
+  } as Record<string, string>,
+} as const;
+
+// Type for counter-trend admission failure reasons
+export type CounterTrendFailureReason = keyof typeof COUNTER_TREND_ADMISSION.FAILURE_REASONS;
+
 // ============= PHASE: MOMENTUM DIRECTION HARD GATE =============
 // CRITICAL FIX: Prevents counter-trend entries when momentum has flipped
 // This gate runs BEFORE any exception overrides (MICRO_TREND, STRONG_TREND, etc.)

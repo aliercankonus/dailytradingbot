@@ -1,12 +1,27 @@
-// ============= MEAN REVERSION STRATEGY MODULE =============
-// Production-grade exhaustion detection with regime-aware gates
-// Addresses gate collision by running BEFORE blocking gates
+// ============= COUNTER-TREND ADMISSION LAYER =============
+// Unified authority for allowing opposite-direction (reversal) entries
+// Single source of truth for all counter-trend admission decisions
+//
+// ARCHITECTURAL ROLE:
+// This module answers: "Is the dominant trend exhausted enough to allow a reversal probe?"
+// It is NOT a separate gate - it is the ADMISSION CONTROLLER for counter-trend trades.
+//
+// EXECUTION ORDER:
+// 1. Direction is derived (LONG or SHORT)
+// 2. If direction is COUNTER-TREND, this module evaluates admission
+// 3. PASS → Generate reversal signal @ probe size (0.25x)
+// 4. FAIL → Block + log explicit failure reason
+//
+// MUTUAL EXCLUSIVITY:
+// Strong Trend Tier 0 Override (continuation) and Counter-Trend Admission (reversal)
+// cannot both fire. Enforced by flow in strategy-analyzer.
 
 import { 
   MEAN_REVERSION_CONFIG, 
   TREND_PHASE_GATE, 
   EXPANSION_GATE, 
-  MEAN_REVERSION_REGIME_REQUIREMENTS 
+  MEAN_REVERSION_REGIME_REQUIREMENTS,
+  COUNTER_TREND_ADMISSION
 } from "./constants.ts";
 
 // ============= TYPE DEFINITIONS =============
@@ -57,6 +72,369 @@ interface ExhaustionCheck {
   tag: string | null;
   // Recommendation #3: Explicit override reason for post-mortem analysis
   overrideReason: 'EXTREME_ADX_OVERRIDE' | 'EXTREME_REGIME_OVERRIDE' | 'MODERATE_ADX_SLOPE_OVERRIDE' | null;
+}
+
+// ============= COUNTER-TREND ADMISSION RESULT =============
+
+export interface CounterTrendAdmissionResult {
+  allowed: boolean;
+  reason: string;
+  exhaustionStage: 'EARLY' | 'CONFIRMED' | 'NONE';
+  positionSizeMultiplier: number;
+  // Detailed checks
+  adxExhausted: boolean;
+  adxSlopePersistence: number;
+  volatilityContracting: boolean;
+  volatilityReason: string;
+  ltfStructureFlip: boolean;
+  ltfStructureScore: number;
+  stochDepegged: boolean;
+  // Logging
+  failureReasons: string[];
+  triggers: string[];
+}
+
+// ============= ADX SLOPE PERSISTENCE CHECK =============
+
+/**
+ * Checks consecutive periods where ADX slope is non-positive (flat or declining)
+ * This confirms trend energy decay is persistent, not a single-candle fluke
+ * 
+ * @param adxArray - Array of ADX values (most recent last)
+ * @param requiredCandles - Number of consecutive non-positive slope periods required
+ * @returns Number of consecutive non-positive slope periods found
+ */
+export function checkAdxSlopePersistence(adxArray: number[], requiredCandles: number): number {
+  if (!adxArray || adxArray.length < requiredCandles + 1) return 0;
+  
+  let consecutiveNonPositive = 0;
+  
+  // Work backwards from most recent
+  for (let i = adxArray.length - 1; i > 0 && consecutiveNonPositive < requiredCandles + 1; i--) {
+    const currentADX = adxArray[i];
+    const prevADX = adxArray[i - 1];
+    const slope = currentADX - prevADX;
+    
+    if (slope <= 0) {
+      consecutiveNonPositive++;
+    } else {
+      break; // Streak broken by positive slope
+    }
+  }
+  
+  return consecutiveNonPositive;
+}
+
+// ============= VOLATILITY CONTRACTION CHECK =============
+
+/**
+ * Checks if volatility is contracting (BB width declining or ATR flat)
+ * Confirms impulse is dying, not just oscillators resetting
+ * 
+ * @param currentBbWidth - Current Bollinger Band width
+ * @param prevBbWidth - Previous Bollinger Band width
+ * @param currentAtr - Current ATR value
+ * @param prevAtr - Previous ATR value
+ * @returns Object with contracting status and reason
+ */
+export function checkVolatilityContracting(
+  currentBbWidth: number | null,
+  prevBbWidth: number | null,
+  currentAtr: number | null,
+  prevAtr: number | null
+): { contracting: boolean; reason: string } {
+  const config = COUNTER_TREND_ADMISSION;
+  
+  // Check BB width decline
+  if (currentBbWidth != null && prevBbWidth != null && prevBbWidth > 0) {
+    const bbDeclinePercent = ((prevBbWidth - currentBbWidth) / prevBbWidth) * 100;
+    if (bbDeclinePercent >= config.BB_WIDTH_DECLINE_MIN_PERCENT) {
+      return { contracting: true, reason: 'BB_WIDTH_DECLINING' };
+    }
+  }
+  
+  // Check ATR flat/declining
+  if (currentAtr != null && prevAtr != null && prevAtr > 0) {
+    const atrChangePercent = Math.abs((currentAtr - prevAtr) / prevAtr) * 100;
+    if (atrChangePercent < config.ATR_CHANGE_FLAT_THRESHOLD) {
+      return { contracting: true, reason: 'ATR_FLAT' };
+    }
+    // Also accept declining ATR
+    if (currentAtr < prevAtr) {
+      return { contracting: true, reason: 'ATR_DECLINING' };
+    }
+  }
+  
+  // If we can't compute either, be permissive (don't block on missing data)
+  if ((currentBbWidth == null || prevBbWidth == null) && (currentAtr == null || prevAtr == null)) {
+    return { contracting: true, reason: 'VOLATILITY_DATA_UNAVAILABLE' };
+  }
+  
+  return { contracting: false, reason: 'VOLATILITY_EXPANDING' };
+}
+
+// ============= LTF STRUCTURE FLIP DETECTION =============
+
+/**
+ * Detects lower-timeframe structure flip for counter-trend entry timing
+ * For LONG: 15m or 30m shows Higher Low + Higher High
+ * For SHORT: 15m or 30m shows Lower High + Lower Low
+ * 
+ * @param trendData - Trend data containing timeframe information
+ * @param direction - Trade direction ('long' or 'short')
+ * @returns Object with flip status and confidence score
+ */
+export function checkLtfStructureFlip(
+  trendData: any,
+  direction: 'long' | 'short'
+): { flipped: boolean; score: number; details: string } {
+  const tf15m = trendData?.timeframes?.['15m'];
+  const tf30m = trendData?.timeframes?.['30m'];
+  
+  let score = 0;
+  const details: string[] = [];
+  
+  if (direction === 'long') {
+    // For LONG: Look for Higher Low + Higher High (bullish structure)
+    
+    // Check 15m
+    if (tf15m?.structure?.higherLow) {
+      score += 5;
+      details.push('15m HL');
+    }
+    if (tf15m?.structure?.higherHigh) {
+      score += 5;
+      details.push('15m HH');
+    }
+    
+    // Check 30m (weighted slightly higher)
+    if (tf30m?.structure?.higherLow) {
+      score += 6;
+      details.push('30m HL');
+    }
+    if (tf30m?.structure?.higherHigh) {
+      score += 6;
+      details.push('30m HH');
+    }
+    
+    // Alternative: Check trend direction flip
+    if (tf15m?.trend === 'bullish' || tf15m?.indicators?.trend === 'bullish') {
+      score += 4;
+      details.push('15m bullish');
+    }
+    if (tf30m?.trend === 'bullish' || tf30m?.indicators?.trend === 'bullish') {
+      score += 5;
+      details.push('30m bullish');
+    }
+  } else {
+    // For SHORT: Look for Lower High + Lower Low (bearish structure)
+    
+    // Check 15m
+    if (tf15m?.structure?.lowerHigh) {
+      score += 5;
+      details.push('15m LH');
+    }
+    if (tf15m?.structure?.lowerLow) {
+      score += 5;
+      details.push('15m LL');
+    }
+    
+    // Check 30m (weighted slightly higher)
+    if (tf30m?.structure?.lowerHigh) {
+      score += 6;
+      details.push('30m LH');
+    }
+    if (tf30m?.structure?.lowerLow) {
+      score += 6;
+      details.push('30m LL');
+    }
+    
+    // Alternative: Check trend direction flip
+    if (tf15m?.trend === 'bearish' || tf15m?.indicators?.trend === 'bearish') {
+      score += 4;
+      details.push('15m bearish');
+    }
+    if (tf30m?.trend === 'bearish' || tf30m?.indicators?.trend === 'bearish') {
+      score += 5;
+      details.push('30m bearish');
+    }
+  }
+  
+  // Consider flipped if score meets threshold (bonus level)
+  const flipped = score >= COUNTER_TREND_ADMISSION.LTF_STRUCTURE_BONUS;
+  
+  return {
+    flipped,
+    score,
+    details: details.length > 0 ? details.join(', ') : 'No structure flip detected'
+  };
+}
+
+// ============= UNIFIED COUNTER-TREND ADMISSION EVALUATION =============
+
+/**
+ * Main entry point for counter-trend admission evaluation
+ * Single authority for allowing reversal entries
+ * 
+ * @param trendData - Full trend data from calculate-trend
+ * @param derivedDirection - The direction derived by the signal generator
+ * @param htfTrend - The higher timeframe trend ('bullish', 'bearish', 'neutral')
+ * @returns CounterTrendAdmissionResult with pass/fail and detailed diagnostics
+ */
+export function evaluateCounterTrendAdmission(
+  trendData: any,
+  derivedDirection: 'long' | 'short',
+  htfTrend: string
+): CounterTrendAdmissionResult {
+  const config = COUNTER_TREND_ADMISSION;
+  const failureReasons: string[] = [];
+  const triggers: string[] = [];
+  
+  // Extract indicators
+  const adx = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
+  const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
+  const adxArray = trendData?.volatility?.adxArray ?? [];
+  const stochK = trendData?.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 
+                 trendData?.stochasticRsi?.['4h']?.k ?? 
+                 trendData?.stochasticRsi?.aggregated?.k ?? 50;
+  
+  // Volatility data
+  const currentBbWidth = trendData?.bollingerBands?.['4h']?.width ?? null;
+  const prevBbWidth = trendData?.bollingerBands?.['4h']?.prevWidth ?? null;
+  const currentAtr = trendData?.volatility?.atr ?? trendData?.atr ?? null;
+  const prevAtr = trendData?.volatility?.prevAtr ?? null;
+  
+  // Determine if this is a counter-trend entry
+  const isCounterTrend = (
+    (derivedDirection === 'long' && htfTrend === 'bearish') ||
+    (derivedDirection === 'short' && htfTrend === 'bullish')
+  );
+  
+  // If NOT counter-trend, admission is automatic
+  if (!isCounterTrend) {
+    return {
+      allowed: true,
+      reason: 'NOT_COUNTER_TREND',
+      exhaustionStage: 'NONE',
+      positionSizeMultiplier: 1.0,
+      adxExhausted: true,
+      adxSlopePersistence: 0,
+      volatilityContracting: true,
+      volatilityReason: 'N/A',
+      ltfStructureFlip: true,
+      ltfStructureScore: 0,
+      stochDepegged: true,
+      failureReasons: [],
+      triggers: ['Direction aligns with HTF - no counter-trend admission required'],
+    };
+  }
+  
+  triggers.push(`Counter-trend ${derivedDirection.toUpperCase()} against ${htfTrend} HTF`);
+  
+  // ===== CHECK 1: ADX EXHAUSTION =====
+  // ADX must be below threshold (not in dominant trend)
+  const adxExhausted = adx < config.MAX_ADX_FOR_EXHAUSTION;
+  if (!adxExhausted) {
+    failureReasons.push(`ADX_NOT_EXHAUSTED: ADX=${adx.toFixed(1)} >= ${config.MAX_ADX_FOR_EXHAUSTION}`);
+  } else {
+    triggers.push(`ADX=${adx.toFixed(1)} < ${config.MAX_ADX_FOR_EXHAUSTION} ✓`);
+  }
+  
+  // ===== CHECK 2: ADX SLOPE PERSISTENCE =====
+  // ADX slope must be non-positive for consecutive candles
+  const adxSlopePersistence = checkAdxSlopePersistence(adxArray, config.MIN_ADX_SLOPE_PERSISTENCE);
+  const adxSlopePasses = adxSlope <= config.MAX_ADX_SLOPE && adxSlopePersistence >= config.MIN_ADX_SLOPE_PERSISTENCE;
+  
+  if (adxSlope > config.MAX_ADX_SLOPE) {
+    failureReasons.push(`ADX_STILL_EXPANDING: slope=${adxSlope.toFixed(2)} > ${config.MAX_ADX_SLOPE}`);
+  } else if (adxSlopePersistence < config.MIN_ADX_SLOPE_PERSISTENCE) {
+    failureReasons.push(`ADX_PERSISTENCE_INSUFFICIENT: ${adxSlopePersistence} < ${config.MIN_ADX_SLOPE_PERSISTENCE} consecutive candles`);
+  } else {
+    triggers.push(`ADX slope=${adxSlope.toFixed(2)} for ${adxSlopePersistence} candles ✓`);
+  }
+  
+  // ===== CHECK 3: VOLATILITY CONTRACTION =====
+  const volatilityCheck = checkVolatilityContracting(currentBbWidth, prevBbWidth, currentAtr, prevAtr);
+  const volatilityPasses = !config.REQUIRE_VOLATILITY_CONTRACTION || volatilityCheck.contracting;
+  
+  if (!volatilityPasses) {
+    failureReasons.push(`VOLATILITY_EXPANDING: ${volatilityCheck.reason}`);
+  } else {
+    triggers.push(`Volatility contracting: ${volatilityCheck.reason} ✓`);
+  }
+  
+  // ===== CHECK 4: STOCHRSI DE-PEGGING =====
+  // StochRSI must not be stuck at absolute extremes
+  const stochPegged = (stochK < 5 || stochK > 95);
+  const stochDepegged = !stochPegged;
+  
+  if (stochPegged) {
+    failureReasons.push(`STOCHRSI_STILL_PEGGED: K=${stochK.toFixed(1)} at extreme`);
+  } else {
+    triggers.push(`StochRSI K=${stochK.toFixed(1)} de-pegged ✓`);
+  }
+  
+  // ===== CHECK 5: LTF STRUCTURE FLIP (Optional Bonus) =====
+  const ltfCheck = config.LTF_STRUCTURE_ENABLED 
+    ? checkLtfStructureFlip(trendData, derivedDirection)
+    : { flipped: true, score: 0, details: 'LTF check disabled' };
+  
+  if (ltfCheck.flipped) {
+    triggers.push(`LTF structure flip: ${ltfCheck.details} (score=${ltfCheck.score}) ✓`);
+  } else {
+    // Not a hard failure, but log it
+    triggers.push(`LTF_NO_STRUCTURE_FLIP: ${ltfCheck.details} (score=${ltfCheck.score})`);
+  }
+  
+  // ===== DETERMINE EXHAUSTION STAGE =====
+  let exhaustionStage: 'EARLY' | 'CONFIRMED' | 'NONE' = 'NONE';
+  
+  const coreChecksPassed = adxExhausted && adxSlopePasses && stochDepegged;
+  
+  if (coreChecksPassed && volatilityPasses && ltfCheck.flipped) {
+    exhaustionStage = 'CONFIRMED';
+  } else if (coreChecksPassed && volatilityPasses) {
+    exhaustionStage = 'EARLY';
+  }
+  
+  // ===== FINAL ADMISSION DECISION =====
+  // Core checks must pass; volatility and LTF are additional confirmation
+  const allowed = coreChecksPassed && volatilityPasses;
+  
+  // Position size multiplier (probe size for counter-trend)
+  let positionSizeMultiplier = config.PROBE_POSITION_MULTIPLIER;
+  
+  // Bonus for confirmed exhaustion with LTF flip
+  if (exhaustionStage === 'CONFIRMED') {
+    positionSizeMultiplier *= 1.2; // Allow up to 30% of normal instead of 25%
+  }
+  
+  // Log failure if not allowed
+  if (!allowed && config.LOG_FAILURE_REASONS) {
+    console.log(
+      `[COUNTER_TREND_ADMISSION] BLOCKED: ${derivedDirection.toUpperCase()} against ${htfTrend}\n` +
+      `  Failures: ${failureReasons.join('; ')}\n` +
+      `  Context: ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, K=${stochK.toFixed(1)}`
+    );
+  }
+  
+  return {
+    allowed,
+    reason: allowed 
+      ? `COUNTER_TREND_ADMITTED: exhaustionStage=${exhaustionStage}` 
+      : failureReasons[0] ?? 'UNKNOWN_FAILURE',
+    exhaustionStage,
+    positionSizeMultiplier,
+    adxExhausted,
+    adxSlopePersistence,
+    volatilityContracting: volatilityCheck.contracting,
+    volatilityReason: volatilityCheck.reason,
+    ltfStructureFlip: ltfCheck.flipped,
+    ltfStructureScore: ltfCheck.score,
+    stochDepegged,
+    failureReasons,
+    triggers,
+  };
 }
 
 // ============= REGIME CLASSIFICATION (ORTHOGONAL) =============

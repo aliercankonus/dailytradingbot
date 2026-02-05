@@ -259,8 +259,10 @@ import {
   calculateMeanReversionStop,
   calculateMeanReversionTP,
   isExtremeMeanReversion,  // FIX #1 (Audit): Formal definition for Tier 1 bypass
+  evaluateCounterTrendAdmission,  // Counter-Trend Admission Layer
   type ExhaustionSignal,
-  type GateBypass
+  type GateBypass,
+  type CounterTrendAdmissionResult
 } from "../_shared/mean-reversion.ts";
 // NEW: Strategy-Independent Adaptive Signal Generation Module
 import {
@@ -2320,7 +2322,9 @@ serve(async (req) => {
       // NEW: BE Analysis Gates
       | 'ADX_SLOPE_GRADUATED'
       | 'HIGH_ADX_1H_CONFIRMATION'
-      | 'STOCHRSI_RUNWAY';
+      | 'STOCHRSI_RUNWAY'
+      // Counter-Trend Admission Layer
+      | 'COUNTER_TREND_ADMISSION';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -2909,6 +2913,90 @@ serve(async (req) => {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ EARLY TIER 0: LONG at K=${earlyStochRsiK4h.toFixed(1)} allowed (mean reversion direction)`);
             }
           }
+        }
+        
+        // ============= COUNTER-TREND ADMISSION LAYER =============
+        // Unified authority for allowing counter-trend (reversal) entries
+        // This check runs AFTER direction derivation but BEFORE strategy logic
+        // 
+        // MUTUAL EXCLUSIVITY: If Strong Trend Override was applied (continuation mode),
+        // skip counter-trend admission entirely - we're in trend-following mode
+        let counterTrendAdmissionResult: CounterTrendAdmissionResult | null = null;
+        let counterTrendAdmissionMultiplier = 1.0;
+        
+        if (!strongTrendTier0OverrideApplied && directionResult.direction) {
+          // Get HTF trend for counter-trend determination
+          const htfTrend4h = timeframes?.['4h']?.trend ?? 'neutral';
+          
+          // Evaluate counter-trend admission
+          counterTrendAdmissionResult = evaluateCounterTrendAdmission(
+            trendData,
+            directionResult.direction,
+            htfTrend4h
+          );
+          
+          // If counter-trend and NOT admitted, block the signal
+          const isCounterTrend = (
+            (directionResult.direction === 'long' && htfTrend4h === 'bearish') ||
+            (directionResult.direction === 'short' && htfTrend4h === 'bullish')
+          );
+          
+          if (isCounterTrend && !counterTrendAdmissionResult.allowed) {
+            // Counter-trend entry blocked by admission layer
+            rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'COUNTER_TREND_ADMISSION', 
+              details: counterTrendAdmissionResult.reason 
+            });
+            
+            logger.forSymbol(symbol).warn(
+              `${LOG_CATEGORIES.GATE} 🚫 COUNTER_TREND_ADMISSION BLOCKED: ${directionResult.direction.toUpperCase()} against ${htfTrend4h} HTF\n` +
+              `   → Reason: ${counterTrendAdmissionResult.reason}\n` +
+              `   → Failures: ${counterTrendAdmissionResult.failureReasons.join('; ')}`
+            );
+            
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `COUNTER_TREND_ADMISSION: ${directionResult.direction.toUpperCase()} blocked - ${counterTrendAdmissionResult.reason}`,
+              { 
+                gate: "COUNTER_TREND_ADMISSION",
+                direction: directionResult.direction,
+                htfTrend: htfTrend4h,
+                reason: counterTrendAdmissionResult.reason,
+                exhaustionStage: counterTrendAdmissionResult.exhaustionStage,
+                adxExhausted: counterTrendAdmissionResult.adxExhausted,
+                adxSlopePersistence: counterTrendAdmissionResult.adxSlopePersistence,
+                volatilityContracting: counterTrendAdmissionResult.volatilityContracting,
+                volatilityReason: counterTrendAdmissionResult.volatilityReason,
+                stochDepegged: counterTrendAdmissionResult.stochDepegged,
+                ltfStructureFlip: counterTrendAdmissionResult.ltfStructureFlip,
+                failureReasons: counterTrendAdmissionResult.failureReasons,
+                triggers: counterTrendAdmissionResult.triggers,
+                message: `Counter-trend ${directionResult.direction.toUpperCase()} blocked: trend energy not exhausted`
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
+          
+          // If counter-trend and admitted, apply probe position sizing
+          if (isCounterTrend && counterTrendAdmissionResult.allowed) {
+            counterTrendAdmissionMultiplier = counterTrendAdmissionResult.positionSizeMultiplier;
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.SUCCESS} ✅ COUNTER_TREND_ADMITTED: ${directionResult.direction.toUpperCase()} against ${htfTrend4h}\n` +
+              `   → Stage: ${counterTrendAdmissionResult.exhaustionStage}\n` +
+              `   → Position: ${(counterTrendAdmissionMultiplier * 100).toFixed(0)}% (probe size)\n` +
+              `   → ADX: exhausted=${counterTrendAdmissionResult.adxExhausted}, persistence=${counterTrendAdmissionResult.adxSlopePersistence}\n` +
+              `   → Volatility: ${counterTrendAdmissionResult.volatilityReason}`
+            );
+          }
+        } else if (strongTrendTier0OverrideApplied) {
+          // Log that counter-trend admission was skipped due to continuation mode
+          logger.forSymbol(symbol).debug(
+            `${LOG_CATEGORIES.GATE} ⏭️ COUNTER_TREND_ADMISSION skipped: Strong Trend Override active (continuation mode)`
+          );
         }
         
         // ============= LATE GRIND ACCEPTANCE MODE =============
