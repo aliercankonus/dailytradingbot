@@ -1,4 +1,17 @@
 
+# Trading Bot Development Plan
+
+## Recent Changes
+
+### ✅ Contextual TP Expansion (2025-02-05)
+- Added `CONTEXTUAL_TP_EXPANSION` config to constants.ts
+- Implements +30% wider TP for Counter-Trend Exhaustion and Strong Trend Override entries
+- Implements +20% wider TP for Squeeze Breakout entries
+- Philosophy: "Be selective on entry, patient on exit" - increases PnL by expectancy, not leverage
+- Applied in execute-trade after SL validation, before R:R check
+
+---
+
 # Counter-Trend Admission Layer Refactor
 
 ## Status: ✅ COMPLETE (2025-02-05)

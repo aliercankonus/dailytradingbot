@@ -17,6 +17,43 @@ export const TRADING_FEE_PARAMS = {
   TRUE_BE_SAFETY_BUFFER_PERCENT: 0.02,
 } as const;
 
+// ============= CONTEXTUAL TP EXPANSION PARAMETERS =============
+// High-conviction inflection points get wider TP targets to capture larger moves
+// Philosophy: "Be selective on entry, patient on exit"
+// This increases PnL per position by expanding expectancy (wider TP), not risk (larger size)
+export const CONTEXTUAL_TP_EXPANSION = {
+  ENABLED: true,
+  
+  // ===== COUNTER-TREND EXHAUSTION ENTRIES =====
+  // MR probes at validated exhaustion points have asymmetric upside
+  COUNTER_TREND_EXHAUSTION: {
+    ENABLED: true,
+    TP_MULTIPLIER: 1.30,  // +30% wider TP
+    // Entry types that qualify
+    QUALIFYING_TYPES: ['COUNTER_TREND_EXHAUSTION', 'MR_PROBE', 'MEAN_REVERSION'] as string[],
+  },
+  
+  // ===== STRONG TREND OVERRIDE ENTRIES =====
+  // Entries into extreme StochRSI during powerful trends (ADX >= 40)
+  STRONG_TREND_OVERRIDE: {
+    ENABLED: true,
+    TP_MULTIPLIER: 1.30,  // +30% wider TP
+    // Entry types that qualify
+    QUALIFYING_TYPES: ['STRONG_TREND_TIER0_OVERRIDE', 'STRONG_TREND', 'STRONG_TREND_HTF_BYPASS'] as string[],
+  },
+  
+  // ===== SQUEEZE BREAKOUT ENTRIES =====
+  // Entries during volatility expansion from compression
+  SQUEEZE_BREAKOUT: {
+    ENABLED: true,
+    TP_MULTIPLIER: 1.20,  // +20% wider TP (more volatile, less predictable)
+    QUALIFYING_TYPES: ['SQUEEZE_EXPANSION', 'EARLY_IGNITION'] as string[],
+  },
+  
+  // ===== LOGGING =====
+  LOG_TP_EXPANSION: true,
+} as const;
+
 export const ADX_THRESHOLDS = {
   VERY_WEAK: 12,
   SEVERE_PENALTY: 15,

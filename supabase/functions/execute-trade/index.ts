@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, STRONG_TREND_HTF_BYPASS_PARAMS, TREND_CONTINUATION_TIGHT_STOPS, DEEP_STOCHRSI_HARD_GATE, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, STRONG_TREND_HTF_BYPASS_PARAMS, TREND_CONTINUATION_TIGHT_STOPS, DEEP_STOCHRSI_HARD_GATE, CONTEXTUAL_TP_EXPANSION, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { checkPositionCorrelation, getKnownCorrelation } from "../_shared/correlation.ts";
 import { calculateATR, calculateHistoricalATRAvg } from "../_shared/indicators.ts";
 import { 
@@ -1375,6 +1375,72 @@ serve(async (req) => {
     }
 
     logger.info(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)} (minimum ${RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT}% distance enforced)`);
+
+    // ============================================================
+    // CONTEXTUAL TP EXPANSION - Wider targets for high-conviction entries
+    // Philosophy: "Be selective on entry, patient on exit"
+    // Increases PnL by expanding expectancy (wider TP), not risk (larger size)
+    // ============================================================
+    let tpExpansionMultiplier = 1.0;
+    let tpExpansionReason = '';
+    
+    if (CONTEXTUAL_TP_EXPANSION.ENABLED) {
+      // Get entry exception type from signal indicators
+      const signalExceptionType = signal.indicators?.exceptionType || 
+                                  signal.indicators?.entryExceptionType || '';
+      const strategyName = signal.strategy_name || '';
+      const isMrProbe = signal.indicators?.isMrProbe === true || 
+                        signal.indicators?.counterTrendAdmission?.result === 'ADMIT';
+      
+      // Check Counter-Trend Exhaustion entries
+      if (CONTEXTUAL_TP_EXPANSION.COUNTER_TREND_EXHAUSTION.ENABLED && 
+          (CONTEXTUAL_TP_EXPANSION.COUNTER_TREND_EXHAUSTION.QUALIFYING_TYPES.some(t => 
+            signalExceptionType.toUpperCase().includes(t) || 
+            strategyName.toUpperCase().includes(t)
+          ) || isMrProbe)) {
+        tpExpansionMultiplier = CONTEXTUAL_TP_EXPANSION.COUNTER_TREND_EXHAUSTION.TP_MULTIPLIER;
+        tpExpansionReason = 'COUNTER_TREND_EXHAUSTION';
+      }
+      // Check Strong Trend Override entries
+      else if (CONTEXTUAL_TP_EXPANSION.STRONG_TREND_OVERRIDE.ENABLED &&
+               (CONTEXTUAL_TP_EXPANSION.STRONG_TREND_OVERRIDE.QUALIFYING_TYPES.some(t => 
+                 signalExceptionType.toUpperCase().includes(t) || 
+                 strategyName.toUpperCase().includes(t)
+               ) || signal.indicators?.strongTrendHTFBypass === true ||
+               signal.indicators?.trendContinuationAtExtreme === true)) {
+        tpExpansionMultiplier = CONTEXTUAL_TP_EXPANSION.STRONG_TREND_OVERRIDE.TP_MULTIPLIER;
+        tpExpansionReason = 'STRONG_TREND_OVERRIDE';
+      }
+      // Check Squeeze Breakout entries
+      else if (CONTEXTUAL_TP_EXPANSION.SQUEEZE_BREAKOUT.ENABLED &&
+               CONTEXTUAL_TP_EXPANSION.SQUEEZE_BREAKOUT.QUALIFYING_TYPES.some(t => 
+                 signalExceptionType.toUpperCase().includes(t) || 
+                 strategyName.toUpperCase().includes(t)
+               )) {
+        tpExpansionMultiplier = CONTEXTUAL_TP_EXPANSION.SQUEEZE_BREAKOUT.TP_MULTIPLIER;
+        tpExpansionReason = 'SQUEEZE_BREAKOUT';
+      }
+      
+      // Apply TP expansion if applicable
+      if (tpExpansionMultiplier > 1.0) {
+        const originalTP = takeProfit;
+        const tpDistance = Math.abs(takeProfit - currentPrice);
+        const expandedDistance = tpDistance * tpExpansionMultiplier;
+        
+        if (signalSide === 'BUY') {
+          takeProfit = currentPrice + expandedDistance;
+        } else {
+          takeProfit = currentPrice - expandedDistance;
+        }
+        
+        if (CONTEXTUAL_TP_EXPANSION.LOG_TP_EXPANSION) {
+          const expansionPercent = ((tpExpansionMultiplier - 1) * 100).toFixed(0);
+          logger.info(`🎯 CONTEXTUAL TP EXPANSION [${tpExpansionReason}]: +${expansionPercent}% wider target`);
+          logger.info(`   Original TP: $${originalTP.toFixed(2)} → Expanded TP: $${takeProfit.toFixed(2)}`);
+          logger.info(`   Distance: $${tpDistance.toFixed(2)} → $${expandedDistance.toFixed(2)} (${((expandedDistance/currentPrice)*100).toFixed(2)}% from entry)`);
+        }
+      }
+    }
 
     // ============================================================
     // FILTER 11: RISK/REWARD RATIO VALIDATION
