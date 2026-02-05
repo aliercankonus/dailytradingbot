@@ -162,6 +162,8 @@ import {
   COUNTER_TREND_ADMISSION,
   // NEW: Capitulation Bounce Probe (post-capitulation balance zone entry)
   CAPITULATION_BOUNCE_PROBE,
+  // NEW: Flash Crash Bounce Probe (rapid V-reversal capture)
+  FLASH_CRASH_BOUNCE_PROBE,
   type ExceptionType,
   type MarketContext
 } from "../_shared/constants.ts";
@@ -2943,8 +2945,167 @@ serve(async (req) => {
                 }
               }
               
-              // If capitulation probe triggered, skip the standard Tier 0 block
-              if (capitulationProbeTriggered) {
+              // ===== FLASH CRASH BOUNCE PROBE CHECK (NEW) =====
+              // Fires when Capitulation Bounce didn't trigger due to ADX slope/structure guards
+              // Flash crashes keep ADX slope positive and bounce on same candle as low
+              let flashCrashProbeTriggered = false;
+              if (!capitulationProbeTriggered && FLASH_CRASH_BOUNCE_PROBE.ENABLED) {
+                const priceDropPercent = trendData?.priceDistanceFromSwing?.distanceFromHighPercent ?? 0;
+                const stochK4h = earlyStochRsiK4h;
+                const stochK1h = extractStochRsiK(trendData, '1h');
+                
+                // Check if either 4h or 1h K is pinned at floor
+                const stochRsiPinned = stochK4h <= FLASH_CRASH_BOUNCE_PROBE.MAX_STOCHRSI_K || 
+                                       stochK1h <= FLASH_CRASH_BOUNCE_PROBE.MAX_STOCHRSI_K;
+                
+                // Velocity check: estimate drop duration and calculate drop rate per hour
+                const calculateDropDuration = (): number => {
+                  const klines1h = trendData?.klines1h ?? [];
+                  const high24h = trendData?.priceDistanceFromSwing?.high24h ?? 0;
+                  
+                  if (!klines1h.length || !high24h) return 24; // Default to full 24h
+                  
+                  // Find the candle where price was at or near 24h high
+                  for (let i = klines1h.length - 1; i >= 0; i--) {
+                    const candleHigh = typeof klines1h[i] === 'object' && 'high' in klines1h[i] 
+                      ? klines1h[i].high 
+                      : (Array.isArray(klines1h[i]) ? parseFloat(klines1h[i][2]) : 0);
+                    if (candleHigh >= high24h * 0.999) {
+                      return klines1h.length - i;
+                    }
+                  }
+                  return 24;
+                };
+                
+                const dropHours = Math.max(1, calculateDropDuration());
+                const dropRatePerHour = priceDropPercent / dropHours;
+                const velocityOk = !FLASH_CRASH_BOUNCE_PROBE.REQUIRE_VELOCITY_CONFIRMATION || 
+                                   dropRatePerHour >= FLASH_CRASH_BOUNCE_PROBE.MIN_HOURLY_DROP_RATE;
+                
+                // Velocity also requires drop happened quickly (within MAX_DROP_HOURS)
+                const dropWithinTimeWindow = dropHours <= FLASH_CRASH_BOUNCE_PROBE.MAX_DROP_HOURS;
+                
+                // Momentum check: not extreme opposing (allow more momentum than capitulation)
+                const momentumOk = earlyMomentumScore >= -FLASH_CRASH_BOUNCE_PROBE.MOMENTUM_MAX_OPPOSING;
+                
+                // ADX check (ignores slope - key difference from Capitulation)
+                const adxOk = adx >= FLASH_CRASH_BOUNCE_PROBE.MIN_ADX;
+                
+                const sufficientDrop = priceDropPercent >= FLASH_CRASH_BOUNCE_PROBE.MIN_DROP_PERCENT;
+                
+                // Reversal candle detection (optional size boost)
+                const detectReversalCandle = (): boolean => {
+                  const klines15m = trendData?.klines15m ?? [];
+                  if (klines15m.length < 2) return false;
+                  
+                  const getCandleData = (k: any) => {
+                    if (typeof k === 'object' && 'open' in k) {
+                      return { open: k.open, high: k.high, low: k.low, close: k.close };
+                    } else if (Array.isArray(k)) {
+                      return { 
+                        open: parseFloat(k[1]), 
+                        high: parseFloat(k[2]), 
+                        low: parseFloat(k[3]), 
+                        close: parseFloat(k[4]) 
+                      };
+                    }
+                    return null;
+                  };
+                  
+                  const current = getCandleData(klines15m[klines15m.length - 1]);
+                  const prior = getCandleData(klines15m[klines15m.length - 2]);
+                  
+                  if (!current || !prior) return false;
+                  
+                  // Bullish engulfing
+                  const isBullishEngulfing = 
+                    prior.close < prior.open &&  // Prior bearish
+                    current.close > current.open && // Current bullish
+                    current.close > prior.open &&   // Close above prior open
+                    current.open < prior.close;     // Open below prior close
+                  
+                  // Hammer pattern
+                  const bodySize = Math.abs(current.close - current.open);
+                  const lowerWick = Math.min(current.open, current.close) - current.low;
+                  const isHammer = bodySize > 0 && lowerWick >= bodySize * 2;
+                  
+                  return isBullishEngulfing || isHammer;
+                };
+                
+                if (sufficientDrop && stochRsiPinned && adxOk && velocityOk && dropWithinTimeWindow && momentumOk) {
+                  flashCrashProbeTriggered = true;
+                  earlyDirection = 'long'; // Flip direction for bounce capture
+                  
+                  // Calculate position size with scaling
+                  const volumeRatio = trendData?.volume?.['1h']?.volumeRatio ?? 
+                                      trendData?.timeframes?.['1h']?.volumeRatio ?? 1.0;
+                  const hasReversalCandle = detectReversalCandle();
+                  
+                  let probeSize = FLASH_CRASH_BOUNCE_PROBE.BASE_POSITION_SIZE;
+                  let sizeReason = 'base';
+                  if (hasReversalCandle) {
+                    probeSize = FLASH_CRASH_BOUNCE_PROBE.WITH_REVERSAL_CANDLE;
+                    sizeReason = 'reversal_candle';
+                  } else if (volumeRatio >= FLASH_CRASH_BOUNCE_PROBE.VOLUME_SPIKE_THRESHOLD) {
+                    probeSize = FLASH_CRASH_BOUNCE_PROBE.WITH_VOLUME_SPIKE;
+                    sizeReason = 'volume_spike';
+                  }
+                  
+                  logger.forSymbol(symbol).info(
+                    `${LOG_CATEGORIES.SUCCESS} 🔥 FLASH CRASH BOUNCE PROBE ACTIVATED (at Tier 0):\n` +
+                    `   → Regime: ${FLASH_CRASH_BOUNCE_PROBE.REGIME_TAG}\n` +
+                    `   → StochRSI K: 4h=${stochK4h.toFixed(1)}, 1h=${stochK1h.toFixed(1)} (pinned at floor)\n` +
+                    `   → Price Drop: ${priceDropPercent.toFixed(1)}% in ${dropHours}h (${dropRatePerHour.toFixed(1)}%/h)\n` +
+                    `   → Momentum: ${earlyMomentumScore.toFixed(0)} (within tolerance >=${-FLASH_CRASH_BOUNCE_PROBE.MOMENTUM_MAX_OPPOSING})\n` +
+                    `   → ADX: ${adx.toFixed(1)} slope=${earlyAdxSlope.toFixed(2)} (slope IGNORED for flash crash)\n` +
+                    `   → Reversal Candle: ${hasReversalCandle ? 'DETECTED' : 'none'}\n` +
+                    `   → Volume Ratio: ${volumeRatio.toFixed(2)}${volumeRatio >= FLASH_CRASH_BOUNCE_PROBE.VOLUME_SPIKE_THRESHOLD ? ' (SPIKE)' : ''}\n` +
+                    `   → Direction: FLIPPED to LONG (from SHORT)\n` +
+                    `   → Position: ${(probeSize * 100).toFixed(0)}% (${sizeReason})`
+                  );
+                  
+                  // Store probe metadata for downstream use
+                  (trendData as Record<string, unknown>).flashCrashBounceProbe = {
+                    active: true,
+                    regime: FLASH_CRASH_BOUNCE_PROBE.REGIME_TAG,
+                    positionMultiplier: probeSize,
+                    stochK4h: stochK4h,
+                    stochK1h: stochK1h,
+                    priceDrop: priceDropPercent,
+                    dropHours: dropHours,
+                    dropRatePerHour: dropRatePerHour,
+                    momentum: earlyMomentumScore,
+                    adx: adx,
+                    adxSlope: earlyAdxSlope,
+                    hasReversalCandle: hasReversalCandle,
+                    volumeRatio: volumeRatio,
+                    sizeReason: sizeReason
+                  };
+                } else if (FLASH_CRASH_BOUNCE_PROBE.LOG_NEAR_MISS && 
+                           priceDropPercent >= 8 && 
+                           (stochK4h <= 5 || stochK1h <= 5)) {
+                  // Log near-miss for diagnostics
+                  const failedConditions: string[] = [];
+                  if (!sufficientDrop) failedConditions.push(`drop=${priceDropPercent.toFixed(1)}% < ${FLASH_CRASH_BOUNCE_PROBE.MIN_DROP_PERCENT}%`);
+                  if (!stochRsiPinned) failedConditions.push(`K not pinned (4h=${stochK4h.toFixed(1)}, 1h=${stochK1h.toFixed(1)} > ${FLASH_CRASH_BOUNCE_PROBE.MAX_STOCHRSI_K})`);
+                  if (!adxOk) failedConditions.push(`ADX=${adx.toFixed(1)} < ${FLASH_CRASH_BOUNCE_PROBE.MIN_ADX}`);
+                  if (!velocityOk) failedConditions.push(`velocity=${dropRatePerHour.toFixed(1)}%/h < ${FLASH_CRASH_BOUNCE_PROBE.MIN_HOURLY_DROP_RATE}%/h`);
+                  if (!dropWithinTimeWindow) failedConditions.push(`duration=${dropHours}h > ${FLASH_CRASH_BOUNCE_PROBE.MAX_DROP_HOURS}h`);
+                  if (!momentumOk) failedConditions.push(`momentum=${earlyMomentumScore.toFixed(0)} < ${-FLASH_CRASH_BOUNCE_PROBE.MOMENTUM_MAX_OPPOSING} (extreme opposing)`);
+                  
+                  logger.forSymbol(symbol).info(
+                    `${LOG_CATEGORIES.GATE} 📋 FLASH CRASH BOUNCE NEAR-MISS:\n` +
+                    `   → Price Drop: ${priceDropPercent.toFixed(1)}% in ${dropHours}h (${dropRatePerHour.toFixed(1)}%/h)\n` +
+                    `   → StochRSI K: 4h=${stochK4h.toFixed(1)}, 1h=${stochK1h.toFixed(1)}\n` +
+                    `   → ADX: ${adx.toFixed(1)} slope=${earlyAdxSlope.toFixed(2)}\n` +
+                    `   → Momentum: ${earlyMomentumScore.toFixed(0)}\n` +
+                    `   → Failed: ${failedConditions.join(', ')}`
+                  );
+                }
+              }
+              
+              // If capitulation or flash crash probe triggered, skip the standard Tier 0 block
+              if (capitulationProbeTriggered || flashCrashProbeTriggered) {
                 // Continue to normal processing with flipped direction
               } else if (overrideCheck.allowed) {
                 // STRONG TREND OVERRIDE ACTIVATED - allow SHORT with reduced size

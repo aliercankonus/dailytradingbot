@@ -103,6 +103,16 @@ export interface BlockedSignal {
     // Direction derivation
     derivedDirection?: string;
     direction?: string;
+    // NEW: Flash Crash Bounce Probe metadata
+    flashCrashProbeChecked?: boolean;
+    flashCrashProbeActive?: boolean;
+    flashCrashDropPercent?: number;
+    flashCrashDropHours?: number;
+    flashCrashDropRatePerHour?: number;
+    flashCrashReversalCandle?: boolean;
+    // NEW: Capitulation Bounce Probe metadata
+    capitulationProbeChecked?: boolean;
+    capitulationProbeActive?: boolean;
     // Allow additional dynamic properties
     [key: string]: unknown;
   } | null;
