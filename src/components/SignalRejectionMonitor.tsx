@@ -37,6 +37,7 @@ import { useState, useMemo, memo } from "react";
 type PageSize = 10 | 25 | 50;
 type TimeRange = "15m" | "30m" | "1h";
 type GateFilter = "all" | "momentum" | "regime" | "direction" | "htf" | "adx";
+type SymbolFilter = "all" | string;
 
 // Gate classification for filtering
 const classifyGate = (reason: string): GateFilter => {
@@ -235,8 +236,16 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
   const { data: blockedSignals, isLoading } = useBlockedSignals(100);
   const [timeRange, setTimeRange] = useState<TimeRange>("30m");
   const [gateFilter, setGateFilter] = useState<GateFilter>("all");
+  const [symbolFilter, setSymbolFilter] = useState<SymbolFilter>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(10);
+  
+  // Get unique symbols for dropdown
+  const uniqueSymbols = useMemo(() => {
+    if (!blockedSignals) return [];
+    const symbols = [...new Set(blockedSignals.map(s => s.symbol))];
+    return symbols.sort((a, b) => a.localeCompare(b));
+  }, [blockedSignals]);
   
   // Filter signals by time range
   const filteredByTime = useMemo(() => {
@@ -257,9 +266,20 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
   
   // Filter by gate type
   const filteredSignals = useMemo(() => {
-    if (gateFilter === "all") return filteredByTime;
-    return filteredByTime.filter(s => classifyGate(s.rejection_reason) === gateFilter);
-  }, [filteredByTime, gateFilter]);
+    let result = filteredByTime;
+    
+    // Apply symbol filter
+    if (symbolFilter !== "all") {
+      result = result.filter(s => s.symbol === symbolFilter);
+    }
+    
+    // Apply gate filter
+    if (gateFilter !== "all") {
+      result = result.filter(s => classifyGate(s.rejection_reason) === gateFilter);
+    }
+    
+    return result;
+  }, [filteredByTime, gateFilter, symbolFilter]);
   
   // Pagination calculations
   const totalPages = Math.max(1, Math.ceil(filteredSignals.length / pageSize));
@@ -407,6 +427,23 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
                 <TabsTrigger value="htf" className="text-xs px-2 py-1">HTF ({stats.byGate.htf})</TabsTrigger>
               </TabsList>
             </Tabs>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <Target className="h-4 w-4 text-muted-foreground" />
+            <Select value={symbolFilter} onValueChange={(v) => { setSymbolFilter(v); setCurrentPage(1); }}>
+              <SelectTrigger className="h-7 w-[140px] text-xs bg-background">
+                <SelectValue placeholder="All Symbols" />
+              </SelectTrigger>
+              <SelectContent className="bg-background border z-50">
+                <SelectItem value="all" className="text-xs">All Symbols</SelectItem>
+                {uniqueSymbols.map((symbol) => (
+                  <SelectItem key={symbol} value={symbol} className="text-xs font-mono">
+                    {symbol}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </CardHeader>
