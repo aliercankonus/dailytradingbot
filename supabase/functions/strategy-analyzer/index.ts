@@ -4649,7 +4649,7 @@ serve(async (req) => {
         let moveExhaustionPositionMultiplier = 1.0;
         
         // Zone analytics tracking
-        type MoveZone = 'FRESH' | 'SOFT' | 'HARD' | 'EXCEPTION' | 'RELAXED_SOFT' | 'RELAXED_HARD';
+        type MoveZone = 'FRESH' | 'SOFT' | 'HARD' | 'EXCEPTION' | 'RELAXED_SOFT' | 'RELAXED_HARD' | 'MEAN_REVERSION';
         let moveZone: MoveZone = 'FRESH';
         let moveZoneDetails: {
           zone: MoveZone;
@@ -4658,11 +4658,15 @@ serve(async (req) => {
           stochRsiK: number;
           adx: number;
           adxSlope: number;
-          outcome: 'ALLOWED' | 'REDUCED' | 'BLOCKED' | 'EXCEPTION_ALLOWED';
+          outcome: 'ALLOWED' | 'REDUCED' | 'BLOCKED' | 'EXCEPTION_ALLOWED' | 'MEAN_REVERSION_ALLOWED';
           positionMultiplier: number;
           overrideReason?: string;
           relaxationApplied?: boolean;
           relaxationCondition?: string;
+          // Mean reversion specific fields
+          meanReversionAllowed?: boolean;
+          meanReversionScore?: number;
+          meanReversionBlockReason?: string;
         } | null = null;
         
         if (MOVE_EXHAUSTION_FILTER_PARAMS.ENABLED) {
@@ -4746,10 +4750,23 @@ serve(async (req) => {
             // ===== HARD BLOCK: Price dropped too far already =====
             if (distanceFromHigh >= effectiveHardThreshold) {
               moveZone = useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD';
-              // Check for strong trend exception
+              // Check for strong trend exception (continuation)
               const strongTrendException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_STRONG_TREND_EXCEPTION &&
                 adx >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX &&
                 adxSlope >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX_SLOPE;
+              
+              // NEW: Check for mean reversion exception (counter-trend bounce)
+              // For SHORT exhaustion → allows LONG bounce entry
+              const mrConfig = MOVE_EXHAUSTION_FILTER_PARAMS.MEAN_REVERSION;
+              const meanReversionException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_MEAN_REVERSION_EXCEPTION &&
+                mrConfig &&
+                // Trend energy must be decaying (ADX not too high OR slope declining)
+                (adx < mrConfig.MAX_ADX_FOR_EXCEPTION || adxSlope <= mrConfig.MAX_ADX_SLOPE) &&
+                adxSlope <= mrConfig.MAX_ADX_SLOPE &&
+                // StochRSI must be at oversold extreme (for LONG bounce)
+                stochRsiK4h <= mrConfig.LONG_MAX_K_FOR_EXCEPTION &&
+                // Move must be significant enough to warrant reversal
+                distanceFromHigh >= mrConfig.MIN_MOVE_PERCENT_FOR_EXCEPTION;
               
               if (strongTrendException) {
                 moveZone = 'EXCEPTION';
@@ -4768,6 +4785,26 @@ serve(async (req) => {
                   relaxationCondition
                 };
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION EXCEPTION: Price dropped ${distanceFromHigh.toFixed(1)}% but ADX=${adx.toFixed(1)} rising (slope=${adxSlope.toFixed(2)}) - allowing with ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}% position`);
+              } else if (meanReversionException) {
+                // Mean Reversion bypass: allow LONG bounce after extended drop
+                moveZone = 'MEAN_REVERSION';
+                moveExhaustionPositionMultiplier = mrConfig.POSITION_SIZE;
+                moveZoneDetails = {
+                  zone: 'MEAN_REVERSION',
+                  distancePercent: distanceFromHigh,
+                  direction: 'long',  // Opposite direction for MR
+                  stochRsiK: stochRsiK4h,
+                  adx,
+                  adxSlope,
+                  outcome: 'MEAN_REVERSION_ALLOWED',
+                  positionMultiplier: moveExhaustionPositionMultiplier,
+                  overrideReason: `Mean Reversion Bounce: ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)} <= 0, K=${stochRsiK4h.toFixed(0)} <= ${mrConfig.LONG_MAX_K_FOR_EXCEPTION} (oversold)`,
+                  meanReversionAllowed: true,
+                  meanReversionScore: Math.min(100, Math.round((distanceFromHigh / 10) * 50 + ((15 - stochRsiK4h) / 15) * 50)),
+                  relaxationApplied: useRelaxedThresholds,
+                  relaxationCondition
+                };
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔄 MOVE_EXHAUSTION MEAN_REVERSION: Price dropped ${distanceFromHigh.toFixed(1)}%, ADX=${adx.toFixed(1)} decaying (slope=${adxSlope.toFixed(2)}), K=${stochRsiK4h.toFixed(0)} (oversold) - allowing LONG bounce at ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}% position`);
               } else {
                 moveExhaustionBlocked = true;
                 moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% from 24h high ($${priceDistance.high24h.toFixed(2)}), too late to SHORT (threshold: ${effectiveHardThreshold}%${useRelaxedThresholds ? ' [relaxed]' : ''})`;
@@ -4780,6 +4817,15 @@ serve(async (req) => {
                   adxSlope,
                   outcome: 'BLOCKED',
                   positionMultiplier: 0,
+                  // Add mean reversion diagnostics to blocked signals
+                  meanReversionAllowed: false,
+                  meanReversionBlockReason: mrConfig ? 
+                    (adx >= mrConfig.MAX_ADX_FOR_EXCEPTION && adxSlope > mrConfig.MAX_ADX_SLOPE ? 
+                      `ADX=${adx.toFixed(1)} >= ${mrConfig.MAX_ADX_FOR_EXCEPTION} with slope=${adxSlope.toFixed(2)} > 0 (trend still expanding)` :
+                      stochRsiK4h > mrConfig.LONG_MAX_K_FOR_EXCEPTION ? 
+                        `K=${stochRsiK4h.toFixed(0)} > ${mrConfig.LONG_MAX_K_FOR_EXCEPTION} (not oversold enough for bounce)` :
+                        'Mean reversion conditions not met') : 
+                    'Mean reversion not configured',
                   relaxationApplied: useRelaxedThresholds,
                   relaxationCondition
                 };
@@ -4870,10 +4916,23 @@ serve(async (req) => {
             // ===== HARD BLOCK: Price rallied too far already =====
             if (distanceFromLow >= effectiveHardThreshold) {
               moveZone = useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD';
-              // Check for strong trend exception
+              // Check for strong trend exception (continuation)
               const strongTrendException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_STRONG_TREND_EXCEPTION &&
                 adx >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX &&
                 adxSlope >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX_SLOPE;
+              
+              // NEW: Check for mean reversion exception (counter-trend fade)
+              // For LONG exhaustion → allows SHORT fade entry
+              const mrConfig = MOVE_EXHAUSTION_FILTER_PARAMS.MEAN_REVERSION;
+              const meanReversionException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_MEAN_REVERSION_EXCEPTION &&
+                mrConfig &&
+                // Trend energy must be decaying (ADX not too high OR slope declining)
+                (adx < mrConfig.MAX_ADX_FOR_EXCEPTION || adxSlope <= mrConfig.MAX_ADX_SLOPE) &&
+                adxSlope <= mrConfig.MAX_ADX_SLOPE &&
+                // StochRSI must be at overbought extreme (for SHORT fade)
+                stochRsiK4h >= mrConfig.SHORT_MIN_K_FOR_EXCEPTION &&
+                // Move must be significant enough to warrant reversal
+                distanceFromLow >= mrConfig.MIN_MOVE_PERCENT_FOR_EXCEPTION;
               
               if (strongTrendException) {
                 moveZone = 'EXCEPTION';
@@ -4892,6 +4951,26 @@ serve(async (req) => {
                   relaxationCondition
                 };
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION EXCEPTION: Price rallied ${distanceFromLow.toFixed(1)}% but ADX=${adx.toFixed(1)} rising (slope=${adxSlope.toFixed(2)}) - allowing with ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}% position`);
+              } else if (meanReversionException) {
+                // Mean Reversion bypass: allow SHORT fade after extended rally
+                moveZone = 'MEAN_REVERSION';
+                moveExhaustionPositionMultiplier = mrConfig.POSITION_SIZE;
+                moveZoneDetails = {
+                  zone: 'MEAN_REVERSION',
+                  distancePercent: distanceFromLow,
+                  direction: 'short',  // Opposite direction for MR
+                  stochRsiK: stochRsiK4h,
+                  adx,
+                  adxSlope,
+                  outcome: 'MEAN_REVERSION_ALLOWED',
+                  positionMultiplier: moveExhaustionPositionMultiplier,
+                  overrideReason: `Mean Reversion Fade: ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)} <= 0, K=${stochRsiK4h.toFixed(0)} >= ${mrConfig.SHORT_MIN_K_FOR_EXCEPTION} (overbought)`,
+                  meanReversionAllowed: true,
+                  meanReversionScore: Math.min(100, Math.round((distanceFromLow / 10) * 50 + ((stochRsiK4h - 85) / 15) * 50)),
+                  relaxationApplied: useRelaxedThresholds,
+                  relaxationCondition
+                };
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔄 MOVE_EXHAUSTION MEAN_REVERSION: Price rallied ${distanceFromLow.toFixed(1)}%, ADX=${adx.toFixed(1)} decaying (slope=${adxSlope.toFixed(2)}), K=${stochRsiK4h.toFixed(0)} (overbought) - allowing SHORT fade at ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}% position`);
               } else {
                 moveExhaustionBlocked = true;
                 moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% from 24h low ($${priceDistance.low24h.toFixed(2)}), too late to LONG (threshold: ${effectiveHardThreshold}%${useRelaxedThresholds ? ' [relaxed]' : ''})`;
@@ -4904,6 +4983,15 @@ serve(async (req) => {
                   adxSlope,
                   outcome: 'BLOCKED',
                   positionMultiplier: 0,
+                  // Add mean reversion diagnostics to blocked signals
+                  meanReversionAllowed: false,
+                  meanReversionBlockReason: mrConfig ? 
+                    (adx >= mrConfig.MAX_ADX_FOR_EXCEPTION && adxSlope > mrConfig.MAX_ADX_SLOPE ? 
+                      `ADX=${adx.toFixed(1)} >= ${mrConfig.MAX_ADX_FOR_EXCEPTION} with slope=${adxSlope.toFixed(2)} > 0 (trend still expanding)` :
+                      stochRsiK4h < mrConfig.SHORT_MIN_K_FOR_EXCEPTION ? 
+                        `K=${stochRsiK4h.toFixed(0)} < ${mrConfig.SHORT_MIN_K_FOR_EXCEPTION} (not overbought enough for fade)` :
+                        'Mean reversion conditions not met') : 
+                    'Mean reversion not configured',
                   relaxationApplied: useRelaxedThresholds,
                   relaxationCondition
                 };
@@ -4991,6 +5079,25 @@ serve(async (req) => {
           if (moveZoneDetails) {
             const relaxedTag = moveZoneDetails.relaxationApplied ? ` [RELAXED: ${moveZoneDetails.relaxationCondition}]` : '';
             logger.forSymbol(symbol).info(`📊 ZONE_ANALYTICS: ${moveZoneDetails.zone} | move=${moveZoneDetails.distancePercent.toFixed(1)}% | dir=${moveZoneDetails.direction} | outcome=${moveZoneDetails.outcome} | size=${(moveZoneDetails.positionMultiplier * 100).toFixed(0)}% | K=${moveZoneDetails.stochRsiK.toFixed(0)} | ADX=${moveZoneDetails.adx.toFixed(1)}${moveZoneDetails.overrideReason ? ` | reason=${moveZoneDetails.overrideReason}` : ''}${relaxedTag}`);
+          }
+          
+          // ===== MEAN REVERSION DIRECTION FLIP =====
+          // When mean reversion is triggered, flip the trade direction to counter-trend
+          let meanReversionDirectionFlipped = false;
+          let meanReversionReason = '';
+          if (moveZone === 'MEAN_REVERSION' && moveZoneDetails?.meanReversionAllowed) {
+            const originalDirection = derivedDirection;
+            // Flip direction for mean reversion
+            derivedDirection = derivedDirection === 'long' ? 'short' : 'long';
+            meanReversionDirectionFlipped = true;
+            meanReversionReason = `MEAN_REVERSION: Flipped from ${originalDirection} due to exhausted move (${moveZoneDetails.distancePercent.toFixed(1)}% from swing)`;
+            
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION DIRECTION FLIP: ${originalDirection?.toUpperCase()} → ${derivedDirection.toUpperCase()}\n` +
+              `   → ADX: ${moveZoneDetails.adx.toFixed(1)}, slope: ${moveZoneDetails.adxSlope.toFixed(2)}\n` +
+              `   → K: ${moveZoneDetails.stochRsiK.toFixed(0)}, move: ${moveZoneDetails.distancePercent.toFixed(1)}%\n` +
+              `   → Position: ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`
+            );
           }
           
           // Log swing distance for debugging if significant
