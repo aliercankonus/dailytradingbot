@@ -461,10 +461,23 @@ const logRejectionWithAI = async (
   // Contract: volumeRatio must always be present (null = not computed, number = actual value)
   // This fixes the UI bug where missing volumeRatio defaulted to 1.0 ("100% Normal") incorrectly
   const volumeData = {
-    volumeRatio: trendData?.volume?.ratio ?? null,  // null = not computed, DO NOT default to 1.0
-    volumeTrend: trendData?.volume?.trend ?? null,
-    volumeSpike: trendData?.volume?.spike ?? null,
-    volumeAboveMA: trendData?.volume?.aboveMA ?? null,
+    // Extract volumeRatio from 1h timeframe (primary reference) with fallbacks to other timeframes
+    // The volume object is structured as { "15m": {...volumeRatio...}, "30m": {...}, "1h": {...}, "4h": {...} }
+    volumeRatio: trendData?.volume?.["1h"]?.volumeRatio ?? 
+                 trendData?.volume?.["30m"]?.volumeRatio ?? 
+                 trendData?.volume?.["4h"]?.volumeRatio ?? 
+                 trendData?.volume?.["15m"]?.volumeRatio ?? 
+                 trendData?.volume?.ratio ?? 
+                 null,  // null = not computed, DO NOT default to 1.0
+    volumeTrend: trendData?.volume?.["1h"]?.volumeTrend ?? 
+                 trendData?.volume?.trend ?? 
+                 null,
+    volumeSpike: trendData?.volume?.["1h"]?.volumeSpike ?? 
+                 trendData?.volume?.spike ?? 
+                 null,
+    volumeAboveMA: trendData?.volume?.aboveMA ?? 
+                   (trendData?.volume?.["1h"]?.volumeRatio > 1.0 ? true : 
+                    trendData?.volume?.["1h"]?.volumeRatio !== undefined ? false : null),
   };
   
   // Merge Order Flow data, StochRSI data, Bollinger data, ADX data, and Volume data into filters_status
