@@ -2757,7 +2757,9 @@ serve(async (req) => {
             
             // Helper: Check if Strong Trend Override conditions are met
             const checkStrongTrendOverride = (direction: 'long' | 'short'): { allowed: boolean; reason: string } => {
-              if (!STRONG_TREND_TIER0_OVERRIDE.ENABLED || !DEEP_STOCHRSI_HARD_GATE.ALLOW_STRONG_TREND_OVERRIDE) {
+               // FIXED: Single authority - only check STRONG_TREND_TIER0_OVERRIDE.ENABLED
+               // Removed ALLOW_STRONG_TREND_OVERRIDE to prevent configuration divergence
+               if (!STRONG_TREND_TIER0_OVERRIDE.ENABLED) {
                 return { allowed: false, reason: 'Strong Trend Override disabled' };
               }
               
@@ -2771,35 +2773,30 @@ serve(async (req) => {
                 return { allowed: false, reason: `ADX slope ${earlyAdxSlope.toFixed(2)} < ${STRONG_TREND_TIER0_OVERRIDE.MIN_ADX_SLOPE}` };
               }
               
-              // Check momentum score (confirming direction)
+               // SIMPLIFIED: Check momentum score only (quantitative, stable)
+               // Score inherently encodes direction: positive = bullish, negative = bearish
+               // This removes the redundant direction enum check that caused over-filtering
               const momentumRequirement = direction === 'short' 
                 ? earlyMomentumScore <= -STRONG_TREND_TIER0_OVERRIDE.MIN_MOMENTUM_SCORE  // Negative for shorts
                 : earlyMomentumScore >= STRONG_TREND_TIER0_OVERRIDE.MIN_MOMENTUM_SCORE;   // Positive for longs
-              if (STRONG_TREND_TIER0_OVERRIDE.REQUIRE_MOMENTUM_ALIGNMENT && !momentumRequirement) {
-                return { allowed: false, reason: `Momentum ${earlyMomentumScore.toFixed(0)} doesn't confirm ${direction}` };
+               if (!momentumRequirement) {
+                 return { allowed: false, reason: `Momentum ${earlyMomentumScore.toFixed(0)} doesn't confirm ${direction} (need ${direction === 'short' ? '<=' : '>='} ${direction === 'short' ? '-' : ''}${STRONG_TREND_TIER0_OVERRIDE.MIN_MOMENTUM_SCORE})` };
               }
               
-              // Check momentum direction alignment
-              const momentumAligns = direction === 'short' 
-                ? earlyMomentumDirection === 'bearish' || earlyMomentumDirection === 'strongly_bearish'
-                : earlyMomentumDirection === 'bullish' || earlyMomentumDirection === 'strongly_bullish';
-              if (STRONG_TREND_TIER0_OVERRIDE.REQUIRE_MOMENTUM_ALIGNMENT && !momentumAligns) {
-                return { allowed: false, reason: `Momentum direction ${earlyMomentumDirection} doesn't align with ${direction}` };
-              }
-              
-              // Check 1H alignment (not counter-trend)
+               // FIXED: Check 1H alignment using config value instead of hardcoded 60
+               // 1H is only considered "opposing" if confidence >= MIN_1H_OPPOSING_CONFIDENCE
               if (STRONG_TREND_TIER0_OVERRIDE.REQUIRE_1H_ALIGNMENT) {
                 const is1hOpposing = direction === 'short' 
-                  ? early1hTrend === 'bullish' && early1hConfidence >= 60
-                  : early1hTrend === 'bearish' && early1hConfidence >= 60;
+                   ? early1hTrend === 'bullish' && early1hConfidence >= STRONG_TREND_TIER0_OVERRIDE.MIN_1H_OPPOSING_CONFIDENCE
+                   : early1hTrend === 'bearish' && early1hConfidence >= STRONG_TREND_TIER0_OVERRIDE.MIN_1H_OPPOSING_CONFIDENCE;
                 if (is1hOpposing) {
-                  return { allowed: false, reason: `1H trend ${early1hTrend} (${early1hConfidence}%) opposes ${direction}` };
+                   return { allowed: false, reason: `1H trend ${early1hTrend} (${early1hConfidence}%) opposes ${direction} (threshold: ${STRONG_TREND_TIER0_OVERRIDE.MIN_1H_OPPOSING_CONFIDENCE}%)` };
                 }
               }
               
               return { 
                 allowed: true, 
-                reason: `ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)}, momentum=${earlyMomentumScore.toFixed(0)} ${earlyMomentumDirection}` 
+                 reason: `ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)}, momentum=${earlyMomentumScore.toFixed(0)}` 
               };
             };
             
@@ -7294,7 +7291,7 @@ serve(async (req) => {
                 threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
                 percentB: percentB.toFixed(1),
                 adx: adx.toFixed(1),
-                allowStrongTrendOverride: DEEP_STOCHRSI_HARD_GATE.ALLOW_STRONG_TREND_OVERRIDE,
+                 allowStrongTrendOverride: STRONG_TREND_TIER0_OVERRIDE.ENABLED,
                 meanReversionBypass: false,
                 message: `Bounce probability extremely high (~80%+) at K=${stochRsiK4h.toFixed(1)}, blocking SHORT with NO EXCEPTIONS`
               },
@@ -7331,7 +7328,7 @@ serve(async (req) => {
                 threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
                 percentB: percentB.toFixed(1),
                 adx: adx.toFixed(1),
-                allowStrongTrendOverride: DEEP_STOCHRSI_HARD_GATE.ALLOW_STRONG_TREND_OVERRIDE,
+                 allowStrongTrendOverride: STRONG_TREND_TIER0_OVERRIDE.ENABLED,
                 meanReversionBypass: false,
                 message: `Pullback probability extremely high (~80%+) at K=${stochRsiK4h.toFixed(1)}, blocking LONG with NO EXCEPTIONS`
               },
