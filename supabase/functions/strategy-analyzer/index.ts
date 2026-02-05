@@ -158,6 +158,8 @@ import {
   ADX_SLOPE_GRADUATED_GATE,
   HIGH_ADX_1H_CONFIRMATION_GATE,
   STOCHRSI_RUNWAY_GATE,
+  // NEW: Counter-Trend Admission Layer (MR probe momentum tolerance)
+  COUNTER_TREND_ADMISSION,
   type ExceptionType,
   type MarketContext
 } from "../_shared/constants.ts";
@@ -2337,7 +2339,9 @@ serve(async (req) => {
       | 'HIGH_ADX_1H_CONFIRMATION'
       | 'STOCHRSI_RUNWAY'
       // Counter-Trend Admission Layer
-      | 'COUNTER_TREND_ADMISSION';
+      | 'COUNTER_TREND_ADMISSION'
+      // NEW: MR Probe Momentum Tolerance
+      | 'MR_EXTREME_MOMENTUM_BLOCK';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -5235,47 +5239,118 @@ serve(async (req) => {
               }
             } else if (is1hNeutral && is30mNeutral) {
               // BOTH LTF neutral - check if momentum is also opposing (double-warning signal)
-              const momentumOpposing = 
-                (derivedDirection === 'long' && smartMomentum.score < -LTF_CONFIRMATION_GATE.MOMENTUM_OPPOSING_THRESHOLD) ||
-                (derivedDirection === 'short' && smartMomentum.score > LTF_CONFIRMATION_GATE.MOMENTUM_OPPOSING_THRESHOLD);
               
-              if (LTF_CONFIRMATION_GATE.BLOCK_WHEN_MOMENTUM_ALSO_OPPOSING && momentumOpposing) {
-                // Double-warning: LTF neutral + momentum opposing = BLOCK (not just reduce)
-                rejectedByHardGates++;
-                const blockReason = `LTF_CONFIRMATION_BLOCK: ${derivedDirection.toUpperCase()} blocked - BOTH 1h/30m neutral AND momentum opposing (${smartMomentum.score.toFixed(0)})`;
-                perSymbolGateAttribution.set(symbol, { 
-                  gate: 'LTF_BOTH_NEUTRAL_PLUS_MOMENTUM',
-                  details: blockReason 
-                });
-                
-                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
-                logger.forSymbol(symbol).warn(`   → 4h=${tf4hDir} at ${conf4h}% but LTF and momentum both unfavorable`);
-                
-                await logRejectionWithAI(
-                  supabase, userId, symbol,
-                  blockReason,
-                  {
-                    gate: "LTF_BOTH_NEUTRAL_PLUS_MOMENTUM",
-                    derivedDirection,
-                    tf4hDir, tf1hDir, tf30mDir,
-                    conf4h,
-                    momentumScore: smartMomentum.score,
-                    adx: adx.toFixed(1),
-                    ltfConfirmationRequired: true,
-                    wouldPassWith: `Either 1h or 30m must align with direction, OR momentum must not oppose (|score| <= ${LTF_CONFIRMATION_GATE.MOMENTUM_OPPOSING_THRESHOLD})`,
-                  },
-                  trendData,
-                  riskParams.ai_analysis_enabled !== false,
-                  earlyOrderFlowAnalysis
-                );
-                continue;
+              // ===== MR PROBE MOMENTUM TOLERANCE =====
+              // For Mean Reversion probes, opposing momentum is EXPECTED (we just flipped direction)
+              // Use relaxed thresholds from COUNTER_TREND_ADMISSION.MOMENTUM_TOLERANCE
+              const mrTolerance = COUNTER_TREND_ADMISSION.MOMENTUM_TOLERANCE;
+              const isMrProbe = moveZone === 'MEAN_REVERSION' && moveZoneDetails?.meanReversionAllowed && mrTolerance.ENABLED;
+              
+              // Determine effective momentum opposing threshold
+              const effectiveThreshold = isMrProbe 
+                ? mrTolerance.RELAXED_OPPOSING_THRESHOLD 
+                : LTF_CONFIRMATION_GATE.MOMENTUM_OPPOSING_THRESHOLD;
+              
+              // Check if momentum is in EXTREME opposing zone (block even MR probes)
+              const extremeMomentumOpposing = isMrProbe && (
+                (derivedDirection === 'long' && smartMomentum.score < -mrTolerance.EXTREME_OPPOSING_THRESHOLD) ||
+                (derivedDirection === 'short' && smartMomentum.score > mrTolerance.EXTREME_OPPOSING_THRESHOLD)
+              );
+              
+              // Standard momentum opposition check (uses relaxed threshold for MR probes)
+              const momentumOpposing = 
+                (derivedDirection === 'long' && smartMomentum.score < -effectiveThreshold) ||
+                (derivedDirection === 'short' && smartMomentum.score > effectiveThreshold);
+              
+              // MR probe with moderate opposition: allow entry with reduced size
+              const mrModerateOpposition = isMrProbe && momentumOpposing && !extremeMomentumOpposing;
+              
+              if (LTF_CONFIRMATION_GATE.BLOCK_WHEN_MOMENTUM_ALSO_OPPOSING && (momentumOpposing || extremeMomentumOpposing)) {
+                // Check for MR probe bypass
+                if (mrModerateOpposition) {
+                  // Allow MR probe with reduced position size for moderate opposition
+                  ltfConfirmationPositionMultiplier = mrTolerance.MODERATE_OPPOSITION_MULTIPLIER;
+                  ltfConfirmationApplied = true;
+                  
+                  if (mrTolerance.LOG_TOLERANCE_APPLIED) {
+                    logger.forSymbol(symbol).info(
+                      `${LOG_CATEGORIES.GATE} 🔄 MR_MOMENTUM_TOLERANCE APPLIED:\n` +
+                      `   → MR probe ${derivedDirection.toUpperCase()} allowed despite momentum=${smartMomentum.score.toFixed(0)}\n` +
+                      `   → Standard threshold: ${LTF_CONFIRMATION_GATE.MOMENTUM_OPPOSING_THRESHOLD}, MR relaxed: ${mrTolerance.RELAXED_OPPOSING_THRESHOLD}\n` +
+                      `   → Position reduced to ${(ltfConfirmationPositionMultiplier * 100).toFixed(0)}%`
+                    );
+                  }
+                } else if (extremeMomentumOpposing) {
+                  // Even MR probes blocked at extreme momentum
+                  rejectedByHardGates++;
+                  const blockReason = `MR_EXTREME_MOMENTUM_BLOCK: ${derivedDirection.toUpperCase()} MR probe blocked - momentum (${smartMomentum.score.toFixed(0)}) exceeds extreme threshold (±${mrTolerance.EXTREME_OPPOSING_THRESHOLD})`;
+                  perSymbolGateAttribution.set(symbol, { 
+                    gate: 'MR_EXTREME_MOMENTUM_BLOCK',
+                    details: blockReason 
+                  });
+                  
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                  
+                  await logRejectionWithAI(
+                    supabase, userId, symbol,
+                    blockReason,
+                    {
+                      gate: "MR_EXTREME_MOMENTUM_BLOCK",
+                      derivedDirection,
+                      meanReversionDirectionFlipped: true,
+                      tf4hDir, tf1hDir, tf30mDir,
+                      conf4h,
+                      momentumScore: smartMomentum.score,
+                      extremeThreshold: mrTolerance.EXTREME_OPPOSING_THRESHOLD,
+                      adx: adx.toFixed(1),
+                      mrProbe: true,
+                      wouldPassWith: `Momentum must be less extreme (|score| <= ${mrTolerance.EXTREME_OPPOSING_THRESHOLD})`,
+                    },
+                    trendData,
+                    riskParams.ai_analysis_enabled !== false,
+                    earlyOrderFlowAnalysis
+                  );
+                  continue;
+                } else {
+                  // Standard block for non-MR entries
+                  rejectedByHardGates++;
+                  const blockReason = `LTF_CONFIRMATION_BLOCK: ${derivedDirection.toUpperCase()} blocked - BOTH 1h/30m neutral AND momentum opposing (${smartMomentum.score.toFixed(0)})`;
+                  perSymbolGateAttribution.set(symbol, { 
+                    gate: 'LTF_BOTH_NEUTRAL_PLUS_MOMENTUM',
+                    details: blockReason 
+                  });
+                  
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                  logger.forSymbol(symbol).warn(`   → 4h=${tf4hDir} at ${conf4h}% but LTF and momentum both unfavorable`);
+                  
+                  await logRejectionWithAI(
+                    supabase, userId, symbol,
+                    blockReason,
+                    {
+                      gate: "LTF_BOTH_NEUTRAL_PLUS_MOMENTUM",
+                      derivedDirection,
+                      tf4hDir, tf1hDir, tf30mDir,
+                      conf4h,
+                      momentumScore: smartMomentum.score,
+                      adx: adx.toFixed(1),
+                      ltfConfirmationRequired: true,
+                      wouldPassWith: `Either 1h or 30m must align with direction, OR momentum must not oppose (|score| <= ${LTF_CONFIRMATION_GATE.MOMENTUM_OPPOSING_THRESHOLD})`,
+                    },
+                    trendData,
+                    riskParams.ai_analysis_enabled !== false,
+                    earlyOrderFlowAnalysis
+                  );
+                  continue;
+                }
               }
               
-              // Otherwise, reduce to probe size (no momentum opposition)
-              ltfConfirmationPositionMultiplier = LTF_CONFIRMATION_GATE.SIZING.NO_ALIGNMENT;
-              ltfConfirmationApplied = true;
-              
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ LTF_NEUTRAL: ${derivedDirection.toUpperCase()} at 4h=${tf4hDir} but 1h/30m both neutral - reducing to ${(LTF_CONFIRMATION_GATE.SIZING.NO_ALIGNMENT * 100).toFixed(0)}% position`);
+              // No momentum opposition (or MR tolerance applied) - reduce to probe size
+              if (!ltfConfirmationApplied) {
+                ltfConfirmationPositionMultiplier = LTF_CONFIRMATION_GATE.SIZING.NO_ALIGNMENT;
+                ltfConfirmationApplied = true;
+                
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ LTF_NEUTRAL: ${derivedDirection.toUpperCase()} at 4h=${tf4hDir} but 1h/30m both neutral - reducing to ${(LTF_CONFIRMATION_GATE.SIZING.NO_ALIGNMENT * 100).toFixed(0)}% position`);
+              }
             }
             
             if (ltfConfirmationApplied && ltfConfirmationPositionMultiplier < 1.0) {
