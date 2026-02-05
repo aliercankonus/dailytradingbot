@@ -376,10 +376,8 @@ export const DEEP_STOCHRSI_HARD_GATE = {
   // Tier 0: Deep overbought threshold - block ALL LONGs when 4h K above this
   // At K > 95, pullback probability is ~80%+ (statistically poor long entry)
   DEEP_OVERBOUGHT_K_THRESHOLD: 95,
-  
-  // STRONG TREND OVERRIDE: Allow exceptions when ADX confirms powerful trend
-  // In capitulation events, StochRSI can remain pegged while price continues moving 5-10%+
-  ALLOW_STRONG_TREND_OVERRIDE: true,
+   // NOTE: Strong Trend Override is controlled solely by STRONG_TREND_TIER0_OVERRIDE.ENABLED
+   // REMOVED: ALLOW_STRONG_TREND_OVERRIDE (was causing configuration divergence risk)
 } as const;
 
 // ============= STRONG TREND TIER 0 OVERRIDE =============
@@ -404,24 +402,39 @@ export const STRONG_TREND_TIER0_OVERRIDE = {
   // Minimum ADX for override consideration
   MIN_ADX: 40,
   // ADX slope must not be sharply falling (trend still has energy)
+   // NOTE: Consider tightening to -0.5 for cleaner continuation if false positives occur
   MIN_ADX_SLOPE: -1.0,
   
   // ===== MOMENTUM REQUIREMENTS =====
-  // Momentum score must confirm trade direction
+   // Momentum score must confirm trade direction (>= 30 for long, <= -30 for short)
+   // SIMPLIFIED: Use score only (quantitative), not direction enum (categorical)
+   // Score inherently encodes direction: positive = bullish, negative = bearish
   MIN_MOMENTUM_SCORE: 30,
-  // Smart momentum direction must align (not opposing)
-  REQUIRE_MOMENTUM_ALIGNMENT: true,
+   // REMOVED: REQUIRE_MOMENTUM_ALIGNMENT - redundant with score check
+   // Score >= 30 implies bullish direction, score <= -30 implies bearish direction
   
   // ===== TREND ALIGNMENT =====
   // 1H timeframe must align with trade direction
   REQUIRE_1H_ALIGNMENT: true,
-  // Minimum 1H confidence for alignment (neutral at 0 is OK if not opposing)
-  MIN_1H_CONFIDENCE: 0,
+   // Minimum 1H confidence for "opposing" determination
+   // 1H trend is only considered opposing if confidence >= this threshold
+   // Set to 60 by default - neutral or weak 1H trends don't block
+   MIN_1H_OPPOSING_CONFIDENCE: 60,
   
   // ===== POSITION SIZING =====
   // Conservative position size for late-entry at extremes
   POSITION_SIZE_MULTIPLIER: 0.25,
   
+   // ===== COOLDOWN PROTECTION =====
+   // Prevents repeated late entries in a grinding trend ("death by 100 small cuts")
+   // Maximum override entries per symbol per N hours
+   MAX_OVERRIDES_PER_SYMBOL: 1,
+   COOLDOWN_HOURS: 4,
+   
+   // ===== ENTRY TYPE TAGGING =====
+   // Tag for forensics and separate win rate analysis
+   ENTRY_TYPE_TAG: 'STRONG_TREND_TIER0_OVERRIDE' as const,
+   
   // ===== LOGGING =====
   LOG_OVERRIDE_DETAILS: true,
 } as const;
