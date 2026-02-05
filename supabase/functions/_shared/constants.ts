@@ -4443,6 +4443,27 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   EXCEPTION_MIN_ADX_SLOPE: 0.2,       // ADX must be rising
   EXCEPTION_POSITION_SIZE: 0.40,      // 40% position for exception entries
   
+  // ===== EXCEPTION: MEAN REVERSION BOUNCE/FADE =====
+  // Allow counter-trend probes when move is exhausted AND trend energy is decaying
+  // This captures bounces after extended moves when ADX confirms trend exhaustion
+  ALLOW_MEAN_REVERSION_EXCEPTION: true,
+  MEAN_REVERSION: {
+    // ADX must be below this (not in dominant trend) OR slope must be declining
+    MAX_ADX_FOR_EXCEPTION: 45,
+    // ADX slope must be <= 0 (flat or declining) - trend energy decay required
+    MAX_ADX_SLOPE: 0,
+    // StochRSI extremes required for counter-trend entry
+    // LONG bounce: K must be < 15 (oversold)
+    LONG_MAX_K_FOR_EXCEPTION: 15,
+    // SHORT fade: K must be > 85 (overbought)
+    SHORT_MIN_K_FOR_EXCEPTION: 85,
+    // Position size for mean reversion exceptions (probe size)
+    POSITION_SIZE: 0.25,
+    // Minimum move percentage before mean reversion is allowed
+    // Prevents MR entries on small moves - only after extended ones
+    MIN_MOVE_PERCENT_FOR_EXCEPTION: 5.0,
+  },
+  
   // ===== ADDITIONAL ENTRY QUALITY GATES =====
   SOFT_SHORT_MIN_STOCHRSI: 35,
   SOFT_LONG_MAX_STOCHRSI: 50,         // Tightened from 65
