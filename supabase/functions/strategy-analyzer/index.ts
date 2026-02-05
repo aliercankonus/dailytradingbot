@@ -2837,7 +2837,7 @@ serve(async (req) => {
               // If probe conditions are met, we flip direction to LONG instead of blocking
               let capitulationProbeTriggered = false;
               if (CAPITULATION_BOUNCE_PROBE.ENABLED && earlyStochRsiK4h <= CAPITULATION_BOUNCE_PROBE.MAX_STOCHRSI_K) {
-                const priceDropPercent = trendData?.priceDistance?.distanceFromHighPercent ?? 0;
+                const priceDropPercent = trendData?.priceDistanceFromSwing?.distanceFromHighPercent ?? 0;
                 const momentumCollapsed = earlyMomentumScore >= CAPITULATION_BOUNCE_PROBE.MOMENTUM_COLLAPSED_MIN && 
                                           earlyMomentumScore <= CAPITULATION_BOUNCE_PROBE.MOMENTUM_COLLAPSED_MAX;
                 const highAdxExhausting = adx >= CAPITULATION_BOUNCE_PROBE.MIN_ADX && 
@@ -3062,7 +3062,7 @@ serve(async (req) => {
         if (CAPITULATION_BOUNCE_PROBE.ENABLED) {
           // Extract required data using centralized extractors
           const stochK4h = extractStochRsiK(trendData, '4h');
-          const priceDropPercent = trendData?.priceDistance?.distanceFromHighPercent ?? 0;
+          const priceDropPercent = trendData?.priceDistanceFromSwing?.distanceFromHighPercent ?? 0;
           const momentumScoreRaw = trendData?.smartMomentum?.score ?? trendData?.smart_momentum?.normalized_score ?? 0;
           const adxValue = extractADX(trendData);
           // ADX slope - extractADXSlope returns an object, get the value
