@@ -4730,6 +4730,38 @@ export const COUNTER_TREND_ADMISSION = {
     REQUIRE_MOMENTUM_SUPPORT: true, // Momentum must turn supportive
   },
   
+  // ===== MOMENTUM TOLERANCE FOR MR PROBES =====
+  // MR probes are counter-trend by definition → opposing momentum is EXPECTED
+  // Standard gates treat them identically to trend entries → too strict
+  // These relaxed thresholds apply ONLY when meanReversionDirectionFlipped = true
+  MOMENTUM_TOLERANCE: {
+    ENABLED: true,
+    
+    // Standard gates block at ±15 score - MR probes allow up to ±25
+    // Rationale: Counter-trend entries naturally face opposing momentum
+    RELAXED_OPPOSING_THRESHOLD: 25,
+    
+    // Absolute block threshold - even MR probes blocked beyond this
+    // Score > 50 = extreme momentum, not worth fighting
+    EXTREME_OPPOSING_THRESHOLD: 50,
+    
+    // Position multiplier when momentum opposition is in the 15-25 range
+    // More conservative than standard but still allows probe entry
+    MODERATE_OPPOSITION_MULTIPLIER: 0.20,  // 20% position for moderate opposition
+    
+    // Require momentum DELTA to be improving (slope flattening), not positive
+    // This confirms the impulse is weakening, not just oscillators
+    REQUIRE_IMPROVING_DELTA: true,
+    IMPROVING_DELTA_THRESHOLD: 0.0,  // Delta >= 0 means not getting worse
+    
+    // Allow bypass if ADX slope persistence >= 2 candles (additional safety)
+    // More consecutive decaying candles = higher confidence of exhaustion
+    ADX_PERSISTENCE_BYPASS_THRESHOLD: 2,
+    
+    // Logging for forensics
+    LOG_TOLERANCE_APPLIED: true,
+  },
+  
   // ===== FAILURE REASON LOGGING =====
   LOG_FAILURE_REASONS: true,        // Log exact failure cause for forensics
   
