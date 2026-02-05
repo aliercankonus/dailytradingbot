@@ -472,8 +472,112 @@ export const STRONG_TREND_TIER0_OVERRIDE = {
    // Tag for forensics and separate win rate analysis
    ENTRY_TYPE_TAG: 'STRONG_TREND_TIER0_OVERRIDE' as const,
    
-  // ===== LOGGING =====
+   // ===== LOGGING =====
   LOG_OVERRIDE_DETAILS: true,
+} as const;
+
+// ============= CAPITULATION BOUNCE PROBE =============
+// NEW MICRO-REGIME: Post-capitulation balance zone entry
+// 
+// RATIONALE:
+// During capitulation events (10%+ drops), the system correctly blocks:
+// - SHORTs via Tier 0 DEEP_OVERSOLD (K < 5 → 80% bounce probability)
+// - LONGs via LTF_COUNTER_ALIGNED (structure still bearish)
+// 
+// BUT: Neither MR nor continuation logic fires in this regime because:
+// - Trend: Momentum has COLLAPSED to ~0 (not directional)
+// - Mean Reversion: Requires momentum decay, but momentum is already at zero
+// - Continuation: Requires strong momentum, but momentum is at zero
+//
+// This is a TRANSITIONAL REGIME - liquidity vacuum rebound capture
+// NOT mean reversion (which requires decaying momentum)
+// NOT trend continuation (which requires strong directional momentum)
+//
+// STRICT CONDITIONS (ALL REQUIRED):
+// 1. StochRSI 4H K ≤ 1 (pinned at absolute extreme)
+// 2. Price dropped ≥ 8% in ≤ 24h (significant capitulation move)
+// 3. Momentum score between -5 and +5 (collapsed, not directional)
+// 4. ADX ≥ 35 but slope ≤ 0 (high energy but exhausting)
+// 5. Volatility not expanding (ATR flat or BB width stabilizing)
+//
+// BEHAVIOR:
+// - Direction: LONG only (bounce capture from oversold extreme)
+// - Size: 0.15-0.20x (very conservative probe)
+// - TP: Modest (1.5-2.5% target, not trend reversal)
+// - No pyramiding allowed
+// - Hard invalidation if K > 5 without price move (bounce failed)
+export const CAPITULATION_BOUNCE_PROBE = {
+  ENABLED: true,
+  
+  // ===== STOCHRSI REQUIREMENTS =====
+  // Must be at absolute extreme (pinned)
+  MAX_STOCHRSI_K: 1,  // K ≤ 1 (pinned at bottom)
+  
+  // ===== PRICE DROP REQUIREMENTS =====
+  // Significant drop must have occurred
+  MIN_DROP_PERCENT: 8,   // At least 8% drop from 24h high
+  MAX_LOOKBACK_HOURS: 24,
+  
+  // ===== MOMENTUM REQUIREMENTS =====
+  // Momentum must have COLLAPSED (not directional)
+  // This distinguishes from continuation (strong momentum) and MR (decaying momentum)
+  MOMENTUM_COLLAPSED_MIN: -5,  // Score must be >= -5
+  MOMENTUM_COLLAPSED_MAX: 5,   // Score must be <= 5
+  // Block if momentum is still strong in either direction
+  BLOCK_IF_MOMENTUM_DIRECTIONAL: true,
+  
+  // ===== ADX REQUIREMENTS =====
+  // High energy trend that is EXHAUSTING (not accelerating)
+  MIN_ADX: 35,           // Must have had strong trend
+  MAX_ADX_SLOPE: 0,      // Trend energy not expanding (flat or falling)
+  
+  // ===== VOLATILITY REQUIREMENTS =====
+  // Volatility must not be expanding (calm after storm)
+  REQUIRE_VOLATILITY_NOT_EXPANDING: true,
+  ATR_EXPANSION_THRESHOLD: 1.0,  // ATR slope must be < 1.0
+  // OR BB width stabilizing
+  BB_WIDTH_STABILIZING_THRESHOLD: 0.5,  // BB width change < 0.5%
+  
+  // ===== POSITION SIZING =====
+  // Very conservative - this is a speculative probe
+  BASE_POSITION_SIZE: 0.15,      // 15% of normal position
+  WITH_VOLUME_SPIKE: 0.20,       // 20% if volume spike confirms bounce interest
+  
+  // ===== VOLUME CONFIRMATION (OPTIONAL BOOST) =====
+  // If volume spikes at the bottom, increases size from 15% to 20%
+  VOLUME_SPIKE_THRESHOLD: 1.5,   // 1.5x average volume
+  
+  // ===== STOP LOSS =====
+  // Tight stop - invalidation is clear
+  STOP_LOSS_ATR_MULTIPLIER: 0.8, // 0.8x ATR (tight)
+  STOP_LOSS_MAX_PERCENT: 1.0,    // Max 1.0% stop loss
+  
+  // ===== TAKE PROFIT =====
+  // Modest target - bounce capture, not reversal
+  TAKE_PROFIT_MIN_PERCENT: 1.5,  // Minimum 1.5% target
+  TAKE_PROFIT_MAX_PERCENT: 2.5,  // Maximum 2.5% target
+  TAKE_PROFIT_ATR_MULTIPLIER: 1.5, // 1.5x ATR target
+  
+  // ===== SAFETY LIMITS =====
+  // Prevent overexposure to this speculative setup
+  MAX_PROBES_PER_SYMBOL_PER_DAY: 1,  // Only 1 probe per symbol per day
+  NO_PYRAMIDING: true,
+  
+  // ===== COOLDOWN =====
+  // Cooldown after failed probe
+  COOLDOWN_HOURS_AFTER_FAILED: 4,
+  
+  // ===== HARD INVALIDATION =====
+  // If K rises above this without price moving 1%, probe is invalidated
+  INVALIDATION_K_THRESHOLD: 5,
+  INVALIDATION_REQUIRE_PRICE_MOVE: 1.0,  // 1% minimum move for K rise to be valid
+  
+  // ===== ENTRY TYPE TAGGING =====
+  ENTRY_TYPE_TAG: 'CAPITULATION_BOUNCE_PROBE' as const,
+  
+  // ===== LOGGING =====
+  LOG_PROBE_DETAILS: true,
+  LOG_NEAR_MISS: true,  // Log when close but conditions not met
 } as const;
 
 // ============= PHASE 3: TIME-IN-EXTREME THRESHOLDS =============

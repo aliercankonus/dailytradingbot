@@ -160,6 +160,8 @@ import {
   STOCHRSI_RUNWAY_GATE,
   // NEW: Counter-Trend Admission Layer (MR probe momentum tolerance)
   COUNTER_TREND_ADMISSION,
+  // NEW: Capitulation Bounce Probe (post-capitulation balance zone entry)
+  CAPITULATION_BOUNCE_PROBE,
   type ExceptionType,
   type MarketContext
 } from "../_shared/constants.ts";
@@ -2342,7 +2344,9 @@ serve(async (req) => {
       | 'COUNTER_TREND_ADMISSION'
       // NEW: MR Probe Momentum Tolerance
       | 'MR_EXTREME_MOMENTUM_BLOCK'
-      | 'MR_SAFETY_CHECK_FAILED';  // MR probe blocked by safety checks (ADX persistence, delta)
+      | 'MR_SAFETY_CHECK_FAILED'
+      // NEW: Capitulation Bounce Probe
+      | 'CAPITULATION_BOUNCE_PROBE';  // Post-capitulation balance zone entry
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -2933,6 +2937,88 @@ serve(async (req) => {
           }
         }
         
+        // ============= CAPITULATION BOUNCE PROBE =============
+        // NEW MICRO-REGIME: Post-capitulation balance zone entry
+        // This fires when NEITHER continuation NOR mean reversion logic applies:
+        // - Continuation blocked: momentum collapsed to ~0
+        // - Mean Reversion blocked: LTF structure still bearish
+        // - BUT: Price at absolute extreme (K ≤ 1) after significant drop (≥8%)
+        //
+        // This is TRANSITIONAL REGIME entry - liquidity vacuum rebound capture
+        let capitulationBounceProbeActive = false;
+        let capitulationBouncePositionMultiplier = 0.15;
+        
+        if (CAPITULATION_BOUNCE_PROBE.ENABLED) {
+          // Extract required data using centralized extractors
+          const stochK4h = extractStochRsiK(trendData, '4h');
+          const priceDropPercent = trendData?.priceDistance?.distanceFromHighPercent ?? 0;
+          const momentumScoreRaw = trendData?.smartMomentum?.score ?? trendData?.smart_momentum?.normalized_score ?? 0;
+          const adxValue = extractADX(trendData);
+          // ADX slope - extractADXSlope returns an object, get the value
+          const adxSlopeResult = extractADXSlope(trendData);
+          const adxSlopeValue = typeof adxSlopeResult === 'number' ? adxSlopeResult : (adxSlopeResult?.slope ?? trendData?.volatility?.adxSlope ?? 0);
+          
+          // Check all required conditions
+          const stochAtExtreme = stochK4h <= CAPITULATION_BOUNCE_PROBE.MAX_STOCHRSI_K;
+          const sufficientDrop = priceDropPercent >= CAPITULATION_BOUNCE_PROBE.MIN_DROP_PERCENT;
+          const momentumCollapsed = momentumScoreRaw >= CAPITULATION_BOUNCE_PROBE.MOMENTUM_COLLAPSED_MIN && 
+                                    momentumScoreRaw <= CAPITULATION_BOUNCE_PROBE.MOMENTUM_COLLAPSED_MAX;
+          const highAdxExhausting = adxValue >= CAPITULATION_BOUNCE_PROBE.MIN_ADX && 
+                                    adxSlopeValue <= CAPITULATION_BOUNCE_PROBE.MAX_ADX_SLOPE;
+          
+          // Check volatility not expanding (optional)
+          let volatilityOk = true;
+          if (CAPITULATION_BOUNCE_PROBE.REQUIRE_VOLATILITY_NOT_EXPANDING) {
+            const atrChange = trendData?.volatility?.atrSlope ?? 0;
+            const bbWidthChange = trendData?.volatility?.bbWidthChange ?? 0;
+            volatilityOk = atrChange < CAPITULATION_BOUNCE_PROBE.ATR_EXPANSION_THRESHOLD || 
+                           Math.abs(bbWidthChange) < CAPITULATION_BOUNCE_PROBE.BB_WIDTH_STABILIZING_THRESHOLD;
+          }
+          
+          // All conditions met = Capitulation Bounce Probe
+          if (stochAtExtreme && sufficientDrop && momentumCollapsed && highAdxExhausting && volatilityOk) {
+            capitulationBounceProbeActive = true;
+            
+            // Check for volume spike bonus
+            const volumeRatio = trendData?.timeframes?.['1h']?.volumeRatio ?? 1.0;
+            if (volumeRatio >= CAPITULATION_BOUNCE_PROBE.VOLUME_SPIKE_THRESHOLD) {
+              capitulationBouncePositionMultiplier = CAPITULATION_BOUNCE_PROBE.WITH_VOLUME_SPIKE;
+            } else {
+              capitulationBouncePositionMultiplier = CAPITULATION_BOUNCE_PROBE.BASE_POSITION_SIZE;
+            }
+            
+            // Log and override direction for bounce capture
+            const originalDirection = directionResult.direction;
+            
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.SUCCESS} 🔄 CAPITULATION BOUNCE PROBE ACTIVATED:\n` +
+              `   → StochRSI K: ${stochK4h.toFixed(1)} (pinned at extreme)\n` +
+              `   → Price Drop: ${priceDropPercent.toFixed(1)}% (significant capitulation)\n` +
+              `   → Momentum: ${momentumScoreRaw.toFixed(0)} (collapsed to neutral)\n` +
+              `   → ADX: ${adxValue.toFixed(1)}, Slope: ${adxSlopeValue.toFixed(2)} (exhausting)\n` +
+              `   → Volume Ratio: ${volumeRatio.toFixed(2)}${volumeRatio >= CAPITULATION_BOUNCE_PROBE.VOLUME_SPIKE_THRESHOLD ? ' (SPIKE)' : ''}\n` +
+              `   → Position: ${(capitulationBouncePositionMultiplier * 100).toFixed(0)}% (probe size)\n` +
+              `   → Direction: LONG (bounce capture from ${originalDirection ?? 'undefined'})`
+            );
+            
+            // Override directionResult for the rest of the pipeline
+            directionResult.direction = 'long';
+            directionResult.confidence = Math.min(80, (directionResult.confidence || 50) + 20);
+            directionResult.reasons = [`CAPITULATION_BOUNCE_PROBE: K=${stochK4h.toFixed(1)}, drop=${priceDropPercent.toFixed(1)}%, momentum=${momentumScoreRaw.toFixed(0)}, ADX=${adxValue.toFixed(1)} slope=${adxSlopeValue.toFixed(2)}`];
+          } else if (CAPITULATION_BOUNCE_PROBE.LOG_NEAR_MISS && stochK4h <= 5) {
+            // Log near-miss for diagnostics (when close but conditions not met)
+            const failedConditions: string[] = [];
+            if (!stochAtExtreme) failedConditions.push(`K=${stochK4h.toFixed(1)} > ${CAPITULATION_BOUNCE_PROBE.MAX_STOCHRSI_K}`);
+            if (!sufficientDrop) failedConditions.push(`drop=${priceDropPercent.toFixed(1)}% < ${CAPITULATION_BOUNCE_PROBE.MIN_DROP_PERCENT}%`);
+            if (!momentumCollapsed) failedConditions.push(`momentum=${momentumScoreRaw.toFixed(0)} not in [${CAPITULATION_BOUNCE_PROBE.MOMENTUM_COLLAPSED_MIN}, ${CAPITULATION_BOUNCE_PROBE.MOMENTUM_COLLAPSED_MAX}]`);
+            if (!highAdxExhausting) failedConditions.push(`ADX=${adxValue.toFixed(1)} < ${CAPITULATION_BOUNCE_PROBE.MIN_ADX} or slope=${adxSlopeValue.toFixed(2)} > ${CAPITULATION_BOUNCE_PROBE.MAX_ADX_SLOPE}`);
+            if (!volatilityOk) failedConditions.push('volatility still expanding');
+            
+            logger.forSymbol(symbol).debug(
+              `${LOG_CATEGORIES.GATE} 📋 CAPITULATION BOUNCE NEAR-MISS: K=${stochK4h.toFixed(1)} but failed: ${failedConditions.join(', ')}`
+            );
+          }
+        }
         // ============= COUNTER-TREND ADMISSION LAYER =============
         // Unified authority for allowing counter-trend (reversal) entries
         // This check runs AFTER direction derivation but BEFORE strategy logic
