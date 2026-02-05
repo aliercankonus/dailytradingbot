@@ -36,7 +36,15 @@ export interface BlockedSignal {
     adx30m?: number;
     adx4h?: number;
     stochRsiK?: number;
+    stochRsiD?: number;           // NEW: 4h D value for reversal quality
     stochRsiK4h?: number;
+    stochRsiD4h?: number;         // NEW: Explicit 4h D
+    stochRsiK1h?: number;         // NEW: 1h K for LTF alignment
+    stochRsiD1h?: number;         // NEW: 1h D for LTF alignment
+    stochRsiK30m?: number;        // 30m K
+    stochRsiD30m?: number;        // 30m D
+    stochRsiK15m?: number;        // 15m K
+    stochRsiD15m?: number;        // 15m D
     trend4h?: string;
     trend1h?: string;
     squeeze?: boolean;
