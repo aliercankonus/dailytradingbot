@@ -3,6 +3,14 @@
 
 ## Recent Changes
 
+### ✅ Capitulation Bounce Probe (2025-02-05)
+- Added `CAPITULATION_BOUNCE_PROBE` config to constants.ts
+- New micro-regime for post-capitulation balance zone entries
+- Conditions: K ≤ 1, drop ≥ 8%, momentum ±5 (collapsed), ADX ≥ 35 slope ≤ 0
+- Position size: 15-20% (probe), LONG only (bounce capture)
+- Separate from MR (which requires decaying momentum) and continuation (which requires strong momentum)
+- Addresses the gap where neither logic fires during capitulation → balance transition
+
 ### ✅ Contextual TP Expansion (2025-02-05)
 - Added `CONTEXTUAL_TP_EXPANSION` config to constants.ts
 - Implements +30% wider TP for Counter-Trend Exhaustion and Strong Trend Override entries
