@@ -55,7 +55,10 @@ export const useSignalRejections = () => {
         }
       });
 
-      return Array.from(latestBySymbol.values());
+      // Sort by symbol name ascending for consistent display order
+      return Array.from(latestBySymbol.values()).sort((a, b) => 
+        a.symbol.localeCompare(b.symbol)
+      );
     },
     enabled: !!user?.id,
     staleTime: 55000,
