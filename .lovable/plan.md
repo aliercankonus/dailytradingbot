@@ -1,347 +1,242 @@
 
+# Counter-Trend Admission Layer Refactor
 
-# Neutral-Bias Amplification Fix: Direction Derivation Architecture Overhaul
+## Summary
 
-## Executive Summary
-
-The investigation confirms a **systemic neutral-bias amplification** causing ~3% market rallies to trigger `NO_CLEAR_DIRECTION` rejections. The core issue is not a single bug, but an architectural pattern where:
-
-1. Conservative trend classification (netSignal ≥ ±4.0) labels 44-55% confidence as "neutral"
-2. Binary neutral handling (neutral = 0 contribution) discards partial directional signals
-3. Tier gating requires non-neutral labels instead of directional strength scores
-4. Terminal fallback (Tier 12) masks structural failures as "no clear direction"
+Refactor the existing `mean-reversion.ts` module into a unified **Counter-Trend Admission Controller** - the single authority for allowing opposite-direction (reversal) entries. This eliminates the architectural risk of adding a standalone EXHAUSTION_GATE while preserving the original design intent.
 
 ---
 
-## Root Cause Analysis (Validated)
+## Architectural Rationale
 
-### Problem 1: Over-Strict Trend Classification (trend-core.ts)
+### Why NOT a Standalone Gate
 
-**Location**: `supabase/functions/_shared/trend-core.ts` (lines 96-98)
+| Issue | Impact |
+|-------|--------|
+| **Dual Authority** | `mean-reversion.ts` already has `checkOversoldExhaustion()` and `checkOverboughtExhaustion()` doing exhaustion detection |
+| **70-80% Logic Overlap** | ADX slope decay, momentum decay, StochRSI de-peg, reduced sizing already exist |
+| **Gate Hierarchy Inflation** | Adding Tier 1.5 blurs responsibility and increases cognitive load |
+| **Configuration Divergence** | Two systems deciding exhaustion = impossible forensics |
 
-**Current Logic**:
-```text
-if (netSignal >= 4.0) trend = "bullish";
-else if (netSignal <= -4.0) trend = "bearish";
-else trend = "neutral";
-```
+### The Real Problem
 
-**Issue**: During a +3% impulse rally:
-- EMA confirms early (weight 3)
-- RSI lags, often only partial weight
-- MACD histogram often weak initially
-
-This frequently produces netSignal = 3.2–3.8, which is:
-- Directionally meaningful
-- Structurally aligned
-- But classified as "neutral"
+Mean reversion is acting like a strategy, but it is functionally an **admission controller** for counter-trend trades. This is a semantic mismatch, not a missing gate.
 
 ---
 
-### Problem 2: Binary Neutral Contribution (scoring.ts)
+## Refactor Plan
 
-**Location**: `supabase/functions/_shared/scoring.ts` (lines 2633-2644)
+### Phase 1: Rename and Restructure Conceptually
 
-**Current Logic**:
-```text
-const trendToValue = (trend: string, conf: number): number => {
-  if (trend === "neutral" && conf < 45) return 0;
-  const confWeight = Math.min(1, conf / 65);
-  if (trend === "bullish") return confWeight;
-  if (trend === "bearish") return -confWeight;
-  return 0;  // <-- neutral with conf >= 45 still returns 0
-};
+**File**: `supabase/functions/_shared/mean-reversion.ts`
+
+- Keep the file name for now (less churn), but add header documentation clarifying its role as "Counter-Trend Admission Layer"
+- Internal function naming stays the same for backwards compatibility
+- Export a new unified function: `evaluateCounterTrendAdmission(trendData, derivedDirection)`
+
+### Phase 2: Add Missing Features Directly
+
+Extend the existing exhaustion checks with the 3 missing conditions from the EXHAUSTION_GATE spec:
+
+#### 2.1 ADX Slope Persistence (N Candles)
+
+**Current State**: ADX slope is checked instantaneously
+**Gap**: No consecutive candle tracking
+
+**Implementation**:
+```
+ADX < MAX_ADX_FOR_EXHAUSTION (45)
+AND ADX_SLOPE <= 0
+FOR >= 2 consecutive periods
 ```
 
-**Issue**: This is "catastrophically lossy". A state with:
-- 4h: 44% confidence
-- 1h: 53% confidence
-- 30m: 55% confidence
+- Add `adxSlopePersistence: number` to track consecutive negative/flat slope periods
+- Use existing `adxArray` from `calculateADX()` to derive historical slopes
+- New config: `MIN_ADX_SLOPE_PERSISTENCE_CANDLES: 2`
 
-Produces a weighted sum of **0.00** because all timeframes are labeled "neutral" despite strong partial directional pressure.
+#### 2.2 Volatility Contraction Check
+
+**Current State**: Volume exhaustion is checked (`volumeRatio < 0.8`)
+**Gap**: BB width / ATR contraction not tracked
+
+**Implementation**:
+```
+Bollinger Band width declining
+OR ATR flat/declining
+OR No new range expansion in last N candles
+```
+
+- Add check for `bbWidthPercentile < prevBbWidthPercentile` (distribution -> balance transition)
+- Add check for ATR plateau: `|atrChange| < 0.5%` over last 3 candles
+- This confirms impulse is dying, not just oscillators resetting
+
+#### 2.3 LTF Structure Flip (Optional Confirmation)
+
+**Current State**: Not implemented
+**Gap**: No higher-high/lower-low detection for counter-trend entry timing
+
+**Implementation** (as soft confirmation, not hard gate):
+```
+For LONG: 15m or 30m shows Higher Low + Higher High
+For SHORT: 15m or 30m shows Lower High + Lower Low
+```
+
+- Add `ltfStructureFlip: boolean` and `ltfStructureScore: number` to ExhaustionSignal
+- Bonus confidence (+10 points) when LTF structure confirms, but not required
+- Prevents knife-catching without being overly restrictive
 
 ---
 
-### Problem 3: Tier Gating Depends on Labels, Not Strength
+### Phase 3: Strengthen the Admission Decision Flow
 
-**Location**: `supabase/functions/_shared/scoring.ts` (lines 3579-3690)
+Update `detectExhaustion()` to enforce the unified flow:
 
-**Current Logic**: Multiple tiers require `trend4h !== "neutral"`:
 ```text
-// Priority 3: 4h neutral but 1h+30m aligned
-if (trend4h === "neutral" && trend1h === trend30m && trend1h !== "neutral")
+[Direction Derived]
+      |
+      v
+[Is Counter-Trend?] -- NO --> [Normal signal flow]
+      |
+      YES
+      v
+[Counter-Trend Admission (existing MR logic)]
+      |
+      +-- FAIL --> Block + log exhaustion failure reason
+      |
+      +-- PASS
+             v
+     [Generate reversal signal @ 0.25x probe size]
 ```
 
-**Issue**: If all timeframes are conservatively labeled "neutral" (even with 44-55% confidence), tiers 0-8 are skipped entirely, leading directly to Tier 12 fallback.
+Key changes:
+- Explicit `isCounterTrend` check at entry
+- Single unified path for all counter-trend entries
+- Clear failure reasons: `ADX_STILL_EXPANDING`, `MOMENTUM_NOT_DECAYING`, `VOLATILITY_EXPANDING`, `STOCHRSI_STILL_PEGGED`
 
 ---
 
-### Problem 4: Tier 12 as Silent Failure Sink
+### Phase 4: Mutual Exclusivity by Flow
 
-**Location**: `supabase/functions/_shared/scoring.ts` (lines 4031-4051)
+Ensure `STRONG_TREND_TIER0_OVERRIDE` (continuation) and Counter-Trend Admission (reversal) cannot both fire:
 
-**Current Logic**: After exhausting all 12 tiers, returns `direction: null` with `NO_CLEAR_DIRECTION`.
-
-**Issue**: This masks whether the failure was:
-- Trend classification lag
-- Momentum opposition
-- Regime mismatch
-- Or genuine ambiguity
-
----
-
-## Implementation Plan
-
-### Phase 1: Replace Binary Neutral with Partial Contribution
-**Priority: CRITICAL**
-
-**File**: `supabase/functions/_shared/scoring.ts`
-
-**Changes**:
-1. Modify `trendToValue()` function to return scaled partial contribution for neutral trends
-2. Add a new `neutralContribution` parameter based on confidence level
-
-**New Logic**:
-```text
-const trendToValue = (trend: string, conf: number): number => {
-  // Neutral with low confidence = no contribution
-  if (trend === "neutral" && conf < NEUTRAL_CONTRIBUTION_FLOOR) return 0;
-  
-  const confWeight = Math.min(1, conf / 65);
-  if (trend === "bullish") return confWeight;
-  if (trend === "bearish") return -confWeight;
-  
-  // NEW: Neutral with meaningful confidence = partial contribution
-  // Scale 45-60% confidence to ±0.2 to ±0.6 based on momentum indicators
-  if (conf >= NEUTRAL_CONTRIBUTION_FLOOR) {
-    const partialWeight = (conf - NEUTRAL_CONTRIBUTION_FLOOR) / (65 - NEUTRAL_CONTRIBUTION_FLOOR);
-    return partialWeight * momentumDirectionHint; // -1, 0, or +1 from MACD/RSI
-  }
-  return 0;
-};
-```
-
-**New Constants** (in `constants.ts`):
-```text
-NEUTRAL_CONTRIBUTION_FLOOR: 40,
-NEUTRAL_CONTRIBUTION_CEILING: 60,
-NEUTRAL_PARTIAL_MAX_WEIGHT: 0.6,
-```
-
-**Outcome**: 
-- 4h 44% + 1h 53% + 30m 55% now produces ~0.49 weighted sum (not 0.00)
-- Partial directional pressure is preserved instead of discarded
-
----
-
-### Phase 2: Lower netSignal Threshold
-**Priority: HIGH**
-
-**File**: `supabase/functions/_shared/trend-core.ts`
-
-**Changes**:
-1. Lower trend classification threshold from ±4.0 to ±3.0
-2. Add a new "weak_bullish"/"weak_bearish" intermediate state for ±2.5 to ±3.0
-
-**New Logic**:
-```text
-let trend: "bullish" | "bearish" | "neutral" | "weak_bullish" | "weak_bearish" = "neutral";
-if (netSignal >= 4.0) trend = "bullish";
-else if (netSignal >= 3.0) trend = "weak_bullish";  // NEW
-else if (netSignal <= -4.0) trend = "bearish";
-else if (netSignal <= -3.0) trend = "weak_bearish";  // NEW
-```
-
-**New Constants** (in `constants.ts`):
-```text
-NET_SIGNAL_STRONG_THRESHOLD: 4.0,
-NET_SIGNAL_WEAK_THRESHOLD: 3.0,
-```
-
-**Outcome**: 
-- More signals classified as directional during early impulse phases
-- "weak_bullish"/"weak_bearish" contributes partial weight to direction derivation
-
----
-
-### Phase 3: Add Pre-Terminal Bias Resolution Tier (Tier 9.5)
-**Priority: HIGH**
-
-**File**: `supabase/functions/_shared/scoring.ts`
-
-**Changes**:
-1. Insert new tier between Tier 9 (Primary Trend Fallback) and Tier 10 (Momentum Fallback)
-2. Uses micro-direction, consecutive bars, StochRSI extremes, and order flow as bias indicators
-
-**New Logic**:
-```text
-// ============= TIER 9.5: BIAS RESOLUTION BEFORE FALLBACK =============
-// When timeframes are neutral but price action shows clear bias
-if (BIAS_RESOLUTION_TIER_ENABLED) {
-  const biasEvidence = [];
-  let biasDirection: TradeDirection | null = null;
-  let biasScore = 0;
-  
-  // Evidence 1: Micro-direction (8+ consecutive bars)
-  const consecutiveBars = trendData.momentum?.consecutiveBars || 0;
-  if (consecutiveBars >= 8) {
-    biasScore += 2;
-    biasDirection = trendData.momentum?.direction === "bullish" ? "long" : "short";
-    biasEvidence.push(`MICRO_DIRECTION(${consecutiveBars} bars)`);
-  }
-  
-  // Evidence 2: StochRSI extreme
-  const stochK = extractStochRsiK(trendData, '4h');
-  if (stochK >= 90) {
-    biasScore += 1;
-    if (!biasDirection) biasDirection = "short";
-    biasEvidence.push(`STOCHRSI_OVERBOUGHT(${stochK})`);
-  } else if (stochK <= 10) {
-    biasScore += 1;
-    if (!biasDirection) biasDirection = "long";
-    biasEvidence.push(`STOCHRSI_OVERSOLD(${stochK})`);
-  }
-  
-  // Evidence 3: Order flow signal
-  if (orderFlowData?.score >= 60) {
-    biasScore += 1;
-    const ofDir = orderFlowData.signal.includes("buy") ? "long" : "short";
-    if (!biasDirection) biasDirection = ofDir;
-    biasEvidence.push(`ORDER_FLOW(${orderFlowData.score})`);
-  }
-  
-  // Require at least 2 evidence sources
-  if (biasScore >= 2 && biasDirection) {
-    return {
-      direction: biasDirection,
-      confidence: 50,
-      source: "bias-resolution",
-      positionSizeMultiplier: 0.25,  // WEAK_LONG/WEAK_SHORT = minimal size
-      directionContext: createDirectionContext(biasDirection, {
-        tier: 9.5,
-        tierSource: 'TIER_9.5_BIAS_RESOLUTION',
-        evidenceType: 'MICRO_STRUCTURE',
-        // ...
-      }),
-    };
-  }
+**Enforcement**:
+```typescript
+// In strategy-analyzer direction derivation
+if (strongTrendTier0OverrideApplied) {
+  // Continuation mode - skip counter-trend admission entirely
+  skipCounterTrendAdmission = true;
 }
 ```
 
-**New Constants** (in `constants.ts`):
-```text
-BIAS_RESOLUTION_TIER: {
-  ENABLED: true,
-  MIN_EVIDENCE_SCORE: 2,
-  MICRO_DIRECTION_MIN_BARS: 8,
-  STOCHRSI_EXTREME_K_HIGH: 90,
-  STOCHRSI_EXTREME_K_LOW: 10,
-  ORDER_FLOW_MIN_SCORE: 60,
-  POSITION_SIZE: 0.25,
-  CONFIDENCE: 50,
-},
-```
-
-**Outcome**:
-- Prevents Tier 12 terminal fallback during impulse phases
-- Provides `WEAK_LONG` or `WEAK_SHORT` direction with minimal position size
-- Direction must not be `NONE` when clear micro-evidence exists
+This is enforced by **flow**, not by dual flags.
 
 ---
 
-### Phase 4: Decouple Tier Eligibility from Labels
-**Priority: MEDIUM**
+## Configuration Updates
 
-**File**: `supabase/functions/_shared/scoring.ts`
+**File**: `supabase/functions/_shared/constants.ts`
 
-**Changes**:
-1. Replace label-based tier conditions with strength-based conditions
-2. Use confidence scores instead of "neutral"/"bullish"/"bearish" labels
+Add to existing `MEAN_REVERSION_CONFIG`:
 
-**Before**:
-```text
-if (trend4h === "neutral" && trend1h === trend30m && trend1h !== "neutral")
-```
-
-**After**:
-```text
-if (conf4h < TIER_DIRECTIONAL_THRESHOLD && conf1h >= TIER_DIRECTIONAL_THRESHOLD && ...)
-```
-
-**New Constants**:
-```text
-TIER_DIRECTIONAL_THRESHOLD: 50,  // Confidence >= 50 = directional (regardless of label)
+```typescript
+COUNTER_TREND_ADMISSION: {
+  // ADX Exhaustion Requirements
+  MAX_ADX_FOR_EXHAUSTION: 45,
+  MAX_ADX_SLOPE: 0.0,           // -0.5 for strong exhaustion
+  MIN_ADX_SLOPE_PERSISTENCE: 2, // Consecutive candles
+  
+  // Volatility Contraction Requirements  
+  REQUIRE_VOLATILITY_CONTRACTION: true,
+  BB_WIDTH_DECLINE_MIN_PERCENT: 5,
+  ATR_CHANGE_FLAT_THRESHOLD: 0.5,
+  
+  // LTF Structure (optional bonus)
+  LTF_STRUCTURE_BONUS: 10,
+  
+  // Position Sizing
+  PROBE_POSITION_MULTIPLIER: 0.25,
+  
+  // Failure Logging
+  LOG_FAILURE_REASONS: true,
+}
 ```
 
 ---
 
-### Phase 5: Add StochRSI Extreme as Direction Bias
-**Priority: MEDIUM**
+## Failure Reason Logging (Explicit)
 
-**File**: `supabase/functions/_shared/scoring.ts`
+The admission layer must log exact failure cause for forensics:
 
-**Changes**:
-1. In weighted direction derivation, add StochRSI extreme as a bias input
-2. K >= 90 adds bearish bias (-0.1 to weighted sum)
-3. K <= 10 adds bullish bias (+0.1 to weighted sum)
-
-**New Logic** (in `deriveTradeDirection`):
-```text
-// StochRSI extreme bias (only for direction hint, not override)
-let stochBias = 0;
-const stochK4h = extractStochRsiK(trendData, '4h');
-if (stochK4h >= 90) stochBias = -0.10;  // Overbought = bearish bias
-else if (stochK4h <= 10) stochBias = +0.10;  // Oversold = bullish bias
-
-const weightedSum = baseWeightedSum + momentumAdjustment + stochBias;
-```
-
----
-
-### Phase 6: Enhanced Tier 12 Diagnostics
-**Priority: LOW**
-
-**File**: `supabase/functions/_shared/scoring.ts`
-
-**Changes**:
-1. Log detailed breakdown of why each tier was skipped
-2. Add `tierSkipReasons` array to DirectionResult
-3. Include raw netSignal values and confidence scores in rejection metadata
-
-**Outcome**: When Tier 12 fires during a +3% day, logs will show exactly which upstream tier failed and why.
-
----
-
-## Validation Criteria
-
-After implementation, verify:
-
-1. **+2-3% impulse** → Produces `WEAK_LONG` or directional signal (not `NO_CLEAR_DIRECTION`)
-2. **NO_CLEAR_DIRECTION rate** → Becomes rare, only in:
-   - Low volatility (ADX < 15)
-   - Flat chop (all TFs truly indecisive)
-   - Conflicting HTF/LTF states (e.g., 4h bearish, 1h bullish)
-3. **Tier 12 fires during +3% BTC day** → System is still broken (regression test)
-
----
-
-## Technical Summary
-
-| Phase | File | Change | Risk |
-|-------|------|--------|------|
-| 1 | scoring.ts | Partial neutral contribution | Medium - core logic |
-| 2 | trend-core.ts | Lower netSignal threshold | Low - additive |
-| 3 | scoring.ts | Bias Resolution Tier 9.5 | Medium - new tier |
-| 4 | scoring.ts | Decouple tier eligibility | Medium - multiple tiers |
-| 5 | scoring.ts | StochRSI bias input | Low - additive |
-| 6 | scoring.ts | Enhanced diagnostics | Low - logging only |
+| Code | Meaning |
+|------|---------|
+| `ADX_STILL_EXPANDING` | ADX slope > 0, trend energy not decaying |
+| `ADX_NOT_EXHAUSTED` | ADX >= 45, still in dominant trend |
+| `MOMENTUM_NOT_DECAYING` | Momentum magnitude not decreasing |
+| `VOLATILITY_EXPANDING` | BB width or ATR still increasing |
+| `STOCHRSI_STILL_PEGGED` | K stuck at extreme (< 5 or > 95) |
+| `LTF_NO_STRUCTURE_FLIP` | Lower timeframe shows no reversal structure |
 
 ---
 
 ## Files to Modify
 
-1. `supabase/functions/_shared/constants.ts` - Add new thresholds and tier parameters
-2. `supabase/functions/_shared/trend-core.ts` - Lower netSignal threshold, add weak labels
-3. `supabase/functions/_shared/scoring.ts` - Partial contribution, Tier 9.5, StochRSI bias
-4. `src/components/SignalRejectionReasons.tsx` - Enhanced UI for new tier reasons (optional)
+| File | Changes |
+|------|---------|
+| `supabase/functions/_shared/mean-reversion.ts` | Add ADX persistence tracking, volatility contraction check, LTF structure bonus, unified `evaluateCounterTrendAdmission()` export |
+| `supabase/functions/_shared/constants.ts` | Add `COUNTER_TREND_ADMISSION` config block |
+| `supabase/functions/strategy-analyzer/index.ts` | Wire up unified counter-trend admission check, enforce mutual exclusivity with Strong Trend Override |
 
+---
+
+## Technical Details
+
+### ADX Slope Persistence Implementation
+
+```typescript
+function checkAdxSlopePersistence(adxArray: number[], requiredCandles: number): number {
+  if (adxArray.length < requiredCandles + 1) return 0;
+  
+  let consecutiveNonPositive = 0;
+  for (let i = adxArray.length - 1; i > 0 && consecutiveNonPositive < requiredCandles + 1; i--) {
+    const slope = (adxArray[i] - adxArray[i - 1]);
+    if (slope <= 0) {
+      consecutiveNonPositive++;
+    } else {
+      break; // Streak broken
+    }
+  }
+  return consecutiveNonPositive;
+}
+```
+
+### Volatility Contraction Check
+
+```typescript
+function checkVolatilityContracting(
+  currentBbWidth: number, 
+  prevBbWidth: number,
+  currentAtr: number,
+  prevAtr: number
+): { contracting: boolean; reason: string } {
+  const bbContracting = prevBbWidth > 0 && 
+    ((prevBbWidth - currentBbWidth) / prevBbWidth) * 100 >= 5;
+  const atrFlat = prevAtr > 0 && 
+    Math.abs((currentAtr - prevAtr) / prevAtr) * 100 < 0.5;
+  
+  if (bbContracting) return { contracting: true, reason: 'BB_WIDTH_DECLINING' };
+  if (atrFlat) return { contracting: true, reason: 'ATR_FLAT' };
+  return { contracting: false, reason: 'VOLATILITY_EXPANDING' };
+}
+```
+
+---
+
+## Expected Outcome
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Counter-trend admission sources | 2 (MR + potential gate) | 1 (unified) |
+| ADX persistence tracking | Instantaneous only | 2+ candle confirmation |
+| Volatility contraction check | None | BB width + ATR |
+| LTF structure confirmation | None | Optional bonus |
+| Forensic clarity | Partial | Full failure reason logging |
