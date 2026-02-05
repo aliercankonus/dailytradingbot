@@ -650,7 +650,9 @@ export const FLASH_CRASH_BOUNCE_PROBE = {
   // ===== MOMENTUM REQUIREMENTS =====
   // More lenient than capitulation - allow directional momentum
   // Block only if momentum is extreme opposing
-  MOMENTUM_MAX_OPPOSING: 30,     // Block if momentum < -30 (extreme bearish)
+  // NOTE: Raised from 30 to 40 per historical analysis - true liquidation events
+  // often print momentum -35 to -45 but still violently bounce
+  MOMENTUM_MAX_OPPOSING: 40,     // Block if momentum < -40 (extreme bearish)
   
   // ===== VELOCITY CONFIRMATION =====
   // Confirm rapid decline via price action (not gradual drift)

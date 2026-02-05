@@ -2962,16 +2962,42 @@ serve(async (req) => {
                 const calculateDropDuration = (): number => {
                   const klines1h = trendData?.klines1h ?? [];
                   const high24h = trendData?.priceDistanceFromSwing?.high24h ?? 0;
+                  const lookbackHours = FLASH_CRASH_BOUNCE_PROBE.MAX_DROP_HOURS;
                   
-                  if (!klines1h.length || !high24h) return 24; // Default to full 24h
+                  if (!klines1h.length) return 24; // Default to full 24h
                   
-                  // Find the candle where price was at or near 24h high
-                  for (let i = klines1h.length - 1; i >= 0; i--) {
-                    const candleHigh = typeof klines1h[i] === 'object' && 'high' in klines1h[i] 
-                      ? klines1h[i].high 
-                      : (Array.isArray(klines1h[i]) ? parseFloat(klines1h[i][2]) : 0);
-                    if (candleHigh >= high24h * 0.999) {
-                      return klines1h.length - i;
+                  // IMPROVED: First try to find local high within MAX_DROP_HOURS window
+                  // This handles post-consolidation breakdowns where 24h high is stale
+                  const recentKlines = klines1h.slice(-lookbackHours);
+                  if (recentKlines.length > 0) {
+                    // Find the highest candle within recent window
+                    let localHighIdx = 0;
+                    let localHighPrice = 0;
+                    for (let i = 0; i < recentKlines.length; i++) {
+                      const candleHigh = typeof recentKlines[i] === 'object' && 'high' in recentKlines[i] 
+                        ? recentKlines[i].high 
+                        : (Array.isArray(recentKlines[i]) ? parseFloat(recentKlines[i][2]) : 0);
+                      if (candleHigh > localHighPrice) {
+                        localHighPrice = candleHigh;
+                        localHighIdx = i;
+                      }
+                    }
+                    // If we found a local high within the window, use that duration
+                    const localDropHours = recentKlines.length - localHighIdx;
+                    if (localDropHours > 0 && localDropHours <= lookbackHours) {
+                      return localDropHours;
+                    }
+                  }
+                  
+                  // Fallback: Find candle where price was at or near 24h high
+                  if (high24h > 0) {
+                    for (let i = klines1h.length - 1; i >= 0; i--) {
+                      const candleHigh = typeof klines1h[i] === 'object' && 'high' in klines1h[i] 
+                        ? klines1h[i].high 
+                        : (Array.isArray(klines1h[i]) ? parseFloat(klines1h[i][2]) : 0);
+                      if (candleHigh >= high24h * 0.999) {
+                        return klines1h.length - i;
+                      }
                     }
                   }
                   return 24;
