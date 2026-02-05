@@ -1,167 +1,340 @@
 
-# Trading Bot Development Plan
 
-## Recent Changes
+# Flash Crash Bounce Probe Implementation Plan
 
-### ✅ Capitulation Bounce Probe v1.1 (2025-02-05)
-- **Explicit Override Mechanism**: Uses `forcedDirectionOverride` flag instead of direct `directionResult` mutation
-- **HTF Structure Guard**: Added `REQUIRE_HTF_STRUCTURE_STABLE` - blocks if price made new 4H low within last 2 candles
-- **Volatility Instrumentation**: Logs which sub-condition (ATR slope vs BB width) validated the entry
-- **Partial TP Logic**: 50% position close at 1.0% profit to capture fast impulse + stall pattern
-- **Regime Tagging**: Explicit `REGIME_TAG: 'TRANSITION_CAPITULATION'` for analytics
+## Executive Summary
 
-### ✅ Capitulation Bounce Probe (2025-02-05)
-- Added `CAPITULATION_BOUNCE_PROBE` config to constants.ts
-- New micro-regime for post-capitulation balance zone entries
-- Conditions: K ≤ 1, drop ≥ 8%, momentum ±5 (collapsed), ADX ≥ 35 slope ≤ 0
-- Position size: 15-20% (probe), LONG only (bounce capture)
-- Separate from MR (which requires decaying momentum) and continuation (which requires strong momentum)
-- Addresses the gap where neither logic fires during capitulation → balance transition
+This plan introduces a new **Flash Crash Bounce Probe** regime to capture V-shaped reversals after rapid market drops (≥10% in ≤4h) where the existing Capitulation Bounce Probe cannot fire due to its structural guards.
 
-### ✅ Contextual TP Expansion (2025-02-05)
-- Added `CONTEXTUAL_TP_EXPANSION` config to constants.ts
-- Implements +30% wider TP for Counter-Trend Exhaustion and Strong Trend Override entries
-- Implements +20% wider TP for Squeeze Breakout entries
-- Philosophy: "Be selective on entry, patient on exit" - increases PnL by expectancy, not leverage
-- Applied in execute-trade after SL validation, before R:R check
+**Key Insight**: The system correctly blocked shorts and correctly blocked longs during the 12-14% flash crash. This is not a bug—it's a **missing regime**. Flash crashes violate both assumptions of the Capitulation Bounce Probe:
+- ADX slope stays positive into the low (no exhaustion)
+- The bounce begins on the same candle or next candle (no structure stabilization)
 
 ---
 
-# Counter-Trend Admission Layer Refactor
+## Architectural Decision
 
-## Status: ✅ COMPLETE (2025-02-05)
+**Parallel Regime, Not Guard Relaxation**
 
-All safety mechanisms are now implemented and deployed.
+The Flash Crash Bounce Probe will be implemented as a **separate, isolated regime** with its own configuration. This preserves:
+- Capitulation Bounce Probe's conservative guards for gradual exhaustion scenarios
+- Mean Reversion logic for controlled counter-trend entries
+- Priority 1-2 gates remain untouched
 
----
-
-## Summary
-
-Refactor the existing `mean-reversion.ts` module into a unified **Counter-Trend Admission Controller** - the single authority for allowing opposite-direction (reversal) entries. This eliminates the architectural risk of adding a standalone EXHAUSTION_GATE while preserving the original design intent.
-
----
-
-## Implementation Status
-
-### ✅ Phase 1: MR Bypass for MOVE_EXHAUSTED (Complete)
-- Direction flip logic when entering MEAN_REVERSION zone
-- Mean reversion exception added alongside strong-trend continuation exception
-- `evaluateCounterTrendAdmission()` exported and integrated
-
-### ✅ Phase 2: Momentum Tolerance for MR Probes (Complete)
-- Relaxed opposing threshold (±25 vs standard ±15)
-- Extreme opposing threshold (±50) remains as hard block
-- Moderate opposition multiplier (0.20x)
-
-### ✅ Phase 3: Safety Mechanisms (Complete - 2025-02-05)
-
-| Item | Status | Implementation |
-|------|--------|----------------|
-| Delta decay enforcement | ✅ | `REQUIRE_IMPROVING_DELTA: true` + enforcement in LTF gate |
-| ADX persistence gating | ✅ | `adxSlopePersistence >= 2` required for MR tolerance |
-| Size safety invariant | ✅ | `Math.min(baseMrProbeMultiplier, mrMomentumMultiplier)` |
-| New rejection reason | ✅ | `MR_SAFETY_CHECK_FAILED` gate type added |
+```text
+                   ┌──────────────────────────┐
+                   │    Counter-Trend Entry   │
+                   │         Decision         │
+                   └─────────────┬────────────┘
+                                 │
+          ┌──────────────────────┼──────────────────────┐
+          │                      │                      │
+          ▼                      ▼                      ▼
+   ┌─────────────┐       ┌──────────────┐       ┌───────────────┐
+   │  Mean       │       │ Capitulation │       │ Flash Crash   │
+   │  Reversion  │       │ Bounce Probe │       │ Bounce Probe  │
+   │  (gradual)  │       │ (exhaustion) │       │ (rapid V-rev) │
+   └─────────────┘       └──────────────┘       └───────────────┘
+                                                        │
+                                                        ▼
+                                                 NEW REGIME
+```
 
 ---
 
-## Configuration (constants.ts)
+## Detection Criteria (Hard Requirements)
+
+| Condition | Threshold | Rationale |
+|:----------|:----------|:----------|
+| Price Drop | ≥10% from 24h high | Significant capitulation event |
+| Drop Velocity | ≤4 hours | Flash crash, not gradual decline |
+| StochRSI K (4h or 1h) | ≤1 | Absolute floor indicator |
+| ADX | ≥35 | High trend energy present |
+| Direction | LONG only | Bounce capture, not reversal |
+
+**Key Differences from Capitulation Bounce Probe:**
+
+| Parameter | Capitulation Bounce | Flash Crash Bounce |
+|:----------|:--------------------|:-------------------|
+| ADX slope | ≤ 0 required | **Ignored** (allowed > 0) |
+| Candles since low | ≥ 2 required | **0-1 allowed** |
+| Price drop | ≥ 8% | **≥ 10%** (stricter) |
+| Intent | Exhaustion bounce | Forced liquidation rebound |
+
+---
+
+## Risk Controls (Mandatory)
+
+Flash crash entries are inherently speculative. These controls are non-negotiable:
+
+1. **Position Size**: 0.20-0.35x (conservative probe)
+2. **Stop Loss**: Ultra-tight (≤0.5 ATR or 0.8% fixed)
+3. **No Pyramiding**: One-shot attempt only
+4. **Cooldown**: 6 hours after failed probe
+5. **Max Probes**: 1 per symbol per day
+6. **Hard Invalidation**: If K rises above 5 without price moving 0.8%, probe failed
+
+---
+
+## Technical Implementation
+
+### Phase 1: Configuration (constants.ts)
+
+Add new `FLASH_CRASH_BOUNCE_PROBE` configuration block:
 
 ```typescript
-COUNTER_TREND_ADMISSION: {
+export const FLASH_CRASH_BOUNCE_PROBE = {
   ENABLED: true,
   
-  // ADX Exhaustion Requirements
-  MAX_ADX_FOR_EXHAUSTION: 45,
-  MAX_ADX_SLOPE: 0.0,
-  MIN_ADX_SLOPE_PERSISTENCE: 2,
+  // ===== DETECTION THRESHOLDS =====
+  MIN_DROP_PERCENT: 10,          // ≥10% drop (stricter than capitulation)
+  MAX_DROP_HOURS: 4,             // Within 4 hours (velocity check)
+  MAX_STOCHRSI_K: 1,             // K ≤ 1 (pinned at floor)
+  MIN_ADX: 35,                   // High trend energy
   
-  // Volatility Contraction Requirements  
-  REQUIRE_VOLATILITY_CONTRACTION: true,
-  BB_WIDTH_DECLINE_MIN_PERCENT: 5,
-  ATR_CHANGE_FLAT_THRESHOLD: 0.5,
+  // ===== KEY DIFFERENCE: NO ADX SLOPE REQUIREMENT =====
+  // Flash crashes keep ADX slope positive until reversal
+  IGNORE_ADX_SLOPE: true,
   
-  // Position Sizing
-  PROBE_POSITION_MULTIPLIER: 0.25,
+  // ===== KEY DIFFERENCE: NO HTF STRUCTURE REQUIREMENT =====
+  // Flash crashes bounce on same candle as low
+  IGNORE_HTF_STRUCTURE: true,
   
-  // Momentum Tolerance for MR Probes
-  MOMENTUM_TOLERANCE: {
-    ENABLED: true,
-    RELAXED_OPPOSING_THRESHOLD: 25,
-    EXTREME_OPPOSING_THRESHOLD: 50,
-    MODERATE_OPPOSITION_MULTIPLIER: 0.20,
-    REQUIRE_IMPROVING_DELTA: true,
-    IMPROVING_DELTA_THRESHOLD: 0.0,
-    ADX_PERSISTENCE_BYPASS_THRESHOLD: 2,
-    LOG_TOLERANCE_APPLIED: true,
-  },
+  // ===== MOMENTUM REQUIREMENTS =====
+  // More lenient than capitulation - allow directional momentum
+  MOMENTUM_MAX_OPPOSING: 30,     // Block if momentum < -30 (extreme)
+  
+  // ===== VELOCITY CONFIRMATION =====
+  // Optional: Confirm rapid decline via price action
+  REQUIRE_VELOCITY_CONFIRMATION: true,
+  MIN_HOURLY_DROP_RATE: 2.5,     // ≥2.5% per hour average
+  
+  // ===== POSITION SIZING =====
+  BASE_POSITION_SIZE: 0.20,
+  WITH_VOLUME_SPIKE: 0.30,
+  WITH_REVERSAL_CANDLE: 0.35,    // If bullish engulfing detected
+  
+  // ===== STOP LOSS (ULTRA-TIGHT) =====
+  STOP_LOSS_ATR_MULTIPLIER: 0.5, // 0.5x ATR
+  STOP_LOSS_MAX_PERCENT: 0.8,    // Max 0.8%
+  
+  // ===== TAKE PROFIT =====
+  TAKE_PROFIT_MIN_PERCENT: 2.0,
+  TAKE_PROFIT_MAX_PERCENT: 4.0,
+  TAKE_PROFIT_ATR_MULTIPLIER: 2.0,
+  
+  // ===== PARTIAL TP =====
+  PARTIAL_TP_ENABLED: true,
+  PARTIAL_TP_PERCENT: 1.0,       // First TP at 1.0%
+  PARTIAL_TP_SIZE: 0.50,         // Close 50%
+  
+  // ===== SAFETY LIMITS =====
+  MAX_PROBES_PER_SYMBOL_PER_DAY: 1,
+  NO_PYRAMIDING: true,
+  COOLDOWN_HOURS_AFTER_FAILED: 6,
+  
+  // ===== HARD INVALIDATION =====
+  INVALIDATION_K_THRESHOLD: 5,
+  INVALIDATION_REQUIRE_PRICE_MOVE: 0.8,
+  
+  // ===== REGIME TAGGING =====
+  REGIME_TAG: 'FLASH_CRASH_BOUNCE' as const,
+  ENTRY_TYPE_TAG: 'FLASH_CRASH_BOUNCE_PROBE' as const,
+  
+  // ===== LOGGING =====
+  LOG_PROBE_DETAILS: true,
+  LOG_NEAR_MISS: true,
+};
+```
+
+### Phase 2: Strategy Analyzer Integration
+
+Insert Flash Crash Bounce check **inside the Early Tier 0 block**, positioned after Capitulation Bounce Probe check:
+
+```typescript
+// Inside Early Tier 0 block (around line 2843)
+if (earlyDirection === 'short' && earlyStochRsiK4h < DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD) {
+  
+  // 1. Check Capitulation Bounce Probe (existing)
+  // ...
+  
+  // 2. Check Flash Crash Bounce Probe (NEW)
+  if (!capitulationProbeTriggered && FLASH_CRASH_BOUNCE_PROBE.ENABLED) {
+    const priceDropPercent = trendData?.priceDistanceFromSwing?.distanceFromHighPercent ?? 0;
+    const stochK4h = earlyStochRsiK4h;
+    const stochK1h = extractStochRsiK(trendData, '1h');
+    
+    // Check if either 4h or 1h K is pinned
+    const stochRsiPinned = stochK4h <= FLASH_CRASH_BOUNCE_PROBE.MAX_STOCHRSI_K || 
+                           stochK1h <= FLASH_CRASH_BOUNCE_PROBE.MAX_STOCHRSI_K;
+    
+    // Velocity check: drop rate per hour
+    const dropHours = Math.max(1, calculateDropDuration(trendData)); // helper needed
+    const dropRatePerHour = priceDropPercent / dropHours;
+    const velocityOk = dropRatePerHour >= FLASH_CRASH_BOUNCE_PROBE.MIN_HOURLY_DROP_RATE;
+    
+    // Momentum check: not extreme opposing
+    const momentumOk = earlyMomentumScore >= -FLASH_CRASH_BOUNCE_PROBE.MOMENTUM_MAX_OPPOSING;
+    
+    // ADX check (ignores slope)
+    const adxOk = adx >= FLASH_CRASH_BOUNCE_PROBE.MIN_ADX;
+    
+    const sufficientDrop = priceDropPercent >= FLASH_CRASH_BOUNCE_PROBE.MIN_DROP_PERCENT;
+    
+    if (sufficientDrop && stochRsiPinned && adxOk && velocityOk && momentumOk) {
+      flashCrashProbeTriggered = true;
+      earlyDirection = 'long'; // Flip direction
+      
+      // Calculate position size
+      const volumeRatio = trendData?.volume?.['1h']?.volumeRatio ?? 1.0;
+      const hasReversalCandle = detectReversalCandle(trendData); // helper needed
+      
+      let probeSize = FLASH_CRASH_BOUNCE_PROBE.BASE_POSITION_SIZE;
+      if (hasReversalCandle) {
+        probeSize = FLASH_CRASH_BOUNCE_PROBE.WITH_REVERSAL_CANDLE;
+      } else if (volumeRatio >= 1.5) {
+        probeSize = FLASH_CRASH_BOUNCE_PROBE.WITH_VOLUME_SPIKE;
+      }
+      
+      // Store metadata for downstream
+      trendData.flashCrashBounceProbe = {
+        active: true,
+        regime: FLASH_CRASH_BOUNCE_PROBE.REGIME_TAG,
+        positionMultiplier: probeSize,
+        // ... details
+      };
+    } else {
+      // Log near-miss
+    }
+  }
+}
+```
+
+### Phase 3: Gate Type Registration
+
+Add new gate type to the GateType union:
+
+```typescript
+type GateType = 
+  | ... existing types
+  | 'FLASH_CRASH_BOUNCE_PROBE';  // Flash crash V-reversal entry
+```
+
+### Phase 4: Execute-Trade Support
+
+Handle the new regime in execute-trade for proper SL/TP application:
+
+```typescript
+// In execute-trade/index.ts
+const flashCrashProbe = signal.indicators?.flashCrashBounceProbe;
+if (flashCrashProbe?.active) {
+  // Apply ultra-tight stop
+  const flashCrashStop = Math.min(
+    atrPercent * FLASH_CRASH_BOUNCE_PROBE.STOP_LOSS_ATR_MULTIPLIER,
+    FLASH_CRASH_BOUNCE_PROBE.STOP_LOSS_MAX_PERCENT
+  );
+  stopLossPercent = flashCrashStop;
+  
+  // Apply wider TP for bounce capture
+  const flashCrashTP = Math.max(
+    FLASH_CRASH_BOUNCE_PROBE.TAKE_PROFIT_MIN_PERCENT,
+    Math.min(
+      atrPercent * FLASH_CRASH_BOUNCE_PROBE.TAKE_PROFIT_ATR_MULTIPLIER,
+      FLASH_CRASH_BOUNCE_PROBE.TAKE_PROFIT_MAX_PERCENT
+    )
+  );
+  takeProfitPercent = flashCrashTP;
+}
+```
+
+### Phase 5: UI Hook Updates
+
+Update `useBlockedSignals.ts` to recognize new gate type and display relevant metadata.
+
+---
+
+## Helper Functions Required
+
+### 1. Drop Duration Calculator
+
+```typescript
+function calculateDropDuration(trendData: any): number {
+  // Estimate hours from 24h high to current using klines
+  const klines1h = trendData?.klines1h ?? [];
+  const high24h = trendData?.priceDistanceFromSwing?.high24h ?? 0;
+  
+  if (!klines1h.length || !high24h) return 24; // Default to full 24h
+  
+  // Find the candle where price was at 24h high
+  for (let i = klines1h.length - 1; i >= 0; i--) {
+    if (klines1h[i].high >= high24h * 0.999) {
+      return klines1h.length - i;
+    }
+  }
+  return 24;
+}
+```
+
+### 2. Reversal Candle Detector
+
+```typescript
+function detectReversalCandle(trendData: any): boolean {
+  // Check for bullish engulfing or hammer on recent candles
+  const klines15m = trendData?.klines15m ?? [];
+  if (klines15m.length < 2) return false;
+  
+  const current = klines15m[klines15m.length - 1];
+  const prior = klines15m[klines15m.length - 2];
+  
+  // Bullish engulfing
+  const isBullishEngulfing = 
+    prior.close < prior.open &&  // Prior bearish
+    current.close > current.open && // Current bullish
+    current.close > prior.open &&   // Close above prior open
+    current.open < prior.close;     // Open below prior close
+  
+  // Hammer pattern
+  const bodySize = Math.abs(current.close - current.open);
+  const lowerWick = Math.min(current.open, current.close) - current.low;
+  const isHammer = lowerWick >= bodySize * 2;
+  
+  return isBullishEngulfing || isHammer;
 }
 ```
 
 ---
 
-## Failure Reason Logging
-
-| Code | Meaning |
-|------|---------|
-| `ADX_STILL_EXPANDING` | ADX slope > 0, trend energy not decaying |
-| `ADX_NOT_EXHAUSTED` | ADX >= 45, still in dominant trend |
-| `ADX_PERSISTENCE_INSUFFICIENT` | ADX slope not negative for required consecutive candles |
-| `MOMENTUM_NOT_DECAYING` | Momentum magnitude not decreasing |
-| `VOLATILITY_EXPANDING` | BB width or ATR still increasing |
-| `STOCHRSI_STILL_PEGGED` | K stuck at extreme (< 5 or > 95) |
-| `MR_SAFETY_CHECK_FAILED` | MR probe blocked by safety checks (ADX persistence, delta) |
-| `MR_EXTREME_MOMENTUM_BLOCK` | MR probe blocked by extreme opposing momentum (>±50) |
-
----
-
-## Decision Flow (Final)
-
-```text
-[Direction Derived]
-      |
-      v
-[Is Counter-Trend?] -- NO --> [Normal signal flow]
-      |
-      YES
-      v
-[Counter-Trend Admission Layer]
-      |
-      +-- FAIL --> Block + log failure reason
-      |
-      +-- PASS --> Generate probe @ 0.25x
-              |
-              v
-      [LTF Confirmation Gate]
-              |
-              +-- LTF Neutral + Momentum Opposing?
-                      |
-                      +-- Check MR Tolerance Eligibility
-                              |
-                              +-- ADX persistence >= 2?
-                              +-- Momentum delta improving?
-                              |
-                              +-- BOTH YES --> Apply relaxed threshold (±25)
-                              |                Position = min(0.25x, 0.20x) = 0.20x
-                              |
-                              +-- EITHER NO --> MR_SAFETY_CHECK_FAILED
-```
-
----
-
-## Files Modified
+## Files to Modify
 
 | File | Changes |
-|------|---------|
-| `supabase/functions/_shared/mean-reversion.ts` | `evaluateCounterTrendAdmission()` export |
-| `supabase/functions/_shared/constants.ts` | `COUNTER_TREND_ADMISSION.MOMENTUM_TOLERANCE` config |
-| `supabase/functions/strategy-analyzer/index.ts` | ADX persistence gating, delta enforcement, multiplier stacking, `MR_SAFETY_CHECK_FAILED` gate type |
-| `docs/gates/LTF_CONFIRMATION.md` | Documentation for MR tolerance behavior |
+|:-----|:--------|
+| `supabase/functions/_shared/constants.ts` | Add `FLASH_CRASH_BOUNCE_PROBE` config |
+| `supabase/functions/strategy-analyzer/index.ts` | Import new config, add detection logic in Tier 0, register gate type |
+| `supabase/functions/execute-trade/index.ts` | Handle SL/TP for flash crash probe entries |
+| `src/hooks/useBlockedSignals.ts` | Add new gate type for UI display |
 
 ---
 
-## Verification
+## Monitoring & Validation
 
-Monitor the Signal Rejection Monitor for:
-- `MR_MOMENTUM_TOLERANCE APPLIED` - MR probes passing with relaxed threshold
-- `MR_SAFETY_CHECK_FAILED` - MR probes blocked by safety checks
-- `MR_EXTREME_MOMENTUM_BLOCK` - MR probes blocked by extreme momentum
+After deployment, monitor logs for:
+- `FLASH_CRASH_BOUNCE_PROBE ACTIVATED` - Successful probe triggers
+- `FLASH_CRASH_BOUNCE_PROBE NEAR-MISS` - Close but conditions not met
+- Compare with historical data to validate detection accuracy
+
+Add dashboard metrics:
+- Flash crash detection rate
+- Probe success rate (TP hit vs SL hit)
+- Average return per probe
+
+---
+
+## Risk Assessment
+
+| Risk | Mitigation |
+|:-----|:-----------|
+| False positives (entering dead cat bounces) | Ultra-tight stop (0.5 ATR / 0.8%) limits loss |
+| Over-trading | Max 1 probe per symbol per day, 6h cooldown |
+| Exposure creep | Position size capped at 0.35x |
+| Reversal candle false signals | Optional enhancement, not required for entry |
+
