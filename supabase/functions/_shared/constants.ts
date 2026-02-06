@@ -644,11 +644,14 @@ export const FLASH_CRASH_BOUNCE_PROBE = {
   // K was recently pinned but has started recovering (momentum leads price)
   // This catches V-shaped bounces where oscillators rebound before price confirms
   PHASE_2_ENABLED: true,
-  PHASE_2_FLOOR_THRESHOLD: 5,    // K was ≤ 5 within lookback
+  PHASE_2_FLOOR_THRESHOLD: 3,    // K was ≤ 3 within lookback (asymmetric - liquidations overshoot to 0-2)
   PHASE_2_LOOKBACK_CANDLES: 3,   // Check last 3 candles (4h = 12 hours lookback)
-  PHASE_2_CURRENT_MAX_K: 25,     // Current K must still be < 25 (not fully recovered)
+  PHASE_2_CURRENT_MAX_K: 30,     // Current K must still be < 30 (relaxed to capture fast recoveries)
   PHASE_2_MIN_K_RISE: 5,         // K must have risen at least 5 points (momentum snapback)
   PHASE_2_REQUIRE_K_RISING: true, // K must be actively rising (not stalling)
+  PHASE_2_MIN_RISING_STEPS: 2,   // Require 2 consecutive rising K values (anti-jitter)
+  PHASE_2_COOLDOWN_CANDLES: 3,   // Cooldown: don't retrigger for 3 candles after Phase 2 trigger
+  PHASE_2_INCLUDE_1H_RECOVERY: true, // Allow recovery detection via 1h (catches faster V-bottoms)
   
   // ===== KEY DIFFERENCE: NO ADX SLOPE REQUIREMENT =====
   // Flash crashes keep ADX slope positive until reversal
@@ -666,6 +669,13 @@ export const FLASH_CRASH_BOUNCE_PROBE = {
   // NOTE: Raised from 30 to 40 per historical analysis - true liquidation events
   // often print momentum -35 to -45 but still violently bounce
   MOMENTUM_MAX_OPPOSING: 40,     // Block if momentum < -40 (extreme bearish)
+  
+  // ===== PHASE 2 MOMENTUM SAFETY GUARDRAIL =====
+  // Phase 2 (release state) can trigger while ADX is still expanding and 
+  // momentum is deeply negative - this risks counter-trend knife-catching.
+  // Require momentum to be STABILIZING (not at worst opposing level) for Phase 2
+  PHASE_2_MOMENTUM_STABILIZATION: true,
+  PHASE_2_MOMENTUM_MAX_OPPOSING: 28, // Phase 2 requires momentum > -28 (70% of -40)
   
   // ===== VELOCITY CONFIRMATION =====
   // Confirm rapid decline via price action (not gradual drift)
