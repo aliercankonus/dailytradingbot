@@ -23,6 +23,7 @@ import {
   roundToStepSize, 
   roundToTickSize,
   createBinanceSignature,
+  sendBinanceApiErrorNotification,
   type SymbolFilters
 } from "../_shared/binance.ts";
 
@@ -2014,6 +2015,16 @@ serve(async (req) => {
               continue;
             }
             
+            // Send email notification for non-transient errors
+            await sendBinanceApiErrorNotification(supabaseUrl!, supabaseKey!, user.id, {
+              operation: 'execute_trade',
+              symbol: signal.symbol,
+              binanceErrorCode: errorData.code,
+              binanceErrorMsg: errorData.msg || errorText,
+              httpStatus: orderResponse.status,
+              context: `Failed to place ${side} order for ${quantity} ${signal.symbol}`,
+            });
+            
             logger.error(`Binance API error: ${errorText}`);
             throw new Error(`Failed to place order: ${errorData.msg || errorText}`);
           }
@@ -2027,14 +2038,32 @@ serve(async (req) => {
           logger.trade(`Order response: status=${orderStatus}, orderId=${orderData.orderId}`);
           
           if (orderStatus === 'REJECTED') {
+            await sendBinanceApiErrorNotification(supabaseUrl!, supabaseKey!, user.id, {
+              operation: 'execute_trade',
+              symbol: signal.symbol,
+              binanceErrorMsg: `Order rejected by exchange: ${JSON.stringify(orderData)}`,
+              context: `${side} order rejected - check order parameters`,
+            });
             throw new Error(`Order rejected by exchange: ${JSON.stringify(orderData)}`);
           }
           
           if (orderStatus === 'EXPIRED') {
+            await sendBinanceApiErrorNotification(supabaseUrl!, supabaseKey!, user.id, {
+              operation: 'execute_trade',
+              symbol: signal.symbol,
+              binanceErrorMsg: `Order expired before fill`,
+              context: `${side} order expired - market may be illiquid`,
+            });
             throw new Error(`Order expired before fill: ${JSON.stringify(orderData)}`);
           }
           
           if (orderStatus === 'CANCELED') {
+            await sendBinanceApiErrorNotification(supabaseUrl!, supabaseKey!, user.id, {
+              operation: 'execute_trade',
+              symbol: signal.symbol,
+              binanceErrorMsg: `Order was canceled unexpectedly`,
+              context: `${side} order canceled before execution`,
+            });
             throw new Error(`Order was canceled: ${JSON.stringify(orderData)}`);
           }
           
@@ -2304,7 +2333,15 @@ serve(async (req) => {
       if (!slResponse.ok) {
         const slErrorText = await slResponse.text();
         logger.error(`⚠️ Failed to place stop-loss order for position ${position.id}: ${slErrorText}`);
-        // Don't throw - position is already created, just log the warning
+        // Send notification but don't throw - position is already created
+        await sendBinanceApiErrorNotification(supabaseUrl!, supabaseKey!, user.id, {
+          operation: 'place_stop_loss',
+          symbol: signal.symbol,
+          positionId: position.id,
+          binanceErrorMsg: slErrorText,
+          httpStatus: slResponse.status,
+          context: `Failed to place stop-loss at $${stopLoss} - manual intervention may be needed`,
+        });
       } else {
         logger.info(`✓ Stop-loss order placed for position ${position.id} at $${stopLoss}`);
       }
@@ -2324,7 +2361,15 @@ serve(async (req) => {
       if (!tpResponse.ok) {
         const tpErrorText = await tpResponse.text();
         logger.error(`⚠️ Failed to place take-profit order for position ${position.id}: ${tpErrorText}`);
-        // Don't throw - position is already created, just log the warning
+        // Send notification but don't throw - position is already created
+        await sendBinanceApiErrorNotification(supabaseUrl!, supabaseKey!, user.id, {
+          operation: 'place_take_profit',
+          symbol: signal.symbol,
+          positionId: position.id,
+          binanceErrorMsg: tpErrorText,
+          httpStatus: tpResponse.status,
+          context: `Failed to place take-profit at $${takeProfit} - manual intervention may be needed`,
+        });
       } else {
         logger.info(`✓ Take-profit order placed for position ${position.id} at $${takeProfit}`);
       }

@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 import { createLogger, logError } from "../_shared/logging.ts";
-import { getCurrentPrice } from "../_shared/binance.ts";
+import { getCurrentPrice, sendBinanceApiErrorNotification } from "../_shared/binance.ts";
 import { LOSS_CLUSTERING_PARAMS, TRADING_FEE_PARAMS } from "../_shared/constants.ts";
 
 // Create logger instance
@@ -125,7 +125,7 @@ serve(async (req) => {
       }
 
       for (const position of positions) {
-        const result = await closePosition(supabase, position, manualClose, closedByRebalancer, userLogger);
+        const result = await closePosition(supabase, position, manualClose, closedByRebalancer, userLogger, supabaseUrl, supabaseServiceKey);
         if (result.success) closedCount++;
       }
 
@@ -166,7 +166,7 @@ serve(async (req) => {
         );
       }
 
-      const result = await closePosition(supabase, position, manualClose, closedByRebalancer, userLogger);
+      const result = await closePosition(supabase, position, manualClose, closedByRebalancer, userLogger, supabaseUrl, supabaseServiceKey);
       
       if (!result.success) {
         return new Response(
@@ -211,7 +211,9 @@ async function closePosition(
   position: any, 
   manualClose: boolean = false, 
   closedByRebalancer: boolean = false,
-  parentLogger: any
+  parentLogger: any,
+  supabaseUrl?: string,
+  supabaseKey?: string
 ): Promise<CloseResult> {
   const posLogger = parentLogger.forSymbol(position.symbol);
   
@@ -226,10 +228,30 @@ async function closePosition(
         posLogger.info(`Fetched fresh price: ${currentPrice}`);
       } else {
         posLogger.warn(`No price from Binance, using stored current_price`);
+        // Send notification for price fetch failure if we have supabase config
+        if (supabaseUrl && supabaseKey) {
+          await sendBinanceApiErrorNotification(supabaseUrl, supabaseKey, position.user_id, {
+            operation: 'fetch_price_for_close',
+            symbol: position.symbol,
+            positionId: position.id,
+            binanceErrorMsg: 'getCurrentPrice returned null - no price data available',
+            context: `Closing position with stale price (stored: ${currentPrice})`,
+          });
+        }
       }
     } catch (error) {
       posLogger.error(`Failed to fetch Binance price: ${error}`);
       posLogger.info(`Falling back to stored current_price: ${currentPrice}`);
+      // Send notification for price fetch exception
+      if (supabaseUrl && supabaseKey) {
+        await sendBinanceApiErrorNotification(supabaseUrl, supabaseKey, position.user_id, {
+          operation: 'fetch_price_for_close',
+          symbol: position.symbol,
+          positionId: position.id,
+          binanceErrorMsg: error instanceof Error ? error.message : String(error),
+          context: `Exception fetching price - closing with stale price (stored: ${currentPrice})`,
+        });
+      }
     }
     
     // Final validation - must have valid price

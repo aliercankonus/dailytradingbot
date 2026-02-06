@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.81.1';
+import { sendBinanceApiErrorNotification } from '../_shared/binance.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -123,6 +124,27 @@ Deno.serve(async (req) => {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Binance API error:', errorText);
+      
+      // Try to parse error for notification
+      let binanceErrorCode: number | undefined;
+      let binanceErrorMsg = errorText;
+      try {
+        const errorData = JSON.parse(errorText);
+        binanceErrorCode = errorData.code;
+        binanceErrorMsg = errorData.msg || errorText;
+      } catch { /* ignore parse errors */ }
+      
+      // Send notification for API key errors
+      if (userId && supabaseUrl) {
+        await sendBinanceApiErrorNotification(supabaseUrl, supabaseServiceKey, userId, {
+          operation: 'fetch_account_balance',
+          binanceErrorCode,
+          binanceErrorMsg,
+          httpStatus: response.status,
+          context: 'Failed to fetch Binance account balance - check API keys',
+        });
+      }
+      
       // Fallback to paper balance on API errors
       return new Response(
         JSON.stringify({

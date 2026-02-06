@@ -587,3 +587,76 @@ export class BinanceWebSocketManager {
     return this.reconnectAttempts;
   }
 }
+
+// ============= BINANCE API ERROR NOTIFICATION HELPER =============
+
+export interface BinanceApiErrorDetails {
+  operation: string;           // e.g., 'execute_trade', 'close_position', 'fetch_price'
+  symbol?: string;
+  positionId?: string;
+  binanceErrorCode?: number;   // Binance error code (e.g., -2010)
+  binanceErrorMsg?: string;    // Binance error message
+  httpStatus?: number;         // HTTP status code
+  context?: string;            // Additional context
+}
+
+/**
+ * Send email notification for Binance API errors
+ * Call this when critical Binance API operations fail
+ */
+export async function sendBinanceApiErrorNotification(
+  supabaseUrl: string,
+  supabaseKey: string,
+  userId: string,
+  error: BinanceApiErrorDetails
+): Promise<boolean> {
+  try {
+    // Get user email from risk_parameters
+    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.81.1");
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    const { data: riskParams } = await supabase
+      .from('risk_parameters')
+      .select('notification_email, email_notifications_enabled')
+      .eq('user_id', userId)
+      .maybeSingle();
+    
+    // Only send if email notifications are enabled
+    if (!riskParams?.email_notifications_enabled || !riskParams?.notification_email) {
+      logger.info(`Skipping Binance API error notification - email not configured or disabled`);
+      return false;
+    }
+    
+    // Call send-notification function
+    const response = await fetch(`${supabaseUrl}/functions/v1/send-notification`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: 'binance_api_error',
+        email: riskParams.notification_email,
+        userId,
+        operation: error.operation,
+        symbol: error.symbol,
+        positionId: error.positionId,
+        binanceErrorCode: error.binanceErrorCode,
+        binanceErrorMsg: error.binanceErrorMsg,
+        httpStatus: error.httpStatus,
+        context: error.context,
+      }),
+    });
+    
+    if (!response.ok) {
+      logger.warn(`Failed to send Binance API error notification: ${response.status}`);
+      return false;
+    }
+    
+    logger.info(`📧 Sent Binance API error notification for ${error.operation}`);
+    return true;
+  } catch (notifyError) {
+    logger.error(`Error sending Binance API error notification: ${notifyError}`);
+    return false;
+  }
+}
