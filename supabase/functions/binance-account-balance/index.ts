@@ -134,14 +134,16 @@ Deno.serve(async (req) => {
         binanceErrorMsg = errorData.msg || errorText;
       } catch { /* ignore parse errors */ }
       
-      // Send notification for API key errors
-      if (userId && supabaseUrl) {
+      // Send notification only for credential errors (API key issues) - not transient failures
+      // This prevents email flooding on temporary network issues
+      const isCredentialError = binanceErrorCode === -2015 || binanceErrorCode === -2014 || binanceErrorCode === -1022;
+      if (userId && supabaseUrl && isCredentialError) {
         await sendBinanceApiErrorNotification(supabaseUrl, supabaseServiceKey, userId, {
           operation: 'fetch_account_balance',
           binanceErrorCode,
           binanceErrorMsg,
           httpStatus: response.status,
-          context: 'Failed to fetch Binance account balance - check API keys',
+          context: 'Failed to fetch Binance account balance - API key issue detected',
         });
       }
       
