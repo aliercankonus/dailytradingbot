@@ -5527,6 +5527,496 @@ const MultiTimeframeStochRSIPanel = ({ filtersStatus, trendData }: { filtersStat
   );
 };
 
+// ============= LTF CONFIRMATION GATE DISPLAY =============
+// User-friendly display for when lower timeframes don't confirm the higher timeframe trend
+const LtfConfirmationGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const derivedDirection = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
+  const trend4h = filtersStatus?.tf4hDir || filtersStatus?.trend4h || extractTimeframeTrend(trendData, "4h");
+  const trend1h = filtersStatus?.tf1hDir || filtersStatus?.trend1h || extractTimeframeTrend(trendData, "1h");
+  const trend30m = filtersStatus?.tf30mDir || filtersStatus?.trend30m || extractTimeframeTrend(trendData, "30m");
+  const conf4h = coerceNumeric(filtersStatus?.conf4h ?? trendData?.timeframes?.['4h']?.confidence, 0);
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const positionMultiplier = coerceNumeric(filtersStatus?.positionMultiplier ?? filtersStatus?.multiplier, 1);
+  const momentumScore = coerceNumeric(filtersStatus?.momentumScore, null);
+  const wouldPassWith = filtersStatus?.wouldPassWith;
+  const isBlock = filtersStatus?.isBlock ?? positionMultiplier === 0;
+  
+  // Determine alignment status
+  const is1hAligned = trend1h?.toLowerCase() === derivedDirection?.toLowerCase() || 
+                      (derivedDirection === 'long' && trend1h?.toLowerCase() === 'bullish') ||
+                      (derivedDirection === 'short' && trend1h?.toLowerCase() === 'bearish');
+  const is30mAligned = trend30m?.toLowerCase() === derivedDirection?.toLowerCase() ||
+                       (derivedDirection === 'long' && trend30m?.toLowerCase() === 'bullish') ||
+                       (derivedDirection === 'short' && trend30m?.toLowerCase() === 'bearish');
+  const is1hNeutral = trend1h?.toLowerCase() === 'neutral' || trend1h?.toLowerCase() === 'ranging';
+  const is30mNeutral = trend30m?.toLowerCase() === 'neutral' || trend30m?.toLowerCase() === 'ranging';
+  
+  const getTrendIcon = (trend: string) => {
+    if (trend?.toLowerCase() === 'bullish' || trend?.toLowerCase() === 'long') return <TrendingUp className="h-3 w-3 text-green-400" />;
+    if (trend?.toLowerCase() === 'bearish' || trend?.toLowerCase() === 'short') return <TrendingDown className="h-3 w-3 text-red-400" />;
+    return <Minus className="h-3 w-3 text-yellow-400" />;
+  };
+  
+  const getTrendColor = (trend: string, isAligned: boolean) => {
+    if (isAligned) return 'text-green-400';
+    if (trend?.toLowerCase() === 'neutral' || trend?.toLowerCase() === 'ranging') return 'text-yellow-400';
+    return 'text-red-400';
+  };
+  
+  const getBlockReason = () => {
+    if (isBlock && momentumScore !== null && Math.abs(momentumScore) > 15) {
+      return "Both LTF neutral + momentum opposing";
+    }
+    if (isBlock) return "Counter-aligned LTF detected";
+    if (is1hNeutral && is30mNeutral) return "Both 1H and 30m neutral - probe sizing";
+    if (is1hNeutral || is30mNeutral) return "Partial LTF alignment - reduced sizing";
+    return "LTF structure not confirming";
+  };
+  
+  return (
+    <div className={`space-y-3 p-3 rounded-md border ${isBlock ? 'bg-red-500/10 border-red-500/30' : 'bg-amber-500/10 border-amber-500/30'}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Layers className={`h-4 w-4 ${isBlock ? 'text-red-400' : 'text-amber-400'}`} />
+          <span className={`text-xs font-semibold ${isBlock ? 'text-red-400' : 'text-amber-400'}`}>
+            LTF Confirmation {isBlock ? "Blocked" : "Reduced"}
+          </span>
+        </div>
+        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${isBlock ? 'text-red-400 border-red-500/30' : 'text-amber-400 border-amber-500/30'}`}>
+          {isBlock ? "BLOCK" : `${(positionMultiplier * 100).toFixed(0)}% size`}
+        </Badge>
+      </div>
+      
+      {/* Direction Context */}
+      <div className="flex items-center justify-between p-2 bg-muted/30 rounded text-[10px]">
+        <span className="text-muted-foreground">Trade Direction:</span>
+        <div className="flex items-center gap-1">
+          {derivedDirection === 'long' ? <TrendingUp className="h-3 w-3 text-green-400" /> : <TrendingDown className="h-3 w-3 text-red-400" />}
+          <span className={`font-medium uppercase ${derivedDirection === 'long' ? 'text-green-400' : 'text-red-400'}`}>
+            {derivedDirection}
+          </span>
+        </div>
+      </div>
+      
+      {/* LTF Alignment Grid */}
+      <div className="grid grid-cols-3 gap-2">
+        {/* 4H - Anchor */}
+        <div className="p-2 bg-blue-500/10 rounded border border-blue-500/30 text-center">
+          <div className="text-[9px] text-muted-foreground mb-1">4H (Anchor)</div>
+          <div className="flex items-center justify-center gap-1">
+            {getTrendIcon(trend4h)}
+            <span className="text-xs font-medium capitalize text-blue-400">{trend4h}</span>
+          </div>
+          <div className="text-[9px] text-muted-foreground mt-0.5">
+            Conf: {conf4h}%
+          </div>
+        </div>
+        
+        {/* 1H */}
+        <div className={`p-2 rounded border text-center ${is1hAligned ? 'bg-green-500/10 border-green-500/30' : is1hNeutral ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+          <div className="text-[9px] text-muted-foreground mb-1">1H</div>
+          <div className="flex items-center justify-center gap-1">
+            {is1hAligned ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : is1hNeutral ? <Minus className="h-3 w-3 text-yellow-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+            <span className={`text-xs font-medium capitalize ${getTrendColor(trend1h, is1hAligned)}`}>{trend1h}</span>
+          </div>
+          <div className="text-[9px] text-muted-foreground mt-0.5">
+            {is1hAligned ? "✓ Aligned" : is1hNeutral ? "Neutral" : "✗ Opposing"}
+          </div>
+        </div>
+        
+        {/* 30M */}
+        <div className={`p-2 rounded border text-center ${is30mAligned ? 'bg-green-500/10 border-green-500/30' : is30mNeutral ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+          <div className="text-[9px] text-muted-foreground mb-1">30m</div>
+          <div className="flex items-center justify-center gap-1">
+            {is30mAligned ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : is30mNeutral ? <Minus className="h-3 w-3 text-yellow-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+            <span className={`text-xs font-medium capitalize ${getTrendColor(trend30m, is30mAligned)}`}>{trend30m}</span>
+          </div>
+          <div className="text-[9px] text-muted-foreground mt-0.5">
+            {is30mAligned ? "✓ Aligned" : is30mNeutral ? "Neutral" : "✗ Opposing"}
+          </div>
+        </div>
+      </div>
+      
+      {/* Momentum Context if relevant */}
+      {momentumScore !== null && (
+        <div className={`flex items-center justify-between p-1.5 rounded text-[10px] ${Math.abs(momentumScore) > 15 ? 'bg-orange-500/10' : 'bg-muted/30'}`}>
+          <span className="text-muted-foreground">Momentum Score:</span>
+          <span className={`font-mono font-medium ${momentumScore > 15 ? 'text-green-400' : momentumScore < -15 ? 'text-red-400' : 'text-muted-foreground'}`}>
+            {momentumScore > 0 ? '+' : ''}{momentumScore}
+            {Math.abs(momentumScore) > 15 && " (opposing)"}
+          </span>
+        </div>
+      )}
+      
+      {/* What would pass hint */}
+      {wouldPassWith && (
+        <div className="p-1.5 bg-blue-500/10 rounded text-[10px] text-blue-400">
+          💡 Would pass with: {wouldPassWith}
+        </div>
+      )}
+      
+      {/* Explanation */}
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className={isBlock ? "text-red-400" : "text-amber-400"}>
+          {isBlock ? "⛔" : "⚠️"} {getBlockReason()}
+        </span>
+        <p className="mt-1">
+          Strong 4H trend requires LTF participation. When 1H and 30m are neutral or opposing, 
+          {isBlock ? " entries are blocked to prevent fighting structural headwinds." : " position size is reduced to account for weaker confirmation."}
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// ============= LTF SPIKE PROTECTION DISPLAY =============
+// User-friendly display for climax candle detection
+const LtfSpikeProtectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const derivedDirection = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
+  const stochRsiK15m = coerceNumeric(filtersStatus?.stochRsiK15m ?? filtersStatus?.stochK15m, 50);
+  const momentumScore = coerceNumeric(filtersStatus?.momentumScore, 0);
+  const adxSlope = coerceNumeric(filtersStatus?.adxSlope, 0);
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  
+  const isBlockingShort = derivedDirection === 'short' && stochRsiK15m > 95;
+  const isBlockingLong = derivedDirection === 'long' && stochRsiK15m < 5;
+  const spikeType = isBlockingShort ? "bullish" : "bearish";
+  
+  const getStochRsiColor = () => {
+    if (stochRsiK15m > 95 || stochRsiK15m < 5) return "text-red-400";
+    if (stochRsiK15m > 80 || stochRsiK15m < 20) return "text-orange-400";
+    return "text-green-400";
+  };
+  
+  return (
+    <div className="space-y-3 p-3 bg-red-500/10 rounded-md border border-red-500/30">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Zap className="h-4 w-4 text-red-400" />
+          <span className="text-xs font-semibold text-red-400">
+            LTF Spike Protection (Priority 2)
+          </span>
+        </div>
+        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+          HARD BLOCK
+        </Badge>
+      </div>
+      
+      {/* Spike Explanation */}
+      <div className="p-3 bg-muted/30 rounded border border-muted/50">
+        <div className="flex items-center gap-2 mb-2">
+          <AlertTriangle className="h-4 w-4 text-orange-400" />
+          <span className="text-xs font-medium text-orange-400">
+            15m Momentum Climax Detected
+          </span>
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          {isBlockingShort 
+            ? "15m StochRSI at extreme bullish spike (K > 95) with bullish momentum. This is a climax candle—not an early reversal opportunity."
+            : "15m StochRSI at extreme bearish spike (K < 5) with bearish momentum. This is a climax candle—not an early reversal opportunity."
+          }
+        </p>
+      </div>
+      
+      {/* Metrics Grid */}
+      <div className="grid grid-cols-4 gap-1.5">
+        <div className={`p-1.5 rounded border text-center ${stochRsiK15m > 95 || stochRsiK15m < 5 ? 'bg-red-500/20 border-red-500/30' : 'bg-muted/30 border-muted/50'}`}>
+          <div className="text-[9px] text-muted-foreground">15m K</div>
+          <div className={`text-sm font-mono font-bold ${getStochRsiColor()}`}>
+            {stochRsiK15m.toFixed(1)}
+          </div>
+        </div>
+        <div className={`p-1.5 rounded border text-center ${Math.abs(momentumScore) > 20 ? 'bg-orange-500/20 border-orange-500/30' : 'bg-muted/30 border-muted/50'}`}>
+          <div className="text-[9px] text-muted-foreground">Momentum</div>
+          <div className={`text-sm font-mono font-bold ${momentumScore > 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {momentumScore > 0 ? '+' : ''}{momentumScore}
+          </div>
+        </div>
+        <div className={`p-1.5 rounded border text-center ${adxSlope >= 0 ? 'bg-orange-500/20 border-orange-500/30' : 'bg-muted/30 border-muted/50'}`}>
+          <div className="text-[9px] text-muted-foreground">ADX Slope</div>
+          <div className={`text-sm font-mono font-bold ${adxSlope >= 0 ? 'text-orange-400' : 'text-green-400'}`}>
+            {adxSlope >= 0 ? '+' : ''}{adxSlope.toFixed(2)}
+          </div>
+        </div>
+        <div className="p-1.5 rounded border text-center bg-muted/30 border-muted/50">
+          <div className="text-[9px] text-muted-foreground">ADX</div>
+          <div className="text-sm font-mono font-bold text-muted-foreground">
+            {adx.toFixed(1)}
+          </div>
+        </div>
+      </div>
+      
+      {/* Condition Checklist */}
+      <div className="space-y-1">
+        <div className="text-[10px] text-muted-foreground mb-1">Why this is a spike (all conditions met):</div>
+        <div className="grid grid-cols-1 gap-1">
+          <div className="flex items-center gap-1.5 p-1 bg-red-500/10 rounded text-[10px]">
+            <XCircle className="h-3 w-3 text-red-400" />
+            <span>15m StochRSI K {isBlockingShort ? "> 95" : "< 5"} (at {spikeType} extreme)</span>
+          </div>
+          <div className="flex items-center gap-1.5 p-1 bg-red-500/10 rounded text-[10px]">
+            <XCircle className="h-3 w-3 text-red-400" />
+            <span>Momentum {momentumScore > 0 ? "bullish" : "bearish"} (aligns with spike)</span>
+          </div>
+          <div className="flex items-center gap-1.5 p-1 bg-red-500/10 rounded text-[10px]">
+            <XCircle className="h-3 w-3 text-red-400" />
+            <span>ADX slope ≥ 0 (trend still accelerating)</span>
+          </div>
+        </div>
+      </div>
+      
+      {/* Explanation */}
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-red-400">⛔ {derivedDirection.toUpperCase()} blocked:</span>{" "}
+        Entering at momentum climax candles statistically favors immediate reversals. 
+        Wait for StochRSI to de-peg from the extreme zone before entry.
+      </div>
+    </div>
+  );
+};
+
+// ============= MOMENTUM SLOPE GATE DISPLAY =============
+// User-friendly display for accelerating opposing momentum (Priority 1)
+const MomentumSlopeGateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const derivedDirection = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
+  const momentumScore = coerceNumeric(filtersStatus?.momentumScore, 0);
+  const momentumSlope = coerceNumeric(filtersStatus?.momentumSlope ?? filtersStatus?.slope, 0);
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  
+  const isOpposingMomentum = (derivedDirection === 'long' && momentumScore < -15) || 
+                              (derivedDirection === 'short' && momentumScore > 15);
+  const isSlopeAccelerating = (derivedDirection === 'long' && momentumSlope < 0) ||
+                               (derivedDirection === 'short' && momentumSlope > 0);
+  
+  const getMomentumColor = () => {
+    if (Math.abs(momentumScore) > 40) return "text-red-400";
+    if (Math.abs(momentumScore) > 25) return "text-orange-400";
+    return "text-yellow-400";
+  };
+  
+  return (
+    <div className="space-y-3 p-3 bg-red-500/10 rounded-md border border-red-500/30">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Activity className="h-4 w-4 text-red-400" />
+          <span className="text-xs font-semibold text-red-400">
+            Momentum Slope Gate (Priority 1)
+          </span>
+        </div>
+        <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+          HARD BLOCK
+        </Badge>
+      </div>
+      
+      {/* Core Principle */}
+      <div className="p-2 bg-muted/30 rounded border border-muted/50 text-[10px]">
+        <div className="flex items-center gap-1.5 text-amber-400 font-medium mb-1">
+          <AlertTriangle className="h-3 w-3" />
+          <span>ADX does NOT override this gate</span>
+        </div>
+        <p className="text-muted-foreground">
+          Accelerating opposing momentum = stronger block, not weaker. ADX measures trend strength, 
+          not entry validity.
+        </p>
+      </div>
+      
+      {/* Momentum Visualization */}
+      <div className="space-y-2">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Momentum Score</span>
+          <span className={`font-mono font-bold ${getMomentumColor()}`}>
+            {momentumScore > 0 ? '+' : ''}{momentumScore}
+          </span>
+        </div>
+        <div className="relative h-3 bg-muted/50 rounded-full overflow-hidden">
+          {/* Center marker */}
+          <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-foreground/40 z-10" />
+          {/* Opposing zone markers */}
+          <div className="absolute left-[32.5%] top-0 bottom-0 w-px bg-orange-500/50" />
+          <div className="absolute left-[67.5%] top-0 bottom-0 w-px bg-orange-500/50" />
+          {/* Score bar */}
+          <div 
+            className={`absolute top-0 bottom-0 ${momentumScore > 0 ? 'bg-green-500' : 'bg-red-500'}`}
+            style={{
+              left: momentumScore >= 0 ? '50%' : `${50 + (momentumScore / 2)}%`,
+              width: `${Math.min(50, Math.abs(momentumScore) / 2)}%`,
+            }}
+          />
+        </div>
+        <div className="flex justify-between text-[8px] text-muted-foreground font-mono">
+          <span className="text-red-400">Bearish</span>
+          <span>0</span>
+          <span className="text-green-400">Bullish</span>
+        </div>
+      </div>
+      
+      {/* Key Metrics */}
+      <div className="grid grid-cols-3 gap-1.5">
+        <div className={`p-1.5 rounded border text-center ${isOpposingMomentum ? 'bg-red-500/20 border-red-500/30' : 'bg-green-500/20 border-green-500/30'}`}>
+          <div className="text-[9px] text-muted-foreground">Momentum</div>
+          <div className={`text-sm font-mono font-bold ${getMomentumColor()}`}>
+            {momentumScore > 0 ? '+' : ''}{momentumScore}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {isOpposingMomentum ? "✗ Opposing" : "✓ Aligned"}
+          </div>
+        </div>
+        <div className={`p-1.5 rounded border text-center ${isSlopeAccelerating ? 'bg-red-500/20 border-red-500/30' : 'bg-green-500/20 border-green-500/30'}`}>
+          <div className="text-[9px] text-muted-foreground">Slope</div>
+          <div className={`text-sm font-mono font-bold ${isSlopeAccelerating ? 'text-red-400' : 'text-green-400'}`}>
+            {momentumSlope > 0 ? '+' : ''}{momentumSlope.toFixed(2)}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {isSlopeAccelerating ? "✗ Accelerating" : "✓ Decelerating"}
+          </div>
+        </div>
+        <div className="p-1.5 rounded border text-center bg-blue-500/10 border-blue-500/30">
+          <div className="text-[9px] text-muted-foreground">ADX</div>
+          <div className="text-sm font-mono font-bold text-blue-400">
+            {adx.toFixed(1)}
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            No override
+          </div>
+        </div>
+      </div>
+      
+      {/* Block Logic */}
+      <div className="space-y-1">
+        <div className="text-[10px] text-muted-foreground mb-1">Block conditions (both must be true):</div>
+        <div className={`flex items-center gap-1.5 p-1 rounded text-[10px] ${isOpposingMomentum ? 'bg-red-500/10' : 'bg-green-500/10'}`}>
+          {isOpposingMomentum ? <XCircle className="h-3 w-3 text-red-400" /> : <CheckCircle2 className="h-3 w-3 text-green-400" />}
+          <span>Opposing momentum {'>'}15: {Math.abs(momentumScore) > 15 && isOpposingMomentum ? `Yes (${Math.abs(momentumScore)})` : 'No'}</span>
+        </div>
+        <div className={`flex items-center gap-1.5 p-1 rounded text-[10px] ${isSlopeAccelerating ? 'bg-red-500/10' : 'bg-green-500/10'}`}>
+          {isSlopeAccelerating ? <XCircle className="h-3 w-3 text-red-400" /> : <CheckCircle2 className="h-3 w-3 text-green-400" />}
+          <span>Slope accelerating against trade: {isSlopeAccelerating ? 'Yes' : 'No'}</span>
+        </div>
+      </div>
+      
+      {/* Explanation */}
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-red-400">⛔ {derivedDirection.toUpperCase()} blocked:</span>{" "}
+        Momentum is {momentumScore > 0 ? "bullish" : "bearish"} and accelerating. 
+        Even with ADX at {adx.toFixed(0)}, entering against accelerating momentum has poor outcomes.
+      </div>
+    </div>
+  );
+};
+
+// ============= NEAR EXTREME PROTECTION DISPLAY =============
+// User-friendly display for entries too close to 24h highs/lows
+const NearExtremeProtectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const derivedDirection = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
+  const distancePercent = coerceNumeric(filtersStatus?.distancePercent ?? filtersStatus?.distance, 0);
+  const currentPrice = coerceNumeric(filtersStatus?.currentPrice ?? filtersStatus?.price, 0);
+  const extremePrice = coerceNumeric(filtersStatus?.extremePrice ?? filtersStatus?.extreme, 0);
+  const zone = filtersStatus?.zone || (distancePercent < 1.5 ? "HARD" : "SOFT");
+  const positionMultiplier = coerceNumeric(filtersStatus?.positionMultiplier ?? filtersStatus?.multiplier, 1);
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const ltfConfirms = filtersStatus?.ltfConfirms ?? false;
+  const isNearHigh = derivedDirection === 'long' || filtersStatus?.extremeType === 'high';
+  const isBlock = zone === "HARD" || positionMultiplier === 0;
+  
+  const getDistanceColor = () => {
+    if (distancePercent < 1.5) return "text-red-400";
+    if (distancePercent < 2.5) return "text-orange-400";
+    return "text-green-400";
+  };
+  
+  return (
+    <div className={`space-y-3 p-3 rounded-md border ${isBlock ? 'bg-red-500/10 border-red-500/30' : 'bg-amber-500/10 border-amber-500/30'}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Target className={`h-4 w-4 ${isBlock ? 'text-red-400' : 'text-amber-400'}`} />
+          <span className={`text-xs font-semibold ${isBlock ? 'text-red-400' : 'text-amber-400'}`}>
+            Near {isNearHigh ? "High" : "Low"} Protection
+          </span>
+        </div>
+        <Badge variant={isBlock ? "destructive" : "outline"} className={`text-[10px] px-1.5 py-0 ${!isBlock && 'text-amber-400 border-amber-500/30'}`}>
+          {zone} ZONE
+        </Badge>
+      </div>
+      
+      {/* Distance Visualization */}
+      <div className="p-3 bg-muted/30 rounded border border-muted/50">
+        <div className="flex justify-between text-[10px] mb-2">
+          <span className="text-muted-foreground">Distance from 24h {isNearHigh ? "High" : "Low"}</span>
+          <span className={`font-mono font-bold ${getDistanceColor()}`}>
+            {distancePercent.toFixed(2)}%
+          </span>
+        </div>
+        
+        {/* Visual distance bar */}
+        <div className="relative h-6 bg-muted/50 rounded overflow-hidden">
+          {/* Zone markers */}
+          <div className="absolute left-0 top-0 bottom-0 w-[30%] bg-red-500/20" />
+          <div className="absolute left-[30%] top-0 bottom-0 w-[20%] bg-orange-500/20" />
+          <div className="absolute left-[50%] top-0 bottom-0 w-[50%] bg-green-500/10" />
+          
+          {/* Current position marker */}
+          <div 
+            className={`absolute top-0 bottom-0 w-1 rounded ${getDistanceColor().replace('text-', 'bg-')}`}
+            style={{ left: `${Math.min(Math.max(distancePercent * 10, 2), 98)}%` }}
+          />
+          
+          {/* Zone labels */}
+          <div className="absolute inset-0 flex items-center justify-between px-2 text-[8px]">
+            <span className="text-red-400">Hard (&lt;1.5%)</span>
+            <span className="text-orange-400">Soft (&lt;2.5%)</span>
+            <span className="text-green-400">Safe</span>
+          </div>
+        </div>
+        
+        {/* Price info */}
+        {currentPrice > 0 && extremePrice > 0 && (
+          <div className="flex justify-between text-[9px] text-muted-foreground mt-2">
+            <span>Current: ${currentPrice.toLocaleString()}</span>
+            <span>24h {isNearHigh ? "High" : "Low"}: ${extremePrice.toLocaleString()}</span>
+          </div>
+        )}
+      </div>
+      
+      {/* Bypass Conditions */}
+      <div className="space-y-1">
+        <div className="text-[10px] text-muted-foreground mb-1">Bypass conditions:</div>
+        <div className={`flex items-center gap-1.5 p-1 rounded text-[10px] ${adx > 50 ? 'bg-green-500/10' : 'bg-muted/30'}`}>
+          {adx > 50 ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-muted-foreground" />}
+          <span>ADX {'>'}50 (breakout strength): {adx.toFixed(1)}</span>
+        </div>
+        <div className={`flex items-center gap-1.5 p-1 rounded text-[10px] ${ltfConfirms ? 'bg-green-500/10' : 'bg-muted/30'}`}>
+          {ltfConfirms ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-muted-foreground" />}
+          <span>LTF confirms breakout: {ltfConfirms ? 'Yes' : 'No'}</span>
+        </div>
+      </div>
+      
+      {/* Position size if reduced */}
+      {!isBlock && positionMultiplier < 1 && (
+        <div className="flex items-center justify-between p-1.5 bg-amber-500/10 rounded text-[10px]">
+          <span className="text-muted-foreground">Position Size:</span>
+          <span className="font-mono font-medium text-amber-400">{(positionMultiplier * 100).toFixed(0)}%</span>
+        </div>
+      )}
+      
+      {/* Explanation */}
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className={isBlock ? "text-red-400" : "text-amber-400"}>
+          {isBlock ? "⛔" : "⚠️"} {derivedDirection.toUpperCase()} {isBlock ? "blocked" : "reduced"}:
+        </span>{" "}
+        {isNearHigh 
+          ? "Entry near 24h high limits upside potential. Poor risk/reward for LONG."
+          : "Entry near 24h low limits downside potential. Poor risk/reward for SHORT."
+        }
+        {!isBlock && ` Position reduced to ${(positionMultiplier * 100).toFixed(0)}%.`}
+      </div>
+    </div>
+  );
+};
+
 // Reusable Momentum Indicators Panel - shows MACD, momentum status, and fake breakout risk
 const MomentumIndicatorsPanel = ({ trendData, filtersStatus }: { trendData?: any; filtersStatus?: any }) => {
   // Extract momentum data from trend_data.timeframes['1h'].indicators or trend_data.momentum
