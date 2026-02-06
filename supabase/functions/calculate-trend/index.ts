@@ -1327,7 +1327,7 @@ serve(async (req) => {
     );
 
     const symLog = logger.forSymbol(symbol);
-    symLog.info(`${LOG_CATEGORIES.STOCHRSI} 1h K=${stochRsi1h.k} D=${stochRsi1h.d} signal=${stochRsi1h.signal} barsOB=${barsAtExtreme1h.barsOverbought} barsOS=${barsAtExtreme1h.barsOversold} | 4h K=${stochRsi4h.k} D=${stochRsi4h.d} signal=${stochRsi4h.signal} barsOB=${barsAtExtreme4h.barsOverbought} barsOS=${barsAtExtreme4h.barsOversold}`);
+    symLog.info(`${LOG_CATEGORIES.STOCHRSI} 1h K=${stochRsi1h.k} D=${stochRsi1h.d} signal=${stochRsi1h.signal} barsOB=${barsAtExtreme1h.barsOverbought} barsOS=${barsAtExtreme1h.barsOversold} kArrayLen=${stochRsi1h.kArray?.length ?? 0} | 4h K=${stochRsi4h.k} D=${stochRsi4h.d} signal=${stochRsi4h.signal} barsOB=${barsAtExtreme4h.barsOverbought} barsOS=${barsAtExtreme4h.barsOversold} kArrayLen=${stochRsi4h.kArray?.length ?? 0}`);
 
     const dominantTrend = trend4h.trend;
     const dominantConfidence = trend4h.confidence;
@@ -1849,8 +1849,8 @@ serve(async (req) => {
     // Market structure validation
     const marketStructure = validateMarketStructure(klines1h, dominantTrend);
 
-    // Build response with full type safety
-    const response: TrendDataResponse = {
+    // Build response - using explicit object type to ensure all fields are included
+    const response = {
       symbol,
       timestamp: new Date().toISOString(),
       currentPrice,
@@ -1885,6 +1885,14 @@ serve(async (req) => {
           "4h": barsAtExtreme4h,
         },
       },
+      // NEW: StochRSI K history for Phase 2 Flash Crash detection (v2)
+      // Last N K values per timeframe (covers 24h for 4h, 12h for 1h)
+      stochRsiHistory: (() => {
+        const h1 = stochRsi1h.kArray ? stochRsi1h.kArray.slice(-12) : [];
+        const h4 = stochRsi4h.kArray ? stochRsi4h.kArray.slice(-6) : [];
+        symLog.info(`📊 STOCHRSI_HISTORY: 1h=[${h1.length} values], 4h=[${h4.length} values]`);
+        return { "1h": h1, "4h": h4 };
+      })(),
       momentum: {
         state: momentumState,
         macdExpanding,
