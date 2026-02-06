@@ -6103,8 +6103,9 @@ export const TREND_CONTINUATION_PULLBACK_REGIME = {
   // ===== TREND STRENGTH REQUIREMENTS =====
   // Must be in a strong trend (ADX >= 30, not 40 which is too restrictive)
   MIN_ADX: 30,
-  // ADX slope must be positive (trend still gaining strength)
-  MIN_ADX_SLOPE: 0.0,
+  // ADX slope must be meaningfully positive (trend gaining strength)
+  // REFINED: Increased from 0.0 to 0.05 - slope hovering at 0 is often trend plateau
+  MIN_ADX_SLOPE: 0.05,
   // 4H trend must be directional (not neutral)
   REQUIRE_4H_DIRECTIONAL: true,
   MIN_4H_CONFIDENCE: 50,
@@ -6116,8 +6117,12 @@ export const TREND_CONTINUATION_PULLBACK_REGIME = {
   EMA_PULLBACK: {
     // Check if price is near EMA20/EMA50 midline
     ENABLED: true,
-    // Price within this % of EMA midpoint to trigger
-    PROXIMITY_THRESHOLD_PERCENT: 0.8,
+    // REFINED: Dynamic proximity based on ADX strength
+    // ADX < 35: use looser 0.8% (moderate trends need larger pullback zone)
+    // ADX >= 35: use tighter 0.5% (strong trends have tighter structure)
+    PROXIMITY_THRESHOLD_PERCENT: 0.8,  // Default/base value
+    PROXIMITY_THRESHOLD_STRONG_ADX: 0.5,  // For ADX >= 35
+    STRONG_ADX_THRESHOLD: 35,  // ADX level to switch to tighter proximity
     // Which EMA to use: 'EMA20', 'EMA50', or 'MIDPOINT'
     EMA_TYPE: 'MIDPOINT' as 'EMA20' | 'EMA50' | 'MIDPOINT',
     // Alternative: check if price touched EMA in last N candles
@@ -6141,12 +6146,16 @@ export const TREND_CONTINUATION_PULLBACK_REGIME = {
   // ===== MOVE EXHAUSTION CHECK =====
   // Even with pullback, we need some remaining runway
   // This is RELAXED from normal thresholds (allows more extended moves)
+  // REFINED: Shallow pullbacks get tighter exhaustion limits
   RELAXED_MOVE_EXHAUSTION: {
     // Maximum move from swing for pullback entry (vs 5-6% normal)
     LONG_MAX_MOVE_FROM_LOW_PERCENT: 8.0,
     SHORT_MAX_MOVE_FROM_HIGH_PERCENT: 8.0,
     // Even more relaxed for very strong trends (ADX >= 40)
     VERY_STRONG_TREND_MAX_MOVE_PERCENT: 10.0,
+    // REFINED: Tighten exhaustion for shallow pullbacks (< 1.5%)
+    SHALLOW_PULLBACK_MAX_MOVE_PERCENT: 6.0,  // Only 6% if pullback is shallow
+    SHALLOW_PULLBACK_THRESHOLD: 1.5,  // "Shallow" = less than 1.5% from EMA
   },
   
   // ===== POSITION SIZING =====
@@ -6159,10 +6168,26 @@ export const TREND_CONTINUATION_PULLBACK_REGIME = {
   
   // ===== STOP LOSS =====
   // Structure-based stops for pullback entries
+  // REFINED: Use MAX of ATR and EMA stops (never allow stop inside structure)
   STOP_LOSS_ATR_MULTIPLIER: 1.0,  // Tight 1.0 ATR stop
-  // Alternative: stop below EMA that triggered entry
   USE_EMA_AS_STOP: true,
   EMA_STOP_BUFFER_PERCENT: 0.3,  // 0.3% below EMA
+  USE_MAX_STOP: true,  // STOP = max(ATR_stop, EMA_stop) - never inside structure
+  
+  // ===== CONTINUATION COOLDOWN =====
+  // REFINED: Prevent death-by-a-thousand-pullbacks
+  // Only ONE continuation entry per symbol per trend leg
+  COOLDOWN: {
+    ENABLED: true,
+    // Cooldown period after a continuation entry (prevents overtrading)
+    COOLDOWN_HOURS: 4,  // 4 hours between continuation entries
+    // Max entries per trend leg (reset on direction change or ADX < 25)
+    MAX_ENTRIES_PER_LEG: 1,
+    // Block if last trade was same regime and resulted in loss
+    BLOCK_AFTER_LOSS: true,
+    // Trend leg reset conditions
+    LEG_RESET_ADX_THRESHOLD: 25,  // ADX drops below this = new leg
+  },
   
   // ===== GATE BYPASS =====
   // This regime can bypass certain gates that would normally block
