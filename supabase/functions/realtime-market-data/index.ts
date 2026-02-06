@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 import { buildStreamUrl, parseTickerMessage } from "../_shared/binance.ts";
 
 const corsHeaders = {
@@ -10,14 +11,71 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 const BASE_RECONNECT_DELAY = 1000;
 const HEARTBEAT_INTERVAL = 30000;
 
+// Track active connections for health check
+let activeConnections = 0;
+let lastBinanceMessage = Date.now();
+let totalMessagesReceived = 0;
+let lastError: string | null = null;
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const reqUrl = new URL(req.url);
+  
+  // ===== HEALTH CHECK ENDPOINT =====
+  // GET request without WebSocket upgrade = health check
   const { headers } = req;
   const upgradeHeader = headers.get("upgrade") || "";
+  
+  if (req.method === 'GET' && upgradeHeader.toLowerCase() !== "websocket") {
+    const now = Date.now();
+    const timeSinceLastMessage = now - lastBinanceMessage;
+    const isHealthy = activeConnections === 0 || timeSinceLastMessage < 120000; // 2 min threshold
+    
+    // Log health heartbeat to DB
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL");
+      const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+      if (supabaseUrl && supabaseKey) {
+        const supabase = createClient(supabaseUrl, supabaseKey);
+        await supabase.from('bot_heartbeat').insert({
+          user_id: '00000000-0000-0000-0000-000000000000', // System user
+          symbols_scanned: activeConnections,
+          signals_generated: totalMessagesReceived,
+          rejections_logged: 0,
+          no_trade_state: isHealthy ? 'WS_HEALTHY' : 'WS_STALE',
+          no_trade_reason: isHealthy 
+            ? `${activeConnections} active connections, ${totalMessagesReceived} messages` 
+            : `No messages for ${Math.round(timeSinceLastMessage / 1000)}s`,
+          details: {
+            function: 'realtime-market-data',
+            activeConnections,
+            totalMessagesReceived,
+            timeSinceLastMessageMs: timeSinceLastMessage,
+            lastError,
+          },
+        });
+      }
+    } catch (e) {
+      console.error('[MarketData-Edge] Failed to log health:', e);
+    }
+    
+    return new Response(JSON.stringify({
+      status: isHealthy ? 'healthy' : 'degraded',
+      function: 'realtime-market-data',
+      activeConnections,
+      totalMessagesReceived,
+      lastMessageAgoMs: timeSinceLastMessage,
+      lastError,
+      checkedAt: new Date().toISOString(),
+    }), {
+      status: isHealthy ? 200 : 503,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 
   if (upgradeHeader.toLowerCase() !== "websocket") {
     return new Response("Expected WebSocket connection", { status: 400 });
@@ -33,8 +91,7 @@ serve(async (req) => {
   let heartbeatInterval: number | null = null;
 
   // Parse symbols from query params or use defaults
-  const url = new URL(req.url);
-  const symbolsParam = url.searchParams.get('symbols');
+  const symbolsParam = reqUrl.searchParams.get('symbols');
   const symbols: string[] = symbolsParam ? JSON.parse(symbolsParam) : ['BTCUSDT', 'ETHUSDT'];
   
   console.log('[MarketData-Edge] Subscribing to symbols:', symbols);
@@ -65,6 +122,10 @@ serve(async (req) => {
       binanceSocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          
+          // Track message activity for health monitoring
+          lastBinanceMessage = Date.now();
+          totalMessagesReceived++;
           
           // Binance sends data in a specific format for combined streams
           if (data.data) {
@@ -101,6 +162,7 @@ serve(async (req) => {
 
       binanceSocket.onerror = (error) => {
         console.error('[MarketData-Edge] Binance WebSocket error:', error);
+        lastError = `Binance error at ${new Date().toISOString()}`;
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify({
             type: 'error',
@@ -152,6 +214,7 @@ serve(async (req) => {
 
   socket.onopen = () => {
     console.log('[MarketData-Edge] Client WebSocket opened');
+    activeConnections++;
     connectToBinance();
     
     // Start heartbeat to keep connection alive
@@ -185,6 +248,7 @@ serve(async (req) => {
 
   socket.onclose = () => {
     console.log('[MarketData-Edge] Client WebSocket closed - cleaning up resources');
+    activeConnections = Math.max(0, activeConnections - 1);
     
     // Clean up Binance connection
     if (binanceSocket) {

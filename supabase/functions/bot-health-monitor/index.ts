@@ -25,6 +25,11 @@ const ALERT_CONFIG = {
   // TIER 3: CRITICAL - Operational concern (immediate)
   OPERATIONAL_CONCERN_IMMEDIATE: true,
   
+  // TIER 4: WebSocket health check
+  WEBSOCKET_CHECK_ENABLED: true,
+  WEBSOCKET_STALE_THRESHOLD_SECONDS: 120, // 2 minutes without messages = stale
+  WEBSOCKET_FUNCTIONS: ['realtime-market-data', 'realtime-prices'] as string[],
+  
   // Alert cooldown (prevent spam)
   COOLDOWN_MINUTES: 60,
   
@@ -33,11 +38,19 @@ const ALERT_CONFIG = {
 };
 
 interface AlertResult {
-  alertType: 'heartbeat_missing' | 'state_prolonged' | 'operational_concern';
+  alertType: 'heartbeat_missing' | 'state_prolonged' | 'operational_concern' | 'websocket_failure';
   severity: 'critical' | 'warning';
   message: string;
   details: Record<string, unknown>;
   alertSent: boolean;
+}
+
+interface WebSocketHealthResult {
+  function: string;
+  status: 'healthy' | 'degraded' | 'unreachable';
+  activeConnections?: number;
+  lastMessageAgoMs?: number;
+  error?: string;
 }
 
 interface HealthCheckResult {
@@ -221,6 +234,47 @@ async function markAlertSent(
     .is('resolved_at', null);
 }
 
+// Check WebSocket function health
+async function checkWebSocketHealth(
+  supabaseUrl: string,
+  supabaseKey: string,
+  functionName: string
+): Promise<WebSocketHealthResult> {
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      const text = await response.text();
+      return {
+        function: functionName,
+        status: 'unreachable',
+        error: `HTTP ${response.status}: ${text.substring(0, 100)}`,
+      };
+    }
+    
+    const data = await response.json();
+    return {
+      function: functionName,
+      status: data.status === 'healthy' ? 'healthy' : 'degraded',
+      activeConnections: data.activeConnections,
+      lastMessageAgoMs: data.lastMessageAgoMs,
+      error: data.lastError,
+    };
+  } catch (error) {
+    return {
+      function: functionName,
+      status: 'unreachable',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -249,11 +303,54 @@ serve(async (req) => {
       );
     }
 
+    let alertsSentCount = 0;
+
+    // ===== TIER 4: Check WebSocket health =====
+    const wsHealthResults: WebSocketHealthResult[] = [];
+    if (ALERT_CONFIG.WEBSOCKET_CHECK_ENABLED) {
+      console.log('[HEALTH_MONITOR] Checking WebSocket function health...');
+      
+      for (const fn of ALERT_CONFIG.WEBSOCKET_FUNCTIONS) {
+        const wsHealth = await checkWebSocketHealth(supabaseUrl, supabaseKey, fn);
+        wsHealthResults.push(wsHealth);
+        
+        if (wsHealth.status !== 'healthy') {
+          console.warn(`[HEALTH_MONITOR] ⚠️ WebSocket ${fn}: ${wsHealth.status} - ${wsHealth.error || 'stale'}`);
+          
+          // Check cooldown before alerting
+          const withinCooldown = await isWithinCooldown(supabase, 'system', `websocket_${fn}`);
+          if (!withinCooldown) {
+            // Send alert to all active traders
+            for (const user of riskParams) {
+              const alert: AlertResult = {
+                alertType: 'websocket_failure',
+                severity: wsHealth.status === 'unreachable' ? 'critical' : 'warning',
+                message: `WebSocket ${fn} is ${wsHealth.status}${wsHealth.error ? `: ${wsHealth.error}` : ''}`,
+                details: {
+                  function: fn,
+                  status: wsHealth.status,
+                  activeConnections: wsHealth.activeConnections,
+                  lastMessageAgoMs: wsHealth.lastMessageAgoMs,
+                  error: wsHealth.error,
+                },
+                alertSent: false,
+              };
+              
+              const sent = await sendHealthAlert(supabaseUrl, supabaseKey, user.user_id, alert);
+              if (sent) {
+                alertsSentCount++;
+                await updateStateTracking(supabase, user.user_id, `websocket_${fn}`, wsHealth.status, alert.details);
+                await markAlertSent(supabase, user.user_id, `websocket_${fn}`, wsHealth.status);
+              }
+            }
+          }
+        }
+      }
+    }
+
     const results: HealthCheckResult[] = [];
     let criticalCount = 0;
     let warningCount = 0;
-    let alertsSentCount = 0;
-
     for (const user of riskParams) {
       const userId = user.user_id;
       const userIdShort = userId.substring(0, 8);
@@ -448,10 +545,12 @@ serve(async (req) => {
           critical: criticalCount,
           alertsSent: alertsSentCount,
         },
+        websocketHealth: wsHealthResults,
         thresholds: {
           heartbeatMissingMinutes: ALERT_CONFIG.HEARTBEAT_MISSING_MINUTES,
           stateThresholds: ALERT_CONFIG.STATE_THRESHOLDS,
           cooldownMinutes: ALERT_CONFIG.COOLDOWN_MINUTES,
+          websocketStaleThresholdSeconds: ALERT_CONFIG.WEBSOCKET_STALE_THRESHOLD_SECONDS,
         },
         results,
         checkedAt: new Date().toISOString(),
