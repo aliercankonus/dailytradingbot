@@ -295,6 +295,23 @@ const formatUserFriendlyReason = (reason: string, filters?: any): string => {
     return "⚠️ High reversal risk detected";
   }
   
+  // COUNTER_TREND_ADMISSION - counter-trend probe rejected
+  if (lowerReason.includes("counter_trend_admission") || filters?.gate === "COUNTER_TREND_ADMISSION") {
+    const failReason = filters?.reason || "";
+    const direction = filters?.direction || "unknown";
+    
+    if (failReason.includes("ADX_PERSISTENCE_INSUFFICIENT")) {
+      return `⏳ Counter-trend needs more trend decay`;
+    }
+    if (failReason.includes("ADX_NOT_EXHAUSTED")) {
+      return `⚡ Trend still too strong for counter-${direction}`;
+    }
+    if (failReason.includes("STOCHRSI_NOT_DEPEGGED")) {
+      return `📊 Momentum not resetting - wait`;
+    }
+    return `🔄 Counter-trend ${direction.toUpperCase()} blocked`;
+  }
+  
   // Regime
   if (lowerReason.includes("regime") || lowerReason.includes("ranging")) {
     return "📊 Market regime unfavorable";
