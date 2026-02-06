@@ -230,6 +230,13 @@ export interface TrendDataResponse {
     };
   };
   
+  // NEW: StochRSI K history for Phase 2 Flash Crash detection
+  // Stores last N K values per timeframe for temporal analysis
+  stochRsiHistory?: {
+    "1h"?: number[];
+    "4h"?: number[];
+  };
+  
   momentum: MomentumData;
   volatility: VolatilityData;
   
