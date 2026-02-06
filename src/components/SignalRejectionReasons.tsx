@@ -1008,6 +1008,187 @@ const ExecutionRejectionDisplay = ({ filtersStatus }: { filtersStatus: any }) =>
   );
 };
 
+// Counter-Trend Admission Gate Display - for counter-trend probe attempts
+const CounterTrendAdmissionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const direction = filtersStatus?.direction || "unknown";
+  const htfTrend = filtersStatus?.htfTrend || "unknown";
+  const failReason = filtersStatus?.reason || filtersStatus?.failureReasons?.[0] || "Unknown";
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const adxSlope = coerceNumeric(filtersStatus?.adxSlope ?? trendData?.volatility?.adxSlope, 0);
+  const stochK4h = coerceNumeric(filtersStatus?.stochRsiK4h ?? filtersStatus?.stochRsiK, 50);
+  const stochDepegged = filtersStatus?.stochDepegged ?? false;
+  const volatilityContracting = filtersStatus?.volatilityContracting ?? false;
+  const volatilityReason = filtersStatus?.volatilityReason || "";
+  const exhaustionStage = filtersStatus?.exhaustionStage || "NONE";
+  const ltfStructureFlip = filtersStatus?.ltfStructureFlip ?? false;
+  const adxSlopePersistence = coerceNumeric(filtersStatus?.adxSlopePersistence, 0);
+  const triggers = filtersStatus?.triggers || [];
+  
+  // Parse the failure reason to show user-friendly explanation
+  const getFailureExplanation = (reason: string) => {
+    if (reason.includes("ADX_PERSISTENCE_INSUFFICIENT")) {
+      const match = reason.match(/(\d+)\s*<\s*(\d+)/);
+      if (match) {
+        return {
+          title: "Trend decay not confirmed",
+          detail: `ADX slope has been negative for ${match[1]} candle(s), but needs ${match[2]} consecutive candles`,
+          icon: Timer
+        };
+      }
+      return { title: "Trend decay not confirmed", detail: "Need more consecutive candles with declining ADX", icon: Timer };
+    }
+    if (reason.includes("ADX_NOT_EXHAUSTED")) {
+      return { title: "Trend still strong", detail: `ADX ${adx.toFixed(1)} indicates significant trend energy remains`, icon: Zap };
+    }
+    if (reason.includes("STOCHRSI_NOT_DEPEGGED")) {
+      return { title: "Momentum not resetting", detail: `StochRSI K=${stochK4h.toFixed(1)} hasn't returned from extreme zone`, icon: Gauge };
+    }
+    if (reason.includes("VOLATILITY")) {
+      return { title: "Volatility not contracting", detail: volatilityReason || "Bollinger/ATR not showing exhaustion", icon: Activity };
+    }
+    if (reason.includes("LTF_NO_STRUCTURE_FLIP")) {
+      return { title: "Lower timeframe not confirming", detail: "15m/30m structure hasn't flipped to support counter-trend", icon: Layers };
+    }
+    return { title: "Counter-trend conditions not met", detail: reason, icon: AlertTriangle };
+  };
+  
+  const failure = getFailureExplanation(failReason);
+  const FailureIcon = failure.icon;
+  
+  // Determine which conditions passed
+  const passedConditions: { label: string; value: string }[] = [];
+  const failedConditions: { label: string; value: string; required: string }[] = [];
+  
+  // ADX exhaustion check
+  if (adx < 45) {
+    passedConditions.push({ label: "ADX < 45", value: `${adx.toFixed(1)}` });
+  } else {
+    failedConditions.push({ label: "ADX", value: `${adx.toFixed(1)}`, required: "< 45" });
+  }
+  
+  // ADX slope persistence
+  if (adxSlopePersistence >= 2) {
+    passedConditions.push({ label: "ADX Decay Persistence", value: `${adxSlopePersistence} candles ✓` });
+  } else {
+    failedConditions.push({ label: "ADX Decay Persistence", value: `${adxSlopePersistence} candles`, required: "≥ 2" });
+  }
+  
+  // StochRSI de-pegged
+  if (stochDepegged) {
+    passedConditions.push({ label: "StochRSI De-pegged", value: `K=${stochK4h.toFixed(1)} ✓` });
+  } else {
+    failedConditions.push({ label: "StochRSI De-pegged", value: `K=${stochK4h.toFixed(1)}`, required: "Back from extreme" });
+  }
+  
+  // Volatility contracting
+  if (volatilityContracting) {
+    passedConditions.push({ label: "Volatility Contracting", value: "✓" });
+  } else {
+    failedConditions.push({ label: "Volatility Contracting", value: "No", required: "BB width ↓ or flat ATR" });
+  }
+  
+  return (
+    <div className="space-y-3 p-3 bg-blue-500/10 rounded-md border border-blue-500/30">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <TrendingDown className="h-4 w-4 text-blue-400" />
+          <span className="text-xs font-semibold text-blue-400">
+            Counter-Trend Probe Blocked
+          </span>
+        </div>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-blue-400 border-blue-500/30">
+          {direction.toUpperCase()} vs {htfTrend.charAt(0).toUpperCase() + htfTrend.slice(1)} Trend
+        </Badge>
+      </div>
+      
+      {/* Primary Failure Reason */}
+      <div className="p-2 bg-amber-500/10 rounded border border-amber-500/20">
+        <div className="flex items-start gap-2">
+          <FailureIcon className="h-4 w-4 text-amber-400 mt-0.5 shrink-0" />
+          <div>
+            <div className="text-[11px] font-medium text-amber-400">{failure.title}</div>
+            <div className="text-[10px] text-muted-foreground">{failure.detail}</div>
+          </div>
+        </div>
+      </div>
+      
+      {/* Exhaustion Check Grid */}
+      <div className="grid grid-cols-2 gap-2">
+        {/* Passed Conditions */}
+        {passedConditions.map((cond, idx) => (
+          <div key={`pass-${idx}`} className="flex items-center gap-1.5 p-1.5 bg-green-500/10 rounded text-[10px]">
+            <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
+            <span className="text-muted-foreground">{cond.label}:</span>
+            <span className="text-green-400 font-medium">{cond.value}</span>
+          </div>
+        ))}
+        
+        {/* Failed Conditions */}
+        {failedConditions.map((cond, idx) => (
+          <div key={`fail-${idx}`} className="flex items-center gap-1.5 p-1.5 bg-red-500/10 rounded text-[10px]">
+            <XCircle className="h-3 w-3 text-red-400 shrink-0" />
+            <span className="text-muted-foreground">{cond.label}:</span>
+            <span className="text-red-400 font-medium">{cond.value}</span>
+            <span className="text-[9px] text-muted-foreground ml-auto">({cond.required})</span>
+          </div>
+        ))}
+      </div>
+      
+      {/* Technical Details */}
+      <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">ADX</div>
+          <div className={`font-mono font-medium ${adx < 45 ? 'text-green-400' : 'text-red-400'}`}>
+            {adx.toFixed(1)}
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Slope</div>
+          <div className={`font-mono font-medium ${adxSlope <= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {adxSlope > 0 ? '+' : ''}{adxSlope.toFixed(2)}
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">K (4h)</div>
+          <div className="font-mono font-medium">
+            {stochK4h.toFixed(1)}
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Stage</div>
+          <Badge variant="outline" className={`text-[9px] px-1 py-0 ${
+            exhaustionStage === 'CONFIRMED' ? 'text-green-400 border-green-500/30' :
+            exhaustionStage === 'PARTIAL' ? 'text-yellow-400 border-yellow-500/30' :
+            'text-muted-foreground'
+          }`}>
+            {exhaustionStage}
+          </Badge>
+        </div>
+      </div>
+      
+      {/* LTF Structure Flip Status */}
+      {ltfStructureFlip !== undefined && (
+        <div className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${ltfStructureFlip ? 'bg-green-500/10' : 'bg-muted/30'}`}>
+          {ltfStructureFlip ? (
+            <CheckCircle2 className="h-3 w-3 text-green-400" />
+          ) : (
+            <XCircle className="h-3 w-3 text-muted-foreground" />
+          )}
+          <span>LTF Structure Flip (15m/30m): {ltfStructureFlip ? "Confirmed ✓" : "Not detected"}</span>
+        </div>
+      )}
+      
+      {/* Explanation */}
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-blue-400">💡 Counter-trend probes</span> require proven trend exhaustion: 
+        ADX declining for 2+ candles, StochRSI de-pegging from extremes, and volatility contraction. 
+        These protect against fighting strong trends.
+      </div>
+    </div>
+  );
+};
+
 const MaxTradesDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
   const current = filtersStatus?.currentTradeCount;
   const max = filtersStatus?.maxTradesPerSymbol;
@@ -6657,12 +6838,36 @@ export const SignalRejectionReasons = () => {
       return "📉 Opposing momentum accelerating";
     }
     
+    // COUNTER_TREND_ADMISSION - counter-trend probe rejected
+    if (reason.includes("COUNTER_TREND_ADMISSION") || filtersStatus?.gate === "COUNTER_TREND_ADMISSION") {
+      const failReason = filtersStatus?.reason || "";
+      const htfTrend = filtersStatus?.htfTrend || "unknown";
+      const direction = filtersStatus?.direction || "unknown";
+      
+      // User-friendly failure reason extraction
+      if (failReason.includes("ADX_PERSISTENCE_INSUFFICIENT")) {
+        return `⏳ Counter-trend ${direction.toUpperCase()} needs more trend decay`;
+      }
+      if (failReason.includes("ADX_NOT_EXHAUSTED")) {
+        return `⚡ Trend still too strong for counter-${direction}`;
+      }
+      if (failReason.includes("STOCHRSI_NOT_DEPEGGED")) {
+        return `📊 Momentum not resetting - wait for de-peg`;
+      }
+      if (failReason.includes("VOLATILITY")) {
+        return `📉 Waiting for volatility contraction`;
+      }
+      
+      return `🔄 Counter-trend ${direction.toUpperCase()} blocked vs ${htfTrend} trend`;
+    }
+    
     // If nothing matched, return a cleaned up version
     let cleaned = reason
       .replace(/\s*\([^)]*\)/g, '')
       .replace(/^HARD GATE:\s*/i, '')
       .replace(/^EXECUTION:\s*/i, '')
       .replace(/^REGIME:\s*/i, '')
+      .replace(/^COUNTER_TREND_ADMISSION:\s*/i, '')
       .replace(/⛔\s*/g, '')
       .replace(/_/g, ' ')
       .trim();
@@ -6695,6 +6900,11 @@ export const SignalRejectionReasons = () => {
         reason.includes("EXTREME MOMENTUM VETO") || 
         fs?.gate === "EXTREME_MOMENTUM_VETO") {
       return <ExtremeMomentumVetoDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // COUNTER_TREND_ADMISSION - counter-trend probe rejected
+    if (reason.includes("COUNTER_TREND_ADMISSION") || fs?.gate === "COUNTER_TREND_ADMISSION") {
+      return <CounterTrendAdmissionDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // Unified Reversal BLOCK/REDUCE
