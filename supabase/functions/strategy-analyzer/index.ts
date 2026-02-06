@@ -2963,6 +2963,7 @@ serve(async (req) => {
                 let phase2Triggered = false;
                 let phase2Details = '';
                 let recentMinK = stochK4h;
+                let phase2Diagnostics: Record<string, unknown> = {};
                 
                 if (!phase1Triggered && FLASH_CRASH_BOUNCE_PROBE.PHASE_2_ENABLED) {
                   // Extract recent StochRSI K values from klines
@@ -2971,8 +2972,9 @@ serve(async (req) => {
                   
                   // Try to get historical K values from indicators or compute from klines
                   const recentKValues: number[] = [];
+                  let historySource = 'none';
                   
-                  // Method 1: Check if we have stochRsi history in trend data
+                  // Method 1: Check if we have stochRsi history in trend data (4h)
                   const stochHistory4h = trendData?.stochRsiHistory?.['4h'] ?? trendData?.timeframes?.['4h']?.stochRsiHistory ?? [];
                   if (Array.isArray(stochHistory4h) && stochHistory4h.length >= lookback) {
                     // Use last N K values
@@ -2982,6 +2984,7 @@ serve(async (req) => {
                         : (typeof stochHistory4h[i] === 'number' ? stochHistory4h[i] : null);
                       if (kValue !== null) recentKValues.push(kValue);
                     }
+                    historySource = '4h';
                   }
                   
                   // Method 2: Fall back to computing from 1h data (more granular)
@@ -2996,6 +2999,7 @@ serve(async (req) => {
                           : (typeof stochHistory1h[i] === 'number' ? stochHistory1h[i] : null);
                         if (kValue !== null) recentKValues.push(kValue);
                       }
+                      historySource = '1h';
                     }
                   }
                   
@@ -3008,33 +3012,97 @@ serve(async (req) => {
                   // 1. K was recently at floor (within lookback)
                   const wasAtFloor = recentMinK <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_FLOOR_THRESHOLD;
                   
-                  // 2. Current K is still low but recovering
-                  const currentKRecovering = stochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K;
+                  // 2. Current K is still low but recovering (INCLUDE 1H - Issue 3 fix)
+                  const include1hRecovery = FLASH_CRASH_BOUNCE_PROBE.PHASE_2_INCLUDE_1H_RECOVERY ?? true;
+                  const currentKRecovering = include1hRecovery 
+                    ? (stochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K || stochK1h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K)
+                    : stochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K;
+                  
+                  // Determine which K to use for rise calculation (use the one that's recovering)
+                  const effectiveCurrentK = (include1hRecovery && stochK1h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K && stochK4h > FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K)
+                    ? stochK1h
+                    : stochK4h;
                   
                   // 3. K has risen enough (momentum snapback)
-                  const kRise = stochK4h - recentMinK;
+                  const kRise = effectiveCurrentK - recentMinK;
                   const hasMinRise = kRise >= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_MIN_K_RISE;
                   
-                  // 4. K is actively rising (not stalling)
+                  // 4. K is actively rising (not stalling) - FIXED: Use 2-step confirmation (Issue 2)
                   let kIsRising = true;
-                  if (FLASH_CRASH_BOUNCE_PROBE.PHASE_2_REQUIRE_K_RISING && recentKValues.length >= 2) {
-                    const prevK = recentKValues[recentKValues.length - 2] ?? stochK4h;
-                    kIsRising = stochK4h > prevK;
+                  let risingSteps = 0;
+                  const minRisingSteps = FLASH_CRASH_BOUNCE_PROBE.PHASE_2_MIN_RISING_STEPS ?? 2;
+                  
+                  if (FLASH_CRASH_BOUNCE_PROBE.PHASE_2_REQUIRE_K_RISING && recentKValues.length >= 3) {
+                    // Count how many consecutive rising steps in last 3 values
+                    // FIXED Issue 1: Use last element as most recent comparison (not second-to-last)
+                    const checkValues = recentKValues.slice(-3);
+                    for (let i = 1; i < checkValues.length; i++) {
+                      if (checkValues[i] > checkValues[i - 1]) {
+                        risingSteps++;
+                      }
+                    }
+                    // Also check current value against last history value
+                    if (recentKValues.length > 0) {
+                      const lastHistoryK = recentKValues[recentKValues.length - 1];
+                      if (effectiveCurrentK > lastHistoryK) {
+                        risingSteps++;
+                      }
+                    }
+                    kIsRising = risingSteps >= minRisingSteps;
+                  } else if (FLASH_CRASH_BOUNCE_PROBE.PHASE_2_REQUIRE_K_RISING && recentKValues.length >= 1) {
+                    // Fallback: at least check current vs last
+                    const lastHistoryK = recentKValues[recentKValues.length - 1];
+                    kIsRising = effectiveCurrentK > lastHistoryK;
+                    risingSteps = kIsRising ? 1 : 0;
                   }
                   
-                  phase2Triggered = wasAtFloor && currentKRecovering && hasMinRise && kIsRising;
+                  // 5. Momentum stabilization guardrail (Issue 4 fix)
+                  // Phase 2 requires momentum to be stabilizing (not at worst opposing level)
+                  const phase2MomentumEnabled = FLASH_CRASH_BOUNCE_PROBE.PHASE_2_MOMENTUM_STABILIZATION ?? true;
+                  const phase2MomentumMax = FLASH_CRASH_BOUNCE_PROBE.PHASE_2_MOMENTUM_MAX_OPPOSING ?? 28;
+                  const momentumStabilizing = !phase2MomentumEnabled || earlyMomentumScore >= -phase2MomentumMax;
+                  
+                  // Store diagnostics for logging and metadata
+                  phase2Diagnostics = {
+                    recentMinK,
+                    currentK: effectiveCurrentK,
+                    kRise,
+                    kIsRising,
+                    risingSteps,
+                    minRisingSteps,
+                    wasAtFloor,
+                    currentKRecovering,
+                    hasMinRise,
+                    momentumStabilizing,
+                    momentumScore: earlyMomentumScore,
+                    phase2MomentumMax,
+                    historySource,
+                    recentKValuesCount: recentKValues.length,
+                    include1hRecovery
+                  };
+                  
+                  phase2Triggered = wasAtFloor && currentKRecovering && hasMinRise && kIsRising && momentumStabilizing;
                   
                   if (phase2Triggered) {
-                    phase2Details = `Phase 2 RELEASE: min_K=${recentMinK.toFixed(1)} → current=${stochK4h.toFixed(1)} (rise=${kRise.toFixed(1)}, rising=${kIsRising})`;
+                    phase2Details = `Phase 2 RELEASE: min_K=${recentMinK.toFixed(1)} → current=${effectiveCurrentK.toFixed(1)} (rise=${kRise.toFixed(1)}, risingSteps=${risingSteps}/${minRisingSteps}, momentum=${earlyMomentumScore.toFixed(0)})`;
                   } else if (wasAtFloor && priceDropPercent >= 8) {
-                    // Log near-miss for Phase 2
+                    // Log near-miss for Phase 2 with detailed diagnostics
+                    const failedReasons: string[] = [];
+                    if (!currentKRecovering) failedReasons.push(`current_K too high (4h=${stochK4h.toFixed(1)}, 1h=${stochK1h.toFixed(1)} > ${FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K})`);
+                    if (!hasMinRise) failedReasons.push(`rise insufficient (${kRise.toFixed(1)} < ${FLASH_CRASH_BOUNCE_PROBE.PHASE_2_MIN_K_RISE})`);
+                    if (!kIsRising) failedReasons.push(`not enough rising steps (${risingSteps} < ${minRisingSteps})`);
+                    if (!momentumStabilizing) failedReasons.push(`momentum not stabilizing (${earlyMomentumScore.toFixed(0)} < ${-phase2MomentumMax})`);
+                    
                     logger.forSymbol(symbol).info(
                       `${LOG_CATEGORIES.INFO} 📊 FLASH CRASH PHASE 2 CHECK:\n` +
                       `   → Recent min K: ${recentMinK.toFixed(1)} (threshold ≤${FLASH_CRASH_BOUNCE_PROBE.PHASE_2_FLOOR_THRESHOLD})\n` +
-                      `   → Current K: ${stochK4h.toFixed(1)} (max allowed: ${FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K})\n` +
+                      `   → Current K: 4h=${stochK4h.toFixed(1)}, 1h=${stochK1h.toFixed(1)} (effective=${effectiveCurrentK.toFixed(1)}, max allowed: ${FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K})\n` +
                       `   → K Rise: ${kRise.toFixed(1)} (min required: ${FLASH_CRASH_BOUNCE_PROBE.PHASE_2_MIN_K_RISE})\n` +
-                      `   → K Rising: ${kIsRising}\n` +
-                      `   → Phase 2 result: ${wasAtFloor ? '✓floor' : '✗floor'} ${currentKRecovering ? '✓current' : '✗current'} ${hasMinRise ? '✓rise' : '✗rise'} ${kIsRising ? '✓rising' : '✗rising'}`
+                      `   → K Rising Steps: ${risingSteps}/${minRisingSteps}\n` +
+                      `   → Momentum Stabilizing: ${momentumStabilizing} (score=${earlyMomentumScore.toFixed(0)}, max opposing=${-phase2MomentumMax})\n` +
+                      `   → History Source: ${historySource} (${recentKValues.length} values)\n` +
+                      `   → Phase 2 result: ${wasAtFloor ? '✓floor' : '✗floor'} ${currentKRecovering ? '✓current' : '✗current'} ${hasMinRise ? '✓rise' : '✗rise'} ${kIsRising ? '✓rising' : '✗rising'} ${momentumStabilizing ? '✓momentum' : '✗momentum'}\n` +
+                      `   → Failed: ${failedReasons.join(', ') || 'none'}`
                     );
                   }
                 }
@@ -3181,7 +3249,7 @@ serve(async (req) => {
                     `   → Position: ${(probeSize * 100).toFixed(0)}% (${sizeReason})`
                   );
                   
-                  // Store probe metadata for downstream use
+                  // Store probe metadata for downstream use (with phase-specific diagnostics)
                   (trendData as Record<string, unknown>).flashCrashBounceProbe = {
                     active: true,
                     regime: FLASH_CRASH_BOUNCE_PROBE.REGIME_TAG,
@@ -3198,7 +3266,19 @@ serve(async (req) => {
                     adxSlope: earlyAdxSlope,
                     hasReversalCandle: hasReversalCandle,
                     volumeRatio: volumeRatio,
-                    sizeReason: sizeReason
+                    sizeReason: sizeReason,
+                    // Phase 2 specific diagnostics (stored separately for tuning/post-mortem)
+                    phase2: phase2Triggered ? {
+                      triggered: true,
+                      recentMinK: phase2Diagnostics.recentMinK,
+                      currentK: phase2Diagnostics.currentK,
+                      kRise: phase2Diagnostics.kRise,
+                      risingSteps: phase2Diagnostics.risingSteps,
+                      minRisingSteps: phase2Diagnostics.minRisingSteps,
+                      momentumStabilizing: phase2Diagnostics.momentumStabilizing,
+                      historySource: phase2Diagnostics.historySource,
+                      include1hRecovery: phase2Diagnostics.include1hRecovery
+                    } : null
                   };
                 } else if (FLASH_CRASH_BOUNCE_PROBE.LOG_NEAR_MISS && 
                            priceDropPercent >= 8 && 
