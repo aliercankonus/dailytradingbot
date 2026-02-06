@@ -444,7 +444,11 @@ const handler = async (req: Request): Promise<Response> => {
 
     console.log('Email sent:', emailResponse);
 
-    // Send SMS notification for critical events (stop loss, take profit, strategy rotation, bot health critical)
+    // Send SMS notification for critical events (stop loss, take profit, strategy rotation, bot health critical, credential errors)
+    // Only send SMS for credential errors in binance_api_error (most critical)
+    const isBinanceCredentialError = payload.type === 'binance_api_error' && 
+      (payload.binanceErrorCode === -2015 || payload.binanceErrorCode === -2014 || payload.binanceErrorCode === -1022);
+    
     let smsResponse;
     if (
       riskParams?.sms_notifications_enabled &&
@@ -452,7 +456,7 @@ const handler = async (req: Request): Promise<Response> => {
       twilioAccountSid &&
       twilioAuthToken &&
       twilioPhoneNumber &&
-      (payload.type === 'stop_loss_hit' || payload.type === 'take_profit_hit' || payload.type === 'strategy_rotation' || payload.type === 'bot_health_critical')
+      (payload.type === 'stop_loss_hit' || payload.type === 'take_profit_hit' || payload.type === 'strategy_rotation' || payload.type === 'bot_health_critical' || isBinanceCredentialError)
     ) {
       try {
         const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`;

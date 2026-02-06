@@ -228,28 +228,23 @@ async function closePosition(
         posLogger.info(`Fetched fresh price: ${currentPrice}`);
       } else {
         posLogger.warn(`No price from Binance, using stored current_price`);
-        // Send notification for price fetch failure if we have supabase config
-        if (supabaseUrl && supabaseKey) {
-          await sendBinanceApiErrorNotification(supabaseUrl, supabaseKey, position.user_id, {
-            operation: 'fetch_price_for_close',
-            symbol: position.symbol,
-            positionId: position.id,
-            binanceErrorMsg: 'getCurrentPrice returned null - no price data available',
-            context: `Closing position with stale price (stored: ${currentPrice})`,
-          });
-        }
+        // Don't send email for null price - this is common during maintenance windows
+        // The position will close with stored price, which is acceptable
       }
     } catch (error) {
       posLogger.error(`Failed to fetch Binance price: ${error}`);
       posLogger.info(`Falling back to stored current_price: ${currentPrice}`);
-      // Send notification for price fetch exception
-      if (supabaseUrl && supabaseKey) {
+      // Only send notification for persistent API errors, not transient network issues
+      // Parse error to check if it's a critical issue
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const isCriticalError = errorMsg.includes('-2015') || errorMsg.includes('-2014') || errorMsg.includes('Invalid API');
+      if (supabaseUrl && supabaseKey && isCriticalError) {
         await sendBinanceApiErrorNotification(supabaseUrl, supabaseKey, position.user_id, {
           operation: 'fetch_price_for_close',
           symbol: position.symbol,
           positionId: position.id,
-          binanceErrorMsg: error instanceof Error ? error.message : String(error),
-          context: `Exception fetching price - closing with stale price (stored: ${currentPrice})`,
+          binanceErrorMsg: errorMsg,
+          context: `Critical error fetching price - closing with stale price (stored: ${currentPrice})`,
         });
       }
     }
