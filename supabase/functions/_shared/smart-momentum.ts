@@ -2095,3 +2095,193 @@ export function checkMomentumDirectionAlignment(
     severity: 'low'
   };
 }
+
+// ============= TREND CONTINUATION PULLBACK DETECTION =============
+// NEW: Detects EMA-based pullbacks for trend continuation re-entries
+// Philosophy: "If you can't enter at the start, wait for the first pullback"
+export interface TrendContinuationPullbackResult {
+  detected: boolean;
+  eligible: boolean;
+  direction: 'long' | 'short' | null;
+  pullbackType: 'ema20' | 'ema50' | 'midpoint' | null;
+  priceToEmaMidpoint: number;
+  priceToEma20: number;
+  priceToEma50: number;
+  stochRsiCooled: boolean;
+  stochRsiK: number;
+  adxSufficient: boolean;
+  adx: number;
+  adxSlope: number;
+  moveFromSwingPercent: number;
+  positionMultiplier: number;
+  stopLossAtr: number;
+  reasons: string[];
+  blockReason: string | null;
+}
+
+export function detectTrendContinuationPullback(
+  prices: number[],
+  direction: 'long' | 'short',
+  adx: number,
+  adxSlope: number,
+  stochRsiK4h: number,
+  stochRsiK1h: number,
+  high24h: number,
+  low24h: number,
+  atr: number,
+  config: {
+    minAdx: number;
+    minAdxSlope: number;
+    emaProximityThreshold: number;
+    longMaxK: number;
+    shortMinK: number;
+    longMaxMove: number;
+    shortMaxMove: number;
+    baseMultiplier: number;
+    momentumAlignedMultiplier: number;
+  }
+): TrendContinuationPullbackResult {
+  const defaultResult: TrendContinuationPullbackResult = {
+    detected: false,
+    eligible: false,
+    direction: null,
+    pullbackType: null,
+    priceToEmaMidpoint: 0,
+    priceToEma20: 0,
+    priceToEma50: 0,
+    stochRsiCooled: false,
+    stochRsiK: stochRsiK4h,
+    adxSufficient: false,
+    adx,
+    adxSlope,
+    moveFromSwingPercent: 0,
+    positionMultiplier: config.baseMultiplier,
+    stopLossAtr: atr,
+    reasons: [],
+    blockReason: null,
+  };
+
+  if (prices.length < 50) {
+    defaultResult.blockReason = 'Insufficient price history for EMA calculation';
+    return defaultResult;
+  }
+
+  const currentPrice = prices[prices.length - 1];
+  const reasons: string[] = [];
+
+  // Calculate EMAs
+  const ema20Array = calculateEMAArray(prices, 20);
+  const ema50Array = calculateEMAArray(prices, 50);
+  
+  if (ema20Array.length < 1 || ema50Array.length < 1) {
+    defaultResult.blockReason = 'Could not calculate EMAs';
+    return defaultResult;
+  }
+
+  const ema20 = ema20Array[ema20Array.length - 1];
+  const ema50 = ema50Array[ema50Array.length - 1];
+  const emaMidpoint = (ema20 + ema50) / 2;
+
+  // Calculate distances
+  const priceToEma20 = Math.abs((currentPrice - ema20) / ema20 * 100);
+  const priceToEma50 = Math.abs((currentPrice - ema50) / ema50 * 100);
+  const priceToEmaMidpoint = Math.abs((currentPrice - emaMidpoint) / emaMidpoint * 100);
+
+  defaultResult.priceToEma20 = priceToEma20;
+  defaultResult.priceToEma50 = priceToEma50;
+  defaultResult.priceToEmaMidpoint = priceToEmaMidpoint;
+
+  // Check ADX requirement
+  defaultResult.adxSufficient = adx >= config.minAdx && adxSlope >= config.minAdxSlope;
+  if (!defaultResult.adxSufficient) {
+    defaultResult.blockReason = `ADX ${adx.toFixed(1)} < ${config.minAdx} or slope ${adxSlope.toFixed(2)} < ${config.minAdxSlope}`;
+    return defaultResult;
+  }
+  reasons.push(`ADX ${adx.toFixed(1)} (slope: ${adxSlope >= 0 ? '+' : ''}${adxSlope.toFixed(2)})`);
+
+  // Check StochRSI cooldown
+  if (direction === 'long') {
+    defaultResult.stochRsiCooled = stochRsiK4h <= config.longMaxK;
+    if (!defaultResult.stochRsiCooled) {
+      defaultResult.blockReason = `StochRSI K ${stochRsiK4h.toFixed(1)} > ${config.longMaxK} (not cooled from overbought)`;
+      return defaultResult;
+    }
+    reasons.push(`StochRSI cooled: K=${stochRsiK4h.toFixed(1)} <= ${config.longMaxK}`);
+  } else {
+    defaultResult.stochRsiCooled = stochRsiK4h >= config.shortMinK;
+    if (!defaultResult.stochRsiCooled) {
+      defaultResult.blockReason = `StochRSI K ${stochRsiK4h.toFixed(1)} < ${config.shortMinK} (not cooled from oversold)`;
+      return defaultResult;
+    }
+    reasons.push(`StochRSI cooled: K=${stochRsiK4h.toFixed(1)} >= ${config.shortMinK}`);
+  }
+
+  // Check move exhaustion
+  const moveFromLow = ((currentPrice - low24h) / low24h) * 100;
+  const moveFromHigh = ((high24h - currentPrice) / high24h) * 100;
+  defaultResult.moveFromSwingPercent = direction === 'long' ? moveFromLow : moveFromHigh;
+
+  const maxMove = direction === 'long' ? config.longMaxMove : config.shortMaxMove;
+  if (defaultResult.moveFromSwingPercent > maxMove) {
+    defaultResult.blockReason = `Move from swing ${defaultResult.moveFromSwingPercent.toFixed(1)}% > ${maxMove}% (too extended)`;
+    return defaultResult;
+  }
+  reasons.push(`Move from swing: ${defaultResult.moveFromSwingPercent.toFixed(1)}% <= ${maxMove}%`);
+
+  // Detect pullback type based on EMA proximity
+  let pullbackDetected = false;
+  let pullbackType: 'ema20' | 'ema50' | 'midpoint' | null = null;
+
+  if (priceToEmaMidpoint <= config.emaProximityThreshold) {
+    pullbackDetected = true;
+    pullbackType = 'midpoint';
+    reasons.push(`✅ Pullback to EMA midpoint (${priceToEmaMidpoint.toFixed(2)}% away)`);
+  } else if (priceToEma20 <= config.emaProximityThreshold) {
+    pullbackDetected = true;
+    pullbackType = 'ema20';
+    reasons.push(`✅ Pullback to EMA20 (${priceToEma20.toFixed(2)}% away)`);
+  } else if (priceToEma50 <= config.emaProximityThreshold) {
+    pullbackDetected = true;
+    pullbackType = 'ema50';
+    reasons.push(`✅ Pullback to EMA50 (${priceToEma50.toFixed(2)}% away)`);
+  }
+
+  if (!pullbackDetected) {
+    // Check if price touched EMA recently (last 3 candles)
+    const recentPrices = prices.slice(-3);
+    const recentEma20 = ema20Array.slice(-3);
+    const recentEma50 = ema50Array.slice(-3);
+    
+    for (let i = 0; i < recentPrices.length; i++) {
+      const p = recentPrices[i];
+      const e20 = recentEma20[i];
+      const e50 = recentEma50[i];
+      const mid = (e20 + e50) / 2;
+      
+      if (Math.abs((p - mid) / mid * 100) <= config.emaProximityThreshold) {
+        pullbackDetected = true;
+        pullbackType = 'midpoint';
+        reasons.push(`Recent touch of EMA midpoint (${3 - i} candles ago)`);
+        break;
+      }
+    }
+  }
+
+  if (!pullbackDetected) {
+    defaultResult.blockReason = `Price not near EMA zone (EMA20: ${priceToEma20.toFixed(2)}%, EMA50: ${priceToEma50.toFixed(2)}%, Mid: ${priceToEmaMidpoint.toFixed(2)}%)`;
+    return defaultResult;
+  }
+
+  // Pullback detected and all conditions met
+  defaultResult.detected = true;
+  defaultResult.eligible = true;
+  defaultResult.direction = direction;
+  defaultResult.pullbackType = pullbackType;
+  defaultResult.positionMultiplier = config.baseMultiplier;
+  defaultResult.stopLossAtr = atr;
+  defaultResult.reasons = reasons;
+  
+  reasons.push(`TREND_CONTINUATION_PULLBACK eligible for ${direction.toUpperCase()}`);
+
+  return defaultResult;
+}

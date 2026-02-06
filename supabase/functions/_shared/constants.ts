@@ -6089,3 +6089,161 @@ export const STOCHRSI_RUNWAY_GATE = {
   LOG_GATE_CHECKS: true,
 } as const;
 
+// ============= TREND CONTINUATION PULLBACK REGIME =============
+// NEW: Addresses "Too strong to fade, too extended to buy" deadlock
+// Allows pullback re-entries during strong trends after missing initial entry
+// Philosophy: "If you can't enter at the start, wait for the first pullback"
+export const TREND_CONTINUATION_PULLBACK_REGIME = {
+  ENABLED: true,
+  
+  // ===== REGIME IDENTIFICATION =====
+  // Active when: strong uptrend blocked by extreme overbought, now pulling back
+  REGIME_TAG: 'TREND_CONTINUATION_PULLBACK',
+  
+  // ===== TREND STRENGTH REQUIREMENTS =====
+  // Must be in a strong trend (ADX >= 30, not 40 which is too restrictive)
+  MIN_ADX: 30,
+  // ADX slope must be positive (trend still gaining strength)
+  MIN_ADX_SLOPE: 0.0,
+  // 4H trend must be directional (not neutral)
+  REQUIRE_4H_DIRECTIONAL: true,
+  MIN_4H_CONFIDENCE: 50,
+  // 1H trend should align or be neutral
+  REQUIRE_1H_NOT_OPPOSING: true,
+  
+  // ===== PULLBACK DETECTION (EMA-based) =====
+  // Price must have pulled back to EMA zone
+  EMA_PULLBACK: {
+    // Check if price is near EMA20/EMA50 midline
+    ENABLED: true,
+    // Price within this % of EMA midpoint to trigger
+    PROXIMITY_THRESHOLD_PERCENT: 0.8,
+    // Which EMA to use: 'EMA20', 'EMA50', or 'MIDPOINT'
+    EMA_TYPE: 'MIDPOINT' as 'EMA20' | 'EMA50' | 'MIDPOINT',
+    // Alternative: check if price touched EMA in last N candles
+    RECENT_TOUCH_CANDLES: 3,
+  },
+  
+  // ===== STOCHRSI COOLDOWN =====
+  // Must have cooled down from overbought (for LONG) or oversold (for SHORT)
+  // This ensures we're not re-entering at the same extreme
+  STOCHRSI_COOLDOWN: {
+    ENABLED: true,
+    // For LONG: 4H StochRSI K must be below this (cooled from overbought)
+    LONG_MAX_K: 80,
+    // For SHORT: 4H StochRSI K must be above this (cooled from oversold)
+    SHORT_MIN_K: 20,
+    // 1H StochRSI can have more tolerance (it moves faster)
+    LONG_1H_MAX_K: 85,
+    SHORT_1H_MIN_K: 15,
+  },
+  
+  // ===== MOVE EXHAUSTION CHECK =====
+  // Even with pullback, we need some remaining runway
+  // This is RELAXED from normal thresholds (allows more extended moves)
+  RELAXED_MOVE_EXHAUSTION: {
+    // Maximum move from swing for pullback entry (vs 5-6% normal)
+    LONG_MAX_MOVE_FROM_LOW_PERCENT: 8.0,
+    SHORT_MAX_MOVE_FROM_HIGH_PERCENT: 8.0,
+    // Even more relaxed for very strong trends (ADX >= 40)
+    VERY_STRONG_TREND_MAX_MOVE_PERCENT: 10.0,
+  },
+  
+  // ===== POSITION SIZING =====
+  // Conservative sizing for pullback entries
+  BASE_POSITION_MULTIPLIER: 0.50,  // 50% base size
+  // Boost if momentum is aligned
+  MOMENTUM_ALIGNED_MULTIPLIER: 0.70,  // 70% if momentum confirms
+  // Reduce further if pullback is shallow (less confirmation)
+  SHALLOW_PULLBACK_MULTIPLIER: 0.40,  // 40% if pullback < 1.5%
+  
+  // ===== STOP LOSS =====
+  // Structure-based stops for pullback entries
+  STOP_LOSS_ATR_MULTIPLIER: 1.0,  // Tight 1.0 ATR stop
+  // Alternative: stop below EMA that triggered entry
+  USE_EMA_AS_STOP: true,
+  EMA_STOP_BUFFER_PERCENT: 0.3,  // 0.3% below EMA
+  
+  // ===== GATE BYPASS =====
+  // This regime can bypass certain gates that would normally block
+  BYPASSES_MOVE_EXHAUSTION: true,  // Can enter > 5% moves if pullback occurred
+  BYPASSES_NEAR_EXTREME: false,    // Still respect if too close to 24h high/low
+  BYPASSES_TIER_0_STOCHRSI: false, // Never bypass deep overbought/oversold
+  
+  // ===== LOGGING =====
+  LOG_REGIME_CHECKS: true,
+  LOG_PULLBACK_DETECTION: true,
+} as const;
+
+// ============= BOT HEARTBEAT MONITORING =============
+// NEW: Prevents "silent failures" where bot stops running without alerting
+// Tracks each strategy-analyzer execution for operational health monitoring
+export const BOT_HEARTBEAT_CONFIG = {
+  ENABLED: true,
+  
+  // ===== HEARTBEAT LOGGING =====
+  // Log a heartbeat on every strategy-analyzer execution
+  LOG_HEARTBEAT: true,
+  // Include timestamp, symbols scanned, and regime state
+  INCLUDE_REGIME_SUMMARY: true,
+  
+  // ===== NO-TRADE STATE CLASSIFICATION =====
+  // When the system correctly does nothing, classify why
+  NO_TRADE_STATES: {
+    // All symbols blocked by same gate = regime-wide condition
+    TREND_LOCKED_OVERBOUGHT: 'All symbols blocked by TIER_0_OVERBOUGHT',
+    TREND_LOCKED_OVERSOLD: 'All symbols blocked by TIER_0_OVERSOLD',
+    NO_CLEAR_DIRECTION: 'All symbols have NO_CLEAR_DIRECTION',
+    ALL_COUNTER_TREND: 'All symbols blocked by COUNTER_TREND_PROTECTION',
+    // Mixed blocking = normal operation
+    MIXED_REJECTIONS: 'Symbols blocked by different gates',
+    // No rejection = signals should have been generated
+    OPERATIONAL_CONCERN: 'No rejections logged but no signals either',
+  } as Record<string, string>,
+  
+  // ===== REGIME SUMMARY FIELDS =====
+  // Fields to include in the daily regime summary
+  SUMMARY_FIELDS: [
+    'dominant_trend',      // Bullish/Bearish/Ranging across symbols
+    'avg_adx',             // Average ADX across symbols
+    'avg_stochrsi_k',      // Average 4H StochRSI K
+    'primary_block_gate',  // Most common rejection gate
+    'symbols_blocked',     // Count of symbols blocked
+    'signals_generated',   // Count of signals generated
+  ] as string[],
+  
+  // ===== ALERTING THRESHOLDS =====
+  // Consider these for future notification system
+  ALERT_IF_NO_SIGNALS_HOURS: 6,    // Alert if 0 signals for 6+ hours
+  ALERT_IF_NO_HEARTBEAT_MINUTES: 30, // Alert if no heartbeat for 30+ min
+} as const;
+
+// ============= NO-TRADE ZONE STATE =============
+// Makes "no trades" an explicit, observable state rather than an invisible outcome
+// Enables: "Today: NO_TRADE_ZONE (reason: all symbols overbought)"
+export const NO_TRADE_ZONE_STATE = {
+  ENABLED: true,
+  
+  // ===== STATE TYPES =====
+  // Explicit states when system correctly produces 0 signals
+  STATES: {
+    PULLBACK_WAITING: 'PULLBACK_WAITING',     // Trend valid, waiting for pullback
+    EXTREME_OVERBOUGHT: 'EXTREME_OVERBOUGHT', // All symbols K > 95
+    EXTREME_OVERSOLD: 'EXTREME_OVERSOLD',     // All symbols K < 5
+    COUNTER_TREND_ONLY: 'COUNTER_TREND_ONLY', // All signals would be counter-trend
+    NO_ENERGY: 'NO_ENERGY',                    // All ADX < 18
+    MIXED_BLOCK: 'MIXED_BLOCK',               // Various gates blocking different symbols
+    OPERATIONAL: 'OPERATIONAL',                // System working, just no opportunities
+  } as Record<string, string>,
+  
+  // ===== CLASSIFICATION RULES =====
+  // Thresholds for classifying the no-trade state
+  OVERBOUGHT_THRESHOLD: 95,  // K > 95 for overbought classification
+  OVERSOLD_THRESHOLD: 5,     // K < 5 for oversold classification
+  LOW_ENERGY_ADX: 18,        // ADX < 18 for no energy
+  
+  // ===== LOGGING =====
+  LOG_STATE_CLASSIFICATION: true,
+  INCLUDE_IN_RESPONSE: true,
+} as const;
+
