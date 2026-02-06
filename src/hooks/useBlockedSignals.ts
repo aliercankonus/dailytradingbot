@@ -110,6 +110,24 @@ export interface BlockedSignal {
     flashCrashDropHours?: number;
     flashCrashDropRatePerHour?: number;
     flashCrashReversalCandle?: boolean;
+    // NEW: Flash Crash Bounce Probe Phase 2 (temporal) diagnostics
+    flashCrashPhase1Triggered?: boolean;
+    flashCrashPhase2Triggered?: boolean;
+    flashCrashPhase2Diagnostics?: {
+      recentMinK?: number;
+      currentK?: number;
+      kRise?: number;
+      risingSteps?: number;
+      minRisingSteps?: number;
+      wasAtFloor?: boolean;
+      currentKRecovering?: boolean;
+      hasMinRise?: boolean;
+      momentumStabilizing?: boolean;
+      momentumScore?: number;
+      phase2MomentumMax?: number;
+      historySource?: '4h' | '1h' | 'none';
+      recentKValuesCount?: number;
+    } | null;
     // NEW: Capitulation Bounce Probe metadata
     capitulationProbeChecked?: boolean;
     capitulationProbeActive?: boolean;

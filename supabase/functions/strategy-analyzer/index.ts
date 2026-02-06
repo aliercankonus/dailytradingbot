@@ -3341,6 +3341,7 @@ serve(async (req) => {
                     direction: "short",
                     earlyDirection,
                     stochRsiK4h: earlyStochRsiK4h.toFixed(1),
+                    stochRsiK1h: extractStochRsiK(trendData, '1h').toFixed(1),
                     threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
                     adx: adx.toFixed(1),
                     adxSlope: earlyAdxSlope.toFixed(2),
@@ -3351,8 +3352,29 @@ serve(async (req) => {
                     // Add Capitulation Bounce Probe near-miss data
                     capitulationProbeChecked: CAPITULATION_BOUNCE_PROBE.ENABLED && earlyStochRsiK4h <= CAPITULATION_BOUNCE_PROBE.MAX_STOCHRSI_K,
                     capitulationProbeFailed: CAPITULATION_BOUNCE_PROBE.ENABLED && earlyStochRsiK4h <= CAPITULATION_BOUNCE_PROBE.MAX_STOCHRSI_K,
+                    // Add Flash Crash Bounce Probe Phase 2 diagnostics for temporal visibility
+                    flashCrashProbeChecked: FLASH_CRASH_BOUNCE_PROBE.ENABLED,
+                    flashCrashProbeActive: flashCrashProbeTriggered,
+                    flashCrashPhase1Triggered: phase1Triggered ?? false,
+                    flashCrashPhase2Triggered: phase2Triggered ?? false,
+                    flashCrashPhase2Diagnostics: Object.keys(phase2Diagnostics).length > 0 ? {
+                      recentMinK: phase2Diagnostics.recentMinK,
+                      currentK: phase2Diagnostics.currentK,
+                      kRise: phase2Diagnostics.kRise,
+                      risingSteps: phase2Diagnostics.risingSteps,
+                      minRisingSteps: phase2Diagnostics.minRisingSteps,
+                      wasAtFloor: phase2Diagnostics.wasAtFloor,
+                      currentKRecovering: phase2Diagnostics.currentKRecovering,
+                      hasMinRise: phase2Diagnostics.hasMinRise,
+                      momentumStabilizing: phase2Diagnostics.momentumStabilizing,
+                      momentumScore: phase2Diagnostics.momentumScore,
+                      phase2MomentumMax: phase2Diagnostics.phase2MomentumMax,
+                      historySource: phase2Diagnostics.historySource,
+                      recentKValuesCount: phase2Diagnostics.recentKValuesCount,
+                    } : null,
+                    flashCrashDropPercent: trendData?.priceDistanceFromSwing?.distanceFromHighPercent?.toFixed(1) ?? null,
                     isPreStrategy: true,
-                    message: `Bounce probability ~80%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}`
+                    message: `Bounce probability ~80%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}. Flash Crash Phase 2: ${phase2Triggered ? 'TRIGGERED' : (Object.keys(phase2Diagnostics).length > 0 ? 'EVALUATED' : 'NOT_CHECKED')}`
                   },
                   trendData,
                   riskParams.ai_analysis_enabled !== false,

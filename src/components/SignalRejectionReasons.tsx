@@ -1189,6 +1189,203 @@ const CounterTrendAdmissionDisplay = ({ filtersStatus, trendData }: { filtersSta
   );
 };
 
+// Flash Crash Bounce Probe Phase 2 Display - shows temporal detection diagnostics
+const FlashCrashProbePhase2Display = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const probeChecked = filtersStatus?.flashCrashProbeChecked ?? false;
+  const probeActive = filtersStatus?.flashCrashProbeActive ?? false;
+  const phase1Triggered = filtersStatus?.flashCrashPhase1Triggered ?? false;
+  const phase2Triggered = filtersStatus?.flashCrashPhase2Triggered ?? false;
+  const phase2 = filtersStatus?.flashCrashPhase2Diagnostics;
+  const dropPercent = coerceNumeric(filtersStatus?.flashCrashDropPercent, 0);
+  const stochK4h = coerceNumeric(filtersStatus?.stochRsiK4h, 50);
+  const stochK1h = coerceNumeric(filtersStatus?.stochRsiK1h, 50);
+  const adx = coerceNumeric(filtersStatus?.adx, 0);
+  const momentum = coerceNumeric(filtersStatus?.momentumScore, 0);
+  
+  if (!probeChecked) {
+    return null;
+  }
+  
+  // If probe was active (triggered), show success state
+  if (probeActive) {
+    return (
+      <div className="p-3 bg-green-500/10 rounded-md border border-green-500/30">
+        <div className="flex items-center gap-1.5 mb-2">
+          <Zap className="h-4 w-4 text-green-400" />
+          <span className="text-xs font-semibold text-green-400">
+            Flash Crash Bounce Probe ACTIVATED
+          </span>
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-green-400 border-green-500/30 ml-auto">
+            {phase1Triggered ? 'Phase 1 (Static)' : 'Phase 2 (Release)'}
+          </Badge>
+        </div>
+        <div className="text-[10px] text-muted-foreground">
+          Direction flipped to LONG for V-shaped rebound capture
+        </div>
+      </div>
+    );
+  }
+  
+  // Show Phase 2 diagnostics when checked but not triggered
+  const getPhaseStatus = () => {
+    if (phase1Triggered) return { phase: "Phase 1", detail: "K pinned at floor NOW", triggered: true };
+    if (phase2Triggered) return { phase: "Phase 2", detail: "K was recently pinned, now recovering", triggered: true };
+    if (phase2) return { phase: "Phase 2", detail: "Evaluated but conditions not met", triggered: false };
+    return { phase: "Not evaluated", detail: "Probe not applicable", triggered: false };
+  };
+  
+  const phaseStatus = getPhaseStatus();
+  
+  // Build condition checklist for Phase 2
+  const buildPhase2Conditions = () => {
+    if (!phase2) return [];
+    
+    const conditions: { label: string; passed: boolean; value: string; required?: string }[] = [];
+    
+    // Was at floor
+    conditions.push({
+      label: "K was at floor (≤3 recently)",
+      passed: phase2.wasAtFloor ?? false,
+      value: `min K = ${phase2.recentMinK?.toFixed(1) ?? 'N/A'}`,
+      required: "≤ 3"
+    });
+    
+    // Current K recovering
+    conditions.push({
+      label: "Current K still low (<30)",
+      passed: phase2.currentKRecovering ?? false,
+      value: `K = ${phase2.currentK?.toFixed(1) ?? 'N/A'}`,
+      required: "< 30"
+    });
+    
+    // K has risen enough
+    conditions.push({
+      label: "K rise ≥5 (momentum snapback)",
+      passed: phase2.hasMinRise ?? false,
+      value: `rise = ${phase2.kRise?.toFixed(1) ?? 'N/A'}`,
+      required: "≥ 5"
+    });
+    
+    // K actively rising
+    conditions.push({
+      label: `Rising steps ≥${phase2.minRisingSteps ?? 2}`,
+      passed: (phase2.risingSteps ?? 0) >= (phase2.minRisingSteps ?? 2),
+      value: `${phase2.risingSteps ?? 0} steps`,
+      required: `≥ ${phase2.minRisingSteps ?? 2}`
+    });
+    
+    // Momentum stabilizing
+    conditions.push({
+      label: `Momentum stabilizing (>-${phase2.phase2MomentumMax ?? 28})`,
+      passed: phase2.momentumStabilizing ?? false,
+      value: `score = ${phase2.momentumScore?.toFixed(0) ?? 'N/A'}`,
+      required: `> -${phase2.phase2MomentumMax ?? 28}`
+    });
+    
+    return conditions;
+  };
+  
+  const phase2Conditions = buildPhase2Conditions();
+  const passedCount = phase2Conditions.filter(c => c.passed).length;
+  const totalCount = phase2Conditions.length;
+  
+  return (
+    <div className="space-y-2 p-3 bg-purple-500/10 rounded-md border border-purple-500/30 mt-2">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Zap className="h-4 w-4 text-purple-400" />
+          <span className="text-xs font-semibold text-purple-400">
+            Flash Crash Bounce Probe
+          </span>
+        </div>
+        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
+          probeActive ? 'text-green-400 border-green-500/30' : 'text-amber-400 border-amber-500/30'
+        }`}>
+          {probeActive ? 'TRIGGERED' : 'NOT TRIGGERED'}
+        </Badge>
+      </div>
+      
+      {/* Phase Status */}
+      <div className="p-2 bg-muted/30 rounded text-[10px]">
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Evaluation:</span>
+          <span className="font-medium">{phaseStatus.phase}</span>
+        </div>
+        <div className="text-[9px] text-muted-foreground mt-0.5">{phaseStatus.detail}</div>
+      </div>
+      
+      {/* Context Metrics */}
+      <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Drop %</div>
+          <div className={`font-mono font-medium ${dropPercent >= 10 ? 'text-green-400' : 'text-red-400'}`}>
+            {dropPercent.toFixed(1)}%
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">K (4h)</div>
+          <div className={`font-mono font-medium ${stochK4h <= 5 ? 'text-green-400' : stochK4h <= 30 ? 'text-yellow-400' : 'text-red-400'}`}>
+            {stochK4h.toFixed(1)}
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">ADX</div>
+          <div className={`font-mono font-medium ${adx >= 35 ? 'text-green-400' : 'text-red-400'}`}>
+            {adx.toFixed(1)}
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Momentum</div>
+          <div className={`font-mono font-medium ${momentum >= -40 ? 'text-green-400' : 'text-red-400'}`}>
+            {momentum.toFixed(0)}
+          </div>
+        </div>
+      </div>
+      
+      {/* Phase 2 Condition Checklist */}
+      {phase2Conditions.length > 0 && (
+        <div className="space-y-1">
+          <div className="text-[10px] text-muted-foreground font-medium">
+            Phase 2 Conditions ({passedCount}/{totalCount}):
+          </div>
+          <div className="grid grid-cols-1 gap-1">
+            {phase2Conditions.map((cond, idx) => (
+              <div key={idx} className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] ${
+                cond.passed ? 'bg-green-500/10' : 'bg-red-500/10'
+              }`}>
+                {cond.passed ? (
+                  <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
+                ) : (
+                  <XCircle className="h-3 w-3 text-red-400 shrink-0" />
+                )}
+                <span className="text-muted-foreground flex-1">{cond.label}</span>
+                <span className={`font-mono ${cond.passed ? 'text-green-400' : 'text-red-400'}`}>
+                  {cond.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
+      {/* Data Source */}
+      {phase2?.historySource && (
+        <div className="text-[9px] text-muted-foreground">
+          History source: {phase2.historySource} ({phase2.recentKValuesCount ?? 0} values)
+        </div>
+      )}
+      
+      {/* Explanation */}
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-purple-400">💡 Phase 2 (Release State)</span> captures V-shaped bounces where 
+        K was recently pinned at floor but has started recovering. This addresses temporal blindness 
+        where momentum leads price in flash crash reversals.
+      </div>
+    </div>
+  );
+};
+
 const MaxTradesDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
   const current = filtersStatus?.currentTradeCount;
   const max = filtersStatus?.maxTradesPerSymbol;
@@ -7472,6 +7669,19 @@ export const SignalRejectionReasons = () => {
     // HARD BLOCK: Absolute min StochRSI (K <= 2)
     if (fs?.gate === "ABSOLUTE_MIN_STOCHRSI_HARD_BLOCK") {
       return <HardBlockStochRsiDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // EARLY TIER 0: Deep oversold with Flash Crash Bounce Probe diagnostics
+    if (fs?.gate === "EARLY_TIER_0_DEEP_OVERSOLD" || fs?.gate === "EARLY_TIER_0_DEEP_OVERBOUGHT") {
+      return (
+        <div className="space-y-2">
+          <SevereHTFGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />
+          {/* Show Flash Crash Bounce Probe Phase 2 diagnostics if checked */}
+          {fs?.flashCrashProbeChecked && (
+            <FlashCrashProbePhase2Display filtersStatus={fs} trendData={rejection.trend_data} />
+          )}
+        </div>
+      );
     }
     
     // TIER 0/1: Severe HTF Gate (Deep oversold/overbought - NO bypass)
