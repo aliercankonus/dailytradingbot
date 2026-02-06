@@ -634,8 +634,21 @@ export const FLASH_CRASH_BOUNCE_PROBE = {
   // ===== DETECTION THRESHOLDS =====
   MIN_DROP_PERCENT: 10,          // ≥10% drop (stricter than capitulation's 8%)
   MAX_DROP_HOURS: 4,             // Within 4 hours (velocity check)
-  MAX_STOCHRSI_K: 1,             // K ≤ 1 (pinned at floor)
   MIN_ADX: 35,                   // High trend energy present
+  
+  // ===== PHASE 1: STATIC EXHAUSTION (Original Logic) =====
+  // K currently pinned at absolute floor
+  PHASE_1_MAX_STOCHRSI_K: 1,     // K ≤ 1 (pinned at floor NOW)
+  
+  // ===== PHASE 2: RELEASE STATE (NEW - Temporal Logic) =====
+  // K was recently pinned but has started recovering (momentum leads price)
+  // This catches V-shaped bounces where oscillators rebound before price confirms
+  PHASE_2_ENABLED: true,
+  PHASE_2_FLOOR_THRESHOLD: 5,    // K was ≤ 5 within lookback
+  PHASE_2_LOOKBACK_CANDLES: 3,   // Check last 3 candles (4h = 12 hours lookback)
+  PHASE_2_CURRENT_MAX_K: 25,     // Current K must still be < 25 (not fully recovered)
+  PHASE_2_MIN_K_RISE: 5,         // K must have risen at least 5 points (momentum snapback)
+  PHASE_2_REQUIRE_K_RISING: true, // K must be actively rising (not stalling)
   
   // ===== KEY DIFFERENCE: NO ADX SLOPE REQUIREMENT =====
   // Flash crashes keep ADX slope positive until reversal
