@@ -164,6 +164,11 @@ import {
   CAPITULATION_BOUNCE_PROBE,
   // NEW: Flash Crash Bounce Probe (rapid V-reversal capture)
   FLASH_CRASH_BOUNCE_PROBE,
+  // NEW: Trend Continuation Pullback Regime (EMA-based re-entry)
+  TREND_CONTINUATION_PULLBACK_REGIME,
+  // NEW: Heartbeat and No-Trade State monitoring
+  BOT_HEARTBEAT_CONFIG,
+  NO_TRADE_ZONE_STATE,
   type ExceptionType,
   type MarketContext
 } from "../_shared/constants.ts";
@@ -14530,6 +14535,74 @@ serve(async (req) => {
       logger.info(`🚧 GATE_SUMMARY: ${compactAttribution || 'NO_REJECTIONS'}`);
     }
 
+    // ===== HEARTBEAT & REGIME SUMMARY =====
+    // NEW: Provides observability into "no trade" periods
+    const heartbeatTimestamp = new Date().toISOString();
+    
+    // Classify the no-trade state if no signals were generated
+    let noTradeState: string | null = null;
+    let noTradeReason: string | null = null;
+    
+    if (signals.length === 0 && perSymbolGateAttribution.size > 0) {
+      // Count gate types to find dominant blocker
+      const gateCounts = new Map<string, number>();
+      perSymbolGateAttribution.forEach((value) => {
+        const current = gateCounts.get(value.gate) || 0;
+        gateCounts.set(value.gate, current + 1);
+      });
+      
+      // Find the most common gate
+      let dominantGate = '';
+      let dominantCount = 0;
+      gateCounts.forEach((count, gate) => {
+        if (count > dominantCount) {
+          dominantGate = gate;
+          dominantCount = count;
+        }
+      });
+      
+      // Classify based on dominant gate
+      const totalSymbols = perSymbolGateAttribution.size;
+      const isUniformBlock = dominantCount === totalSymbols;
+      
+      if (isUniformBlock) {
+        if (dominantGate === 'EARLY_TIER_0_DEEP_OVERBOUGHT' || dominantGate === 'TIER_0_DEEP_OVERBOUGHT') {
+          noTradeState = NO_TRADE_ZONE_STATE.STATES.EXTREME_OVERBOUGHT;
+          noTradeReason = `All ${totalSymbols} symbols blocked by deep overbought (4H K > 95)`;
+        } else if (dominantGate === 'EARLY_TIER_0_DEEP_OVERSOLD' || dominantGate === 'TIER_0_DEEP_OVERSOLD') {
+          noTradeState = NO_TRADE_ZONE_STATE.STATES.EXTREME_OVERSOLD;
+          noTradeReason = `All ${totalSymbols} symbols blocked by deep oversold (4H K < 5)`;
+        } else if (dominantGate === 'COUNTER_TREND_PROTECTION') {
+          noTradeState = NO_TRADE_ZONE_STATE.STATES.COUNTER_TREND_ONLY;
+          noTradeReason = `All ${totalSymbols} symbols blocked by counter-trend protection`;
+        } else if (dominantGate === 'ADX_TOO_LOW' || dominantGate === 'ADX_GATE') {
+          noTradeState = NO_TRADE_ZONE_STATE.STATES.NO_ENERGY;
+          noTradeReason = `All ${totalSymbols} symbols blocked by low ADX (< 18)`;
+        } else if (dominantGate === 'NO_CLEAR_DIRECTION') {
+          noTradeState = NO_TRADE_ZONE_STATE.STATES.PULLBACK_WAITING;
+          noTradeReason = `All ${totalSymbols} symbols have no clear direction - waiting for pullback`;
+        } else {
+          noTradeState = NO_TRADE_ZONE_STATE.STATES.MIXED_BLOCK;
+          noTradeReason = `All ${totalSymbols} symbols blocked by ${dominantGate}`;
+        }
+      } else {
+        noTradeState = NO_TRADE_ZONE_STATE.STATES.MIXED_BLOCK;
+        noTradeReason = `${totalSymbols} symbols blocked by various gates (dominant: ${dominantGate} - ${dominantCount}/${totalSymbols})`;
+      }
+      
+      // Log the no-trade state for monitoring
+      logger.info(`💤 NO_TRADE_STATE: ${noTradeState} | ${noTradeReason}`);
+    } else if (signals.length === 0 && perSymbolGateAttribution.size === 0) {
+      noTradeState = 'OPERATIONAL_CONCERN';
+      noTradeReason = 'No rejections logged but no signals generated either';
+      logger.warn(`⚠️ OPERATIONAL_CONCERN: No rejections and no signals - check if trend data was fetched`);
+    }
+    
+    // Log heartbeat
+    if (BOT_HEARTBEAT_CONFIG.LOG_HEARTBEAT) {
+      logger.info(`💓 HEARTBEAT: ${heartbeatTimestamp} | Symbols: ${perSymbolGateAttribution.size} | Signals: ${signals.length} | State: ${noTradeState || 'OPERATIONAL'}`);
+    }
+
     return new Response(JSON.stringify({
       signals,
       totalSignalsGenerated,
@@ -14566,8 +14639,20 @@ serve(async (req) => {
           ranging: Array.from(highPerformingStrategiesByRegime.get("ranging") || []),
         },
       },
+      // NEW: Heartbeat and No-Trade State for observability
+      heartbeat: {
+        timestamp: heartbeatTimestamp,
+        symbolsScanned: perSymbolGateAttribution.size,
+        signalsGenerated: signals.length,
+      },
+      noTradeState: noTradeState ? {
+        state: noTradeState,
+        reason: noTradeReason,
+      } : null,
       minQualityScore: DEFAULT_MIN_QUALITY,
-      message: `Quality Score System active (dynamic threshold based on ADX)`,
+      message: noTradeState 
+        ? `No trade zone: ${noTradeState} - ${noTradeReason}`
+        : `Quality Score System active (dynamic threshold based on ADX)`,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (error) {
