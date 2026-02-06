@@ -14598,9 +14598,45 @@ serve(async (req) => {
       logger.warn(`⚠️ OPERATIONAL_CONCERN: No rejections and no signals - check if trend data was fetched`);
     }
     
-    // Log heartbeat
+    // Log heartbeat and persist to database
     if (BOT_HEARTBEAT_CONFIG.LOG_HEARTBEAT) {
       logger.info(`💓 HEARTBEAT: ${heartbeatTimestamp} | Symbols: ${perSymbolGateAttribution.size} | Signals: ${signals.length} | State: ${noTradeState || 'OPERATIONAL'}`);
+    }
+    
+    // Persist heartbeat to database for health monitoring
+    if (BOT_HEARTBEAT_CONFIG.PERSIST_TO_DB) {
+      try {
+        const { error: heartbeatError } = await supabase
+          .from('bot_heartbeat')
+          .insert({
+            user_id: userId,
+            recorded_at: heartbeatTimestamp,
+            symbols_scanned: perSymbolGateAttribution.size,
+            signals_generated: signals.length,
+            rejections_logged: perSymbolGateAttribution.size,
+            no_trade_state: noTradeState,
+            no_trade_reason: noTradeReason,
+            details: {
+              rejections: {
+                byHardGates: rejectedByHardGates,
+                byRegime: rejectedByRegime,
+                byReversalRisk: rejectedByReversalRisk,
+                byStochRsiExtreme: rejectedByStochRsiExtreme,
+                byQuality: rejectedByQuality,
+                byStrategy: rejectedByStrategy,
+              },
+              dominantGate: perSymbolGateAttribution.size > 0 
+                ? Array.from(perSymbolGateAttribution.values())[0]?.gate 
+                : null,
+            },
+          });
+        
+        if (heartbeatError) {
+          logger.warn(`❤️ Heartbeat DB persist failed: ${heartbeatError.message}`);
+        }
+      } catch (heartbeatErr) {
+        logger.warn(`❤️ Heartbeat persist error: ${heartbeatErr}`);
+      }
     }
 
     return new Response(JSON.stringify({

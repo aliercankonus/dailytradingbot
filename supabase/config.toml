@@ -40,6 +40,13 @@ cron = "*/5 * * * *"
 enabled = true
 cron = "*/1 * * * *"
 
+[functions.bot-health-monitor]
+verify_jwt = false
+
+[functions.bot-health-monitor.schedule]
+enabled = true
+cron = "*/5 * * * *"
+
 [functions.validate-adx]
 verify_jwt = false
 

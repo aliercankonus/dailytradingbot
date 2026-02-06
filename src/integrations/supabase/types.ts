@@ -149,6 +149,81 @@ export type Database = {
         }
         Relationships: []
       }
+      bot_health_state: {
+        Row: {
+          alert_sent: boolean
+          alert_sent_at: string | null
+          details: Json | null
+          id: string
+          last_seen_at: string
+          resolved_at: string | null
+          started_at: string
+          state: string
+          state_type: string
+          user_id: string
+        }
+        Insert: {
+          alert_sent?: boolean
+          alert_sent_at?: string | null
+          details?: Json | null
+          id?: string
+          last_seen_at?: string
+          resolved_at?: string | null
+          started_at?: string
+          state: string
+          state_type: string
+          user_id: string
+        }
+        Update: {
+          alert_sent?: boolean
+          alert_sent_at?: string | null
+          details?: Json | null
+          id?: string
+          last_seen_at?: string
+          resolved_at?: string | null
+          started_at?: string
+          state?: string
+          state_type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      bot_heartbeat: {
+        Row: {
+          details: Json | null
+          id: string
+          no_trade_reason: string | null
+          no_trade_state: string | null
+          recorded_at: string
+          rejections_logged: number
+          signals_generated: number
+          symbols_scanned: number
+          user_id: string
+        }
+        Insert: {
+          details?: Json | null
+          id?: string
+          no_trade_reason?: string | null
+          no_trade_state?: string | null
+          recorded_at?: string
+          rejections_logged?: number
+          signals_generated?: number
+          symbols_scanned?: number
+          user_id: string
+        }
+        Update: {
+          details?: Json | null
+          id?: string
+          no_trade_reason?: string | null
+          no_trade_state?: string | null
+          recorded_at?: string
+          rejections_logged?: number
+          signals_generated?: number
+          symbols_scanned?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       entry_quality_log: {
         Row: {
           created_at: string | null

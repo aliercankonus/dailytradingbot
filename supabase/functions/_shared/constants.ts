@@ -6201,74 +6201,100 @@ export const TREND_CONTINUATION_PULLBACK_REGIME = {
 } as const;
 
 // ============= BOT HEARTBEAT MONITORING =============
-// NEW: Prevents "silent failures" where bot stops running without alerting
+// Prevents "silent failures" where bot stops running without alerting
 // Tracks each strategy-analyzer execution for operational health monitoring
 export const BOT_HEARTBEAT_CONFIG = {
   ENABLED: true,
   
   // ===== HEARTBEAT LOGGING =====
-  // Log a heartbeat on every strategy-analyzer execution
   LOG_HEARTBEAT: true,
-  // Include timestamp, symbols scanned, and regime state
   INCLUDE_REGIME_SUMMARY: true,
   
-  // ===== NO-TRADE STATE CLASSIFICATION =====
-  // When the system correctly does nothing, classify why
-  NO_TRADE_STATES: {
-    // All symbols blocked by same gate = regime-wide condition
-    TREND_LOCKED_OVERBOUGHT: 'All symbols blocked by TIER_0_OVERBOUGHT',
-    TREND_LOCKED_OVERSOLD: 'All symbols blocked by TIER_0_OVERSOLD',
-    NO_CLEAR_DIRECTION: 'All symbols have NO_CLEAR_DIRECTION',
-    ALL_COUNTER_TREND: 'All symbols blocked by COUNTER_TREND_PROTECTION',
-    // Mixed blocking = normal operation
-    MIXED_REJECTIONS: 'Symbols blocked by different gates',
-    // No rejection = signals should have been generated
-    OPERATIONAL_CONCERN: 'No rejections logged but no signals either',
-  } as Record<string, string>,
-  
-  // ===== REGIME SUMMARY FIELDS =====
-  // Fields to include in the daily regime summary
-  SUMMARY_FIELDS: [
-    'dominant_trend',      // Bullish/Bearish/Ranging across symbols
-    'avg_adx',             // Average ADX across symbols
-    'avg_stochrsi_k',      // Average 4H StochRSI K
-    'primary_block_gate',  // Most common rejection gate
-    'symbols_blocked',     // Count of symbols blocked
-    'signals_generated',   // Count of signals generated
-  ] as string[],
+  // ===== DATABASE PERSISTENCE =====
+  // Persist heartbeats to bot_heartbeat table for health monitoring
+  PERSIST_TO_DB: true,
+  // Keep heartbeats for 24 hours (cleanup happens in health monitor)
+  HEARTBEAT_RETENTION_HOURS: 24,
   
   // ===== ALERTING THRESHOLDS =====
-  // Consider these for future notification system
-  ALERT_IF_NO_SIGNALS_HOURS: 6,    // Alert if 0 signals for 6+ hours
-  ALERT_IF_NO_HEARTBEAT_MINUTES: 30, // Alert if no heartbeat for 30+ min
+  // CRITICAL: No heartbeat for 30+ minutes
+  ALERT_NO_HEARTBEAT_MINUTES: 30,
+  // WARNING: Same no-trade state persists for X hours
+  ALERT_STATE_THRESHOLDS: {
+    EXTREME_OVERBOUGHT: 6,    // 6 hours
+    EXTREME_OVERSOLD: 6,      // 6 hours
+    COUNTER_TREND_ONLY: 8,    // 8 hours
+    NO_ENERGY: 8,             // 8 hours
+    MIXED_BLOCK: 12,          // 12 hours
+    PULLBACK_WAITING: 10,     // 10 hours
+  } as Record<string, number>,
+  // Default threshold for any state not listed above
+  ALERT_STATE_DEFAULT_HOURS: 12,
+  
+  // CRITICAL: OPERATIONAL_CONCERN triggers immediately
+  ALERT_OPERATIONAL_CONCERN_IMMEDIATE: true,
+  
+  // ===== ALERT COOLDOWN =====
+  // Prevent alert spam - minimum time between same alert type
+  ALERT_COOLDOWN_MINUTES: 60,
+  
+  // ===== STATE PERSISTENCE TRACKING =====
+  // Track how long a state has been active before alerting
+  TRACK_STATE_PERSISTENCE: true,
 } as const;
 
 // ============= NO-TRADE ZONE STATE =============
 // Makes "no trades" an explicit, observable state rather than an invisible outcome
-// Enables: "Today: NO_TRADE_ZONE (reason: all symbols overbought)"
 export const NO_TRADE_ZONE_STATE = {
   ENABLED: true,
   
   // ===== STATE TYPES =====
-  // Explicit states when system correctly produces 0 signals
   STATES: {
-    PULLBACK_WAITING: 'PULLBACK_WAITING',     // Trend valid, waiting for pullback
-    EXTREME_OVERBOUGHT: 'EXTREME_OVERBOUGHT', // All symbols K > 95
-    EXTREME_OVERSOLD: 'EXTREME_OVERSOLD',     // All symbols K < 5
-    COUNTER_TREND_ONLY: 'COUNTER_TREND_ONLY', // All signals would be counter-trend
-    NO_ENERGY: 'NO_ENERGY',                    // All ADX < 18
-    MIXED_BLOCK: 'MIXED_BLOCK',               // Various gates blocking different symbols
-    OPERATIONAL: 'OPERATIONAL',                // System working, just no opportunities
+    PULLBACK_WAITING: 'PULLBACK_WAITING',
+    EXTREME_OVERBOUGHT: 'EXTREME_OVERBOUGHT',
+    EXTREME_OVERSOLD: 'EXTREME_OVERSOLD',
+    COUNTER_TREND_ONLY: 'COUNTER_TREND_ONLY',
+    NO_ENERGY: 'NO_ENERGY',
+    MIXED_BLOCK: 'MIXED_BLOCK',
+    OPERATIONAL: 'OPERATIONAL',
+    OPERATIONAL_CONCERN: 'OPERATIONAL_CONCERN',
   } as Record<string, string>,
   
-  // ===== CLASSIFICATION RULES =====
-  // Thresholds for classifying the no-trade state
-  OVERBOUGHT_THRESHOLD: 95,  // K > 95 for overbought classification
-  OVERSOLD_THRESHOLD: 5,     // K < 5 for oversold classification
-  LOW_ENERGY_ADX: 18,        // ADX < 18 for no energy
+  // ===== CLASSIFICATION THRESHOLDS =====
+  OVERBOUGHT_THRESHOLD: 95,
+  OVERSOLD_THRESHOLD: 5,
+  LOW_ENERGY_ADX: 18,
   
   // ===== LOGGING =====
   LOG_STATE_CLASSIFICATION: true,
   INCLUDE_IN_RESPONSE: true,
+} as const;
+
+// ============= HEALTH ALERT TYPES =============
+// Alert classifications for the 3-tier alerting system
+export const HEALTH_ALERT_TYPES = {
+  // TIER 1: CRITICAL - System not running
+  HEARTBEAT_MISSING: {
+    code: 'HEARTBEAT_MISSING',
+    severity: 'critical',
+    subject: '🚨 CRITICAL: Trading bot heartbeat missing',
+    description: 'No bot activity detected for 30+ minutes',
+  },
+  
+  // TIER 2: WARNING - System stuck in a state too long
+  STATE_PROLONGED: {
+    code: 'STATE_PROLONGED',
+    severity: 'warning',
+    subject: '⚠️ WARNING: Bot stuck in no-trade state',
+    description: 'Same no-trade state persisting beyond threshold',
+  },
+  
+  // TIER 3: CRITICAL - Logic failure (running but doing nothing)
+  OPERATIONAL_CONCERN: {
+    code: 'OPERATIONAL_CONCERN',
+    severity: 'critical',
+    subject: '🚨 LOGIC FAILURE: No signals AND no rejections',
+    description: 'Bot running but not processing - check data feeds',
+  },
 } as const;
 
