@@ -2133,12 +2133,20 @@ export function detectTrendContinuationPullback(
     minAdx: number;
     minAdxSlope: number;
     emaProximityThreshold: number;
+    emaProximityThresholdStrong: number;  // NEW: tighter threshold for strong ADX
+    strongAdxThreshold: number;            // NEW: ADX level to use tighter threshold
     longMaxK: number;
     shortMinK: number;
     longMaxMove: number;
     shortMaxMove: number;
+    shallowPullbackMaxMove: number;        // NEW: tighter exhaustion for shallow pullbacks
+    shallowPullbackThreshold: number;      // NEW: what defines "shallow"
     baseMultiplier: number;
     momentumAlignedMultiplier: number;
+    shallowPullbackMultiplier: number;     // NEW: reduced size for shallow pullbacks
+    stopLossAtrMultiplier: number;
+    emaStopBufferPercent: number;
+    useMaxStop: boolean;                   // NEW: use max of ATR and EMA stops
   }
 ): TrendContinuationPullbackResult {
   const defaultResult: TrendContinuationPullbackResult = {
@@ -2216,31 +2224,47 @@ export function detectTrendContinuationPullback(
     reasons.push(`StochRSI cooled: K=${stochRsiK4h.toFixed(1)} >= ${config.shortMinK}`);
   }
 
+  // REFINED: Dynamic EMA proximity based on ADX strength
+  const effectiveProximityThreshold = adx >= config.strongAdxThreshold 
+    ? config.emaProximityThresholdStrong 
+    : config.emaProximityThreshold;
+  reasons.push(`EMA proximity threshold: ${effectiveProximityThreshold.toFixed(2)}% (ADX ${adx >= config.strongAdxThreshold ? '>=' : '<'} ${config.strongAdxThreshold})`);
+
   // Check move exhaustion
   const moveFromLow = ((currentPrice - low24h) / low24h) * 100;
   const moveFromHigh = ((high24h - currentPrice) / high24h) * 100;
   defaultResult.moveFromSwingPercent = direction === 'long' ? moveFromLow : moveFromHigh;
 
-  const maxMove = direction === 'long' ? config.longMaxMove : config.shortMaxMove;
+  // REFINED: Determine if pullback is shallow (use tighter exhaustion limits)
+  const minDistance = Math.min(priceToEmaMidpoint, priceToEma20, priceToEma50);
+  const isShallowPullback = minDistance < config.shallowPullbackThreshold;
+  
+  // Apply appropriate exhaustion limit
+  let maxMove = direction === 'long' ? config.longMaxMove : config.shortMaxMove;
+  if (isShallowPullback) {
+    maxMove = config.shallowPullbackMaxMove;  // Tighter limit for shallow pullbacks
+    reasons.push(`⚠️ Shallow pullback (${minDistance.toFixed(2)}% < ${config.shallowPullbackThreshold}%): max move reduced to ${maxMove}%`);
+  }
+  
   if (defaultResult.moveFromSwingPercent > maxMove) {
-    defaultResult.blockReason = `Move from swing ${defaultResult.moveFromSwingPercent.toFixed(1)}% > ${maxMove}% (too extended)`;
+    defaultResult.blockReason = `Move from swing ${defaultResult.moveFromSwingPercent.toFixed(1)}% > ${maxMove}% (too extended${isShallowPullback ? ' for shallow pullback' : ''})`;
     return defaultResult;
   }
   reasons.push(`Move from swing: ${defaultResult.moveFromSwingPercent.toFixed(1)}% <= ${maxMove}%`);
 
-  // Detect pullback type based on EMA proximity
+  // Detect pullback type based on EMA proximity (using dynamic threshold)
   let pullbackDetected = false;
   let pullbackType: 'ema20' | 'ema50' | 'midpoint' | null = null;
 
-  if (priceToEmaMidpoint <= config.emaProximityThreshold) {
+  if (priceToEmaMidpoint <= effectiveProximityThreshold) {
     pullbackDetected = true;
     pullbackType = 'midpoint';
     reasons.push(`✅ Pullback to EMA midpoint (${priceToEmaMidpoint.toFixed(2)}% away)`);
-  } else if (priceToEma20 <= config.emaProximityThreshold) {
+  } else if (priceToEma20 <= effectiveProximityThreshold) {
     pullbackDetected = true;
     pullbackType = 'ema20';
     reasons.push(`✅ Pullback to EMA20 (${priceToEma20.toFixed(2)}% away)`);
-  } else if (priceToEma50 <= config.emaProximityThreshold) {
+  } else if (priceToEma50 <= effectiveProximityThreshold) {
     pullbackDetected = true;
     pullbackType = 'ema50';
     reasons.push(`✅ Pullback to EMA50 (${priceToEma50.toFixed(2)}% away)`);
@@ -2258,7 +2282,7 @@ export function detectTrendContinuationPullback(
       const e50 = recentEma50[i];
       const mid = (e20 + e50) / 2;
       
-      if (Math.abs((p - mid) / mid * 100) <= config.emaProximityThreshold) {
+      if (Math.abs((p - mid) / mid * 100) <= effectiveProximityThreshold) {
         pullbackDetected = true;
         pullbackType = 'midpoint';
         reasons.push(`Recent touch of EMA midpoint (${3 - i} candles ago)`);
@@ -2268,7 +2292,7 @@ export function detectTrendContinuationPullback(
   }
 
   if (!pullbackDetected) {
-    defaultResult.blockReason = `Price not near EMA zone (EMA20: ${priceToEma20.toFixed(2)}%, EMA50: ${priceToEma50.toFixed(2)}%, Mid: ${priceToEmaMidpoint.toFixed(2)}%)`;
+    defaultResult.blockReason = `Price not near EMA zone (EMA20: ${priceToEma20.toFixed(2)}%, EMA50: ${priceToEma50.toFixed(2)}%, Mid: ${priceToEmaMidpoint.toFixed(2)}%; threshold: ${effectiveProximityThreshold.toFixed(2)}%)`;
     return defaultResult;
   }
 
@@ -2277,10 +2301,29 @@ export function detectTrendContinuationPullback(
   defaultResult.eligible = true;
   defaultResult.direction = direction;
   defaultResult.pullbackType = pullbackType;
-  defaultResult.positionMultiplier = config.baseMultiplier;
-  defaultResult.stopLossAtr = atr;
-  defaultResult.reasons = reasons;
   
+  // REFINED: Apply appropriate position multiplier
+  let positionMultiplier = config.baseMultiplier;
+  if (isShallowPullback) {
+    positionMultiplier = config.shallowPullbackMultiplier;
+    reasons.push(`Position size: ${(positionMultiplier * 100).toFixed(0)}% (shallow pullback)`);
+  } else {
+    reasons.push(`Position size: ${(positionMultiplier * 100).toFixed(0)}% (base)`);
+  }
+  defaultResult.positionMultiplier = positionMultiplier;
+  
+  // REFINED: Stop loss uses MAX of ATR and EMA stops (never inside structure)
+  const atrStop = atr * config.stopLossAtrMultiplier;
+  const emaStop = (direction === 'long' ? ema50 : ema50) * (config.emaStopBufferPercent / 100);
+  
+  if (config.useMaxStop) {
+    defaultResult.stopLossAtr = Math.max(atrStop, emaStop);
+    reasons.push(`Stop: max(ATR ${atrStop.toFixed(2)}, EMA ${emaStop.toFixed(2)}) = ${defaultResult.stopLossAtr.toFixed(2)}`);
+  } else {
+    defaultResult.stopLossAtr = atrStop;
+  }
+  
+  defaultResult.reasons = reasons;
   reasons.push(`TREND_CONTINUATION_PULLBACK eligible for ${direction.toUpperCase()}`);
 
   return defaultResult;
