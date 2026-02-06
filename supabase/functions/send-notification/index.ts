@@ -18,7 +18,7 @@ const corsHeaders = {
 };
 
 interface NotificationRequest {
-  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated' | 'bot_health_critical' | 'bot_health_warning' | 'websocket_failure';
+  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated' | 'bot_health_critical' | 'bot_health_warning' | 'websocket_failure' | 'binance_api_error';
   userId?: string;
   tradeId?: string;
   symbol?: string;
@@ -69,6 +69,13 @@ interface NotificationRequest {
   activeConnections?: number;
   lastMessageAgoMs?: number;
   wsError?: string;
+  // Binance API error fields
+  operation?: string;
+  binanceErrorCode?: number;
+  binanceErrorMsg?: string;
+  httpStatus?: number;
+  positionId?: string;
+  context?: string;
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -316,6 +323,91 @@ const handler = async (req: Request): Promise<Response> => {
           </p>
         `;
         smsMessage = `${isCritical ? '🚨' : '⚠️'} WebSocket ${wsFunction} ${wsStatus}. Price updates may be stale.`;
+        break;
+
+      case 'binance_api_error':
+        const operation = payload.operation || 'unknown operation';
+        const binanceCode = payload.binanceErrorCode;
+        const binanceMsg = payload.binanceErrorMsg || 'Unknown error';
+        const httpStatus = payload.httpStatus;
+        const posId = payload.positionId;
+        const ctx = payload.context || '';
+        
+        // Determine severity based on error type
+        const isCredentialError = binanceCode === -2015 || binanceCode === -2014 || binanceCode === -1022;
+        const isInsufficientBalance = binanceCode === -2010;
+        const isSymbolError = binanceCode === -1121 || binanceCode === -1100;
+        
+        subject = isCredentialError 
+          ? `🚨 CRITICAL: Binance API Key Error - ${operation}`
+          : `⚠️ Binance API Error: ${operation}`;
+        
+        message = `
+          <h2>${isCredentialError ? '🚨' : '⚠️'} Binance API Error</h2>
+          <p style="font-size: 1.1em;">A Binance API error occurred during <strong>${operation}</strong>.</p>
+          
+          <div style="background: ${isCredentialError ? '#fef2f2' : '#fef3c7'}; padding: 15px; border-radius: 8px; border-left: 4px solid ${isCredentialError ? '#ef4444' : '#f59e0b'}; margin: 20px 0;">
+            <h3 style="margin-top: 0; color: ${isCredentialError ? '#991b1b' : '#92400e'};">Error Details</h3>
+            <p><strong>Operation:</strong> ${operation}</p>
+            ${payload.symbol ? `<p><strong>Symbol:</strong> ${payload.symbol}</p>` : ''}
+            ${posId ? `<p><strong>Position ID:</strong> ${posId}</p>` : ''}
+            ${binanceCode ? `<p><strong>Binance Error Code:</strong> ${binanceCode}</p>` : ''}
+            <p><strong>Error Message:</strong> ${binanceMsg}</p>
+            ${httpStatus ? `<p><strong>HTTP Status:</strong> ${httpStatus}</p>` : ''}
+            ${ctx ? `<p><strong>Context:</strong> ${ctx}</p>` : ''}
+          </div>
+          
+          <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin-top: 15px;">
+            <h3 style="margin-top: 0;">Common Causes</h3>
+            <ul>
+              ${isCredentialError ? `
+                <li><strong>Invalid API Key:</strong> Your API key may have expired or been revoked</li>
+                <li><strong>IP Restriction:</strong> The API key may have IP restrictions that don't match our servers</li>
+                <li><strong>Permissions:</strong> The API key may not have trading permissions enabled</li>
+              ` : ''}
+              ${isInsufficientBalance ? `
+                <li><strong>Insufficient Balance:</strong> Not enough USDT in your Binance account</li>
+                <li><strong>Funds Locked:</strong> Funds may be locked in open orders or pending withdrawals</li>
+              ` : ''}
+              ${isSymbolError ? `
+                <li><strong>Invalid Symbol:</strong> The trading pair may have been delisted</li>
+                <li><strong>Symbol Format:</strong> Check if the symbol format is correct</li>
+              ` : ''}
+              ${!isCredentialError && !isInsufficientBalance && !isSymbolError ? `
+                <li><strong>Rate Limiting:</strong> Too many API requests in a short period</li>
+                <li><strong>Market Conditions:</strong> High volatility may cause order rejections</li>
+                <li><strong>Order Parameters:</strong> Price or quantity may be outside allowed range</li>
+              ` : ''}
+            </ul>
+          </div>
+          
+          <div style="background: #eff6ff; padding: 15px; border-radius: 8px; margin-top: 15px;">
+            <h3 style="margin-top: 0; color: #2563eb;">Recommended Actions</h3>
+            <ol>
+              ${isCredentialError ? `
+                <li>Check your Binance API keys in Settings</li>
+                <li>Verify the API key has trading permissions enabled</li>
+                <li>Ensure there are no IP restrictions blocking our servers</li>
+                <li>Generate a new API key if needed</li>
+              ` : isInsufficientBalance ? `
+                <li>Check your USDT balance on Binance</li>
+                <li>Cancel any pending orders that may be locking funds</li>
+                <li>Deposit additional funds if needed</li>
+              ` : `
+                <li>Check your dashboard for position status</li>
+                <li>Verify the symbol is still tradeable on Binance</li>
+                <li>Review your risk parameters and position sizes</li>
+              `}
+            </ol>
+          </div>
+          
+          <p style="margin-top: 20px; color: #6b7280; font-size: 0.9em;">
+            ${isCredentialError 
+              ? 'This is a critical error - live trading is disabled until API keys are fixed.' 
+              : 'Trading continues for other positions. This error affects only the operation mentioned above.'}
+          </p>
+        `;
+        smsMessage = `${isCredentialError ? '🚨 CRITICAL' : '⚠️'} Binance API error: ${operation}. ${binanceMsg}`;
         break;
     }
 
