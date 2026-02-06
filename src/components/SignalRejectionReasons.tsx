@@ -7507,6 +7507,33 @@ export const SignalRejectionReasons = () => {
       return <MomentumDirectionOpposingDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
+    // LTF Confirmation Gate (lower timeframes don't confirm higher timeframe trend)
+    if (fs?.gate === "LTF_CONFIRMATION" || reason.includes("LTF_CONFIRMATION") || 
+        reason.includes("LTF confirmation") || reason.includes("Lower timeframe confirmation")) {
+      return <LtfConfirmationGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // LTF Spike Protection Gate (climax candle detection)
+    if (fs?.gate === "LTF_SPIKE_PROTECTION" || fs?.gate === "LTF_SPIKE_PROTECTION_GATE" ||
+        reason.includes("LTF_SPIKE_PROTECTION") || reason.includes("LTF spike") || 
+        reason.includes("climax candle") || reason.includes("15m StochRSI extreme")) {
+      return <LtfSpikeProtectionDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // Momentum Slope Gate (Priority 1 - accelerating opposing momentum)
+    if (fs?.gate === "MOMENTUM_SLOPE_GATE" || fs?.gate === "MOMENTUM_SLOPE" ||
+        reason.includes("MOMENTUM_SLOPE_GATE") || reason.includes("MOMENTUM SLOPE") ||
+        reason.includes("momentum slope") || reason.includes("opposing momentum accelerating")) {
+      return <MomentumSlopeGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // Near Extreme Protection Gate (entries too close to 24h highs/lows)
+    if (fs?.gate === "NEAR_EXTREME_PROTECTION" || fs?.gate === "NEAR_EXTREME" ||
+        reason.includes("NEAR_EXTREME") || reason.includes("near extreme") ||
+        reason.includes("too close to 24h") || reason.includes("24h high") || reason.includes("24h low")) {
+      return <NearExtremeProtectionDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
     // NEW: Bollinger LONG Gate (for longs above upper BB)
     if (fs?.gate === "BOLLINGER_POSITION_FILTER_LONG" || fs?.gate === "BOLLINGER_LONG_GATE" || 
         (fs?.direction === "long" && (reason.includes("BOLLINGER GATE") || reason.includes("BOLLINGER POSITION FILTER")))) {
