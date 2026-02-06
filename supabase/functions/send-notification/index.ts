@@ -18,7 +18,7 @@ const corsHeaders = {
 };
 
 interface NotificationRequest {
-  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated' | 'bot_health_critical';
+  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated' | 'bot_health_critical' | 'bot_health_warning';
   userId?: string;
   tradeId?: string;
   symbol?: string;
@@ -58,6 +58,11 @@ interface NotificationRequest {
   positionsOpened?: number;
   positionsClosed?: number;
   rejectionsLogged?: number;
+  // Bot health warning fields (state prolonged)
+  alertType?: string;
+  state?: string;
+  durationHours?: number;
+  threshold?: number;
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -222,6 +227,42 @@ const handler = async (req: Request): Promise<Response> => {
           </p>
         `;
         smsMessage = `🚨 CRITICAL: Trading bot inactive for ${payload.lastActivityMinutesAgo || 60}+ min. Check your dashboard immediately!`;
+        break;
+
+      case 'bot_health_warning':
+        subject = `⚠️ WARNING: Bot stuck in ${payload.state} for ${payload.durationHours?.toFixed(1) || '?'}h`;
+        const stateDisplay = payload.state?.replace(/_/g, ' ') || 'unknown state';
+        const reasonDisplay = (payload as any).reason || 'No specific reason provided';
+        
+        message = `
+          <h2>⚠️ Bot No-Trade State Alert</h2>
+          <p style="font-size: 1.1em;">Your trading bot has been in a no-trade state for an extended period.</p>
+          
+          <div style="background: #fef3c7; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 20px 0;">
+            <h3 style="margin-top: 0; color: #92400e;">Current State: ${stateDisplay}</h3>
+            <p><strong>Duration:</strong> ${payload.durationHours?.toFixed(1) || '?'} hours</p>
+            <p><strong>Threshold:</strong> ${payload.threshold || '?'} hours</p>
+            <p><strong>Reason:</strong> ${reasonDisplay}</p>
+          </div>
+          
+          <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin-top: 15px;">
+            <h3 style="margin-top: 0;">What This Means</h3>
+            <p>This is <strong>not necessarily an error</strong>. The bot may be correctly waiting for better market conditions.</p>
+            <ul>
+              <li><strong>EXTREME_OVERBOUGHT:</strong> All symbols at StochRSI K > 95 — waiting for cooldown</li>
+              <li><strong>EXTREME_OVERSOLD:</strong> All symbols at StochRSI K < 5 — waiting for bounce</li>
+              <li><strong>COUNTER_TREND_ONLY:</strong> Only counter-trend entries available — blocked for safety</li>
+              <li><strong>NO_ENERGY:</strong> ADX too low — no trending energy in the market</li>
+              <li><strong>MIXED_BLOCK:</strong> Various gates blocking different symbols</li>
+            </ul>
+          </div>
+          
+          <p style="margin-top: 20px; color: #6b7280; font-size: 0.9em;">
+            This alert triggers when the same no-trade state persists beyond configured thresholds. 
+            Review market conditions to verify this is expected behavior.
+          </p>
+        `;
+        smsMessage = `⚠️ WARNING: Bot stuck in ${stateDisplay} for ${payload.durationHours?.toFixed(1) || '?'}h. Check market conditions.`;
         break;
     }
 

@@ -6,76 +6,76 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Health check thresholds
-const HEALTH_CHECK_CONFIG = {
-  // Time thresholds (in minutes)
-  WARNING_THRESHOLD_MINUTES: 30,    // Warn if no activity for 30 min
-  CRITICAL_THRESHOLD_MINUTES: 60,   // Critical if no activity for 1 hour
+// ============= 3-TIER ALERTING CONFIGURATION =============
+const ALERT_CONFIG = {
+  // TIER 1: CRITICAL - No heartbeat
+  HEARTBEAT_MISSING_MINUTES: 30,
   
-  // What counts as "activity"
-  CHECK_SIGNALS: true,              // Check trading_signals table
-  CHECK_POSITIONS: true,            // Check positions table for opens/closes
-  CHECK_REJECTIONS: true,           // Check signal_rejection_log
+  // TIER 2: WARNING - State persistence thresholds (hours)
+  STATE_THRESHOLDS: {
+    EXTREME_OVERBOUGHT: 6,
+    EXTREME_OVERSOLD: 6,
+    COUNTER_TREND_ONLY: 8,
+    NO_ENERGY: 8,
+    MIXED_BLOCK: 12,
+    PULLBACK_WAITING: 10,
+  } as Record<string, number>,
+  DEFAULT_STATE_THRESHOLD_HOURS: 12,
   
-  // Notification settings
-  SEND_CRITICAL_ALERTS: true,       // Send email alerts on critical status
-  ALERT_COOLDOWN_MINUTES: 60,       // Don't send alerts more often than this
+  // TIER 3: CRITICAL - Operational concern (immediate)
+  OPERATIONAL_CONCERN_IMMEDIATE: true,
   
-  // Logging
-  LOG_HEALTHY: true,                // Log even when healthy
-  LOG_DETAILS: true,                // Log detailed activity counts
+  // Alert cooldown (prevent spam)
+  COOLDOWN_MINUTES: 60,
+  
+  // Heartbeat retention (cleanup old records)
+  HEARTBEAT_RETENTION_HOURS: 24,
 };
 
-interface HealthStatus {
-  status: 'healthy' | 'warning' | 'critical';
-  lastActivityMinutesAgo: number | null;
-  signalsGenerated: number;
-  positionsOpened: number;
-  positionsClosed: number;
-  rejectionsLogged: number;
-  botEnabled: boolean;
+interface AlertResult {
+  alertType: 'heartbeat_missing' | 'state_prolonged' | 'operational_concern';
+  severity: 'critical' | 'warning';
   message: string;
-  alertSent?: boolean;
+  details: Record<string, unknown>;
+  alertSent: boolean;
 }
 
-// Track last alert time to prevent spam (in-memory, resets on cold start)
-const lastAlertSent: Record<string, number> = {};
+interface HealthCheckResult {
+  userId: string;
+  status: 'healthy' | 'warning' | 'critical';
+  lastHeartbeat: string | null;
+  minutesSinceHeartbeat: number | null;
+  currentState: string | null;
+  stateStartedAt: string | null;
+  stateDurationHours: number | null;
+  alerts: AlertResult[];
+}
 
-async function sendCriticalAlert(
+// Send alert email via send-notification function
+async function sendHealthAlert(
   supabaseUrl: string,
   supabaseKey: string,
   userId: string,
-  healthStatus: HealthStatus
+  alert: AlertResult
 ): Promise<boolean> {
-  const now = Date.now();
-  const lastSent = lastAlertSent[userId] || 0;
-  const cooldownMs = HEALTH_CHECK_CONFIG.ALERT_COOLDOWN_MINUTES * 60 * 1000;
-  
-  // Check cooldown
-  if (now - lastSent < cooldownMs) {
-    console.log(`[BOT_HEALTH] Alert cooldown active for user ${userId.substring(0, 8)}, skipping notification`);
-    return false;
-  }
-
   try {
-    // Get user's notification email from risk_parameters or profiles
     const supabase = createClient(supabaseUrl, supabaseKey);
     
+    // Get user's notification preferences
     const { data: riskParams } = await supabase
       .from('risk_parameters')
       .select('notification_email, email_notifications_enabled')
       .eq('user_id', userId)
       .single();
-
-    // Only send if email notifications are enabled
+    
     if (!riskParams?.email_notifications_enabled) {
-      console.log(`[BOT_HEALTH] Email notifications disabled for user ${userId.substring(0, 8)}`);
+      console.log(`[HEALTH_MONITOR] Email notifications disabled for user ${userId.substring(0, 8)}`);
       return false;
     }
-
+    
     let email = riskParams?.notification_email;
     
-    // Fall back to profile email if no notification email set
+    // Fallback to profile email
     if (!email) {
       const { data: profile } = await supabase
         .from('profiles')
@@ -84,24 +84,25 @@ async function sendCriticalAlert(
         .single();
       email = profile?.email;
     }
-
+    
     if (!email) {
-      console.warn(`[BOT_HEALTH] No email found for user ${userId.substring(0, 8)}, cannot send alert`);
+      console.warn(`[HEALTH_MONITOR] No email found for user ${userId.substring(0, 8)}`);
       return false;
     }
-
-    // Call send-notification function
+    
+    // Prepare notification payload based on alert type
     const notificationPayload = {
-      type: 'bot_health_critical',
+      type: alert.alertType === 'heartbeat_missing' ? 'bot_health_critical' : 
+            alert.alertType === 'operational_concern' ? 'bot_health_critical' : 
+            'bot_health_warning',
       userId,
       email,
-      lastActivityMinutesAgo: healthStatus.lastActivityMinutesAgo,
-      signalsGenerated: healthStatus.signalsGenerated,
-      positionsOpened: healthStatus.positionsOpened,
-      positionsClosed: healthStatus.positionsClosed,
-      rejectionsLogged: healthStatus.rejectionsLogged,
+      alertType: alert.alertType,
+      severity: alert.severity,
+      message: alert.message,
+      ...alert.details,
     };
-
+    
     const response = await fetch(`${supabaseUrl}/functions/v1/send-notification`, {
       method: 'POST',
       headers: {
@@ -110,26 +111,117 @@ async function sendCriticalAlert(
       },
       body: JSON.stringify(notificationPayload),
     });
-
+    
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[BOT_HEALTH] Failed to send notification: ${errorText}`);
+      console.error(`[HEALTH_MONITOR] Failed to send notification: ${errorText}`);
       return false;
     }
-
-    // Update cooldown tracker
-    lastAlertSent[userId] = now;
-    console.log(`[BOT_HEALTH] ✅ Critical alert sent to ${email} for user ${userId.substring(0, 8)}`);
+    
+    console.log(`[HEALTH_MONITOR] ✅ Alert sent to ${email}: ${alert.alertType}`);
     return true;
-
   } catch (error) {
-    console.error(`[BOT_HEALTH] Error sending critical alert:`, error);
+    console.error(`[HEALTH_MONITOR] Error sending alert:`, error);
     return false;
   }
 }
 
+// Check if we're within cooldown period for this alert type
+async function isWithinCooldown(
+  supabase: any,
+  userId: string,
+  alertType: string
+): Promise<boolean> {
+  const cooldownTime = new Date(Date.now() - ALERT_CONFIG.COOLDOWN_MINUTES * 60 * 1000);
+  
+  const { data: recentAlert } = await supabase
+    .from('bot_health_state')
+    .select('alert_sent_at')
+    .eq('user_id', userId)
+    .eq('state_type', alertType)
+    .eq('alert_sent', true)
+    .gte('alert_sent_at', cooldownTime.toISOString())
+    .order('alert_sent_at', { ascending: false })
+    .limit(1);
+  
+  return recentAlert && recentAlert.length > 0;
+}
+
+// Update or create state tracking record
+async function updateStateTracking(
+  supabase: any,
+  userId: string,
+  stateType: string,
+  state: string,
+  details: Record<string, unknown>
+): Promise<{ isNew: boolean; startedAt: string; durationHours: number }> {
+  const now = new Date().toISOString();
+  
+  // Check for existing active state
+  const { data: existingState } = await supabase
+    .from('bot_health_state')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('state_type', stateType)
+    .eq('state', state)
+    .is('resolved_at', null)
+    .single();
+  
+  if (existingState) {
+    // Update last_seen_at
+    await supabase
+      .from('bot_health_state')
+      .update({ last_seen_at: now, details })
+      .eq('id', existingState.id);
+    
+    const startedAt = new Date(existingState.started_at);
+    const durationHours = (Date.now() - startedAt.getTime()) / (1000 * 60 * 60);
+    
+    return { isNew: false, startedAt: existingState.started_at, durationHours };
+  }
+  
+  // Resolve any previous states of this type
+  await supabase
+    .from('bot_health_state')
+    .update({ resolved_at: now })
+    .eq('user_id', userId)
+    .eq('state_type', stateType)
+    .is('resolved_at', null);
+  
+  // Create new state
+  await supabase
+    .from('bot_health_state')
+    .insert({
+      user_id: userId,
+      state_type: stateType,
+      state,
+      started_at: now,
+      last_seen_at: now,
+      details,
+    });
+  
+  return { isNew: true, startedAt: now, durationHours: 0 };
+}
+
+// Mark alert as sent
+async function markAlertSent(
+  supabase: any,
+  userId: string,
+  stateType: string,
+  state: string
+): Promise<void> {
+  const now = new Date().toISOString();
+  
+  await supabase
+    .from('bot_health_state')
+    .update({ alert_sent: true, alert_sent_at: now })
+    .eq('user_id', userId)
+    .eq('state_type', stateType)
+    .eq('state', state)
+    .is('resolved_at', null);
+}
+
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -138,188 +230,213 @@ serve(async (req) => {
   const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  console.log('[BOT_HEALTH] Starting health check...');
+  console.log('[HEALTH_MONITOR] Starting 3-tier health check...');
 
   try {
     // Get all users with trading enabled
     const { data: riskParams, error: riskError } = await supabase
       .from('risk_parameters')
-      .select('user_id, is_trading_enabled, updated_at')
+      .select('user_id, is_trading_enabled')
       .eq('is_trading_enabled', true);
 
-    if (riskError) {
-      console.error('[BOT_HEALTH] Error fetching risk parameters:', riskError);
-      throw riskError;
-    }
+    if (riskError) throw riskError;
 
     if (!riskParams || riskParams.length === 0) {
-      console.log('[BOT_HEALTH] No users have trading enabled - skipping health check');
+      console.log('[HEALTH_MONITOR] No users have trading enabled');
       return new Response(
-        JSON.stringify({ 
-          status: 'skipped', 
-          message: 'No users have trading enabled',
-          usersChecked: 0 
-        }),
+        JSON.stringify({ status: 'skipped', message: 'No active traders', usersChecked: 0 }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const healthResults: Record<string, HealthStatus> = {};
-    const warningThreshold = new Date(Date.now() - HEALTH_CHECK_CONFIG.WARNING_THRESHOLD_MINUTES * 60 * 1000);
-    const criticalThreshold = new Date(Date.now() - HEALTH_CHECK_CONFIG.CRITICAL_THRESHOLD_MINUTES * 60 * 1000);
+    const results: HealthCheckResult[] = [];
+    let criticalCount = 0;
+    let warningCount = 0;
+    let alertsSentCount = 0;
 
     for (const user of riskParams) {
       const userId = user.user_id;
       const userIdShort = userId.substring(0, 8);
+      const alerts: AlertResult[] = [];
+      let overallStatus: 'healthy' | 'warning' | 'critical' = 'healthy';
 
-      // Check recent signals
-      const { data: recentSignals, error: signalError } = await supabase
-        .from('trading_signals')
-        .select('created_at')
-        .eq('user_id', userId)
-        .gte('created_at', criticalThreshold.toISOString())
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (signalError) {
-        console.error(`[BOT_HEALTH user=${userIdShort}] Error fetching signals:`, signalError);
-      }
-
-      // Check recent position opens
-      const { data: recentOpens, error: openError } = await supabase
-        .from('positions')
-        .select('opened_at')
-        .eq('user_id', userId)
-        .gte('opened_at', criticalThreshold.toISOString())
-        .order('opened_at', { ascending: false })
-        .limit(10);
-
-      if (openError) {
-        console.error(`[BOT_HEALTH user=${userIdShort}] Error fetching position opens:`, openError);
-      }
-
-      // Check recent position closes
-      const { data: recentCloses, error: closeError } = await supabase
-        .from('positions')
-        .select('closed_at')
-        .eq('user_id', userId)
-        .not('closed_at', 'is', null)
-        .gte('closed_at', criticalThreshold.toISOString())
-        .order('closed_at', { ascending: false })
-        .limit(10);
-
-      if (closeError) {
-        console.error(`[BOT_HEALTH user=${userIdShort}] Error fetching position closes:`, closeError);
-      }
-
-      // Check recent rejections (proves bot is running even if no signals generated)
-      const { data: recentRejections, error: rejectError } = await supabase
-        .from('signal_rejection_log')
-        .select('checked_at')
-        .eq('user_id', userId)
-        .gte('checked_at', criticalThreshold.toISOString())
-        .order('checked_at', { ascending: false })
-        .limit(10);
-
-      if (rejectError) {
-        console.error(`[BOT_HEALTH user=${userIdShort}] Error fetching rejections:`, rejectError);
-      }
-
-      // Calculate activity counts
-      const signalsCount = recentSignals?.length || 0;
-      const opensCount = recentOpens?.length || 0;
-      const closesCount = recentCloses?.length || 0;
-      const rejectionsCount = recentRejections?.length || 0;
-
-      // Find most recent activity timestamp
-      const allTimestamps: Date[] = [];
+      // ===== TIER 1: Check for missing heartbeat =====
+      const heartbeatThreshold = new Date(Date.now() - ALERT_CONFIG.HEARTBEAT_MISSING_MINUTES * 60 * 1000);
       
-      if (recentSignals?.length) {
-        allTimestamps.push(new Date(recentSignals[0].created_at));
-      }
-      if (recentOpens?.length) {
-        allTimestamps.push(new Date(recentOpens[0].opened_at));
-      }
-      if (recentCloses?.length) {
-        allTimestamps.push(new Date(recentCloses[0].closed_at));
-      }
-      if (recentRejections?.length) {
-        allTimestamps.push(new Date(recentRejections[0].checked_at));
-      }
+      const { data: latestHeartbeat } = await supabase
+        .from('bot_heartbeat')
+        .select('*')
+        .eq('user_id', userId)
+        .order('recorded_at', { ascending: false })
+        .limit(1);
 
-      let lastActivityMinutesAgo: number | null = null;
-      let status: 'healthy' | 'warning' | 'critical' = 'healthy';
-      let message = '';
+      let lastHeartbeatTime: Date | null = null;
+      let minutesSinceHeartbeat: number | null = null;
 
-      if (allTimestamps.length === 0) {
-        // No activity at all in the critical window
-        status = 'critical';
-        lastActivityMinutesAgo = null;
-        message = `🚨 CRITICAL: No bot activity detected in last ${HEALTH_CHECK_CONFIG.CRITICAL_THRESHOLD_MINUTES} minutes!`;
+      if (latestHeartbeat && latestHeartbeat.length > 0) {
+        lastHeartbeatTime = new Date(latestHeartbeat[0].recorded_at);
+        minutesSinceHeartbeat = Math.round((Date.now() - lastHeartbeatTime.getTime()) / (1000 * 60));
+        
+        if (lastHeartbeatTime < heartbeatThreshold) {
+          // TIER 1 ALERT: No heartbeat for 30+ minutes
+          overallStatus = 'critical';
+          
+          const withinCooldown = await isWithinCooldown(supabase, userId, 'heartbeat_missing');
+          if (!withinCooldown) {
+            const alert: AlertResult = {
+              alertType: 'heartbeat_missing',
+              severity: 'critical',
+              message: `Trading bot heartbeat missing for ${minutesSinceHeartbeat} minutes`,
+              details: {
+                lastActivityMinutesAgo: minutesSinceHeartbeat,
+                lastHeartbeat: latestHeartbeat[0].recorded_at,
+                signalsGenerated: latestHeartbeat[0].signals_generated,
+                rejectionsLogged: latestHeartbeat[0].rejections_logged,
+              },
+              alertSent: false,
+            };
+            
+            const sent = await sendHealthAlert(supabaseUrl, supabaseKey, userId, alert);
+            alert.alertSent = sent;
+            if (sent) {
+              alertsSentCount++;
+              await updateStateTracking(supabase, userId, 'heartbeat_missing', 'active', alert.details);
+              await markAlertSent(supabase, userId, 'heartbeat_missing', 'active');
+            }
+            alerts.push(alert);
+          }
+          
+          console.error(`[HEALTH_MONITOR user=${userIdShort}] 🚨 CRITICAL: No heartbeat for ${minutesSinceHeartbeat} min`);
+          criticalCount++;
+        }
       } else {
-        // Find the most recent timestamp
-        const mostRecent = new Date(Math.max(...allTimestamps.map(d => d.getTime())));
-        lastActivityMinutesAgo = Math.round((Date.now() - mostRecent.getTime()) / (60 * 1000));
+        // No heartbeat at all
+        overallStatus = 'critical';
+        console.error(`[HEALTH_MONITOR user=${userIdShort}] 🚨 CRITICAL: No heartbeat records found`);
+        criticalCount++;
+      }
 
-        if (mostRecent < criticalThreshold) {
-          status = 'critical';
-          message = `🚨 CRITICAL: Last activity was ${lastActivityMinutesAgo} minutes ago!`;
-        } else if (mostRecent < warningThreshold) {
-          status = 'warning';
-          message = `⚠️ WARNING: Last activity was ${lastActivityMinutesAgo} minutes ago`;
+      // ===== TIER 2: Check for prolonged no-trade state =====
+      if (latestHeartbeat && latestHeartbeat.length > 0) {
+        const currentState = latestHeartbeat[0].no_trade_state;
+        
+        if (currentState && currentState !== 'OPERATIONAL') {
+          // Track this state
+          const stateTracking = await updateStateTracking(
+            supabase, 
+            userId, 
+            'no_trade_state', 
+            currentState,
+            { 
+              reason: latestHeartbeat[0].no_trade_reason,
+              symbolsScanned: latestHeartbeat[0].symbols_scanned,
+            }
+          );
+          
+          // Check if state exceeds threshold
+          const threshold = ALERT_CONFIG.STATE_THRESHOLDS[currentState] || ALERT_CONFIG.DEFAULT_STATE_THRESHOLD_HOURS;
+          
+          if (stateTracking.durationHours >= threshold) {
+            if (overallStatus === 'healthy') overallStatus = 'warning';
+            
+            const withinCooldown = await isWithinCooldown(supabase, userId, `state_${currentState}`);
+            if (!withinCooldown) {
+              const alert: AlertResult = {
+                alertType: 'state_prolonged',
+                severity: 'warning',
+                message: `Bot stuck in ${currentState} for ${stateTracking.durationHours.toFixed(1)} hours`,
+                details: {
+                  state: currentState,
+                  reason: latestHeartbeat[0].no_trade_reason,
+                  startedAt: stateTracking.startedAt,
+                  durationHours: stateTracking.durationHours,
+                  threshold,
+                },
+                alertSent: false,
+              };
+              
+              const sent = await sendHealthAlert(supabaseUrl, supabaseKey, userId, alert);
+              alert.alertSent = sent;
+              if (sent) {
+                alertsSentCount++;
+                await markAlertSent(supabase, userId, 'no_trade_state', currentState);
+              }
+              alerts.push(alert);
+            }
+            
+            console.warn(`[HEALTH_MONITOR user=${userIdShort}] ⚠️ WARNING: ${currentState} for ${stateTracking.durationHours.toFixed(1)}h (threshold: ${threshold}h)`);
+            warningCount++;
+          }
+          
+          // ===== TIER 3: Check for OPERATIONAL_CONCERN =====
+          if (currentState === 'OPERATIONAL_CONCERN' && ALERT_CONFIG.OPERATIONAL_CONCERN_IMMEDIATE) {
+            overallStatus = 'critical';
+            
+            const withinCooldown = await isWithinCooldown(supabase, userId, 'operational_concern');
+            if (!withinCooldown) {
+              const alert: AlertResult = {
+                alertType: 'operational_concern',
+                severity: 'critical',
+                message: 'Bot running but producing no signals AND no rejections - check data feeds',
+                details: {
+                  symbolsScanned: latestHeartbeat[0].symbols_scanned,
+                  signalsGenerated: latestHeartbeat[0].signals_generated,
+                  rejectionsLogged: latestHeartbeat[0].rejections_logged,
+                  lastHeartbeat: latestHeartbeat[0].recorded_at,
+                },
+                alertSent: false,
+              };
+              
+              const sent = await sendHealthAlert(supabaseUrl, supabaseKey, userId, alert);
+              alert.alertSent = sent;
+              if (sent) {
+                alertsSentCount++;
+                await markAlertSent(supabase, userId, 'operational_concern', 'active');
+              }
+              alerts.push(alert);
+            }
+            
+            console.error(`[HEALTH_MONITOR user=${userIdShort}] 🚨 CRITICAL: OPERATIONAL_CONCERN - no signals AND no rejections`);
+            criticalCount++;
+          }
         } else {
-          status = 'healthy';
-          message = `✅ Healthy: Last activity ${lastActivityMinutesAgo} minutes ago`;
+          // State is OPERATIONAL - resolve any pending state alerts
+          await supabase
+            .from('bot_health_state')
+            .update({ resolved_at: new Date().toISOString() })
+            .eq('user_id', userId)
+            .eq('state_type', 'no_trade_state')
+            .is('resolved_at', null);
         }
       }
 
-      // Store result
-      const healthResult: HealthStatus = {
-        status,
-        lastActivityMinutesAgo,
-        signalsGenerated: signalsCount,
-        positionsOpened: opensCount,
-        positionsClosed: closesCount,
-        rejectionsLogged: rejectionsCount,
-        botEnabled: true,
-        message,
-      };
-
-      // Log based on status
-      if (status === 'critical') {
-        console.error(`[BOT_HEALTH user=${userIdShort}] ${message}`);
-        console.error(`[BOT_HEALTH user=${userIdShort}]    Activity in last ${HEALTH_CHECK_CONFIG.CRITICAL_THRESHOLD_MINUTES}min: signals=${signalsCount}, opens=${opensCount}, closes=${closesCount}, rejections=${rejectionsCount}`);
-        
-        // Send critical alert notification
-        if (HEALTH_CHECK_CONFIG.SEND_CRITICAL_ALERTS) {
-          const alertSent = await sendCriticalAlert(supabaseUrl, supabaseKey, userId, healthResult);
-          healthResult.alertSent = alertSent;
-        }
-        
-      } else if (status === 'warning') {
-        console.warn(`[BOT_HEALTH user=${userIdShort}] ${message}`);
-        if (HEALTH_CHECK_CONFIG.LOG_DETAILS) {
-          console.warn(`[BOT_HEALTH user=${userIdShort}]    Activity: signals=${signalsCount}, opens=${opensCount}, closes=${closesCount}, rejections=${rejectionsCount}`);
-        }
-      } else if (HEALTH_CHECK_CONFIG.LOG_HEALTHY) {
-        console.log(`[BOT_HEALTH user=${userIdShort}] ${message}`);
-        if (HEALTH_CHECK_CONFIG.LOG_DETAILS) {
-          console.log(`[BOT_HEALTH user=${userIdShort}]    Activity: signals=${signalsCount}, opens=${opensCount}, closes=${closesCount}, rejections=${rejectionsCount}`);
-        }
-      }
-
-      healthResults[userId] = healthResult;
+      results.push({
+        userId,
+        status: overallStatus,
+        lastHeartbeat: lastHeartbeatTime?.toISOString() || null,
+        minutesSinceHeartbeat,
+        currentState: latestHeartbeat?.[0]?.no_trade_state || null,
+        stateStartedAt: null,
+        stateDurationHours: null,
+        alerts,
+      });
     }
 
-    // Summary
-    const criticalCount = Object.values(healthResults).filter(r => r.status === 'critical').length;
-    const warningCount = Object.values(healthResults).filter(r => r.status === 'warning').length;
-    const healthyCount = Object.values(healthResults).filter(r => r.status === 'healthy').length;
-    const alertsSentCount = Object.values(healthResults).filter(r => r.alertSent === true).length;
+    // Cleanup old heartbeats (keep last 24 hours)
+    const cleanupThreshold = new Date(Date.now() - ALERT_CONFIG.HEARTBEAT_RETENTION_HOURS * 60 * 60 * 1000);
+    const { error: cleanupError } = await supabase
+      .from('bot_heartbeat')
+      .delete()
+      .lt('recorded_at', cleanupThreshold.toISOString());
+    
+    if (cleanupError) {
+      console.warn(`[HEALTH_MONITOR] Heartbeat cleanup failed: ${cleanupError.message}`);
+    }
 
+    const healthyCount = results.filter(r => r.status === 'healthy').length;
     const overallStatus = criticalCount > 0 ? 'critical' : warningCount > 0 ? 'warning' : 'healthy';
 
-    console.log(`[BOT_HEALTH] Summary: ${healthyCount} healthy, ${warningCount} warning, ${criticalCount} critical, ${alertsSentCount} alerts sent`);
+    console.log(`[HEALTH_MONITOR] Summary: ${healthyCount} healthy, ${warningCount} warning, ${criticalCount} critical, ${alertsSentCount} alerts sent`);
 
     return new Response(
       JSON.stringify({
@@ -332,17 +449,18 @@ serve(async (req) => {
           alertsSent: alertsSentCount,
         },
         thresholds: {
-          warningMinutes: HEALTH_CHECK_CONFIG.WARNING_THRESHOLD_MINUTES,
-          criticalMinutes: HEALTH_CHECK_CONFIG.CRITICAL_THRESHOLD_MINUTES,
+          heartbeatMissingMinutes: ALERT_CONFIG.HEARTBEAT_MISSING_MINUTES,
+          stateThresholds: ALERT_CONFIG.STATE_THRESHOLDS,
+          cooldownMinutes: ALERT_CONFIG.COOLDOWN_MINUTES,
         },
-        results: healthResults,
+        results,
         checkedAt: new Date().toISOString(),
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
-    console.error('[BOT_HEALTH] Health check failed:', error);
+    console.error('[HEALTH_MONITOR] Health check failed:', error);
     return new Response(
       JSON.stringify({ 
         status: 'error', 
