@@ -18,7 +18,7 @@ const corsHeaders = {
 };
 
 interface NotificationRequest {
-  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated' | 'bot_health_critical' | 'bot_health_warning';
+  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated' | 'bot_health_critical' | 'bot_health_warning' | 'websocket_failure';
   userId?: string;
   tradeId?: string;
   symbol?: string;
@@ -63,6 +63,12 @@ interface NotificationRequest {
   state?: string;
   durationHours?: number;
   threshold?: number;
+  // WebSocket failure fields
+  function?: string;
+  wsStatus?: string;
+  activeConnections?: number;
+  lastMessageAgoMs?: number;
+  wsError?: string;
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -263,6 +269,53 @@ const handler = async (req: Request): Promise<Response> => {
           </p>
         `;
         smsMessage = `⚠️ WARNING: Bot stuck in ${stateDisplay} for ${payload.durationHours?.toFixed(1) || '?'}h. Check market conditions.`;
+        break;
+
+      case 'websocket_failure':
+        const wsFunction = payload.function || 'unknown';
+        const wsStatus = payload.wsStatus || 'unknown';
+        const isCritical = wsStatus === 'unreachable';
+        const lastMsgAgo = payload.lastMessageAgoMs ? Math.round(payload.lastMessageAgoMs / 1000) : null;
+        
+        subject = isCritical 
+          ? `🚨 CRITICAL: WebSocket ${wsFunction} Unreachable`
+          : `⚠️ WARNING: WebSocket ${wsFunction} Degraded`;
+        
+        message = `
+          <h2>${isCritical ? '🚨' : '⚠️'} WebSocket Health Alert</h2>
+          <p style="font-size: 1.1em;">The <strong>${wsFunction}</strong> WebSocket function is experiencing issues.</p>
+          
+          <div style="background: ${isCritical ? '#fef2f2' : '#fef3c7'}; padding: 15px; border-radius: 8px; border-left: 4px solid ${isCritical ? '#ef4444' : '#f59e0b'}; margin: 20px 0;">
+            <h3 style="margin-top: 0; color: ${isCritical ? '#991b1b' : '#92400e'};">Status: ${wsStatus.toUpperCase()}</h3>
+            <p><strong>Function:</strong> ${wsFunction}</p>
+            <p><strong>Active Connections:</strong> ${payload.activeConnections ?? 'unknown'}</p>
+            ${lastMsgAgo !== null ? `<p><strong>Last Message:</strong> ${lastMsgAgo} seconds ago</p>` : ''}
+            ${payload.wsError ? `<p><strong>Error:</strong> ${payload.wsError}</p>` : ''}
+          </div>
+          
+          <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin-top: 15px;">
+            <h3 style="margin-top: 0;">What This Means</h3>
+            <ul>
+              <li><strong>Unreachable:</strong> The WebSocket function cannot be contacted - may need restart</li>
+              <li><strong>Degraded:</strong> The function is running but hasn't received data recently</li>
+            </ul>
+            <p>This affects <strong>real-time price updates</strong> in the UI, but does NOT affect trading (which uses separate data feeds).</p>
+          </div>
+          
+          <div style="background: #eff6ff; padding: 15px; border-radius: 8px; margin-top: 15px;">
+            <h3 style="margin-top: 0; color: #2563eb;">Recommended Actions</h3>
+            <ol>
+              <li>Check your dashboard - prices may be stale</li>
+              <li>Refresh the page to re-establish connection</li>
+              <li>If issue persists, check Supabase Edge Function logs</li>
+            </ol>
+          </div>
+          
+          <p style="margin-top: 20px; color: #6b7280; font-size: 0.9em;">
+            This alert triggers when WebSocket health checks fail. Trading continues via separate API calls.
+          </p>
+        `;
+        smsMessage = `${isCritical ? '🚨' : '⚠️'} WebSocket ${wsFunction} ${wsStatus}. Price updates may be stale.`;
         break;
     }
 

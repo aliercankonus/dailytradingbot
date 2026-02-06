@@ -14,6 +14,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Track active connections for health check
+let activeConnections = 0;
+let lastBinanceMessage = Date.now();
+let totalMessagesReceived = 0;
+let lastError: string | null = null;
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -21,6 +27,56 @@ serve(async (req) => {
 
   const { headers } = req;
   const upgradeHeader = headers.get("upgrade") || "";
+  
+  // ===== HEALTH CHECK ENDPOINT =====
+  // GET request without WebSocket upgrade = health check
+  if (req.method === 'GET' && upgradeHeader.toLowerCase() !== "websocket") {
+    const now = Date.now();
+    const timeSinceLastMessage = now - lastBinanceMessage;
+    const isHealthy = activeConnections === 0 || timeSinceLastMessage < 120000; // 2 min threshold
+    
+    // Log health heartbeat to DB
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL");
+      const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+      if (supabaseUrl && supabaseKey) {
+        const supabase = createClient(supabaseUrl, supabaseKey);
+        await supabase.from('bot_heartbeat').insert({
+          user_id: '00000000-0000-0000-0000-000000000001', // System user for realtime-prices
+          symbols_scanned: activeConnections,
+          signals_generated: totalMessagesReceived,
+          rejections_logged: 0,
+          no_trade_state: isHealthy ? 'WS_HEALTHY' : 'WS_STALE',
+          no_trade_reason: isHealthy 
+            ? `${activeConnections} active connections, ${totalMessagesReceived} messages` 
+            : `No messages for ${Math.round(timeSinceLastMessage / 1000)}s`,
+          details: {
+            function: 'realtime-prices',
+            activeConnections,
+            totalMessagesReceived,
+            timeSinceLastMessageMs: timeSinceLastMessage,
+            lastError,
+          },
+        });
+      }
+    } catch (e) {
+      logger.error(`Failed to log health: ${e}`);
+    }
+    
+    return new Response(JSON.stringify({
+      status: isHealthy ? 'healthy' : 'degraded',
+      function: 'realtime-prices',
+      activeConnections,
+      totalMessagesReceived,
+      lastMessageAgoMs: timeSinceLastMessage,
+      lastError,
+      checkedAt: new Date().toISOString(),
+    }), {
+      status: isHealthy ? 200 : 503,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+  
   if (upgradeHeader.toLowerCase() !== "websocket") {
     return new Response("Expected WebSocket connection", { status: 400 });
   }
@@ -121,6 +177,11 @@ serve(async (req) => {
       binanceSocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          
+          // Track message activity for health monitoring
+          lastBinanceMessage = Date.now();
+          totalMessagesReceived++;
+          
           // Parse using shared utility
           const formattedData = parseTickerMessage(data);
           if (formattedData && socket.readyState === WebSocket.OPEN) {
@@ -133,6 +194,7 @@ serve(async (req) => {
 
       binanceSocket.onerror = (error) => {
         logger.error(`Binance WebSocket error: ${error}`);
+        lastError = `Binance error at ${new Date().toISOString()}`;
       };
 
       binanceSocket.onclose = (event) => {
@@ -173,6 +235,7 @@ serve(async (req) => {
 
   socket.onopen = () => {
     logger.info("Client WebSocket connected");
+    activeConnections++;
     connectToBinance();
 
     heartbeatInterval = setInterval(() => {
@@ -195,6 +258,7 @@ serve(async (req) => {
 
   socket.onclose = () => {
     logger.info("Client WebSocket disconnected - cleaning up resources");
+    activeConnections = Math.max(0, activeConnections - 1);
     if (binanceSocket) {
       if (binanceSocket.readyState === WebSocket.OPEN || binanceSocket.readyState === WebSocket.CONNECTING) {
         binanceSocket.close();
