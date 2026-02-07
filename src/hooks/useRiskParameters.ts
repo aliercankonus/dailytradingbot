@@ -53,6 +53,9 @@ export interface RiskParameters {
   min_hold_time_minutes: number;
   // AI Analysis Toggle
   ai_analysis_enabled: boolean;
+  // Email notifications
+  notification_email: string | null;
+  email_notifications_enabled: boolean;
   updated_at: string;
   // Smart Trading Settings (Phase 1-7)
   regime_aware_trading: boolean;
