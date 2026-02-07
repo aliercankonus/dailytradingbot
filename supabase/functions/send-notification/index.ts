@@ -91,11 +91,24 @@ const handler = async (req: Request): Promise<Response> => {
     const payload: NotificationRequest = await req.json();
     console.log('Notification request:', payload);
 
-    // Get notification preferences
-    const { data: riskParams } = await supabase
+    // Get notification preferences (email and SMS)
+    const { data: riskParams, error: riskError } = await supabase
       .from('risk_parameters')
-      .select('notification_phone, sms_notifications_enabled')
+      .select('notification_email, email_notifications_enabled, notification_phone, sms_notifications_enabled')
       .single();
+    
+    if (riskError) {
+      console.error('Failed to fetch risk_parameters:', riskError);
+    }
+    
+    // Check if email notifications are enabled and email is configured
+    if (!riskParams?.email_notifications_enabled) {
+      console.log('Email notifications are disabled, skipping email');
+    }
+    
+    if (!riskParams?.notification_email) {
+      console.warn('No notification_email configured in risk_parameters - email will not be sent');
+    }
 
     let subject = '';
     let message = '';
@@ -411,38 +424,48 @@ const handler = async (req: Request): Promise<Response> => {
         break;
     }
 
-    // Default email if not provided
-    const emailTo = payload.email || 'trader@example.com';
-
-    // Send email notification
-    const emailResponse = await resend.emails.send({
-      from: "Trading Bot <onboarding@resend.dev>",
-      to: [emailTo],
-      subject: subject,
-      html: `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <style>
-              body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-              h2 { color: #2563eb; }
-              .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #666; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              ${message}
-              <div class="footer">
-                <p>This is an automated notification from your Trading Bot. Trade ID: ${payload.tradeId}</p>
-              </div>
-            </div>
-          </body>
-        </html>
-      `,
-    });
-
-    console.log('Email sent:', emailResponse);
+    // Determine email recipient - prioritize payload.email, then risk_parameters notification_email
+    const emailTo = payload.email || riskParams?.notification_email;
+    
+    let emailResponse: any = null;
+    
+    // Only send email if we have a valid recipient AND email notifications are enabled
+    if (emailTo && riskParams?.email_notifications_enabled !== false) {
+      try {
+        emailResponse = await resend.emails.send({
+          from: "Trading Bot <onboarding@resend.dev>",
+          to: [emailTo],
+          subject: subject,
+          html: `
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <style>
+                  body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                  .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                  h2 { color: #2563eb; }
+                  .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #666; }
+                </style>
+              </head>
+              <body>
+                <div class="container">
+                  ${message}
+                  <div class="footer">
+                    <p>This is an automated notification from your Trading Bot. Trade ID: ${payload.tradeId}</p>
+                  </div>
+                </div>
+              </body>
+            </html>
+          `,
+        });
+        console.log('Email sent successfully to:', emailTo, emailResponse);
+      } catch (emailError) {
+        console.error('Failed to send email to:', emailTo, emailError);
+        // Continue with SMS even if email fails
+      }
+    } else {
+      console.warn('Email not sent - no recipient configured or notifications disabled. emailTo:', emailTo, 'email_notifications_enabled:', riskParams?.email_notifications_enabled);
+    }
 
     // Send SMS notification for critical events (stop loss, take profit, strategy rotation, bot health critical, credential errors)
     // Only send SMS for credential errors in binance_api_error (most critical)
