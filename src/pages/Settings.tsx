@@ -28,6 +28,7 @@ export default function Settings() {
     binanceApiKey: '',
     binanceApiSecret: '',
     notificationPhone: riskParams?.notification_phone || '',
+    notificationEmail: '',
   });
 
   const [hasEncryptedKeys, setHasEncryptedKeys] = useState(false);
@@ -370,36 +371,114 @@ export default function Settings() {
               <h2 className="text-xl font-semibold">Notifications</h2>
             </div>
             
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Configure SMS notifications for important trading events.
-              </p>
-              
-              <div className="flex items-center justify-between p-4 border rounded-lg">
-                <div className="space-y-1">
-                  <div className="font-medium">SMS Notifications</div>
-                  <p className="text-sm text-muted-foreground">
-                    Receive text alerts for critical trading events
-                  </p>
+            <div className="space-y-6">
+              {/* Email Notifications */}
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Configure email notifications for trading events and alerts.
+                </p>
+                
+                <div className="flex items-center justify-between p-4 border rounded-lg">
+                  <div className="space-y-1">
+                    <div className="font-medium">Email Notifications</div>
+                    <p className="text-sm text-muted-foreground">
+                      Receive email alerts for trades and API errors
+                    </p>
+                  </div>
+                  <Switch
+                    checked={riskParams?.email_notifications_enabled ?? true}
+                    onCheckedChange={async (enabled) => {
+                      try {
+                        await updateRiskParameters({ email_notifications_enabled: enabled });
+                        toast({
+                          title: enabled ? "Email Notifications Enabled" : "Email Notifications Disabled",
+                          description: enabled 
+                            ? "You'll receive email alerts for trading events" 
+                            : "Email alerts are now disabled",
+                        });
+                      } catch (error) {
+                        toast({
+                          title: "Error",
+                          description: "Failed to update email settings",
+                          variant: "destructive",
+                        });
+                      }
+                    }}
+                  />
                 </div>
-                <Switch
-                  checked={riskParams?.sms_notifications_enabled ?? true}
-                  onCheckedChange={handleToggleSmsNotifications}
-                />
+
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email Address for Notifications</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={formData.notificationEmail || riskParams?.notification_email || ''}
+                    onChange={(e) => setFormData({ ...formData, notificationEmail: e.target.value })}
+                    placeholder="your-email@example.com"
+                  />
+                  <Button 
+                    onClick={async () => {
+                      if (!formData.notificationEmail) {
+                        toast({
+                          title: "Missing Email",
+                          description: "Please enter an email address",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+                      try {
+                        await updateRiskParameters({ notification_email: formData.notificationEmail });
+                        toast({
+                          title: "Email Updated",
+                          description: "Your notification email has been saved",
+                        });
+                      } catch (error) {
+                        toast({
+                          title: "Error",
+                          description: "Failed to update email",
+                          variant: "destructive",
+                        });
+                      }
+                    }} 
+                    className="w-full"
+                  >
+                    Save Email Address
+                  </Button>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="phone">Phone Number for SMS</Label>
-                <Input
-                  id="phone"
-                  type="tel"
-                  value={formData.notificationPhone}
-                  onChange={(e) => setFormData({ ...formData, notificationPhone: e.target.value })}
-                  placeholder="+1234567890"
-                />
-                <Button onClick={handleSavePhoneNumber} className="w-full">
-                  Save Phone Number
-                </Button>
+              <div className="border-t pt-4">
+                {/* SMS Notifications */}
+                <p className="text-sm text-muted-foreground mb-4">
+                  Configure SMS notifications for critical trading events.
+                </p>
+                
+                <div className="flex items-center justify-between p-4 border rounded-lg">
+                  <div className="space-y-1">
+                    <div className="font-medium">SMS Notifications</div>
+                    <p className="text-sm text-muted-foreground">
+                      Receive text alerts for critical trading events
+                    </p>
+                  </div>
+                  <Switch
+                    checked={riskParams?.sms_notifications_enabled ?? true}
+                    onCheckedChange={handleToggleSmsNotifications}
+                  />
+                </div>
+
+                <div className="space-y-2 mt-4">
+                  <Label htmlFor="phone">Phone Number for SMS</Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    value={formData.notificationPhone}
+                    onChange={(e) => setFormData({ ...formData, notificationPhone: e.target.value })}
+                    placeholder="+1234567890"
+                  />
+                  <Button onClick={handleSavePhoneNumber} className="w-full">
+                    Save Phone Number
+                  </Button>
+                </div>
               </div>
             </div>
           </Card>
