@@ -12,17 +12,35 @@ const ALERT_CONFIG = {
   HEARTBEAT_MISSING_MINUTES: 30,
   
   // TIER 2: WARNING - State persistence thresholds (hours)
+  // These only apply when rejections_logged === 0 (bot stuck, not actively working)
   STATE_THRESHOLDS: {
-    EXTREME_OVERBOUGHT: 6,
-    EXTREME_OVERSOLD: 6,
-    COUNTER_TREND_ONLY: 8,
-    NO_ENERGY: 8,
-    MIXED_BLOCK: 12,
-    PULLBACK_WAITING: 10,
+    EXTREME_OVERBOUGHT: 24,  // Extended: 24h is acceptable if actively rejecting
+    EXTREME_OVERSOLD: 24,
+    COUNTER_TREND_ONLY: 24,
+    NO_ENERGY: 24,
+    MIXED_BLOCK: 48,         // Extended: Very common in ranging markets
+    PULLBACK_WAITING: 24,
+    ADX_TOO_LOW: 48,         // Extended: Low volatility periods can last days
+    NO_CLEAR_DIRECTION: 48,
   } as Record<string, number>,
-  DEFAULT_STATE_THRESHOLD_HOURS: 12,
+  DEFAULT_STATE_THRESHOLD_HOURS: 24,
+  
+  // STRATEGIC REJECTION STATES - These are HEALTHY when rejections are logged
+  // The bot is working correctly, just no good setups available
+  HEALTHY_REJECTION_STATES: [
+    'MIXED_BLOCK',
+    'ADX_TOO_LOW', 
+    'NO_ENERGY',
+    'NO_CLEAR_DIRECTION',
+    'EXTREME_OVERBOUGHT',
+    'EXTREME_OVERSOLD',
+    'COUNTER_TREND_ONLY',
+    'PULLBACK_WAITING',
+    'HTF_NOT_ALIGNED',
+  ],
   
   // TIER 3: CRITICAL - Operational concern (immediate)
+  // Only triggers when 0 signals AND 0 rejections (bot truly stuck)
   OPERATIONAL_CONCERN_IMMEDIATE: true,
   
   // TIER 4: WebSocket health check
@@ -31,7 +49,7 @@ const ALERT_CONFIG = {
   WEBSOCKET_FUNCTIONS: ['realtime-market-data', 'realtime-prices'] as string[],
   
   // Alert cooldown (prevent spam)
-  COOLDOWN_MINUTES: 60,
+  COOLDOWN_MINUTES: 120, // Increased from 60 to reduce noise
   
   // Heartbeat retention (cleanup old records)
   HEARTBEAT_RETENTION_HOURS: 24,
@@ -416,85 +434,119 @@ serve(async (req) => {
       // ===== TIER 2: Check for prolonged no-trade state =====
       if (latestHeartbeat && latestHeartbeat.length > 0) {
         const currentState = latestHeartbeat[0].no_trade_state;
+        const rejectionsLogged = latestHeartbeat[0].rejections_logged || 0;
+        const signalsGenerated = latestHeartbeat[0].signals_generated || 0;
+        
+        // Check if this is a "healthy rejection" state - bot is working, just no setups
+        const isHealthyRejectionState = ALERT_CONFIG.HEALTHY_REJECTION_STATES.includes(currentState);
+        const hasActiveRejections = rejectionsLogged > 0;
         
         if (currentState && currentState !== 'OPERATIONAL') {
-          // Track this state
-          const stateTracking = await updateStateTracking(
-            supabase, 
-            userId, 
-            'no_trade_state', 
-            currentState,
-            { 
-              reason: latestHeartbeat[0].no_trade_reason,
-              symbolsScanned: latestHeartbeat[0].symbols_scanned,
-            }
-          );
-          
-          // Check if state exceeds threshold
-          const threshold = ALERT_CONFIG.STATE_THRESHOLDS[currentState] || ALERT_CONFIG.DEFAULT_STATE_THRESHOLD_HOURS;
-          
-          if (stateTracking.durationHours >= threshold) {
-            if (overallStatus === 'healthy') overallStatus = 'warning';
+          // If rejections are being logged, the bot is WORKING - it's just that market conditions
+          // don't meet entry criteria. This is healthy behavior.
+          if (isHealthyRejectionState && hasActiveRejections) {
+            console.log(`[HEALTH_MONITOR user=${userIdShort}] ✅ HEALTHY: ${currentState} with ${rejectionsLogged} rejections (bot actively filtering)`);
             
-            const withinCooldown = await isWithinCooldown(supabase, userId, `state_${currentState}`);
-            if (!withinCooldown) {
-              const alert: AlertResult = {
-                alertType: 'state_prolonged',
-                severity: 'warning',
-                message: `Bot stuck in ${currentState} for ${stateTracking.durationHours.toFixed(1)} hours`,
-                details: {
-                  state: currentState,
-                  reason: latestHeartbeat[0].no_trade_reason,
-                  startedAt: stateTracking.startedAt,
-                  durationHours: stateTracking.durationHours,
-                  threshold,
-                },
-                alertSent: false,
-              };
-              
-              const sent = await sendHealthAlert(supabaseUrl, supabaseKey, userId, alert);
-              alert.alertSent = sent;
-              if (sent) {
-                alertsSentCount++;
-                await markAlertSent(supabase, userId, 'no_trade_state', currentState);
+            // Resolve any pending state alerts since bot is working correctly
+            await supabase
+              .from('bot_health_state')
+              .update({ resolved_at: new Date().toISOString() })
+              .eq('user_id', userId)
+              .eq('state_type', 'no_trade_state')
+              .is('resolved_at', null);
+          } else {
+            // Track this state - only alert if bot is truly stuck (no rejections)
+            const stateTracking = await updateStateTracking(
+              supabase, 
+              userId, 
+              'no_trade_state', 
+              currentState,
+              { 
+                reason: latestHeartbeat[0].no_trade_reason,
+                symbolsScanned: latestHeartbeat[0].symbols_scanned,
+                rejectionsLogged,
+                signalsGenerated,
               }
-              alerts.push(alert);
-            }
+            );
             
-            console.warn(`[HEALTH_MONITOR user=${userIdShort}] ⚠️ WARNING: ${currentState} for ${stateTracking.durationHours.toFixed(1)}h (threshold: ${threshold}h)`);
-            warningCount++;
+            // Check if state exceeds threshold AND no rejections are being logged
+            const threshold = ALERT_CONFIG.STATE_THRESHOLDS[currentState] || ALERT_CONFIG.DEFAULT_STATE_THRESHOLD_HOURS;
+            
+            // Only alert if: duration exceeded AND no rejections (truly stuck)
+            if (stateTracking.durationHours >= threshold && !hasActiveRejections) {
+              if (overallStatus === 'healthy') overallStatus = 'warning';
+              
+              const withinCooldown = await isWithinCooldown(supabase, userId, `state_${currentState}`);
+              if (!withinCooldown) {
+                const alert: AlertResult = {
+                  alertType: 'state_prolonged',
+                  severity: 'warning',
+                  message: `Bot stuck in ${currentState} for ${stateTracking.durationHours.toFixed(1)} hours with NO rejections logged`,
+                  details: {
+                    state: currentState,
+                    reason: latestHeartbeat[0].no_trade_reason,
+                    startedAt: stateTracking.startedAt,
+                    durationHours: stateTracking.durationHours,
+                    threshold,
+                    rejectionsLogged,
+                    signalsGenerated,
+                  },
+                  alertSent: false,
+                };
+                
+                const sent = await sendHealthAlert(supabaseUrl, supabaseKey, userId, alert);
+                alert.alertSent = sent;
+                if (sent) {
+                  alertsSentCount++;
+                  await markAlertSent(supabase, userId, 'no_trade_state', currentState);
+                }
+                alerts.push(alert);
+              }
+              
+              console.warn(`[HEALTH_MONITOR user=${userIdShort}] ⚠️ WARNING: ${currentState} for ${stateTracking.durationHours.toFixed(1)}h with 0 rejections (threshold: ${threshold}h)`);
+              warningCount++;
+            } else if (stateTracking.durationHours >= threshold && hasActiveRejections) {
+              // State duration exceeded but rejections are being logged - this is fine
+              console.log(`[HEALTH_MONITOR user=${userIdShort}] ✅ OK: ${currentState} for ${stateTracking.durationHours.toFixed(1)}h but ${rejectionsLogged} rejections logged (bot working)`);
+            }
           }
           
           // ===== TIER 3: Check for OPERATIONAL_CONCERN =====
+          // Only trigger if 0 signals AND 0 rejections - bot truly stuck
           if (currentState === 'OPERATIONAL_CONCERN' && ALERT_CONFIG.OPERATIONAL_CONCERN_IMMEDIATE) {
-            overallStatus = 'critical';
-            
-            const withinCooldown = await isWithinCooldown(supabase, userId, 'operational_concern');
-            if (!withinCooldown) {
-              const alert: AlertResult = {
-                alertType: 'operational_concern',
-                severity: 'critical',
-                message: 'Bot running but producing no signals AND no rejections - check data feeds',
-                details: {
-                  symbolsScanned: latestHeartbeat[0].symbols_scanned,
-                  signalsGenerated: latestHeartbeat[0].signals_generated,
-                  rejectionsLogged: latestHeartbeat[0].rejections_logged,
-                  lastHeartbeat: latestHeartbeat[0].recorded_at,
-                },
-                alertSent: false,
-              };
+            // Double-check: only alert if BOTH are zero
+            if (signalsGenerated === 0 && rejectionsLogged === 0) {
+              overallStatus = 'critical';
               
-              const sent = await sendHealthAlert(supabaseUrl, supabaseKey, userId, alert);
-              alert.alertSent = sent;
-              if (sent) {
-                alertsSentCount++;
-                await markAlertSent(supabase, userId, 'operational_concern', 'active');
+              const withinCooldown = await isWithinCooldown(supabase, userId, 'operational_concern');
+              if (!withinCooldown) {
+                const alert: AlertResult = {
+                  alertType: 'operational_concern',
+                  severity: 'critical',
+                  message: 'Bot running but producing no signals AND no rejections - possible data feed issue',
+                  details: {
+                    symbolsScanned: latestHeartbeat[0].symbols_scanned,
+                    signalsGenerated,
+                    rejectionsLogged,
+                    lastHeartbeat: latestHeartbeat[0].recorded_at,
+                  },
+                  alertSent: false,
+                };
+                
+                const sent = await sendHealthAlert(supabaseUrl, supabaseKey, userId, alert);
+                alert.alertSent = sent;
+                if (sent) {
+                  alertsSentCount++;
+                  await markAlertSent(supabase, userId, 'operational_concern', 'active');
+                }
+                alerts.push(alert);
               }
-              alerts.push(alert);
+              
+              console.error(`[HEALTH_MONITOR user=${userIdShort}] 🚨 CRITICAL: OPERATIONAL_CONCERN - 0 signals AND 0 rejections`);
+              criticalCount++;
+            } else {
+              console.log(`[HEALTH_MONITOR user=${userIdShort}] ✅ OPERATIONAL_CONCERN resolved: ${signalsGenerated} signals, ${rejectionsLogged} rejections`);
             }
-            
-            console.error(`[HEALTH_MONITOR user=${userIdShort}] 🚨 CRITICAL: OPERATIONAL_CONCERN - no signals AND no rejections`);
-            criticalCount++;
           }
         } else {
           // State is OPERATIONAL - resolve any pending state alerts
