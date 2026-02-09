@@ -4906,7 +4906,8 @@ serve(async (req) => {
         
         // ============= PHASE 11: TREND EXHAUSTION PROTECTION =============
         // Expert insight: "ADX declining + weak trend strength = exhausted trend"
-        // Block entries when trend is running out of steam (AVAXUSDT losses at 19:20)
+        // Block CONTINUATION entries when trend is running out of steam (AVAXUSDT losses at 19:20)
+        // BUT ALLOW reversal/counter-trend entries - exhaustion is a SETUP for reversals
         if (TREND_EXHAUSTION_PROTECTION.ENABLED) {
           // Calculate trend strength from timeframe confidences (0-100 scale)
           // Uses 4h and 1h confidence weighted average as proxy for trend strength
@@ -4918,44 +4919,72 @@ serve(async (req) => {
           const weakTrendStrength = trendStrength < TREND_EXHAUSTION_PROTECTION.TREND_STRENGTH_THRESHOLD;
           const adxWasMeaningful = adx >= TREND_EXHAUSTION_PROTECTION.MIN_ADX_FOR_CHECK;
           
+          // Get the prior trend direction to determine if entry is continuation or reversal
+          const trend4h = trendData.timeframes?.['4h']?.trend ?? "neutral";
+          const trend1h = trendData.timeframes?.['1h']?.trend ?? "neutral";
+          const priorTrendBullish = trend4h === "bullish" || (trend4h === "neutral" && trend1h === "bullish");
+          const priorTrendBearish = trend4h === "bearish" || (trend4h === "neutral" && trend1h === "bearish");
+          
+          // Is this a continuation entry (same direction as exhausting trend)?
+          const isContinuationEntry = 
+            (derivedDirection === 'long' && priorTrendBullish) ||
+            (derivedDirection === 'short' && priorTrendBearish);
+          
+          // Is this a reversal/counter-trend entry (opposite direction)?
+          const isReversalEntry = 
+            (derivedDirection === 'long' && priorTrendBearish) ||
+            (derivedDirection === 'short' && priorTrendBullish);
+          
           if (adxDeclining && weakTrendStrength && adxWasMeaningful) {
-            if (TREND_EXHAUSTION_PROTECTION.REDUCE_POSITION_INSTEAD_OF_BLOCK) {
-              // Reduce position instead of blocking
-              const exhaustionMultiplier = TREND_EXHAUSTION_PROTECTION.EXHAUSTION_POSITION_MULTIPLIER;
-              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ TREND_EXHAUSTION: ADX=${adx.toFixed(1)} declining (slope=${adxSlope.toFixed(2)}), trendStrength=${trendStrength}% - position reduced to ${(exhaustionMultiplier * 100).toFixed(0)}%`);
-            } else {
-              // Block entry entirely
-              rejectedByHardGates++;
-              const blockMsg = `ADX=${adx.toFixed(1)} declining (slope=${adxSlope.toFixed(2)}) with weak trend strength (${trendStrength}%)`;
-              perSymbolGateAttribution.set(symbol, { gate: 'TREND_EXHAUSTION_PROTECTION', details: blockMsg });
-              
-              if (TREND_EXHAUSTION_PROTECTION.LOG_BLOCKS) {
-                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 TREND_EXHAUSTION_GATE: ${blockMsg}`);
-                logger.forSymbol(symbol).warn(`   → Trend is exhausted - blocking entry to prevent losses like AVAXUSDT at 19:20`);
+            // KEY INSIGHT: Only block CONTINUATION entries
+            // Reversal entries should be ALLOWED when trend is exhausted (that's the setup!)
+            if (isContinuationEntry) {
+              if (TREND_EXHAUSTION_PROTECTION.REDUCE_POSITION_INSTEAD_OF_BLOCK) {
+                // Reduce position instead of blocking
+                const exhaustionMultiplier = TREND_EXHAUSTION_PROTECTION.EXHAUSTION_POSITION_MULTIPLIER;
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ TREND_EXHAUSTION: ADX=${adx.toFixed(1)} declining (slope=${adxSlope.toFixed(2)}), trendStrength=${trendStrength}% - position reduced to ${(exhaustionMultiplier * 100).toFixed(0)}%`);
+              } else {
+                // Block continuation entry entirely
+                rejectedByHardGates++;
+                const blockMsg = `ADX=${adx.toFixed(1)} declining (slope=${adxSlope.toFixed(2)}) with weak trend strength (${trendStrength}%)`;
+                perSymbolGateAttribution.set(symbol, { gate: 'TREND_EXHAUSTION_PROTECTION', details: blockMsg });
+                
+                if (TREND_EXHAUSTION_PROTECTION.LOG_BLOCKS) {
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 TREND_EXHAUSTION_GATE: ${blockMsg}`);
+                  logger.forSymbol(symbol).warn(`   → Trend is exhausted - blocking CONTINUATION ${derivedDirection} entry (prior trend: ${trend4h}/${trend1h})`);
+                }
+                
+                await logRejectionWithAI(
+                  supabase, userId, symbol,
+                  `TREND_EXHAUSTION_PROTECTION: ${blockMsg}`,
+                  {
+                    gate: "TREND_EXHAUSTION_PROTECTION",
+                    derivedDirection,
+                    direction: derivedDirection,
+                    adx: adx.toFixed(1),
+                    adxSlope: adxSlope.toFixed(2),
+                    trendStrength,
+                    priorTrend4h: trend4h,
+                    priorTrend1h: trend1h,
+                    isContinuationEntry: true,
+                    thresholds: {
+                      adxSlopeDeclineThreshold: TREND_EXHAUSTION_PROTECTION.ADX_SLOPE_DECLINE_THRESHOLD,
+                      trendStrengthThreshold: TREND_EXHAUSTION_PROTECTION.TREND_STRENGTH_THRESHOLD,
+                      minAdxForCheck: TREND_EXHAUSTION_PROTECTION.MIN_ADX_FOR_CHECK,
+                    }
+                  },
+                  trendData,
+                  riskParams.ai_analysis_enabled !== false,
+                  earlyOrderFlowAnalysis
+                );
+                continue;
               }
-              
-              await logRejectionWithAI(
-                supabase, userId, symbol,
-                `TREND_EXHAUSTION_PROTECTION: ${blockMsg}`,
-                {
-                  gate: "TREND_EXHAUSTION_PROTECTION",
-                  derivedDirection,
-                  direction: derivedDirection,
-                  adx: adx.toFixed(1),
-                  adxSlope: adxSlope.toFixed(2),
-                  trendStrength,
-                  thresholds: {
-                    adxSlopeDeclineThreshold: TREND_EXHAUSTION_PROTECTION.ADX_SLOPE_DECLINE_THRESHOLD,
-                    trendStrengthThreshold: TREND_EXHAUSTION_PROTECTION.TREND_STRENGTH_THRESHOLD,
-                    minAdxForCheck: TREND_EXHAUSTION_PROTECTION.MIN_ADX_FOR_CHECK,
-                  }
-                },
-                trendData,
-                riskParams.ai_analysis_enabled !== false,
-                earlyOrderFlowAnalysis
-              );
-              continue;
+            } else if (isReversalEntry) {
+              // ALLOW reversal entries but log for transparency
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ TREND_EXHAUSTION_BYPASS: Allowing REVERSAL ${derivedDirection} entry (prior trend exhausted: ${trend4h}/${trend1h})`);
+              logger.forSymbol(symbol).info(`   → ADX=${adx.toFixed(1)} declining (slope=${adxSlope.toFixed(2)}), trendStrength=${trendStrength}% - reversal setup`);
             }
+            // If neither continuation nor reversal (neutral prior trend), allow with reduced position
           }
         }
         

@@ -4300,12 +4300,15 @@ export const deriveTradeDirection = (
   // NEW: Also skip if Tier 9.5 already fired
   let tier10Fired = false;  // Flag to track if Tier 10 fires (blocks Tier 11)
   
-  // FIX #5: Guard against Tier 10 firing when Tier 0.5 already processed the same momentum+OF evidence
-  // If Tier 0.5 evaluated but didn't fire (score too low or StochRSI blocking), we should NOT 
-  // let Tier 10 re-evaluate the same evidence with lower thresholds
-  const tier10BlockedByTier05 = tier05Evaluated && !tier05Blocked;  // Only block if 0.5 ran scoring (not if it was 30m-blocked)
+  // FIX #5 (REVISED): Only block Tier 10 if Tier 0.5 actually SUCCEEDED (returned a direction)
+  // Previous logic was too aggressive - blocking Tier 10 when Tier 0.5 merely evaluated but FAILED
+  // This caused deadlock: Tier 0.5 fails (score too low) → blocks Tier 10 → NO_CLEAR_DIRECTION
+  // NEW LOGIC: Tier 10 is ONLY blocked if we already returned a direction from an earlier tier
+  // Since we're still executing here, no earlier tier succeeded - allow Tier 10 to run
+  // The tier05Evaluated flag is now ONLY used for logging, not blocking
+  // NOTE: Tier 9.5 blocking is still active (tier95Fired) - that tier DID return a direction
   
-  if (MOMENTUM_FALLBACK_DIRECTION_PARAMS.ENABLED && !tier10BlockedByTier05) {
+  if (MOMENTUM_FALLBACK_DIRECTION_PARAMS.ENABLED) {
     const P = MOMENTUM_FALLBACK_DIRECTION_PARAMS;
     
     // Get momentum data from trendData
@@ -4431,9 +4434,95 @@ export const deriveTradeDirection = (
         }
       }
     }
-  } else if (tier10BlockedByTier05) {
-    // FIX #5: Log that Tier 10 was skipped because Tier 0.5 already evaluated
-    reasons.push(`TIER 10 SKIPPED (FIX #5): Tier 0.5 already evaluated momentum+OF evidence (score=${tier05Score}) - preventing double-dip`);
+    
+    // ============= TIER 10.5: STRONG ORDER FLOW OVERRIDE =============
+    // NEW: When order flow is VERY strong (>= 65) and momentum is only moderate (not extreme),
+    // use order flow direction. This catches scenarios like:
+    // - momentum=-33 (bearish), order_flow=70 (strong buy) → derive LONG
+    // Order flow is more leading than momentum score in neutral/ranging markets
+    const STRONG_OF_OVERRIDE_THRESHOLD = 65;
+    const EXTREME_MOMENTUM_THRESHOLD = 45;  // Only override if momentum isn't extreme
+    const tier105OfScore = orderFlowData?.score ?? 0;
+    const tier105OfSignal = orderFlowData?.signal?.toLowerCase() ?? "";
+    const tier105OfBullish = tier105OfSignal.includes("buy") || tier105OfSignal === "bullish";
+    const tier105OfBearish = tier105OfSignal.includes("sell") || tier105OfSignal === "bearish";
+    const tier105MomentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+    const tier105AbsMomentum = Math.abs(tier105MomentumScore);
+    
+    // Order flow must be strong AND momentum must be only moderate (not extreme)
+    // This prevents overriding a -60 momentum (extreme bearish) with +70 order flow
+    const ofIsStrongBullish = tier105OfBullish && tier105OfScore >= STRONG_OF_OVERRIDE_THRESHOLD;
+    const ofIsStrongBearish = tier105OfBearish && tier105OfScore >= STRONG_OF_OVERRIDE_THRESHOLD;
+    const momentumNotExtreme = tier105AbsMomentum < EXTREME_MOMENTUM_THRESHOLD;
+    
+    // Additional safety: StochRSI should not be at extreme that contradicts OF direction
+    const stochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
+    const stochAllowsLong = stochK < 90;  // Not deeply overbought
+    const stochAllowsShort = stochK > 10; // Not deeply oversold
+    
+    if (ofIsStrongBullish && momentumNotExtreme && stochAllowsLong) {
+      tier10Fired = true;
+      const ofConfidence = Math.min(60, 50 + (ofScore - 50) * 0.3);
+      const ofPosition = 0.55;  // Conservative 55% position
+      
+      reasons.push(`TIER 10.5 ORDER FLOW OVERRIDE → LONG: OF score=${tier105OfScore.toFixed(0)} (${tier105OfSignal}) overrides moderate momentum (${tier105MomentumScore.toFixed(0)})`);
+      reasons.push(`Conditions: OF >= ${STRONG_OF_OVERRIDE_THRESHOLD}, |momentum|=${tier105AbsMomentum.toFixed(0)} < ${EXTREME_MOMENTUM_THRESHOLD}, StochK=${stochK.toFixed(0)} < 90`);
+      reasons.push(`Confidence: ${ofConfidence.toFixed(0)}% | Position: ${(ofPosition * 100).toFixed(0)}%`);
+      
+      return {
+        direction: "long",
+        confidence: ofConfidence,
+        source: "order-flow-override",
+        reasons,
+        positionSizeMultiplier: ofPosition,
+        isOrderFlowOverride: true,
+        regime,
+        directionContext: createDirectionContext("long", {
+          evidenceType: 'ORDER_FLOW',
+          tier: 10.5,
+          tierSource: 'TIER_10.5_ORDER_FLOW_OVERRIDE_LONG',
+          confidence: ofConfidence,
+          positionMultiplier: ofPosition,
+          isCounterTrend: tier105MomentumScore < 0,  // Counter to momentum direction
+          riskClass: 'HIGH',
+          evidenceStrength: tier105OfScore >= 70 ? 'MODERATE' : 'WEAK',
+        }),
+      };
+    }
+    
+    if (ofIsStrongBearish && momentumNotExtreme && stochAllowsShort) {
+      tier10Fired = true;
+      const ofConfidence = Math.min(60, 50 + (ofScore - 50) * 0.3);
+      const ofPosition = 0.55;  // Conservative 55% position
+      
+      reasons.push(`TIER 10.5 ORDER FLOW OVERRIDE → SHORT: OF score=${tier105OfScore.toFixed(0)} (${tier105OfSignal}) overrides moderate momentum (${tier105MomentumScore.toFixed(0)})`);
+      reasons.push(`Conditions: OF >= ${STRONG_OF_OVERRIDE_THRESHOLD}, |momentum|=${tier105AbsMomentum.toFixed(0)} < ${EXTREME_MOMENTUM_THRESHOLD}, StochK=${stochK.toFixed(0)} > 10`);
+      reasons.push(`Confidence: ${ofConfidence.toFixed(0)}% | Position: ${(ofPosition * 100).toFixed(0)}%`);
+      
+      return {
+        direction: "short",
+        confidence: ofConfidence,
+        source: "order-flow-override",
+        reasons,
+        positionSizeMultiplier: ofPosition,
+        isOrderFlowOverride: true,
+        regime,
+        directionContext: createDirectionContext("short", {
+          evidenceType: 'ORDER_FLOW',
+          tier: 10.5,
+          tierSource: 'TIER_10.5_ORDER_FLOW_OVERRIDE_SHORT',
+          confidence: ofConfidence,
+          positionMultiplier: ofPosition,
+          isCounterTrend: tier105MomentumScore > 0,  // Counter to momentum direction
+          riskClass: 'HIGH',
+          evidenceStrength: tier105OfScore >= 70 ? 'MODERATE' : 'WEAK',
+        }),
+      };
+    }
+  // FIX #5 REVISED: Log if Tier 0.5 evaluated but we still reached here (for debugging)
+  // This is now informational, not blocking
+  } else if (tier05Evaluated && !tier05Blocked) {
+    reasons.push(`TIER 10: Tier 0.5 evaluated (score=${tier05Score}) but didn't fire - Tier 10 allowed to evaluate`);
   }
   
   // ============= PRIORITY 8 (TIER 11): EXHAUSTION ESCAPE (PHASE 1 FIX) =============
@@ -4454,26 +4543,26 @@ export const deriveTradeDirection = (
       const percentB = trendData.bollingerBands?.['4h']?.percentB ?? 
                        trendData.bollingerBands?.['1h']?.percentB ?? 50;
       
-      // Get momentum score
-      const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
-      const absMomentum = Math.abs(momentumScore);
+      // Get momentum score (use different names to avoid shadowing outer scope)
+      const tier11MomentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+      const tier11AbsMomentum = Math.abs(tier11MomentumScore);
       
-      // Get order flow data
-      const ofScore = orderFlowData?.score ?? 0;
-      const ofSignal = orderFlowData?.signal?.toLowerCase() ?? "";
-      const ofBullish = ofSignal.includes("buy") || ofSignal === "bullish";
-      const ofBearish = ofSignal.includes("sell") || ofSignal === "bearish";
+      // Get order flow data (use different names to avoid shadowing outer scope)
+      const tier11OfScore = orderFlowData?.score ?? 0;
+      const tier11OfSignal = orderFlowData?.signal?.toLowerCase() ?? "";
+      const tier11OfBullish = tier11OfSignal.includes("buy") || tier11OfSignal === "bullish";
+      const tier11OfBearish = tier11OfSignal.includes("sell") || tier11OfSignal === "bearish";
       
       // Check for oversold escape (LONG)
       const isOversold = stochK4h <= EE.OVERSOLD_K_THRESHOLD && percentB <= EE.OVERSOLD_PERCENT_B_THRESHOLD;
-      const momentumAllowsLong = absMomentum >= EE.MIN_MOMENTUM_SCORE || momentumScore > 0;
+      const momentumAllowsLong = tier11AbsMomentum >= EE.MIN_MOMENTUM_SCORE || tier11MomentumScore > 0;
       
       if (isOversold && momentumAllowsLong) {
         let confidence: number = EE.BASE_CONFIDENCE;
         let positionMult: number = EE.BASE_POSITION_MULTIPLIER;
         
         // Order flow alignment bonus
-        if (ofBullish && ofScore >= EE.MIN_ORDER_FLOW_SCORE) {
+        if (tier11OfBullish && tier11OfScore >= EE.MIN_ORDER_FLOW_SCORE) {
           confidence += EE.ORDER_FLOW_ALIGNED_BONUS;
           positionMult = EE.STRONG_POSITION_MULTIPLIER;
         }
@@ -4483,7 +4572,7 @@ export const deriveTradeDirection = (
         if (EE.LOG_ESCAPES) {
           reasons.push(`EXHAUSTION ESCAPE → LONG: All derivation methods failed, but extreme oversold detected`);
           reasons.push(`StochRSI K=${stochK4h.toFixed(1)} <= ${EE.OVERSOLD_K_THRESHOLD}, %B=${percentB.toFixed(1)} <= ${EE.OVERSOLD_PERCENT_B_THRESHOLD}`);
-          reasons.push(`Momentum=${momentumScore.toFixed(0)}, OrderFlow=${ofScore.toFixed(0)} (${ofSignal})`);
+          reasons.push(`Momentum=${tier11MomentumScore.toFixed(0)}, OrderFlow=${tier11OfScore.toFixed(0)} (${tier11OfSignal})`);
           reasons.push(`Regime=${regime} | Conf=${confidence.toFixed(0)}% | Pos=${(positionMult * 100).toFixed(0)}%`);
         }
         
@@ -4510,7 +4599,7 @@ export const deriveTradeDirection = (
       
       // Check for overbought escape (SHORT)
       const isOverbought = stochK4h >= EE.OVERBOUGHT_K_THRESHOLD && percentB >= EE.OVERBOUGHT_PERCENT_B_THRESHOLD;
-      const momentumAllowsShort = absMomentum >= EE.MIN_MOMENTUM_SCORE || momentumScore < 0;
+      const momentumAllowsShort = tier11AbsMomentum >= EE.MIN_MOMENTUM_SCORE || tier11MomentumScore < 0;
       
       // Additional protection: don't SHORT if 4h is strongly bullish
       const is4hStrongBullish = trend4h === "bullish" && conf4h >= 70;
@@ -4520,7 +4609,7 @@ export const deriveTradeDirection = (
         let positionMult: number = EE.BASE_POSITION_MULTIPLIER;
         
         // Order flow alignment bonus
-        if (ofBearish && ofScore >= EE.MIN_ORDER_FLOW_SCORE) {
+        if (tier11OfBearish && tier11OfScore >= EE.MIN_ORDER_FLOW_SCORE) {
           confidence += EE.ORDER_FLOW_ALIGNED_BONUS;
           positionMult = EE.STRONG_POSITION_MULTIPLIER;
         }
@@ -4530,7 +4619,7 @@ export const deriveTradeDirection = (
         if (EE.LOG_ESCAPES) {
           reasons.push(`EXHAUSTION ESCAPE → SHORT: All derivation methods failed, but extreme overbought detected`);
           reasons.push(`StochRSI K=${stochK4h.toFixed(1)} >= ${EE.OVERBOUGHT_K_THRESHOLD}, %B=${percentB.toFixed(1)} >= ${EE.OVERBOUGHT_PERCENT_B_THRESHOLD}`);
-          reasons.push(`Momentum=${momentumScore.toFixed(0)}, OrderFlow=${ofScore.toFixed(0)} (${ofSignal})`);
+          reasons.push(`Momentum=${tier11MomentumScore.toFixed(0)}, OrderFlow=${tier11OfScore.toFixed(0)} (${tier11OfSignal})`);
           reasons.push(`Regime=${regime} | Conf=${confidence.toFixed(0)}% | Pos=${(positionMult * 100).toFixed(0)}%`);
         }
         
