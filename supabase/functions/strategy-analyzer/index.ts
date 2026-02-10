@@ -2769,7 +2769,7 @@ serve(async (req) => {
         // ============= PHASE 1 IMPROVEMENT: EXPLICIT DIRECTION DERIVATION =============
         // Derive trade direction early in the pipeline to prevent inconsistent direction evaluation
         // This ensures all downstream gates use the same direction logic
-        const directionResult = deriveTradeDirection(trendData, trend);
+        const directionResult = deriveTradeDirection(trendData, trend, earlyOrderFlowAnalysis ? { score: earlyOrderFlowAnalysis.score, signal: earlyOrderFlowAnalysis.signal } : null);
         
         // Track if Strong Trend Tier 0 Override was applied (for position sizing)
         let strongTrendTier0OverrideApplied = false;
