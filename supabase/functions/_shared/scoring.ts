@@ -4402,7 +4402,7 @@ export const deriveTradeDirection = (
         reasons.push(`MOMENTUM FALLBACK (TIER 10): score=${momentumScore.toFixed(0)} → ${momentumDirection.toUpperCase()}`);
         reasons.push(`Evidence types: ${evidenceTypes.join(', ')} (${evidenceCount} sources)`);
         reasons.push(`Order flow: score=${ofScore.toFixed(0)}, signal=${ofSignal}, aligned=${orderFlowAligned}`);
-        reasons.push(`StochRSI K=${stochK.toFixed(0)} (${stochOversold ? 'oversold' : stochOverbought ? 'overbought' : 'normal'})`);
+        reasons.push(`StochRSI K=${tier10StochK.toFixed(0)} (${stochOversold ? 'oversold' : stochOverbought ? 'overbought' : 'normal'})`);
         reasons.push(`ADX=${adx.toFixed(1)} | Confidence=${confidence.toFixed(0)}% | Position=${(positionMultiplier * 100).toFixed(0)}%`);
         reasons.push("Timeframes neutral/conflicting - momentum + order flow determining direction");
         
