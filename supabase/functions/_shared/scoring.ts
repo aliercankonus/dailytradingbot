@@ -4313,7 +4313,7 @@ export const deriveTradeDirection = (
     
     // Get momentum data from trendData
     const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
-    const stochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
+    const tier10StochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
     
     // Check if we have strong enough momentum signal
     const absMomentum = Math.abs(momentumScore);
@@ -4332,8 +4332,8 @@ export const deriveTradeDirection = (
       const orderFlowSupports = ofScore >= P.MIN_ORDER_FLOW_SCORE && orderFlowAligned;
       
       // Check StochRSI context (oversold favors LONG, overbought favors SHORT for mean reversion)
-      const stochOversold = stochK <= P.STOCHRSI_EXTREME_OVERSOLD;
-      const stochOverbought = stochK >= P.STOCHRSI_EXTREME_OVERBOUGHT;
+      const stochOversold = tier10StochK <= P.STOCHRSI_EXTREME_OVERSOLD;
+      const stochOverbought = tier10StochK >= P.STOCHRSI_EXTREME_OVERBOUGHT;
       const stochConfirmsLong = momentumDirection === "long" && stochOversold;
       const stochConfirmsShort = momentumDirection === "short" && stochOverbought;
       const stochConfirms = stochConfirmsLong || stochConfirmsShort;
@@ -4456,9 +4456,9 @@ export const deriveTradeDirection = (
     const momentumNotExtreme = tier105AbsMomentum < EXTREME_MOMENTUM_THRESHOLD;
     
     // Additional safety: StochRSI should not be at extreme that contradicts OF direction
-    const stochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
-    const stochAllowsLong = stochK < 90;  // Not deeply overbought
-    const stochAllowsShort = stochK > 10; // Not deeply oversold
+    const tier105StochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
+    const stochAllowsLong = tier105StochK < 90;  // Not deeply overbought
+    const stochAllowsShort = tier105StochK > 10; // Not deeply oversold
     
     if (ofIsStrongBullish && momentumNotExtreme && stochAllowsLong) {
       tier10Fired = true;
@@ -4466,7 +4466,7 @@ export const deriveTradeDirection = (
       const ofPosition = 0.55;  // Conservative 55% position
       
       reasons.push(`TIER 10.5 ORDER FLOW OVERRIDE → LONG: OF score=${tier105OfScore.toFixed(0)} (${tier105OfSignal}) overrides moderate momentum (${tier105MomentumScore.toFixed(0)})`);
-      reasons.push(`Conditions: OF >= ${STRONG_OF_OVERRIDE_THRESHOLD}, |momentum|=${tier105AbsMomentum.toFixed(0)} < ${EXTREME_MOMENTUM_THRESHOLD}, StochK=${stochK.toFixed(0)} < 90`);
+      reasons.push(`Conditions: OF >= ${STRONG_OF_OVERRIDE_THRESHOLD}, |momentum|=${tier105AbsMomentum.toFixed(0)} < ${EXTREME_MOMENTUM_THRESHOLD}, StochK=${tier105StochK.toFixed(0)} < 90`);
       reasons.push(`Confidence: ${ofConfidence.toFixed(0)}% | Position: ${(ofPosition * 100).toFixed(0)}%`);
       
       return {
@@ -4496,7 +4496,7 @@ export const deriveTradeDirection = (
       const ofPosition = 0.55;  // Conservative 55% position
       
       reasons.push(`TIER 10.5 ORDER FLOW OVERRIDE → SHORT: OF score=${tier105OfScore.toFixed(0)} (${tier105OfSignal}) overrides moderate momentum (${tier105MomentumScore.toFixed(0)})`);
-      reasons.push(`Conditions: OF >= ${STRONG_OF_OVERRIDE_THRESHOLD}, |momentum|=${tier105AbsMomentum.toFixed(0)} < ${EXTREME_MOMENTUM_THRESHOLD}, StochK=${stochK.toFixed(0)} > 10`);
+      reasons.push(`Conditions: OF >= ${STRONG_OF_OVERRIDE_THRESHOLD}, |momentum|=${tier105AbsMomentum.toFixed(0)} < ${EXTREME_MOMENTUM_THRESHOLD}, StochK=${tier105StochK.toFixed(0)} > 10`);
       reasons.push(`Confidence: ${ofConfidence.toFixed(0)}% | Position: ${(ofPosition * 100).toFixed(0)}%`);
       
       return {
