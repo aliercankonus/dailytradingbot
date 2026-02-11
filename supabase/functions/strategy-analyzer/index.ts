@@ -6193,7 +6193,62 @@ serve(async (req) => {
               // ADX exception check
               const adxOverrideAllowed = adx >= NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD;
               
-              if (inHardZone && NEAR_EXTREME_PROTECTION_GATE.BLOCK_IN_HARD_ZONE && !adxOverrideAllowed && !ltfSupportsShort) {
+              // ===== REGIME-AWARE EXTREME PROXIMITY BLOCK =====
+              // Block shorts extremely close to 24h low unless strong expansion regime
+              const regimeBlock = NEAR_EXTREME_PROTECTION_GATE.REGIME_AWARE_BLOCK;
+              if (regimeBlock.ENABLED && distanceFromLow < regimeBlock.PROXIMITY_THRESHOLD_PERCENT) {
+                const absMomentumScore = Math.abs(smartMomentum.score);
+                const absOrderFlowScore = Math.abs(earlyOrderFlowAnalysis?.score ?? 0);
+                const adxBypass = adx >= regimeBlock.MIN_ADX_TO_BYPASS;
+                const momentumBypass = absMomentumScore >= regimeBlock.MIN_MOMENTUM_SCORE_TO_BYPASS && smartMomentum.score < 0;
+                const orderFlowBypass = absOrderFlowScore >= regimeBlock.MIN_ORDER_FLOW_SCORE_TO_BYPASS && (earlyOrderFlowAnalysis?.score ?? 0) < 0;
+                
+                if (!adxBypass && !momentumBypass && !orderFlowBypass) {
+                  // HARD BLOCK: Location failure - no expansion regime to justify entry
+                  nearExtremeBlocked = true;
+                  rejectedByHardGates++;
+                  perSymbolGateAttribution.set(symbol, { 
+                    gate: 'NEAR_24H_LOW_HARD', 
+                    details: `SHORT blocked: ${distanceFromLow.toFixed(2)}% from 24h low (regime-aware: ADX=${adx.toFixed(1)}<${regimeBlock.MIN_ADX_TO_BYPASS}, momentum=${smartMomentum.score.toFixed(0)}, OF=${earlyOrderFlowAnalysis?.score?.toFixed(0) ?? 'N/A'})` 
+                  });
+                  
+                  const blockReason = `NEAR_24H_LOW_REGIME_BLOCK: SHORT blocked - only ${distanceFromLow.toFixed(2)}% above 24h low ($${priceDistance.low24h.toFixed(2)}), ADX=${adx.toFixed(1)}<${regimeBlock.MIN_ADX_TO_BYPASS}, sm_score=${smartMomentum.score.toFixed(0)} (need <=-${regimeBlock.MIN_MOMENTUM_SCORE_TO_BYPASS}), OF=${earlyOrderFlowAnalysis?.score?.toFixed(0) ?? 'N/A'} (need <=-${regimeBlock.MIN_ORDER_FLOW_SCORE_TO_BYPASS})`;
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                  
+                  await logRejectionWithAI(
+                    supabase, userId, symbol,
+                    blockReason,
+                    {
+                      gate: 'NEAR_24H_LOW_HARD',
+                      subGate: 'REGIME_AWARE_BLOCK',
+                      derivedDirection,
+                      distanceFromLow: distanceFromLow.toFixed(3),
+                      low24h: priceDistance.low24h,
+                      proximityThreshold: regimeBlock.PROXIMITY_THRESHOLD_PERCENT,
+                      adx: adx.toFixed(1),
+                      adxRequired: regimeBlock.MIN_ADX_TO_BYPASS,
+                      smartMomentumScore: smartMomentum.score.toFixed(1),
+                      momentumRequired: `-${regimeBlock.MIN_MOMENTUM_SCORE_TO_BYPASS}`,
+                      orderFlowScore: earlyOrderFlowAnalysis?.score?.toFixed(1) ?? 'N/A',
+                      orderFlowRequired: `-${regimeBlock.MIN_ORDER_FLOW_SCORE_TO_BYPASS}`,
+                      tf1hDir, tf30mDir,
+                      relaxationApplied: nearExtremeRelaxationApplied,
+                      wouldPassWith: `ADX >= ${regimeBlock.MIN_ADX_TO_BYPASS} OR momentum <= -${regimeBlock.MIN_MOMENTUM_SCORE_TO_BYPASS} OR orderFlow <= -${regimeBlock.MIN_ORDER_FLOW_SCORE_TO_BYPASS}`,
+                    },
+                    trendData,
+                    riskParams.ai_analysis_enabled !== false,
+                    earlyOrderFlowAnalysis
+                  );
+                  continue;
+                } else {
+                  // Bypass allowed but with reduced size
+                  const bypassReason = adxBypass ? `ADX ${adx.toFixed(1)}>=${regimeBlock.MIN_ADX_TO_BYPASS}` : momentumBypass ? `momentum ${smartMomentum.score.toFixed(0)}<=-${regimeBlock.MIN_MOMENTUM_SCORE_TO_BYPASS}` : `orderFlow ${earlyOrderFlowAnalysis?.score?.toFixed(0)}<=-${regimeBlock.MIN_ORDER_FLOW_SCORE_TO_BYPASS}`;
+                  nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, regimeBlock.BYPASS_POSITION_MULTIPLIER);
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_LOW REGIME BYPASS: SHORT ${distanceFromLow.toFixed(2)}% from low, allowed via ${bypassReason} - position ${(regimeBlock.BYPASS_POSITION_MULTIPLIER * 100).toFixed(0)}%`);
+                }
+              }
+              
+              if (!nearExtremeBlocked && inHardZone && NEAR_EXTREME_PROTECTION_GATE.BLOCK_IN_HARD_ZONE && !adxOverrideAllowed && !ltfSupportsShort) {
                 // Hard block - too close to 24h low with no LTF support
                 nearExtremeBlocked = true;
                 rejectedByHardGates++;
@@ -6228,21 +6283,21 @@ serve(async (req) => {
                   earlyOrderFlowAnalysis
                 );
                 continue;
-              } else if (!ltfSupportsShort) {
+              } else if (!nearExtremeBlocked && !ltfSupportsShort) {
                 // Soft gate - reduce position for near-low shorts without LTF support
                 if (adxOverrideAllowed) {
-                  nearExtremePositionMultiplier = NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_MULTIPLIER;
+                  nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_MULTIPLIER);
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_LOW ADX OVERRIDE: SHORT ${distanceFromLow.toFixed(1)}% from low, ADX=${adx.toFixed(1)} >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
                 } else if (useRelaxedThresholds && distanceFromLow > NEAR_EXTREME_PROTECTION_GATE.SHORT_NEAR_LOW_THRESHOLD_PERCENT) {
                   // In relaxed zone but outside default soft zone - use relaxed multiplier
-                  nearExtremePositionMultiplier = relaxConfig.RELAXED_SOFT_MULTIPLIER;
+                  nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, relaxConfig.RELAXED_SOFT_MULTIPLIER);
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 NEAR_24H_LOW RELAXED: SHORT ${distanceFromLow.toFixed(1)}% from low (relaxed threshold: ${effectiveSoftThreshold}%), ${relaxationReason} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
                 } else if (useRelaxedThresholds && distanceFromLow <= NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_THRESHOLD_PERCENT) {
                   // In original hard zone but relaxed to transition zone
-                  nearExtremePositionMultiplier = relaxConfig.RELAXED_TRANSITION_MULTIPLIER;
+                  nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, relaxConfig.RELAXED_TRANSITION_MULTIPLIER);
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 NEAR_24H_LOW RELAXED (transition): SHORT ${distanceFromLow.toFixed(1)}% from low, ${relaxationReason} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
                 } else {
-                  nearExtremePositionMultiplier = NEAR_EXTREME_PROTECTION_GATE.PROXIMITY_POSITION_MULTIPLIER;
+                  nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, NEAR_EXTREME_PROTECTION_GATE.PROXIMITY_POSITION_MULTIPLIER);
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_LOW: SHORT ${distanceFromLow.toFixed(1)}% from low, LTF not bearish - position reduced to ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
                 }
               }
@@ -6257,7 +6312,59 @@ serve(async (req) => {
               const inHardZone = distanceFromHigh <= effectiveHardThreshold;
               const adxOverrideAllowed = adx >= NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD;
               
-              if (inHardZone && NEAR_EXTREME_PROTECTION_GATE.BLOCK_IN_HARD_ZONE && !adxOverrideAllowed && !ltfSupportsLong) {
+              // ===== REGIME-AWARE EXTREME PROXIMITY BLOCK (LONG near high) =====
+              const regimeBlockLong = NEAR_EXTREME_PROTECTION_GATE.REGIME_AWARE_BLOCK;
+              if (regimeBlockLong.ENABLED && distanceFromHigh < regimeBlockLong.PROXIMITY_THRESHOLD_PERCENT) {
+                const absMomentumScore = Math.abs(smartMomentum.score);
+                const absOrderFlowScore = Math.abs(earlyOrderFlowAnalysis?.score ?? 0);
+                const adxBypass = adx >= regimeBlockLong.MIN_ADX_TO_BYPASS;
+                const momentumBypass = absMomentumScore >= regimeBlockLong.MIN_MOMENTUM_SCORE_TO_BYPASS && smartMomentum.score > 0;
+                const orderFlowBypass = absOrderFlowScore >= regimeBlockLong.MIN_ORDER_FLOW_SCORE_TO_BYPASS && (earlyOrderFlowAnalysis?.score ?? 0) > 0;
+                
+                if (!adxBypass && !momentumBypass && !orderFlowBypass) {
+                  nearExtremeBlocked = true;
+                  rejectedByHardGates++;
+                  perSymbolGateAttribution.set(symbol, { 
+                    gate: 'NEAR_24H_HIGH_HARD', 
+                    details: `LONG blocked: ${distanceFromHigh.toFixed(2)}% from 24h high (regime-aware: ADX=${adx.toFixed(1)}<${regimeBlockLong.MIN_ADX_TO_BYPASS}, momentum=${smartMomentum.score.toFixed(0)}, OF=${earlyOrderFlowAnalysis?.score?.toFixed(0) ?? 'N/A'})` 
+                  });
+                  
+                  const blockReason = `NEAR_24H_HIGH_REGIME_BLOCK: LONG blocked - only ${distanceFromHigh.toFixed(2)}% below 24h high ($${priceDistance.high24h.toFixed(2)}), ADX=${adx.toFixed(1)}<${regimeBlockLong.MIN_ADX_TO_BYPASS}, sm_score=${smartMomentum.score.toFixed(0)} (need >=${regimeBlockLong.MIN_MOMENTUM_SCORE_TO_BYPASS}), OF=${earlyOrderFlowAnalysis?.score?.toFixed(0) ?? 'N/A'} (need >=${regimeBlockLong.MIN_ORDER_FLOW_SCORE_TO_BYPASS})`;
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                  
+                  await logRejectionWithAI(
+                    supabase, userId, symbol,
+                    blockReason,
+                    {
+                      gate: 'NEAR_24H_HIGH_HARD',
+                      subGate: 'REGIME_AWARE_BLOCK',
+                      derivedDirection,
+                      distanceFromHigh: distanceFromHigh.toFixed(3),
+                      high24h: priceDistance.high24h,
+                      proximityThreshold: regimeBlockLong.PROXIMITY_THRESHOLD_PERCENT,
+                      adx: adx.toFixed(1),
+                      adxRequired: regimeBlockLong.MIN_ADX_TO_BYPASS,
+                      smartMomentumScore: smartMomentum.score.toFixed(1),
+                      momentumRequired: `+${regimeBlockLong.MIN_MOMENTUM_SCORE_TO_BYPASS}`,
+                      orderFlowScore: earlyOrderFlowAnalysis?.score?.toFixed(1) ?? 'N/A',
+                      orderFlowRequired: `+${regimeBlockLong.MIN_ORDER_FLOW_SCORE_TO_BYPASS}`,
+                      tf1hDir, tf30mDir,
+                      relaxationApplied: nearExtremeRelaxationApplied,
+                      wouldPassWith: `ADX >= ${regimeBlockLong.MIN_ADX_TO_BYPASS} OR momentum >= +${regimeBlockLong.MIN_MOMENTUM_SCORE_TO_BYPASS} OR orderFlow >= +${regimeBlockLong.MIN_ORDER_FLOW_SCORE_TO_BYPASS}`,
+                    },
+                    trendData,
+                    riskParams.ai_analysis_enabled !== false,
+                    earlyOrderFlowAnalysis
+                  );
+                  continue;
+                } else {
+                  const bypassReason = adxBypass ? `ADX ${adx.toFixed(1)}>=${regimeBlockLong.MIN_ADX_TO_BYPASS}` : momentumBypass ? `momentum ${smartMomentum.score.toFixed(0)}>=${regimeBlockLong.MIN_MOMENTUM_SCORE_TO_BYPASS}` : `orderFlow ${earlyOrderFlowAnalysis?.score?.toFixed(0)}>=${regimeBlockLong.MIN_ORDER_FLOW_SCORE_TO_BYPASS}`;
+                  nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, regimeBlockLong.BYPASS_POSITION_MULTIPLIER);
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_HIGH REGIME BYPASS: LONG ${distanceFromHigh.toFixed(2)}% from high, allowed via ${bypassReason} - position ${(regimeBlockLong.BYPASS_POSITION_MULTIPLIER * 100).toFixed(0)}%`);
+                }
+              }
+              
+              if (!nearExtremeBlocked && inHardZone && NEAR_EXTREME_PROTECTION_GATE.BLOCK_IN_HARD_ZONE && !adxOverrideAllowed && !ltfSupportsLong) {
                 nearExtremeBlocked = true;
                 rejectedByHardGates++;
                 perSymbolGateAttribution.set(symbol, { 
@@ -6291,20 +6398,18 @@ serve(async (req) => {
                   earlyOrderFlowAnalysis
                 );
                 continue;
-              } else if (!ltfSupportsLong) {
+              } else if (!nearExtremeBlocked && !ltfSupportsLong) {
                 if (adxOverrideAllowed) {
-                  nearExtremePositionMultiplier = NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_MULTIPLIER;
+                  nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_MULTIPLIER);
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_HIGH ADX OVERRIDE: LONG ${distanceFromHigh.toFixed(1)}% from high, ADX=${adx.toFixed(1)} >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
                 } else if (useRelaxedThresholds && distanceFromHigh > NEAR_EXTREME_PROTECTION_GATE.LONG_NEAR_HIGH_THRESHOLD_PERCENT) {
-                  // In relaxed zone but outside default soft zone
-                  nearExtremePositionMultiplier = relaxConfig.RELAXED_SOFT_MULTIPLIER;
+                  nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, relaxConfig.RELAXED_SOFT_MULTIPLIER);
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 NEAR_24H_HIGH RELAXED: LONG ${distanceFromHigh.toFixed(1)}% from high (relaxed threshold: ${effectiveSoftThreshold}%), ${relaxationReason} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
                 } else if (useRelaxedThresholds && distanceFromHigh <= NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_THRESHOLD_PERCENT) {
-                  // In original hard zone but relaxed to transition zone
-                  nearExtremePositionMultiplier = relaxConfig.RELAXED_TRANSITION_MULTIPLIER;
+                  nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, relaxConfig.RELAXED_TRANSITION_MULTIPLIER);
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 NEAR_24H_HIGH RELAXED (transition): LONG ${distanceFromHigh.toFixed(1)}% from high, ${relaxationReason} - position ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
                 } else {
-                  nearExtremePositionMultiplier = NEAR_EXTREME_PROTECTION_GATE.PROXIMITY_POSITION_MULTIPLIER;
+                  nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, NEAR_EXTREME_PROTECTION_GATE.PROXIMITY_POSITION_MULTIPLIER);
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_HIGH: LONG ${distanceFromHigh.toFixed(1)}% from high, LTF not bullish - position reduced to ${(nearExtremePositionMultiplier * 100).toFixed(0)}%`);
                 }
               }
