@@ -10750,12 +10750,17 @@ serve(async (req) => {
               ? Math.abs(macdHistogramValue) / atrForNormalization 
               : Math.abs(macdHistogramValue);  // Fallback to raw if no ATR
             
-            // Threshold is now a simple ratio (dimensionless), not ATR-scaled
-            // 0.0001 means MACD histogram must be less than 0.01% of ATR to be "weak"
+            // Threshold is now a realistic ratio: 0.05 = MACD must be ≤5% of ATR to be "weak"
+            // Combined with ADX dual condition for safety (Option B):
+            // Weak MACD bypass only in range environments (ADX < 25)
             const weakMomentumThreshold = MOMENTUM_DIRECTION_ALIGNMENT.WEAK_MACD_ATR_MULTIPLIER;
+            const weakMacdMaxAdx = MOMENTUM_DIRECTION_ALIGNMENT.WEAK_MACD_MAX_ADX;
             
             const isWeakMomentum = macdHistogramNormalized < weakMomentumThreshold;
-            const allowMomentumOverride = isWeakMomentum || adx >= ADX_THRESHOLDS.EXCEPTIONAL;
+            const isRangeEnvironment = adx < weakMacdMaxAdx;
+            const weakMacdBypass = isWeakMomentum && isRangeEnvironment;
+            const adxExceptionalBypass = adx >= ADX_THRESHOLDS.EXCEPTIONAL;
+            const allowMomentumOverride = weakMacdBypass || adxExceptionalBypass;
             
             if (!allowMomentumOverride) {
               rejectedByHardGates++;
@@ -10774,6 +10779,10 @@ serve(async (req) => {
                   macdHistogramNormalized: macdHistogramNormalized.toFixed(6),
                   weakMomentumThreshold: weakMomentumThreshold.toFixed(6),
                   atrForNormalization: atrForNormalization.toFixed(4),
+                  // Dual condition diagnostics
+                  isWeakMomentum,
+                  isRangeEnvironment,
+                  weakMacdMaxAdx,
                   momentumState: momentum?.state,
                   adx: adx.toFixed(1),
                   adxRequiredForOverride: ADX_THRESHOLDS.EXCEPTIONAL,
@@ -10785,8 +10794,8 @@ serve(async (req) => {
               );
               continue;
             }
-            if (isWeakMomentum) {
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} Phase 2: Momentum opposes but weak (normalized |MACD/ATR| ${macdHistogramNormalized.toFixed(6)} < ${weakMomentumThreshold.toFixed(6)}) - allowing`);
+            if (weakMacdBypass) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} Phase 2: Momentum opposes but weak MACD in range (normalized |MACD/ATR| ${macdHistogramNormalized.toFixed(6)} < ${weakMomentumThreshold.toFixed(6)}, ADX ${adx.toFixed(1)} < ${weakMacdMaxAdx}) - allowing`);
             } else {
               logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.MOMENTUM} Phase 2: Momentum opposes but ADX exceptional (${adx.toFixed(1)} >= ${ADX_THRESHOLDS.EXCEPTIONAL}) - allowing with caution`);
             }

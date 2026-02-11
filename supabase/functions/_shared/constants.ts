@@ -3617,7 +3617,7 @@ export const MACD_GATE_PARAMS = {
   // This ensures consistent behavior across high-priced (BTC: ~$95k) and low-priced assets
   // Example: BTC MACD=36, ATR=585 → normalized=0.0615; threshold 0.002 → significant
   MIN_HISTOGRAM_FOR_BLOCK: 0.002,       // Only block if |histogram/ATR| > this (was 0.0002 absolute)
-  NEUTRAL_HISTOGRAM_THRESHOLD: 0.0005,  // Below this = treat as neutral (was 0.00005 absolute)
+  NEUTRAL_HISTOGRAM_THRESHOLD: 0.01,    // Below this = treat as neutral (raised from 0.0005; 1% of ATR)
   
   // Position sizing for soft blocks (instead of hard block)
   POSITION_MULTIPLIER_SOFT: 0.75,     // 75% position when not blocking
@@ -4203,12 +4203,16 @@ export const MOMENTUM_DIRECTION_ALIGNMENT = {
   // Phase 2 uses ATR-normalized MACD threshold for bypass eligibility
   // macdHistogramNormalized < WEAK_MACD_ATR_MULTIPLIER = weak momentum (bypass allowed)
   // 
-  // CALIBRATION NOTE (2026-02-04):
-  // - Typical normalized MACD values: 0.001–0.04 (varies by volatility)
-  // - Using 0.0005 aligns with MACD_GATE_PARAMS.NEUTRAL_HISTOGRAM_THRESHOLD
-  // - Previous 0.0001 was 43x below typical values, making bypass nearly inert
-  // - 0.0005 allows bypass when MACD is genuinely flat (<0.05% of ATR)
-  WEAK_MACD_ATR_MULTIPLIER: 0.0005,
+  // CALIBRATION NOTE (2026-02-11):
+  // - Typical normalized MACD values in ranging markets: 0.01–0.10
+  // - Typical normalized MACD values in trending markets: 0.05–0.30
+  // - Previous 0.0005 was 360x below typical ranging values, making bypass nearly inert
+  // - 0.05 allows bypass when MACD is ≤5% of ATR (genuine range/early reversal)
+  // - Combined with ADX < 25 dual condition for safety (Option B)
+  WEAK_MACD_ATR_MULTIPLIER: 0.05,
+  // ADX ceiling for weak-MACD bypass (dual condition safety)
+  // Only allow weak-MACD bypass in range environments (ADX < 25)
+  WEAK_MACD_MAX_ADX: 25,
 } as const;
 
 // ============= PHASE 12: STRUCTURED LOGGING FOR BLOCK DECISIONS =============
