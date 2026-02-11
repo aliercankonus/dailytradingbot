@@ -5297,6 +5297,9 @@ export const MICRO_TREND_MOMENTUM_SAFETY = {
     ENABLED: true,
     // Block if < 1.5% runway remains (insufficient room)
     MIN_RUNWAY_PERCENT: 1.5,
+    // MICRO_TREND minimum expected expansion (projected RR)
+    // Prevents mathematically disadvantaged trades where peak < fees + trailing
+    MIN_EXPECTED_EXPANSION_PERCENT: 0.8,
     // 1.5-3% runway = partial size
     SHORT_RUNWAY_MAX: 3.0,
     SHORT_RUNWAY_MULTIPLIER: 0.6,
@@ -5465,6 +5468,18 @@ export function calculateMicroTrendScaling(input: MicroTrendScalingInput): Micro
   // ===== STEP 4: DIRECTIONAL RUNWAY CHECK =====
   if (config.RUNWAY.ENABLED) {
     const movePercent = input.isLong ? input.moveFromLowPercent : input.moveFromHighPercent;
+    // For MICRO_TREND: distance from the OPPOSITE extreme is the projected expansion room
+    // SHORT: distance from low = expansion room; LONG: distance from high = expansion room  
+    const expansionRoom = input.isLong ? input.moveFromHighPercent : input.moveFromLowPercent;
+    
+    // NEW: Minimum expected expansion check
+    // If expansion room < 0.8%, peak P&L will likely not survive fees + trailing
+    if (expansionRoom < config.RUNWAY.MIN_EXPECTED_EXPANSION_PERCENT) {
+      blocked = true;
+      blockReason = `Blocked: insufficient expansion room (${expansionRoom.toFixed(2)}% from ${input.isLong ? 'high' : 'low'} < ${config.RUNWAY.MIN_EXPECTED_EXPANSION_PERCENT}% min expected expansion)`;
+      appliedSteps.runway = { multiplier: 0, reason: blockReason };
+      return { sizeMultiplier: 0, blocked, blockReason, scalingReasons: [...scalingReasons, blockReason], appliedSteps };
+    }
     
     if (movePercent < config.RUNWAY.MIN_RUNWAY_PERCENT) {
       blocked = true;
@@ -5974,6 +5989,23 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
   // Very high ADX can override (parabolic moves)
   ADX_OVERRIDE_THRESHOLD: 50,
   ADX_OVERRIDE_MULTIPLIER: 0.40,
+  
+  // ===== REGIME-AWARE EXTREME PROXIMITY BLOCK =====
+  // Block entries very close to extremes unless in strong expansion regime
+  // Addresses: shorts at 0.1-0.4% from 24h low with moderate ADX = location failure
+  REGIME_AWARE_BLOCK: {
+    ENABLED: true,
+    // Block if distance from extreme < this AND regime is not strong
+    PROXIMITY_THRESHOLD_PERCENT: 0.4,
+    // Regime strength requirements to bypass the block
+    MIN_ADX_TO_BYPASS: 32,
+    // Momentum must be decisive (absolute score) to bypass
+    MIN_MOMENTUM_SCORE_TO_BYPASS: 20,
+    // Order flow must confirm breakdown to bypass
+    MIN_ORDER_FLOW_SCORE_TO_BYPASS: 20,
+    // If ANY of these bypass conditions met, allow with reduced size
+    BYPASS_POSITION_MULTIPLIER: 0.35,
+  },
   
   // ===== LOGGING =====
   LOG_GATE_CHECKS: true,
