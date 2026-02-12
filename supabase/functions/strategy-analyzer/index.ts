@@ -170,7 +170,9 @@ import {
   BOT_HEARTBEAT_CONFIG,
   NO_TRADE_ZONE_STATE,
   type ExceptionType,
-  type MarketContext
+  type MarketContext,
+  // NEW: 4-State Regime Classifier
+  FOUR_STATE_REGIME
 } from "../_shared/constants.ts";
 // NEW: Smart Momentum Module for enhanced trend detection and entry quality
 import { 
@@ -229,6 +231,8 @@ import {
   getEffectiveMomentumThreshold,
   applyQualityNearMissBoost,
   checkImpulseContinuation,
+  // NEW: 4-State Regime Classifier
+  classify4StateRegime,
   // CENTRALIZED EXTRACTION HELPERS (consistency across all edge functions)
   extractADX,
   extractADXSlope,
@@ -249,7 +253,8 @@ import {
   type ExceptionBudgetResult,
   type SetupType,
   type MasterRegimeResult,
-  type ImpulseContinuationResult
+  type ImpulseContinuationResult,
+  type FourStateRegimeResult
 } from "../_shared/scoring.ts";
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
@@ -4144,6 +4149,91 @@ serve(async (req) => {
         if (directionResult.reasons.some(r => r.includes("Warning"))) {
           logger.forSymbol(symbol).warn(`   ${directionResult.reasons.filter(r => r.includes("Warning")).join(", ")}`);
         }
+        
+        // ============= 4-STATE REGIME CLASSIFIER GATE =============
+        // Forensic audit: 100% of recent losses came from neutral/ranging entries.
+        // This gate classifies market into 4 states and hard-blocks RANGE_COMPRESSION.
+        const htf1hTrendForRegime = trendData.timeframes?.['1h']?.trend || htfTrend1h || 'neutral';
+        const htf30mTrendForRegime = trendData.timeframes?.['30m']?.trend || 'neutral';
+        const momentumStateForRegime = trendData?.momentum?.state || 'none';
+        const stochK4hForRegime = extractStochRsiK(trendData, '4h');
+        const primaryTrendForRegime = trendData?.primaryTrend || 'neutral';
+        const isBBSqueeze = trendData?.bollingerBands?.squeezeActive || bbSqueeze?.isSqueeze || false;
+        
+        // Count aligned timeframes for breakout confirmation
+        let alignedTFCount = 0;
+        const tfTrends = trendData.timeframes || {};
+        for (const tf of ['15m', '30m', '1h', '4h']) {
+          const tfTrend = tfTrends[tf]?.trend;
+          if ((derivedDirection === 'long' && tfTrend === 'bullish') || 
+              (derivedDirection === 'short' && tfTrend === 'bearish')) {
+            alignedTFCount++;
+          }
+        }
+        
+        const fourStateRegime = classify4StateRegime(
+          adx,
+          adxSlope,
+          primaryTrendForRegime,
+          momentumStateForRegime,
+          smartMomentum?.score ?? 0,
+          htf1hTrendForRegime,
+          htf30mTrendForRegime,
+          derivedDirection,
+          stochK4hForRegime,
+          adxExhaustion?.isExhausted ?? false,
+          isBBSqueeze,
+          alignedTFCount
+        );
+        
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME: ${fourStateRegime.regime} - ${fourStateRegime.reason}`);
+        logger.forSymbol(symbol).info(`   → allowContinuation=${fourStateRegime.allowContinuation}, allowMR=${fourStateRegime.allowMeanReversion}, posMultiplier=${fourStateRegime.positionMultiplier.toFixed(2)}`);
+        
+        // HARD BLOCK: RANGE_COMPRESSION - no statistical edge exists
+        // Note: MR bypass is checked via StochRSI extreme only (strategy-level MR check happens later)
+        if (fourStateRegime.regime === 'RANGE_COMPRESSION') {
+          const stochK = stochK4hForRegime;
+          const mrStochCondition = stochK < FOUR_STATE_REGIME.RANGE_COMPRESSION.MR_BYPASS_MIN_STOCHRSI_DISTANCE || 
+                                   stochK > (100 - FOUR_STATE_REGIME.RANGE_COMPRESSION.MR_BYPASS_MIN_STOCHRSI_DISTANCE);
+          const mrBypassAllowed = fourStateRegime.allowMeanReversion && mrStochCondition;
+          
+          if (!mrBypassAllowed) {
+            rejectedByHardGates++;
+            const blockReason = `RANGE_COMPRESSION_BLOCK: 4-State regime=RANGE_COMPRESSION, primaryTrend=${primaryTrendForRegime}, momentum=${momentumStateForRegime}, ADX=${adx.toFixed(1)}, |score|=${Math.abs(smartMomentum?.score ?? 0).toFixed(0)} → noise dominates, no edge`;
+            perSymbolGateAttribution.set(symbol, { gate: 'RANGE_COMPRESSION_BLOCK', details: blockReason });
+            
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+            
+            await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+              gate: 'RANGE_COMPRESSION_BLOCK',
+              fourStateRegime: fourStateRegime.regime,
+              derivedDirection,
+              primaryTrend: primaryTrendForRegime,
+              momentumState: momentumStateForRegime,
+              momentumScore: (smartMomentum?.score ?? 0).toFixed(1),
+              adx: adx.toFixed(1),
+              adxSlope: adxSlope.toFixed(2),
+              alignedTimeframes: alignedTFCount,
+              stochRsiK4h: stochK4hForRegime.toFixed(1),
+              isSqueeze: isBBSqueeze,
+              diagnostics: fourStateRegime.diagnostics,
+            }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+            continue;
+          } else {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 RANGE_COMPRESSION: Would block but MR bypass allowed (stochK=${stochK.toFixed(1)} at extreme)`);
+          }
+        }
+        
+        // TREND_EXHAUSTION: Block continuation trades at per-symbol level
+        // MR strategies will be allowed through at per-strategy evaluation later
+        if (fourStateRegime.regime === 'TREND_EXHAUSTION' && !fourStateRegime.allowContinuation) {
+          // Don't hard-block at symbol level - let per-strategy gates handle MR vs continuation
+          // Instead, flag that only MR entries should proceed and set restrictive position multiplier
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ TREND_EXHAUSTION: Continuation entries will be filtered at strategy level, MR probes allowed`);
+        }
+        
+        // Apply 4-state regime position multiplier (stacks with other multipliers)
+        let fourStatePositionMultiplier = fourStateRegime.positionMultiplier;
         
         // NOTE: MOMENTUM_DIRECTION_HARD_GATE and MOMENTUM_FLIP_DETECTION gates moved after smartMomentum calculation
         // (see after line ~3250 where smartMomentum is calculated)
@@ -14452,6 +14542,12 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🎯 MASTER REGIME (${masterRegime.regime}) - position size capped at ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
+        // Step 22b: Apply 4-STATE REGIME position multiplier (BREAKOUT_SETUP=50%, TREND_EXHAUSTION=25%)
+        if (fourStatePositionMultiplier < 1.0) {
+          positionSizeMultiplier *= fourStatePositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🏷️ 4-STATE REGIME (${fourStateRegime.regime}) - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
         // Step 23: Apply Strong Trend Tier 0 Override position reduction (25%)
         // Entries at extreme StochRSI (K<5 or K>95) via Strong Trend Override get heavily reduced position
         if (strongTrendTier0OverrideApplied && strongTrendTier0PositionMultiplier < 1.0) {
@@ -14830,6 +14926,16 @@ serve(async (req) => {
                 volume: weightedComponents.volumeWeighted ?? 0,
                 adx: weightedComponents.adxWeighted ?? 0,
               },
+            },
+            // NEW: 4-State Regime Classifier tracking for forensic traceability
+            fourStateRegime: {
+              regime: fourStateRegime.regime,
+              positionMultiplier: fourStatePositionMultiplier,
+              allowContinuation: fourStateRegime.allowContinuation,
+              allowMeanReversion: fourStateRegime.allowMeanReversion,
+              requireConfirmation: fourStateRegime.requireConfirmation,
+              reason: fourStateRegime.reason,
+              diagnostics: fourStateRegime.diagnostics,
             },
           },
           expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minute TTL for actionable signals

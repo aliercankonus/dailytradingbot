@@ -3890,6 +3890,97 @@ export const MARKET_REGIME_CLASSIFIER = {
 // Market regime type
 export type MasterMarketRegime = 'PARABOLIC' | 'STRONG_TREND' | 'NORMAL' | 'STEALTH_DRIFT';
 
+// ============= 4-STATE REGIME CLASSIFIER =============
+// Purpose: Eliminate noise trades by classifying market into 4 distinct states
+// Based on forensic audit: 100% of recent losses came from neutral/ranging entries
+// 
+// States:
+//   TREND_EXPANSION   → Full continuation trades allowed (1.0x sizing)
+//   TREND_EXHAUSTION   → Block continuation, allow MR probes only (0.25x sizing)
+//   RANGE_COMPRESSION  → HARD BLOCK - no trades (noise dominates)
+//   BREAKOUT_SETUP     → Allow only on directional confirmation (0.50x sizing)
+export type FourStateRegime = 'TREND_EXPANSION' | 'TREND_EXHAUSTION' | 'RANGE_COMPRESSION' | 'BREAKOUT_SETUP';
+
+export const FOUR_STATE_REGIME = {
+  ENABLED: true,
+  
+  // ===== TREND EXPANSION =====
+  // Strong directional move with aligned structure - best entries
+  TREND_EXPANSION: {
+    // ADX must show trend energy
+    MIN_ADX: 30,
+    // ADX slope must be non-negative (not decaying)
+    MIN_ADX_SLOPE: 0,
+    // At least one LTF must align with direction
+    REQUIRE_LTF_ALIGNMENT: true,
+    // Position multiplier (full conviction)
+    POSITION_MULTIPLIER: 1.0,
+    // Allowed entry types
+    ALLOWED_ENTRIES: ['continuation', 'pullback', 'breakout'] as string[],
+  },
+  
+  // ===== TREND EXHAUSTION =====
+  // Trend energy is declining - continuation is dangerous, reversal probes only
+  TREND_EXHAUSTION: {
+    // ADX still elevated but slope is declining
+    MIN_ADX: 30,
+    // Negative slope = decelerating trend
+    MAX_ADX_SLOPE: 0,
+    // OR: Momentum state exhausted
+    EXHAUSTION_MOMENTUM_STATES: ['exhausted'] as string[],
+    // OR: StochRSI at extreme for sustained period
+    STOCHRSI_EXHAUSTION_K_LONG: 90,   // K > 90 for longs = exhausted
+    STOCHRSI_EXHAUSTION_K_SHORT: 10,  // K < 10 for shorts = exhausted
+    // Position multiplier (probe sizing only)
+    POSITION_MULTIPLIER: 0.25,
+    // Only mean reversion / counter-trend allowed
+    ALLOWED_ENTRIES: ['mean_reversion', 'counter_trend'] as string[],
+    // Block continuation trades
+    BLOCK_CONTINUATION: true,
+  },
+  
+  // ===== RANGE COMPRESSION =====
+  // No directional edge - HARD BLOCK all entries
+  RANGE_COMPRESSION: {
+    // ADX below this = no trend energy
+    MAX_ADX: 25,
+    // Primary trend must be neutral/ranging
+    REQUIRE_NEUTRAL_TREND: true,
+    // Momentum must lack conviction
+    NO_EDGE_MOMENTUM_STATES: ['mixed', 'none'] as string[],
+    // Maximum absolute momentum score (below this = noise)
+    MAX_ABS_MOMENTUM_SCORE: 20,
+    // ATR compression detection
+    LOW_ATR_MULTIPLIER: 0.7,  // ATR < 70% of historical = compressed
+    // HARD BLOCK - no entries at all (except MR probes with strict conditions)
+    ALLOW_MR_BYPASS: true,
+    MR_BYPASS_MIN_STOCHRSI_DISTANCE: 15,  // StochRSI K must be < 15 or > 85 for MR
+  },
+  
+  // ===== BREAKOUT SETUP =====
+  // ADX rising from compression - potential new trend forming
+  BREAKOUT_SETUP: {
+    // ADX transitional zone
+    MIN_ADX: 18,
+    MAX_ADX: 30,
+    // ADX slope must be clearly rising (new energy entering)
+    MIN_ADX_SLOPE: 0.5,
+    // Require directional confirmation from at least 2 timeframes
+    MIN_ALIGNED_TIMEFRAMES: 2,
+    // OR: Bollinger squeeze breaking out
+    ALLOW_SQUEEZE_BREAKOUT: true,
+    // Position multiplier (cautious)
+    POSITION_MULTIPLIER: 0.50,
+    // Require momentum confirmation
+    REQUIRE_MOMENTUM_CONFIRMATION: true,
+    MIN_MOMENTUM_SCORE: 15,  // |score| must be >= 15 in trade direction
+  },
+  
+  // ===== LOGGING =====
+  LOG_REGIME_CLASSIFICATION: true,
+  LOG_BLOCK_DETAILS: true,
+} as const;
+
 // ============= PHASE 1: STRONG ADX UNIVERSAL OVERRIDE =============
 // When ADX confirms regime, gates downgrade from "hard block" to "context adjustment"
 // Key insight: "Bollinger should downgrade from 'gate' to 'context'"
