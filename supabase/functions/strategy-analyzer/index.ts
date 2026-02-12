@@ -5120,12 +5120,43 @@ serve(async (req) => {
           // Check for severe decline
           if (adxSlope < directionSpecificThreshold) {
             // Exception: High ADX (>= 55) can still work with declining slope
+            // BUT: Now also requires LTF alignment (Improvement #4)
             if (adx >= ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD) {
+              // IMPROVEMENT #4: Even at ADX >= 55, check LTF alignment
+              const contReq = ADX_SLOPE_GRADUATED_GATE.CONTINUATION_REQUIREMENTS;
+              const tf1hTrend = trendData.timeframes?.['1h']?.trend || 'neutral';
+              const tf30mTrend = trendData.timeframes?.['30m']?.trend || 'neutral';
+              const ltfAligned = (derivedDirection === 'long' && (tf1hTrend === 'bullish' || tf30mTrend === 'bullish')) ||
+                                 (derivedDirection === 'short' && (tf1hTrend === 'bearish' || tf30mTrend === 'bearish'));
+              
+              if (contReq?.ENABLED && contReq.REQUIRE_LTF_ALIGNMENT && !ltfAligned) {
+                // High ADX but NO LTF alignment + declining slope = late-stage exhaustion
+                // This is the -2.3% loss pattern: ADX 55 + slope -0.42 + 1h neutral + 30m neutral
+                rejectedByHardGates++;
+                const blockReason = `ADX_SLOPE_CONTINUATION_FAIL: ${derivedDirection.toUpperCase()} blocked - ADX=${adx.toFixed(1)} (high) but slope=${adxSlope.toFixed(2)} (declining) AND no LTF alignment (1h=${tf1hTrend}, 30m=${tf30mTrend}) → late-stage trend exhaustion`;
+                perSymbolGateAttribution.set(symbol, { gate: 'ADX_SLOPE_GRADUATED', details: blockReason });
+                
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                
+                await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                  gate: "ADX_SLOPE_GRADUATED",
+                  subGate: "CONTINUATION_FAIL",
+                  derivedDirection,
+                  adx: adx.toFixed(1),
+                  adxSlope: adxSlope.toFixed(2),
+                  tf1hTrend,
+                  tf30mTrend,
+                  ltfAligned: false,
+                  wouldPassWith: `ADX slope >= 0 OR 1h/30m aligned with ${derivedDirection}`,
+                }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                continue;
+              }
+              
               adxSlopeGraduatedMultiplier = ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_DECLINE_MULTIPLIER;
               adxSlopeGateApplied = true;
               
               if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_GRADUATED: Slope=${adxSlope.toFixed(2)} severely declining but ADX=${adx.toFixed(1)} >= ${ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD} - allowing with ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% position`);
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_GRADUATED: Slope=${adxSlope.toFixed(2)} severely declining but ADX=${adx.toFixed(1)} >= ${ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD} + LTF aligned (1h=${tf1hTrend}, 30m=${tf30mTrend}) - allowing with ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% position`);
               }
             }
             // Exception 2: Bollinger Breakdown Override - price outside bands with StochRSI runway
@@ -5218,11 +5249,52 @@ serve(async (req) => {
           } else if (adxSlope < ADX_SLOPE_GRADUATED_GATE.REDUCE_POSITION_SLOPE_THRESHOLD && adxSlope >= directionSpecificThreshold) {
             // Moderate decline: reduce position unless high ADX
             if (adx < ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD) {
-              adxSlopeGraduatedMultiplier = ADX_SLOPE_GRADUATED_GATE.MODERATE_DECLINE_MULTIPLIER;
-              adxSlopeGateApplied = true;
-              
-              if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_GRADUATED: Slope=${adxSlope.toFixed(2)} moderately declining, ADX=${adx.toFixed(1)} - reducing to ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}%`);
+              // IMPROVEMENT #4: For ADX 35+ with moderate decline, also check LTF alignment
+              const contReq = ADX_SLOPE_GRADUATED_GATE.CONTINUATION_REQUIREMENTS;
+              if (contReq?.ENABLED && adx >= contReq.MIN_ADX && adxSlope < contReq.MIN_ADX_SLOPE && contReq.BLOCK_DECLINING_NO_LTF) {
+                const tf1hTrend = trendData.timeframes?.['1h']?.trend || 'neutral';
+                const tf30mTrend = trendData.timeframes?.['30m']?.trend || 'neutral';
+                const ltfAligned = (derivedDirection === 'long' && (tf1hTrend === 'bullish' || tf30mTrend === 'bullish')) ||
+                                   (derivedDirection === 'short' && (tf1hTrend === 'bearish' || tf30mTrend === 'bearish'));
+                
+                if (!ltfAligned) {
+                  // ADX 35+ with declining slope AND no LTF = trend exhaustion, not continuation
+                  rejectedByHardGates++;
+                  const blockReason = `ADX_SLOPE_CONTINUATION_FAIL: ${derivedDirection.toUpperCase()} blocked - ADX=${adx.toFixed(1)} >= ${contReq.MIN_ADX} but slope=${adxSlope.toFixed(2)} < 0 AND no LTF alignment (1h=${tf1hTrend}, 30m=${tf30mTrend}) → trend decaying without LTF follow-through`;
+                  perSymbolGateAttribution.set(symbol, { gate: 'ADX_SLOPE_GRADUATED', details: blockReason });
+                  
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                  
+                  await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                    gate: "ADX_SLOPE_GRADUATED",
+                    subGate: "CONTINUATION_FAIL_MODERATE",
+                    derivedDirection,
+                    adx: adx.toFixed(1),
+                    adxSlope: adxSlope.toFixed(2),
+                    tf1hTrend,
+                    tf30mTrend,
+                    ltfAligned: false,
+                    wouldPassWith: `ADX slope >= 0 OR 1h/30m aligned with ${derivedDirection}`,
+                  }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                  continue;
+                }
+                
+                // LTF aligned but declining slope → marginal entry with reduced size
+                adxSlopeGraduatedMultiplier = contReq.MARGINAL_LTF_MULTIPLIER;
+                adxSlopeGateApplied = true;
+                
+                if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
+                  const tf1hTrendLog = trendData.timeframes?.['1h']?.trend || 'neutral';
+                  const tf30mTrendLog = trendData.timeframes?.['30m']?.trend || 'neutral';
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_CONTINUATION: ADX=${adx.toFixed(1)} >= ${contReq.MIN_ADX}, slope=${adxSlope.toFixed(2)} declining BUT LTF aligned (1h=${tf1hTrendLog}, 30m=${tf30mTrendLog}) - allowing with ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}%`);
+                }
+              } else {
+                adxSlopeGraduatedMultiplier = ADX_SLOPE_GRADUATED_GATE.MODERATE_DECLINE_MULTIPLIER;
+                adxSlopeGateApplied = true;
+                
+                if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_GRADUATED: Slope=${adxSlope.toFixed(2)} moderately declining, ADX=${adx.toFixed(1)} - reducing to ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}%`);
+                }
               }
             }
           } else if (derivedDirection === 'long' && ADX_SLOPE_GRADUATED_GATE.LONG_POSITIVE_SLOPE_TIERS?.ENABLED) {
@@ -6248,6 +6320,48 @@ serve(async (req) => {
                 }
               }
               
+              // ===== IMPROVEMENT #3: EXPANDED HARD BLOCK (1.2% zone) =====
+              // Block shorts within 1.2% of 24h low unless momentum is BEARISH (not neutral)
+              // Neutral momentum = absence of confirmation, NOT confirmation
+              const expandedBlock = NEAR_EXTREME_PROTECTION_GATE.EXPANDED_HARD_BLOCK;
+              if (!nearExtremeBlocked && expandedBlock?.ENABLED && distanceFromLow <= expandedBlock.SHORT_NEAR_LOW_THRESHOLD_PERCENT) {
+                const momentumIsBearish = smartMomentum.score <= expandedBlock.MIN_MOMENTUM_SCORE_SHORT;
+                
+                if (!momentumIsBearish && !adxOverrideAllowed) {
+                  nearExtremeBlocked = true;
+                  rejectedByHardGates++;
+                  const blockReason = `NEAR_24H_LOW_EXPANDED: SHORT blocked - ${distanceFromLow.toFixed(2)}% from 24h low ($${priceDistance.low24h.toFixed(2)}), momentum_score=${smartMomentum.score.toFixed(0)} (need <=${expandedBlock.MIN_MOMENTUM_SCORE_SHORT}) - neutral momentum is NOT confirmation`;
+                  perSymbolGateAttribution.set(symbol, { 
+                    gate: 'NEAR_24H_LOW_HARD', 
+                    details: blockReason 
+                  });
+                  
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                  
+                  await logRejectionWithAI(
+                    supabase, userId, symbol,
+                    blockReason,
+                    {
+                      gate: 'NEAR_24H_LOW_HARD',
+                      subGate: 'EXPANDED_MOMENTUM_BLOCK',
+                      derivedDirection,
+                      distanceFromLow: distanceFromLow.toFixed(3),
+                      low24h: priceDistance.low24h,
+                      expandedThreshold: expandedBlock.SHORT_NEAR_LOW_THRESHOLD_PERCENT,
+                      smartMomentumScore: smartMomentum.score.toFixed(1),
+                      momentumRequired: expandedBlock.MIN_MOMENTUM_SCORE_SHORT,
+                      momentumState: trendData?.momentum?.state || 'unknown',
+                      tf1hDir, tf30mDir,
+                      wouldPassWith: `momentum_score <= ${expandedBlock.MIN_MOMENTUM_SCORE_SHORT} OR ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
+                    },
+                    trendData,
+                    riskParams.ai_analysis_enabled !== false,
+                    earlyOrderFlowAnalysis
+                  );
+                  continue;
+                }
+              }
+              
               if (!nearExtremeBlocked && inHardZone && NEAR_EXTREME_PROTECTION_GATE.BLOCK_IN_HARD_ZONE && !adxOverrideAllowed && !ltfSupportsShort) {
                 // Hard block - too close to 24h low with no LTF support
                 nearExtremeBlocked = true;
@@ -6361,6 +6475,43 @@ serve(async (req) => {
                   const bypassReason = adxBypass ? `ADX ${adx.toFixed(1)}>=${regimeBlockLong.MIN_ADX_TO_BYPASS}` : momentumBypass ? `momentum ${smartMomentum.score.toFixed(0)}>=${regimeBlockLong.MIN_MOMENTUM_SCORE_TO_BYPASS}` : `orderFlow ${earlyOrderFlowAnalysis?.score?.toFixed(0)}>=${regimeBlockLong.MIN_ORDER_FLOW_SCORE_TO_BYPASS}`;
                   nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, regimeBlockLong.BYPASS_POSITION_MULTIPLIER);
                   logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_HIGH REGIME BYPASS: LONG ${distanceFromHigh.toFixed(2)}% from high, allowed via ${bypassReason} - position ${(regimeBlockLong.BYPASS_POSITION_MULTIPLIER * 100).toFixed(0)}%`);
+                }
+              }
+              
+              // ===== IMPROVEMENT #3: EXPANDED HARD BLOCK for LONG near high =====
+              const expandedBlockLong = NEAR_EXTREME_PROTECTION_GATE.EXPANDED_HARD_BLOCK;
+              if (!nearExtremeBlocked && expandedBlockLong?.ENABLED && distanceFromHigh <= expandedBlockLong.LONG_NEAR_HIGH_THRESHOLD_PERCENT) {
+                const momentumIsBullish = smartMomentum.score >= expandedBlockLong.MIN_MOMENTUM_SCORE_LONG;
+                
+                if (!momentumIsBullish && !adxOverrideAllowed) {
+                  nearExtremeBlocked = true;
+                  rejectedByHardGates++;
+                  const blockReason = `NEAR_24H_HIGH_EXPANDED: LONG blocked - ${distanceFromHigh.toFixed(2)}% from 24h high ($${priceDistance.high24h.toFixed(2)}), momentum_score=${smartMomentum.score.toFixed(0)} (need >=${expandedBlockLong.MIN_MOMENTUM_SCORE_LONG}) - neutral momentum is NOT confirmation`;
+                  perSymbolGateAttribution.set(symbol, { gate: 'NEAR_24H_HIGH_HARD', details: blockReason });
+                  
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                  
+                  await logRejectionWithAI(
+                    supabase, userId, symbol,
+                    blockReason,
+                    {
+                      gate: 'NEAR_24H_HIGH_HARD',
+                      subGate: 'EXPANDED_MOMENTUM_BLOCK',
+                      derivedDirection,
+                      distanceFromHigh: distanceFromHigh.toFixed(3),
+                      high24h: priceDistance.high24h,
+                      expandedThreshold: expandedBlockLong.LONG_NEAR_HIGH_THRESHOLD_PERCENT,
+                      smartMomentumScore: smartMomentum.score.toFixed(1),
+                      momentumRequired: expandedBlockLong.MIN_MOMENTUM_SCORE_LONG,
+                      momentumState: trendData?.momentum?.state || 'unknown',
+                      tf1hDir, tf30mDir,
+                      wouldPassWith: `momentum_score >= ${expandedBlockLong.MIN_MOMENTUM_SCORE_LONG} OR ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
+                    },
+                    trendData,
+                    riskParams.ai_analysis_enabled !== false,
+                    earlyOrderFlowAnalysis
+                  );
+                  continue;
                 }
               }
               
@@ -6511,6 +6662,84 @@ serve(async (req) => {
           
           // Ranging market = both 4h and 1h are neutral + ADX is below threshold
           isInRangingMarket = all4hNeutral && all1hNeutral && adxBelowThreshold;
+          
+          // ===== IMPROVEMENT #1: HARD BLOCK - NO-TRADE RANGE REGIME =====
+          // When primary_trend=neutral AND momentum_state IN (mixed,none) AND ADX < 28 → HARD BLOCK
+          // This regime statistically does not produce follow-through. Noise > edge.
+          const hardBlock = RANGING_MARKET_PROTECTION.HARD_BLOCK;
+          if (hardBlock?.ENABLED) {
+            const momentumState = trendData?.momentum?.state || 'none';
+            const primaryTrend = trendData?.primaryTrend || 'neutral';
+            const absMomentumScore = Math.abs(smartMomentum?.score ?? 0);
+            
+            const trendIsNeutral = primaryTrend === 'neutral' || primaryTrend === 'ranging';
+            const momentumHasNoEdge = hardBlock.NO_EDGE_MOMENTUM_STATES.includes(momentumState);
+            const adxTooLow = adx < hardBlock.MAX_ADX;
+            const momentumScoreTooLow = !hardBlock.REQUIRE_LOW_MOMENTUM_SCORE || absMomentumScore < hardBlock.MAX_ABS_MOMENTUM_SCORE;
+            
+            if (trendIsNeutral && momentumHasNoEdge && adxTooLow && momentumScoreTooLow) {
+              // Check if this is a mean reversion entry (allowed through)
+              const isMREntry = isMeanReversionStrategy(activeStrategyName || '');
+              
+              if (!isMREntry) {
+                rejectedByHardGates++;
+                const blockReason = `NO_TRADE_RANGE_REGIME: HARD BLOCK - primaryTrend=${primaryTrend}, momentum=${momentumState}, ADX=${adx.toFixed(1)}<${hardBlock.MAX_ADX}, |score|=${absMomentumScore.toFixed(0)}<${hardBlock.MAX_ABS_MOMENTUM_SCORE} → no statistical edge, noise dominates`;
+                perSymbolGateAttribution.set(symbol, { gate: 'NO_TRADE_RANGE_REGIME', details: blockReason });
+                
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                
+                await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                  gate: 'NO_TRADE_RANGE_REGIME',
+                  derivedDirection,
+                  primaryTrend,
+                  momentumState,
+                  momentumScore: smartMomentum?.score?.toFixed(1),
+                  adx: adx.toFixed(1),
+                  adxSlope: adxSlope.toFixed(2),
+                  maxAdxThreshold: hardBlock.MAX_ADX,
+                  maxAbsMomentumScore: hardBlock.MAX_ABS_MOMENTUM_SCORE,
+                  wouldPassWith: `ADX >= ${hardBlock.MAX_ADX} OR momentum_state=confirmed/building OR |momentum_score| >= ${hardBlock.MAX_ABS_MOMENTUM_SCORE}`,
+                }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                continue;
+              } else {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 NO_TRADE_RANGE_REGIME: Would block but allowing Mean Reversion entry`);
+              }
+            }
+          }
+          
+          // ===== IMPROVEMENT #2: MINIMUM ATR FILTER =====
+          // Block when volatility is too compressed for fee-positive expectancy
+          const atrFilter = RANGING_MARKET_PROTECTION.MIN_ATR_FILTER;
+          if (atrFilter?.ENABLED) {
+            const currentPrice = trendData?.currentPrice || 0;
+            const currentATR = trendData?.volatility?.atr ?? 0;
+            const atrPercent24h = currentPrice > 0 ? (currentATR / currentPrice) * 100 : 0;
+            
+            if (atrPercent24h > 0 && atrPercent24h < atrFilter.MIN_ATR_PERCENT) {
+              const isMREntry = atrFilter.ALLOW_MR_BYPASS && isMeanReversionStrategy(activeStrategyName || '');
+              
+              if (!isMREntry) {
+                rejectedByHardGates++;
+                const blockReason = `LOW_ATR_BLOCK: ATR=${atrPercent24h.toFixed(2)}% < ${atrFilter.MIN_ATR_PERCENT}% minimum → compressed volatility, negative expectancy after fees (0.2% round-trip)`;
+                perSymbolGateAttribution.set(symbol, { gate: 'LOW_ATR_BLOCK', details: blockReason });
+                
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                
+                await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                  gate: 'LOW_ATR_BLOCK',
+                  derivedDirection,
+                  atrPercent: atrPercent24h.toFixed(3),
+                  minAtrRequired: atrFilter.MIN_ATR_PERCENT,
+                  currentPrice: currentPrice.toFixed(2),
+                  atr: currentATR.toFixed(4),
+                  wouldPassWith: `ATR% >= ${atrFilter.MIN_ATR_PERCENT}%`,
+                }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                continue;
+              } else {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 LOW_ATR: ATR=${atrPercent24h.toFixed(2)}% < ${atrFilter.MIN_ATR_PERCENT}% but allowing Mean Reversion`);
+              }
+            }
+          }
           
           if (isInRangingMarket) {
             rangingMarketPositionMultiplier = RANGING_MARKET_PROTECTION.RANGING_POSITION_MULTIPLIER;
