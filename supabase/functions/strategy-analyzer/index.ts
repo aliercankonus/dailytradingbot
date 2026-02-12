@@ -2368,7 +2368,9 @@ serve(async (req) => {
       | 'MR_EXTREME_MOMENTUM_BLOCK'
       | 'MR_SAFETY_CHECK_FAILED'
       // NEW: Capitulation Bounce Probe
-      | 'CAPITULATION_BOUNCE_PROBE';  // Post-capitulation balance zone entry
+      | 'CAPITULATION_BOUNCE_PROBE'  // Post-capitulation balance zone entry
+      // NEW: 4-State Regime Classifier gates
+      | 'RANGE_COMPRESSION_BLOCK';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -15059,6 +15061,9 @@ serve(async (req) => {
         } else if (dominantGate === 'NO_CLEAR_DIRECTION') {
           noTradeState = NO_TRADE_ZONE_STATE.STATES.PULLBACK_WAITING;
           noTradeReason = `All ${totalSymbols} symbols have no clear direction - waiting for pullback`;
+        } else if (dominantGate === 'RANGE_COMPRESSION_BLOCK') {
+          noTradeState = NO_TRADE_ZONE_STATE.STATES.NO_ENERGY;
+          noTradeReason = `All ${totalSymbols} symbols in RANGE_COMPRESSION (ADX < 25, no momentum) - no edge exists`;
         } else {
           noTradeState = NO_TRADE_ZONE_STATE.STATES.MIXED_BLOCK;
           noTradeReason = `All ${totalSymbols} symbols blocked by ${dominantGate}`;
