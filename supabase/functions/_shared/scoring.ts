@@ -5092,6 +5092,100 @@ export const classify4StateRegime = (
   };
 };
 
+// ============= REGIME PERSISTENCE ENGINE =============
+// Asymmetric persistence: require N consecutive candles of a new regime before switching.
+// Prevents boundary-condition flip-flopping without delaying explosive moves.
+
+export interface RegimePersistenceInput {
+  currentDetectedRegime: FourStateRegime;
+  recentRegimeHistory: { regime: string }[];  // Most recent first (last 3 rows)
+}
+
+export interface RegimePersistenceResult {
+  effectiveRegime: FourStateRegime;
+  wasOverridden: boolean;
+  candidateRegime: FourStateRegime | null;
+  candidateCount: number;
+  requiredCandles: number;
+  reason: string;
+}
+
+export const applyRegimePersistence = (
+  input: RegimePersistenceInput
+): RegimePersistenceResult => {
+  const P = FOUR_STATE_REGIME.PERSISTENCE;
+  const { currentDetectedRegime, recentRegimeHistory } = input;
+  
+  if (!P.ENABLED || recentRegimeHistory.length === 0) {
+    return {
+      effectiveRegime: currentDetectedRegime,
+      wasOverridden: false,
+      candidateRegime: null,
+      candidateCount: 0,
+      requiredCandles: 0,
+      reason: P.ENABLED ? 'No regime history available, using raw classification' : 'Persistence disabled',
+    };
+  }
+  
+  const lastConfirmedRegime = recentRegimeHistory[0].regime as FourStateRegime;
+  
+  if (currentDetectedRegime === lastConfirmedRegime) {
+    return {
+      effectiveRegime: currentDetectedRegime,
+      wasOverridden: false,
+      candidateRegime: null,
+      candidateCount: 0,
+      requiredCandles: 0,
+      reason: `Regime stable: ${currentDetectedRegime}`,
+    };
+  }
+  
+  const transitionKey = `${lastConfirmedRegime}_TO_${currentDetectedRegime}`;
+  const requiredCandles = P.TRANSITIONS[transitionKey] ?? P.DEFAULT_REQUIRED_CANDLES;
+  
+  if (requiredCandles === 0) {
+    return {
+      effectiveRegime: currentDetectedRegime,
+      wasOverridden: false,
+      candidateRegime: null,
+      candidateCount: 0,
+      requiredCandles: 0,
+      reason: `Immediate transition: ${transitionKey} (0 candles required)`,
+    };
+  }
+  
+  let candidateCount = 0;
+  for (const entry of recentRegimeHistory) {
+    if (entry.regime === currentDetectedRegime) {
+      candidateCount++;
+    } else {
+      break;
+    }
+  }
+  
+  const totalCount = candidateCount + 1;
+  
+  if (totalCount >= requiredCandles) {
+    return {
+      effectiveRegime: currentDetectedRegime,
+      wasOverridden: false,
+      candidateRegime: currentDetectedRegime,
+      candidateCount: totalCount,
+      requiredCandles,
+      reason: `Transition confirmed: ${transitionKey} (${totalCount}/${requiredCandles} candles)`,
+    };
+  }
+  
+  return {
+    effectiveRegime: lastConfirmedRegime,
+    wasOverridden: true,
+    candidateRegime: currentDetectedRegime,
+    candidateCount: totalCount,
+    requiredCandles,
+    reason: `Transition blocked: ${transitionKey} (${totalCount}/${requiredCandles} candles, holding ${lastConfirmedRegime})`,
+  };
+};
+
 
 // Returns the effective minimum momentum score based on ADX level
 // Key insight: At high ADX, momentum score should not block, only adjust position

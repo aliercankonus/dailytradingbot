@@ -231,8 +231,9 @@ import {
   getEffectiveMomentumThreshold,
   applyQualityNearMissBoost,
   checkImpulseContinuation,
-  // NEW: 4-State Regime Classifier
+  // NEW: 4-State Regime Classifier + Persistence
   classify4StateRegime,
+  applyRegimePersistence,
   // CENTRALIZED EXTRACTION HELPERS (consistency across all edge functions)
   extractADX,
   extractADXSlope,
@@ -2556,6 +2557,32 @@ serve(async (req) => {
       logger.info(`   → Position size multiplier: ${recoveryPositionSizeMultiplier * 100}%`);
     }
 
+    // ============= PRE-FETCH REGIME HISTORY FOR PERSISTENCE =============
+    // Query last 3 regime entries per symbol for asymmetric persistence engine
+    const regimeHistoryBySymbol = new Map<string, { regime: string }[]>();
+    try {
+      const symbolNames = activeSymbols.map(s => s.symbol);
+      const { data: regimeRows } = await supabase
+        .from('market_regime_history')
+        .select('symbol, regime, recorded_at')
+        .eq('user_id', userId)
+        .in('symbol', symbolNames)
+        .order('recorded_at', { ascending: false })
+        .limit(symbolNames.length * 3);  // Up to 3 per symbol
+      
+      if (regimeRows) {
+        for (const row of regimeRows) {
+          const existing = regimeHistoryBySymbol.get(row.symbol) || [];
+          if (existing.length < 3) {
+            existing.push({ regime: row.regime });
+            regimeHistoryBySymbol.set(row.symbol, existing);
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn(`Failed to fetch regime history for persistence: ${err}`);
+    }
+
     // Analyze each symbol (using filtered activeSymbols that passed win rate check)
     for (const { symbol } of activeSymbols) {
       const currentTradeCount = openTradesPerSymbol.get(symbol) || 0;
@@ -4194,8 +4221,69 @@ serve(async (req) => {
           alignedTFCount
         );
         
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME: ${fourStateRegime.regime} - ${fourStateRegime.reason}`);
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME (raw): ${fourStateRegime.regime} - ${fourStateRegime.reason}`);
+        
+        // ============= REGIME PERSISTENCE =============
+        // Apply asymmetric persistence to prevent boundary-condition flip-flopping
+        const regimeHistory = regimeHistoryBySymbol.get(symbol) || [];
+        const persistenceResult = applyRegimePersistence({
+          currentDetectedRegime: fourStateRegime.regime,
+          recentRegimeHistory: regimeHistory,
+        });
+        
+        // Override regime if persistence blocked the transition
+        if (persistenceResult.wasOverridden) {
+          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.TREND} 🔒 REGIME PERSISTENCE: ${persistenceResult.reason}`);
+          // Re-derive regime result with the persisted regime's properties
+          const persistedRegimeConfig = FOUR_STATE_REGIME[persistenceResult.effectiveRegime];
+          if (persistenceResult.effectiveRegime === 'RANGE_COMPRESSION') {
+            fourStateRegime.regime = 'RANGE_COMPRESSION';
+            fourStateRegime.positionMultiplier = 0;
+            fourStateRegime.allowContinuation = false;
+            fourStateRegime.allowMeanReversion = FOUR_STATE_REGIME.RANGE_COMPRESSION.ALLOW_MR_BYPASS;
+          } else if (persistenceResult.effectiveRegime === 'TREND_EXHAUSTION') {
+            fourStateRegime.regime = 'TREND_EXHAUSTION';
+            fourStateRegime.positionMultiplier = FOUR_STATE_REGIME.TREND_EXHAUSTION.POSITION_MULTIPLIER;
+            fourStateRegime.allowContinuation = false;
+            fourStateRegime.allowMeanReversion = true;
+          } else if (persistenceResult.effectiveRegime === 'BREAKOUT_SETUP') {
+            fourStateRegime.regime = 'BREAKOUT_SETUP';
+            fourStateRegime.positionMultiplier = FOUR_STATE_REGIME.BREAKOUT_SETUP.POSITION_MULTIPLIER;
+            fourStateRegime.allowContinuation = true;
+            fourStateRegime.allowMeanReversion = true;
+            fourStateRegime.requireConfirmation = true;
+          } else {
+            fourStateRegime.regime = 'TREND_EXPANSION';
+            fourStateRegime.positionMultiplier = FOUR_STATE_REGIME.TREND_EXPANSION.POSITION_MULTIPLIER;
+            fourStateRegime.allowContinuation = true;
+            fourStateRegime.allowMeanReversion = true;
+          }
+          fourStateRegime.reason = `[PERSISTED] ${persistenceResult.reason} | Raw: ${fourStateRegime.reason}`;
+        } else if (persistenceResult.reason !== `Regime stable: ${fourStateRegime.regime}`) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} ✅ REGIME PERSISTENCE: ${persistenceResult.reason}`);
+        }
+        
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME (effective): ${fourStateRegime.regime}`);
         logger.forSymbol(symbol).info(`   → allowContinuation=${fourStateRegime.allowContinuation}, allowMR=${fourStateRegime.allowMeanReversion}, posMultiplier=${fourStateRegime.positionMultiplier.toFixed(2)}`);
+        
+        // Store 4-state regime to history EARLY (before any gate blocks via continue)
+        // This ensures persistence engine has data even for blocked symbols
+        supabase
+          .from("market_regime_history")
+          .insert({
+            user_id: userId,
+            symbol,
+            regime: fourStateRegime.regime,
+            adx: adx,
+            adx_slope: adxSlope,
+            trend_strength: 0,  // Will be calculated later; not needed for persistence
+            trend_direction: derivedDirection === 'long' ? 'bullish' : derivedDirection === 'short' ? 'bearish' : 'neutral',
+            bb_squeeze: isBBSqueeze,
+            bb_width: trendData?.bollingerBands?.['1h']?.bandwidth || 0
+          })
+          .then(({ error }) => {
+            if (error) logger.forSymbol(symbol).debug(`Failed to store early regime history: ${error.message}`);
+          });
         
         // HARD BLOCK: RANGE_COMPRESSION - no statistical edge exists
         // Note: MR bypass is checked via StochRSI extreme only (strategy-level MR check happens later)
@@ -7388,23 +7476,8 @@ serve(async (req) => {
             if (error) logger.forSymbol(symbol).debug(`Failed to store momentum analysis: ${error.message}`);
           });
         
-        // Store market regime history (async, don't block)
-        supabase
-          .from("market_regime_history")
-          .insert({
-            user_id: userId,
-            symbol,
-            regime: smartRegime.regime,
-            adx: adx,
-            adx_slope: smartAdxRising ? 1 : -1,
-            trend_strength: smartRegime.regimeScore,
-            trend_direction: smartMomentum.direction,
-            bb_squeeze: bbSqueeze.isSqueeze,
-            bb_width: bbSqueeze.bbWidth
-          })
-          .then(({ error }) => {
-            if (error) logger.forSymbol(symbol).debug(`Failed to store regime history: ${error.message}`);
-          });
+        // NOTE: Regime history is now stored early (after 4-state classification, before gate blocks)
+        // to ensure persistence engine has data even for symbols blocked by gates.
         
         // ============= MEAN REVERSION EARLY DETECTION (BEFORE PRE_RECOVERY GATE) =============
         // CRITICAL: Runs BEFORE PRE_RECOVERY to potentially flip direction for extreme oversold/overbought

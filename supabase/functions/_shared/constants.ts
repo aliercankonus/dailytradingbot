@@ -3976,6 +3976,36 @@ export const FOUR_STATE_REGIME = {
     MIN_MOMENTUM_SCORE: 15,  // |score| must be >= 15 in trade direction
   },
   
+  // ===== REGIME PERSISTENCE =====
+  // Asymmetric persistence: require N consecutive candles of a new regime before switching
+  // This eliminates boundary-condition flip-flopping without delaying explosive moves
+  PERSISTENCE: {
+    ENABLED: true,
+    // Default: require 2 consecutive candles of new regime before switching
+    DEFAULT_REQUIRED_CANDLES: 2,
+    // Transition-specific overrides (asymmetric persistence)
+    TRANSITIONS: {
+      // COMPRESSION → EXPANSION: Immediate (explosive breakout from compression)
+      RANGE_COMPRESSION_TO_TREND_EXPANSION: 0,  // No delay - compression breakouts are explosive
+      // EXPANSION → EXHAUSTION: Fast (1 candle) - don't delay risk reduction
+      TREND_EXPANSION_TO_TREND_EXHAUSTION: 1,
+      // EXHAUSTION → EXPANSION: Standard (2 candles) - confirm recovery
+      TREND_EXHAUSTION_TO_TREND_EXPANSION: 2,
+      // BREAKOUT ↔ EXPANSION: Standard (2 candles)
+      BREAKOUT_SETUP_TO_TREND_EXPANSION: 2,
+      TREND_EXPANSION_TO_BREAKOUT_SETUP: 2,
+      // Any → COMPRESSION: Standard (2 candles) - confirm energy truly gone
+      TREND_EXPANSION_TO_RANGE_COMPRESSION: 2,
+      BREAKOUT_SETUP_TO_RANGE_COMPRESSION: 2,
+      TREND_EXHAUSTION_TO_RANGE_COMPRESSION: 2,
+      // COMPRESSION → BREAKOUT: Standard (2 candles)
+      RANGE_COMPRESSION_TO_BREAKOUT_SETUP: 2,
+      // COMPRESSION → EXHAUSTION: Immediate (already in low-energy state)
+      RANGE_COMPRESSION_TO_TREND_EXHAUSTION: 0,
+    } as Record<string, number>,
+    LOG_PERSISTENCE_DECISIONS: true,
+  },
+  
   // ===== LOGGING =====
   LOG_REGIME_CLASSIFICATION: true,
   LOG_BLOCK_DETAILS: true,
