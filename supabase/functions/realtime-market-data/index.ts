@@ -160,9 +160,12 @@ serve(async (req) => {
         }
       };
 
-      binanceSocket.onerror = (error) => {
-        console.error('[MarketData-Edge] Binance WebSocket error:', error);
-        lastError = `Binance error at ${new Date().toISOString()}`;
+      binanceSocket.onerror = (error: Event | ErrorEvent) => {
+        const errorDetail = error instanceof ErrorEvent 
+          ? `message=${error.message || 'unknown'} type=${error.type}` 
+          : `type=${error.type}`;
+        console.error(`[MarketData-Edge] Binance WebSocket error: ${errorDetail}`);
+        lastError = `Binance error: ${errorDetail} at ${new Date().toISOString()}`;
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify({
             type: 'error',
@@ -238,8 +241,11 @@ serve(async (req) => {
     }
   };
 
-  socket.onerror = (error) => {
-    console.error('[MarketData-Edge] Client WebSocket error:', error);
+  socket.onerror = (error: Event | ErrorEvent) => {
+    const errorDetail = error instanceof ErrorEvent 
+      ? `message=${error.message || 'unknown'} type=${error.type}` 
+      : `type=${error.type}`;
+    console.error(`[MarketData-Edge] Client WebSocket error: ${errorDetail}`);
     // Close Binance connection on client error
     if (binanceSocket && binanceSocket.readyState === WebSocket.OPEN) {
       binanceSocket.close();
