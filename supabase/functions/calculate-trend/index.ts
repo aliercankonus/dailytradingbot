@@ -1318,7 +1318,17 @@ serve(async (req) => {
       throw new Error(`Insufficient 4h data for ${symbol}: ${prices4h.length} closed candles (need ${MIN_CANDLES_4H}+)`);
     }
     
-    logger.forSymbol(symbol).info(`📊 CANDLE SEPARATION: 1h=${closedKlines1h.length} closed + 1 live, 4h=${closedKlines4h.length} closed + 1 live, 15m=${closedKlines15m.length} closed, 30m=${closedKlines30m.length} closed`);
+    // ===== INTRA-CANDLE DEVIATION DIAGNOSTIC =====
+    // Quantifies noise eliminated by hybrid architecture
+    const lastClosedPrice1h = prices1h[prices1h.length - 1];
+    const lastClosedPrice4h = prices4h[prices4h.length - 1];
+    const deviation1h = lastClosedPrice1h !== 0 ? ((currentPrice - lastClosedPrice1h) / lastClosedPrice1h) * 100 : 0;
+    const liveCandle4h = klines4h[klines4h.length - 1];
+    const livePrice4h = parseFloat(liveCandle4h[4]);
+    const deviation4h = lastClosedPrice4h !== 0 ? ((livePrice4h - lastClosedPrice4h) / lastClosedPrice4h) * 100 : 0;
+    
+    logger.forSymbol(symbol).info(`📊 CANDLE SEPARATION: 1h=${closedKlines1h.length} closed + 1 live, 4h=${closedKlines4h.length} closed + 1 live`);
+    logger.forSymbol(symbol).info(`📐 INTRA-CANDLE DEVIATION: livePrice=${currentPrice.toFixed(2)} vs lastClosed1h=${lastClosedPrice1h.toFixed(2)} (Δ${deviation1h >= 0 ? '+' : ''}${deviation1h.toFixed(4)}%) | lastClosed4h=${lastClosedPrice4h.toFixed(2)} (Δ${deviation4h >= 0 ? '+' : ''}${deviation4h.toFixed(4)}%)`);
 
     // Calculate trends using shared module
     const trend15m = calculateTrend(prices15m);
