@@ -37,7 +37,11 @@ const ALERT_CONFIG = {
     'COUNTER_TREND_ONLY',
     'PULLBACK_WAITING',
     'HTF_NOT_ALIGNED',
+    'WS_HEALTHY',  // WebSocket health probe - not a real strategy run
   ],
+  
+  // States that are NOT real strategy-analyzer runs (should be skipped for alerting)
+  NON_STRATEGY_STATES: ['WS_HEALTHY'],
   
   // TIER 3: CRITICAL - Operational concern (immediate)
   // Only triggers when 0 signals AND 0 rejections (bot truly stuck)
@@ -382,6 +386,7 @@ serve(async (req) => {
         .from('bot_heartbeat')
         .select('*')
         .eq('user_id', userId)
+        .not('no_trade_state', 'in', `(${ALERT_CONFIG.NON_STRATEGY_STATES.join(',')})`)
         .order('recorded_at', { ascending: false })
         .limit(1);
 
