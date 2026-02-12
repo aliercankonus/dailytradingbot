@@ -195,38 +195,50 @@ export function analyzeMultiTimeframe(
 ): MultiTimeframeTrendData | null {
   if (klines1h.length < 50 || klines4h.length < 20) return null;
   
-  const prices1h = klines1h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
-  const prices4h = klines4h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+  // HYBRID CANDLE SEPARATION: Use closed candles for structural indicators
+  // The last kline is the currently forming (incomplete) candle
+  const closedKlines1h = klines1h.length > 1 ? klines1h.slice(0, -1) : klines1h;
+  const closedKlines4h = klines4h.length > 1 ? klines4h.slice(0, -1) : klines4h;
+  
+  // Structural prices from CLOSED candles only
+  const prices1h = closedKlines1h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+  const prices4h = closedKlines4h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
   
   if (prices1h.length === 0) return null;
   
-  const currentPrice = prices1h[prices1h.length - 1];
+  // Live price from the forming candle (tactical use)
+  const liveCandle = klines1h[klines1h.length - 1];
+  const currentPrice = parseFloat(liveCandle[4]);
+  
+  // All structural indicators use CLOSED candle data
   const trend1h = calculateTrend(prices1h);
   const trend4h = calculateTrend(prices4h);
   
   const stochRsi1h = calculateStochasticRSI(prices1h, 14, 14, 3, 3, trend1h.indicators.rsiArray);
   const stochRsi4h = calculateStochasticRSI(prices4h, 14, 14, 3, 3, trend4h.indicators.rsiArray);
   
-  const adxResult = calculateADXWithDirection(klines1h, 14);
+  // ADX and ATR from CLOSED klines
+  const adxResult = calculateADXWithDirection(closedKlines1h, 14);
   const adx = adxResult.adx;
-  const currentATR = calculateATR(klines1h, 14);
+  const currentATR = calculateATR(closedKlines1h, 14);
   const atrPercent = currentPrice !== 0 ? (currentATR / currentPrice) * 100 : 0;
-  const historicalATRAvg = calculateHistoricalATRAvg(klines1h, 14, 30, currentATR);
+  const historicalATRAvg = calculateHistoricalATRAvg(closedKlines1h, 14, 30, currentATR);
   const relativeATR = historicalATRAvg !== 0 ? currentATR / historicalATRAvg : 0;
   
   // Simplified alignment check
   const isAligned = trend4h.trend !== "neutral" && 
     (trend1h.trend === trend4h.trend || trend1h.trend === "neutral");
   
-  // Volume analysis
-  const volume1h = calculateVolumeAnalysis(klines1h);
+  // Volume analysis from CLOSED klines
+  const volume1h = calculateVolumeAnalysis(closedKlines1h);
   
-  // Momentum state
+  // Momentum state (uses structural MACD from closed candles)
   const macdHistogram = trend1h.indicators.macdHistogram;
   const prevMacdHistogram = trend1h.indicators.macdHistogramArray.length > 1 
     ? trend1h.indicators.macdHistogramArray[trend1h.indicators.macdHistogramArray.length - 2] 
     : 0;
   const macdExpanding = Math.abs(macdHistogram) > Math.abs(prevMacdHistogram);
+  // For close alignment, compare last two CLOSED candle closes
   const lastClose = prices1h[prices1h.length - 1] || 0;
   const prevClose = prices1h[prices1h.length - 2] || lastClose;
   const lastCloseAligns = trend4h.trend === "bullish" ? lastClose > prevClose : 

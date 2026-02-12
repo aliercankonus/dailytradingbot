@@ -2161,18 +2161,23 @@ serve(async (req) => {
     };
 
     // Fetch historical klines using shared Binance utilities
-    const fetchHistoricalKlines = async (symbol: string): Promise<{ prices: number[]; volumes: number[]; klines: any[] }> => {
+    const fetchHistoricalKlines = async (symbol: string): Promise<{ prices: number[]; volumes: number[]; klines: any[]; livePrice: number }> => {
       try {
         const klines = await getKlines(symbol, "15m", 50);
-        const { closes, volumes } = parseKlinePrices(klines);
+        // HYBRID CANDLE SEPARATION: Use closed candles for indicator data
+        const closedKlines = klines.length > 1 ? klines.slice(0, -1) : klines;
+        const liveCandle = klines[klines.length - 1];
+        const livePrice = parseFloat(liveCandle?.[4] ?? '0');
+        const { closes, volumes } = parseKlinePrices(closedKlines);
         return {
           prices: closes,
           volumes: volumes,
-          klines: klines,  // Keep full kline data for order flow analysis
+          klines: closedKlines,  // Closed kline data for order flow analysis
+          livePrice,
         };
       } catch (error) {
         logger.forSymbol(symbol).error(`Failed to fetch klines: ${error}`);
-        return { prices: [], volumes: [], klines: [] };
+        return { prices: [], volumes: [], klines: [], livePrice: 0 };
       }
     };
 
@@ -2188,7 +2193,7 @@ serve(async (req) => {
     ]);
 
     const marketDataMap = new Map(marketDataResults.filter(Boolean).map((d) => [d.symbol, d]));
-    const historicalDataMap = new Map<string, { prices: number[]; volumes: number[]; klines: any[] }>();
+    const historicalDataMap = new Map<string, { prices: number[]; volumes: number[]; klines: any[]; livePrice: number }>();
     historicalResults.forEach(({ symbol, data }) => historicalDataMap.set(symbol, data));
 
     // Fetch trend data in PARALLEL for eligible symbols (already filtered by win rate)
