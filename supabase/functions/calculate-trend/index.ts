@@ -1284,23 +1284,41 @@ serve(async (req) => {
       ]);
     }
 
-    const prices15m = klines15m.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
-    const prices30m = klines30m.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
-    const prices1h = klines1h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
-    const prices4h = klines4h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+    // ============= HYBRID CANDLE SEPARATION =============
+    // ARCHITECTURAL PRINCIPLE: Regime decisions use CLOSED candles (structural truth).
+    // Execution/price checks use LIVE candle (tactical responsiveness).
+    // The last kline from Binance is the currently forming (incomplete) candle.
+    // Using it for indicators (StochRSI, ADX, MACD) causes regime flickering.
+    // Dropping it stabilizes regime classification while keeping price-proximity checks live.
+    
+    // Closed klines: all candles EXCEPT the currently forming one
+    const closedKlines15m = klines15m.length > 1 ? klines15m.slice(0, -1) : klines15m;
+    const closedKlines30m = klines30m.length > 1 ? klines30m.slice(0, -1) : klines30m;
+    const closedKlines1h = klines1h.length > 1 ? klines1h.slice(0, -1) : klines1h;
+    const closedKlines4h = klines4h.length > 1 ? klines4h.slice(0, -1) : klines4h;
+    
+    // Structural prices: from CLOSED candles only (for indicators, regime, trend)
+    const prices15m = closedKlines15m.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+    const prices30m = closedKlines30m.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+    const prices1h = closedKlines1h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+    const prices4h = closedKlines4h.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+    
+    // Live price: from the currently forming candle (tactical use only)
+    const liveCandle1h = klines1h[klines1h.length - 1];
+    const currentPrice = parseFloat(liveCandle1h[4]); // Live spot price for tactical checks
 
     // Minimum candle requirements for accurate indicator calculations
     const MIN_CANDLES_1H = 35; // Required for MACD (26 + 9 smoothing)
     const MIN_CANDLES_4H = 20; // Required for ADX and trend analysis
     
     if (prices1h.length < MIN_CANDLES_1H) {
-      throw new Error(`Insufficient 1h data for ${symbol}: ${prices1h.length} candles (need ${MIN_CANDLES_1H}+)`);
+      throw new Error(`Insufficient 1h data for ${symbol}: ${prices1h.length} closed candles (need ${MIN_CANDLES_1H}+)`);
     }
     if (prices4h.length < MIN_CANDLES_4H) {
-      throw new Error(`Insufficient 4h data for ${symbol}: ${prices4h.length} candles (need ${MIN_CANDLES_4H}+)`);
+      throw new Error(`Insufficient 4h data for ${symbol}: ${prices4h.length} closed candles (need ${MIN_CANDLES_4H}+)`);
     }
-
-    const currentPrice = prices1h[prices1h.length - 1];
+    
+    logger.forSymbol(symbol).info(`📊 CANDLE SEPARATION: 1h=${closedKlines1h.length} closed + 1 live, 4h=${closedKlines4h.length} closed + 1 live, 15m=${closedKlines15m.length} closed, 30m=${closedKlines30m.length} closed`);
 
     // Calculate trends using shared module
     const trend15m = calculateTrend(prices15m);
@@ -1332,13 +1350,13 @@ serve(async (req) => {
     const dominantTrend = trend4h.trend;
     const dominantConfidence = trend4h.confidence;
 
-    // ADX and ATR using shared modules
-    const adxResult = calculateADXWithDirection(klines1h, 14);
+    // ADX and ATR using shared modules (CLOSED candles for structural stability)
+    const adxResult = calculateADXWithDirection(closedKlines1h, 14);
     const adx = adxResult.adx;
     const adxRising = adxResult.adxRising;
-    const currentATR = calculateATR(klines1h, 14);
+    const currentATR = calculateATR(closedKlines1h, 14);
     const atrPercent = currentPrice !== 0 ? (currentATR / currentPrice) * 100 : 0;
-    const historicalATRAvg = calculateHistoricalATRAvg(klines1h, 14, 30, currentATR);
+    const historicalATRAvg = calculateHistoricalATRAvg(closedKlines1h, 14, 30, currentATR);
     const relativeATR = historicalATRAvg !== 0 ? currentATR / historicalATRAvg : 1.0;
 
     symLog.info(`${LOG_CATEGORIES.ADX} ${adx.toFixed(1)} (${adxRising ? 'rising' : 'falling'}) | ATR: ${currentATR.toFixed(4)} (${atrPercent.toFixed(2)}%) | Relative ATR: ${relativeATR.toFixed(2)}x`);
@@ -1439,13 +1457,13 @@ serve(async (req) => {
     
     let primaryTrend: "bullish" | "bearish" | "neutral" | "ranging" = dominantTrend;
     
-    // Volume analysis using shared module
-    const volume15m = calculateVolumeAnalysis(klines15m);
-    const volume30m = calculateVolumeAnalysis(klines30m);
-    const volume1h = calculateVolumeAnalysis(klines1h);
-    const volume4h = calculateVolumeAnalysis(klines4h);
+    // Volume analysis using shared module (CLOSED candles for structural consistency)
+    const volume15m = calculateVolumeAnalysis(closedKlines15m);
+    const volume30m = calculateVolumeAnalysis(closedKlines30m);
+    const volume1h = calculateVolumeAnalysis(closedKlines1h);
+    const volume4h = calculateVolumeAnalysis(closedKlines4h);
     
-    // Bollinger Bands
+    // Bollinger Bands (CLOSED candle prices for structural stability)
     const bb15m = calculateBollingerBands(prices15m, 20, 2);
     const bb30m = calculateBollingerBands(prices30m, 20, 2);
     const bb1h = calculateBollingerBands(prices1h, 20, 2);
@@ -1456,10 +1474,10 @@ serve(async (req) => {
     
     symLog.info(`${LOG_CATEGORIES.BOLLINGER} 1h squeeze=${bb1h.squeeze}(${bb1h.squeezeIntensity}%) 4h squeeze=${bb4h.squeeze}(${bb4h.squeezeIntensity}%) position=${bb1h.pricePosition} %B=${bb1h.percentB}`);
 
-    // ADX for each timeframe for enhanced confidence
-    const adx15m = calculateADX(klines15m, 14);
-    const adx30m = calculateADX(klines30m, 14);
-    const adx4h = calculateADX(klines4h, 14);
+    // ADX for each timeframe for enhanced confidence (CLOSED candles)
+    const adx15m = calculateADX(closedKlines15m, 14);
+    const adx30m = calculateADX(closedKlines30m, 14);
+    const adx4h = calculateADX(closedKlines4h, 14);
 
     // Enhanced confidence using shared module
     const hasRangeExpansion1h = relativeATR > 1.0;
@@ -1517,7 +1535,7 @@ serve(async (req) => {
     // ============= STEALTH TREND DETECTION =============
     // Detect gradual price grinds (2-4% moves) that slip through ADX/momentum filters
     const stealthTrend = calculateStealthTrend(
-      klines15m,
+      closedKlines15m,
       adx,
       trend1h,
       trend30m,
@@ -1543,7 +1561,7 @@ serve(async (req) => {
     );
     
     const neutralPersistence = calculateNeutralPersistence(
-      klines15m,
+      closedKlines15m,
       trend4h,
       trend1h,
       trend30m,
@@ -1847,7 +1865,7 @@ serve(async (req) => {
     symLog.info(`${LOG_CATEGORIES.MOMENTUM} state=${momentumState} macdExpanding=${macdExpanding} lastCloseAligns=${lastCloseAlignsWithTrend} divergence=${hasDivergence} volumeConfirms=${volumeConfirmsDirection} ADX=${adx.toFixed(1)} adxRising=${adxRising} fakeBreakoutRisk=${fakeBreakoutRisk} genuineMomentum=${genuineMomentum}`);
 
     // Market structure validation
-    const marketStructure = validateMarketStructure(klines1h, dominantTrend);
+    const marketStructure = validateMarketStructure(closedKlines1h, dominantTrend);
 
     // Build response - using explicit object type to ensure all fields are included
     const response = {
@@ -2004,9 +2022,11 @@ serve(async (req) => {
         confidenceBonus: neutralPersistence.confidenceBonus,
         reason: neutralPersistence.reason,
       },
-      // Raw klines for downstream pullback analysis
-      klines15m: klines15m.slice(-20),  // Last 20 candles for 15m pullback analysis
-      klines30m: klines30m.slice(-20),  // Last 20 candles for 30m pullback analysis
+      // Raw CLOSED klines for downstream pullback analysis (structural data only)
+      klines15m: closedKlines15m.slice(-20),  // Last 20 closed candles for 15m pullback analysis
+      klines30m: closedKlines30m.slice(-20),  // Last 20 closed candles for 30m pullback analysis
+      // Live price for downstream tactical use
+      livePrice: currentPrice,
     };
 
     return new Response(
