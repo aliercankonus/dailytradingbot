@@ -5030,7 +5030,9 @@ export const classify4StateRegime = (
   
   // ===== STATE 4: BREAKOUT SETUP (check before Range Compression) =====
   // ADX in transition but rising fast with directional confirmation
+  // CRITICAL: Must require non-neutral trend to prevent range leakage
   const absMomentumScore = Math.abs(momentumScore);
+  const trendIsNeutral = primaryTrend === 'neutral' || primaryTrend === 'ranging';
   const hasDirectionalMomentum = absMomentumScore >= R.BREAKOUT_SETUP.MIN_MOMENTUM_SCORE;
   const hasBreakoutStructure = (
     adx >= R.BREAKOUT_SETUP.MIN_ADX && 
@@ -5039,26 +5041,32 @@ export const classify4StateRegime = (
   );
   const hasSqueezeBreakout = R.BREAKOUT_SETUP.ALLOW_SQUEEZE_BREAKOUT && isSqueeze && adxSlope > 0;
   
-  if ((hasBreakoutStructure || hasSqueezeBreakout) && (hasDirectionalMomentum || alignedTimeframeCount >= R.BREAKOUT_SETUP.MIN_ALIGNED_TIMEFRAMES)) {
+  // BREAKOUT requires EITHER: non-neutral trend OR both directional momentum AND LTF alignment
+  // This prevents neutral/ranging markets from leaking through via temporary ADX slope spikes
+  const hasBreakoutConfirmation = !trendIsNeutral || (hasDirectionalMomentum && alignedTimeframeCount >= R.BREAKOUT_SETUP.MIN_ALIGNED_TIMEFRAMES);
+  
+  if ((hasBreakoutStructure || hasSqueezeBreakout) && hasBreakoutConfirmation && (hasDirectionalMomentum || alignedTimeframeCount >= R.BREAKOUT_SETUP.MIN_ALIGNED_TIMEFRAMES)) {
     return {
       regime: 'BREAKOUT_SETUP',
       positionMultiplier: R.BREAKOUT_SETUP.POSITION_MULTIPLIER,
       allowContinuation: true,
       allowMeanReversion: true,
       requireConfirmation: true,
-      reason: `BREAKOUT_SETUP: ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}≥${R.BREAKOUT_SETUP.MIN_ADX_SLOPE}, |momentum|=${absMomentumScore.toFixed(0)}, squeeze=${isSqueeze} → confirmed directional entry`,
+      reason: `BREAKOUT_SETUP: ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}≥${R.BREAKOUT_SETUP.MIN_ADX_SLOPE}, |momentum|=${absMomentumScore.toFixed(0)}, trend=${primaryTrend}, squeeze=${isSqueeze} → confirmed directional entry`,
       diagnostics: diag,
     };
   }
   
   // ===== STATE 3: RANGE COMPRESSION (default safe state) =====
   // Low ADX + neutral trend + weak momentum = noise dominates
-  const trendIsNeutral = primaryTrend === 'neutral' || primaryTrend === 'ranging';
+  // Also serves as the FALLBACK for any unclassified state (safe default)
   const momentumHasNoEdge = R.RANGE_COMPRESSION.NO_EDGE_MOMENTUM_STATES.includes(momentumState);
   const adxBelowThreshold = adx < R.RANGE_COMPRESSION.MAX_ADX;
   const momentumScoreTooLow = absMomentumScore < R.RANGE_COMPRESSION.MAX_ABS_MOMENTUM_SCORE;
   
-  if (trendIsNeutral && (adxBelowThreshold || (momentumHasNoEdge && momentumScoreTooLow))) {
+  const isExplicitRangeCompression = trendIsNeutral && (adxBelowThreshold || (momentumHasNoEdge && momentumScoreTooLow));
+  
+  if (isExplicitRangeCompression) {
     return {
       regime: 'RANGE_COMPRESSION',
       positionMultiplier: 0,  // Hard block
@@ -5070,15 +5078,16 @@ export const classify4StateRegime = (
     };
   }
   
-  // ===== FALLBACK: Non-neutral trend but weak ADX → cautious entry =====
-  // Trend exists but energy is low - allow with reduced sizing
+  // ===== FALLBACK: Default safe state = RANGE_COMPRESSION =====
+  // If no state matched explicitly, assume no edge exists.
+  // This prevents structural bias toward trading.
   return {
-    regime: 'BREAKOUT_SETUP',
-    positionMultiplier: R.BREAKOUT_SETUP.POSITION_MULTIPLIER,
-    allowContinuation: true,
-    allowMeanReversion: true,
-    requireConfirmation: true,
-    reason: `BREAKOUT_SETUP (fallback): ADX=${adx.toFixed(1)}, trend=${primaryTrend}, momentum=${momentumState} → cautious entry with confirmation`,
+    regime: 'RANGE_COMPRESSION',
+    positionMultiplier: 0,  // Hard block
+    allowContinuation: false,
+    allowMeanReversion: R.RANGE_COMPRESSION.ALLOW_MR_BYPASS,
+    requireConfirmation: false,
+    reason: `RANGE_COMPRESSION (fallback): ADX=${adx.toFixed(1)}, trend=${primaryTrend}, momentum=${momentumState}, |score|=${absMomentumScore.toFixed(0)} → no regime matched, default to safe state`,
     diagnostics: diag,
   };
 };
