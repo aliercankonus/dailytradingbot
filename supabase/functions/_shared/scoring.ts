@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, MOMENTUM_FALLBACK_DIRECTION_PARAMS, DIRECTION_REGIME_PARAMS, TIER2_WEIGHTED_CONFIRMATION, DIRECTIONAL_BIAS_ESCAPE_PARAMS, EXHAUSTION_REVERSAL_OVERRIDE_PARAMS, EXHAUSTION_ESCAPE_PARAMS, type AdxPhase, type ExceptionType, type MasterMarketRegime, type DirectionRegime } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, MOMENTUM_FALLBACK_DIRECTION_PARAMS, DIRECTION_REGIME_PARAMS, TIER2_WEIGHTED_CONFIRMATION, DIRECTIONAL_BIAS_ESCAPE_PARAMS, EXHAUSTION_REVERSAL_OVERRIDE_PARAMS, EXHAUSTION_ESCAPE_PARAMS, FOUR_STATE_REGIME, type AdxPhase, type ExceptionType, type MasterMarketRegime, type FourStateRegime, type DirectionRegime } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -4918,7 +4918,172 @@ export const classifyMasterRegime = (
   };
 };
 
-// ============= PHASE 2: ADX-AWARE MOMENTUM THRESHOLD =============
+// ============= 4-STATE REGIME CLASSIFIER =============
+// Forensic audit revealed 100% of recent losses came from neutral/ranging entries.
+// This classifier replaces binary "ranging vs trending" with 4 distinct market states,
+// each with specific trading rules and position sizing.
+//
+// Decision tree:
+//   1. ADX >= 30 AND slope >= 0 AND LTF aligned → TREND_EXPANSION (full trades)
+//   2. ADX >= 30 AND (slope < 0 OR exhausted) → TREND_EXHAUSTION (MR probes only)
+//   3. ADX < 25 AND neutral trend AND weak momentum → RANGE_COMPRESSION (hard block)
+//   4. ADX 18-30 AND slope rising > 0.5 → BREAKOUT_SETUP (confirmation required)
+//   5. Fallback → RANGE_COMPRESSION (default safe state)
+
+export interface FourStateRegimeResult {
+  regime: FourStateRegime;
+  positionMultiplier: number;
+  allowContinuation: boolean;
+  allowMeanReversion: boolean;
+  requireConfirmation: boolean;
+  reason: string;
+  diagnostics: {
+    adx: number;
+    adxSlope: number;
+    primaryTrend: string;
+    momentumState: string;
+    momentumScore: number;
+    ltfAligned: boolean;
+    stochRsiK4h: number;
+    isExhausted: boolean;
+    isSqueeze: boolean;
+  };
+}
+
+export const classify4StateRegime = (
+  adx: number,
+  adxSlope: number,
+  primaryTrend: string,
+  momentumState: string,
+  momentumScore: number,
+  htf1hTrend: string,
+  htf30mTrend: string,
+  derivedDirection: string,
+  stochRsiK4h: number,
+  isExhausted: boolean,
+  isSqueeze: boolean,
+  alignedTimeframeCount: number = 0
+): FourStateRegimeResult => {
+  const R = FOUR_STATE_REGIME;
+  
+  if (!R.ENABLED) {
+    // Disabled - return permissive default
+    return {
+      regime: 'TREND_EXPANSION',
+      positionMultiplier: 1.0,
+      allowContinuation: true,
+      allowMeanReversion: true,
+      requireConfirmation: false,
+      reason: '4-state regime classifier disabled',
+      diagnostics: { adx, adxSlope, primaryTrend, momentumState, momentumScore, ltfAligned: true, stochRsiK4h, isExhausted, isSqueeze },
+    };
+  }
+  
+  // Check if LTF (1h or 30m) aligns with derived direction
+  const ltfAligned = (
+    (htf1hTrend === 'bullish' && derivedDirection === 'long') ||
+    (htf1hTrend === 'bearish' && derivedDirection === 'short') ||
+    (htf30mTrend === 'bullish' && derivedDirection === 'long') ||
+    (htf30mTrend === 'bearish' && derivedDirection === 'short')
+  );
+  
+  const diag = { adx, adxSlope, primaryTrend, momentumState, momentumScore, ltfAligned, stochRsiK4h, isExhausted, isSqueeze };
+  
+  // ===== STATE 1: TREND EXPANSION =====
+  // ADX >= 30, slope non-negative, LTF aligned → best entries
+  if (adx >= R.TREND_EXPANSION.MIN_ADX && adxSlope >= R.TREND_EXPANSION.MIN_ADX_SLOPE && ltfAligned) {
+    return {
+      regime: 'TREND_EXPANSION',
+      positionMultiplier: R.TREND_EXPANSION.POSITION_MULTIPLIER,
+      allowContinuation: true,
+      allowMeanReversion: true,
+      requireConfirmation: false,
+      reason: `TREND_EXPANSION: ADX=${adx.toFixed(1)}≥${R.TREND_EXPANSION.MIN_ADX}, slope=${adxSlope.toFixed(2)}≥0, LTF aligned → full continuation`,
+      diagnostics: diag,
+    };
+  }
+  
+  // ===== STATE 2: TREND EXHAUSTION =====
+  // ADX >= 30 but slope declining OR momentum exhausted OR StochRSI extreme
+  const isStochExhausted = derivedDirection === 'long' 
+    ? stochRsiK4h >= R.TREND_EXHAUSTION.STOCHRSI_EXHAUSTION_K_LONG 
+    : stochRsiK4h <= R.TREND_EXHAUSTION.STOCHRSI_EXHAUSTION_K_SHORT;
+  const isMomentumExhausted = R.TREND_EXHAUSTION.EXHAUSTION_MOMENTUM_STATES.includes(momentumState);
+  
+  if (adx >= R.TREND_EXHAUSTION.MIN_ADX && (adxSlope < R.TREND_EXHAUSTION.MAX_ADX_SLOPE || isExhausted || isMomentumExhausted || isStochExhausted)) {
+    const exhaustionReasons: string[] = [];
+    if (adxSlope < 0) exhaustionReasons.push(`slope=${adxSlope.toFixed(2)}<0`);
+    if (isExhausted) exhaustionReasons.push('behavioral_exhaustion');
+    if (isMomentumExhausted) exhaustionReasons.push(`momentum=${momentumState}`);
+    if (isStochExhausted) exhaustionReasons.push(`stochK4h=${stochRsiK4h.toFixed(1)}`);
+    
+    return {
+      regime: 'TREND_EXHAUSTION',
+      positionMultiplier: R.TREND_EXHAUSTION.POSITION_MULTIPLIER,
+      allowContinuation: false,
+      allowMeanReversion: true,
+      requireConfirmation: false,
+      reason: `TREND_EXHAUSTION: ADX=${adx.toFixed(1)}≥${R.TREND_EXHAUSTION.MIN_ADX}, exhaustion=[${exhaustionReasons.join(', ')}] → MR probes only`,
+      diagnostics: diag,
+    };
+  }
+  
+  // ===== STATE 4: BREAKOUT SETUP (check before Range Compression) =====
+  // ADX in transition but rising fast with directional confirmation
+  const absMomentumScore = Math.abs(momentumScore);
+  const hasDirectionalMomentum = absMomentumScore >= R.BREAKOUT_SETUP.MIN_MOMENTUM_SCORE;
+  const hasBreakoutStructure = (
+    adx >= R.BREAKOUT_SETUP.MIN_ADX && 
+    adx < R.BREAKOUT_SETUP.MAX_ADX &&
+    adxSlope >= R.BREAKOUT_SETUP.MIN_ADX_SLOPE
+  );
+  const hasSqueezeBreakout = R.BREAKOUT_SETUP.ALLOW_SQUEEZE_BREAKOUT && isSqueeze && adxSlope > 0;
+  
+  if ((hasBreakoutStructure || hasSqueezeBreakout) && (hasDirectionalMomentum || alignedTimeframeCount >= R.BREAKOUT_SETUP.MIN_ALIGNED_TIMEFRAMES)) {
+    return {
+      regime: 'BREAKOUT_SETUP',
+      positionMultiplier: R.BREAKOUT_SETUP.POSITION_MULTIPLIER,
+      allowContinuation: true,
+      allowMeanReversion: true,
+      requireConfirmation: true,
+      reason: `BREAKOUT_SETUP: ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}≥${R.BREAKOUT_SETUP.MIN_ADX_SLOPE}, |momentum|=${absMomentumScore.toFixed(0)}, squeeze=${isSqueeze} → confirmed directional entry`,
+      diagnostics: diag,
+    };
+  }
+  
+  // ===== STATE 3: RANGE COMPRESSION (default safe state) =====
+  // Low ADX + neutral trend + weak momentum = noise dominates
+  const trendIsNeutral = primaryTrend === 'neutral' || primaryTrend === 'ranging';
+  const momentumHasNoEdge = R.RANGE_COMPRESSION.NO_EDGE_MOMENTUM_STATES.includes(momentumState);
+  const adxBelowThreshold = adx < R.RANGE_COMPRESSION.MAX_ADX;
+  const momentumScoreTooLow = absMomentumScore < R.RANGE_COMPRESSION.MAX_ABS_MOMENTUM_SCORE;
+  
+  if (trendIsNeutral && (adxBelowThreshold || (momentumHasNoEdge && momentumScoreTooLow))) {
+    return {
+      regime: 'RANGE_COMPRESSION',
+      positionMultiplier: 0,  // Hard block
+      allowContinuation: false,
+      allowMeanReversion: R.RANGE_COMPRESSION.ALLOW_MR_BYPASS,
+      requireConfirmation: false,
+      reason: `RANGE_COMPRESSION: primaryTrend=${primaryTrend}, ADX=${adx.toFixed(1)}<${R.RANGE_COMPRESSION.MAX_ADX}, momentum=${momentumState}, |score|=${absMomentumScore.toFixed(0)}<${R.RANGE_COMPRESSION.MAX_ABS_MOMENTUM_SCORE} → HARD BLOCK (noise dominates)`,
+      diagnostics: diag,
+    };
+  }
+  
+  // ===== FALLBACK: Non-neutral trend but weak ADX → cautious entry =====
+  // Trend exists but energy is low - allow with reduced sizing
+  return {
+    regime: 'BREAKOUT_SETUP',
+    positionMultiplier: R.BREAKOUT_SETUP.POSITION_MULTIPLIER,
+    allowContinuation: true,
+    allowMeanReversion: true,
+    requireConfirmation: true,
+    reason: `BREAKOUT_SETUP (fallback): ADX=${adx.toFixed(1)}, trend=${primaryTrend}, momentum=${momentumState} → cautious entry with confirmation`,
+    diagnostics: diag,
+  };
+};
+
+
 // Returns the effective minimum momentum score based on ADX level
 // Key insight: At high ADX, momentum score should not block, only adjust position
 
