@@ -4331,6 +4331,34 @@ export const RANGING_MARKET_PROTECTION = {
   NEUTRAL_TREND_QUALITY_BOOST: 10,  // Add +10 to quality threshold
   NEUTRAL_ADX_THRESHOLD: 30,        // ADX must be below this for the boost
   
+  // ===== HARD BLOCK: NO-TRADE RANGE REGIME =====
+  // Improvement #1: Hard block when NO directional edge exists
+  // Addresses: 7/15 recent losses from fee-eaten micro profits in directionless markets
+  // When all of these conditions are true, there is NO statistical edge → hard block
+  HARD_BLOCK: {
+    ENABLED: true,
+    // primary_trend must be neutral
+    REQUIRE_NEUTRAL_TREND: true,
+    // momentum_state must be in these states (no directional conviction)
+    NO_EDGE_MOMENTUM_STATES: ['mixed', 'none'] as string[],
+    // ADX below this = no trend energy
+    MAX_ADX: 28,
+    // Optional: Also check momentum score magnitude (abs < this = no directional edge)
+    MAX_ABS_MOMENTUM_SCORE: 15,
+    REQUIRE_LOW_MOMENTUM_SCORE: true,
+  },
+  
+  // ===== MINIMUM ATR FILTER =====
+  // Improvement #2: Block when volatility is too compressed for fee-positive expectancy
+  // Low ATR + fees = negative expectancy (0.3% move - 0.2% fees = 0.1% gross, often reverts)
+  MIN_ATR_FILTER: {
+    ENABLED: true,
+    // 24h ATR percent must be >= this to allow entries
+    MIN_ATR_PERCENT: 1.8,
+    // Allow mean reversion to bypass (they profit from range-bound conditions)
+    ALLOW_MR_BYPASS: true,
+  },
+  
   // ===== LOGGING =====
   LOG_BLOCKS: true,
 } as const;
@@ -6007,6 +6035,22 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
     BYPASS_POSITION_MULTIPLIER: 0.35,
   },
   
+  // ===== IMPROVEMENT #3: EXPANDED NEAR-EXTREME HARD BLOCK =====
+  // Block shorts within 1.2% of 24h low unless momentum is BEARISH (not just neutral)
+  // Neutral momentum = absence of confirmation, NOT confirmation
+  // Addresses: 3/15 losses from near-extreme bounce shorts
+  EXPANDED_HARD_BLOCK: {
+    ENABLED: true,
+    // Expanded hard zone for shorts near low / longs near high
+    SHORT_NEAR_LOW_THRESHOLD_PERCENT: 1.2,
+    LONG_NEAR_HIGH_THRESHOLD_PERCENT: 1.2,
+    // Must have STRONG directional momentum to enter within this zone
+    MIN_MOMENTUM_SCORE_SHORT: -25,   // momentum score must be <= -25 for SHORT
+    MIN_MOMENTUM_SCORE_LONG: 25,     // momentum score must be >= 25 for LONG
+    // Require momentum direction to match trade direction (neutral = NOT a pass)
+    REQUIRE_DIRECTIONAL_MOMENTUM: true,
+  },
+  
   // ===== LOGGING =====
   LOG_GATE_CHECKS: true,
 } as const;
@@ -6026,9 +6070,29 @@ export const ADX_SLOPE_GRADUATED_GATE = {
   MODERATE_DECLINE_MULTIPLIER: 0.50,
   
   // ===== ADX VALUE EXCEPTION =====
-  // High ADX can still work with declining slope (data shows ADX >= 55 profitable even with slope < -1.0)
+  // IMPROVEMENT #4: Tightened from ADX >= 55 to ADX >= 35 WITH slope >= 0 AND LTF alignment
+  // Old: High ADX alone was enough (ADX 55 + slope -0.69 = allowed → -2.3% loss)
+  // New: ADX strength alone doesn't override decaying momentum
   HIGH_ADX_EXCEPTION_THRESHOLD: 55,
   HIGH_ADX_DECLINE_MULTIPLIER: 0.70,
+  
+  // ===== STRONG TREND CONTINUATION FIX =====
+  // Require ADX slope >= 0 AND at least one LTF aligned for continuation entries
+  // Addresses: 4/15 losses from "strong ADX + negative slope + neutral LTF" pattern
+  CONTINUATION_REQUIREMENTS: {
+    ENABLED: true,
+    // Minimum ADX to trigger continuation check (replaces raw ADX > 40 check)
+    MIN_ADX: 35,
+    // ADX slope must be non-negative (trend NOT decaying)
+    MIN_ADX_SLOPE: 0,
+    // At least one of 1h or 30m must align with trade direction
+    REQUIRE_LTF_ALIGNMENT: true,
+    // Position multiplier when continuation passes with marginal LTF support (only 30m)
+    MARGINAL_LTF_MULTIPLIER: 0.60,
+    // Hard block: ADX > 35 but slope negative AND both LTFs neutral
+    // This is the "late-stage trend exhaustion" pattern that produced -2.3% losses
+    BLOCK_DECLINING_NO_LTF: true,
+  },
   
   // ===== DIRECTION-SPECIFIC THRESHOLDS =====
   // Shorts are more sensitive to momentum decay
