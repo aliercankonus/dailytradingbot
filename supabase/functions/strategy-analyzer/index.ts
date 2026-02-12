@@ -4161,7 +4161,7 @@ serve(async (req) => {
         const momentumStateForRegime = trendData?.momentum?.state || 'none';
         const stochK4hForRegime = extractStochRsiK(trendData, '4h');
         const primaryTrendForRegime = trendData?.primaryTrend || 'neutral';
-        const isBBSqueeze = trendData?.bollingerBands?.squeezeActive || bbSqueeze?.isSqueeze || false;
+        const isBBSqueeze = trendData?.bollingerBands?.squeezeActive || trendData?.bollingerBand?.squeeze || trendData?.bollingerBands?.['4h']?.squeeze || false;
         
         // Count aligned timeframes for breakout confirmation
         let alignedTFCount = 0;
