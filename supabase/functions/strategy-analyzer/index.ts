@@ -2370,7 +2370,8 @@ serve(async (req) => {
       // NEW: Capitulation Bounce Probe
       | 'CAPITULATION_BOUNCE_PROBE'  // Post-capitulation balance zone entry
       // NEW: 4-State Regime Classifier gates
-      | 'RANGE_COMPRESSION_BLOCK';
+      | 'RANGE_COMPRESSION_BLOCK'
+      | 'TREND_EXHAUSTION_CONTINUATION_BLOCK';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     
@@ -4178,12 +4179,12 @@ serve(async (req) => {
           adxSlope,
           primaryTrendForRegime,
           momentumStateForRegime,
-          smartMomentum?.score ?? 0,
+          earlySmartMomentum?.score ?? 0,
           htf1hTrendForRegime,
           htf30mTrendForRegime,
           derivedDirection,
           stochK4hForRegime,
-          adxExhaustion?.isExhausted ?? false,
+          false,  // adxExhaustion not yet calculated; conservative default
           isBBSqueeze,
           alignedTFCount
         );
@@ -4201,7 +4202,7 @@ serve(async (req) => {
           
           if (!mrBypassAllowed) {
             rejectedByHardGates++;
-            const blockReason = `RANGE_COMPRESSION_BLOCK: 4-State regime=RANGE_COMPRESSION, primaryTrend=${primaryTrendForRegime}, momentum=${momentumStateForRegime}, ADX=${adx.toFixed(1)}, |score|=${Math.abs(smartMomentum?.score ?? 0).toFixed(0)} → noise dominates, no edge`;
+            const blockReason = `RANGE_COMPRESSION_BLOCK: 4-State regime=RANGE_COMPRESSION, primaryTrend=${primaryTrendForRegime}, momentum=${momentumStateForRegime}, ADX=${adx.toFixed(1)}, |score|=${Math.abs(earlySmartMomentum?.score ?? 0).toFixed(0)} → noise dominates, no edge`;
             perSymbolGateAttribution.set(symbol, { gate: 'RANGE_COMPRESSION_BLOCK', details: blockReason });
             
             logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
@@ -4212,7 +4213,7 @@ serve(async (req) => {
               derivedDirection,
               primaryTrend: primaryTrendForRegime,
               momentumState: momentumStateForRegime,
-              momentumScore: (smartMomentum?.score ?? 0).toFixed(1),
+              momentumScore: (earlySmartMomentum?.score ?? 0).toFixed(1),
               adx: adx.toFixed(1),
               adxSlope: adxSlope.toFixed(2),
               alignedTimeframes: alignedTFCount,
@@ -4226,12 +4227,9 @@ serve(async (req) => {
           }
         }
         
-        // TREND_EXHAUSTION: Block continuation trades at per-symbol level
-        // MR strategies will be allowed through at per-strategy evaluation later
+        // TREND_EXHAUSTION: Log regime state - continuation hard-block enforced at per-strategy level
         if (fourStateRegime.regime === 'TREND_EXHAUSTION' && !fourStateRegime.allowContinuation) {
-          // Don't hard-block at symbol level - let per-strategy gates handle MR vs continuation
-          // Instead, flag that only MR entries should proceed and set restrictive position multiplier
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ TREND_EXHAUSTION: Continuation entries will be filtered at strategy level, MR probes allowed`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ TREND_EXHAUSTION: Continuation strategies will be HARD BLOCKED at strategy level, only MR probes proceed`);
         }
         
         // Apply 4-state regime position multiplier (stacks with other multipliers)
@@ -12920,6 +12918,29 @@ serve(async (req) => {
               skipReason: `Signal type invalid: ${signalTypeValidation.violations.join(', ')}`
             });
             continue;
+          }
+          
+          // ============= 4-STATE REGIME: TREND_EXHAUSTION HARD BLOCK FOR CONTINUATION =============
+          // If regime is TREND_EXHAUSTION, only Mean Reversion strategies pass.
+          // Continuation strategies are hard-blocked at strategy level to prevent regime leakage.
+          if (fourStateRegime.regime === 'TREND_EXHAUSTION' && !fourStateRegime.allowContinuation) {
+            const stratIsMR = isMeanReversionStrategy(strategy.id || '', strategy.name);
+            if (!stratIsMR) {
+              rejectedByStrategy++;
+              perSymbolGateAttribution.set(symbol, { 
+                gate: 'TREND_EXHAUSTION_CONTINUATION_BLOCK', 
+                details: `Strategy "${strategy.name}" is continuation but regime=TREND_EXHAUSTION (ADX declining/exhausted) → only MR probes allowed` 
+              });
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 TREND_EXHAUSTION: Continuation strategy "${strategy.name}" hard-blocked (regime forbids continuation)`);
+              strategyNearMisses.push({
+                name: strategy.name,
+                passedCount: 0,
+                totalConditions: entryConditions.length,
+                failedConditions: [],
+                skipReason: `TREND_EXHAUSTION regime blocks continuation strategies`
+              });
+              continue;
+            }
           }
           
           // ============= PHASE 4: SQUEEZE STATE CLASSIFICATION =============
