@@ -192,9 +192,12 @@ serve(async (req) => {
         }
       };
 
-      binanceSocket.onerror = (error) => {
-        logger.error(`Binance WebSocket error: ${error}`);
-        lastError = `Binance error at ${new Date().toISOString()}`;
+      binanceSocket.onerror = (error: Event | ErrorEvent) => {
+        const errorDetail = error instanceof ErrorEvent 
+          ? `message=${error.message || 'unknown'} type=${error.type}` 
+          : `type=${error.type}`;
+        logger.error(`Binance WebSocket error: ${errorDetail}`);
+        lastError = `Binance error: ${errorDetail} at ${new Date().toISOString()}`;
       };
 
       binanceSocket.onclose = (event) => {
@@ -275,8 +278,11 @@ serve(async (req) => {
     }
   };
 
-  socket.onerror = (error) => {
-    logger.error(`Client WebSocket error: ${error}`);
+  socket.onerror = (error: Event | ErrorEvent) => {
+    const errorDetail = error instanceof ErrorEvent 
+      ? `message=${error.message || 'unknown'} type=${error.type}` 
+      : `type=${error.type}`;
+    logger.error(`Client WebSocket error: ${errorDetail}`);
     if (binanceSocket && binanceSocket.readyState === WebSocket.OPEN) {
       binanceSocket.close();
     }
