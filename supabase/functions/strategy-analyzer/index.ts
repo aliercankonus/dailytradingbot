@@ -2583,6 +2583,13 @@ serve(async (req) => {
       logger.warn(`Failed to fetch regime history for persistence: ${err}`);
     }
 
+    // ===== REGIME PERSISTENCE COUNTERS =====
+    // Lightweight metrics for behavioral validation without log spam
+    let regimeEvaluations = 0;
+    let regimeTransitionsAttempted = 0;
+    let regimeTransitionsBlocked = 0;
+    let regimeTransitionsConfirmed = 0;
+
     // Analyze each symbol (using filtered activeSymbols that passed win rate check)
     for (const { symbol } of activeSymbols) {
       const currentTradeCount = openTradesPerSymbol.get(symbol) || 0;
@@ -4231,6 +4238,19 @@ serve(async (req) => {
           recentRegimeHistory: regimeHistory,
         });
         
+        // ===== REGIME PERSISTENCE COUNTER INCREMENT =====
+        regimeEvaluations++;
+        const isTransitionAttempt = persistenceResult.reason !== `Regime stable: ${fourStateRegime.regime}` 
+          && !persistenceResult.reason.includes('No regime history');
+        if (isTransitionAttempt) {
+          regimeTransitionsAttempted++;
+          if (persistenceResult.wasOverridden) {
+            regimeTransitionsBlocked++;
+          } else {
+            regimeTransitionsConfirmed++;
+          }
+        }
+        
         // Override regime if persistence blocked the transition
         if (persistenceResult.wasOverridden) {
           logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.TREND} 🔒 REGIME PERSISTENCE: ${persistenceResult.reason}`);
@@ -4259,7 +4279,7 @@ serve(async (req) => {
             fourStateRegime.allowMeanReversion = true;
           }
           fourStateRegime.reason = `[PERSISTED] ${persistenceResult.reason} | Raw: ${fourStateRegime.reason}`;
-        } else if (persistenceResult.reason !== `Regime stable: ${fourStateRegime.regime}`) {
+        } else if (isTransitionAttempt) {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} ✅ REGIME PERSISTENCE: ${persistenceResult.reason}`);
         }
         
@@ -15183,6 +15203,7 @@ serve(async (req) => {
     // Log heartbeat and persist to database
     if (BOT_HEARTBEAT_CONFIG.LOG_HEARTBEAT) {
       logger.info(`💓 HEARTBEAT: ${heartbeatTimestamp} | Symbols: ${perSymbolGateAttribution.size} | Signals: ${signals.length} | State: ${noTradeState || 'OPERATIONAL'}`);
+      logger.info(`🔒 REGIME PERSISTENCE METRICS: evaluations=${regimeEvaluations} | attempted=${regimeTransitionsAttempted} | blocked=${regimeTransitionsBlocked} | confirmed=${regimeTransitionsConfirmed}`);
     }
     
     // Persist heartbeat to database for health monitoring
@@ -15206,6 +15227,12 @@ serve(async (req) => {
                 byStochRsiExtreme: rejectedByStochRsiExtreme,
                 byQuality: rejectedByQuality,
                 byStrategy: rejectedByStrategy,
+              },
+              regimePersistence: {
+                evaluations: regimeEvaluations,
+                transitionsAttempted: regimeTransitionsAttempted,
+                transitionsBlocked: regimeTransitionsBlocked,
+                transitionsConfirmed: regimeTransitionsConfirmed,
               },
               dominantGate: perSymbolGateAttribution.size > 0 
                 ? Array.from(perSymbolGateAttribution.values())[0]?.gate 
@@ -15262,6 +15289,12 @@ serve(async (req) => {
         timestamp: heartbeatTimestamp,
         symbolsScanned: perSymbolGateAttribution.size,
         signalsGenerated: signals.length,
+        regimePersistence: {
+          evaluations: regimeEvaluations,
+          transitionsAttempted: regimeTransitionsAttempted,
+          transitionsBlocked: regimeTransitionsBlocked,
+          transitionsConfirmed: regimeTransitionsConfirmed,
+        },
       },
       noTradeState: noTradeState ? {
         state: noTradeState,
