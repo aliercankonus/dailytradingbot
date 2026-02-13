@@ -4228,6 +4228,9 @@ serve(async (req) => {
           alignedTFCount
         );
         
+        // Capture raw regime BEFORE persistence override (needed for correct history storage)
+        const rawDetectedRegime = fourStateRegime.regime;
+        
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME (raw): ${fourStateRegime.regime} - ${fourStateRegime.reason}`);
         
         // ============= REGIME PERSISTENCE =============
@@ -4286,14 +4289,15 @@ serve(async (req) => {
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME (effective): ${fourStateRegime.regime}`);
         logger.forSymbol(symbol).info(`   → allowContinuation=${fourStateRegime.allowContinuation}, allowMR=${fourStateRegime.allowMeanReversion}, posMultiplier=${fourStateRegime.positionMultiplier.toFixed(2)}`);
         
-        // Store 4-state regime to history EARLY (before any gate blocks via continue)
-        // This ensures persistence engine has data even for blocked symbols
+        // Store RAW detected regime to history (BEFORE persistence override)
+        // CRITICAL: Must store raw regime, not effective regime, otherwise persistence
+        // counter can never accumulate consecutive detections of a new regime (self-locking bug)
         supabase
           .from("market_regime_history")
           .insert({
             user_id: userId,
             symbol,
-            regime: fourStateRegime.regime,
+            regime: rawDetectedRegime,
             adx: adx,
             adx_slope: adxSlope,
             trend_strength: 0,  // Will be calculated later; not needed for persistence
