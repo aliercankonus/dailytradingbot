@@ -372,6 +372,14 @@ const extractConfidence = (filtersStatus: any, trendData: any): number | undefin
   return undefined;
 };
 
+const getScoreStatus = (percentage: number): { label: string; color: string } => {
+  if (percentage >= 80) return { label: "Strong", color: "text-green-400" };
+  if (percentage >= 60) return { label: "Good", color: "text-yellow-400" };
+  if (percentage >= 40) return { label: "Weak", color: "text-orange-400" };
+  if (percentage > 0) return { label: "Poor", color: "text-red-400" };
+  return { label: "None", color: "text-muted-foreground" };
+};
+
 const ScoreBar = ({
   label,
   score,
@@ -383,13 +391,14 @@ const ScoreBar = ({
   max: number;
   icon: React.ElementType;
 }) => {
-  const percentage = (score / max) * 100;
+  const percentage = max > 0 ? (score / max) * 100 : 0;
   const getColor = () => {
     if (percentage >= 80) return "bg-green-500";
     if (percentage >= 60) return "bg-yellow-500";
     if (percentage >= 40) return "bg-orange-500";
     return "bg-red-500";
   };
+  const status = getScoreStatus(percentage);
   
   return (
     <TooltipProvider>
@@ -397,22 +406,110 @@ const ScoreBar = ({
         <TooltipTrigger asChild>
           <div className="flex items-center gap-1.5 min-w-0">
             <Icon className="h-3 w-3 text-muted-foreground shrink-0" />
-            <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden min-w-[40px]">
+            <span className="text-[10px] w-[52px] shrink-0 truncate">{label}</span>
+            <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden min-w-[32px]">
               <div 
                 className={`h-full rounded-full transition-all ${getColor()}`}
-                style={{ width: `${percentage}%` }}
+                style={{ width: `${Math.max(0, percentage)}%` }}
               />
             </div>
-            <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-              {score}/{max}
+            <span className={`text-[10px] font-medium shrink-0 w-[36px] text-right ${status.color}`}>
+              {status.label}
             </span>
           </div>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">
-          <p>{label}: {score}/{max} ({percentage.toFixed(0)}%)</p>
+          <p><span className="font-medium">{label}:</span> {score}/{max} pts ({percentage.toFixed(0)}%)</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  );
+};
+
+// Range Compression Block Display - when 4-state regime identifies no edge
+const RangeCompressionBlockDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const regime = filtersStatus?.fourStateRegime || filtersStatus?.regime || 'RANGE_COMPRESSION';
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const adxSlope = filtersStatus?.adxSlope;
+  const momentumState = filtersStatus?.momentumState || 'none';
+  const momentumScore = coerceNumeric(filtersStatus?.momentumScore, 0);
+  const primaryTrend = filtersStatus?.primaryTrend || 'neutral';
+  const isSqueeze = filtersStatus?.isSqueeze;
+  const derivedDirection = filtersStatus?.derivedDirection;
+
+  const getRegimeLabel = (r: string) => {
+    switch (r) {
+      case 'RANGE_COMPRESSION': return '🔄 Range Compression';
+      case 'BREAKOUT_SETUP': return '🚀 Breakout Setup';
+      case 'TRENDING': return '📈 Trending';
+      case 'CHOPPY': return '⚡ Choppy';
+      default: return r;
+    }
+  };
+
+  return (
+    <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Minimize2 className="h-3.5 w-3.5 text-amber-400" />
+          <span className="text-xs font-medium">Regime Block</span>
+        </div>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-400 border-amber-500/40">
+          {getRegimeLabel(regime)}
+        </Badge>
+      </div>
+
+      <div className="text-[10px] text-muted-foreground italic">
+        Market is compressing — no directional edge available
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1 border-t border-border/50">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">ADX</span>
+          <span className={`font-mono font-medium ${adx >= 20 ? 'text-green-400' : 'text-red-400'}`}>
+            {adx.toFixed(1)} {adx < 20 ? '⚠️' : ''}
+          </span>
+        </div>
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Trend</span>
+          <span className={`font-medium capitalize ${primaryTrend === 'neutral' ? 'text-muted-foreground' : primaryTrend === 'bullish' ? 'text-green-400' : 'text-red-400'}`}>
+            {primaryTrend}
+          </span>
+        </div>
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Momentum</span>
+          <span className={`font-medium capitalize ${momentumState === 'confirmed' ? 'text-green-400' : momentumState === 'none' ? 'text-muted-foreground' : 'text-amber-400'}`}>
+            {momentumState} ({momentumScore})
+          </span>
+        </div>
+        {adxSlope !== undefined && typeof adxSlope === 'number' && (
+          <div className="flex justify-between text-[10px]">
+            <span className="text-muted-foreground">ADX Slope</span>
+            <span className={`font-mono ${adxSlope > 0 ? 'text-green-400' : adxSlope < -0.05 ? 'text-red-400' : 'text-yellow-400'}`}>
+              {adxSlope >= 0 ? '+' : ''}{adxSlope.toFixed(2)}
+            </span>
+          </div>
+        )}
+        {isSqueeze && (
+          <div className="flex justify-between text-[10px] col-span-2">
+            <span className="text-muted-foreground">Bollinger Squeeze</span>
+            <span className="text-purple-400 font-medium">Active</span>
+          </div>
+        )}
+        {derivedDirection && (
+          <div className="flex justify-between text-[10px] col-span-2">
+            <span className="text-muted-foreground">Derived Direction</span>
+            <Badge variant="outline" className={`text-[9px] px-1 py-0 ${derivedDirection === 'long' ? 'text-green-400 border-green-500/40' : derivedDirection === 'short' ? 'text-red-400 border-red-500/40' : 'text-muted-foreground'}`}>
+              {derivedDirection.toUpperCase()}
+            </Badge>
+          </div>
+        )}
+      </div>
+
+      <div className="text-[9px] text-muted-foreground pt-1 border-t border-border/30">
+        💡 Wait for ADX ≥ 20 with momentum confirmation before entry
+      </div>
+    </div>
   );
 };
 
@@ -7246,6 +7343,8 @@ export const SignalRejectionReasons = () => {
     if (reason.includes("Quality score")) return "medium";
     
     // LOW - Informational blocks
+    if (gate === "RANGE_COMPRESSION_BLOCK") return "low";
+    if (reason.includes("RANGE_COMPRESSION_BLOCK")) return "low";
     if (reason.includes("Max trades")) return "low";
     if (reason.startsWith("EXECUTION:")) return "low";
     if (reason.includes("No strategy")) return "low";
@@ -7346,6 +7445,12 @@ export const SignalRejectionReasons = () => {
     const score = filtersStatus?.momentumScore;
     const adx = filtersStatus?.adx;
     const graduatedEffect = filtersStatus?.graduatedMomentumEffect;
+    
+    // RANGE_COMPRESSION_BLOCK
+    if (reason.includes("RANGE_COMPRESSION_BLOCK") || filtersStatus?.gate === "RANGE_COMPRESSION_BLOCK") {
+      const adxVal = adx?.toFixed?.(0) ?? adx;
+      return `🔄 Range compression — no edge (ADX ${adxVal || '?'})`;
+    }
     
     // EXTREME MOMENTUM VETO - highest priority
     if (reason.includes("EXTREME MOMENTUM VETO") || filtersStatus?.source === 'extreme_momentum_veto') {
@@ -7571,6 +7676,12 @@ export const SignalRejectionReasons = () => {
     const fs = rejection.filters_status;
     const reason = rejection.rejection_reason || "";
     const reasonLower = reason.toLowerCase();
+    
+    // RANGE_COMPRESSION_BLOCK - 4-state regime identifies no edge
+    if (fs?.gate === "RANGE_COMPRESSION_BLOCK" || reason.includes("RANGE_COMPRESSION_BLOCK") ||
+        fs?.fourStateRegime === "RANGE_COMPRESSION") {
+      return <RangeCompressionBlockDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
     
     // Execution rejections - signals blocked during trade execution
     if (reason.startsWith("EXECUTION:")) {
@@ -8058,7 +8169,7 @@ export const SignalRejectionReasons = () => {
             <TableRow>
               <TableHead className="w-[100px]">Symbol</TableHead>
               <TableHead className="w-[200px]">Rejection Reason</TableHead>
-              <TableHead className="min-w-[250px]">Score Breakdown</TableHead>
+              <TableHead className="min-w-[250px]">Signal Diagnostics</TableHead>
               <TableHead>Details</TableHead>
               {aiEnabled && (
                 <TableHead className="w-[180px]">
