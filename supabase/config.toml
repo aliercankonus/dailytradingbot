@@ -26,7 +26,7 @@ verify_jwt = false
 
 [functions.cleanup-expired-signals.schedule]
 enabled = true
-cron = "* * * * *"
+cron = "0 * * * *"
 
 [functions.capture-portfolio-snapshot.schedule]
 enabled = true
