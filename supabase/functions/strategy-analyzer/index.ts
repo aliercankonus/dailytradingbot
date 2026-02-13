@@ -6882,7 +6882,7 @@ serve(async (req) => {
             
             if (trendIsNeutral && momentumHasNoEdge && adxTooLow && momentumScoreTooLow) {
               // Check if this is a mean reversion entry (allowed through)
-              const isMREntry = isMeanReversionStrategy(activeStrategyName || '');
+              const isMREntry = false; // Pre-strategy gate: no strategy selected yet
               
               if (!isMREntry) {
                 rejectedByHardGates++;
@@ -6919,7 +6919,7 @@ serve(async (req) => {
             const atrPercent24h = currentPrice > 0 ? (currentATR / currentPrice) * 100 : 0;
             
             if (atrPercent24h > 0 && atrPercent24h < atrFilter.MIN_ATR_PERCENT) {
-              const isMREntry = atrFilter.ALLOW_MR_BYPASS && isMeanReversionStrategy(activeStrategyName || '');
+              const isMREntry = false; // Pre-strategy gate: no strategy selected yet
               
               if (!isMREntry) {
                 rejectedByHardGates++;
