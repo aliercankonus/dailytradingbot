@@ -295,6 +295,7 @@ export type Database = {
           adx_slope: number | null
           bb_squeeze: boolean | null
           bb_width: number | null
+          effective_regime: string | null
           id: string
           recorded_at: string | null
           regime: string
@@ -308,6 +309,7 @@ export type Database = {
           adx_slope?: number | null
           bb_squeeze?: boolean | null
           bb_width?: number | null
+          effective_regime?: string | null
           id?: string
           recorded_at?: string | null
           regime: string
@@ -321,6 +323,7 @@ export type Database = {
           adx_slope?: number | null
           bb_squeeze?: boolean | null
           bb_width?: number | null
+          effective_regime?: string | null
           id?: string
           recorded_at?: string | null
           regime?: string

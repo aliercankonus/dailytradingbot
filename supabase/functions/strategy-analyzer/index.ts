@@ -4298,6 +4298,7 @@ serve(async (req) => {
             user_id: userId,
             symbol,
             regime: rawDetectedRegime,
+            effective_regime: fourStateRegime.regime,
             adx: adx,
             adx_slope: adxSlope,
             trend_strength: 0,  // Will be calculated later; not needed for persistence
