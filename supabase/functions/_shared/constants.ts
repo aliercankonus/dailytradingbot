@@ -4011,6 +4011,71 @@ export const FOUR_STATE_REGIME = {
   LOG_BLOCK_DETAILS: true,
 } as const;
 
+// ============= COMPRESSION MICRO-RANGE MODULE =============
+// Independent second engine for RANGE_COMPRESSION regimes
+// Executes small mean-reversion scalps during low-volatility compression
+// Mutual exclusivity: only active when fourStateRegime === RANGE_COMPRESSION
+// Kill switches ensure immediate shutdown on expansion signals
+export const COMPRESSION_MODULE = {
+  ENABLED: true,
+  
+  // ===== STRUCTURAL CONDITIONS =====
+  // ATR threshold uses dynamicMinATR (not fixed) — activates exactly where trend is blocked
+  MAX_ADX: 25,
+  
+  // BB width stability: must be contracting for N candles (prevents false compression)
+  BB_WIDTH_CONTRACTING_CANDLES: 2,
+  
+  // ===== DIRECTION FROM EXTREMES =====
+  // Direction derived from StochRSI + BB position, NOT trend alignment
+  LONG_MAX_STOCHRSI_K: 15,
+  SHORT_MIN_STOCHRSI_K: 85,
+  LONG_MAX_PERCENT_B: 15,
+  SHORT_MIN_PERCENT_B: 85,
+  
+  // ===== MOMENTUM: DIRECTIONAL CHECK (not absolute value) =====
+  // LONG: momentumScore > -20 (not strongly bearish)
+  // SHORT: momentumScore < +20 (not strongly bullish)
+  LONG_MIN_MOMENTUM_SCORE: -20,
+  SHORT_MAX_MOMENTUM_SCORE: 20,
+  
+  // ===== SCORING WEIGHTS (±40 range, threshold ≥ 25) =====
+  SCORE_STOCHRSI_EXTREME: 15,  // K < 10 or K > 90: ±15
+  SCORE_BB_TOUCH: 10,          // %B ≤ 10 or ≥ 90: ±10
+  SCORE_MOMENTUM_SUPPORTIVE: 10, // Momentum not opposing: ±10
+  SCORE_LOW_ADX_BONUS: 5,      // ADX < 20: +5
+  ENTRY_THRESHOLD: 25,         // |score| must be ≥ 25
+  
+  // ===== RISK (35% of trend base, not 50%) =====
+  // Lower R multiple + higher frequency justify smaller initial sizing
+  POSITION_SIZE_MULTIPLIER: 0.35,
+  TP_ATR_MULTIPLIER: 0.5,   // Tight TP for range
+  SL_ATR_MULTIPLIER: 0.4,   // Tight SL for range
+  
+  // ===== TIME EXIT =====
+  MAX_HOLD_CANDLES: 8,  // 8 × 15m = 2 hours max hold
+  MAX_HOLD_MINUTES: 120, // 2 hours
+  
+  // ===== KILL SWITCHES =====
+  KILL_ADX_THRESHOLD: 28,  // ADX > 28 = immediate kill
+  KILL_CANDLE_RANGE_ATR_RATIO: 0.9, // Large candle = regime shift brewing
+  
+  // ===== COOLDOWN =====
+  COOLDOWN_MINUTES: 30,
+  REQUIRE_OPPOSITE_BAND_TOUCH: true, // No re-entry at same band edge
+  
+  // ===== CONCURRENCY =====
+  MAX_CONCURRENT_PER_SYMBOL: 1,
+  
+  // ===== SIGNAL CONFIGURATION =====
+  STRATEGY_NAME: 'Compression Scalp' as const,
+  REGIME_TAG: 'RANGE_COMPRESSION_SCALP' as const,
+  SIGNAL_EXPIRY_MINUTES: 30, // Shorter than trend signals (30 min vs 2 hours)
+  
+  // ===== LOGGING =====
+  LOG_COMPRESSION_CHECKS: true,
+} as const;
+
 // ============= PHASE 1: STRONG ADX UNIVERSAL OVERRIDE =============
 // When ADX confirms regime, gates downgrade from "hard block" to "context adjustment"
 // Key insight: "Bollinger should downgrade from 'gate' to 'context'"

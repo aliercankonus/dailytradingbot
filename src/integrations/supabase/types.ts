@@ -897,6 +897,7 @@ export type Database = {
           break_even_enabled: boolean | null
           circuit_breaker_triggered: boolean | null
           circuit_breaker_triggered_at: string | null
+          compression_module_enabled: boolean | null
           consecutive_loss_threshold: number
           consecutive_losses: number | null
           consecutive_wins: number | null
@@ -1002,6 +1003,7 @@ export type Database = {
           break_even_enabled?: boolean | null
           circuit_breaker_triggered?: boolean | null
           circuit_breaker_triggered_at?: string | null
+          compression_module_enabled?: boolean | null
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
           consecutive_wins?: number | null
@@ -1107,6 +1109,7 @@ export type Database = {
           break_even_enabled?: boolean | null
           circuit_breaker_triggered?: boolean | null
           circuit_breaker_triggered_at?: string | null
+          compression_module_enabled?: boolean | null
           consecutive_loss_threshold?: number
           consecutive_losses?: number | null
           consecutive_wins?: number | null
