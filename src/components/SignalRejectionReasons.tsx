@@ -7598,6 +7598,20 @@ export const SignalRejectionReasons = () => {
       return "🔍 Market direction unclear";
     }
     
+    // NO_TRADE_RANGE_REGIME - hard block when market is ranging with no edge
+    if (reason.includes("NO_TRADE_RANGE_REGIME") || filtersStatus?.gate === "NO_TRADE_RANGE_REGIME") {
+      const adxVal = adx?.toFixed?.(1) ?? adx;
+      const momScore = Math.abs(filtersStatus?.momentumScore ?? 0);
+      return `🔄 Ranging market — no edge (ADX ${adxVal || '?'}, |mom| ${momScore})`;
+    }
+    
+    // ADX_SLOPE_CONTINUATION_FAIL - trend decaying without LTF follow-through
+    if (reason.includes("ADX_SLOPE_CONTINUATION_FAIL") || filtersStatus?.subGate === "CONTINUATION_FAIL_MODERATE") {
+      const slope = filtersStatus?.adxSlope;
+      const slopeStr = typeof slope === 'number' ? slope.toFixed(2) : '?';
+      return `📉 Trend decaying (slope ${slopeStr}) — no LTF confirmation`;
+    }
+    
     // LOW_ATR_BLOCK
     if (reason.includes("LOW_ATR_BLOCK") || filtersStatus?.gate === "LOW_ATR_BLOCK") {
       const atr = filtersStatus?.atrPercent ?? filtersStatus?.atr;
@@ -7798,6 +7812,19 @@ export const SignalRejectionReasons = () => {
     // LOW_ATR_BLOCK - volatility too compressed for profitable trades
     if (reason.includes("LOW_ATR_BLOCK") || fs?.gate === "LOW_ATR_BLOCK") {
       return <LowAtrBlockDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // NO_TRADE_RANGE_REGIME - hard block when market is ranging
+    if (reason.includes("NO_TRADE_RANGE_REGIME")) {
+      return <RangeCompressionBlockDisplay filtersStatus={{
+        ...fs,
+        fourStateRegime: 'RANGE_COMPRESSION',
+        primaryTrend: fs?.primaryTrend || 'neutral',
+        adx: fs?.adx,
+        adxSlope: fs?.adxSlope,
+        momentumState: fs?.momentumState || 'mixed',
+        momentumScore: fs?.momentumScore ?? 0,
+      }} trendData={rejection.trend_data} />;
     }
     
     // RANGE_COMPRESSION_BLOCK - 4-state regime identifies no edge
