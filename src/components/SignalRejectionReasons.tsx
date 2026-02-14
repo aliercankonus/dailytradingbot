@@ -7442,11 +7442,15 @@ export const SignalRejectionReasons = () => {
   const LowAtrBlockDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
     const atrPercent = coerceNumeric(filtersStatus?.atrPercent, 0);
     const atrRaw = coerceNumeric(filtersStatus?.atr ?? filtersStatus?.atrValue, 0);
-    const minAtrRequired = coerceNumeric(filtersStatus?.minAtrRequired, 1.8);
+    const minAtrRequired = coerceNumeric(filtersStatus?.minAtrRequired, 1.1);
     const currentPrice = coerceNumeric(filtersStatus?.currentPrice ?? trendData?.currentPrice, 0);
     const wouldPassWith = filtersStatus?.wouldPassWith;
     const derivedDirection = filtersStatus?.derivedDirection;
     const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+    const isDynamic = filtersStatus?.dynamicThreshold === true || filtersStatus?.dynamicThreshold === 'true';
+    const absoluteFloor = coerceNumeric(filtersStatus?.absoluteFloor, 1.1);
+    const adaptiveComponent = filtersStatus?.adaptiveComponent;
+    const historicalATRPct = filtersStatus?.historicalATRPct;
     
     // Calculate how far ATR is from minimum
     const atrDeficit = minAtrRequired - atrPercent;
@@ -7482,7 +7486,7 @@ export const SignalRejectionReasons = () => {
           <div className="flex items-center justify-between text-[10px]">
             <span className="text-muted-foreground">ATR Volatility</span>
             <span className="font-mono font-medium text-red-400">
-              {atrPercent.toFixed(2)}% / {minAtrRequired.toFixed(1)}% min
+              {atrPercent.toFixed(2)}% / {minAtrRequired.toFixed(2)}% min
             </span>
           </div>
           <div className="h-2 bg-muted rounded-full overflow-hidden">
@@ -7491,6 +7495,18 @@ export const SignalRejectionReasons = () => {
               style={{ width: `${Math.min(100, atrRatio)}%` }}
             />
           </div>
+          {isDynamic && (
+            <div className="text-[9px] text-muted-foreground flex items-center gap-1">
+              <span>🎯 Dynamic: max(</span>
+              <span className="font-mono">{absoluteFloor}%</span>
+              <span>floor,</span>
+              <span className="font-mono">{adaptiveComponent || '?'}%</span>
+              <span>adaptive)</span>
+              {historicalATRPct && historicalATRPct !== 'N/A' && (
+                <span className="ml-1 text-blue-400">| 30d avg: {parseFloat(historicalATRPct).toFixed(2)}%</span>
+              )}
+            </div>
+          )}
           <div className="text-[9px] text-muted-foreground">
             {atrDeficit > 0 
               ? `Needs ${atrDeficit.toFixed(2)}% more volatility to trade`
@@ -7616,8 +7632,9 @@ export const SignalRejectionReasons = () => {
     if (reason.includes("LOW_ATR_BLOCK") || filtersStatus?.gate === "LOW_ATR_BLOCK") {
       const atr = filtersStatus?.atrPercent ?? filtersStatus?.atr;
       const atrVal = typeof atr === 'number' ? atr.toFixed(2) : atr;
-      const minAtr = filtersStatus?.minAtrRequired ?? 1.8;
-      return `📉 Volatility too low (ATR ${atrVal || '?'}% < ${minAtr}%)`;
+      const minAtr = filtersStatus?.minAtrRequired ?? '1.1';
+      const isDyn = filtersStatus?.dynamicThreshold ? ' (dynamic)' : '';
+      return `📉 Volatility too low (ATR ${atrVal || '?'}% < ${minAtr}%${isDyn})`;
     }
     
     // ADX TOO LOW

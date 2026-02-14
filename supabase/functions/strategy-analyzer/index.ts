@@ -6915,20 +6915,33 @@ serve(async (req) => {
             }
           }
           
-          // ===== IMPROVEMENT #2: MINIMUM ATR FILTER =====
-          // Block when volatility is too compressed for fee-positive expectancy
+          // ===== IMPROVEMENT #2: DYNAMIC MINIMUM ATR FILTER =====
+          // Dynamic threshold: max(absoluteFloor, adaptiveMultiplier * 30d_avg_ATR%)
+          // Adapts to volatility regime shifts without manual retuning
           const atrFilter = RANGING_MARKET_PROTECTION.MIN_ATR_FILTER;
           if (atrFilter?.ENABLED) {
             const currentPrice = trendData?.currentPrice || 0;
             const currentATR = trendData?.volatility?.atr ?? 0;
             const atrPercent24h = currentPrice > 0 ? (currentATR / currentPrice) * 100 : 0;
+            const relativeATR = trendData?.volatility?.relativeATR ?? 0;
             
-            if (atrPercent24h > 0 && atrPercent24h < atrFilter.MIN_ATR_PERCENT) {
+            // Calculate dynamic threshold using 30-bar rolling average ATR%
+            // historicalATRAvg_pct = atrPercent / relativeATR (since relativeATR = current/historical)
+            let dynamicMinATR = atrFilter.FALLBACK_MIN_ATR_PERCENT;
+            if (relativeATR > 0 && atrPercent24h > 0) {
+              const historicalATRPct = atrPercent24h / relativeATR;
+              dynamicMinATR = Math.max(
+                atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT,
+                atrFilter.ADAPTIVE_MULTIPLIER * historicalATRPct
+              );
+            }
+            
+            if (atrPercent24h > 0 && atrPercent24h < dynamicMinATR) {
               const isMREntry = false; // Pre-strategy gate: no strategy selected yet
               
               if (!isMREntry) {
                 rejectedByHardGates++;
-                const blockReason = `LOW_ATR_BLOCK: ATR=${atrPercent24h.toFixed(2)}% < ${atrFilter.MIN_ATR_PERCENT}% minimum → compressed volatility, negative expectancy after fees (0.2% round-trip)`;
+                const blockReason = `LOW_ATR_BLOCK: ATR=${atrPercent24h.toFixed(2)}% < ${dynamicMinATR.toFixed(2)}% dynamic minimum (floor=${atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT}%, adaptive=${(atrFilter.ADAPTIVE_MULTIPLIER * (relativeATR > 0 ? atrPercent24h / relativeATR : 0)).toFixed(2)}%) → compressed volatility, negative expectancy after fees`;
                 perSymbolGateAttribution.set(symbol, { gate: 'LOW_ATR_BLOCK', details: blockReason });
                 
                 logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
@@ -6937,14 +6950,19 @@ serve(async (req) => {
                   gate: 'LOW_ATR_BLOCK',
                   derivedDirection,
                   atrPercent: atrPercent24h.toFixed(3),
-                  minAtrRequired: atrFilter.MIN_ATR_PERCENT,
+                  minAtrRequired: dynamicMinATR.toFixed(2),
+                  dynamicThreshold: true,
+                  absoluteFloor: atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT,
+                  adaptiveComponent: relativeATR > 0 ? (atrFilter.ADAPTIVE_MULTIPLIER * (atrPercent24h / relativeATR)).toFixed(2) : 'N/A',
+                  historicalATRPct: relativeATR > 0 ? (atrPercent24h / relativeATR).toFixed(3) : 'N/A',
+                  relativeATR: relativeATR.toFixed(2),
                   currentPrice: currentPrice.toFixed(2),
                   atr: currentATR.toFixed(4),
-                  wouldPassWith: `ATR% >= ${atrFilter.MIN_ATR_PERCENT}%`,
+                  wouldPassWith: `ATR% >= ${dynamicMinATR.toFixed(2)}%`,
                 }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                 continue;
               } else {
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 LOW_ATR: ATR=${atrPercent24h.toFixed(2)}% < ${atrFilter.MIN_ATR_PERCENT}% but allowing Mean Reversion`);
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 LOW_ATR: ATR=${atrPercent24h.toFixed(2)}% < ${dynamicMinATR.toFixed(2)}% but allowing Mean Reversion`);
               }
             }
           }

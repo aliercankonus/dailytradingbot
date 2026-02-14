@@ -4469,13 +4469,18 @@ export const RANGING_MARKET_PROTECTION = {
     REQUIRE_LOW_MOMENTUM_SCORE: true,
   },
   
-  // ===== MINIMUM ATR FILTER =====
+  // ===== MINIMUM ATR FILTER (Dynamic) =====
   // Improvement #2: Block when volatility is too compressed for fee-positive expectancy
-  // Low ATR + fees = negative expectancy (0.3% move - 0.2% fees = 0.1% gross, often reverts)
+  // Dynamic threshold: max(ABSOLUTE_FLOOR, ADAPTIVE_MULTIPLIER * 30d_avg_ATR%)
+  // Adapts to volatility regime shifts without manual retuning
   MIN_ATR_FILTER: {
     ENABLED: true,
-    // 24h ATR percent must be >= this to allow entries
-    MIN_ATR_PERCENT: 1.8,
+    // Absolute structural floor — never trade below this regardless of regime
+    ABSOLUTE_FLOOR_ATR_PERCENT: 1.1,
+    // Adaptive multiplier applied to 30-bar rolling average ATR%
+    ADAPTIVE_MULTIPLIER: 0.8,
+    // Legacy fallback if historical ATR is unavailable
+    FALLBACK_MIN_ATR_PERCENT: 1.8,
     // Allow mean reversion to bypass (they profit from range-bound conditions)
     ALLOW_MR_BYPASS: true,
   },
