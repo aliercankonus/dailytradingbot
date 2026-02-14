@@ -7438,6 +7438,116 @@ export const SignalRejectionReasons = () => {
     return "destructive";
   };
 
+  // LOW_ATR_BLOCK Display - compressed volatility, no profit runway
+  const LowAtrBlockDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+    const atrPercent = coerceNumeric(filtersStatus?.atrPercent, 0);
+    const atrRaw = coerceNumeric(filtersStatus?.atr ?? filtersStatus?.atrValue, 0);
+    const minAtrRequired = coerceNumeric(filtersStatus?.minAtrRequired, 1.8);
+    const currentPrice = coerceNumeric(filtersStatus?.currentPrice ?? trendData?.currentPrice, 0);
+    const wouldPassWith = filtersStatus?.wouldPassWith;
+    const derivedDirection = filtersStatus?.derivedDirection;
+    const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+    
+    // Calculate how far ATR is from minimum
+    const atrDeficit = minAtrRequired - atrPercent;
+    const atrRatio = minAtrRequired > 0 ? (atrPercent / minAtrRequired) * 100 : 0;
+    
+    // Bollinger squeeze info
+    const squeeze15m = filtersStatus?.bollinger15m?.squeeze;
+    const squeeze30m = filtersStatus?.bollinger30m?.squeeze;
+    const squeezeIntensity15m = coerceNumeric(filtersStatus?.bollinger15m?.squeezeIntensity, 0);
+    const squeezeIntensity30m = coerceNumeric(filtersStatus?.bollinger30m?.squeezeIntensity, 0);
+    const hasActiveSqueeze = squeeze15m || squeeze30m;
+
+    return (
+      <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <Minimize2 className="h-3.5 w-3.5 text-blue-400" />
+            <span className="text-xs font-medium">Low Volatility Block</span>
+          </div>
+          {derivedDirection && (
+            <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${
+              derivedDirection === 'long' ? 'bg-green-500/20 text-green-400 border-green-500/40' :
+              derivedDirection === 'short' ? 'bg-red-500/20 text-red-400 border-red-500/40' :
+              'bg-muted/30 text-muted-foreground'
+            }`}>
+              {derivedDirection.toUpperCase()}
+            </Badge>
+          )}
+        </div>
+
+        {/* ATR Progress Bar */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="text-muted-foreground">ATR Volatility</span>
+            <span className="font-mono font-medium text-red-400">
+              {atrPercent.toFixed(2)}% / {minAtrRequired.toFixed(1)}% min
+            </span>
+          </div>
+          <div className="h-2 bg-muted rounded-full overflow-hidden">
+            <div 
+              className="h-full rounded-full transition-all bg-red-500/70"
+              style={{ width: `${Math.min(100, atrRatio)}%` }}
+            />
+          </div>
+          <div className="text-[9px] text-muted-foreground">
+            {atrDeficit > 0 
+              ? `Needs ${atrDeficit.toFixed(2)}% more volatility to trade`
+              : 'Sufficient volatility'}
+          </div>
+        </div>
+
+        {/* Key metrics grid */}
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+          {currentPrice > 0 && (
+            <div>
+              <span className="text-muted-foreground">Price: </span>
+              <span className="font-mono">${currentPrice.toLocaleString()}</span>
+            </div>
+          )}
+          {atrRaw > 0 && (
+            <div>
+              <span className="text-muted-foreground">ATR Value: </span>
+              <span className="font-mono">${atrRaw.toFixed(2)}</span>
+            </div>
+          )}
+          {adx > 0 && (
+            <div>
+              <span className="text-muted-foreground">ADX: </span>
+              <span className={`font-mono ${adx >= 25 ? 'text-green-400' : adx >= 20 ? 'text-yellow-400' : 'text-red-400'}`}>
+                {adx.toFixed(1)}
+              </span>
+            </div>
+          )}
+          <div>
+            <span className="text-muted-foreground">Fee Floor: </span>
+            <span className="font-mono">0.2%</span>
+          </div>
+        </div>
+
+        {/* Squeeze detection */}
+        {hasActiveSqueeze && (
+          <div className="flex items-center gap-1.5 text-[10px] text-amber-400">
+            <Gauge className="h-3 w-3" />
+            <span>
+              BB Squeeze active
+              {squeeze15m && ` (15m: ${squeezeIntensity15m}%)`}
+              {squeeze30m && ` (30m: ${squeezeIntensity30m}%)`}
+            </span>
+          </div>
+        )}
+
+        {/* What would pass */}
+        {wouldPassWith && (
+          <div className="text-[9px] text-muted-foreground italic border-t border-border/30 pt-1">
+            ✅ Would pass with: {wouldPassWith}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Convert technical rejection reasons to user-friendly messages
   const formatUserFriendlyReason = (reason: string, filtersStatus?: any): string => {
     if (!reason) return "Unknown rejection";
@@ -7486,6 +7596,14 @@ export const SignalRejectionReasons = () => {
       }
       
       return "🔍 Market direction unclear";
+    }
+    
+    // LOW_ATR_BLOCK
+    if (reason.includes("LOW_ATR_BLOCK") || filtersStatus?.gate === "LOW_ATR_BLOCK") {
+      const atr = filtersStatus?.atrPercent ?? filtersStatus?.atr;
+      const atrVal = typeof atr === 'number' ? atr.toFixed(2) : atr;
+      const minAtr = filtersStatus?.minAtrRequired ?? 1.8;
+      return `📉 Volatility too low (ATR ${atrVal || '?'}% < ${minAtr}%)`;
     }
     
     // ADX TOO LOW
@@ -7676,6 +7794,11 @@ export const SignalRejectionReasons = () => {
     const fs = rejection.filters_status;
     const reason = rejection.rejection_reason || "";
     const reasonLower = reason.toLowerCase();
+    
+    // LOW_ATR_BLOCK - volatility too compressed for profitable trades
+    if (reason.includes("LOW_ATR_BLOCK") || fs?.gate === "LOW_ATR_BLOCK") {
+      return <LowAtrBlockDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
     
     // RANGE_COMPRESSION_BLOCK - 4-state regime identifies no edge
     if (fs?.gate === "RANGE_COMPRESSION_BLOCK" || reason.includes("RANGE_COMPRESSION_BLOCK") ||

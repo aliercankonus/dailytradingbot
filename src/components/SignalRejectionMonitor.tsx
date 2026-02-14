@@ -43,7 +43,7 @@ type SymbolFilter = "all" | string;
 const classifyGate = (reason: string): GateFilter => {
   const r = reason.toLowerCase();
   if (r.includes("momentum") || r.includes("macd")) return "momentum";
-  if (r.includes("regime") || r.includes("ranging")) return "regime";
+  if (r.includes("regime") || r.includes("ranging") || r.includes("low_atr")) return "regime";
   if (r.includes("direction") || r.includes("no_clear")) return "direction";
   if (r.includes("htf") || r.includes("4h") || r.includes("aligned")) return "htf";
   if (r.includes("adx")) return "adx";
