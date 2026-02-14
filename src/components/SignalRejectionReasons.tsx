@@ -1105,6 +1105,78 @@ const ExecutionRejectionDisplay = ({ filtersStatus }: { filtersStatus: any }) =>
   );
 };
 
+// Counter-Trend Protection Display - direction blocked against dominant trend
+const CounterTrendProtectionDisplay = ({ filtersStatus, trendData, rejectionReason }: { filtersStatus: any; trendData?: any; rejectionReason?: string }) => {
+  const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
+  const momentumScore = coerceNumeric(filtersStatus?.momentumScore, 0);
+  const derivedDirection = filtersStatus?.derivedDirection || "unknown";
+  const regimeTrendDirection = filtersStatus?.regimeTrendDirection || filtersStatus?.primaryTrend || trendData?.primaryTrend || "unknown";
+  const masterRegime = filtersStatus?.masterRegime || filtersStatus?.regime || "unknown";
+  const regimeRuleId = filtersStatus?.regimeRuleId || "";
+  const blockReasonCode = filtersStatus?.blockReasonCode || filtersStatus?.primaryGateFailed || "";
+  const momentumDirection = filtersStatus?.momentumDirection || "neutral";
+  const stochK4h = coerceNumeric(filtersStatus?.stochRsiK4h ?? filtersStatus?.stochRsiK, 0);
+  const adxSlope = filtersStatus?.adxSlope;
+  
+  const isBullishTrend = regimeTrendDirection.toLowerCase() === "bullish";
+  const trendColor = isBullishTrend ? "text-green-400" : "text-red-400";
+  const dirColor = derivedDirection === "long" ? "text-green-400" : derivedDirection === "short" ? "text-red-400" : "text-muted-foreground";
+
+  return (
+    <div className="space-y-2 p-2 bg-amber-500/10 rounded-md border border-amber-500/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Ban className="h-4 w-4 text-amber-400" />
+          <span className="text-xs font-semibold text-amber-400">Counter-Trend Protection</span>
+        </div>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-amber-400 border-amber-500/30">
+          {derivedDirection.toUpperCase()} vs {regimeTrendDirection}
+        </Badge>
+      </div>
+      
+      <div className="p-2 bg-muted/30 rounded border border-border/50">
+        <div className="text-[11px] font-medium text-amber-300">
+          {derivedDirection.toUpperCase()} entry blocked because the dominant trend is {regimeTrendDirection}
+        </div>
+        <div className="text-[10px] text-muted-foreground mt-1">
+          Strong ADX ({adx.toFixed(1)}) confirms the {regimeTrendDirection} trend is dominant. Trading against it has negative expectancy.
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 text-[10px]">
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">ADX</div>
+          <div className={`font-mono font-medium ${adx >= 30 ? 'text-green-400' : adx >= 20 ? 'text-yellow-400' : 'text-red-400'}`}>
+            {adx.toFixed(1)}
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Trend</div>
+          <div className={`font-medium capitalize ${trendColor}`}>{regimeTrendDirection}</div>
+        </div>
+        <div className="p-1.5 bg-muted/30 rounded text-center">
+          <div className="text-muted-foreground">Momentum</div>
+          <div className={`font-mono font-medium ${momentumScore > 10 ? 'text-green-400' : momentumScore < -10 ? 'text-red-400' : 'text-muted-foreground'}`}>
+            {momentumScore}
+          </div>
+        </div>
+      </div>
+
+      {masterRegime !== "unknown" && (
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-1 border-t border-border/30">
+          <span>Regime:</span>
+          <Badge variant="outline" className="text-[9px] px-1 py-0">{masterRegime}</Badge>
+          {regimeRuleId && <span className="text-[9px] font-mono">({regimeRuleId})</span>}
+        </div>
+      )}
+
+      <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+        <span className="text-amber-400">💡</span> Wait for trend reversal confirmation or use counter-trend admission (requires proven exhaustion).
+      </div>
+    </div>
+  );
+};
+
 // Counter-Trend Admission Gate Display - for counter-trend probe attempts
 const CounterTrendAdmissionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const direction = filtersStatus?.direction || "unknown";
@@ -7765,6 +7837,24 @@ export const SignalRejectionReasons = () => {
       return "⚡ Execution-time filter triggered";
     }
     
+    // COUNTER_TREND_PROTECTION - direction blocked against strong trend
+    if (reason.includes("COUNTER_TREND_PROTECTION")) {
+      const sideMatch = reason.match(/(\w+)\s+blocked/i);
+      const trendMatch = reason.match(/against\s+(\w+)\s+trend/i);
+      const side = sideMatch?.[1]?.toUpperCase() || "";
+      const trend = trendMatch?.[1] || "";
+      return `🛡️ ${side} blocked — ${trend} trend too strong`;
+    }
+    
+    // EARLY TIER 0 CIRCUIT BREAKER - deep overbought/oversold
+    if (reason.includes("EARLY TIER 0 CIRCUIT BREAKER")) {
+      const sideMatch = reason.match(/(\w+)\s+blocked/i);
+      const kMatch = reason.match(/K=([0-9.]+)/);
+      const side = sideMatch?.[1]?.toUpperCase() || "";
+      const zone = reason.toLowerCase().includes("overbought") ? "overbought" : "oversold";
+      return `🔴 ${side} blocked — deeply ${zone}${kMatch ? ` (K=${kMatch[1]})` : ""}`;
+    }
+    
     // LTF gates
     if (reason.includes("LTF_CONFIRMATION") || filtersStatus?.gate === "LTF_CONFIRMATION") {
       return "⏱️ Lower timeframe not confirming";
@@ -7853,6 +7943,23 @@ export const SignalRejectionReasons = () => {
     // Execution rejections - signals blocked during trade execution
     if (reason.startsWith("EXECUTION:")) {
       return <ExecutionRejectionDisplay filtersStatus={fs} />;
+    }
+    
+    // COUNTER_TREND_PROTECTION - direction blocked against strong trend
+    if (reason.includes("COUNTER_TREND_PROTECTION") || fs?.gate === "COUNTER_TREND_PROTECTION") {
+      return <CounterTrendProtectionDisplay filtersStatus={fs} trendData={rejection.trend_data} rejectionReason={reason} />;
+    }
+    
+    // EARLY TIER 0 CIRCUIT BREAKER - deep overbought/oversold before full analysis
+    if (reason.includes("EARLY TIER 0 CIRCUIT BREAKER") || fs?.gate === "EARLY_TIER_0_CIRCUIT_BREAKER") {
+      return (
+        <div className="space-y-2">
+          <SevereHTFGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />
+          {fs?.flashCrashProbeChecked && (
+            <FlashCrashProbePhase2Display filtersStatus={fs} trendData={rejection.trend_data} />
+          )}
+        </div>
+      );
     }
     
     // Already has active signal
