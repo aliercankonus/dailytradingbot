@@ -212,6 +212,70 @@ const BypassBadge = ({ eligible }: { eligible: boolean }) => {
   );
 };
 
+// Parse raw rejection reason into user-friendly label + short description
+const getFriendlyRejection = (reason: string): { label: string; summary: string; icon: typeof AlertCircle } => {
+  const r = reason.toLowerCase();
+  
+  if (r.startsWith("counter_trend_protection")) {
+    const side = reason.match(/(\w+) blocked/)?.[1] || "";
+    const trend = reason.match(/against (\w+) trend/)?.[1] || "";
+    return { label: "Counter-Trend Block", summary: `${side} against ${trend} trend`, icon: Ban };
+  }
+  if (r.startsWith("early tier 0 circuit breaker")) {
+    const side = reason.match(/(\w+) blocked/)?.[1] || "";
+    const k = reason.match(/K=([0-9.]+)/)?.[1] || "";
+    const zone = r.includes("overbought") ? "overbought" : "oversold";
+    return { label: "Extreme StochRSI", summary: `${side} blocked — K=${k} (${zone})`, icon: Zap };
+  }
+  if (r.startsWith("low_atr_block")) {
+    const atr = reason.match(/ATR=([0-9.]+%)/)?.[1] || "";
+    return { label: "Low Volatility", summary: `ATR ${atr} too low for profit`, icon: Activity };
+  }
+  if (r.startsWith("move_exhausted")) {
+    const pct = reason.match(/(\d+\.?\d*)%/)?.[1] || "";
+    const side = r.includes("long") ? "LONG" : "SHORT";
+    return { label: "Move Exhausted", summary: `${pct}% move — too late to ${side}`, icon: AlertCircle };
+  }
+  if (r.startsWith("adx_slope_graduated")) {
+    const side = reason.match(/(\w+) blocked/)?.[1] || "";
+    return { label: "ADX Slope Declining", summary: `${side} blocked — trend weakening`, icon: TrendingDown };
+  }
+  if (r.startsWith("no clear trade direction") || r.includes("no_clear_direction")) {
+    const regime = reason.match(/REGIME:\s*(\w+)/)?.[1] || "";
+    return { label: "No Direction", summary: `Timeframes conflicting (${regime})`, icon: Minus };
+  }
+  if (r.startsWith("no_trade_range_regime")) {
+    return { label: "Range Regime", summary: "No edge — noise dominates", icon: Minus };
+  }
+  if (r.includes("momentum_direction") || r.includes("momentum_slope")) {
+    return { label: "Momentum Opposing", summary: "Momentum against trade direction", icon: ArrowDownCircle };
+  }
+  if (r.includes("htf_not_aligned")) {
+    return { label: "HTF Misaligned", summary: "Higher timeframe not supporting", icon: Target };
+  }
+  if (r.includes("quality_too_low") || r.includes("quality score")) {
+    const score = reason.match(/(\d+)/)?.[1] || "";
+    return { label: "Low Quality", summary: `Score ${score} below threshold`, icon: BarChart3 };
+  }
+  if (r.includes("execution:")) {
+    const detail = reason.replace(/EXECUTION:\s*/i, "").slice(0, 40);
+    return { label: "Execution Hold", summary: detail, icon: Ban };
+  }
+  if (r.includes("flash_crash") || r.includes("capitulation")) {
+    return { label: "Flash Crash Probe", summary: "Extreme drop detected", icon: Zap };
+  }
+  if (r.includes("ltf_spike")) {
+    return { label: "LTF Spike", summary: "15m climax candle detected", icon: Zap };
+  }
+  if (r.includes("near_extreme")) {
+    return { label: "Near Extreme", summary: "Price near extreme zone", icon: AlertCircle };
+  }
+  
+  // Fallback: extract first meaningful word
+  const code = reason.split(":")[0].trim();
+  return { label: code.slice(0, 20), summary: reason.slice(0, 50), icon: AlertCircle };
+};
+
 const DirectionBadge = ({ direction }: { direction: string | undefined }) => {
   if (!direction) return <span className="text-muted-foreground">-</span>;
   
@@ -498,19 +562,28 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="text-xs truncate max-w-[170px] block cursor-help">
-                                  {signal.rejection_reason?.replace(/\s*\([^)]*\)/g, '').slice(0, 50)}
-                                  {signal.rejection_reason && signal.rejection_reason.length > 50 && "..."}
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent side="bottom" className="max-w-[300px]">
-                                <p className="text-xs">{signal.rejection_reason}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
+                          {(() => {
+                            const friendly = getFriendlyRejection(signal.rejection_reason);
+                            const FriendlyIcon = friendly.icon;
+                            return (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <div className="flex flex-col gap-0.5 cursor-help max-w-[170px]">
+                                      <div className="flex items-center gap-1">
+                                        <FriendlyIcon className="h-3 w-3 text-muted-foreground shrink-0" />
+                                        <span className="text-xs font-medium truncate">{friendly.label}</span>
+                                      </div>
+                                      <span className="text-[10px] text-muted-foreground truncate">{friendly.summary}</span>
+                                    </div>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="bottom" className="max-w-[400px]">
+                                    <p className="text-xs whitespace-pre-wrap">{signal.rejection_reason}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            );
+                          })()}
                         </TableCell>
                         <TableCell>
                           <DirectionBadge direction={direction} />
