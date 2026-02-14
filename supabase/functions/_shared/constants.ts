@@ -4039,10 +4039,16 @@ export const COMPRESSION_MODULE = {
   LONG_MIN_MOMENTUM_SCORE: -20,
   SHORT_MAX_MOMENTUM_SCORE: 20,
   
+  // ===== EARLY EXPANSION GUARD =====
+  // ADX 23-25 with rising slope = early expansion zone, block new compression entries
+  EARLY_EXPANSION_ADX: 23,
+  
   // ===== SCORING WEIGHTS (±40 range, threshold ≥ 25) =====
   SCORE_STOCHRSI_EXTREME: 15,  // K < 10 or K > 90: ±15
   SCORE_BB_TOUCH: 10,          // %B ≤ 10 or ≥ 90: ±10
-  SCORE_MOMENTUM_SUPPORTIVE: 10, // Momentum not opposing: ±10
+  SCORE_MOMENTUM_ALIGNED: 10,  // Momentum in entry direction: ±10
+  SCORE_MOMENTUM_NEUTRAL: 5,   // Momentum neutral (not aligned, not opposing): ±5
+  // Momentum mildly opposing but within tolerance: +0 (no contribution)
   SCORE_LOW_ADX_BONUS: 5,      // ADX < 20: +5
   ENTRY_THRESHOLD: 25,         // |score| must be ≥ 25
   

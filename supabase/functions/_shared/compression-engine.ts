@@ -85,9 +85,14 @@ export function checkCompressionKillSwitch(input: {
   }
   
   // Kill 2: ADX slope positive for 2+ candles — trend forming
-  // We use adxSlope > 0 as a proxy; the caller checks consecutive candles via regime history
   if (input.adxSlope > 0.1) {
     return { killed: true, reason: `ADX slope ${input.adxSlope.toFixed(2)} rising — expansion forming` };
+  }
+  
+  // Kill 2b: Early expansion zone — ADX >= 23 AND slope positive
+  // ADX 23-25 is the transition zone where breakouts begin forming
+  if (input.adx >= cfg.EARLY_EXPANSION_ADX && input.adxSlope > 0) {
+    return { killed: true, reason: `Early expansion: ADX ${input.adx.toFixed(1)} >= ${cfg.EARLY_EXPANSION_ADX} with rising slope ${input.adxSlope.toFixed(2)}` };
   }
   
   // Kill 3: ATR expanding above dynamic threshold — volatility returning
@@ -162,24 +167,37 @@ export function calculateCompressionScore(input: {
   }
   score += breakdown.bbTouchContribution;
   
-  // ===== MOMENTUM SUPPORTIVE CONTRIBUTION (±10) =====
-  // Directional check: momentum must not strongly oppose
-  const momentumSupportive = direction === 'long' 
+  // ===== MOMENTUM GRADUATED CONTRIBUTION (±10/±5/0) =====
+  // Three-tier: aligned (+10), neutral (+5), mildly opposing but tolerated (0)
+  // Hard block if strongly opposing beyond tolerance
+  const momentumOpposingLimit = direction === 'long' ? cfg.LONG_MIN_MOMENTUM_SCORE : cfg.SHORT_MAX_MOMENTUM_SCORE;
+  const momentumAligned = direction === 'long' ? input.momentumScore > 10 : input.momentumScore < -10;
+  const momentumNeutral = direction === 'long' 
+    ? (input.momentumScore >= -5 && input.momentumScore <= 10)
+    : (input.momentumScore >= -10 && input.momentumScore <= 5);
+  const momentumTolerated = direction === 'long'
     ? input.momentumScore > cfg.LONG_MIN_MOMENTUM_SCORE
     : input.momentumScore < cfg.SHORT_MAX_MOMENTUM_SCORE;
   
-  if (momentumSupportive) {
-    breakdown.momentumContribution = sign * cfg.SCORE_MOMENTUM_SUPPORTIVE;
-    score += breakdown.momentumContribution;
-  } else {
-    // Momentum opposing — return null direction (block)
+  if (!momentumTolerated) {
+    // Momentum strongly opposing — hard block
     return { 
       score: 0, 
       direction: null, 
       breakdown, 
-      reason: `Momentum ${input.momentumScore.toFixed(0)} opposing ${direction} (limit: ${direction === 'long' ? cfg.LONG_MIN_MOMENTUM_SCORE : cfg.SHORT_MAX_MOMENTUM_SCORE})` 
+      reason: `Momentum ${input.momentumScore.toFixed(0)} opposing ${direction} (limit: ${momentumOpposingLimit})` 
     };
   }
+  
+  if (momentumAligned) {
+    breakdown.momentumContribution = sign * cfg.SCORE_MOMENTUM_ALIGNED;
+  } else if (momentumNeutral) {
+    breakdown.momentumContribution = sign * cfg.SCORE_MOMENTUM_NEUTRAL;
+  } else {
+    // Mildly opposing but within tolerance — 0 contribution
+    breakdown.momentumContribution = 0;
+  }
+  score += breakdown.momentumContribution;
   
   // ===== LOW ADX BONUS (+5) =====
   if (input.adx < 20) {
@@ -253,12 +271,13 @@ export function evaluateCompressionEntry(input: CompressionEvalInput): Compressi
     return defaultResult;
   }
   
-  // BB width contraction stability (2+ candles)
+  // BB width contraction stability — strict monotonic decrease for 2+ candles
+  // bbWidth[t] < bbWidth[t-1] AND bbWidth[t-1] < bbWidth[t-2] (not just percentile)
   let bbWidthContracting = false;
   if (input.bbWidth !== undefined && input.bbWidthPrev !== undefined && input.bbWidthPrev2 !== undefined) {
-    bbWidthContracting = input.bbWidth <= input.bbWidthPrev && input.bbWidthPrev <= input.bbWidthPrev2;
+    bbWidthContracting = input.bbWidth < input.bbWidthPrev && input.bbWidthPrev < input.bbWidthPrev2;
   } else if (input.bbWidth !== undefined && input.bbWidthPrev !== undefined) {
-    bbWidthContracting = input.bbWidth <= input.bbWidthPrev;
+    bbWidthContracting = input.bbWidth < input.bbWidthPrev;
   } else {
     // If BB width history not available, allow but note it
     bbWidthContracting = true; // Permissive fallback
