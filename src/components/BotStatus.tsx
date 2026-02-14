@@ -9,13 +9,16 @@ import { useRiskParameters } from "@/hooks/useRiskParameters";
 import { useToast } from "@/hooks/use-toast";
 import { useLiveTrend } from "@/hooks/useLiveTrend";
 import { useSymbols } from "@/hooks/useSymbols";
-import { useRegimeTransitions } from "@/hooks/useRegimeTransitions";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export const BotStatus = () => {
   const { riskParams, updateRiskParameters } = useRiskParameters();
   const { toast } = useToast();
   const { activeSymbols, symbols } = useSymbols();
+  const { user } = useAuth();
   const [selectedCrypto, setSelectedCrypto] = useState("");
   
   // Set default to first active symbol when available
@@ -24,12 +27,29 @@ export const BotStatus = () => {
       setSelectedCrypto(activeSymbols[0]);
     }
   }, [activeSymbols]);
-  
-  const { trendData, loading: trendLoading } = useLiveTrend(selectedCrypto || activeSymbols[0] || "", 60000);
-  const { data: regimeTransitions } = useRegimeTransitions();
 
-  // Get the latest regime for the selected symbol
-  const currentRegime = regimeTransitions?.find(t => t.symbol === (selectedCrypto || activeSymbols[0]));
+  const currentSymbol = selectedCrypto || activeSymbols[0] || "";
+  
+  const { trendData, loading: trendLoading } = useLiveTrend(currentSymbol, 60000);
+
+  // Direct query for latest regime per selected symbol
+  const { data: currentRegime } = useQuery({
+    queryKey: ['current-regime', user?.id, currentSymbol],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('market_regime_history')
+        .select('regime, effective_regime, adx, adx_slope, trend_direction, recorded_at')
+        .eq('symbol', currentSymbol)
+        .order('recorded_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user?.id && !!currentSymbol,
+    refetchInterval: 60000,
+    staleTime: 55000,
+  });
 
   const cryptoOptions = symbols
     .filter(s => s.is_active)
@@ -128,7 +148,7 @@ export const BotStatus = () => {
                 >
                   {(currentRegime.effective_regime || currentRegime.regime).replace(/_/g, " ")}
                 </Badge>
-                {currentRegime.isDivergent && (
+                {currentRegime.effective_regime && currentRegime.regime !== currentRegime.effective_regime && (
                   <span className="text-[10px] text-warning" title={`Raw: ${currentRegime.regime}`}>⚠</span>
                 )}
               </div>
