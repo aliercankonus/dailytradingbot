@@ -27,6 +27,7 @@ import { MomentumStatusDashboard } from "@/components/MomentumStatusDashboard";
 import { RegimeTransitionLog } from "@/components/RegimeTransitionLog";
 import { ExitManagementDashboard } from "@/components/ExitManagementDashboard";
 import { MarketConditionsDashboard } from "@/components/MarketConditionsDashboard";
+import ModuleInventoryDashboard from "@/components/ModuleInventoryDashboard";
 
 import { BlockedSignalsWidget } from "@/components/BlockedSignalsWidget";
 import { SignalRejectionMonitor } from "@/components/SignalRejectionMonitor";
@@ -158,7 +159,14 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="monitor" className="space-y-6">
-            <MomentumStatusDashboard />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2">
+                <MomentumStatusDashboard />
+              </div>
+              <div className="lg:col-span-1">
+                <ModuleInventoryDashboard />
+              </div>
+            </div>
             <RegimeTransitionLog />
             
             <OrderFlowDashboard />
