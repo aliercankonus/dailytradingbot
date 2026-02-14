@@ -2565,25 +2565,46 @@ serve(async (req) => {
       logger.info(`   → Position size multiplier: ${recoveryPositionSizeMultiplier * 100}%`);
     }
 
-    // ============= PRE-FETCH REGIME HISTORY FOR PERSISTENCE =============
-    // Query last 3 regime entries per symbol for asymmetric persistence engine
+    // ============= PRE-FETCH REGIME HISTORY FOR PERSISTENCE + AGE DECAY =============
+    // Query regime entries per symbol: 3 for persistence, up to 60 for age decay
     const regimeHistoryBySymbol = new Map<string, { regime: string }[]>();
+    const regimeAgeBySymbol = new Map<string, number>();  // Consecutive candles in current effective regime
     try {
       const symbolNames = activeSymbols.map(s => s.symbol);
+      const maxRowsPerSymbol = FOUR_STATE_REGIME.REGIME_AGE_DECAY.ENABLED ? 60 : 3;
       const { data: regimeRows } = await supabase
         .from('market_regime_history')
-        .select('symbol, regime, recorded_at')
+        .select('symbol, regime, effective_regime, recorded_at')
         .eq('user_id', userId)
         .in('symbol', symbolNames)
         .order('recorded_at', { ascending: false })
-        .limit(symbolNames.length * 3);  // Up to 3 per symbol
+        .limit(symbolNames.length * maxRowsPerSymbol);
       
       if (regimeRows) {
         for (const row of regimeRows) {
+          // Persistence uses raw regime (first 3 per symbol)
           const existing = regimeHistoryBySymbol.get(row.symbol) || [];
           if (existing.length < 3) {
             existing.push({ regime: row.regime });
             regimeHistoryBySymbol.set(row.symbol, existing);
+          }
+        }
+        
+        // Age decay: count consecutive candles in same effective regime
+        if (FOUR_STATE_REGIME.REGIME_AGE_DECAY.ENABLED) {
+          for (const sym of symbolNames) {
+            const symbolRows = regimeRows.filter(r => r.symbol === sym);
+            if (symbolRows.length === 0) continue;
+            const currentEffective = symbolRows[0].effective_regime;
+            let consecutiveCount = 0;
+            for (const row of symbolRows) {
+              if (row.effective_regime === currentEffective) {
+                consecutiveCount++;
+              } else {
+                break;
+              }
+            }
+            regimeAgeBySymbol.set(sym, consecutiveCount);
           }
         }
       }
@@ -4221,6 +4242,12 @@ serve(async (req) => {
           }
         }
         
+        // Extract DI separation for transition buffer confidence scoring
+        const diPlus = trendData?.volatility?.diPlus ?? 0;
+        const diMinus = trendData?.volatility?.diMinus ?? 0;
+        const diSeparation = Math.abs(diPlus - diMinus);
+        const relativeATR = trendData?.volatility?.relativeATR ?? 1.0;
+        
         const fourStateRegime = classify4StateRegime(
           adx,
           adxSlope,
@@ -4233,7 +4260,9 @@ serve(async (req) => {
           stochK4hForRegime,
           false,  // adxExhaustion not yet calculated; conservative default
           isBBSqueeze,
-          alignedTFCount
+          alignedTFCount,
+          diSeparation,
+          relativeATR
         );
         
         // Capture raw regime BEFORE persistence override (needed for correct history storage)
@@ -4294,9 +4323,31 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} ✅ REGIME PERSISTENCE: ${persistenceResult.reason}`);
         }
         
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME (effective): ${fourStateRegime.regime}`);
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME (effective): ${fourStateRegime.regime}, confidence=${fourStateRegime.regimeConfidence}${fourStateRegime.isTransitionZone ? ' [TRANSITION]' : ''}`);
         logger.forSymbol(symbol).info(`   → allowContinuation=${fourStateRegime.allowContinuation}, allowMR=${fourStateRegime.allowMeanReversion}, posMultiplier=${fourStateRegime.positionMultiplier.toFixed(2)}`);
         
+        // ============= REGIME AGE DECAY =============
+        // Apply graduated fatigue as regimes age — markets statistically rotate
+        const AGE_DECAY = FOUR_STATE_REGIME.REGIME_AGE_DECAY;
+        const regimeAge = regimeAgeBySymbol.get(symbol) || 0;
+        let ageDecayMultiplier = 1.0;
+        
+        if (AGE_DECAY.ENABLED && regimeAge > 0 && AGE_DECAY.AFFECTED_REGIMES.includes(fourStateRegime.regime)) {
+          if (regimeAge >= AGE_DECAY.FATIGUE_START_CANDLES) {
+            // Linear interpolation from 1.0 to MAX_FATIGUE_MULTIPLIER
+            const fatigueProgress = Math.min(1.0, (regimeAge - AGE_DECAY.FATIGUE_START_CANDLES) / (AGE_DECAY.FULL_FATIGUE_CANDLES - AGE_DECAY.FATIGUE_START_CANDLES));
+            ageDecayMultiplier = 1.0 - fatigueProgress * (1.0 - AGE_DECAY.MAX_FATIGUE_MULTIPLIER);
+            
+            // Apply fatigue to position multiplier
+            fourStateRegime.positionMultiplier = Math.round(fourStateRegime.positionMultiplier * ageDecayMultiplier * 100) / 100;
+            
+            if (AGE_DECAY.LOG_AGE_DECAY) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} ⏳ REGIME AGE DECAY: ${fourStateRegime.regime} age=${regimeAge} candles, fatigue=${(fatigueProgress * 100).toFixed(0)}%, sizeMultiplier=${ageDecayMultiplier.toFixed(2)} → posMultiplier=${fourStateRegime.positionMultiplier.toFixed(2)}`);
+            }
+          } else if (AGE_DECAY.LOG_AGE_DECAY && regimeAge >= AGE_DECAY.FATIGUE_START_CANDLES - 5) {
+            logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.TREND} ⏳ REGIME AGE: ${fourStateRegime.regime} age=${regimeAge}/${AGE_DECAY.FATIGUE_START_CANDLES} (approaching fatigue)`);
+          }
+        }
         // Store RAW detected regime to history (BEFORE persistence override)
         // CRITICAL: Must store raw regime, not effective regime, otherwise persistence
         // counter can never accumulate consecutive detections of a new regime (self-locking bug)

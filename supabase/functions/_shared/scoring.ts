@@ -4937,6 +4937,10 @@ export interface FourStateRegimeResult {
   allowMeanReversion: boolean;
   requireConfirmation: boolean;
   reason: string;
+  // NEW: Continuous regime confidence score (0-100)
+  regimeConfidence: number;
+  // NEW: Whether this is in the transition buffer zone
+  isTransitionZone: boolean;
   diagnostics: {
     adx: number;
     adxSlope: number;
@@ -4947,6 +4951,15 @@ export interface FourStateRegimeResult {
     stochRsiK4h: number;
     isExhausted: boolean;
     isSqueeze: boolean;
+    // NEW: Confidence breakdown for diagnostics
+    confidenceBreakdown?: {
+      adxComponent: number;
+      adxSlopeComponent: number;
+      atrExpansionComponent: number;
+      diSeparationComponent: number;
+      momentumComponent: number;
+      rawScore: number;
+    };
   };
 }
 
@@ -4962,12 +4975,62 @@ export const classify4StateRegime = (
   stochRsiK4h: number,
   isExhausted: boolean,
   isSqueeze: boolean,
-  alignedTimeframeCount: number = 0
+  alignedTimeframeCount: number = 0,
+  // NEW: Optional inputs for transition buffer confidence scoring
+  diSeparation: number = 0,
+  relativeATR: number = 1.0
 ): FourStateRegimeResult => {
   const R = FOUR_STATE_REGIME;
   
+  // ===== TRANSITION BUFFER: Compute continuous confidence score =====
+  const TB = R.TRANSITION_BUFFER;
+  let regimeConfidence = 50; // Neutral baseline
+  let confidenceBreakdown = {
+    adxComponent: 0,
+    adxSlopeComponent: 0,
+    atrExpansionComponent: 0,
+    diSeparationComponent: 0,
+    momentumComponent: 0,
+    rawScore: 0,
+  };
+  
+  if (TB.ENABLED) {
+    // Normalize each component to 0-1 range, then weight
+    const normalize = (val: number, min: number, max: number) => 
+      Math.max(0, Math.min(1, (val - min) / (max - min)));
+    
+    const adxNorm = normalize(adx, TB.ADX_NORM_MIN, TB.ADX_NORM_MAX);
+    const adxSlopeNorm = normalize(adxSlope, TB.ADX_SLOPE_NORM_MIN, TB.ADX_SLOPE_NORM_MAX);
+    const atrExpNorm = normalize(relativeATR, TB.ATR_EXP_NORM_MIN, TB.ATR_EXP_NORM_MAX);
+    const diSepNorm = normalize(diSeparation, TB.DI_SEP_NORM_MIN, TB.DI_SEP_NORM_MAX);
+    
+    // Momentum alignment: 1.0 if aligned, 0.5 if neutral, 0.0 if opposing
+    const momentumAligned = derivedDirection === 'long' ? momentumScore > 10 : momentumScore < -10;
+    const momentumNeutral = Math.abs(momentumScore) <= 10;
+    const momentumNorm = momentumAligned ? 1.0 : momentumNeutral ? 0.5 : 0.0;
+    
+    // Weighted sum → 0-100 scale
+    const rawScore = (
+      adxNorm * TB.WEIGHTS.ADX_NORMALIZED +
+      adxSlopeNorm * TB.WEIGHTS.ADX_SLOPE +
+      atrExpNorm * TB.WEIGHTS.ATR_EXPANSION_RATE +
+      diSepNorm * TB.WEIGHTS.DI_SEPARATION +
+      momentumNorm * TB.WEIGHTS.MOMENTUM_ALIGNMENT
+    ) * 100;
+    
+    regimeConfidence = Math.max(0, Math.min(100, Math.round(rawScore)));
+    
+    confidenceBreakdown = {
+      adxComponent: Math.round(adxNorm * TB.WEIGHTS.ADX_NORMALIZED * 100),
+      adxSlopeComponent: Math.round(adxSlopeNorm * TB.WEIGHTS.ADX_SLOPE * 100),
+      atrExpansionComponent: Math.round(atrExpNorm * TB.WEIGHTS.ATR_EXPANSION_RATE * 100),
+      diSeparationComponent: Math.round(diSepNorm * TB.WEIGHTS.DI_SEPARATION * 100),
+      momentumComponent: Math.round(momentumNorm * TB.WEIGHTS.MOMENTUM_ALIGNMENT * 100),
+      rawScore: Math.round(rawScore * 10) / 10,
+    };
+  }
+  
   if (!R.ENABLED) {
-    // Disabled - return permissive default
     return {
       regime: 'TREND_EXPANSION',
       positionMultiplier: 1.0,
@@ -4975,7 +5038,9 @@ export const classify4StateRegime = (
       allowMeanReversion: true,
       requireConfirmation: false,
       reason: '4-state regime classifier disabled',
-      diagnostics: { adx, adxSlope, primaryTrend, momentumState, momentumScore, ltfAligned: true, stochRsiK4h, isExhausted, isSqueeze },
+      regimeConfidence: 100,
+      isTransitionZone: false,
+      diagnostics: { adx, adxSlope, primaryTrend, momentumState, momentumScore, ltfAligned: true, stochRsiK4h, isExhausted, isSqueeze, confidenceBreakdown },
     };
   }
   
@@ -4987,24 +5052,32 @@ export const classify4StateRegime = (
     (htf30mTrend === 'bearish' && derivedDirection === 'short')
   );
   
-  const diag = { adx, adxSlope, primaryTrend, momentumState, momentumScore, ltfAligned, stochRsiK4h, isExhausted, isSqueeze };
+  const diag = { adx, adxSlope, primaryTrend, momentumState, momentumScore, ltfAligned, stochRsiK4h, isExhausted, isSqueeze, confidenceBreakdown };
   
   // ===== STATE 1: TREND EXPANSION =====
-  // ADX >= 30, slope non-negative, LTF aligned → best entries
   if (adx >= R.TREND_EXPANSION.MIN_ADX && adxSlope >= R.TREND_EXPANSION.MIN_ADX_SLOPE && ltfAligned) {
+    // Apply transition buffer: if confidence is in the upper transition zone, reduce sizing
+    let posMultiplier = R.TREND_EXPANSION.POSITION_MULTIPLIER;
+    let isTransition = false;
+    if (TB.ENABLED && regimeConfidence < TB.EXPANSION_THRESHOLD && regimeConfidence >= TB.TRANSITION_LOW) {
+      posMultiplier = TB.TRANSITION_POSITION_MULTIPLIER_HIGH;
+      isTransition = true;
+    }
+    
     return {
       regime: 'TREND_EXPANSION',
-      positionMultiplier: R.TREND_EXPANSION.POSITION_MULTIPLIER,
+      positionMultiplier: posMultiplier,
       allowContinuation: true,
       allowMeanReversion: true,
-      requireConfirmation: false,
-      reason: `TREND_EXPANSION: ADX=${adx.toFixed(1)}≥${R.TREND_EXPANSION.MIN_ADX}, slope=${adxSlope.toFixed(2)}≥0, LTF aligned → full continuation`,
+      requireConfirmation: isTransition,
+      reason: `TREND_EXPANSION: ADX=${adx.toFixed(1)}≥${R.TREND_EXPANSION.MIN_ADX}, slope=${adxSlope.toFixed(2)}≥0, LTF aligned, confidence=${regimeConfidence}${isTransition ? ' [TRANSITION BUFFER: 70% sizing]' : ''} → full continuation`,
+      regimeConfidence,
+      isTransitionZone: isTransition,
       diagnostics: diag,
     };
   }
   
   // ===== STATE 2: TREND EXHAUSTION =====
-  // ADX >= 30 but slope declining OR momentum exhausted OR StochRSI extreme
   const isStochExhausted = derivedDirection === 'long' 
     ? stochRsiK4h >= R.TREND_EXHAUSTION.STOCHRSI_EXHAUSTION_K_LONG 
     : stochRsiK4h <= R.TREND_EXHAUSTION.STOCHRSI_EXHAUSTION_K_SHORT;
@@ -5023,14 +5096,14 @@ export const classify4StateRegime = (
       allowContinuation: false,
       allowMeanReversion: true,
       requireConfirmation: false,
-      reason: `TREND_EXHAUSTION: ADX=${adx.toFixed(1)}≥${R.TREND_EXHAUSTION.MIN_ADX}, exhaustion=[${exhaustionReasons.join(', ')}] → MR probes only`,
+      reason: `TREND_EXHAUSTION: ADX=${adx.toFixed(1)}≥${R.TREND_EXHAUSTION.MIN_ADX}, exhaustion=[${exhaustionReasons.join(', ')}], confidence=${regimeConfidence} → MR probes only`,
+      regimeConfidence,
+      isTransitionZone: false,
       diagnostics: diag,
     };
   }
   
-  // ===== STATE 4: BREAKOUT SETUP (check before Range Compression) =====
-  // ADX in transition but rising fast with directional confirmation
-  // CRITICAL: Must require non-neutral trend to prevent range leakage
+  // ===== STATE 4: BREAKOUT SETUP =====
   const absMomentumScore = Math.abs(momentumScore);
   const trendIsNeutral = primaryTrend === 'neutral' || primaryTrend === 'ranging';
   const hasDirectionalMomentum = absMomentumScore >= R.BREAKOUT_SETUP.MIN_MOMENTUM_SCORE;
@@ -5040,9 +5113,6 @@ export const classify4StateRegime = (
     adxSlope >= R.BREAKOUT_SETUP.MIN_ADX_SLOPE
   );
   const hasSqueezeBreakout = R.BREAKOUT_SETUP.ALLOW_SQUEEZE_BREAKOUT && isSqueeze && adxSlope > 0;
-  
-  // BREAKOUT requires EITHER: non-neutral trend OR both directional momentum AND LTF alignment
-  // This prevents neutral/ranging markets from leaking through via temporary ADX slope spikes
   const hasBreakoutConfirmation = !trendIsNeutral || (hasDirectionalMomentum && alignedTimeframeCount >= R.BREAKOUT_SETUP.MIN_ALIGNED_TIMEFRAMES);
   
   if ((hasBreakoutStructure || hasSqueezeBreakout) && hasBreakoutConfirmation && (hasDirectionalMomentum || alignedTimeframeCount >= R.BREAKOUT_SETUP.MIN_ALIGNED_TIMEFRAMES)) {
@@ -5052,42 +5122,62 @@ export const classify4StateRegime = (
       allowContinuation: true,
       allowMeanReversion: true,
       requireConfirmation: true,
-      reason: `BREAKOUT_SETUP: ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}≥${R.BREAKOUT_SETUP.MIN_ADX_SLOPE}, |momentum|=${absMomentumScore.toFixed(0)}, trend=${primaryTrend}, squeeze=${isSqueeze} → confirmed directional entry`,
+      reason: `BREAKOUT_SETUP: ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}≥${R.BREAKOUT_SETUP.MIN_ADX_SLOPE}, |momentum|=${absMomentumScore.toFixed(0)}, confidence=${regimeConfidence} → confirmed directional entry`,
+      regimeConfidence,
+      isTransitionZone: false,
       diagnostics: diag,
     };
   }
   
-  // ===== STATE 3: RANGE COMPRESSION (default safe state) =====
-  // Low ADX + neutral trend + weak momentum = noise dominates
-  // Also serves as the FALLBACK for any unclassified state (safe default)
+  // ===== STATE 3: RANGE COMPRESSION =====
   const momentumHasNoEdge = R.RANGE_COMPRESSION.NO_EDGE_MOMENTUM_STATES.includes(momentumState);
   const adxBelowThreshold = adx < R.RANGE_COMPRESSION.MAX_ADX;
   const momentumScoreTooLow = absMomentumScore < R.RANGE_COMPRESSION.MAX_ABS_MOMENTUM_SCORE;
   
   const isExplicitRangeCompression = trendIsNeutral && (adxBelowThreshold || (momentumHasNoEdge && momentumScoreTooLow));
   
+  // Transition buffer: if confidence is in the lower transition zone (45-55), allow cautious entries
   if (isExplicitRangeCompression) {
+    const isLowerTransition = TB.ENABLED && regimeConfidence >= TB.TRANSITION_LOW && regimeConfidence < TB.TRANSITION_HIGH;
+    
+    if (isLowerTransition) {
+      // Lower transition zone: cautious entries allowed at reduced sizing
+      return {
+        regime: 'RANGE_COMPRESSION',
+        positionMultiplier: TB.TRANSITION_POSITION_MULTIPLIER_LOW,
+        allowContinuation: true,
+        allowMeanReversion: true,
+        requireConfirmation: true,
+        reason: `RANGE_COMPRESSION [TRANSITION BUFFER]: confidence=${regimeConfidence} (${TB.TRANSITION_LOW}-${TB.TRANSITION_HIGH}), ADX=${adx.toFixed(1)}, trend=${primaryTrend} → cautious 40% sizing allowed`,
+        regimeConfidence,
+        isTransitionZone: true,
+        diagnostics: diag,
+      };
+    }
+    
     return {
       regime: 'RANGE_COMPRESSION',
-      positionMultiplier: 0,  // Hard block
+      positionMultiplier: 0,
       allowContinuation: false,
       allowMeanReversion: R.RANGE_COMPRESSION.ALLOW_MR_BYPASS,
       requireConfirmation: false,
-      reason: `RANGE_COMPRESSION: primaryTrend=${primaryTrend}, ADX=${adx.toFixed(1)}<${R.RANGE_COMPRESSION.MAX_ADX}, momentum=${momentumState}, |score|=${absMomentumScore.toFixed(0)}<${R.RANGE_COMPRESSION.MAX_ABS_MOMENTUM_SCORE} → HARD BLOCK (noise dominates)`,
+      reason: `RANGE_COMPRESSION: primaryTrend=${primaryTrend}, ADX=${adx.toFixed(1)}<${R.RANGE_COMPRESSION.MAX_ADX}, momentum=${momentumState}, |score|=${absMomentumScore.toFixed(0)}, confidence=${regimeConfidence} → HARD BLOCK`,
+      regimeConfidence,
+      isTransitionZone: false,
       diagnostics: diag,
     };
   }
   
-  // ===== FALLBACK: Default safe state = RANGE_COMPRESSION =====
-  // If no state matched explicitly, assume no edge exists.
-  // This prevents structural bias toward trading.
+  // ===== FALLBACK: Default safe state =====
   return {
     regime: 'RANGE_COMPRESSION',
-    positionMultiplier: 0,  // Hard block
+    positionMultiplier: 0,
     allowContinuation: false,
     allowMeanReversion: R.RANGE_COMPRESSION.ALLOW_MR_BYPASS,
     requireConfirmation: false,
-    reason: `RANGE_COMPRESSION (fallback): ADX=${adx.toFixed(1)}, trend=${primaryTrend}, momentum=${momentumState}, |score|=${absMomentumScore.toFixed(0)} → no regime matched, default to safe state`,
+    reason: `RANGE_COMPRESSION (fallback): ADX=${adx.toFixed(1)}, trend=${primaryTrend}, momentum=${momentumState}, confidence=${regimeConfidence} → default safe state`,
+    regimeConfidence,
+    isTransitionZone: false,
     diagnostics: diag,
   };
 };
