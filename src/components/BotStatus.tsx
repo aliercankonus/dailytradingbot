@@ -9,6 +9,7 @@ import { useRiskParameters } from "@/hooks/useRiskParameters";
 import { useToast } from "@/hooks/use-toast";
 import { useLiveTrend } from "@/hooks/useLiveTrend";
 import { useSymbols } from "@/hooks/useSymbols";
+import { useRegimeTransitions } from "@/hooks/useRegimeTransitions";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export const BotStatus = () => {
@@ -25,6 +26,10 @@ export const BotStatus = () => {
   }, [activeSymbols]);
   
   const { trendData, loading: trendLoading } = useLiveTrend(selectedCrypto || activeSymbols[0] || "", 60000);
+  const { data: regimeTransitions } = useRegimeTransitions();
+
+  // Get the latest regime for the selected symbol
+  const currentRegime = regimeTransitions?.find(t => t.symbol === (selectedCrypto || activeSymbols[0]));
 
   const cryptoOptions = symbols
     .filter(s => s.is_active)
@@ -105,6 +110,31 @@ export const BotStatus = () => {
             <Badge variant={riskParams?.paper_trading_mode ? "secondary" : "destructive"}>
               {riskParams?.paper_trading_mode ? "Paper Trading" : "Live Trading"}
             </Badge>
+          </div>
+
+          <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+            <span className="text-sm text-muted-foreground">Active Regime:</span>
+            {currentRegime ? (
+              <div className="flex items-center gap-1.5">
+                <Badge
+                  variant={
+                    (currentRegime.effective_regime || currentRegime.regime) === "TREND_EXPANSION"
+                      ? "default"
+                      : (currentRegime.effective_regime || currentRegime.regime) === "TREND_EXHAUSTION"
+                        ? "destructive"
+                        : "secondary"
+                  }
+                  className="text-[10px] px-2 py-0.5"
+                >
+                  {(currentRegime.effective_regime || currentRegime.regime).replace(/_/g, " ")}
+                </Badge>
+                {currentRegime.isDivergent && (
+                  <span className="text-[10px] text-warning" title={`Raw: ${currentRegime.regime}`}>⚠</span>
+                )}
+              </div>
+            ) : (
+              <Badge variant="secondary" className="text-[10px]">No Data</Badge>
+            )}
           </div>
 
           <TooltipProvider>
