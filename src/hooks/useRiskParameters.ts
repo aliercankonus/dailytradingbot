@@ -75,6 +75,8 @@ export interface RiskParameters {
   enable_atr_based_stops: boolean;
   enable_adx_position_scaling: boolean;
   enable_quality_based_sizing: boolean;
+  // Compression Module
+  compression_module_enabled: boolean;
 }
 
 export const useRiskParameters = () => {

@@ -516,6 +516,7 @@ serve(async (req) => {
       // Different strategy types have different exit behaviors
       // ============================================================
       const strategyName = position.strategy_name || '';
+      const isCompressionTrade = strategyName === 'Compression Scalp';
       const signalData = position.signal_id ? await supabase
         .from("trading_signals")
         .select("strategy_id")
@@ -528,6 +529,57 @@ serve(async (req) => {
       const isMomentum = isMomentumStrategy(strategyId, strategyName);
       const isMeanReversion = isMeanReversionStrategy(strategyId, strategyName);
       
+      // ============= COMPRESSION TRADE EXIT LOGIC =============
+      // Compression trades have special exit rules: time-based, regime-shift, ATR expansion
+      if (isCompressionTrade) {
+        const openedAt = position.opened_at || position.executed_at;
+        const holdMinutes = openedAt ? (Date.now() - new Date(openedAt).getTime()) / (1000 * 60) : 0;
+        const maxHoldMinutes = 120; // 2 hours max hold
+        
+        let compressionExitReason: string | null = null;
+        
+        // Time-based exit: close after 2 hours (no trailing for range trades)
+        if (holdMinutes >= maxHoldMinutes) {
+          compressionExitReason = `COMPRESSION_TIME_EXIT: Held ${holdMinutes.toFixed(0)}min >= ${maxHoldMinutes}min max`;
+        }
+        
+        // Regime shift exit: ADX rising above 28
+        if (!compressionExitReason && positionAdx > 28) {
+          compressionExitReason = `COMPRESSION_REGIME_SHIFT: ADX ${positionAdx.toFixed(1)} > 28 — trend energy returning`;
+        }
+        
+        // ATR expansion exit
+        if (!compressionExitReason && atrPercent > 1.8) {
+          compressionExitReason = `COMPRESSION_ATR_EXPANSION: ATR ${atrPercent.toFixed(2)}% expanding — volatility returning`;
+        }
+        
+        if (compressionExitReason) {
+          const side = position.side?.toUpperCase();
+          const pnlCalc = calculateFeeAwarePnL(side, position.entry_price, currentPrice, position.quantity, position.trading_fee_percent);
+          
+          positionLogger.warn(`📦 ${compressionExitReason}`);
+          
+          const { error: closeError } = await supabase
+            .from("positions")
+            .update({
+              status: "closed",
+              current_price: currentPrice,
+              exit_price: currentPrice,
+              realized_pnl: pnlCalc.netPnl,
+              realized_pnl_percent: pnlCalc.netPnlPercent,
+              trading_fee_amount: pnlCalc.totalFee,
+              close_reason: compressionExitReason,
+              closed_at: new Date().toISOString(),
+            })
+            .eq("id", position.id);
+          
+          if (!closeError) {
+            closedPositions.push({ symbol: position.symbol, reason: compressionExitReason, pnl: pnlCalc.netPnl });
+          }
+          continue; // Skip normal exit logic for compression trades
+        }
+        // If no special exit triggered, still apply standard SL/TP below
+      }
       // Strategy-specific exit threshold adjustments
       let strategyExitAdjustment = 0;
       let strategyExitNote = "";

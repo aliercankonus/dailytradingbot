@@ -172,8 +172,15 @@ import {
   type ExceptionType,
   type MarketContext,
   // NEW: 4-State Regime Classifier
-  FOUR_STATE_REGIME
+  FOUR_STATE_REGIME,
+  // NEW: Compression Micro-Range Module
+  COMPRESSION_MODULE
 } from "../_shared/constants.ts";
+// NEW: Compression Engine for RANGE_COMPRESSION scalps
+import {
+  evaluateCompressionEntry,
+  type CompressionEntryResult
+} from "../_shared/compression-engine.ts";
 // NEW: Smart Momentum Module for enhanced trend detection and entry quality
 import { 
   calculateMomentumScore, 
@@ -2036,7 +2043,7 @@ serve(async (req) => {
 
     const { data: activePositions } = await supabase
       .from("positions")
-      .select("symbol, side, quantity, entry_price")
+      .select("symbol, side, quantity, entry_price, strategy_name, opened_at, executed_at, status")
       .eq("user_id", userId)
       .eq("status", "active");
 
@@ -2377,6 +2384,7 @@ serve(async (req) => {
       | 'CAPITULATION_BOUNCE_PROBE'  // Post-capitulation balance zone entry
       // NEW: 4-State Regime Classifier gates
       | 'RANGE_COMPRESSION_BLOCK'
+      | 'COMPRESSION_NO_SETUP'
       | 'TREND_EXHAUSTION_CONTINUATION_BLOCK';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
@@ -4312,6 +4320,7 @@ serve(async (req) => {
         
         // HARD BLOCK: RANGE_COMPRESSION - no statistical edge exists
         // Note: MR bypass is checked via StochRSI extreme only (strategy-level MR check happens later)
+        // NEW: Compression Module evaluation added as secondary engine for this regime
         if (fourStateRegime.regime === 'RANGE_COMPRESSION') {
           const stochK = stochK4hForRegime;
           const mrStochCondition = stochK < FOUR_STATE_REGIME.RANGE_COMPRESSION.MR_BYPASS_MIN_STOCHRSI_DISTANCE || 
@@ -4319,14 +4328,172 @@ serve(async (req) => {
           const mrBypassAllowed = fourStateRegime.allowMeanReversion && mrStochCondition;
           
           if (!mrBypassAllowed) {
+            // ============= COMPRESSION MODULE EVALUATION =============
+            // Before hard-blocking, check if the compression scalp engine has a valid setup
+            const compressionModuleEnabled = COMPRESSION_MODULE.ENABLED && (riskParams.compression_module_enabled !== false);
+            let compressionEntryResult: CompressionEntryResult | null = null;
+            
+            if (compressionModuleEnabled) {
+              // Extract BB width history for contraction check
+              const bb1h = trendData?.bollingerBands?.['1h'];
+              const percentB1h = bb1h?.percentB ?? 50;
+              const bbWidth1h = bb1h?.bandwidth ?? undefined;
+              // BB width previous candles: use 30m as proxy for "previous" bandwidth snapshots
+              const bb30m = trendData?.bollingerBands?.['30m'];
+              const bbWidthPrev = bb30m?.bandwidth ?? undefined;
+              
+              // Calculate current candle range for kill switch
+              const klines15m = trendData?.klines15m;
+              let currentCandleRange = 0;
+              if (klines15m && klines15m.length > 0) {
+                const lastCandle = klines15m[klines15m.length - 1];
+                const high = parseFloat(lastCandle[2]);
+                const low = parseFloat(lastCandle[3]);
+                currentCandleRange = high - low;
+              }
+              
+              // Get ATR for compression TP/SL calculations
+              const currentATR = trendData?.volatility?.atr ?? 0;
+              const atrPct = trendData?.volatility?.atrPercent ?? 0;
+              const relativeATR = trendData?.volatility?.relativeATR ?? 0;
+              
+              // Calculate dynamicMinATR (same logic as LOW_ATR_BLOCK)
+              const atrFilter = RANGING_MARKET_PROTECTION?.MIN_ATR_FILTER;
+              let dynamicMinATR = atrFilter?.FALLBACK_MIN_ATR_PERCENT ?? 1.8;
+              if (atrFilter && relativeATR > 0 && atrPct > 0) {
+                const historicalATRPct = atrPct / relativeATR;
+                dynamicMinATR = Math.max(
+                  atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT ?? 1.0,
+                  (atrFilter.ADAPTIVE_MULTIPLIER ?? 0.7) * historicalATRPct
+                );
+              }
+              
+              // Check for existing active compression trades on this symbol
+              const existingCompressionTrades = activePositions?.filter(
+                (p: any) => p.symbol === symbol && p.strategy_name === COMPRESSION_MODULE.STRATEGY_NAME
+              ) || [];
+              
+              if (existingCompressionTrades.length >= COMPRESSION_MODULE.MAX_CONCURRENT_PER_SYMBOL) {
+                logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} 🔄 COMPRESSION: Max concurrent trades reached (${existingCompressionTrades.length}/${COMPRESSION_MODULE.MAX_CONCURRENT_PER_SYMBOL})`);
+              } else {
+                // Get last compression entry time for cooldown
+                const lastCompressionPosition = activePositions?.filter(
+                  (p: any) => p.symbol === symbol && p.strategy_name === COMPRESSION_MODULE.STRATEGY_NAME
+                ).sort((a: any, b: any) => new Date(b.opened_at || b.executed_at || 0).getTime() - new Date(a.opened_at || a.executed_at || 0).getTime())[0];
+                
+                const lastCompressionEntryTime = lastCompressionPosition 
+                  ? new Date(lastCompressionPosition.opened_at || lastCompressionPosition.executed_at || 0).getTime()
+                  : undefined;
+                
+                compressionEntryResult = evaluateCompressionEntry({
+                  atrPercent: atrPct,
+                  dynamicMinATR,
+                  adx,
+                  adxSlope,
+                  stochK,
+                  percentB: percentB1h,
+                  momentumScore: earlySmartMomentum?.score ?? 0,
+                  currentCandleRange,
+                  atr: currentATR,
+                  bbWidth: bbWidth1h,
+                  bbWidthPrev,
+                  lastCompressionEntryTime,
+                });
+                
+                if (COMPRESSION_MODULE.LOG_COMPRESSION_CHECKS) {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔄 COMPRESSION EVAL: allowed=${compressionEntryResult.allowed}, score=${compressionEntryResult.score}, dir=${compressionEntryResult.direction}, reason=${compressionEntryResult.reason}`);
+                }
+              }
+            }
+            
+            // If compression module found a valid entry, generate compression signal
+            if (compressionEntryResult?.allowed && compressionEntryResult.direction) {
+              const currentPrice = trendData?.currentPrice || 0;
+              const currentATR = trendData?.volatility?.atr ?? 0;
+              const compressionDirection = compressionEntryResult.direction;
+              const signalType = compressionDirection === 'long' ? 'long' : 'short';
+              
+              // Calculate TP and SL using ATR multipliers
+              const slAmount = currentATR * compressionEntryResult.slAtrMultiplier;
+              const tpAmount = currentATR * compressionEntryResult.tpAtrMultiplier;
+              
+              const stopLoss = signalType === 'long' 
+                ? currentPrice - slAmount 
+                : currentPrice + slAmount;
+              const takeProfit = signalType === 'long' 
+                ? currentPrice + tpAmount 
+                : currentPrice - tpAmount;
+              
+              // Calculate position size using unified risk parameters
+              const basePositionSize = riskParams.base_position_size_percent || 2;
+              const compressionPositionSize = basePositionSize * compressionEntryResult.positionMultiplier;
+              
+              const dbTrend = 'ranging'; // Compression is always in ranging regime
+              
+              const compressionSignal = {
+                user_id: userId,
+                symbol,
+                signal_type: signalType as 'long' | 'short',
+                trend: dbTrend as 'ranging',
+                confidence_score: Math.round(Math.min(Math.abs(compressionEntryResult.score) * 2.5, 100)),
+                entry_price: currentPrice,
+                stop_loss: stopLoss,
+                take_profit: takeProfit,
+                strategy_name: COMPRESSION_MODULE.STRATEGY_NAME,
+                reason: `Compression Scalp: ${compressionEntryResult.reason}`,
+                indicators: {
+                  compressionScore: compressionEntryResult.score,
+                  compressionReason: compressionEntryResult.reason,
+                  compressionDiagnostics: compressionEntryResult.diagnostics,
+                  regime: COMPRESSION_MODULE.REGIME_TAG,
+                  strategyType: 'COMPRESSION',
+                  positionSizePercent: compressionPositionSize,
+                  positionMultiplier: compressionEntryResult.positionMultiplier,
+                  tpAtrMultiplier: compressionEntryResult.tpAtrMultiplier,
+                  slAtrMultiplier: compressionEntryResult.slAtrMultiplier,
+                  maxHoldMinutes: COMPRESSION_MODULE.MAX_HOLD_MINUTES,
+                  adx: adx.toFixed(1),
+                  adxSlope: adxSlope.toFixed(2),
+                  stochRsiK4h: stochK.toFixed(1),
+                  atrPercent: (trendData?.volatility?.atrPercent ?? 0).toFixed(3),
+                  fourStateRegime: {
+                    regime: fourStateRegime.regime,
+                    reason: fourStateRegime.reason,
+                  },
+                },
+                expires_at: new Date(Date.now() + COMPRESSION_MODULE.SIGNAL_EXPIRY_MINUTES * 60 * 1000).toISOString(),
+                created_by_rebalancer: false,
+              };
+              
+              const { data: insertedSignal, error: insertError } = await supabase
+                .from("trading_signals")
+                .insert(compressionSignal)
+                .select("id")
+                .single();
+              
+              if (insertError) {
+                logger.forSymbol(symbol).error(`Compression signal insert error: ${insertError.message}`);
+              } else if (insertedSignal) {
+                signals.push({ ...compressionSignal, id: insertedSignal.id });
+                totalSignalsGenerated++;
+                existingSignalsSet.add(symbol);
+                logger.forSymbol(symbol).success(`📦 COMPRESSION ${signalType.toUpperCase()} via "${COMPRESSION_MODULE.STRATEGY_NAME}" | Score: ${compressionEntryResult.score} | Entry: ${currentPrice.toFixed(2)} | TP: ${takeProfit.toFixed(2)} | SL: ${stopLoss.toFixed(2)}`);
+              }
+              continue; // Signal generated, skip to next symbol
+            }
+            
+            // Neither MR bypass nor compression fired — log standard rejection
             rejectedByHardGates++;
-            const blockReason = `RANGE_COMPRESSION_BLOCK: 4-State regime=RANGE_COMPRESSION, primaryTrend=${primaryTrendForRegime}, momentum=${momentumStateForRegime}, ADX=${adx.toFixed(1)}, |score|=${Math.abs(earlySmartMomentum?.score ?? 0).toFixed(0)} → noise dominates, no edge`;
-            perSymbolGateAttribution.set(symbol, { gate: 'RANGE_COMPRESSION_BLOCK', details: blockReason });
+            const compressionDiag = compressionEntryResult 
+              ? `, compression: score=${compressionEntryResult.score}, reason=${compressionEntryResult.reason}`
+              : ', compression: disabled';
+            const blockReason = `RANGE_COMPRESSION_BLOCK: 4-State regime=RANGE_COMPRESSION, primaryTrend=${primaryTrendForRegime}, momentum=${momentumStateForRegime}, ADX=${adx.toFixed(1)}, |score|=${Math.abs(earlySmartMomentum?.score ?? 0).toFixed(0)} → noise dominates, no edge${compressionDiag}`;
+            perSymbolGateAttribution.set(symbol, { gate: compressionEntryResult ? 'COMPRESSION_NO_SETUP' : 'RANGE_COMPRESSION_BLOCK', details: blockReason });
             
             logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
             
             await logRejectionWithAI(supabase, userId, symbol, blockReason, {
-              gate: 'RANGE_COMPRESSION_BLOCK',
+              gate: compressionEntryResult ? 'COMPRESSION_NO_SETUP' : 'RANGE_COMPRESSION_BLOCK',
               fourStateRegime: fourStateRegime.regime,
               derivedDirection,
               primaryTrend: primaryTrendForRegime,
@@ -4338,6 +4505,12 @@ serve(async (req) => {
               stochRsiK4h: stochK4hForRegime.toFixed(1),
               isSqueeze: isBBSqueeze,
               diagnostics: fourStateRegime.diagnostics,
+              compressionEval: compressionEntryResult ? {
+                score: compressionEntryResult.score,
+                direction: compressionEntryResult.direction,
+                reason: compressionEntryResult.reason,
+                killSwitch: compressionEntryResult.diagnostics.killSwitch,
+              } : null,
             }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
             continue;
           } else {
