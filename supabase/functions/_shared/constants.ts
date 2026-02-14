@@ -4006,6 +4006,62 @@ export const FOUR_STATE_REGIME = {
     LOG_PERSISTENCE_DECISIONS: true,
   },
   
+  // ===== TRANSITION BUFFER SCORING =====
+  // Continuous regime confidence score (0-100) to replace binary thresholds
+  // Reduces whipsaw losses during regime transitions
+  TRANSITION_BUFFER: {
+    ENABLED: true,
+    // Weighted components for regime confidence calculation
+    WEIGHTS: {
+      ADX_NORMALIZED: 0.30,       // ADX contribution (normalized 0-1 from ADX value)
+      ADX_SLOPE: 0.25,            // ADX slope (positive = expansion energy)
+      ATR_EXPANSION_RATE: 0.20,   // ATR expansion rate (change over recent candles)
+      DI_SEPARATION: 0.15,        // DI+/DI- gap (directional conviction)
+      MOMENTUM_ALIGNMENT: 0.10,   // Momentum aligned with direction
+    },
+    // ADX normalization range
+    ADX_NORM_MIN: 15,   // ADX below this = 0 contribution
+    ADX_NORM_MAX: 45,   // ADX above this = max contribution
+    // ADX slope normalization
+    ADX_SLOPE_NORM_MIN: -1.0,
+    ADX_SLOPE_NORM_MAX: 2.0,
+    // DI separation normalization
+    DI_SEP_NORM_MIN: 0,
+    DI_SEP_NORM_MAX: 30,
+    // ATR expansion rate normalization (ratio of current ATR to rolling avg)
+    ATR_EXP_NORM_MIN: 0.5,  // Very compressed
+    ATR_EXP_NORM_MAX: 1.5,  // Expanding
+    // Regime confidence thresholds
+    EXPANSION_THRESHOLD: 70,   // >= 70 = TREND_EXPANSION
+    TRANSITION_HIGH: 70,       // 55-70 = upper transition (cautious expansion)
+    TRANSITION_LOW: 45,        // 45-55 = lower transition (cautious compression)
+    COMPRESSION_THRESHOLD: 45, // < 45 = RANGE_COMPRESSION
+    // Transition zone sizing (graduated between full and blocked)
+    TRANSITION_POSITION_MULTIPLIER_HIGH: 0.70,  // Upper transition: 70% sizing
+    TRANSITION_POSITION_MULTIPLIER_LOW: 0.40,   // Lower transition: 40% sizing
+    // Log confidence calculations
+    LOG_CONFIDENCE_CALC: true,
+  },
+  
+  // ===== REGIME AGE DECAY =====
+  // Markets statistically rotate — long-running regimes are more likely to transition
+  // Applies graduated fatigue factor to position sizing as regimes age
+  REGIME_AGE_DECAY: {
+    ENABLED: true,
+    // Number of candles at which regime starts to fatigue
+    FATIGUE_START_CANDLES: 20,
+    // Maximum decay factor (position size multiplier at full fatigue)
+    // 0.60 means at max fatigue, sizing reduced to 60% of normal
+    MAX_FATIGUE_MULTIPLIER: 0.60,
+    // Candle count for full fatigue (linear interpolation from 1.0 to MAX_FATIGUE_MULTIPLIER)
+    FULL_FATIGUE_CANDLES: 60,
+    // Regimes affected by age decay (expansion and exhaustion benefit most)
+    AFFECTED_REGIMES: ['TREND_EXPANSION', 'TREND_EXHAUSTION'] as string[],
+    // Compression doesn't decay — it's already a blocked state
+    // Breakout doesn't decay — it's transitional by nature
+    LOG_AGE_DECAY: true,
+  },
+  
   // ===== LOGGING =====
   LOG_REGIME_CLASSIFICATION: true,
   LOG_BLOCK_DETAILS: true,
