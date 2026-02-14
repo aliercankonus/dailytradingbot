@@ -1,340 +1,207 @@
 
 
-# Flash Crash Bounce Probe Implementation Plan
+# Compression Micro-Range Module — Production-Grade Implementation
 
-## Executive Summary
+## Overview
 
-This plan introduces a new **Flash Crash Bounce Probe** regime to capture V-shaped reversals after rapid market drops (≥10% in ≤4h) where the existing Capitulation Bounce Probe cannot fire due to its structural guards.
+Add an independent second trading engine that activates exclusively during `RANGE_COMPRESSION` regime periods. Instead of hard-blocking all entries during low-volatility compression, the system will execute small, controlled mean-reversion scalps with tight risk parameters and strict kill switches.
 
-**Key Insight**: The system correctly blocked shorts and correctly blocked longs during the 12-14% flash crash. This is not a bug—it's a **missing regime**. Flash crashes violate both assumptions of the Capitulation Bounce Probe:
-- ADX slope stays positive into the low (no exhaustion)
-- The bounce begins on the same candle or next candle (no structure stabilization)
+The existing Trend Expansion engine remains completely untouched.
 
----
+## Expert Refinements Incorporated
 
-## Architectural Decision
+All critical adjustments from the pressure-test review are integrated:
 
-**Parallel Regime, Not Guard Relaxation**
+1. **35% position size** (not 50%) — lower R multiple and higher frequency justify smaller initial sizing
+2. **Use `dynamicMinATR` threshold** (not fixed 0.9%) — compression activates exactly where trend is blocked
+3. **BB width contraction stability rule** — require contracting for 2+ candles, not just low width
+4. **Directional momentum check** — `momentumScore > -20` for LONG, `< +20` for SHORT (not absolute value)
+5. **Large candle protection** — block if current candle range > 0.9x ATR (regime shift brewing)
+6. **Cooldown strengthening** — no re-entry at same band edge without opposite band touch first
 
-The Flash Crash Bounce Probe will be implemented as a **separate, isolated regime** with its own configuration. This preserves:
-- Capitulation Bounce Probe's conservative guards for gradual exhaustion scenarios
-- Mean Reversion logic for controlled counter-trend entries
-- Priority 1-2 gates remain untouched
+## Architecture
 
 ```text
-                   ┌──────────────────────────┐
-                   │    Counter-Trend Entry   │
-                   │         Decision         │
-                   └─────────────┬────────────┘
-                                 │
-          ┌──────────────────────┼──────────────────────┐
-          │                      │                      │
-          ▼                      ▼                      ▼
-   ┌─────────────┐       ┌──────────────┐       ┌───────────────┐
-   │  Mean       │       │ Capitulation │       │ Flash Crash   │
-   │  Reversion  │       │ Bounce Probe │       │ Bounce Probe  │
-   │  (gradual)  │       │ (exhaustion) │       │ (rapid V-rev) │
-   └─────────────┘       └──────────────┘       └───────────────┘
-                                                        │
-                                                        ▼
-                                                 NEW REGIME
+               classify4StateRegime()
+                      |
+        +-------------+-------------+
+        |             |             |
+  TREND_EXPANSION  BREAKOUT    RANGE_COMPRESSION
+  (untouched)      (untouched)      |
+                              +-----+-----+
+                              |           |
+                         No Setup?   Compression
+                         (skip)      Engine (NEW)
+                                      |
+                               Score extremes
+                               Enter scalp
+                               35% risk budget
+                               Kill switch active
 ```
 
----
+## Implementation Steps
 
-## Detection Criteria (Hard Requirements)
+### Step 1: New File — `supabase/functions/_shared/compression-engine.ts`
 
-| Condition | Threshold | Rationale |
-|:----------|:----------|:----------|
-| Price Drop | ≥10% from 24h high | Significant capitulation event |
-| Drop Velocity | ≤4 hours | Flash crash, not gradual decline |
-| StochRSI K (4h or 1h) | ≤1 | Absolute floor indicator |
-| ADX | ≥35 | High trend energy present |
-| Direction | LONG only | Bounce capture, not reversal |
+Core compression module with three exported functions:
 
-**Key Differences from Capitulation Bounce Probe:**
+**`checkCompressionKillSwitch()`**
+- ADX > 28 = immediate kill
+- ADX slope > 0 for 2+ consecutive candles = kill (check via recent regime history)
+- ATR percent > dynamicMinATR = kill
+- Current candle range > 0.9x ATR = kill (large candle = regime shift brewing)
+- Returns: `{ killed: boolean, reason: string }`
 
-| Parameter | Capitulation Bounce | Flash Crash Bounce |
-|:----------|:--------------------|:-------------------|
-| ADX slope | ≤ 0 required | **Ignored** (allowed > 0) |
-| Candles since low | ≥ 2 required | **0-1 allowed** |
-| Price drop | ≥ 8% | **≥ 10%** (stricter) |
-| Intent | Exhaustion bounce | Forced liquidation rebound |
+**`calculateCompressionScore()`**
+- Score range: -40 to +40
+- StochRSI extreme (K < 10 or K > 90): +/-15 points
+- Bollinger Band touch (%B <= 15 for LONG, >= 85 for SHORT): +/-10 points
+- Momentum supportive (LONG: score > -20, SHORT: score < +20): +/-10 points
+- ADX < 20: +5 bonus points
+- Entry threshold: |score| >= 25
+- Returns: `{ score: number, direction: 'long'|'short'|null, breakdown: object }`
 
----
+**`evaluateCompressionEntry()`**
+- Main entry point, calls kill switch first
+- Validates structural conditions:
+  - ATR percent < dynamicMinATR (use the exact same threshold that blocks trend entries)
+  - ADX < 25
+  - BB width contracting for >= 2 candles (stability rule)
+- Derives direction from StochRSI + BB position (not trend alignment)
+- Calls scoring function
+- Enforces cooldown: max(30 minutes, 2 candles) AND no re-entry at same band edge without opposite band touch
+- Returns: `{ allowed: boolean, direction, score, positionMultiplier: 0.35, tp, sl, reason, diagnostics }`
 
-## Risk Controls (Mandatory)
+### Step 2: Constants — `supabase/functions/_shared/constants.ts`
 
-Flash crash entries are inherently speculative. These controls are non-negotiable:
+Add `COMPRESSION_MODULE` configuration block:
 
-1. **Position Size**: 0.20-0.35x (conservative probe)
-2. **Stop Loss**: Ultra-tight (≤0.5 ATR or 0.8% fixed)
-3. **No Pyramiding**: One-shot attempt only
-4. **Cooldown**: 6 hours after failed probe
-5. **Max Probes**: 1 per symbol per day
-6. **Hard Invalidation**: If K rises above 5 without price moving 0.8%, probe failed
-
----
-
-## Technical Implementation
-
-### Phase 1: Configuration (constants.ts)
-
-Add new `FLASH_CRASH_BOUNCE_PROBE` configuration block:
-
-```typescript
-export const FLASH_CRASH_BOUNCE_PROBE = {
+```
+COMPRESSION_MODULE = {
   ENABLED: true,
   
-  // ===== DETECTION THRESHOLDS =====
-  MIN_DROP_PERCENT: 10,          // ≥10% drop (stricter than capitulation)
-  MAX_DROP_HOURS: 4,             // Within 4 hours (velocity check)
-  MAX_STOCHRSI_K: 1,             // K ≤ 1 (pinned at floor)
-  MIN_ADX: 35,                   // High trend energy
+  // Structural conditions (use dynamicMinATR, not fixed)
+  MAX_ADX: 25,
   
-  // ===== KEY DIFFERENCE: NO ADX SLOPE REQUIREMENT =====
-  // Flash crashes keep ADX slope positive until reversal
-  IGNORE_ADX_SLOPE: true,
+  // BB width stability: must be contracting for N candles
+  BB_WIDTH_CONTRACTING_CANDLES: 2,
   
-  // ===== KEY DIFFERENCE: NO HTF STRUCTURE REQUIREMENT =====
-  // Flash crashes bounce on same candle as low
-  IGNORE_HTF_STRUCTURE: true,
+  // Direction from extremes
+  LONG_MAX_STOCHRSI_K: 15,
+  SHORT_MIN_STOCHRSI_K: 85,
+  LONG_MAX_PERCENT_B: 15,
+  SHORT_MIN_PERCENT_B: 85,
   
-  // ===== MOMENTUM REQUIREMENTS =====
-  // More lenient than capitulation - allow directional momentum
-  MOMENTUM_MAX_OPPOSING: 30,     // Block if momentum < -30 (extreme)
+  // Momentum: directional check (not absolute)
+  LONG_MIN_MOMENTUM_SCORE: -20,
+  SHORT_MAX_MOMENTUM_SCORE: 20,
   
-  // ===== VELOCITY CONFIRMATION =====
-  // Optional: Confirm rapid decline via price action
-  REQUIRE_VELOCITY_CONFIRMATION: true,
-  MIN_HOURLY_DROP_RATE: 2.5,     // ≥2.5% per hour average
+  // Scoring weights
+  SCORE_STOCHRSI_EXTREME: 15,
+  SCORE_BB_TOUCH: 10,
+  SCORE_MOMENTUM_SUPPORTIVE: 10,
+  SCORE_LOW_ADX_BONUS: 5,
+  ENTRY_THRESHOLD: 25,
   
-  // ===== POSITION SIZING =====
-  BASE_POSITION_SIZE: 0.20,
-  WITH_VOLUME_SPIKE: 0.30,
-  WITH_REVERSAL_CANDLE: 0.35,    // If bullish engulfing detected
+  // Risk (35% of trend base, not 50%)
+  POSITION_SIZE_MULTIPLIER: 0.35,
+  TP_ATR_MULTIPLIER: 0.5,
+  SL_ATR_MULTIPLIER: 0.4,
   
-  // ===== STOP LOSS (ULTRA-TIGHT) =====
-  STOP_LOSS_ATR_MULTIPLIER: 0.5, // 0.5x ATR
-  STOP_LOSS_MAX_PERCENT: 0.8,    // Max 0.8%
+  // Time exit
+  MAX_HOLD_CANDLES: 8,  // 8 x 15m = 2 hours
   
-  // ===== TAKE PROFIT =====
-  TAKE_PROFIT_MIN_PERCENT: 2.0,
-  TAKE_PROFIT_MAX_PERCENT: 4.0,
-  TAKE_PROFIT_ATR_MULTIPLIER: 2.0,
+  // Kill switches
+  KILL_ADX_THRESHOLD: 28,
+  KILL_CANDLE_RANGE_ATR_RATIO: 0.9,
   
-  // ===== PARTIAL TP =====
-  PARTIAL_TP_ENABLED: true,
-  PARTIAL_TP_PERCENT: 1.0,       // First TP at 1.0%
-  PARTIAL_TP_SIZE: 0.50,         // Close 50%
+  // Cooldown
+  COOLDOWN_MINUTES: 30,
+  REQUIRE_OPPOSITE_BAND_TOUCH: true,
   
-  // ===== SAFETY LIMITS =====
-  MAX_PROBES_PER_SYMBOL_PER_DAY: 1,
-  NO_PYRAMIDING: true,
-  COOLDOWN_HOURS_AFTER_FAILED: 6,
+  // Concurrency
+  MAX_CONCURRENT_PER_SYMBOL: 1,
   
-  // ===== HARD INVALIDATION =====
-  INVALIDATION_K_THRESHOLD: 5,
-  INVALIDATION_REQUIRE_PRICE_MOVE: 0.8,
-  
-  // ===== REGIME TAGGING =====
-  REGIME_TAG: 'FLASH_CRASH_BOUNCE' as const,
-  ENTRY_TYPE_TAG: 'FLASH_CRASH_BOUNCE_PROBE' as const,
-  
-  // ===== LOGGING =====
-  LOG_PROBE_DETAILS: true,
-  LOG_NEAR_MISS: true,
-};
-```
-
-### Phase 2: Strategy Analyzer Integration
-
-Insert Flash Crash Bounce check **inside the Early Tier 0 block**, positioned after Capitulation Bounce Probe check:
-
-```typescript
-// Inside Early Tier 0 block (around line 2843)
-if (earlyDirection === 'short' && earlyStochRsiK4h < DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD) {
-  
-  // 1. Check Capitulation Bounce Probe (existing)
-  // ...
-  
-  // 2. Check Flash Crash Bounce Probe (NEW)
-  if (!capitulationProbeTriggered && FLASH_CRASH_BOUNCE_PROBE.ENABLED) {
-    const priceDropPercent = trendData?.priceDistanceFromSwing?.distanceFromHighPercent ?? 0;
-    const stochK4h = earlyStochRsiK4h;
-    const stochK1h = extractStochRsiK(trendData, '1h');
-    
-    // Check if either 4h or 1h K is pinned
-    const stochRsiPinned = stochK4h <= FLASH_CRASH_BOUNCE_PROBE.MAX_STOCHRSI_K || 
-                           stochK1h <= FLASH_CRASH_BOUNCE_PROBE.MAX_STOCHRSI_K;
-    
-    // Velocity check: drop rate per hour
-    const dropHours = Math.max(1, calculateDropDuration(trendData)); // helper needed
-    const dropRatePerHour = priceDropPercent / dropHours;
-    const velocityOk = dropRatePerHour >= FLASH_CRASH_BOUNCE_PROBE.MIN_HOURLY_DROP_RATE;
-    
-    // Momentum check: not extreme opposing
-    const momentumOk = earlyMomentumScore >= -FLASH_CRASH_BOUNCE_PROBE.MOMENTUM_MAX_OPPOSING;
-    
-    // ADX check (ignores slope)
-    const adxOk = adx >= FLASH_CRASH_BOUNCE_PROBE.MIN_ADX;
-    
-    const sufficientDrop = priceDropPercent >= FLASH_CRASH_BOUNCE_PROBE.MIN_DROP_PERCENT;
-    
-    if (sufficientDrop && stochRsiPinned && adxOk && velocityOk && momentumOk) {
-      flashCrashProbeTriggered = true;
-      earlyDirection = 'long'; // Flip direction
-      
-      // Calculate position size
-      const volumeRatio = trendData?.volume?.['1h']?.volumeRatio ?? 1.0;
-      const hasReversalCandle = detectReversalCandle(trendData); // helper needed
-      
-      let probeSize = FLASH_CRASH_BOUNCE_PROBE.BASE_POSITION_SIZE;
-      if (hasReversalCandle) {
-        probeSize = FLASH_CRASH_BOUNCE_PROBE.WITH_REVERSAL_CANDLE;
-      } else if (volumeRatio >= 1.5) {
-        probeSize = FLASH_CRASH_BOUNCE_PROBE.WITH_VOLUME_SPIKE;
-      }
-      
-      // Store metadata for downstream
-      trendData.flashCrashBounceProbe = {
-        active: true,
-        regime: FLASH_CRASH_BOUNCE_PROBE.REGIME_TAG,
-        positionMultiplier: probeSize,
-        // ... details
-      };
-    } else {
-      // Log near-miss
-    }
-  }
+  // Logging
+  LOG_COMPRESSION_CHECKS: true,
 }
 ```
 
-### Phase 3: Gate Type Registration
+### Step 3: Strategy Analyzer Integration — `supabase/functions/strategy-analyzer/index.ts`
 
-Add new gate type to the GateType union:
+Modify the RANGE_COMPRESSION hard block (around line 4313-4346):
 
-```typescript
-type GateType = 
-  | ... existing types
-  | 'FLASH_CRASH_BOUNCE_PROBE';  // Flash crash V-reversal entry
-```
+Currently the block does:
+1. Check MR bypass via StochRSI extreme
+2. If no bypass, log rejection and `continue`
 
-### Phase 4: Execute-Trade Support
+Change to:
+1. Check existing MR bypass (unchanged)
+2. If MR bypass not allowed, check `COMPRESSION_MODULE.ENABLED`
+3. If enabled, call `evaluateCompressionEntry()` with available indicators (atrPercent, adx, adxSlope, stochK, percentB from 1h BB, momentumScore, dynamicMinATR)
+4. If compression entry allowed:
+   - Generate signal with `strategy_name: 'Compression Scalp'`
+   - Tag with `REGIME_TAG: 'RANGE_COMPRESSION_SCALP'`
+   - Include `compressionScore` and `compressionReason` in signal indicators
+   - Use compression-specific TP/SL/sizing (0.35x base)
+   - Set shorter signal expiry (30 minutes)
+   - Skip all trend gates (they do not apply to compression logic)
+5. If compression also didn't fire, log rejection as before with added `COMPRESSION_NO_SETUP` diagnostics
 
-Handle the new regime in execute-trade for proper SL/TP application:
+Also handle the second RANGE block location (around line 6870-6915) with the same compression check.
 
-```typescript
-// In execute-trade/index.ts
-const flashCrashProbe = signal.indicators?.flashCrashBounceProbe;
-if (flashCrashProbe?.active) {
-  // Apply ultra-tight stop
-  const flashCrashStop = Math.min(
-    atrPercent * FLASH_CRASH_BOUNCE_PROBE.STOP_LOSS_ATR_MULTIPLIER,
-    FLASH_CRASH_BOUNCE_PROBE.STOP_LOSS_MAX_PERCENT
-  );
-  stopLossPercent = flashCrashStop;
-  
-  // Apply wider TP for bounce capture
-  const flashCrashTP = Math.max(
-    FLASH_CRASH_BOUNCE_PROBE.TAKE_PROFIT_MIN_PERCENT,
-    Math.min(
-      atrPercent * FLASH_CRASH_BOUNCE_PROBE.TAKE_PROFIT_ATR_MULTIPLIER,
-      FLASH_CRASH_BOUNCE_PROBE.TAKE_PROFIT_MAX_PERCENT
-    )
-  );
-  takeProfitPercent = flashCrashTP;
-}
-```
+### Step 4: Monitor Positions Updates — `supabase/functions/monitor-positions/index.ts`
 
-### Phase 5: UI Hook Updates
+Add compression-specific exit logic by detecting `strategy_name === 'Compression Scalp'`:
 
-Update `useBlockedSignals.ts` to recognize new gate type and display relevant metadata.
+- **Time-based exit**: Close after 8 candles (2 hours) — no trailing stops for range trades
+- **Regime shift exit**: If ADX rises above 28 during position lifetime, close immediately
+- **ATR expansion exit**: If ATR expands above dynamicMinATR, close immediately
+- **No trailing**: Standard fee-aware micro-profit protection still applies, but no progressive trailing
+- Standard SL/TP still enforced
 
----
+### Step 5: Database Migration
 
-## Helper Functions Required
+Add `compression_module_enabled` boolean to `risk_parameters` table (default: `true`).
 
-### 1. Drop Duration Calculator
+No new tables needed — signals and positions use existing tables with strategy type differentiation via `strategy_name` and `indicators` JSON fields.
 
-```typescript
-function calculateDropDuration(trendData: any): number {
-  // Estimate hours from 24h high to current using klines
-  const klines1h = trendData?.klines1h ?? [];
-  const high24h = trendData?.priceDistanceFromSwing?.high24h ?? 0;
-  
-  if (!klines1h.length || !high24h) return 24; // Default to full 24h
-  
-  // Find the candle where price was at 24h high
-  for (let i = klines1h.length - 1; i >= 0; i--) {
-    if (klines1h[i].high >= high24h * 0.999) {
-      return klines1h.length - i;
-    }
-  }
-  return 24;
-}
-```
+### Step 6: UI Updates
 
-### 2. Reversal Candle Detector
+**SignalRejectionReasons.tsx**: When compression module evaluates but doesn't fire, display `COMPRESSION_NO_SETUP` with score and conditions checked.
 
-```typescript
-function detectReversalCandle(trendData: any): boolean {
-  // Check for bullish engulfing or hammer on recent candles
-  const klines15m = trendData?.klines15m ?? [];
-  if (klines15m.length < 2) return false;
-  
-  const current = klines15m[klines15m.length - 1];
-  const prior = klines15m[klines15m.length - 2];
-  
-  // Bullish engulfing
-  const isBullishEngulfing = 
-    prior.close < prior.open &&  // Prior bearish
-    current.close > current.open && // Current bullish
-    current.close > prior.open &&   // Close above prior open
-    current.open < prior.close;     // Open below prior close
-  
-  // Hammer pattern
-  const bodySize = Math.abs(current.close - current.open);
-  const lowerWick = Math.min(current.open, current.close) - current.low;
-  const isHammer = lowerWick >= bodySize * 2;
-  
-  return isBullishEngulfing || isHammer;
-}
-```
+**ActivePositions.tsx**: Show "Compression" badge for positions with `strategy_name === 'Compression Scalp'`.
 
----
+**Settings page**: Add toggle for compression module enable/disable linked to `compression_module_enabled` in risk parameters.
 
-## Files to Modify
+**useRiskParameters.ts**: Add `compression_module_enabled` field to the interface.
 
-| File | Changes |
-|:-----|:--------|
-| `supabase/functions/_shared/constants.ts` | Add `FLASH_CRASH_BOUNCE_PROBE` config |
-| `supabase/functions/strategy-analyzer/index.ts` | Import new config, add detection logic in Tier 0, register gate type |
-| `supabase/functions/execute-trade/index.ts` | Handle SL/TP for flash crash probe entries |
-| `src/hooks/useBlockedSignals.ts` | Add new gate type for UI display |
+## What Stays Untouched
 
----
+- All existing trend gates (momentum slope, ADX slope graduated, LTF confirmation, etc.)
+- Direction derivation engine
+- Trend position sizing and exit logic
+- Mean reversion admission layer
+- Strong Trend Tier 0 Override
+- All existing constants and thresholds
+- The `classify4StateRegime()` function itself
 
-## Monitoring & Validation
+## Expected Behavior After Implementation
 
-After deployment, monitor logs for:
-- `FLASH_CRASH_BOUNCE_PROBE ACTIVATED` - Successful probe triggers
-- `FLASH_CRASH_BOUNCE_PROBE NEAR-MISS` - Close but conditions not met
-- Compare with historical data to validate detection accuracy
+| Market Condition | Current | After |
+|---|---|---|
+| ATR 0.5%, ADX 20, neutral trend, StochRSI K=8 | HARD BLOCK | Compression LONG scalp at 35% size |
+| ATR 0.5%, ADX 20, neutral trend, StochRSI K=50 | HARD BLOCK | Still blocked (no compression setup) |
+| ATR 0.5%, ADX 20, StochRSI K=8, large candle | HARD BLOCK | Still blocked (kill switch: regime shift brewing) |
+| ATR 1.5%, ADX 32, strong trend | Full trend trades | Unchanged |
+| ADX rising from 22 to 30 | Breakout setup | Compression auto-kills, trend takes over |
 
-Add dashboard metrics:
-- Flash crash detection rate
-- Probe success rate (TP hit vs SL hit)
-- Average return per probe
+## Risk Controls Summary
 
----
-
-## Risk Assessment
-
-| Risk | Mitigation |
-|:-----|:-----------|
-| False positives (entering dead cat bounces) | Ultra-tight stop (0.5 ATR / 0.8%) limits loss |
-| Over-trading | Max 1 probe per symbol per day, 6h cooldown |
-| Exposure creep | Position size capped at 0.35x |
-| Reversal candle false signals | Optional enhancement, not required for entry |
+- Position size: 35% of trend base (raisable to 50% after 200+ trades if expectancy holds)
+- Maximum 1 compression trade per symbol
+- 30-minute cooldown with opposite-band-touch requirement
+- Instant kill switch on ADX > 28, ATR expansion, or large candle
+- Time-based forced exit at 2 hours (no open-ended compression positions)
+- Separate `strategy_name` tagging for isolated performance tracking
 
