@@ -50,20 +50,9 @@ cron = "*/5 * * * *"
 [functions.validate-adx]
 verify_jwt = false
 
-[functions.backtest-strategy]
-verify_jwt = true
-
 [functions.ai-signal-analyzer]
 verify_jwt = true
 
 [functions.ai-rejection-analyzer]
 verify_jwt = true
 
-[functions.backtest-recovery-comparison]
-verify_jwt = false
-
-[functions.backtest-phase-comparison]
-verify_jwt = false
-
-[functions.backtest-bollinger-bypass]
-verify_jwt = false
