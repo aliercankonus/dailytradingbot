@@ -231,31 +231,34 @@ export const ExitManagementDashboard = () => {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle className="flex items-center gap-2">
-            <Shield className="h-5 w-5 text-primary" />
-            Exit Management Dashboard
-            {connected ? (
-              <Badge variant="outline" className="ml-2 text-green-600 border-green-300">
-                <Wifi className="h-3 w-3 mr-1" />
-                Live
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="ml-2 text-yellow-600 border-yellow-300">
-                <WifiOff className="h-3 w-3 mr-1" />
-                Offline
-              </Badge>
-            )}
-          </CardTitle>
-          <CardDescription>
-            Phase 3: Trailing status, R-multiple levels, and exit signal scores
-          </CardDescription>
+      <CardHeader>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2 flex-wrap">
+              <Shield className="h-5 w-5 text-primary" />
+              <span className="sm:hidden">Exit Mgmt</span>
+              <span className="hidden sm:inline">Exit Management Dashboard</span>
+              {connected ? (
+                <Badge variant="outline" className="text-green-600 border-green-300">
+                  <Wifi className="h-3 w-3 mr-1" />
+                  Live
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-yellow-600 border-yellow-300">
+                  <WifiOff className="h-3 w-3 mr-1" />
+                  Offline
+                </Badge>
+              )}
+            </CardTitle>
+            <CardDescription className="hidden sm:block">
+              Phase 3: Trailing status, R-multiple levels, and exit signal scores
+            </CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
         </div>
-        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -515,10 +518,14 @@ export const ExitManagementDashboard = () => {
                       {/* R-Multiple Progress Bar */}
                       <div className="mt-4">
                         <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                          <span>Stop ({(data.stopLoss).toFixed(2)})</span>
-                          <span>Entry ({data.entryPrice.toFixed(2)})</span>
-                          <span>Current ({data.currentPrice.toFixed(2)})</span>
-                          <span>TP ({data.takeProfit.toFixed(2)})</span>
+                          <span className="hidden sm:inline">Stop ({(data.stopLoss).toFixed(2)})</span>
+                          <span className="sm:hidden">SL</span>
+                          <span className="hidden sm:inline">Entry ({data.entryPrice.toFixed(2)})</span>
+                          <span className="sm:hidden">Entry</span>
+                          <span className="hidden sm:inline">Current ({data.currentPrice.toFixed(2)})</span>
+                          <span className="sm:hidden">Now</span>
+                          <span className="hidden sm:inline">TP ({data.takeProfit.toFixed(2)})</span>
+                          <span className="sm:hidden">TP</span>
                         </div>
                         <div className="relative h-4 bg-muted rounded overflow-hidden">
                           {/* Progress indicator */}

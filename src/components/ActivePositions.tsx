@@ -246,31 +246,29 @@ export const ActivePositions = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h2 className="text-2xl font-bold">Active Positions</h2>
+          <h2 className="text-lg sm:text-2xl font-bold">Active Positions</h2>
           {loading && (
             <Loader2 className="h-4 w-4 text-primary animate-spin" />
           )}
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-muted-foreground" />
-            <Select value={selectedStrategy} onValueChange={setSelectedStrategy}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Filter by strategy" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Strategies</SelectItem>
-                {availableStrategies.map(strategy => (
-                  <SelectItem key={strategy} value={strategy}>
-                    {strategy}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
           <Badge variant="outline">{positionsWithLivePnL.length} Open</Badge>
+        </div>
+        <div className="flex items-center gap-2">
+          <Filter className="h-4 w-4 text-muted-foreground" />
+          <Select value={selectedStrategy} onValueChange={setSelectedStrategy}>
+            <SelectTrigger className="w-[160px] sm:w-[200px]">
+              <SelectValue placeholder="Filter by strategy" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Strategies</SelectItem>
+              {availableStrategies.map(strategy => (
+                <SelectItem key={strategy} value={strategy}>
+                  {strategy}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -296,7 +294,7 @@ export const ActivePositions = () => {
                   <TrendingDown className="h-6 w-6 text-red-500" />
                 )}
                 <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-bold text-lg">{position.symbol}</h3>
                       {position.is_hedge && (
                         <Badge variant="outline" className="text-xs flex items-center gap-1 bg-indigo-500/10 text-indigo-500 border-indigo-500/20">
@@ -396,7 +394,7 @@ export const ActivePositions = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-5 gap-2 text-sm">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 text-sm">
               <div>
                 <div className="text-xs text-muted-foreground">Entry</div>
                 <div className="font-medium">{formatPrice(position.entry_price, 4, '$')}</div>
@@ -481,7 +479,7 @@ export const ActivePositions = () => {
                     <TrendingDown className="h-6 w-6 text-red-500" />
                   )}
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-bold text-lg">{position.symbol}</h3>
                       {position.is_hedge && (
                         <Badge variant="outline" className="text-xs flex items-center gap-1 bg-indigo-500/10 text-indigo-500 border-indigo-500/20">
@@ -581,7 +579,7 @@ export const ActivePositions = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-5 gap-2 text-sm">
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 text-sm">
                 <div>
                   <div className="text-xs text-muted-foreground">Entry</div>
                   <div className="font-medium">{formatPrice(position.entry_price, 4, '$')}</div>
