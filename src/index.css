@@ -4,41 +4,41 @@
 
 @layer base {
   :root {
-    --background: 220 30% 8%;
-    --foreground: 210 40% 98%;
+    --background: 200 10% 8%;
+    --foreground: 60 5% 94%;
 
-    --card: 220 25% 12%;
-    --card-foreground: 210 40% 98%;
+    --card: 200 8% 12%;
+    --card-foreground: 60 5% 94%;
 
-    --popover: 220 25% 12%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 200 8% 12%;
+    --popover-foreground: 60 5% 94%;
 
     --primary: 160 84% 39%;
-    --primary-foreground: 220 30% 8%;
+    --primary-foreground: 200 10% 8%;
 
-    --secondary: 220 25% 16%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 200 8% 16%;
+    --secondary-foreground: 60 5% 94%;
 
-    --muted: 220 25% 16%;
-    --muted-foreground: 215 12% 62%;
+    --muted: 200 6% 16%;
+    --muted-foreground: 200 5% 55%;
 
     --accent: 160 84% 39%;
-    --accent-foreground: 220 30% 8%;
+    --accent-foreground: 200 10% 8%;
 
     --success: 142 76% 36%;
-    --success-foreground: 210 40% 98%;
+    --success-foreground: 60 5% 94%;
 
-    --danger: 0 84% 60%;
-    --danger-foreground: 210 40% 98%;
+    --danger: 0 72% 55%;
+    --danger-foreground: 60 5% 94%;
 
     --warning: 38 92% 50%;
-    --warning-foreground: 220 30% 8%;
+    --warning-foreground: 200 10% 8%;
 
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 60 5% 94%;
 
-    --border: 220 18% 17%;
-    --input: 220 18% 17%;
+    --border: 200 6% 18%;
+    --input: 200 6% 18%;
     --ring: 160 84% 39%;
 
     --radius: 0.5rem;
@@ -46,19 +46,19 @@
     --chart-1: 160 84% 39%;
     --chart-2: 38 92% 50%;
     --chart-3: 142 76% 36%;
-    --chart-4: 271 91% 65%;
-    --chart-5: 0 84% 60%;
+    --chart-4: 271 60% 55%;
+    --chart-5: 0 72% 55%;
 
     /* Trading tokens */
     --profit: 142 76% 36%;
-    --loss: 0 84% 60%;
+    --loss: 0 72% 55%;
     --glow-primary: 160 84% 39%;
     --glow-success: 142 76% 36%;
 
     /* Card effects */
-    --card-glow: linear-gradient(90deg, hsl(160 84% 39% / 0.15) 0%, transparent 50%, hsl(160 84% 39% / 0.15) 100%);
-    --shadow-card: 0 4px 12px -2px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
-    --shadow-glow: 0 0 20px hsla(160, 84%, 39%, 0.2);
+    --card-glow: linear-gradient(90deg, hsl(160 84% 39% / 0.12) 0%, transparent 50%, hsl(160 84% 39% / 0.12) 100%);
+    --shadow-card: 0 4px 12px -2px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.35);
+    --shadow-glow: 0 0 20px hsla(160, 84%, 39%, 0.15);
   }
 }
 
@@ -121,11 +121,11 @@
 .auth-bg {
   background: linear-gradient(
     135deg,
-    hsl(220 30% 8%) 0%,
-    hsl(220 25% 11%) 25%,
-    hsl(160 84% 39% / 0.05) 50%,
-    hsl(220 25% 11%) 75%,
-    hsl(220 30% 8%) 100%
+    hsl(200 10% 8%) 0%,
+    hsl(200 8% 11%) 25%,
+    hsl(160 84% 39% / 0.04) 50%,
+    hsl(200 8% 11%) 75%,
+    hsl(200 10% 8%) 100%
   );
   background-size: 400% 400%;
   animation: auth-gradient 18s ease infinite;
