@@ -79,7 +79,7 @@ export const AppHeader = () => {
             {user && (
               <div className="flex items-center gap-2">
                 {!isMobile && (
-                  <span className="text-sm font-medium text-foreground">
+                  <span className="text-xs text-muted-foreground">
                     {user.email?.split('@')[0] || 'Trader'}
                   </span>
                 )}
