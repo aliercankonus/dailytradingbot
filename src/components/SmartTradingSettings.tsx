@@ -304,7 +304,7 @@ export function SmartTradingSettings() {
             <Activity className="h-4 w-4" />
             Market Regime Behavior
           </h4>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs">
             <div className="flex items-center gap-2">
               <Badge variant="default" className="bg-green-500">TRENDING</Badge>
               <span>Full position</span>

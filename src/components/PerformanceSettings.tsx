@@ -55,7 +55,7 @@ export const PerformanceSettings = () => {
   };
 
   return (
-    <Card className="p-6">
+    <Card className="p-4 sm:p-6">
       <div className="flex items-center gap-3 mb-6">
         <Gauge className="h-5 w-5 text-primary" />
         <h2 className="text-xl font-semibold">Performance Settings</h2>
@@ -70,7 +70,7 @@ export const PerformanceSettings = () => {
             <p className="text-sm text-muted-foreground mb-3">
               How long to cache AI strategy recommendations before fetching new ones. Longer duration reduces API calls but may show outdated insights.
             </p>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
               <Slider
                 id="ai-cache-ttl"
                 min={1}
@@ -78,19 +78,21 @@ export const PerformanceSettings = () => {
                 step={1}
                 value={[aiCacheTTL]}
                 onValueChange={(value) => setAiCacheTTL(value[0])}
-                className="flex-1"
+                className="flex-1 w-full"
               />
-              <div className="w-20">
-                <Input
-                  type="number"
-                  value={aiCacheTTL}
-                  onChange={(e) => setAiCacheTTL(parseInt(e.target.value) || 5)}
-                  min={1}
-                  max={30}
-                  className="text-center"
-                />
+              <div className="flex items-center gap-2">
+                <div className="w-16">
+                  <Input
+                    type="number"
+                    value={aiCacheTTL}
+                    onChange={(e) => setAiCacheTTL(parseInt(e.target.value) || 5)}
+                    min={1}
+                    max={30}
+                    className="text-center"
+                  />
+                </div>
+                <span className="text-sm text-muted-foreground">min</span>
               </div>
-              <span className="text-sm text-muted-foreground w-16">minutes</span>
             </div>
           </div>
         </div>
