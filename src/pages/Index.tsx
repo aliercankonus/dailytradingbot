@@ -91,14 +91,40 @@ const Index = () => {
             </Suspense>
           </TabsContent>
 
-          <TabsContent value="positions" className="space-y-6">
-            <Suspense fallback={<TabFallback />}>
-              <PositionsSummary />
-              <ActivePositions />
-              <ExitManagementDashboard />
-              <TrailingStopMonitor />
-              <EarlyWarningExitsDashboard />
-            </Suspense>
+          <TabsContent value="positions">
+            <Tabs defaultValue="active" className="space-y-4">
+              <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4 h-8">
+                <TabsTrigger value="active" className="min-w-[4.5rem] flex-shrink-0 text-xs">Active</TabsTrigger>
+                <TabsTrigger value="exits" className="min-w-[4.5rem] flex-shrink-0 text-xs">Exit Mgmt</TabsTrigger>
+                <TabsTrigger value="trailing" className="min-w-[5rem] flex-shrink-0 text-xs">Trailing Stop</TabsTrigger>
+                <TabsTrigger value="warnings" className="min-w-[5.5rem] flex-shrink-0 text-xs">Early Warnings</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="active" className="space-y-4">
+                <Suspense fallback={<TabFallback />}>
+                  <PositionsSummary />
+                  <ActivePositions />
+                </Suspense>
+              </TabsContent>
+
+              <TabsContent value="exits">
+                <Suspense fallback={<TabFallback />}>
+                  <ExitManagementDashboard />
+                </Suspense>
+              </TabsContent>
+
+              <TabsContent value="trailing">
+                <Suspense fallback={<TabFallback />}>
+                  <TrailingStopMonitor />
+                </Suspense>
+              </TabsContent>
+
+              <TabsContent value="warnings">
+                <Suspense fallback={<TabFallback />}>
+                  <EarlyWarningExitsDashboard />
+                </Suspense>
+              </TabsContent>
+            </Tabs>
           </TabsContent>
 
           <TabsContent value="history">
