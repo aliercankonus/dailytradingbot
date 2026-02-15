@@ -2256,7 +2256,13 @@ serve(async (req) => {
     }
 
     // Collect effective regime per symbol for batch snapshot update after the loop
+    // Initialize ALL active symbols as EARLY_BLOCK — the 4-state classifier overwrites
+    // with the actual regime when reached. Any symbol that exits before classification
+    // retains EARLY_BLOCK (deterministic terminal state, not NULL ambiguity).
     const symbolRegimeMap = new Map<string, string>();
+    for (const { symbol } of activeSymbols) {
+      symbolRegimeMap.set(symbol, 'EARLY_BLOCK');
+    }
 
     // Track statistics
     const signals: SignalData[] = [];
@@ -2761,6 +2767,7 @@ serve(async (req) => {
       const trendData = trendDataMap.get(symbol);
       if (!trendData) {
         perSymbolGateAttribution.set(symbol, { gate: 'NO_TREND_DATA', details: 'calculate-trend returned null' });
+        symbolRegimeMap.set(symbol, 'ERROR');
         continue;
       }
 
