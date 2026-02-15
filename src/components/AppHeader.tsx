@@ -86,8 +86,8 @@ export const AppHeader = () => {
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" className="relative h-7 w-7 rounded-full p-0">
-                      <Avatar className="h-7 w-7">
-                        <AvatarFallback className="bg-secondary text-muted-foreground text-[10px] font-semibold">
+                      <Avatar className="h-7 w-7 ring-1 ring-primary/40">
+                        <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-semibold">
                           {getInitials(user.email || "U")}
                         </AvatarFallback>
                       </Avatar>
