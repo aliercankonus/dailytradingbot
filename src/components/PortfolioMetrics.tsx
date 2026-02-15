@@ -152,7 +152,7 @@ export const PortfolioMetrics = () => {
 
       {/* Hero: Portfolio Value */}
       <div className="text-center py-3 mb-4 border-b border-border">
-        <div className="text-xs text-muted-foreground mb-1">Portfolio Value</div>
+        <div className="text-sm text-muted-foreground mb-1">Portfolio Value</div>
         <div className="text-2xl sm:text-3xl font-bold text-foreground font-mono">{metrics.portfolioValue}</div>
         <div className={`text-xs sm:text-sm mt-1 flex items-center justify-center gap-1 ${metrics.isPositiveReturn ? "text-profit" : "text-loss"}`}>
           {metrics.isPositiveReturn ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
@@ -162,43 +162,28 @@ export const PortfolioMetrics = () => {
 
       {/* Metric rows */}
       <div className="space-y-2">
-        <div className="flex items-center justify-between p-2.5 bg-muted/30 rounded-lg">
-          <div className="flex items-center gap-2">
-            <TrendingUp className="h-3.5 w-3.5 text-primary" />
-            <span className="text-xs text-muted-foreground">Total P&L</span>
-          </div>
+        <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+          <span className="text-sm text-muted-foreground">Total P&L</span>
           <span className={`text-sm font-bold font-mono ${metrics.isPositivePnL ? "text-profit" : "text-loss"}`}>{metrics.totalPnL}</span>
         </div>
 
-        <div className="flex items-center justify-between p-2.5 bg-muted/30 rounded-lg">
-          <div className="flex items-center gap-2">
-            <Wallet className="h-3.5 w-3.5 text-primary" />
-            <span className="text-xs text-muted-foreground">Realized P&L</span>
-          </div>
+        <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+          <span className="text-sm text-muted-foreground">Realized P&L</span>
           <span className={`text-sm font-bold font-mono ${metrics.isPositiveRealizedPnL ? "text-profit" : "text-loss"}`}>{metrics.realizedPnL}</span>
         </div>
 
-        <div className="flex items-center justify-between p-2.5 bg-muted/30 rounded-lg">
-          <div className="flex items-center gap-2">
-            <Activity className="h-3.5 w-3.5 text-primary" />
-            <span className="text-xs text-muted-foreground">Unrealized P&L</span>
-          </div>
+        <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+          <span className="text-sm text-muted-foreground">Unrealized P&L</span>
           <span className={`text-sm font-bold font-mono ${metrics.isPositiveUnrealizedPnL ? "text-profit" : "text-loss"}`}>{metrics.unrealizedPnL}</span>
         </div>
 
-        <div className="flex items-center justify-between p-2.5 bg-muted/30 rounded-lg">
-          <div className="flex items-center gap-2">
-            <Target className="h-3.5 w-3.5 text-primary" />
-            <span className="text-xs text-muted-foreground">Win Rate</span>
-          </div>
+        <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+          <span className="text-sm text-muted-foreground">Win Rate</span>
           <span className="text-sm font-bold font-mono text-foreground">{metrics.winRate}</span>
         </div>
 
-        <div className="flex items-center justify-between p-2.5 bg-muted/30 rounded-lg">
-          <div className="flex items-center gap-2">
-            <Activity className="h-3.5 w-3.5 text-primary" />
-            <span className="text-xs text-muted-foreground">Open Positions</span>
-          </div>
+        <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+          <span className="text-sm text-muted-foreground">Open Positions</span>
           <span className="text-sm font-bold font-mono text-foreground">
             {positions.length} <span className="text-xs text-muted-foreground font-normal">/ {riskParams?.max_open_trades || 0}</span>
           </span>
