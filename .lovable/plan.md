@@ -1,59 +1,65 @@
 
 
-# Fix Mobile Layout Issues: Signal Rejections, Closed Positions & Main Tabs
+## Plan: Health Page with Error Details and WebSocket Monitor
 
-## Problems Found
+### Problem Analysis
+The WebSocket Connection Monitor shows "13 errors" but there's no way to see error details because:
+- The `WebSocketMonitorContext` only stores a counter (`errorCount`) and the last error string (`lastError`)
+- No error history/log is maintained
+- These errors are normal WebSocket reconnection events from the price feed and market data streams
 
-### 1. Signal Rejection Reasons -- No Mobile Layout (Critical)
-The `SignalRejectionReasons.tsx` component renders a 5-6 column `<Table>` (Symbol, Rejection Reason, Signal Diagnostics, Details, AI Analysis, Checked) with no mobile alternative. This causes severe horizontal overflow and left-right scrolling on mobile.
+### What Will Be Built
 
-### 2. Closed Positions History -- Overflow in Stats/Distribution Grids
-While the positions table already has a mobile card view, the **Closure Distribution** section uses `grid-cols-2 md:grid-cols-4 lg:grid-cols-7` with `text-2xl` numbers and long labels that cause overflow. The **Summary Stats** cards with `text-3xl` values also overflow on narrow screens. The pagination "Previous/Next" buttons crowd against the page text.
+#### 1. Add Error History to WebSocket Monitor Context
+Extend `WebSocketMonitorContext` to store a rolling log of the last 50 errors per connection, each with:
+- Timestamp
+- Error message
+- Connection name
 
-### 3. Main Tab Strip -- Labels Still Hard to Read
-The main TabsList has `flex overflow-x-auto scrollbar-hide` and short labels, but the `min-w-[4.5rem]` / `min-w-[3rem]` values may cause tabs to appear cramped. The scroll indicator is invisible so users don't realize they can scroll.
+This enables the "click to see details" feature.
 
----
+#### 2. Clickable Error Count with Details Dialog
+In `WebSocketHealthDashboard`, make the error count clickable. Clicking it opens a Dialog showing:
+- Chronological list of errors with timestamps
+- Which connection produced each error
+- A "Clear" button to reset the log
 
-## Solution
+#### 3. New Health Page (`/health`)
+Create a dedicated `/health` route with comprehensive system health info:
 
-### 1. Signal Rejection Reasons: Mobile Card View
-- Add a `md:hidden` card layout that renders each rejection as a stacked card showing: Symbol + Severity badge, Rejection Reason badge, and Checked time
-- Hide the diagnostics/details columns on mobile (they're too complex) -- show them behind a tap-to-expand collapsible
-- Keep the existing `<Table>` behind `hidden md:block`
+**Section 1 — System Status Overview**
+- Bot heartbeat status (last heartbeat time, current no-trade state, symbols scanned, rejections logged)
+- Health state history from `bot_health_state` table (OPERATIONAL_CONCERN, EXTREME_OVERBOUGHT, MIXED_BLOCK events with durations and resolution times)
 
-### 2. Closed Positions: Tighten Mobile Layout
-- Reduce Summary Stats card title from `text-3xl` to `text-xl sm:text-3xl`
-- Reduce Closure Distribution from `text-2xl` to `text-lg sm:text-2xl` and label from `text-sm` to `text-xs sm:text-sm`
-- Simplify pagination on mobile: hide "Previous"/"Next" text, show only chevron icons
+**Section 2 — WebSocket Connection Monitor**
+- Move `WebSocketHealthDashboard` from the Monitor tab to this page
+- Includes the new clickable error details
 
-### 3. Main Tabs: Improve Visibility
-- Slightly increase `min-w` on the tab triggers so text doesn't appear squished
-- Add a subtle gradient fade on the right edge of the tab strip to hint at scrollability
+**Section 3 — Heartbeat Timeline**
+- Recent heartbeat entries showing scanner activity over time
+- Visual indicator of no-trade state transitions
 
----
+**Section 4 — Health Alerts History**
+- Past health state entries from `bot_health_state` showing when alerts were triggered and resolved
 
-## Technical Details
+#### 4. Navigation Update
+- Add a Health icon button in the header (next to Performance, Symbols, Settings)
+- Remove `WebSocketHealthDashboard` from the Monitor tab in Index.tsx
 
-### Files to modify:
+### Technical Details
 
-1. **`src/components/SignalRejectionReasons.tsx`** (lines ~8421-8553)
-   - Wrap existing `<Table>` in `hidden md:block`
-   - Add a `md:hidden` section above it that maps rejections to stacked cards
-   - Each card: symbol + severity badge on top row, rejection reason badge below, checked time at bottom
-   - Add a `<Collapsible>` for diagnostics detail per card
+**Files to create:**
+- `src/pages/Health.tsx` — New health page with all sections
+- `src/hooks/useBotHealth.ts` — Hook to fetch `bot_heartbeat` and `bot_health_state` data
 
-2. **`src/components/ClosedPositionsDashboard.tsx`**
-   - Lines ~376-422: Change `text-3xl` to `text-xl sm:text-3xl` on summary stat CardTitles
-   - Lines ~431-461: Change closure distribution `text-2xl` to `text-lg sm:text-2xl`, and label `text-sm` to `text-xs sm:text-sm`
-   - Lines ~586-616: On mobile, simplify pagination to icon-only buttons
+**Files to modify:**
+- `src/contexts/WebSocketMonitorContext.tsx` — Add `errorLog` array to each connection's metrics, and expose it; add `clearErrors` method
+- `src/components/WebSocketHealthDashboard.tsx` — Make error count clickable, show Dialog with error history
+- `src/pages/Index.tsx` — Remove `WebSocketHealthDashboard` from Monitor tab, add Health nav button in header
+- `src/App.tsx` — Add `/health` route (lazy loaded, protected)
 
-3. **`src/pages/Index.tsx`** (line 87)
-   - Adjust `min-w` values on tab triggers for better readability
-   - Wrap TabsList in a container with a right-edge gradient overlay on mobile to hint scrollability
-
-4. **`src/index.css`**
-   - Add a `.tab-scroll-hint` utility with a pseudo-element gradient fade on the right side
-
-No new dependencies required. All changes use existing Tailwind responsive prefixes.
+**Data sources:**
+- `bot_heartbeat` table: `recorded_at`, `no_trade_state`, `symbols_scanned`, `signals_generated`, `rejections_logged`, `details`
+- `bot_health_state` table: `state`, `state_type`, `started_at`, `resolved_at`, `alert_sent`, `details`
+- `WebSocketMonitorContext`: live connection metrics + new error log
 
