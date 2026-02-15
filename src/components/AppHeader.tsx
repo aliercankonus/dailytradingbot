@@ -43,10 +43,11 @@ export const AppHeader = () => {
   return (
     <header className="sticky top-0 z-50 bg-background/95 backdrop-blur-md border-b border-border">
       <div className="container mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-between h-14">
-          {/* Left: Brand */}
+        <div className="flex items-center justify-between h-16">
+          {/* Left: Brand + Nav */}
+          <div className="flex items-center gap-6">
           <Link to="/" className="flex items-center shrink-0 hover:opacity-80 transition-opacity">
-            <BrandLogo size="sm" showText />
+            <BrandLogo size="md" showText />
           </Link>
 
           {/* Center: Desktop nav */}
@@ -66,8 +67,7 @@ export const AppHeader = () => {
               ))}
             </nav>
           )}
-
-          {/* Right: Status + Greeting + Avatar + Mobile Menu */}
+          </div>
           <div className="flex items-center gap-3">
             <div className="hidden sm:flex items-center gap-1.5">
               <div className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
