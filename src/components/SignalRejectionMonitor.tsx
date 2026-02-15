@@ -519,7 +519,53 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            {/* Mobile Card View */}
+            <div className="md:hidden space-y-3">
+              {paginatedSignals.map((signal) => {
+                const fs = signal.filters_status;
+                const td = signal.trend_data;
+                const severity = getGateSeverity(signal.rejection_reason, fs);
+                const styles = getSeverityStyles(severity);
+                const friendly = getFriendlyRejection(signal.rejection_reason);
+                const FriendlyIcon = friendly.icon;
+                const adx = fs?.adx ?? td?.volatility?.adx;
+                const direction = fs?.derivedDirection ?? fs?.direction ?? td?.direction;
+                
+                return (
+                  <div key={signal.id} className={`p-3 rounded-lg border bg-card/50 ${styles.row}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-sm font-medium">{signal.symbol}</span>
+                        <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${styles.badge}`}>
+                          {severity.toUpperCase()}
+                        </Badge>
+                        {direction && <DirectionBadge direction={direction} />}
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">
+                        {formatDistanceToNow(new Date(signal.checked_at), { addSuffix: true })}
+                      </span>
+                    </div>
+                    <div className="flex items-start gap-1.5 mb-2">
+                      <FriendlyIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                      <div>
+                        <div className="text-xs font-medium">{friendly.label}</div>
+                        <div className="text-[10px] text-muted-foreground">{friendly.summary}</div>
+                      </div>
+                    </div>
+                    {adx !== undefined && (
+                      <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                        <span>ADX: <span className={`font-mono ${adx >= 25 ? "text-green-400" : adx >= 20 ? "text-yellow-400" : "text-red-400"}`}>{extractNumeric(adx, 1)}</span></span>
+                        <MRStatusBadge status={deriveMRStatus(fs)} />
+                        <BypassBadge eligible={checkBypassEligible(fs)} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -544,7 +590,6 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
                     const mrStatus = deriveMRStatus(fs);
                     const bypassEligible = checkBypassEligible(fs);
                     
-                    // Extract values with fallbacks
                     const adx = fs?.adx ?? td?.volatility?.adx;
                     const adxSlope = fs?.adxSlope ?? td?.volatility?.adxSlope;
                     const momentumScore = fs?.momentumScore ?? 0;
@@ -625,53 +670,38 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
             </div>
             
             {/* Pagination */}
-            <div className="flex items-center justify-between pt-4 border-t border-border mt-4">
-              <div className="flex items-center gap-4">
-                <span className="text-xs text-muted-foreground">
-                  Showing {((safeCurrentPage - 1) * pageSize) + 1}-{Math.min(safeCurrentPage * pageSize, filteredSignals.length)} of {filteredSignals.length} rejections
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-4 border-t border-border mt-4">
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] sm:text-xs text-muted-foreground">
+                  {((safeCurrentPage - 1) * pageSize) + 1}-{Math.min(safeCurrentPage * pageSize, filteredSignals.length)} of {filteredSignals.length}
                 </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Per page:</span>
-                  <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
-                    <SelectTrigger className="h-7 w-[70px] text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="10">10</SelectItem>
-                      <SelectItem value="25">25</SelectItem>
-                      <SelectItem value="50">50</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
+                  <SelectTrigger className="h-7 w-[60px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="25">25</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               {totalPages > 1 && (
-                <Pagination>
-                  <PaginationContent>
+                <Pagination className="mx-0 w-auto">
+                  <PaginationContent className="gap-1">
                     <PaginationItem>
                       <PaginationPrevious 
                         onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                        className={safeCurrentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                        className={`h-8 px-2 ${safeCurrentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}`}
                       />
                     </PaginationItem>
-                    {getPageNumbers().map((page, idx) => (
-                      <PaginationItem key={idx}>
-                        {page === 'ellipsis' ? (
-                          <PaginationEllipsis />
-                        ) : (
-                          <PaginationLink
-                            onClick={() => setCurrentPage(page)}
-                            isActive={safeCurrentPage === page}
-                            className="cursor-pointer"
-                          >
-                            {page}
-                          </PaginationLink>
-                        )}
-                      </PaginationItem>
-                    ))}
+                    <PaginationItem>
+                      <span className="text-xs text-muted-foreground px-1">{safeCurrentPage}/{totalPages}</span>
+                    </PaginationItem>
                     <PaginationItem>
                       <PaginationNext 
                         onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                        className={safeCurrentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                        className={`h-8 px-2 ${safeCurrentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}`}
                       />
                     </PaginationItem>
                   </PaginationContent>
