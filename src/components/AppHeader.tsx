@@ -49,7 +49,7 @@ export const AppHeader = () => {
       <SystemStatusStrip />
       
       <div className="container mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-between h-14">
+        <div className="flex items-center justify-between h-16">
           {/* Left: Brand + Nav */}
           <div className="flex items-center gap-5">
             <Link to="/" className="flex items-center shrink-0 hover:opacity-80 transition-opacity">
