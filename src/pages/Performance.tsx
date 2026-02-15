@@ -138,123 +138,139 @@ const Performance = () => {
             </TabsList>
 
             <TabsContent value="portfolio" className="space-y-4">
-              <Card className="p-3 sm:p-6">
+              <Card className="p-3 sm:p-6 overflow-hidden">
                 <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Portfolio Value Over Time</h3>
-                <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]">
-                  <AreaChart data={chartData}>
-                    <defs>
-                      <linearGradient id="portfolioGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
-                    <YAxis 
-                      stroke="hsl(var(--muted-foreground))" 
-                      domain={[(dataMin: number) => {
-                        const range = Math.max(dataMin * 0.02, 100);
-                        return Math.floor((dataMin - range) / 10) * 10;
-                      }, (dataMax: number) => {
-                        const range = Math.max(dataMax * 0.02, 100);
-                        return Math.ceil((dataMax + range) / 10) * 10;
-                      }]}
-                      tickFormatter={(value) => `$${value.toLocaleString()}`}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                      }}
-                      formatter={(value: number) => [`$${value.toFixed(2)}`, "Portfolio Value"]}
-                    />
-                    <Legend />
-                    <Area
-                      type="monotone"
-                      dataKey="portfolioValue"
-                      stroke="hsl(var(--primary))"
-                      fill="url(#portfolioGradient)"
-                      name="Portfolio Value"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <div className="w-full overflow-x-auto -mx-1">
+                  <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]" minWidth={280}>
+                    <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                      <defs>
+                        <linearGradient id="portfolioGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} />
+                      <YAxis 
+                        stroke="hsl(var(--muted-foreground))" 
+                        tick={{ fontSize: 10 }}
+                        width={45}
+                        domain={[(dataMin: number) => {
+                          const range = Math.max(dataMin * 0.02, 100);
+                          return Math.floor((dataMin - range) / 10) * 10;
+                        }, (dataMax: number) => {
+                          const range = Math.max(dataMax * 0.02, 100);
+                          return Math.ceil((dataMax + range) / 10) * 10;
+                        }]}
+                        tickFormatter={(value) => `$${value.toLocaleString()}`}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "8px",
+                          fontSize: "12px",
+                        }}
+                        formatter={(value: number) => [`$${value.toFixed(2)}`, "Portfolio Value"]}
+                      />
+                      <Legend wrapperStyle={{ fontSize: "11px" }} />
+                      <Area
+                        type="monotone"
+                        dataKey="portfolioValue"
+                        stroke="hsl(var(--primary))"
+                        fill="url(#portfolioGradient)"
+                        name="Portfolio Value"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
               </Card>
             </TabsContent>
 
             <TabsContent value="pnl" className="space-y-4">
-              <Card className="p-3 sm:p-6">
+              <Card className="p-3 sm:p-6 overflow-hidden">
                 <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">P&L Breakdown</h3>
-                <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]">
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
-                    <YAxis 
-                      stroke="hsl(var(--muted-foreground))" 
-                      domain={[(dataMin: number) => {
-                        const padding = Math.max(Math.abs(dataMin) * 0.1, 10);
-                        return Math.floor(dataMin - padding);
-                      }, (dataMax: number) => {
-                        const padding = Math.max(Math.abs(dataMax) * 0.1, 10);
-                        return Math.ceil(dataMax + padding);
-                      }]}
-                      tickFormatter={(value) => `$${value.toFixed(0)}`}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                      }}
-                    />
-                    <Legend />
-                    <Line type="monotone" dataKey="totalPnL" stroke="hsl(var(--primary))" name="Total P&L" strokeWidth={2} />
-                    <Line type="monotone" dataKey="realizedPnL" stroke="hsl(var(--profit))" name="Realized P&L" strokeWidth={2} />
-                    <Line type="monotone" dataKey="unrealizedPnL" stroke="hsl(var(--chart-3))" name="Unrealized P&L" strokeWidth={2} />
-                  </LineChart>
-                </ResponsiveContainer>
+                <div className="w-full overflow-x-auto -mx-1">
+                  <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]" minWidth={280}>
+                    <LineChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} />
+                      <YAxis 
+                        stroke="hsl(var(--muted-foreground))" 
+                        tick={{ fontSize: 10 }}
+                        width={40}
+                        domain={[(dataMin: number) => {
+                          const padding = Math.max(Math.abs(dataMin) * 0.1, 10);
+                          return Math.floor(dataMin - padding);
+                        }, (dataMax: number) => {
+                          const padding = Math.max(Math.abs(dataMax) * 0.1, 10);
+                          return Math.ceil(dataMax + padding);
+                        }]}
+                        tickFormatter={(value) => `$${value.toFixed(0)}`}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "8px",
+                          fontSize: "12px",
+                        }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: "11px" }} />
+                      <Line type="monotone" dataKey="totalPnL" stroke="hsl(var(--primary))" name="Total P&L" strokeWidth={2} />
+                      <Line type="monotone" dataKey="realizedPnL" stroke="hsl(var(--profit))" name="Realized P&L" strokeWidth={2} />
+                      <Line type="monotone" dataKey="unrealizedPnL" stroke="hsl(var(--chart-3))" name="Unrealized P&L" strokeWidth={2} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               </Card>
             </TabsContent>
 
             <TabsContent value="winrate" className="space-y-4">
-              <Card className="p-3 sm:p-6">
+              <Card className="p-3 sm:p-6 overflow-hidden">
                 <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Win Rate & Trade Distribution</h3>
-                <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]">
-                  <BarChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
-                    <YAxis stroke="hsl(var(--muted-foreground))" />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                      }}
-                    />
-                    <Legend />
-                    <Bar dataKey="winningTrades" fill="hsl(var(--profit))" name="Winning Trades" />
-                    <Bar dataKey="losingTrades" fill="hsl(var(--loss))" name="Losing Trades" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <div className="w-full overflow-x-auto -mx-1">
+                  <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]" minWidth={280}>
+                    <BarChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} width={35} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "8px",
+                          fontSize: "12px",
+                        }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: "11px" }} />
+                      <Bar dataKey="winningTrades" fill="hsl(var(--profit))" name="Winning Trades" />
+                      <Bar dataKey="losingTrades" fill="hsl(var(--loss))" name="Losing Trades" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </Card>
-              <Card className="p-3 sm:p-6">
+              <Card className="p-3 sm:p-6 overflow-hidden">
                 <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Win Rate Trend</h3>
-                <ResponsiveContainer width="100%" height={240} className="sm:!h-[300px]">
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
-                    <YAxis stroke="hsl(var(--muted-foreground))" domain={[0, 100]} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                      }}
-                    />
-                    <Legend />
-                    <Line type="monotone" dataKey="winRate" stroke="hsl(var(--primary))" name="Win Rate %" strokeWidth={2} />
-                  </LineChart>
-                </ResponsiveContainer>
+                <div className="w-full overflow-x-auto -mx-1">
+                  <ResponsiveContainer width="100%" height={240} className="sm:!h-[300px]" minWidth={280}>
+                    <LineChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} width={35} domain={[0, 100]} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "8px",
+                          fontSize: "12px",
+                        }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: "11px" }} />
+                      <Line type="monotone" dataKey="winRate" stroke="hsl(var(--primary))" name="Win Rate %" strokeWidth={2} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               </Card>
             </TabsContent>
 
