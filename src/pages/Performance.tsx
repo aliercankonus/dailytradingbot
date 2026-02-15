@@ -61,7 +61,7 @@ const Performance = () => {
     },
     {
       label: "Max Drawdown",
-      value: latestSnapshot ? `${latestSnapshot.max_drawdown.toFixed(2)}%` : "0%",
+      value: latestSnapshot ? `${latestSnapshot.max_drawdown.toFixed(4)}%` : "0%",
       change: latestSnapshot && latestSnapshot.max_drawdown > 10 ? "High risk" : "Within limits",
       changePositive: latestSnapshot ? latestSnapshot.max_drawdown < 10 : true,
       icon: AlertTriangle,
