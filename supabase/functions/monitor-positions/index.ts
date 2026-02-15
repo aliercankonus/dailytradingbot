@@ -306,10 +306,11 @@ serve(async (req) => {
       // Also track single candle change for logging
       const singleCandleChange = ((lastClose - prevClose) / prevClose) * 100;
 
-      // Volume analysis (current vs average)
-      const currentVolume = parseFloat(lastCandle[5]);
-      const avgCandleVolume = klines.slice(-20).reduce((sum, k) => sum + parseFloat(k[5]), 0) / 20;
-      const volumeRatio = currentVolume / avgCandleVolume; // >3 = volume spike
+      // Volume analysis (use last closed candle, not live forming candle)
+      const closedKlines = klines.slice(0, -1);
+      const currentVolume = closedKlines.length > 0 ? parseFloat(closedKlines[closedKlines.length - 1][5]) : 0;
+      const avgCandleVolume = closedKlines.slice(-20).reduce((sum, k) => sum + parseFloat(k[5]), 0) / Math.min(20, closedKlines.length || 1);
+      const volumeRatio = avgCandleVolume > 0 ? currentVolume / avgCandleVolume : 1; // >3 = volume spike
 
       // MACD calculation for divergence detection
       const closes = klines.map((k: any) => parseFloat(k[4]));
@@ -801,11 +802,11 @@ serve(async (req) => {
       const isVolumeSpike = volumeRatio >= EMERGENCY_EXIT_PARAMS.VOLUME_SPIKE_THRESHOLD;
       
       if (isVolumeSpike) {
-        positionLogger.signal(`VOLUME SPIKE: ${volumeRatio.toFixed(1)}x average volume - potential reversal signal!`);
+        positionLogger.signal(`VOLUME SPIKE: ${(volumeRatio * 100).toFixed(0)}% of avg (${volumeRatio.toFixed(1)}x) - potential reversal signal!`);
         volatilityAlerts.push({
           symbol: position.symbol,
           volumeRatio,
-          message: `Volume ${volumeRatio.toFixed(1)}x above average`,
+          message: `Volume ${(volumeRatio * 100).toFixed(0)}% of avg (${volumeRatio.toFixed(1)}x)`,
         });
       }
 
@@ -946,7 +947,7 @@ serve(async (req) => {
           details: {
             recentPriceChange: recentPriceChange.toFixed(2) + "%",
             atrRatio: atrRatio.toFixed(2) + "x",
-            volumeRatio: volumeRatio.toFixed(1) + "x",
+            volumeRatio: (volumeRatio * 100).toFixed(1) + "% of avg",
             hasDivergence,
             priceChangePercent: priceChangePercent?.toFixed(2) + "%",
             macdChangePercent: macdChangePercent?.toFixed(2) + "%",
