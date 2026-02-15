@@ -138,9 +138,9 @@ export const PortfolioMetrics = () => {
     },
   ];
   return (
-    <Card className="h-full p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-foreground">Portfolio Overview</h3>
+    <Card className="h-full p-4 sm:p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
+      <div className="flex items-center justify-between mb-3 sm:mb-4">
+        <h3 className="text-base sm:text-lg font-semibold text-foreground">Portfolio Overview</h3>
         <div className="flex items-center gap-2 text-xs">
           <Activity
             className={`h-3 w-3 ${connected ? "text-success animate-pulse" : "text-muted-foreground"}`}
@@ -150,16 +150,16 @@ export const PortfolioMetrics = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
         {metricsDisplay.map((metric, idx) => (
-          <div key={idx} className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">{metric.label}</span>
-              <metric.icon className="h-4 w-4 text-primary" aria-hidden="true" />
+          <div key={idx} className="space-y-1 sm:space-y-2 min-w-0">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-xs sm:text-sm text-muted-foreground truncate">{metric.label}</span>
+              <metric.icon className="h-3 w-3 sm:h-4 sm:w-4 text-primary flex-shrink-0" aria-hidden="true" />
             </div>
-            <div className="space-y-1">
-              <div className="text-2xl font-bold text-foreground font-mono">{metric.value}</div>
-              <div className={`text-sm flex items-center gap-1 ${metric.isPositive ? "text-profit" : "text-loss"}`}>
+            <div className="space-y-0.5 sm:space-y-1">
+              <div className="text-lg sm:text-2xl font-bold text-foreground font-mono truncate">{metric.value}</div>
+              <div className={`text-xs sm:text-sm flex items-center gap-1 ${metric.isPositive ? "text-profit" : "text-loss"}`}>
                 {metric.isPositive ? (
                   <TrendingUp className="h-3 w-3" aria-hidden="true" />
                 ) : (

@@ -109,8 +109,8 @@ export const TradeHistory = () => {
   }, [selectedStrategy]);
 
   return (
-    <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
-      <div className="flex items-center justify-between mb-4">
+    <Card className="p-4 sm:p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0 mb-4">
         <div className="flex items-center gap-3">
           <h3 className="text-lg font-semibold text-foreground">Recent Trades</h3>
           {loading && (
@@ -140,35 +140,68 @@ export const TradeHistory = () => {
         </div>
       </div>
       
-      <div className="overflow-x-auto">
+      {/* Mobile card view */}
+      <div className="md:hidden space-y-3">
+        {loading ? (
+          <p className="text-center py-8 text-muted-foreground">Loading trade data...</p>
+        ) : paginatedTrades.length === 0 ? (
+          <p className="text-center py-8 text-muted-foreground">No trades found</p>
+        ) : (
+          paginatedTrades.map((trade) => (
+            <div key={trade.id} className="p-3 rounded-lg bg-muted/30 border border-border/50 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className={`h-2 w-2 rounded-full ${trade.side === "BUY" ? "bg-success" : "bg-danger"}`} />
+                  <span className="font-semibold text-foreground text-sm">{trade.symbol.replace('USDT', '/USDT')}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={trade.side === "BUY" ? "default" : "secondary"} className={`text-xs ${trade.side === "BUY" ? "bg-success/20 text-success" : "bg-danger/20 text-danger"}`}>
+                    {trade.side}
+                  </Badge>
+                  <Badge variant={trade.status === 'open' ? 'default' : trade.status === 'closed' ? 'secondary' : 'outline'} className="text-xs">
+                    {trade.status}
+                  </Badge>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Entry:</span>
+                  <span className="font-mono text-foreground">{formatPrice(trade.entry_price, 4, '$')}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Exit:</span>
+                  <span className="font-mono text-foreground">{trade.exit_price ? formatPrice(trade.exit_price, 4, '$') : '-'}</span>
+                </div>
+              </div>
+              {trade.realized_pnl !== null && (
+                <div className={`flex items-center gap-1 text-sm font-semibold font-mono ${trade.realized_pnl >= 0 ? "text-profit" : "text-loss"}`}>
+                  {trade.realized_pnl >= 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+                  {trade.realized_pnl >= 0 ? '+' : ''}{formatPrice(trade.realized_pnl, 2, '$')}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Desktop table view */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr className="text-sm text-muted-foreground border-b border-border">
               <th className="text-left py-2 px-2">
-                <button 
-                  onClick={() => handleSort('symbol')}
-                  className="flex items-center gap-1 hover:text-foreground transition-colors"
-                >
-                  Pair
-                  <SortIcon column="symbol" />
+                <button onClick={() => handleSort('symbol')} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                  Pair <SortIcon column="symbol" />
                 </button>
               </th>
               <th className="text-left py-2 px-2">
-                <button 
-                  onClick={() => handleSort('strategy_name')}
-                  className="flex items-center gap-1 hover:text-foreground transition-colors"
-                >
-                  Strategy
-                  <SortIcon column="strategy_name" />
+                <button onClick={() => handleSort('strategy_name')} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                  Strategy <SortIcon column="strategy_name" />
                 </button>
               </th>
               <th className="text-left py-2 px-2">
-                <button 
-                  onClick={() => handleSort('side')}
-                  className="flex items-center gap-1 hover:text-foreground transition-colors"
-                >
-                  Type
-                  <SortIcon column="side" />
+                <button onClick={() => handleSort('side')} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                  Type <SortIcon column="side" />
                 </button>
               </th>
               <th className="text-right py-2 px-2">Entry</th>
@@ -177,21 +210,13 @@ export const TradeHistory = () => {
               <th className="text-right py-2 px-2">Take Profit</th>
               <th className="text-right py-2 px-2">Quantity</th>
               <th className="text-right py-2 px-2">
-                <button 
-                  onClick={() => handleSort('profit_loss')}
-                  className="flex items-center gap-1 hover:text-foreground transition-colors ml-auto"
-                >
-                  P&L
-                  <SortIcon column="profit_loss" />
+                <button onClick={() => handleSort('profit_loss')} className="flex items-center gap-1 hover:text-foreground transition-colors ml-auto">
+                  P&L <SortIcon column="profit_loss" />
                 </button>
               </th>
               <th className="text-left py-2 px-2">
-                <button 
-                  onClick={() => handleSort('status')}
-                  className="flex items-center gap-1 hover:text-foreground transition-colors"
-                >
-                  Status
-                  <SortIcon column="status" />
+                <button onClick={() => handleSort('status')} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                  Status <SortIcon column="status" />
                 </button>
               </th>
             </tr>
@@ -199,30 +224,19 @@ export const TradeHistory = () => {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={10} className="text-center py-8 text-muted-foreground">
-                  Loading trade data...
-                </td>
+                <td colSpan={10} className="text-center py-8 text-muted-foreground">Loading trade data...</td>
               </tr>
             ) : paginatedTrades.length === 0 ? (
               <tr>
-                <td colSpan={10} className="text-center py-8 text-muted-foreground">
-                  No trades found
-                </td>
+                <td colSpan={10} className="text-center py-8 text-muted-foreground">No trades found</td>
               </tr>
             ) : (
               paginatedTrades.map((trade) => (
-                <tr
-                  key={trade.id}
-                  className="text-sm border-b border-border/50 hover:bg-secondary/30 transition-colors"
-                >
+                <tr key={trade.id} className="text-sm border-b border-border/50 hover:bg-secondary/30 transition-colors">
                   <td className="py-3 px-2">
                     <div className="flex items-center gap-2">
-                      <div className={`h-2 w-2 rounded-full ${
-                        trade.side === "BUY" ? "bg-success" : "bg-danger"
-                      }`} />
-                      <span className="font-semibold text-foreground">
-                        {trade.symbol.replace('USDT', '/USDT')}
-                      </span>
+                      <div className={`h-2 w-2 rounded-full ${trade.side === "BUY" ? "bg-success" : "bg-danger"}`} />
+                      <span className="font-semibold text-foreground">{trade.symbol.replace('USDT', '/USDT')}</span>
                     </div>
                   </td>
                   <td className="py-3 px-2">
@@ -232,48 +246,23 @@ export const TradeHistory = () => {
                         {trade.strategy_name || 'Hedge'}
                       </Badge>
                     ) : (
-                      <Badge variant="outline" className="text-xs">
-                        {trade.strategy_name || 'Unknown'}
-                      </Badge>
+                      <Badge variant="outline" className="text-xs">{trade.strategy_name || 'Unknown'}</Badge>
                     )}
                   </td>
                   <td className="py-3 px-2">
-                    <Badge
-                      variant={trade.side === "BUY" ? "default" : "secondary"}
-                      className={`text-xs ${
-                        trade.side === "BUY" 
-                          ? "bg-success/20 text-success" 
-                          : "bg-danger/20 text-danger"
-                      }`}
-                    >
+                    <Badge variant={trade.side === "BUY" ? "default" : "secondary"} className={`text-xs ${trade.side === "BUY" ? "bg-success/20 text-success" : "bg-danger/20 text-danger"}`}>
                       {trade.side}
                     </Badge>
                   </td>
-                  <td className="py-3 px-2 text-right font-mono text-foreground">
-                    {formatPrice(trade.entry_price, 4, '$')}
-                  </td>
-                  <td className="py-3 px-2 text-right font-mono text-foreground">
-                    {trade.exit_price ? formatPrice(trade.exit_price, 4, '$') : '-'}
-                  </td>
-                  <td className="py-3 px-2 text-right font-mono text-red-500">
-                    {trade.stop_loss ? formatPrice(trade.stop_loss, 4, '$') : '-'}
-                  </td>
-                  <td className="py-3 px-2 text-right font-mono text-green-500">
-                    {trade.take_profit ? formatPrice(trade.take_profit, 4, '$') : '-'}
-                  </td>
-                  <td className="py-3 px-2 text-right font-mono text-muted-foreground">
-                    {formatQuantity(trade.quantity, 4)}
-                  </td>
+                  <td className="py-3 px-2 text-right font-mono text-foreground">{formatPrice(trade.entry_price, 4, '$')}</td>
+                  <td className="py-3 px-2 text-right font-mono text-foreground">{trade.exit_price ? formatPrice(trade.exit_price, 4, '$') : '-'}</td>
+                  <td className="py-3 px-2 text-right font-mono text-red-500">{trade.stop_loss ? formatPrice(trade.stop_loss, 4, '$') : '-'}</td>
+                  <td className="py-3 px-2 text-right font-mono text-green-500">{trade.take_profit ? formatPrice(trade.take_profit, 4, '$') : '-'}</td>
+                  <td className="py-3 px-2 text-right font-mono text-muted-foreground">{formatQuantity(trade.quantity, 4)}</td>
                   <td className="py-3 px-2 text-right">
                     {trade.realized_pnl !== null ? (
-                      <div className={`flex items-center justify-end gap-1 font-semibold font-mono ${
-                        trade.realized_pnl >= 0 ? "text-profit" : "text-loss"
-                      }`}>
-                        {trade.realized_pnl >= 0 ? (
-                          <ArrowUpRight className="h-3 w-3" />
-                        ) : (
-                          <ArrowDownRight className="h-3 w-3" />
-                        )}
+                      <div className={`flex items-center justify-end gap-1 font-semibold font-mono ${trade.realized_pnl >= 0 ? "text-profit" : "text-loss"}`}>
+                        {trade.realized_pnl >= 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
                         {trade.realized_pnl >= 0 ? '+' : ''}{formatPrice(trade.realized_pnl, 2, '$')}
                       </div>
                     ) : (
@@ -281,10 +270,7 @@ export const TradeHistory = () => {
                     )}
                   </td>
                   <td className="py-3 px-2">
-                    <Badge 
-                      variant={trade.status === 'open' ? 'default' : trade.status === 'closed' ? 'secondary' : 'outline'}
-                      className="text-xs"
-                    >
+                    <Badge variant={trade.status === 'open' ? 'default' : trade.status === 'closed' ? 'secondary' : 'outline'} className="text-xs">
                       {trade.status}
                     </Badge>
                   </td>
