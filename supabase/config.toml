@@ -56,3 +56,6 @@ verify_jwt = true
 [functions.ai-rejection-analyzer]
 verify_jwt = true
 
+[functions.fetch-klines]
+verify_jwt = false
+
