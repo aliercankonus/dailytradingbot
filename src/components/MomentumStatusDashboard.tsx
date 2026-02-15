@@ -97,26 +97,29 @@ export const MomentumStatusDashboard = () => {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle className="flex items-center gap-2">
-            <Gauge className="h-5 w-5 text-primary" />
-            Momentum Status Dashboard
-            {wsConnected && (
-              <Badge variant="outline" className="ml-2 text-green-600 border-green-600">
-                <Radio className="h-3 w-3 mr-1 animate-pulse" />
-                Live
-              </Badge>
-            )}
-          </CardTitle>
-          <CardDescription>
-            Real-time momentum scores, entry quality, and market regime for active symbols
-          </CardDescription>
+      <CardHeader>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2 flex-wrap">
+              <Gauge className="h-5 w-5 text-primary" />
+              <span className="sm:hidden">Momentum</span>
+              <span className="hidden sm:inline">Momentum Status Dashboard</span>
+              {wsConnected && (
+                <Badge variant="outline" className="text-green-600 border-green-600">
+                  <Radio className="h-3 w-3 mr-1 animate-pulse" />
+                  Live
+                </Badge>
+              )}
+            </CardTitle>
+            <CardDescription className="hidden sm:block">
+              Real-time momentum scores, entry quality, and market regime for active symbols
+            </CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -127,7 +130,7 @@ export const MomentumStatusDashboard = () => {
           <p className="text-muted-foreground text-center py-8">No active symbols configured</p>
         ) : (
           <Tabs defaultValue="overview" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="flex w-full overflow-x-auto scrollbar-hide sm:grid sm:grid-cols-3">
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="details">Symbol Details</TabsTrigger>
               <TabsTrigger value="regime">Market Regime</TabsTrigger>
