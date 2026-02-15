@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, DYNAMIC_REVERSAL_EXIT, COMPRESSION_TRADE_EXIT, STRATEGY_EXIT_ADJUSTMENTS, HTF_ALIGNMENT_EXIT, TRAILING_STOP_INLINE, MICRO_TREND_EXIT, HEDGE_EXIT_PARAMS, REVERSAL_RISK_EXIT_SCORES, TIME_STOP_MULTIPLIER as TIME_STOP_MULT, PARTIAL_TP_LADDER, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import {
   evaluateDecayVelocity,
   evaluateMicroProfitLock,
@@ -74,9 +74,9 @@ function extractTrueAlignment(trendData: any): TrueAlignmentData | null {
     },
     neutralCapped,
     // Premium: Strong 4H AND 1H alignment with good ADX contribution
-    isPremium: tf4hWeighted >= 30 && tf1hWeighted >= 15 && adxContribution >= 15,
+    isPremium: tf4hWeighted >= HTF_ALIGNMENT_EXIT.PREMIUM_MIN_TF4H_WEIGHTED && tf1hWeighted >= HTF_ALIGNMENT_EXIT.PREMIUM_MIN_TF1H_WEIGHTED && adxContribution >= HTF_ALIGNMENT_EXIT.PREMIUM_MIN_ADX_CONTRIBUTION,
     // Weak: Neutral capped OR very low 4H confidence
-    isWeak: neutralCapped || tf4hConfidence < 40,
+    isWeak: neutralCapped || tf4hConfidence < HTF_ALIGNMENT_EXIT.WEAK_MAX_TF4H_CONFIDENCE,
   };
 }
 import type { TrendDataResponse, PartialTrendData } from "../_shared/trend-types.ts";
@@ -468,26 +468,26 @@ serve(async (req) => {
       
       // ADX-based reversal risk threshold adjustment - Uses centralized ADX_THRESHOLDS
       // Higher ADX = more lenient (allow higher reversal risk before exit)
-      let dynamicReversalThreshold = 60; // Base threshold
+      let dynamicReversalThreshold = DYNAMIC_REVERSAL_EXIT.BASE_THRESHOLD;
       if (positionAdx >= ADX_THRESHOLDS.EXCEPTIONAL) {
-        dynamicReversalThreshold = 70; // Very strong trend - allow more reversal risk
+        dynamicReversalThreshold += DYNAMIC_REVERSAL_EXIT.ADX_EXCEPTIONAL_BONUS;
       } else if (positionAdx >= ADX_THRESHOLDS.STRONG) {
-        dynamicReversalThreshold = 65; // Strong trend
+        dynamicReversalThreshold += DYNAMIC_REVERSAL_EXIT.ADX_STRONG_BONUS;
       } else if (positionAdx < ADX_THRESHOLDS.MINIMUM) {
-        dynamicReversalThreshold = 55; // Weak trend - exit earlier
+        dynamicReversalThreshold += DYNAMIC_REVERSAL_EXIT.ADX_WEAK_PENALTY;
       }
       
       // Volume-aware exit: High volume confirmation = hold longer
-      if (positionVolumeScore >= 7) {
-        dynamicReversalThreshold += 5; // Volume strongly confirms - be more patient
-      } else if (positionVolumeScore <= 2 && positionAdx < ADX_THRESHOLDS.STRONG) {
-        dynamicReversalThreshold -= 5; // Low volume + weak trend = exit sooner
+      if (positionVolumeScore >= DYNAMIC_REVERSAL_EXIT.VOLUME_CONFIRM_MIN_SCORE) {
+        dynamicReversalThreshold += DYNAMIC_REVERSAL_EXIT.VOLUME_CONFIRM_BONUS;
+      } else if (positionVolumeScore <= DYNAMIC_REVERSAL_EXIT.VOLUME_WEAK_MAX_SCORE && positionAdx < ADX_THRESHOLDS.STRONG) {
+        dynamicReversalThreshold += DYNAMIC_REVERSAL_EXIT.VOLUME_WEAK_PENALTY;
       }
       
       // Apply confidence penalty to reversal threshold
       // High confidence (trend exhaustion) = tighter exit threshold
-      if (confidencePenalty < -10) {
-        dynamicReversalThreshold -= 5; // Exit sooner when confidence indicates exhaustion
+      if (confidencePenalty < DYNAMIC_REVERSAL_EXIT.CONFIDENCE_PENALTY_THRESHOLD) {
+        dynamicReversalThreshold += DYNAMIC_REVERSAL_EXIT.CONFIDENCE_PENALTY_ADJ;
         positionLogger.info(`Confidence penalty ${confidencePenalty} applied - threshold ${dynamicReversalThreshold}`);
       }
       
@@ -514,22 +514,22 @@ serve(async (req) => {
       if (isCompressionTrade) {
         const openedAt = position.opened_at || position.executed_at;
         const holdMinutes = openedAt ? (Date.now() - new Date(openedAt).getTime()) / (1000 * 60) : 0;
-        const maxHoldMinutes = 120; // 2 hours max hold
+        const maxHoldMinutes = COMPRESSION_TRADE_EXIT.MAX_HOLD_MINUTES;
         
         let compressionExitReason: string | null = null;
         
-        // Time-based exit: close after 2 hours (no trailing for range trades)
+        // Time-based exit: close after max hold (no trailing for range trades)
         if (holdMinutes >= maxHoldMinutes) {
           compressionExitReason = `COMPRESSION_TIME_EXIT: Held ${holdMinutes.toFixed(0)}min >= ${maxHoldMinutes}min max`;
         }
         
-        // Regime shift exit: ADX rising above 28
-        if (!compressionExitReason && positionAdx > 28) {
-          compressionExitReason = `COMPRESSION_REGIME_SHIFT: ADX ${positionAdx.toFixed(1)} > 28 — trend energy returning`;
+        // Regime shift exit: ADX rising above threshold
+        if (!compressionExitReason && positionAdx > COMPRESSION_TRADE_EXIT.ADX_REGIME_SHIFT_THRESHOLD) {
+          compressionExitReason = `COMPRESSION_REGIME_SHIFT: ADX ${positionAdx.toFixed(1)} > ${COMPRESSION_TRADE_EXIT.ADX_REGIME_SHIFT_THRESHOLD} — trend energy returning`;
         }
         
         // ATR expansion exit
-        if (!compressionExitReason && atrPercent > 1.8) {
+        if (!compressionExitReason && atrPercent > COMPRESSION_TRADE_EXIT.ATR_EXPANSION_THRESHOLD) {
           compressionExitReason = `COMPRESSION_ATR_EXPANSION: ATR ${atrPercent.toFixed(2)}% expanding — volatility returning`;
         }
         
@@ -569,12 +569,12 @@ serve(async (req) => {
         // - More aggressive trailing stops (lock profits faster)
         // - Exit earlier on divergence (momentum loss is fatal)
         // - More sensitive to trend changes
-        strategyExitAdjustment = -8; // Lower reversal threshold = exit sooner
+        strategyExitAdjustment = STRATEGY_EXIT_ADJUSTMENTS.MOMENTUM.BASE_ADJ;
         strategyExitNote = "Momentum strategy: tighter exit sensitivity";
         
         // Additional exit pressure if momentum divergence detected
         if (atrData?.hasDivergence) {
-          strategyExitAdjustment -= 5; // Even more sensitive to divergence
+          strategyExitAdjustment += STRATEGY_EXIT_ADJUSTMENTS.MOMENTUM.DIVERGENCE_PENALTY;
           strategyExitNote += " + divergence penalty";
         }
       } else if (isMeanReversion) {
@@ -582,22 +582,22 @@ serve(async (req) => {
         // - More patient exits (expect price to oscillate)
         // - Less sensitive to reversal risk (that's expected!)
         // - Exit on trend continuation, not reversal
-        strategyExitAdjustment = +10; // Higher threshold = stay longer
+        strategyExitAdjustment = STRATEGY_EXIT_ADJUSTMENTS.MEAN_REVERSION.BASE_ADJ;
         strategyExitNote = "Mean reversion: patient exit threshold";
         
         // For mean reversion, we WANT price to reverse - don't exit on reversal signals
         // But DO exit if trend continues against us (our thesis is wrong)
         if (positionAdx >= ADX_THRESHOLDS.STRONG) {
-          strategyExitAdjustment -= 5; // Strong trend = our mean reversion thesis may be wrong
+          strategyExitAdjustment += STRATEGY_EXIT_ADJUSTMENTS.MEAN_REVERSION.STRONG_TREND_PENALTY;
           strategyExitNote += " (strong trend warning)";
         }
       } else if (strategyType === 'TREND_FOLLOWING') {
         // TREND FOLLOWING: Very patient, only exit on clear trend breaks
-        strategyExitAdjustment = +5;
+        strategyExitAdjustment = STRATEGY_EXIT_ADJUSTMENTS.TREND_FOLLOWING.BASE_ADJ;
         strategyExitNote = "Trend following: patient threshold";
       } else if (strategyType === 'GRID_RANGE') {
         // GRID/RANGE: Quick exits, optimized for small gains
-        strategyExitAdjustment = -5;
+        strategyExitAdjustment = STRATEGY_EXIT_ADJUSTMENTS.GRID_RANGE.BASE_ADJ;
         strategyExitNote = "Grid strategy: quick exit threshold";
       }
       
@@ -625,35 +625,34 @@ serve(async (req) => {
         
         if (trueAlignment.isPremium && isPositionAlignedWithHTF) {
           // PREMIUM ALIGNMENT: Strong HTF support - be very patient
-          // Position is in line with strong 4H and 1H trends
-          alignmentExitAdjustment = +8; // Higher threshold = more tolerance for pullbacks
-          htfAlignmentMultiplier = 1.15; // Wider trailing stop distance
+          alignmentExitAdjustment = HTF_ALIGNMENT_EXIT.PREMIUM_ALIGNED.thresholdAdj;
+          htfAlignmentMultiplier = HTF_ALIGNMENT_EXIT.PREMIUM_ALIGNED.trailingMult;
           alignmentExitNote = `Premium HTF alignment (4h=${tf4hWeighted.toFixed(1)}, 1h=${tf1hWeighted.toFixed(1)}, ADX=${adxWeighted.toFixed(1)})`;
         } else if (trueAlignment.isPremium && !isPositionAlignedWithHTF) {
           // PREMIUM but COUNTER-TREND: Strong HTF against us - exit faster!
-          alignmentExitAdjustment = -10; // Much tighter exit
-          htfAlignmentMultiplier = 0.85; // Tighter trailing stop
+          alignmentExitAdjustment = HTF_ALIGNMENT_EXIT.PREMIUM_COUNTER.thresholdAdj;
+          htfAlignmentMultiplier = HTF_ALIGNMENT_EXIT.PREMIUM_COUNTER.trailingMult;
           alignmentExitNote = `COUNTER-TREND: Premium HTF opposes position (4h=${tf4hWeighted.toFixed(1)}, 1h=${tf1hWeighted.toFixed(1)})`;
         } else if (trueAlignment.isWeak) {
           // WEAK ALIGNMENT: No clear HTF direction - exit sooner on any warning
-          alignmentExitAdjustment = -5;
-          htfAlignmentMultiplier = 0.90; // Slightly tighter trailing
+          alignmentExitAdjustment = HTF_ALIGNMENT_EXIT.WEAK.thresholdAdj;
+          htfAlignmentMultiplier = HTF_ALIGNMENT_EXIT.WEAK.trailingMult;
           alignmentExitNote = trueAlignment.neutralCapped 
             ? `Neutral-capped HTF alignment (4h conf=${trueAlignment.tf4hConfidence.toFixed(0)}%)`
             : `Weak HTF alignment (4h conf=${trueAlignment.tf4hConfidence.toFixed(0)}%)`;
-        } else if (isPositionAlignedWithHTF && tf4hWeighted >= 20) {
+        } else if (isPositionAlignedWithHTF && tf4hWeighted >= HTF_ALIGNMENT_EXIT.SOLID_MIN_TF4H_WEIGHTED) {
           // SOLID ALIGNMENT: Good 4H support
-          alignmentExitAdjustment = +3;
-          htfAlignmentMultiplier = 1.05; // Slightly wider trailing
+          alignmentExitAdjustment = HTF_ALIGNMENT_EXIT.SOLID.thresholdAdj;
+          htfAlignmentMultiplier = HTF_ALIGNMENT_EXIT.SOLID.trailingMult;
           alignmentExitNote = `Solid HTF alignment (4h=${tf4hWeighted.toFixed(1)}, 1h=${tf1hWeighted.toFixed(1)})`;
         }
         
         // Volume confirmation bonus/penalty
-        if (volumeWeighted >= 4 && isPositionAlignedWithHTF) {
-          alignmentExitAdjustment += 2; // Volume confirms direction - more patience
+        if (volumeWeighted >= HTF_ALIGNMENT_EXIT.VOLUME_CONFIRM_MIN_WEIGHTED && isPositionAlignedWithHTF) {
+          alignmentExitAdjustment += HTF_ALIGNMENT_EXIT.VOLUME_CONFIRM_BONUS;
           alignmentExitNote += " +vol_confirm";
-        } else if (volumeWeighted < 1.5 && !isPositionAlignedWithHTF) {
-          alignmentExitAdjustment -= 2; // Low volume counter-trend - exit faster
+        } else if (volumeWeighted < HTF_ALIGNMENT_EXIT.VOLUME_WEAK_MAX_WEIGHTED && !isPositionAlignedWithHTF) {
+          alignmentExitAdjustment += HTF_ALIGNMENT_EXIT.VOLUME_WEAK_PENALTY;
           alignmentExitNote += " -vol_weak";
         }
         
@@ -666,8 +665,8 @@ serve(async (req) => {
         }
       }
       
-      // Clamp to reasonable bounds (50-85)
-      dynamicReversalThreshold = Math.max(50, Math.min(85, dynamicReversalThreshold));
+      // Clamp to reasonable bounds
+      dynamicReversalThreshold = Math.max(DYNAMIC_REVERSAL_EXIT.CLAMP_MIN, Math.min(DYNAMIC_REVERSAL_EXIT.CLAMP_MAX, dynamicReversalThreshold));
       
       if (strategyExitAdjustment !== 0) {
         positionLogger.info(`Strategy-aware exit: ${strategyType} | Adj: ${strategyExitAdjustment > 0 ? '+' : ''}${strategyExitAdjustment} | ${strategyExitNote}`);
@@ -859,7 +858,7 @@ serve(async (req) => {
       // ADJUSTED: Changed from earlyPnlPercent < 0 to < -0.3% to prevent cutting winners short
       // Analysis showed momentum exit was triggering at +0.26% and -0.13%, killing potential profits
       // If position is above -0.3%, let trailing stop or break-even handle it instead
-      else if (divergenceExit && isMomentum && earlyPnlPercent < -0.3) {
+      else if (divergenceExit && isMomentum && earlyPnlPercent < STRATEGY_EXIT_ADJUSTMENTS.MOMENTUM.DIVERGENCE_EXIT_PNL_THRESHOLD) {
         // Grace period: use user's minHoldTimeMinutes instead of hardcoded 10 minutes
         // This ensures consistency with other position management logic
         const positionAgeMinutes = position.opened_at 
@@ -876,7 +875,7 @@ serve(async (req) => {
         }
       }
       // Log when momentum divergence is detected but P&L is above threshold (letting other guards handle it)
-      else if (divergenceExit && isMomentum && earlyPnlPercent >= -0.3 && earlyPnlPercent < 0) {
+      else if (divergenceExit && isMomentum && earlyPnlPercent >= STRATEGY_EXIT_ADJUSTMENTS.MOMENTUM.DIVERGENCE_EXIT_PNL_THRESHOLD && earlyPnlPercent < 0) {
         positionLogger.info(`STRATEGY-AWARE: Momentum divergence detected but P&L ${earlyPnlPercent.toFixed(2)}% >= -0.3% threshold - letting trailing/break-even guards handle`);
       }
       // SCENARIO 5 FIX: Conditional volatility exit - extreme volatility alone = conditional exit
@@ -919,13 +918,13 @@ serve(async (req) => {
           const positionAgeForVolatility = position.opened_at 
             ? (Date.now() - new Date(position.opened_at).getTime()) / (1000 * 60) 
             : 999;
-          const VOLATILITY_GRACE_PERIOD_MINUTES = 5;
+          const VOLATILITY_GRACE_PERIOD_MINUTES = TRAILING_STOP_INLINE.VOLATILITY_GRACE_PERIOD_MINUTES;
           
           // FIX: Skip extreme volatility exit for positions younger than 5 minutes
           // This prevents killing trades before they have time to develop
           if (positionAgeForVolatility < VOLATILITY_GRACE_PERIOD_MINUTES) {
             positionLogger.info(`VOLATILITY GRACE: Position age ${positionAgeForVolatility.toFixed(1)}min < ${VOLATILITY_GRACE_PERIOD_MINUTES}min grace period - skipping extreme volatility check (ATR ${atrRatio.toFixed(2)}x, threshold ${adaptiveVolatilityThreshold.toFixed(2)}x, mode=${volatilityMode})`);
-          } else if (earlyPnlPercent > 0 && positionConfidence >= 55) {
+          } else if (earlyPnlPercent > 0 && positionConfidence >= TRAILING_STOP_INLINE.CONDITIONAL_VOLATILITY_MIN_CONFIDENCE) {
             // SCENARIO 5: Conditional - profitable position in confident trend should reduce, not exit
             positionLogger.info(`CONDITIONAL VOLATILITY: ATR ${atrRatio.toFixed(2)}x >= ${adaptiveVolatilityThreshold.toFixed(2)}x but P&L ${earlyPnlPercent.toFixed(2)}% > 0 and confidence ${positionConfidence}% >= 55 - skipping exit (mode=${volatilityMode}, ADX=${positionAdxValue.toFixed(1)})`);
           } else {
@@ -1488,8 +1487,8 @@ serve(async (req) => {
           } else if (hasMetMinHoldTime && pnlPercent > 0) {
             // For non-emergency profitable positions, tighten stop aggressively
             const aggressiveStop = position.side === "BUY"
-              ? currentPrice * 0.995 // 0.5% below current
-              : currentPrice * 1.005; // 0.5% above current
+              ? currentPrice * (1 - TRAILING_STOP_INLINE.AGGRESSIVE_STOP_DISTANCE_PERCENT / 100)
+              : currentPrice * (1 + TRAILING_STOP_INLINE.AGGRESSIVE_STOP_DISTANCE_PERCENT / 100);
             
             if (position.side === "BUY" && aggressiveStop > (newStopLoss || position.stop_loss)) {
               newStopLoss = aggressiveStop;
@@ -1519,7 +1518,7 @@ serve(async (req) => {
         // Premium alignment = wider trailing (more room for pullbacks)
         // Weak/counter-trend = tighter trailing (lock profits faster)
         // ============================================================
-        const baseTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * 0.015); // Min 1.5% of current price
+        const baseTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * (TRAILING_STOP_INLINE.MIN_TRAILING_DISTANCE_PERCENT / 100));
         const minTrailingDistance = baseTrailingDistance * htfAlignmentMultiplier; // Apply HTF multiplier
         
         if (htfAlignmentMultiplier !== 1.0) {
@@ -1560,8 +1559,8 @@ serve(async (req) => {
           if (userSettings.decayVelocityExitEnabled && minutesSincePeak > 0) {
             const decayPercent = newPeakPnl - pnlPercent;
             const decayVelocity = decayPercent / minutesSincePeak;
-            if (decayVelocity > 0.02) {
-              decayOverride = 0.80; // Force 80% lock on fast decay
+            if (decayVelocity > TRAILING_STOP_INLINE.DECAY_OVERRIDE_VELOCITY_THRESHOLD) {
+              decayOverride = TRAILING_STOP_INLINE.DECAY_OVERRIDE_LOCK_PERCENT;
               lockTier = "decay_override";
             }
           }
@@ -1571,7 +1570,7 @@ serve(async (req) => {
           
           // Only use smart AITS if it's more protective than user setting
           if (adaptiveLock > profitLockPercent) {
-            profitLockPercent = Math.min(0.85, adaptiveLock);
+            profitLockPercent = Math.min(TRAILING_STOP_INLINE.MAX_ADAPTIVE_LOCK, adaptiveLock);
             smartAitsApplied = true;
             
             // Determine tier for logging
@@ -2015,19 +2014,19 @@ serve(async (req) => {
           
           // Check if momentum is turning against position
           if (momentum.hasDivergence) {
-            riskScore += 25;
+            riskScore += REVERSAL_RISK_EXIT_SCORES.MACD_DIVERGENCE;
             signals.push("MACD divergence detected");
           }
           if (!momentum.confirms && momentum.state !== "confirmed") {
-            riskScore += 15;
+            riskScore += REVERSAL_RISK_EXIT_SCORES.MOMENTUM_WEAKENING;
             signals.push(`Momentum weakening (state: ${momentum.state || "none"})`);
           }
           if (!momentum.lastCloseAlignsWithTrend) {
-            riskScore += 10;
+            riskScore += REVERSAL_RISK_EXIT_SCORES.LAST_CLOSE_OPPOSES;
             signals.push("Last close opposes trend");
           }
           if (!momentum.macdDirectionAligned) {
-            riskScore += 15;
+            riskScore += REVERSAL_RISK_EXIT_SCORES.MACD_DIRECTION_MISALIGNED;
             signals.push("MACD direction misaligned");
           }
           
@@ -2042,22 +2041,21 @@ serve(async (req) => {
             const shouldReduceStochZonePenalty = rsiIndicatesPullback && momentumConfirms;
             
             if ((stochRsi.bullishCrossCount || 0) >= 1) {
-              riskScore += 25;
+              riskScore += REVERSAL_RISK_EXIT_SCORES.STOCHRSI_CROSS;
               signals.push(`StochRSI bullish cross (${stochRsi.bullishCrossCount} TF)`);
             }
             if ((stochRsi.oversoldCount || 0) >= 2) {
-              // Apply 50% reduction if RSI pullback + momentum confirms
-              let zoneScore = 15;
+              let zoneScore = REVERSAL_RISK_EXIT_SCORES.STOCHRSI_EXTREME_ZONE;
               if (shouldReduceStochZonePenalty) {
-                zoneScore = Math.round(zoneScore * 0.5);
-                signals.push(`StochRSI oversold on ${stochRsi.oversoldCount} TF - reduced 50% (RSI pullback + momentum)`);
+                zoneScore = Math.round(zoneScore * REVERSAL_RISK_EXIT_SCORES.RSI_PULLBACK_REDUCTION_FACTOR);
+                signals.push(`StochRSI oversold on ${stochRsi.oversoldCount} TF - reduced ${REVERSAL_RISK_EXIT_SCORES.RSI_PULLBACK_REDUCTION_FACTOR * 100}% (RSI pullback + momentum)`);
               } else {
                 signals.push(`StochRSI oversold on ${stochRsi.oversoldCount} TF (bounce risk)`);
               }
               riskScore += zoneScore;
             }
             if (trend1h === "bullish") {
-              riskScore += 20;
+              riskScore += REVERSAL_RISK_EXIT_SCORES.TREND_1H_FLIPPED;
               signals.push("1h trend turned bullish");
             }
           }
@@ -2068,22 +2066,21 @@ serve(async (req) => {
             const shouldReduceStochZonePenalty = rsiIndicatesPullback && momentumConfirms;
             
             if ((stochRsi.bearishCrossCount || 0) >= 1) {
-              riskScore += 25;
+              riskScore += REVERSAL_RISK_EXIT_SCORES.STOCHRSI_CROSS;
               signals.push(`StochRSI bearish cross (${stochRsi.bearishCrossCount} TF)`);
             }
             if ((stochRsi.overboughtCount || 0) >= 2) {
-              // Apply 50% reduction if RSI pullback + momentum confirms
-              let zoneScore = 15;
+              let zoneScore = REVERSAL_RISK_EXIT_SCORES.STOCHRSI_EXTREME_ZONE;
               if (shouldReduceStochZonePenalty) {
-                zoneScore = Math.round(zoneScore * 0.5);
-                signals.push(`StochRSI overbought on ${stochRsi.overboughtCount} TF - reduced 50% (RSI pullback + momentum)`);
+                zoneScore = Math.round(zoneScore * REVERSAL_RISK_EXIT_SCORES.RSI_PULLBACK_REDUCTION_FACTOR);
+                signals.push(`StochRSI overbought on ${stochRsi.overboughtCount} TF - reduced ${REVERSAL_RISK_EXIT_SCORES.RSI_PULLBACK_REDUCTION_FACTOR * 100}% (RSI pullback + momentum)`);
               } else {
                 signals.push(`StochRSI overbought on ${stochRsi.overboughtCount} TF (pullback risk)`);
               }
               riskScore += zoneScore;
             }
             if (trend1h === "bearish") {
-              riskScore += 20;
+              riskScore += REVERSAL_RISK_EXIT_SCORES.TREND_1H_FLIPPED;
               signals.push("1h trend turned bearish");
             }
           }
@@ -2149,15 +2146,15 @@ serve(async (req) => {
             const parentLossAmount = Math.abs(parentLossPercent);
             
             // Hedge TP should cover the parent's loss + some profit (1.5x coverage)
-            const hedgeTpPercent = Math.max(parentLossAmount * 1.5, 1.0);
+            const hedgeTpPercent = Math.max(parentLossAmount * HEDGE_EXIT_PARAMS.TP_COVERAGE_MULTIPLIER, HEDGE_EXIT_PARAMS.MIN_TP_PERCENT);
             // For SELL hedge: TP when price goes DOWN, SL when goes UP
             // For BUY hedge: TP when price goes UP, SL when goes DOWN
             const hedgeTpPrice = isLong
               ? currentPrice * (1 - hedgeTpPercent / 100)
               : currentPrice * (1 + hedgeTpPercent / 100);
             const hedgeSlPrice = isLong
-              ? currentPrice * 1.015  // 1.5% stop above for SELL hedge
-              : currentPrice * 0.985; // 1.5% stop below for BUY hedge
+              ? currentPrice * (1 + HEDGE_EXIT_PARAMS.HEDGE_SL_PERCENT / 100)
+              : currentPrice * (1 - HEDGE_EXIT_PARAMS.HEDGE_SL_PERCENT / 100);
             
             positionLogger.info(`HEDGE CALC: Parent ${positionSide} loss ${parentLossPercent.toFixed(2)}%, Hedge TP target ${hedgeTpPercent.toFixed(2)}% at $${hedgeTpPrice.toFixed(4)}`);
             
@@ -2238,8 +2235,8 @@ serve(async (req) => {
           
           // MICRO_TREND: Time-bound expiry (max 2 hours for short-term plays)
           const isMicroTrendEntry = entryExceptionType === 'MICRO_TREND';
-          const MICRO_TREND_MAX_AGE_MINUTES = 120;
-          const MICRO_TREND_MIN_PROFIT_PERCENT = 0.3;
+          const MICRO_TREND_MAX_AGE_MINUTES = MICRO_TREND_EXIT.MAX_AGE_MINUTES;
+          const MICRO_TREND_MIN_PROFIT_PERCENT = MICRO_TREND_EXIT.MIN_PROFIT_PERCENT;
           
           // Check MICRO_TREND timeout first (before other exit logic)
           if (!result.shouldClose && isMicroTrendEntry && positionAgeMinutes > MICRO_TREND_MAX_AGE_MINUTES && pnlPercent < MICRO_TREND_MIN_PROFIT_PERCENT) {
@@ -2437,8 +2434,7 @@ serve(async (req) => {
         const hoursOpen = (now.getTime() - openedAt.getTime()) / (1000 * 60 * 60);
         
         // Give 50% more time than configured before considering time-based exit
-        const TIME_STOP_MULTIPLIER = 1.5;
-        const effectiveTimeLimit = userSettings.timeBasedStopHours * TIME_STOP_MULTIPLIER;
+        const effectiveTimeLimit = userSettings.timeBasedStopHours * TIME_STOP_MULT;
         const MIN_LOSS_FOR_TIME_EXIT = EXIT_THRESHOLDS.TIME_BASED_MIN_PNL_PERCENT;
         const TIME_BASED_MAX_ADX = EXIT_THRESHOLDS.TIME_BASED_MAX_ADX;
         
@@ -2713,12 +2709,12 @@ serve(async (req) => {
         const effectiveTpDistance = tpDistance > 0 ? tpDistance : (position.entry_price * atrPercent / 100) * 2;
         
         if (position.side === "BUY") {
-          tp1Price = position.entry_price + (effectiveTpDistance * 0.33);
-          tp2Price = position.entry_price + (effectiveTpDistance * 0.66);
+          tp1Price = position.entry_price + (effectiveTpDistance * PARTIAL_TP_LADDER.TP1_DISTANCE_FRACTION);
+          tp2Price = position.entry_price + (effectiveTpDistance * PARTIAL_TP_LADDER.TP2_DISTANCE_FRACTION);
           tp3Price = position.take_profit || position.entry_price + effectiveTpDistance;
         } else {
-          tp1Price = position.entry_price - (effectiveTpDistance * 0.33);
-          tp2Price = position.entry_price - (effectiveTpDistance * 0.66);
+          tp1Price = position.entry_price - (effectiveTpDistance * PARTIAL_TP_LADDER.TP1_DISTANCE_FRACTION);
+          tp2Price = position.entry_price - (effectiveTpDistance * PARTIAL_TP_LADDER.TP2_DISTANCE_FRACTION);
           tp3Price = position.take_profit || position.entry_price - effectiveTpDistance;
         }
         
@@ -2751,13 +2747,13 @@ serve(async (req) => {
         // LONG: TP when price goes UP
         if (currentTpLevel < 1 && currentPrice >= tp1Price) {
           partialTpTriggered = true;
-          partialClosePercent = 50; // Close 50%
+          partialClosePercent = PARTIAL_TP_LADDER.TP1_CLOSE_PERCENT;
           newTpLevel = 1;
           partialCloseReason = "partial_tp_1";
           positionLogger.signal(`TP1 HIT for LONG: Price $${currentPrice.toFixed(2)} >= TP1 $${tp1Price.toFixed(2)}`);
         } else if (currentTpLevel < 2 && currentTpLevel >= 1 && currentPrice >= tp2Price) {
           partialTpTriggered = true;
-          partialClosePercent = 60; // Close 60% of remaining (30% of original)
+          partialClosePercent = PARTIAL_TP_LADDER.TP2_CLOSE_PERCENT;
           newTpLevel = 2;
           partialCloseReason = "partial_tp_2";
           positionLogger.signal(`TP2 HIT for LONG: Price $${currentPrice.toFixed(2)} >= TP2 $${tp2Price.toFixed(2)}`);
@@ -2766,13 +2762,13 @@ serve(async (req) => {
         // SHORT: TP when price goes DOWN
         if (currentTpLevel < 1 && currentPrice <= tp1Price) {
           partialTpTriggered = true;
-          partialClosePercent = 50;
+          partialClosePercent = PARTIAL_TP_LADDER.TP1_CLOSE_PERCENT;
           newTpLevel = 1;
           partialCloseReason = "partial_tp_1";
           positionLogger.signal(`TP1 HIT for SHORT: Price $${currentPrice.toFixed(2)} <= TP1 $${tp1Price.toFixed(2)}`);
         } else if (currentTpLevel < 2 && currentTpLevel >= 1 && currentPrice <= tp2Price) {
           partialTpTriggered = true;
-          partialClosePercent = 60;
+          partialClosePercent = PARTIAL_TP_LADDER.TP2_CLOSE_PERCENT;
           newTpLevel = 2;
           partialCloseReason = "partial_tp_2";
           positionLogger.signal(`TP2 HIT for SHORT: Price $${currentPrice.toFixed(2)} <= TP2 $${tp2Price.toFixed(2)}`);
