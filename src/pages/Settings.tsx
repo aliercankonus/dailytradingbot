@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,7 +6,8 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Settings as SettingsIcon, Key, Mail, Shield, ArrowLeft, Brain } from 'lucide-react';
+import { Key, Mail, Shield, Brain } from 'lucide-react';
+import { AppHeader } from '@/components/AppHeader';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { PerformanceSettings } from '@/components/PerformanceSettings';
 
@@ -18,7 +18,6 @@ import { SmartTradingSettings } from '@/components/SmartTradingSettings';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function Settings() {
-  const navigate = useNavigate();
   const { toast } = useToast();
   const { riskParams, updateRiskParameters } = useRiskParameters();
   const [loading, setLoading] = useState(false);
@@ -212,20 +211,9 @@ export default function Settings() {
   };
 
   return (
-    <div className="container mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6">
-      <div className="flex items-center gap-2 sm:gap-3 mb-6">
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          onClick={() => navigate('/')}
-          className="mr-1 sm:mr-2 shrink-0"
-        >
-          <ArrowLeft className="h-4 w-4 sm:mr-2" />
-          <span className="hidden sm:inline">Back</span>
-        </Button>
-        <SettingsIcon className="h-6 w-6 sm:h-8 sm:w-8 text-primary shrink-0" />
-        <h1 className="text-xl sm:text-3xl font-bold">Settings</h1>
-      </div>
+    <div className="min-h-screen bg-background">
+      <AppHeader />
+      <div className="container mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6">
 
       <Tabs defaultValue="general" className="w-full">
         <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-2">
@@ -493,6 +481,7 @@ export default function Settings() {
         </TabsContent>
 
       </Tabs>
+      </div>
     </div>
   );
 }

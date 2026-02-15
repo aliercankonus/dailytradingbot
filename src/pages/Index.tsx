@@ -1,7 +1,5 @@
-import { useNavigate, } from "react-router-dom";
-import { Settings, Coins, BarChart3, HeartPulse } from "lucide-react";
 import { lazy, Suspense } from "react";
-import { DashboardHeader } from "@/components/DashboardHeader";
+import { AppHeader } from "@/components/AppHeader";
 import { BotStatus } from "@/components/BotStatus";
 import { TodayPerformanceWidget } from "@/components/TodayPerformanceWidget";
 import { TradeHistory } from "@/components/TradeHistory";
@@ -12,10 +10,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
 import { TradeCounterSync } from "@/components/TradeCounterSync";
 import { Skeleton } from "@/components/ui/skeleton";
-
 import { SignalRefreshProvider } from "@/contexts/SignalRefreshContext";
 
-// Lazy load heavy tab content that isn't visible on initial render
+// Lazy load heavy tab content
 const MarketConditionsDashboard = lazy(() => import("@/components/MarketConditionsDashboard").then(m => ({ default: m.MarketConditionsDashboard })));
 const SignalsOverview = lazy(() => import("@/components/SignalsOverview").then(m => ({ default: m.SignalsOverview })));
 const ActivePositions = lazy(() => import("@/components/ActivePositions").then(m => ({ default: m.ActivePositions })));
@@ -31,7 +28,6 @@ const MomentumStatusDashboard = lazy(() => import("@/components/MomentumStatusDa
 const ModuleInventoryDashboard = lazy(() => import("@/components/ModuleInventoryDashboard"));
 const RegimeTransitionLog = lazy(() => import("@/components/RegimeTransitionLog").then(m => ({ default: m.RegimeTransitionLog })));
 const OrderFlowDashboard = lazy(() => import("@/components/OrderFlowDashboard").then(m => ({ default: m.OrderFlowDashboard })));
-
 const MarketOpportunityDensity = lazy(() => import("@/components/MarketOpportunityDensity"));
 
 const TabFallback = () => (
@@ -42,48 +38,10 @@ const TabFallback = () => (
 );
 
 const Index = () => {
-  const navigate = useNavigate();
-
   return (
     <SignalRefreshProvider>
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between gap-4">
-            <DashboardHeader />
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <button
-                onClick={() => navigate('/health')}
-                className="p-2 hover:bg-accent rounded-lg transition-colors"
-                aria-label="System Health"
-              >
-                <HeartPulse className="h-5 w-5 text-muted-foreground hover:text-foreground" />
-              </button>
-              <button
-                onClick={() => navigate('/performance')}
-                className="p-2 hover:bg-accent rounded-lg transition-colors"
-                aria-label="Performance"
-              >
-                <BarChart3 className="h-5 w-5 text-muted-foreground hover:text-foreground" />
-              </button>
-              <button
-                onClick={() => navigate('/symbols')}
-                className="p-2 hover:bg-accent rounded-lg transition-colors"
-                aria-label="Trading Symbols"
-              >
-                <Coins className="h-5 w-5 text-muted-foreground hover:text-foreground" />
-              </button>
-              <button
-                onClick={() => navigate('/settings')}
-                className="p-2 hover:bg-accent rounded-lg transition-colors"
-                aria-label="Settings"
-              >
-                <Settings className="h-5 w-5 text-muted-foreground hover:text-foreground" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
+      <AppHeader />
       
       <main className="container mx-auto px-4 py-6">
         <AutoSignalGenerator />
@@ -120,13 +78,11 @@ const Index = () => {
             </div>
 
             <LivePriceCard />
-
             <TradeHistory />
 
             <Suspense fallback={<Skeleton className="h-48 w-full" />}>
               <MarketConditionsDashboard />
             </Suspense>
-
           </TabsContent>
 
           <TabsContent value="signals" className="space-y-6">
