@@ -165,15 +165,15 @@ export const OrderFlowDashboard = () => {
         }
       });
 
-      // Fetch kline data for all symbols in parallel
-      const klinePromises = symbols.map(({ symbol }) => 
-        fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=100`)
-          .then(res => res.json())
-          .then(klines => ({ symbol, klines }))
-          .catch(() => ({ symbol, klines: [] }))
-      );
+      // Fetch kline data for all symbols via backend function (avoids CORS)
+      const symbolNames = symbols.map(({ symbol }) => symbol);
+      const { data: klineResponse, error: klineError } = await supabase.functions.invoke('fetch-klines', {
+        body: { symbols: symbolNames, interval: '1h', limit: 100 }
+      });
 
-      const klineResults = await Promise.all(klinePromises);
+      const klineResults: { symbol: string; klines: any[] }[] = 
+        (!klineError && klineResponse?.success) ? klineResponse.data : 
+        symbolNames.map(symbol => ({ symbol, klines: [] }));
       
       // Store price data for correlation calculation
       const newPriceData = new Map<string, number[]>();
