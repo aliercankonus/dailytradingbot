@@ -16,11 +16,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { SignalRefreshProvider } from "@/contexts/SignalRefreshContext";
 
 // Lazy load heavy tab content that isn't visible on initial render
-const TradingSignalsDashboard = lazy(() => import("@/components/TradingSignalsDashboard").then(m => ({ default: m.TradingSignalsDashboard })));
 const MarketConditionsDashboard = lazy(() => import("@/components/MarketConditionsDashboard").then(m => ({ default: m.MarketConditionsDashboard })));
-
-const SignalRejectionMonitor = lazy(() => import("@/components/SignalRejectionMonitor").then(m => ({ default: m.SignalRejectionMonitor })));
-const AIAnalysisDashboard = lazy(() => import("@/components/AIAnalysisDashboard").then(m => ({ default: m.AIAnalysisDashboard })));
+const SignalsOverview = lazy(() => import("@/components/SignalsOverview").then(m => ({ default: m.SignalsOverview })));
 const ActivePositions = lazy(() => import("@/components/ActivePositions").then(m => ({ default: m.ActivePositions })));
 const PositionsSummary = lazy(() => import("@/components/PositionsSummary").then(m => ({ default: m.PositionsSummary })));
 const ExitManagementDashboard = lazy(() => import("@/components/ExitManagementDashboard").then(m => ({ default: m.ExitManagementDashboard })));
@@ -134,9 +131,7 @@ const Index = () => {
 
           <TabsContent value="signals" className="space-y-6">
             <Suspense fallback={<TabFallback />}>
-              <SignalRejectionMonitor />
-              <TradingSignalsDashboard />
-              <AIAnalysisDashboard />
+              <SignalsOverview />
             </Suspense>
           </TabsContent>
 
