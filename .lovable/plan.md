@@ -1,65 +1,158 @@
 
 
-## Plan: Health Page with Error Details and WebSocket Monitor
+## Production-Ready UI Overhaul
 
-### Problem Analysis
-The WebSocket Connection Monitor shows "13 errors" but there's no way to see error details because:
-- The `WebSocketMonitorContext` only stores a counter (`errorCount`) and the last error string (`lastError`)
-- No error history/log is maintained
-- These errors are normal WebSocket reconnection events from the price feed and market data streams
+Phased execution plan aligned with architectural stability. No phase mixing -- each phase completes before the next begins.
 
-### What Will Be Built
+---
 
-#### 1. Add Error History to WebSocket Monitor Context
-Extend `WebSocketMonitorContext` to store a rolling log of the last 50 errors per connection, each with:
-- Timestamp
-- Error message
-- Connection name
+### Phase 1 -- Core Brand and Visual System
 
-This enables the "click to see details" feature.
+Lock the foundation before touching any components.
 
-#### 2. Clickable Error Count with Details Dialog
-In `WebSocketHealthDashboard`, make the error count clickable. Clicking it opens a Dialog showing:
-- Chronological list of errors with timestamps
-- Which connection produced each error
-- A "Clear" button to reset the log
+**Step 1: Brand System**
 
-#### 3. New Health Page (`/health`)
-Create a dedicated `/health` route with comprehensive system health info:
+- Product name: **TradeFlow** (institutional tone, no crypto hype)
+- Create `public/favicon.svg` -- minimal geometric brand mark (stylized chart pulse / flow line)
+- Create `src/components/BrandLogo.tsx` -- reusable inline SVG component, scalable, two sizes (compact for header, large for auth)
+- Update `index.html`:
+  - `<title>TradeFlow - Algorithmic Trading Platform</title>`
+  - Favicon reference to `/favicon.svg`
+  - Updated OG meta tags with new brand name
 
-**Section 1 — System Status Overview**
-- Bot heartbeat status (last heartbeat time, current no-trade state, symbols scanned, rejections logged)
-- Health state history from `bot_health_state` table (OPERATIONAL_CONCERN, EXTREME_OVERBOUGHT, MIXED_BLOCK events with durations and resolution times)
+**Step 2: Design Tokens**
 
-**Section 2 — WebSocket Connection Monitor**
-- Move `WebSocketHealthDashboard` from the Monitor tab to this page
-- Includes the new clickable error details
+Update `src/index.css` with refined palette (all values per your specification):
 
-**Section 3 — Heartbeat Timeline**
-- Recent heartbeat entries showing scanner activity over time
-- Visual indicator of no-trade state transitions
+| Token | Current | New |
+|-------|---------|-----|
+| Primary | `189 85% 52%` | `192 72% 46%` |
+| Background | `222 47% 11%` | `222 38% 9%` |
+| Card | `217 33% 14%` | `222 30% 13%` |
+| Border | `217 33% 20%` | `220 20% 18%` |
+| Muted foreground | `215 20% 65%` | `215 12% 62%` |
+| Warning | `38 92% 50%` | `38 85% 55%` |
 
-**Section 4 — Health Alerts History**
-- Past health state entries from `bot_health_state` showing when alerts were triggered and resolved
+Add CSS custom properties for subtle card effects:
+- `--card-glow`: top border gradient at 15% primary opacity
+- `--shadow-card`: refined `shadow-lg shadow-black/30`
+- Skeleton animation keyframe (pulsing brand logo)
 
-#### 4. Navigation Update
-- Add a Health icon button in the header (next to Performance, Symbols, Settings)
-- Remove `WebSocketHealthDashboard` from the Monitor tab in Index.tsx
+No changes to `tailwind.config.ts` beyond adding a `glass` utility if needed for `backdrop-blur-sm` shorthand.
 
-### Technical Details
+---
+
+### Phase 2 -- Information Architecture
+
+**Step 3: Shared Header Component**
+
+Create `src/components/AppHeader.tsx` -- single header used by ALL pages:
+
+- Left: BrandLogo + "TradeFlow" text
+- Center/Right: Labeled navigation links using `NavLink` component:
+  - Dashboard (`/`)
+  - Performance (`/performance`)
+  - Symbols (`/symbols`)
+  - Health (`/health`)
+  - Settings (`/settings`)
+- Active state: underline + soft background fill (not capsule pills -- institutional tone)
+- Right edge: connection status dot + user avatar dropdown
+- Bottom: 1px divider with low-opacity primary glow for depth
+- Mobile: nav items collapse into a hamburger that opens a Sheet/Drawer with full navigation
+
+Files modified:
+- `src/components/DashboardHeader.tsx` -- replaced by `AppHeader.tsx` (or refactored in place)
+- `src/pages/Index.tsx` -- use shared header, remove inline icon buttons (lines 54-83)
+- `src/pages/Health.tsx` -- replace custom back-button header with shared `AppHeader`
+- `src/pages/Performance.tsx` -- replace custom back-button header with shared `AppHeader`
+- `src/pages/Settings.tsx` -- replace custom back-button header with shared `AppHeader`
+- `src/pages/Symbols.tsx` -- replace custom back-button header with shared `AppHeader`
+
+Every page gets the same persistent navigation. No page feels secondary. Consistency equals trust.
+
+**Step 4: Summary Card Styling**
+
+Refine the existing `SignalsOverview` summary cards and all metric cards across Dashboard:
+- `backdrop-blur-sm` with semi-transparent background
+- Subtle gradient top border (primary at 15% opacity, 1px)
+- Shadow: `shadow-lg shadow-black/30`
+- Hover: slight elevation shift for interactive cards
+- Keep glass subtle -- avoid SaaS template appearance
+
+---
+
+### Phase 3 -- UX Professionalization
+
+**Step 5: Tab Styling**
+
+Update tab indicators across all pages (Dashboard main tabs, Settings tabs, Performance tabs, Positions sub-tabs):
+- Style: underline + soft background fill on active state (not full capsule pills)
+- Smooth transition on state change
+- Mobile scroll indicator gradient retained
+
+Implementation in `src/index.css` via scoped styles on `[data-state=active]` selectors.
+
+**Step 6: Loading States**
+
+Replace all loading fallbacks with proper skeletons:
+
+- `src/App.tsx` `PageFallback`: Replace "Loading..." text with pulsing BrandLogo icon centered on screen
+- `src/pages/Index.tsx` `TabFallback`: Already uses `Skeleton` -- keep as is
+- `src/pages/Symbols.tsx`: Replace `Loader2` spinner with BrandLogo pulse
+- `src/pages/Performance.tsx`: Replace "Loading performance data..." with skeleton cards matching the 4-stat grid + chart placeholder
+
+**Step 7: Auth Page Polish**
+
+Update `src/pages/Auth.tsx`:
+- Replace `TrendingUp` icon with `BrandLogo` component (large variant)
+- Title: "TradeFlow"
+- Tagline: "Professional Algorithmic Trading"
+- Background: slow animated CSS gradient (15-20s loop), defined in `src/index.css`
+- Clean input spacing improvements
+- No particles, no heavy animation
+
+---
+
+### Phase 4 -- Consistency and System Integrity
+
+**Step 8: Shared Header Verification**
+
+After all pages use `AppHeader`, verify:
+- Active route highlighting works on every page
+- Mobile hamburger menu opens and navigates correctly
+- User avatar dropdown and sign-out work from every page
+- Connection status indicator visible on desktop
+
+**Step 9: Optional Footer**
+
+Add lightweight `src/components/AppFooter.tsx`:
+- Muted text, small font
+- Content: `v1.0.0 -- Powered by TradeFlow`
+- Shown on sub-pages (Health, Performance, Settings, Symbols)
+- No marketing copy
+
+---
+
+### Technical Summary
 
 **Files to create:**
-- `src/pages/Health.tsx` — New health page with all sections
-- `src/hooks/useBotHealth.ts` — Hook to fetch `bot_heartbeat` and `bot_health_state` data
+- `public/favicon.svg`
+- `src/components/BrandLogo.tsx`
+- `src/components/AppHeader.tsx`
+- `src/components/AppFooter.tsx` (optional)
 
 **Files to modify:**
-- `src/contexts/WebSocketMonitorContext.tsx` — Add `errorLog` array to each connection's metrics, and expose it; add `clearErrors` method
-- `src/components/WebSocketHealthDashboard.tsx` — Make error count clickable, show Dialog with error history
-- `src/pages/Index.tsx` — Remove `WebSocketHealthDashboard` from Monitor tab, add Health nav button in header
-- `src/App.tsx` — Add `/health` route (lazy loaded, protected)
+- `index.html` -- favicon, title, OG tags
+- `src/index.css` -- design tokens, card effects, tab styles, auth gradient animation, skeleton keyframes
+- `src/App.tsx` -- branded loading fallback
+- `src/pages/Index.tsx` -- use AppHeader, remove icon nav buttons
+- `src/pages/Health.tsx` -- use AppHeader
+- `src/pages/Performance.tsx` -- use AppHeader, skeleton loading
+- `src/pages/Settings.tsx` -- use AppHeader
+- `src/pages/Symbols.tsx` -- use AppHeader, branded loading
+- `src/pages/Auth.tsx` -- brand logo, tagline, animated background
+- `src/components/SignalsOverview.tsx` -- card glass styling
+- `src/components/DashboardHeader.tsx` -- may be deprecated or merged into AppHeader
 
-**Data sources:**
-- `bot_heartbeat` table: `recorded_at`, `no_trade_state`, `symbols_scanned`, `signals_generated`, `rejections_logged`, `details`
-- `bot_health_state` table: `state`, `state_type`, `started_at`, `resolved_at`, `alert_sent`, `details`
-- `WebSocketMonitorContext`: live connection metrics + new error log
+**No database changes. No new dependencies.**
 
