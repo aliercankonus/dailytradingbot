@@ -311,25 +311,25 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
                     key={sym.symbol} 
                     className="p-3 rounded-lg border bg-muted/30 space-y-2"
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-medium">{sym.symbol}</span>
-                        <VolumeStatusBadge ratio={sym.volumeRatio} />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {sym.trendDirection !== 'unknown' && (
-                          <Badge variant="outline" className="text-xs">
-                            <TrendingUp className="h-3 w-3 mr-1" />
-                            {sym.trendDirection}
-                          </Badge>
-                        )}
-                        {typeof sym.adx === 'number' && (
-                          <Badge variant="outline" className="text-xs">
-                            ADX: {sym.adx.toFixed(1)}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
+                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                       <div className="flex items-center gap-2 min-w-0">
+                         <span className="font-mono font-medium truncate">{sym.symbol}</span>
+                         <VolumeStatusBadge ratio={sym.volumeRatio} />
+                       </div>
+                       <div className="flex items-center gap-1 flex-wrap">
+                         {sym.trendDirection !== 'unknown' && (
+                           <Badge variant="outline" className="text-xs">
+                             <TrendingUp className="h-3 w-3 mr-1" />
+                             {sym.trendDirection}
+                           </Badge>
+                         )}
+                         {typeof sym.adx === 'number' && (
+                           <Badge variant="outline" className="text-xs">
+                             ADX: {sym.adx.toFixed(1)}
+                           </Badge>
+                         )}
+                       </div>
+                     </div>
                     
                     <div className="flex items-center gap-2 text-xs">
                       {sym.qualityScore !== null && (

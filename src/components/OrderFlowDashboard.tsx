@@ -427,14 +427,14 @@ export const OrderFlowDashboard = () => {
 
   return (
     <Card className="bg-card border-border">
-      <CardHeader className="flex flex-row items-center justify-between pb-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary/10">
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="p-2 rounded-lg bg-primary/10 shrink-0">
             <Activity className="h-5 w-5 text-primary" />
           </div>
-          <div>
-            <CardTitle className="text-lg font-semibold">Order Flow Analysis</CardTitle>
-            <p className="text-sm text-muted-foreground">Volume spikes, price rejections & institutional activity</p>
+          <div className="min-w-0">
+            <CardTitle className="text-base sm:text-lg font-semibold">Order Flow</CardTitle>
+            <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">Volume spikes, price rejections & institutional activity</p>
           </div>
         </div>
         <Button 
@@ -442,6 +442,7 @@ export const OrderFlowDashboard = () => {
           size="sm" 
           onClick={fetchOrderFlowData}
           disabled={isLoading}
+          className="shrink-0 self-end sm:self-auto"
         >
           {isLoading ? 'Loading...' : 'Refresh'}
         </Button>
@@ -453,11 +454,11 @@ export const OrderFlowDashboard = () => {
           </div>
         ) : (
           <Tabs defaultValue="orderflow" className="w-full">
-            <TabsList className="mb-4">
+            <TabsList className="mb-4 flex w-full overflow-x-auto scrollbar-hide">
               <TabsTrigger value="orderflow">Order Flow</TabsTrigger>
               <TabsTrigger value="correlation">
-                <Grid3X3 className="h-4 w-4 mr-2" />
-                Correlation Matrix
+                <Grid3X3 className="h-4 w-4 mr-1 sm:mr-2" />
+                Correlation
               </TabsTrigger>
             </TabsList>
             
@@ -466,8 +467,8 @@ export const OrderFlowDashboard = () => {
                 <Card key={data.symbol} className="bg-background/50 border-border/50">
                   <CardContent className="p-4">
                     {/* Header Row */}
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="font-bold text-lg">{data.symbol}</span>
                         <Badge className={getSignalColor(data.signal)}>
                           {data.signal.replace('_', ' ').toUpperCase()}
@@ -484,14 +485,14 @@ export const OrderFlowDashboard = () => {
                           {data.directionSource === "strategy-analyzer" ? "📊 Strategy" : "📈 SMA20"}
                         </Badge>
                       </div>
-                      <div className="flex items-center gap-4">
-                        <div className="text-right">
-                          <div className={`text-2xl font-bold ${getScoreColor(data.score)}`}>
+                      <div className="flex items-center gap-2 sm:gap-4">
+                        <div className="sm:text-right">
+                          <span className={`text-xl sm:text-2xl font-bold ${getScoreColor(data.score)}`}>
                             {data.score}/100
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {data.confidence}% confidence
-                          </div>
+                          </span>
+                          <span className="text-xs text-muted-foreground ml-2 sm:ml-0 sm:block">
+                            {data.confidence}% conf
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -603,15 +604,15 @@ export const OrderFlowDashboard = () => {
               <Card className="bg-background/50 border-border/50">
                 <CardContent className="p-4">
                   <div className="mb-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-semibold text-lg">Symbol Correlation Matrix</h3>
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <h3 className="font-semibold text-base sm:text-lg">Correlation Matrix</h3>
                       <Badge variant="outline" className="text-xs border-emerald-500/30 text-emerald-400">
                         <RefreshCw className="h-3 w-3 mr-1" />
-                        Live (100 candles)
+                        Live
                       </Badge>
                     </div>
-                    <p className="text-sm text-muted-foreground">
-                      Real-time Pearson correlation from 1H kline returns. Higher = more similar price movements.
+                    <p className="text-xs sm:text-sm text-muted-foreground">
+                      Pearson correlation from 1H returns. Higher = more similar movements.
                     </p>
                   </div>
                   
