@@ -2247,6 +2247,26 @@ serve(async (req) => {
       // Gate information
       entry_gates_passed: signal.indicators?.gatesPassed ?? [],
       position_size_multiplier: signal.indicators?.positionSizePercent ?? null,
+      // === PRODUCTION MULTIPLIER FORENSICS (mandatory for sizing compression analysis) ===
+      finalMultiplier: signal.indicators?.positionSizePercent ?? null,
+      regimeConfidence: signal.indicators?.fourStateRegime?.diagnostics?.regimeConfidence ?? null,
+      regimeAge: signal.indicators?.fourStateRegime?.diagnostics?.regimeAge ?? null,
+      fourStateRegime: signal.indicators?.fourStateRegime?.regime ?? null,
+      fourStatePositionMultiplier: signal.indicators?.fourStateRegime?.positionMultiplier ?? null,
+      dominantGate: signal.indicators?.exceptionType ?? signal.indicators?.exceptionDetails?.type ?? null,
+      // Gate multiplier stack for compression analysis
+      gateMultiplierStack: {
+        qualityScore: signal.indicators?.qualityScore ?? null,
+        qualityTier: signal.indicators?.qualityBreakdown ?? null,
+        exceptionMultiplier: signal.indicators?.exceptionDetails?.positionMultiplier ?? null,
+        fourStateMultiplier: signal.indicators?.fourStateRegime?.positionMultiplier ?? null,
+        strongAdxMultiplier: signal.indicators?.strongAdxOverride?.positionSizeMultiplier ?? null,
+        continuationMultiplier: signal.indicators?.continuationMode?.positionSizeMultiplier ?? null,
+        lateGrindMultiplier: signal.indicators?.lateGrindAcceptance?.positionSizeMultiplier ?? null,
+        meanReversionMultiplier: signal.indicators?.meanReversion?.positionMultiplier ?? null,
+        trendAccelerationMultiplier: signal.indicators?.trendAcceleration?.positionSizeMultiplier ?? null,
+        priceActionMultiplier: signal.indicators?.priceActionEarlyEntry?.positionSizeMultiplier ?? null,
+      },
       // Timeframe alignment
       tf_4h_trend: trendData?.timeframes?.['4h']?.trend ?? null,
       tf_1h_trend: trendData?.timeframes?.['1h']?.trend ?? null,

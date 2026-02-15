@@ -406,13 +406,21 @@ export const DEEP_STOCHRSI_HARD_GATE = {
   ENABLED: true,
   TIER: 0 as const,  // Explicit tier label
   
-  // Tier 0: Deep oversold threshold - block ALL SHORTs when 4h K below this
-  // At K < 5, bounce probability is ~80%+ (statistically poor short entry)
-  DEEP_OVERSOLD_K_THRESHOLD: 5,
+  // Tier 0: Deep oversold threshold - HARD BLOCK ALL SHORTs when 4h K below this
+  // At K < 3, bounce probability is ~90%+ (statistical blow-off territory)
+  DEEP_OVERSOLD_K_THRESHOLD: 3,
   
-  // Tier 0: Deep overbought threshold - block ALL LONGs when 4h K above this
-  // At K > 95, pullback probability is ~80%+ (statistically poor long entry)
-  DEEP_OVERBOUGHT_K_THRESHOLD: 95,
+  // Tier 0: Deep overbought threshold - HARD BLOCK ALL LONGs when 4h K above this
+  // At K > 97, pullback probability is ~90%+ (statistical blow-off territory)
+  DEEP_OVERBOUGHT_K_THRESHOLD: 97,
+  
+  // Tier 0 SOFT CAP: Reduced sizing zone before hard block
+  // K 95-97 for LONGs, K 3-5 for SHORTs → allow entry with 0.5x position cap
+  // Rationale: 95 is early climax, 97+ is real statistical blow-off
+  SOFT_CAP_OVERBOUGHT_K_THRESHOLD: 95,  // LONGs soft-capped above this
+  SOFT_CAP_OVERSOLD_K_THRESHOLD: 5,     // SHORTs soft-capped below this
+  SOFT_CAP_POSITION_MULTIPLIER: 0.50,   // 50% position size in soft cap zone
+  
    // NOTE: Strong Trend Override is controlled solely by STRONG_TREND_TIER0_OVERRIDE.ENABLED
    // REMOVED: ALLOW_STRONG_TREND_OVERRIDE (was causing configuration divergence risk)
 } as const;
