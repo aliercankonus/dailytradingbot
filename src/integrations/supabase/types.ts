@@ -304,41 +304,6 @@ export type Database = {
         }
         Relationships: []
       }
-      notifications: {
-        Row: {
-          id: string
-          message: string
-          position_id: string | null
-          sent_at: string | null
-          type: string
-          user_id: string
-        }
-        Insert: {
-          id?: string
-          message: string
-          position_id?: string | null
-          sent_at?: string | null
-          type: string
-          user_id: string
-        }
-        Update: {
-          id?: string
-          message?: string
-          position_id?: string | null
-          sent_at?: string | null
-          type?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "notifications_position_id_fkey"
-            columns: ["position_id"]
-            isOneToOne: false
-            referencedRelation: "positions"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       portfolio_performance_history: {
         Row: {
           avg_loss: number | null
