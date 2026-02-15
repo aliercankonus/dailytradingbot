@@ -74,6 +74,15 @@ export const AppHeader = () => {
             </div>
 
             {user && (
+              <div className="flex items-center gap-3">
+                {!isMobile && (
+                  <div className="text-right">
+                    <p className="text-xs text-muted-foreground leading-none">Welcome back</p>
+                    <p className="text-sm font-medium text-foreground leading-tight mt-0.5 max-w-[160px] truncate">
+                      {user.email?.split('@')[0] || 'Trader'}
+                    </p>
+                  </div>
+                )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="relative h-9 w-9 rounded-full ring-1 ring-border hover:ring-primary/40 transition-all">
@@ -97,7 +106,8 @@ export const AppHeader = () => {
                     <span>Log out</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
-              </DropdownMenu>
+               </DropdownMenu>
+              </div>
             )}
 
             {/* Mobile hamburger */}
