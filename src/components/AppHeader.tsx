@@ -1,5 +1,6 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { BrandLogo } from "@/components/BrandLogo";
+import { useNavigate } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -26,12 +27,12 @@ const navItems = [
   { label: "Analytics", to: "/performance", icon: BarChart3 },
   { label: "Markets", to: "/symbols", icon: Coins },
   { label: "System", to: "/health", icon: HeartPulse },
-  { label: "Settings", to: "/settings", icon: Settings },
 ];
 
 export const AppHeader = () => {
   const { user, signOut } = useAuth();
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const getInitials = (email: string) => email.substring(0, 2).toUpperCase();
@@ -99,6 +100,10 @@ export const AppHeader = () => {
                       </div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => navigate('/settings')} className="cursor-pointer">
+                      <Settings className="mr-2 h-4 w-4" />
+                      <span>Settings</span>
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={signOut} className="cursor-pointer">
                       <LogOut className="mr-2 h-4 w-4" />
                       <span>Log out</span>
