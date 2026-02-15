@@ -115,13 +115,13 @@ const Index = () => {
               </div>
             </div>
 
-            <Suspense fallback={<Skeleton className="h-48 w-full" />}>
-              <MarketConditionsDashboard />
-            </Suspense>
+            <LivePriceCard />
 
             <TradeHistory />
 
-            <LivePriceCard />
+            <Suspense fallback={<Skeleton className="h-48 w-full" />}>
+              <MarketConditionsDashboard />
+            </Suspense>
 
           </TabsContent>
 
