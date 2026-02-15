@@ -6659,3 +6659,53 @@ export const HEALTH_ALERT_TYPES = {
   },
 } as const;
 
+// ============= GRADUATED QUALITY GATE (execute-trade) =============
+// Centralized thresholds for the graduated quality scoring system
+// Used in execute-trade to apply position reductions for borderline quality scores
+export const GRADUATED_QUALITY_GATE = {
+  // Hard minimum quality score - trades below this are always blocked
+  HARD_MIN: 55,
+  // Soft zone upper bound - scores between HARD_MIN and this get 30% position reduction
+  SOFT_ZONE_UPPER: 60,
+  // Position reduction percentages for each zone
+  SOFT_ZONE_REDUCTION_PERCENT: 30,      // 55-60 zone
+  BORDERLINE_REDUCTION_PERCENT: 15,     // 60-threshold zone
+  // ADX-based quality relaxation tiers
+  ADX_RELAXATION: {
+    ULTRA_STRONG_ADX: 50,     // ADX >= 50 → 5pt relaxation
+    ULTRA_STRONG_RELAX: 5,
+    STRONG_ADX: 40,           // ADX >= 40 → 3pt relaxation
+    STRONG_RELAX: 3,
+  },
+} as const;
+
+// ============= ADAPTIVE TREND ENTRY THRESHOLDS (strategy-analyzer) =============
+// Used by Phase 3 Adaptive Trend Entry in strategy-analyzer
+// These are more permissive than standard thresholds since all gates have already passed
+export const ADAPTIVE_ENTRY_THRESHOLDS = {
+  MIN_QUALITY: 55,
+  MIN_HTF_CONFIDENCE: 55,
+  MAX_REVERSAL_SCORE: 45,
+  // Graduated position sizing by quality + ADX
+  SIZING: {
+    HIGH_QUALITY_STRONG_TREND: { minQuality: 75, minAdx: 30, multiplier: 0.85 },
+    HIGH_QUALITY:              { minQuality: 70, multiplier: 0.75 },
+    GOOD_QUALITY:              { minQuality: 65, multiplier: 0.65 },
+    ABOVE_AVERAGE:             { minQuality: 60, multiplier: 0.55 },
+    BASELINE:                  { multiplier: 0.45 },
+  },
+} as const;
+
+// ============= RSI ZONE THRESHOLDS =============
+// Centralized RSI thresholds used across scoring and pullback detection
+export const RSI_ZONE_THRESHOLDS = {
+  // Directional bias zones (scoring.ts micro-structure)
+  BULLISH_HINT: 50,        // RSI > 50 with bullish MACD = bullish hint
+  BEARISH_HINT: 50,        // RSI < 50 with bearish MACD = bearish hint
+  MILD_BULLISH: 55,        // RSI > 55 alone = mild bullish hint
+  MILD_BEARISH: 45,        // RSI < 45 alone = mild bearish hint
+  // Pullback detection zone (strategy-analyzer)
+  PULLBACK_ZONE_LOW: 40,   // RSI > 40 = possible pullback
+  PULLBACK_ZONE_HIGH: 60,  // RSI < 60 = possible pullback
+} as const;
+
