@@ -35,6 +35,7 @@ const ModuleInventoryDashboard = lazy(() => import("@/components/ModuleInventory
 const RegimeTransitionLog = lazy(() => import("@/components/RegimeTransitionLog").then(m => ({ default: m.RegimeTransitionLog })));
 const OrderFlowDashboard = lazy(() => import("@/components/OrderFlowDashboard").then(m => ({ default: m.OrderFlowDashboard })));
 const WebSocketHealthDashboard = lazy(() => import("@/components/WebSocketHealthDashboard").then(m => ({ default: m.WebSocketHealthDashboard })));
+const MarketOpportunityDensity = lazy(() => import("@/components/MarketOpportunityDensity"));
 
 const TabFallback = () => (
   <div className="space-y-4">
@@ -192,7 +193,7 @@ const Index = () => {
                 </div>
               </div>
               <RegimeTransitionLog />
-              
+              <MarketOpportunityDensity />
               <OrderFlowDashboard />
               <WebSocketHealthDashboard />
             </Suspense>
