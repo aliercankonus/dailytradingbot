@@ -47,90 +47,88 @@ const Symbols = () => {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+        <div className="container mx-auto px-3 sm:px-4 py-3 sm:py-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => navigate('/')}
-                className="hover:bg-accent"
+                className="hover:bg-accent shrink-0"
               >
                 <ArrowLeft className="h-5 w-5" />
               </Button>
-              <div>
-                <h1 className="text-3xl font-bold">Trading Symbols</h1>
-                <p className="text-muted-foreground mt-1">
+              <div className="min-w-0">
+                <h1 className="text-xl sm:text-3xl font-bold truncate">Trading Symbols</h1>
+                <p className="text-muted-foreground text-xs sm:text-sm mt-0.5 sm:mt-1 hidden sm:block">
                   Manage which trading pairs are active in your system
                 </p>
               </div>
             </div>
-            <Button onClick={() => setShowAddDialog(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Symbol
+            <Button onClick={() => setShowAddDialog(true)} size="sm" className="shrink-0">
+              <Plus className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Add Symbol</span>
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8">
+      <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-8">
         <div className="grid gap-4 mb-6">
-          <Card className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold">Active Trading Pairs</h3>
-                <p className="text-sm text-muted-foreground">
-                  Currently monitoring {activeSymbols.length} trading pair{activeSymbols.length !== 1 ? 's' : ''}
+          <Card className="p-3 sm:p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="font-semibold text-sm sm:text-base">Active Trading Pairs</h3>
+                <p className="text-xs sm:text-sm text-muted-foreground">
+                  Monitoring {activeSymbols.length} pair{activeSymbols.length !== 1 ? 's' : ''}
                 </p>
               </div>
-              <Badge variant="default" className="text-lg px-4 py-2">
+              <Badge variant="default" className="text-sm sm:text-lg px-3 sm:px-4 py-1 sm:py-2 shrink-0">
                 {activeSymbols.length} Active
               </Badge>
             </div>
           </Card>
         </div>
 
-        <Card className="p-6">
+        <Card className="p-3 sm:p-6">
           <div className="space-y-3">
             {symbols.map((symbol) => (
               <div
                 key={symbol.id}
-                className={`flex items-center justify-between p-4 rounded-lg border transition-all ${
+                className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 rounded-lg border transition-all gap-3 ${
                   symbol.is_active
                     ? 'bg-primary/5 border-primary/20'
                     : 'bg-muted/30 border-border'
                 }`}
               >
-                <div className="flex items-center gap-4 flex-1">
+                <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
                   <div
-                    className={`flex items-center justify-center w-10 h-10 rounded-full ${
+                    className={`flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-full shrink-0 ${
                       symbol.is_active ? 'bg-primary/20' : 'bg-muted'
                     }`}
                   >
                     {symbol.is_active ? (
-                      <CheckCircle2 className="h-5 w-5 text-primary" />
+                      <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
                     ) : (
-                      <XCircle className="h-5 w-5 text-muted-foreground" />
+                      <XCircle className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground" />
                     )}
                   </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-semibold">{symbol.display_name}</h4>
-                      <Badge variant="outline" className="font-mono text-xs">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="font-semibold text-sm sm:text-base">{symbol.display_name}</h4>
+                      <Badge variant="outline" className="font-mono text-[10px] sm:text-xs">
                         {symbol.symbol}
                       </Badge>
                     </div>
-                    <p className="text-sm text-muted-foreground">
-                      {symbol.is_active
-                        ? 'Active - Included in signal generation and monitoring'
-                        : 'Inactive - Not used in trading operations'}
+                    <p className="text-xs sm:text-sm text-muted-foreground truncate">
+                      {symbol.is_active ? 'Active - Signal generation & monitoring' : 'Inactive'}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center justify-end gap-3 shrink-0">
                   <div className="flex items-center gap-2">
-                    <Label htmlFor={`symbol-${symbol.id}`} className="text-sm cursor-pointer">
+                    <Label htmlFor={`symbol-${symbol.id}`} className="text-xs sm:text-sm cursor-pointer">
                       {symbol.is_active ? 'Active' : 'Inactive'}
                     </Label>
                     <Switch
@@ -143,7 +141,7 @@ const Symbols = () => {
                     variant="ghost"
                     size="icon"
                     onClick={() => deleteSymbol(symbol.id)}
-                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8"
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
