@@ -5610,6 +5610,15 @@ serve(async (req) => {
               }
             }
             
+            // ===== STEP 6: CAP — bonuses cannot exceed 0.9 when slope is declining =====
+            const maxCap = contReq?.MAX_DECLINING_SLOPE_MULTIPLIER ?? 0.90;
+            if (adxSlope < ADX_SLOPE_GRADUATED_GATE.MODERATE_DECLINE_THRESHOLD && adxSlopeGraduatedMultiplier > maxCap) {
+              if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔒 ADX_SLOPE_GRADUATED CAP: slope=${adxSlope.toFixed(2)} < ${ADX_SLOPE_GRADUATED_GATE.MODERATE_DECLINE_THRESHOLD} — capping ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% → ${(maxCap * 100).toFixed(0)}%`);
+              }
+              adxSlopeGraduatedMultiplier = maxCap;
+            }
+            
             if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 ADX_SLOPE_GRADUATED FINAL: Slope=${adxSlope.toFixed(2)}, Tier=${tierName}, ADX=${adx.toFixed(1)}, Final multiplier=${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}%`);
             }
