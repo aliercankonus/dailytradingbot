@@ -33,6 +33,9 @@ interface MomentumData {
   error?: string;
 }
 
+// Staleness threshold: snapshots older than 7 minutes are considered stale
+const SNAPSHOT_STALE_MINUTES = 7;
+
 const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
   // Get active trading symbols
   const { data: symbols, error: symbolsError } = await supabase
@@ -53,12 +56,18 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
 
   if (snapshotError) throw snapshotError;
 
-  const snapshotMap = new Map<string, any>();
-  (snapshots || []).forEach((s: any) => snapshotMap.set(s.symbol, s.snapshot_data));
+  const snapshotMap = new Map<string, { data: any; recorded_at: string }>();
+  (snapshots || []).forEach((s: any) => snapshotMap.set(s.symbol, { 
+    data: s.snapshot_data, 
+    recorded_at: s.recorded_at 
+  }));
+
+  const now = Date.now();
 
   return symbolList.map((symbol) => {
-    const data = snapshotMap.get(symbol);
-    if (!data) {
+    const snapshot = snapshotMap.get(symbol);
+    
+    if (!snapshot) {
       return {
         symbol,
         loading: false,
@@ -66,6 +75,19 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
       } as MomentumData;
     }
 
+    // Staleness guard: reject snapshots older than threshold
+    const snapshotAge = now - new Date(snapshot.recorded_at).getTime();
+    const staleMs = SNAPSHOT_STALE_MINUTES * 60 * 1000;
+    if (snapshotAge > staleMs) {
+      const ageMinutes = Math.round(snapshotAge / 60000);
+      return {
+        symbol,
+        loading: false,
+        error: `Snapshot stale (${ageMinutes}m old) — analyzer may be down`,
+      } as MomentumData;
+    }
+
+    const data = snapshot.data;
     const timeframes = data.timeframes || {};
     const volatility = data.volatility || {};
 
