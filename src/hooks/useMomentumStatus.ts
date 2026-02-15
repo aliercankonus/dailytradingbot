@@ -43,8 +43,10 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
   if (symbolsError) throw symbolsError;
   if (!symbols || symbols.length === 0) return [];
 
-  // Fetch trend data for each symbol in parallel
-  const momentumPromises = symbols.map(async ({ symbol }) => {
+  // Fetch trend data sequentially to avoid cold-start failures
+  // (8 parallel calls to a cold edge function all fail; sequential lets the first warm it up)
+  const results: MomentumData[] = [];
+  for (const { symbol } of symbols) {
     try {
       const { data, error } = await supabase.functions.invoke('calculate-trend', {
         body: { symbol }
@@ -52,7 +54,6 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
 
       if (error) throw error;
 
-      // Map from calculate-trend response structure to MomentumData
       const timeframes = data.timeframes || {};
       const volatility = data.volatility || {};
 
@@ -70,11 +71,10 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
         timeframes?.["1h"]?.indicators?.macd?.histogram ??
         0;
 
-      return {
+      results.push({
         symbol,
         momentum: {
           confirms: data.momentum?.confirms ?? false,
-          // "building" state from calculate-trend indicates aligned trends with partial confirmation
           building: data.momentum?.state === "building",
           state: data.momentum?.state ?? "none",
           lastCloseAlignsWithTrend: data.momentum?.lastCloseAlignsWithTrend ?? false,
@@ -101,17 +101,17 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
           trend30m: getTfTrend("30m"),
         },
         trend: data.primaryTrend ?? "unknown",
-      } as MomentumData;
+      });
     } catch (err) {
-      return {
+      results.push({
         symbol,
         loading: false,
         error: err instanceof Error ? err.message : 'Failed to fetch',
-      } as MomentumData;
+      } as MomentumData);
     }
-  });
+  }
 
-  return await Promise.all(momentumPromises);
+  return results;
 };
 
 export const MOMENTUM_STATUS_QUERY_KEY = ['momentum-status'];
