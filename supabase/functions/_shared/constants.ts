@@ -4994,9 +4994,26 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
     STOCHRSI_RUNWAY_MIN_K_FOR_SHORT: 15,  // K must be >= 15 for continued short
     STOCHRSI_RUNWAY_MAX_K_FOR_LONG: 85,   // K must be <= 85 for continued long
     
-    // Block relaxation if ADX slope is sharply declining (trend exhausting)
+    // Graduated relaxation slope check (matches ADX_SLOPE_GRADUATED philosophy)
+    // Instead of binary block, slope determines relaxation DEGREE
     BLOCK_IF_ADX_SLOPE_DECLINING: true,
-    ADX_SLOPE_DECLINE_THRESHOLD: -1.0,  // Block if slope < -1.0
+    ADX_SLOPE_DECLINE_THRESHOLD: -2.5,  // Only fully block relaxation at structural decline
+    // Graduated relaxation tiers based on slope
+    GRADUATED_SLOPE_RELAXATION: {
+      ENABLED: true,
+      // slope >= -1.0: full relaxation (6.0% hard threshold)
+      FULL_RELAXATION_SLOPE: -1.0,
+      FULL_HARD_THRESHOLD: 6.0,
+      // slope -1.0 to -2.0: partial relaxation (5.5% hard threshold, reduced size)
+      PARTIAL_RELAXATION_SLOPE: -2.0,
+      PARTIAL_HARD_THRESHOLD: 5.5,
+      PARTIAL_POSITION_SIZE: 0.35,
+      // slope -2.0 to -2.5: limited relaxation (5.2% hard threshold, minimal size)
+      LIMITED_RELAXATION_SLOPE: -2.5,
+      LIMITED_HARD_THRESHOLD: 5.2,
+      LIMITED_POSITION_SIZE: 0.30,
+      // slope < -2.5: no relaxation (default 5.0% hard block)
+    },
   },
   
   // ===== STOCHRSI ALIGNMENT REQUIRED =====
