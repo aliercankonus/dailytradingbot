@@ -212,19 +212,19 @@ export default function Settings() {
   };
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center gap-3 mb-6">
+    <div className="container mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6">
+      <div className="flex items-center gap-2 sm:gap-3 mb-6">
         <Button 
           variant="ghost" 
           size="sm" 
           onClick={() => navigate('/')}
-          className="mr-2"
+          className="mr-1 sm:mr-2 shrink-0"
         >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back
+          <ArrowLeft className="h-4 w-4 sm:mr-2" />
+          <span className="hidden sm:inline">Back</span>
         </Button>
-        <SettingsIcon className="h-8 w-8 text-primary" />
-        <h1 className="text-3xl font-bold">Settings</h1>
+        <SettingsIcon className="h-6 w-6 sm:h-8 sm:w-8 text-primary shrink-0" />
+        <h1 className="text-xl sm:text-3xl font-bold">Settings</h1>
       </div>
 
       <Tabs defaultValue="general" className="w-full">
@@ -239,7 +239,7 @@ export default function Settings() {
 
         <TabsContent value="general" className="space-y-6">
           {/* Trading Mode */}
-          <Card className="p-6">
+          <Card className="p-4 sm:p-6">
             <div className="flex items-center gap-3 mb-4">
               <Shield className="h-5 w-5 text-primary" />
               <h2 className="text-xl font-semibold">Trading Mode</h2>
@@ -270,7 +270,7 @@ export default function Settings() {
           </Card>
 
           {/* AI Analysis */}
-          <Card className="p-6">
+          <Card className="p-4 sm:p-6">
             <div className="flex items-center gap-3 mb-4">
               <Brain className="h-5 w-5 text-primary" />
               <h2 className="text-xl font-semibold">AI Analysis</h2>
@@ -301,7 +301,7 @@ export default function Settings() {
           </Card>
 
           {/* API Keys */}
-          <Card className="p-6">
+          <Card className="p-4 sm:p-6">
             <div className="flex items-center gap-3 mb-4">
               <Key className="h-5 w-5 text-primary" />
               <h2 className="text-xl font-semibold">Binance API Keys</h2>
@@ -364,7 +364,7 @@ export default function Settings() {
           </Card>
 
           {/* Notifications */}
-          <Card className="p-6">
+          <Card className="p-4 sm:p-6">
             <div className="flex items-center gap-3 mb-4">
               <Mail className="h-5 w-5 text-primary" />
               <h2 className="text-xl font-semibold">Notifications</h2>
