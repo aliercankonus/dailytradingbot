@@ -121,6 +121,7 @@ export const BotStatus = () => {
 
         {/* Status rows — clean, dense */}
         <div className="px-1">
+          <StatusRow label="Exchange" value="Binance" />
           <StatusRow
             label="Mode"
             value={riskParams?.paper_trading_mode ? "Paper" : "Live"}
