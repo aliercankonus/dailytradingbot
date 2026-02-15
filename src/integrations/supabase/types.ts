@@ -1245,22 +1245,40 @@ export type Database = {
       }
       trend_snapshots: {
         Row: {
+          adx: number | null
           id: string
+          is_aligned: boolean | null
+          macd_histogram: number | null
+          momentum_state: string | null
+          primary_trend: string | null
           recorded_at: string
+          regime: string | null
           snapshot_data: Json
           symbol: string
           user_id: string
         }
         Insert: {
+          adx?: number | null
           id?: string
+          is_aligned?: boolean | null
+          macd_histogram?: number | null
+          momentum_state?: string | null
+          primary_trend?: string | null
           recorded_at?: string
+          regime?: string | null
           snapshot_data: Json
           symbol: string
           user_id: string
         }
         Update: {
+          adx?: number | null
           id?: string
+          is_aligned?: boolean | null
+          macd_histogram?: number | null
+          momentum_state?: string | null
+          primary_trend?: string | null
           recorded_at?: string
+          regime?: string | null
           snapshot_data?: Json
           symbol?: string
           user_id?: string

@@ -2227,23 +2227,32 @@ serve(async (req) => {
 
     logger.success(`Got trend data for ${trendDataMap.size} symbols`);
 
-    // ============= CACHE TREND SNAPSHOTS FOR FRONTEND =============
-    // Upsert full calculate-trend response into trend_snapshots table
+    // ============= CACHE TREND SNAPSHOTS FOR FRONTEND (ATOMIC) =============
+    // Upsert full calculate-trend response + extracted summary columns into trend_snapshots
     // Frontend reads this instead of calling calculate-trend directly (eliminates Binance geo-block)
+    // AWAITED: Ensures all snapshots are written atomically before proceeding
     const snapshotUpserts = Array.from(trendDataMap.entries()).map(([sym, td]) => ({
       user_id: userId,
       symbol: sym,
       snapshot_data: td,
       recorded_at: new Date().toISOString(),
+      // Extracted summary columns for indexed queryability
+      primary_trend: td?.primaryTrend ?? null,
+      is_aligned: td?.isAligned ?? null,
+      momentum_state: td?.momentum?.state ?? null,
+      regime: td?.regime ?? td?.marketRegime ?? null,
+      adx: td?.volatility?.adx ?? null,
+      macd_histogram: td?.momentum?.macdHistogram ?? td?.timeframes?.["1h"]?.indicators?.macdHistogram ?? null,
     }));
     if (snapshotUpserts.length > 0) {
-      supabase
+      const { error: snapshotError } = await supabase
         .from("trend_snapshots")
-        .upsert(snapshotUpserts, { onConflict: "user_id,symbol" })
-        .then(({ error }: { error: any }) => {
-          if (error) logger.warn(`Failed to upsert trend snapshots: ${error.message}`);
-          else logger.info(`📸 Cached ${snapshotUpserts.length} trend snapshots for frontend`);
-        });
+        .upsert(snapshotUpserts, { onConflict: "user_id,symbol" });
+      if (snapshotError) {
+        logger.warn(`⚠️ Failed to upsert trend snapshots: ${snapshotError.message}`);
+      } else {
+        logger.info(`📸 Cached ${snapshotUpserts.length} trend snapshots for frontend (atomic)`);
+      }
     }
 
     // Track statistics
