@@ -8421,18 +8421,19 @@ export const SignalRejectionReasons = () => {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div>
-            <CardTitle className="flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-muted-foreground" />
-              Signal Rejection Reasons (Last 30 Minutes)
+            <CardTitle className="flex items-center gap-2 text-sm sm:text-base">
+              <AlertCircle className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground shrink-0" />
+              <span className="sm:hidden">Rejections (30m)</span>
+              <span className="hidden sm:inline">Signal Rejection Reasons (Last 30 Minutes)</span>
             </CardTitle>
-            <CardDescription>Why signals are not being generated for each symbol</CardDescription>
+            <CardDescription className="hidden sm:block">Why signals are not being generated for each symbol</CardDescription>
           </div>
           {aiEnabled && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-green-500/10 rounded-lg border border-green-500/20">
-              <Bot className="h-4 w-4 text-green-500" />
-              <span className="text-sm font-medium text-green-500">AI Analysis On</span>
+            <div className="flex items-center gap-1.5 px-2 py-1 sm:px-3 sm:py-2 bg-green-500/10 rounded-lg border border-green-500/20 self-start">
+              <Bot className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-green-500" />
+              <span className="text-xs sm:text-sm font-medium text-green-500">AI On</span>
             </div>
           )}
         </div>
