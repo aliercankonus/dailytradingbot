@@ -84,15 +84,18 @@ const Index = () => {
         <AutoSignalGenerator />
         <TradeCounterSync />
         <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-7">
-            <TabsTrigger value="dashboard" className="min-w-[4.5rem] flex-shrink-0"><span className="sm:hidden">Dash</span><span className="hidden sm:inline">Dashboard</span></TabsTrigger>
-            <TabsTrigger value="signals" className="min-w-[4rem] flex-shrink-0"><span className="sm:hidden">Sigs</span><span className="hidden sm:inline">Signals</span></TabsTrigger>
-            <TabsTrigger value="positions" className="min-w-[3.5rem] flex-shrink-0"><span className="sm:hidden">Pos</span><span className="hidden sm:inline">Positions</span></TabsTrigger>
-            <TabsTrigger value="history" className="min-w-[3.5rem] flex-shrink-0"><span className="sm:hidden">Hist</span><span className="hidden sm:inline">History</span></TabsTrigger>
-            <TabsTrigger value="analytics" className="min-w-[4.5rem] flex-shrink-0"><span className="sm:hidden">Stats</span><span className="hidden sm:inline">Analytics</span></TabsTrigger>
-            <TabsTrigger value="risk" className="min-w-[3rem] flex-shrink-0">Risk</TabsTrigger>
-            <TabsTrigger value="monitor" className="min-w-[3rem] flex-shrink-0"><span className="sm:hidden">Mon</span><span className="hidden sm:inline">Monitor</span></TabsTrigger>
-          </TabsList>
+          <div className="relative md:contents">
+            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-7">
+              <TabsTrigger value="dashboard" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Dash</span><span className="hidden sm:inline">Dashboard</span></TabsTrigger>
+              <TabsTrigger value="signals" className="min-w-[4.5rem] flex-shrink-0"><span className="sm:hidden">Sigs</span><span className="hidden sm:inline">Signals</span></TabsTrigger>
+              <TabsTrigger value="positions" className="min-w-[4rem] flex-shrink-0"><span className="sm:hidden">Pos</span><span className="hidden sm:inline">Positions</span></TabsTrigger>
+              <TabsTrigger value="history" className="min-w-[4rem] flex-shrink-0"><span className="sm:hidden">Hist</span><span className="hidden sm:inline">History</span></TabsTrigger>
+              <TabsTrigger value="analytics" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Stats</span><span className="hidden sm:inline">Analytics</span></TabsTrigger>
+              <TabsTrigger value="risk" className="min-w-[3.5rem] flex-shrink-0">Risk</TabsTrigger>
+              <TabsTrigger value="monitor" className="min-w-[4rem] flex-shrink-0"><span className="sm:hidden">Mon</span><span className="hidden sm:inline">Monitor</span></TabsTrigger>
+            </TabsList>
+            <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-background to-transparent pointer-events-none md:hidden" />
+          </div>
 
           <TabsContent value="dashboard" className="space-y-6">
             <div className="flex justify-end mb-4">

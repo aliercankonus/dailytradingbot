@@ -8438,6 +8438,80 @@ export const SignalRejectionReasons = () => {
         </div>
       </CardHeader>
       <CardContent>
+        {/* Mobile card view */}
+        <div className="md:hidden space-y-3">
+          {rejections.map((rejection) => {
+            const severity = getSeverityLevel(rejection.rejection_reason ?? "", rejection.filters_status);
+            const severityStyles = getSeverityStyles(severity);
+            
+            return (
+              <Collapsible key={rejection.id}>
+                <div className={`rounded-lg border p-3 space-y-2 ${severityStyles.border} ${severityStyles.bg}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-medium text-sm truncate">{rejection.symbol}</span>
+                      <Badge 
+                        variant="outline" 
+                        className={`text-[9px] px-1.5 py-0 shrink-0 ${severityStyles.badge}`}
+                      >
+                        {severityStyles.label}
+                      </Badge>
+                    </div>
+                    <Badge variant="outline" className="text-[9px] shrink-0">
+                      {formatDistanceToNow(new Date(rejection.checked_at), { addSuffix: true })}
+                    </Badge>
+                  </div>
+                  
+                  <div className="flex items-start gap-2">
+                    {getReasonIcon(rejection.rejection_reason ?? "")}
+                    <Badge 
+                      variant="outline"
+                      className={`text-[10px] font-medium whitespace-normal text-left leading-tight py-1 px-2 ${
+                        severity === "critical" 
+                          ? "bg-red-500/20 text-red-400 border-red-500/40" 
+                          : severity === "high"
+                          ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
+                          : severity === "medium"
+                          ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/40"
+                          : severity === "low"
+                          ? "bg-blue-500/20 text-blue-400 border-blue-500/40"
+                          : "bg-muted text-muted-foreground border-muted-foreground/30"
+                      }`}
+                    >
+                      {formatUserFriendlyReason(rejection.rejection_reason ?? "", rejection.filters_status)}
+                    </Badge>
+                  </div>
+
+                  <CollapsibleTrigger className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors w-full justify-center pt-1 border-t border-border/30">
+                    <ChevronDown className="h-3 w-3" />
+                    <span>Diagnostics & Details</span>
+                  </CollapsibleTrigger>
+                  
+                  <CollapsibleContent className="space-y-2 pt-1">
+                    <div className="text-xs">
+                      {renderFilterDetails(rejection)}
+                    </div>
+                    {getRejectionDetails(rejection) && (
+                      <div className="text-xs text-muted-foreground">
+                        {getRejectionDetails(rejection)}
+                      </div>
+                    )}
+                    {aiEnabled && (
+                      <AIAnalysisCell
+                        result={rejection.ai_analysis}
+                        isLoading={false}
+                        error={undefined}
+                      />
+                    )}
+                  </CollapsibleContent>
+                </div>
+              </Collapsible>
+            );
+          })}
+        </div>
+
+        {/* Desktop table view */}
+        <div className="hidden md:block">
         <Table>
           <TableHeader>
             <TableRow>
@@ -8547,6 +8621,7 @@ export const SignalRejectionReasons = () => {
             })}
           </TableBody>
         </Table>
+        </div>
       </CardContent>
     </Card>
   );
