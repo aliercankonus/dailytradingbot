@@ -138,17 +138,27 @@ const Index = () => {
 
           <TabsContent value="monitor" className="space-y-6">
             <Suspense fallback={<TabFallback />}>
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2">
+              <Tabs defaultValue="market-state" className="w-full">
+                <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4">
+                  <TabsTrigger value="market-state" className="min-w-[5.5rem] flex-shrink-0">Market State</TabsTrigger>
+                  <TabsTrigger value="modules" className="min-w-[4.5rem] flex-shrink-0">Modules</TabsTrigger>
+                  <TabsTrigger value="opportunity" className="min-w-[5rem] flex-shrink-0">Opportunity</TabsTrigger>
+                  <TabsTrigger value="order-flow" className="min-w-[5rem] flex-shrink-0">Order Flow</TabsTrigger>
+                </TabsList>
+                <TabsContent value="market-state" className="mt-4 space-y-6">
                   <MomentumStatusDashboard />
-                </div>
-                <div className="lg:col-span-1">
+                  <RegimeTransitionLog />
+                </TabsContent>
+                <TabsContent value="modules" className="mt-4">
                   <ModuleInventoryDashboard />
-                </div>
-              </div>
-              <RegimeTransitionLog />
-              <MarketOpportunityDensity />
-              <OrderFlowDashboard />
+                </TabsContent>
+                <TabsContent value="opportunity" className="mt-4">
+                  <MarketOpportunityDensity />
+                </TabsContent>
+                <TabsContent value="order-flow" className="mt-4">
+                  <OrderFlowDashboard />
+                </TabsContent>
+              </Tabs>
             </Suspense>
           </TabsContent>
         </Tabs>
