@@ -70,23 +70,23 @@ const Performance = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20">
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => navigate("/")} className="hover:bg-secondary">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <Button variant="ghost" size="icon" onClick={() => navigate("/")} className="hover:bg-secondary flex-shrink-0">
               <ArrowLeft className="h-5 w-5" />
             </Button>
-            <div>
-              <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
-                <BarChart3 className="h-8 w-8 text-primary" />
-                Portfolio Performance
+            <div className="min-w-0">
+              <h1 className="text-xl sm:text-3xl font-bold text-foreground flex items-center gap-2">
+                <BarChart3 className="h-5 w-5 sm:h-8 sm:w-8 text-primary flex-shrink-0" />
+                <span className="truncate">Portfolio Performance</span>
               </h1>
-              <p className="text-muted-foreground mt-1">Historical performance tracking and analytics</p>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-1 hidden sm:block">Historical performance tracking and analytics</p>
             </div>
           </div>
           <Select value={timeRange} onValueChange={setTimeRange}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[140px] sm:w-[180px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -99,17 +99,17 @@ const Performance = () => {
         </div>
 
         {/* Summary Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {stats.map((stat, idx) => (
-            <Card key={idx} className="p-6 bg-card border-border shadow-lg hover:shadow-xl transition-shadow">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-muted-foreground">{stat.label}</span>
-                <stat.icon className="h-4 w-4 text-primary" />
+            <Card key={idx} className="p-3 sm:p-6 bg-card border-border shadow-lg hover:shadow-xl transition-shadow">
+              <div className="flex items-center justify-between mb-1 sm:mb-2">
+                <span className="text-xs sm:text-sm text-muted-foreground truncate pr-1">{stat.label}</span>
+                <stat.icon className="h-3 w-3 sm:h-4 sm:w-4 text-primary flex-shrink-0" />
               </div>
-              <div className="text-2xl font-bold text-foreground font-mono">{stat.value}</div>
-              <div className={`text-sm mt-1 flex items-center gap-1 ${stat.changePositive ? "text-profit" : "text-loss"}`}>
+              <div className="text-base sm:text-2xl font-bold text-foreground font-mono truncate">{stat.value}</div>
+              <div className={`text-xs sm:text-sm mt-1 flex items-center gap-1 ${stat.changePositive ? "text-profit" : "text-loss"}`}>
                 {stat.changePositive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                {stat.change}
+                <span className="truncate">{stat.change}</span>
               </div>
             </Card>
           ))}
@@ -130,17 +130,17 @@ const Performance = () => {
           </Card>
         ) : (
           <Tabs defaultValue="portfolio" className="w-full">
-            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4">
-              <TabsTrigger value="portfolio" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Portfolio</span><span className="hidden sm:inline">Portfolio Value</span></TabsTrigger>
-              <TabsTrigger value="pnl" className="min-w-[4rem] flex-shrink-0"><span className="sm:hidden">P&L</span><span className="hidden sm:inline">P&L Breakdown</span></TabsTrigger>
-              <TabsTrigger value="winrate" className="min-w-[4.5rem] flex-shrink-0"><span className="sm:hidden">Wins</span><span className="hidden sm:inline">Win Rate</span></TabsTrigger>
-              <TabsTrigger value="drawdown" className="min-w-[4rem] flex-shrink-0"><span className="sm:hidden">Risk</span><span className="hidden sm:inline">Drawdown & Risk</span></TabsTrigger>
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="portfolio" className="text-xs sm:text-sm px-1 sm:px-3"><span className="sm:hidden">Portfolio</span><span className="hidden sm:inline">Portfolio Value</span></TabsTrigger>
+              <TabsTrigger value="pnl" className="text-xs sm:text-sm px-1 sm:px-3"><span className="sm:hidden">P&L</span><span className="hidden sm:inline">P&L Breakdown</span></TabsTrigger>
+              <TabsTrigger value="winrate" className="text-xs sm:text-sm px-1 sm:px-3"><span className="sm:hidden">Wins</span><span className="hidden sm:inline">Win Rate</span></TabsTrigger>
+              <TabsTrigger value="drawdown" className="text-xs sm:text-sm px-1 sm:px-3"><span className="sm:hidden">Risk</span><span className="hidden sm:inline">Drawdown & Risk</span></TabsTrigger>
             </TabsList>
 
             <TabsContent value="portfolio" className="space-y-4">
-              <Card className="p-6">
-                <h3 className="text-lg font-semibold text-foreground mb-4">Portfolio Value Over Time</h3>
-                <ResponsiveContainer width="100%" height={400}>
+              <Card className="p-3 sm:p-6">
+                <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Portfolio Value Over Time</h3>
+                <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]">
                   <AreaChart data={chartData}>
                     <defs>
                       <linearGradient id="portfolioGradient" x1="0" y1="0" x2="0" y2="1">
@@ -183,9 +183,9 @@ const Performance = () => {
             </TabsContent>
 
             <TabsContent value="pnl" className="space-y-4">
-              <Card className="p-6">
-                <h3 className="text-lg font-semibold text-foreground mb-4">P&L Breakdown</h3>
-                <ResponsiveContainer width="100%" height={400}>
+              <Card className="p-3 sm:p-6">
+                <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">P&L Breakdown</h3>
+                <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]">
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
@@ -217,9 +217,9 @@ const Performance = () => {
             </TabsContent>
 
             <TabsContent value="winrate" className="space-y-4">
-              <Card className="p-6">
-                <h3 className="text-lg font-semibold text-foreground mb-4">Win Rate & Trade Distribution</h3>
-                <ResponsiveContainer width="100%" height={400}>
+              <Card className="p-3 sm:p-6">
+                <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Win Rate & Trade Distribution</h3>
+                <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]">
                   <BarChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
@@ -237,9 +237,9 @@ const Performance = () => {
                   </BarChart>
                 </ResponsiveContainer>
               </Card>
-              <Card className="p-6">
-                <h3 className="text-lg font-semibold text-foreground mb-4">Win Rate Trend</h3>
-                <ResponsiveContainer width="100%" height={300}>
+              <Card className="p-3 sm:p-6">
+                <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Win Rate Trend</h3>
+                <ResponsiveContainer width="100%" height={240} className="sm:!h-[300px]">
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
@@ -259,9 +259,9 @@ const Performance = () => {
             </TabsContent>
 
             <TabsContent value="drawdown" className="space-y-4">
-              <Card className="p-6">
-                <h3 className="text-lg font-semibold text-foreground mb-4">Maximum Drawdown</h3>
-                <ResponsiveContainer width="100%" height={400}>
+              <Card className="p-3 sm:p-6">
+                <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Maximum Drawdown</h3>
+                <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]">
                   <AreaChart data={chartData}>
                     <defs>
                       <linearGradient id="drawdownGradient" x1="0" y1="0" x2="0" y2="1">
@@ -290,9 +290,9 @@ const Performance = () => {
                   </AreaChart>
                 </ResponsiveContainer>
               </Card>
-              <Card className="p-6">
-                <h3 className="text-lg font-semibold text-foreground mb-4">Profit Factor</h3>
-                <ResponsiveContainer width="100%" height={300}>
+              <Card className="p-3 sm:p-6">
+                <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Profit Factor</h3>
+                <ResponsiveContainer width="100%" height={240} className="sm:!h-[300px]">
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
