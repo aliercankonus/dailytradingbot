@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, STRONG_TREND_HTF_BYPASS_PARAMS, TREND_CONTINUATION_TIGHT_STOPS, DEEP_STOCHRSI_HARD_GATE, CONTEXTUAL_TP_EXPANSION, FLASH_CRASH_BOUNCE_PROBE, CAPITULATION_BOUNCE_PROBE, GRADUATED_QUALITY_GATE, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, STRONG_TREND_HTF_BYPASS_PARAMS, TREND_CONTINUATION_TIGHT_STOPS, DEEP_STOCHRSI_HARD_GATE, CONTEXTUAL_TP_EXPANSION, FLASH_CRASH_BOUNCE_PROBE, CAPITULATION_BOUNCE_PROBE, GRADUATED_QUALITY_GATE, DYNAMIC_MAX_TRADES, TRAILING_DAILY_LIMIT, DYNAMIC_CONSISTENCY, VOLUME_FILTER, OBV_FILTER, VWAP_FILTER, SLIPPAGE_PROTECTION, MOMENTUM_POSITION_ADJ, ALIGNMENT_POSITION_ADJ, BOLLINGER_POSITION_ADJ, QUALITY_BASED_SIZING, LEGACY_STRATEGY_MULTIPLIERS, RISK_REWARD_FILTER, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { checkPositionCorrelation, getKnownCorrelation } from "../_shared/correlation.ts";
 import { calculateATR, calculateHistoricalATRAvg } from "../_shared/indicators.ts";
 import { 
@@ -207,17 +207,17 @@ serve(async (req) => {
         .eq('user_id', user.id)
         .eq('status', 'closed')
         .order('closed_at', { ascending: false })
-        .limit(10);
+        .limit(DYNAMIC_MAX_TRADES.LOOKBACK_COUNT);
       
       const recentWins = recentTrades?.filter(t => (t.realized_pnl || 0) > 0).length || 0;
       const recentWinRate = recentTrades?.length ? (recentWins / recentTrades.length) * 100 : 50;
       
       // Adjust based on recent performance
-      if (recentWinRate >= 70 && recentTrades && recentTrades.length >= 5) {
-        effectiveMaxTrades = Math.min(riskParams.max_open_trades + 2, 10); // Bonus for good performance
-        logger.risk(`📈 Dynamic Max Trades: +2 bonus for ${recentWinRate.toFixed(0)}% win rate → ${effectiveMaxTrades}`);
-      } else if (recentWinRate < 40 && recentTrades && recentTrades.length >= 5) {
-        effectiveMaxTrades = Math.max(Math.floor(riskParams.max_open_trades * 0.5), 1); // Reduce for poor performance
+      if (recentWinRate >= DYNAMIC_MAX_TRADES.HIGH_WIN_RATE_THRESHOLD && recentTrades && recentTrades.length >= DYNAMIC_MAX_TRADES.MIN_TRADES_FOR_EVAL) {
+        effectiveMaxTrades = Math.min(riskParams.max_open_trades + DYNAMIC_MAX_TRADES.HIGH_WIN_RATE_BONUS, DYNAMIC_MAX_TRADES.MAX_TRADES_CAP);
+        logger.risk(`📈 Dynamic Max Trades: +${DYNAMIC_MAX_TRADES.HIGH_WIN_RATE_BONUS} bonus for ${recentWinRate.toFixed(0)}% win rate → ${effectiveMaxTrades}`);
+      } else if (recentWinRate < DYNAMIC_MAX_TRADES.LOW_WIN_RATE_THRESHOLD && recentTrades && recentTrades.length >= DYNAMIC_MAX_TRADES.MIN_TRADES_FOR_EVAL) {
+        effectiveMaxTrades = Math.max(Math.floor(riskParams.max_open_trades * DYNAMIC_MAX_TRADES.LOW_WIN_RATE_MULTIPLIER), DYNAMIC_MAX_TRADES.MIN_TRADES_FLOOR);
         logger.risk(`📉 Dynamic Max Trades: Reduced for ${recentWinRate.toFixed(0)}% win rate → ${effectiveMaxTrades}`);
       } else {
         logger.info(`📊 Dynamic Max Trades: Standard (${recentWinRate.toFixed(0)}% win rate) → ${effectiveMaxTrades}`);
@@ -597,16 +597,13 @@ serve(async (req) => {
     let dynamicMinConsistency = riskParams.min_trend_consistency || 60;
     
     if (isNeutralStrategyForConsistency) {
-      // Neutral strategies rely on HTF direction, lower consistency requirement
-      dynamicMinConsistency = 40;
+      dynamicMinConsistency = DYNAMIC_CONSISTENCY.NEUTRAL_STRATEGY_MIN;
       logger.info(`📊 Neutral Strategy: Consistency threshold lowered to ${dynamicMinConsistency}%`);
     } else if (confidence1hForConsistency >= CONFIDENCE_THRESHOLDS.HTF_EXCEPTION) {
-      // Strong 1h alignment allows lower consistency (1h is driving direction)
-      dynamicMinConsistency = 50;
+      dynamicMinConsistency = DYNAMIC_CONSISTENCY.STRONG_1H_ALIGNMENT_MIN;
       logger.info(`📊 Strong 1h alignment (${confidence1hForConsistency.toFixed(0)}%): Consistency threshold lowered to ${dynamicMinConsistency}%`);
     } else if (adxValueForConsistency >= ADX_THRESHOLDS.STRONG) {
-      // Strong ADX means clear trend, can accept slightly lower consistency
-      dynamicMinConsistency = 55;
+      dynamicMinConsistency = DYNAMIC_CONSISTENCY.STRONG_ADX_MIN;
       logger.info(`📊 Strong ADX (${adxValueForConsistency.toFixed(1)}): Consistency threshold lowered to ${dynamicMinConsistency}%`);
     }
     
@@ -790,22 +787,22 @@ serve(async (req) => {
     
     // Weak momentum: 10% position size reduction
     if (momentumState === 'none' && !isCounterTrendEntry) {
-      momentumPositionMultiplier *= 0.90;
-      logger.warn(`⚠️ WEAK MOMENTUM: state=${momentumState} → position size reduced to 90%`);
+      momentumPositionMultiplier *= MOMENTUM_POSITION_ADJ.WEAK_MOMENTUM_MULTIPLIER;
+      logger.warn(`⚠️ WEAK MOMENTUM: state=${momentumState} → position size reduced to ${(MOMENTUM_POSITION_ADJ.WEAK_MOMENTUM_MULTIPLIER * 100).toFixed(0)}%`);
     } else if (momentumState === 'mixed') {
-      momentumPositionMultiplier *= 0.95;
-      logger.warn(`⚠️ MIXED MOMENTUM: state=${momentumState} → position size reduced to 95%`);
+      momentumPositionMultiplier *= MOMENTUM_POSITION_ADJ.MIXED_MOMENTUM_MULTIPLIER;
+      logger.warn(`⚠️ MIXED MOMENTUM: state=${momentumState} → position size reduced to ${(MOMENTUM_POSITION_ADJ.MIXED_MOMENTUM_MULTIPLIER * 100).toFixed(0)}%`);
     }
     
-    // Fake breakout risk: Additional 15% position size reduction
+    // Fake breakout risk: position size reduction
     if (fakeBreakoutRisk) {
-      momentumPositionMultiplier *= 0.85;
+      momentumPositionMultiplier *= MOMENTUM_POSITION_ADJ.FAKE_BREAKOUT_MULTIPLIER;
       logger.warn(`⚠️ FAKE BREAKOUT RISK: MACD expanding but ADX falling → additional position size reduction to ${(momentumPositionMultiplier * 100).toFixed(0)}%`);
     }
     
-    // Genuine momentum: 5% position size boost (cap at 1.0 to not exceed base)
+    // Genuine momentum: position size boost (cap to not exceed base)
     if (genuineMomentum && momentumState === 'confirmed') {
-      momentumPositionMultiplier = Math.min(1.05, momentumPositionMultiplier * 1.05);
+      momentumPositionMultiplier = Math.min(MOMENTUM_POSITION_ADJ.GENUINE_MOMENTUM_BOOST, momentumPositionMultiplier * MOMENTUM_POSITION_ADJ.GENUINE_MOMENTUM_BOOST);
       logger.info(`✅ GENUINE MOMENTUM: MACD expanding + ADX rising → position size boost to ${(momentumPositionMultiplier * 100).toFixed(0)}%`);
     }
     
@@ -820,18 +817,15 @@ serve(async (req) => {
     const tf1hWeighted = weightedComponents.tf1hWeighted ?? 0;
     const adxWeighted = weightedComponents.adxWeighted ?? 0;
     
-    if (tf4hWeighted >= 30 && tf1hWeighted >= 15 && adxContribution >= 15) {
-      // Very strong alignment: 4h confidence high, 1h confirms, ADX contributes
-      alignmentPositionMultiplier = 1.10; // +10% size for premium setups
-      logger.info(`✅ PREMIUM ALIGNMENT: tf4h=${tf4hWeighted.toFixed(1)}, tf1h=${tf1hWeighted.toFixed(1)}, adx=${adxContribution.toFixed(1)} → +10% position size`);
-    } else if (tf4hWeighted >= 25 && tf1hWeighted >= 10) {
-      // Good alignment: 4h and 1h both contribute meaningfully
-      alignmentPositionMultiplier = 1.05; // +5% size for solid setups
-      logger.info(`✅ SOLID ALIGNMENT: tf4h=${tf4hWeighted.toFixed(1)}, tf1h=${tf1hWeighted.toFixed(1)} → +5% position size`);
-    } else if (neutralCapped || tf4hConfidence < 40) {
-      // Weak alignment: Neutral capped or low 4h confidence
-      alignmentPositionMultiplier = 0.90; // -10% size for uncertain direction
-      logger.warn(`⚠️ WEAK ALIGNMENT: neutralCapped=${neutralCapped}, tf4h=${tf4hConfidence.toFixed(0)} → -10% position size`);
+    if (tf4hWeighted >= ALIGNMENT_POSITION_ADJ.PREMIUM_MIN_TF4H && tf1hWeighted >= ALIGNMENT_POSITION_ADJ.PREMIUM_MIN_TF1H && adxContribution >= ALIGNMENT_POSITION_ADJ.PREMIUM_MIN_ADX) {
+      alignmentPositionMultiplier = ALIGNMENT_POSITION_ADJ.PREMIUM_MULTIPLIER;
+      logger.info(`✅ PREMIUM ALIGNMENT: tf4h=${tf4hWeighted.toFixed(1)}, tf1h=${tf1hWeighted.toFixed(1)}, adx=${adxContribution.toFixed(1)} → +${((ALIGNMENT_POSITION_ADJ.PREMIUM_MULTIPLIER - 1) * 100).toFixed(0)}% position size`);
+    } else if (tf4hWeighted >= ALIGNMENT_POSITION_ADJ.SOLID_MIN_TF4H && tf1hWeighted >= ALIGNMENT_POSITION_ADJ.SOLID_MIN_TF1H) {
+      alignmentPositionMultiplier = ALIGNMENT_POSITION_ADJ.SOLID_MULTIPLIER;
+      logger.info(`✅ SOLID ALIGNMENT: tf4h=${tf4hWeighted.toFixed(1)}, tf1h=${tf1hWeighted.toFixed(1)} → +${((ALIGNMENT_POSITION_ADJ.SOLID_MULTIPLIER - 1) * 100).toFixed(0)}% position size`);
+    } else if (neutralCapped || tf4hConfidence < ALIGNMENT_POSITION_ADJ.WEAK_MAX_TF4H_CONF) {
+      alignmentPositionMultiplier = ALIGNMENT_POSITION_ADJ.WEAK_MULTIPLIER;
+      logger.warn(`⚠️ WEAK ALIGNMENT: neutralCapped=${neutralCapped}, tf4h=${tf4hConfidence.toFixed(0)} → ${((ALIGNMENT_POSITION_ADJ.WEAK_MULTIPLIER - 1) * 100).toFixed(0)}% position size`);
     }
     
     // Log final alignment impact
@@ -857,46 +851,35 @@ serve(async (req) => {
     const percentB4h = bb4h.percentB || 50;
     
     if (is1hSqueeze && is4hSqueeze) {
-      // Double squeeze = volatility contraction, breakout imminent
       logger.info(`🔥 DOUBLE SQUEEZE detected: Both 1h and 4h bands contracted - breakout imminent`);
-      bollingerBoostMultiplier = 1.2; // 20% boost for squeeze breakout setup
+      bollingerBoostMultiplier = BOLLINGER_POSITION_ADJ.DOUBLE_SQUEEZE_BOOST;
     } else if (is1hSqueeze || is4hSqueeze) {
       logger.info(`📊 Single timeframe squeeze detected: 1h=${is1hSqueeze}, 4h=${is4hSqueeze}`);
-      bollingerBoostMultiplier = 1.1; // 10% boost for single squeeze
+      bollingerBoostMultiplier = BOLLINGER_POSITION_ADJ.SINGLE_SQUEEZE_BOOST;
     }
-    
-    // %B position analysis - detect overbought/oversold for entry timing
-    // %B > 100 = price above upper band (overbought for LONG)
-    // %B < 0 = price below lower band (oversold for SHORT)
     
     if (signalSideForBB === 'BUY') {
-      if (percentB1h > 100) {
-        // Price above upper band - potential overextension
+      if (percentB1h > BOLLINGER_POSITION_ADJ.OVERBOUGHT_PERCENT_B) {
         logger.warn(`⚠️ BB Warning: Price above upper band (%B=${percentB1h.toFixed(1)}%) - potential overbought`);
-        bollingerBoostMultiplier *= 0.85; // 15% reduction for overbought entry
-      } else if (percentB1h < 20 && percentB4h < 30) {
-        // Price near lower band in both timeframes - good entry for LONG
+        bollingerBoostMultiplier *= BOLLINGER_POSITION_ADJ.OVERBOUGHT_REDUCTION;
+      } else if (percentB1h < BOLLINGER_POSITION_ADJ.LONG_LOWER_BAND_1H && percentB4h < BOLLINGER_POSITION_ADJ.LONG_LOWER_BAND_4H) {
         logger.info(`✅ BB confirms LONG: Price near lower band, good entry (%B 1h=${percentB1h.toFixed(1)}%, 4h=${percentB4h.toFixed(1)}%)`);
-        bollingerBoostMultiplier *= 1.15; // 15% boost for mean reversion entry
+        bollingerBoostMultiplier *= BOLLINGER_POSITION_ADJ.MEAN_REVERSION_BOOST;
       }
     } else if (signalSideForBB === 'SELL') {
-      if (percentB1h < 0) {
-        // Price below lower band - potential oversold
+      if (percentB1h < BOLLINGER_POSITION_ADJ.OVERSOLD_PERCENT_B) {
         logger.warn(`⚠️ BB Warning: Price below lower band (%B=${percentB1h.toFixed(1)}%) - potential oversold`);
-        bollingerBoostMultiplier *= 0.85; // 15% reduction for oversold entry
-      } else if (percentB1h > 80 && percentB4h > 70) {
-        // Price near upper band in both timeframes - good entry for SHORT
+        bollingerBoostMultiplier *= BOLLINGER_POSITION_ADJ.OVERBOUGHT_REDUCTION;
+      } else if (percentB1h > BOLLINGER_POSITION_ADJ.SHORT_UPPER_BAND_1H && percentB4h > BOLLINGER_POSITION_ADJ.SHORT_UPPER_BAND_4H) {
         logger.info(`✅ BB confirms SHORT: Price near upper band, good entry (%B 1h=${percentB1h.toFixed(1)}%, 4h=${percentB4h.toFixed(1)}%)`);
-        bollingerBoostMultiplier *= 1.15; // 15% boost for mean reversion entry
+        bollingerBoostMultiplier *= BOLLINGER_POSITION_ADJ.MEAN_REVERSION_BOOST;
       }
     }
     
-    // Breakout detection - price moving from squeeze
-    // Fix: Use correct field from calculate-trend response
     const breakoutPotential = trendData?.bollingerBands?.breakoutPotential || false;
     if (breakoutPotential) {
       logger.info(`🚀 HIGH BREAKOUT POTENTIAL detected - bands expanding after squeeze`);
-      bollingerBoostMultiplier *= 1.1; // Additional 10% for breakout momentum
+      bollingerBoostMultiplier *= BOLLINGER_POSITION_ADJ.BREAKOUT_POTENTIAL_BOOST;
     }
     
     // Store Bollinger boost for position sizing
@@ -922,8 +905,8 @@ serve(async (req) => {
 
     // FILTER 6: Minimum volume requirement (avoid illiquid periods)
     // Require at least $10M USDT volume in last 24h for major pairs, $1M for others
-    const isMainPair = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'].includes(signal.symbol);
-    const minQuoteVolume = isMainPair ? 10_000_000 : 1_000_000;
+    const isMainPair = VOLUME_FILTER.MAIN_PAIRS.includes(signal.symbol);
+    const minQuoteVolume = isMainPair ? VOLUME_FILTER.MIN_QUOTE_VOLUME_MAIN : VOLUME_FILTER.MIN_QUOTE_VOLUME_OTHER;
     
     if (quoteVolume24h < minQuoteVolume) {
       await logExecutionRejection(supabase, user.id, signal.symbol, 'Insufficient 24h Volume', signal, trendData, { quoteVolume: quoteVolume24h, minRequired: minQuoteVolume, isMainPair });
@@ -978,13 +961,13 @@ serve(async (req) => {
           (!VOLUME_RELAXATION_PARAMS.REQUIRE_ADX_RISING || adxRising) &&
           trend30m !== "neutral" && trend1h !== "neutral" &&
           trend30m === trend1h &&  // 30m and 1h agree on direction
-          conf30m >= 55 && conf1h >= 50 &&  // Reasonable confidence in both
-          htf4hAlignedOrNeutral;  // FIX: 4h must not be opposing signal
+          conf30m >= VOLUME_FILTER.TREND_FORMATION_CONF_30M && conf1h >= VOLUME_FILTER.TREND_FORMATION_CONF_1H &&
+          htf4hAlignedOrNeutral;
         
         // Determine minimum volume ratio based on conditions
         const minVolumeRatio = isTrendForming 
-          ? VOLUME_RELAXATION_PARAMS.MIN_VOLUME_RATIO_WITH_TREND  // 10%
-          : 0.2;  // Default 20%
+          ? VOLUME_RELAXATION_PARAMS.MIN_VOLUME_RATIO_WITH_TREND
+          : VOLUME_FILTER.MIN_VOLUME_RATIO_DEFAULT;
         
         if (volumeRatio < minVolumeRatio) {
           await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Current Volume', signal, trendData, { 
@@ -1000,18 +983,15 @@ serve(async (req) => {
         }
         
         // Log if trend formation relaxation was applied
-        if (isTrendForming && volumeRatio < 0.2) {
+        if (isTrendForming && volumeRatio < VOLUME_FILTER.MIN_VOLUME_RATIO_DEFAULT) {
           logger.info(`📊 VOLUME RELAXATION: Allowing entry at ${(volumeRatio * 100).toFixed(0)}% volume due to trend formation (ADX=${adx.toFixed(1)} rising=${adxRising}, 30m=${trend30m}, 1h=${trend1h}, 4h=${trend4h})`);
-          // Apply position size reduction for relaxed volume entries
           (signal as any).volumeRelaxationApplied = true;
           (signal as any).volumeRelaxationMultiplier = VOLUME_RELAXATION_PARAMS.POSITION_SIZE_MULTIPLIER;
-        } else if (!isTrendForming && volumeRatio < 0.2 && volumeRatio >= 0.1 && !htf4hAlignedOrNeutral) {
-          // FIX: Log when volume relaxation is blocked due to 4h counter-trend
+        } else if (!isTrendForming && volumeRatio < VOLUME_FILTER.MIN_VOLUME_RATIO_DEFAULT && volumeRatio >= 0.1 && !htf4hAlignedOrNeutral) {
           logger.info(`📊 VOLUME RELAXATION BLOCKED: 4h trend (${trend4h}) opposes signal (${signalDirection}) - using standard volume threshold`);
         }
 
-        // Log volume spike detection (informational)
-        if (volumeRatio > 2.0) {
+        if (volumeRatio > VOLUME_FILTER.VOLUME_SPIKE_RATIO) {
           logger.info(`⚡ VOLUME SPIKE detected: ${volumeRatio.toFixed(2)}x average - high activity period`);
         }
 
@@ -1054,37 +1034,35 @@ serve(async (req) => {
         const signalSide = signal.signal_type === 'long' ? 'BUY' : 'SELL';
         
         // FILTER 10: OBV trend confirmation - BLOCK on strong divergence
-        if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -15) {
+        if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -OBV_FILTER.STRONG_DIVERGENCE_BLOCK_PERCENT) {
           await logExecutionRejection(supabase, user.id, signal.symbol, 'OBV Divergence (LONG vs Bearish)', signal, trendData, { obvDirection, obvChange, signalSide });
           throw new Error(`OBV divergence: LONG signal but volume strongly bearish (${obvChange.toFixed(1)}% decline) - trade cancelled`);
         }
         
-        if (signalSide === 'SELL' && obvDirection === 'bullish' && obvChange > 15) {
+        if (signalSide === 'SELL' && obvDirection === 'bullish' && obvChange > OBV_FILTER.STRONG_DIVERGENCE_BLOCK_PERCENT) {
           await logExecutionRejection(supabase, user.id, signal.symbol, 'OBV Divergence (SHORT vs Bullish)', signal, trendData, { obvDirection, obvChange, signalSide });
           throw new Error(`OBV divergence: SHORT signal but volume strongly bullish (${obvChange.toFixed(1)}% rise) - trade cancelled`);
         }
         
-        // Warn on moderate divergence (don't block)
-        if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -10) {
+        if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -OBV_FILTER.MODERATE_DIVERGENCE_WARN_PERCENT) {
           logger.warn(`⚠️ OBV DIVERGENCE: LONG signal but OBV is bearish (${obvChange.toFixed(2)}% decline)`);
         }
-        if (signalSide === 'SELL' && obvDirection === 'bullish' && obvChange > 10) {
+        if (signalSide === 'SELL' && obvDirection === 'bullish' && obvChange > OBV_FILTER.MODERATE_DIVERGENCE_WARN_PERCENT) {
           logger.warn(`⚠️ OBV DIVERGENCE: SHORT signal but OBV is bullish (${obvChange.toFixed(2)}% rise)`);
         }
 
-        // Calculate volume boost multiplier based on OBV confirmation
         let obvBoostMultiplier = 1.0;
         
-        if (signalSide === 'BUY' && obvDirection === 'bullish' && obvChange > 5) {
-          obvBoostMultiplier = 1.15; // 15% boost for strong OBV confirmation
+        if (signalSide === 'BUY' && obvDirection === 'bullish' && obvChange > OBV_FILTER.CONFIRMATION_PERCENT) {
+          obvBoostMultiplier = OBV_FILTER.CONFIRMATION_BOOST;
           logger.info(`✅ OBV confirms LONG: Volume accumulation detected, boost=${obvBoostMultiplier}x`);
-        } else if (signalSide === 'SELL' && obvDirection === 'bearish' && obvChange < -5) {
-          obvBoostMultiplier = 1.15; // 15% boost for strong OBV confirmation
+        } else if (signalSide === 'SELL' && obvDirection === 'bearish' && obvChange < -OBV_FILTER.CONFIRMATION_PERCENT) {
+          obvBoostMultiplier = OBV_FILTER.CONFIRMATION_BOOST;
           logger.info(`✅ OBV confirms SHORT: Volume distribution detected, boost=${obvBoostMultiplier}x`);
         } else if ((signalSide === 'BUY' && obvDirection === 'bearish') || 
                    (signalSide === 'SELL' && obvDirection === 'bullish')) {
-          obvBoostMultiplier = 0.85; // 15% reduction for OBV divergence
-          logger.info(`⚠️ OBV divergence detected, reducing position size by 15%`);
+          obvBoostMultiplier = OBV_FILTER.DIVERGENCE_REDUCTION;
+          logger.info(`⚠️ OBV divergence detected, reducing position size`);
         }
 
         // Store OBV boost for later use in position sizing
@@ -1129,16 +1107,16 @@ serve(async (req) => {
         if (vwapSignalSide === 'BUY') {
           if (currentPrice < currentVWAP) {
             const discountPercent = Math.abs(vwapDeviation);
-            if (discountPercent > 1) {
-              vwapBoostMultiplier = 1.2;
+            if (discountPercent > VWAP_FILTER.EXCELLENT_ENTRY_DEVIATION_PERCENT) {
+              vwapBoostMultiplier = VWAP_FILTER.EXCELLENT_ENTRY_BOOST;
               logger.info(`✅ VWAP confirms LONG: Price ${discountPercent.toFixed(2)}% below VWAP - excellent entry`);
             } else {
-              vwapBoostMultiplier = 1.1;
+              vwapBoostMultiplier = VWAP_FILTER.GOOD_ENTRY_BOOST;
               logger.info(`✅ VWAP supports LONG: Price slightly below VWAP - good entry`);
             }
           } else if (currentPrice > vwapUpperBand) {
             const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
-            const ADX_EXCEPTION_THRESHOLD = 25; // Lowered from 30 for more momentum breakout entries
+            const ADX_EXCEPTION_THRESHOLD = VWAP_FILTER.ADX_EXCEPTION_THRESHOLD;
             
             // Smart guards: ADX rising OR momentum direction agrees with trade
             const adxRising = trendData?.momentum?.adxRising === true || 
@@ -1151,29 +1129,28 @@ serve(async (req) => {
             const hasWeakException = adxValue >= ADX_EXCEPTION_THRESHOLD && !adxRising && !momentumDirectionAgrees;
             
             // Graduated exception: ADX 22-25 with ALL confirmations (rising + momentum + quality)
-            const ADX_GRADUATED_MIN = 22;
+            const ADX_GRADUATED_MIN = VWAP_FILTER.ADX_GRADUATED_MIN;
             const qualityScore = signal.indicators?.qualityScore || signalQualityScore || 0;
             const hasGraduatedException = adxValue >= ADX_GRADUATED_MIN && adxValue < ADX_EXCEPTION_THRESHOLD && 
-              adxRising && momentumDirectionAgrees && qualityScore >= 65;
+              adxRising && momentumDirectionAgrees && qualityScore >= VWAP_FILTER.GRADUATED_MIN_QUALITY;
             
             if (hasValidException) {
               const guardReason = adxRising ? 'ADX rising' : 'momentum direction agrees';
-              vwapBoostMultiplier = 0.8;
-              logger.warn(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band, ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD}, guard=${guardReason} - allowing LONG with 80% size`);
+              vwapBoostMultiplier = VWAP_FILTER.VALID_EXCEPTION_MULTIPLIER;
+              logger.warn(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band, ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD}, guard=${guardReason} - allowing LONG with ${(VWAP_FILTER.VALID_EXCEPTION_MULTIPLIER * 100).toFixed(0)}% size`);
             } else if (hasWeakException) {
-              vwapBoostMultiplier = 0.7;
-              logger.warn(`⚠️ VWAP WEAK EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band, ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} but no guard passed - allowing LONG with 70% size`);
+              vwapBoostMultiplier = VWAP_FILTER.WEAK_EXCEPTION_MULTIPLIER;
+              logger.warn(`⚠️ VWAP WEAK EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band, ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} but no guard passed - allowing LONG with ${(VWAP_FILTER.WEAK_EXCEPTION_MULTIPLIER * 100).toFixed(0)}% size`);
             } else if (hasGraduatedException) {
-              // Graduated exception: ADX 22-25 with full confirmation stack
-              vwapBoostMultiplier = 0.6;
-              logger.warn(`⚠️ VWAP GRADUATED EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band, ADX=${adxValue.toFixed(1)} in 22-25 zone with all confirmations (rising=${adxRising}, macd=${macdHistogram.toFixed(4)}, quality=${qualityScore}) - allowing LONG with 60% size`);
+              vwapBoostMultiplier = VWAP_FILTER.GRADUATED_EXCEPTION_MULTIPLIER;
+              logger.warn(`⚠️ VWAP GRADUATED EXCEPTION: Price $${currentPrice.toFixed(2)} above upper band, ADX=${adxValue.toFixed(1)} in ${VWAP_FILTER.ADX_GRADUATED_MIN}-${ADX_EXCEPTION_THRESHOLD} zone with all confirmations (rising=${adxRising}, macd=${macdHistogram.toFixed(4)}, quality=${qualityScore}) - allowing LONG with ${(VWAP_FILTER.GRADUATED_EXCEPTION_MULTIPLIER * 100).toFixed(0)}% size`);
             } else {
               // Calculate band deviation for audit accuracy
               const vwapBandDeviationPct = vwapUpperBand > 0 ? ((currentPrice - vwapUpperBand) / vwapUpperBand) * 100 : 0;
               
               // Log why graduated exception failed if in the 22-25 zone
               const graduatedFailReason = adxValue >= ADX_GRADUATED_MIN && adxValue < ADX_EXCEPTION_THRESHOLD 
-                ? ` (graduated failed: rising=${adxRising}, macdAligns=${momentumDirectionAgrees}, quality=${qualityScore}>=65?${qualityScore >= 65})`
+                ? ` (graduated failed: rising=${adxRising}, macdAligns=${momentumDirectionAgrees}, quality=${qualityScore}>=${VWAP_FILTER.GRADUATED_MIN_QUALITY}?${qualityScore >= VWAP_FILTER.GRADUATED_MIN_QUALITY})`
                 : '';
               
               logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} above upper VWAP band $${vwapUpperBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD}, adxRising=${adxRising}, macdHistogram=${macdHistogram.toFixed(4)})${graduatedFailReason}`);
@@ -1188,88 +1165,70 @@ serve(async (req) => {
                 macdHistogram,
                 qualityScore,
                 graduatedEligible: adxValue >= ADX_GRADUATED_MIN,
-                graduatedFailReason: !adxRising ? 'ADX not rising' : !momentumDirectionAgrees ? 'MACD not aligned' : qualityScore < 65 ? 'Quality < 65' : 'Unknown'
+                graduatedFailReason: !adxRising ? 'ADX not rising' : !momentumDirectionAgrees ? 'MACD not aligned' : qualityScore < VWAP_FILTER.GRADUATED_MIN_QUALITY ? `Quality < ${VWAP_FILTER.GRADUATED_MIN_QUALITY}` : 'Unknown'
               });
               throw new Error(`Price above upper VWAP band - overextended LONG entry blocked (ADX < ${ADX_EXCEPTION_THRESHOLD} or no guard passed)`);
             }
-          } else if (vwapDeviation > 1.0) {
-            vwapBoostMultiplier = 0.75;
+          } else if (vwapDeviation > VWAP_FILTER.MODERATE_DEVIATION_PERCENT) {
+            vwapBoostMultiplier = VWAP_FILTER.MODERATE_REDUCTION;
             logger.info(`📊 VWAP: Price ${vwapDeviation.toFixed(2)}% above VWAP - reducing position`);
-          } else if (vwapDeviation > 0.5) {
-            vwapBoostMultiplier = 0.9;
+          } else if (vwapDeviation > VWAP_FILTER.SLIGHT_DEVIATION_PERCENT) {
+            vwapBoostMultiplier = VWAP_FILTER.SLIGHT_REDUCTION;
             logger.info(`📊 VWAP neutral: Price ${vwapDeviation.toFixed(2)}% above VWAP`);
           }
         } else if (vwapSignalSide === 'SELL') {
           if (currentPrice > currentVWAP) {
             const premiumPercent = vwapDeviation;
-            if (premiumPercent > 1) {
-              vwapBoostMultiplier = 1.2;
+            if (premiumPercent > VWAP_FILTER.EXCELLENT_ENTRY_DEVIATION_PERCENT) {
+              vwapBoostMultiplier = VWAP_FILTER.EXCELLENT_ENTRY_BOOST;
               logger.info(`✅ VWAP confirms SHORT: Price ${premiumPercent.toFixed(2)}% above VWAP - excellent entry`);
             } else {
-              vwapBoostMultiplier = 1.1;
+              vwapBoostMultiplier = VWAP_FILTER.GOOD_ENTRY_BOOST;
               logger.info(`✅ VWAP supports SHORT: Price slightly above VWAP - good entry`);
             }
           } else if (currentPrice < vwapLowerBand) {
             const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
-            const ADX_EXCEPTION_THRESHOLD = 25; // Lowered from 30 for more momentum breakout entries
-            
-            // Smart guards: ADX rising OR momentum direction agrees with trade
+            const ADX_EXCEPTION_THRESHOLD = VWAP_FILTER.ADX_EXCEPTION_THRESHOLD;
             const adxRising = trendData?.momentum?.adxRising === true || 
               (trendData?.volatility?.adxSlope && trendData.volatility.adxSlope > 0);
             const macdHistogram = trendData?.momentum?.macdHistogram || 0;
-            const momentumDirectionAgrees = macdHistogram < 0; // SHORT needs negative MACD histogram
-            
-            // Valid exception: ADX >= 25 AND (ADX rising OR momentum agrees)
+            const momentumDirectionAgrees = macdHistogram < 0;
             const hasValidException = adxValue >= ADX_EXCEPTION_THRESHOLD && (adxRising || momentumDirectionAgrees);
             const hasWeakException = adxValue >= ADX_EXCEPTION_THRESHOLD && !adxRising && !momentumDirectionAgrees;
-            
-            // Graduated exception: ADX 22-25 with ALL confirmations (rising + momentum + quality)
-            const ADX_GRADUATED_MIN = 22;
+            const ADX_GRADUATED_MIN = VWAP_FILTER.ADX_GRADUATED_MIN;
             const qualityScore = signal.indicators?.qualityScore || signalQualityScore || 0;
             const hasGraduatedException = adxValue >= ADX_GRADUATED_MIN && adxValue < ADX_EXCEPTION_THRESHOLD && 
-              adxRising && momentumDirectionAgrees && qualityScore >= 65;
+              adxRising && momentumDirectionAgrees && qualityScore >= VWAP_FILTER.GRADUATED_MIN_QUALITY;
             
             if (hasValidException) {
               const guardReason = adxRising ? 'ADX rising' : 'momentum direction agrees';
-              vwapBoostMultiplier = 0.8;
-              logger.warn(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band, ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD}, guard=${guardReason} - allowing SHORT with 80% size`);
+              vwapBoostMultiplier = VWAP_FILTER.VALID_EXCEPTION_MULTIPLIER;
+              logger.warn(`⚠️ VWAP EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band, ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD}, guard=${guardReason} - allowing SHORT with ${(VWAP_FILTER.VALID_EXCEPTION_MULTIPLIER * 100).toFixed(0)}% size`);
             } else if (hasWeakException) {
-              vwapBoostMultiplier = 0.7;
-              logger.warn(`⚠️ VWAP WEAK EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band, ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} but no guard passed - allowing SHORT with 70% size`);
+              vwapBoostMultiplier = VWAP_FILTER.WEAK_EXCEPTION_MULTIPLIER;
+              logger.warn(`⚠️ VWAP WEAK EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band, ADX=${adxValue.toFixed(1)} >= ${ADX_EXCEPTION_THRESHOLD} but no guard passed - allowing SHORT with ${(VWAP_FILTER.WEAK_EXCEPTION_MULTIPLIER * 100).toFixed(0)}% size`);
             } else if (hasGraduatedException) {
-              // Graduated exception: ADX 22-25 with full confirmation stack
-              vwapBoostMultiplier = 0.6;
-              logger.warn(`⚠️ VWAP GRADUATED EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band, ADX=${adxValue.toFixed(1)} in 22-25 zone with all confirmations (rising=${adxRising}, macd=${macdHistogram.toFixed(4)}, quality=${qualityScore}) - allowing SHORT with 60% size`);
+              vwapBoostMultiplier = VWAP_FILTER.GRADUATED_EXCEPTION_MULTIPLIER;
+              logger.warn(`⚠️ VWAP GRADUATED EXCEPTION: Price $${currentPrice.toFixed(2)} below lower band, ADX=${adxValue.toFixed(1)} in ${ADX_GRADUATED_MIN}-${ADX_EXCEPTION_THRESHOLD} zone with all confirmations - allowing SHORT with ${(VWAP_FILTER.GRADUATED_EXCEPTION_MULTIPLIER * 100).toFixed(0)}% size`);
             } else {
-              // Calculate band deviation for audit accuracy
               const vwapBandDeviationPct = vwapLowerBand > 0 ? ((currentPrice - vwapLowerBand) / vwapLowerBand) * 100 : 0;
-              
-              // Log why graduated exception failed if in the 22-25 zone
               const graduatedFailReason = adxValue >= ADX_GRADUATED_MIN && adxValue < ADX_EXCEPTION_THRESHOLD 
-                ? ` (graduated failed: rising=${adxRising}, macdAligns=${momentumDirectionAgrees}, quality=${qualityScore}>=65?${qualityScore >= 65})`
+                ? ` (graduated failed: rising=${adxRising}, macdAligns=${momentumDirectionAgrees}, quality=${qualityScore}>=${VWAP_FILTER.GRADUATED_MIN_QUALITY}?${qualityScore >= VWAP_FILTER.GRADUATED_MIN_QUALITY})`
                 : '';
-              
-              logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD}, adxRising=${adxRising}, macdHistogram=${macdHistogram.toFixed(4)})${graduatedFailReason}`);
+              logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD})${graduatedFailReason}`);
               await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (SHORT)', signal, trendData, { 
-                currentPrice, 
-                vwapMid: currentVWAP,
-                vwapMidDeviationPct: vwapDeviation,
-                vwapLowerBand, 
-                vwapBandDeviationPct,
-                adx: adxValue, 
-                adxRising, 
-                macdHistogram,
-                qualityScore,
+                currentPrice, vwapMid: currentVWAP, vwapMidDeviationPct: vwapDeviation, vwapLowerBand, vwapBandDeviationPct,
+                adx: adxValue, adxRising, macdHistogram, qualityScore,
                 graduatedEligible: adxValue >= ADX_GRADUATED_MIN,
-                graduatedFailReason: !adxRising ? 'ADX not rising' : !momentumDirectionAgrees ? 'MACD not aligned' : qualityScore < 65 ? 'Quality < 65' : 'Unknown'
+                graduatedFailReason: !adxRising ? 'ADX not rising' : !momentumDirectionAgrees ? 'MACD not aligned' : qualityScore < VWAP_FILTER.GRADUATED_MIN_QUALITY ? `Quality < ${VWAP_FILTER.GRADUATED_MIN_QUALITY}` : 'Unknown'
               });
               throw new Error(`Price below lower VWAP band - oversold SHORT entry blocked (ADX < ${ADX_EXCEPTION_THRESHOLD} or no guard passed)`);
             }
-          } else if (vwapDeviation < -1.0) {
-            vwapBoostMultiplier = 0.75;
+          } else if (vwapDeviation < -VWAP_FILTER.MODERATE_DEVIATION_PERCENT) {
+            vwapBoostMultiplier = VWAP_FILTER.MODERATE_REDUCTION;
             logger.info(`📊 VWAP: Price ${Math.abs(vwapDeviation).toFixed(2)}% below VWAP - reducing position`);
-          } else if (vwapDeviation < -0.5) {
-            vwapBoostMultiplier = 0.9;
+          } else if (vwapDeviation < -VWAP_FILTER.SLIGHT_DEVIATION_PERCENT) {
+            vwapBoostMultiplier = VWAP_FILTER.SLIGHT_REDUCTION;
             logger.info(`📊 VWAP neutral: Price ${Math.abs(vwapDeviation).toFixed(2)}% below VWAP`);
           }
         }
@@ -1282,13 +1241,12 @@ serve(async (req) => {
     // ============================================================
     // SLIPPAGE PROTECTION - Pre-trade price validation
     // ============================================================
-    const maxSlippagePercent = 0.5; // Maximum 0.5% slippage tolerance
+    const maxSlippagePercent = SLIPPAGE_PROTECTION.MAX_PRE_SLIPPAGE_PERCENT;
     const signalEntryPrice = signal.entry_price || currentPrice;
     const priceDeviation = Math.abs((currentPrice - signalEntryPrice) / signalEntryPrice) * 100;
 
     logger.info(`💱 Slippage Check: Signal Entry=$${signalEntryPrice.toFixed(2)}, Current=$${currentPrice.toFixed(2)}, Deviation=${priceDeviation.toFixed(3)}%`);
 
-    // FILTER 8: Pre-execution slippage check
     if (priceDeviation > maxSlippagePercent) {
       await logExecutionRejection(supabase, user.id, signal.symbol, 'Price Slippage', signal, trendData, { priceDeviation, maxAllowed: maxSlippagePercent, signalEntryPrice, currentPrice });
       throw new Error(`Price moved ${priceDeviation.toFixed(2)}% since signal (max ${maxSlippagePercent}%) - trade cancelled to avoid slippage`);
@@ -1306,7 +1264,7 @@ serve(async (req) => {
       logger.info(`📖 Order Book: Bid=$${bestBid.toFixed(2)}, Ask=$${bestAsk.toFixed(2)}, Spread=${spread.toFixed(4)}%`);
 
       // FILTER 9: Wide spread protection (avoid illiquid order books)
-      const maxSpreadPercent = 0.1; // Max 0.1% spread
+      const maxSpreadPercent = SLIPPAGE_PROTECTION.MAX_SPREAD_PERCENT;
       if (spread > maxSpreadPercent) {
         await logExecutionRejection(supabase, user.id, signal.symbol, 'Wide Spread', signal, trendData, { spread, maxAllowed: maxSpreadPercent, bestBid, bestAsk });
         throw new Error(`Order book spread too wide (${spread.toFixed(3)}% > ${maxSpreadPercent}%) - trade cancelled to avoid slippage`);
@@ -1535,7 +1493,7 @@ serve(async (req) => {
     }
     
     const riskRewardRatio = rewardAmount / riskAmount;
-    const minRiskReward = 1.5; // Optimal for high win rate - closer TPs are more likely to hit
+    const minRiskReward = RISK_REWARD_FILTER.MIN_RATIO;
     
     logger.info(`📊 Risk/Reward Analysis: Risk=$${riskAmount.toFixed(2)} (${((riskAmount/currentPrice)*100).toFixed(2)}%), Reward=$${rewardAmount.toFixed(2)} (${((rewardAmount/currentPrice)*100).toFixed(2)}%), R:R=${riskRewardRatio.toFixed(2)}:1`);
     
@@ -1636,12 +1594,12 @@ serve(async (req) => {
     } else {
       // Default based on quality score - higher quality = larger position
       const qualityScore = signal.indicators?.qualityScore ?? 60;
-      if (qualityScore >= 80) {
-        positionSizePercent = 2.0;
-      } else if (qualityScore >= 70) {
-        positionSizePercent = 1.5;
+      if (qualityScore >= QUALITY_BASED_SIZING.HIGH_QUALITY_MIN) {
+        positionSizePercent = QUALITY_BASED_SIZING.HIGH_QUALITY_SIZE_PERCENT;
+      } else if (qualityScore >= QUALITY_BASED_SIZING.MEDIUM_QUALITY_MIN) {
+        positionSizePercent = QUALITY_BASED_SIZING.MEDIUM_QUALITY_SIZE_PERCENT;
       } else {
-        positionSizePercent = 1.0;
+        positionSizePercent = QUALITY_BASED_SIZING.DEFAULT_SIZE_PERCENT;
       }
       logger.info(`Using quality-based positionSizePercent: ${positionSizePercent}% (quality=${qualityScore})`);
     }
@@ -1915,7 +1873,7 @@ serve(async (req) => {
     // This is a POSITIVE signal in professional trading systems, not exhaustion
     // Only penalize genuinely low confidence signals
     if (confidence < CONFIDENCE_THRESHOLDS.LOW) {
-      quantity *= 0.7; // 30% reduction for low confidence (weak signal)
+      quantity *= LEGACY_STRATEGY_MULTIPLIERS.LOW_CONFIDENCE_MULTIPLIER;
       logger.info(`Position size reduced by 30% due to low confidence (${confidence}% < ${CONFIDENCE_THRESHOLDS.LOW}%)`);
     } else {
       // All other confidence levels: no penalty - high confidence is now rewarded

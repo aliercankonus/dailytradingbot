@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 import { createLogger, logError } from "../_shared/logging.ts";
 import { getCurrentPrice, sendBinanceApiErrorNotification } from "../_shared/binance.ts";
-import { LOSS_CLUSTERING_PARAMS, TRADING_FEE_PARAMS } from "../_shared/constants.ts";
+import { LOSS_CLUSTERING_PARAMS, TRADING_FEE_PARAMS, TRADE_QUALITY_ESTIMATION } from "../_shared/constants.ts";
 
 // Create logger instance
 const logger = createLogger("close-trade");
@@ -10,34 +10,36 @@ const logger = createLogger("close-trade");
 // ===== PHASE 6: TRADE QUALITY ESTIMATION =====
 // Estimates quality score (0-100) from available position data
 function estimateTradeQuality(position: any, pnl: number, pnlPercent: number): number {
-  let quality = 50; // Baseline
+  let quality = TRADE_QUALITY_ESTIMATION.BASELINE;
   
-  // Confidence score contribution (0-20 points)
-  const confidence = position.confidence_score || 50;
-  quality += Math.min(20, (confidence - 50) / 2.5);
+  // Confidence score contribution
+  const confidence = position.confidence_score || TRADE_QUALITY_ESTIMATION.CONFIDENCE_BASELINE;
+  quality += Math.min(TRADE_QUALITY_ESTIMATION.MAX_CONFIDENCE_POINTS, (confidence - TRADE_QUALITY_ESTIMATION.CONFIDENCE_BASELINE) / TRADE_QUALITY_ESTIMATION.CONFIDENCE_DIVISOR);
   
-  // Trend consistency contribution (0-15 points)
-  const trendConsistency = position.trend_consistency || 50;
-  quality += Math.min(15, (trendConsistency - 50) / 3.33);
+  // Trend consistency contribution
+  const trendConsistency = position.trend_consistency || TRADE_QUALITY_ESTIMATION.CONSISTENCY_BASELINE;
+  quality += Math.min(TRADE_QUALITY_ESTIMATION.MAX_CONSISTENCY_POINTS, (trendConsistency - TRADE_QUALITY_ESTIMATION.CONSISTENCY_BASELINE) / TRADE_QUALITY_ESTIMATION.CONSISTENCY_DIVISOR);
   
-  // P&L impact on quality (-20 to +15 points)
-  if (pnlPercent > 1.5) quality += 15;
-  else if (pnlPercent > 0.5) quality += 10;
-  else if (pnlPercent > 0) quality += 5;
-  else if (pnlPercent > -1) quality -= 5;
-  else if (pnlPercent > -2) quality -= 10;
-  else quality -= 20;
+  // P&L impact on quality
+  let pnlPoints = TRADE_QUALITY_ESTIMATION.PNL_WORST_POINTS;
+  for (const tier of TRADE_QUALITY_ESTIMATION.PNL_TIERS) {
+    if (pnlPercent > tier.minPercent) {
+      pnlPoints = tier.points;
+      break;
+    }
+  }
+  quality += pnlPoints;
   
-  // Hold time contribution - longer holds generally mean more deliberate trades
+  // Hold time contribution
   const holdTimeMs = position.closed_at && position.opened_at 
     ? new Date(position.closed_at).getTime() - new Date(position.opened_at).getTime()
     : 0;
   const holdTimeMinutes = holdTimeMs / (1000 * 60);
   
-  if (holdTimeMinutes > 60) quality += 5; // Held longer than 1 hour
-  else if (holdTimeMinutes < 5) quality -= 5; // Closed too quickly (likely stop hit)
+  if (holdTimeMinutes > TRADE_QUALITY_ESTIMATION.LONG_HOLD_MINUTES) quality += TRADE_QUALITY_ESTIMATION.LONG_HOLD_BONUS;
+  else if (holdTimeMinutes < TRADE_QUALITY_ESTIMATION.SHORT_HOLD_MINUTES) quality += TRADE_QUALITY_ESTIMATION.SHORT_HOLD_PENALTY;
   
-  return Math.max(0, Math.min(100, Math.round(quality)));
+  return Math.max(TRADE_QUALITY_ESTIMATION.MIN_QUALITY, Math.min(TRADE_QUALITY_ESTIMATION.MAX_QUALITY, Math.round(quality)));
 }
 
 const corsHeaders = {
