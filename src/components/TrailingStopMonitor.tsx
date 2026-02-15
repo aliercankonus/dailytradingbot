@@ -236,10 +236,11 @@ export const TrailingStopMonitor = () => {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Shield className="h-5 w-5 text-primary" />
-          Smart Trailing Stop Monitor
+          <Shield className="h-5 w-5 shrink-0 text-primary" />
+          <span className="hidden sm:inline">Smart Trailing Stop Monitor</span>
+          <span className="sm:hidden">Smart AITS</span>
           {activeTrailingPositions.length > 0 && (
-            <Badge variant="default" className="ml-auto">
+            <Badge variant="default" className="ml-auto shrink-0">
               {activeTrailingPositions.length} Active
             </Badge>
           )}
@@ -287,9 +288,9 @@ export const TrailingStopMonitor = () => {
                     </div>
                     
                     {/* Prices */}
-                    <div className="mb-2 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                    <div className="mb-2 grid grid-cols-3 gap-1 text-xs sm:flex sm:flex-wrap sm:items-center sm:gap-3 sm:text-sm text-muted-foreground">
                       <span>Entry: {formatPrice(position.entry_price, 4, "$")}</span>
-                      <span className="text-primary">Current: {formatPrice(position.currentPrice, 4, "$")}</span>
+                      <span className="text-primary">Now: {formatPrice(position.currentPrice, 4, "$")}</span>
                       <span className="text-destructive">Stop: {formatPrice(position.stop_loss, 4, "$")}</span>
                     </div>
                     
@@ -320,29 +321,29 @@ export const TrailingStopMonitor = () => {
                       </div>
                       
                       {/* Decay Velocity */}
-                      <div className="flex items-center gap-2">
-                        <Shield className={`h-3 w-3 ${position.isDecayCritical ? 'text-red-500' : position.isDecayWarning ? 'text-amber-500' : 'text-green-500'}`} />
+                      <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+                        <Shield className={`h-3 w-3 shrink-0 ${position.isDecayCritical ? 'text-red-500' : position.isDecayWarning ? 'text-amber-500' : 'text-green-500'}`} />
                         <span className={position.isDecayCritical ? 'text-red-500' : position.isDecayWarning ? 'text-amber-500' : ''}>
                           Decay: {position.decayVelocity.toFixed(2)}%/min
                         </span>
                         {position.isDecayCritical && (
                           <Badge variant="destructive" className="gap-1 text-[10px]">
-                            <AlertTriangle className="h-2.5 w-2.5" /> Emergency Exit Zone
+                            <AlertTriangle className="h-2.5 w-2.5" /> <span className="hidden sm:inline">Emergency</span> Exit
                           </Badge>
                         )}
                         {position.isDecayWarning && !position.isDecayCritical && (
                           <Badge variant="outline" className="text-[10px] text-amber-500">
-                            High Decay - 80% Lock
+                            High Decay
                           </Badge>
                       )}
                       
                       {/* HTF Alignment Context */}
                       {position.htfAlignment && (
                         <div className="mt-2 border-t border-border/50 pt-2">
-                          <div className="mb-1.5 flex items-center gap-2">
-                            <Layers className="h-3 w-3 text-blue-500" />
-                            <span className="font-medium">HTF Alignment:</span>
-                            <span className="text-muted-foreground">Score {position.htfAlignment.score}</span>
+                          <div className="mb-1.5 flex flex-wrap items-center gap-1 sm:gap-2">
+                            <Layers className="h-3 w-3 shrink-0 text-blue-500" />
+                            <span className="font-medium">HTF:</span>
+                            <span className="text-muted-foreground">{position.htfAlignment.score}</span>
                             {position.htfAlignment.isPremium && (
                               <Badge variant="default" className="gap-0.5 bg-green-500/20 text-[10px] text-green-400">
                                 <ArrowUp className="h-2.5 w-2.5" /> PREMIUM
@@ -355,7 +356,7 @@ export const TrailingStopMonitor = () => {
                             )}
                             {position.htfAlignment.neutralCapped && (
                               <Badge variant="outline" className="text-[10px] text-amber-500">
-                                Neutral Capped
+                                Capped
                               </Badge>
                             )}
                           </div>
@@ -406,11 +407,11 @@ export const TrailingStopMonitor = () => {
             <Brain className="h-4 w-4" />
             Smart AITS Configuration:
           </h4>
-          <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-            <div>• Aggressiveness: Level {settings.trailingAggressiveness}</div>
-            <div>• Progressive Lock: {settings.progressiveLockEnabled ? "On" : "Off"}</div>
-            <div>• Stale Peak Protection: {settings.stalePeakProtectionEnabled ? "On" : "Off"}</div>
-            <div>• Decay Velocity Exit: {settings.decayVelocityExitEnabled ? "On" : "Off"}</div>
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <div>• Aggr: Lv{settings.trailingAggressiveness}</div>
+            <div>• Prog Lock: {settings.progressiveLockEnabled ? "On" : "Off"}</div>
+            <div>• Stale Peak: {settings.stalePeakProtectionEnabled ? "On" : "Off"}</div>
+            <div>• Decay Exit: {settings.decayVelocityExitEnabled ? "On" : "Off"}</div>
             <div>• Activation: +{settings.activationPercent}%</div>
             <div>• Base Lock: {settings.profitLockPercent}%</div>
           </div>
