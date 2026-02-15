@@ -373,14 +373,14 @@ export const ClosedPositionsDashboard = () => {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total Closed</CardDescription>
-            <CardTitle className="text-3xl">{stats.total}</CardTitle>
+            <CardTitle className="text-xl sm:text-3xl">{stats.total}</CardTitle>
           </CardHeader>
         </Card>
         
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total P&L</CardDescription>
-            <CardTitle className={`text-3xl ${stats.totalPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
+            <CardTitle className={`text-xl sm:text-3xl ${stats.totalPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
               {formatPrice(stats.totalPnL, 2, '$')}
             </CardTitle>
           </CardHeader>
@@ -389,7 +389,7 @@ export const ClosedPositionsDashboard = () => {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Win Rate</CardDescription>
-            <CardTitle className="text-3xl">
+            <CardTitle className="text-xl sm:text-3xl">
               {formatPercent(fullCloseStats.winRate, 1)}
             </CardTitle>
             <div className="text-xs text-muted-foreground mt-1">
@@ -401,7 +401,7 @@ export const ClosedPositionsDashboard = () => {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total Fees Paid</CardDescription>
-            <CardTitle className="text-3xl text-amber-500">
+            <CardTitle className="text-xl sm:text-3xl text-amber-500">
               {formatPrice(stats.totalFees, 2, '$')}
             </CardTitle>
             <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
@@ -414,7 +414,7 @@ export const ClosedPositionsDashboard = () => {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Avg P&L</CardDescription>
-            <CardTitle className={`text-3xl ${stats.avgPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
+            <CardTitle className={`text-xl sm:text-3xl ${stats.avgPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
               {formatPrice(stats.avgPnL, 2, '$')}
             </CardTitle>
           </CardHeader>
@@ -428,34 +428,34 @@ export const ClosedPositionsDashboard = () => {
           <CardDescription>How positions were closed</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-            <div className="text-center p-4 border rounded-lg bg-success/5">
-              <div className="text-2xl font-bold text-success">{stats.takeProfitCount}</div>
-              <div className="text-sm text-muted-foreground">Take Profit</div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-4">
+            <div className="text-center p-2 sm:p-4 border rounded-lg bg-success/5">
+              <div className="text-lg sm:text-2xl font-bold text-success">{stats.takeProfitCount}</div>
+              <div className="text-xs sm:text-sm text-muted-foreground">TP</div>
             </div>
-            <div className="text-center p-4 border rounded-lg bg-yellow-500/5">
-              <div className="text-2xl font-bold text-yellow-600">{stats.trailingStopCount}</div>
-              <div className="text-sm text-muted-foreground">Trailing Stop</div>
+            <div className="text-center p-2 sm:p-4 border rounded-lg bg-yellow-500/5">
+              <div className="text-lg sm:text-2xl font-bold text-yellow-600">{stats.trailingStopCount}</div>
+              <div className="text-xs sm:text-sm text-muted-foreground">Trailing</div>
             </div>
-            <div className="text-center p-4 border rounded-lg bg-purple-500/5">
-              <div className="text-2xl font-bold text-purple-500">{stats.trendExitCount}</div>
-              <div className="text-sm text-muted-foreground">Trend Exit</div>
+            <div className="text-center p-2 sm:p-4 border rounded-lg bg-purple-500/5">
+              <div className="text-lg sm:text-2xl font-bold text-purple-500">{stats.trendExitCount}</div>
+              <div className="text-xs sm:text-sm text-muted-foreground">Trend</div>
             </div>
-            <div className="text-center p-4 border rounded-lg bg-indigo-500/5">
-              <div className="text-2xl font-bold text-indigo-500">{stats.hedgeCount}</div>
-              <div className="text-sm text-muted-foreground">Hedge</div>
+            <div className="text-center p-2 sm:p-4 border rounded-lg bg-indigo-500/5">
+              <div className="text-lg sm:text-2xl font-bold text-indigo-500">{stats.hedgeCount}</div>
+              <div className="text-xs sm:text-sm text-muted-foreground">Hedge</div>
             </div>
-            <div className="text-center p-4 border rounded-lg bg-orange-500/5">
-              <div className="text-2xl font-bold text-orange-500">{stats.emergencyExitCount}</div>
-              <div className="text-sm text-muted-foreground">Emergency</div>
+            <div className="text-center p-2 sm:p-4 border rounded-lg bg-orange-500/5">
+              <div className="text-lg sm:text-2xl font-bold text-orange-500">{stats.emergencyExitCount}</div>
+              <div className="text-xs sm:text-sm text-muted-foreground">Emergency</div>
             </div>
-            <div className="text-center p-4 border rounded-lg bg-destructive/5">
-              <div className="text-2xl font-bold text-destructive">{stats.stopLossCount}</div>
-              <div className="text-sm text-muted-foreground">Stop Loss</div>
+            <div className="text-center p-2 sm:p-4 border rounded-lg bg-destructive/5">
+              <div className="text-lg sm:text-2xl font-bold text-destructive">{stats.stopLossCount}</div>
+              <div className="text-xs sm:text-sm text-muted-foreground">SL</div>
             </div>
-            <div className="text-center p-4 border rounded-lg">
-              <div className="text-2xl font-bold text-muted-foreground">{stats.manualCount}</div>
-              <div className="text-sm text-muted-foreground">Manual</div>
+            <div className="text-center p-2 sm:p-4 border rounded-lg">
+              <div className="text-lg sm:text-2xl font-bold text-muted-foreground">{stats.manualCount}</div>
+              <div className="text-xs sm:text-sm text-muted-foreground">Manual</div>
             </div>
           </div>
         </CardContent>
@@ -586,8 +586,11 @@ export const ClosedPositionsDashboard = () => {
               {/* Pagination Controls */}
               {totalPages > 1 && (
                 <div className="flex items-center justify-between px-2 py-4">
-                  <div className="text-sm text-muted-foreground">
-                    Showing {startIndex + 1} to {Math.min(endIndex, filteredPositions.length)} of {filteredPositions.length} positions
+                  <div className="hidden sm:block text-sm text-muted-foreground">
+                    Showing {startIndex + 1}-{Math.min(endIndex, filteredPositions.length)} of {filteredPositions.length}
+                  </div>
+                  <div className="text-xs sm:hidden text-muted-foreground">
+                    {currentPage}/{totalPages}
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
@@ -595,11 +598,12 @@ export const ClosedPositionsDashboard = () => {
                       size="sm"
                       onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                       disabled={currentPage === 1}
+                      className="h-8 px-2 sm:px-3"
                     >
                       <ChevronLeft className="h-4 w-4" />
-                      Previous
+                      <span className="hidden sm:inline ml-1">Previous</span>
                     </Button>
-                    <div className="text-sm">
+                    <div className="hidden sm:block text-sm">
                       Page {currentPage} of {totalPages}
                     </div>
                     <Button
@@ -607,8 +611,9 @@ export const ClosedPositionsDashboard = () => {
                       size="sm"
                       onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                       disabled={currentPage === totalPages}
+                      className="h-8 px-2 sm:px-3"
                     >
-                      Next
+                      <span className="hidden sm:inline mr-1">Next</span>
                       <ChevronRight className="h-4 w-4" />
                     </Button>
                   </div>
