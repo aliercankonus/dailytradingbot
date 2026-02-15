@@ -6,16 +6,16 @@ interface MomentumData {
   momentum: {
     confirms: boolean;
     building: boolean;
-    state: "none" | "mixed" | "confirmed" | "building" | "exhausted";  // Added "exhausted" state
+    state: "none" | "mixed" | "confirmed" | "building" | "exhausted";
     lastCloseAlignsWithTrend: boolean;
     hasDivergence: boolean;
     macdHistogram: number;
     macdExpanding: boolean;
     macdDirectionAligned: boolean;
     adx: number;
-    adxRising?: boolean;  // NEW: ADX direction for fake breakout detection
-    fakeBreakoutRisk?: boolean;  // NEW: MACD expanding + ADX falling = warning
-    genuineMomentum?: boolean;   // NEW: MACD expanding + ADX rising = real momentum
+    adxRising?: boolean;
+    fakeBreakoutRisk?: boolean;
+    genuineMomentum?: boolean;
     volumeConfirms?: boolean;
     volumeBoost?: number;
   };
@@ -43,75 +43,78 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
   if (symbolsError) throw symbolsError;
   if (!symbols || symbols.length === 0) return [];
 
-  // Fetch trend data sequentially to avoid cold-start failures
-  // (8 parallel calls to a cold edge function all fail; sequential lets the first warm it up)
-  const results: MomentumData[] = [];
-  for (const { symbol } of symbols) {
-    try {
-      const { data, error } = await supabase.functions.invoke('calculate-trend', {
-        body: { symbol }
-      });
+  // Read cached trend snapshots from DB (written by strategy-analyzer every 5 min)
+  // No Binance API calls — eliminates geo-block, cold-start, and latency issues
+  const symbolList = symbols.map(s => s.symbol);
+  const { data: snapshots, error: snapshotError } = await supabase
+    .from('trend_snapshots')
+    .select('symbol, snapshot_data, recorded_at')
+    .in('symbol', symbolList);
 
-      if (error) throw error;
+  if (snapshotError) throw snapshotError;
 
-      const timeframes = data.timeframes || {};
-      const volatility = data.volatility || {};
+  const snapshotMap = new Map<string, any>();
+  (snapshots || []).forEach((s: any) => snapshotMap.set(s.symbol, s.snapshot_data));
 
-      const getTfTrend = (tf: string) =>
-        timeframes?.[tf]?.trend ?? timeframes?.[tf]?.indicators?.emaSignal ?? "unknown";
-
-      const toNumber = (value: unknown, fallback = 0) => {
-        const n = typeof value === "string" ? parseFloat(value) : typeof value === "number" ? value : Number(value);
-        return Number.isFinite(n) ? n : fallback;
-      };
-
-      const macdHistogramRaw =
-        data.momentum?.macdHistogram ??
-        timeframes?.["1h"]?.indicators?.macdHistogram ??
-        timeframes?.["1h"]?.indicators?.macd?.histogram ??
-        0;
-
-      results.push({
-        symbol,
-        momentum: {
-          confirms: data.momentum?.confirms ?? false,
-          building: data.momentum?.state === "building",
-          state: data.momentum?.state ?? "none",
-          lastCloseAlignsWithTrend: data.momentum?.lastCloseAlignsWithTrend ?? false,
-          hasDivergence: data.momentum?.hasDivergence ?? false,
-          macdHistogram: toNumber(macdHistogramRaw, 0),
-          macdExpanding: data.momentum?.macdExpanding ?? false,
-          macdDirectionAligned:
-            data.momentum?.macdDirectionAligned ??
-            Boolean(data.momentum?.macdStrong || data.momentum?.macdExpanding),
-          adx: volatility.adx ?? 0,
-          adxRising: data.momentum?.adxRising,
-          fakeBreakoutRisk: data.momentum?.fakeBreakoutRisk,
-          genuineMomentum: data.momentum?.genuineMomentum,
-          volumeConfirms: data.momentum?.volumeConfirms ?? false,
-          volumeBoost: data.volume?.["1h"]?.ratio,
-        },
-        higherTimeframeFilter: {
-          trend4h: getTfTrend("4h"),
-          trend1h: getTfTrend("1h"),
-          aligned: data.isAligned ?? false,
-        },
-        multiTimeframe: {
-          trend15m: getTfTrend("15m"),
-          trend30m: getTfTrend("30m"),
-        },
-        trend: data.primaryTrend ?? "unknown",
-      });
-    } catch (err) {
-      results.push({
+  return symbolList.map((symbol) => {
+    const data = snapshotMap.get(symbol);
+    if (!data) {
+      return {
         symbol,
         loading: false,
-        error: err instanceof Error ? err.message : 'Failed to fetch',
-      } as MomentumData);
+        error: 'No cached data yet — waiting for next analysis cycle',
+      } as MomentumData;
     }
-  }
 
-  return results;
+    const timeframes = data.timeframes || {};
+    const volatility = data.volatility || {};
+
+    const getTfTrend = (tf: string) =>
+      timeframes?.[tf]?.trend ?? timeframes?.[tf]?.indicators?.emaSignal ?? "unknown";
+
+    const toNumber = (value: unknown, fallback = 0) => {
+      const n = typeof value === "string" ? parseFloat(value) : typeof value === "number" ? value : Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    };
+
+    const macdHistogramRaw =
+      data.momentum?.macdHistogram ??
+      timeframes?.["1h"]?.indicators?.macdHistogram ??
+      timeframes?.["1h"]?.indicators?.macd?.histogram ??
+      0;
+
+    return {
+      symbol,
+      momentum: {
+        confirms: data.momentum?.confirms ?? false,
+        building: data.momentum?.state === "building",
+        state: data.momentum?.state ?? "none",
+        lastCloseAlignsWithTrend: data.momentum?.lastCloseAlignsWithTrend ?? false,
+        hasDivergence: data.momentum?.hasDivergence ?? false,
+        macdHistogram: toNumber(macdHistogramRaw, 0),
+        macdExpanding: data.momentum?.macdExpanding ?? false,
+        macdDirectionAligned:
+          data.momentum?.macdDirectionAligned ??
+          Boolean(data.momentum?.macdStrong || data.momentum?.macdExpanding),
+        adx: volatility.adx ?? 0,
+        adxRising: data.momentum?.adxRising,
+        fakeBreakoutRisk: data.momentum?.fakeBreakoutRisk,
+        genuineMomentum: data.momentum?.genuineMomentum,
+        volumeConfirms: data.momentum?.volumeConfirms ?? false,
+        volumeBoost: data.volume?.["1h"]?.ratio,
+      },
+      higherTimeframeFilter: {
+        trend4h: getTfTrend("4h"),
+        trend1h: getTfTrend("1h"),
+        aligned: data.isAligned ?? false,
+      },
+      multiTimeframe: {
+        trend15m: getTfTrend("15m"),
+        trend30m: getTfTrend("30m"),
+      },
+      trend: data.primaryTrend ?? "unknown",
+    } as MomentumData;
+  });
 };
 
 export const MOMENTUM_STATUS_QUERY_KEY = ['momentum-status'];
@@ -120,10 +123,10 @@ export const useMomentumStatus = () => {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: MOMENTUM_STATUS_QUERY_KEY,
     queryFn: fetchMomentumForSymbols,
-    staleTime: 30000, // Cache data for 30 seconds
-    gcTime: 300000, // Keep in cache for 5 minutes
+    staleTime: 30000,
+    gcTime: 300000,
     refetchOnWindowFocus: false,
-    refetchInterval: 60000, // Auto-refresh every 60 seconds (aligned with signal rejections)
+    refetchInterval: 60000,
   });
 
   return { 

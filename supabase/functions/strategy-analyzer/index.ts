@@ -2227,6 +2227,25 @@ serve(async (req) => {
 
     logger.success(`Got trend data for ${trendDataMap.size} symbols`);
 
+    // ============= CACHE TREND SNAPSHOTS FOR FRONTEND =============
+    // Upsert full calculate-trend response into trend_snapshots table
+    // Frontend reads this instead of calling calculate-trend directly (eliminates Binance geo-block)
+    const snapshotUpserts = Array.from(trendDataMap.entries()).map(([sym, td]) => ({
+      user_id: userId,
+      symbol: sym,
+      snapshot_data: td,
+      recorded_at: new Date().toISOString(),
+    }));
+    if (snapshotUpserts.length > 0) {
+      supabase
+        .from("trend_snapshots")
+        .upsert(snapshotUpserts, { onConflict: "user_id,symbol" })
+        .then(({ error }: { error: any }) => {
+          if (error) logger.warn(`Failed to upsert trend snapshots: ${error.message}`);
+          else logger.info(`📸 Cached ${snapshotUpserts.length} trend snapshots for frontend`);
+        });
+    }
+
     // Track statistics
     const signals: SignalData[] = [];
     let totalSignalsGenerated = 0;
