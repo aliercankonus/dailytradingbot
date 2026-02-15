@@ -2255,6 +2255,9 @@ serve(async (req) => {
       }
     }
 
+    // Collect effective regime per symbol for batch snapshot update after the loop
+    const symbolRegimeMap = new Map<string, string>();
+
     // Track statistics
     const signals: SignalData[] = [];
     let totalSignalsGenerated = 0;
@@ -4356,6 +4359,9 @@ serve(async (req) => {
         
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME (effective): ${fourStateRegime.regime}, confidence=${fourStateRegime.regimeConfidence}${fourStateRegime.isTransitionZone ? ' [TRANSITION]' : ''}`);
         logger.forSymbol(symbol).info(`   → allowContinuation=${fourStateRegime.allowContinuation}, allowMR=${fourStateRegime.allowMeanReversion}, posMultiplier=${fourStateRegime.positionMultiplier.toFixed(2)}`);
+        
+        // Collect effective regime for batch trend_snapshots update after loop
+        symbolRegimeMap.set(symbol, fourStateRegime.regime);
         
         // ============= REGIME AGE DECAY =============
         // Apply graduated fatigue as regimes age — markets statistically rotate
@@ -15496,6 +15502,26 @@ serve(async (req) => {
       logger.warn(`⚠️ OPERATIONAL_CONCERN: No rejections and no signals - check if trend data was fetched`);
     }
     
+    // ============= BATCH UPDATE REGIME COLUMN IN TREND SNAPSHOTS =============
+    // The regime is computed per-symbol AFTER the initial snapshot upsert,
+    // so we batch-update the regime column here after the per-symbol loop completes
+    if (symbolRegimeMap.size > 0) {
+      const regimeUpdatePromises = Array.from(symbolRegimeMap.entries()).map(([sym, regime]) =>
+        supabase
+          .from("trend_snapshots")
+          .update({ regime })
+          .eq("user_id", userId)
+          .eq("symbol", sym)
+      );
+      const regimeResults = await Promise.all(regimeUpdatePromises);
+      const regimeErrors = regimeResults.filter(r => r.error);
+      if (regimeErrors.length > 0) {
+        logger.warn(`⚠️ Failed to update regime for ${regimeErrors.length}/${symbolRegimeMap.size} symbols`);
+      } else {
+        logger.info(`🏷️ Updated regime column in trend_snapshots for ${symbolRegimeMap.size} symbols`);
+      }
+    }
+
     // Log heartbeat and persist to database
     if (BOT_HEARTBEAT_CONFIG.LOG_HEARTBEAT) {
       logger.info(`💓 HEARTBEAT: ${heartbeatTimestamp} | Symbols: ${perSymbolGateAttribution.size} | Signals: ${signals.length} | State: ${noTradeState || 'OPERATIONAL'}`);
