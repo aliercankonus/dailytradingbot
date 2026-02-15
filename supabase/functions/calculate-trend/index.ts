@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 // ============= SHARED MODULES - Single source of truth =============
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, TIME_IN_EXTREME_PARAMS, MICRO_TREND_PARAMS, MOMENTUM_CONTINUATION_PARAMS, STEALTH_TREND_PARAMS, NEUTRAL_PERSISTENCE_PARAMS } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, TIME_IN_EXTREME_PARAMS, MICRO_TREND_PARAMS, MOMENTUM_CONTINUATION_PARAMS, STEALTH_TREND_PARAMS, NEUTRAL_PERSISTENCE_PARAMS, BOLLINGER_CALC_PARAMS, MARKET_STRUCTURE_VALIDATION, DIVERGENCE_POSITION_SIZING, TRUE_ALIGNMENT_SCORING, MICRO_TREND_SCORING, NEUTRAL_BAR_CRITERIA, STEALTH_SCORING_POINTS, ATR_REGIME_THRESHOLDS, DIVERGENCE_CONFIDENCE_SCALING, PULLBACK_RANGE_DETECTION, DIVERGENCE_ALIGNMENT_THRESHOLDS, MACD_NORMALIZED_THRESHOLDS, MOMENTUM_STATE_PARAMS } from "../_shared/constants.ts";
 import { 
   calculateEMA, calculateEMAArray, calculateRSI, calculateRSIArray, calculateMACD,
   calculateStochasticRSI, calculateBarsAtExtreme, calculateATR, calculateHistoricalATRAvg,
@@ -71,7 +71,7 @@ function calculateBollingerBands(prices: number[], period = 20, stdDevMultiplier
       const bandRange = upper - lower;
       const percentB = bandRange !== 0 ? ((currentPrice - lower) / bandRange) * 100 : 50;
       const avgBandwidth = bandwidthCount > 0 ? bandwidthSum / bandwidthCount : bw;
-      const squeeze = bw < avgBandwidth * 0.75;
+      const squeeze = bw < avgBandwidth * BOLLINGER_CALC_PARAMS.SQUEEZE_RATIO;
       const squeezeIntensity = avgBandwidth > 0 
         ? Math.max(0, Math.min(100, (1 - bw / avgBandwidth) * 100)) 
         : 0;
@@ -116,10 +116,11 @@ function validateMarketStructure(
   klines: any[],
   trend: "bullish" | "bearish" | "neutral",
 ): { valid: boolean; confidence: number } {
-  if (klines.length < 10) return { valid: false, confidence: 0 };
+  const lookback = MARKET_STRUCTURE_VALIDATION.LOOKBACK_BARS;
+  if (klines.length < lookback) return { valid: false, confidence: 0 };
 
-  const highs = klines.slice(-10).map((k: any) => parseFloat(k[2])).filter(Number.isFinite);
-  const lows = klines.slice(-10).map((k: any) => parseFloat(k[3])).filter(Number.isFinite);
+  const highs = klines.slice(-lookback).map((k: any) => parseFloat(k[2])).filter(Number.isFinite);
+  const lows = klines.slice(-lookback).map((k: any) => parseFloat(k[3])).filter(Number.isFinite);
 
   if (trend === "bullish") {
     let higherHighs = 0, higherLows = 0;
@@ -130,7 +131,7 @@ function validateMarketStructure(
     const hhPercent = highs.length > 1 ? (higherHighs / (highs.length - 1)) * 100 : 0;
     const hlPercent = lows.length > 1 ? (higherLows / (lows.length - 1)) * 100 : 0;
     const structureScore = (hhPercent + hlPercent) / 2;
-    return { valid: structureScore > 50, confidence: structureScore };
+    return { valid: structureScore > MARKET_STRUCTURE_VALIDATION.VALID_THRESHOLD_PERCENT, confidence: structureScore };
   } else if (trend === "bearish") {
     let lowerHighs = 0, lowerLows = 0;
     for (let i = 1; i < highs.length; i++) {
@@ -140,7 +141,7 @@ function validateMarketStructure(
     const lhPercent = highs.length > 1 ? (lowerHighs / (highs.length - 1)) * 100 : 0;
     const llPercent = lows.length > 1 ? (lowerLows / (lows.length - 1)) * 100 : 0;
     const structureScore = (lhPercent + llPercent) / 2;
-    return { valid: structureScore > 50, confidence: structureScore };
+    return { valid: structureScore > MARKET_STRUCTURE_VALIDATION.VALID_THRESHOLD_PERCENT, confidence: structureScore };
   }
   return { valid: false, confidence: 0 };
 }
@@ -148,9 +149,9 @@ function validateMarketStructure(
 // ============= HELPER FUNCTIONS =============
 function calculateRecommendedPositionSize(divergenceType: string): number {
   switch (divergenceType) {
-    case "aligned": return 100;
-    case "pullback": return 50;
-    case "early_reversal": return 40;
+    case "aligned": return DIVERGENCE_POSITION_SIZING.ALIGNED_PERCENT;
+    case "pullback": return DIVERGENCE_POSITION_SIZING.PULLBACK_PERCENT;
+    case "early_reversal": return DIVERGENCE_POSITION_SIZING.EARLY_REVERSAL_PERCENT;
     default: return 0;
   }
 }
@@ -339,52 +340,49 @@ function calculateStealthTrend(
   let reason = "";
   
   if (isStealthDetected) {
-    // Points for drift size (up to 40 points)
-    stealthScore += Math.min(40, absDrift * 20);
+    // Points for drift size (up to max points)
+    stealthScore += Math.min(STEALTH_SCORING_POINTS.MAX_DRIFT_POINTS, absDrift * STEALTH_SCORING_POINTS.DRIFT_MULTIPLIER);
     
-    // Lower ADX = more stealth (up to 20 points)
-    // Use effectiveMaxADX for proper scaling
-    stealthScore += Math.min(20, (effectiveMaxADX - currentADX) * 2);
+    // Lower ADX = more stealth (up to max points)
+    stealthScore += Math.min(STEALTH_SCORING_POINTS.MAX_ADX_DISTANCE_POINTS, (effectiveMaxADX - currentADX) * STEALTH_SCORING_POINTS.ADX_DISTANCE_MULTIPLIER);
     
     // ===== Extra points for very large drifts =====
-    // Larger drifts are stronger signals even with elevated ADX
-    if (absDrift >= 2.5) {
-      stealthScore += 15;  // Strong drift bonus
-    } else if (absDrift >= 2.0) {
-      stealthScore += 10;  // Moderate drift bonus
+    if (absDrift >= STEALTH_SCORING_POINTS.STRONG_DRIFT_THRESHOLD) {
+      stealthScore += STEALTH_SCORING_POINTS.STRONG_DRIFT_BONUS;
+    } else if (absDrift >= STEALTH_SCORING_POINTS.MODERATE_DRIFT_THRESHOLD) {
+      stealthScore += STEALTH_SCORING_POINTS.MODERATE_DRIFT_BONUS;
     }
     
-    // ===== Bonus for high monotonicity (up to 15 points) =====
-    // More consistent drift = higher confidence
-    if (monotonicConsistency >= 80) {
-      stealthScore += 15;
-    } else if (monotonicConsistency >= 75) {
-      stealthScore += 10;
-    } else if (monotonicConsistency >= 70) {
-      stealthScore += 5;
+    // ===== Bonus for high monotonicity =====
+    if (monotonicConsistency >= STEALTH_SCORING_POINTS.HIGH_MONOTONIC_THRESHOLD) {
+      stealthScore += STEALTH_SCORING_POINTS.HIGH_MONOTONIC_BONUS;
+    } else if (monotonicConsistency >= STEALTH_SCORING_POINTS.MEDIUM_MONOTONIC_THRESHOLD) {
+      stealthScore += STEALTH_SCORING_POINTS.MEDIUM_MONOTONIC_BONUS;
+    } else if (monotonicConsistency >= STEALTH_SCORING_POINTS.LOW_MONOTONIC_THRESHOLD) {
+      stealthScore += STEALTH_SCORING_POINTS.LOW_MONOTONIC_BONUS;
     }
     
-    // Bonus if 1h trend matches drift direction (15 points)
+    // Bonus if 1h trend matches drift direction
     if (params.REQUIRE_1H_ALIGNMENT || true) {
       if ((direction === "bearish" && trend1h.trend === "bearish") ||
           (direction === "bullish" && trend1h.trend === "bullish")) {
-        stealthScore += 15;
+        stealthScore += STEALTH_SCORING_POINTS.TF_1H_ALIGNED_POINTS;
         if (trend1h.confidence >= params.MIN_1H_CONFIDENCE_FOR_ALIGNMENT) {
-          stealthScore += 5;
+          stealthScore += STEALTH_SCORING_POINTS.TF_1H_HIGH_CONF_BONUS;
         }
       }
     }
     
-    // Bonus if 30m also aligns (10 points)
+    // Bonus if 30m also aligns
     if (!params.REQUIRE_30M_ALIGNMENT || 
         ((direction === "bearish" && trend30m.trend === "bearish") ||
          (direction === "bullish" && trend30m.trend === "bullish"))) {
-      stealthScore += 10;
+      stealthScore += STEALTH_SCORING_POINTS.TF_30M_ALIGNED_POINTS;
     }
     
     // Penalty if StochRSI is at dangerous extremes
     if (!isStochRsiSafe) {
-      stealthScore -= 20;
+      stealthScore -= STEALTH_SCORING_POINTS.STOCHRSI_EXTREME_PENALTY;
     }
     
     stealthScore = Math.max(0, Math.min(100, stealthScore));
@@ -486,7 +484,7 @@ function calculateNeutralPersistence(
     const interBarChange = Math.abs((close - prevClose) / prevClose) * 100;
     
     // Neutral bar criteria: small candle, no strong momentum
-    if (barChange < 0.3 && interBarChange < 0.4) {
+    if (barChange < NEUTRAL_BAR_CRITERIA.MAX_BAR_CHANGE_PERCENT && interBarChange < NEUTRAL_BAR_CRITERIA.MAX_INTER_BAR_CHANGE_PERCENT) {
       neutralBars++;
     } else {
       break;  // Sequence broken
@@ -570,16 +568,16 @@ function detectMicroTrend(
   
   // Calculate alignment score
   let alignmentScore = 0;
-  if (lowerTFsAligned) alignmentScore += 40;
-  if (macdAligned) alignmentScore += 30;
+  if (lowerTFsAligned) alignmentScore += MICRO_TREND_SCORING.BOTH_LTF_ALIGNED_POINTS;
+  if (macdAligned) alignmentScore += MICRO_TREND_SCORING.MACD_ALIGNED_POINTS;
   
   // Bonus if 1h also agrees or is neutral
-  if (bothBullish && (t1h === "bullish" || t1h === "neutral")) alignmentScore += 20;
-  if (bothBearish && (t1h === "bearish" || t1h === "neutral")) alignmentScore += 20;
+  if (bothBullish && (t1h === "bullish" || t1h === "neutral")) alignmentScore += MICRO_TREND_SCORING.TF_1H_AGREES_POINTS;
+  if (bothBearish && (t1h === "bearish" || t1h === "neutral")) alignmentScore += MICRO_TREND_SCORING.TF_1H_AGREES_POINTS;
   
   // Confidence averaging
   const avgConfidence = (conf15m + conf30m) / 2;
-  if (avgConfidence >= 55) alignmentScore += 10;
+  if (avgConfidence >= MICRO_TREND_SCORING.HIGH_CONFIDENCE_THRESHOLD) alignmentScore += MICRO_TREND_SCORING.CONFIDENCE_HIGH_POINTS;
   
   // Determine micro-trend direction
   let direction: "bullish" | "bearish" | "neutral" = "neutral";
@@ -587,14 +585,14 @@ function detectMicroTrend(
   let reason = "";
   
   // MICRO-TREND DETECTED: Lower timeframes strongly aligned
-  if (lowerTFsAligned && alignmentScore >= 50) {
+  if (lowerTFsAligned && alignmentScore >= MICRO_TREND_SCORING.MIN_ALIGNMENT_SCORE) {
     direction = bothBullish ? "bullish" : "bearish";
     hasMicroTrend = true;
     reason = `15m+30m aligned ${direction} (score=${alignmentScore}, conf=${avgConfidence.toFixed(0)}%)`;
     
     // Extra strong if 1h also agrees
     if ((bothBullish && t1h === "bullish") || (bothBearish && t1h === "bearish")) {
-      alignmentScore = Math.min(100, alignmentScore + 15);
+      alignmentScore = Math.min(100, alignmentScore + MICRO_TREND_SCORING.EXTRA_1H_ALIGNED_POINTS);
       reason = `15m+30m+1h aligned ${direction} (score=${alignmentScore}, conf=${avgConfidence.toFixed(0)}%)`;
     }
   } 
@@ -604,17 +602,17 @@ function detectMicroTrend(
     const directionalConf = t15m !== "neutral" ? conf15m : conf30m;
     
     // Only accept if MACD confirms and confidence is good
-    if (macdAligned && directionalConf >= 55) {
+    if (macdAligned && directionalConf >= MICRO_TREND_SCORING.PARTIAL_MIN_CONFIDENCE) {
       direction = directionalTF as "bullish" | "bearish";
       hasMicroTrend = true;
-      alignmentScore = Math.min(alignmentScore + 20, 60); // Cap at 60 for partial alignment
+      alignmentScore = Math.min(alignmentScore + MICRO_TREND_SCORING.PARTIAL_MACD_ALIGNED_POINTS, MICRO_TREND_SCORING.PARTIAL_ALIGNMENT_CAP);
       reason = `${t15m !== "neutral" ? "15m" : "30m"} ${direction} with MACD confirm (score=${alignmentScore})`;
     }
   }
   
   // ADX bonus: strong micro-trends get extra credit
   if (hasMicroTrend && adx >= ADX_THRESHOLDS.MODERATE) {
-    alignmentScore = Math.min(100, alignmentScore + 10);
+    alignmentScore = Math.min(100, alignmentScore + MICRO_TREND_SCORING.ADX_MODERATE_POINTS);
   }
   
   // ===== PHASE 2: MICRO-TREND HARDENING CHECKS =====
@@ -704,27 +702,27 @@ function calculateTrueAlignmentScore(
   let directionScore = 0, indicatorScore = 0, penaltyScore = 0;
   
   const trends = [
-    { tf: "4h", trend: trend4h.trend, weight: 35, indicators: trend4h.indicators },
-    { tf: "1h", trend: trend1h.trend, weight: 30, indicators: trend1h.indicators },
-    { tf: "30m", trend: trend30m.trend, weight: 20, indicators: trend30m.indicators },
-    { tf: "15m", trend: trend15m.trend, weight: 15, indicators: trend15m.indicators },
+    { tf: "4h", trend: trend4h.trend, weight: TRUE_ALIGNMENT_SCORING.TF_4H_WEIGHT, indicators: trend4h.indicators },
+    { tf: "1h", trend: trend1h.trend, weight: TRUE_ALIGNMENT_SCORING.TF_1H_WEIGHT, indicators: trend1h.indicators },
+    { tf: "30m", trend: trend30m.trend, weight: TRUE_ALIGNMENT_SCORING.TF_30M_WEIGHT, indicators: trend30m.indicators },
+    { tf: "15m", trend: trend15m.trend, weight: TRUE_ALIGNMENT_SCORING.TF_15M_WEIGHT, indicators: trend15m.indicators },
   ];
   
   for (const tf of trends) {
     if (dominantTrend === "neutral") {
       const agreesWithMajority = tf.trend === trend1h.trend;
       if (agreesWithMajority && tf.trend !== "neutral") {
-        directionScore += tf.weight * 0.6;
+        directionScore += tf.weight * TRUE_ALIGNMENT_SCORING.ALIGNED_MULTIPLIER;
       } else if (tf.trend === "neutral") {
-        directionScore += tf.weight * 0.3;
+        directionScore += tf.weight * TRUE_ALIGNMENT_SCORING.NEUTRAL_MULTIPLIER;
       }
     } else {
       if (tf.trend === dominantTrend) {
-        directionScore += tf.weight * 0.6;
+        directionScore += tf.weight * TRUE_ALIGNMENT_SCORING.ALIGNED_MULTIPLIER;
       } else if (tf.trend === "neutral") {
-        directionScore += tf.weight * 0.3;
+        directionScore += tf.weight * TRUE_ALIGNMENT_SCORING.NEUTRAL_MULTIPLIER;
       } else {
-        penaltyScore += tf.weight * 0.3;
+        penaltyScore += tf.weight * TRUE_ALIGNMENT_SCORING.OPPOSING_PENALTY;
       }
     }
   }
@@ -740,9 +738,9 @@ function calculateTrueAlignmentScore(
   const macdBearish = macdHistograms.filter(m => m < 0).length;
   const macdAgreement = Math.max(macdBullish, macdBearish);
   
-  if (macdAgreement === 4) indicatorScore += 15;
-  else if (macdAgreement === 3) indicatorScore += 10;
-  else if (macdAgreement === 2) indicatorScore += 5;
+  if (macdAgreement === 4) indicatorScore += TRUE_ALIGNMENT_SCORING.MACD_4_AGREE_POINTS;
+  else if (macdAgreement === 3) indicatorScore += TRUE_ALIGNMENT_SCORING.MACD_3_AGREE_POINTS;
+  else if (macdAgreement === 2) indicatorScore += TRUE_ALIGNMENT_SCORING.MACD_2_AGREE_POINTS;
   
   const rsiSignals = [
     trend4h.indicators?.rsiSignal || "neutral",
@@ -755,15 +753,15 @@ function calculateTrueAlignmentScore(
   const rsiBearish = rsiSignals.filter(s => s === "bearish" || s === "oversold").length;
   const rsiAgreement = Math.max(rsiBullish, rsiBearish);
   
-  if (rsiAgreement >= 3) indicatorScore += 10;
-  else if (rsiAgreement >= 2) indicatorScore += 5;
+  if (rsiAgreement >= 3) indicatorScore += TRUE_ALIGNMENT_SCORING.RSI_3_PLUS_AGREE_POINTS;
+  else if (rsiAgreement >= 2) indicatorScore += TRUE_ALIGNMENT_SCORING.RSI_2_AGREE_POINTS;
   
   const rawScore = directionScore + indicatorScore - penaltyScore;
-  let normalizedScore = Math.min(Math.max(Math.round(rawScore * 1.18), 0), 100);
+  let normalizedScore = Math.min(Math.max(Math.round(rawScore * TRUE_ALIGNMENT_SCORING.NORMALIZATION_FACTOR), 0), 100);
   
   let neutralCapped = false;
   if (dominantTrend === "neutral" && adx < ADX_THRESHOLDS.MINIMUM) {
-    const maxNeutralScore = volumeConfirms ? 70 : 60;
+    const maxNeutralScore = volumeConfirms ? TRUE_ALIGNMENT_SCORING.NEUTRAL_CAP_WITH_VOLUME : TRUE_ALIGNMENT_SCORING.NEUTRAL_CAP_WITHOUT_VOLUME;
     if (normalizedScore > maxNeutralScore) {
       normalizedScore = maxNeutralScore;
       neutralCapped = true;
@@ -771,11 +769,11 @@ function calculateTrueAlignmentScore(
   }
   
   // Calculate enhanced alignment components for transparency
-  const volumeBoost = volumeConfirms ? 0.10 : 0;
-  const adxContribution = Math.min(10, (adx - 15) * 0.5);  // ADX contribution scaled
-  const tf4hWeighted = trend4h.confidence * 0.35;
-  const tf1hWeighted = trend1h.confidence * 0.30;
-  const volumeWeighted = volumeRatio * 5;  // Volume ratio contribution
+  const volumeBoost = volumeConfirms ? TRUE_ALIGNMENT_SCORING.VOLUME_BOOST_MULTIPLIER : 0;
+  const adxContribution = Math.min(TRUE_ALIGNMENT_SCORING.ADX_CONTRIBUTION_MAX, (adx - TRUE_ALIGNMENT_SCORING.ADX_CONTRIBUTION_OFFSET) * TRUE_ALIGNMENT_SCORING.ADX_CONTRIBUTION_SCALE);
+  const tf4hWeighted = trend4h.confidence * (TRUE_ALIGNMENT_SCORING.TF_4H_WEIGHT / 100);
+  const tf1hWeighted = trend1h.confidence * (TRUE_ALIGNMENT_SCORING.TF_1H_WEIGHT / 100);
+  const volumeWeighted = volumeRatio * TRUE_ALIGNMENT_SCORING.VOLUME_RATIO_WEIGHT;
   const adxWeighted = adxContribution;
   const totalWeightedConfidence = tf4hWeighted + tf1hWeighted + volumeWeighted + adxWeighted;
   
@@ -887,7 +885,7 @@ serve(async (req) => {
           const bAtrPercent = bCurrentPrice !== 0 ? (bCurrentATR / bCurrentPrice) * 100 : 0;
           const bHistoricalATRAvg = calculateHistoricalATRAvg(bKlines1h, 14, 30, bCurrentATR);
           const bRelativeATR = bHistoricalATRAvg !== 0 ? bCurrentATR / bHistoricalATRAvg : 1;
-          const bAtrCompressed = bRelativeATR < 0.6;
+          const bAtrCompressed = bRelativeATR < ATR_REGIME_THRESHOLDS.COMPRESSION_RATIO;
           const bIsRanging = bAtrCompressed && bAdx < ADX_THRESHOLDS.WEAK;
           
           // Volume analysis for all timeframes
@@ -958,7 +956,7 @@ serve(async (req) => {
           const bMacdExpanding = Math.abs(bMacdHistogram) > Math.abs(bPrevMacdHistogram);
           // Use ATR-normalized threshold: MACD-signal gap must be 0.1% of ATR to be "strong"
           const bMacdNormalized = bCurrentATR > 0 ? Math.abs(bTrend1h.indicators.macd - bTrend1h.indicators.macdSignal) / bCurrentATR : 0;
-          const bMacdStrong = bMacdNormalized > 0.001;
+          const bMacdStrong = bMacdNormalized > MACD_NORMALIZED_THRESHOLDS.BATCH_STRONG_RATIO;
           
           const bLastClose = bPrices1h[bPrices1h.length - 1] || 0;
           const bPrevClose = bPrices1h[bPrices1h.length - 2] || bLastClose;
@@ -1018,7 +1016,7 @@ serve(async (req) => {
           // Calculate consecutive bars for micro-trend
           const bBarsAligned15m = bTrend15m ? countConsecutiveBarsInDirection(bTrend15m.indicators?.macdHistogramArray) : 0;
           const bBarsAligned30m = bTrend30m ? countConsecutiveBarsInDirection(bTrend30m.indicators?.macdHistogramArray) : 0;
-          const bVolumeAboveMA = bVolume1h.volumeRatio >= 1.0;
+          const bVolumeAboveMA = bVolume1h.volumeRatio >= ATR_REGIME_THRESHOLDS.RANGE_EXPANSION_RATIO;
           
           // Micro-trend detection (aligned with single mode)
           const bMicroTrend = detectMicroTrend(
@@ -1164,7 +1162,7 @@ serve(async (req) => {
                 adx4h: Math.round(bAdx4h * 10) / 10,
                 adxSlope: bAdxSlope,
                 adxRising: bAdxRising,
-                volatilityNormal: bAtrPercent >= 0.3 && bAtrPercent <= 3.0,
+                volatilityNormal: bAtrPercent >= ATR_REGIME_THRESHOLDS.VOLATILITY_NORMAL_MIN && bAtrPercent <= ATR_REGIME_THRESHOLDS.VOLATILITY_NORMAL_MAX,
                 isRanging: bIsRanging,
               },
               
@@ -1174,7 +1172,7 @@ serve(async (req) => {
                 "1h": bVolume1h,
                 "4h": bVolume4h,
                 confirmsDirection: bVolumeConfirms,
-                hasRangeExpansion1h: bVolume1h.volumeRatio > 1.3 && bMacdExpanding,
+                hasRangeExpansion1h: bVolume1h.volumeRatio > ATR_REGIME_THRESHOLDS.VOLUME_EXPANSION_RATIO && bMacdExpanding,
               },
               
               bollingerBands: {
@@ -1449,12 +1447,12 @@ serve(async (req) => {
     if (!highTimeframeAligned) {
       if (dominantTrend !== "neutral" && dominantConfidence >= CONFIDENCE_THRESHOLDS.PULLBACK_4H_MIN && trend1h.confidence >= CONFIDENCE_THRESHOLDS.STRONG_1H_MIN) {
         divergenceType = "pullback";
-        divergenceConfidence = Math.min(dominantConfidence * 0.7, CONFIDENCE_THRESHOLDS.HTF_EXCEPTION);
+        divergenceConfidence = Math.min(dominantConfidence * DIVERGENCE_CONFIDENCE_SCALING.PULLBACK_MULTIPLIER, CONFIDENCE_THRESHOLDS.HTF_EXCEPTION);
         allowDivergenceSignal = true;
         symLog.info(`${LOG_CATEGORIES.SIGNAL} ${dominantTrend.toUpperCase()} PULLBACK detected: 4h=${dominantConfidence}% vs 1h=${trend1h.trend}`);
       } else if (trend1h.confidence >= CONFIDENCE_THRESHOLDS.STRONG_1H_REVERSAL && (dominantTrend === "neutral" || dominantConfidence < CONFIDENCE_THRESHOLDS.WEAK_4H) && adx >= ADX_THRESHOLDS.WEAK) {
         divergenceType = "early_reversal";
-        divergenceConfidence = Math.min(trend1h.confidence * 0.65, CONFIDENCE_THRESHOLDS.DEAD_ZONE_LOWER);
+        divergenceConfidence = Math.min(trend1h.confidence * DIVERGENCE_CONFIDENCE_SCALING.EARLY_REVERSAL_MULTIPLIER, CONFIDENCE_THRESHOLDS.DEAD_ZONE_LOWER);
         allowDivergenceSignal = true;
         symLog.info(`${LOG_CATEGORIES.REVERSAL} EARLY REVERSAL detected: 1h=${trend1h.trend}(${trend1h.confidence}%) vs weak/neutral 4h=${dominantTrend}(${dominantConfidence}%) ADX=${adx.toFixed(1)}`);
       } else {
@@ -1490,7 +1488,7 @@ serve(async (req) => {
     const adx4h = calculateADX(closedKlines4h, 14);
 
     // Enhanced confidence using shared module
-    const hasRangeExpansion1h = relativeATR > 1.0;
+    const hasRangeExpansion1h = relativeATR > ATR_REGIME_THRESHOLDS.RANGE_EXPANSION_RATIO;
     const enhancedConfidence15m = enhanceConfidenceWithIndicators(
       trend15m.confidence, adx15m, volume15m.volumeSpike || volume15m.volumeTrend === "increasing", volume15m.volumeRatio, false
     );
@@ -1585,8 +1583,8 @@ serve(async (req) => {
     }
     
     // Divergence alignment validation
-    const PULLBACK_ALIGNMENT_THRESHOLD = 55;
-    const EARLY_REVERSAL_ALIGNMENT_THRESHOLD = 45;
+    const PULLBACK_ALIGNMENT_THRESHOLD = DIVERGENCE_ALIGNMENT_THRESHOLDS.PULLBACK_MIN_SCORE;
+    const EARLY_REVERSAL_ALIGNMENT_THRESHOLD = DIVERGENCE_ALIGNMENT_THRESHOLDS.EARLY_REVERSAL_MIN_SCORE;
     
     if (divergenceType === "pullback" && trueAlignment.score < PULLBACK_ALIGNMENT_THRESHOLD) {
       symLog.info(`${LOG_CATEGORIES.REJECTION} PULLBACK REJECTED - alignment score ${trueAlignment.score} < ${PULLBACK_ALIGNMENT_THRESHOLD} threshold`);
@@ -1604,10 +1602,10 @@ serve(async (req) => {
     symLog.info(`${LOG_CATEGORIES.QUALITY} ENHANCED CONFIDENCE: 4h=${trend4h.confidence}->${enhancedConfidence4h} 1h=${trend1h.confidence}->${enhancedConfidence1h} | ALIGNMENT: score=${trueAlignment.score} (dir=${trueAlignment.breakdown.directionScore} ind=${trueAlignment.breakdown.indicatorScore} pen=${trueAlignment.breakdown.penaltyScore})${neutralCapLog}`);
 
     // Ranging market detection
-    const atrCompressed = relativeATR < 0.6;
+    const atrCompressed = relativeATR < ATR_REGIME_THRESHOLDS.COMPRESSION_RATIO;
     const adxWeak = adx < ADX_THRESHOLDS.MINIMUM;
     const isRanging = atrCompressed && adxWeak;
-    const volatilityNormal = !isRanging && atrPercent < 5.0;
+    const volatilityNormal = !isRanging && atrPercent < ATR_REGIME_THRESHOLDS.VOLATILITY_NORMAL_MAX;
     
     if (isRanging) {
       primaryTrend = "ranging";
@@ -1686,14 +1684,14 @@ serve(async (req) => {
         const range = swingHigh - swingLow;
         const pullback = swingHigh - currentPrice;
         pullbackPercent = range !== 0 ? (pullback / range) * 100 : 0;
-        inPullback = pullbackPercent >= 10 && pullbackPercent <= 65;
+        inPullback = pullbackPercent >= PULLBACK_RANGE_DETECTION.MIN_PULLBACK_PERCENT && pullbackPercent <= PULLBACK_RANGE_DETECTION.MAX_PULLBACK_PERCENT;
       } else if (dominantTrend === "bearish") {
         const swingLow = recentLows.length > 0 ? Math.min(...recentLows) : 0;
         const swingHigh = recentHighs.slice(-12).length > 0 ? Math.max(...recentHighs.slice(-12)) : 0;
         const range = swingHigh - swingLow;
         const pullback = currentPrice - swingLow;
         pullbackPercent = range !== 0 ? (pullback / range) * 100 : 0;
-        inPullback = pullbackPercent >= 10 && pullbackPercent <= 65;
+        inPullback = pullbackPercent >= PULLBACK_RANGE_DETECTION.MIN_PULLBACK_PERCENT && pullbackPercent <= PULLBACK_RANGE_DETECTION.MAX_PULLBACK_PERCENT;
       }
     }
 
@@ -1724,7 +1722,7 @@ serve(async (req) => {
       : 0;
     
     // Log if significant move detected
-    if (distanceFromHighPercent >= 5 || distanceFromLowPercent >= 5) {
+    if (distanceFromHighPercent >= MOMENTUM_STATE_PARAMS.SWING_DISTANCE_LOG_THRESHOLD || distanceFromLowPercent >= MOMENTUM_STATE_PARAMS.SWING_DISTANCE_LOG_THRESHOLD) {
       symLog.info(`${LOG_CATEGORIES.TREND} SWING DISTANCE: ${distanceFromHighPercent.toFixed(1)}% from high ($${swingHigh24h.toFixed(2)}), ${distanceFromLowPercent.toFixed(1)}% from low ($${swingLow24h.toFixed(2)})`);
     }
 
@@ -1769,12 +1767,12 @@ serve(async (req) => {
       volume1h.volumeSpike
     );
     
-    const volumeBoost = volumeConfirmsDirection ? 1.10 : 1.0;
+    const volumeBoost = volumeConfirmsDirection ? MOMENTUM_STATE_PARAMS.VOLUME_DIRECTION_BOOST : 1.0;
 
     // IMPROVED: Check last 3 candles instead of just last candle (2/3 majority rule)
     // This allows occasional bounces in strong trends without failing momentum confirmation
     // GAP 2 FIX: Relax alignment requirement during low-volatility compression
-    const isCompressed = relativeATR < 0.7;  // ATR below 70% of historical average
+    const isCompressed = relativeATR < ATR_REGIME_THRESHOLDS.LOW_COMPRESSION_RATIO;
     const candleCount = Math.min(3, prices1h.length - 1);
     let alignedCandles = 0;
     for (let i = 0; i < candleCount; i++) {
@@ -1790,7 +1788,7 @@ serve(async (req) => {
     }
     // GAP 2: In compression, relax to 1/3 alignment OR volume confirmation
     // Standard: Require 2/3 majority (2 of 3 candles aligned) OR neutral trend
-    const alignmentThreshold = isCompressed ? 0.34 : 0.67;  // 1/3 vs 2/3 majority
+    const alignmentThreshold = isCompressed ? MOMENTUM_STATE_PARAMS.COMPRESSED_ALIGNMENT_RATIO : MOMENTUM_STATE_PARAMS.STANDARD_ALIGNMENT_RATIO;
     const lastCloseAlignsWithTrend = effectiveTrendForMomentum === "neutral" || 
       alignedCandles >= Math.ceil(candleCount * alignmentThreshold) ||
       (isCompressed && volumeConfirmsDirection);  // Volume can substitute in compression
@@ -1802,7 +1800,7 @@ serve(async (req) => {
     const priceMovementPercent = prevClose !== 0 ? Math.abs(priceMovement / prevClose) : 0;
     const macdMovementPercent = prevMacdHistogram !== 0 ? Math.abs(macdMovement / prevMacdHistogram) : 0;
     
-    if (priceMovementPercent > 0.001 && macdMovementPercent > 0.05) {
+    if (priceMovementPercent > MOMENTUM_STATE_PARAMS.PRICE_MOVEMENT_MIN_PERCENT && macdMovementPercent > MOMENTUM_STATE_PARAMS.MACD_MOVEMENT_MIN_PERCENT) {
       hasDivergence = (priceMovement > 0 && macdMovement < 0) || (priceMovement < 0 && macdMovement > 0);
     }
 
@@ -1815,8 +1813,8 @@ serve(async (req) => {
     // 0.005 = MACD must be 0.5% of ATR to be "expanding"
     // 0.05 = MACD must be 5% of ATR to be "strong"
     const macdNormalized = currentATR > 0 ? Math.abs(macdHistogram) / currentATR : Math.abs(macdHistogram);
-    const macdExpanding = macdNormalized > 0.005 && macdDirectionAligned && adx >= ADX_THRESHOLDS.SEVERE_PENALTY;
-    const macdStrong = macdNormalized > 0.05 && macdDirectionAligned && adx >= ADX_THRESHOLDS.SEVERE_PENALTY;
+    const macdExpanding = macdNormalized > MACD_NORMALIZED_THRESHOLDS.EXPANDING_RATIO && macdDirectionAligned && adx >= ADX_THRESHOLDS.SEVERE_PENALTY;
+    const macdStrong = macdNormalized > MACD_NORMALIZED_THRESHOLDS.STRONG_RATIO && macdDirectionAligned && adx >= ADX_THRESHOLDS.SEVERE_PENALTY;
 
     // Fake breakout detection
     const fakeBreakoutRisk = macdExpanding && !adxRising;
@@ -1826,7 +1824,7 @@ serve(async (req) => {
     // Previously required ALL: macdExpanding, lastCloseAlignsWithTrend, !hasDivergence, ADX >= 22, adxRising
     // Now: Strong aligned moves (4h+1h same direction) can pass with just MACD expanding + ADX >= 18
     const is4h1hAligned = trend4h.trend !== "neutral" && trend4h.trend === trend1h.trend;
-    const strongAlignment = is4h1hAligned && trend4h.confidence >= 55 && trend1h.confidence >= 50;
+    const strongAlignment = is4h1hAligned && trend4h.confidence >= MOMENTUM_STATE_PARAMS.STRONG_4H_CONFIDENCE && trend1h.confidence >= MOMENTUM_STATE_PARAMS.STRONG_1H_CONFIDENCE;
     
     // Standard full confirmation
     const fullMomentumConfirms = macdExpanding && lastCloseAlignsWithTrend && !hasDivergence && adx >= ADX_THRESHOLDS.MODERATE && adxRising;
@@ -1841,7 +1839,7 @@ serve(async (req) => {
       adx >= ADX_THRESHOLDS.EXHAUSTION &&  // ADX >= 45
       !adxRising &&  // ADX falling = trend decelerating
       (hasDivergence || !macdExpanding) &&  // Momentum diverging or contracting
-      (stochRsi4h.k > 90 || stochRsi4h.k < 10)  // At StochRSI extremes
+      (stochRsi4h.k > MOMENTUM_STATE_PARAMS.EXHAUSTION_STOCHRSI_HIGH || stochRsi4h.k < MOMENTUM_STATE_PARAMS.EXHAUSTION_STOCHRSI_LOW)
     );
     
     // ISSUE 3 FIX: Volume as soft booster - can promote building → confirmed
