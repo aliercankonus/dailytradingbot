@@ -26,8 +26,6 @@ export default function Settings() {
   const [formData, setFormData] = useState({
     binanceApiKey: '',
     binanceApiSecret: '',
-    notificationPhone: riskParams?.notification_phone || '',
-    notificationEmail: '',
   });
 
   const [hasEncryptedKeys, setHasEncryptedKeys] = useState(false);
@@ -144,49 +142,6 @@ export default function Settings() {
       toast({
         title: "Error",
         description: "Failed to update trading mode",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleToggleSmsNotifications = async (enabled: boolean) => {
-    try {
-      await updateRiskParameters({ sms_notifications_enabled: enabled });
-      toast({
-        title: enabled ? "SMS Notifications Enabled" : "SMS Notifications Disabled",
-        description: enabled 
-          ? "You'll receive SMS alerts for critical events" 
-          : "SMS alerts are now disabled",
-      });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update SMS settings",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleSavePhoneNumber = async () => {
-    if (!formData.notificationPhone) {
-      toast({
-        title: "Missing Phone Number",
-        description: "Please enter a phone number",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      await updateRiskParameters({ notification_phone: formData.notificationPhone });
-      toast({
-        title: "Phone Number Updated",
-        description: "Your phone number has been saved successfully",
-      });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update phone number",
         variant: "destructive",
       });
     }
