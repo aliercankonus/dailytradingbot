@@ -5772,16 +5772,52 @@ serve(async (req) => {
           const bbSqueeze = bb4h?.squeeze ?? false;
           
           if (relaxation?.ENABLED) {
-            // Check if ADX slope is too negative (trend exhausting)
-            const slopeBlocksRelaxation = relaxation.BLOCK_IF_ADX_SLOPE_DECLINING && 
+            // ===== GRADUATED SLOPE RELAXATION =====
+            // Instead of binary block, slope determines relaxation DEGREE
+            const gradSlope = relaxation.GRADUATED_SLOPE_RELAXATION;
+            const slopeFullyBlocksRelaxation = relaxation.BLOCK_IF_ADX_SLOPE_DECLINING && 
               adxSlope < relaxation.ADX_SLOPE_DECLINE_THRESHOLD;
             
-            if (!slopeBlocksRelaxation) {
-              // Check relaxation conditions
+            // Determine relaxation tier based on slope
+            let relaxationTier = 'NONE';
+            let effectiveHardThreshold = derivedDirection === 'short' 
+              ? MOVE_EXHAUSTION_FILTER_PARAMS.SHORT_HARD_THRESHOLD_PERCENT 
+              : MOVE_EXHAUSTION_FILTER_PARAMS.LONG_HARD_THRESHOLD_PERCENT;
+            let effectiveSoftThreshold = derivedDirection === 'short'
+              ? MOVE_EXHAUSTION_FILTER_PARAMS.SHORT_SOFT_THRESHOLD_PERCENT
+              : MOVE_EXHAUSTION_FILTER_PARAMS.LONG_SOFT_THRESHOLD_PERCENT;
+            let relaxedPositionSize = relaxation.RELAXED_SOFT_POSITION_SIZE;
+            
+            if (!slopeFullyBlocksRelaxation && gradSlope?.ENABLED) {
+              if (adxSlope >= gradSlope.FULL_RELAXATION_SLOPE) {
+                relaxationTier = 'FULL';
+                effectiveHardThreshold = gradSlope.FULL_HARD_THRESHOLD;
+                effectiveSoftThreshold = relaxation.RELAXED_SOFT_THRESHOLD_PERCENT;
+                relaxedPositionSize = relaxation.RELAXED_SOFT_POSITION_SIZE;
+              } else if (adxSlope >= gradSlope.PARTIAL_RELAXATION_SLOPE) {
+                relaxationTier = 'PARTIAL';
+                effectiveHardThreshold = gradSlope.PARTIAL_HARD_THRESHOLD;
+                effectiveSoftThreshold = relaxation.RELAXED_SOFT_THRESHOLD_PERCENT;
+                relaxedPositionSize = gradSlope.PARTIAL_POSITION_SIZE;
+              } else if (adxSlope >= gradSlope.LIMITED_RELAXATION_SLOPE) {
+                relaxationTier = 'LIMITED';
+                effectiveHardThreshold = gradSlope.LIMITED_HARD_THRESHOLD;
+                effectiveSoftThreshold = MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_PERCENT;
+                relaxedPositionSize = gradSlope.LIMITED_POSITION_SIZE;
+              }
+              // else: slope < -2.5, relaxationTier stays 'NONE'
+            } else if (!slopeFullyBlocksRelaxation && !gradSlope?.ENABLED) {
+              // Fallback: legacy binary relaxation
+              relaxationTier = 'FULL';
+              effectiveHardThreshold = relaxation.RELAXED_HARD_THRESHOLD_PERCENT;
+              effectiveSoftThreshold = relaxation.RELAXED_SOFT_THRESHOLD_PERCENT;
+            }
+            
+            if (relaxationTier !== 'NONE') {
+              // Check relaxation conditions (ADX, squeeze, breakdown)
               const adxCondition = adx >= relaxation.MIN_ADX_FOR_RELAXATION;
               const squeezeCondition = relaxation.BB_SQUEEZE_RELAXATION && bbSqueeze;
               
-              // Bollinger breakdown conditions (direction-aware)
               let breakdownCondition = false;
               if (relaxation.BB_BREAKDOWN_RELAXATION) {
                 if (derivedDirection === 'short') {
@@ -5791,7 +5827,6 @@ serve(async (req) => {
                 }
               }
               
-              // StochRSI runway check for relaxation
               let hasStochRsiRunway = true;
               if (relaxation.REQUIRE_STOCHRSI_RUNWAY) {
                 if (derivedDirection === 'short') {
@@ -5801,7 +5836,6 @@ serve(async (req) => {
                 }
               }
               
-              // Apply relaxation if any condition is met AND runway exists
               if (hasStochRsiRunway && (adxCondition || squeezeCondition || breakdownCondition)) {
                 useRelaxedThresholds = true;
                 const conditions = [];
@@ -5810,20 +5844,25 @@ serve(async (req) => {
                 if (breakdownCondition) conditions.push(`%B=${percentB4h.toFixed(1)}%`);
                 relaxationCondition = conditions.join(' + ');
                 
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 MOVE_EXHAUSTION relaxation activated: ${relaxationCondition} | Thresholds: soft=${relaxation.RELAXED_SOFT_THRESHOLD_PERCENT}%, hard=${relaxation.RELAXED_HARD_THRESHOLD_PERCENT}%`);
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 MOVE_EXHAUSTION graduated relaxation: tier=${relaxationTier}, slope=${adxSlope.toFixed(2)}, ${relaxationCondition} | Hard=${effectiveHardThreshold}%, Size=${(relaxedPositionSize * 100).toFixed(0)}%`);
               }
             } else {
-              logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} MOVE_EXHAUSTION relaxation blocked: ADX slope=${adxSlope.toFixed(2)} < ${relaxation.ADX_SLOPE_DECLINE_THRESHOLD} (trend exhausting)`);
+              logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} MOVE_EXHAUSTION relaxation blocked: ADX slope=${adxSlope.toFixed(2)} < ${relaxation.ADX_SLOPE_DECLINE_THRESHOLD} (structural decline)`);
             }
           }
           
-          // Determine effective thresholds based on relaxation
-          const effectiveSoftThreshold = useRelaxedThresholds 
-            ? relaxation.RELAXED_SOFT_THRESHOLD_PERCENT 
-            : MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_PERCENT;
-          const effectiveHardThreshold = useRelaxedThresholds 
-            ? relaxation.RELAXED_HARD_THRESHOLD_PERCENT 
-            : MOVE_EXHAUSTION_FILTER_PARAMS.HARD_THRESHOLD_PERCENT;
+          // Determine effective thresholds based on graduated relaxation
+          // Note: effectiveHardThreshold and effectiveSoftThreshold are already set
+          // by the graduated slope logic above when useRelaxedThresholds = true
+          if (!useRelaxedThresholds) {
+            // No relaxation — use default direction-specific thresholds
+            effectiveHardThreshold = derivedDirection === 'short'
+              ? MOVE_EXHAUSTION_FILTER_PARAMS.SHORT_HARD_THRESHOLD_PERCENT
+              : MOVE_EXHAUSTION_FILTER_PARAMS.LONG_HARD_THRESHOLD_PERCENT;
+            effectiveSoftThreshold = derivedDirection === 'short'
+              ? MOVE_EXHAUSTION_FILTER_PARAMS.SHORT_SOFT_THRESHOLD_PERCENT
+              : MOVE_EXHAUSTION_FILTER_PARAMS.LONG_SOFT_THRESHOLD_PERCENT;
+          }
           
           if (derivedDirection === 'short' && priceDistance) {
             const distanceFromHigh = priceDistance.distanceFromHighPercent ?? 0;
