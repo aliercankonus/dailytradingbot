@@ -212,6 +212,24 @@ const BypassBadge = ({ eligible }: { eligible: boolean }) => {
   );
 };
 
+// Category classification for colored tag badges
+const getRejectionCategory = (reason: string): { label: string; color: string } => {
+  const r = reason.toLowerCase();
+  if (r.includes("adx")) return { label: "ADX", color: "bg-amber-500/20 text-amber-400 border-amber-500/30" };
+  if (r.includes("stoch") || r.includes("rsi") || r.includes("tier_0") || r.includes("tier 0") || r.includes("circuit breaker")) return { label: "StochRSI", color: "bg-purple-500/20 text-purple-400 border-purple-500/30" };
+  if (r.includes("momentum") || r.includes("macd")) return { label: "Momentum", color: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30" };
+  if (r.includes("counter_trend")) return { label: "Counter-Trend", color: "bg-red-500/20 text-red-400 border-red-500/30" };
+  if (r.includes("move_exhausted") || r.includes("near_extreme")) return { label: "Exhaustion", color: "bg-orange-500/20 text-orange-400 border-orange-500/30" };
+  if (r.includes("htf") || r.includes("ltf") || r.includes("aligned")) return { label: "Alignment", color: "bg-blue-500/20 text-blue-400 border-blue-500/30" };
+  if (r.includes("quality") || r.includes("confidence")) return { label: "Quality", color: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" };
+  if (r.includes("regime") || r.includes("ranging") || r.includes("low_atr") || r.includes("no_trade")) return { label: "Regime", color: "bg-indigo-500/20 text-indigo-400 border-indigo-500/30" };
+  if (r.includes("flash_crash") || r.includes("capitulation")) return { label: "Flash Crash", color: "bg-pink-500/20 text-pink-400 border-pink-500/30" };
+  if (r.includes("direction") || r.includes("no_clear")) return { label: "Direction", color: "bg-slate-500/20 text-slate-400 border-slate-500/30" };
+  if (r.includes("squeeze")) return { label: "Squeeze", color: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" };
+  if (r.includes("symbol disabled")) return { label: "Disabled", color: "bg-red-500/20 text-red-400 border-red-500/30" };
+  return { label: "Gate", color: "bg-muted text-muted-foreground border-border" };
+};
+
 // Parse raw rejection reason into user-friendly label + short description
 const getFriendlyRejection = (reason: string): { label: string; summary: string; icon: typeof AlertCircle } => {
   const r = reason.toLowerCase();
@@ -528,6 +546,7 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
                 const styles = getSeverityStyles(severity);
                 const friendly = getFriendlyRejection(signal.rejection_reason);
                 const FriendlyIcon = friendly.icon;
+                const category = getRejectionCategory(signal.rejection_reason);
                 const adx = fs?.adx ?? td?.volatility?.adx;
                 const direction = fs?.derivedDirection ?? fs?.direction ?? td?.direction;
                 
@@ -538,6 +557,9 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
                         <span className="font-mono text-sm font-medium">{signal.symbol}</span>
                         <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${styles.badge}`}>
                           {severity.toUpperCase()}
+                        </Badge>
+                        <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${category.color}`}>
+                          {category.label}
                         </Badge>
                         {direction && <DirectionBadge direction={direction} />}
                       </div>
@@ -589,6 +611,7 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
                     const styles = getSeverityStyles(severity);
                     const mrStatus = deriveMRStatus(fs);
                     const bypassEligible = checkBypassEligible(fs);
+                    const category = getRejectionCategory(signal.rejection_reason);
                     
                     const adx = fs?.adx ?? td?.volatility?.adx;
                     const adxSlope = fs?.adxSlope ?? td?.volatility?.adxSlope;
@@ -601,9 +624,14 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
                         <TableCell className="font-medium">
                           <div className="flex flex-col gap-0.5">
                             <span className="text-sm">{signal.symbol}</span>
-                            <Badge variant="outline" className={`text-[8px] px-1 py-0 w-fit ${styles.badge}`}>
-                              {severity.toUpperCase()}
-                            </Badge>
+                            <div className="flex items-center gap-1">
+                              <Badge variant="outline" className={`text-[8px] px-1 py-0 w-fit ${styles.badge}`}>
+                                {severity.toUpperCase()}
+                              </Badge>
+                              <Badge variant="outline" className={`text-[8px] px-1 py-0 w-fit ${category.color}`}>
+                                {category.label}
+                              </Badge>
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell>
