@@ -73,8 +73,8 @@ const Performance = () => {
         {/* Sub-header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-lg sm:text-2xl font-bold text-foreground flex items-center gap-2">
-              <BarChart3 className="h-5 w-5 text-primary flex-shrink-0" />
+            <h2 className="text-base sm:text-lg font-semibold text-foreground flex items-center gap-2">
+              <BarChart3 className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               <span className="truncate">Portfolio Performance</span>
             </h2>
             <p className="text-xs sm:text-sm text-muted-foreground mt-1 hidden sm:block">Historical performance tracking and analytics</p>
@@ -95,12 +95,12 @@ const Performance = () => {
         {/* Summary Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {stats.map((stat, idx) => (
-            <Card key={idx} className="p-3 sm:p-6 bg-card border-border shadow-lg hover:shadow-xl transition-shadow">
-              <div className="flex items-center justify-between mb-1 sm:mb-2">
-                <span className="text-xs sm:text-sm text-muted-foreground truncate pr-1">{stat.label}</span>
-                <stat.icon className="h-3 w-3 sm:h-4 sm:w-4 text-primary flex-shrink-0" />
+            <Card key={idx} className="p-3 border-border">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] text-muted-foreground truncate pr-1">{stat.label}</span>
+                <stat.icon className="h-3 w-3 text-muted-foreground flex-shrink-0" />
               </div>
-              <div className="text-base sm:text-2xl font-bold text-foreground font-mono truncate">{stat.value}</div>
+              <div className="text-sm sm:text-lg font-bold text-foreground font-mono truncate">{stat.value}</div>
               <div className={`text-xs sm:text-sm mt-1 flex items-center gap-1 ${stat.changePositive ? "text-profit" : "text-loss"}`}>
                 {stat.changePositive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                 <span className="truncate">{stat.change}</span>

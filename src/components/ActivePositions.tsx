@@ -248,7 +248,7 @@ export const ActivePositions = () => {
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h2 className="text-lg sm:text-2xl font-bold">Active Positions</h2>
+          <h2 className="text-base sm:text-lg font-semibold">Active Positions</h2>
           {loading && (
             <Loader2 className="h-4 w-4 text-primary animate-spin" />
           )}

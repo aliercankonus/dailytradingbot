@@ -54,20 +54,20 @@ export default function Profile() {
   return (
     <div className="min-h-screen bg-background">
       <AppHeader />
-      <div className="container mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6 max-w-2xl">
-        <h1 className="text-2xl font-bold">Profile</h1>
+      <div className="container mx-auto px-3 sm:px-6 py-4 space-y-4 max-w-2xl">
+        <h1 className="text-lg font-semibold">Profile</h1>
 
         {/* Account Info */}
-        <Card className="p-6">
-          <div className="flex items-center gap-4 mb-6">
-            <Avatar className="h-16 w-16">
-              <AvatarFallback className="bg-primary/15 text-primary text-xl font-semibold">
+        <Card className="p-4">
+          <div className="flex items-center gap-3 mb-4">
+            <Avatar className="h-12 w-12">
+              <AvatarFallback className="bg-secondary text-muted-foreground text-sm font-semibold">
                 {getInitials(user?.email || 'U')}
               </AvatarFallback>
             </Avatar>
             <div>
-              <p className="text-lg font-semibold">{user?.email?.split('@')[0] || 'Trader'}</p>
-              <p className="text-sm text-muted-foreground">{user?.email}</p>
+              <p className="text-sm font-semibold">{user?.email?.split('@')[0] || 'Trader'}</p>
+              <p className="text-xs text-muted-foreground">{user?.email}</p>
             </div>
           </div>
 
@@ -84,8 +84,8 @@ export default function Profile() {
         </Card>
 
         {/* Change Password */}
-        <Card className="p-6">
-          <h2 className="text-xl font-semibold mb-4">Change Password</h2>
+        <Card className="p-4">
+          <h2 className="text-[15px] font-semibold mb-3">Change Password</h2>
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="new-password">New Password</Label>
@@ -104,8 +104,8 @@ export default function Profile() {
         </Card>
 
         {/* Sign Out */}
-        <Card className="p-6">
-          <h2 className="text-xl font-semibold mb-4">Session</h2>
+        <Card className="p-4">
+          <h2 className="text-[15px] font-semibold mb-3">Session</h2>
           <Button variant="destructive" onClick={signOut}>
             <LogOut className="mr-2 h-4 w-4" />
             Sign Out

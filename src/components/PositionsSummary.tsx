@@ -101,17 +101,17 @@ export const PositionsSummary = () => {
   ];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       {metrics.map((metric) => (
-        <Card key={metric.label} className="p-4 bg-card/50 border-border">
+        <Card key={metric.label} className="p-3 border-border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-muted-foreground">{metric.label}</p>
-              <p className={`text-xl font-bold font-mono ${metric.color}`}>
+              <p className="text-[11px] text-muted-foreground">{metric.label}</p>
+              <p className={`text-lg font-bold font-mono ${metric.color}`}>
                 {metric.value}
               </p>
             </div>
-            <metric.icon className={`h-5 w-5 ${metric.color} opacity-70`} />
+            <metric.icon className={`h-4 w-4 ${metric.color} opacity-50`} />
           </div>
         </Card>
       ))}

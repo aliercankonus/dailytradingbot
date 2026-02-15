@@ -168,7 +168,7 @@ export default function Settings() {
   return (
     <div className="min-h-screen bg-background">
       <AppHeader />
-      <div className="container mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6">
+      <div className="container mx-auto px-3 sm:px-4 py-4 space-y-4">
 
       <Tabs defaultValue="trading" className="w-full">
         <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4">
@@ -180,12 +180,12 @@ export default function Settings() {
 
         {/* Tab 1: Trading Mode */}
         <TabsContent value="trading" className="space-y-6">
-          <Card className="p-4 sm:p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <Shield className="h-5 w-5 text-primary" />
-              <h2 className="text-xl font-semibold">Trading Mode</h2>
+          <Card className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Shield className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-[15px] font-semibold">Trading Mode</h2>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="space-y-1">
                   <div className="font-medium">Paper Trading Mode</div>
@@ -208,12 +208,12 @@ export default function Settings() {
             </div>
           </Card>
 
-          <Card className="p-4 sm:p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <Brain className="h-5 w-5 text-primary" />
-              <h2 className="text-xl font-semibold">AI Analysis</h2>
+          <Card className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Brain className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-[15px] font-semibold">AI Analysis</h2>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="space-y-1">
                   <div className="font-medium">Enable AI Analysis</div>
@@ -239,10 +239,10 @@ export default function Settings() {
 
         {/* Tab 2: API & Security */}
         <TabsContent value="api" className="space-y-6">
-          <Card className="p-4 sm:p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <Key className="h-5 w-5 text-primary" />
-              <h2 className="text-xl font-semibold">Binance API Keys</h2>
+          <Card className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Key className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-[15px] font-semibold">Binance API Keys</h2>
             </div>
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">

@@ -37,9 +37,9 @@ export const LivePriceCard = () => {
   }, [error, toast]);
 
   return (
-    <Card className="p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-foreground">Live Market Prices</h3>
+    <Card className="p-4 border-border">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-[15px] font-semibold text-foreground">Live Market Prices</h3>
         <WebSocketStatus connected={connected} error={error} showText={true} />
       </div>
 
@@ -50,7 +50,7 @@ export const LivePriceCard = () => {
         </div>
       )}
 
-      <div className="space-y-3">
+      <div className="space-y-1.5">
         {symbolsLoading ? (
           <div className="text-center py-8 text-muted-foreground">
             Loading symbols...
@@ -69,20 +69,20 @@ export const LivePriceCard = () => {
             return (
               <div
                 key={price.symbol}
-                className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 hover:bg-secondary/70 transition-colors"
+                className="flex items-center justify-between py-2 px-2.5 border-b border-border last:border-0 hover:bg-secondary/30 transition-colors"
               >
                 <div className="flex items-center gap-3">
                   <div className={`h-2 w-2 rounded-full ${isPositive ? 'bg-profit' : 'bg-loss'}`} />
-                  <span className="font-semibold text-foreground">
+                  <span className="font-mono text-xs font-semibold text-foreground">
                     {price.symbol.replace('USDT', '/USDT')}
                   </span>
                 </div>
 
                 <div className="text-right">
-                  <div className="font-mono font-semibold text-foreground">
+                  <div className="font-mono text-xs font-bold text-foreground">
                     {formatPrice(parseFloat(price.price), 4, '$')}
                   </div>
-                  <div className={`text-sm flex items-center justify-end gap-1 ${
+                  <div className={`text-[10px] font-mono flex items-center justify-end gap-0.5 ${
                     isPositive ? 'text-profit' : 'text-loss'
                   }`}>
                     {isPositive ? (

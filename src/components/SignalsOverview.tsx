@@ -96,7 +96,7 @@ export const SignalsOverview = () => {
             )}
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold">{activeCount}</span>
+            <span className="text-lg font-bold">{activeCount}</span>
             {activeCount > 0 && (
               <div className="flex gap-1.5">
                 {longCount > 0 && (
@@ -146,7 +146,7 @@ export const SignalsOverview = () => {
             )}
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold">{recentRejections}</span>
+            <span className="text-lg font-bold">{recentRejections}</span>
             <span className="text-xs text-muted-foreground">last 30m</span>
           </div>
           <p className="text-xs text-muted-foreground mt-1">
@@ -177,7 +177,7 @@ export const SignalsOverview = () => {
             )}
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold">{aiCount ?? 0}</span>
+            <span className="text-lg font-bold">{aiCount ?? 0}</span>
             <span className="text-xs text-muted-foreground">evaluations</span>
           </div>
           <p className="text-xs text-muted-foreground mt-1">

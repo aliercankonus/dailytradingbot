@@ -367,20 +367,20 @@ export const ClosedPositionsDashboard = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Summary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total Closed</CardDescription>
-            <CardTitle className="text-xl sm:text-3xl">{stats.total}</CardTitle>
+            <CardTitle className="text-lg">{stats.total}</CardTitle>
           </CardHeader>
         </Card>
         
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total P&L</CardDescription>
-            <CardTitle className={`text-xl sm:text-3xl ${stats.totalPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
+            <CardTitle className={`text-lg ${stats.totalPnL >= 0 ? 'text-profit' : 'text-loss'}`}>
               {formatPrice(stats.totalPnL, 2, '$')}
             </CardTitle>
           </CardHeader>
@@ -389,7 +389,7 @@ export const ClosedPositionsDashboard = () => {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Win Rate</CardDescription>
-            <CardTitle className="text-xl sm:text-3xl">
+            <CardTitle className="text-lg">
               {formatPercent(fullCloseStats.winRate, 1)}
             </CardTitle>
             <div className="text-xs text-muted-foreground mt-1">
@@ -401,7 +401,7 @@ export const ClosedPositionsDashboard = () => {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total Fees Paid</CardDescription>
-            <CardTitle className="text-xl sm:text-3xl text-amber-500">
+            <CardTitle className="text-lg text-warning">
               {formatPrice(stats.totalFees, 2, '$')}
             </CardTitle>
             <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
@@ -414,7 +414,7 @@ export const ClosedPositionsDashboard = () => {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Avg P&L</CardDescription>
-            <CardTitle className={`text-xl sm:text-3xl ${stats.avgPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
+            <CardTitle className={`text-lg ${stats.avgPnL >= 0 ? 'text-profit' : 'text-loss'}`}>
               {formatPrice(stats.avgPnL, 2, '$')}
             </CardTitle>
           </CardHeader>
