@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, MOMENTUM_FALLBACK_DIRECTION_PARAMS, DIRECTION_REGIME_PARAMS, TIER2_WEIGHTED_CONFIRMATION, DIRECTIONAL_BIAS_ESCAPE_PARAMS, EXHAUSTION_REVERSAL_OVERRIDE_PARAMS, EXHAUSTION_ESCAPE_PARAMS, FOUR_STATE_REGIME, RSI_ZONE_THRESHOLDS, type AdxPhase, type ExceptionType, type MasterMarketRegime, type FourStateRegime, type DirectionRegime } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, MOMENTUM_FALLBACK_DIRECTION_PARAMS, DIRECTION_REGIME_PARAMS, TIER2_WEIGHTED_CONFIRMATION, DIRECTIONAL_BIAS_ESCAPE_PARAMS, EXHAUSTION_REVERSAL_OVERRIDE_PARAMS, EXHAUSTION_ESCAPE_PARAMS, FOUR_STATE_REGIME, RSI_ZONE_THRESHOLDS, VOLUME_SCORE_PARAMS, ADX_SCORE_PARAMS, ALIGNMENT_SCORE_PARAMS, ADX_REVERSAL_WEIGHTS, REVERSAL_CROSS_SCORES, MARKET_REGIME_DETECTION, type AdxPhase, type ExceptionType, type MasterMarketRegime, type FourStateRegime, type DirectionRegime } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -510,12 +510,12 @@ export const getStochRsiWeightedRsiScore = (
 //   ADX < 20:  1.00 (no reduction - weak/no trend)
 //
 export const getAdxWeight = (adxValue: number): number => {
-  if (adxValue >= ADX_THRESHOLDS.EXTREME) return 0.40;      // 60% reduction
-  if (adxValue >= ADX_THRESHOLDS.EXCEPTIONAL) return 0.50;  // 50% reduction
-  if (adxValue >= ADX_THRESHOLDS.VERY_STRONG) return 0.60;  // 40% reduction
-  if (adxValue >= ADX_THRESHOLDS.STRONG) return 0.75;       // 25% reduction
-  if (adxValue >= ADX_THRESHOLDS.MINIMUM) return 0.85;      // 15% reduction
-  return 1.00;  // No reduction - weak trend
+  if (adxValue >= ADX_THRESHOLDS.EXTREME) return ADX_REVERSAL_WEIGHTS.EXTREME_WEIGHT;
+  if (adxValue >= ADX_THRESHOLDS.EXCEPTIONAL) return ADX_REVERSAL_WEIGHTS.EXCEPTIONAL_WEIGHT;
+  if (adxValue >= ADX_THRESHOLDS.VERY_STRONG) return ADX_REVERSAL_WEIGHTS.VERY_STRONG_WEIGHT;
+  if (adxValue >= ADX_THRESHOLDS.STRONG) return ADX_REVERSAL_WEIGHTS.STRONG_WEIGHT;
+  if (adxValue >= ADX_THRESHOLDS.MINIMUM) return ADX_REVERSAL_WEIGHTS.MINIMUM_WEIGHT;
+  return ADX_REVERSAL_WEIGHTS.DEFAULT_WEIGHT;
 };
 
 // ============= VOLUME SCORE (0-10 points) =============
@@ -528,74 +528,70 @@ export const getVolumeScore = (
   trend: string = "neutral"
 ): number => {
   // Perfect volume signal: confirms + spike + range expansion
-  if (volumeConfirms && volumeSpike && hasRangeExpansion && volumeRatio > 2.0) {
-    return 10;
+  if (volumeConfirms && volumeSpike && hasRangeExpansion && volumeRatio > VOLUME_SCORE_PARAMS.SPIKE_WITH_EXPANSION) {
+    return VOLUME_SCORE_PARAMS.SCORE_PERFECT;
   }
   
   // Strong volume: confirms + spike + high ratio
-  if (volumeConfirms && volumeSpike && volumeRatio > 2.0) {
-    return 8;
+  if (volumeConfirms && volumeSpike && volumeRatio > VOLUME_SCORE_PARAMS.SPIKE_WITH_EXPANSION) {
+    return VOLUME_SCORE_PARAMS.SCORE_STRONG;
   }
   
   // Volume confirms with above-average ratio and range expansion
-  if (volumeConfirms && volumeRatio > 1.5 && hasRangeExpansion) {
-    return 7;
+  if (volumeConfirms && volumeRatio > VOLUME_SCORE_PARAMS.ABOVE_AVG_HIGH && hasRangeExpansion) {
+    return VOLUME_SCORE_PARAMS.SCORE_CONFIRMS_EXPANSION;
   }
   
   // Volume confirms with above-average ratio (no range expansion)
-  if (volumeConfirms && volumeRatio > 1.5) {
-    return 5;
+  if (volumeConfirms && volumeRatio > VOLUME_SCORE_PARAMS.ABOVE_AVG_HIGH) {
+    return VOLUME_SCORE_PARAMS.SCORE_CONFIRMS;
   }
   
   // Volume confirms at normal levels
   if (volumeConfirms) {
-    return 4;
+    return VOLUME_SCORE_PARAMS.SCORE_CONFIRMS_BASIC;
   }
   
   // Spike without confirmation needs range expansion to score
-  if (volumeSpike && hasRangeExpansion && volumeRatio > 1.5) {
-    return 4;
+  if (volumeSpike && hasRangeExpansion && volumeRatio > VOLUME_SCORE_PARAMS.ABOVE_AVG_HIGH) {
+    return VOLUME_SCORE_PARAMS.SCORE_SPIKE_NO_CONFIRM;
   }
   
   // Above average volume with range expansion
-  if (volumeRatio > 1.5 && hasRangeExpansion) {
-    return 3;
+  if (volumeRatio > VOLUME_SCORE_PARAMS.ABOVE_AVG_HIGH && hasRangeExpansion) {
+    return VOLUME_SCORE_PARAMS.SCORE_EXPANSION_NO_CONFIRM;
   }
   
   // Above average volume without range expansion (less reliable)
-  if (volumeRatio > 1.5) {
-    return 2;
+  if (volumeRatio > VOLUME_SCORE_PARAMS.ABOVE_AVG_HIGH) {
+    return VOLUME_SCORE_PARAMS.SCORE_ABOVE_AVG;
   }
   
   // Slightly above average
-  if (volumeRatio > 1.2) {
-    return 2;  // IMPROVED: Was 1, now 2 (120%+ volume = decent confirmation)
+  if (volumeRatio > VOLUME_SCORE_PARAMS.ABOVE_AVG) {
+    return VOLUME_SCORE_PARAMS.SCORE_ABOVE_AVG;
   }
   
-  // CRITICAL: Very low volume (< 10%) = holiday/weekend conditions = 0 points
-  // This prevents false signals in illiquid markets
-  if (volumeRatio < 0.1) {
+  // Very low volume - no points
+  if (volumeRatio < VOLUME_SCORE_PARAMS.VERY_LOW) {
     return 0;
   }
   
-  // PARTIAL CREDIT: At least average volume (volumeRatio >= 1.0)
-  // This prevents zero volume score in normal market conditions
-  if (volumeRatio >= 1.0) {
-    return 2;  // IMPROVED: Was 1, now 2 (average volume = baseline credit)
+  // At least average volume
+  if (volumeRatio >= VOLUME_SCORE_PARAMS.AT_AVG) {
+    return VOLUME_SCORE_PARAMS.SCORE_BASELINE;
   }
   
-  // IMPROVED: 50-100% volume = still reasonable for momentum trades
-  // Strong moves can happen on slightly below average volume
-  if (volumeRatio >= 0.5) {
-    return 2;  // Was 1 at 0.3+, now 2 at 0.5+ (better scoring for near-average volume)
+  // 50-100% volume
+  if (volumeRatio >= VOLUME_SCORE_PARAMS.BELOW_AVG) {
+    return VOLUME_SCORE_PARAMS.SCORE_BASELINE;
   }
   
-  // Low but not critical volume (30-50% of average) - minimal credit
-  if (volumeRatio >= 0.3) {
-    return 1;  // Kept as 1 for genuinely low volume
+  // Low but not critical volume
+  if (volumeRatio >= VOLUME_SCORE_PARAMS.LOW) {
+    return VOLUME_SCORE_PARAMS.SCORE_LOW;
   }
   
-  // Very low volume (10-30%) in any condition - no bonus
   return 0;
 };
 
@@ -628,23 +624,23 @@ export const getConfidencePenalty = (
 export const getAdxScore = (adx: number, adxSlope?: number): number => {
   let baseScore: number;
   
-  if (adx >= ADX_THRESHOLDS.EXTREME) baseScore = 25;
-  else if (adx >= ADX_THRESHOLDS.VERY_STRONG) baseScore = 22;
-  else if (adx >= ADX_THRESHOLDS.STRONG) baseScore = 18;
-  else if (adx >= ADX_THRESHOLDS.MINIMUM) baseScore = 14;
-  else if (adx >= ADX_THRESHOLDS.WEAK) baseScore = 8;
-  else if (adx >= ADX_THRESHOLDS.VERY_WEAK) baseScore = 4;
+  if (adx >= ADX_THRESHOLDS.EXTREME) baseScore = ADX_SCORE_PARAMS.SCORE_EXTREME;
+  else if (adx >= ADX_THRESHOLDS.VERY_STRONG) baseScore = ADX_SCORE_PARAMS.SCORE_VERY_STRONG;
+  else if (adx >= ADX_THRESHOLDS.STRONG) baseScore = ADX_SCORE_PARAMS.SCORE_STRONG;
+  else if (adx >= ADX_THRESHOLDS.MINIMUM) baseScore = ADX_SCORE_PARAMS.SCORE_MINIMUM;
+  else if (adx >= ADX_THRESHOLDS.WEAK) baseScore = ADX_SCORE_PARAMS.SCORE_WEAK;
+  else if (adx >= ADX_THRESHOLDS.VERY_WEAK) baseScore = ADX_SCORE_PARAMS.SCORE_VERY_WEAK;
   else baseScore = 0;
   
   // PHASE 3: Apply ADX falling penalty
   // Falling ADX with weak trend = double penalty
   if (adxSlope !== undefined && adxSlope < 0) {
-    if (adx < 25) {
+    if (adx < ADX_SCORE_PARAMS.FALLING_THRESHOLD) {
       // Weak AND falling ADX = -8 penalty (was -3)
-      baseScore = Math.max(0, baseScore - 8);
+      baseScore = Math.max(0, baseScore - ADX_SCORE_PARAMS.FALLING_WEAK_PENALTY);
     } else {
       // Strong but falling ADX = -5 penalty (was -3)
-      baseScore = Math.max(0, baseScore - 5);
+      baseScore = Math.max(0, baseScore - ADX_SCORE_PARAMS.FALLING_STRONG_PENALTY);
     }
   }
   
@@ -755,54 +751,52 @@ export const getAlignmentScore = (
   
   // Full alignment bonus (0-8)
   if (aligned) {
-    score += 8;
+    score += ALIGNMENT_SCORE_PARAMS.FULL_ALIGNMENT_SCORE;
   } else if (tf) {
     // ============= STRONG 1H TREND CREDIT (NEW) =============
-    // When 4h is neutral but 1h has strong directional confirmation
-    // This is a valid setup for shorter-term entries
-    if (trend4h === "neutral" && trend1h !== "neutral" && conf1h >= 65) {
-      score += 6;  // Strong 1h with neutral 4h = good setup
+    const ASP = ALIGNMENT_SCORE_PARAMS;
+    if (trend4h === "neutral" && trend1h !== "neutral" && conf1h >= ASP.STRONG_1H_MIN_CONFIDENCE) {
+      score += ASP.STRONG_1H_NEUTRAL_4H_SCORE;
     }
     // 4h neutral with 1h+30m aligned = partial alignment
     else if (trend4h === "neutral" && trend1h === trend30m && trend1h !== "neutral") {
-      score += 5;
+      score += ASP.PARTIAL_ALIGNMENT_SCORE;
     }
     // 1h and 30m agree but different from 4h
     else if (trend1h === trend30m && trend1h !== "neutral") {
-      score += 3;
+      score += ASP.LOWER_TF_ALIGNMENT_SCORE;
     }
     // Strong 1h alone (without 30m confirmation) still gets some credit
-    else if (trend1h !== "neutral" && conf1h >= 60) {
-      score += 3;
+    else if (trend1h !== "neutral" && conf1h >= ASP.STRONG_1H_ALONE_MIN_CONFIDENCE) {
+      score += ASP.STRONG_1H_ALONE_SCORE;
     }
   }
   
   // ============= PHASE 4 FIX: LOADING ZONE BONUS =============
-  // Add points when StochRSI is in 30-70 loading zone AND ADX is strong
-  // This rewards entries that have room to run
   const stochRsi1h = trendData?.stochasticRsi?.['1h'];
   const stochK1h = stochRsi1h?.k ?? 50;
-  if (stochK1h >= 30 && stochK1h <= 70 && adx >= 35) {
-    score += 3;  // +3 for loading zone with strong ADX
-  } else if (stochK1h >= 35 && stochK1h <= 65 && adx >= 25) {
-    score += 2;  // +2 for ideal loading zone with moderate ADX
+  const ASP = ALIGNMENT_SCORE_PARAMS;
+  
+  if (stochK1h >= ASP.LOADING_ZONE_WIDE_K_MIN && stochK1h <= ASP.LOADING_ZONE_WIDE_K_MAX && adx >= ASP.LOADING_ZONE_WIDE_ADX_MIN) {
+    score += ASP.LOADING_ZONE_WIDE_BONUS;
+  } else if (stochK1h >= ASP.LOADING_ZONE_NARROW_K_MIN && stochK1h <= ASP.LOADING_ZONE_NARROW_K_MAX && adx >= ASP.LOADING_ZONE_NARROW_ADX_MIN) {
+    score += ASP.LOADING_ZONE_NARROW_BONUS;
   }
   
   // ============= 1H CONFIDENCE BONUS (NEW) =============
-  // Extra credit for very strong 1h directional confidence
-  if (conf1h >= 70) {
-    score += 2;  // Very strong 1h direction
-  } else if (conf1h >= 65) {
-    score += 1;  // Strong 1h direction
+  if (conf1h >= ASP.VERY_STRONG_1H_CONFIDENCE) {
+    score += ASP.VERY_STRONG_1H_BONUS;
+  } else if (conf1h >= ASP.STRONG_1H_CONFIDENCE) {
+    score += ASP.STRONG_1H_BONUS;
   }
   
-  // Consistency component (0-4, reduced from 0-6 to balance 1h credit)
-  if (consistency >= 75) score += 4;
-  else if (consistency >= 65) score += 3;
-  else if (consistency >= 55) score += 2;
-  else if (consistency >= 45) score += 1;
+  // Consistency component
+  if (consistency >= ASP.CONSISTENCY_EXCELLENT) score += ASP.CONSISTENCY_EXCELLENT_SCORE;
+  else if (consistency >= ASP.CONSISTENCY_GOOD) score += ASP.CONSISTENCY_GOOD_SCORE;
+  else if (consistency >= ASP.CONSISTENCY_FAIR) score += ASP.CONSISTENCY_FAIR_SCORE;
+  else if (consistency >= ASP.CONSISTENCY_BASIC) score += ASP.CONSISTENCY_BASIC_SCORE;
   
-  return Math.min(14, score);
+  return Math.min(ASP.MAX_SCORE, score);
 };
 
 // ============= TECHNICAL INDICATOR SCORE (0-15 points) =============
@@ -1311,13 +1305,13 @@ export const calculateUnifiedReversalScore = (
   let rawStochCrossScore = 0;
   
   if (stochSignals.opposingCrossCount >= 3) {
-    rawStochCrossScore = 50;
+    rawStochCrossScore = REVERSAL_CROSS_SCORES.THREE_PLUS_CROSSES;
     reasons.push(`${stochSignals.opposingCrossCount} opposing StochRSI crosses`);
   } else if (stochSignals.opposingCrossCount >= 2) {
-    rawStochCrossScore = 40;
+    rawStochCrossScore = REVERSAL_CROSS_SCORES.TWO_CROSSES;
     reasons.push(`${stochSignals.opposingCrossCount} opposing StochRSI crosses`);
   } else if (stochSignals.opposingCrossCount >= 1) {
-    rawStochCrossScore = 30;
+    rawStochCrossScore = REVERSAL_CROSS_SCORES.ONE_CROSS;
     reasons.push(`Opposing StochRSI cross`);
   }
   
@@ -1338,45 +1332,43 @@ export const calculateUnifiedReversalScore = (
   if (isLong) {
     // Check deeply oversold (favorable for LONG = reduces score)
     if (k4h < STOCHRSI_THRESHOLDS.DEEPLY_OVERSOLD) {
-      rawStochZoneScore += 15;
+      rawStochZoneScore += REVERSAL_CROSS_SCORES.DEEPLY_ZONE;
       reasons.push(`4h StochRSI deeply oversold (K=${k4h.toFixed(1)})`);
     } else if (k4h < STOCHRSI_THRESHOLDS.OVERSOLD_ZONE) {
-      rawStochZoneScore += 8;
+      rawStochZoneScore += REVERSAL_CROSS_SCORES.OUTER_ZONE;
       reasons.push(`4h StochRSI oversold zone (K=${k4h.toFixed(1)})`);
     }
     
     // ENHANCED: Check extremely overbought (risky for LONG = increases score significantly)
-    // K >= 95: +35 points (was +10) - HIGH REVERSAL RISK
     if (k4h >= HIGH_REVERSAL_OB) {
-      rawStochZoneScore += 35;
+      rawStochZoneScore += REVERSAL_CROSS_SCORES.HIGH_REVERSAL_RISK;
       reasons.push(`4h StochRSI at high reversal risk (K=${k4h.toFixed(1)} >= ${HIGH_REVERSAL_OB}) - nowhere to rise`);
     } else if (k4h > STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT) {
-      rawStochZoneScore += 18;
+      rawStochZoneScore += REVERSAL_CROSS_SCORES.EXTREME_ZONE;
       reasons.push(`4h StochRSI extremely overbought (K=${k4h.toFixed(1)})`);
     } else if (k4h > STOCHRSI_THRESHOLDS.OVERBOUGHT) {
-      rawStochZoneScore += 10;
+      rawStochZoneScore += REVERSAL_CROSS_SCORES.STANDARD_ZONE;
       reasons.push(`4h StochRSI overbought (K=${k4h.toFixed(1)})`);
     }
   } else {
     // Check deeply overbought (favorable for SHORT = reduces score)
     if (k4h > STOCHRSI_THRESHOLDS.DEEPLY_OVERBOUGHT) {
-      rawStochZoneScore += 15;
+      rawStochZoneScore += REVERSAL_CROSS_SCORES.DEEPLY_ZONE;
       reasons.push(`4h StochRSI deeply overbought (K=${k4h.toFixed(1)})`);
     } else if (k4h > STOCHRSI_THRESHOLDS.OVERBOUGHT_ZONE) {
-      rawStochZoneScore += 8;
+      rawStochZoneScore += REVERSAL_CROSS_SCORES.OUTER_ZONE;
       reasons.push(`4h StochRSI overbought zone (K=${k4h.toFixed(1)})`);
     }
     
     // ENHANCED: Check extremely oversold (risky for SHORT = increases score significantly)
-    // K <= 5: +35 points (was +10) - HIGH REVERSAL RISK
     if (k4h <= HIGH_REVERSAL_OS) {
-      rawStochZoneScore += 35;
+      rawStochZoneScore += REVERSAL_CROSS_SCORES.HIGH_REVERSAL_RISK;
       reasons.push(`4h StochRSI at high reversal risk (K=${k4h.toFixed(1)} <= ${HIGH_REVERSAL_OS}) - nowhere to fall`);
     } else if (k4h < STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD) {
-      rawStochZoneScore += 18;
+      rawStochZoneScore += REVERSAL_CROSS_SCORES.EXTREME_ZONE;
       reasons.push(`4h StochRSI extremely oversold (K=${k4h.toFixed(1)})`);
     } else if (k4h < STOCHRSI_THRESHOLDS.OVERSOLD) {
-      rawStochZoneScore += 10;
+      rawStochZoneScore += REVERSAL_CROSS_SCORES.STANDARD_ZONE;
       reasons.push(`4h StochRSI oversold (K=${k4h.toFixed(1)})`);
     }
   }
@@ -1408,31 +1400,31 @@ export const calculateUnifiedReversalScore = (
   // Check "mixed" state FIRST (highest penalty) - prevents premature catch by other conditions
   if (momentumState === "mixed") {
     if (adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION) {
-      rawMomentumScore = 30;
+      rawMomentumScore = REVERSAL_CROSS_SCORES.MIXED_WEAK_ADX;
       reasons.push(`Mixed momentum with weak ADX`);
     } else {
-      rawMomentumScore = 15;
+      rawMomentumScore = REVERSAL_CROSS_SCORES.MIXED_STRONG_ADX;
       reasons.push(`Mixed momentum (ADX allows)`);
     }
   } else if (momentumState === "none") {
     if (isStrongTrendException) {
       // Strong trend exception - reduced penalty for early entries
-      rawMomentumScore = 10;
+      rawMomentumScore = REVERSAL_CROSS_SCORES.NONE_STRONG_ADX;
       reasons.push(`No momentum but strong trend (ADX=${adx.toFixed(1)} >= 28)`);
     } else {
-      rawMomentumScore = 25;
+      rawMomentumScore = REVERSAL_CROSS_SCORES.NONE_STATE;
       reasons.push(`Momentum not confirmed (state: ${momentumState})`);
     }
   } else if (!momentumConfirms && momentumState !== "building") {
     if (isStrongTrendException) {
-      rawMomentumScore = 8;
+      rawMomentumScore = REVERSAL_CROSS_SCORES.UNCONFIRMED_STRONG;
       reasons.push(`Momentum unconfirmed but strong trend (ADX=${adx.toFixed(1)})`);
     } else {
-      rawMomentumScore = 20;
+      rawMomentumScore = REVERSAL_CROSS_SCORES.UNCONFIRMED;
       reasons.push(`Momentum state ${momentumState} not confirmed`);
     }
   } else if (momentumState === "building" && !momentumConfirms) {
-    rawMomentumScore = 10;
+    rawMomentumScore = REVERSAL_CROSS_SCORES.BUILDING_UNCONFIRMED;
     reasons.push("Momentum building but not confirmed");
   }
   
@@ -1445,13 +1437,13 @@ export const calculateUnifiedReversalScore = (
   // 4. MACD ALIGNMENT (0-15 points) - PHASE 2: Apply cap
   let rawMacdScore = 0;
   if (momentum.hasDivergence) {
-    rawMacdScore += 15;
+    rawMacdScore += REVERSAL_CROSS_SCORES.DIVERGENCE;
     reasons.push("MACD divergence detected");
   } else if (!momentum.macdDirectionAligned) {
-    rawMacdScore += 10;
+    rawMacdScore += REVERSAL_CROSS_SCORES.DIRECTION_MISALIGNED;
     reasons.push("MACD direction misaligned");
   } else if (!macdExpanding) {
-    rawMacdScore += 5;
+    rawMacdScore += REVERSAL_CROSS_SCORES.NOT_EXPANDING;
     reasons.push("MACD not expanding");
   }
   
@@ -1465,20 +1457,20 @@ export const calculateUnifiedReversalScore = (
   let rawTimeframeScore = 0;
   if (isLong) {
     if (trend1h === "bearish") {
-      rawTimeframeScore += 15;
+      rawTimeframeScore += REVERSAL_CROSS_SCORES.OPPOSING_1H;
       reasons.push("1h trend bearish (opposing LONG)");
     }
     if (trend4h === "bearish") {
-      rawTimeframeScore += 5;
+      rawTimeframeScore += REVERSAL_CROSS_SCORES.OPPOSING_4H;
       reasons.push("4h trend bearish");
     }
   } else {
     if (trend1h === "bullish") {
-      rawTimeframeScore += 15;
+      rawTimeframeScore += REVERSAL_CROSS_SCORES.OPPOSING_1H;
       reasons.push("1h trend bullish (opposing SHORT)");
     }
     if (trend4h === "bullish") {
-      rawTimeframeScore += 5;
+      rawTimeframeScore += REVERSAL_CROSS_SCORES.OPPOSING_4H;
       reasons.push("4h trend bullish");
     }
   }
@@ -1494,10 +1486,10 @@ export const calculateUnifiedReversalScore = (
   const volumeBoost = momentum.volumeBoost ?? 1.0;
   
   if (volumeConfirms && volumeBoost > 1.3) {
-    breakdown.volumeScore = -10;
+    breakdown.volumeScore = REVERSAL_CROSS_SCORES.VOLUME_CONFIRMS;
     reasons.push(`Volume confirms - risk reduced`);
   } else if (!volumeConfirms && volatility.volumeRatio < 0.5) {
-    breakdown.volumeScore = 5;
+    breakdown.volumeScore = REVERSAL_CROSS_SCORES.LOW_VOLUME;
     reasons.push("Low volume - reduced conviction");
   }
   
@@ -1558,12 +1550,12 @@ export const calculateUnifiedReversalScore = (
     decision = "BLOCK";
     positionSizeMultiplier = 0;
     reasons.push(`PHASE 2: BLOCK by reversal probability (${separatedRisk.reversalProbability.score})`);
-  } else if (totalScore >= 75) {
+  } else if (totalScore >= REVERSAL_CROSS_SCORES.BLOCK_THRESHOLD) {
     // Fallback to legacy scoring if reversal probability didn't block but total is very high
     // Raised from 60 to 75 to allow more signals through during transitional markets
     decision = "BLOCK";
     positionSizeMultiplier = 0;
-  } else if (totalScore >= 40 || separatedRisk.continuationRisk.positionMultiplier < 1.0) {
+  } else if (totalScore >= REVERSAL_CROSS_SCORES.REDUCE_THRESHOLD || separatedRisk.continuationRisk.positionMultiplier < 1.0) {
     decision = "REDUCE";
     // Use the more conservative of the two position multipliers
     const legacyMultiplier = totalScore >= 40 ? 0.5 : 1.0;
@@ -1616,7 +1608,7 @@ export const detectMarketRegime = (trendData: any): {
   const consistency = trendData?.trueAlignment?.score || 0;
   
   // Ranging market (ADX low, mixed signals)
-  if (adx < 15 && confidence < 50) {
+  if (adx < MARKET_REGIME_DETECTION.RANGING_ADX_MAX && confidence < MARKET_REGIME_DETECTION.RANGING_CONFIDENCE_MAX) {
     return { 
       regime: "ranging", 
       tradeable: false, 
@@ -1625,7 +1617,7 @@ export const detectMarketRegime = (trendData: any): {
   }
   
   // Choppy market (inconsistent direction)
-  if (consistency < 40 && adx < ADX_THRESHOLDS.MINIMUM) {
+  if (consistency < MARKET_REGIME_DETECTION.CHOPPY_CONSISTENCY_MAX && adx < ADX_THRESHOLDS.MINIMUM) {
     return { 
       regime: "choppy", 
       tradeable: false, 
@@ -1634,7 +1626,7 @@ export const detectMarketRegime = (trendData: any): {
   }
   
   // Volatile market (high ATR with weak trend)
-  if (atrPercent > 2.5 && adx < ADX_THRESHOLDS.STRONG) {
+  if (atrPercent > MARKET_REGIME_DETECTION.VOLATILE_ATR_MIN && adx < ADX_THRESHOLDS.STRONG) {
     return { 
       regime: "volatile", 
       tradeable: false, 

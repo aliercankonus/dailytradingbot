@@ -5,7 +5,7 @@
 // Part of the comprehensive trading intelligence upgrade
 
 import { calculateEMAArray, calculateRSIArray, calculateMACD, calculateADXWithDirection, calculateVolumeAnalysis, calculateATR, type ADXResult } from "./indicators.ts";
-import { ADX_THRESHOLDS, ADX_EXHAUSTION_PARAMS } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_EXHAUSTION_PARAMS, MOMENTUM_SCORE_COMPONENTS, DYNAMIC_TRAILING_PARAMS, CONTEXT_STOP_PARAMS, EXIT_SIGNAL_SCORING, PULLBACK_DETECTION_PARAMS, ENTRY_CONFIRMATION_PARAMS, ENTRY_QUALITY_GRADES } from "./constants.ts";
 
 // ============= TREND MOMENTUM SCORE =============
 // Scores momentum from -100 (strong bearish) to +100 (strong bullish)
@@ -48,7 +48,7 @@ export function calculateMomentumScore(
   const reasons: string[] = [];
   let totalScore = 0;
 
-  // 1. EMA Spread Rate of Change (max ±30 points)
+  // 1. EMA Spread Rate of Change (max ±MOMENTUM_SCORE_COMPONENTS.EMA_SPREAD_MAX points)
   const ema12Array = calculateEMAArray(prices, 12);
   const ema26Array = calculateEMAArray(prices, 26);
   
@@ -62,22 +62,22 @@ export function calculateMomentumScore(
     const spreadRoC = ((spreadCurrent - spreadPrev5) / Math.abs(currentEma || 1)) * 100;
     const spreadChange = spreadCurrent - spreadPrev1;
     
-    const emaSpreadScore = Math.min(30, Math.max(-30, spreadRoC * 10));
+    const MSC = MOMENTUM_SCORE_COMPONENTS;
+    const emaSpreadScore = Math.min(MSC.EMA_SPREAD_MAX, Math.max(-MSC.EMA_SPREAD_MAX, spreadRoC * MSC.EMA_SPREAD_SCORE_MULTIPLIER));
     totalScore += emaSpreadScore;
     
-    if (spreadRoC > 0.1) reasons.push(`EMA spread widening: +${emaSpreadScore.toFixed(0)}`);
-    else if (spreadRoC < -0.1) reasons.push(`EMA spread narrowing: ${emaSpreadScore.toFixed(0)}`);
+    if (spreadRoC > MSC.EMA_SPREAD_WIDENING) reasons.push(`EMA spread widening: +${emaSpreadScore.toFixed(0)}`);
+    else if (spreadRoC < MSC.EMA_SPREAD_NARROWING) reasons.push(`EMA spread narrowing: ${emaSpreadScore.toFixed(0)}`);
     
     defaultResult.components.emaSpreadRoC = spreadRoC;
   }
 
-  // 2. RSI Momentum (max ±25 points)
+  // 2. RSI Momentum (max ±MOMENTUM_SCORE_COMPONENTS.RSI_MOMENTUM_MAX points)
   const rsiArray = calculateRSIArray(prices, 14);
   if (rsiArray.length >= 5) {
     const rsiCurrent = rsiArray[rsiArray.length - 1];
     const rsiPrev3 = rsiArray[rsiArray.length - 4];
     
-    // Track consecutive higher/lower lows
     let consecutiveHigherLows = 0;
     let consecutiveLowerHighs = 0;
     
@@ -86,8 +86,8 @@ export function calculateMomentumScore(
       else if (rsiArray[i + 1] < rsiArray[i]) consecutiveLowerHighs++;
     }
     
-    const rsiMomentum = (rsiCurrent - rsiPrev3) / 3; // Average change per period
-    const rsiScore = Math.min(25, Math.max(-25, rsiMomentum * 2));
+    const rsiMomentum = (rsiCurrent - rsiPrev3) / 3;
+    const rsiScore = Math.min(MOMENTUM_SCORE_COMPONENTS.RSI_MOMENTUM_MAX, Math.max(-MOMENTUM_SCORE_COMPONENTS.RSI_MOMENTUM_MAX, rsiMomentum * 2));
     totalScore += rsiScore;
     
     if (consecutiveHigherLows >= 2) reasons.push(`RSI higher lows: +${rsiScore.toFixed(0)}`);
@@ -124,15 +124,15 @@ export function calculateMomentumScore(
     defaultResult.components.macdSlope = slope;
   }
 
-  // 4. ADX Trend Contribution (max ±15 points)
+  // 4. ADX Trend Contribution (max ±MOMENTUM_SCORE_COMPONENTS.ADX_TREND_MAX points)
   let adxScore = 0;
   if (adx >= ADX_THRESHOLDS.STRONG) {
-    adxScore = adxRising ? 15 : -5;
+    adxScore = adxRising ? MOMENTUM_SCORE_COMPONENTS.ADX_STRONG_RISING : MOMENTUM_SCORE_COMPONENTS.ADX_STRONG_FALLING;
     if (adxRising) reasons.push(`Strong ADX rising: +${adxScore}`);
   } else if (adx >= ADX_THRESHOLDS.MINIMUM) {
-    adxScore = adxRising ? 8 : -3;
+    adxScore = adxRising ? MOMENTUM_SCORE_COMPONENTS.ADX_MODERATE_RISING : MOMENTUM_SCORE_COMPONENTS.ADX_MODERATE_FALLING;
   } else {
-    adxScore = -10;
+    adxScore = MOMENTUM_SCORE_COMPONENTS.ADX_WEAK;
     reasons.push(`Weak ADX (${adx.toFixed(1)}): ${adxScore}`);
   }
   totalScore += adxScore;
@@ -146,13 +146,13 @@ export function calculateMomentumScore(
   defaultResult.overextensionATR = overextensionATR;
 
   // Determine states
-  const isAccelerating = totalScore > 30 && defaultResult.components.macdSlope > 0;
+  const isAccelerating = totalScore > MOMENTUM_SCORE_COMPONENTS.ACCELERATING_THRESHOLD && defaultResult.components.macdSlope > 0;
   const isWeakening = 
     (totalScore > 0 && defaultResult.components.macdSlope < 0 && !adxRising) ||
     (totalScore < 0 && defaultResult.components.macdSlope > 0 && !adxRising);
   const isExhausted = 
     adx >= ADX_THRESHOLDS.EXTREME && 
-    overextensionATR >= 2.0 && 
+    overextensionATR >= MOMENTUM_SCORE_COMPONENTS.EXHAUSTION_ATR_THRESHOLD && 
     !adxRising;
 
   if (isWeakening) reasons.push("⚠️ Momentum WEAKENING");
@@ -161,7 +161,7 @@ export function calculateMomentumScore(
 
   return {
     score: Math.min(100, Math.max(-100, Math.round(totalScore))),
-    direction: totalScore > 20 ? "bullish" : totalScore < -20 ? "bearish" : "neutral",
+    direction: totalScore > MOMENTUM_SCORE_COMPONENTS.BULLISH_THRESHOLD ? "bullish" : totalScore < MOMENTUM_SCORE_COMPONENTS.BEARISH_THRESHOLD ? "bearish" : "neutral",
     isAccelerating,
     isWeakening,
     isExhausted,
@@ -1378,20 +1378,19 @@ export function calculateContextAwareStop(
   klines: any[],
   atrRatio: number = 1.0 // Current ATR / historical ATR
 ): ContextAwareStopResult {
-  // Import constants inline to avoid circular dependencies
-  const STRONG_TREND_ADX = 30;
-  const MEDIUM_TREND_ADX_MIN = 22;
-  const WEAK_TREND_ADX = 22;
-  const STRONG_TREND_ATR_MULT = 1.2;
-  const MEDIUM_TREND_ATR_MULT = 1.5;
-  const WEAK_TREND_ATR_MULT = 2.0;
-  const HIGH_VOL_RATIO = 1.5;
-  const HIGH_VOL_EXPANSION = 1.3;
-  const LOW_VOL_RATIO = 0.7;
-  const LOW_VOL_CONTRACTION = 0.85;
-  const SWING_BUFFER_ATR = 0.3;
-  const MAX_SWING_DISTANCE_ATR = 3.0;
-  const MIN_SWING_DISTANCE_ATR = 0.8;
+  const CS = CONTEXT_STOP_PARAMS;
+  const STRONG_TREND_ADX = CS.STRONG_TREND_ADX;
+  const MEDIUM_TREND_ADX_MIN = CS.MEDIUM_TREND_ADX;
+  const STRONG_TREND_ATR_MULT = CS.STRONG_ATR_MULT;
+  const MEDIUM_TREND_ATR_MULT = CS.MEDIUM_ATR_MULT;
+  const WEAK_TREND_ATR_MULT = CS.WEAK_ATR_MULT;
+  const HIGH_VOL_RATIO = CS.HIGH_VOL_RATIO;
+  const HIGH_VOL_EXPANSION = CS.HIGH_VOL_EXPANSION;
+  const LOW_VOL_RATIO = CS.LOW_VOL_RATIO;
+  const LOW_VOL_CONTRACTION = CS.LOW_VOL_CONTRACTION;
+  const SWING_BUFFER_ATR = CS.SWING_BUFFER_ATR;
+  const MAX_SWING_DISTANCE_ATR = CS.MAX_SWING_DISTANCE_ATR;
+  const MIN_SWING_DISTANCE_ATR = CS.MIN_SWING_DISTANCE_ATR;
 
   // 1. Determine base ATR multiplier from ADX
   let atrMultiplier: number;
@@ -1527,30 +1526,22 @@ export function calculateDynamicTrailing(
   momentumScore: MomentumScoreResult,
   peakRMultiple: number = 0
 ): DynamicTrailingResult {
-  // Constants for R-multiple trailing
-  const STRONG_TREND_ADX = 30;
-  const MEDIUM_TREND_ADX_MIN = 22;
+  const DT = DYNAMIC_TRAILING_PARAMS;
+  const STRONG_TREND_ADX = DT.STRONG_ADX;
+  const MEDIUM_TREND_ADX_MIN = DT.MEDIUM_ADX;
   
-  const STRONG_ACTIVATION_R = 1.0;
-  const MEDIUM_ACTIVATION_R = 1.2;
-  const WEAK_ACTIVATION_R = 1.5;
+  const STRONG_ACTIVATION_R = DT.STRONG_ACTIVATION_R;
+  const MEDIUM_ACTIVATION_R = DT.MEDIUM_ACTIVATION_R;
+  const WEAK_ACTIVATION_R = DT.WEAK_ACTIVATION_R;
   
-  const STRONG_TRAIL_R = 0.5;
-  const MEDIUM_TRAIL_R = 0.75;
-  const WEAK_TRAIL_R = 1.0;
+  const STRONG_TRAIL_R = DT.STRONG_TRAIL_R;
+  const MEDIUM_TRAIL_R = DT.MEDIUM_TRAIL_R;
+  const WEAK_TRAIL_R = DT.WEAK_TRAIL_R;
   
-  const ACCELERATION_MULTIPLIER = 0.7;
-  const EXHAUSTION_BONUS_R = 0.5;
+  const ACCELERATION_MULTIPLIER = DT.ACCELERATION_MULTIPLIER;
+  const EXHAUSTION_BONUS_R = DT.EXHAUSTION_BONUS_R;
   
-  const LOCK_TIERS = [
-    { rMultiple: 1.0, lockR: 0.25 },
-    { rMultiple: 1.5, lockR: 0.5 },
-    { rMultiple: 2.0, lockR: 0.75 },
-    { rMultiple: 2.5, lockR: 1.0 },
-    { rMultiple: 3.0, lockR: 1.5 },
-    { rMultiple: 4.0, lockR: 2.0 },
-    { rMultiple: 5.0, lockR: 3.0 },
-  ];
+  const LOCK_TIERS = DT.LOCK_TIERS;
 
   // Calculate risk (R) in price terms
   const riskPrice = side === "BUY" 
