@@ -6843,3 +6843,207 @@ export const PARTIAL_TP_LADDER = {
   TP1_CLOSE_PERCENT: 50,         // Close 50% at TP1
   TP2_CLOSE_PERCENT: 60,         // Close 60% of remaining at TP2
 } as const;
+
+// ============= DYNAMIC MAX TRADES (execute-trade) =============
+// Adjusts max open trades based on recent performance
+export const DYNAMIC_MAX_TRADES = {
+  // Recent trades lookback
+  LOOKBACK_COUNT: 10,
+  MIN_TRADES_FOR_EVAL: 5,
+  // High performance bonus
+  HIGH_WIN_RATE_THRESHOLD: 70,
+  HIGH_WIN_RATE_BONUS: 2,
+  MAX_TRADES_CAP: 10,
+  // Poor performance reduction
+  LOW_WIN_RATE_THRESHOLD: 40,
+  LOW_WIN_RATE_MULTIPLIER: 0.5,
+  MIN_TRADES_FLOOR: 1,
+} as const;
+
+// ============= TRAILING DAILY LIMIT (execute-trade) =============
+// Lock daily profits by tightening loss limit when in profit
+export const TRAILING_DAILY_LIMIT = {
+  // Lock this fraction of peak daily gains
+  PEAK_LOCK_FRACTION: 0.5,
+  // Minimum daily loss limit (never go below this %)
+  MIN_LIMIT_PERCENT: 1.0,
+} as const;
+
+// ============= DYNAMIC CONSISTENCY THRESHOLDS (execute-trade) =============
+// Context-dependent trend consistency requirements
+export const DYNAMIC_CONSISTENCY = {
+  NEUTRAL_STRATEGY_MIN: 40,
+  STRONG_1H_ALIGNMENT_MIN: 50,
+  STRONG_ADX_MIN: 55,
+} as const;
+
+// ============= VOLUME FILTER (execute-trade) =============
+// 24h volume requirements to avoid illiquid markets
+export const VOLUME_FILTER = {
+  MAIN_PAIRS: ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'] as string[],
+  MIN_QUOTE_VOLUME_MAIN: 10_000_000,   // $10M for major pairs
+  MIN_QUOTE_VOLUME_OTHER: 1_000_000,   // $1M for others
+  // Current period volume ratio thresholds
+  MIN_VOLUME_RATIO_DEFAULT: 0.2,       // 20% of average
+  // Volume spike detection (informational)
+  VOLUME_SPIKE_RATIO: 2.0,
+  // Confidence requirements for trend formation relaxation
+  TREND_FORMATION_CONF_30M: 55,
+  TREND_FORMATION_CONF_1H: 50,
+} as const;
+
+// ============= OBV FILTER (execute-trade) =============
+// On-Balance Volume divergence detection thresholds
+export const OBV_FILTER = {
+  // Strong divergence = BLOCK trade
+  STRONG_DIVERGENCE_BLOCK_PERCENT: 15,
+  // Moderate divergence = WARNING only
+  MODERATE_DIVERGENCE_WARN_PERCENT: 10,
+  // Confirmation threshold for boost
+  CONFIRMATION_PERCENT: 5,
+  // Position multipliers
+  CONFIRMATION_BOOST: 1.15,
+  DIVERGENCE_REDUCTION: 0.85,
+} as const;
+
+// ============= VWAP FILTER (execute-trade) =============
+// VWAP overextension and entry optimization thresholds
+export const VWAP_FILTER = {
+  // Deviation thresholds for position boost
+  EXCELLENT_ENTRY_DEVIATION_PERCENT: 1.0,
+  EXCELLENT_ENTRY_BOOST: 1.2,
+  GOOD_ENTRY_BOOST: 1.1,
+  // Moderate deviation reductions
+  MODERATE_DEVIATION_PERCENT: 1.0,
+  MODERATE_REDUCTION: 0.75,
+  SLIGHT_DEVIATION_PERCENT: 0.5,
+  SLIGHT_REDUCTION: 0.9,
+  // ADX exception thresholds for overextension bypass
+  ADX_EXCEPTION_THRESHOLD: 25,
+  ADX_GRADUATED_MIN: 22,
+  GRADUATED_MIN_QUALITY: 65,
+  // Exception position multipliers
+  VALID_EXCEPTION_MULTIPLIER: 0.8,
+  WEAK_EXCEPTION_MULTIPLIER: 0.7,
+  GRADUATED_EXCEPTION_MULTIPLIER: 0.6,
+} as const;
+
+// ============= SLIPPAGE PROTECTION (execute-trade) =============
+// Pre-trade and post-trade slippage limits
+export const SLIPPAGE_PROTECTION = {
+  // Pre-execution: max deviation from signal entry price
+  MAX_PRE_SLIPPAGE_PERCENT: 0.5,
+  // Post-execution: warn threshold (order already filled)
+  POST_SLIPPAGE_WARN_PERCENT: 0.3,
+  // Order book spread: max bid-ask spread
+  MAX_SPREAD_PERCENT: 0.1,
+} as const;
+
+// ============= MOMENTUM POSITION ADJUSTMENTS (execute-trade) =============
+// Position size adjustments based on momentum state
+export const MOMENTUM_POSITION_ADJ = {
+  WEAK_MOMENTUM_MULTIPLIER: 0.90,
+  MIXED_MOMENTUM_MULTIPLIER: 0.95,
+  FAKE_BREAKOUT_MULTIPLIER: 0.85,
+  GENUINE_MOMENTUM_BOOST: 1.05,
+} as const;
+
+// ============= ALIGNMENT POSITION ADJUSTMENTS (execute-trade) =============
+// Position size adjustments based on True Alignment v2.0
+export const ALIGNMENT_POSITION_ADJ = {
+  // Premium alignment thresholds
+  PREMIUM_MIN_TF4H: 30,
+  PREMIUM_MIN_TF1H: 15,
+  PREMIUM_MIN_ADX: 15,
+  PREMIUM_MULTIPLIER: 1.10,
+  // Solid alignment thresholds
+  SOLID_MIN_TF4H: 25,
+  SOLID_MIN_TF1H: 10,
+  SOLID_MULTIPLIER: 1.05,
+  // Weak alignment
+  WEAK_MAX_TF4H_CONF: 40,
+  WEAK_MULTIPLIER: 0.90,
+} as const;
+
+// ============= BOLLINGER POSITION ADJUSTMENTS (execute-trade) =============
+// Bollinger Bands squeeze/entry position sizing
+export const BOLLINGER_POSITION_ADJ = {
+  DOUBLE_SQUEEZE_BOOST: 1.2,
+  SINGLE_SQUEEZE_BOOST: 1.1,
+  // %B thresholds
+  OVERBOUGHT_PERCENT_B: 100,
+  OVERBOUGHT_REDUCTION: 0.85,
+  LONG_LOWER_BAND_1H: 20,
+  LONG_LOWER_BAND_4H: 30,
+  MEAN_REVERSION_BOOST: 1.15,
+  OVERSOLD_PERCENT_B: 0,
+  SHORT_UPPER_BAND_1H: 80,
+  SHORT_UPPER_BAND_4H: 70,
+  BREAKOUT_POTENTIAL_BOOST: 1.1,
+} as const;
+
+// ============= QUALITY BASED SIZING (execute-trade) =============
+// Default position size tiers when signal lacks positionSizePercent
+export const QUALITY_BASED_SIZING = {
+  HIGH_QUALITY_MIN: 80,
+  HIGH_QUALITY_SIZE_PERCENT: 2.0,
+  MEDIUM_QUALITY_MIN: 70,
+  MEDIUM_QUALITY_SIZE_PERCENT: 1.5,
+  DEFAULT_SIZE_PERCENT: 1.0,
+} as const;
+
+// ============= LEGACY STRATEGY MULTIPLIERS (execute-trade) =============
+// Position size multipliers for strategy types (fallback when unified risk not active)
+export const LEGACY_STRATEGY_MULTIPLIERS = {
+  // Momentum strategy
+  MOMENTUM_STRONG_ADX_MULTIPLIER: 1.25,
+  MOMENTUM_CONFIRMED_MULTIPLIER: 1.15,
+  MOMENTUM_UNCONFIRMED_MULTIPLIER: 0.8,
+  // Mean reversion
+  MR_EXTREME_MULTIPLIER: 1.1,
+  MR_STANDARD_MULTIPLIER: 0.75,
+  // Trend following
+  TREND_STRONG_MULTIPLIER: 1.2,
+  TREND_WEAK_MULTIPLIER: 0.7,
+  // Grid/range
+  GRID_RANGE_MULTIPLIER: 0.6,
+  // Low confidence
+  LOW_CONFIDENCE_MULTIPLIER: 0.7,
+} as const;
+
+// ============= RISK REWARD FILTER (execute-trade) =============
+// Minimum risk/reward ratio for trade acceptance
+export const RISK_REWARD_FILTER = {
+  MIN_RATIO: 1.5,
+} as const;
+
+// ============= TRADE QUALITY ESTIMATION (close-trade) =============
+// Scoring weights for estimating trade quality at close time
+export const TRADE_QUALITY_ESTIMATION = {
+  BASELINE: 50,
+  // Confidence contribution (0-20 points)
+  MAX_CONFIDENCE_POINTS: 20,
+  CONFIDENCE_DIVISOR: 2.5,
+  CONFIDENCE_BASELINE: 50,
+  // Trend consistency contribution (0-15 points)
+  MAX_CONSISTENCY_POINTS: 15,
+  CONSISTENCY_DIVISOR: 3.33,
+  CONSISTENCY_BASELINE: 50,
+  // P&L quality adjustments
+  PNL_TIERS: [
+    { minPercent: 1.5, points: 15 },
+    { minPercent: 0.5, points: 10 },
+    { minPercent: 0, points: 5 },
+    { minPercent: -1, points: -5 },
+    { minPercent: -2, points: -10 },
+  ] as { minPercent: number; points: number }[],
+  PNL_WORST_POINTS: -20,
+  // Hold time adjustments
+  LONG_HOLD_MINUTES: 60,
+  LONG_HOLD_BONUS: 5,
+  SHORT_HOLD_MINUTES: 5,
+  SHORT_HOLD_PENALTY: -5,
+  // Quality clamp
+  MIN_QUALITY: 0,
+  MAX_QUALITY: 100,
+} as const;
