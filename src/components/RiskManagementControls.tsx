@@ -103,14 +103,14 @@ export const RiskManagementControls = () => {
     <div className="space-y-4">
       <h2 className="text-2xl font-bold">Risk Management</h2>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         <Card className="p-4">
           <div className="flex items-center gap-2 mb-2">
             <Shield className="h-5 w-5 text-primary" />
             <span className="text-sm font-medium">Open Trades</span>
           </div>
-          <div className="text-2xl font-bold">{riskParams.current_open_trades}</div>
-          <div className="text-xs text-muted-foreground">Max: {riskParams.max_open_trades}</div>
+          <div className="text-xl sm:text-2xl font-bold">{riskParams.current_open_trades}</div>
+          <div className="text-[10px] sm:text-xs text-muted-foreground">Max: {riskParams.max_open_trades}</div>
         </Card>
 
         <Card className="p-4">
@@ -118,8 +118,8 @@ export const RiskManagementControls = () => {
             <TrendingDown className="h-5 w-5 text-destructive" />
             <span className="text-sm font-medium">Consecutive Losses</span>
           </div>
-          <div className="text-2xl font-bold">{riskParams.consecutive_losses}</div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-xl sm:text-2xl font-bold">{riskParams.consecutive_losses}</div>
+          <div className="text-[10px] sm:text-xs text-muted-foreground">
             Threshold: {riskParams.consecutive_loss_threshold}
           </div>
         </Card>
@@ -129,8 +129,8 @@ export const RiskManagementControls = () => {
             <DollarSign className="h-5 w-5 text-green-500" />
             <span className="text-sm font-medium">Portfolio Value</span>
           </div>
-          <div className="text-2xl font-bold">{formatPrice(riskParams.portfolio_value, 2, '$')}</div>
-          <div className="text-xs text-muted-foreground">Total capital</div>
+          <div className="text-xl sm:text-2xl font-bold truncate">{formatPrice(riskParams.portfolio_value, 2, '$')}</div>
+          <div className="text-[10px] sm:text-xs text-muted-foreground">Total capital</div>
         </Card>
 
         <Card className="p-4">
@@ -138,10 +138,10 @@ export const RiskManagementControls = () => {
             <AlertTriangle className="h-5 w-5 text-yellow-500" />
             <span className="text-sm font-medium">Unrealized P&L</span>
           </div>
-          <div className={`text-2xl font-bold ${totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+          <div className={`text-xl sm:text-2xl font-bold truncate ${totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
             {formatPrice(totalPnL, 2, '$')}
           </div>
-          <div className="text-xs text-muted-foreground">From open positions</div>
+          <div className="text-[10px] sm:text-xs text-muted-foreground">From open positions</div>
         </Card>
 
         <Card className="p-4">
@@ -149,11 +149,11 @@ export const RiskManagementControls = () => {
             <AlertTriangle className="h-5 w-5 text-destructive" />
             <span className="text-sm font-medium">Daily Loss</span>
           </div>
-          <div className="text-2xl font-bold text-destructive">
+          <div className="text-xl sm:text-2xl font-bold text-destructive truncate">
             {formatPrice(riskParams.daily_realized_loss || 0, 2, '$')}
           </div>
-          <div className="text-xs text-muted-foreground">
-            Limit: {riskParams.daily_loss_limit_percent}% ({formatPrice((riskParams.portfolio_value * riskParams.daily_loss_limit_percent) / 100, 2, '$')})
+          <div className="text-[10px] sm:text-xs text-muted-foreground truncate">
+            Limit: {riskParams.daily_loss_limit_percent}%
           </div>
         </Card>
       </div>
@@ -162,7 +162,7 @@ export const RiskManagementControls = () => {
         {/* Trade Sizing (NEW - Primary) */}
         <AccordionItem value="trade-sizing">
           <Card>
-            <AccordionTrigger className="px-6 py-4 hover:no-underline">
+            <AccordionTrigger className="px-3 sm:px-6 py-4 hover:no-underline">
               <div className="flex items-center gap-3">
                 <Target className="h-5 w-5 text-primary" />
                 <div className="text-left">
@@ -171,7 +171,7 @@ export const RiskManagementControls = () => {
                 </div>
               </div>
             </AccordionTrigger>
-            <AccordionContent className="px-6 pb-6">
+            <AccordionContent className="px-3 sm:px-6 pb-6">
               <UnifiedRiskSettings />
             </AccordionContent>
           </Card>
@@ -180,7 +180,7 @@ export const RiskManagementControls = () => {
         {/* Basic Risk Parameters */}
         <AccordionItem value="basic">
           <Card>
-            <AccordionTrigger className="px-6 py-4 hover:no-underline">
+            <AccordionTrigger className="px-3 sm:px-6 py-4 hover:no-underline">
               <div className="flex items-center gap-3">
                 <Shield className="h-5 w-5 text-primary" />
                 <div className="text-left">
@@ -189,7 +189,7 @@ export const RiskManagementControls = () => {
                 </div>
               </div>
             </AccordionTrigger>
-            <AccordionContent className="px-6 pb-6">
+            <AccordionContent className="px-3 sm:px-6 pb-6">
               <div className="space-y-6 pt-4">
                 <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -338,7 +338,7 @@ export const RiskManagementControls = () => {
         {/* Advanced Strategies */}
         <AccordionItem value="advanced">
           <Card>
-            <AccordionTrigger className="px-6 py-4 hover:no-underline">
+            <AccordionTrigger className="px-3 sm:px-6 py-4 hover:no-underline">
               <div className="flex items-center gap-3">
                 <TrendingDown className="h-5 w-5 text-primary" />
                 <div className="text-left">
@@ -347,7 +347,7 @@ export const RiskManagementControls = () => {
                 </div>
               </div>
             </AccordionTrigger>
-            <AccordionContent className="px-6 pb-6">
+            <AccordionContent className="px-3 sm:px-6 pb-6">
               <div className="space-y-6 pt-4">
                 <div className="grid gap-4 md:grid-cols-2">
 
@@ -418,7 +418,7 @@ export const RiskManagementControls = () => {
         {/* Position Management */}
         <AccordionItem value="position">
           <Card>
-            <AccordionTrigger className="px-6 py-4 hover:no-underline">
+            <AccordionTrigger className="px-3 sm:px-6 py-4 hover:no-underline">
               <div className="flex items-center gap-3">
                 <AlertTriangle className="h-5 w-5 text-primary" />
                 <div className="text-left">
@@ -427,7 +427,7 @@ export const RiskManagementControls = () => {
                 </div>
               </div>
             </AccordionTrigger>
-            <AccordionContent className="px-6 pb-6 space-y-6 pt-4">
+            <AccordionContent className="px-3 sm:px-6 pb-6 space-y-6 pt-4">
 
               {/* Loss Management Strategies - NEW */}
               <LossManagementSettings />
