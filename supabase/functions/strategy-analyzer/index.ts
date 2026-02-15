@@ -2850,6 +2850,9 @@ serve(async (req) => {
         // Track if Strong Trend Tier 0 Override was applied (for position sizing)
         let strongTrendTier0OverrideApplied = false;
         let strongTrendTier0PositionMultiplier = 1.0;
+        // Track if Tier 0 Soft Cap was applied (95-97 overbought, 3-5 oversold)
+        let tier0SoftCapApplied = false;
+        let tier0SoftCapMultiplier = 1.0;
         
         // ============= EARLY TIER 0: DEEP STOCHRSI CIRCUIT BREAKER (PRE-STRATEGY) =============
         // CRITICAL: This gate runs BEFORE any direction overrides (late-grind, momentum, order-flow, etc.)
@@ -3464,8 +3467,14 @@ serve(async (req) => {
                 continue;
               }
             }
-            
-            // TIER 0 DEEP OVERBOUGHT: Block LONGs when K > 95
+            // TIER 0 SOFT CAP: SHORTs at K 3-5 → allow with 0.5x position cap (early capitulation zone)
+            else if (earlyDirection === 'short' && earlyStochRsiK4h < DEEP_STOCHRSI_HARD_GATE.SOFT_CAP_OVERSOLD_K_THRESHOLD) {
+              tier0SoftCapApplied = true;
+              tier0SoftCapMultiplier = DEEP_STOCHRSI_HARD_GATE.SOFT_CAP_POSITION_MULTIPLIER;
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ TIER 0 SOFT CAP: SHORT at K=${earlyStochRsiK4h.toFixed(1)} → position capped at ${(tier0SoftCapMultiplier * 100).toFixed(0)}% (early capitulation zone ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}-${DEEP_STOCHRSI_HARD_GATE.SOFT_CAP_OVERSOLD_K_THRESHOLD})`);
+            }
+
+            // TIER 0 DEEP OVERBOUGHT: Block LONGs when K > 97 (hard), soft cap at 95-97
             // EXCEPTION 1: Mean reversion strategies targeting reversal (SHORT) are allowed at K > 95
             // EXCEPTION 2: Strong Trend Override allows LONG if ADX>40 and momentum confirms
             if (earlyDirection === 'long' && earlyStochRsiK4h > DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD) {
@@ -3506,7 +3515,7 @@ serve(async (req) => {
                     strongTrendOverrideAttempted: true,
                     strongTrendOverrideReason: overrideCheck.reason,
                     isPreStrategy: true,
-                    message: `Pullback probability ~80%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}`
+                    message: `Pullback probability ~90%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}`
                   },
                   trendData,
                   riskParams.ai_analysis_enabled !== false,
@@ -3514,6 +3523,12 @@ serve(async (req) => {
                 );
                 continue;
               }
+            }
+            // TIER 0 SOFT CAP: LONGs at K 95-97 → allow with 0.5x position cap (early climax zone)
+            else if (earlyDirection === 'long' && earlyStochRsiK4h > DEEP_STOCHRSI_HARD_GATE.SOFT_CAP_OVERBOUGHT_K_THRESHOLD) {
+              tier0SoftCapApplied = true;
+              tier0SoftCapMultiplier = DEEP_STOCHRSI_HARD_GATE.SOFT_CAP_POSITION_MULTIPLIER;
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ TIER 0 SOFT CAP: LONG at K=${earlyStochRsiK4h.toFixed(1)} → position capped at ${(tier0SoftCapMultiplier * 100).toFixed(0)}% (early climax zone ${DEEP_STOCHRSI_HARD_GATE.SOFT_CAP_OVERBOUGHT_K_THRESHOLD}-${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD})`);
             }
             
             // Log if at extreme but direction is compatible (mean reversion allowed)
@@ -7989,7 +8004,6 @@ serve(async (req) => {
         } else {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} Unified reversal check passed (${unifiedReversal.score}/100)`);
         }
-
         
         // ============= STOCHRSI EXTREME FILTER WITH SMART EXCEPTIONS =============
         // Prevent entries at extreme oversold/overbought 4h levels where bounces are likely
@@ -14923,6 +14937,13 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🚀 STRONG TREND TIER 0 OVERRIDE entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (late entry at extreme StochRSI)`);
         }
         
+        // Step 23b: Apply Tier 0 Soft Cap position reduction (50%)
+        // Entries in the soft cap zone (K 95-97 for LONGs, K 3-5 for SHORTs) get reduced position
+        if (tier0SoftCapApplied && tier0SoftCapMultiplier < 1.0) {
+          positionSizeMultiplier *= tier0SoftCapMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ TIER 0 SOFT CAP entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (early climax zone)`);
+        }
+        
         // ============= UNIFIED RISK CALCULATION (NEW) =============
         // Use user-configured base values from risk_parameters instead of legacy strategy templates
         // The system applies intelligent adjustments based on market conditions
@@ -15303,8 +15324,20 @@ serve(async (req) => {
               allowMeanReversion: fourStateRegime.allowMeanReversion,
               requireConfirmation: fourStateRegime.requireConfirmation,
               reason: fourStateRegime.reason,
-              diagnostics: fourStateRegime.diagnostics,
+              diagnostics: {
+                ...fourStateRegime.diagnostics,
+                regimeAge: regimeAgeBySymbol.get(symbol) || 0,
+                regimeConfidence: fourStateRegime.regimeConfidence,
+                ageDecayMultiplier: ageDecayMultiplier,
+              },
             },
+            // NEW: Tier 0 Soft Cap tracking for forensic traceability
+            tier0SoftCap: {
+              applied: tier0SoftCapApplied,
+              multiplier: tier0SoftCapMultiplier,
+            },
+            // NEW: Final cumulative position multiplier for sizing compression analysis
+            finalCumulativeMultiplier: positionSizeMultiplier,
           },
           expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minute TTL for actionable signals
           created_by_rebalancer: false,
