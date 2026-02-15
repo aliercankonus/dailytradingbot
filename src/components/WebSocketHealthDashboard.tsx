@@ -47,22 +47,24 @@ export const WebSocketHealthDashboard = () => {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Activity className="h-5 w-5" />
-          WebSocket Connection Monitor
+          <Activity className="h-5 w-5 shrink-0" />
+          <span className="hidden sm:inline">WebSocket Connection Monitor</span>
+          <span className="sm:hidden">WS Monitor</span>
         </CardTitle>
-        <CardDescription>
+        <CardDescription className="hidden sm:block">
           Real-time health metrics for all WebSocket connections
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Summary Stats */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground flex items-center gap-1">
               <Wifi className="h-3 w-3" />
-              Active Connections
+              <span className="hidden sm:inline">Active Connections</span>
+              <span className="sm:hidden">Active</span>
             </div>
-            <div className="text-2xl font-bold">{connectionsArray.length}</div>
+            <div className="text-xl sm:text-2xl font-bold">{connectionsArray.length}</div>
             <div className="text-xs text-muted-foreground">
               {connectedCount} connected
             </div>
@@ -72,17 +74,17 @@ export const WebSocketHealthDashboard = () => {
               <RefreshCw className="h-3 w-3" />
               Reconnecting
             </div>
-            <div className="text-2xl font-bold">{reconnectingCount}</div>
+            <div className="text-xl sm:text-2xl font-bold">{reconnectingCount}</div>
             <div className="text-xs text-muted-foreground">
-              {reconnectingCount === 0 ? 'All stable' : 'In progress'}
+              {reconnectingCount === 0 ? 'Stable' : 'In progress'}
             </div>
           </div>
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground flex items-center gap-1">
               <MessageSquare className="h-3 w-3" />
-              Total Messages
+              Messages
             </div>
-            <div className="text-2xl font-bold">{totalMessages}</div>
+            <div className="text-xl sm:text-2xl font-bold">{totalMessages}</div>
             <div className="text-xs text-muted-foreground">
               All connections
             </div>
@@ -90,13 +92,13 @@ export const WebSocketHealthDashboard = () => {
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground flex items-center gap-1">
               <AlertTriangle className="h-3 w-3" />
-              Total Errors
+              Errors
             </div>
-            <div className={`text-2xl font-bold ${totalErrors > 0 ? 'text-red-500' : 'text-green-500'}`}>
+            <div className={`text-xl sm:text-2xl font-bold ${totalErrors > 0 ? 'text-red-500' : 'text-green-500'}`}>
               {totalErrors}
             </div>
             <div className="text-xs text-muted-foreground">
-              {totalErrors === 0 ? 'No errors' : 'See details'}
+              {totalErrors === 0 ? 'None' : 'See details'}
             </div>
           </div>
         </div>

@@ -30,24 +30,25 @@ const TransitionRow = ({ entry }: { entry: RegimeTransitionEntry }) => {
   const symbol = entry.symbol.replace('USDT', '');
 
   return (
-    <div className={`flex items-center gap-2 py-2 px-3 rounded-md text-sm ${
+    <div className={`flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 py-2 px-2 sm:px-3 rounded-md text-sm ${
       entry.isDivergent ? 'bg-amber-500/5 border border-amber-500/20' : 'border border-transparent'
     }`}>
-      <span className="text-xs text-muted-foreground w-12 shrink-0 font-mono">{time}</span>
-      <span className="font-medium w-14 shrink-0">{symbol}</span>
-      
-      <div className="flex items-center gap-1.5 flex-1 min-w-0">
-        <RegimeBadge regime={entry.regime} />
-        {entry.isDivergent && (
-          <>
-            <ArrowRight className="h-3 w-3 text-amber-400 shrink-0" />
-            <RegimeBadge regime={entry.effective_regime!} />
-            <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
-          </>
-        )}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground w-12 shrink-0 font-mono">{time}</span>
+        <span className="font-medium w-14 shrink-0">{symbol}</span>
+        <div className="flex items-center gap-1 flex-wrap">
+          <RegimeBadge regime={entry.regime} />
+          {entry.isDivergent && (
+            <>
+              <ArrowRight className="h-3 w-3 text-amber-400 shrink-0" />
+              <RegimeBadge regime={entry.effective_regime!} />
+              <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0 pl-[6.5rem] sm:pl-0 sm:ml-auto">
         <span className="font-mono">ADX {entry.adx?.toFixed(1) ?? '—'}</span>
         {entry.adx_slope !== null && (
           <span className={`font-mono ${entry.adx_slope > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
