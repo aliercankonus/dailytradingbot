@@ -94,26 +94,10 @@ const Index = () => {
           <TabsContent value="positions" className="space-y-6">
             <Suspense fallback={<TabFallback />}>
               <PositionsSummary />
-              <Tabs defaultValue="active" className="w-full">
-                <TabsList className="inline-flex h-8 items-center gap-0 rounded-lg border border-border/60 bg-card/80 p-0.5 text-muted-foreground w-auto">
-                  <TabsTrigger value="active" className="rounded-md px-3 py-1 text-xs font-medium transition-all duration-150 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none">Active</TabsTrigger>
-                  <TabsTrigger value="exit-mgmt" className="rounded-md px-3 py-1 text-xs font-medium transition-all duration-150 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none">Exit Mgmt</TabsTrigger>
-                  <TabsTrigger value="trailing" className="rounded-md px-3 py-1 text-xs font-medium transition-all duration-150 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none">Trailing Stops</TabsTrigger>
-                  <TabsTrigger value="early-exits" className="rounded-md px-3 py-1 text-xs font-medium transition-all duration-150 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none">Early Exits</TabsTrigger>
-                </TabsList>
-                <TabsContent value="active" className="mt-4">
-                  <ActivePositions />
-                </TabsContent>
-                <TabsContent value="exit-mgmt" className="mt-4">
-                  <ExitManagementDashboard />
-                </TabsContent>
-                <TabsContent value="trailing" className="mt-4">
-                  <TrailingStopMonitor />
-                </TabsContent>
-                <TabsContent value="early-exits" className="mt-4">
-                  <EarlyWarningExitsDashboard />
-                </TabsContent>
-              </Tabs>
+              <ActivePositions />
+              <ExitManagementDashboard />
+              <TrailingStopMonitor />
+              <EarlyWarningExitsDashboard />
             </Suspense>
           </TabsContent>
 
@@ -138,27 +122,11 @@ const Index = () => {
 
           <TabsContent value="monitor" className="space-y-6">
             <Suspense fallback={<TabFallback />}>
-              <Tabs defaultValue="market-state" className="w-full">
-                <TabsList className="inline-flex h-8 items-center gap-0 rounded-lg border border-border/60 bg-card/80 p-0.5 text-muted-foreground w-auto">
-                  <TabsTrigger value="market-state" className="rounded-md px-3 py-1 text-xs font-medium transition-all duration-150 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none">Market State</TabsTrigger>
-                  <TabsTrigger value="modules" className="rounded-md px-3 py-1 text-xs font-medium transition-all duration-150 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none">Modules</TabsTrigger>
-                  <TabsTrigger value="opportunity" className="rounded-md px-3 py-1 text-xs font-medium transition-all duration-150 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none">Opportunity</TabsTrigger>
-                  <TabsTrigger value="order-flow" className="rounded-md px-3 py-1 text-xs font-medium transition-all duration-150 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none">Order Flow</TabsTrigger>
-                </TabsList>
-                <TabsContent value="market-state" className="mt-4 space-y-6">
-                  <MomentumStatusDashboard />
-                  <RegimeTransitionLog />
-                </TabsContent>
-                <TabsContent value="modules" className="mt-4">
-                  <ModuleInventoryDashboard />
-                </TabsContent>
-                <TabsContent value="opportunity" className="mt-4">
-                  <MarketOpportunityDensity />
-                </TabsContent>
-                <TabsContent value="order-flow" className="mt-4">
-                  <OrderFlowDashboard />
-                </TabsContent>
-              </Tabs>
+              <MomentumStatusDashboard />
+              <RegimeTransitionLog />
+              <ModuleInventoryDashboard />
+              <MarketOpportunityDensity />
+              <OrderFlowDashboard />
             </Suspense>
           </TabsContent>
         </Tabs>
