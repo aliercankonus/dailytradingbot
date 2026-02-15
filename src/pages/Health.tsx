@@ -1,15 +1,13 @@
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, HeartPulse, Activity, AlertTriangle, Clock, Radio, CheckCircle2, XCircle } from "lucide-react";
+import { AppHeader } from "@/components/AppHeader";
+import { Activity, AlertTriangle, Clock, Radio, CheckCircle2, XCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WebSocketHealthDashboard } from "@/components/WebSocketHealthDashboard";
 import { useBotHeartbeats, useBotHealthStates } from "@/hooks/useBotHealth";
 import { format, formatDistanceToNow } from "date-fns";
 
 const Health = () => {
-  const navigate = useNavigate();
   const { data: heartbeats, isLoading: hbLoading } = useBotHeartbeats(30);
   const { data: healthStates, isLoading: hsLoading } = useBotHealthStates(30);
 
@@ -23,20 +21,7 @@ const Health = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={() => navigate("/")}>
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <HeartPulse className="h-6 w-6 text-primary" />
-            <div>
-              <h1 className="text-lg sm:text-xl font-bold text-foreground">System Health</h1>
-              <p className="text-xs text-muted-foreground hidden sm:block">Bot heartbeat, health states & WebSocket connections</p>
-            </div>
-          </div>
-        </div>
-      </header>
+      <AppHeader />
 
       <main className="container mx-auto px-4 py-6 space-y-6">
         {/* System Status Overview */}
@@ -89,10 +74,8 @@ const Health = () => {
           </CardContent>
         </Card>
 
-        {/* WebSocket Connection Monitor */}
         <WebSocketHealthDashboard />
 
-        {/* Heartbeat Timeline */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -138,7 +121,6 @@ const Health = () => {
           </CardContent>
         </Card>
 
-        {/* Health Alerts History */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -156,7 +138,7 @@ const Health = () => {
                   <div key={hs.id} className="flex items-start gap-3 p-3 rounded-lg border bg-card text-sm">
                     <div className="flex-shrink-0 mt-0.5">
                       {hs.resolved_at ? (
-                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        <CheckCircle2 className="h-4 w-4 text-success" />
                       ) : (
                         <XCircle className="h-4 w-4 text-destructive" />
                       )}
@@ -174,7 +156,7 @@ const Health = () => {
                         )}
                       </div>
                       {hs.alert_sent && (
-                        <div className="text-xs text-yellow-500">
+                        <div className="text-xs text-warning">
                           Alert sent {hs.alert_sent_at ? format(new Date(hs.alert_sent_at), "MMM dd HH:mm") : ""}
                         </div>
                       )}

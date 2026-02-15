@@ -8,6 +8,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { WebSocketMonitorProvider } from "@/contexts/WebSocketMonitorContext";
 import { RealtimePricesProvider } from "@/contexts/RealtimePricesContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { BrandLogo } from "@/components/BrandLogo";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -22,7 +23,7 @@ const queryClient = new QueryClient();
 
 const PageFallback = () => (
   <div className="min-h-screen bg-background flex items-center justify-center">
-    <div className="animate-pulse text-muted-foreground">Loading...</div>
+    <BrandLogo size="lg" showText={false} className="logo-pulse" />
   </div>
 );
 

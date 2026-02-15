@@ -1,15 +1,13 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, TrendingUp, TrendingDown, Target, DollarSign, AlertTriangle, BarChart3 } from "lucide-react";
+import { TrendingUp, TrendingDown, Target, DollarSign, AlertTriangle, BarChart3 } from "lucide-react";
+import { AppHeader } from "@/components/AppHeader";
 import { usePortfolioHistory } from "@/hooks/usePortfolioHistory";
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { format } from "date-fns";
 const Performance = () => {
-  const navigate = useNavigate();
   const [timeRange, setTimeRange] = useState("30");
   const { history, loading } = usePortfolioHistory(parseInt(timeRange));
 
@@ -69,21 +67,17 @@ const Performance = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20">
+    <div className="min-h-screen bg-background">
+      <AppHeader />
       <div className="container mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
-        {/* Header */}
+        {/* Sub-header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-            <Button variant="ghost" size="icon" onClick={() => navigate("/")} className="hover:bg-secondary flex-shrink-0">
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <div className="min-w-0">
-              <h1 className="text-xl sm:text-3xl font-bold text-foreground flex items-center gap-2">
-                <BarChart3 className="h-5 w-5 sm:h-8 sm:w-8 text-primary flex-shrink-0" />
-                <span className="truncate">Portfolio Performance</span>
-              </h1>
-              <p className="text-xs sm:text-sm text-muted-foreground mt-1 hidden sm:block">Historical performance tracking and analytics</p>
-            </div>
+          <div className="min-w-0">
+            <h2 className="text-lg sm:text-2xl font-bold text-foreground flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-primary flex-shrink-0" />
+              <span className="truncate">Portfolio Performance</span>
+            </h2>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1 hidden sm:block">Historical performance tracking and analytics</p>
           </div>
           <Select value={timeRange} onValueChange={setTimeRange}>
             <SelectTrigger className="w-[140px] sm:w-[180px]">

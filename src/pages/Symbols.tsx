@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -15,10 +14,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useSymbols } from '@/hooks/useSymbols';
-import { Plus, Trash2, Loader2, CheckCircle2, XCircle, ArrowLeft } from 'lucide-react';
+import { Plus, Trash2, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { AppHeader } from '@/components/AppHeader';
+import { BrandLogo } from '@/components/BrandLogo';
 
 const Symbols = () => {
-  const navigate = useNavigate();
   const { symbols, activeSymbols, loading, toggleSymbol, addSymbol, deleteSymbol } = useSymbols();
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newSymbol, setNewSymbol] = useState('');
@@ -38,42 +38,33 @@ const Symbols = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="min-h-screen bg-background">
+        <AppHeader />
+        <div className="flex items-center justify-center py-24">
+          <BrandLogo size="lg" showText={false} className="logo-pulse" />
+        </div>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-3 sm:px-4 py-3 sm:py-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => navigate('/')}
-                className="hover:bg-accent shrink-0"
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-              <div className="min-w-0">
-                <h1 className="text-xl sm:text-3xl font-bold truncate">Trading Symbols</h1>
-                <p className="text-muted-foreground text-xs sm:text-sm mt-0.5 sm:mt-1 hidden sm:block">
-                  Manage which trading pairs are active in your system
-                </p>
-              </div>
-            </div>
-            <Button onClick={() => setShowAddDialog(true)} size="sm" className="shrink-0">
-              <Plus className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">Add Symbol</span>
-            </Button>
-          </div>
-        </div>
-      </header>
+      <AppHeader />
 
       <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-8">
+        <div className="flex items-center justify-between gap-2 mb-6">
+          <div className="min-w-0">
+            <h2 className="text-lg sm:text-2xl font-bold truncate">Trading Symbols</h2>
+            <p className="text-muted-foreground text-xs sm:text-sm mt-0.5 hidden sm:block">
+              Manage which trading pairs are active in your system
+            </p>
+          </div>
+          <Button onClick={() => setShowAddDialog(true)} size="sm" className="shrink-0">
+            <Plus className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Add Symbol</span>
+          </Button>
+        </div>
+
         <div className="grid gap-4 mb-6">
           <Card className="p-3 sm:p-4">
             <div className="flex items-center justify-between gap-2">
