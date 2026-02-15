@@ -350,7 +350,7 @@ export const MomentumStatusDashboard = () => {
                             )}
                           </div>
 
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                             <div>
                               <p className="text-xs text-muted-foreground mb-1">ADX (Trend Strength)</p>
                               <div className="flex items-center gap-2">
@@ -438,38 +438,40 @@ export const MomentumStatusDashboard = () => {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium">ADX Distribution by Symbol</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <ChartContainer config={chartConfig} className="h-[300px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={enhancedMomentumData.map(d => ({
-                          symbol: d.symbol.replace('USDT', ''),
-                          adx: d.momentum?.adx ?? 0,
-                          fill: getRegimeColor(d.momentum?.adx ?? 0)
-                        }))}
-                        margin={{ top: 10, right: 10, left: 10, bottom: 30 }}
-                      >
-                        <XAxis
-                          dataKey="symbol"
-                          tick={{ fontSize: 12 }}
-                          angle={-45}
-                          textAnchor="end"
-                          height={60}
-                        />
-                        <YAxis domain={[0, 50]} tick={{ fontSize: 12 }} />
-                        <ChartTooltip content={<ChartTooltipContent />} />
-                        <Bar dataKey="adx" radius={[4, 4, 0, 0]}>
-                          {enhancedMomentumData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={getRegimeColor(entry.momentum?.adx ?? 0)} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </ChartContainer>
+                <CardContent className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+                  <div className="min-w-[320px]">
+                    <ChartContainer config={chartConfig} className="h-[250px] sm:h-[300px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={enhancedMomentumData.map(d => ({
+                            symbol: d.symbol.replace('USDT', ''),
+                            adx: d.momentum?.adx ?? 0,
+                            fill: getRegimeColor(d.momentum?.adx ?? 0)
+                          }))}
+                          margin={{ top: 10, right: 5, left: 0, bottom: 30 }}
+                        >
+                          <XAxis
+                            dataKey="symbol"
+                            tick={{ fontSize: 10 }}
+                            angle={-45}
+                            textAnchor="end"
+                            height={50}
+                          />
+                          <YAxis domain={[0, 50]} tick={{ fontSize: 10 }} width={30} />
+                          <ChartTooltip content={<ChartTooltipContent />} />
+                          <Bar dataKey="adx" radius={[4, 4, 0, 0]}>
+                            {enhancedMomentumData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={getRegimeColor(entry.momentum?.adx ?? 0)} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </ChartContainer>
+                  </div>
                 </CardContent>
               </Card>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 <Card className="bg-green-50 dark:bg-green-950/30">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium text-green-700 dark:text-green-300">
