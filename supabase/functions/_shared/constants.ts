@@ -6709,3 +6709,137 @@ export const RSI_ZONE_THRESHOLDS = {
   PULLBACK_ZONE_HIGH: 60,  // RSI < 60 = possible pullback
 } as const;
 
+// ============= DYNAMIC REVERSAL EXIT THRESHOLDS (monitor-positions) =============
+// Controls the adaptive reversal risk threshold for position exit decisions
+export const DYNAMIC_REVERSAL_EXIT = {
+  BASE_THRESHOLD: 60,
+  // ADX-based adjustments
+  ADX_EXCEPTIONAL_BONUS: 10,     // ADX >= EXCEPTIONAL → +10
+  ADX_STRONG_BONUS: 5,           // ADX >= STRONG → +5
+  ADX_WEAK_PENALTY: -5,          // ADX < MINIMUM → -5
+  // Volume adjustments
+  VOLUME_CONFIRM_BONUS: 5,       // volumeScore >= 7 → +5
+  VOLUME_CONFIRM_MIN_SCORE: 7,
+  VOLUME_WEAK_PENALTY: -5,       // volumeScore <= 2 + weak ADX → -5
+  VOLUME_WEAK_MAX_SCORE: 2,
+  // Confidence penalty adjustment
+  CONFIDENCE_PENALTY_THRESHOLD: -10,  // confidencePenalty < this → -5
+  CONFIDENCE_PENALTY_ADJ: -5,
+  // Final clamp bounds
+  CLAMP_MIN: 50,
+  CLAMP_MAX: 85,
+} as const;
+
+// ============= COMPRESSION TRADE EXIT (monitor-positions) =============
+// Special exit rules for Compression Scalp strategy entries
+export const COMPRESSION_TRADE_EXIT = {
+  MAX_HOLD_MINUTES: 120,         // 2 hours max hold for range trades
+  ADX_REGIME_SHIFT_THRESHOLD: 28, // ADX > this = trend energy returning
+  ATR_EXPANSION_THRESHOLD: 1.8,  // ATR% > this = volatility returning
+} as const;
+
+// ============= STRATEGY EXIT ADJUSTMENTS (monitor-positions) =============
+// Per-strategy-type reversal threshold adjustments
+export const STRATEGY_EXIT_ADJUSTMENTS = {
+  MOMENTUM: {
+    BASE_ADJ: -8,                // Lower threshold = exit sooner
+    DIVERGENCE_PENALTY: -5,      // Extra penalty on MACD divergence
+    DIVERGENCE_EXIT_PNL_THRESHOLD: -0.3,  // Only emergency exit below this P&L
+  },
+  MEAN_REVERSION: {
+    BASE_ADJ: 10,                // Higher threshold = more patience
+    STRONG_TREND_PENALTY: -5,    // Strong ADX = MR thesis may be wrong
+  },
+  TREND_FOLLOWING: {
+    BASE_ADJ: 5,                 // Patient exits
+  },
+  GRID_RANGE: {
+    BASE_ADJ: -5,                // Quick exits for small gains
+  },
+} as const;
+
+// ============= HTF ALIGNMENT EXIT ADJUSTMENTS (monitor-positions) =============
+// True Alignment v2.0-based exit threshold and trailing distance adjustments
+export const HTF_ALIGNMENT_EXIT = {
+  // Premium alignment (strong 4H + 1H + ADX) WITH position aligned
+  PREMIUM_ALIGNED: { thresholdAdj: 8, trailingMult: 1.15 },
+  // Premium alignment but COUNTER to position
+  PREMIUM_COUNTER: { thresholdAdj: -10, trailingMult: 0.85 },
+  // Weak/neutral capped alignment
+  WEAK: { thresholdAdj: -5, trailingMult: 0.90 },
+  // Solid alignment (4H weighted >= 20)
+  SOLID: { thresholdAdj: 3, trailingMult: 1.05 },
+  SOLID_MIN_TF4H_WEIGHTED: 20,
+  // Volume confirmation adjustments
+  VOLUME_CONFIRM_BONUS: 2,
+  VOLUME_CONFIRM_MIN_WEIGHTED: 4,
+  VOLUME_WEAK_PENALTY: -2,
+  VOLUME_WEAK_MAX_WEIGHTED: 1.5,
+  // True Alignment component thresholds for isPremium / isWeak
+  PREMIUM_MIN_TF4H_WEIGHTED: 30,
+  PREMIUM_MIN_TF1H_WEIGHTED: 15,
+  PREMIUM_MIN_ADX_CONTRIBUTION: 15,
+  WEAK_MAX_TF4H_CONFIDENCE: 40,
+} as const;
+
+// ============= TRAILING STOP INLINE PARAMS (monitor-positions) =============
+// Inline trailing stop thresholds that were previously hardcoded
+export const TRAILING_STOP_INLINE = {
+  // Minimum trailing distance as % of current price
+  MIN_TRAILING_DISTANCE_PERCENT: 1.5,
+  // Aggressive stop distance from current price (for Phase 3 exit signals)
+  AGGRESSIVE_STOP_DISTANCE_PERCENT: 0.5,
+  // Decay velocity override in smart AITS
+  DECAY_OVERRIDE_VELOCITY_THRESHOLD: 0.02,  // %/min
+  DECAY_OVERRIDE_LOCK_PERCENT: 0.80,
+  // Maximum adaptive lock cap
+  MAX_ADAPTIVE_LOCK: 0.85,
+  // Volatility grace period (minutes)
+  VOLATILITY_GRACE_PERIOD_MINUTES: 5,
+  // Conditional volatility exit confidence threshold
+  CONDITIONAL_VOLATILITY_MIN_CONFIDENCE: 55,
+} as const;
+
+// ============= MICRO TREND EXIT PARAMS (monitor-positions) =============
+// Time-bound exit rules for MICRO_TREND entry exception type
+export const MICRO_TREND_EXIT = {
+  MAX_AGE_MINUTES: 120,
+  MIN_PROFIT_PERCENT: 0.3,
+} as const;
+
+// ============= HEDGE EXIT PARAMS (monitor-positions) =============
+// Hedge position sizing and stop/TP parameters
+export const HEDGE_EXIT_PARAMS = {
+  // TP coverage = max(parentLoss * COVERAGE_MULTIPLIER, MIN_TP_PERCENT)
+  TP_COVERAGE_MULTIPLIER: 1.5,
+  MIN_TP_PERCENT: 1.0,
+  // Fixed SL distance for hedge positions
+  HEDGE_SL_PERCENT: 1.5,
+} as const;
+
+// ============= REVERSAL RISK EXIT SCORES (monitor-positions) =============
+// Individual component scores for the exit reversal risk detector
+export const REVERSAL_RISK_EXIT_SCORES = {
+  MACD_DIVERGENCE: 25,
+  MOMENTUM_WEAKENING: 15,
+  LAST_CLOSE_OPPOSES: 10,
+  MACD_DIRECTION_MISALIGNED: 15,
+  STOCHRSI_CROSS: 25,
+  STOCHRSI_EXTREME_ZONE: 15,
+  TREND_1H_FLIPPED: 20,
+  // Reduction factor when RSI pullback + momentum confirms
+  RSI_PULLBACK_REDUCTION_FACTOR: 0.5,
+} as const;
+
+// ============= TIME STOP MULTIPLIER (monitor-positions) =============
+// Time-based stop uses configured hours * this multiplier for effective limit
+export const TIME_STOP_MULTIPLIER = 1.5;
+
+// ============= PARTIAL TP LADDER (monitor-positions) =============
+// Take-profit ladder distances and close percentages
+export const PARTIAL_TP_LADDER = {
+  TP1_DISTANCE_FRACTION: 0.33,   // 33% of TP distance
+  TP2_DISTANCE_FRACTION: 0.66,   // 66% of TP distance
+  TP1_CLOSE_PERCENT: 50,         // Close 50% at TP1
+  TP2_CLOSE_PERCENT: 60,         // Close 60% of remaining at TP2
+} as const;
