@@ -6317,82 +6317,81 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
 } as const;
 
 // ============= ADX SLOPE GRADUATED GATE =============
-// Based on BE trade analysis: ADX slope < 0 isn't always bad, but needs graduated handling
-// Key insight: Profitable trades with declining ADX had HIGH ADX (>=55), BE trades didn't
+// ADX Slope Gate v2.0: Graduated Penalty Architecture
+// Philosophy: ADX slope decline = reduce exposure, not reject entry
+// Only structural collapse (slope < -3.0) warrants hard blocking
+// Everything else scales position size to handle uncertainty
 export const ADX_SLOPE_GRADUATED_GATE = {
   ENABLED: true,
   
-  // ===== GRADUATED THRESHOLDS FOR DECLINING SLOPES =====
-  // Hard block when ADX slope is severely declining
-  HARD_BLOCK_SLOPE_THRESHOLD: -1.5,
-  // Reduce position when slope is moderately declining
-  REDUCE_POSITION_SLOPE_THRESHOLD: -0.2,
-  // Position multiplier for moderate decline
-  MODERATE_DECLINE_MULTIPLIER: 0.50,
+  // ===== HARD BLOCK: Only true structural collapse =====
+  // Slope < -3.0 means ADX is collapsing rapidly — trend structure is breaking
+  HARD_BLOCK_SLOPE_THRESHOLD: -3.0,
+  // Direction-specific hard blocks (both at -3.0 for symmetry)
+  SHORT_HARD_BLOCK_SLOPE: -3.0,
+  LONG_HARD_BLOCK_SLOPE: -3.0,
   
-  // ===== ADX VALUE EXCEPTION =====
-  // IMPROVEMENT #4: Tightened from ADX >= 55 to ADX >= 35 WITH slope >= 0 AND LTF alignment
-  // Old: High ADX alone was enough (ADX 55 + slope -0.69 = allowed → -2.3% loss)
-  // New: ADX strength alone doesn't override decaying momentum
+  // ===== GRADUATED PENALTY TIERS (soft — reduce size, never block) =====
+  // Tier 1: Severe decline (-3.0 to -2.0) — significant size reduction
+  SEVERE_DECLINE_THRESHOLD: -2.0,
+  SEVERE_DECLINE_MULTIPLIER: 0.40,
+  // Tier 2: Steep decline (-2.0 to -1.0) — moderate size reduction
+  STEEP_DECLINE_THRESHOLD: -1.0,
+  STEEP_DECLINE_MULTIPLIER: 0.60,
+  // Tier 3: Moderate decline (-1.0 to -0.2) — mild size reduction
+  MODERATE_DECLINE_THRESHOLD: -0.2,
+  MODERATE_DECLINE_MULTIPLIER: 0.80,
+  // Tier 4: Flat/positive (>= -0.2) — no penalty
+  // (handled implicitly: multiplier stays 1.0)
+  
+  // ===== ADX VALUE BONUS =====
+  // High ADX = trend energy reservoir — improves multiplier by one tier
   HIGH_ADX_EXCEPTION_THRESHOLD: 40,
-  HIGH_ADX_DECLINE_MULTIPLIER: 0.70,
+  HIGH_ADX_TIER_BONUS_MULTIPLIER: 1.25, // e.g., 0.60 * 1.25 = 0.75 (capped at 1.0)
   
-  // ===== STRONG TREND CONTINUATION FIX =====
-  // Require ADX slope >= 0 AND at least one LTF aligned for continuation entries
-  // Addresses: 4/15 losses from "strong ADX + negative slope + neutral LTF" pattern
+  // ===== CONTINUATION REQUIREMENTS (for moderate zone, ADX 35+) =====
+  // When ADX is strong but declining, LTF alignment determines if it's exhaustion or normalization
   CONTINUATION_REQUIREMENTS: {
     ENABLED: true,
-    // Minimum ADX to trigger continuation check (replaces raw ADX > 40 check)
     MIN_ADX: 35,
-    // ADX slope must be non-negative (trend NOT decaying)
     MIN_ADX_SLOPE: 0,
-    // At least one of 1h or 30m must align with trade direction
     REQUIRE_LTF_ALIGNMENT: true,
+    // LTF aligned: boost multiplier (trend is continuing, just normalizing)
+    LTF_ALIGNED_BONUS: 1.15, // e.g., 0.60 * 1.15 = 0.69
+    // No LTF alignment: additional penalty (trend may be exhausting)
+    NO_LTF_PENALTY: 0.70,
     // Position multiplier when continuation passes with marginal LTF support (only 30m)
     MARGINAL_LTF_MULTIPLIER: 0.60,
-    // Hard block: ADX > 35 but slope negative AND both LTFs neutral
-    // This is the "late-stage trend exhaustion" pattern that produced -2.3% losses
+    // Hard block only if ADX 35+ AND slope < -2.0 AND both LTFs neutral (true exhaustion)
     BLOCK_DECLINING_NO_LTF: true,
+    BLOCK_DECLINING_NO_LTF_SLOPE_THRESHOLD: -2.0, // Only block at severe decline + no LTF
   },
   
-  // ===== DIRECTION-SPECIFIC THRESHOLDS =====
-  // Shorts are more sensitive to momentum decay
-  SHORT_HARD_BLOCK_SLOPE: -1.5,
-  LONG_HARD_BLOCK_SLOPE: -0.7,  // Longs can tolerate more decline
-  
   // ===== GRADUATED POSITIVE SLOPE TIERING FOR LONGS =====
-  // Allows earlier continuation entries during stabilizing phases
-  // Gap identified: system blocked valid LONGs waiting for slope >= +0.3
   LONG_POSITIVE_SLOPE_TIERS: {
     ENABLED: true,
-    // Tier 1: Full size (trend strengthening) - slope >= +0.3
     FULL_SIZE_MIN_SLOPE: 0.3,
     FULL_SIZE_MULTIPLIER: 1.0,
-    // Tier 2: Reduced size (stabilizing/flat) - slope 0.0 to +0.3
     STABILIZING_MIN_SLOPE: 0.0,
     STABILIZING_MULTIPLIER: 0.60,
-    // Note: slopes < 0.0 handled by decline logic above
   },
   
   // ===== BOLLINGER BREAKDOWN OVERRIDE =====
-  // Allows continuation entries when price is outside Bollinger Bands with StochRSI runway
-  // Addresses: missed opportunities in structurally strong trends with lagging ADX
+  // Additional bonus for price-at-extreme entries (unchanged)
   BOLLINGER_BREAKDOWN_OVERRIDE: {
     ENABLED: true,
-    // %B threshold for SHORT breakdown (price below lower band)
     SHORT_MAX_PERCENT_B: 20,
-    // %B threshold for LONG breakout (price above upper band)
     LONG_MIN_PERCENT_B: 80,
-    // 4H StochRSI runway requirements (K not at extreme)
-    SHORT_MAX_STOCHRSI_K: 85,  // SHORT needs K not overbought (has room to fall)
-    SHORT_MIN_STOCHRSI_K: 15,  // SHORT blocked if already oversold (no runway)
-    LONG_MIN_STOCHRSI_K: 15,   // LONG needs K not oversold (has room to rise)
-    LONG_MAX_STOCHRSI_K: 85,   // LONG blocked if already overbought (no runway)
-    // Position sizing for breakdown override entries (reduced due to lagging ADX)
+    SHORT_MAX_STOCHRSI_K: 85,
+    SHORT_MIN_STOCHRSI_K: 15,
+    LONG_MIN_STOCHRSI_K: 15,
+    LONG_MAX_STOCHRSI_K: 85,
     POSITION_MULTIPLIER: 0.55,
-    // Minimum ADX to even consider the override (some trend strength required)
     MIN_ADX_FOR_OVERRIDE: 20,
   },
+  
+  // ===== REDUCE_POSITION_SLOPE_THRESHOLD (legacy compat) =====
+  REDUCE_POSITION_SLOPE_THRESHOLD: -0.2,
   
   LOG_GATE_CHECKS: true,
 } as const;

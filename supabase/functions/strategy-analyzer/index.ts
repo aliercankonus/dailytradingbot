@@ -5475,201 +5475,155 @@ serve(async (req) => {
             ? ADX_SLOPE_GRADUATED_GATE.SHORT_HARD_BLOCK_SLOPE 
             : ADX_SLOPE_GRADUATED_GATE.LONG_HARD_BLOCK_SLOPE;
           
-          // Check for severe decline
+          // ===== STEP 1: HARD BLOCK — Only true structural collapse (slope < -3.0) =====
           if (adxSlope < directionSpecificThreshold) {
-            // Exception: High ADX (>= 55) can still work with declining slope
-            // BUT: Now also requires LTF alignment (Improvement #4)
+            rejectedByHardGates++;
+            const blockReason = `ADX_SLOPE_STRUCTURAL_COLLAPSE: ${derivedDirection.toUpperCase()} blocked - ADX slope=${adxSlope.toFixed(2)} < ${directionSpecificThreshold} (structural trend collapse), ADX=${adx.toFixed(1)}`;
+            perSymbolGateAttribution.set(symbol, { gate: 'ADX_SLOPE_GRADUATED', details: blockReason });
+            
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+            
+            await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+              gate: "ADX_SLOPE_GRADUATED",
+              subGate: "STRUCTURAL_COLLAPSE",
+              derivedDirection,
+              adx: adx.toFixed(1),
+              adxSlope: adxSlope.toFixed(2),
+              thresholds: {
+                hardBlockSlope: directionSpecificThreshold,
+              },
+              analysis: "ADX slope < -3.0 indicates rapid trend structure breakdown — hard block justified"
+            }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+            continue;
+          }
+          
+          // ===== STEP 2: GRADUATED PENALTIES — Scale position size, never block =====
+          if (adxSlope < ADX_SLOPE_GRADUATED_GATE.MODERATE_DECLINE_THRESHOLD) {
+            // Determine base penalty tier
+            let tierName = '';
+            if (adxSlope < ADX_SLOPE_GRADUATED_GATE.SEVERE_DECLINE_THRESHOLD) {
+              // Tier 1: Severe decline (-3.0 to -2.0)
+              adxSlopeGraduatedMultiplier = ADX_SLOPE_GRADUATED_GATE.SEVERE_DECLINE_MULTIPLIER;
+              tierName = 'SEVERE';
+            } else if (adxSlope < ADX_SLOPE_GRADUATED_GATE.STEEP_DECLINE_THRESHOLD) {
+              // Tier 2: Steep decline (-2.0 to -1.0)
+              adxSlopeGraduatedMultiplier = ADX_SLOPE_GRADUATED_GATE.STEEP_DECLINE_MULTIPLIER;
+              tierName = 'STEEP';
+            } else {
+              // Tier 3: Moderate decline (-1.0 to -0.2)
+              adxSlopeGraduatedMultiplier = ADX_SLOPE_GRADUATED_GATE.MODERATE_DECLINE_MULTIPLIER;
+              tierName = 'MODERATE';
+            }
+            adxSlopeGateApplied = true;
+            
+            // ===== STEP 3: ADX ENERGY BONUS — High ADX improves multiplier by one tier =====
             if (adx >= ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD) {
-              // IMPROVEMENT #4: Even at ADX >= 55, check LTF alignment
-              const contReq = ADX_SLOPE_GRADUATED_GATE.CONTINUATION_REQUIREMENTS;
+              const boosted = Math.min(1.0, adxSlopeGraduatedMultiplier * ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_TIER_BONUS_MULTIPLIER);
+              if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚡ ADX_SLOPE_GRADUATED: ADX=${adx.toFixed(1)} >= ${ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD} energy bonus: ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% → ${(boosted * 100).toFixed(0)}%`);
+              }
+              adxSlopeGraduatedMultiplier = boosted;
+            }
+            
+            // ===== STEP 4: LTF ALIGNMENT CONTEXT — Determines normalization vs exhaustion =====
+            const contReq = ADX_SLOPE_GRADUATED_GATE.CONTINUATION_REQUIREMENTS;
+            if (contReq?.ENABLED && adx >= contReq.MIN_ADX && adxSlope < contReq.MIN_ADX_SLOPE) {
               const tf1hTrend = trendData.timeframes?.['1h']?.trend || 'neutral';
               const tf30mTrend = trendData.timeframes?.['30m']?.trend || 'neutral';
               const ltfAligned = (derivedDirection === 'long' && (tf1hTrend === 'bullish' || tf30mTrend === 'bullish')) ||
                                  (derivedDirection === 'short' && (tf1hTrend === 'bearish' || tf30mTrend === 'bearish'));
               
-              if (contReq?.ENABLED && contReq.REQUIRE_LTF_ALIGNMENT && !ltfAligned) {
-                // High ADX but NO LTF alignment + declining slope = late-stage exhaustion
-                // This is the -2.3% loss pattern: ADX 55 + slope -0.42 + 1h neutral + 30m neutral
+              if (ltfAligned) {
+                // LTF confirms direction — this is trend normalization, not exhaustion
+                const boosted = Math.min(1.0, adxSlopeGraduatedMultiplier * contReq.LTF_ALIGNED_BONUS);
+                if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ ADX_SLOPE_CONTINUATION: LTF aligned (1h=${tf1hTrend}, 30m=${tf30mTrend}) — trend normalizing, bonus: ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% → ${(boosted * 100).toFixed(0)}%`);
+                }
+                adxSlopeGraduatedMultiplier = boosted;
+              } else if (contReq.BLOCK_DECLINING_NO_LTF && adxSlope < (contReq.BLOCK_DECLINING_NO_LTF_SLOPE_THRESHOLD ?? -2.0)) {
+                // Severe decline + no LTF = true exhaustion — this IS a hard block
                 rejectedByHardGates++;
-                const blockReason = `ADX_SLOPE_CONTINUATION_FAIL: ${derivedDirection.toUpperCase()} blocked - ADX=${adx.toFixed(1)} (high) but slope=${adxSlope.toFixed(2)} (declining) AND no LTF alignment (1h=${tf1hTrend}, 30m=${tf30mTrend}) → late-stage trend exhaustion`;
+                const blockReason = `ADX_SLOPE_EXHAUSTION: ${derivedDirection.toUpperCase()} blocked - ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)} (severe decline) AND no LTF alignment (1h=${tf1hTrend}, 30m=${tf30mTrend}) → confirmed trend exhaustion`;
                 perSymbolGateAttribution.set(symbol, { gate: 'ADX_SLOPE_GRADUATED', details: blockReason });
                 
                 logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
                 
                 await logRejectionWithAI(supabase, userId, symbol, blockReason, {
                   gate: "ADX_SLOPE_GRADUATED",
-                  subGate: "CONTINUATION_FAIL",
+                  subGate: "EXHAUSTION_CONFIRMED",
                   derivedDirection,
                   adx: adx.toFixed(1),
                   adxSlope: adxSlope.toFixed(2),
                   tf1hTrend,
                   tf30mTrend,
                   ltfAligned: false,
-                  wouldPassWith: `ADX slope >= 0 OR 1h/30m aligned with ${derivedDirection}`,
+                  wouldPassWith: `Slope >= ${contReq.BLOCK_DECLINING_NO_LTF_SLOPE_THRESHOLD} OR 1h/30m aligned with ${derivedDirection}`,
                 }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                 continue;
-              }
-              
-              adxSlopeGraduatedMultiplier = ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_DECLINE_MULTIPLIER;
-              adxSlopeGateApplied = true;
-              
-              if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_GRADUATED: Slope=${adxSlope.toFixed(2)} severely declining but ADX=${adx.toFixed(1)} >= ${ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD} + LTF aligned (1h=${tf1hTrend}, 30m=${tf30mTrend}) - allowing with ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% position`);
+              } else {
+                // No LTF but decline is moderate — apply penalty, don't block
+                adxSlopeGraduatedMultiplier *= contReq.NO_LTF_PENALTY;
+                if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_CONTINUATION: No LTF alignment (1h=${tf1hTrend}, 30m=${tf30mTrend}) — penalty applied: ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}%`);
+                }
               }
             }
-            // Exception 2: Bollinger Breakdown Override - price outside bands with StochRSI runway
-            else if (ADX_SLOPE_GRADUATED_GATE.BOLLINGER_BREAKDOWN_OVERRIDE?.ENABLED) {
+            
+            // ===== STEP 5: BOLLINGER BREAKDOWN BONUS =====
+            if (ADX_SLOPE_GRADUATED_GATE.BOLLINGER_BREAKDOWN_OVERRIDE?.ENABLED) {
               const bbOverride = ADX_SLOPE_GRADUATED_GATE.BOLLINGER_BREAKDOWN_OVERRIDE;
               const bb4h = trendData?.bollingerBands?.["4h"];
               const stochRsi4h = trendData?.stochasticRsi?.["4h"];
               const percentB = bb4h?.percentB ?? 50;
               const stochRsiK = stochRsi4h?.k ?? 50;
               
-              let bollingerBreakdownAllowed = false;
-              let breakdownReason = '';
-              
-              // Check if ADX meets minimum for override
               if (adx >= bbOverride.MIN_ADX_FOR_OVERRIDE) {
+                let bollingerBonus = false;
+                let breakdownReason = '';
+                
                 if (derivedDirection === 'short') {
-                  // SHORT breakdown: price below lower band (%B <= 20) AND StochRSI has runway (15 < K < 85)
                   const isBelowLowerBand = percentB <= bbOverride.SHORT_MAX_PERCENT_B;
                   const hasRunway = stochRsiK > bbOverride.SHORT_MIN_STOCHRSI_K && stochRsiK < bbOverride.SHORT_MAX_STOCHRSI_K;
-                  
                   if (isBelowLowerBand && hasRunway) {
-                    bollingerBreakdownAllowed = true;
-                    breakdownReason = `SHORT breakdown: %B=${percentB.toFixed(1)}% (below lower band), StochRSI K=${stochRsiK.toFixed(1)} (has runway)`;
+                    bollingerBonus = true;
+                    breakdownReason = `SHORT breakdown: %B=${percentB.toFixed(1)}%, StochRSI K=${stochRsiK.toFixed(1)}`;
                   }
                 } else {
-                  // LONG breakout: price above upper band (%B >= 80) AND StochRSI has runway (15 < K < 85)
                   const isAboveUpperBand = percentB >= bbOverride.LONG_MIN_PERCENT_B;
                   const hasRunway = stochRsiK > bbOverride.LONG_MIN_STOCHRSI_K && stochRsiK < bbOverride.LONG_MAX_STOCHRSI_K;
-                  
                   if (isAboveUpperBand && hasRunway) {
-                    bollingerBreakdownAllowed = true;
-                    breakdownReason = `LONG breakout: %B=${percentB.toFixed(1)}% (above upper band), StochRSI K=${stochRsiK.toFixed(1)} (has runway)`;
+                    bollingerBonus = true;
+                    breakdownReason = `LONG breakout: %B=${percentB.toFixed(1)}%, StochRSI K=${stochRsiK.toFixed(1)}`;
+                  }
+                }
+                
+                if (bollingerBonus) {
+                  // Bollinger override replaces penalty with its own multiplier if better
+                  const bbMultiplier = bbOverride.POSITION_MULTIPLIER;
+                  if (bbMultiplier > adxSlopeGraduatedMultiplier) {
+                    if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
+                      logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ ADX_SLOPE_GRADUATED BOLLINGER BONUS: ${breakdownReason} — upgrading ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% → ${(bbMultiplier * 100).toFixed(0)}%`);
+                    }
+                    adxSlopeGraduatedMultiplier = bbMultiplier;
                   }
                 }
               }
-              
-              if (bollingerBreakdownAllowed) {
-                adxSlopeGraduatedMultiplier = bbOverride.POSITION_MULTIPLIER;
-                adxSlopeGateApplied = true;
-                
-                if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
-                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ ADX_SLOPE_GRADUATED BOLLINGER OVERRIDE: Slope=${adxSlope.toFixed(2)} declining but ${breakdownReason} - allowing with ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% position`);
-                }
-              } else {
-                // No override applies - hard block
-                rejectedByHardGates++;
-                const blockReason = `ADX_SLOPE_GRADUATED: ${derivedDirection.toUpperCase()} blocked - ADX slope=${adxSlope.toFixed(2)} severely declining AND ADX=${adx.toFixed(1)} < ${ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD} (BE zone), Bollinger override not met (%B=${percentB.toFixed(1)}, StochRSI K=${stochRsiK.toFixed(1)})`;
-                perSymbolGateAttribution.set(symbol, { gate: 'ADX_SLOPE_GRADUATED', details: blockReason });
-                
-                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
-                
-                await logRejectionWithAI(supabase, userId, symbol, blockReason, {
-                  gate: "ADX_SLOPE_GRADUATED",
-                  derivedDirection,
-                  adx: adx.toFixed(1),
-                  adxSlope: adxSlope.toFixed(2),
-                  percentB: percentB.toFixed(1),
-                  stochRsiK4h: stochRsiK.toFixed(1),
-                  bollingerBreakdownChecked: true,
-                  thresholds: {
-                    hardBlockSlope: directionSpecificThreshold,
-                    highAdxException: ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD,
-                    bollingerOverride: bbOverride,
-                  },
-                  analysis: "BE trades cluster when ADX < 50 with declining slope, Bollinger breakdown override not satisfied"
-                }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
-                continue;
-              }
-            } else {
-              // Hard block for low-ADX with severe decline (no override configured)
-              rejectedByHardGates++;
-              const blockReason = `ADX_SLOPE_GRADUATED: ${derivedDirection.toUpperCase()} blocked - ADX slope=${adxSlope.toFixed(2)} severely declining AND ADX=${adx.toFixed(1)} < ${ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD} (BE zone)`;
-              perSymbolGateAttribution.set(symbol, { gate: 'ADX_SLOPE_GRADUATED', details: blockReason });
-              
-              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
-              
-              await logRejectionWithAI(supabase, userId, symbol, blockReason, {
-                gate: "ADX_SLOPE_GRADUATED",
-                derivedDirection,
-                adx: adx.toFixed(1),
-                adxSlope: adxSlope.toFixed(2),
-                thresholds: {
-                  hardBlockSlope: directionSpecificThreshold,
-                  highAdxException: ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD,
-                },
-                analysis: "BE trades cluster when ADX < 50 with declining slope"
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
-              continue;
             }
-          } else if (adxSlope < ADX_SLOPE_GRADUATED_GATE.REDUCE_POSITION_SLOPE_THRESHOLD && adxSlope >= directionSpecificThreshold) {
-            // Moderate decline: reduce position unless high ADX
-            if (adx < ADX_SLOPE_GRADUATED_GATE.HIGH_ADX_EXCEPTION_THRESHOLD) {
-              // IMPROVEMENT #4: For ADX 35+ with moderate decline, also check LTF alignment
-              const contReq = ADX_SLOPE_GRADUATED_GATE.CONTINUATION_REQUIREMENTS;
-              if (contReq?.ENABLED && adx >= contReq.MIN_ADX && adxSlope < contReq.MIN_ADX_SLOPE && contReq.BLOCK_DECLINING_NO_LTF) {
-                const tf1hTrend = trendData.timeframes?.['1h']?.trend || 'neutral';
-                const tf30mTrend = trendData.timeframes?.['30m']?.trend || 'neutral';
-                const ltfAligned = (derivedDirection === 'long' && (tf1hTrend === 'bullish' || tf30mTrend === 'bullish')) ||
-                                   (derivedDirection === 'short' && (tf1hTrend === 'bearish' || tf30mTrend === 'bearish'));
-                
-                if (!ltfAligned) {
-                  // ADX 35+ with declining slope AND no LTF = trend exhaustion, not continuation
-                  rejectedByHardGates++;
-                  const blockReason = `ADX_SLOPE_CONTINUATION_FAIL: ${derivedDirection.toUpperCase()} blocked - ADX=${adx.toFixed(1)} >= ${contReq.MIN_ADX} but slope=${adxSlope.toFixed(2)} < 0 AND no LTF alignment (1h=${tf1hTrend}, 30m=${tf30mTrend}) → trend decaying without LTF follow-through`;
-                  perSymbolGateAttribution.set(symbol, { gate: 'ADX_SLOPE_GRADUATED', details: blockReason });
-                  
-                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
-                  
-                  await logRejectionWithAI(supabase, userId, symbol, blockReason, {
-                    gate: "ADX_SLOPE_GRADUATED",
-                    subGate: "CONTINUATION_FAIL_MODERATE",
-                    derivedDirection,
-                    adx: adx.toFixed(1),
-                    adxSlope: adxSlope.toFixed(2),
-                    tf1hTrend,
-                    tf30mTrend,
-                    ltfAligned: false,
-                    wouldPassWith: `ADX slope >= 0 OR 1h/30m aligned with ${derivedDirection}`,
-                  }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
-                  continue;
-                }
-                
-                // LTF aligned but declining slope → marginal entry with reduced size
-                adxSlopeGraduatedMultiplier = contReq.MARGINAL_LTF_MULTIPLIER;
-                adxSlopeGateApplied = true;
-                
-                if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
-                  const tf1hTrendLog = trendData.timeframes?.['1h']?.trend || 'neutral';
-                  const tf30mTrendLog = trendData.timeframes?.['30m']?.trend || 'neutral';
-                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_CONTINUATION: ADX=${adx.toFixed(1)} >= ${contReq.MIN_ADX}, slope=${adxSlope.toFixed(2)} declining BUT LTF aligned (1h=${tf1hTrendLog}, 30m=${tf30mTrendLog}) - allowing with ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}%`);
-                }
-              } else {
-                adxSlopeGraduatedMultiplier = ADX_SLOPE_GRADUATED_GATE.MODERATE_DECLINE_MULTIPLIER;
-                adxSlopeGateApplied = true;
-                
-                if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
-                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_GRADUATED: Slope=${adxSlope.toFixed(2)} moderately declining, ADX=${adx.toFixed(1)} - reducing to ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}%`);
-                }
-              }
+            
+            if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 ADX_SLOPE_GRADUATED FINAL: Slope=${adxSlope.toFixed(2)}, Tier=${tierName}, ADX=${adx.toFixed(1)}, Final multiplier=${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}%`);
             }
           } else if (derivedDirection === 'long' && ADX_SLOPE_GRADUATED_GATE.LONG_POSITIVE_SLOPE_TIERS?.ENABLED) {
-            // ===== NEW: GRADUATED POSITIVE SLOPE TIERING FOR LONGS =====
-            // Allows earlier continuation entries during stabilizing phases
+            // ===== GRADUATED POSITIVE SLOPE TIERING FOR LONGS =====
             const positiveTiers = ADX_SLOPE_GRADUATED_GATE.LONG_POSITIVE_SLOPE_TIERS;
             
             if (adxSlope >= positiveTiers.FULL_SIZE_MIN_SLOPE) {
-              // Tier 1: Trend strengthening - full size
               adxSlopeGraduatedMultiplier = positiveTiers.FULL_SIZE_MULTIPLIER;
-              // Don't mark as "applied" for full size - no reduction needed
               
               if (ADX_SLOPE_GRADUATED_GATE.LOG_GATE_CHECKS) {
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ ADX_SLOPE_GRADUATED LONG: Slope=${adxSlope.toFixed(2)} >= ${positiveTiers.FULL_SIZE_MIN_SLOPE} (trend strengthening) - full ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% position`);
               }
             } else if (adxSlope >= positiveTiers.STABILIZING_MIN_SLOPE) {
-              // Tier 2: Stabilizing/flat slope (0.0 to +0.3) - reduced size for early continuation
               adxSlopeGraduatedMultiplier = positiveTiers.STABILIZING_MULTIPLIER;
               adxSlopeGateApplied = true;
               
@@ -5677,7 +5631,6 @@ serve(async (req) => {
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_GRADUATED LONG: Slope=${adxSlope.toFixed(2)} in stabilizing range [${positiveTiers.STABILIZING_MIN_SLOPE}, ${positiveTiers.FULL_SIZE_MIN_SLOPE}) - reducing to ${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}% (early continuation)`);
               }
             }
-            // Note: slopes < 0.0 are handled by the decline logic above
           }
         }
         
