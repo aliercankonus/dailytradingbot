@@ -3917,8 +3917,11 @@ export const FOUR_STATE_REGIME = {
   TREND_EXPANSION: {
     // ADX must show trend energy
     MIN_ADX: 30,
-    // ADX slope must be non-negative (not decaying)
+    // ADX slope must be non-negative for full expansion (not decaying)
     MIN_ADX_SLOPE: 0,
+    // Buffer zone: slopes between -0.5 and 0 are noise, still EXPANSION at reduced sizing
+    BUFFER_SLOPE_THRESHOLD: -0.5,
+    BUFFER_POSITION_MULTIPLIER: 0.85,
     // At least one LTF must align with direction
     REQUIRE_LTF_ALIGNMENT: true,
     // Position multiplier (full conviction)
@@ -3927,23 +3930,39 @@ export const FOUR_STATE_REGIME = {
     ALLOWED_ENTRIES: ['continuation', 'pullback', 'breakout'] as string[],
   },
   
-  // ===== TREND EXHAUSTION =====
-  // Trend energy is declining - continuation is dangerous, reversal probes only
+  // ===== TREND EXHAUSTION (GRADUATED) =====
+  // Replaces binary slope<0 cliff with graduated tiers
+  // Consistent with ADX_SLOPE_GRADUATED and MOVE_EXHAUSTION graduated architectures
   TREND_EXHAUSTION: {
     // ADX still elevated but slope is declining
     MIN_ADX: 30,
-    // Negative slope = decelerating trend
-    MAX_ADX_SLOPE: 0,
+    
+    // === GRADUATED SLOPE TIERS ===
+    // TIER: CONDITIONAL (slope -1.5 to -0.5)
+    // Secondary signals must confirm exhaustion before classifying
+    CONDITIONAL_SLOPE_THRESHOLD: -0.5,   // Enters conditional zone
+    CONDITIONAL_EXHAUSTION_SLOPE: -1.5,  // Below this = confirmed exhaustion
+    CONDITIONAL_POSITION_MULTIPLIER_CONFIRMED: 0.50,  // If secondary signals confirm
+    CONDITIONAL_POSITION_MULTIPLIER_DENIED: 0.70,     // If secondary signals deny exhaustion
+    // Minimum secondary signals needed to confirm exhaustion in conditional zone
+    CONDITIONAL_MIN_SECONDARY_SIGNALS: 1,
+    
+    // TIER: CONFIRMED EXHAUSTION (slope < -1.5)
+    // Hard reduction — confirmed energy drain
+    CONFIRMED_POSITION_MULTIPLIER: 0.25,
+    
+    // === SECONDARY EXHAUSTION SIGNALS ===
     // OR: Momentum state exhausted
     EXHAUSTION_MOMENTUM_STATES: ['exhausted'] as string[],
     // OR: StochRSI at extreme for sustained period
     STOCHRSI_EXHAUSTION_K_LONG: 90,   // K > 90 for longs = exhausted
     STOCHRSI_EXHAUSTION_K_SHORT: 10,  // K < 10 for shorts = exhausted
-    // Position multiplier (probe sizing only)
+    
+    // Legacy fallback multiplier (used when secondary signals force exhaustion regardless of slope)
     POSITION_MULTIPLIER: 0.25,
-    // Only mean reversion / counter-trend allowed
+    // Only mean reversion / counter-trend allowed in confirmed exhaustion
     ALLOWED_ENTRIES: ['mean_reversion', 'counter_trend'] as string[],
-    // Block continuation trades
+    // Block continuation trades in confirmed exhaustion
     BLOCK_CONTINUATION: true,
   },
   
