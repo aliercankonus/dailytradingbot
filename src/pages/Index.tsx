@@ -43,29 +43,29 @@ const Index = () => {
     <div className="min-h-screen bg-background">
       <AppHeader />
       
-      <main className="container mx-auto px-4 py-6">
+      <main className="container mx-auto px-3 sm:px-4 py-4">
         <AutoSignalGenerator />
         <TradeCounterSync />
-        <Tabs defaultValue="dashboard" className="space-y-6">
+        <Tabs defaultValue="dashboard" className="space-y-4">
           <div className="relative md:contents">
-            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-7">
-              <TabsTrigger value="dashboard" className="min-w-[5rem] flex-shrink-0">Dashboard</TabsTrigger>
-              <TabsTrigger value="signals" className="min-w-[4.5rem] flex-shrink-0">Signals</TabsTrigger>
-              <TabsTrigger value="positions" className="min-w-[4.5rem] flex-shrink-0">Positions</TabsTrigger>
-              <TabsTrigger value="history" className="min-w-[4rem] flex-shrink-0">History</TabsTrigger>
-              <TabsTrigger value="analytics" className="min-w-[5rem] flex-shrink-0">Analytics</TabsTrigger>
-              <TabsTrigger value="risk" className="min-w-[3.5rem] flex-shrink-0">Risk</TabsTrigger>
-              <TabsTrigger value="monitor" className="min-w-[4.5rem] flex-shrink-0">Monitor</TabsTrigger>
+            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-7 h-8">
+              <TabsTrigger value="dashboard" className="min-w-[5rem] flex-shrink-0 text-xs">Dashboard</TabsTrigger>
+              <TabsTrigger value="signals" className="min-w-[4.5rem] flex-shrink-0 text-xs">Signals</TabsTrigger>
+              <TabsTrigger value="positions" className="min-w-[4.5rem] flex-shrink-0 text-xs">Positions</TabsTrigger>
+              <TabsTrigger value="history" className="min-w-[4rem] flex-shrink-0 text-xs">History</TabsTrigger>
+              <TabsTrigger value="analytics" className="min-w-[5rem] flex-shrink-0 text-xs">Analytics</TabsTrigger>
+              <TabsTrigger value="risk" className="min-w-[3.5rem] flex-shrink-0 text-xs">Risk</TabsTrigger>
+              <TabsTrigger value="monitor" className="min-w-[4.5rem] flex-shrink-0 text-xs">Monitor</TabsTrigger>
             </TabsList>
             <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-background to-transparent pointer-events-none md:hidden" />
           </div>
 
-          <TabsContent value="dashboard" className="space-y-6">
-            <div className="flex justify-end mb-4">
+          <TabsContent value="dashboard" className="space-y-4">
+            <div className="flex justify-end mb-2">
               <CloseAllTradesButton />
             </div>
             
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
               <div>
                 <BotStatus />
               </div>

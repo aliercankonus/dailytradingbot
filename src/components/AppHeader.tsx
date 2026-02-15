@@ -21,6 +21,8 @@ import { LogOut, Menu, LayoutDashboard, BarChart3, Coins, HeartPulse, Settings, 
 import { useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Link } from "react-router-dom";
+import { useRiskParameters } from "@/hooks/useRiskParameters";
+import { SystemStatusStrip } from "@/components/SystemStatusStrip";
 
 const navItems = [
   { label: "Dashboard", to: "/", icon: LayoutDashboard },
@@ -38,83 +40,82 @@ export const AppHeader = () => {
   const getInitials = (email: string) => email.substring(0, 2).toUpperCase();
 
   const navLinkClasses =
-    "px-4 py-2.5 text-[15px] font-medium rounded-lg transition-all duration-200 text-muted-foreground hover:text-foreground hover:bg-secondary/70 flex items-center gap-2";
-  const activeClasses = "text-primary bg-primary/10";
+    "px-3 py-2 text-[13px] font-medium transition-colors text-muted-foreground hover:text-foreground flex items-center gap-1.5 relative";
+  const activeClasses = "text-foreground font-semibold";
 
   return (
-    <header className="sticky top-0 z-50 bg-card/90 backdrop-blur-md border-b border-primary/10 shadow-lg shadow-primary/5">
+    <header className="sticky top-0 z-50 bg-card/95 backdrop-blur-sm border-b border-border">
+      {/* System Status Strip */}
+      <SystemStatusStrip />
+      
       <div className="container mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-between h-20">
+        <div className="flex items-center justify-between h-14">
           {/* Left: Brand + Nav */}
-          <div className="flex items-center gap-6">
-          <Link to="/" className="flex items-center shrink-0 hover:opacity-80 transition-opacity">
-            <BrandLogo size="md" showText />
-          </Link>
+          <div className="flex items-center gap-5">
+            <Link to="/" className="flex items-center shrink-0 hover:opacity-80 transition-opacity">
+              <BrandLogo size="sm" showText />
+            </Link>
 
-          {/* Center: Desktop nav */}
-          {!isMobile && (
-            <nav className="flex items-center gap-1">
-              {navItems.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.to === "/"}
-                  className={navLinkClasses}
-                  activeClassName={activeClasses}
-                >
-                  <item.icon className="h-4 w-4" />
-                  {item.label}
-                </NavLink>
-              ))}
-            </nav>
-          )}
+            {/* Desktop nav — flat underline style */}
+            {!isMobile && (
+              <nav className="flex items-center">
+                {navItems.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === "/"}
+                    className={navLinkClasses}
+                    activeClassName={activeClasses}
+                  >
+                    <item.icon className="h-3.5 w-3.5" />
+                    {item.label}
+                  </NavLink>
+                ))}
+              </nav>
+            )}
           </div>
-          <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-1.5">
-              <div className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
-              <span className="text-xs text-muted-foreground">Live</span>
-            </div>
 
+          <div className="flex items-center gap-2">
             {user && (
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2">
                 {!isMobile && (
-                  <span className="text-sm text-muted-foreground">
-                    Hi, <span className="text-foreground font-medium">{user.email?.split('@')[0] || 'Trader'}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {user.email?.split('@')[0] || 'Trader'}
                   </span>
                 )}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                      <Avatar className="h-8 w-8">
-                        <AvatarFallback className="bg-primary/15 text-primary text-xs font-semibold">
+                    <Button variant="ghost" className="relative h-7 w-7 rounded-full p-0">
+                      <Avatar className="h-7 w-7">
+                        <AvatarFallback className="bg-secondary text-muted-foreground text-[10px] font-semibold">
                           {getInitials(user.email || "U")}
                         </AvatarFallback>
                       </Avatar>
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent className="w-56" align="end" forceMount>
+                  <DropdownMenuContent className="w-52" align="end" forceMount>
                     <DropdownMenuLabel className="font-normal">
                       <div className="flex flex-col space-y-1">
-                        <p className="text-sm font-medium leading-none">Account</p>
-                        <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
+                        <p className="text-xs font-medium leading-none">Account</p>
+                        <p className="text-[10px] leading-none text-muted-foreground">{user.email}</p>
                       </div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => navigate('/profile')} className="cursor-pointer">
-                      <User className="mr-2 h-4 w-4" />
+                    <DropdownMenuItem onClick={() => navigate('/profile')} className="cursor-pointer text-xs">
+                      <User className="mr-2 h-3.5 w-3.5" />
                       <span>Profile</span>
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => navigate('/notifications')} className="cursor-pointer">
-                      <Bell className="mr-2 h-4 w-4" />
+                    <DropdownMenuItem onClick={() => navigate('/notifications')} className="cursor-pointer text-xs">
+                      <Bell className="mr-2 h-3.5 w-3.5" />
                       <span>Notifications</span>
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => navigate('/settings')} className="cursor-pointer">
-                      <Settings className="mr-2 h-4 w-4" />
+                    <DropdownMenuItem onClick={() => navigate('/settings')} className="cursor-pointer text-xs">
+                      <Settings className="mr-2 h-3.5 w-3.5" />
                       <span>Settings</span>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={signOut} className="cursor-pointer">
-                      <LogOut className="mr-2 h-4 w-4" />
+                    <DropdownMenuItem onClick={signOut} className="cursor-pointer text-xs">
+                      <LogOut className="mr-2 h-3.5 w-3.5" />
                       <span>Log out</span>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -125,22 +126,22 @@ export const AppHeader = () => {
             {isMobile && (
               <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
                 <SheetTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8">
-                    <Menu className="h-5 w-5" />
+                  <Button variant="ghost" size="icon" className="h-7 w-7">
+                    <Menu className="h-4 w-4" />
                   </Button>
                 </SheetTrigger>
-                <SheetContent side="right" className="w-64 bg-card border-border">
-                  <div className="mt-6 flex flex-col gap-1">
+                <SheetContent side="right" className="w-56 bg-card border-border">
+                  <div className="mt-6 flex flex-col gap-0.5">
                     {navItems.map((item) => (
                       <NavLink
                         key={item.to}
                         to={item.to}
                         end={item.to === "/"}
-                        className="px-4 py-3 text-sm font-medium rounded-lg transition-all text-muted-foreground hover:text-foreground hover:bg-secondary/60 flex items-center gap-3"
-                        activeClassName="text-primary bg-primary/10"
+                        className="px-3 py-2.5 text-sm font-medium transition-all text-muted-foreground hover:text-foreground hover:bg-secondary/60 flex items-center gap-2.5"
+                        activeClassName="text-foreground bg-secondary"
                         onClick={() => setSheetOpen(false)}
                       >
-                        <item.icon className="h-5 w-5" />
+                        <item.icon className="h-4 w-4" />
                         {item.label}
                       </NavLink>
                     ))}
