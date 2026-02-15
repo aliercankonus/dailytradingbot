@@ -170,24 +170,21 @@ export default function Settings() {
       <AppHeader />
       <div className="container mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6">
 
-      <Tabs defaultValue="general" className="w-full">
-        <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-2">
-          <TabsTrigger value="general" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">General</span><span className="hidden sm:inline">General Settings</span></TabsTrigger>
+      <Tabs defaultValue="trading" className="w-full">
+        <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4">
+          <TabsTrigger value="trading" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Trading</span><span className="hidden sm:inline">Trading Mode</span></TabsTrigger>
+          <TabsTrigger value="api" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">API</span><span className="hidden sm:inline">API & Security</span></TabsTrigger>
+          <TabsTrigger value="risk" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Risk</span><span className="hidden sm:inline">Risk Management</span></TabsTrigger>
           <TabsTrigger value="smart" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Smart</span><span className="hidden sm:inline">Smart Trading</span></TabsTrigger>
         </TabsList>
 
-        <TabsContent value="smart" className="space-y-6">
-          <SmartTradingSettings />
-        </TabsContent>
-
-        <TabsContent value="general" className="space-y-6">
-          {/* Trading Mode */}
+        {/* Tab 1: Trading Mode */}
+        <TabsContent value="trading" className="space-y-6">
           <Card className="p-4 sm:p-6">
             <div className="flex items-center gap-3 mb-4">
               <Shield className="h-5 w-5 text-primary" />
               <h2 className="text-xl font-semibold">Trading Mode</h2>
             </div>
-            
             <div className="space-y-4">
               <div className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="space-y-1">
@@ -201,7 +198,6 @@ export default function Settings() {
                   onCheckedChange={handleTogglePaperTrading}
                 />
               </div>
-              
               {riskParams?.paper_trading_mode === false && (
                 <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
                   <p className="text-sm text-destructive font-medium">
@@ -212,13 +208,11 @@ export default function Settings() {
             </div>
           </Card>
 
-          {/* AI Analysis */}
           <Card className="p-4 sm:p-6">
             <div className="flex items-center gap-3 mb-4">
               <Brain className="h-5 w-5 text-primary" />
               <h2 className="text-xl font-semibold">AI Analysis</h2>
             </div>
-            
             <div className="space-y-4">
               <div className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="space-y-1">
@@ -232,7 +226,6 @@ export default function Settings() {
                   onCheckedChange={handleToggleAIAnalysis}
                 />
               </div>
-              
               {riskParams?.ai_analysis_enabled === false && (
                 <div className="p-4 bg-muted/50 border border-muted rounded-lg">
                   <p className="text-sm text-muted-foreground">
@@ -242,19 +235,19 @@ export default function Settings() {
               )}
             </div>
           </Card>
+        </TabsContent>
 
-          {/* API Keys */}
+        {/* Tab 2: API & Security */}
+        <TabsContent value="api" className="space-y-6">
           <Card className="p-4 sm:p-6">
             <div className="flex items-center gap-3 mb-4">
               <Key className="h-5 w-5 text-primary" />
               <h2 className="text-xl font-semibold">Binance API Keys</h2>
             </div>
-            
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 Your Binance API credentials are stored securely and used for trade execution.
               </p>
-              
               {apiKeysLoading ? (
                 <div className="p-4 bg-muted/30 rounded-lg">
                   <p className="text-sm text-muted-foreground">Loading API keys...</p>
@@ -268,7 +261,6 @@ export default function Settings() {
                       </p>
                     </div>
                   )}
-                  
                   <div className="space-y-2">
                     <Label htmlFor="binance-api-key">Binance API Key</Label>
                     <Input
@@ -279,7 +271,6 @@ export default function Settings() {
                       onChange={(e) => setFormData({ ...formData, binanceApiKey: e.target.value })}
                     />
                   </div>
-
                   <div className="space-y-2">
                     <Label htmlFor="binance-api-secret">Binance API Secret</Label>
                     <Input
@@ -290,30 +281,28 @@ export default function Settings() {
                       onChange={(e) => setFormData({ ...formData, binanceApiSecret: e.target.value })}
                     />
                   </div>
-
-                  <Button 
-                    onClick={handleUpdateBinanceKeys}
-                    disabled={loading}
-                  >
+                  <Button onClick={handleUpdateBinanceKeys} disabled={loading}>
                     {loading ? 'Encrypting & Saving...' : (hasEncryptedKeys ? 'Update & Re-encrypt Keys' : 'Save Binance Keys')}
                   </Button>
                 </div>
               )}
-              
               <p className="text-xs text-muted-foreground border-l-2 border-primary/50 pl-3 py-2">
                 🔒 Security: Your API keys are encrypted using Supabase Vault and stored securely. Only your edge functions can decrypt them.
               </p>
             </div>
           </Card>
+        </TabsContent>
 
-          {/* Hedging Settings */}
-          <HedgingSettings />
-
-          {/* Smart Risk Management */}
+        {/* Tab 3: Risk Management */}
+        <TabsContent value="risk" className="space-y-6">
           <SmartRiskSettings />
-
-          {/* Risk Management */}
+          <HedgingSettings />
           <PerformanceSettings />
+        </TabsContent>
+
+        {/* Tab 4: Smart Trading */}
+        <TabsContent value="smart" className="space-y-6">
+          <SmartTradingSettings />
         </TabsContent>
 
       </Tabs>
