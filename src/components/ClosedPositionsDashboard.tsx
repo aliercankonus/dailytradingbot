@@ -502,10 +502,10 @@ export const ClosedPositionsDashboard = () => {
         <CardContent>
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'all' | 'profitable' | 'losses')}>
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
-              <TabsList>
-                <TabsTrigger value="all">All ({hidePartialCloses ? fullCloseStats.total : stats.total})</TabsTrigger>
-                <TabsTrigger value="profitable">Profitable ({hidePartialCloses ? fullCloseStats.profitable : stats.profitable})</TabsTrigger>
-                <TabsTrigger value="losses">Losses ({hidePartialCloses ? fullCloseStats.losses : stats.losses})</TabsTrigger>
+              <TabsList className="flex overflow-x-auto scrollbar-hide">
+                <TabsTrigger value="all" className="min-w-[3rem] flex-shrink-0">All ({hidePartialCloses ? fullCloseStats.total : stats.total})</TabsTrigger>
+                <TabsTrigger value="profitable" className="min-w-[5rem] flex-shrink-0">Profitable ({hidePartialCloses ? fullCloseStats.profitable : stats.profitable})</TabsTrigger>
+                <TabsTrigger value="losses" className="min-w-[4rem] flex-shrink-0">Losses ({hidePartialCloses ? fullCloseStats.losses : stats.losses})</TabsTrigger>
               </TabsList>
               
               {/* Filters */}

@@ -472,10 +472,10 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
           <div className="flex items-center gap-2">
             <Clock className="h-4 w-4 text-muted-foreground" />
             <Tabs value={timeRange} onValueChange={(v) => setTimeRange(v as TimeRange)}>
-              <TabsList className="h-7">
-                <TabsTrigger value="15m" className="text-xs px-2 py-1">15m</TabsTrigger>
-                <TabsTrigger value="30m" className="text-xs px-2 py-1">30m</TabsTrigger>
-                <TabsTrigger value="1h" className="text-xs px-2 py-1">1h</TabsTrigger>
+              <TabsList className="h-7 flex overflow-x-auto scrollbar-hide">
+                <TabsTrigger value="15m" className="text-xs px-2 py-1 flex-shrink-0">15m</TabsTrigger>
+                <TabsTrigger value="30m" className="text-xs px-2 py-1 flex-shrink-0">30m</TabsTrigger>
+                <TabsTrigger value="1h" className="text-xs px-2 py-1 flex-shrink-0">1h</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -483,12 +483,12 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-muted-foreground" />
             <Tabs value={gateFilter} onValueChange={(v) => setGateFilter(v as GateFilter)}>
-              <TabsList className="h-7">
-                <TabsTrigger value="all" className="text-xs px-2 py-1">All ({stats.total})</TabsTrigger>
-                <TabsTrigger value="momentum" className="text-xs px-2 py-1">Momentum ({stats.byGate.momentum})</TabsTrigger>
-                <TabsTrigger value="direction" className="text-xs px-2 py-1">Direction ({stats.byGate.direction})</TabsTrigger>
-                <TabsTrigger value="adx" className="text-xs px-2 py-1">ADX ({stats.byGate.adx})</TabsTrigger>
-                <TabsTrigger value="htf" className="text-xs px-2 py-1">HTF ({stats.byGate.htf})</TabsTrigger>
+              <TabsList className="h-7 flex overflow-x-auto scrollbar-hide">
+                <TabsTrigger value="all" className="text-xs px-2 py-1 flex-shrink-0">All ({stats.total})</TabsTrigger>
+                <TabsTrigger value="momentum" className="text-xs px-2 py-1 flex-shrink-0">Momentum ({stats.byGate.momentum})</TabsTrigger>
+                <TabsTrigger value="direction" className="text-xs px-2 py-1 flex-shrink-0">Direction ({stats.byGate.direction})</TabsTrigger>
+                <TabsTrigger value="adx" className="text-xs px-2 py-1 flex-shrink-0">ADX ({stats.byGate.adx})</TabsTrigger>
+                <TabsTrigger value="htf" className="text-xs px-2 py-1 flex-shrink-0">HTF ({stats.byGate.htf})</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>

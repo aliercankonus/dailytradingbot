@@ -130,11 +130,11 @@ const Performance = () => {
           </Card>
         ) : (
           <Tabs defaultValue="portfolio" className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="portfolio">Portfolio Value</TabsTrigger>
-              <TabsTrigger value="pnl">P&L Breakdown</TabsTrigger>
-              <TabsTrigger value="winrate">Win Rate</TabsTrigger>
-              <TabsTrigger value="drawdown">Drawdown & Risk</TabsTrigger>
+            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4">
+              <TabsTrigger value="portfolio" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Portfolio</span><span className="hidden sm:inline">Portfolio Value</span></TabsTrigger>
+              <TabsTrigger value="pnl" className="min-w-[4rem] flex-shrink-0"><span className="sm:hidden">P&L</span><span className="hidden sm:inline">P&L Breakdown</span></TabsTrigger>
+              <TabsTrigger value="winrate" className="min-w-[4.5rem] flex-shrink-0"><span className="sm:hidden">Wins</span><span className="hidden sm:inline">Win Rate</span></TabsTrigger>
+              <TabsTrigger value="drawdown" className="min-w-[4rem] flex-shrink-0"><span className="sm:hidden">Risk</span><span className="hidden sm:inline">Drawdown & Risk</span></TabsTrigger>
             </TabsList>
 
             <TabsContent value="portfolio" className="space-y-4">
