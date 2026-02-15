@@ -40,7 +40,7 @@ export const AppHeader = () => {
   const getInitials = (email: string) => email.substring(0, 2).toUpperCase();
 
   const navLinkClasses =
-    "px-3 py-2 text-[13px] font-medium transition-colors text-muted-foreground hover:text-foreground flex items-center gap-1.5 relative";
+    "px-3 py-2 text-sm font-medium transition-colors text-muted-foreground hover:text-foreground flex items-center gap-1.5 relative";
   const activeClasses = "text-foreground font-semibold";
 
   return (
@@ -49,7 +49,7 @@ export const AppHeader = () => {
       <SystemStatusStrip />
       
       <div className="container mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between" style={{ height: '72px' }}>
           {/* Left: Brand + Nav */}
           <div className="flex items-center gap-5">
             <Link to="/" className="flex items-center shrink-0 hover:opacity-80 transition-opacity">
