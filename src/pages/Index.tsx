@@ -120,14 +120,46 @@ const Index = () => {
             </Suspense>
           </TabsContent>
 
-          <TabsContent value="monitor" className="space-y-6">
-            <Suspense fallback={<TabFallback />}>
-              <MomentumStatusDashboard />
-              <RegimeTransitionLog />
-              <ModuleInventoryDashboard />
-              <MarketOpportunityDensity />
-              <OrderFlowDashboard />
-            </Suspense>
+          <TabsContent value="monitor">
+            <Tabs defaultValue="momentum" className="space-y-4">
+              <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-5 h-8">
+                <TabsTrigger value="momentum" className="min-w-[5rem] flex-shrink-0 text-xs">Momentum</TabsTrigger>
+                <TabsTrigger value="regime" className="min-w-[4.5rem] flex-shrink-0 text-xs">Regime</TabsTrigger>
+                <TabsTrigger value="modules" className="min-w-[4.5rem] flex-shrink-0 text-xs">Modules</TabsTrigger>
+                <TabsTrigger value="opportunity" className="min-w-[5.5rem] flex-shrink-0 text-xs">Opportunity</TabsTrigger>
+                <TabsTrigger value="orderflow" className="min-w-[5.5rem] flex-shrink-0 text-xs">Order Flow</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="momentum">
+                <Suspense fallback={<TabFallback />}>
+                  <MomentumStatusDashboard />
+                </Suspense>
+              </TabsContent>
+
+              <TabsContent value="regime">
+                <Suspense fallback={<TabFallback />}>
+                  <RegimeTransitionLog />
+                </Suspense>
+              </TabsContent>
+
+              <TabsContent value="modules">
+                <Suspense fallback={<TabFallback />}>
+                  <ModuleInventoryDashboard />
+                </Suspense>
+              </TabsContent>
+
+              <TabsContent value="opportunity">
+                <Suspense fallback={<TabFallback />}>
+                  <MarketOpportunityDensity />
+                </Suspense>
+              </TabsContent>
+
+              <TabsContent value="orderflow">
+                <Suspense fallback={<TabFallback />}>
+                  <OrderFlowDashboard />
+                </Suspense>
+              </TabsContent>
+            </Tabs>
           </TabsContent>
         </Tabs>
       </main>
