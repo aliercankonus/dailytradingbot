@@ -1,5 +1,11 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 
+export interface ErrorLogEntry {
+  timestamp: number;
+  message: string;
+  connectionName: string;
+}
+
 export interface WebSocketMetrics {
   id: string;
   name: string;
@@ -13,6 +19,7 @@ export interface WebSocketMetrics {
   messageCount: number;
   errorCount: number;
   lastError: string | null;
+  errorLog: ErrorLogEntry[];
 }
 
 interface WebSocketMonitorContextType {
@@ -24,6 +31,7 @@ interface WebSocketMonitorContextType {
   recordLatency: (id: string, latency: number) => void;
   recordError: (id: string, error: string) => void;
   unregisterConnection: (id: string) => void;
+  clearErrors: (id: string) => void;
 }
 
 const WebSocketMonitorContext = createContext<WebSocketMonitorContextType | null>(null);
@@ -47,6 +55,7 @@ export const WebSocketMonitorProvider: React.FC<{ children: React.ReactNode }> =
         messageCount: 0,
         errorCount: 0,
         lastError: null,
+        errorLog: [],
       });
       return next;
     });
@@ -119,10 +128,17 @@ export const WebSocketMonitorProvider: React.FC<{ children: React.ReactNode }> =
       const next = new Map(prev);
       const conn = next.get(id);
       if (conn) {
+        const newEntry: ErrorLogEntry = {
+          timestamp: Date.now(),
+          message: error,
+          connectionName: conn.name,
+        };
+        const errorLog = [newEntry, ...conn.errorLog].slice(0, 50);
         next.set(id, {
           ...conn,
           errorCount: conn.errorCount + 1,
           lastError: error,
+          errorLog,
         });
       }
       return next;
@@ -133,6 +149,17 @@ export const WebSocketMonitorProvider: React.FC<{ children: React.ReactNode }> =
     setConnections(prev => {
       const next = new Map(prev);
       next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const clearErrors = useCallback((id: string) => {
+    setConnections(prev => {
+      const next = new Map(prev);
+      const conn = next.get(id);
+      if (conn) {
+        next.set(id, { ...conn, errorCount: 0, lastError: null, errorLog: [] });
+      }
       return next;
     });
   }, []);
@@ -172,6 +199,7 @@ export const WebSocketMonitorProvider: React.FC<{ children: React.ReactNode }> =
         recordLatency,
         recordError,
         unregisterConnection,
+        clearErrors,
       }}
     >
       {children}

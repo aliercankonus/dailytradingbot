@@ -16,6 +16,7 @@ const Index = lazy(() => import("./pages/Index"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Symbols = lazy(() => import("./pages/Symbols"));
 const Performance = lazy(() => import("./pages/Performance"));
+const Health = lazy(() => import("./pages/Health"));
 
 const queryClient = new QueryClient();
 
@@ -42,6 +43,7 @@ const App = () => (
                 <Route path="/symbols" element={<ProtectedRoute><Symbols /></ProtectedRoute>} />
                 
                 <Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} />
+                <Route path="/health" element={<ProtectedRoute><Health /></ProtectedRoute>} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
                 </Routes>

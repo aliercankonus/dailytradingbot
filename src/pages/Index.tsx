@@ -1,5 +1,5 @@
 import { useNavigate, } from "react-router-dom";
-import { Settings, Coins, BarChart3 } from "lucide-react";
+import { Settings, Coins, BarChart3, HeartPulse } from "lucide-react";
 import { lazy, Suspense } from "react";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { BotStatus } from "@/components/BotStatus";
@@ -34,7 +34,7 @@ const MomentumStatusDashboard = lazy(() => import("@/components/MomentumStatusDa
 const ModuleInventoryDashboard = lazy(() => import("@/components/ModuleInventoryDashboard"));
 const RegimeTransitionLog = lazy(() => import("@/components/RegimeTransitionLog").then(m => ({ default: m.RegimeTransitionLog })));
 const OrderFlowDashboard = lazy(() => import("@/components/OrderFlowDashboard").then(m => ({ default: m.OrderFlowDashboard })));
-const WebSocketHealthDashboard = lazy(() => import("@/components/WebSocketHealthDashboard").then(m => ({ default: m.WebSocketHealthDashboard })));
+
 const MarketOpportunityDensity = lazy(() => import("@/components/MarketOpportunityDensity"));
 
 const TabFallback = () => (
@@ -55,6 +55,13 @@ const Index = () => {
           <div className="flex items-center justify-between gap-4">
             <DashboardHeader />
             <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => navigate('/health')}
+                className="p-2 hover:bg-accent rounded-lg transition-colors"
+                aria-label="System Health"
+              >
+                <HeartPulse className="h-5 w-5 text-muted-foreground hover:text-foreground" />
+              </button>
               <button
                 onClick={() => navigate('/performance')}
                 className="p-2 hover:bg-accent rounded-lg transition-colors"
@@ -191,7 +198,6 @@ const Index = () => {
               <RegimeTransitionLog />
               <MarketOpportunityDensity />
               <OrderFlowDashboard />
-              <WebSocketHealthDashboard />
             </Suspense>
           </TabsContent>
         </Tabs>
