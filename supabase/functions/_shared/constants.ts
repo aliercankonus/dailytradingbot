@@ -7237,3 +7237,300 @@ export const MOMENTUM_STATE_PARAMS = {
   // Volume boost for confirmed direction
   VOLUME_DIRECTION_BOOST: 1.10,
 } as const;
+
+// ============= VOLUME SCORE THRESHOLDS (scoring.ts) =============
+// Graduated volume scoring for entry quality assessment
+export const VOLUME_SCORE_PARAMS = {
+  // Volume ratio thresholds (current / average)
+  SPIKE_WITH_EXPANSION: 2.0,  // +10 with range expansion, +8 without
+  ABOVE_AVG_HIGH: 1.5,        // +7 with expansion, +5 without
+  ABOVE_AVG: 1.2,             // +2
+  AT_AVG: 1.0,                // +2 baseline
+  BELOW_AVG: 0.5,             // +2 (still reasonable)
+  LOW: 0.3,                   // +1
+  VERY_LOW: 0.1,              // 0 (holiday/weekend)
+  // Score values
+  SCORE_PERFECT: 10,
+  SCORE_STRONG: 8,
+  SCORE_CONFIRMS_EXPANSION: 7,
+  SCORE_CONFIRMS: 5,
+  SCORE_CONFIRMS_BASIC: 4,
+  SCORE_SPIKE_NO_CONFIRM: 4,
+  SCORE_EXPANSION_NO_CONFIRM: 3,
+  SCORE_ABOVE_AVG: 2,
+  SCORE_BASELINE: 2,
+  SCORE_LOW: 1,
+} as const;
+
+// ============= ADX SCORE PARAMS (scoring.ts) =============
+// ADX quality scoring with falling-ADX penalties
+export const ADX_SCORE_PARAMS = {
+  // Base scores by ADX level (uses ADX_THRESHOLDS for levels)
+  SCORE_EXTREME: 25,
+  SCORE_VERY_STRONG: 22,
+  SCORE_STRONG: 18,
+  SCORE_MINIMUM: 14,
+  SCORE_WEAK: 8,
+  SCORE_VERY_WEAK: 4,
+  // Falling ADX penalties
+  FALLING_WEAK_PENALTY: 8,    // ADX < 25 and falling
+  FALLING_STRONG_PENALTY: 5,  // ADX >= 25 and falling
+  FALLING_THRESHOLD: 25,      // Divider between weak/strong falling
+} as const;
+
+// ============= ALIGNMENT SCORE PARAMS (scoring.ts) =============
+// Timeframe alignment quality scoring
+export const ALIGNMENT_SCORE_PARAMS = {
+  // Full alignment
+  FULL_ALIGNMENT_SCORE: 8,
+  // Strong 1H with neutral 4H
+  STRONG_1H_NEUTRAL_4H_SCORE: 6,
+  STRONG_1H_MIN_CONFIDENCE: 65,
+  // Partial alignment (1h+30m agree, 4h neutral)
+  PARTIAL_ALIGNMENT_SCORE: 5,
+  // 1h+30m agree but differ from 4h
+  LOWER_TF_ALIGNMENT_SCORE: 3,
+  // Strong 1h alone
+  STRONG_1H_ALONE_SCORE: 3,
+  STRONG_1H_ALONE_MIN_CONFIDENCE: 60,
+  // Loading zone bonus
+  LOADING_ZONE_WIDE_K_MIN: 30,
+  LOADING_ZONE_WIDE_K_MAX: 70,
+  LOADING_ZONE_WIDE_ADX_MIN: 35,
+  LOADING_ZONE_WIDE_BONUS: 3,
+  LOADING_ZONE_NARROW_K_MIN: 35,
+  LOADING_ZONE_NARROW_K_MAX: 65,
+  LOADING_ZONE_NARROW_ADX_MIN: 25,
+  LOADING_ZONE_NARROW_BONUS: 2,
+  // 1H confidence bonus
+  VERY_STRONG_1H_CONFIDENCE: 70,
+  VERY_STRONG_1H_BONUS: 2,
+  STRONG_1H_CONFIDENCE: 65,
+  STRONG_1H_BONUS: 1,
+  // Consistency tiers
+  CONSISTENCY_EXCELLENT: 75,
+  CONSISTENCY_EXCELLENT_SCORE: 4,
+  CONSISTENCY_GOOD: 65,
+  CONSISTENCY_GOOD_SCORE: 3,
+  CONSISTENCY_FAIR: 55,
+  CONSISTENCY_FAIR_SCORE: 2,
+  CONSISTENCY_BASIC: 45,
+  CONSISTENCY_BASIC_SCORE: 1,
+  // Max cap
+  MAX_SCORE: 14,
+} as const;
+
+// ============= ADX REVERSAL WEIGHTS (scoring.ts) =============
+// Graduated ADX-based reduction of reversal score impact
+export const ADX_REVERSAL_WEIGHTS = {
+  EXTREME_WEIGHT: 0.40,       // ADX >= 40: 60% reduction
+  EXCEPTIONAL_WEIGHT: 0.50,   // ADX >= 35: 50% reduction
+  VERY_STRONG_WEIGHT: 0.60,   // ADX >= 30: 40% reduction
+  STRONG_WEIGHT: 0.75,        // ADX >= 25: 25% reduction
+  MINIMUM_WEIGHT: 0.85,       // ADX >= 20: 15% reduction
+  DEFAULT_WEIGHT: 1.00,       // ADX < 20: no reduction
+} as const;
+
+// ============= REVERSAL SCORE CROSS POINTS (scoring.ts) =============
+// StochRSI cross signal scoring in unified reversal score
+export const REVERSAL_CROSS_SCORES = {
+  THREE_PLUS_CROSSES: 50,
+  TWO_CROSSES: 40,
+  ONE_CROSS: 30,
+  // Zone extreme scores
+  HIGH_REVERSAL_RISK: 35,
+  EXTREME_ZONE: 18,
+  DEEPLY_ZONE: 15,
+  STANDARD_ZONE: 10,
+  OUTER_ZONE: 8,
+  // Momentum reversal scores
+  MIXED_WEAK_ADX: 30,
+  NONE_STATE: 25,
+  UNCONFIRMED: 20,
+  MIXED_STRONG_ADX: 15,
+  NONE_STRONG_ADX: 10,
+  BUILDING_UNCONFIRMED: 10,
+  UNCONFIRMED_STRONG: 8,
+  // MACD reversal scores
+  DIVERGENCE: 15,
+  DIRECTION_MISALIGNED: 10,
+  NOT_EXPANDING: 5,
+  // Timeframe conflict scores
+  OPPOSING_1H: 15,
+  OPPOSING_4H: 5,
+  // Volume scores
+  VOLUME_CONFIRMS: -10,
+  LOW_VOLUME: 5,
+  // Decision thresholds
+  BLOCK_THRESHOLD: 75,
+  REDUCE_THRESHOLD: 40,
+} as const;
+
+// ============= MARKET REGIME DETECTION PARAMS (scoring.ts) =============
+// Legacy market regime detection thresholds
+export const MARKET_REGIME_DETECTION = {
+  RANGING_ADX_MAX: 15,
+  RANGING_CONFIDENCE_MAX: 50,
+  CHOPPY_CONSISTENCY_MAX: 40,
+  VOLATILE_ATR_MIN: 2.5,
+} as const;
+
+// ============= MOMENTUM SCORE COMPONENT LIMITS (smart-momentum.ts) =============
+// Max contribution per component in momentum score calculation
+export const MOMENTUM_SCORE_COMPONENTS = {
+  EMA_SPREAD_MAX: 30,
+  RSI_MOMENTUM_MAX: 25,
+  MACD_HISTOGRAM_MAX: 30,
+  ADX_TREND_MAX: 15,
+  // ADX contribution scores
+  ADX_STRONG_RISING: 15,
+  ADX_STRONG_FALLING: -5,
+  ADX_MODERATE_RISING: 8,
+  ADX_MODERATE_FALLING: -3,
+  ADX_WEAK: -10,
+  // Direction determination
+  BULLISH_THRESHOLD: 20,
+  BEARISH_THRESHOLD: -20,
+  // State thresholds
+  ACCELERATING_THRESHOLD: 30,
+  // Overextension
+  EXHAUSTION_ATR_THRESHOLD: 2.0,
+  // EMA spread significance
+  EMA_SPREAD_WIDENING: 0.1,
+  EMA_SPREAD_NARROWING: -0.1,
+  EMA_SPREAD_SCORE_MULTIPLIER: 10,
+} as const;
+
+// ============= DYNAMIC TRAILING R-MULTIPLE PARAMS (smart-momentum.ts) =============
+// R-multiple based trailing stop parameters
+export const DYNAMIC_TRAILING_PARAMS = {
+  // ADX-based activation thresholds
+  STRONG_ADX: 30,
+  MEDIUM_ADX: 22,
+  STRONG_ACTIVATION_R: 1.0,
+  MEDIUM_ACTIVATION_R: 1.2,
+  WEAK_ACTIVATION_R: 1.5,
+  // Trail distances in R
+  STRONG_TRAIL_R: 0.5,
+  MEDIUM_TRAIL_R: 0.75,
+  WEAK_TRAIL_R: 1.0,
+  // Momentum adjustments
+  ACCELERATION_MULTIPLIER: 0.7,
+  EXHAUSTION_BONUS_R: 0.5,
+  // Lock tiers: [rMultiple, lockR]
+  LOCK_TIERS: [
+    { rMultiple: 1.0, lockR: 0.25 },
+    { rMultiple: 1.5, lockR: 0.5 },
+    { rMultiple: 2.0, lockR: 0.75 },
+    { rMultiple: 2.5, lockR: 1.0 },
+    { rMultiple: 3.0, lockR: 1.5 },
+    { rMultiple: 4.0, lockR: 2.0 },
+    { rMultiple: 5.0, lockR: 3.0 },
+  ],
+} as const;
+
+// ============= CONTEXT AWARE STOP PARAMS (smart-momentum.ts) =============
+// ATR-based and swing-based stop loss parameters
+export const CONTEXT_STOP_PARAMS = {
+  // ADX tiers
+  STRONG_TREND_ADX: 30,
+  MEDIUM_TREND_ADX: 22,
+  // ATR multipliers by trend strength
+  STRONG_ATR_MULT: 1.2,
+  MEDIUM_ATR_MULT: 1.5,
+  WEAK_ATR_MULT: 2.0,
+  // Volatility adjustments
+  HIGH_VOL_RATIO: 1.5,
+  HIGH_VOL_EXPANSION: 1.3,
+  LOW_VOL_RATIO: 0.7,
+  LOW_VOL_CONTRACTION: 0.85,
+  // Swing-based stop
+  SWING_BUFFER_ATR: 0.3,
+  MAX_SWING_DISTANCE_ATR: 3.0,
+  MIN_SWING_DISTANCE_ATR: 0.8,
+  // Hybrid detection
+  HYBRID_PROXIMITY_ATR: 0.2,
+} as const;
+
+// ============= EXIT SIGNAL SCORING (smart-momentum.ts) =============
+// Component weights for exit signal calculation
+export const EXIT_SIGNAL_SCORING = {
+  // Max component scores
+  MOMENTUM_EXHAUSTION_MAX: 30,
+  MOMENTUM_WEAKENING_AGAINST: 20,
+  SWING_VIOLATION_MAX: 25,
+  REVERSAL_HIGH: 20,
+  REVERSAL_MODERATE: 10,
+  REVERSAL_HIGH_THRESHOLD: 70,
+  REVERSAL_MODERATE_THRESHOLD: 50,
+  TIME_DECAY_STALE: 15,
+  TIME_DECAY_AGING: 8,
+  VOLATILITY_EXTREME: 10,
+  VOLATILITY_HIGH: 5,
+  // Time thresholds (hours)
+  STALE_POSITION_HOURS: 4,
+  AGING_POSITION_HOURS: 2,
+  // Decay thresholds (percent)
+  STALE_PROFIT_DECAY: 0.5,
+  AGING_PROFIT_DECAY: 0.3,
+  // Volatility ratio thresholds
+  EXTREME_VOLATILITY_RATIO: 2.0,
+  HIGH_VOLATILITY_RATIO: 1.5,
+  // Exit decision thresholds
+  SHOULD_EXIT_THRESHOLD: 50,
+  EMERGENCY_EXIT_THRESHOLD: 80,
+} as const;
+
+// ============= PULLBACK DETECTION PARAMS (smart-momentum.ts) =============
+// Fibonacci and RSI thresholds for pullback detection
+export const PULLBACK_DETECTION_PARAMS = {
+  // RSI thresholds
+  LONG_RSI_DIP: 45,
+  SHORT_RSI_SPIKE: 55,
+  LONG_RSI_ZONE: 50,
+  SHORT_RSI_ZONE: 50,
+  // Fibonacci levels
+  FIB_SHALLOW: 23.6,
+  FIB_MODERATE: 38.2,
+  FIB_DEEP: 61.8,
+  FIB_MAX_VALID: 78.6,
+  // RSI lookback for dip detection
+  RSI_DIP_LOOKBACK: 5,
+  // Minimum confirmation candles
+  MIN_CONFIRMATION_CANDLES: 1,
+} as const;
+
+// ============= ENTRY CONFIRMATION PARAMS (smart-momentum.ts) =============
+// Entry confirmation check thresholds
+export const ENTRY_CONFIRMATION_PARAMS = {
+  // Volume thresholds
+  VOLUME_STRONG: 1.5,
+  VOLUME_OK: 1.0,
+  // StochRSI extremes
+  LONG_STOCHRSI_MAX: 80,
+  SHORT_STOCHRSI_MIN: 20,
+  // Confirmation count
+  MIN_CONFIRMATIONS: 4,
+  MAX_CONFIRMATIONS: 5,
+} as const;
+
+// ============= ENTRY QUALITY GRADES (smart-momentum.ts) =============
+// Quality grade thresholds and factor limits
+export const ENTRY_QUALITY_GRADES = {
+  GRADE_A: 90,
+  GRADE_B: 75,
+  GRADE_C: 60,
+  GRADE_D: 45,
+  // Factor max scores
+  MOMENTUM_ALIGNMENT_MAX: 25,
+  PULLBACK_QUALITY_MAX: 25,
+  VOLUME_CONFIRMATION_MAX: 15,
+  TIMEFRAME_ALIGNMENT_MAX: 15,
+  STOCHRSI_POSITION_MAX: 10,
+  MACD_EXPANDING_MAX: 10,
+  ENTRY_CONFIRMATION_MAX: 10,
+  // Minimum recommended score
+  MIN_RECOMMENDED: 60,
+  // Breakout volume threshold
+  BREAKOUT_VOLUME: 1.5,
+} as const;
