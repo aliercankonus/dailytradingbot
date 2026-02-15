@@ -15513,13 +15513,18 @@ serve(async (req) => {
     // The regime is computed per-symbol AFTER the initial snapshot upsert,
     // so we batch-update the regime column here after the per-symbol loop completes
     if (symbolRegimeMap.size > 0) {
-      const regimeUpdatePromises = Array.from(symbolRegimeMap.entries()).map(([sym, regime]) =>
-        supabase
+      const regimeUpdatePromises = Array.from(symbolRegimeMap.entries()).map(([sym, regime]) => {
+        // For EARLY_BLOCK/ERROR symbols, store the specific gate name as block_reason
+        const gateAttribution = perSymbolGateAttribution.get(sym);
+        const block_reason = regime === 'EARLY_BLOCK' || regime === 'ERROR'
+          ? (gateAttribution?.gate ?? null)
+          : null;  // Classified symbols have no block reason
+        return supabase
           .from("trend_snapshots")
-          .update({ regime })
+          .update({ regime, block_reason })
           .eq("user_id", userId)
-          .eq("symbol", sym)
-      );
+          .eq("symbol", sym);
+      });
       const regimeResults = await Promise.all(regimeUpdatePromises);
       const regimeErrors = regimeResults.filter(r => r.error);
       if (regimeErrors.length > 0) {
