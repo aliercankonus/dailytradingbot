@@ -6324,7 +6324,7 @@ export const ADX_SLOPE_GRADUATED_GATE = {
   
   // ===== GRADUATED THRESHOLDS FOR DECLINING SLOPES =====
   // Hard block when ADX slope is severely declining
-  HARD_BLOCK_SLOPE_THRESHOLD: -0.5,
+  HARD_BLOCK_SLOPE_THRESHOLD: -1.5,
   // Reduce position when slope is moderately declining
   REDUCE_POSITION_SLOPE_THRESHOLD: -0.2,
   // Position multiplier for moderate decline
@@ -6334,7 +6334,7 @@ export const ADX_SLOPE_GRADUATED_GATE = {
   // IMPROVEMENT #4: Tightened from ADX >= 55 to ADX >= 35 WITH slope >= 0 AND LTF alignment
   // Old: High ADX alone was enough (ADX 55 + slope -0.69 = allowed → -2.3% loss)
   // New: ADX strength alone doesn't override decaying momentum
-  HIGH_ADX_EXCEPTION_THRESHOLD: 55,
+  HIGH_ADX_EXCEPTION_THRESHOLD: 40,
   HIGH_ADX_DECLINE_MULTIPLIER: 0.70,
   
   // ===== STRONG TREND CONTINUATION FIX =====
@@ -6357,7 +6357,7 @@ export const ADX_SLOPE_GRADUATED_GATE = {
   
   // ===== DIRECTION-SPECIFIC THRESHOLDS =====
   // Shorts are more sensitive to momentum decay
-  SHORT_HARD_BLOCK_SLOPE: -0.5,
+  SHORT_HARD_BLOCK_SLOPE: -1.5,
   LONG_HARD_BLOCK_SLOPE: -0.7,  // Longs can tolerate more decline
   
   // ===== GRADUATED POSITIVE SLOPE TIERING FOR LONGS =====
