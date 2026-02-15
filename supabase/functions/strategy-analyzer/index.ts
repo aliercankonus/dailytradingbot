@@ -1153,16 +1153,18 @@ const detectReversalRisk = (trendData: any, intendedDirection: string): Reversal
 };
 
 // ============= IMPROVEMENT #3: ENHANCED PULLBACK ENTRY DETECTION =============
-// CRITICAL FIX: Require BOTH RSI pullback AND Bollinger touch for highest score
+// UNIFIED: Delegates structural pullback detection to detectPullback (smart-momentum.ts)
+// This function adds Bollinger, StochRSI, momentum continuation, and multi-timeframe scoring
+// on top of the shared structural pullback result — single source of truth for "what is a pullback"
 interface PullbackAnalysis {
   isPullback: boolean;
   pullbackDepth: number;     // 0-100% of recent swing
-  entryTimingScore: number;  // 0-25 bonus points (INCREASED from 20 based on win rate data)
+  entryTimingScore: number;  // 0-28 bonus points
   reason: string;
   hasBothConditions: boolean; // RSI + Bollinger combined
 }
 
-const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis => {
+const analyzePullbackEntry = (trendData: any, trend: string, smartPullback: PullbackResult): PullbackAnalysis => {
   const indicators1h = trendData?.timeframes?.['1h']?.indicators || {};
   const indicators30m = trendData?.timeframes?.['30m']?.indicators || {};
   // CENTRALIZED: Use shared extractors for StochRSI K values
@@ -1196,9 +1198,17 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
   // Strong Trend Continuation Check: 4h + 1h aligned + momentum active
   const trend4h = timeframes['4h']?.trend || timeframes['4h']?.indicators?.emaSignal || "neutral";
   const trend1h = timeframes['1h']?.trend || timeframes['1h']?.indicators?.emaSignal || "neutral";
-  const trend30m = timeframes['30m']?.trend || timeframes['30m']?.indicators?.emaSignal || "neutral";
   const isBullishAligned = trend4h === "bullish" && trend1h === "bullish";
   const isBearishAligned = trend4h === "bearish" && trend1h === "bearish";
+  
+  // UNIFIED: Use smartPullback structural data for RSI pullback detection
+  // Instead of independently checking RSI thresholds, delegate to detectPullback's analysis
+  const hasStructuralPullback = smartPullback.isPullback;
+  const hasValidPullback = smartPullback.isValidPullback;
+  const hasBounceConfirmation = smartPullback.hasBounceConfirmation;
+  const isRsiRecovering = smartPullback.rsiRecovering;
+  const rsiDipped = smartPullback.rsiDipped;
+  const structuralDepth = smartPullback.pullbackDepth;
   
   // NEW: 30m pullback confirmation - pullback visible on 30m timeframe too
   const has30mPullbackConfirm = trend === "bullish" 
@@ -1211,63 +1221,59 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
   );
   
   // ============= STOCHRSI-RSI CONFLICT RESOLUTION =============
-  // Check if StochRSI is at extreme that would reduce RSI signal reliability
   const isLong = trend === "bullish";
   const isStochRsiExtreme = isLong 
-    ? k4h > STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT  // 90+ for bullish
-    : k4h < STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD;   // 10- for bearish
+    ? k4h > STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT
+    : k4h < STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD;
   
-  // Helper to apply StochRSI extreme weight reduction to RSI-based scores
   const applyStochRsiWeight = (score: number, reason: string): { score: number; reason: string } => {
     if (isStochRsiExtreme && score > 10) {
       const weighted = Math.round(score * 0.5);
-      return { 
-        score: weighted, 
-        reason: `${reason} [StochRSI extreme: score ${score} -> ${weighted}]` 
-      };
+      return { score: weighted, reason: `${reason} [StochRSI extreme: score ${score} -> ${weighted}]` };
     }
     return { score, reason };
   };
   
-  // Define pullback conditions
-  const rsiPullbackBullish = rsi < RSI_THRESHOLDS.NEUTRAL_LOW;  // RSI showing pullback in uptrend
-  const rsiPullbackBearish = rsi > RSI_THRESHOLDS.NEUTRAL_HIGH;  // RSI showing rally in downtrend
+  // Define Bollinger pullback conditions (these remain in analyzePullbackEntry — Bollinger is not in detectPullback)
   const bollingerPullbackBullish = percentB < 35 || bb1h.pricePosition === "lower_zone";
   const bollingerPullbackBearish = percentB > 65 || bb1h.pricePosition === "upper_zone";
   
-  // For bullish trend, look for pullback entries
+  // UNIFIED: Use structural pullback + Bollinger for entry scoring
+  // detectPullback handles RSI dip/recovery/bounce — we layer Bollinger and momentum on top
+  
   if (trend === "bullish") {
-    // 30m confirmation bonus: +3 points when 30m also shows pullback structure
     const mtfBonus = has30mPullbackConfirm ? 3 : 0;
     const mtfSuffix = has30mPullbackConfirm ? " [30m confirmed +3]" : "";
     
-    // BEST ENTRY: Both RSI oversold AND near lower Bollinger
-    if ((rsi < RSI_THRESHOLDS.BULLISH_PULLBACK || stochRsi.oversoldCount >= 1) && bollingerPullbackBullish) {
+    // BEST ENTRY: Structural pullback with RSI recovery + Bollinger confirmation
+    if ((hasStructuralPullback && rsiDipped) && bollingerPullbackBullish) {
       const baseScore = 25 + mtfBonus;
-      const weighted = applyStochRsiWeight(baseScore, "OPTIMAL: RSI oversold + near lower Bollinger band" + mtfSuffix);
+      const bounceNote = hasBounceConfirmation ? " + bounce confirmed" : "";
+      const weighted = applyStochRsiWeight(baseScore, `OPTIMAL: Structural pullback (${structuralDepth.toFixed(1)}%) + Bollinger${bounceNote}` + mtfSuffix);
       return {
         isPullback: true,
         hasBothConditions: true,
-        pullbackDepth: 100 - rsi,
+        pullbackDepth: structuralDepth,
         entryTimingScore: weighted.score,
         reason: weighted.reason
       };
     }
     
-    // GOOD ENTRY: RSI pullback only
-    if (rsi < RSI_THRESHOLDS.BULLISH_PULLBACK || stochRsi.oversoldCount >= 1) {
+    // GOOD ENTRY: Structural pullback with RSI dip (from detectPullback)
+    if (hasStructuralPullback && rsiDipped) {
       const baseScore = 18 + mtfBonus;
-      const weighted = applyStochRsiWeight(baseScore, "Bullish pullback: RSI oversold in uptrend" + mtfSuffix);
+      const recoveryNote = isRsiRecovering ? " (RSI recovering)" : "";
+      const weighted = applyStochRsiWeight(baseScore, `Bullish pullback: ${smartPullback.pullbackType} (${structuralDepth.toFixed(1)}%)${recoveryNote}` + mtfSuffix);
       return {
         isPullback: true,
         hasBothConditions: false,
-        pullbackDepth: 100 - rsi,
+        pullbackDepth: structuralDepth,
         entryTimingScore: weighted.score,
         reason: weighted.reason
       };
     }
     
-    // GOOD ENTRY: Bollinger pullback only
+    // GOOD ENTRY: Bollinger pullback only (no structural pullback from detectPullback)
     if (bollingerPullbackBullish) {
       const baseScore = 15 + mtfBonus;
       const weighted = applyStochRsiWeight(baseScore, "Bullish pullback: Price near lower Bollinger band" + mtfSuffix);
@@ -1294,8 +1300,7 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     }
     
     // MOMENTUM CONTINUATION: Only if very strong trend + confirmed momentum
-    // RSI must be in 45-65 range to prevent late entries near trend reversals
-    const rsiInMomentumZone = rsi > RSI_THRESHOLDS.NEUTRAL_LOW && rsi < RSI_THRESHOLDS.BULLISH_STRONG; // 45-65
+    const rsiInMomentumZone = rsi > RSI_THRESHOLDS.NEUTRAL_LOW && rsi < RSI_THRESHOLDS.BULLISH_STRONG;
     if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsiInMomentumZone) {
       const weighted = applyStochRsiWeight(8, `Momentum continuation: Strong ADX + MACD expansion (RSI=${rsi.toFixed(1)})`);
       return {
@@ -1307,107 +1312,68 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
       };
     }
     
-    // STRONG TREND CONTINUATION: 4h+1h aligned + momentum active (even if RSI not in ideal zone)
-    // This gives partial credit when timeframes strongly agree even without perfect RSI setup
+    // STRONG TREND CONTINUATION: 4h+1h aligned + momentum active
     if (hasStrongTrendContinuation) {
       let continuationScore = 10;
       let continuationReason = `Trend continuation: 4h+1h bullish aligned + momentum ${momentumState}`;
-      
-      // Bonus for MACD expanding
-      if (hasMacdExpanding) {
-        continuationScore = 14;
-        continuationReason += " + MACD expanding";
-      }
-      
-      // Slight reduction if RSI is getting overbought (but not blocking)
+      if (hasMacdExpanding) { continuationScore = 14; continuationReason += " + MACD expanding"; }
       if (rsi > RSI_THRESHOLDS.BULLISH_STRONG) {
         continuationScore = Math.max(8, continuationScore - 4);
         continuationReason += ` [RSI=${rsi.toFixed(1)} slightly extended]`;
       }
-      
       const weighted = applyStochRsiWeight(continuationScore, continuationReason);
-      return {
-        isPullback: false,
-        hasBothConditions: false,
-        pullbackDepth: 0,
-        entryTimingScore: weighted.score,
-        reason: weighted.reason
-      };
+      return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: weighted.score, reason: weighted.reason };
     }
     
     // POOR ENTRY: Strong trend but overbought - low score
     if (isStrongTrend && rsi > RSI_THRESHOLDS.BULLISH_STRONG) {
-      return {
-        isPullback: false,
-        hasBothConditions: false,
-        pullbackDepth: 0,
-        entryTimingScore: 2,  // Reduced from 5
-        reason: "Poor entry: Overbought in strong trend"
-      };
+      return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 2, reason: "Poor entry: Overbought in strong trend" };
     }
     
     // MOMENTUM CONTINUATION FALLBACK: ADX >= 25 with MACD expanding
-    // This catches entries where trend is strong but no clear pullback pattern
     if (adx >= ADX_THRESHOLDS.STRONG && hasMacdExpanding && rsi > RSI_THRESHOLDS.BULLISH_PULLBACK && rsi < RSI_THRESHOLDS.OVERBOUGHT) {
-      return {
-        isPullback: false,
-        hasBothConditions: false,
-        pullbackDepth: 0,
-        entryTimingScore: 10,  // NEW: Momentum continuation credit
-        reason: `Momentum continuation: ADX=${adx.toFixed(1)} + MACD expanding (RSI=${rsi.toFixed(1)})`
-      };
+      return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 10, reason: `Momentum continuation: ADX=${adx.toFixed(1)} + MACD expanding (RSI=${rsi.toFixed(1)})` };
     }
     
     // POOR ENTRY: RSI in neutral zone = not ideal timing
     if (rsi >= RSI_THRESHOLDS.BULLISH_PULLBACK && rsi <= RSI_THRESHOLDS.BULLISH_STRONG) {
-      return {
-        isPullback: false,
-        hasBothConditions: false,
-        pullbackDepth: 0,
-        entryTimingScore: 4,  // Reduced from 5
-        reason: "Neutral entry: RSI in middle zone"
-      };
+      return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 4, reason: "Neutral entry: RSI in middle zone" };
     }
     
     // AVOID: Overbought in weak trend
     if (rsi > RSI_THRESHOLDS.OVERBOUGHT || stochRsi.overboughtCount >= 2) {
-      return {
-        isPullback: false,
-        hasBothConditions: false,
-        pullbackDepth: 0,
-        entryTimingScore: 0,  // Changed from 2 to 0 - bad entry
-        reason: "Avoid: Overbought in weak trend"
-      };
+      return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 0, reason: "Avoid: Overbought in weak trend" };
     }
   }
   
   // For bearish trend, look for rally (price spiked but downtrend intact)
   if (trend === "bearish") {
-    // 30m confirmation bonus: +3 points when 30m also shows rally structure
     const mtfBonus = has30mPullbackConfirm ? 3 : 0;
     const mtfSuffix = has30mPullbackConfirm ? " [30m confirmed +3]" : "";
     
-    // BEST ENTRY: Both RSI overbought AND near upper Bollinger
-    if ((rsi > RSI_THRESHOLDS.BEARISH_RALLY || stochRsi.overboughtCount >= 1) && bollingerPullbackBearish) {
+    // BEST ENTRY: Structural pullback with RSI spike + Bollinger confirmation
+    if ((hasStructuralPullback && rsiDipped) && bollingerPullbackBearish) {
       const baseScore = 25 + mtfBonus;
-      const weighted = applyStochRsiWeight(baseScore, "OPTIMAL: RSI overbought + near upper Bollinger band" + mtfSuffix);
+      const bounceNote = hasBounceConfirmation ? " + rejection confirmed" : "";
+      const weighted = applyStochRsiWeight(baseScore, `OPTIMAL: Structural rally (${structuralDepth.toFixed(1)}%) + Bollinger${bounceNote}` + mtfSuffix);
       return {
         isPullback: true,
         hasBothConditions: true,
-        pullbackDepth: rsi - RSI_THRESHOLDS.NEUTRAL,
+        pullbackDepth: structuralDepth,
         entryTimingScore: weighted.score,
         reason: weighted.reason
       };
     }
     
-    // GOOD ENTRY: RSI rally only
-    if (rsi > RSI_THRESHOLDS.BEARISH_RALLY || stochRsi.overboughtCount >= 1) {
+    // GOOD ENTRY: Structural pullback with RSI spike (from detectPullback)
+    if (hasStructuralPullback && rsiDipped) {
       const baseScore = 18 + mtfBonus;
-      const weighted = applyStochRsiWeight(baseScore, "Bearish rally: RSI overbought in downtrend" + mtfSuffix);
+      const recoveryNote = isRsiRecovering ? " (RSI falling)" : "";
+      const weighted = applyStochRsiWeight(baseScore, `Bearish rally: ${smartPullback.pullbackType} (${structuralDepth.toFixed(1)}%)${recoveryNote}` + mtfSuffix);
       return {
         isPullback: true,
         hasBothConditions: false,
-        pullbackDepth: rsi - RSI_THRESHOLDS.NEUTRAL,
+        pullbackDepth: structuralDepth,
         entryTimingScore: weighted.score,
         reason: weighted.reason
       };
@@ -1417,161 +1383,75 @@ const analyzePullbackEntry = (trendData: any, trend: string): PullbackAnalysis =
     if (bollingerPullbackBearish) {
       const baseScore = 15 + mtfBonus;
       const weighted = applyStochRsiWeight(baseScore, "Bearish rally: Price near upper Bollinger band" + mtfSuffix);
-      return {
-        isPullback: true,
-        hasBothConditions: false,
-        pullbackDepth: 30,
-        entryTimingScore: weighted.score,
-        reason: weighted.reason
-      };
+      return { isPullback: true, hasBothConditions: false, pullbackDepth: 30, entryTimingScore: weighted.score, reason: weighted.reason };
     }
     
     // ACCEPTABLE: StochRSI bearish cross
     if (stochRsi.bearishCrossCount >= 1) {
       const baseScore = 12 + mtfBonus;
       const weighted = applyStochRsiWeight(baseScore, "Bearish rally: StochRSI bearish cross" + mtfSuffix);
-      return {
-        isPullback: true,
-        hasBothConditions: false,
-        pullbackDepth: 25,
-        entryTimingScore: weighted.score,
-        reason: weighted.reason
-      };
+      return { isPullback: true, hasBothConditions: false, pullbackDepth: 25, entryTimingScore: weighted.score, reason: weighted.reason };
     }
     
     // MOMENTUM CONTINUATION: Only if very strong trend + confirmed momentum
-    // RSI must be in 35-55 range to prevent late entries near trend reversals (inverted for shorts)
-    const rsiInMomentumZone = rsi > RSI_THRESHOLDS.BEARISH_PULLBACK && rsi < RSI_THRESHOLDS.NEUTRAL_HIGH; // 35-55
+    const rsiInMomentumZone = rsi > RSI_THRESHOLDS.BEARISH_PULLBACK && rsi < RSI_THRESHOLDS.NEUTRAL_HIGH;
     if (isStrongTrend && hasMacdExpanding && isMomentumConfirmed && rsiInMomentumZone) {
       const weighted = applyStochRsiWeight(8, `Momentum continuation: Strong ADX + MACD expansion (RSI=${rsi.toFixed(1)})`);
-      return {
-        isPullback: false,
-        hasBothConditions: false,
-        pullbackDepth: 0,
-        entryTimingScore: weighted.score,
-        reason: weighted.reason
-      };
+      return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: weighted.score, reason: weighted.reason };
     }
     
-    // STRONG TREND CONTINUATION: 4h+1h aligned + momentum active (even if RSI not in ideal zone)
-    // This gives partial credit when timeframes strongly agree even without perfect RSI setup
+    // STRONG TREND CONTINUATION: 4h+1h aligned + momentum active
     if (hasStrongTrendContinuation) {
       let continuationScore = 10;
       let continuationReason = `Trend continuation: 4h+1h bearish aligned + momentum ${momentumState}`;
-      
-      // Bonus for MACD expanding
-      if (hasMacdExpanding) {
-        continuationScore = 14;
-        continuationReason += " + MACD expanding";
-      }
-      
-      // Slight reduction if RSI is getting oversold (but not blocking)
+      if (hasMacdExpanding) { continuationScore = 14; continuationReason += " + MACD expanding"; }
       if (rsi < RSI_THRESHOLDS.BEARISH_PULLBACK) {
         continuationScore = Math.max(8, continuationScore - 4);
         continuationReason += ` [RSI=${rsi.toFixed(1)} slightly extended]`;
       }
-      
       const weighted = applyStochRsiWeight(continuationScore, continuationReason);
-      return {
-        isPullback: false,
-        hasBothConditions: false,
-        pullbackDepth: 0,
-        entryTimingScore: weighted.score,
-        reason: weighted.reason
-      };
+      return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: weighted.score, reason: weighted.reason };
     }
     
     // MOMENTUM CONTINUATION FALLBACK: ADX >= 25 with MACD expanding
-    // This catches entries where trend is strong but no clear pullback pattern
     if (adx >= ADX_THRESHOLDS.STRONG && hasMacdExpanding && rsi < RSI_THRESHOLDS.BEARISH_RALLY && rsi > RSI_THRESHOLDS.OVERSOLD) {
-      return {
-        isPullback: false,
-        hasBothConditions: false,
-        pullbackDepth: 0,
-        entryTimingScore: 10,  // NEW: Momentum continuation credit
-        reason: `Momentum continuation: ADX=${adx.toFixed(1)} + MACD expanding (RSI=${rsi.toFixed(1)})`
-      };
+      return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 10, reason: `Momentum continuation: ADX=${adx.toFixed(1)} + MACD expanding (RSI=${rsi.toFixed(1)})` };
     }
     
     // POOR ENTRY: RSI in neutral zone
     if (rsi <= RSI_THRESHOLDS.BEARISH_RALLY && rsi >= RSI_THRESHOLDS.BEARISH_PULLBACK) {
-      return {
-        isPullback: false,
-        hasBothConditions: false,
-        pullbackDepth: 0,
-        entryTimingScore: 4,
-        reason: "Neutral entry: RSI in middle zone"
-      };
+      return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 4, reason: "Neutral entry: RSI in middle zone" };
     }
     
     // POOR ENTRY: Strong downtrend but oversold
     if (isStrongTrend && rsi < RSI_THRESHOLDS.BEARISH_PULLBACK) {
-      return {
-        isPullback: false,
-        hasBothConditions: false,
-        pullbackDepth: 0,
-        entryTimingScore: 2,
-        reason: "Poor entry: Oversold in strong downtrend"
-      };
+      return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 2, reason: "Poor entry: Oversold in strong downtrend" };
     }
     
     // AVOID: Oversold in weak downtrend
     if (rsi < RSI_THRESHOLDS.OVERSOLD || stochRsi.oversoldCount >= 2) {
-      return {
-        isPullback: false,
-        hasBothConditions: false,
-        pullbackDepth: 0,
-        entryTimingScore: 0,  // Bad entry
-        reason: "Avoid: Oversold in weak downtrend"
-      };
+      return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 0, reason: "Avoid: Oversold in weak downtrend" };
     }
   }
   
   // ============= TREND CONTINUATION CREDIT =============
-  // In strong confirmed trends, not having a pullback is acceptable for continuation entries
-  // ADX confirms trend strength, so we give partial credit instead of heavy penalty
-  
   // Very strong trend (ADX >= 28): Continuation is a valid strategy
   if (adx >= ADX_THRESHOLDS.VERY_STRONG && hasStrongTrendContinuation) {
-    return {
-      isPullback: false,
-      hasBothConditions: false,
-      pullbackDepth: 0,
-      entryTimingScore: 15,  // Good credit for strong trend continuation
-      reason: `Strong trend continuation: ADX=${adx.toFixed(1)} with aligned timeframes`
-    };
+    return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 15, reason: `Strong trend continuation: ADX=${adx.toFixed(1)} with aligned timeframes` };
   }
   
-  // Moderate trend (ADX >= 22): Some credit for trend following
+  // Moderate trend (ADX >= 22): Some credit for confirmed momentum
   if (adx >= ADX_THRESHOLDS.MODERATE && isActiveMomentum) {
-    return {
-      isPullback: false,
-      hasBothConditions: false,
-      pullbackDepth: 0,
-      entryTimingScore: 10,  // Moderate credit for confirmed momentum
-      reason: `Trend continuation: ADX=${adx.toFixed(1)} with active momentum`
-    };
+    return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 10, reason: `Trend continuation: ADX=${adx.toFixed(1)} with active momentum` };
   }
   
   // Minimum trend (ADX >= 20): Small credit
   if (adx >= ADX_THRESHOLDS.MINIMUM && isActiveMomentum) {
-    return {
-      isPullback: false,
-      hasBothConditions: false,
-      pullbackDepth: 0,
-      entryTimingScore: 6,  // Small credit for minimum trend
-      reason: `Weak trend continuation: ADX=${adx.toFixed(1)}`
-    };
+    return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 6, reason: `Weak trend continuation: ADX=${adx.toFixed(1)}` };
   }
   
   // Default - no trend confirmation, poor timing
-  return {
-    isPullback: false,
-    hasBothConditions: false,
-    pullbackDepth: 0,
-    entryTimingScore: 2,
-    reason: "No pullback detected - not ideal entry timing"
-  };
+  return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 2, reason: "No pullback detected - not ideal entry timing" };
 };
 
 // Evaluate StochRSI signals for entry timing
@@ -12442,7 +12322,8 @@ serve(async (req) => {
         const bollingerEval = evaluateBollingerBands(trendData.bollingerBands, trend);
 
         // ============= IMPROVEMENT #3: Pullback Entry Detection =============
-        const pullbackAnalysis = analyzePullbackEntry(trendData, trend);
+        // UNIFIED: Delegates structural pullback detection to smartPullback (detectPullback)
+        const pullbackAnalysis = analyzePullbackEntry(trendData, trend, smartPullback);
 
         // ============= SCENARIO 6: ENHANCED RECOVERY MODE =============
         // Recovery mode = precision trading only, not punishment loop
