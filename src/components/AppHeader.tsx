@@ -16,16 +16,16 @@ import {
   SheetContent,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { LogOut, Menu } from "lucide-react";
+import { LogOut, Menu, LayoutDashboard, BarChart3, Coins, HeartPulse, Settings } from "lucide-react";
 import { useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 const navItems = [
-  { label: "Dashboard", to: "/" },
-  { label: "Performance", to: "/performance" },
-  { label: "Symbols", to: "/symbols" },
-  { label: "Health", to: "/health" },
-  { label: "Settings", to: "/settings" },
+  { label: "Dashboard", to: "/", icon: LayoutDashboard },
+  { label: "Analytics", to: "/performance", icon: BarChart3 },
+  { label: "Markets", to: "/symbols", icon: Coins },
+  { label: "System", to: "/health", icon: HeartPulse },
+  { label: "Settings", to: "/settings", icon: Settings },
 ];
 
 export const AppHeader = () => {
@@ -58,6 +58,7 @@ export const AppHeader = () => {
                     className={navLinkClasses}
                     activeClassName={activeClasses}
                   >
+                    <item.icon className="h-4 w-4 mr-1.5" />
                     {item.label}
                   </NavLink>
                 ))}
@@ -114,10 +115,11 @@ export const AppHeader = () => {
                         key={item.to}
                         to={item.to}
                         end={item.to === "/"}
-                        className="px-4 py-3 text-sm font-medium rounded-lg transition-colors text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                        className="px-4 py-3 text-sm font-medium rounded-lg transition-colors text-muted-foreground hover:text-foreground hover:bg-secondary/60 flex items-center gap-2"
                         activeClassName="text-foreground bg-secondary"
                         onClick={() => setSheetOpen(false)}
                       >
+                        <item.icon className="h-4 w-4" />
                         {item.label}
                       </NavLink>
                     ))}
