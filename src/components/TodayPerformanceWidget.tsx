@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TrendingUp, TrendingDown, Target, Activity, Trophy, BarChart3, Zap } from "lucide-react";
+import { TrendingUp, TrendingDown, Trophy, Zap } from "lucide-react";
 import { useClosedPositions } from "@/hooks/useClosedPositions";
 import { useMemo } from "react";
 import { startOfDay, startOfWeek, startOfMonth, isAfter } from "date-fns";
@@ -17,58 +17,57 @@ interface PeriodStats {
   bestTrade: number;
   worstTrade: number;
   profitFactor: number;
+  avgHoldTimeMin: number;
+  maxDrawdown: number;
 }
 
-const StatRow = ({ label, value, icon: Icon, color }: { label: string; value: string; icon: React.ElementType; color?: string }) => (
-  <div className="flex items-center justify-between p-2 bg-muted/30 rounded-lg">
-    <div className="flex items-center gap-2">
-      <Icon className={cn("h-3.5 w-3.5", color || "text-muted-foreground")} />
-      <span className="text-xs text-muted-foreground">{label}</span>
-    </div>
-    <span className={cn("text-sm font-bold font-mono", color || "text-foreground")}>{value}</span>
+const StatRow = ({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) => (
+  <div className="flex items-center justify-between py-1.5 border-b border-border last:border-0">
+    <span className="text-[11px] text-muted-foreground">{label}</span>
+    <span className={cn("text-xs font-bold font-mono", valueClass || "text-foreground")}>{value}</span>
   </div>
 );
 
 const StatsDisplay = ({ stats }: { stats: PeriodStats }) => (
-  <div className="space-y-2">
+  <div className="space-y-1">
     {/* Hero P&L */}
     <div className="text-center py-2 border-b border-border">
       <div className={cn(
-        "text-2xl sm:text-3xl font-bold font-mono flex items-center justify-center gap-1.5",
+        "text-xl sm:text-2xl font-bold font-mono flex items-center justify-center gap-1",
         stats.totalPnL >= 0 ? 'text-profit' : 'text-loss'
       )}>
-        {stats.totalPnL >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
         {stats.totalPnL >= 0 ? '+' : ''}${stats.totalPnL.toFixed(2)}
       </div>
-      <div className="text-xs text-muted-foreground mt-1">Total P&L</div>
+      <div className="text-[10px] text-muted-foreground mt-0.5">Total P&L</div>
     </div>
 
-    {/* Key metrics grid */}
-    <div className="grid grid-cols-3 gap-2">
-      <div className="text-center p-1.5 bg-muted/20 rounded-lg">
-        <div className={cn("text-sm font-bold font-mono", stats.winRate >= 50 ? 'text-profit' : stats.totalTrades === 0 ? 'text-muted-foreground' : 'text-warning')}>
+    {/* Key metrics — 3 column grid */}
+    <div className="grid grid-cols-3 gap-1.5 py-2 border-b border-border">
+      <div className="text-center">
+        <div className={cn("text-xs font-bold font-mono", stats.winRate >= 50 ? 'text-profit' : stats.totalTrades === 0 ? 'text-muted-foreground' : 'text-warning')}>
           {stats.winRate.toFixed(0)}%
         </div>
-        <div className="text-[10px] text-muted-foreground">Win Rate</div>
+        <div className="text-[9px] text-muted-foreground">Win Rate</div>
       </div>
-      <div className="text-center p-1.5 bg-muted/20 rounded-lg">
-        <div className="text-sm font-bold font-mono text-foreground">{stats.totalTrades}</div>
-        <div className="text-[10px] text-muted-foreground">{stats.winningTrades}W / {stats.losingTrades}L</div>
+      <div className="text-center">
+        <div className="text-xs font-bold font-mono text-foreground">{stats.totalTrades}</div>
+        <div className="text-[9px] text-muted-foreground">{stats.winningTrades}W / {stats.losingTrades}L</div>
       </div>
-      <div className="text-center p-1.5 bg-muted/20 rounded-lg">
-        <div className={cn("text-sm font-bold font-mono", stats.profitFactor >= 1 ? 'text-profit' : stats.totalTrades === 0 ? 'text-muted-foreground' : 'text-loss')}>
+      <div className="text-center">
+        <div className={cn("text-xs font-bold font-mono", stats.profitFactor >= 1 ? 'text-profit' : stats.totalTrades === 0 ? 'text-muted-foreground' : 'text-loss')}>
           {stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)}
         </div>
-        <div className="text-[10px] text-muted-foreground">Profit Factor</div>
+        <div className="text-[9px] text-muted-foreground">Profit Factor</div>
       </div>
     </div>
 
     {/* Detail rows */}
-    <div className="space-y-1.5">
-      <StatRow label="Best Trade" value={`+$${stats.bestTrade.toFixed(2)}`} icon={Trophy} color="text-profit" />
-      <StatRow label="Worst Trade" value={`-$${Math.abs(stats.worstTrade).toFixed(2)}`} icon={TrendingDown} color="text-loss" />
-      <StatRow label="Avg Win" value={`+$${stats.avgWin.toFixed(2)}`} icon={Zap} color="text-profit" />
-      <StatRow label="Avg Loss" value={`-$${Math.abs(stats.avgLoss).toFixed(2)}`} icon={BarChart3} color="text-loss" />
+    <div className="px-0.5">
+      <StatRow label="Best Trade" value={`+$${stats.bestTrade.toFixed(2)}`} valueClass="text-profit" />
+      <StatRow label="Worst Trade" value={`-$${Math.abs(stats.worstTrade).toFixed(2)}`} valueClass="text-loss" />
+      <StatRow label="Avg Win" value={`+$${stats.avgWin.toFixed(2)}`} valueClass="text-profit" />
+      <StatRow label="Avg Loss" value={`-$${Math.abs(stats.avgLoss).toFixed(2)}`} valueClass="text-loss" />
+      <StatRow label="Max Drawdown" value={`-$${Math.abs(stats.maxDrawdown).toFixed(2)}`} valueClass="text-loss" />
     </div>
   </div>
 );
@@ -106,7 +105,29 @@ export const TodayPerformanceWidget = () => {
       const worstTrade = filtered.length > 0 ? Math.min(...filtered.map(p => p.realized_pnl || 0)) : 0;
       const profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? Infinity : 0;
 
-      return { totalPnL, winningTrades, losingTrades, totalTrades, winRate, avgWin, avgLoss, bestTrade, worstTrade, profitFactor };
+      // Max drawdown calculation
+      let peak = 0;
+      let maxDD = 0;
+      let running = 0;
+      for (const p of filtered.sort((a, b) => new Date(a.closed_at!).getTime() - new Date(b.closed_at!).getTime())) {
+        running += (p.realized_pnl || 0);
+        if (running > peak) peak = running;
+        const dd = peak - running;
+        if (dd > maxDD) maxDD = dd;
+      }
+
+      // Avg hold time
+      let totalHoldMin = 0;
+      let holdCount = 0;
+      for (const p of filtered) {
+        if (p.opened_at && p.closed_at) {
+          totalHoldMin += (new Date(p.closed_at).getTime() - new Date(p.opened_at).getTime()) / 60000;
+          holdCount++;
+        }
+      }
+      const avgHoldTimeMin = holdCount > 0 ? totalHoldMin / holdCount : 0;
+
+      return { totalPnL, winningTrades, losingTrades, totalTrades, winRate, avgWin, avgLoss, bestTrade, worstTrade, profitFactor, avgHoldTimeMin, maxDrawdown: maxDD };
     };
 
     return {
@@ -118,34 +139,27 @@ export const TodayPerformanceWidget = () => {
 
   if (isLoading) {
     return (
-      <Card className="h-full p-4 sm:p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
-        <div className="animate-pulse space-y-3">
-          <div className="h-5 bg-muted rounded w-1/2" />
-          <div className="h-16 bg-muted rounded" />
-          <div className="h-8 bg-muted rounded" />
-          <div className="h-8 bg-muted rounded" />
-          <div className="h-8 bg-muted rounded" />
+      <Card className="h-full p-4 border-border">
+        <div className="animate-pulse space-y-2">
+          <div className="h-4 bg-muted rounded w-1/2" />
+          <div className="h-12 bg-muted rounded" />
+          <div className="h-6 bg-muted rounded" />
+          <div className="h-6 bg-muted rounded" />
         </div>
       </Card>
     );
   }
 
   return (
-    <Card className="h-full p-4 sm:p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-base sm:text-lg font-semibold text-foreground flex items-center gap-2">
-            <Activity className="h-4 w-4 text-primary" />
-            Performance
-          </h3>
-          <Target className="h-4 w-4 text-muted-foreground" />
-        </div>
+    <Card className="h-full p-4 border-border">
+      <div className="space-y-2">
+        <h3 className="text-[15px] font-semibold text-foreground">Performance</h3>
 
         <Tabs defaultValue="today" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 h-7 mb-3">
-            <TabsTrigger value="today" className="text-xs py-1">Today</TabsTrigger>
-            <TabsTrigger value="week" className="text-xs py-1">Week</TabsTrigger>
-            <TabsTrigger value="month" className="text-xs py-1">Month</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-3 h-7 mb-2">
+            <TabsTrigger value="today" className="text-[11px] py-0.5">Today</TabsTrigger>
+            <TabsTrigger value="week" className="text-[11px] py-0.5">Week</TabsTrigger>
+            <TabsTrigger value="month" className="text-[11px] py-0.5">Month</TabsTrigger>
           </TabsList>
 
           <TabsContent value="today" className="mt-0">
