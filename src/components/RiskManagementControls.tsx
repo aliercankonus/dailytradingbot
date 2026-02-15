@@ -21,7 +21,11 @@ import {
 } from '@/components/ui/accordion';
 import { formatPrice } from '@/lib/utils';
 
-export const RiskManagementControls = () => {
+interface RiskManagementControlsProps {
+  section?: 'trade-sizing' | 'basic' | 'advanced' | 'position';
+}
+
+export const RiskManagementControls = ({ section }: RiskManagementControlsProps = {}) => {
   const { riskParams, updateRiskParameters } = useRiskParameters();
   const { positions } = usePositions();
   
@@ -99,10 +103,14 @@ export const RiskManagementControls = () => {
       return sum + pnl;
     }, 0);
 
+  const showAll = !section;
+  const showSection = (s: string) => showAll || section === s;
+
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Risk Management</h2>
+      {showAll && <h2 className="text-lg font-semibold">Risk Management</h2>}
 
+      {showAll && (
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         <Card className="p-3">
           <div className="flex items-center gap-1.5 mb-1.5">
@@ -155,9 +163,10 @@ export const RiskManagementControls = () => {
           </div>
         </Card>
       </div>
+      )}
 
-      <Accordion type="multiple" defaultValue={["trade-sizing", "basic", "position"]} className="space-y-4">
-        {/* Trade Sizing (NEW - Primary) */}
+      <Accordion type="multiple" defaultValue={[section || "trade-sizing", "basic", "position"]} className="space-y-4">
+        {showSection('trade-sizing') && (
         <AccordionItem value="trade-sizing">
           <Card>
             <AccordionTrigger className="px-3 sm:px-6 py-4 hover:no-underline">
@@ -174,8 +183,9 @@ export const RiskManagementControls = () => {
             </AccordionContent>
           </Card>
         </AccordionItem>
+        )}
 
-        {/* Basic Risk Parameters */}
+        {showSection('basic') && (
         <AccordionItem value="basic">
           <Card>
             <AccordionTrigger className="px-3 sm:px-6 py-4 hover:no-underline">
@@ -332,8 +342,9 @@ export const RiskManagementControls = () => {
             </AccordionContent>
           </Card>
         </AccordionItem>
+        )}
 
-        {/* Advanced Strategies */}
+        {showSection('advanced') && (
         <AccordionItem value="advanced">
           <Card>
             <AccordionTrigger className="px-3 sm:px-6 py-4 hover:no-underline">
@@ -412,8 +423,9 @@ export const RiskManagementControls = () => {
             </AccordionContent>
           </Card>
         </AccordionItem>
+        )}
 
-        {/* Position Management */}
+        {showSection('position') && (
         <AccordionItem value="position">
           <Card>
             <AccordionTrigger className="px-3 sm:px-6 py-4 hover:no-underline">
@@ -438,6 +450,7 @@ export const RiskManagementControls = () => {
             </AccordionContent>
           </Card>
         </AccordionItem>
+        )}
       </Accordion>
     </div>
   );
