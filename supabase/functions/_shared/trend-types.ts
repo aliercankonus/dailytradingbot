@@ -70,6 +70,7 @@ export interface VolumeData {
   avgVolume: number;
   currentVolume: number;
   volumeDirection?: TrendDirection;
+  isClosedCandle?: boolean;
 }
 
 // ============= COMPLEX ANALYSIS INTERFACES =============

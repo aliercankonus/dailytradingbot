@@ -502,25 +502,52 @@ export function calculateADX(klines: any[], period = 14): number {
 }
 
 // ============= VOLUME ANALYSIS =============
-export function calculateVolumeAnalysis(klines: any[]): {
+export function calculateVolumeAnalysis(klines: any[], options?: { ensureClosedCandles?: boolean; symbol?: string; timeframe?: string }): {
   volumeSpike: boolean;
   volumeRatio: number;
   volumeTrend: "increasing" | "decreasing" | "neutral";
   currentVolume: number;
   avgVolume: number;
+  isClosedCandle: boolean;
 } {
   if (klines.length < 21) {
-    return { volumeSpike: false, volumeRatio: 1.0, volumeTrend: "neutral", currentVolume: 0, avgVolume: 0 };
+    return { volumeSpike: false, volumeRatio: 1.0, volumeTrend: "neutral", currentVolume: 0, avgVolume: 0, isClosedCandle: false };
   }
 
-  const volumes = klines.map((k: any) => parseFloat(k[5])).filter(v => Number.isFinite(v) && v > 0);
-  if (volumes.length < 21) return { volumeSpike: false, volumeRatio: 1.0, volumeTrend: "neutral", currentVolume: 0, avgVolume: 0 };
+  // If ensureClosedCandles is true, strip the last (potentially incomplete) candle
+  const effectiveKlines = options?.ensureClosedCandles ? klines.slice(0, -1) : klines;
+  if (effectiveKlines.length < 21) {
+    return { volumeSpike: false, volumeRatio: 1.0, volumeTrend: "neutral", currentVolume: 0, avgVolume: 0, isClosedCandle: false };
+  }
+
+  const volumes = effectiveKlines.map((k: any) => parseFloat(k[5])).filter(v => Number.isFinite(v) && v > 0);
+  if (volumes.length < 21) return { volumeSpike: false, volumeRatio: 1.0, volumeTrend: "neutral", currentVolume: 0, avgVolume: 0, isClosedCandle: false };
 
   const historicalVolumes = volumes.slice(-21, -1);
   const avgVolume = historicalVolumes.reduce((sum, v) => sum + v, 0) / historicalVolumes.length;
   const currentVolume = volumes[volumes.length - 1];
   const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1.0;
   const volumeSpike = volumeRatio > 1.5;
+
+  // Determine if we're evaluating a closed candle
+  const isClosedCandle = options?.ensureClosedCandles === true;
+
+  // Structured debug logging for volume diagnostics
+  if (options?.symbol) {
+    const lastCandle = effectiveKlines[effectiveKlines.length - 1];
+    const candleTimestamp = lastCandle?.[0] ? new Date(lastCandle[0]).toISOString() : 'unknown';
+    console.log(`[VolumeDebug] ${JSON.stringify({
+      symbol: options.symbol,
+      timeframe: options.timeframe ?? 'unknown',
+      currentVolume: Math.round(currentVolume),
+      avgVolume: Math.round(avgVolume),
+      volumeRatio: Math.round(volumeRatio * 100) / 100,
+      volumeSpike,
+      isClosedCandle,
+      candleTimestamp,
+      smaLookback: historicalVolumes.length
+    })}`);
+  }
 
   const recentAvg = volumes.slice(-3).reduce((sum, v) => sum + v, 0) / 3;
   const previousAvg = volumes.slice(-6, -3).reduce((sum, v) => sum + v, 0) / 3;
@@ -529,5 +556,5 @@ export function calculateVolumeAnalysis(klines: any[]): {
   if (recentAvg > previousAvg * 1.2) volumeTrend = "increasing";
   else if (recentAvg < previousAvg * 0.8) volumeTrend = "decreasing";
 
-  return { volumeSpike, volumeRatio: Math.round(volumeRatio * 100) / 100, volumeTrend, currentVolume: Math.round(currentVolume), avgVolume: Math.round(avgVolume) };
+  return { volumeSpike, volumeRatio: Math.round(volumeRatio * 100) / 100, volumeTrend, currentVolume: Math.round(currentVolume), avgVolume: Math.round(avgVolume), isClosedCandle };
 }
