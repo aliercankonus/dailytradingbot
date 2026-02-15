@@ -35,7 +35,7 @@ const AIAnalysisDashboard = lazy(() =>
 type Section = "signals" | "rejections" | "ai" | null;
 
 export const SignalsOverview = () => {
-  const [expanded, setExpanded] = useState<Section>(null);
+  const [expanded, setExpanded] = useState<Section>("signals");
   const { signals } = useSignals();
   const { data: blockedSignals } = useBlockedSignals(100);
   const { user } = useAuth();
