@@ -7320,16 +7320,7 @@ export const ALIGNMENT_SCORE_PARAMS = {
   MAX_SCORE: 14,
 } as const;
 
-// ============= ADX REVERSAL WEIGHTS (scoring.ts) =============
-// Graduated ADX-based reduction of reversal score impact
-export const ADX_REVERSAL_WEIGHTS = {
-  EXTREME_WEIGHT: 0.40,       // ADX >= 40: 60% reduction
-  EXCEPTIONAL_WEIGHT: 0.50,   // ADX >= 35: 50% reduction
-  VERY_STRONG_WEIGHT: 0.60,   // ADX >= 30: 40% reduction
-  STRONG_WEIGHT: 0.75,        // ADX >= 25: 25% reduction
-  MINIMUM_WEIGHT: 0.85,       // ADX >= 20: 15% reduction
-  DEFAULT_WEIGHT: 1.00,       // ADX < 20: no reduction
-} as const;
+// NOTE: ADX_REVERSAL_WEIGHTS is defined earlier (line ~5192) with threshold references — single source of truth
 
 // ============= REVERSAL SCORE CROSS POINTS (scoring.ts) =============
 // StochRSI cross signal scoring in unified reversal score
@@ -7481,24 +7472,9 @@ export const EXIT_SIGNAL_SCORING = {
   EMERGENCY_EXIT_THRESHOLD: 80,
 } as const;
 
-// ============= PULLBACK DETECTION PARAMS (smart-momentum.ts) =============
-// Fibonacci and RSI thresholds for pullback detection
-export const PULLBACK_DETECTION_PARAMS = {
-  // RSI thresholds
-  LONG_RSI_DIP: 45,
-  SHORT_RSI_SPIKE: 55,
-  LONG_RSI_ZONE: 50,
-  SHORT_RSI_ZONE: 50,
-  // Fibonacci levels
-  FIB_SHALLOW: 23.6,
-  FIB_MODERATE: 38.2,
-  FIB_DEEP: 61.8,
-  FIB_MAX_VALID: 78.6,
-  // RSI lookback for dip detection
-  RSI_DIP_LOOKBACK: 5,
-  // Minimum confirmation candles
-  MIN_CONFIRMATION_CANDLES: 1,
-} as const;
+// NOTE: PULLBACK_DETECTION_PARAMS is defined earlier (line ~1832) for strategy-analyzer
+// The smart-momentum pullback detection function uses hardcoded Fibonacci levels inline
+// No duplicate needed here
 
 // ============= ENTRY CONFIRMATION PARAMS (smart-momentum.ts) =============
 // Entry confirmation check thresholds
