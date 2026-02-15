@@ -133,17 +133,60 @@ const Index = () => {
             </Suspense>
           </TabsContent>
 
-          <TabsContent value="analytics" className="space-y-6">
-            <Suspense fallback={<TabFallback />}>
-              <PerformanceAnalytics />
-              <LossAttributionDashboard />
-            </Suspense>
+          <TabsContent value="analytics">
+            <Tabs defaultValue="performance" className="space-y-4">
+              <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-2 h-8">
+                <TabsTrigger value="performance" className="min-w-[5.5rem] flex-shrink-0 text-xs">Performance</TabsTrigger>
+                <TabsTrigger value="losses" className="min-w-[5.5rem] flex-shrink-0 text-xs">Loss Attribution</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="performance">
+                <Suspense fallback={<TabFallback />}>
+                  <PerformanceAnalytics />
+                </Suspense>
+              </TabsContent>
+
+              <TabsContent value="losses">
+                <Suspense fallback={<TabFallback />}>
+                  <LossAttributionDashboard />
+                </Suspense>
+              </TabsContent>
+            </Tabs>
           </TabsContent>
 
           <TabsContent value="risk">
-            <Suspense fallback={<TabFallback />}>
-              <RiskManagementControls />
-            </Suspense>
+            <Tabs defaultValue="sizing" className="space-y-4">
+              <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4 h-8">
+                <TabsTrigger value="sizing" className="min-w-[5rem] flex-shrink-0 text-xs">Trade Sizing</TabsTrigger>
+                <TabsTrigger value="basic" className="min-w-[4.5rem] flex-shrink-0 text-xs">Basic Risk</TabsTrigger>
+                <TabsTrigger value="advanced" className="min-w-[4.5rem] flex-shrink-0 text-xs">Advanced</TabsTrigger>
+                <TabsTrigger value="position" className="min-w-[5rem] flex-shrink-0 text-xs">Position Mgmt</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="sizing">
+                <Suspense fallback={<TabFallback />}>
+                  <RiskManagementControls section="trade-sizing" />
+                </Suspense>
+              </TabsContent>
+
+              <TabsContent value="basic">
+                <Suspense fallback={<TabFallback />}>
+                  <RiskManagementControls section="basic" />
+                </Suspense>
+              </TabsContent>
+
+              <TabsContent value="advanced">
+                <Suspense fallback={<TabFallback />}>
+                  <RiskManagementControls section="advanced" />
+                </Suspense>
+              </TabsContent>
+
+              <TabsContent value="position">
+                <Suspense fallback={<TabFallback />}>
+                  <RiskManagementControls section="position" />
+                </Suspense>
+              </TabsContent>
+            </Tabs>
           </TabsContent>
 
           <TabsContent value="monitor">
