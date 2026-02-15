@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useRiskParameters } from "@/hooks/useRiskParameters";
 import { 
   Cpu, 
@@ -44,8 +45,14 @@ const ModuleInventoryDashboard = () => {
             Module Inventory
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">Loading modules...</p>
+        <CardContent className="space-y-4">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="space-y-2">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ))}
         </CardContent>
       </Card>
     );
