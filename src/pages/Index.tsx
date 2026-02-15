@@ -137,11 +137,11 @@ const Index = () => {
             <Suspense fallback={<TabFallback />}>
               <PositionsSummary />
               <Tabs defaultValue="active" className="w-full">
-                <TabsList className="grid w-full grid-cols-4">
-                  <TabsTrigger value="active">Active</TabsTrigger>
-                  <TabsTrigger value="exit-mgmt">Exit Mgmt</TabsTrigger>
-                  <TabsTrigger value="trailing">Trailing Stops</TabsTrigger>
-                  <TabsTrigger value="early-exits">Early Exits</TabsTrigger>
+                <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4">
+                  <TabsTrigger value="active" className="min-w-[4rem] flex-shrink-0">Active</TabsTrigger>
+                  <TabsTrigger value="exit-mgmt" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Exits</span><span className="hidden sm:inline">Exit Mgmt</span></TabsTrigger>
+                  <TabsTrigger value="trailing" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Trailing</span><span className="hidden sm:inline">Trailing Stops</span></TabsTrigger>
+                  <TabsTrigger value="early-exits" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Early</span><span className="hidden sm:inline">Early Exits</span></TabsTrigger>
                 </TabsList>
                 <TabsContent value="active" className="mt-4">
                   <ActivePositions />
