@@ -100,11 +100,11 @@ export const AppHeader = () => {
                       </div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => navigate('/settings')} className="cursor-pointer">
+                    <DropdownMenuItem onClick={() => navigate('/profile')} className="cursor-pointer">
                       <User className="mr-2 h-4 w-4" />
                       <span>Profile</span>
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => navigate('/settings')} className="cursor-pointer">
+                    <DropdownMenuItem onClick={() => navigate('/notifications')} className="cursor-pointer">
                       <Bell className="mr-2 h-4 w-4" />
                       <span>Notifications</span>
                     </DropdownMenuItem>

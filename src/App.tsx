@@ -15,6 +15,8 @@ import NotFound from "./pages/NotFound";
 // Lazy load heavy pages
 const Index = lazy(() => import("./pages/Index"));
 const Settings = lazy(() => import("./pages/Settings"));
+const Profile = lazy(() => import("./pages/Profile"));
+const Notifications = lazy(() => import("./pages/Notifications"));
 const Symbols = lazy(() => import("./pages/Symbols"));
 const Performance = lazy(() => import("./pages/Performance"));
 const Health = lazy(() => import("./pages/Health"));
@@ -41,6 +43,8 @@ const App = () => (
                 <Route path="/auth" element={<Auth />} />
                 <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
                 <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+                <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+                <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
                 <Route path="/symbols" element={<ProtectedRoute><Symbols /></ProtectedRoute>} />
                 
                 <Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} />
