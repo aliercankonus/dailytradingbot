@@ -6362,9 +6362,12 @@ export const ADX_SLOPE_GRADUATED_GATE = {
     NO_LTF_PENALTY: 0.70,
     // Position multiplier when continuation passes with marginal LTF support (only 30m)
     MARGINAL_LTF_MULTIPLIER: 0.60,
-    // Hard block only if ADX 35+ AND slope < -2.0 AND both LTFs neutral (true exhaustion)
-    BLOCK_DECLINING_NO_LTF: true,
-    BLOCK_DECLINING_NO_LTF_SLOPE_THRESHOLD: -2.0, // Only block at severe decline + no LTF
+    // Secondary hard block REMOVED — only slope < -3.0 is structural invalidation
+    // Everything else = size scaling (architecturally clean)
+    BLOCK_DECLINING_NO_LTF: false,
+    BLOCK_DECLINING_NO_LTF_SLOPE_THRESHOLD: -2.0, // Kept for reference but inactive
+    // Cap: bonuses cannot push multiplier above 0.9 when slope is declining
+    MAX_DECLINING_SLOPE_MULTIPLIER: 0.90,
   },
   
   // ===== GRADUATED POSITIVE SLOPE TIERING FOR LONGS =====
