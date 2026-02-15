@@ -1246,6 +1246,7 @@ export type Database = {
       trend_snapshots: {
         Row: {
           adx: number | null
+          block_reason: string | null
           id: string
           is_aligned: boolean | null
           macd_histogram: number | null
@@ -1259,6 +1260,7 @@ export type Database = {
         }
         Insert: {
           adx?: number | null
+          block_reason?: string | null
           id?: string
           is_aligned?: boolean | null
           macd_histogram?: number | null
@@ -1272,6 +1274,7 @@ export type Database = {
         }
         Update: {
           adx?: number | null
+          block_reason?: string | null
           id?: string
           is_aligned?: boolean | null
           macd_histogram?: number | null
