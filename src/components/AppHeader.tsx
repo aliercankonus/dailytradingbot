@@ -41,7 +41,7 @@ export const AppHeader = () => {
   const activeClasses = "text-primary bg-primary/10";
 
   return (
-    <header className="sticky top-0 z-50 bg-background/95 backdrop-blur-md border-b border-border">
+    <header className="sticky top-0 z-50 bg-card/90 backdrop-blur-md border-b border-primary/10 shadow-lg shadow-primary/5">
       <div className="container mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-20">
           {/* Left: Brand + Nav */}
