@@ -171,7 +171,7 @@ const Performance = () => {
                           borderRadius: "8px",
                           fontSize: "12px",
                         }}
-                        formatter={(value: number) => [`$${value.toFixed(2)}`, "Portfolio Value"]}
+                        formatter={(value: number) => [`$${value.toFixed(4)}`, "Portfolio Value"]}
                       />
                       <Legend wrapperStyle={{ fontSize: "11px" }} />
                       <Area
@@ -215,6 +215,7 @@ const Performance = () => {
                           borderRadius: "8px",
                           fontSize: "12px",
                         }}
+                        formatter={(value: number) => [`$${value.toFixed(4)}`]}
                       />
                       <Legend wrapperStyle={{ fontSize: "11px" }} />
                       <Line type="monotone" dataKey="totalPnL" stroke="hsl(var(--primary))" name="Total P&L" strokeWidth={2} />
@@ -257,7 +258,7 @@ const Performance = () => {
                     <LineChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} />
-                      <YAxis stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} width={35} domain={[0, 100]} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} width={45} domain={[0, 100]} tickFormatter={(value) => `${value.toFixed(4)}%`} />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
@@ -265,6 +266,7 @@ const Performance = () => {
                           borderRadius: "8px",
                           fontSize: "12px",
                         }}
+                        formatter={(value: number) => [`${value.toFixed(4)}%`]}
                       />
                       <Legend wrapperStyle={{ fontSize: "11px" }} />
                       <Line type="monotone" dataKey="winRate" stroke="hsl(var(--primary))" name="Win Rate %" strokeWidth={2} />
@@ -288,7 +290,7 @@ const Performance = () => {
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} />
-                      <YAxis stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} width={35} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} width={55} tickFormatter={(value) => `${value.toFixed(4)}%`} />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
@@ -296,6 +298,7 @@ const Performance = () => {
                           borderRadius: "8px",
                           fontSize: "12px",
                         }}
+                        formatter={(value: number) => [`${value.toFixed(4)}%`]}
                       />
                       <Legend wrapperStyle={{ fontSize: "11px" }} />
                       <Area
@@ -316,7 +319,7 @@ const Performance = () => {
                     <LineChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} />
-                      <YAxis stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} width={35} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} width={45} tickFormatter={(value) => value.toFixed(4)} />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
@@ -324,6 +327,7 @@ const Performance = () => {
                           borderRadius: "8px",
                           fontSize: "12px",
                         }}
+                        formatter={(value: number) => [value.toFixed(4)]}
                       />
                       <Legend wrapperStyle={{ fontSize: "11px" }} />
                       <Line type="monotone" dataKey="profitFactor" stroke="hsl(var(--primary))" name="Profit Factor" strokeWidth={2} />
