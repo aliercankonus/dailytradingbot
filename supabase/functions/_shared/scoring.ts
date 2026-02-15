@@ -5046,15 +5046,21 @@ export const classify4StateRegime = (
   
   const diag = { adx, adxSlope, primaryTrend, momentumState, momentumScore, ltfAligned, stochRsiK4h, isExhausted, isSqueeze, confidenceBreakdown };
   
-  // ===== STATE 1: TREND EXPANSION =====
-  if (adx >= R.TREND_EXPANSION.MIN_ADX && adxSlope >= R.TREND_EXPANSION.MIN_ADX_SLOPE && ltfAligned) {
+  // ===== STATE 1: TREND EXPANSION (with buffer zone) =====
+  // Buffer zone: slopes between BUFFER_SLOPE_THRESHOLD (-0.5) and 0 are noise, still EXPANSION
+  const isFullExpansion = adx >= R.TREND_EXPANSION.MIN_ADX && adxSlope >= R.TREND_EXPANSION.MIN_ADX_SLOPE && ltfAligned;
+  const isBufferedExpansion = adx >= R.TREND_EXPANSION.MIN_ADX && adxSlope >= R.TREND_EXPANSION.BUFFER_SLOPE_THRESHOLD && adxSlope < R.TREND_EXPANSION.MIN_ADX_SLOPE && ltfAligned;
+  
+  if (isFullExpansion || isBufferedExpansion) {
     // Apply transition buffer: if confidence is in the upper transition zone, reduce sizing
-    let posMultiplier = R.TREND_EXPANSION.POSITION_MULTIPLIER;
-    let isTransition = false;
+    let posMultiplier = isBufferedExpansion ? R.TREND_EXPANSION.BUFFER_POSITION_MULTIPLIER : R.TREND_EXPANSION.POSITION_MULTIPLIER;
+    let isTransition = isBufferedExpansion;
     if (TB.ENABLED && regimeConfidence < TB.EXPANSION_THRESHOLD && regimeConfidence >= TB.TRANSITION_LOW) {
-      posMultiplier = TB.TRANSITION_POSITION_MULTIPLIER_HIGH;
+      posMultiplier = Math.min(posMultiplier, TB.TRANSITION_POSITION_MULTIPLIER_HIGH);
       isTransition = true;
     }
+    
+    const bufferLabel = isBufferedExpansion ? ` [BUFFERED: slope=${adxSlope.toFixed(2)} in noise band, ${(posMultiplier * 100).toFixed(0)}% sizing]` : '';
     
     return {
       regime: 'TREND_EXPANSION',
@@ -5062,37 +5068,83 @@ export const classify4StateRegime = (
       allowContinuation: true,
       allowMeanReversion: true,
       requireConfirmation: isTransition,
-      reason: `TREND_EXPANSION: ADX=${adx.toFixed(1)}≥${R.TREND_EXPANSION.MIN_ADX}, slope=${adxSlope.toFixed(2)}≥0, LTF aligned, confidence=${regimeConfidence}${isTransition ? ' [TRANSITION BUFFER: 70% sizing]' : ''} → full continuation`,
+      reason: `TREND_EXPANSION: ADX=${adx.toFixed(1)}≥${R.TREND_EXPANSION.MIN_ADX}, slope=${adxSlope.toFixed(2)}, LTF aligned, confidence=${regimeConfidence}${bufferLabel}${isTransition && !isBufferedExpansion ? ' [TRANSITION BUFFER: 70% sizing]' : ''} → continuation allowed`,
       regimeConfidence,
       isTransitionZone: isTransition,
       diagnostics: diag,
     };
   }
   
-  // ===== STATE 2: TREND EXHAUSTION =====
+  // ===== STATE 2: TREND EXHAUSTION (GRADUATED) =====
+  // Graduated architecture: replaces binary slope<0 cliff
+  // Tiers: CONDITIONAL (-0.5 to -1.5 with secondary confirmation) → CONFIRMED (< -1.5)
   const isStochExhausted = derivedDirection === 'long' 
     ? stochRsiK4h >= R.TREND_EXHAUSTION.STOCHRSI_EXHAUSTION_K_LONG 
     : stochRsiK4h <= R.TREND_EXHAUSTION.STOCHRSI_EXHAUSTION_K_SHORT;
   const isMomentumExhausted = R.TREND_EXHAUSTION.EXHAUSTION_MOMENTUM_STATES.includes(momentumState);
   
-  if (adx >= R.TREND_EXHAUSTION.MIN_ADX && (adxSlope < R.TREND_EXHAUSTION.MAX_ADX_SLOPE || isExhausted || isMomentumExhausted || isStochExhausted)) {
+  // Count secondary exhaustion signals
+  const secondarySignals: string[] = [];
+  if (isExhausted) secondarySignals.push('behavioral_exhaustion');
+  if (isMomentumExhausted) secondarySignals.push(`momentum=${momentumState}`);
+  if (isStochExhausted) secondarySignals.push(`stochK4h=${stochRsiK4h.toFixed(1)}`);
+  const secondaryCount = secondarySignals.length;
+  
+  // Determine exhaustion tier
+  const slopeInConditionalZone = adx >= R.TREND_EXHAUSTION.MIN_ADX && adxSlope < R.TREND_EXHAUSTION.CONDITIONAL_SLOPE_THRESHOLD && adxSlope >= R.TREND_EXHAUSTION.CONDITIONAL_EXHAUSTION_SLOPE;
+  const slopeConfirmedExhaustion = adx >= R.TREND_EXHAUSTION.MIN_ADX && adxSlope < R.TREND_EXHAUSTION.CONDITIONAL_EXHAUSTION_SLOPE;
+  const secondaryForcedExhaustion = adx >= R.TREND_EXHAUSTION.MIN_ADX && secondaryCount >= 2; // 2+ secondary signals = exhaustion regardless of slope
+  
+  if (slopeConfirmedExhaustion || secondaryForcedExhaustion) {
+    // TIER: CONFIRMED EXHAUSTION — hard reduction
     const exhaustionReasons: string[] = [];
-    if (adxSlope < 0) exhaustionReasons.push(`slope=${adxSlope.toFixed(2)}<0`);
-    if (isExhausted) exhaustionReasons.push('behavioral_exhaustion');
-    if (isMomentumExhausted) exhaustionReasons.push(`momentum=${momentumState}`);
-    if (isStochExhausted) exhaustionReasons.push(`stochK4h=${stochRsiK4h.toFixed(1)}`);
+    if (adxSlope < R.TREND_EXHAUSTION.CONDITIONAL_EXHAUSTION_SLOPE) exhaustionReasons.push(`slope=${adxSlope.toFixed(2)}<${R.TREND_EXHAUSTION.CONDITIONAL_EXHAUSTION_SLOPE}`);
+    exhaustionReasons.push(...secondarySignals);
     
     return {
       regime: 'TREND_EXHAUSTION',
-      positionMultiplier: R.TREND_EXHAUSTION.POSITION_MULTIPLIER,
+      positionMultiplier: R.TREND_EXHAUSTION.CONFIRMED_POSITION_MULTIPLIER,
       allowContinuation: false,
       allowMeanReversion: true,
       requireConfirmation: false,
-      reason: `TREND_EXHAUSTION: ADX=${adx.toFixed(1)}≥${R.TREND_EXHAUSTION.MIN_ADX}, exhaustion=[${exhaustionReasons.join(', ')}], confidence=${regimeConfidence} → MR probes only`,
+      reason: `TREND_EXHAUSTION [CONFIRMED]: ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, signals=[${exhaustionReasons.join(', ')}], confidence=${regimeConfidence} → MR probes only (${(R.TREND_EXHAUSTION.CONFIRMED_POSITION_MULTIPLIER * 100).toFixed(0)}% sizing)`,
       regimeConfidence,
       isTransitionZone: false,
       diagnostics: diag,
     };
+  }
+  
+  if (slopeInConditionalZone) {
+    // TIER: CONDITIONAL — secondary signals determine outcome
+    const hasSecondaryConfirmation = secondaryCount >= R.TREND_EXHAUSTION.CONDITIONAL_MIN_SECONDARY_SIGNALS;
+    
+    if (hasSecondaryConfirmation) {
+      // Secondary signals confirm exhaustion in conditional zone
+      return {
+        regime: 'TREND_EXHAUSTION',
+        positionMultiplier: R.TREND_EXHAUSTION.CONDITIONAL_POSITION_MULTIPLIER_CONFIRMED,
+        allowContinuation: false,
+        allowMeanReversion: true,
+        requireConfirmation: false,
+        reason: `TREND_EXHAUSTION [CONDITIONAL+CONFIRMED]: ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)} in [-1.5,-0.5], secondary=[${secondarySignals.join(', ')}] confirmed → reduced continuation (${(R.TREND_EXHAUSTION.CONDITIONAL_POSITION_MULTIPLIER_CONFIRMED * 100).toFixed(0)}% sizing)`,
+        regimeConfidence,
+        isTransitionZone: true,
+        diagnostics: diag,
+      };
+    } else {
+      // No secondary confirmation — slope alone is not enough, allow continuation at reduced size
+      return {
+        regime: 'TREND_EXPANSION',
+        positionMultiplier: R.TREND_EXHAUSTION.CONDITIONAL_POSITION_MULTIPLIER_DENIED,
+        allowContinuation: true,
+        allowMeanReversion: true,
+        requireConfirmation: true,
+        reason: `TREND_EXPANSION [DECELERATION]: ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)} in conditional zone but no secondary exhaustion signals → continuation allowed at ${(R.TREND_EXHAUSTION.CONDITIONAL_POSITION_MULTIPLIER_DENIED * 100).toFixed(0)}% sizing`,
+        regimeConfidence,
+        isTransitionZone: true,
+        diagnostics: diag,
+      };
+    }
   }
   
   // ===== STATE 4: BREAKOUT SETUP =====
