@@ -259,55 +259,61 @@ const Performance = () => {
             </TabsContent>
 
             <TabsContent value="drawdown" className="space-y-4">
-              <Card className="p-3 sm:p-6">
+              <Card className="p-3 sm:p-6 overflow-hidden">
                 <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Maximum Drawdown</h3>
-                <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]">
-                  <AreaChart data={chartData}>
-                    <defs>
-                      <linearGradient id="drawdownGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(var(--loss))" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="hsl(var(--loss))" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
-                    <YAxis stroke="hsl(var(--muted-foreground))" />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                      }}
-                    />
-                    <Legend />
-                    <Area
-                      type="monotone"
-                      dataKey="maxDrawdown"
-                      stroke="hsl(var(--loss))"
-                      fill="url(#drawdownGradient)"
-                      name="Max Drawdown %"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <div className="w-full overflow-x-auto -mx-1">
+                  <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]" minWidth={280}>
+                    <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                      <defs>
+                        <linearGradient id="drawdownGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(var(--loss))" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(var(--loss))" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} width={35} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "8px",
+                          fontSize: "12px",
+                        }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: "11px" }} />
+                      <Area
+                        type="monotone"
+                        dataKey="maxDrawdown"
+                        stroke="hsl(var(--loss))"
+                        fill="url(#drawdownGradient)"
+                        name="Max Drawdown %"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
               </Card>
-              <Card className="p-3 sm:p-6">
+              <Card className="p-3 sm:p-6 overflow-hidden">
                 <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Profit Factor</h3>
-                <ResponsiveContainer width="100%" height={240} className="sm:!h-[300px]">
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" />
-                    <YAxis stroke="hsl(var(--muted-foreground))" />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                      }}
-                    />
-                    <Legend />
-                    <Line type="monotone" dataKey="profitFactor" stroke="hsl(var(--primary))" name="Profit Factor" strokeWidth={2} />
-                  </LineChart>
-                </ResponsiveContainer>
+                <div className="w-full overflow-x-auto -mx-1">
+                  <ResponsiveContainer width="100%" height={240} className="sm:!h-[300px]" minWidth={280}>
+                    <LineChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} width={35} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "8px",
+                          fontSize: "12px",
+                        }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: "11px" }} />
+                      <Line type="monotone" dataKey="profitFactor" stroke="hsl(var(--primary))" name="Profit Factor" strokeWidth={2} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               </Card>
             </TabsContent>
 
