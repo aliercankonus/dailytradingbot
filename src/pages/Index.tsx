@@ -86,13 +86,13 @@ const Index = () => {
         <Tabs defaultValue="dashboard" className="space-y-6">
           <div className="relative md:contents">
             <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-7">
-              <TabsTrigger value="dashboard" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Dash</span><span className="hidden sm:inline">Dashboard</span></TabsTrigger>
-              <TabsTrigger value="signals" className="min-w-[4.5rem] flex-shrink-0"><span className="sm:hidden">Sigs</span><span className="hidden sm:inline">Signals</span></TabsTrigger>
-              <TabsTrigger value="positions" className="min-w-[4rem] flex-shrink-0"><span className="sm:hidden">Pos</span><span className="hidden sm:inline">Positions</span></TabsTrigger>
-              <TabsTrigger value="history" className="min-w-[4rem] flex-shrink-0"><span className="sm:hidden">Hist</span><span className="hidden sm:inline">History</span></TabsTrigger>
-              <TabsTrigger value="analytics" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Stats</span><span className="hidden sm:inline">Analytics</span></TabsTrigger>
+              <TabsTrigger value="dashboard" className="min-w-[5rem] flex-shrink-0">Dashboard</TabsTrigger>
+              <TabsTrigger value="signals" className="min-w-[4.5rem] flex-shrink-0">Signals</TabsTrigger>
+              <TabsTrigger value="positions" className="min-w-[4.5rem] flex-shrink-0">Positions</TabsTrigger>
+              <TabsTrigger value="history" className="min-w-[4rem] flex-shrink-0">History</TabsTrigger>
+              <TabsTrigger value="analytics" className="min-w-[5rem] flex-shrink-0">Analytics</TabsTrigger>
               <TabsTrigger value="risk" className="min-w-[3.5rem] flex-shrink-0">Risk</TabsTrigger>
-              <TabsTrigger value="monitor" className="min-w-[4rem] flex-shrink-0"><span className="sm:hidden">Mon</span><span className="hidden sm:inline">Monitor</span></TabsTrigger>
+              <TabsTrigger value="monitor" className="min-w-[4.5rem] flex-shrink-0">Monitor</TabsTrigger>
             </TabsList>
             <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-background to-transparent pointer-events-none md:hidden" />
           </div>
@@ -142,9 +142,9 @@ const Index = () => {
               <Tabs defaultValue="active" className="w-full">
                 <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4">
                   <TabsTrigger value="active" className="min-w-[4rem] flex-shrink-0">Active</TabsTrigger>
-                  <TabsTrigger value="exit-mgmt" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Exits</span><span className="hidden sm:inline">Exit Mgmt</span></TabsTrigger>
-                  <TabsTrigger value="trailing" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Trailing</span><span className="hidden sm:inline">Trailing Stops</span></TabsTrigger>
-                  <TabsTrigger value="early-exits" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Early</span><span className="hidden sm:inline">Early Exits</span></TabsTrigger>
+                  <TabsTrigger value="exit-mgmt" className="min-w-[5rem] flex-shrink-0">Exit Mgmt</TabsTrigger>
+                  <TabsTrigger value="trailing" className="min-w-[5rem] flex-shrink-0">Trailing Stops</TabsTrigger>
+                  <TabsTrigger value="early-exits" className="min-w-[5rem] flex-shrink-0">Early Exits</TabsTrigger>
                 </TabsList>
                 <TabsContent value="active" className="mt-4">
                   <ActivePositions />
