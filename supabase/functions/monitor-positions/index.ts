@@ -1005,9 +1005,18 @@ serve(async (req) => {
       };
       
       // 🆕 MINIMUM HOLD TIME CHECK - Prevents early exits on new positions
-      const positionOpenedAt = new Date(position.opened_at || position.executed_at || Date.now());
+      const positionOpenedAtRaw = position.opened_at || position.executed_at;
+      if (!positionOpenedAtRaw) {
+        positionLogger.warn(`⚠️ NULL_SAFETY: Position ${position.id} missing both opened_at and executed_at — defaulting age to 0 (will skip hold-time-gated exits)`);
+      }
+      const positionOpenedAt = new Date(positionOpenedAtRaw || Date.now());
       const positionAgeMinutes = (Date.now() - positionOpenedAt.getTime()) / (1000 * 60);
       const hasMetMinHoldTime = positionAgeMinutes >= userSettings.minHoldTimeMinutes;
+      
+      // Fee null-safety: warn if position has no stored fee rate (will use default)
+      if (position.trading_fee_percent == null) {
+        positionLogger.warn(`⚠️ NULL_SAFETY: Position ${position.id} missing trading_fee_percent — using default ${TRADING_FEE_PARAMS.DEFAULT_FEE_RATE_PERCENT}%`);
+      }
       
       if (!hasMetMinHoldTime) {
         positionLogger.info(`Position age ${positionAgeMinutes.toFixed(1)}min < ${userSettings.minHoldTimeMinutes}min hold time - skipping reversal/hedge/early exit checks`);
