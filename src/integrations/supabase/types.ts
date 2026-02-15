@@ -1243,6 +1243,30 @@ export type Database = {
         }
         Relationships: []
       }
+      trend_snapshots: {
+        Row: {
+          id: string
+          recorded_at: string
+          snapshot_data: Json
+          symbol: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          recorded_at?: string
+          snapshot_data: Json
+          symbol: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          recorded_at?: string
+          snapshot_data?: Json
+          symbol?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_api_keys: {
         Row: {
           binance_api_key: string | null
