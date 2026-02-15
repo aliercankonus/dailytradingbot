@@ -420,21 +420,21 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <CardTitle className="flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <BarChart3 className="h-5 w-5 text-muted-foreground" />
               Signal Rejection Monitor
             </CardTitle>
-            <CardDescription>Comprehensive view of blocked signals with gate attribution</CardDescription>
+            <CardDescription className="hidden sm:block">Comprehensive view of blocked signals with gate attribution</CardDescription>
           </div>
           
           {/* Statistics Badges */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Badge variant="outline" className="bg-red-500/10 text-red-400 border-red-500/30">
+                  <Badge variant="outline" className="bg-red-500/10 text-red-400 border-red-500/30 text-xs">
                     <Ban className="h-3 w-3 mr-1" />
                     {stats.vetoes} Vetoes
                   </Badge>
@@ -445,7 +445,7 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Badge variant="outline" className="bg-orange-500/10 text-orange-400 border-orange-500/30">
+                  <Badge variant="outline" className="bg-orange-500/10 text-orange-400 border-orange-500/30 text-xs">
                     <XCircle className="h-3 w-3 mr-1" />
                     {stats.blocks} Blocks
                   </Badge>
@@ -456,7 +456,7 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/30">
+                  <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/30 text-xs">
                     <Activity className="h-3 w-3 mr-1" />
                     {stats.reductions} Reduced
                   </Badge>
@@ -467,10 +467,10 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
           </div>
         </div>
         
-        {/* Filters */}
-        <div className="flex items-center gap-4 pt-3">
+        {/* Filters - stack vertically on mobile */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-3">
           <div className="flex items-center gap-2">
-            <Clock className="h-4 w-4 text-muted-foreground" />
+            <Clock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             <Tabs value={timeRange} onValueChange={(v) => setTimeRange(v as TimeRange)}>
               <TabsList className="h-7 flex overflow-x-auto scrollbar-hide">
                 <TabsTrigger value="15m" className="text-xs px-2 py-1 flex-shrink-0">15m</TabsTrigger>
@@ -481,12 +481,12 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
           </div>
           
           <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-muted-foreground" />
+            <Filter className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             <Tabs value={gateFilter} onValueChange={(v) => setGateFilter(v as GateFilter)}>
               <TabsList className="h-7 flex overflow-x-auto scrollbar-hide">
                 <TabsTrigger value="all" className="text-xs px-2 py-1 flex-shrink-0">All ({stats.total})</TabsTrigger>
-                <TabsTrigger value="momentum" className="text-xs px-2 py-1 flex-shrink-0">Momentum ({stats.byGate.momentum})</TabsTrigger>
-                <TabsTrigger value="direction" className="text-xs px-2 py-1 flex-shrink-0">Direction ({stats.byGate.direction})</TabsTrigger>
+                <TabsTrigger value="momentum" className="text-xs px-2 py-1 flex-shrink-0">Mom ({stats.byGate.momentum})</TabsTrigger>
+                <TabsTrigger value="direction" className="text-xs px-2 py-1 flex-shrink-0">Dir ({stats.byGate.direction})</TabsTrigger>
                 <TabsTrigger value="adx" className="text-xs px-2 py-1 flex-shrink-0">ADX ({stats.byGate.adx})</TabsTrigger>
                 <TabsTrigger value="htf" className="text-xs px-2 py-1 flex-shrink-0">HTF ({stats.byGate.htf})</TabsTrigger>
               </TabsList>
@@ -494,7 +494,7 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
           </div>
           
           <div className="flex items-center gap-2">
-            <Target className="h-4 w-4 text-muted-foreground" />
+            <Target className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             <Select value={symbolFilter} onValueChange={(v) => { setSymbolFilter(v); setCurrentPage(1); }}>
               <SelectTrigger className="h-7 w-[140px] text-xs bg-background">
                 <SelectValue placeholder="All Symbols" />
