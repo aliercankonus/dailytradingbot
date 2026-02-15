@@ -101,58 +101,56 @@ export const RiskManagementControls = () => {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-2xl font-bold">Risk Management</h2>
+      <h2 className="text-lg font-semibold">Risk Management</h2>
 
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Shield className="h-5 w-5 text-primary" />
+        <Card className="p-3">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Shield className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-sm font-medium">Open Trades</span>
           </div>
-          <div className="text-xl sm:text-2xl font-bold">{riskParams.current_open_trades}</div>
-          <div className="text-[10px] sm:text-xs text-muted-foreground">Max: {riskParams.max_open_trades}</div>
+          <div className="text-lg font-bold">{riskParams.current_open_trades}</div>
+          <div className="text-[10px] text-muted-foreground">Max: {riskParams.max_open_trades}</div>
         </Card>
 
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <TrendingDown className="h-5 w-5 text-destructive" />
-            <span className="text-sm font-medium">Consecutive Losses</span>
+        <Card className="p-3">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <TrendingDown className="h-3.5 w-3.5 text-loss" />
+            <span className="text-xs font-medium">Consec. Losses</span>
           </div>
-          <div className="text-xl sm:text-2xl font-bold">{riskParams.consecutive_losses}</div>
-          <div className="text-[10px] sm:text-xs text-muted-foreground">
-            Threshold: {riskParams.consecutive_loss_threshold}
-          </div>
+          <div className="text-lg font-bold">{riskParams.consecutive_losses}</div>
+          <div className="text-[10px] text-muted-foreground">Threshold: {riskParams.consecutive_loss_threshold}</div>
         </Card>
 
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <DollarSign className="h-5 w-5 text-green-500" />
-            <span className="text-sm font-medium">Portfolio Value</span>
+        <Card className="p-3">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <DollarSign className="h-3.5 w-3.5 text-profit" />
+            <span className="text-xs font-medium">Portfolio Value</span>
           </div>
-          <div className="text-xl sm:text-2xl font-bold truncate">{formatPrice(riskParams.portfolio_value, 2, '$')}</div>
-          <div className="text-[10px] sm:text-xs text-muted-foreground">Total capital</div>
+          <div className="text-lg font-bold truncate">{formatPrice(riskParams.portfolio_value, 2, '$')}</div>
+          <div className="text-[10px] text-muted-foreground">Total capital</div>
         </Card>
 
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertTriangle className="h-5 w-5 text-yellow-500" />
-            <span className="text-sm font-medium">Unrealized P&L</span>
+        <Card className="p-3">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+            <span className="text-xs font-medium">Unrealized P&L</span>
           </div>
-          <div className={`text-xl sm:text-2xl font-bold truncate ${totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+          <div className={`text-lg font-bold truncate ${totalPnL >= 0 ? 'text-profit' : 'text-loss'}`}>
             {formatPrice(totalPnL, 2, '$')}
           </div>
-          <div className="text-[10px] sm:text-xs text-muted-foreground">From open positions</div>
+          <div className="text-[10px] text-muted-foreground">From open positions</div>
         </Card>
 
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertTriangle className="h-5 w-5 text-destructive" />
-            <span className="text-sm font-medium">Daily Loss</span>
+        <Card className="p-3">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 text-loss" />
+            <span className="text-xs font-medium">Daily Loss</span>
           </div>
-          <div className="text-xl sm:text-2xl font-bold text-destructive truncate">
+          <div className="text-lg font-bold text-loss truncate">
             {formatPrice(riskParams.daily_realized_loss || 0, 2, '$')}
           </div>
-          <div className="text-[10px] sm:text-xs text-muted-foreground truncate">
+          <div className="text-[10px] text-muted-foreground truncate">
             Limit: {riskParams.daily_loss_limit_percent}%
           </div>
         </Card>

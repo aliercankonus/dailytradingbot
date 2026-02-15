@@ -44,14 +44,14 @@ export default function Notifications() {
   return (
     <div className="min-h-screen bg-background">
       <AppHeader />
-      <div className="container mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6 max-w-2xl">
-        <h1 className="text-2xl font-bold">Notifications</h1>
+      <div className="container mx-auto px-3 sm:px-6 py-4 space-y-4 max-w-2xl">
+        <h1 className="text-lg font-semibold">Notifications</h1>
 
         {/* Email Notifications */}
-        <Card className="p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <Mail className="h-5 w-5 text-primary" />
-            <h2 className="text-xl font-semibold">Email Notifications</h2>
+        <Card className="p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Mail className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-[15px] font-semibold">Email Notifications</h2>
           </div>
 
           <div className="space-y-4">
@@ -91,10 +91,10 @@ export default function Notifications() {
         </Card>
 
         {/* SMS Notifications */}
-        <Card className="p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <Phone className="h-5 w-5 text-primary" />
-            <h2 className="text-xl font-semibold">SMS Notifications</h2>
+        <Card className="p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Phone className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-[15px] font-semibold">SMS Notifications</h2>
           </div>
 
           <div className="space-y-4">

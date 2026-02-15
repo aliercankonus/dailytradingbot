@@ -109,10 +109,10 @@ export const TradeHistory = () => {
   }, [selectedStrategy]);
 
   return (
-    <Card className="p-4 sm:p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0 mb-4">
-        <div className="flex items-center gap-3">
-          <h3 className="text-lg font-semibold text-foreground">Recent Trades</h3>
+    <Card className="p-4 border-border">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0 mb-3">
+        <div className="flex items-center gap-2">
+          <h3 className="text-[15px] font-semibold text-foreground">Recent Trades</h3>
           {loading && (
             <Loader2 className="h-4 w-4 text-primary animate-spin" />
           )}
