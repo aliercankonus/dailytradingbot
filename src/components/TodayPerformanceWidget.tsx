@@ -65,9 +65,6 @@ const StatsDisplay = ({ stats }: { stats: PeriodStats }) => (
     <div className="px-0.5">
       <StatRow label="Best Trade" value={`+$${stats.bestTrade.toFixed(2)}`} valueClass="text-profit" />
       <StatRow label="Worst Trade" value={`-$${Math.abs(stats.worstTrade).toFixed(2)}`} valueClass="text-loss" />
-      <StatRow label="Avg Win" value={`+$${stats.avgWin.toFixed(2)}`} valueClass="text-profit" />
-      <StatRow label="Avg Loss" value={`-$${Math.abs(stats.avgLoss).toFixed(2)}`} valueClass="text-loss" />
-      <StatRow label="Max Drawdown" value={`-$${Math.abs(stats.maxDrawdown).toFixed(2)}`} valueClass="text-loss" />
     </div>
   </div>
 );
