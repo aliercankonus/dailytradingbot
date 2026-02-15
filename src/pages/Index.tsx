@@ -115,6 +115,10 @@ const Index = () => {
               </div>
             </div>
 
+            <Suspense fallback={<Skeleton className="h-48 w-full" />}>
+              <MarketConditionsDashboard />
+            </Suspense>
+
             <TradeHistory />
 
             <LivePriceCard />
@@ -123,14 +127,7 @@ const Index = () => {
 
           <TabsContent value="signals" className="space-y-6">
             <Suspense fallback={<TabFallback />}>
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2">
-                  <MarketConditionsDashboard />
-                </div>
-                <div className="lg:col-span-1">
-                  <BlockedSignalsWidget />
-                </div>
-              </div>
+              <BlockedSignalsWidget />
               <SignalRejectionMonitor />
               <TradingSignalsDashboard />
               <AIAnalysisDashboard />
