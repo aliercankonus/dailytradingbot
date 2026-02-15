@@ -118,7 +118,7 @@ export const TodayPerformanceWidget = () => {
 
   if (isLoading) {
     return (
-      <Card className="h-full p-4 sm:p-6 bg-card border-border">
+      <Card className="h-full p-4 sm:p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
         <div className="animate-pulse space-y-3">
           <div className="h-5 bg-muted rounded w-1/2" />
           <div className="h-16 bg-muted rounded" />
