@@ -10,7 +10,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Settings as SettingsIcon, Key, Mail, Shield, ArrowLeft, Brain } from 'lucide-react';
 import { useRiskParameters } from '@/hooks/useRiskParameters';
 import { PerformanceSettings } from '@/components/PerformanceSettings';
-import { PerformanceMonitoringDashboard } from '@/components/PerformanceMonitoringDashboard';
+
 import SmartRiskSettings from '@/components/SmartRiskSettings';
 import { HedgingSettings } from '@/components/HedgingSettings';
 
@@ -228,10 +228,9 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-3">
+        <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-2">
           <TabsTrigger value="general" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">General</span><span className="hidden sm:inline">General Settings</span></TabsTrigger>
           <TabsTrigger value="smart" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Smart</span><span className="hidden sm:inline">Smart Trading</span></TabsTrigger>
-          <TabsTrigger value="performance" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Perf</span><span className="hidden sm:inline">Performance Monitor</span></TabsTrigger>
         </TabsList>
 
         <TabsContent value="smart" className="space-y-6">
@@ -493,10 +492,6 @@ export default function Settings() {
           <PerformanceSettings />
         </TabsContent>
 
-
-        <TabsContent value="performance">
-          <PerformanceMonitoringDashboard />
-        </TabsContent>
       </Tabs>
     </div>
   );
