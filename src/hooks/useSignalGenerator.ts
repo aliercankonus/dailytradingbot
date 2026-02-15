@@ -62,11 +62,8 @@ export const useSignalGenerator = () => {
             : `Found ${data.signals.length} new trading signals${deduplicationInfo}`,
         });
       } else {
-        toast({
-          title: "No Signals",
-          description: "No trading opportunities found at this time",
-          variant: "default"
-        });
+        // Silently skip - no toast for "no signals" to avoid noise
+        console.log('No trading opportunities found at this time');
       }
     } catch (error) {
       console.error('Error generating signals:', error);
