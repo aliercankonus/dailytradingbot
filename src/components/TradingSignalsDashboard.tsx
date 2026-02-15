@@ -312,84 +312,78 @@ export const TradingSignalsDashboard = () => {
               </div>
             )}
             
-            <div className="flex items-start justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
               <div className="flex items-center gap-3">
                 {signal.signal_type === 'long' ? (
-                  <TrendingUp className="h-8 w-8 text-green-500" />
+                  <TrendingUp className="h-6 w-6 sm:h-8 sm:w-8 text-green-500" />
                 ) : (
-                  <TrendingDown className="h-8 w-8 text-red-500" />
+                  <TrendingDown className="h-6 w-6 sm:h-8 sm:w-8 text-red-500" />
                 )}
                 <div>
-                  <h3 className="text-xl font-bold">{signal.symbol}</h3>
-                  <div className="flex items-center gap-2 mt-1">
+                  <h3 className="text-lg sm:text-xl font-bold">{signal.symbol}</h3>
+                  <div className="flex items-center gap-1.5 sm:gap-2 mt-1 flex-wrap">
                     <Badge 
                       variant={signal.signal_type === 'long' ? 'default' : 'destructive'}
                     >
                       {signal.signal_type.toUpperCase()}
                     </Badge>
                     {continuationStatus.isContinuation && (
-                      <Badge variant="outline" className="bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border-purple-300">
-                        <Zap className="h-3 w-3 mr-1" />
-                        Continuation
+                      <Badge variant="outline" className="bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border-purple-300 text-[10px] sm:text-xs">
+                        <Zap className="h-3 w-3 mr-0.5" />
+                        Cont
                       </Badge>
                     )}
                     {earlySignalStatus.isEarly && !continuationStatus.isContinuation && (
-                      <Badge variant="outline" className="bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-300">
-                        <Sparkles className="h-3 w-3 mr-1" />
+                      <Badge variant="outline" className="bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-300 text-[10px] sm:text-xs">
+                        <Sparkles className="h-3 w-3 mr-0.5" />
                         Early
                       </Badge>
                     )}
                     {exhaustionStatus.isExhausted && !continuationStatus.isContinuation && (
-                      <Badge variant="outline" className="bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-300">
-                        <AlertTriangle className="h-3 w-3 mr-1" />
+                      <Badge variant="outline" className="bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-300 text-[10px] sm:text-xs">
+                        <AlertTriangle className="h-3 w-3 mr-0.5" />
                         Late
                       </Badge>
                     )}
                   </div>
                 </div>
               </div>
-              <div className="text-right">
-                <div className="flex items-center gap-2 text-sm mb-1">
-                  <Zap className="h-4 w-4" />
-                  <Badge 
-                    variant={
-                      signal.confidence_score > 70 ? 'default' : 
-                      signal.confidence_score >= 40 ? 'outline' : 
-                      'destructive'
-                    }
-                    className={`text-xs ${
-                      signal.confidence_score > 70 ? 'bg-green-500 hover:bg-green-600' :
-                      signal.confidence_score >= 40 ? 'bg-yellow-500 hover:bg-yellow-600 text-black' :
-                      'bg-red-500 hover:bg-red-600'
-                    }`}
-                  >
-                    {signal.confidence_score}% Confidence
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 sm:justify-end">
+                <Badge 
+                  variant={
+                    signal.confidence_score > 70 ? 'default' : 
+                    signal.confidence_score >= 40 ? 'outline' : 
+                    'destructive'
+                  }
+                  className={`text-[10px] sm:text-xs ${
+                    signal.confidence_score > 70 ? 'bg-green-500 hover:bg-green-600' :
+                    signal.confidence_score >= 40 ? 'bg-yellow-500 hover:bg-yellow-600 text-black' :
+                    'bg-red-500 hover:bg-red-600'
+                  }`}
+                >
+                  {signal.confidence_score}%
+                </Badge>
+                <Badge 
+                  variant={getSignalPriorityVariant(getSignalPriorityTier(signal.confidence_score))}
+                  className="font-medium text-[10px] sm:text-xs"
+                >
+                  {getSignalPriorityTier(signal.confidence_score)}
+                </Badge>
+                <Badge 
+                  variant={
+                    signal.trend.toLowerCase() === 'bullish' ? 'default' : 
+                    signal.trend.toLowerCase() === 'bearish' ? 'destructive' : 
+                    'secondary'
+                  }
+                  className="font-medium text-[10px] sm:text-xs"
+                >
+                  {signal.trend}
+                </Badge>
+                {signal.strategy_name && (
+                  <Badge variant="outline" className="font-medium text-[10px] sm:text-xs">
+                    {signal.strategy_name}
                   </Badge>
-                </div>
-                <div className="flex items-center gap-2 justify-end flex-wrap">
-                  <Badge 
-                    variant={getSignalPriorityVariant(getSignalPriorityTier(signal.confidence_score))}
-                    className="font-medium"
-                  >
-                    <AlertCircle className="h-3 w-3 mr-1" />
-                    {getSignalPriorityTier(signal.confidence_score)} Priority
-                  </Badge>
-                  <Badge 
-                    variant={
-                      signal.trend.toLowerCase() === 'bullish' ? 'default' : 
-                      signal.trend.toLowerCase() === 'bearish' ? 'destructive' : 
-                      'secondary'
-                    }
-                    className="font-medium"
-                  >
-                    📈 {signal.trend}
-                  </Badge>
-                  {signal.strategy_name && (
-                    <Badge variant="outline" className="font-medium">
-                      {signal.strategy_name}
-                    </Badge>
-                  )}
-                </div>
+                )}
               </div>
             </div>
 

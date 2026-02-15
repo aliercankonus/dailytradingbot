@@ -163,8 +163,8 @@ export const AIAnalysisDashboard = () => {
             <h4 className="text-sm font-medium text-muted-foreground">Recent Analyses</h4>
             {analyses.slice(0, 10).map((analysis) => (
               <div key={analysis.id} className="border rounded-lg p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Badge variant={analysis.signal_type === 'long' ? 'default' : 'secondary'}>
                       {analysis.signal_type === 'long' ? (
                         <TrendingUp className="h-3 w-3 mr-1" />
@@ -176,24 +176,24 @@ export const AIAnalysisDashboard = () => {
                     {getRecommendationBadge(analysis.recommendation)}
                     {getRiskBadge(analysis.risk_level)}
                   </div>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-[10px] sm:text-xs text-muted-foreground">
                     {formatDistanceToNow(new Date(analysis.created_at), { addSuffix: true })}
                   </span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 text-sm">
                   <div>
                     <span className="text-muted-foreground">Strategy:</span>
                     <span className="ml-2 font-medium">{analysis.strategy_name || 'N/A'}</span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">Confidence Adj:</span>
+                    <span className="text-muted-foreground">Conf Adj:</span>
                     <span className={`ml-2 font-medium ${analysis.confidence_adjustment > 0 ? 'text-success' : analysis.confidence_adjustment < 0 ? 'text-destructive' : ''}`}>
                       {analysis.confidence_adjustment > 0 ? '+' : ''}{analysis.confidence_adjustment}
                     </span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">Size Multiplier:</span>
+                    <span className="text-muted-foreground">Size:</span>
                     <span className="ml-2 font-medium">{analysis.position_size_multiplier}x</span>
                   </div>
                 </div>
@@ -208,10 +208,10 @@ export const AIAnalysisDashboard = () => {
                   </div>
                 )}
 
-                <div className="grid grid-cols-3 gap-4 text-xs text-muted-foreground border-t pt-2">
-                  <div>Entry: ${analysis.entry_price?.toFixed(4)}</div>
-                  <div>SL: ${analysis.stop_loss?.toFixed(4)}</div>
-                  <div>TP: ${analysis.take_profit?.toFixed(4)}</div>
+                <div className="grid grid-cols-3 gap-2 sm:gap-4 text-[10px] sm:text-xs text-muted-foreground border-t pt-2">
+                  <div>Entry: ${analysis.entry_price?.toFixed(2)}</div>
+                  <div>SL: ${analysis.stop_loss?.toFixed(2)}</div>
+                  <div>TP: ${analysis.take_profit?.toFixed(2)}</div>
                 </div>
               </div>
             ))}
