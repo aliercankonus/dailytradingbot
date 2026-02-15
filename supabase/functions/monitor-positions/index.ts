@@ -1,6 +1,18 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
 import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import {
+  evaluateDecayVelocity,
+  evaluateMicroProfitLock,
+  evaluateProgressiveProfitLock,
+  evaluateMeanReversionExit,
+  calculateFeeAwarePnL as sharedCalculateFeeAwarePnL,
+  getProgressiveLockPercent as sharedGetProgressiveLockPercent,
+  getStalePeakBonus as sharedGetStalePeakBonus,
+  type PositionContext as ExitPositionContext,
+  type MarketContext as ExitMarketContext,
+  type UserExitSettings,
+} from "../_shared/exit-strategies.ts";
 import { calculateATR, calculateEMA } from "../_shared/indicators.ts";
 import { 
   getStochRsiWeightedRsiScore, 
@@ -104,53 +116,8 @@ function calculateHistoricalATR(klines: any[], histStartIdx: number, histEndIdx:
 
 // ============= FEE-AWARE P&L CALCULATION =============
 // Centralized helper for consistent fee calculation across all close operations
-interface FeeAwarePnL {
-  grossPnl: number;
-  grossPnlPercent: number;
-  netPnl: number;
-  netPnlPercent: number;
-  totalFee: number;
-  feeRatePercent: number;
-}
-
-function calculateFeeAwarePnL(
-  side: string,
-  entryPrice: number,
-  exitPrice: number,
-  quantity: number,
-  storedFeePercent?: number | null
-): FeeAwarePnL {
-  // Get fee rate from position (if stored at entry) or use default
-  const feeRatePercent = storedFeePercent ?? TRADING_FEE_PARAMS.DEFAULT_FEE_RATE_PERCENT;
-  const feeRate = feeRatePercent / 100;
-  
-  // GROSS P&L (before fees)
-  const grossPnl = side === "BUY"
-    ? (exitPrice - entryPrice) * quantity
-    : (entryPrice - exitPrice) * quantity;
-  
-  const grossPnlPercent = side === "BUY"
-    ? ((exitPrice - entryPrice) / entryPrice) * 100
-    : ((entryPrice - exitPrice) / entryPrice) * 100;
-  
-  // Round-trip fee: entry fee + exit fee
-  const entryFee = entryPrice * quantity * feeRate;
-  const exitFee = exitPrice * quantity * feeRate;
-  const totalFee = entryFee + exitFee;
-  
-  // NET P&L (after fees) - this is the TRUE realized P&L
-  const netPnl = grossPnl - totalFee;
-  const netPnlPercent = grossPnlPercent - ((totalFee / (entryPrice * quantity)) * 100);
-  
-  return {
-    grossPnl,
-    grossPnlPercent,
-    netPnl,
-    netPnlPercent,
-    totalFee,
-    feeRatePercent,
-  };
-}
+// FeeAwarePnL delegated to shared exit-strategies module
+const calculateFeeAwarePnL = sharedCalculateFeeAwarePnL;
 
 // ============= StochRSI-RSI CONFLICT RESOLUTION =============
 // Imported from "../_shared/scoring.ts" - getStochRsiWeightedRsiScore
@@ -1084,222 +1051,81 @@ serve(async (req) => {
         }
       }
       
-      // ============= MEAN REVERSION: MAE TRACKING & ATR-BASED EXIT LOGIC =============
-      // Special monitoring for mean reversion trades with ATR-based exits and early adverse protection
+      // ============= MEAN REVERSION EXIT: Delegated to shared exit-strategies module =============
       let meanReversionExitTriggered = false;
       let meanReversionExitReason = "";
       
       if (isMeanReversion && MEAN_REVERSION_CONFIG.ENABLED) {
-        // Get entry ATR (stored at execution) or calculate from current data
-        const entryAtr = position.entry_atr || (atrData?.atr || currentPrice * 0.02);
-        const entryAtrPercent = position.entry_atr_percent || atrPercent;
-        
-        // Calculate current adverse excursion in ATR units
-        const currentAdverseMove = position.side === "BUY"
-          ? Math.max(0, position.entry_price - currentPrice) // For LONG: adverse = price below entry
-          : Math.max(0, currentPrice - position.entry_price); // For SHORT: adverse = price above entry
-        const currentAdverseAtr = entryAtr > 0 ? currentAdverseMove / entryAtr : 0;
-        
-        // Calculate favorable move in ATR units
-        const currentFavorableMove = position.side === "BUY"
-          ? Math.max(0, currentPrice - position.entry_price)
-          : Math.max(0, position.entry_price - currentPrice);
-        const currentFavorableAtr = entryAtr > 0 ? currentFavorableMove / entryAtr : 0;
-        
-        // Track max adverse excursion (update if current is worse)
-        const existingMae = position.max_adverse_excursion_atr || 0;
-        const newMaeAtr = Math.max(existingMae, currentAdverseAtr);
+        const mrResult = evaluateMeanReversionExit(
+          { ...position, side: position.side as "BUY" | "SELL", peak_pnl_percent: newPeakPnl } as ExitPositionContext,
+          { currentPrice, pnlPercent, atrPercent, atr: atrData?.atr || currentPrice * 0.02, trendData: trendDataForPosition } as ExitMarketContext,
+          positionAgeMinutes,
+        );
         
         // Update MAE in database if it increased
-        if (newMaeAtr > existingMae) {
+        const existingMae = position.max_adverse_excursion_atr || 0;
+        if (mrResult.newMaeAtr > existingMae) {
           const { error: maeError } = await supabase
             .from("positions")
-            .update({ max_adverse_excursion_atr: newMaeAtr })
+            .update({ max_adverse_excursion_atr: mrResult.newMaeAtr })
             .eq("id", position.id)
             .eq("status", "active");
-          
           if (!maeError) {
-            positionLogger.debug(`MEAN REVERSION MAE: Updated to ${newMaeAtr.toFixed(2)} ATR (adverse: $${currentAdverseMove.toFixed(2)})`);
+            positionLogger.debug(`MEAN REVERSION MAE: Updated to ${mrResult.newMaeAtr.toFixed(2)} ATR`);
           }
         }
         
-        // Calculate position age in bars (1h candles)
-        const positionAgeBars = positionAgeMinutes / 60;
+        // Apply suggested stop loss if provided (ATR target / quick profit trailing)
+        if (!mrResult.shouldExit && mrResult.suggestedStopLoss !== null) {
+          if ((position.side === "BUY" && mrResult.suggestedStopLoss > (newStopLoss || 0)) ||
+              (position.side === "SELL" && mrResult.suggestedStopLoss < (newStopLoss || Infinity))) {
+            newStopLoss = mrResult.suggestedStopLoss;
+            positionLogger.trade(`MEAN REVERSION STOP TIGHTENED: → ${mrResult.suggestedStopLoss.toFixed(2)}`);
+          }
+        }
         
-        // ============= EARLY ADVERSE EXIT PROTECTION =============
-        // If position moves against us by FAILURE_ATR_THRESHOLD within FAILURE_TIME_BARS,
-        // exit early to prevent larger losses (mean reversion thesis is failing)
-        if (positionAgeBars <= MEAN_REVERSION_CONFIG.EXIT.FAILURE_TIME_BARS && 
-            currentAdverseAtr >= MEAN_REVERSION_CONFIG.EXIT.FAILURE_ATR_THRESHOLD) {
+        if (mrResult.shouldExit) {
           meanReversionExitTriggered = true;
-          meanReversionExitReason = "mean_reversion_early_failure";
-          positionLogger.risk(`MEAN REVERSION EARLY FAILURE: ${currentAdverseAtr.toFixed(2)} ATR adverse (>= ${MEAN_REVERSION_CONFIG.EXIT.FAILURE_ATR_THRESHOLD} ATR) within ${positionAgeBars.toFixed(1)} bars (limit: ${MEAN_REVERSION_CONFIG.EXIT.FAILURE_TIME_BARS}) - thesis failed early`);
-        }
-        
-        // ============= ATR-BASED TARGET EXIT =============
-        // If position moves in our favor by BASE_TIMEOUT_ATR_MULTIPLE, take profit
-        if (!meanReversionExitTriggered && currentFavorableAtr >= MEAN_REVERSION_CONFIG.EXIT.BASE_TIMEOUT_ATR_MULTIPLE) {
-          // This triggers a take-profit at ATR target instead of waiting for fixed TP
-          positionLogger.trade(`MEAN REVERSION ATR TARGET: Reached ${currentFavorableAtr.toFixed(2)} ATR favorable (target: ${MEAN_REVERSION_CONFIG.EXIT.BASE_TIMEOUT_ATR_MULTIPLE} ATR)`);
-          // Tighten stop to lock in most of the gain
-          const lockPrice = position.side === "BUY"
-            ? position.entry_price + (currentFavorableMove * 0.7) // Lock 70% of gain
-            : position.entry_price - (currentFavorableMove * 0.7);
+          meanReversionExitReason = mrResult.exitReason;
+          positionLogger.risk(`MEAN REVERSION EXIT: ${mrResult.exitReason}`);
           
-          if ((position.side === "BUY" && lockPrice > (newStopLoss || 0)) ||
-              (position.side === "SELL" && lockPrice < (newStopLoss || Infinity))) {
-            newStopLoss = lockPrice;
-            positionLogger.trade(`MEAN REVERSION LOCK: Tightening stop to ${lockPrice.toFixed(2)} (70% of ${currentFavorableAtr.toFixed(2)} ATR gain)`);
-          }
-        }
-        
-        // ============= QUICK PROFIT TARGET =============
-        // Take profit at quick target percentage - activate aggressive trailing
-        if (!meanReversionExitTriggered && pnlPercent >= MEAN_REVERSION_CONFIG.EXIT.QUICK_PROFIT_TARGET_PERCENT) {
-          const quickTrailingDistance = position.entry_price * (MEAN_REVERSION_CONFIG.EXIT.TRAILING_DISTANCE_PERCENT / 100);
-          const quickTrailingStop = position.side === "BUY"
-            ? currentPrice - quickTrailingDistance
-            : currentPrice + quickTrailingDistance;
-          
-          if ((position.side === "BUY" && quickTrailingStop > (newStopLoss || 0)) ||
-              (position.side === "SELL" && quickTrailingStop < (newStopLoss || Infinity))) {
-            newStopLoss = quickTrailingStop;
-            positionLogger.trade(`MEAN REVERSION TRAILING: P&L ${pnlPercent.toFixed(2)}% >= ${MEAN_REVERSION_CONFIG.EXIT.QUICK_PROFIT_TARGET_PERCENT}% - stop at ${quickTrailingStop.toFixed(2)}`);
-          }
-        }
-        
-        // ============= TIME-BASED FAILURE EXIT =============
-        // If position hasn't reached target after MAX_HOLD_HOURS, exit to free capital
-        const maxHoldMinutes = MEAN_REVERSION_CONFIG.EXIT.MAX_HOLD_HOURS * 60;
-        if (!meanReversionExitTriggered && positionAgeMinutes >= maxHoldMinutes && pnlPercent < MEAN_REVERSION_CONFIG.EXIT.QUICK_PROFIT_TARGET_PERCENT) {
-          meanReversionExitTriggered = true;
-          meanReversionExitReason = "mean_reversion_time_exit";
-          positionLogger.risk(`MEAN REVERSION TIME EXIT: Position held ${(positionAgeMinutes / 60).toFixed(1)}h (max: ${MEAN_REVERSION_CONFIG.EXIT.MAX_HOLD_HOURS}h) without reaching ${MEAN_REVERSION_CONFIG.EXIT.QUICK_PROFIT_TARGET_PERCENT}% target (current: ${pnlPercent.toFixed(2)}%)`);
-        }
-        
-        // ============= TREND CONTINUATION FAILURE =============
-        // If ADX starts rising strongly, our mean reversion thesis is wrong
-        // CENTRALIZED: Use shared extractor for ADX slope
-        const { slope: mrAdxSlope } = extractADXSlope(trendDataForPosition);
-        if (!meanReversionExitTriggered && positionAdx >= MEAN_REVERSION_CONFIG.LONG.MAX_ADX && mrAdxSlope > 0.5 && pnlPercent < 0) {
-          meanReversionExitTriggered = true;
-          meanReversionExitReason = "mean_reversion_trend_continuation";
-          positionLogger.risk(`MEAN REVERSION TREND FAILURE: ADX ${positionAdx.toFixed(1)} >= ${MEAN_REVERSION_CONFIG.LONG.MAX_ADX} with rising slope ${mrAdxSlope.toFixed(2)} - trend continuing, thesis failed`);
-        }
-        
-        // ============= MODERATE EXHAUSTION MOMENTUM INVALIDATION =============
-        // MR_MODERATE_EXHAUSTION positions are momentum-gated - invalidate if momentum deteriorates
-        const isModerateExhaustionPosition = position.strategy_name?.includes('MR_MODERATE_EXHAUSTION');
-        if (!meanReversionExitTriggered && isModerateExhaustionPosition) {
-          const momentumScore = trendDataForPosition?.momentum?.score ?? 0;
-          const momentumFloor = MEAN_REVERSION_CONFIG.MODERATE_EXHAUSTION?.INVALIDATION_MOMENTUM_FLOOR ?? 30;
-          
-          // For LONG: momentum score must remain >= floor (positive)
-          // For SHORT: momentum score must remain <= -floor (negative)
-          const isLong = position.side === "BUY";
-          const momentumInvalidated = isLong 
-            ? momentumScore < momentumFloor 
-            : momentumScore > -momentumFloor;
-          
-          if (momentumInvalidated && pnlPercent < 0.5) {
-            meanReversionExitTriggered = true;
-            meanReversionExitReason = "moderate_exhaustion_momentum_invalidated";
-            positionLogger.risk(
-              `MODERATE EXHAUSTION INVALIDATED: ${isLong ? 'LONG' : 'SHORT'} momentum=${momentumScore.toFixed(0)} ` +
-              `${isLong ? '<' : '>'} ${isLong ? '' : '-'}${momentumFloor} (floor), P&L=${pnlPercent.toFixed(2)}% - momentum confirmation lost`
-            );
-          }
-        }
-        
-        // Apply mean reversion exit to emergency close
-        if (meanReversionExitTriggered) {
           emergencyClose = true;
           emergencyReason = meanReversionExitReason;
           
-          // Track for analytics
-          const mrMaeAtr = position.max_adverse_excursion_atr || newMaeAtr;
           meanReversionExits.push({
             symbol: position.symbol,
             side: position.side,
             reason: meanReversionExitReason,
-            maeAtr: mrMaeAtr,
+            maeAtr: mrResult.newMaeAtr,
             pnlPercent,
             positionAgeBars: positionAgeMinutes / 60,
           });
         }
       }
       
-      // ============= SMART AITS: DECAY VELOCITY DETECTION (TIERED) =============
-      // Check for rapid profit decay and trigger emergency exit if needed
-      // TIERED: Strong trends get more tolerance for normal pullbacks
-      // MINIMUM OBSERVATION: Wait 2 minutes before evaluating to avoid false positives from brief dips
-      if (userSettings.decayVelocityExitEnabled && newPeakPnl > userSettings.activationPercent && minutesSincePeak >= DECAY_VELOCITY_TIERS.MIN_OBSERVATION_MINUTES) {
-        const decayPercent = newPeakPnl - pnlPercent;
-        const decayVelocity = decayPercent / minutesSincePeak; // % per minute
+      // ============= DECAY VELOCITY: Delegated to shared exit-strategies module =============
+      {
+        const decayResult = evaluateDecayVelocity(
+          { ...position, side: position.side as "BUY" | "SELL", peak_pnl_percent: newPeakPnl } as ExitPositionContext,
+          { currentPrice, pnlPercent, atrPercent, atr: atrData?.atr || currentPrice * 0.02, trendData: trendDataForPosition } as ExitMarketContext,
+          { activationPercent: userSettings.activationPercent, trailingAggressiveness: userSettings.trailingAggressiveness, progressiveLockEnabled: userSettings.progressiveLockEnabled, stalePeakProtectionEnabled: userSettings.stalePeakProtectionEnabled, decayVelocityExitEnabled: userSettings.decayVelocityExitEnabled },
+        );
         
-        // Get trend data for tiered threshold determination
-        // CENTRALIZED: Use shared extractors for consistent access
-        const tieredPositionAdx = extractADX(trendDataForPosition);
-        const { slope: tieredAdxSlope } = extractADXSlope(trendDataForPosition);
-        const primaryTrend = trendDataForPosition?.primaryTrend || 'ranging';
-        const isAlignedWithPosition = (position.side === 'BUY' && primaryTrend === 'bullish') || 
-                                       (position.side === 'SELL' && primaryTrend === 'bearish');
-        
-        // Determine decay velocity tier based on trend strength
-        let decayTier: 'base' | 'tier1' | 'tier2' | 'tier3' | 'tier4' = 'base';
-        let decayThreshold: number = DECAY_VELOCITY_TIERS.BASE_EXIT_PER_MINUTE;
-        let maxDecayMinutes: number = DECAY_VELOCITY_TIERS.BASE_MAX_DECAY_MINUTES;
-        
-        // Only apply strong trend exception if trend aligns with position
-        if (isAlignedWithPosition) {
-          if (tieredPositionAdx >= DECAY_VELOCITY_TIERS.TIER4_MIN_ADX && tieredAdxSlope >= DECAY_VELOCITY_TIERS.TIER4_MIN_ADX_SLOPE) {
-            decayTier = 'tier4';
-            decayThreshold = DECAY_VELOCITY_TIERS.TIER4_EXIT_PER_MINUTE;
-            maxDecayMinutes = DECAY_VELOCITY_TIERS.TIER4_MAX_DECAY_MINUTES;
-          } else if (tieredPositionAdx >= DECAY_VELOCITY_TIERS.TIER3_MIN_ADX && tieredAdxSlope >= DECAY_VELOCITY_TIERS.TIER3_MIN_ADX_SLOPE) {
-            decayTier = 'tier3';
-            decayThreshold = DECAY_VELOCITY_TIERS.TIER3_EXIT_PER_MINUTE;
-            maxDecayMinutes = DECAY_VELOCITY_TIERS.TIER3_MAX_DECAY_MINUTES;
-          } else if (tieredPositionAdx >= DECAY_VELOCITY_TIERS.TIER2_MIN_ADX && tieredAdxSlope >= DECAY_VELOCITY_TIERS.TIER2_MIN_ADX_SLOPE) {
-            decayTier = 'tier2';
-            decayThreshold = DECAY_VELOCITY_TIERS.TIER2_EXIT_PER_MINUTE;
-            maxDecayMinutes = DECAY_VELOCITY_TIERS.TIER2_MAX_DECAY_MINUTES;
-          } else if (tieredPositionAdx >= DECAY_VELOCITY_TIERS.TIER1_MIN_ADX && tieredAdxSlope >= DECAY_VELOCITY_TIERS.TIER1_MIN_ADX_SLOPE) {
-            decayTier = 'tier1';
-            decayThreshold = DECAY_VELOCITY_TIERS.TIER1_EXIT_PER_MINUTE;
-            maxDecayMinutes = DECAY_VELOCITY_TIERS.TIER1_MAX_DECAY_MINUTES;
-          }
-        }
-        
-        // Safety: Force exit if decay persists beyond tier's max time
-        const forceExitByTime = minutesSincePeak > maxDecayMinutes && decayVelocity > DECAY_VELOCITY_TIERS.FORCE_EXIT_MIN_VELOCITY;
-        
-        // Emergency exit if decay exceeds tier threshold OR time safety triggered
-        if ((decayVelocity > decayThreshold || forceExitByTime) && pnlPercent > 0) {
-          const exitReason = forceExitByTime ? 'smart_aits_prolonged_decay' : 'smart_aits_rapid_decay';
-          positionLogger.risk(`SMART AITS [${decayTier.toUpperCase()}]: ${forceExitByTime ? 'Prolonged' : 'Rapid'} decay detected ${position.side} - velocity ${(decayVelocity * 100).toFixed(2)}%/min (threshold ${(decayThreshold * 100).toFixed(2)}%/min), ADX=${tieredPositionAdx.toFixed(1)}, slope=${tieredAdxSlope.toFixed(3)}, aligned=${isAlignedWithPosition}`);
+        if (decayResult.shouldExit) {
+          positionLogger.risk(`SMART AITS [${decayResult.decayTier.toUpperCase()}]: ${decayResult.exitReason} - velocity ${(decayResult.decayVelocity * 100).toFixed(2)}%/min, mins=${decayResult.minutesSincePeak.toFixed(0)}`);
           
           emergencyExits.push({
             symbol: position.symbol,
             side: position.side,
-            reason: exitReason,
+            reason: decayResult.exitReason,
             peakPnl: newPeakPnl,
             currentPnl: pnlPercent,
-            decayVelocity: decayVelocity * 100,
-            minutesSincePeak,
-            decayTier,
-            adx: tieredPositionAdx,
-            adxSlope: tieredAdxSlope,
+            decayVelocity: decayResult.decayVelocity * 100,
+            minutesSincePeak: decayResult.minutesSincePeak,
+            decayTier: decayResult.decayTier,
           });
           
-          // Close position immediately with fee-aware P&L
-          const feeAwarePnL = calculateFeeAwarePnL(
-            position.side,
-            position.entry_price,
-            currentPrice,
-            position.quantity,
-            position.trading_fee_percent
-          );
+          const feeAwarePnL = calculateFeeAwarePnL(position.side, position.entry_price, currentPrice, position.quantity, position.trading_fee_percent);
           
           const { error: closeError } = await supabase
             .from("positions")
@@ -1309,7 +1135,7 @@ serve(async (req) => {
               exit_price: currentPrice,
               realized_pnl: feeAwarePnL.netPnl,
               realized_pnl_percent: feeAwarePnL.netPnlPercent,
-              close_reason: exitReason,
+              close_reason: decayResult.exitReason,
               trading_fee_amount: feeAwarePnL.totalFee,
               trading_fee_percent: feeAwarePnL.feeRatePercent,
             })
@@ -1319,168 +1145,58 @@ serve(async (req) => {
           if (closeError) {
             positionLogger.error(`Error closing position ${position.id}: ${closeError}`);
           } else {
-            closedPositions.push({
-              id: position.id,
-              symbol: position.symbol,
-              side: position.side,
-              reason: exitReason,
-              pnlPercent,
-            });
+            closedPositions.push({ id: position.id, symbol: position.symbol, side: position.side, reason: decayResult.exitReason, pnlPercent });
           }
-          continue; // Skip to next position
-        } else if (decayVelocity > DECAY_VELOCITY_TIERS.BASE_EXIT_PER_MINUTE && decayTier !== 'base') {
-          // Log when decay exceeds base but is allowed by tier exception
-          positionLogger.info(`SMART AITS [${decayTier.toUpperCase()}]: Decay ${(decayVelocity * 100).toFixed(2)}%/min tolerated (threshold ${(decayThreshold * 100).toFixed(2)}%/min) - ADX=${tieredPositionAdx.toFixed(1)}, slope=${tieredAdxSlope.toFixed(3)}, aligned=${isAlignedWithPosition}, mins=${minutesSincePeak.toFixed(0)}/${maxDecayMinutes}`);
+          continue;
+        } else if (decayResult.tierExceptionActive) {
+          positionLogger.info(`SMART AITS [${decayResult.decayTier.toUpperCase()}]: Decay ${(decayResult.decayVelocity * 100).toFixed(2)}%/min tolerated by tier exception`);
         }
       }
       
       // ============= SMART AITS: PROGRESSIVE LOCK TIERS =============
       // Calculate dynamic profit lock based on peak P&L level
-      const getProgressiveLockPercent = (peakPnl: number, aggressiveness: number): number => {
-        // Base lock from aggressiveness (1=35%, 2=40%, 3=45%, 4=50%, 5=55%)
-        const baseLock = 0.30 + (aggressiveness * 0.05);
-        
-        // Progressive tier bonus based on peak P&L
-        let tierBonus = 0;
-        if (peakPnl >= 5) tierBonus = 0.30;       // 5%+ peak: +30% bonus (85% total at agg 5)
-        else if (peakPnl >= 3) tierBonus = 0.20;  // 3-5% peak: +20% bonus
-        else if (peakPnl >= 2) tierBonus = 0.15;  // 2-3% peak: +15% bonus
-        else if (peakPnl >= 1) tierBonus = 0.10;  // 1-2% peak: +10% bonus
-        else tierBonus = 0;                        // 0-1% peak: no bonus
-        
-        return Math.min(0.85, baseLock + tierBonus); // Cap at 85%
-      };
+      // SMART AITS helpers delegated to shared exit-strategies module
+      const getProgressiveLockPercent = sharedGetProgressiveLockPercent;
+      const getStalePeakBonus = (mins: number) => sharedGetStalePeakBonus(mins, userSettings.stalePeakProtectionEnabled);
       
-      // ============= SMART AITS: STALE PEAK BONUS =============
-      // Add tighter locks when peak hasn't been updated for a while
-      const getStalePeakBonus = (minutesSincePeak: number): number => {
-        if (!userSettings.stalePeakProtectionEnabled) return 0;
-        if (minutesSincePeak > 120) return 0.25;  // +25% after 2 hours
-        if (minutesSincePeak > 60) return 0.20;   // +20% after 1 hour  
-        if (minutesSincePeak > 30) return 0.10;   // +10% after 30 min
-        if (minutesSincePeak > 15) return 0.05;   // +5% after 15 min
-        return 0;
-      };
-      
-      // ============= MICRO-PROFIT LOCK: TIERED PROTECTION (0.15%-0.50%) =============
-      // NEW: Fill the gap between 0% and break-even activation
-      // Key insight: Any favorable movement is signal confirmation worth monetizing
-      // Order: micro_profit_lock → break_even → progressive_lock → trailing_stop
-      // CRITICAL: Stops only ever move in one direction (monotonic)
+      // ============= MICRO-PROFIT LOCK: Delegated to shared exit-strategies module =============
       let microProfitLockApplied = false;
-      let microLockStopPrice: number | null = null;
       
-      if (MICRO_PROFIT_LOCK_PARAMS.ENABLED && 
-          newPeakPnl > 0 && 
-          newPeakPnl < MICRO_PROFIT_LOCK_PARAMS.HANDOFF_THRESHOLD &&
-          position.stop_loss !== null) {
-        
-        // Find the highest applicable micro-lock tier based on peak P&L
-        // Sort descending so we find the highest tier first
-        const sortedTiers = [...MICRO_PROFIT_LOCK_PARAMS.TIERS].sort((a, b) => b.peakThreshold - a.peakThreshold);
-        let matchedTier: { peakThreshold: number; lockTarget: number } | null = null;
-        
-        for (const tier of sortedTiers) {
-          if (newPeakPnl >= tier.peakThreshold) {
-            matchedTier = tier;
-            break;
-          }
-        }
-        
-        if (matchedTier) {
-          // Calculate the lock stop price based on tier's lockTarget
-          const lockTargetPercent = matchedTier.lockTarget;
-          const slippageBuffer = position.entry_price * (MICRO_PROFIT_LOCK_PARAMS.SLIPPAGE_BUFFER_PERCENT / 100);
+      {
+        const microResult = evaluateMicroProfitLock(
+          { ...position, side: position.side as "BUY" | "SELL", peak_pnl_percent: newPeakPnl } as ExitPositionContext,
+          newPeakPnl,
+        );
+        if (microResult.applied && microResult.newStopLoss !== null) {
+          microProfitLockApplied = true;
+          newStopLoss = microResult.newStopLoss;
+          positionLogger.trade(`MICRO_PROFIT_LOCK_APPLIED for ${position.side}: Peak ${newPeakPnl.toFixed(3)}% → ${microResult.tierLabel} → Stop ${microResult.newStopLoss.toFixed(2)} (was ${position.stop_loss?.toFixed(2)})`);
           
-          if (position.side === "BUY") {
-            // For LONG: stop = entry + (lockTarget% of entry) - slippage buffer
-            const lockProfit = position.entry_price * (lockTargetPercent / 100);
-            microLockStopPrice = position.entry_price + lockProfit - slippageBuffer;
-            
-            // Only apply if this moves stop UP (monotonic)
-            if (microLockStopPrice > position.stop_loss) {
-              microProfitLockApplied = true;
-              newStopLoss = microLockStopPrice;
-              positionLogger.trade(`MICRO_PROFIT_LOCK_APPLIED for BUY: Peak ${newPeakPnl.toFixed(3)}% → Tier ${matchedTier.peakThreshold}% → Lock +${lockTargetPercent.toFixed(2)}% → Stop ${microLockStopPrice.toFixed(2)} (was ${position.stop_loss.toFixed(2)})`);
-            }
+          const { error: microLockError } = await supabase
+            .from("positions")
+            .update({ stop_loss: newStopLoss })
+            .eq("id", position.id)
+            .eq("status", "active");
+          
+          if (microLockError) {
+            positionLogger.error(`Error applying micro profit lock for ${position.id}: ${microLockError}`);
           } else {
-            // For SHORT: stop = entry - (lockTarget% of entry) + slippage buffer
-            const lockProfit = position.entry_price * (lockTargetPercent / 100);
-            microLockStopPrice = position.entry_price - lockProfit + slippageBuffer;
-            
-            // Only apply if this moves stop DOWN (monotonic for SHORT)
-            if (microLockStopPrice < position.stop_loss) {
-              microProfitLockApplied = true;
-              newStopLoss = microLockStopPrice;
-              positionLogger.trade(`MICRO_PROFIT_LOCK_APPLIED for SHORT: Peak ${newPeakPnl.toFixed(3)}% → Tier ${matchedTier.peakThreshold}% → Lock +${lockTargetPercent.toFixed(2)}% → Stop ${microLockStopPrice.toFixed(2)} (was ${position.stop_loss.toFixed(2)})`);
-            }
-          }
-          
-          if (microProfitLockApplied) {
-            // Update stop loss in database
-            const { error: microLockError } = await supabase
-              .from("positions")
-              .update({ stop_loss: newStopLoss })
-              .eq("id", position.id)
-              .eq("status", "active");
-            
-            if (microLockError) {
-              positionLogger.error(`Error applying micro profit lock for ${position.id}: ${microLockError}`);
-            } else {
-              updatedStopLossMap.set(position.id, newStopLoss!);
-            }
+            updatedStopLossMap.set(position.id, newStopLoss!);
           }
         }
       }
       
-      // ============= PROGRESSIVE PROFIT LOCK (0.50%+) =============
-      // For peaks between 0.50% and trailing activation threshold
-      // Takes over from micro-lock at HANDOFF_THRESHOLD
-      let progressiveLockApplied = false;
-      let progressiveLockStopPrice: number | null = null;
-      
-      if (PROGRESSIVE_PROFIT_LOCK_PARAMS.ENABLED && 
-          !microProfitLockApplied &&
-          newPeakPnl >= MICRO_PROFIT_LOCK_PARAMS.HANDOFF_THRESHOLD && 
-          newPeakPnl < PROGRESSIVE_PROFIT_LOCK_PARAMS.DEFER_TO_TRAILING_AT &&
-          position.stop_loss !== null) {
-        
-        // Find highest applicable progressive tier
-        const sortedProgTiers = [...PROGRESSIVE_PROFIT_LOCK_PARAMS.TIERS].sort((a, b) => b.peakThreshold - a.peakThreshold);
-        let matchedProgTier: { peakThreshold: number; lockTarget: number } | null = null;
-        
-        for (const tier of sortedProgTiers) {
-          if (newPeakPnl >= tier.peakThreshold) {
-            matchedProgTier = tier;
-            break;
-          }
-        }
-        
-        if (matchedProgTier) {
-          const lockTargetPercent = matchedProgTier.lockTarget;
-          const slippageBuffer = position.entry_price * (SLIPPAGE_PARAMS.BREAK_EVEN_BUFFER_PERCENT / 100);
-          
-          if (position.side === "BUY") {
-            const lockProfit = position.entry_price * (lockTargetPercent / 100);
-            progressiveLockStopPrice = position.entry_price + lockProfit - slippageBuffer;
+      // ============= PROGRESSIVE PROFIT LOCK: Delegated to shared exit-strategies module =============
+      {
+        if (!microProfitLockApplied) {
+          const progResult = evaluateProgressiveProfitLock(
+            { ...position, side: position.side as "BUY" | "SELL", peak_pnl_percent: newPeakPnl } as ExitPositionContext,
+            newPeakPnl,
+          );
+          if (progResult.applied && progResult.newStopLoss !== null) {
+            newStopLoss = progResult.newStopLoss;
+            positionLogger.trade(`PROGRESSIVE_LOCK_APPLIED for ${position.side}: Peak ${newPeakPnl.toFixed(3)}% → ${progResult.tierLabel} → Stop ${progResult.newStopLoss.toFixed(2)}`);
             
-            if (progressiveLockStopPrice > position.stop_loss) {
-              progressiveLockApplied = true;
-              newStopLoss = progressiveLockStopPrice;
-              positionLogger.trade(`PROGRESSIVE_LOCK_APPLIED for BUY: Peak ${newPeakPnl.toFixed(3)}% → Tier ${matchedProgTier.peakThreshold}% → Lock +${lockTargetPercent.toFixed(2)}% → Stop ${progressiveLockStopPrice.toFixed(2)}`);
-            }
-          } else {
-            const lockProfit = position.entry_price * (lockTargetPercent / 100);
-            progressiveLockStopPrice = position.entry_price - lockProfit + slippageBuffer;
-            
-            if (progressiveLockStopPrice < position.stop_loss) {
-              progressiveLockApplied = true;
-              newStopLoss = progressiveLockStopPrice;
-              positionLogger.trade(`PROGRESSIVE_LOCK_APPLIED for SHORT: Peak ${newPeakPnl.toFixed(3)}% → Tier ${matchedProgTier.peakThreshold}% → Lock +${lockTargetPercent.toFixed(2)}% → Stop ${progressiveLockStopPrice.toFixed(2)}`);
-            }
-          }
-          
-          if (progressiveLockApplied) {
             const { error: progLockError } = await supabase
               .from("positions")
               .update({ stop_loss: newStopLoss })
