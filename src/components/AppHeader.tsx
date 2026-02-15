@@ -28,7 +28,7 @@ const navItems = [
   { label: "Dashboard", to: "/", icon: LayoutDashboard },
   { label: "Analytics", to: "/performance", icon: BarChart3 },
   { label: "Markets", to: "/symbols", icon: Coins },
-  { label: "System", to: "/health", icon: HeartPulse },
+  { label: "Health", to: "/health", icon: HeartPulse },
 ];
 
 export const AppHeader = () => {
