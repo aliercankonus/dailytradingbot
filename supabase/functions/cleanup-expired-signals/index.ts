@@ -75,20 +75,7 @@ Deno.serve(async (req) => {
       console.log(`Deleted ${momentumDeleted || 0} momentum analysis records older than 24h`);
     }
 
-    // Clean up entry_quality_log - keep only last 7 days
-    console.log('Cleaning up entry_quality_log table (keeping last 7 days)...');
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    
-    const { error: entryQualityDeleteError, count: entryQualityDeleted } = await supabase
-      .from('entry_quality_log')
-      .delete({ count: 'exact' })
-      .lt('created_at', sevenDaysAgo);
-
-    if (entryQualityDeleteError) {
-      console.error('Error deleting old entry quality logs:', entryQualityDeleteError);
-    } else {
-      console.log(`Deleted ${entryQualityDeleted || 0} entry quality logs older than 7 days`);
-    }
 
     // Clean up shadow_mode_signals - keep only last 7 days
     console.log('Cleaning up shadow_mode_signals table (keeping last 7 days)...');
@@ -251,7 +238,6 @@ Deno.serve(async (req) => {
         rejectionLogsDeleted,
         marketRegimeDeleted: regimeDeleted || 0,
         momentumAnalysisDeleted: momentumDeleted || 0,
-        entryQualityDeleted: entryQualityDeleted || 0,
         shadowSignalsDeleted: shadowDeleted || 0,
         signals: signalsToDelete.map(s => ({
           symbol: s.symbol,

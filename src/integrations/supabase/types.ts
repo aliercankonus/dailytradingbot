@@ -143,71 +143,6 @@ export type Database = {
         }
         Relationships: []
       }
-      entry_quality_log: {
-        Row: {
-          created_at: string | null
-          entry_factors: Json | null
-          entry_score: number
-          id: string
-          macd_expanding: boolean | null
-          momentum_score: number | null
-          outcome: string | null
-          pnl_percent: number | null
-          position_id: string | null
-          pullback_depth: number | null
-          regime: string | null
-          stochrsi_position: string | null
-          symbol: string
-          timeframe_alignment_score: number | null
-          user_id: string
-          volume_confirmation: boolean | null
-        }
-        Insert: {
-          created_at?: string | null
-          entry_factors?: Json | null
-          entry_score: number
-          id?: string
-          macd_expanding?: boolean | null
-          momentum_score?: number | null
-          outcome?: string | null
-          pnl_percent?: number | null
-          position_id?: string | null
-          pullback_depth?: number | null
-          regime?: string | null
-          stochrsi_position?: string | null
-          symbol: string
-          timeframe_alignment_score?: number | null
-          user_id: string
-          volume_confirmation?: boolean | null
-        }
-        Update: {
-          created_at?: string | null
-          entry_factors?: Json | null
-          entry_score?: number
-          id?: string
-          macd_expanding?: boolean | null
-          momentum_score?: number | null
-          outcome?: string | null
-          pnl_percent?: number | null
-          position_id?: string | null
-          pullback_depth?: number | null
-          regime?: string | null
-          stochrsi_position?: string | null
-          symbol?: string
-          timeframe_alignment_score?: number | null
-          user_id?: string
-          volume_confirmation?: boolean | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "entry_quality_log_position_id_fkey"
-            columns: ["position_id"]
-            isOneToOne: false
-            referencedRelation: "positions"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       market_regime_history: {
         Row: {
           adx: number | null
@@ -1201,42 +1136,6 @@ export type Database = {
           symbol?: string
           trend_data?: Json | null
           user_id?: string
-        }
-        Relationships: []
-      }
-      strategy_performance: {
-        Row: {
-          id: string
-          last_updated: string | null
-          max_drawdown: number | null
-          status: string
-          strategy_name: string
-          total_profit: number | null
-          total_trades: number | null
-          user_id: string
-          winning_trades: number | null
-        }
-        Insert: {
-          id?: string
-          last_updated?: string | null
-          max_drawdown?: number | null
-          status?: string
-          strategy_name: string
-          total_profit?: number | null
-          total_trades?: number | null
-          user_id: string
-          winning_trades?: number | null
-        }
-        Update: {
-          id?: string
-          last_updated?: string | null
-          max_drawdown?: number | null
-          status?: string
-          strategy_name?: string
-          total_profit?: number | null
-          total_trades?: number | null
-          user_id?: string
-          winning_trades?: number | null
         }
         Relationships: []
       }
