@@ -1,4 +1,5 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { AppHeader } from "@/components/AppHeader";
 import { BotStatus } from "@/components/BotStatus";
 import { TodayPerformanceWidget } from "@/components/TodayPerformanceWidget";
@@ -38,6 +39,16 @@ const TabFallback = () => (
 );
 
 const Index = () => {
+  const location = useLocation();
+  const [activeTab, setActiveTab] = useState("dashboard");
+
+  // Reset to dashboard tab when navigating to "/" (e.g. clicking logo)
+  useEffect(() => {
+    if (location.key) {
+      setActiveTab("dashboard");
+    }
+  }, [location.key]);
+
   return (
     <SignalRefreshProvider>
     <div className="min-h-screen bg-background">
@@ -46,7 +57,7 @@ const Index = () => {
       <main className="container mx-auto px-3 sm:px-4 py-4">
         <AutoSignalGenerator />
         <TradeCounterSync />
-        <Tabs defaultValue="dashboard" className="space-y-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <div className="relative md:contents">
             <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-7 h-8">
               <TabsTrigger value="dashboard" className="min-w-[5rem] flex-shrink-0 text-xs">Dashboard</TabsTrigger>
