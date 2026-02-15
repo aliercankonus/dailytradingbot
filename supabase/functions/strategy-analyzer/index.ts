@@ -174,7 +174,9 @@ import {
   // NEW: 4-State Regime Classifier
   FOUR_STATE_REGIME,
   // NEW: Compression Micro-Range Module
-  COMPRESSION_MODULE
+  COMPRESSION_MODULE,
+  // Centralized adaptive entry thresholds
+  ADAPTIVE_ENTRY_THRESHOLDS
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
@@ -14107,17 +14109,18 @@ serve(async (req) => {
         // Position sizing based on quality score and market conditions
         
         // Adaptive thresholds - more permissive since all gates already passed
-        const ADAPTIVE_MIN_QUALITY = 55;
-        const ADAPTIVE_MIN_HTF_CONF = 55;
-        const ADAPTIVE_MAX_REVERSAL = 45;
+        const ADAPTIVE_MIN_QUALITY = ADAPTIVE_ENTRY_THRESHOLDS.MIN_QUALITY;
+        const ADAPTIVE_MIN_HTF_CONF = ADAPTIVE_ENTRY_THRESHOLDS.MIN_HTF_CONFIDENCE;
+        const ADAPTIVE_MAX_REVERSAL = ADAPTIVE_ENTRY_THRESHOLDS.MAX_REVERSAL_SCORE;
         
         // PHASE 17: Graduated position sizing based on quality (no longer conservative fallback)
+        const { SIZING } = ADAPTIVE_ENTRY_THRESHOLDS;
         const getAdaptivePositionMultiplier = (quality: number, adxValue: number): number => {
-          if (quality >= 75 && adxValue >= 30) return 0.85;  // High quality + strong trend
-          if (quality >= 70) return 0.75;  // High quality
-          if (quality >= 65) return 0.65;  // Good quality
-          if (quality >= 60) return 0.55;  // Above average
-          return 0.45;  // Baseline for Q55-59
+          if (quality >= SIZING.HIGH_QUALITY_STRONG_TREND.minQuality && adxValue >= (SIZING.HIGH_QUALITY_STRONG_TREND.minAdx ?? 0)) return SIZING.HIGH_QUALITY_STRONG_TREND.multiplier;
+          if (quality >= SIZING.HIGH_QUALITY.minQuality) return SIZING.HIGH_QUALITY.multiplier;
+          if (quality >= SIZING.GOOD_QUALITY.minQuality) return SIZING.GOOD_QUALITY.multiplier;
+          if (quality >= SIZING.ABOVE_AVERAGE.minQuality) return SIZING.ABOVE_AVERAGE.multiplier;
+          return SIZING.BASELINE.multiplier;
         };
         
         if (candidates.length === 0 && qualityScore >= ADAPTIVE_MIN_QUALITY) {

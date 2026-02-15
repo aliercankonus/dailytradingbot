@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, STRONG_TREND_HTF_BYPASS_PARAMS, TREND_CONTINUATION_TIGHT_STOPS, DEEP_STOCHRSI_HARD_GATE, CONTEXTUAL_TP_EXPANSION, FLASH_CRASH_BOUNCE_PROBE, CAPITULATION_BOUNCE_PROBE, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, STRONG_TREND_HTF_BYPASS_PARAMS, TREND_CONTINUATION_TIGHT_STOPS, DEEP_STOCHRSI_HARD_GATE, CONTEXTUAL_TP_EXPANSION, FLASH_CRASH_BOUNCE_PROBE, CAPITULATION_BOUNCE_PROBE, GRADUATED_QUALITY_GATE, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { checkPositionCorrelation, getKnownCorrelation } from "../_shared/correlation.ts";
 import { calculateATR, calculateHistoricalATRAvg } from "../_shared/indicators.ts";
 import { 
@@ -724,16 +724,17 @@ serve(async (req) => {
     // ADX >= 50 provides additional relaxation as strong trends confirm direction
     // ============================================================
     const signalQualityScore = signal.indicators?.qualityScore ?? 0;
-    const hardMinQualityThreshold = 55; // Never allow below 55
+    const hardMinQualityThreshold = GRADUATED_QUALITY_GATE.HARD_MIN;
     
     // ADX-based quality relaxation for very strong trends
-    const adxBasedQualityRelaxation = adxValue >= 50 ? 5 : adxValue >= 40 ? 3 : 0;
+    const { ADX_RELAXATION } = GRADUATED_QUALITY_GATE;
+    const adxBasedQualityRelaxation = adxValue >= ADX_RELAXATION.ULTRA_STRONG_ADX ? ADX_RELAXATION.ULTRA_STRONG_RELAX : adxValue >= ADX_RELAXATION.STRONG_ADX ? ADX_RELAXATION.STRONG_RELAX : 0;
     const effectiveQualityThreshold = Math.max(hardMinQualityThreshold, dynamicQualityThreshold - adxBasedQualityRelaxation);
     
     let qualityPositionReduction = 0;
     
     if (signalQualityScore > 0 && signalQualityScore < hardMinQualityThreshold) {
-      // HARD BLOCK: Below 55 is never allowed
+      // HARD BLOCK: Below hard minimum is never allowed
       await logExecutionRejection(supabase, user.id, signal.symbol, 'Quality Score Too Low', signal, trendData, { 
         qualityScore: signalQualityScore, 
         threshold: hardMinQualityThreshold, 
@@ -741,17 +742,17 @@ serve(async (req) => {
         confidence1h,
         isNeutralStrategy,
         adx: adxValue,
-        reason: 'Below hard minimum of 55'
+        reason: `Below hard minimum of ${hardMinQualityThreshold}`
       });
       throw new Error(`Signal quality score (${signalQualityScore}) below hard minimum (${hardMinQualityThreshold}) - trade cancelled`);
-    } else if (signalQualityScore > 0 && signalQualityScore < 60) {
-      // SOFT GATE: 55-60 → Allow with 30% position reduction
-      qualityPositionReduction = 30;
-      logger.info(`✓ GRADUATED QUALITY: Score ${signalQualityScore} in 55-60 zone → -30% position (ADX=${adxValue.toFixed(1)}, relaxation=${adxBasedQualityRelaxation})`);
+    } else if (signalQualityScore > 0 && signalQualityScore < GRADUATED_QUALITY_GATE.SOFT_ZONE_UPPER) {
+      // SOFT GATE: HARD_MIN to SOFT_ZONE_UPPER → position reduction
+      qualityPositionReduction = GRADUATED_QUALITY_GATE.SOFT_ZONE_REDUCTION_PERCENT;
+      logger.info(`✓ GRADUATED QUALITY: Score ${signalQualityScore} in ${hardMinQualityThreshold}-${GRADUATED_QUALITY_GATE.SOFT_ZONE_UPPER} zone → -${qualityPositionReduction}% position (ADX=${adxValue.toFixed(1)}, relaxation=${adxBasedQualityRelaxation})`);
     } else if (signalQualityScore > 0 && signalQualityScore < effectiveQualityThreshold) {
-      // SOFT GATE: 60-threshold → Allow with 15% position reduction
-      qualityPositionReduction = 15;
-      logger.info(`✓ GRADUATED QUALITY: Score ${signalQualityScore} in 60-${effectiveQualityThreshold} zone → -15% position (ADX=${adxValue.toFixed(1)})`);
+      // SOFT GATE: SOFT_ZONE_UPPER to threshold → smaller position reduction
+      qualityPositionReduction = GRADUATED_QUALITY_GATE.BORDERLINE_REDUCTION_PERCENT;
+      logger.info(`✓ GRADUATED QUALITY: Score ${signalQualityScore} in ${GRADUATED_QUALITY_GATE.SOFT_ZONE_UPPER}-${effectiveQualityThreshold} zone → -${qualityPositionReduction}% position (ADX=${adxValue.toFixed(1)})`);
     } else {
       logger.validation(`✓ Quality check: ${signalQualityScore} >= ${effectiveQualityThreshold} threshold`, true);
     }
