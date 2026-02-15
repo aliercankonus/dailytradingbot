@@ -1971,20 +1971,8 @@ serve(async (req) => {
     // - ADX/momentum conditions
     // ============================================================
 
-    // Fetch manually paused strategies from strategy_performance table
-    const { data: pausedStrategiesData } = await supabase
-      .from("strategy_performance")
-      .select("strategy_name")
-      .eq("user_id", userId)
-      .eq("status", "paused");
-    
-    const pausedStrategyNames = new Set(
-      (pausedStrategiesData || []).map(s => s.strategy_name.toLowerCase())
-    );
-    
-    if (pausedStrategyNames.size > 0) {
-      logger.info(`${LOG_CATEGORIES.SUMMARY} Manually paused strategies: ${Array.from(pausedStrategyNames).join(', ')}`);
-    }
+    // No manually paused strategies (strategy_performance table removed)
+    const pausedStrategyNames = new Set<string>();
 
     // Use only built-in templates that are not paused AND not in disabled legacy list
     // PHASE 17: Disable legacy strategies that lack exhaustion protection
