@@ -973,20 +973,23 @@ serve(async (req) => {
           ? VOLUME_RELAXATION_PARAMS.MIN_VOLUME_RATIO_WITH_TREND
           : VOLUME_FILTER.MIN_VOLUME_RATIO_DEFAULT;
         
-        if (volumeRatio < minVolumeRatio) {
+        // Epsilon tolerance: prevent micro-cliff rejections from rounding/measurement noise
+        const VOLUME_EPSILON = 0.005; // 0.5% tolerance
+        if (volumeRatio < minVolumeRatio - VOLUME_EPSILON) {
           await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Current Volume', signal, trendData, { 
-            volumePercent: (volumeRatio * 100).toFixed(1),
-            thresholdPercent: (minVolumeRatio * 100).toFixed(1),
+            volumePercent: (volumeRatio * 100).toFixed(2),
+            thresholdPercent: (minVolumeRatio * 100).toFixed(2),
             volumeRatio: volumeRatio.toFixed(3),
             threshold: minVolumeRatio.toFixed(3),
+            effectiveThreshold: (minVolumeRatio - VOLUME_EPSILON).toFixed(3),
             isTrendForming,
             adx: adx.toFixed(1),
             adxRising,
             trend30m,
             trend1h,
-            note: 'volumePercent = volume as % of 20-period avg (closed candles only)'
+            note: 'volumePercent = volume as % of 20-period avg (closed candles only). Epsilon tolerance: 0.5%'
           });
-          throw new Error(`Current volume too low (${(volumeRatio * 100).toFixed(1)}% of avg < ${(minVolumeRatio * 100).toFixed(0)}% threshold) - trade cancelled to avoid illiquid entry`);
+          throw new Error(`Current volume too low (${(volumeRatio * 100).toFixed(2)}% of avg < ${((minVolumeRatio - VOLUME_EPSILON) * 100).toFixed(2)}% effective threshold) - trade cancelled to avoid illiquid entry`);
         }
         
         // Log if trend formation relaxation was applied
