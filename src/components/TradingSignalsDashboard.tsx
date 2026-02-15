@@ -226,7 +226,7 @@ export const TradingSignalsDashboard = () => {
               // Volume details with threshold comparison
               if (filters.volumeRatio !== undefined) {
                 const threshold = filters.threshold !== undefined ? Number(filters.threshold) : 10;
-                details.push(`Volume: ${Number(filters.volumeRatio).toFixed(1)}x (need ${threshold}x)`);
+                details.push(`Volume: ${Number(filters.volumeRatio).toFixed(3)}x (need ${threshold.toFixed(3)}x)`);
               }
               // ADX context with graduated zone indication
               if (filters.adx !== undefined) {
