@@ -269,10 +269,10 @@ export const ExitManagementDashboard = () => {
           </div>
         ) : (
           <Tabs defaultValue="overview" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="trailing">Trailing Status</TabsTrigger>
-              <TabsTrigger value="exits">Exit Signals</TabsTrigger>
+            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-3">
+              <TabsTrigger value="overview" className="min-w-[5rem] flex-shrink-0">Overview</TabsTrigger>
+              <TabsTrigger value="trailing" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Trailing</span><span className="hidden sm:inline">Trailing Status</span></TabsTrigger>
+              <TabsTrigger value="exits" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Exits</span><span className="hidden sm:inline">Exit Signals</span></TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="space-y-4">

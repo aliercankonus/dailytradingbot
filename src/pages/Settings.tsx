@@ -228,10 +228,10 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="general">General Settings</TabsTrigger>
-          <TabsTrigger value="smart">Smart Trading</TabsTrigger>
-          <TabsTrigger value="performance">Performance Monitor</TabsTrigger>
+        <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-3">
+          <TabsTrigger value="general" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">General</span><span className="hidden sm:inline">General Settings</span></TabsTrigger>
+          <TabsTrigger value="smart" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Smart</span><span className="hidden sm:inline">Smart Trading</span></TabsTrigger>
+          <TabsTrigger value="performance" className="min-w-[5rem] flex-shrink-0"><span className="sm:hidden">Perf</span><span className="hidden sm:inline">Performance Monitor</span></TabsTrigger>
         </TabsList>
 
         <TabsContent value="smart" className="space-y-6">
