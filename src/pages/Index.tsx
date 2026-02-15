@@ -84,14 +84,14 @@ const Index = () => {
         <AutoSignalGenerator />
         <TradeCounterSync />
         <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-7">
-            <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-            <TabsTrigger value="signals">Signals</TabsTrigger>
-            <TabsTrigger value="positions">Positions</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
-            <TabsTrigger value="analytics">Analytics</TabsTrigger>
-            <TabsTrigger value="risk">Risk</TabsTrigger>
-            <TabsTrigger value="monitor">Monitor</TabsTrigger>
+          <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-7">
+            <TabsTrigger value="dashboard" className="min-w-[4.5rem] flex-shrink-0"><span className="sm:hidden">Dash</span><span className="hidden sm:inline">Dashboard</span></TabsTrigger>
+            <TabsTrigger value="signals" className="min-w-[4rem] flex-shrink-0"><span className="sm:hidden">Sigs</span><span className="hidden sm:inline">Signals</span></TabsTrigger>
+            <TabsTrigger value="positions" className="min-w-[3.5rem] flex-shrink-0"><span className="sm:hidden">Pos</span><span className="hidden sm:inline">Positions</span></TabsTrigger>
+            <TabsTrigger value="history" className="min-w-[3.5rem] flex-shrink-0"><span className="sm:hidden">Hist</span><span className="hidden sm:inline">History</span></TabsTrigger>
+            <TabsTrigger value="analytics" className="min-w-[4.5rem] flex-shrink-0"><span className="sm:hidden">Stats</span><span className="hidden sm:inline">Analytics</span></TabsTrigger>
+            <TabsTrigger value="risk" className="min-w-[3rem] flex-shrink-0">Risk</TabsTrigger>
+            <TabsTrigger value="monitor" className="min-w-[3rem] flex-shrink-0"><span className="sm:hidden">Mon</span><span className="hidden sm:inline">Monitor</span></TabsTrigger>
           </TabsList>
 
           <TabsContent value="dashboard" className="space-y-6">

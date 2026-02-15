@@ -21,12 +21,12 @@ export const DashboardHeader = () => {
   return (
     <div className="flex items-center justify-between w-full">
       <div className="flex items-center gap-3">
-        <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
-          <Activity className="h-6 w-6 text-primary-foreground" />
+        <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
+          <Activity className="h-4 w-4 sm:h-6 sm:w-6 text-primary-foreground" />
         </div>
         <div>
-          <h1 className="text-xl font-bold text-foreground">Daily Trading Bot</h1>
-          <p className="text-xs text-muted-foreground">Algorithmic Trading System</p>
+          <h1 className="text-base sm:text-xl font-bold text-foreground">Daily Trading Bot</h1>
+          <p className="text-xs text-muted-foreground hidden sm:block">Algorithmic Trading System</p>
         </div>
       </div>
       
