@@ -440,27 +440,40 @@ serve(async (req) => {
     const hedgesClosed: { symbol: string; parentSide: string; hedgePositionId: string; riskScore: number }[] = []; // NEW: Track hedges closed when risk drops
     const updatedStopLossMap = new Map<string, number>(); // Track updated stop losses by position ID
     
-    // Fetch trend data for all symbols in PARALLEL
+    // Read cached trend data from trend_snapshots (written by strategy-analyzer every 5 min)
+    // This replaces N separate calculate-trend edge function calls with a single DB query
     const trendDataMap = new Map();
-    const trendPromises = symbols.map(async (symbol) => {
-      try {
-        const trendResponse = await supabase.functions.invoke("calculate-trend", {
-          body: { symbol },
-        });
-        if (trendResponse.error) throw trendResponse.error;
-        return { symbol, data: trendResponse.data };
-      } catch (error) {
-        logger.forSymbol(symbol).error(`Failed to fetch trend: ${error}`);
-        return { symbol, data: null };
+    const TREND_STALENESS_MS = 7 * 60 * 1000; // 7 minutes — strategy-analyzer runs every 5 min
+    const now = Date.now();
+    
+    // Single batch query instead of N edge function invocations
+    const { data: trendSnapshots, error: trendSnapshotError } = await supabase
+      .from("trend_snapshots")
+      .select("symbol, snapshot_data, recorded_at")
+      .in("symbol", symbols);
+    
+    if (trendSnapshotError) {
+      logger.error(`Failed to fetch trend snapshots: ${trendSnapshotError.message}`);
+    } else if (trendSnapshots) {
+      let staleCount = 0;
+      for (const snapshot of trendSnapshots) {
+        const snapshotAge = now - new Date(snapshot.recorded_at).getTime();
+        if (snapshotAge > TREND_STALENESS_MS) {
+          staleCount++;
+          logger.forSymbol(snapshot.symbol).warn(`Trend snapshot stale (${Math.round(snapshotAge / 1000)}s old) — skipping`);
+          continue;
+        }
+        const data = snapshot.snapshot_data;
+        if (data) {
+          trendDataMap.set(snapshot.symbol, data);
+          logger.forSymbol(snapshot.symbol).signal(`Trend: ${data.trend || data.primaryTrend} (confidence: ${data.confidence}%) [cached ${Math.round(snapshotAge / 1000)}s ago]`);
+        }
       }
-    });
-    const trendResults = await Promise.all(trendPromises);
-    trendResults.forEach(({ symbol, data }) => {
-      if (data) {
-        trendDataMap.set(symbol, data);
-        logger.forSymbol(symbol).signal(`Trend: ${data.trend} (confidence: ${data.confidence}%)`);
+      if (staleCount > 0) {
+        logger.warn(`⚠️ ${staleCount}/${symbols.length} trend snapshots were stale (>7min) — strategy-analyzer may not be running`);
       }
-    });
+    }
+    logger.info(`📊 Loaded ${trendDataMap.size}/${symbols.length} trend snapshots from cache`);
     for (const position of positions) {
       const currentPrice = priceMap.get(position.symbol);
       if (currentPrice === undefined || currentPrice === null) continue;
