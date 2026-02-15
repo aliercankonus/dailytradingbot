@@ -464,24 +464,24 @@ export const ClosedPositionsDashboard = () => {
       {/* Positions Table */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
-              <CardTitle>Closed Positions History</CardTitle>
-              <CardDescription>
+              <CardTitle className="text-base sm:text-lg">Closed Positions History</CardTitle>
+              <CardDescription className="text-xs sm:text-sm">
                 {hidePartialCloses 
-                  ? `Full closes only: ${fullCloseStats.total} trades, ${fullCloseStats.winRate.toFixed(1)}% win rate`
-                  : 'All closed trading positions with outcomes'
+                  ? `Full closes: ${fullCloseStats.total} trades, ${fullCloseStats.winRate.toFixed(1)}% win rate`
+                  : 'All closed positions with outcomes'
                 }
               </CardDescription>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
               <div className="flex items-center space-x-2">
                 <Switch
                   id="hide-partial-closes"
                   checked={hidePartialCloses}
                   onCheckedChange={setHidePartialCloses}
                 />
-                <Label htmlFor="hide-partial-closes" className="text-sm cursor-pointer">
+                <Label htmlFor="hide-partial-closes" className="text-xs sm:text-sm cursor-pointer whitespace-nowrap">
                   Hide Partials
                 </Label>
               </div>
@@ -492,8 +492,8 @@ export const ClosedPositionsDashboard = () => {
                   checked={includeArchived}
                   onCheckedChange={setIncludeArchived}
                 />
-                <Label htmlFor="include-archived" className="text-sm cursor-pointer">
-                  Show Archived
+                <Label htmlFor="include-archived" className="text-xs sm:text-sm cursor-pointer whitespace-nowrap">
+                  Archived
                 </Label>
               </div>
             </div>
@@ -508,12 +508,10 @@ export const ClosedPositionsDashboard = () => {
                 <TabsTrigger value="losses" className="min-w-[4rem] flex-shrink-0">Losses ({hidePartialCloses ? fullCloseStats.losses : stats.losses})</TabsTrigger>
               </TabsList>
               
-              {/* Filters */}
-              <div className="flex flex-wrap items-center gap-2">
-                <Filter className="h-4 w-4 text-muted-foreground" />
-                
+              {/* Filters - 2x2 grid on mobile */}
+              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
                 <Select value={symbolFilter} onValueChange={setSymbolFilter}>
-                  <SelectTrigger className="w-[130px] h-8">
+                  <SelectTrigger className="w-full sm:w-[130px] h-8 text-xs sm:text-sm">
                     <SelectValue placeholder="Symbol" />
                   </SelectTrigger>
                   <SelectContent>
@@ -525,7 +523,7 @@ export const ClosedPositionsDashboard = () => {
                 </Select>
                 
                 <Select value={sideFilter} onValueChange={setSideFilter}>
-                  <SelectTrigger className="w-[100px] h-8">
+                  <SelectTrigger className="w-full sm:w-[100px] h-8 text-xs sm:text-sm">
                     <SelectValue placeholder="Side" />
                   </SelectTrigger>
                   <SelectContent>
@@ -536,7 +534,7 @@ export const ClosedPositionsDashboard = () => {
                 </Select>
                 
                 <Select value={strategyFilter} onValueChange={setStrategyFilter}>
-                  <SelectTrigger className="w-[160px] h-8">
+                  <SelectTrigger className="w-full sm:w-[160px] h-8 text-xs sm:text-sm">
                     <SelectValue placeholder="Strategy" />
                   </SelectTrigger>
                   <SelectContent>
@@ -548,8 +546,8 @@ export const ClosedPositionsDashboard = () => {
                 </Select>
                 
                 <Select value={closeReasonFilter} onValueChange={setCloseReasonFilter}>
-                  <SelectTrigger className="w-[150px] h-8">
-                    <SelectValue placeholder="Close Reason" />
+                  <SelectTrigger className="w-full sm:w-[150px] h-8 text-xs sm:text-sm">
+                    <SelectValue placeholder="Reason" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Reasons</SelectItem>
@@ -560,7 +558,7 @@ export const ClosedPositionsDashboard = () => {
                 </Select>
                 
                 {hasActiveFilters && (
-                  <Button variant="ghost" size="sm" onClick={clearFilters} className="h-8 px-2">
+                  <Button variant="ghost" size="sm" onClick={clearFilters} className="h-8 px-2 col-span-2 sm:col-span-1">
                     <X className="h-4 w-4 mr-1" />
                     Clear
                   </Button>
@@ -647,116 +645,153 @@ const PositionsTable = ({ positions, getCloseReasonBadge, onPositionClick }: Pos
   }
 
   return (
-    <div className="rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Symbol</TableHead>
-            <TableHead>Side</TableHead>
-            <TableHead>Strategy</TableHead>
-            <TableHead className="text-right">Entry</TableHead>
-            <TableHead className="text-right">Exit</TableHead>
-            <TableHead className="text-right">Quantity</TableHead>
-            <TableHead className="text-right">P&L</TableHead>
-            <TableHead className="text-right">P&L %</TableHead>
-            <TableHead className="text-right">Fees</TableHead>
-            <TableHead>Close Reason</TableHead>
-            <TableHead>Closed</TableHead>
-            <TableHead className="w-10"></TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {positions.map((position) => (
-            <TableRow 
-              key={position.id} 
-              className="cursor-pointer hover:bg-muted/50 transition-colors"
-              onMouseDown={(e) => {
-                // Prevent text selection on double-click
-                if (e.detail > 1) e.preventDefault();
-              }}
-              onPointerUp={(e) => {
-                // Use onPointerUp for better Safari compatibility
-                // Check if the click target is not the button
-                const target = e.target as HTMLElement;
-                if (!target.closest('button')) {
-                  onPositionClick(position.id);
-                }
-              }}
-            >
-              <TableCell className="font-medium">{position.symbol}</TableCell>
-              <TableCell>
-                <Badge className={`${position.side === 'BUY' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'}`}>
+    <>
+      {/* Mobile card view */}
+      <div className="md:hidden space-y-3">
+        {positions.map((position) => (
+          <div 
+            key={position.id} 
+            className="p-3 rounded-lg bg-muted/30 border border-border/50 space-y-2 cursor-pointer active:bg-muted/50"
+            onClick={() => onPositionClick(position.id)}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-sm text-foreground">{position.symbol}</span>
+                <Badge className={`text-xs ${position.side === 'BUY' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'}`}>
                   {position.side}
                 </Badge>
-              </TableCell>
-              <TableCell>
-                {position.is_hedge || position.strategy_name?.startsWith('Hedge:') ? (
-                  <Badge variant="outline" className="gap-1 bg-indigo-500/10 text-indigo-500 border-indigo-500/20">
-                    <Layers className="h-3 w-3" />
-                    {position.strategy_name || 'Hedge'}
-                  </Badge>
-                ) : (
-                  <span className="text-sm text-muted-foreground">
-                    {position.strategy_name || 'N/A'}
-                  </span>
-                )}
-              </TableCell>
-              <TableCell className="text-right">{formatPrice(position.entry_price, 4, '$')}</TableCell>
-              <TableCell className="text-right">{formatPrice(position.exit_price, 4, '$')}</TableCell>
-              <TableCell className="text-right">{formatQuantity(position.quantity, 4)}</TableCell>
-              <TableCell className="text-right">
-                <span className={(position.realized_pnl || 0) >= 0 ? 'text-success' : 'text-destructive'}>
-                  {(position.realized_pnl || 0) >= 0 ? (
-                    <TrendingUp className="h-4 w-4 inline mr-1" />
-                  ) : (
-                    <TrendingDown className="h-4 w-4 inline mr-1" />
-                  )}
-                  {formatPrice(Math.abs(position.realized_pnl || 0), 2, '$')}
-                </span>
-              </TableCell>
-              <TableCell className="text-right">
-                <span className={(position.realized_pnl_percent || 0) >= 0 ? 'text-success' : 'text-destructive'}>
-                  {formatPercent(position.realized_pnl_percent || 0)}
-                </span>
-              </TableCell>
-              <TableCell className="text-right">
-                {position.trading_fee_amount ? (
-                  <span className="text-amber-500 text-sm" title={`Fee rate: ${position.trading_fee_percent || 0.1}%`}>
-                    ${position.trading_fee_amount.toFixed(4)}
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground text-sm">—</span>
-                )}
-              </TableCell>
-              <TableCell>{getCloseReasonBadge(position)}</TableCell>
-              <TableCell>
-                <span className="text-sm text-muted-foreground">
-                  {formatDistanceToNow(new Date(position.updated_at), { addSuffix: true })}
-                </span>
-              </TableCell>
-              <TableCell>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onPointerDown={(e) => {
-                    // Stop propagation on pointer down to prevent row click
-                    e.stopPropagation();
-                  }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onPositionClick(position.id);
-                  }}
-                  title="View trade lifecycle"
-                >
-                  <History className="h-4 w-4 text-muted-foreground" />
-                </Button>
-              </TableCell>
+              </div>
+              {getCloseReasonBadge(position)}
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Entry:</span>
+                <span className="font-mono text-foreground">{formatPrice(position.entry_price, 4, '$')}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Exit:</span>
+                <span className="font-mono text-foreground">{formatPrice(position.exit_price, 4, '$')}</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className={`text-sm font-semibold font-mono ${(position.realized_pnl || 0) >= 0 ? 'text-success' : 'text-destructive'}`}>
+                {(position.realized_pnl || 0) >= 0 ? <TrendingUp className="h-3 w-3 inline mr-1" /> : <TrendingDown className="h-3 w-3 inline mr-1" />}
+                {formatPrice(Math.abs(position.realized_pnl || 0), 2, '$')} ({formatPercent(position.realized_pnl_percent || 0)})
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {formatDistanceToNow(new Date(position.updated_at), { addSuffix: true })}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table view */}
+      <div className="hidden md:block rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Symbol</TableHead>
+              <TableHead>Side</TableHead>
+              <TableHead>Strategy</TableHead>
+              <TableHead className="text-right">Entry</TableHead>
+              <TableHead className="text-right">Exit</TableHead>
+              <TableHead className="text-right">Quantity</TableHead>
+              <TableHead className="text-right">P&L</TableHead>
+              <TableHead className="text-right">P&L %</TableHead>
+              <TableHead className="text-right">Fees</TableHead>
+              <TableHead>Close Reason</TableHead>
+              <TableHead>Closed</TableHead>
+              <TableHead className="w-10"></TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+          </TableHeader>
+          <TableBody>
+            {positions.map((position) => (
+              <TableRow 
+                key={position.id} 
+                className="cursor-pointer hover:bg-muted/50 transition-colors"
+                onMouseDown={(e) => {
+                  if (e.detail > 1) e.preventDefault();
+                }}
+                onPointerUp={(e) => {
+                  const target = e.target as HTMLElement;
+                  if (!target.closest('button')) {
+                    onPositionClick(position.id);
+                  }
+                }}
+              >
+                <TableCell className="font-medium">{position.symbol}</TableCell>
+                <TableCell>
+                  <Badge className={`${position.side === 'BUY' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'}`}>
+                    {position.side}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  {position.is_hedge || position.strategy_name?.startsWith('Hedge:') ? (
+                    <Badge variant="outline" className="gap-1 bg-indigo-500/10 text-indigo-500 border-indigo-500/20">
+                      <Layers className="h-3 w-3" />
+                      {position.strategy_name || 'Hedge'}
+                    </Badge>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      {position.strategy_name || 'N/A'}
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell className="text-right">{formatPrice(position.entry_price, 4, '$')}</TableCell>
+                <TableCell className="text-right">{formatPrice(position.exit_price, 4, '$')}</TableCell>
+                <TableCell className="text-right">{formatQuantity(position.quantity, 4)}</TableCell>
+                <TableCell className="text-right">
+                  <span className={(position.realized_pnl || 0) >= 0 ? 'text-success' : 'text-destructive'}>
+                    {(position.realized_pnl || 0) >= 0 ? (
+                      <TrendingUp className="h-4 w-4 inline mr-1" />
+                    ) : (
+                      <TrendingDown className="h-4 w-4 inline mr-1" />
+                    )}
+                    {formatPrice(Math.abs(position.realized_pnl || 0), 2, '$')}
+                  </span>
+                </TableCell>
+                <TableCell className="text-right">
+                  <span className={(position.realized_pnl_percent || 0) >= 0 ? 'text-success' : 'text-destructive'}>
+                    {formatPercent(position.realized_pnl_percent || 0)}
+                  </span>
+                </TableCell>
+                <TableCell className="text-right">
+                  {position.trading_fee_amount ? (
+                    <span className="text-amber-500 text-sm" title={`Fee rate: ${position.trading_fee_percent || 0.1}%`}>
+                      ${position.trading_fee_amount.toFixed(4)}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground text-sm">—</span>
+                  )}
+                </TableCell>
+                <TableCell>{getCloseReasonBadge(position)}</TableCell>
+                <TableCell>
+                  <span className="text-sm text-muted-foreground">
+                    {formatDistanceToNow(new Date(position.updated_at), { addSuffix: true })}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onPointerDown={(e) => { e.stopPropagation(); }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onPositionClick(position.id);
+                    }}
+                    title="View trade lifecycle"
+                  >
+                    <History className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   );
 };

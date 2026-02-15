@@ -153,15 +153,15 @@ export const TradingSignalsDashboard = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Trading Signals</h2>
-        <div className="flex items-center gap-3">
-          <Badge variant="outline" className="text-sm">
-            {signals.length} Active Signals
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <h2 className="text-xl sm:text-2xl font-bold">Trading Signals</h2>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <Badge variant="outline" className="text-xs sm:text-sm">
+            {signals.length} Active
           </Badge>
-          <div className="flex items-center gap-2 border rounded-md px-3 py-1.5">
-            <Label htmlFor="auto-exec" className="text-sm cursor-pointer">
-              Auto Execution
+          <div className="flex items-center gap-2 border rounded-md px-2 sm:px-3 py-1.5">
+            <Label htmlFor="auto-exec" className="text-xs sm:text-sm cursor-pointer whitespace-nowrap">
+              Auto Exec
             </Label>
             <Switch
               id="auto-exec"
@@ -169,7 +169,7 @@ export const TradingSignalsDashboard = () => {
               onCheckedChange={toggleAutoExecution}
             />
             {!autoExecEnabled && (
-              <Badge variant="destructive" className="ml-2">OFF</Badge>
+              <Badge variant="destructive" className="ml-1">OFF</Badge>
             )}
           </div>
           <Button
@@ -177,9 +177,11 @@ export const TradingSignalsDashboard = () => {
             size="sm"
             onClick={generateSignals}
             disabled={isGenerating}
+            className="text-xs sm:text-sm"
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isGenerating ? 'animate-spin' : ''}`} />
-            {isGenerating ? 'Analyzing...' : 'Generate Signals'}
+            <RefreshCw className={`h-4 w-4 mr-1 sm:mr-2 ${isGenerating ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{isGenerating ? 'Analyzing...' : 'Generate Signals'}</span>
+            <span className="sm:hidden">{isGenerating ? '...' : 'Generate'}</span>
           </Button>
         </div>
       </div>
