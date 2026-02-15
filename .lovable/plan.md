@@ -1,86 +1,59 @@
 
 
-# Mobile-Friendly Dashboard Overhaul
+# Fix Mobile Layout Issues: Signal Rejections, Closed Positions & Main Tabs
 
-## Problems Identified
+## Problems Found
 
-Looking at the app on a 390px mobile screen, I found these issues:
+### 1. Signal Rejection Reasons -- No Mobile Layout (Critical)
+The `SignalRejectionReasons.tsx` component renders a 5-6 column `<Table>` (Symbol, Rejection Reason, Signal Diagnostics, Details, AI Analysis, Checked) with no mobile alternative. This causes severe horizontal overflow and left-right scrolling on mobile.
 
-1. **Tab navigation is unreadable** -- 7 tabs ("Dashboard", "Signals", "Positions", "History", "Analytics", "Risk", "Monitor") are crammed into one row. Text overlaps and gets cut off.
+### 2. Closed Positions History -- Overflow in Stats/Distribution Grids
+While the positions table already has a mobile card view, the **Closure Distribution** section uses `grid-cols-2 md:grid-cols-4 lg:grid-cols-7` with `text-2xl` numbers and long labels that cause overflow. The **Summary Stats** cards with `text-3xl` values also overflow on narrow screens. The pagination "Previous/Next" buttons crowd against the page text.
 
-2. **Dashboard grid stacks poorly** -- BotStatus, PortfolioMetrics, and TodayPerformanceWidget are in a `lg:grid-cols-4` layout that drops to single column, making BotStatus take full width unnecessarily while PortfolioMetrics metrics values appear cramped.
+### 3. Main Tab Strip -- Labels Still Hard to Read
+The main TabsList has `flex overflow-x-auto scrollbar-hide` and short labels, but the `min-w-[4.5rem]` / `min-w-[3rem]` values may cause tabs to appear cramped. The scroll indicator is invisible so users don't realize they can scroll.
 
-3. **PortfolioMetrics values overlap labels** -- The `grid-cols-2 md:grid-cols-3` grid with `text-2xl` values causes labels and numbers to collide on narrow screens.
-
-4. **Trade History table overflows** -- A 10-column table (Pair, Strategy, Type, Entry, Exit, Stop Loss, Take Profit, Quantity, P&L, Status) requires horizontal scrolling that's hard to use on mobile.
-
-5. **Header icons overlap the title** -- Navigation icons (Performance, Symbols, Settings) crowd against "Daily Trading Bot" text.
-
-6. **"Close All Trades" button floats awkwardly** -- Positioned with `flex justify-end`, it sits alone occupying full width.
+---
 
 ## Solution
 
-### 1. Scrollable Tab Navigation
+### 1. Signal Rejection Reasons: Mobile Card View
+- Add a `md:hidden` card layout that renders each rejection as a stacked card showing: Symbol + Severity badge, Rejection Reason badge, and Checked time
+- Hide the diagnostics/details columns on mobile (they're too complex) -- show them behind a tap-to-expand collapsible
+- Keep the existing `<Table>` behind `hidden md:block`
 
-Replace the `grid-cols-7` TabsList with a horizontally scrollable strip on mobile:
-- Use `flex overflow-x-auto` instead of `grid` on small screens
-- Each tab gets a minimum width so text doesn't truncate
-- Use shorter labels on mobile: "Dash", "Sigs", "Pos", "Hist", "Risk", "Mon"
-- Keep grid layout on `md:` and above
+### 2. Closed Positions: Tighten Mobile Layout
+- Reduce Summary Stats card title from `text-3xl` to `text-xl sm:text-3xl`
+- Reduce Closure Distribution from `text-2xl` to `text-lg sm:text-2xl` and label from `text-sm` to `text-xs sm:text-sm`
+- Simplify pagination on mobile: hide "Previous"/"Next" text, show only chevron icons
 
-### 2. Mobile-Optimized Dashboard Grid (Index.tsx)
+### 3. Main Tabs: Improve Visibility
+- Slightly increase `min-w` on the tab triggers so text doesn't appear squished
+- Add a subtle gradient fade on the right edge of the tab strip to hint at scrollability
 
-- Stack BotStatus, PortfolioMetrics, and TodayPerformanceWidget vertically on mobile (already single-col, but reorder so BotStatus is compact)
-- Move "Close All Trades" button into the header area on mobile to save vertical space
-
-### 3. PortfolioMetrics Responsive Layout
-
-- Use `grid-cols-2` on mobile with smaller text: `text-lg` instead of `text-2xl` for values
-- Truncate long labels on very small screens
-- Reduce padding from `p-6` to `p-4` on mobile
-
-### 4. Trade History: Card View on Mobile
-
-- Below `md:` breakpoint, render trades as stacked cards instead of a table
-- Each card shows: Symbol, Side badge, Entry/Exit prices, P&L
-- Hide less critical columns (Stop Loss, Take Profit, Quantity) behind a tap-to-expand
-
-### 5. Header Compact Layout
-
-- On mobile, shrink the logo and hide the subtitle "Algorithmic Trading System"
-- Navigation icons stay but tighter spacing
-
-### 6. LivePriceCard Compact Mode
-
-- Already looks reasonable but tighten padding on mobile
+---
 
 ## Technical Details
 
 ### Files to modify:
 
-1. **`src/pages/Index.tsx`**
-   - Change TabsList from `grid grid-cols-7` to `flex overflow-x-auto scrollbar-hide` on mobile, `md:grid md:grid-cols-7` on desktop
-   - Add shorter mobile tab labels
-   - Move CloseAllTradesButton positioning
+1. **`src/components/SignalRejectionReasons.tsx`** (lines ~8421-8553)
+   - Wrap existing `<Table>` in `hidden md:block`
+   - Add a `md:hidden` section above it that maps rejections to stacked cards
+   - Each card: symbol + severity badge on top row, rejection reason badge below, checked time at bottom
+   - Add a `<Collapsible>` for diagnostics detail per card
 
-2. **`src/components/PortfolioMetrics.tsx`**
-   - Change value font size: `text-lg sm:text-2xl`
-   - Reduce card padding: `p-4 sm:p-6`
+2. **`src/components/ClosedPositionsDashboard.tsx`**
+   - Lines ~376-422: Change `text-3xl` to `text-xl sm:text-3xl` on summary stat CardTitles
+   - Lines ~431-461: Change closure distribution `text-2xl` to `text-lg sm:text-2xl`, and label `text-sm` to `text-xs sm:text-sm`
+   - Lines ~586-616: On mobile, simplify pagination to icon-only buttons
 
-3. **`src/components/TradeHistory.tsx`**
-   - Add a mobile card view that renders below `md:` breakpoint
-   - Keep existing table for desktop behind `hidden md:block`
-   - Mobile cards show key fields only
+3. **`src/pages/Index.tsx`** (line 87)
+   - Adjust `min-w` values on tab triggers for better readability
+   - Wrap TabsList in a container with a right-edge gradient overlay on mobile to hint scrollability
 
-4. **`src/components/DashboardHeader.tsx`**
-   - Hide subtitle on mobile: `hidden sm:block` on the description paragraph
-   - Reduce logo size on mobile
+4. **`src/index.css`**
+   - Add a `.tab-scroll-hint` utility with a pseudo-element gradient fade on the right side
 
-5. **`src/index.css`**
-   - Add `scrollbar-hide` utility class for the tab strip
-
-6. **`src/components/BotStatus.tsx`**
-   - Reduce padding on mobile for tighter layout
-
-No new dependencies required. All changes use existing Tailwind responsive prefixes (`sm:`, `md:`, `lg:`).
+No new dependencies required. All changes use existing Tailwind responsive prefixes.
 
