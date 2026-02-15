@@ -69,8 +69,8 @@ export const MomentumStatusDashboard = () => {
   // Enhance momentum data with live prices
   const enhancedMomentumData = momentumData.map(data => {
     const livePrice = getPrice(data.symbol);
-    const priceNum = parseFloat(livePrice.price) || 0;
-    const priceChangeNum = parseFloat(livePrice.priceChangePercent) || 0;
+    const priceNum = parseFloat(livePrice?.price) || 0;
+    const priceChangeNum = parseFloat(livePrice?.priceChangePercent) || 0;
     return {
       ...data,
       livePrice: priceNum,
