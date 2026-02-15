@@ -7860,6 +7860,12 @@ export const SignalRejectionReasons = () => {
       return "⏱️ Lower timeframe not confirming";
     }
     
+    // LTF_COUNTER_ALIGNED - lower timeframes actively opposing the 4H direction
+    if (reason.includes("LTF_COUNTER_ALIGNED") || filtersStatus?.gate === "LTF_COUNTER_ALIGNED") {
+      const dir = filtersStatus?.derivedDirection?.toUpperCase() || reason.match(/(\w+)\s+blocked/i)?.[1]?.toUpperCase() || "";
+      return `🔀 ${dir} blocked — LTF trending against 4H`;
+    }
+    
     if (reason.includes("LTF_SPIKE") || filtersStatus?.gate === "LTF_SPIKE_PROTECTION") {
       return "📊 Climax candle detected - waiting";
     }
@@ -8105,6 +8111,11 @@ export const SignalRejectionReasons = () => {
     // LTF Confirmation Gate (lower timeframes don't confirm higher timeframe trend)
     if (fs?.gate === "LTF_CONFIRMATION" || reason.includes("LTF_CONFIRMATION") || 
         reason.includes("LTF confirmation") || reason.includes("Lower timeframe confirmation")) {
+      return <LtfConfirmationGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // LTF Counter-Aligned Gate (lower timeframes actively opposing 4H direction)
+    if (fs?.gate === "LTF_COUNTER_ALIGNED" || reason.includes("LTF_COUNTER_ALIGNED")) {
       return <LtfConfirmationGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
