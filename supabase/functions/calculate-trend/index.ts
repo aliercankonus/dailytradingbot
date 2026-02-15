@@ -888,11 +888,11 @@ serve(async (req) => {
           const bAtrCompressed = bRelativeATR < ATR_REGIME_THRESHOLDS.COMPRESSION_RATIO;
           const bIsRanging = bAtrCompressed && bAdx < ADX_THRESHOLDS.WEAK;
           
-          // Volume analysis for all timeframes
-          const bVolume15m = bKlines15m.length > 0 ? calculateVolumeAnalysis(bKlines15m) : null;
-          const bVolume30m = bKlines30m.length > 0 ? calculateVolumeAnalysis(bKlines30m) : null;
-          const bVolume1h = calculateVolumeAnalysis(bKlines1h);
-          const bVolume4h = calculateVolumeAnalysis(bKlines4h);
+          // Volume analysis for all timeframes (ensureClosedCandles strips incomplete candle)
+          const bVolume15m = bKlines15m.length > 0 ? calculateVolumeAnalysis(bKlines15m, { ensureClosedCandles: true, symbol, timeframe: '15m' }) : null;
+          const bVolume30m = bKlines30m.length > 0 ? calculateVolumeAnalysis(bKlines30m, { ensureClosedCandles: true, symbol, timeframe: '30m' }) : null;
+          const bVolume1h = calculateVolumeAnalysis(bKlines1h, { ensureClosedCandles: true, symbol, timeframe: '1h' });
+          const bVolume4h = calculateVolumeAnalysis(bKlines4h, { ensureClosedCandles: true, symbol, timeframe: '4h' });
           
           // Bollinger Bands for all timeframes
           const bBB15m = bPrices15m.length >= 20 ? calculateBollingerBands(bPrices15m, 20, 2) : null;
