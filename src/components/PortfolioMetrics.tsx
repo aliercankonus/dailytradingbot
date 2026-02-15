@@ -139,7 +139,7 @@ export const PortfolioMetrics = () => {
   ];
   return (
     <Card className="h-full p-4 sm:p-6 bg-gradient-to-br from-card to-card/50 border-border shadow-lg">
-      <div className="flex items-center justify-between mb-3 sm:mb-4">
+      <div className="flex items-center justify-between mb-4">
         <h3 className="text-base sm:text-lg font-semibold text-foreground">Portfolio Overview</h3>
         <div className="flex items-center gap-2 text-xs">
           <Activity
@@ -150,26 +150,59 @@ export const PortfolioMetrics = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
-        {metricsDisplay.map((metric, idx) => (
-          <div key={idx} className="space-y-1 sm:space-y-2 min-w-0">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-xs sm:text-sm text-muted-foreground truncate">{metric.label}</span>
-              <metric.icon className="h-3 w-3 sm:h-4 sm:w-4 text-primary flex-shrink-0" aria-hidden="true" />
-            </div>
-            <div className="space-y-0.5 sm:space-y-1">
-              <div className="text-lg sm:text-2xl font-bold text-foreground font-mono truncate">{metric.value}</div>
-              <div className={`text-xs sm:text-sm flex items-center gap-1 ${metric.isPositive ? "text-profit" : "text-loss"}`}>
-                {metric.isPositive ? (
-                  <TrendingUp className="h-3 w-3" aria-hidden="true" />
-                ) : (
-                  <TrendingDown className="h-3 w-3" aria-hidden="true" />
-                )}
-                {metric.change}
-              </div>
-            </div>
+      {/* Hero: Portfolio Value */}
+      <div className="text-center py-3 mb-4 border-b border-border">
+        <div className="text-xs text-muted-foreground mb-1">Portfolio Value</div>
+        <div className="text-2xl sm:text-3xl font-bold text-foreground font-mono">{metrics.portfolioValue}</div>
+        <div className={`text-xs sm:text-sm mt-1 flex items-center justify-center gap-1 ${metrics.isPositiveReturn ? "text-profit" : "text-loss"}`}>
+          {metrics.isPositiveReturn ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+          {metrics.totalReturn}
+        </div>
+      </div>
+
+      {/* Metric rows */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between p-2.5 bg-muted/30 rounded-lg">
+          <div className="flex items-center gap-2">
+            <TrendingUp className="h-3.5 w-3.5 text-primary" />
+            <span className="text-xs text-muted-foreground">Total P&L</span>
           </div>
-        ))}
+          <span className={`text-sm font-bold font-mono ${metrics.isPositivePnL ? "text-profit" : "text-loss"}`}>{metrics.totalPnL}</span>
+        </div>
+
+        <div className="flex items-center justify-between p-2.5 bg-muted/30 rounded-lg">
+          <div className="flex items-center gap-2">
+            <Wallet className="h-3.5 w-3.5 text-primary" />
+            <span className="text-xs text-muted-foreground">Realized P&L</span>
+          </div>
+          <span className={`text-sm font-bold font-mono ${metrics.isPositiveRealizedPnL ? "text-profit" : "text-loss"}`}>{metrics.realizedPnL}</span>
+        </div>
+
+        <div className="flex items-center justify-between p-2.5 bg-muted/30 rounded-lg">
+          <div className="flex items-center gap-2">
+            <Activity className="h-3.5 w-3.5 text-primary" />
+            <span className="text-xs text-muted-foreground">Unrealized P&L</span>
+          </div>
+          <span className={`text-sm font-bold font-mono ${metrics.isPositiveUnrealizedPnL ? "text-profit" : "text-loss"}`}>{metrics.unrealizedPnL}</span>
+        </div>
+
+        <div className="flex items-center justify-between p-2.5 bg-muted/30 rounded-lg">
+          <div className="flex items-center gap-2">
+            <Target className="h-3.5 w-3.5 text-primary" />
+            <span className="text-xs text-muted-foreground">Win Rate</span>
+          </div>
+          <span className="text-sm font-bold font-mono text-foreground">{metrics.winRate}</span>
+        </div>
+
+        <div className="flex items-center justify-between p-2.5 bg-muted/30 rounded-lg">
+          <div className="flex items-center gap-2">
+            <Activity className="h-3.5 w-3.5 text-primary" />
+            <span className="text-xs text-muted-foreground">Open Positions</span>
+          </div>
+          <span className="text-sm font-bold font-mono text-foreground">
+            {positions.length} <span className="text-xs text-muted-foreground font-normal">/ {riskParams?.max_open_trades || 0}</span>
+          </span>
+        </div>
       </div>
     </Card>
   );
