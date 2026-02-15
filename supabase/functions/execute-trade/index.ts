@@ -929,14 +929,18 @@ serve(async (req) => {
         const closes = klines.map((k: any[]) => parseFloat(k[4])); // Close price at index 4
         
         // Calculate basic volume metrics with safety checks
-        const recentVolumes = volumes.slice(-20);
+        // Use closed candles only: exclude the last (still-forming) candle
+        // The live candle has incomplete volume which causes false low-volume rejections
+        const closedVolumes = volumes.slice(0, -1);
+        const recentVolumes = closedVolumes.slice(-20);
         const avgVolume = recentVolumes.length > 0 
           ? recentVolumes.reduce((a: number, b: number) => a + b, 0) / recentVolumes.length 
           : 1;
-        const currentVolume = volumes[volumes.length - 1] || 0;
+        // Use last closed candle's volume for comparison (not the live forming candle)
+        const currentVolume = closedVolumes.length > 0 ? closedVolumes[closedVolumes.length - 1] : 0;
         const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
 
-        logger.info(`📊 Current 15m Volume: ${currentVolume.toFixed(2)}, Avg: ${avgVolume.toFixed(2)}, Ratio: ${volumeRatio.toFixed(2)}x`);
+        logger.info(`📊 Last Closed 15m Volume: ${currentVolume.toFixed(2)}, Avg (20 closed): ${avgVolume.toFixed(2)}, Ratio: ${(volumeRatio * 100).toFixed(1)}% of avg`);
 
         // FILTER 7: Avoid extremely low volume periods (< 20% of average)
         // RELAXATION: Allow 10% of average if ADX is rising AND 30m+1h agree (trend forming)
@@ -971,20 +975,23 @@ serve(async (req) => {
         
         if (volumeRatio < minVolumeRatio) {
           await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Current Volume', signal, trendData, { 
-            volumeRatio: volumeRatio * 100, 
-            threshold: minVolumeRatio * 100,
+            volumePercent: (volumeRatio * 100).toFixed(1),
+            thresholdPercent: (minVolumeRatio * 100).toFixed(1),
+            volumeRatio: volumeRatio.toFixed(3),
+            threshold: minVolumeRatio.toFixed(3),
             isTrendForming,
             adx: adx.toFixed(1),
             adxRising,
             trend30m,
-            trend1h 
+            trend1h,
+            note: 'volumePercent = volume as % of 20-period avg (closed candles only)'
           });
-          throw new Error(`Current volume too low (${(volumeRatio * 100).toFixed(0)}% of average < ${(minVolumeRatio * 100).toFixed(0)}% threshold) - trade cancelled to avoid illiquid entry`);
+          throw new Error(`Current volume too low (${(volumeRatio * 100).toFixed(1)}% of avg < ${(minVolumeRatio * 100).toFixed(0)}% threshold) - trade cancelled to avoid illiquid entry`);
         }
         
         // Log if trend formation relaxation was applied
         if (isTrendForming && volumeRatio < VOLUME_FILTER.MIN_VOLUME_RATIO_DEFAULT) {
-          logger.info(`📊 VOLUME RELAXATION: Allowing entry at ${(volumeRatio * 100).toFixed(0)}% volume due to trend formation (ADX=${adx.toFixed(1)} rising=${adxRising}, 30m=${trend30m}, 1h=${trend1h}, 4h=${trend4h})`);
+          logger.info(`📊 VOLUME RELAXATION: Allowing entry at ${(volumeRatio * 100).toFixed(1)}% of avg due to trend formation (ADX=${adx.toFixed(1)} rising=${adxRising}, 30m=${trend30m}, 1h=${trend1h}, 4h=${trend4h})`);
           (signal as any).volumeRelaxationApplied = true;
           (signal as any).volumeRelaxationMultiplier = VOLUME_RELAXATION_PARAMS.POSITION_SIZE_MULTIPLIER;
         } else if (!isTrendForming && volumeRatio < VOLUME_FILTER.MIN_VOLUME_RATIO_DEFAULT && volumeRatio >= 0.1 && !htf4hAlignedOrNeutral) {
@@ -992,7 +999,7 @@ serve(async (req) => {
         }
 
         if (volumeRatio > VOLUME_FILTER.VOLUME_SPIKE_RATIO) {
-          logger.info(`⚡ VOLUME SPIKE detected: ${volumeRatio.toFixed(2)}x average - high activity period`);
+          logger.info(`⚡ VOLUME SPIKE detected: ${(volumeRatio * 100).toFixed(0)}% of avg (${volumeRatio.toFixed(2)}x) - high activity period`);
         }
 
         // ============================================================
