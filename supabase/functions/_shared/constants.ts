@@ -7047,3 +7047,193 @@ export const TRADE_QUALITY_ESTIMATION = {
   MIN_QUALITY: 0,
   MAX_QUALITY: 100,
 } as const;
+
+// ============= BOLLINGER CALCULATION PARAMS (calculate-trend) =============
+// Parameters for Bollinger Bands squeeze detection
+export const BOLLINGER_CALC_PARAMS = {
+  // Bandwidth ratio threshold for squeeze detection
+  // Squeeze = current bandwidth < avgBandwidth * this ratio
+  SQUEEZE_RATIO: 0.75,
+} as const;
+
+// ============= MARKET STRUCTURE VALIDATION (calculate-trend) =============
+// Parameters for validating higher-high/lower-low patterns
+export const MARKET_STRUCTURE_VALIDATION = {
+  // Number of recent candles to analyze for structure
+  LOOKBACK_BARS: 10,
+  // Minimum structure score (%) to consider pattern valid
+  VALID_THRESHOLD_PERCENT: 50,
+} as const;
+
+// ============= DIVERGENCE POSITION SIZING (calculate-trend) =============
+// Recommended position size based on divergence type
+export const DIVERGENCE_POSITION_SIZING = {
+  ALIGNED_PERCENT: 100,
+  PULLBACK_PERCENT: 50,
+  EARLY_REVERSAL_PERCENT: 40,
+} as const;
+
+// ============= TRUE ALIGNMENT SCORING (calculate-trend) =============
+// Weights and parameters for multi-timeframe alignment calculation
+export const TRUE_ALIGNMENT_SCORING = {
+  // Timeframe weights (must sum to 100)
+  TF_4H_WEIGHT: 35,
+  TF_1H_WEIGHT: 30,
+  TF_30M_WEIGHT: 20,
+  TF_15M_WEIGHT: 15,
+  // Scoring multipliers per condition
+  ALIGNED_MULTIPLIER: 0.6,
+  NEUTRAL_MULTIPLIER: 0.3,
+  OPPOSING_PENALTY: 0.3,
+  // MACD agreement scoring
+  MACD_4_AGREE_POINTS: 15,
+  MACD_3_AGREE_POINTS: 10,
+  MACD_2_AGREE_POINTS: 5,
+  // RSI agreement scoring
+  RSI_3_PLUS_AGREE_POINTS: 10,
+  RSI_2_AGREE_POINTS: 5,
+  // Score normalization factor
+  NORMALIZATION_FACTOR: 1.18,
+  // Neutral market score caps
+  NEUTRAL_CAP_WITH_VOLUME: 70,
+  NEUTRAL_CAP_WITHOUT_VOLUME: 60,
+  // ADX contribution to weighted confidence
+  ADX_CONTRIBUTION_MAX: 10,
+  ADX_CONTRIBUTION_SCALE: 0.5,
+  ADX_CONTRIBUTION_OFFSET: 15,
+  // Volume ratio weight in total confidence
+  VOLUME_RATIO_WEIGHT: 5,
+  // Volume boost for aligned direction
+  VOLUME_BOOST_MULTIPLIER: 0.10,
+} as const;
+
+// ============= MICRO_TREND_SCORING (calculate-trend) =============
+// Point values for micro-trend alignment detection
+export const MICRO_TREND_SCORING = {
+  // Alignment scores per condition
+  BOTH_LTF_ALIGNED_POINTS: 40,
+  MACD_ALIGNED_POINTS: 30,
+  TF_1H_AGREES_POINTS: 20,
+  CONFIDENCE_HIGH_POINTS: 10,  // avgConfidence >= 55
+  ADX_MODERATE_POINTS: 10,
+  EXTRA_1H_ALIGNED_POINTS: 15,
+  PARTIAL_MACD_ALIGNED_POINTS: 20,
+  // Minimum alignment score for micro-trend
+  MIN_ALIGNMENT_SCORE: 50,
+  // Cap for partial alignment
+  PARTIAL_ALIGNMENT_CAP: 60,
+  // Minimum avg confidence for partial micro-trend
+  PARTIAL_MIN_CONFIDENCE: 55,
+  // High confidence threshold for bonus points
+  HIGH_CONFIDENCE_THRESHOLD: 55,
+} as const;
+
+// ============= NEUTRAL BAR CRITERIA (calculate-trend) =============
+// Thresholds for identifying neutral/choppy bars in persistence calculation
+export const NEUTRAL_BAR_CRITERIA = {
+  MAX_BAR_CHANGE_PERCENT: 0.3,
+  MAX_INTER_BAR_CHANGE_PERCENT: 0.4,
+} as const;
+
+// ============= STEALTH SCORING POINTS (calculate-trend) =============
+// Point allocations for stealth trend confidence scoring
+export const STEALTH_SCORING_POINTS = {
+  // Drift size (up to this max)
+  MAX_DRIFT_POINTS: 40,
+  DRIFT_MULTIPLIER: 20,
+  // ADX distance points (lower ADX = more stealth)
+  MAX_ADX_DISTANCE_POINTS: 20,
+  ADX_DISTANCE_MULTIPLIER: 2,
+  // Large drift bonuses
+  STRONG_DRIFT_BONUS: 15,     // absDrift >= 2.5
+  STRONG_DRIFT_THRESHOLD: 2.5,
+  MODERATE_DRIFT_BONUS: 10,   // absDrift >= 2.0
+  MODERATE_DRIFT_THRESHOLD: 2.0,
+  // Monotonicity bonuses
+  HIGH_MONOTONIC_BONUS: 15,    // consistency >= 80%
+  HIGH_MONOTONIC_THRESHOLD: 80,
+  MEDIUM_MONOTONIC_BONUS: 10,  // consistency >= 75%
+  MEDIUM_MONOTONIC_THRESHOLD: 75,
+  LOW_MONOTONIC_BONUS: 5,      // consistency >= 70%
+  LOW_MONOTONIC_THRESHOLD: 70,
+  // Alignment bonuses
+  TF_1H_ALIGNED_POINTS: 15,
+  TF_1H_HIGH_CONF_BONUS: 5,
+  TF_30M_ALIGNED_POINTS: 10,
+  // Penalty
+  STOCHRSI_EXTREME_PENALTY: 20,
+} as const;
+
+// ============= ATR REGIME THRESHOLDS (calculate-trend) =============
+// ATR-based volatility regime classification
+export const ATR_REGIME_THRESHOLDS = {
+  // ATR compression threshold (relative to historical avg)
+  COMPRESSION_RATIO: 0.6,
+  // Low compression for candle alignment relaxation
+  LOW_COMPRESSION_RATIO: 0.7,
+  // Volatility normal range (ATR percent of price)
+  VOLATILITY_NORMAL_MIN: 0.3,
+  VOLATILITY_NORMAL_MAX: 5.0,
+  // Range expansion detection
+  RANGE_EXPANSION_RATIO: 1.0,
+  // Volume expansion detection for hasRangeExpansion1h
+  VOLUME_EXPANSION_RATIO: 1.3,
+} as const;
+
+// ============= DIVERGENCE CONFIDENCE SCALING (calculate-trend) =============
+// Confidence multipliers for divergence signal types
+export const DIVERGENCE_CONFIDENCE_SCALING = {
+  // Pullback divergence confidence = 4h_confidence * this
+  PULLBACK_MULTIPLIER: 0.7,
+  // Early reversal confidence = 1h_confidence * this
+  EARLY_REVERSAL_MULTIPLIER: 0.65,
+  // Ranging conflict weights
+  RANGING_4H_WEIGHT: 0.6,
+  RANGING_1H_WEIGHT: 0.4,
+} as const;
+
+// ============= PULLBACK RANGE DETECTION (calculate-trend) =============
+// Range thresholds for pullback identification
+export const PULLBACK_RANGE_DETECTION = {
+  MIN_PULLBACK_PERCENT: 10,
+  MAX_PULLBACK_PERCENT: 65,
+} as const;
+
+// ============= DIVERGENCE ALIGNMENT THRESHOLDS (calculate-trend) =============
+// Minimum True Alignment scores for divergence signals
+export const DIVERGENCE_ALIGNMENT_THRESHOLDS = {
+  PULLBACK_MIN_SCORE: 55,
+  EARLY_REVERSAL_MIN_SCORE: 45,
+} as const;
+
+// ============= MACD NORMALIZED THRESHOLDS (calculate-trend) =============
+// ATR-normalized MACD thresholds for momentum classification
+export const MACD_NORMALIZED_THRESHOLDS = {
+  // MACD must be this fraction of ATR to count as "expanding"
+  EXPANDING_RATIO: 0.005,
+  // MACD must be this fraction of ATR to count as "strong"
+  STRONG_RATIO: 0.05,
+  // Batch mode: MACD-signal gap ATR ratio for "strong"
+  BATCH_STRONG_RATIO: 0.001,
+} as const;
+
+// ============= MOMENTUM STATE INLINE (calculate-trend) =============
+// Inline thresholds for momentum state classification
+export const MOMENTUM_STATE_PARAMS = {
+  // StochRSI extremes for exhaustion detection
+  EXHAUSTION_STOCHRSI_HIGH: 90,
+  EXHAUSTION_STOCHRSI_LOW: 10,
+  // Strong alignment confidence thresholds
+  STRONG_4H_CONFIDENCE: 55,
+  STRONG_1H_CONFIDENCE: 50,
+  // Candle alignment thresholds
+  STANDARD_ALIGNMENT_RATIO: 0.67,   // 2/3 majority
+  COMPRESSED_ALIGNMENT_RATIO: 0.34, // 1/3 majority in compression
+  // Divergence detection thresholds
+  PRICE_MOVEMENT_MIN_PERCENT: 0.001,
+  MACD_MOVEMENT_MIN_PERCENT: 0.05,
+  // Swing distance log threshold
+  SWING_DISTANCE_LOG_THRESHOLD: 5,
+  // Volume boost for confirmed direction
+  VOLUME_DIRECTION_BOOST: 1.10,
+} as const;
