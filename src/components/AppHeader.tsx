@@ -37,13 +37,13 @@ export const AppHeader = () => {
   const getInitials = (email: string) => email.substring(0, 2).toUpperCase();
 
   const navLinkClasses =
-    "px-3.5 py-2 text-sm font-medium rounded-lg transition-all duration-200 text-muted-foreground hover:text-foreground hover:bg-secondary/70 flex items-center gap-2";
+    "px-4 py-2.5 text-[15px] font-medium rounded-lg transition-all duration-200 text-muted-foreground hover:text-foreground hover:bg-secondary/70 flex items-center gap-2";
   const activeClasses = "text-primary bg-primary/10";
 
   return (
     <header className="sticky top-0 z-50 bg-background/95 backdrop-blur-md border-b border-border">
       <div className="container mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between h-20">
           {/* Left: Brand + Nav */}
           <div className="flex items-center gap-6">
           <Link to="/" className="flex items-center shrink-0 hover:opacity-80 transition-opacity">
