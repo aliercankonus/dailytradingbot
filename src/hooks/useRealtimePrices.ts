@@ -29,7 +29,7 @@ export const useRealtimePrices = (symbols?: string[]) => {
   const MAX_RECONNECT_ATTEMPTS = 5;
   const BASE_RECONNECT_DELAY = 2000;
   const CONNECTION_TIMEOUT = 15000;
-  const UPDATE_BATCH_DELAY = 100; // Batch updates every 100ms
+  const UPDATE_BATCH_DELAY = 250; // Batch updates every 250ms for smoother performance
   
   const monitor = useWebSocketMonitor();
   const connectionId = useRef(`realtime-prices-${Date.now()}`);
@@ -46,28 +46,24 @@ export const useRealtimePrices = (symbols?: string[]) => {
   // Batch price updates for performance
   const flushPendingUpdates = useCallback(() => {
     if (pendingUpdatesRef.current.size > 0) {
-      // CRITICAL FIX: Snapshot pending updates BEFORE clearing to prevent race condition
       const updates = new Map(pendingUpdatesRef.current);
-      pendingUpdatesRef.current.clear(); // Clear immediately before async state update
+      pendingUpdatesRef.current.clear();
       
-      console.log('[RealtimePrices] Flushing', updates.size, 'pending price updates');
       setPrices((prev) => {
         const newPrices = new Map(prev);
         updates.forEach((price, symbol) => {
           newPrices.set(symbol, price);
-          (newPrices as any)[symbol] = price; // allow prices[symbol] access
+          (newPrices as any)[symbol] = price;
         });
-        console.log('[RealtimePrices] Updated prices map, now has', newPrices.size, 'symbols');
         return newPrices;
       });
-      setPriceVersion(v => v + 1); // Force re-render
+      setPriceVersion(v => v + 1);
     }
     updateTimerRef.current = null;
   }, []);
 
   const schedulePriceUpdate = useCallback((symbol: string, data: RealtimePrice) => {
     pendingUpdatesRef.current.set(symbol, data);
-    
     if (updateTimerRef.current === null) {
       updateTimerRef.current = window.setTimeout(flushPendingUpdates, UPDATE_BATCH_DELAY);
     }
@@ -146,22 +142,19 @@ export const useRealtimePrices = (symbols?: string[]) => {
             ws.onmessage = (event) => {
               try {
                 const data = JSON.parse(event.data);
-                console.log('[RealtimePrices] Received message:', data.type || 'price_update', data.symbol);
                 
                 if (data.type === 'connected') {
-                  console.log('[RealtimePrices] Successfully connected to realtime prices');
+                  console.log('[RealtimePrices] Connected to price feed');
                 } else if (data.type === 'error') {
-                  console.error('[RealtimePrices] Error from server:', data.message);
+                  console.error('[RealtimePrices] Server error:', data.message);
                   setError(data.message);
                 } else if (data.type === 'heartbeat') {
-                  // Heartbeat received, no response needed
+                  // Heartbeat received
                 } else if (data.symbol) {
-                  // Use batched updates for better performance
-                  console.log('[RealtimePrices] Scheduling price update for', data.symbol, 'price:', data.price);
                   schedulePriceUpdate(data.symbol, data);
                 }
               } catch (err) {
-                console.error('[RealtimePrices] Error parsing WebSocket message:', err);
+                console.error('[RealtimePrices] Parse error:', err);
               }
             };
 

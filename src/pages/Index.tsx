@@ -1,37 +1,47 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate, } from "react-router-dom";
 import { Settings, Coins, BarChart3 } from "lucide-react";
+import { lazy, Suspense } from "react";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { BotStatus } from "@/components/BotStatus";
 import { TodayPerformanceWidget } from "@/components/TodayPerformanceWidget";
 import { TradeHistory } from "@/components/TradeHistory";
 import { PortfolioMetrics } from "@/components/PortfolioMetrics";
 import { LivePriceCard } from "@/components/LivePriceCard";
-import { TradingSignalsDashboard } from "@/components/TradingSignalsDashboard";
-import { RiskManagementControls } from "@/components/RiskManagementControls";
-import { PerformanceAnalytics } from "@/components/PerformanceAnalytics";
-import { ActivePositions } from "@/components/ActivePositions";
-import { ClosedPositionsDashboard } from "@/components/ClosedPositionsDashboard";
-import { EarlyWarningExitsDashboard } from "@/components/EarlyWarningExitsDashboard";
 import { CloseAllTradesButton } from "@/components/CloseAllTradesButton";
-import { WebSocketHealthDashboard } from "@/components/WebSocketHealthDashboard";
-import { OrderFlowDashboard } from "@/components/OrderFlowDashboard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
 import { TradeCounterSync } from "@/components/TradeCounterSync";
-import { TrailingStopMonitor } from "@/components/TrailingStopMonitor";
+import { Skeleton } from "@/components/ui/skeleton";
 
-import { PositionsSummary } from "@/components/PositionsSummary";
-import { AIAnalysisDashboard } from "@/components/AIAnalysisDashboard";
-import { LossAttributionDashboard } from "@/components/LossAttributionDashboard";
-import { MomentumStatusDashboard } from "@/components/MomentumStatusDashboard";
-import { RegimeTransitionLog } from "@/components/RegimeTransitionLog";
-import { ExitManagementDashboard } from "@/components/ExitManagementDashboard";
-import { MarketConditionsDashboard } from "@/components/MarketConditionsDashboard";
-import ModuleInventoryDashboard from "@/components/ModuleInventoryDashboard";
-
-import { BlockedSignalsWidget } from "@/components/BlockedSignalsWidget";
-import { SignalRejectionMonitor } from "@/components/SignalRejectionMonitor";
 import { SignalRefreshProvider } from "@/contexts/SignalRefreshContext";
+
+// Lazy load heavy tab content that isn't visible on initial render
+const TradingSignalsDashboard = lazy(() => import("@/components/TradingSignalsDashboard").then(m => ({ default: m.TradingSignalsDashboard })));
+const MarketConditionsDashboard = lazy(() => import("@/components/MarketConditionsDashboard").then(m => ({ default: m.MarketConditionsDashboard })));
+const BlockedSignalsWidget = lazy(() => import("@/components/BlockedSignalsWidget").then(m => ({ default: m.BlockedSignalsWidget })));
+const SignalRejectionMonitor = lazy(() => import("@/components/SignalRejectionMonitor").then(m => ({ default: m.SignalRejectionMonitor })));
+const AIAnalysisDashboard = lazy(() => import("@/components/AIAnalysisDashboard").then(m => ({ default: m.AIAnalysisDashboard })));
+const ActivePositions = lazy(() => import("@/components/ActivePositions").then(m => ({ default: m.ActivePositions })));
+const PositionsSummary = lazy(() => import("@/components/PositionsSummary").then(m => ({ default: m.PositionsSummary })));
+const ExitManagementDashboard = lazy(() => import("@/components/ExitManagementDashboard").then(m => ({ default: m.ExitManagementDashboard })));
+const TrailingStopMonitor = lazy(() => import("@/components/TrailingStopMonitor").then(m => ({ default: m.TrailingStopMonitor })));
+const EarlyWarningExitsDashboard = lazy(() => import("@/components/EarlyWarningExitsDashboard").then(m => ({ default: m.EarlyWarningExitsDashboard })));
+const ClosedPositionsDashboard = lazy(() => import("@/components/ClosedPositionsDashboard").then(m => ({ default: m.ClosedPositionsDashboard })));
+const PerformanceAnalytics = lazy(() => import("@/components/PerformanceAnalytics").then(m => ({ default: m.PerformanceAnalytics })));
+const LossAttributionDashboard = lazy(() => import("@/components/LossAttributionDashboard").then(m => ({ default: m.LossAttributionDashboard })));
+const RiskManagementControls = lazy(() => import("@/components/RiskManagementControls").then(m => ({ default: m.RiskManagementControls })));
+const MomentumStatusDashboard = lazy(() => import("@/components/MomentumStatusDashboard").then(m => ({ default: m.MomentumStatusDashboard })));
+const ModuleInventoryDashboard = lazy(() => import("@/components/ModuleInventoryDashboard"));
+const RegimeTransitionLog = lazy(() => import("@/components/RegimeTransitionLog").then(m => ({ default: m.RegimeTransitionLog })));
+const OrderFlowDashboard = lazy(() => import("@/components/OrderFlowDashboard").then(m => ({ default: m.OrderFlowDashboard })));
+const WebSocketHealthDashboard = lazy(() => import("@/components/WebSocketHealthDashboard").then(m => ({ default: m.WebSocketHealthDashboard })));
+
+const TabFallback = () => (
+  <div className="space-y-4">
+    <Skeleton className="h-32 w-full" />
+    <Skeleton className="h-64 w-full" />
+  </div>
+);
 
 const Index = () => {
   const navigate = useNavigate();
@@ -108,69 +118,81 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="signals" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                <MarketConditionsDashboard />
+            <Suspense fallback={<TabFallback />}>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2">
+                  <MarketConditionsDashboard />
+                </div>
+                <div className="lg:col-span-1">
+                  <BlockedSignalsWidget />
+                </div>
               </div>
-              <div className="lg:col-span-1">
-                <BlockedSignalsWidget />
-              </div>
-            </div>
-            <SignalRejectionMonitor />
-            <TradingSignalsDashboard />
-            <AIAnalysisDashboard />
+              <SignalRejectionMonitor />
+              <TradingSignalsDashboard />
+              <AIAnalysisDashboard />
+            </Suspense>
           </TabsContent>
 
           <TabsContent value="positions" className="space-y-6">
-            <PositionsSummary />
-            <Tabs defaultValue="active" className="w-full">
-              <TabsList className="grid w-full grid-cols-4">
-                <TabsTrigger value="active">Active</TabsTrigger>
-                <TabsTrigger value="exit-mgmt">Exit Mgmt</TabsTrigger>
-                <TabsTrigger value="trailing">Trailing Stops</TabsTrigger>
-                <TabsTrigger value="early-exits">Early Exits</TabsTrigger>
-              </TabsList>
-              <TabsContent value="active" className="mt-4">
-                <ActivePositions />
-              </TabsContent>
-              <TabsContent value="exit-mgmt" className="mt-4">
-                <ExitManagementDashboard />
-              </TabsContent>
-              <TabsContent value="trailing" className="mt-4">
-                <TrailingStopMonitor />
-              </TabsContent>
-              <TabsContent value="early-exits" className="mt-4">
-                <EarlyWarningExitsDashboard />
-              </TabsContent>
-            </Tabs>
+            <Suspense fallback={<TabFallback />}>
+              <PositionsSummary />
+              <Tabs defaultValue="active" className="w-full">
+                <TabsList className="grid w-full grid-cols-4">
+                  <TabsTrigger value="active">Active</TabsTrigger>
+                  <TabsTrigger value="exit-mgmt">Exit Mgmt</TabsTrigger>
+                  <TabsTrigger value="trailing">Trailing Stops</TabsTrigger>
+                  <TabsTrigger value="early-exits">Early Exits</TabsTrigger>
+                </TabsList>
+                <TabsContent value="active" className="mt-4">
+                  <ActivePositions />
+                </TabsContent>
+                <TabsContent value="exit-mgmt" className="mt-4">
+                  <ExitManagementDashboard />
+                </TabsContent>
+                <TabsContent value="trailing" className="mt-4">
+                  <TrailingStopMonitor />
+                </TabsContent>
+                <TabsContent value="early-exits" className="mt-4">
+                  <EarlyWarningExitsDashboard />
+                </TabsContent>
+              </Tabs>
+            </Suspense>
           </TabsContent>
 
           <TabsContent value="history">
-            <ClosedPositionsDashboard />
+            <Suspense fallback={<TabFallback />}>
+              <ClosedPositionsDashboard />
+            </Suspense>
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-6">
-            <PerformanceAnalytics />
-            <LossAttributionDashboard />
+            <Suspense fallback={<TabFallback />}>
+              <PerformanceAnalytics />
+              <LossAttributionDashboard />
+            </Suspense>
           </TabsContent>
 
           <TabsContent value="risk">
-            <RiskManagementControls />
+            <Suspense fallback={<TabFallback />}>
+              <RiskManagementControls />
+            </Suspense>
           </TabsContent>
 
           <TabsContent value="monitor" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                <MomentumStatusDashboard />
+            <Suspense fallback={<TabFallback />}>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2">
+                  <MomentumStatusDashboard />
+                </div>
+                <div className="lg:col-span-1">
+                  <ModuleInventoryDashboard />
+                </div>
               </div>
-              <div className="lg:col-span-1">
-                <ModuleInventoryDashboard />
-              </div>
-            </div>
-            <RegimeTransitionLog />
-            
-            <OrderFlowDashboard />
-            <WebSocketHealthDashboard />
+              <RegimeTransitionLog />
+              
+              <OrderFlowDashboard />
+              <WebSocketHealthDashboard />
+            </Suspense>
           </TabsContent>
         </Tabs>
       </main>
