@@ -1119,10 +1119,10 @@ serve(async (req) => {
               trueAlignment: bTrueAlignment,
               
               timeframes: {
-                "15m": bTrend15m ? { trend: bTrend15m.trend, confidence: bTrend15m.confidence, indicators: bTrend15m.indicators } : null,
-                "30m": bTrend30m ? { trend: bTrend30m.trend, confidence: bTrend30m.confidence, indicators: bTrend30m.indicators } : null,
-                "1h": { trend: bTrend1h.trend, confidence: bTrend1h.confidence, indicators: bTrend1h.indicators },
-                "4h": { trend: bTrend4h.trend, confidence: bTrend4h.confidence, indicators: bTrend4h.indicators },
+                "15m": bTrend15m ? { trend: bTrend15m.trend, extendedTrend: bTrend15m.extendedTrend, confidence: bTrend15m.confidence, indicators: bTrend15m.indicators } : null,
+                "30m": bTrend30m ? { trend: bTrend30m.trend, extendedTrend: bTrend30m.extendedTrend, confidence: bTrend30m.confidence, indicators: bTrend30m.indicators } : null,
+                "1h": { trend: bTrend1h.trend, extendedTrend: bTrend1h.extendedTrend, confidence: bTrend1h.confidence, indicators: bTrend1h.indicators },
+                "4h": { trend: bTrend4h.trend, extendedTrend: bTrend4h.extendedTrend, confidence: bTrend4h.confidence, indicators: bTrend4h.indicators },
               },
               
               stochasticRsi: {
@@ -1895,10 +1895,10 @@ serve(async (req) => {
       },
       trueAlignment: trueAlignment,
       timeframes: {
-        "15m": { trend: trend15m.trend, confidence: trend15m.confidence, enhancedConfidence: enhancedConfidence15m, indicators: trend15m.indicators },
-        "30m": { trend: trend30m.trend, confidence: trend30m.confidence, enhancedConfidence: enhancedConfidence30m, indicators: trend30m.indicators },
-        "1h": { trend: trend1h.trend, confidence: trend1h.confidence, enhancedConfidence: enhancedConfidence1h, indicators: trend1h.indicators },
-        "4h": { trend: trend4h.trend, confidence: trend4h.confidence, enhancedConfidence: enhancedConfidence4h, indicators: trend4h.indicators },
+        "15m": { trend: trend15m.trend, extendedTrend: trend15m.extendedTrend, confidence: trend15m.confidence, enhancedConfidence: enhancedConfidence15m, indicators: trend15m.indicators },
+        "30m": { trend: trend30m.trend, extendedTrend: trend30m.extendedTrend, confidence: trend30m.confidence, enhancedConfidence: enhancedConfidence30m, indicators: trend30m.indicators },
+        "1h": { trend: trend1h.trend, extendedTrend: trend1h.extendedTrend, confidence: trend1h.confidence, enhancedConfidence: enhancedConfidence1h, indicators: trend1h.indicators },
+        "4h": { trend: trend4h.trend, extendedTrend: trend4h.extendedTrend, confidence: trend4h.confidence, enhancedConfidence: enhancedConfidence4h, indicators: trend4h.indicators },
       },
       stochasticRsi: {
         "15m": { ...stochRsi15m, kArray: undefined },  // Don't include large arrays in response
