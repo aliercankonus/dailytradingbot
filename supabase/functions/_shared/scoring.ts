@@ -3208,6 +3208,8 @@ export const deriveTradeDirection = (
   // This captures bounce setups that lagging trend labels miss
   // TIGHTENED: Now requires regime ∈ {EXHAUSTION, RANGE} AND HTF weakening (conf4h < 60% AND conf1h < 55%)
   // EXCEPTION: Absolute extreme StochRSI (K >= 98 or K <= 2) can bypass regime gate in EARLY_TREND
+  // Hoisted flag for cross-tier visibility (used by Tier 9.5 evidence)
+  let hoistedDecliningStrongTrendBypass = false;
   if (EXHAUSTION_REVERSAL_OVERRIDE_PARAMS.ENABLED) {
     const ER = EXHAUSTION_REVERSAL_OVERRIDE_PARAMS;
     
@@ -3300,6 +3302,7 @@ export const deriveTradeDirection = (
     const usingAbsoluteBypass = absoluteExtremeBypass;
     const usingContextualBypass = contextualExtremeBypass && !absoluteExtremeBypass;
     const usingDecliningStrongTrendBypass = decliningStrongTrendBypass && !absoluteExtremeBypass && !contextualExtremeBypass;
+    hoistedDecliningStrongTrendBypass = usingDecliningStrongTrendBypass;
     
     if (!tier025GatePasses) {
       // Log skip reason for debugging
@@ -4276,6 +4279,15 @@ export const deriveTradeDirection = (
       const priceDir: TradeDirection = priceMove > 0 ? "long" : "short";
       if (!biasDirection) biasDirection = priceDir;
       biasEvidence.push(`PRICE_ACTION(${priceMove > 0 ? '+' : ''}${priceMove.toFixed(2)}%)`);
+    }
+    
+    // Evidence 5: Declining Strong Trend structural context
+    // Orthogonal to oscillator state — represents controlled regime decay, not just oversold reading
+    // Only fires when Tier 0.25 bypass is active (slope bounded, StochRSI extreme, STRONG_TREND regime)
+    // Cannot stack with contextual or absolute exhaustion bypasses (avoids double-counting regime logic)
+    if (hoistedDecliningStrongTrendBypass) {
+      biasScore += 1;
+      biasEvidence.push(`DECLINING_STRONG_TREND_PULLBACK(slope=${adxSlope.toFixed(2)}, regime=STRONG_TREND)`);
     }
     
     // Require at least MIN_EVIDENCE_SCORE sources
