@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, DYNAMIC_REVERSAL_EXIT, COMPRESSION_TRADE_EXIT, STRATEGY_EXIT_ADJUSTMENTS, HTF_ALIGNMENT_EXIT, TRAILING_STOP_INLINE, MICRO_TREND_EXIT, HEDGE_EXIT_PARAMS, REVERSAL_RISK_EXIT_SCORES, TIME_STOP_MULTIPLIER as TIME_STOP_MULT, PARTIAL_TP_LADDER, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, DYNAMIC_REVERSAL_EXIT, COMPRESSION_TRADE_EXIT, STRATEGY_EXIT_ADJUSTMENTS, HTF_ALIGNMENT_EXIT, TRAILING_STOP_INLINE, MICRO_TREND_EXIT, MOMENTUM_CONTINUATION_EXIT, HEDGE_EXIT_PARAMS, REVERSAL_RISK_EXIT_SCORES, TIME_STOP_MULTIPLIER as TIME_STOP_MULT, PARTIAL_TP_LADDER, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import {
   evaluateDecayVelocity,
   evaluateMicroProfitLock,
@@ -454,6 +454,7 @@ serve(async (req) => {
       
       // ===== ENTRY TYPE DETECTION (needed early for trailing overrides) =====
       const isMicroTrendEntry = position.entry_exception_type === 'MICRO_TREND';
+      const isMomentumContinuationEntry = position.entry_exception_type === 'MOMENTUM_CONTINUATION';
       
       // ============================================================
       // DYNAMIC THRESHOLDS (aligned with strategy-analyzer)
@@ -1116,11 +1117,17 @@ serve(async (req) => {
       }
       
       // ============= DECAY VELOCITY: Delegated to shared exit-strategies module =============
+      // MOMENTUM_CONTINUATION OVERRIDE: Lower activation threshold so decay engages earlier
+      // This makes decay the primary exit for continuation entries (captures 72-78% vs trailing's 37-46%)
       {
+        const decayActivationOverride = isMomentumContinuationEntry 
+          ? MOMENTUM_CONTINUATION_EXIT.DECAY_ACTIVATION_PERCENT 
+          : userSettings.activationPercent;
+        
         const decayResult = evaluateDecayVelocity(
           { ...position, side: position.side as "BUY" | "SELL", peak_pnl_percent: newPeakPnl } as ExitPositionContext,
           { currentPrice, pnlPercent, atrPercent, atr: atrData?.atr || currentPrice * 0.02, trendData: trendDataForPosition } as ExitMarketContext,
-          { activationPercent: userSettings.activationPercent, trailingAggressiveness: userSettings.trailingAggressiveness, progressiveLockEnabled: userSettings.progressiveLockEnabled, stalePeakProtectionEnabled: userSettings.stalePeakProtectionEnabled, decayVelocityExitEnabled: userSettings.decayVelocityExitEnabled },
+          { activationPercent: decayActivationOverride, trailingAggressiveness: userSettings.trailingAggressiveness, progressiveLockEnabled: userSettings.progressiveLockEnabled, stalePeakProtectionEnabled: userSettings.stalePeakProtectionEnabled, decayVelocityExitEnabled: userSettings.decayVelocityExitEnabled },
         );
         
         if (decayResult.shouldExit) {
@@ -1545,6 +1552,12 @@ serve(async (req) => {
           baseTrailingDistance = fixedDistance;
           minTrailingDistance = fixedDistance; // No HTF adjustment for micro-trend
           positionLogger.trade(`MICRO_TREND TRAILING: Fixed ${MICRO_TREND_EXIT.TRAILING_DISTANCE_PERCENT}% distance = ${fixedDistance.toFixed(2)} (activation: ${MICRO_TREND_EXIT.TRAILING_ACTIVATION_PERCENT}%)`);
+        } else if (isMomentumContinuationEntry) {
+          // MOMENTUM_CONTINUATION: Wider trailing distance (25% wider) so decay fires before trailing
+          // Decay exit captures 72-78% vs trailing's 37-46% — trailing is fallback only
+          baseTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier * MOMENTUM_CONTINUATION_EXIT.TRAILING_DISTANCE_MULTIPLIER, currentPrice * (TRAILING_STOP_INLINE.MIN_TRAILING_DISTANCE_PERCENT / 100));
+          minTrailingDistance = baseTrailingDistance * htfAlignmentMultiplier;
+          positionLogger.trade(`MOMENTUM_CONTINUATION TRAILING: Wider distance ×${MOMENTUM_CONTINUATION_EXIT.TRAILING_DISTANCE_MULTIPLIER} = ${baseTrailingDistance.toFixed(2)} (decay is primary exit)`);
         } else {
           baseTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * (TRAILING_STOP_INLINE.MIN_TRAILING_DISTANCE_PERCENT / 100));
           minTrailingDistance = baseTrailingDistance * htfAlignmentMultiplier; // Apply HTF multiplier

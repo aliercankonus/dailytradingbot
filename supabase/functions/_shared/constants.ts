@@ -6891,6 +6891,28 @@ export const MICRO_TREND_EXIT = {
   USE_FIXED_TRAIL_DISTANCE: true,
 } as const;
 
+// ============= MOMENTUM_CONTINUATION EXIT PARAMS (monitor-positions) =============
+// MOMENTUM_CONTINUATION = structural trend rider (avg peak ~0.81%, avg hold ~66min)
+// Data shows: smart_aits_decay exits capture 72-78%, trailing_stop exits capture 37-46%
+// Architecture: Decay exit is primary (momentum deterioration), trailing is fallback (price retrace)
+// This gives each module its own exit identity instead of sharing generic trailing logic
+export const MOMENTUM_CONTINUATION_EXIT = {
+  // ===== DECAY EXIT: PRIMARY (momentum deterioration → exit) =====
+  // Lower activation threshold so decay engages earlier for continuation entries
+  DECAY_ACTIVATION_PERCENT: 0.30,  // Decay monitors from 0.30% peak (vs default ~1.0%)
+  // Tighter decay velocity threshold (exit faster on momentum loss)
+  DECAY_VELOCITY_MULTIPLIER: 0.85,  // 15% more sensitive to decay velocity
+  
+  // ===== TRAILING STOP: SECONDARY (fallback only) =====
+  // Wider trailing distance to prevent price-retrace exits before decay can fire
+  TRAILING_DISTANCE_MULTIPLIER: 1.25,  // 25% wider trailing than standard
+  // No change to activation - trailing activates normally but with wider leash
+  
+  // ===== NO AGGRESSIVE BREAK-EVEN =====
+  // Don't lock BE too early - continuation moves need room to breathe
+  DELAY_BE_MINUTES: 30,  // Don't apply break-even until 30min into the trade
+} as const;
+
 // ============= HEDGE EXIT PARAMS (monitor-positions) =============
 // Hedge position sizing and stop/TP parameters
 export const HEDGE_EXIT_PARAMS = {
