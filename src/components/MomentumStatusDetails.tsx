@@ -150,18 +150,28 @@ export const MomentumStatusDetails = () => {
                       }`}
                     >
                       {/* Desktop summary */}
-                      <div className="hidden sm:flex items-center px-4 py-3 gap-4">
-                        <div className="flex items-center gap-3 min-w-[140px] shrink-0">
-                          <span className="text-base">{getMomentumEmoji(momentumState)}</span>
-                          <span className="font-semibold text-sm">{data.symbol}</span>
-                          {getMomentumBadge(momentumState)}
+                      <div className="hidden sm:flex flex-col px-4 py-3 gap-1.5">
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-3 min-w-[140px] shrink-0">
+                            <span className="text-base">{getMomentumEmoji(momentumState)}</span>
+                            <span className="font-semibold text-sm">{data.symbol}</span>
+                            {getMomentumBadge(momentumState)}
+                          </div>
+                          <span className="text-xs text-muted-foreground flex-1 truncate">
+                            {getSummaryText(data)}
+                          </span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Badge
+                              variant={trend === "bullish" ? "default" : trend === "bearish" ? "destructive" : "secondary"}
+                              className={`text-[10px] px-1.5 py-0 ${trend === "ranging" ? "bg-slate-600 text-white dark:bg-slate-500" : ""}`}
+                            >
+                              {getTrendIcon(trend ?? "unknown")}
+                              <span className="ml-1">{trend ?? "?"}</span>
+                            </Badge>
+                            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
+                          </div>
                         </div>
-
-                        <span className="text-xs text-muted-foreground flex-1 truncate">
-                          {getSummaryText(data)}
-                        </span>
-
-                        <div className="flex items-center gap-3 shrink-0">
+                        <div className="flex items-center gap-4 pl-[140px]">
                           <span className="text-xs text-muted-foreground">
                             4h/1h: <span className="font-medium text-foreground">{higherTimeframeFilter?.trend4h ?? "?"}/{higherTimeframeFilter?.trend1h ?? "?"}</span>
                             {higherTimeframeFilter?.aligned ? (
@@ -178,14 +188,6 @@ export const MomentumStatusDetails = () => {
                               {adxValue.toFixed(1)}
                             </span>
                           </span>
-                          <Badge
-                            variant={trend === "bullish" ? "default" : trend === "bearish" ? "destructive" : "secondary"}
-                            className={`text-[10px] px-1.5 py-0 ${trend === "ranging" ? "bg-slate-600 text-white dark:bg-slate-500" : ""}`}
-                          >
-                            {getTrendIcon(trend ?? "unknown")}
-                            <span className="ml-1">{trend ?? "?"}</span>
-                          </Badge>
-                          <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
                         </div>
                       </div>
 
@@ -208,8 +210,8 @@ export const MomentumStatusDetails = () => {
                             <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
                           </div>
                         </div>
-                        <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
-                          <span>{getSummaryText(data)}</span>
+                        <span className="text-xs text-muted-foreground">{getSummaryText(data)}</span>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
                           <span>
                             4h/1h: <span className="font-medium text-foreground">{higherTimeframeFilter?.trend4h ?? "?"}/{higherTimeframeFilter?.trend1h ?? "?"}</span>
                             {higherTimeframeFilter?.aligned ? (
@@ -220,6 +222,11 @@ export const MomentumStatusDetails = () => {
                           </span>
                           <span>
                             30m/15m: <span className="font-medium text-foreground">{multiTimeframe?.trend30m ?? "?"}/{multiTimeframe?.trend15m ?? "?"}</span>
+                          </span>
+                          <span>
+                            ADX <span className={`font-medium ${adxOK ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}`}>
+                              {adxValue.toFixed(1)}
+                            </span>
                           </span>
                         </div>
                       </div>
