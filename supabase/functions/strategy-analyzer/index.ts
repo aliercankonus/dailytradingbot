@@ -11635,7 +11635,17 @@ serve(async (req) => {
             );
             
             // Relaxed thresholds: 55% for 4h OR directional 1h with 50%+ OR momentum confirmed
-            const passesNeutralGate = conf4hForGate >= 55 || 
+            // DECLINING_STRONG_TREND_BYPASS: When structural pullback evidence is active,
+            // reduce 4h confidence requirement from 55% to 52% — the bypass provides
+            // orthogonal structural context (ADX slope bounded + StochRSI extreme)
+            const isDecliningStrongTrendActive = (directionResult as any).decliningStrongTrendBypass === true;
+            const neutral4hConfidenceThreshold = isDecliningStrongTrendActive ? 52 : 55;
+            
+            if (isDecliningStrongTrendActive) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 DECLINING_STRONG_TREND_RELAXATION: 4h confidence threshold reduced 55% → 52% (structural pullback context)`);
+            }
+            
+            const passesNeutralGate = conf4hForGate >= neutral4hConfidenceThreshold || 
               (is1hDirectional && conf1hForGate >= 50) ||
               momentumConfirmedBypass;
             
@@ -11665,16 +11675,17 @@ serve(async (req) => {
               
               await logRejectionWithAI(
                 supabase, userId, symbol,
-                `HARD GATE: Neutral 4h requires 55%+ confidence OR directional 1h with 50%+ OR confirmed momentum (4h=${trend4hForNeutralGate} ${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`,
-                { 
-                  gate: "NEUTRAL_4H_LOW_CONFIDENCE",
-                  derivedDirection,
-                  direction: derivedDirection,
-                  trend4h: trend4hForNeutralGate,
-                  confidence4h: conf4hForGate,
-                  trend1h: htfTrend1h,
-                  confidence1h: conf1hForGate,
-                  requiredConfidence: 55,
+                   `HARD GATE: Neutral 4h requires ${neutral4hConfidenceThreshold}%+ confidence OR directional 1h with 50%+ OR confirmed momentum (4h=${trend4hForNeutralGate} ${conf4hForGate.toFixed(0)}%, 1h=${htfTrend1h} ${conf1hForGate.toFixed(0)}%)`,
+                 { 
+                   gate: "NEUTRAL_4H_LOW_CONFIDENCE",
+                   derivedDirection,
+                   direction: derivedDirection,
+                   trend4h: trend4hForNeutralGate,
+                   confidence4h: conf4hForGate,
+                   trend1h: htfTrend1h,
+                   confidence1h: conf1hForGate,
+                   requiredConfidence: neutral4hConfidenceThreshold,
+                   decliningStrongTrendRelaxation: isDecliningStrongTrendActive,
                   is1hDirectional,
                   adx: adx.toFixed(1),
                   momentumConfirmedBypassChecked: true,
