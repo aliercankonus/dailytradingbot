@@ -44,6 +44,10 @@ const GATE_LABELS: Record<string, { label: string; icon: typeof Activity; color:
   LTF_SPIKE_PROTECTION: { label: "LTF Spike", icon: Zap, color: "text-amber-400" },
   BOLLINGER_OVEREXTENSION_GATE: { label: "BB Overextended", icon: BarChart3, color: "text-orange-400" },
   BOLLINGER_UNDEREXTENSION_GATE: { label: "BB Underextended", icon: BarChart3, color: "text-orange-400" },
+  NO_CLEAR_DIRECTION: { label: "No Clear Direction", icon: Ban, color: "text-yellow-400" },
+  NO_TRADE_RANGE_REGIME: { label: "Range Regime Block", icon: Minimize2, color: "text-amber-400" },
+  BULLISH_DIVERGENCE_AT_EXTREME: { label: "Divergence at Extreme", icon: TrendingUp, color: "text-orange-400" },
+  STOCHRSI_OVERSOLD_BLOCK: { label: "StochRSI Oversold", icon: TrendingDown, color: "text-red-400" },
 };
 
 const getGateInfo = (gate: string) => {
@@ -318,6 +322,41 @@ export const MarketOpportunityDensity = () => {
               })}
           </div>
         </div>
+        {/* ========== NO-TRADE STATE DISTRIBUTION ========== */}
+        {Object.keys(data.noTradeStates).length > 0 && (
+          <div>
+            <div className="text-xs font-semibold mb-2 flex items-center gap-1.5">
+              <Ban className="h-3.5 w-3.5 text-muted-foreground" />
+              No-Trade State Distribution
+            </div>
+            <div className="space-y-1.5">
+              {Object.entries(data.noTradeStates)
+                .sort((a, b) => b[1] - a[1])
+                .map(([state, count]) => {
+                  const total = Object.values(data.noTradeStates).reduce((a, b) => a + b, 0);
+                  const pct = (count / total) * 100;
+                  return (
+                    <div key={state} className="flex items-center gap-2">
+                      <span className="text-xs w-[140px] sm:w-[180px] truncate">
+                        {(state === 'UNKNOWN' ? 'Unknown' : state).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                      </span>
+                      <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            pct >= 50 ? 'bg-red-500' : pct >= 25 ? 'bg-orange-500' : 'bg-muted-foreground/40'
+                          }`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] font-mono w-[55px] text-right text-muted-foreground">
+                        {count} ({pct.toFixed(0)}%)
+                      </span>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
