@@ -3269,7 +3269,11 @@ export const deriveTradeDirection = (
     // This captures the DOT/ADA scenario: ADX 38-41, slope negative, K < 10 — structurally declining.
     const DECLINING_STRONG_TREND_K_LOW = 10;
     const DECLINING_STRONG_TREND_K_HIGH = 90;
-    const isDecliningStrongTrend = regime === 'STRONG_TREND' && adxSlope < 0;
+    const DECLINING_STRONG_TREND_MIN_SLOPE = -2.0;  // below this = structural collapse, not pullback
+    const DECLINING_STRONG_TREND_MAX_SLOPE = -0.2;  // above this = flat noise, not meaningful decline
+    const isDecliningStrongTrend = regime === 'STRONG_TREND' && 
+                                    adxSlope <= DECLINING_STRONG_TREND_MAX_SLOPE && 
+                                    adxSlope > DECLINING_STRONG_TREND_MIN_SLOPE;
     const stochExtremeDecliningTrend = stochK4hEarly <= DECLINING_STRONG_TREND_K_LOW || 
                                        stochK4hEarly >= DECLINING_STRONG_TREND_K_HIGH;
     const decliningStrongTrendBypass = isDecliningStrongTrend && stochExtremeDecliningTrend;
@@ -3302,8 +3306,14 @@ export const deriveTradeDirection = (
       if (!regimeAllowsExhaustionReversal && !absoluteExtremeBypass && !contextualExtremeBypass && !decliningStrongTrendBypass) {
         if (isDecliningStrongTrend && !stochExtremeDecliningTrend) {
           reasons.push(`TIER 0.25 BLOCKED: regime=STRONG_TREND declining (adxSlope=${adxSlope.toFixed(2)}) but K=${stochK4hEarly.toFixed(0)} not extreme enough (<${DECLINING_STRONG_TREND_K_LOW} or >${DECLINING_STRONG_TREND_K_HIGH})`);
+        } else if (regime === 'STRONG_TREND' && adxSlope < 0 && !isDecliningStrongTrend) {
+          // Slope is negative but outside bounds
+          if (adxSlope <= DECLINING_STRONG_TREND_MIN_SLOPE) {
+            reasons.push(`TIER 0.25 BLOCKED: STRONG_TREND structural collapse (adxSlope=${adxSlope.toFixed(2)} <= ${DECLINING_STRONG_TREND_MIN_SLOPE}) — bypass requires slope > ${DECLINING_STRONG_TREND_MIN_SLOPE}`);
+          } else {
+            reasons.push(`TIER 0.25 BLOCKED: STRONG_TREND flat noise (adxSlope=${adxSlope.toFixed(2)} > ${DECLINING_STRONG_TREND_MAX_SLOPE}) — bypass requires slope <= ${DECLINING_STRONG_TREND_MAX_SLOPE}`);
+          }
         } else if (isAbsoluteExtreme) {
-          // Explain why absolute extreme bypass didn't work
           const bypassBlockReasons: string[] = [];
           if (!adxAllowsAbsoluteExtreme) bypassBlockReasons.push(`ADX=${adxValueEarly.toFixed(1)} >= ${ER.ABSOLUTE_EXTREME_MAX_ADX ?? 22}`);
           if (!slopeAllowsAbsoluteExtreme) bypassBlockReasons.push(`slope=${Math.abs(momentumSlopeEarly).toFixed(2)} >= ${ER.ABSOLUTE_EXTREME_MAX_SLOPE ?? 0.15}`);
