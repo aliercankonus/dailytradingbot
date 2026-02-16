@@ -5771,6 +5771,15 @@ serve(async (req) => {
           const percentB4h = bb4h?.percentB ?? 50;
           const bbSqueeze = bb4h?.squeeze ?? false;
           
+          // Hoisted: effective thresholds for move exhaustion (set by graduated relaxation or defaults)
+          let effectiveHardThreshold = derivedDirection === 'short' 
+            ? MOVE_EXHAUSTION_FILTER_PARAMS.SHORT_HARD_THRESHOLD_PERCENT 
+            : MOVE_EXHAUSTION_FILTER_PARAMS.LONG_HARD_THRESHOLD_PERCENT;
+          let effectiveSoftThreshold = derivedDirection === 'short'
+            ? MOVE_EXHAUSTION_FILTER_PARAMS.SHORT_SOFT_THRESHOLD_PERCENT
+            : MOVE_EXHAUSTION_FILTER_PARAMS.LONG_SOFT_THRESHOLD_PERCENT;
+          let relaxedPositionSize = 0.45;
+          
           if (relaxation?.ENABLED) {
             // ===== GRADUATED SLOPE RELAXATION =====
             // Instead of binary block, slope determines relaxation DEGREE
@@ -5780,13 +5789,7 @@ serve(async (req) => {
             
             // Determine relaxation tier based on slope
             let relaxationTier = 'NONE';
-            let effectiveHardThreshold = derivedDirection === 'short' 
-              ? MOVE_EXHAUSTION_FILTER_PARAMS.SHORT_HARD_THRESHOLD_PERCENT 
-              : MOVE_EXHAUSTION_FILTER_PARAMS.LONG_HARD_THRESHOLD_PERCENT;
-            let effectiveSoftThreshold = derivedDirection === 'short'
-              ? MOVE_EXHAUSTION_FILTER_PARAMS.SHORT_SOFT_THRESHOLD_PERCENT
-              : MOVE_EXHAUSTION_FILTER_PARAMS.LONG_SOFT_THRESHOLD_PERCENT;
-            let relaxedPositionSize = relaxation.RELAXED_SOFT_POSITION_SIZE;
+            relaxedPositionSize = relaxation.RELAXED_SOFT_POSITION_SIZE;
             
             if (!slopeFullyBlocksRelaxation && gradSlope?.ENABLED) {
               if (adxSlope >= gradSlope.FULL_RELAXATION_SLOPE) {
