@@ -1,158 +1,78 @@
 
 
-## Production-Ready UI Overhaul
+# Tier 2 State-Based Zone Reset Cooldown
 
-Phased execution plan aligned with architectural stability. No phase mixing -- each phase completes before the next begins.
+## Problem
+The graduated Tier 2 StochRSI gate (K 10-20 / 80-90) can allow serial re-entries during persistent band-ride scenarios. While `max_trades_per_symbol = 1` prevents simultaneous stacking, a quick TP/SL close followed by immediate re-entry into the same exhaustion cluster creates "death by repeated small entries."
 
----
+## Solution: Oscillator-Native Zone Reset Gating
+Replace time-based cooldown with state-based logic: allow a new Tier 2 entry only after K has **exited** the Tier 2 zone and **re-entered** it, proving a genuine oscillator reset occurred.
 
-### Phase 1 -- Core Brand and Visual System
+## How It Works
 
-Lock the foundation before touching any components.
+```text
+Entry #1 at K=16 (Tier 2 MODERATE) --> trade opens
+  |
+  v
+Trade closes (TP/SL/timeout)
+  |
+  v
+Next cycle: K=14 --> STILL in Tier 2 zone --> BLOCK (no reset)
+  ...
+K rises to 28 --> EXIT detected, zone reset flag cleared
+  ...
+K drops back to 18 --> Fresh Tier 2 entry allowed
+```
 
-**Step 1: Brand System**
+## Implementation Details
 
-- Product name: **TradeFlow** (institutional tone, no crypto hype)
-- Create `public/favicon.svg` -- minimal geometric brand mark (stylized chart pulse / flow line)
-- Create `src/components/BrandLogo.tsx` -- reusable inline SVG component, scalable, two sizes (compact for header, large for auth)
-- Update `index.html`:
-  - `<title>TradeFlow - Algorithmic Trading Platform</title>`
-  - Favicon reference to `/favicon.svg`
-  - Updated OG meta tags with new brand name
+### 1. Constants (`_shared/constants.ts`)
+Add a new `TIER_2_ZONE_RESET` configuration block inside `HTF_EXTREME_HARD_GATES`:
 
-**Step 2: Design Tokens**
+- `ENABLED: true` -- feature toggle
+- `OVERSOLD_EXIT_THRESHOLD: 25` -- K must rise above 25 to "exit" oversold Tier 2
+- `OVERBOUGHT_EXIT_THRESHOLD: 75` -- K must drop below 75 to "exit" overbought Tier 2
+- `LOG_BLOCKS: true` -- forensic logging
 
-Update `src/index.css` with refined palette (all values per your specification):
+### 2. Per-Symbol State Tracking (`strategy-analyzer/index.ts`)
+Add an in-memory map at the top of the scanning loop (outside the per-symbol iteration):
 
-| Token | Current | New |
-|-------|---------|-----|
-| Primary | `189 85% 52%` | `192 72% 46%` |
-| Background | `222 47% 11%` | `222 38% 9%` |
-| Card | `217 33% 14%` | `222 30% 13%` |
-| Border | `217 33% 20%` | `220 20% 18%` |
-| Muted foreground | `215 20% 65%` | `215 12% 62%` |
-| Warning | `38 92% 50%` | `38 85% 55%` |
+```text
+Map<symbol, {
+  wasInTier2Zone: boolean,
+  lastTier2Direction: 'long' | 'short',
+  hasExitedZone: boolean
+}>
+```
 
-Add CSS custom properties for subtle card effects:
-- `--card-glow`: top border gradient at 15% primary opacity
-- `--shadow-card`: refined `shadow-lg shadow-black/30`
-- Skeleton animation keyframe (pulsing brand logo)
+Populated from a lightweight database query: check if the last closed trade for a symbol used a `TIER_2_GRADUATED` tag and whether StochRSI K has since exited the zone.
 
-No changes to `tailwind.config.ts` beyond adding a `glass` utility if needed for `backdrop-blur-sm` shorthand.
+### 3. Zone Reset Logic (inside Tier 2 graduated blocks)
+Before applying the graduated multiplier, check:
 
----
+1. Query the most recent closed position for this symbol
+2. If it had a `TIER_2_GRADUATED` entry tag:
+   - Check current K against the exit threshold (K > 25 for oversold, K < 75 for overbought)
+   - If K has NOT exited the zone since that trade closed, **block** the entry with gate `TIER2_ZONE_RESET_PENDING`
+   - If K HAS exited (or no recent Tier 2 trade exists), allow the graduated entry
+3. Tag all Tier 2 entries with `entry_context: 'TIER_2_GRADUATED'` so the reset logic can identify them
 
-### Phase 2 -- Information Architecture
+### 4. Data Flow
+- **Entry tagging**: When a Tier 2 graduated entry fires, store the zone tag in the signal/position metadata (existing `strategy_type` or `entry_context` field)
+- **Reset detection**: On each cycle, compare current K to exit thresholds. No persistent state table needed -- the query checks the last closed trade timestamp and the current K value. If K is above the exit threshold at any point between the last close and now, the zone is considered reset.
 
-**Step 3: Shared Header Component**
+### 5. Files Modified
+- `supabase/functions/_shared/constants.ts` -- Add `TIER_2_ZONE_RESET` parameters
+- `supabase/functions/strategy-analyzer/index.ts` -- Add zone-reset check before both SHORT/LONG Tier 2 graduated blocks, add entry tagging to signal metadata
 
-Create `src/components/AppHeader.tsx` -- single header used by ALL pages:
+### 6. Edge Cases Handled
+- **No previous Tier 2 trade**: Zone reset not applicable, entry allowed
+- **Previous trade was a bypass (not graduated)**: Zone reset not applicable, only targets graduated entries
+- **K briefly touches exit threshold then re-enters**: This IS a valid reset -- the oscillator cycled
+- **Multiple symbols**: Per-symbol tracking, no cross-contamination
 
-- Left: BrandLogo + "TradeFlow" text
-- Center/Right: Labeled navigation links using `NavLink` component:
-  - Dashboard (`/`)
-  - Performance (`/performance`)
-  - Symbols (`/symbols`)
-  - Health (`/health`)
-  - Settings (`/settings`)
-- Active state: underline + soft background fill (not capsule pills -- institutional tone)
-- Right edge: connection status dot + user avatar dropdown
-- Bottom: 1px divider with low-opacity primary glow for depth
-- Mobile: nav items collapse into a hamburger that opens a Sheet/Drawer with full navigation
-
-Files modified:
-- `src/components/DashboardHeader.tsx` -- replaced by `AppHeader.tsx` (or refactored in place)
-- `src/pages/Index.tsx` -- use shared header, remove inline icon buttons (lines 54-83)
-- `src/pages/Health.tsx` -- replace custom back-button header with shared `AppHeader`
-- `src/pages/Performance.tsx` -- replace custom back-button header with shared `AppHeader`
-- `src/pages/Settings.tsx` -- replace custom back-button header with shared `AppHeader`
-- `src/pages/Symbols.tsx` -- replace custom back-button header with shared `AppHeader`
-
-Every page gets the same persistent navigation. No page feels secondary. Consistency equals trust.
-
-**Step 4: Summary Card Styling**
-
-Refine the existing `SignalsOverview` summary cards and all metric cards across Dashboard:
-- `backdrop-blur-sm` with semi-transparent background
-- Subtle gradient top border (primary at 15% opacity, 1px)
-- Shadow: `shadow-lg shadow-black/30`
-- Hover: slight elevation shift for interactive cards
-- Keep glass subtle -- avoid SaaS template appearance
-
----
-
-### Phase 3 -- UX Professionalization
-
-**Step 5: Tab Styling**
-
-Update tab indicators across all pages (Dashboard main tabs, Settings tabs, Performance tabs, Positions sub-tabs):
-- Style: underline + soft background fill on active state (not full capsule pills)
-- Smooth transition on state change
-- Mobile scroll indicator gradient retained
-
-Implementation in `src/index.css` via scoped styles on `[data-state=active]` selectors.
-
-**Step 6: Loading States**
-
-Replace all loading fallbacks with proper skeletons:
-
-- `src/App.tsx` `PageFallback`: Replace "Loading..." text with pulsing BrandLogo icon centered on screen
-- `src/pages/Index.tsx` `TabFallback`: Already uses `Skeleton` -- keep as is
-- `src/pages/Symbols.tsx`: Replace `Loader2` spinner with BrandLogo pulse
-- `src/pages/Performance.tsx`: Replace "Loading performance data..." with skeleton cards matching the 4-stat grid + chart placeholder
-
-**Step 7: Auth Page Polish**
-
-Update `src/pages/Auth.tsx`:
-- Replace `TrendingUp` icon with `BrandLogo` component (large variant)
-- Title: "TradeFlow"
-- Tagline: "Professional Algorithmic Trading"
-- Background: slow animated CSS gradient (15-20s loop), defined in `src/index.css`
-- Clean input spacing improvements
-- No particles, no heavy animation
-
----
-
-### Phase 4 -- Consistency and System Integrity
-
-**Step 8: Shared Header Verification**
-
-After all pages use `AppHeader`, verify:
-- Active route highlighting works on every page
-- Mobile hamburger menu opens and navigates correctly
-- User avatar dropdown and sign-out work from every page
-- Connection status indicator visible on desktop
-
-**Step 9: Optional Footer**
-
-Add lightweight `src/components/AppFooter.tsx`:
-- Muted text, small font
-- Content: `v1.0.0 -- Powered by TradeFlow`
-- Shown on sub-pages (Health, Performance, Settings, Symbols)
-- No marketing copy
-
----
-
-### Technical Summary
-
-**Files to create:**
-- `public/favicon.svg`
-- `src/components/BrandLogo.tsx`
-- `src/components/AppHeader.tsx`
-- `src/components/AppFooter.tsx` (optional)
-
-**Files to modify:**
-- `index.html` -- favicon, title, OG tags
-- `src/index.css` -- design tokens, card effects, tab styles, auth gradient animation, skeleton keyframes
-- `src/App.tsx` -- branded loading fallback
-- `src/pages/Index.tsx` -- use AppHeader, remove icon nav buttons
-- `src/pages/Health.tsx` -- use AppHeader
-- `src/pages/Performance.tsx` -- use AppHeader, skeleton loading
-- `src/pages/Settings.tsx` -- use AppHeader
-- `src/pages/Symbols.tsx` -- use AppHeader, branded loading
-- `src/pages/Auth.tsx` -- brand logo, tagline, animated background
-- `src/components/SignalsOverview.tsx` -- card glass styling
-- `src/components/DashboardHeader.tsx` -- may be deprecated or merged into AppHeader
-
-**No database changes. No new dependencies.**
+### 7. Risk Assessment
+- **No new time-based suppression** -- entries are gated by oscillator behavior, not arbitrary timers
+- **No false suppression of valid continuations** -- a genuine trend pullback will push K above 25 before resuming
+- **Minimal DB overhead** -- one query per symbol per cycle to check last closed trade metadata
 
