@@ -14974,7 +14974,17 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ TIER 0 SOFT CAP entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (early climax zone)`);
         }
         
-        // ============= UNIFIED RISK CALCULATION (NEW) =============
+        // Step 24: FIX #4 — Low-confidence STANDARD entry position reduction (60%)
+        // Confidence 55-59 is the statistical gray zone — de-risk instead of blocking
+        // Only applies to STANDARD entries (no entry_exception_type set)
+        const isStandardEntryType = !exceptionResult.exceptionType || exceptionResult.exceptionType === 'NONE';
+        const entryConfidence = Math.round(Math.min(confidence, 100));
+        if (isStandardEntryType && entryConfidence < 58) {
+          const lowConfMultiplier = 0.60; // 40% reduction
+          positionSizeMultiplier *= lowConfMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ LOW CONFIDENCE STANDARD (${entryConfidence} < 58) - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (gray zone de-risk)`);
+        }
+        
         // Use user-configured base values from risk_parameters instead of legacy strategy templates
         // The system applies intelligent adjustments based on market conditions
         

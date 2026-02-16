@@ -6913,6 +6913,61 @@ export const MOMENTUM_CONTINUATION_EXIT = {
   DELAY_BE_MINUTES: 30,  // Don't apply break-even until 30min into the trade
 } as const;
 
+// ============= LOW-CONFIDENCE STANDARD EXIT PARAMS (monitor-positions) =============
+// Addresses profit protection asymmetry + weak-trade filtering leakage
+// Data-driven: 4 STANDARD losses (confidence 55-59) showed 3/4 were profitable at peak
+// but gave back all gains. The 4th was dead-on-arrival capital bleed.
+//
+// Fix #1: Enhanced micro-profit for low-confidence STANDARD entries
+// Fix #2: Fast peak velocity detection → tighter trailing
+// Fix #3: Early invalidation rule → cut dead trades faster
+// Fix #4: Position size reduction (applied in strategy-analyzer)
+export const LOW_CONFIDENCE_STANDARD_EXIT = {
+  // ===== CONFIDENCE THRESHOLD =====
+  // Trades below this confidence are in the "statistical gray zone"
+  MAX_CONFIDENCE: 58,
+  
+  // ===== FIX #1: ENHANCED MICRO-PROFIT LOCK =====
+  // Lower the activation thresholds for micro-profit locks on low-confidence entries
+  // Standard system: 0.22% → BE. Enhanced: 0.25% → BE, 0.40% → +0.15%
+  ENHANCED_MICRO_PROFIT_TIERS: [
+    { peakThreshold: 0.22, lockTarget: 0.0 },    // TRUE break-even (same as standard)
+    { peakThreshold: 0.25, lockTarget: 0.02 },   // Earlier small profit lock
+    { peakThreshold: 0.30, lockTarget: 0.08 },   // Tighter than standard's 0.33% → 0.10%
+    { peakThreshold: 0.35, lockTarget: 0.12 },   // Additional tier
+    { peakThreshold: 0.40, lockTarget: 0.15 },   // User-requested: +0.15% at 0.40% peak
+    { peakThreshold: 0.45, lockTarget: 0.20 },   // Tighter than standard's 0.48% → 0.25%
+  ],
+  
+  // ===== FIX #2: FAST PEAK VELOCITY TRAIL TIGHTENING =====
+  // If peak reached in < N minutes, the move is an impulse liquidity grab
+  // Tighten trailing to prevent full giveback
+  FAST_PEAK_MAX_MINUTES: 10,         // Peak reached within 10 min = fast impulse
+  FAST_PEAK_TRAIL_DISTANCE_PERCENT: 0.18,  // Tight trail: 0.18% (between 0.15-0.20%)
+  // Additional conditions: ADX slope flattening AND momentum weakening
+  FAST_PEAK_REQUIRE_ADX_SLOPE_FLAT: true,
+  FAST_PEAK_ADX_SLOPE_THRESHOLD: 0.3,  // ADX slope < 0.3 = flattening
+  
+  // ===== FIX #3: EARLY INVALIDATION RULE =====
+  // If after N minutes the trade has barely moved and is losing → dead trade, cut it
+  EARLY_INVALIDATION_ENABLED: true,
+  EARLY_INVALIDATION_MIN_AGE_MINUTES: 20,   // Check after 20 minutes
+  EARLY_INVALIDATION_MAX_MFE_PERCENT: 0.10, // MFE must be < 0.10% (trade never worked)
+  EARLY_INVALIDATION_MAX_PNL_PERCENT: -0.40, // Unrealized must be < -0.40%
+  // Close reason tag for forensics
+  EARLY_INVALIDATION_REASON: 'early_invalidation_dead_trade' as const,
+  
+  // ===== FIX #4: POSITION SIZE REDUCTION (applied in strategy-analyzer) =====
+  // De-risk gray zone entries instead of blocking them
+  POSITION_SIZE_MULTIPLIER: 0.60,    // 40% reduction for confidence < 58 STANDARD entries
+  // Alternative: require ADX > 28 instead of size reduction (optional gate)
+  REQUIRE_ADX_THRESHOLD: 28,
+  USE_ADX_GATE_INSTEAD: false,       // If true, block instead of size-reduce when ADX < 28
+  
+  // ===== LOGGING =====
+  LOG_ENHANCED_EXITS: true,
+} as const;
+
 // ============= HEDGE EXIT PARAMS (monitor-positions) =============
 // Hedge position sizing and stop/TP parameters
 export const HEDGE_EXIT_PARAMS = {

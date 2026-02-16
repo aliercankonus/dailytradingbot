@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, DYNAMIC_REVERSAL_EXIT, COMPRESSION_TRADE_EXIT, STRATEGY_EXIT_ADJUSTMENTS, HTF_ALIGNMENT_EXIT, TRAILING_STOP_INLINE, MICRO_TREND_EXIT, MOMENTUM_CONTINUATION_EXIT, HEDGE_EXIT_PARAMS, REVERSAL_RISK_EXIT_SCORES, TIME_STOP_MULTIPLIER as TIME_STOP_MULT, PARTIAL_TP_LADDER, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, DYNAMIC_REVERSAL_EXIT, COMPRESSION_TRADE_EXIT, STRATEGY_EXIT_ADJUSTMENTS, HTF_ALIGNMENT_EXIT, TRAILING_STOP_INLINE, MICRO_TREND_EXIT, MOMENTUM_CONTINUATION_EXIT, LOW_CONFIDENCE_STANDARD_EXIT, HEDGE_EXIT_PARAMS, REVERSAL_RISK_EXIT_SCORES, TIME_STOP_MULTIPLIER as TIME_STOP_MULT, PARTIAL_TP_LADDER, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import {
   evaluateDecayVelocity,
   evaluateMicroProfitLock,
@@ -1172,6 +1172,53 @@ serve(async (req) => {
         }
       }
       
+      // ============= FIX #3: EARLY INVALIDATION RULE =============
+      // Dead-on-arrival detection: If after 20 min the trade has barely moved (MFE < 0.10%)
+      // and is losing significantly (< -0.40%), cut it early instead of bleeding to time stop
+      // This addresses Trade #4 pattern: held 91 min, peak 0%, closed -1.21%
+      const isStandardEntry = !position.entry_exception_type; // No exception = STANDARD
+      const isLowConfidenceStandard = isStandardEntry && (position.confidence_score ?? 100) < LOW_CONFIDENCE_STANDARD_EXIT.MAX_CONFIDENCE;
+      
+      if (LOW_CONFIDENCE_STANDARD_EXIT.EARLY_INVALIDATION_ENABLED && 
+          isStandardEntry && 
+          !emergencyClose && 
+          positionAgeMinutes >= LOW_CONFIDENCE_STANDARD_EXIT.EARLY_INVALIDATION_MIN_AGE_MINUTES) {
+        
+        const mfe = newPeakPnl; // Maximum Favorable Excursion = peak P&L
+        const isDeadTrade = mfe < LOW_CONFIDENCE_STANDARD_EXIT.EARLY_INVALIDATION_MAX_MFE_PERCENT && 
+                            pnlPercent < LOW_CONFIDENCE_STANDARD_EXIT.EARLY_INVALIDATION_MAX_PNL_PERCENT;
+        
+        if (isDeadTrade) {
+          const feeAwarePnL = calculateFeeAwarePnL(position.side, position.entry_price, currentPrice, position.quantity, position.trading_fee_percent);
+          
+          positionLogger.risk(`🔪 EARLY INVALIDATION: Dead trade detected — Age ${positionAgeMinutes.toFixed(0)}min, MFE ${mfe.toFixed(3)}% < ${LOW_CONFIDENCE_STANDARD_EXIT.EARLY_INVALIDATION_MAX_MFE_PERCENT}%, P&L ${pnlPercent.toFixed(2)}% < ${LOW_CONFIDENCE_STANDARD_EXIT.EARLY_INVALIDATION_MAX_PNL_PERCENT}%, Confidence ${position.confidence_score ?? 'N/A'}`);
+          
+          const { error: closeError } = await supabase
+            .from("positions")
+            .update({
+              status: "closed",
+              closed_at: new Date().toISOString(),
+              exit_price: currentPrice,
+              realized_pnl: feeAwarePnL.netPnl,
+              realized_pnl_percent: feeAwarePnL.netPnlPercent,
+              close_reason: LOW_CONFIDENCE_STANDARD_EXIT.EARLY_INVALIDATION_REASON,
+              trading_fee_amount: feeAwarePnL.totalFee,
+              trading_fee_percent: feeAwarePnL.feeRatePercent,
+            })
+            .eq("id", position.id)
+            .eq("status", "active");
+          
+          if (closeError) {
+            positionLogger.error(`Error closing dead trade ${position.id}: ${closeError}`);
+          } else {
+            closedPositions.push({ id: position.id, symbol: position.symbol, side: position.side, reason: LOW_CONFIDENCE_STANDARD_EXIT.EARLY_INVALIDATION_REASON, pnlPercent: feeAwarePnL.netPnlPercent });
+          }
+          continue; // Skip further processing
+        } else if (isLowConfidenceStandard && LOW_CONFIDENCE_STANDARD_EXIT.LOG_ENHANCED_EXITS) {
+          positionLogger.debug(`EARLY INVALIDATION CHECK: Age ${positionAgeMinutes.toFixed(0)}min, MFE ${mfe.toFixed(3)}%, P&L ${pnlPercent.toFixed(2)}% — not triggered`);
+        }
+      }
+      
       // ============= SMART AITS: PROGRESSIVE LOCK TIERS =============
       // Calculate dynamic profit lock based on peak P&L level
       // SMART AITS helpers delegated to shared exit-strategies module
@@ -1179,28 +1226,69 @@ serve(async (req) => {
       const getStalePeakBonus = (mins: number) => sharedGetStalePeakBonus(mins, userSettings.stalePeakProtectionEnabled);
       
       // ============= MICRO-PROFIT LOCK: Delegated to shared exit-strategies module =============
+      // FIX #1: Low-confidence STANDARD entries use enhanced (tighter) micro-profit tiers
       let microProfitLockApplied = false;
       
       {
-        const microResult = evaluateMicroProfitLock(
-          { ...position, side: position.side as "BUY" | "SELL", peak_pnl_percent: newPeakPnl } as ExitPositionContext,
-          newPeakPnl,
-        );
-        if (microResult.applied && microResult.newStopLoss !== null) {
-          microProfitLockApplied = true;
-          newStopLoss = microResult.newStopLoss;
-          positionLogger.trade(`MICRO_PROFIT_LOCK_APPLIED for ${position.side}: Peak ${newPeakPnl.toFixed(3)}% → ${microResult.tierLabel} → Stop ${microResult.newStopLoss.toFixed(2)} (was ${position.stop_loss?.toFixed(2)})`);
-          
-          const { error: microLockError } = await supabase
-            .from("positions")
-            .update({ stop_loss: newStopLoss })
-            .eq("id", position.id)
-            .eq("status", "active");
-          
-          if (microLockError) {
-            positionLogger.error(`Error applying micro profit lock for ${position.id}: ${microLockError}`);
-          } else {
-            updatedStopLossMap.set(position.id, newStopLoss!);
+        // For low-confidence STANDARD entries, apply enhanced micro-profit lock inline
+        // before falling through to the standard evaluateMicroProfitLock
+        if (isLowConfidenceStandard && newPeakPnl > 0 && newPeakPnl < MICRO_PROFIT_LOCK_PARAMS.HANDOFF_THRESHOLD && position.stop_loss !== null) {
+          const enhancedTiers = LOW_CONFIDENCE_STANDARD_EXIT.ENHANCED_MICRO_PROFIT_TIERS;
+          const sortedTiers = [...enhancedTiers].sort((a, b) => b.peakThreshold - a.peakThreshold);
+          let matchedTier: { peakThreshold: number; lockTarget: number } | null = null;
+          for (const tier of sortedTiers) {
+            if (newPeakPnl >= tier.peakThreshold) { matchedTier = tier; break; }
+          }
+          if (matchedTier) {
+            const slippageBuffer = position.entry_price * (MICRO_PROFIT_LOCK_PARAMS.SLIPPAGE_BUFFER_PERCENT / 100);
+            const lockProfit = position.entry_price * (matchedTier.lockTarget / 100);
+            let lockStop: number;
+            let shouldApply: boolean;
+            if (position.side === "BUY") {
+              lockStop = position.entry_price + lockProfit - slippageBuffer;
+              shouldApply = lockStop > position.stop_loss;
+            } else {
+              lockStop = position.entry_price - lockProfit + slippageBuffer;
+              shouldApply = lockStop < position.stop_loss;
+            }
+            if (shouldApply) {
+              microProfitLockApplied = true;
+              newStopLoss = lockStop;
+              positionLogger.trade(`⚡ ENHANCED_MICRO_LOCK (conf<${LOW_CONFIDENCE_STANDARD_EXIT.MAX_CONFIDENCE}) for ${position.side}: Peak ${newPeakPnl.toFixed(3)}% → ${matchedTier.peakThreshold}%→+${matchedTier.lockTarget.toFixed(2)}% → Stop ${lockStop.toFixed(2)}`);
+              const { error: microLockError } = await supabase
+                .from("positions")
+                .update({ stop_loss: newStopLoss })
+                .eq("id", position.id)
+                .eq("status", "active");
+              if (microLockError) {
+                positionLogger.error(`Error applying enhanced micro profit lock for ${position.id}: ${microLockError}`);
+              } else {
+                updatedStopLossMap.set(position.id, newStopLoss!);
+              }
+            }
+          }
+        }
+        
+        // Standard micro-profit lock (for non-low-confidence or if enhanced didn't apply)
+        if (!microProfitLockApplied) {
+          const microResult = evaluateMicroProfitLock(
+            { ...position, side: position.side as "BUY" | "SELL", peak_pnl_percent: newPeakPnl } as ExitPositionContext,
+            newPeakPnl,
+          );
+          if (microResult.applied && microResult.newStopLoss !== null) {
+            microProfitLockApplied = true;
+            newStopLoss = microResult.newStopLoss;
+            positionLogger.trade(`MICRO_PROFIT_LOCK_APPLIED for ${position.side}: Peak ${newPeakPnl.toFixed(3)}% → ${microResult.tierLabel} → Stop ${microResult.newStopLoss.toFixed(2)} (was ${position.stop_loss?.toFixed(2)})`);
+            const { error: microLockError } = await supabase
+              .from("positions")
+              .update({ stop_loss: newStopLoss })
+              .eq("id", position.id)
+              .eq("status", "active");
+            if (microLockError) {
+              positionLogger.error(`Error applying micro profit lock for ${position.id}: ${microLockError}`);
+            } else {
+              updatedStopLossMap.set(position.id, newStopLoss!);
+            }
           }
         }
       }
@@ -1561,6 +1649,32 @@ serve(async (req) => {
         } else {
           baseTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * (TRAILING_STOP_INLINE.MIN_TRAILING_DISTANCE_PERCENT / 100));
           minTrailingDistance = baseTrailingDistance * htfAlignmentMultiplier; // Apply HTF multiplier
+          
+          // ============= FIX #2: FAST PEAK VELOCITY TRAIL TIGHTENING =============
+          // If peak was reached within 10 min, the move is a fast impulse liquidity grab
+          // Tighten trailing to 0.18% to prevent full giveback (addresses Trades #1, #2, #3)
+          if (isLowConfidenceStandard && newPeakPnl > 0.15) {
+            const peakReachedAtDate = position.peak_reached_at ? new Date(position.peak_reached_at) : null;
+            const openedAtDate = position.opened_at ? new Date(position.opened_at) : null;
+            
+            if (peakReachedAtDate && openedAtDate) {
+              const minutesToPeak = (peakReachedAtDate.getTime() - openedAtDate.getTime()) / (1000 * 60);
+              
+              if (minutesToPeak < LOW_CONFIDENCE_STANDARD_EXIT.FAST_PEAK_MAX_MINUTES && minutesToPeak > 0) {
+                // Check additional conditions: ADX slope flattening
+                const { slope: fastPeakAdxSlope } = extractADXSlope(trendDataForPosition);
+                const adxFlattening = !LOW_CONFIDENCE_STANDARD_EXIT.FAST_PEAK_REQUIRE_ADX_SLOPE_FLAT || 
+                                      fastPeakAdxSlope < LOW_CONFIDENCE_STANDARD_EXIT.FAST_PEAK_ADX_SLOPE_THRESHOLD;
+                
+                if (adxFlattening) {
+                  const tightDistance = currentPrice * (LOW_CONFIDENCE_STANDARD_EXIT.FAST_PEAK_TRAIL_DISTANCE_PERCENT / 100);
+                  baseTrailingDistance = tightDistance;
+                  minTrailingDistance = tightDistance; // No HTF adjustment for fast peaks
+                  positionLogger.trade(`⚡ FAST PEAK TRAIL: Peak in ${minutesToPeak.toFixed(0)}min < ${LOW_CONFIDENCE_STANDARD_EXIT.FAST_PEAK_MAX_MINUTES}min → tight trail ${LOW_CONFIDENCE_STANDARD_EXIT.FAST_PEAK_TRAIL_DISTANCE_PERCENT}% = ${tightDistance.toFixed(2)} (ADX slope ${fastPeakAdxSlope.toFixed(2)}, confidence ${position.confidence_score})`);
+                }
+              }
+            }
+          }
         }
         
         if (htfAlignmentMultiplier !== 1.0) {
