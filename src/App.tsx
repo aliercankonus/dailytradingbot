@@ -32,7 +32,7 @@ const PageFallback = () => (
 const AnimatedRoutes = () => {
   const location = useLocation();
   return (
-    <div key={location.pathname} className="animate-fade-in">
+    <div key={location.pathname} className="animate-fast-fade">
       <Suspense fallback={<PageFallback />}>
         <Routes location={location}>
           <Route path="/auth" element={<Auth />} />
