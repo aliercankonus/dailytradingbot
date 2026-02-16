@@ -125,11 +125,9 @@ const Performance = () => {
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="relative md:contents">
-            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-5 h-8">
+            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-3 h-8">
               <TabsTrigger value="portfolio" className="min-w-[5rem] flex-shrink-0 text-xs">Portfolio</TabsTrigger>
-              <TabsTrigger value="pnl" className="min-w-[4rem] flex-shrink-0 text-xs">P&L</TabsTrigger>
-              <TabsTrigger value="winrate" className="min-w-[4.5rem] flex-shrink-0 text-xs">Win Rate</TabsTrigger>
-              <TabsTrigger value="drawdown" className="min-w-[4rem] flex-shrink-0 text-xs">Risk</TabsTrigger>
+              <TabsTrigger value="analytics" className="min-w-[5rem] flex-shrink-0 text-xs">Analytics</TabsTrigger>
               <TabsTrigger value="losses" className="min-w-[5rem] flex-shrink-0 text-xs">Loss Analysis</TabsTrigger>
             </TabsList>
             <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-background to-transparent pointer-events-none md:hidden" />
@@ -195,53 +193,50 @@ const Performance = () => {
             </Suspense>
           </TabsContent>
 
-          {/* P&L Tab */}
-          <TabsContent value="pnl" className="space-y-4">
-            {chartData.length > 0 && (
-              <Card className="p-3 sm:p-6 overflow-hidden">
-                <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">P&L Breakdown</h3>
-                <div className="w-full overflow-x-auto -mx-1">
-                  <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]" minWidth={280}>
-                    <LineChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} />
-                      <YAxis 
-                        stroke="hsl(var(--muted-foreground))" 
-                        tick={{ fontSize: 10 }}
-                        width={40}
-                        domain={[(dataMin: number) => {
-                          const padding = Math.max(Math.abs(dataMin) * 0.1, 10);
-                          return Math.floor(dataMin - padding);
-                        }, (dataMax: number) => {
-                          const padding = Math.max(Math.abs(dataMax) * 0.1, 10);
-                          return Math.ceil(dataMax + padding);
-                        }]}
-                        tickFormatter={(value) => `$${value.toFixed(0)}`}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "8px",
-                          fontSize: "12px",
-                        }}
-                        formatter={(value: number) => [`$${value.toFixed(4)}`]}
-                      />
-                      <Legend wrapperStyle={{ fontSize: "11px" }} />
-                      <Line type="monotone" dataKey="totalPnL" stroke="hsl(var(--primary))" name="Total P&L" strokeWidth={2} />
-                      <Line type="monotone" dataKey="realizedPnL" stroke="hsl(var(--profit))" name="Realized P&L" strokeWidth={2} />
-                      <Line type="monotone" dataKey="unrealizedPnL" stroke="hsl(var(--chart-3))" name="Unrealized P&L" strokeWidth={2} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </Card>
-            )}
-          </TabsContent>
-
-          {/* Win Rate Tab */}
-          <TabsContent value="winrate" className="space-y-4">
+          {/* Analytics Tab - P&L, Win Rate, Risk combined */}
+          <TabsContent value="analytics" className="space-y-4">
             {chartData.length > 0 && (
               <>
+                {/* P&L Breakdown */}
+                <Card className="p-3 sm:p-6 overflow-hidden">
+                  <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">P&L Breakdown</h3>
+                  <div className="w-full overflow-x-auto -mx-1">
+                    <ResponsiveContainer width="100%" height={280} className="sm:!h-[400px]" minWidth={280}>
+                      <LineChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 10 }} />
+                        <YAxis 
+                          stroke="hsl(var(--muted-foreground))" 
+                          tick={{ fontSize: 10 }}
+                          width={40}
+                          domain={[(dataMin: number) => {
+                            const padding = Math.max(Math.abs(dataMin) * 0.1, 10);
+                            return Math.floor(dataMin - padding);
+                          }, (dataMax: number) => {
+                            const padding = Math.max(Math.abs(dataMax) * 0.1, 10);
+                            return Math.ceil(dataMax + padding);
+                          }]}
+                          tickFormatter={(value) => `$${value.toFixed(0)}`}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "hsl(var(--card))",
+                            border: "1px solid hsl(var(--border))",
+                            borderRadius: "8px",
+                            fontSize: "12px",
+                          }}
+                          formatter={(value: number) => [`$${value.toFixed(4)}`]}
+                        />
+                        <Legend wrapperStyle={{ fontSize: "11px" }} />
+                        <Line type="monotone" dataKey="totalPnL" stroke="hsl(var(--primary))" name="Total P&L" strokeWidth={2} />
+                        <Line type="monotone" dataKey="realizedPnL" stroke="hsl(var(--profit))" name="Realized P&L" strokeWidth={2} />
+                        <Line type="monotone" dataKey="unrealizedPnL" stroke="hsl(var(--chart-3))" name="Unrealized P&L" strokeWidth={2} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </Card>
+
+                {/* Win Rate & Trade Distribution */}
                 <Card className="p-3 sm:p-6 overflow-hidden">
                   <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Win Rate & Trade Distribution</h3>
                   <div className="w-full overflow-x-auto -mx-1">
@@ -258,6 +253,8 @@ const Performance = () => {
                     </ResponsiveContainer>
                   </div>
                 </Card>
+
+                {/* Win Rate Trend */}
                 <Card className="p-3 sm:p-6 overflow-hidden">
                   <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Win Rate Trend</h3>
                   <div className="w-full overflow-x-auto -mx-1">
@@ -273,14 +270,8 @@ const Performance = () => {
                     </ResponsiveContainer>
                   </div>
                 </Card>
-              </>
-            )}
-          </TabsContent>
 
-          {/* Drawdown & Risk Tab */}
-          <TabsContent value="drawdown" className="space-y-4">
-            {chartData.length > 0 && (
-              <>
+                {/* Maximum Drawdown */}
                 <Card className="p-3 sm:p-6 overflow-hidden">
                   <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Maximum Drawdown</h3>
                   <div className="w-full overflow-x-auto -mx-1">
@@ -302,6 +293,8 @@ const Performance = () => {
                     </ResponsiveContainer>
                   </div>
                 </Card>
+
+                {/* Profit Factor */}
                 <Card className="p-3 sm:p-6 overflow-hidden">
                   <h3 className="text-sm sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">Profit Factor</h3>
                   <div className="w-full overflow-x-auto -mx-1">
@@ -321,8 +314,7 @@ const Performance = () => {
             )}
           </TabsContent>
 
-
-          {/* Loss Analysis Tab (moved from dashboard) */}
+          {/* Loss Analysis Tab */}
           <TabsContent value="losses" className="space-y-4">
             <Suspense fallback={<TabFallback />}>
               <LossAttributionDashboard />
