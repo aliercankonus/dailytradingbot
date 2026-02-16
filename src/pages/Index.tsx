@@ -38,13 +38,24 @@ const TabFallback = () => (
   </div>
 );
 
+const usePersistedTab = (key: string, defaultValue: string) => {
+  const [value, setValue] = useState(() => {
+    try { return sessionStorage.getItem(key) || defaultValue; } catch { return defaultValue; }
+  });
+  const setAndPersist = (v: string) => {
+    setValue(v);
+    try { sessionStorage.setItem(key, v); } catch {}
+  };
+  return [value, setAndPersist] as const;
+};
+
 const Index = () => {
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [positionsSubTab, setPositionsSubTab] = useState("active");
-  const [analyticsSubTab, setAnalyticsSubTab] = useState("performance");
-  const [riskSubTab, setRiskSubTab] = useState("sizing");
-  const [monitorSubTab, setMonitorSubTab] = useState("momentum");
+  const [activeTab, setActiveTab] = usePersistedTab("tf-active-tab", "dashboard");
+  const [positionsSubTab, setPositionsSubTab] = usePersistedTab("tf-positions-sub", "active");
+  const [analyticsSubTab, setAnalyticsSubTab] = usePersistedTab("tf-analytics-sub", "performance");
+  const [riskSubTab, setRiskSubTab] = usePersistedTab("tf-risk-sub", "sizing");
+  const [monitorSubTab, setMonitorSubTab] = usePersistedTab("tf-monitor-sub", "momentum");
 
   // Reset to dashboard tab only when explicitly navigating to "/" (e.g. clicking logo)
   const prevLocationKey = useRef(location.key);
