@@ -4334,14 +4334,14 @@ serve(async (req) => {
               const atrPct = trendData?.volatility?.atrPercent ?? 0;
               const relativeATR = trendData?.volatility?.relativeATR ?? 0;
               
-              // Calculate dynamicMinATR (same logic as LOW_ATR_BLOCK)
+              // Calculate dynamicMinATR (same logic as graduated ATR filter)
               const atrFilter = RANGING_MARKET_PROTECTION?.MIN_ATR_FILTER;
               let dynamicMinATR = atrFilter?.FALLBACK_MIN_ATR_PERCENT ?? 1.8;
               if (atrFilter && relativeATR > 0 && atrPct > 0) {
                 const historicalATRPct = atrPct / relativeATR;
                 dynamicMinATR = Math.max(
-                  atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT ?? 1.0,
-                  (atrFilter.ADAPTIVE_MULTIPLIER ?? 0.7) * historicalATRPct
+                  atrFilter.SOFT_ZONE_HIGH ?? 1.10,
+                  (atrFilter.ADAPTIVE_MULTIPLIER ?? 0.8) * historicalATRPct
                 );
               }
               
@@ -7069,9 +7069,9 @@ serve(async (req) => {
             }
           }
           
-          // ===== IMPROVEMENT #2: DYNAMIC MINIMUM ATR FILTER =====
-          // Dynamic threshold: max(absoluteFloor, adaptiveMultiplier * 30d_avg_ATR%)
-          // Adapts to volatility regime shifts without manual retuning
+          // ===== IMPROVEMENT #2: GRADUATED ATR FILTER =====
+          // Replaces binary 1.10% cliff with graduated soft penalty zones
+          // Hard block only below structural floor (0.70%), soft penalties 0.70-1.10%
           const atrFilter = RANGING_MARKET_PROTECTION.MIN_ATR_FILTER;
           if (atrFilter?.ENABLED) {
             const currentPrice = trendData?.currentPrice || 0;
@@ -7079,23 +7079,23 @@ serve(async (req) => {
             const atrPercent24h = currentPrice > 0 ? (currentATR / currentPrice) * 100 : 0;
             const relativeATR = trendData?.volatility?.relativeATR ?? 0;
             
-            // Calculate dynamic threshold using 30-bar rolling average ATR%
-            // historicalATRAvg_pct = atrPercent / relativeATR (since relativeATR = current/historical)
-            let dynamicMinATR = atrFilter.FALLBACK_MIN_ATR_PERCENT;
+            // Calculate dynamic high threshold using 30-bar rolling average ATR%
+            let dynamicHighThreshold = atrFilter.SOFT_ZONE_HIGH ?? 1.10;
             if (relativeATR > 0 && atrPercent24h > 0) {
               const historicalATRPct = atrPercent24h / relativeATR;
-              dynamicMinATR = Math.max(
-                atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT,
+              dynamicHighThreshold = Math.max(
+                atrFilter.SOFT_ZONE_HIGH ?? 1.10,
                 atrFilter.ADAPTIVE_MULTIPLIER * historicalATRPct
               );
             }
             
-            if (atrPercent24h > 0 && atrPercent24h < dynamicMinATR) {
+            if (atrPercent24h > 0 && atrPercent24h < atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT) {
+              // HARD BLOCK: Below structural floor — truly dead volatility
               const isMREntry = false; // Pre-strategy gate: no strategy selected yet
               
               if (!isMREntry) {
                 rejectedByHardGates++;
-                const blockReason = `LOW_ATR_BLOCK: ATR=${atrPercent24h.toFixed(2)}% < ${dynamicMinATR.toFixed(2)}% dynamic minimum (floor=${atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT}%, adaptive=${(atrFilter.ADAPTIVE_MULTIPLIER * (relativeATR > 0 ? atrPercent24h / relativeATR : 0)).toFixed(2)}%) → compressed volatility, negative expectancy after fees`;
+                const blockReason = `LOW_ATR_BLOCK: ATR=${atrPercent24h.toFixed(2)}% < ${atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT}% structural floor → dead volatility, no tradeable edge`;
                 perSymbolGateAttribution.set(symbol, { gate: 'LOW_ATR_BLOCK', details: blockReason });
                 
                 logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
@@ -7104,20 +7104,36 @@ serve(async (req) => {
                   gate: 'LOW_ATR_BLOCK',
                   derivedDirection,
                   atrPercent: atrPercent24h.toFixed(3),
-                  minAtrRequired: dynamicMinATR.toFixed(2),
-                  dynamicThreshold: true,
-                  absoluteFloor: atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT,
-                  adaptiveComponent: relativeATR > 0 ? (atrFilter.ADAPTIVE_MULTIPLIER * (atrPercent24h / relativeATR)).toFixed(2) : 'N/A',
-                  historicalATRPct: relativeATR > 0 ? (atrPercent24h / relativeATR).toFixed(3) : 'N/A',
+                  structuralFloor: atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT,
                   relativeATR: relativeATR.toFixed(2),
                   currentPrice: currentPrice.toFixed(2),
                   atr: currentATR.toFixed(4),
-                  wouldPassWith: `ATR% >= ${dynamicMinATR.toFixed(2)}%`,
+                  wouldPassWith: `ATR% >= ${atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT}%`,
                 }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                 continue;
               } else {
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 LOW_ATR: ATR=${atrPercent24h.toFixed(2)}% < ${dynamicMinATR.toFixed(2)}% but allowing Mean Reversion`);
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 LOW_ATR: ATR=${atrPercent24h.toFixed(2)}% < ${atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT}% but allowing Mean Reversion`);
               }
+            } else if (atrPercent24h > 0 && atrPercent24h < dynamicHighThreshold) {
+              // SOFT PENALTY ZONE: Graduated position multiplier instead of hard block
+              const softZoneLow = atrFilter.SOFT_ZONE_LOW ?? 0.90;
+              let atrPenaltyMultiplier: number;
+              let penaltyZone: string;
+              
+              if (atrPercent24h < softZoneLow) {
+                // Lower soft zone: heavy reduction
+                atrPenaltyMultiplier = atrFilter.SOFT_ZONE_LOW_MULTIPLIER ?? 0.25;
+                penaltyZone = `LOW_SOFT (${atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT}%-${softZoneLow}%)`;
+              } else {
+                // Upper soft zone: moderate reduction
+                atrPenaltyMultiplier = atrFilter.SOFT_ZONE_HIGH_MULTIPLIER ?? 0.50;
+                penaltyZone = `HIGH_SOFT (${softZoneLow}%-${dynamicHighThreshold.toFixed(2)}%)`;
+              }
+              
+              // Apply as position multiplier (stacks with other multipliers via Math.min)
+              rangingMarketPositionMultiplier = Math.min(rangingMarketPositionMultiplier, atrPenaltyMultiplier);
+              
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 ATR_SOFT_PENALTY: ATR=${atrPercent24h.toFixed(2)}% in ${penaltyZone} → position reduced to ${(atrPenaltyMultiplier * 100).toFixed(0)}% (was hard block at 1.10%)`);
             }
           }
           

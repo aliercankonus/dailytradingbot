@@ -4629,8 +4629,16 @@ export const RANGING_MARKET_PROTECTION = {
   // Adapts to volatility regime shifts without manual retuning
   MIN_ATR_FILTER: {
     ENABLED: true,
-    // Absolute structural floor — never trade below this regardless of regime
-    ABSOLUTE_FLOOR_ATR_PERCENT: 1.1,
+    // Hard block floor — never trade below this (true compression, no edge)
+    ABSOLUTE_FLOOR_ATR_PERCENT: 0.70,
+    // Graduated soft penalty zones replace the old 1.10% cliff
+    // ATR between ABSOLUTE_FLOOR and SOFT_ZONE_LOW → reduced multiplier
+    // ATR between SOFT_ZONE_LOW and SOFT_ZONE_HIGH → moderate multiplier
+    // ATR >= SOFT_ZONE_HIGH → full sizing (no penalty)
+    SOFT_ZONE_LOW: 0.90,
+    SOFT_ZONE_LOW_MULTIPLIER: 0.25,   // 0.70% – 0.90%: heavy reduction
+    SOFT_ZONE_HIGH: 1.10,
+    SOFT_ZONE_HIGH_MULTIPLIER: 0.50,  // 0.90% – 1.10%: moderate reduction
     // Adaptive multiplier applied to 30-bar rolling average ATR%
     ADAPTIVE_MULTIPLIER: 0.8,
     // Legacy fallback if historical ATR is unavailable
