@@ -40,17 +40,17 @@ const App = () => (
             <RealtimePricesProvider>
               <Suspense fallback={<PageFallback />}>
                 <Routes>
-                <Route path="/auth" element={<Auth />} />
-                <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
-                <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-                <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-                <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
-                <Route path="/symbols" element={<ProtectedRoute><Symbols /></ProtectedRoute>} />
+                <Route path="/auth" element={<div className="animate-fade-in"><Auth /></div>} />
+                <Route path="/" element={<ProtectedRoute><div className="animate-fade-in"><Index /></div></ProtectedRoute>} />
+                <Route path="/settings" element={<ProtectedRoute><div className="animate-fade-in"><Settings /></div></ProtectedRoute>} />
+                <Route path="/profile" element={<ProtectedRoute><div className="animate-fade-in"><Profile /></div></ProtectedRoute>} />
+                <Route path="/notifications" element={<ProtectedRoute><div className="animate-fade-in"><Notifications /></div></ProtectedRoute>} />
+                <Route path="/symbols" element={<ProtectedRoute><div className="animate-fade-in"><Symbols /></div></ProtectedRoute>} />
                 
-                <Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} />
-                <Route path="/health" element={<ProtectedRoute><Health /></ProtectedRoute>} />
+                <Route path="/performance" element={<ProtectedRoute><div className="animate-fade-in"><Performance /></div></ProtectedRoute>} />
+                <Route path="/health" element={<ProtectedRoute><div className="animate-fade-in"><Health /></div></ProtectedRoute>} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                <Route path="*" element={<NotFound />} />
+                <Route path="*" element={<div className="animate-fade-in"><NotFound /></div>} />
                 </Routes>
               </Suspense>
             </RealtimePricesProvider>
