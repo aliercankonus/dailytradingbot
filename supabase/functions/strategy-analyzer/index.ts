@@ -11925,6 +11925,36 @@ serve(async (req) => {
                                      (trend1h === "bullish" || trend1h === "bearish") &&
                                      !is1hCounterTrendTo4h;  // FIX: Block counter-trend 1H bypass
         
+        // ===== DECLINING STRONG TREND (DST) BYPASS for HTF_NOT_ALIGNED =====
+        // Mirror NEUTRAL_4H's WEAK_TREND_PROMOTION: when DST is active, treat weak_bullish/weak_bearish
+        // 1h extendedTrend as directional for the Strong 1H bypass path
+        // This allows symbols like ADAUSDT to pass HTF alignment when structural pullback context exists
+        const isDSTActiveForHTF = (directionResult as any)?.decliningStrongTrendBypass === true;
+        const extendedTrend1hForHTF = timeframes?.['1h']?.extendedTrend || "neutral";
+        const isWeakDirectionalForHTF = extendedTrend1hForHTF === "weak_bullish" || extendedTrend1hForHTF === "weak_bearish";
+        
+        // DST bypass: relaxed 1H threshold (50% instead of 65%) when weak directional + DST active
+        // Must still not be counter-trend to 4H
+        const hasDSTWeakDirectionBypass = isDSTActiveForHTF && 
+                                          isWeakDirectionalForHTF && 
+                                          confidence1h >= 50 && 
+                                          !is1hCounterTrendTo4h &&
+                                          trend4hForHTFGate !== "bearish" && trend4hForHTFGate !== "bullish"; // Only when 4H is neutral
+        
+        // DST also boosts confidenceLocal by treating weak directional as stronger signal
+        // Effective confidence gets a +8 boost when DST promotes weak trend
+        const confidenceLocalDST = hasDSTWeakDirectionBypass 
+          ? Math.min(Math.round(confidenceLocal + 8), 65) // Cap at 65 to prevent over-promotion
+          : confidenceLocal;
+        
+        // Position multiplier for DST HTF bypass: conservative 0.50x
+        let dstHTFPositionMultiplier = 0.50;
+        
+        if (hasDSTWeakDirectionBypass) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 DST_HTF_BYPASS: 1h extendedTrend=${extendedTrend1hForHTF} (conf=${confidence1h}%) treated as directional for HTF alignment`);
+          logger.forSymbol(symbol).info(`   → confidenceLocal boosted: ${confidenceLocal}% → ${confidenceLocalDST}%, position multiplier: ${(dstHTFPositionMultiplier * 100).toFixed(0)}%`);
+        }
+        
         // ===== PHASE 2: HARDENED MICRO-TREND CHECK =====
         // Allows signals when 4h is neutral but lower TFs are aligned
         // Now requires: ADX >= 23 (lowered from 25), persistence >= 3 bars, volume confirmation
@@ -12180,8 +12210,9 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} OVERRIDE DIRECTION MISMATCH: price=${priceActionOverrideDirection}, momentum=${momentumDirection}, intended=${intendedMarketDirection}`);
         }
         
-        // FIX #1 APPLIED: Use confidenceLocal instead of global confidence for bypass logic
-        if (!htfAligned && confidenceLocal < 65 && !has1hStrongDirection && !hasMicroTrendBypass && !anyOverrideActive) {
+        // FIX #1 APPLIED: Use confidenceLocal (or DST-boosted) instead of global confidence for bypass logic
+        // DST bypass: hasDSTWeakDirectionBypass allows pass when Declining Strong Trend promotes weak 1h trend
+        if (!htfAligned && confidenceLocalDST < 65 && !has1hStrongDirection && !hasDSTWeakDirectionBypass && !hasMicroTrendBypass && !anyOverrideActive) {
           rejectedByHardGates++;
           const microTrendInfo = microTrend?.blocked 
             ? `blocked (${microTrend.blockReason})`
@@ -12190,7 +12221,8 @@ serve(async (req) => {
               : `insufficient (align=${microTrend?.alignment}, persist=${microTrend?.persistence}, volOK=${microTrend?.volumeConfirmed})`;
           const lowAdxInfo = lowAdxTrendExceptionActive ? ` (LOW_ADX_EXCEPTION active)` : '';
           const counterTrendInfo = is1hCounterTrendTo4h ? ' (1h counter-trend to 4h)' : '';
-          perSymbolGateAttribution.set(symbol, { gate: 'HTF_NOT_ALIGNED', details: `confLocal=${confidenceLocal}%, 1h=${confidence1h}%${lowAdxInfo}${counterTrendInfo}` });
+          const dstInfo = isDSTActiveForHTF ? ` (DST active but ${!isWeakDirectionalForHTF ? 'no weak trend' : confidence1h < 50 ? '1h conf < 50%' : '4h not neutral'})` : '';
+          perSymbolGateAttribution.set(symbol, { gate: 'HTF_NOT_ALIGNED', details: `confLocal=${confidenceLocalDST}%, 1h=${confidence1h}%${lowAdxInfo}${counterTrendInfo}${dstInfo}` });
           await logRejectionWithAI(
             supabase, userId, symbol,
             `HARD GATE: HTF not aligned, confidence too low, 1h not strong, and micro-trend ${microTrendInfo}`,
@@ -12198,24 +12230,34 @@ serve(async (req) => {
               htfAligned, 
               confidence,  // Keep global for reference
               confidenceLocal,  // FIX #1: Add local confidence for transparency
+              confidenceLocalDST,  // DST-boosted local confidence
               confidence1h,
               confidence30m,
               confidence15m,
               trend1h,
               trend4h: trend4hForHTFGate,
               is1hCounterTrendTo4h,  // FIX #2: Log counter-trend status
+              isDSTActiveForHTF,
+              extendedTrend1hForHTF,
+              isWeakDirectionalForHTF,
+              hasDSTWeakDirectionBypass,
               microTrend: microTrend || null,
               microTrendInfo,
               gate: "HTF_NOT_ALIGNED",
               // FIX #4: Add "what would have passed" hints
               bypassHints: {
-                needsConfidenceLocal: 65 - confidenceLocal,  // Points needed
+                needsConfidenceLocal: 65 - confidenceLocalDST,  // Points needed (uses DST-boosted)
                 needs1hConfidence: 65 - confidence1h,
                 needs4hAligned: !htfAligned,
                 is1hBlockedByCounterTrend: is1hCounterTrendTo4h,
                 microTrendBlocked: is4hCounterTrend,
                 priceActionBlockedByRangeRegime,  // FIX #3: Track RANGE regime blocking
                 currentRegime: currentRegimeForPAO,
+                dstBypassAvailable: isDSTActiveForHTF,
+                dstBypassBlocked: isDSTActiveForHTF && !hasDSTWeakDirectionBypass,
+                dstBlockReason: isDSTActiveForHTF && !hasDSTWeakDirectionBypass 
+                  ? (!isWeakDirectionalForHTF ? 'no_weak_trend' : confidence1h < 50 ? 'low_1h_confidence' : '4h_not_neutral')
+                  : null,
               },
               momentum: {
                 confirms: momentum?.confirms ?? false,
@@ -12244,6 +12286,11 @@ serve(async (req) => {
         // Log if using LOW_ADX_TREND_EXCEPTION to bypass HTF gate
         if (!htfAligned && confidence < 65 && !has1hStrongDirection && !hasMicroTrendBypass && lowAdxTrendExceptionActive) {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate passed via LOW_ADX_TREND_EXCEPTION (ADX=${adx.toFixed(1)} in 12-25 range with HTF confirmation)`);
+        }
+        
+        // Log if using DST weak trend promotion to bypass HTF gate
+        if (!htfAligned && !has1hStrongDirection && hasDSTWeakDirectionBypass) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} HTF gate passed via DST_WEAK_TREND_PROMOTION (1h extendedTrend=${extendedTrend1hForHTF}, conf=${confidence1h}%, position=${(dstHTFPositionMultiplier * 100).toFixed(0)}%)`);
         }
         
         // GATE 4: Confidence Dead Zone - REMOVED
@@ -14747,6 +14794,12 @@ serve(async (req) => {
         if (strongTrendHTFBypassApplied && trendContinuationPositionMultiplier < 1.0) {
           positionSizeMultiplier *= trendContinuationPositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} Strong trend HTF bypass - position size capped at ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 7b: Apply DST HTF bypass reduction (0.50x)
+        if (hasDSTWeakDirectionBypass && dstHTFPositionMultiplier < 1.0) {
+          positionSizeMultiplier *= dstHTFPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} DST HTF bypass - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
         // Step 8: Apply pullback entry position reduction (50% default)

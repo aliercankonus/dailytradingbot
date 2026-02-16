@@ -28,6 +28,7 @@ export interface TrendIndicators {
 
 export interface TimeframeTrend {
   trend: TrendDirection;
+  extendedTrend?: string;  // e.g. "weak_bullish", "weak_bearish" for nuanced classification
   confidence: number;
   enhancedConfidence?: number;
   indicators: TrendIndicators;
