@@ -11509,6 +11509,7 @@ serve(async (req) => {
         const is4hNeutral = trend4hForNeutralGate === "neutral";
         const conf4hForGate = timeframes?.['4h']?.confidence || confidence;
         const conf1hForGate = timeframes?.['1h']?.confidence || 0;
+        const extendedTrend1h = timeframes?.['1h']?.extendedTrend || "neutral";
         const is1hDirectional = htfTrend1h === "bullish" || htfTrend1h === "bearish";
         
         if (is4hNeutral) {
@@ -11645,8 +11646,17 @@ serve(async (req) => {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 DECLINING_STRONG_TREND_RELAXATION: 4h confidence threshold reduced 55% → 52% (structural pullback context)`);
             }
             
+            // DECLINING_STRONG_TREND enhancement: treat weak_bullish/weak_bearish as directional
+            // since structural pullback context provides the missing confirmation
+            const isWeakDirectional = extendedTrend1h === "weak_bullish" || extendedTrend1h === "weak_bearish";
+            const effectiveIs1hDirectional = is1hDirectional || (isDecliningStrongTrendActive && isWeakDirectional);
+            
+            if (isDecliningStrongTrendActive && isWeakDirectional && !is1hDirectional) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 WEAK_TREND_PROMOTION: 1h extendedTrend=${extendedTrend1h} treated as directional (Declining Strong Trend context)`);
+            }
+            
             const passesNeutralGate = conf4hForGate >= neutral4hConfidenceThreshold || 
-              (is1hDirectional && conf1hForGate >= 50) ||
+              (effectiveIs1hDirectional && conf1hForGate >= 50) ||
               momentumConfirmedBypass;
             
             if (!passesNeutralGate) {
@@ -11686,7 +11696,9 @@ serve(async (req) => {
                    confidence1h: conf1hForGate,
                    requiredConfidence: neutral4hConfidenceThreshold,
                    decliningStrongTrendRelaxation: isDecliningStrongTrendActive,
-                  is1hDirectional,
+                   is1hDirectional,
+                   extendedTrend1h,
+                   weakTrendPromoted: isDecliningStrongTrendActive && isWeakDirectional && !is1hDirectional,
                   adx: adx.toFixed(1),
                   momentumConfirmedBypassChecked: true,
                   momentumConfirmed: momentum?.state === "confirmed",
