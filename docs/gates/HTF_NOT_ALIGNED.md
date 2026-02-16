@@ -43,6 +43,13 @@ START
   │   └─ NOT counter-trend to 4H ─────────── YES → PASS (1.0x*)
   │                                                 * reduced to 0.85x if 4H neutral
   │
+  ├─ DST Weak Trend Promotion?
+  │   ├─ Declining Strong Trend bypass active
+  │   ├─ 1H extendedTrend = weak_bullish/weak_bearish
+  │   ├─ 1H confidence ≥ 50%
+  │   ├─ 4H = neutral (not directional)
+  │   └─ NOT counter-trend to 4H ────────────── YES → PASS (0.50x)
+  │
   ├─ Micro-Trend Bypass?
   │   ├─ ADX ≥ 23
   │   ├─ Persistence ≥ 3 bars
@@ -54,6 +61,8 @@ START
   │   ├─ PRICE_ACTION_OVERRIDE (direction match, NOT RANGE regime) ← FIX #3
   │   └─ STRONG_MOMENTUM_OVERRIDE (direction match)
   │   ─────────────────────────────────────── YES → PASS (override size)
+  │
+  └─ REJECT → Log with bypass hints
   │
   └─ REJECT → Log with bypass hints
 ```
@@ -68,6 +77,7 @@ START
 | High Local Confidence | ≥ 65% (local only) | 1.00x |
 | Strong 1H | ≥ 65% + aligned with 4H | 1.00x |
 | Strong 1H | ≥ 65% + 4H neutral | 0.85x |
+| DST Weak Trend | DST active + weak 1h + 4H neutral | 0.50x |
 | Micro-Trend | ADX≥23, vol, 3+ bars | 0.60x |
 | Price Action Override | Direction-aligned | 0.50-0.70x |
 | Strong Momentum Override | Direction-aligned | 0.65x |
@@ -125,6 +135,15 @@ The `HardGateHtfDisplay` component shows:
 ---
 
 ## Changelog
+
+### v6 (2026-02-16)
+- **DST Weak Trend Promotion**: Extended Declining Strong Trend bypass to HTF_NOT_ALIGNED gate
+- When DST is active and 1h extendedTrend is weak_bullish/weak_bearish with ≥50% confidence:
+  - Treats weak directional 1h as sufficient for HTF alignment (0.50x position)
+  - Boosts confidenceLocal by +8 (capped at 65) for threshold evaluation
+  - Only applies when 4H is neutral (not directional) to prevent counter-trend entries
+- Added `isDSTActiveForHTF`, `extendedTrend1hForHTF`, `hasDSTWeakDirectionBypass` to rejection logs
+- Added `dstBypassAvailable`, `dstBypassBlocked`, `dstBlockReason` to bypass hints
 
 ### v5 (2025-01-27)
 - **FIX #3 (Audit)**: Disabled PRICE_ACTION_OVERRIDE bypass when regime == RANGE
