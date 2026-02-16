@@ -870,6 +870,17 @@ const QualityScoreBreakdown = ({ filtersStatus }: { filtersStatus: any }) => {
 const StrategyNearMissesDisplay = ({ nearMisses }: { nearMisses: any[] }) => {
   if (!nearMisses || nearMisses.length === 0) return null;
   
+  // Sort: evaluated strategies first, then skipped
+  const sorted = [...nearMisses].sort((a, b) => {
+    const aSkipped = !!a.skipReason && a.passedCount === 0;
+    const bSkipped = !!b.skipReason && b.passedCount === 0;
+    if (aSkipped !== bSkipped) return aSkipped ? 1 : -1;
+    // Among evaluated, sort by pass ratio descending
+    const aRatio = a.totalConditions > 0 ? a.passedCount / a.totalConditions : 0;
+    const bRatio = b.totalConditions > 0 ? b.passedCount / b.totalConditions : 0;
+    return bRatio - aRatio;
+  });
+  
   return (
     <div className="pt-2 mt-2 border-t border-border/50 space-y-2">
       <div className="flex items-center gap-1.5">
@@ -877,30 +888,56 @@ const StrategyNearMissesDisplay = ({ nearMisses }: { nearMisses: any[] }) => {
         <span className="text-xs font-medium text-orange-400">Closest Strategies</span>
       </div>
       <div className="space-y-1.5">
-        {nearMisses.slice(0, 3).map((miss, idx) => {
+        {sorted.slice(0, 4).map((miss, idx) => {
+          const isSkipped = !!miss.skipReason && miss.passedCount === 0;
           const passRatio = miss.totalConditions > 0 ? (miss.passedCount / miss.totalConditions) * 100 : 0;
-          const isClose = passRatio >= 50;
+          const isClose = !isSkipped && passRatio >= 50;
           
           return (
             <div 
               key={idx} 
-              className={`p-1.5 rounded border ${isClose ? 'bg-orange-500/10 border-orange-500/30' : 'bg-muted/30 border-border/50'}`}
+              className={`p-1.5 rounded border ${
+                isSkipped 
+                  ? 'bg-muted/20 border-border/30 opacity-70' 
+                  : isClose 
+                    ? 'bg-orange-500/10 border-orange-500/30' 
+                    : 'bg-muted/30 border-border/50'
+              }`}
             >
               <div className="flex items-center justify-between mb-1">
-                <span className={`text-[10px] font-medium ${isClose ? 'text-orange-400' : 'text-muted-foreground'}`}>
-                  {miss.name}
-                </span>
-                <span className={`text-[10px] font-mono ${isClose ? 'text-orange-400' : 'text-muted-foreground'}`}>
-                  {miss.passedCount}/{miss.totalConditions} ({passRatio.toFixed(0)}%)
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {isSkipped ? (
+                    <Ban className="h-3 w-3 text-muted-foreground/60" />
+                  ) : isClose ? (
+                    <AlertTriangle className="h-3 w-3 text-orange-400" />
+                  ) : (
+                    <XCircle className="h-3 w-3 text-red-400/60" />
+                  )}
+                  <span className={`text-[10px] font-medium ${
+                    isSkipped ? 'text-muted-foreground/70' : isClose ? 'text-orange-400' : 'text-muted-foreground'
+                  }`}>
+                    {miss.name}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {isSkipped ? (
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 bg-muted/30 text-muted-foreground/60 border-border/40">
+                      Skipped
+                    </Badge>
+                  ) : (
+                    <span className={`text-[10px] font-mono ${isClose ? 'text-orange-400' : 'text-muted-foreground'}`}>
+                      {miss.passedCount}/{miss.totalConditions} ({passRatio.toFixed(0)}%)
+                    </span>
+                  )}
+                </div>
               </div>
               {miss.skipReason && (
-                <div className="text-[9px] text-muted-foreground italic">
-                  Skip: {miss.skipReason}
+                <div className="text-[9px] text-muted-foreground/70 italic pl-4">
+                  Pre-filter: {miss.skipReason.replace(/^Signal type invalid:\s*/i, '')}
                 </div>
               )}
-              {miss.failedConditions && miss.failedConditions.length > 0 && (
-                <div className="text-[9px] text-muted-foreground space-y-0.5">
+              {!isSkipped && miss.failedConditions && miss.failedConditions.length > 0 && (
+                <div className="text-[9px] text-muted-foreground space-y-0.5 pl-4">
                   {miss.failedConditions.slice(0, 2).map((fc: any, fcIdx: number) => (
                     <div key={fcIdx} className="flex items-center gap-1">
                       <XCircle className="h-2.5 w-2.5 text-red-400/70" />
