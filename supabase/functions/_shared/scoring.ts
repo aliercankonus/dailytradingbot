@@ -4814,17 +4814,21 @@ export const classifyMasterRegime = (
   const RC = MARKET_REGIME_CLASSIFIER;
   const SAUO = STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS;
   
-  // Derive actual trend direction from DI and HTF trends
-  // Priority: 1) DI gap, 2) 4h trend, 3) 1h trend
+  // Derive actual trend direction from HTF trends and DI
+  // Priority: 1) 4h structural trend (fastest to detect reversals via MACD), 
+  //           2) DI gap (lagging but confirms energy), 3) 1h trend
+  // BUGFIX: DI is a lagging indicator — it can show DI+ > DI- even after MACD/EMA 
+  // have flipped bearish (e.g., ETHUSDT false bullish direction while 4H is bearish).
+  // The 4H trend uses MACD + EMA + RSI which are faster to detect structural flips.
   let trendDirection: 'bullish' | 'bearish' | 'neutral';
   const diGap = Math.abs(diPlus - diMinus);
   
-  if (diGap >= 5) {
-    // Significant DI gap - use DI for direction
-    trendDirection = diPlus > diMinus ? 'bullish' : 'bearish';
-  } else if (htf4hTrend !== "neutral") {
-    // Use 4h trend if DI gap is narrow
+  if (htf4hTrend !== "neutral") {
+    // 4H structural trend is the primary anchor (uses faster indicators than DI)
     trendDirection = htf4hTrend === "bullish" ? 'bullish' : htf4hTrend === "bearish" ? 'bearish' : 'neutral';
+  } else if (diGap >= 5) {
+    // When 4H is neutral, use DI gap for directional energy
+    trendDirection = diPlus > diMinus ? 'bullish' : 'bearish';
   } else if (htf1hTrend !== "neutral") {
     // Fall back to 1h trend
     trendDirection = htf1hTrend === "bullish" ? 'bullish' : htf1hTrend === "bearish" ? 'bearish' : 'neutral';
