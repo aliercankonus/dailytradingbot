@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
-import { 
+import {
+  LOW_CONFIDENCE_STANDARD_EXIT,
   ADX_THRESHOLDS, 
   STOCHRSI_THRESHOLDS, 
   RSI_THRESHOLDS, 
@@ -14974,15 +14975,17 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ TIER 0 SOFT CAP entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (early climax zone)`);
         }
         
-        // Step 24: FIX #4 — Low-confidence STANDARD entry position reduction (60%)
-        // Confidence 55-59 is the statistical gray zone — de-risk instead of blocking
+        // Step 24: FIX #4 — Low-confidence STANDARD entry position reduction
+        // Confidence below threshold is the "statistical gray zone" — de-risk instead of blocking
         // Only applies to STANDARD entries (no entry_exception_type set)
+        // Uses centralized constants from LOW_CONFIDENCE_STANDARD_EXIT
         const isStandardEntryType = !exceptionResult.exceptionType || exceptionResult.exceptionType === 'NONE';
         const entryConfidence = Math.round(Math.min(confidence, 100));
-        if (isStandardEntryType && entryConfidence < 58) {
-          const lowConfMultiplier = 0.60; // 40% reduction
+        const isLowConfidenceStandard = isStandardEntryType && entryConfidence < LOW_CONFIDENCE_STANDARD_EXIT.MAX_CONFIDENCE;
+        if (isLowConfidenceStandard) {
+          const lowConfMultiplier = LOW_CONFIDENCE_STANDARD_EXIT.POSITION_SIZE_MULTIPLIER;
           positionSizeMultiplier *= lowConfMultiplier;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ LOW CONFIDENCE STANDARD (${entryConfidence} < 58) - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (gray zone de-risk)`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ LOW CONFIDENCE STANDARD (${entryConfidence} < ${LOW_CONFIDENCE_STANDARD_EXIT.MAX_CONFIDENCE}) - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (${(lowConfMultiplier * 100).toFixed(0)}% multiplier, gray zone de-risk)`);
         }
         
         // Use user-configured base values from risk_parameters instead of legacy strategy templates
