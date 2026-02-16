@@ -395,8 +395,8 @@ export const STOCHRSI_THRESHOLDS = {
 // ============= TIER 0: DEEP STOCHRSI EXTREME HARD GATE =============
 // TIER HIERARCHY:
 //   Tier 0 (DEEP): K < 5 or K > 95 - Universal block, NO EXCEPTIONS
-//   Tier 1 (SEVERE): 5 <= K < 15 or 85 < K <= 95 - Block, NO BYPASS
-//   Tier 2 (STANDARD): K <= 20 & %B <= 25 or K >= 80 & %B >= 75 - Block with RESTRICTED bypass
+//   Tier 1 (SEVERE): 5 <= K < 10 or 90 < K <= 95 - Block, NO BYPASS
+//   Tier 2 (GRADUATED): K 10-20 & %B ≤ 25 or K 80-90 & %B ≥ 75 - Graduated multiplier (0.40x deep / 0.50x moderate)
 //   Tier 3 (CAUTION): K <= 30 or K >= 70 - Penalty scoring, no hard block
 //
 // Universal block for deep oversold/overbought - NO EXCEPTIONS ALLOWED
@@ -2341,18 +2341,31 @@ export function isTrendFollowingStrategy(strategyId: string | undefined, strateg
 // Global rule for ALL strategies: Block counter-trend continuation at extremes
 export const HTF_EXTREME_HARD_GATES = {
   // ============= TIER 1: SEVERE STOCHRSI-ONLY GATE (NO BYPASS) =============
-  // Tier 1 catches 5 <= K < 15 (shorts) or 85 < K <= 95 (longs) - where Tier 0 doesn't reach
+  // Tier 1 catches 5 <= K < 10 (shorts) or 90 < K <= 95 (longs) - structural exhaustion
   // When StochRSI is in severe zone, block WITHOUT bypass - %B confirmation not required
+  // UPDATED: Narrowed from K<15/K>85 to K<10/K>90 — K 10-20 zone is now graduated (Tier 2)
   TIER_1_LABEL: 'SEVERE' as const,
-  SEVERE_OVERSOLD_K_THRESHOLD: 15,   // Tier 1: K < 15 = block SHORT with no bypass
-  SEVERE_OVERBOUGHT_K_THRESHOLD: 85, // Tier 1: K > 85 = block LONG with no bypass
+  SEVERE_OVERSOLD_K_THRESHOLD: 10,   // Tier 1: K < 10 = block SHORT with no bypass (was 15)
+  SEVERE_OVERBOUGHT_K_THRESHOLD: 90, // Tier 1: K > 90 = block LONG with no bypass (was 85)
   SEVERE_GATE_ALLOW_BYPASS: false,   // Tier 1: NO bypass allowed
   
-  // ============= TIER 2: STANDARD COMBINED GATE (WITH BYPASS) =============
-  // Tier 2 requires BOTH K AND %B to be in extreme zone - more permissive than Tier 1
-  TIER_2_LABEL: 'STANDARD' as const,
-  STOCHRSI_OVERSOLD_BLOCK: 20,   // Tier 2: K <= 20 for shorts (combined with %B)
-  STOCHRSI_OVERBOUGHT_BLOCK: 80, // Tier 2: K >= 80 for longs (combined with %B)
+  // ============= TIER 2: GRADUATED PENALTY GATE (REPLACES HARD BLOCK) =============
+  // Tier 2 now applies graduated position multipliers instead of hard blocks
+  // K 10-15: 0.40x (deep zone), K 15-20: 0.50x (moderate zone)
+  // Still requires %B confirmation for the moderate zone
+  TIER_2_LABEL: 'GRADUATED' as const,
+  STOCHRSI_OVERSOLD_BLOCK: 20,   // Tier 2 outer boundary: K <= 20 for shorts
+  STOCHRSI_OVERBOUGHT_BLOCK: 80, // Tier 2 outer boundary: K >= 80 for longs
+  
+  // Graduated Tier 2 sub-zones
+  // Deep zone: K 10-15 (oversold) / K 85-90 (overbought) - more conservative multiplier
+  TIER_2_DEEP_OVERSOLD_MAX_K: 15,       // K 10-15 = deep graduated zone
+  TIER_2_DEEP_OVERBOUGHT_MIN_K: 85,     // K 85-90 = deep graduated zone
+  TIER_2_DEEP_ZONE_MULTIPLIER: 0.40,    // 40% position in deep zone
+  // Moderate zone: K 15-20 (oversold) / K 80-85 (overbought) - less conservative
+  TIER_2_MODERATE_ZONE_MULTIPLIER: 0.50, // 50% position in moderate zone
+  // Require %B confirmation for graduated zone (same as before)
+  TIER_2_GRADUATED_REQUIRE_PERCENT_B: true,
   
   // PARABOLIC MODE: Relaxed thresholds only apply to Tier 2 (NOT Tier 1)
   // But parabolic bypass only works if K is NOT in Tier 1 severe zone

@@ -9221,6 +9221,7 @@ serve(async (req) => {
         }
         
         // Block SHORT continuation at 4h oversold (bounce is statistically likely)
+        // UPDATED: Tier 2 now uses graduated penalties instead of hard blocks
         if (intendedTradeDirection === "short" && isHTFOversold) {
           if (canBypassHTFGate) {
             // Allow with reduced position size - use dynamic multiplier based on bypass type
@@ -9236,56 +9237,25 @@ serve(async (req) => {
             logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}→${bypassedReversalScore.score} (FIX#2), exhausted=${isExhausted}${stealthHTFBypassPath ? `, stealth_drift=${stealthTrendHTF.driftPercent?.toFixed(2) || 0}%, stealth_score=${stealthTrendHTF.stealthScore}` : ''}`);
             logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
           } else {
-            rejectedByHardGates++;
-            perSymbolGateAttribution.set(symbol, { gate: 'HTF_EXTREME_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}` });
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking SHORT at 4h oversold (StochRSI K=${stochRsiK4h.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK}, %B=${percentB.toFixed(1)} <= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK})`);
-
-            // Enhanced debug logging for bypass failure
-            logger.forSymbol(symbol).debug(`   Bypass check: ADX=${adx.toFixed(1)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX}? slope=${adxSlopeForBypass.toFixed(3)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX_SLOPE}? reversal=${unifiedReversal.score}<${STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE}?`);
-            logger.forSymbol(symbol).debug(`   → 4hAligned=${is4hAligned}, relaxedAlign=${hasRelaxedAlignment}, altPath=${alternativeBypassPath}, parabolic=${isParabolicMode}, exhausted=${isExhausted}`);
+            // GRADUATED TIER 2: Apply position multiplier instead of hard block
+            // Deep zone (K 10-15): 0.40x, Moderate zone (K 15-20): 0.50x
+            const tier2DeepMaxK = HTF_EXTREME_HARD_GATES.TIER_2_DEEP_OVERSOLD_MAX_K ?? 15;
+            const tier2DeepMultiplier = HTF_EXTREME_HARD_GATES.TIER_2_DEEP_ZONE_MULTIPLIER ?? 0.40;
+            const tier2ModerateMultiplier = HTF_EXTREME_HARD_GATES.TIER_2_MODERATE_ZONE_MULTIPLIER ?? 0.50;
             
-            await logRejectionWithAI(
-              supabase, userId, symbol,
-              `IMPROVEMENT 1 - HTF EXTREME GATE: SHORT blocked at 4h oversold (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
-              { 
-                gate: "HTF_EXTREME_OVERSOLD_BLOCK",
-                derivedDirection,
-                direction: "short",
-                stochRsiK4h: stochRsiK4h.toFixed(1),
-                percentB: percentB.toFixed(1),
-                thresholds: {
-                  stochRsiK_threshold: HTF_EXTREME_HARD_GATES.STOCHRSI_OVERSOLD_BLOCK,
-                  percentB_threshold: HTF_EXTREME_HARD_GATES.PERCENT_B_OVERSOLD_BLOCK
-                },
-                bypassCheck: {
-                  adx: adx.toFixed(1),
-                  adxSlope: adxSlopeForBypass.toFixed(3),
-                  is4hAligned,
-                  hasRelaxedAlignment,
-                  alternativeBypassPath,
-                  isParabolicMode,
-                  reversalScore: unifiedReversal.score,
-                  isExhausted,
-                  canBypass: false,
-                  stealthTrend: {
-                    detected: stealthTrendHTF.detected,
-                    htfBypassAllowed: stealthTrendHTF.htfBypassAllowed,
-                    score: stealthTrendHTF.stealthScore,
-                    drift: stealthTrendHTF.driftPercent,
-                    directionMatch: stealthDirectionMatchesHTF
-                  }
-                },
-                message: "Bounce statistically likely at 4h oversold - blocking SHORT continuation"
-              },
-              trendData,
-              false,
-              earlyOrderFlowAnalysis
-            );
-            continue;
+            const tier2Multiplier = stochRsiK4h < tier2DeepMaxK ? tier2DeepMultiplier : tier2ModerateMultiplier;
+            const tier2Zone = stochRsiK4h < tier2DeepMaxK ? 'DEEP' : 'MODERATE';
+            
+            // Apply as position multiplier via trendContinuationPositionMultiplier (stacks with Math.min later)
+            trendContinuationPositionMultiplier = Math.min(trendContinuationPositionMultiplier, tier2Multiplier);
+            
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ TIER 2 GRADUATED: SHORT at 4h oversold K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)} → ${tier2Zone} zone, position reduced to ${(tier2Multiplier * 100).toFixed(0)}% (was hard block)`);
+            logger.forSymbol(symbol).info(`   → Tier 2 graduated penalty applied instead of hard block. ADX=${adx.toFixed(1)}, bypass failed but graduated allows entry.`);
           }
         }
         
         // Block LONG continuation at 4h overbought (reversal is statistically likely)
+        // UPDATED: Tier 2 now uses graduated penalties instead of hard blocks
         if (intendedTradeDirection === "long" && isHTFOverbought) {
           if (canBypassHTFGate) {
             // Allow with reduced position size - use dynamic multiplier based on bypass type
@@ -9301,45 +9271,20 @@ serve(async (req) => {
             logger.forSymbol(symbol).info(`   ADX=${adx.toFixed(1)} slope=${adxSlopeForBypass.toFixed(3)}, 4h=${tf4hDir}, reversal=${unifiedReversal.score}→${bypassedReversalScore.score} (FIX#2), exhausted=${isExhausted}${stealthHTFBypassPath ? `, stealth_drift=${stealthTrendHTF.driftPercent?.toFixed(2) || 0}%, stealth_score=${stealthTrendHTF.stealthScore}` : ''}`);
             logger.forSymbol(symbol).info(`   Position size reduced to ${(trendContinuationPositionMultiplier * 100).toFixed(0)}%`);
           } else {
-            rejectedByHardGates++;
-            perSymbolGateAttribution.set(symbol, { gate: 'HTF_EXTREME_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)}` });
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} HTF EXTREME GATE - Blocking LONG at 4h overbought (StochRSI K=${stochRsiK4h.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK}, %B=${percentB.toFixed(1)} >= ${HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK})`);
-
-            // Enhanced debug logging for bypass failure
-            logger.forSymbol(symbol).debug(`   Bypass check: ADX=${adx.toFixed(1)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX}? slope=${adxSlopeForBypass.toFixed(3)}>=${STRONG_TREND_HTF_BYPASS_PARAMS.MIN_ADX_SLOPE}? reversal=${unifiedReversal.score}<${STRONG_TREND_HTF_BYPASS_PARAMS.MAX_REVERSAL_SCORE}?`);
-            logger.forSymbol(symbol).debug(`   → 4hAligned=${is4hAligned}, relaxedAlign=${hasRelaxedAlignment}, altPath=${alternativeBypassPath}, parabolic=${isParabolicMode}, exhausted=${isExhausted}`);
+            // GRADUATED TIER 2: Apply position multiplier instead of hard block
+            // Deep zone (K 85-90): 0.40x, Moderate zone (K 80-85): 0.50x
+            const tier2DeepMinK = HTF_EXTREME_HARD_GATES.TIER_2_DEEP_OVERBOUGHT_MIN_K ?? 85;
+            const tier2DeepMultiplier = HTF_EXTREME_HARD_GATES.TIER_2_DEEP_ZONE_MULTIPLIER ?? 0.40;
+            const tier2ModerateMultiplier = HTF_EXTREME_HARD_GATES.TIER_2_MODERATE_ZONE_MULTIPLIER ?? 0.50;
             
-            await logRejectionWithAI(
-              supabase, userId, symbol,
-              `IMPROVEMENT 1 - HTF EXTREME GATE: LONG blocked at 4h overbought (K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)})`,
-              { 
-                gate: "HTF_EXTREME_OVERBOUGHT_BLOCK",
-                derivedDirection,
-                direction: "long",
-                stochRsiK4h: stochRsiK4h.toFixed(1),
-                percentB: percentB.toFixed(1),
-                thresholds: {
-                  stochRsiK_threshold: HTF_EXTREME_HARD_GATES.STOCHRSI_OVERBOUGHT_BLOCK,
-                  percentB_threshold: HTF_EXTREME_HARD_GATES.PERCENT_B_OVERBOUGHT_BLOCK
-                },
-                bypassCheck: {
-                  adx: adx.toFixed(1),
-                  adxSlope: adxSlopeForBypass.toFixed(3),
-                  is4hAligned,
-                  hasRelaxedAlignment,
-                  alternativeBypassPath,
-                  isParabolicMode,
-                  reversalScore: unifiedReversal.score,
-                  isExhausted,
-                  canBypass: false
-                },
-                message: "Reversal statistically likely at 4h overbought - blocking LONG continuation"
-              },
-              trendData,
-              false,
-              earlyOrderFlowAnalysis
-            );
-            continue;
+            const tier2Multiplier = stochRsiK4h > tier2DeepMinK ? tier2DeepMultiplier : tier2ModerateMultiplier;
+            const tier2Zone = stochRsiK4h > tier2DeepMinK ? 'DEEP' : 'MODERATE';
+            
+            // Apply as position multiplier via trendContinuationPositionMultiplier (stacks with Math.min later)
+            trendContinuationPositionMultiplier = Math.min(trendContinuationPositionMultiplier, tier2Multiplier);
+            
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ TIER 2 GRADUATED: LONG at 4h overbought K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)} → ${tier2Zone} zone, position reduced to ${(tier2Multiplier * 100).toFixed(0)}% (was hard block)`);
+            logger.forSymbol(symbol).info(`   → Tier 2 graduated penalty applied instead of hard block. ADX=${adx.toFixed(1)}, bypass failed but graduated allows entry.`);
           }
         }
         
