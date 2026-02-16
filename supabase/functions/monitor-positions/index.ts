@@ -452,6 +452,9 @@ serve(async (req) => {
       // Get user settings early for circuit breaker check
       const userSettingsEarly = userSettingsMap.get(position.user_id);
       
+      // ===== ENTRY TYPE DETECTION (needed early for trailing overrides) =====
+      const isMicroTrendEntry = position.entry_exception_type === 'MICRO_TREND';
+      
       // ============================================================
       // DYNAMIC THRESHOLDS (aligned with strategy-analyzer)
       // Use ADX and volume to determine exit sensitivity
@@ -1243,9 +1246,11 @@ serve(async (req) => {
       // Determine if trailing should activate
       // Priority 1: R-multiple based (if valid stop loss exists)
       // Priority 2: Fall back to percent-based (user setting or default)
+      // Priority 3: MICRO_TREND override - much lower activation threshold
+      const microTrendActivation = isMicroTrendEntry && pnlPercent > MICRO_TREND_EXIT.TRAILING_ACTIVATION_PERCENT;
       const rMultipleActivated = useRMultipleActivation && currentRMultiple >= R_MULTIPLE_TRAILING_PARAMS.ACTIVATION_R_MULTIPLE;
       const percentActivated = pnlPercent > userSettings.activationPercent;
-      const shouldActivateTrailing = rMultipleActivated || (R_MULTIPLE_TRAILING_PARAMS.FALLBACK_TO_PERCENT && percentActivated);
+      const shouldActivateTrailing = microTrendActivation || rMultipleActivated || (R_MULTIPLE_TRAILING_PARAMS.FALLBACK_TO_PERCENT && percentActivated);
       
       // ============= PHASE 3: DYNAMIC R-MULTIPLE TRAILING =============
       // Use ADX-aware activation and momentum-based trailing distance
@@ -1514,6 +1519,8 @@ serve(async (req) => {
       // Log activation method
       if (shouldActivateTrailing && useRMultipleActivation && rMultipleActivated && !phase3TrailingApplied) {
         positionLogger.trade(`TRAILING R-MULTIPLE: ${currentRMultiple.toFixed(2)}R >= ${R_MULTIPLE_TRAILING_PARAMS.ACTIVATION_R_MULTIPLE}R activation (P&L: ${pnlPercent.toFixed(2)}%)`);
+      } else if (shouldActivateTrailing && microTrendActivation && !phase3TrailingApplied) {
+        positionLogger.trade(`TRAILING MICRO_TREND: P&L ${pnlPercent.toFixed(2)}% > ${MICRO_TREND_EXIT.TRAILING_ACTIVATION_PERCENT}% activation (tight trail mode)`);
       } else if (shouldActivateTrailing && !rMultipleActivated && !phase3TrailingApplied) {
         positionLogger.trade(`TRAILING FALLBACK: P&L ${pnlPercent.toFixed(2)}% > ${userSettings.activationPercent}% (R-multiple: ${useRMultipleActivation ? currentRMultiple.toFixed(2) + "R" : "N/A - no valid stop"})`);
       }
@@ -1528,8 +1535,20 @@ serve(async (req) => {
         // Premium alignment = wider trailing (more room for pullbacks)
         // Weak/counter-trend = tighter trailing (lock profits faster)
         // ============================================================
-        const baseTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * (TRAILING_STOP_INLINE.MIN_TRAILING_DISTANCE_PERCENT / 100));
-        const minTrailingDistance = baseTrailingDistance * htfAlignmentMultiplier; // Apply HTF multiplier
+        // MICRO_TREND OVERRIDE: Use fixed tight distance instead of ATR-based
+        let baseTrailingDistance: number;
+        let minTrailingDistance: number;
+        
+        if (isMicroTrendEntry && MICRO_TREND_EXIT.USE_FIXED_TRAIL_DISTANCE) {
+          // Fixed 0.20% trail distance for MICRO_TREND (matches empirical hold profile)
+          const fixedDistance = currentPrice * (MICRO_TREND_EXIT.TRAILING_DISTANCE_PERCENT / 100);
+          baseTrailingDistance = fixedDistance;
+          minTrailingDistance = fixedDistance; // No HTF adjustment for micro-trend
+          positionLogger.trade(`MICRO_TREND TRAILING: Fixed ${MICRO_TREND_EXIT.TRAILING_DISTANCE_PERCENT}% distance = ${fixedDistance.toFixed(2)} (activation: ${MICRO_TREND_EXIT.TRAILING_ACTIVATION_PERCENT}%)`);
+        } else {
+          baseTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * (TRAILING_STOP_INLINE.MIN_TRAILING_DISTANCE_PERCENT / 100));
+          minTrailingDistance = baseTrailingDistance * htfAlignmentMultiplier; // Apply HTF multiplier
+        }
         
         if (htfAlignmentMultiplier !== 1.0) {
           positionLogger.debug(`HTF-adjusted trailing: base=${baseTrailingDistance.toFixed(2)} × ${htfAlignmentMultiplier.toFixed(2)} = ${minTrailingDistance.toFixed(2)}`);
@@ -2243,8 +2262,8 @@ serve(async (req) => {
           const isMomentumContinuationEntry = entryExceptionType === 'MOMENTUM_CONTINUATION';
           const momentumDivergenceDetected = atrData?.hasDivergence && isMomentumContinuationEntry;
           
-          // MICRO_TREND: Time-bound expiry (max 2 hours for short-term plays)
-          const isMicroTrendEntry = entryExceptionType === 'MICRO_TREND';
+          // MICRO_TREND: Time-bound expiry (tight time stop for short-term plays)
+          // isMicroTrendEntry already declared at top of position loop
           const MICRO_TREND_MAX_AGE_MINUTES = MICRO_TREND_EXIT.MAX_AGE_MINUTES;
           const MICRO_TREND_MIN_PROFIT_PERCENT = MICRO_TREND_EXIT.MIN_PROFIT_PERCENT;
           
