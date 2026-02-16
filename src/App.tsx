@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { WebSocketMonitorProvider } from "@/contexts/WebSocketMonitorContext";
@@ -29,6 +29,27 @@ const PageFallback = () => (
   </div>
 );
 
+const AnimatedRoutes = () => {
+  const location = useLocation();
+  return (
+    <div key={location.pathname} className="animate-fade-in">
+      <Suspense fallback={<PageFallback />}>
+        <Routes location={location}>
+          <Route path="/auth" element={<Auth />} />
+          <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+          <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+          <Route path="/symbols" element={<ProtectedRoute><Symbols /></ProtectedRoute>} />
+          <Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} />
+          <Route path="/health" element={<ProtectedRoute><Health /></ProtectedRoute>} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+    </div>
+  );
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -38,21 +59,7 @@ const App = () => (
         <AuthProvider>
           <WebSocketMonitorProvider>
             <RealtimePricesProvider>
-              <Suspense fallback={<PageFallback />}>
-                <Routes>
-                <Route path="/auth" element={<div className="animate-fade-in"><Auth /></div>} />
-                <Route path="/" element={<ProtectedRoute><div className="animate-fade-in"><Index /></div></ProtectedRoute>} />
-                <Route path="/settings" element={<ProtectedRoute><div className="animate-fade-in"><Settings /></div></ProtectedRoute>} />
-                <Route path="/profile" element={<ProtectedRoute><div className="animate-fade-in"><Profile /></div></ProtectedRoute>} />
-                <Route path="/notifications" element={<ProtectedRoute><div className="animate-fade-in"><Notifications /></div></ProtectedRoute>} />
-                <Route path="/symbols" element={<ProtectedRoute><div className="animate-fade-in"><Symbols /></div></ProtectedRoute>} />
-                
-                <Route path="/performance" element={<ProtectedRoute><div className="animate-fade-in"><Performance /></div></ProtectedRoute>} />
-                <Route path="/health" element={<ProtectedRoute><div className="animate-fade-in"><Health /></div></ProtectedRoute>} />
-                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                <Route path="*" element={<div className="animate-fade-in"><NotFound /></div>} />
-                </Routes>
-              </Suspense>
+              <AnimatedRoutes />
             </RealtimePricesProvider>
           </WebSocketMonitorProvider>
         </AuthProvider>
