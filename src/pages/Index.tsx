@@ -102,7 +102,10 @@ const Index = () => {
             </Suspense>
           </TabsContent>
 
-          <TabsContent value="positions">
+          <TabsContent value="positions" className="space-y-4">
+            <Suspense fallback={<Skeleton className="h-24 w-full" />}>
+              <PositionsSummary />
+            </Suspense>
             <Tabs defaultValue="active" className="space-y-4">
               <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4 h-8">
                 <TabsTrigger value="active" className="min-w-[4.5rem] flex-shrink-0 text-xs">Active</TabsTrigger>
@@ -113,7 +116,6 @@ const Index = () => {
 
               <TabsContent value="active" className="space-y-4">
                 <Suspense fallback={<TabFallback />}>
-                  <PositionsSummary />
                   <ActivePositions />
                 </Suspense>
               </TabsContent>
