@@ -4310,6 +4310,7 @@ export const deriveTradeDirection = (
         reasons,
         positionSizeMultiplier: positionMult,
         isBiasResolution: true,
+        decliningStrongTrendBypass: hoistedDecliningStrongTrendBypass,
         regime,
         directionContext: createDirectionContext(biasDirection, {
           evidenceType: 'MICRO_STRUCTURE',
