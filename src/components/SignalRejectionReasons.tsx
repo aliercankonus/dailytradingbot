@@ -8242,7 +8242,8 @@ export const SignalRejectionReasons = () => {
     }
 
     // Quality score rejection - show breakdown
-    if (reason.includes("Quality score") || reason.includes("No strategy conditions met")) {
+    if (reason.includes("Quality score") || reason.includes("No strategy conditions met") || 
+        fs?.gate === "QUALITY_THRESHOLD" || fs?.gate === "NO_STRATEGY_MATCH") {
       return <QualityScoreBreakdown filtersStatus={fs} />;
     }
     
