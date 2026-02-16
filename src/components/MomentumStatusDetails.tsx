@@ -163,6 +163,17 @@ export const MomentumStatusDetails = () => {
 
                         <div className="flex items-center gap-3 shrink-0">
                           <span className="text-xs text-muted-foreground">
+                            4h/1h: <span className="font-medium text-foreground">{higherTimeframeFilter?.trend4h ?? "?"}/{higherTimeframeFilter?.trend1h ?? "?"}</span>
+                            {higherTimeframeFilter?.aligned ? (
+                              <CheckCircle className="inline h-3 w-3 ml-0.5 text-green-600 dark:text-green-400" />
+                            ) : (
+                              <AlertTriangle className="inline h-3 w-3 ml-0.5 text-yellow-600 dark:text-yellow-400" />
+                            )}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            30m/15m: <span className="font-medium text-foreground">{multiTimeframe?.trend30m ?? "?"}/{multiTimeframe?.trend15m ?? "?"}</span>
+                          </span>
+                          <span className="text-xs text-muted-foreground">
                             ADX <span className={`font-medium ${adxOK ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}`}>
                               {adxValue.toFixed(1)}
                             </span>
@@ -197,7 +208,20 @@ export const MomentumStatusDetails = () => {
                             <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
                           </div>
                         </div>
-                        <span className="text-xs text-muted-foreground">{getSummaryText(data)}</span>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                          <span>{getSummaryText(data)}</span>
+                          <span>
+                            4h/1h: <span className="font-medium text-foreground">{higherTimeframeFilter?.trend4h ?? "?"}/{higherTimeframeFilter?.trend1h ?? "?"}</span>
+                            {higherTimeframeFilter?.aligned ? (
+                              <CheckCircle className="inline h-3 w-3 ml-0.5 text-green-600 dark:text-green-400" />
+                            ) : (
+                              <AlertTriangle className="inline h-3 w-3 ml-0.5 text-yellow-600 dark:text-yellow-400" />
+                            )}
+                          </span>
+                          <span>
+                            30m/15m: <span className="font-medium text-foreground">{multiTimeframe?.trend30m ?? "?"}/{multiTimeframe?.trend15m ?? "?"}</span>
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </CollapsibleTrigger>
