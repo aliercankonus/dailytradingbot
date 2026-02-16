@@ -4287,7 +4287,7 @@ serve(async (req) => {
             adx: adx,
             adx_slope: adxSlope,
             trend_strength: 0,  // Will be calculated later; not needed for persistence
-            trend_direction: derivedDirection === 'long' ? 'bullish' : derivedDirection === 'short' ? 'bearish' : 'neutral',
+            trend_direction: (trendData?.timeframes?.['4h']?.trend || trendData?.primaryTrend || 'neutral'),
             bb_squeeze: isBBSqueeze,
             bb_width: trendData?.bollingerBands?.['1h']?.bandwidth || 0
           })
