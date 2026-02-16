@@ -6277,14 +6277,25 @@ const MomentumSlopeGateDisplay = ({ filtersStatus, trendData }: { filtersStatus:
 // User-friendly display for entries too close to 24h highs/lows
 const NearExtremeProtectionDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const derivedDirection = filtersStatus?.derivedDirection || filtersStatus?.direction || "unknown";
-  const distancePercent = coerceNumeric(filtersStatus?.distancePercent ?? filtersStatus?.distance, 0);
+  const isNearHigh = derivedDirection === 'long' || filtersStatus?.extremeType === 'high' || 
+    filtersStatus?.gate === 'NEAR_24H_HIGH_HARD';
+  const distancePercent = coerceNumeric(
+    filtersStatus?.distancePercent ?? filtersStatus?.distance ?? 
+    (isNearHigh ? filtersStatus?.distanceFromHigh : filtersStatus?.distanceFromLow) ??
+    filtersStatus?.distanceFromLow ?? filtersStatus?.distanceFromHigh, 0);
   const currentPrice = coerceNumeric(filtersStatus?.currentPrice ?? filtersStatus?.price, 0);
-  const extremePrice = coerceNumeric(filtersStatus?.extremePrice ?? filtersStatus?.extreme, 0);
-  const zone = filtersStatus?.zone || (distancePercent < 1.5 ? "HARD" : "SOFT");
+  const extremePrice = coerceNumeric(
+    filtersStatus?.extremePrice ?? filtersStatus?.extreme ?? 
+    (isNearHigh ? filtersStatus?.high24h : filtersStatus?.low24h) ??
+    filtersStatus?.low24h ?? filtersStatus?.high24h, 0);
+  const threshold = coerceNumeric(filtersStatus?.expandedThreshold ?? filtersStatus?.softZoneThreshold ?? filtersStatus?.hardZoneThreshold, 2.5);
+  const zone = filtersStatus?.zone || filtersStatus?.subGate?.includes('HARD') ? "HARD" : (distancePercent < 1.5 ? "HARD" : "SOFT");
   const positionMultiplier = coerceNumeric(filtersStatus?.positionMultiplier ?? filtersStatus?.multiplier, 1);
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, 0);
   const ltfConfirms = filtersStatus?.ltfConfirms ?? false;
-  const isNearHigh = derivedDirection === 'long' || filtersStatus?.extremeType === 'high';
+  const momentumScore = coerceNumeric(filtersStatus?.smartMomentumScore, 0);
+  const momentumRequired = coerceNumeric(filtersStatus?.momentumRequired, -25);
+  const wouldPassWith = filtersStatus?.wouldPassWith;
   const isBlock = zone === "HARD" || positionMultiplier === 0;
   
   const getDistanceColor = () => {
@@ -6350,14 +6361,25 @@ const NearExtremeProtectionDisplay = ({ filtersStatus, trendData }: { filtersSta
       {/* Bypass Conditions */}
       <div className="space-y-1">
         <div className="text-[10px] text-muted-foreground mb-1">Bypass conditions:</div>
-        <div className={`flex items-center gap-1.5 p-1 rounded text-[10px] ${adx > 50 ? 'bg-green-500/10' : 'bg-muted/30'}`}>
-          {adx > 50 ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-muted-foreground" />}
-          <span>ADX {'>'}50 (breakout strength): {adx.toFixed(1)}</span>
+        <div className={`flex items-center gap-1.5 p-1 rounded text-[10px] ${adx >= 50 ? 'bg-green-500/10' : 'bg-muted/30'}`}>
+          {adx >= 50 ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-muted-foreground" />}
+          <span>ADX ≥50 (breakout strength): {adx.toFixed(1)}</span>
         </div>
+        {momentumRequired !== 0 && (
+          <div className={`flex items-center gap-1.5 p-1 rounded text-[10px] ${momentumScore <= momentumRequired ? 'bg-green-500/10' : 'bg-muted/30'}`}>
+            {momentumScore <= momentumRequired ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-muted-foreground" />}
+            <span>Momentum ≤{momentumRequired} (confirmation): {momentumScore.toFixed(0)}</span>
+          </div>
+        )}
         <div className={`flex items-center gap-1.5 p-1 rounded text-[10px] ${ltfConfirms ? 'bg-green-500/10' : 'bg-muted/30'}`}>
           {ltfConfirms ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-muted-foreground" />}
           <span>LTF confirms breakout: {ltfConfirms ? 'Yes' : 'No'}</span>
         </div>
+        {wouldPassWith && (
+          <div className="text-[9px] text-muted-foreground italic mt-1 px-1">
+            💡 Would pass with: {wouldPassWith}
+          </div>
+        )}
       </div>
       
       {/* Position size if reduced */}
@@ -8135,7 +8157,9 @@ export const SignalRejectionReasons = () => {
     
     // Near Extreme Protection Gate (entries too close to 24h highs/lows)
     if (fs?.gate === "NEAR_EXTREME_PROTECTION" || fs?.gate === "NEAR_EXTREME" ||
-        reason.includes("NEAR_EXTREME") || reason.includes("near extreme") ||
+        fs?.gate === "NEAR_24H_LOW_HARD" || fs?.gate === "NEAR_24H_HIGH_HARD" ||
+        reason.includes("NEAR_EXTREME") || reason.includes("NEAR_24H_LOW") || reason.includes("NEAR_24H_HIGH") ||
+        reason.includes("near extreme") ||
         reason.includes("too close to 24h") || reason.includes("24h high") || reason.includes("24h low")) {
       return <NearExtremeProtectionDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
