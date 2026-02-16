@@ -41,6 +41,10 @@ const TabFallback = () => (
 const Index = () => {
   const location = useLocation();
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [positionsSubTab, setPositionsSubTab] = useState("active");
+  const [analyticsSubTab, setAnalyticsSubTab] = useState("performance");
+  const [riskSubTab, setRiskSubTab] = useState("sizing");
+  const [monitorSubTab, setMonitorSubTab] = useState("momentum");
 
   // Reset to dashboard tab when navigating to "/" (e.g. clicking logo)
   useEffect(() => {
@@ -106,7 +110,7 @@ const Index = () => {
             <Suspense fallback={<Skeleton className="h-24 w-full" />}>
               <PositionsSummary />
             </Suspense>
-            <Tabs defaultValue="active" className="space-y-4">
+            <Tabs value={positionsSubTab} onValueChange={setPositionsSubTab} className="space-y-4">
               <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4 h-8">
                 <TabsTrigger value="active" className="min-w-[4.5rem] flex-shrink-0 text-xs">Active</TabsTrigger>
                 <TabsTrigger value="exits" className="min-w-[4.5rem] flex-shrink-0 text-xs">Exit Mgmt</TabsTrigger>
@@ -147,7 +151,7 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="analytics">
-            <Tabs defaultValue="performance" className="space-y-4">
+            <Tabs value={analyticsSubTab} onValueChange={setAnalyticsSubTab} className="space-y-4">
               <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-2 h-8">
                 <TabsTrigger value="performance" className="min-w-[5.5rem] flex-shrink-0 text-xs">Performance</TabsTrigger>
                 <TabsTrigger value="losses" className="min-w-[5.5rem] flex-shrink-0 text-xs">Loss Attribution</TabsTrigger>
@@ -168,7 +172,7 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="risk">
-            <Tabs defaultValue="sizing" className="space-y-4">
+            <Tabs value={riskSubTab} onValueChange={setRiskSubTab} className="space-y-4">
               <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4 h-8">
                 <TabsTrigger value="sizing" className="min-w-[5rem] flex-shrink-0 text-xs">Trade Sizing</TabsTrigger>
                 <TabsTrigger value="basic" className="min-w-[4.5rem] flex-shrink-0 text-xs">Basic Risk</TabsTrigger>
@@ -203,7 +207,7 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="monitor">
-            <Tabs defaultValue="momentum" className="space-y-4">
+            <Tabs value={monitorSubTab} onValueChange={setMonitorSubTab} className="space-y-4">
               <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-5 h-8">
                 <TabsTrigger value="momentum" className="min-w-[5rem] flex-shrink-0 text-xs">Momentum</TabsTrigger>
                 <TabsTrigger value="regime" className="min-w-[4.5rem] flex-shrink-0 text-xs">Regime</TabsTrigger>
