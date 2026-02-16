@@ -22,8 +22,6 @@ const ExitManagementDashboard = lazy(() => import("@/components/ExitManagementDa
 const TrailingStopMonitor = lazy(() => import("@/components/TrailingStopMonitor").then(m => ({ default: m.TrailingStopMonitor })));
 const EarlyWarningExitsDashboard = lazy(() => import("@/components/EarlyWarningExitsDashboard").then(m => ({ default: m.EarlyWarningExitsDashboard })));
 const ClosedPositionsDashboard = lazy(() => import("@/components/ClosedPositionsDashboard").then(m => ({ default: m.ClosedPositionsDashboard })));
-const PerformanceAnalytics = lazy(() => import("@/components/PerformanceAnalytics").then(m => ({ default: m.PerformanceAnalytics })));
-const LossAttributionDashboard = lazy(() => import("@/components/LossAttributionDashboard").then(m => ({ default: m.LossAttributionDashboard })));
 const RiskManagementControls = lazy(() => import("@/components/RiskManagementControls").then(m => ({ default: m.RiskManagementControls })));
 const MomentumStatusDashboard = lazy(() => import("@/components/MomentumStatusDashboard").then(m => ({ default: m.MomentumStatusDashboard })));
 const ModuleInventoryDashboard = lazy(() => import("@/components/ModuleInventoryDashboard"));
@@ -53,7 +51,7 @@ const Index = () => {
   const location = useLocation();
   const [activeTab, setActiveTab] = usePersistedTab("tf-active-tab", "dashboard");
   const [positionsSubTab, setPositionsSubTab] = usePersistedTab("tf-positions-sub", "active");
-  const [analyticsSubTab, setAnalyticsSubTab] = usePersistedTab("tf-analytics-sub", "performance");
+  
   const [riskSubTab, setRiskSubTab] = usePersistedTab("tf-risk-sub", "sizing");
   const [monitorSubTab, setMonitorSubTab] = usePersistedTab("tf-monitor-sub", "momentum");
 
@@ -76,12 +74,11 @@ const Index = () => {
         <TradeCounterSync />
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <div className="relative md:contents">
-            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-7 h-8">
+            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-6 h-8">
               <TabsTrigger value="dashboard" className="min-w-[5rem] flex-shrink-0 text-xs">Dashboard</TabsTrigger>
               <TabsTrigger value="signals" className="min-w-[4.5rem] flex-shrink-0 text-xs">Signals</TabsTrigger>
               <TabsTrigger value="positions" className="min-w-[4.5rem] flex-shrink-0 text-xs">Positions</TabsTrigger>
               <TabsTrigger value="history" className="min-w-[4rem] flex-shrink-0 text-xs">History</TabsTrigger>
-              <TabsTrigger value="analytics" className="min-w-[5rem] flex-shrink-0 text-xs">Analytics</TabsTrigger>
               <TabsTrigger value="risk" className="min-w-[3.5rem] flex-shrink-0 text-xs">Risk</TabsTrigger>
               <TabsTrigger value="monitor" className="min-w-[4.5rem] flex-shrink-0 text-xs">Monitor</TabsTrigger>
             </TabsList>
@@ -163,26 +160,6 @@ const Index = () => {
             </Suspense>
           </TabsContent>
 
-          <TabsContent value="analytics">
-            <Tabs value={analyticsSubTab} onValueChange={setAnalyticsSubTab} className="space-y-4">
-              <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-2 h-8">
-                <TabsTrigger value="performance" className="min-w-[5.5rem] flex-shrink-0 text-xs">Performance</TabsTrigger>
-                <TabsTrigger value="losses" className="min-w-[5.5rem] flex-shrink-0 text-xs">Loss Attribution</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="performance">
-                <Suspense fallback={<TabFallback />}>
-                  <PerformanceAnalytics />
-                </Suspense>
-              </TabsContent>
-
-              <TabsContent value="losses">
-                <Suspense fallback={<TabFallback />}>
-                  <LossAttributionDashboard />
-                </Suspense>
-              </TabsContent>
-            </Tabs>
-          </TabsContent>
 
           <TabsContent value="risk">
             <Tabs value={riskSubTab} onValueChange={setRiskSubTab} className="space-y-4">
