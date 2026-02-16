@@ -125,12 +125,11 @@ const Performance = () => {
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="relative md:contents">
-            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-6 h-8">
+            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-5 h-8">
               <TabsTrigger value="portfolio" className="min-w-[5rem] flex-shrink-0 text-xs">Portfolio</TabsTrigger>
               <TabsTrigger value="pnl" className="min-w-[4rem] flex-shrink-0 text-xs">P&L</TabsTrigger>
               <TabsTrigger value="winrate" className="min-w-[4.5rem] flex-shrink-0 text-xs">Win Rate</TabsTrigger>
               <TabsTrigger value="drawdown" className="min-w-[4rem] flex-shrink-0 text-xs">Risk</TabsTrigger>
-              <TabsTrigger value="strategies" className="min-w-[5rem] flex-shrink-0 text-xs">Strategies</TabsTrigger>
               <TabsTrigger value="losses" className="min-w-[5rem] flex-shrink-0 text-xs">Loss Analysis</TabsTrigger>
             </TabsList>
             <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-background to-transparent pointer-events-none md:hidden" />
@@ -189,6 +188,11 @@ const Performance = () => {
                 </div>
               </Card>
             )}
+
+            {/* Strategy Analytics (below portfolio chart) */}
+            <Suspense fallback={<TabFallback />}>
+              <PerformanceAnalytics />
+            </Suspense>
           </TabsContent>
 
           {/* P&L Tab */}
@@ -317,12 +321,6 @@ const Performance = () => {
             )}
           </TabsContent>
 
-          {/* Strategies Tab (moved from dashboard PerformanceAnalytics) */}
-          <TabsContent value="strategies" className="space-y-4">
-            <Suspense fallback={<TabFallback />}>
-              <PerformanceAnalytics />
-            </Suspense>
-          </TabsContent>
 
           {/* Loss Analysis Tab (moved from dashboard) */}
           <TabsContent value="losses" className="space-y-4">
