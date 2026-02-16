@@ -1917,6 +1917,34 @@ serve(async (req) => {
       .eq("user_id", userId)
       .eq("status", "active");
 
+    // ============= TIER 2 ZONE RESET: Query last closed Tier 2 graduated positions =============
+    // Used to detect if a symbol had a recent Tier 2 graduated entry that closed,
+    // and whether the oscillator has reset (exited the zone) since then.
+    const tier2ZoneResetMap = new Map<string, { closedAt: string; side: string }>();
+    if (HTF_EXTREME_HARD_GATES.TIER_2_ZONE_RESET?.ENABLED) {
+      const { data: lastTier2Positions } = await supabase
+        .from("positions")
+        .select("symbol, side, closed_at, entry_exception_type")
+        .eq("user_id", userId)
+        .eq("status", "closed")
+        .eq("entry_exception_type", "TIER_2_GRADUATED")
+        .order("closed_at", { ascending: false })
+        .limit(50);
+      
+      if (lastTier2Positions && lastTier2Positions.length > 0) {
+        // Keep only the most recent Tier 2 closed trade per symbol
+        for (const pos of lastTier2Positions) {
+          if (!tier2ZoneResetMap.has(pos.symbol)) {
+            tier2ZoneResetMap.set(pos.symbol, {
+              closedAt: pos.closed_at,
+              side: pos.side,
+            });
+          }
+        }
+        logger.info(`${LOG_CATEGORIES.GATE} Tier 2 zone reset: tracking ${tier2ZoneResetMap.size} symbols with recent graduated entries`);
+      }
+    }
+
     const openTradesPerSymbol = new Map<string, number>();
     activePositions?.forEach((p) => {
       openTradesPerSymbol.set(p.symbol, (openTradesPerSymbol.get(p.symbol) || 0) + 1);
@@ -8806,6 +8834,7 @@ serve(async (req) => {
         // Determine if strong trend bypass should apply
         let strongTrendHTFBypassApplied = false;
         let trendContinuationPositionMultiplier = 1.0;
+        let tier2GraduatedApplied = false; // Tracks if Tier 2 graduated penalty was applied (for zone reset tagging)
         
         // Get ADX slope for bypass check
         const adxSlopeForBypass = fullAdxResult.adxSlope ?? (smartAdxRising ? 0.5 : -0.5);
@@ -9243,11 +9272,36 @@ serve(async (req) => {
             const tier2DeepMultiplier = HTF_EXTREME_HARD_GATES.TIER_2_DEEP_ZONE_MULTIPLIER ?? 0.40;
             const tier2ModerateMultiplier = HTF_EXTREME_HARD_GATES.TIER_2_MODERATE_ZONE_MULTIPLIER ?? 0.50;
             
+            // ===== TIER 2 ZONE RESET CHECK =====
+            // If the last closed trade for this symbol was a Tier 2 graduated entry,
+            // block re-entry until K exits the zone (proves oscillator reset)
+            const zoneResetConfig = HTF_EXTREME_HARD_GATES.TIER_2_ZONE_RESET;
+            if (zoneResetConfig?.ENABLED) {
+              const lastTier2Trade = tier2ZoneResetMap.get(symbol);
+              if (lastTier2Trade && lastTier2Trade.side === 'short') {
+                const exitThreshold = zoneResetConfig.OVERSOLD_EXIT_THRESHOLD ?? 25;
+                // K must have risen above exitThreshold to prove zone exit
+                if (stochRsiK4h <= exitThreshold) {
+                  // K is still in or below the Tier 2 zone — no oscillator reset occurred
+                  if (zoneResetConfig.LOG_BLOCKS) {
+                    logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🔒 TIER2_ZONE_RESET_PENDING: SHORT blocked — K=${stochRsiK4h.toFixed(1)} has not exited Tier 2 zone (need K > ${exitThreshold}) since last graduated trade closed at ${lastTier2Trade.closedAt}`);
+                  }
+                  await logRejection(symbol, `TIER2_ZONE_RESET_PENDING: K=${stochRsiK4h.toFixed(1)} still in Tier 2 oversold zone, no oscillator reset since last graduated SHORT closed`);
+                  continue;
+                } else {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ Tier 2 zone reset confirmed for SHORT: K=${stochRsiK4h.toFixed(1)} > ${exitThreshold} — oscillator cycled since last graduated trade`);
+                }
+              }
+            }
+            
             const tier2Multiplier = stochRsiK4h < tier2DeepMaxK ? tier2DeepMultiplier : tier2ModerateMultiplier;
             const tier2Zone = stochRsiK4h < tier2DeepMaxK ? 'DEEP' : 'MODERATE';
             
             // Apply as position multiplier via trendContinuationPositionMultiplier (stacks with Math.min later)
             trendContinuationPositionMultiplier = Math.min(trendContinuationPositionMultiplier, tier2Multiplier);
+            
+            // Tag this entry as TIER_2_GRADUATED for zone reset tracking
+            tier2GraduatedApplied = true;
             
             logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ TIER 2 GRADUATED: SHORT at 4h oversold K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)} → ${tier2Zone} zone, position reduced to ${(tier2Multiplier * 100).toFixed(0)}% (was hard block)`);
             logger.forSymbol(symbol).info(`   → Tier 2 graduated penalty applied instead of hard block. ADX=${adx.toFixed(1)}, bypass failed but graduated allows entry.`);
@@ -9277,11 +9331,33 @@ serve(async (req) => {
             const tier2DeepMultiplier = HTF_EXTREME_HARD_GATES.TIER_2_DEEP_ZONE_MULTIPLIER ?? 0.40;
             const tier2ModerateMultiplier = HTF_EXTREME_HARD_GATES.TIER_2_MODERATE_ZONE_MULTIPLIER ?? 0.50;
             
+            // ===== TIER 2 ZONE RESET CHECK =====
+            const zoneResetConfig = HTF_EXTREME_HARD_GATES.TIER_2_ZONE_RESET;
+            if (zoneResetConfig?.ENABLED) {
+              const lastTier2Trade = tier2ZoneResetMap.get(symbol);
+              if (lastTier2Trade && lastTier2Trade.side === 'long') {
+                const exitThreshold = zoneResetConfig.OVERBOUGHT_EXIT_THRESHOLD ?? 75;
+                // K must have dropped below exitThreshold to prove zone exit
+                if (stochRsiK4h >= exitThreshold) {
+                  if (zoneResetConfig.LOG_BLOCKS) {
+                    logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🔒 TIER2_ZONE_RESET_PENDING: LONG blocked — K=${stochRsiK4h.toFixed(1)} has not exited Tier 2 zone (need K < ${exitThreshold}) since last graduated trade closed at ${lastTier2Trade.closedAt}`);
+                  }
+                  await logRejection(symbol, `TIER2_ZONE_RESET_PENDING: K=${stochRsiK4h.toFixed(1)} still in Tier 2 overbought zone, no oscillator reset since last graduated LONG closed`);
+                  continue;
+                } else {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ Tier 2 zone reset confirmed for LONG: K=${stochRsiK4h.toFixed(1)} < ${exitThreshold} — oscillator cycled since last graduated trade`);
+                }
+              }
+            }
+            
             const tier2Multiplier = stochRsiK4h > tier2DeepMinK ? tier2DeepMultiplier : tier2ModerateMultiplier;
             const tier2Zone = stochRsiK4h > tier2DeepMinK ? 'DEEP' : 'MODERATE';
             
             // Apply as position multiplier via trendContinuationPositionMultiplier (stacks with Math.min later)
             trendContinuationPositionMultiplier = Math.min(trendContinuationPositionMultiplier, tier2Multiplier);
+            
+            // Tag this entry as TIER_2_GRADUATED for zone reset tracking
+            tier2GraduatedApplied = true;
             
             logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ TIER 2 GRADUATED: LONG at 4h overbought K=${stochRsiK4h.toFixed(1)}, %B=${percentB.toFixed(1)} → ${tier2Zone} zone, position reduced to ${(tier2Multiplier * 100).toFixed(0)}% (was hard block)`);
             logger.forSymbol(symbol).info(`   → Tier 2 graduated penalty applied instead of hard block. ADX=${adx.toFixed(1)}, bypass failed but graduated allows entry.`);
@@ -15090,7 +15166,9 @@ serve(async (req) => {
               positionSizeMultiplier: unifiedReversal.positionSizeMultiplier,
             },
             // PHASE 3: Exception hierarchy tracking for analytics
-            exceptionType: appliedExceptionType,
+            // Override exception type for Tier 2 graduated entries (for zone reset tracking)
+            exceptionType: tier2GraduatedApplied ? 'TIER_2_GRADUATED' : appliedExceptionType,
+            tier2Graduated: tier2GraduatedApplied,
             exceptionDetails: {
               type: exceptionResult.exceptionType,
               priority: exceptionResult.priority,
