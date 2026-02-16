@@ -28,7 +28,8 @@ import {
   ArrowDownCircle,
   Ban,
   CheckCircle2,
-  XCircle
+  XCircle,
+  RefreshCw
 } from "lucide-react";
 import { useBlockedSignals, BlockedSignal, MoveZoneDetails } from "@/hooks/useBlockedSignals";
 import { formatDistanceToNow } from "date-fns";
@@ -315,7 +316,7 @@ const DirectionBadge = ({ direction }: { direction: string | undefined }) => {
 };
 
 export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
-  const { data: blockedSignals, isLoading } = useBlockedSignals(100);
+  const { data: blockedSignals, isLoading, isFetching } = useBlockedSignals(100);
   const [timeRange, setTimeRange] = useState<TimeRange>("30m");
   const [gateFilter, setGateFilter] = useState<GateFilter>("all");
   const [symbolFilter, setSymbolFilter] = useState<SymbolFilter>("all");
@@ -417,7 +418,7 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
     return { total, byGate, vetoes, blocks, reductions };
   }, [filteredByTime]);
 
-  if (isLoading) {
+  if (isLoading && !blockedSignals) {
     return (
       <Card>
         <CardHeader>
@@ -443,6 +444,7 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <BarChart3 className="h-5 w-5 text-muted-foreground" />
               Signal Rejection Monitor
+              {isFetching && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
             </CardTitle>
             <CardDescription className="hidden sm:block">Comprehensive view of blocked signals with gate attribution</CardDescription>
           </div>

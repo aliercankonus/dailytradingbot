@@ -63,7 +63,7 @@ const getRegimeLabel = (adx: number) => {
 };
 
 export const MomentumStatusDashboard = () => {
-  const { momentumData, loading, refetch } = useMomentumStatus();
+  const { momentumData, loading, refreshing, refetch } = useMomentumStatus();
   const { prices, priceVersion, connected: wsConnected, getPrice } = useRealtimePricesContext();
 
   // Enhance momentum data with live prices
@@ -115,8 +115,8 @@ export const MomentumStatusDashboard = () => {
               Real-time momentum scores, entry quality, and market regime for active symbols
             </CardDescription>
           </div>
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={loading || refreshing}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading || refreshing ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
         </div>

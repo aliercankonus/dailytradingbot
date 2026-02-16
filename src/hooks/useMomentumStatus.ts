@@ -142,18 +142,21 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
 export const MOMENTUM_STATUS_QUERY_KEY = ['momentum-status'];
 
 export const useMomentumStatus = () => {
-  const { data, isLoading, error, refetch } = useQuery({
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey: MOMENTUM_STATUS_QUERY_KEY,
     queryFn: fetchMomentumForSymbols,
     staleTime: 30000,
     gcTime: 300000,
     refetchOnWindowFocus: false,
     refetchInterval: 60000,
+    placeholderData: (previousData) => previousData,
+    structuralSharing: true,
   });
 
   return { 
     momentumData: data || [], 
-    loading: isLoading, 
+    loading: isLoading && !data, // Only true on first load
+    refreshing: isFetching && !!data, // True during background refresh
     error: error?.message || null, 
     refetch 
   };
