@@ -8584,117 +8584,125 @@ export const SignalRejectionReasons = () => {
           })}
         </div>
 
-        {/* Desktop table view */}
-        <div className="hidden md:block">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[100px]">Symbol</TableHead>
-              <TableHead className="w-[200px]">Rejection Reason</TableHead>
-              <TableHead className="min-w-[250px]">Signal Diagnostics</TableHead>
-              <TableHead>Details</TableHead>
-              {aiEnabled && (
-                <TableHead className="w-[180px]">
-                <div className="flex items-center gap-1">
-                    <Bot className="h-3.5 w-3.5" />
-                    AI Analysis
+        {/* Desktop view - compact cards with expandable details */}
+        <div className="hidden md:block space-y-2">
+          {rejections.map((rejection) => {
+            const severity = getSeverityLevel(rejection.rejection_reason ?? "", rejection.filters_status);
+            const severityStyles = getSeverityStyles(severity);
+            const fs = rejection.filters_status;
+            const td = rejection.trend_data;
+            const adx = fs?.adx ?? td?.volatility?.adx;
+            const stochK = fs?.stochRsiK ?? fs?.stochRsiK4h;
+            const direction = fs?.derivedDirection ?? fs?.direction ?? td?.direction;
+            
+            return (
+              <Collapsible key={rejection.id}>
+                <div className={`rounded-lg border ${severityStyles.border} ${severityStyles.bg}`}>
+                  {/* Summary Row - always visible */}
+                  <div className="flex items-center gap-3 px-4 py-2.5">
+                    {/* Symbol + Severity */}
+                    <div className="flex items-center gap-2 w-[120px] shrink-0">
+                      <span className="font-medium text-sm">{rejection.symbol}</span>
+                      <Badge 
+                        variant="outline" 
+                        className={`text-[9px] px-1.5 py-0 ${severityStyles.badge}`}
+                      >
+                        {severityStyles.label}
+                      </Badge>
+                    </div>
+                    
+                    {/* Friendly reason */}
+                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                      {getReasonIcon(rejection.rejection_reason ?? "")}
+                      <span className="text-xs font-medium truncate">
+                        {formatUserFriendlyReason(rejection.rejection_reason ?? "", rejection.filters_status)}
+                      </span>
+                    </div>
+                    
+                    {/* Key metrics - compact */}
+                    <div className="flex items-center gap-3 shrink-0">
+                      {adx !== undefined && typeof adx === 'number' && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className={`text-[10px] font-mono ${adx >= 25 ? 'text-green-400' : adx >= 20 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                ADX {adx.toFixed(0)}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>ADX: {adx.toFixed(1)}</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                      {stochK !== undefined && typeof stochK === 'number' && (
+                        <span className={`text-[10px] font-mono ${stochK <= 10 || stochK >= 90 ? 'text-red-400' : stochK <= 20 || stochK >= 80 ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                          K:{stochK.toFixed(0)}
+                        </span>
+                      )}
+                      {direction && (
+                        <Badge 
+                          variant="outline" 
+                          className={`text-[9px] px-1.5 py-0 ${
+                            direction === 'long' ? 'bg-green-500/20 text-green-400 border-green-500/40' : 
+                            direction === 'short' ? 'bg-red-500/20 text-red-400 border-red-500/40' : 
+                            'bg-muted/30 text-muted-foreground'
+                          }`}
+                        >
+                          {direction.toUpperCase()}
+                        </Badge>
+                      )}
+                    </div>
+                    
+                    {/* Time + expand trigger */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[10px] text-muted-foreground">
+                        {formatDistanceToNow(new Date(rejection.checked_at), { addSuffix: true })}
+                      </span>
+                      <CollapsibleTrigger className="flex items-center text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-muted/50">
+                        <ChevronDown className="h-4 w-4 transition-transform data-[state=open]:rotate-180" />
+                      </CollapsibleTrigger>
+                    </div>
                   </div>
-                </TableHead>
-              )}
-              <TableHead className="w-[100px]">Checked</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rejections.map((rejection) => {
-              const severity = getSeverityLevel(rejection.rejection_reason ?? "", rejection.filters_status);
-              const severityStyles = getSeverityStyles(severity);
-              
-              return (
-                <TableRow key={rejection.id} className={`${severityStyles.border} ${severityStyles.bg}`}>
-                  <TableCell className="font-medium">
-                    <div className="flex flex-col gap-1">
-                      <span>{rejection.symbol}</span>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Badge 
-                              variant="outline" 
-                              className={`text-[9px] px-1.5 py-0 w-fit ${severityStyles.badge}`}
-                            >
-                              {severityStyles.label}
-                            </Badge>
-                          </TooltipTrigger>
-                          <TooltipContent side="right" className="text-xs max-w-[200px]">
-                            {severity === "critical" && "Absolute block with no exceptions. Trade is completely blocked."}
-                            {severity === "high" && "Important gate that blocks trades. Requires significant condition change."}
-                            {severity === "medium" && "Softer gate that may be bypassed with strong signals."}
-                            {severity === "low" && "Informational block due to limits or execution rules."}
-                            {severity === "info" && "Neutral state - not necessarily a problem."}
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </div>
-                  </TableCell>
-                <TableCell className="align-top">
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="flex items-start gap-2 cursor-help">
-                          {getReasonIcon(rejection.rejection_reason ?? "")}
-                          <Badge 
-                            variant="outline"
-                            className={`text-[10px] font-medium whitespace-normal text-left leading-tight py-1 px-2 ${
-                              severity === "critical" 
-                                ? "bg-red-500/20 text-red-400 border-red-500/40" 
-                                : severity === "high"
-                                ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
-                                : severity === "medium"
-                                ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/40"
-                                : severity === "low"
-                                ? "bg-blue-500/20 text-blue-400 border-blue-500/40"
-                                : "bg-muted text-muted-foreground border-muted-foreground/30"
-                            }`}
-                          >
-                            {formatUserFriendlyReason(rejection.rejection_reason ?? "", rejection.filters_status)}
-                          </Badge>
+                  
+                  {/* Expanded Details */}
+                  <CollapsibleContent>
+                    <div className="px-4 pb-3 pt-1 border-t border-border/30 space-y-3">
+                      {/* Technical reason */}
+                      <div className="text-[10px] text-muted-foreground break-words font-mono bg-muted/20 rounded px-2 py-1">
+                        {rejection.rejection_reason}
+                      </div>
+                      
+                      {/* Diagnostics */}
+                      <div className="text-xs">
+                        {renderFilterDetails(rejection)}
+                      </div>
+                      
+                      {/* Details */}
+                      {getRejectionDetails(rejection) && (
+                        <div className="text-xs text-muted-foreground">
+                          {getRejectionDetails(rejection)}
                         </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" className="max-w-[350px] text-xs">
-                        <p className="font-medium mb-1">Technical Details:</p>
-                        <p className="text-muted-foreground break-words">{rejection.rejection_reason}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </TableCell>
-                <TableCell>
-                  {renderFilterDetails(rejection)}
-                </TableCell>
-                <TableCell>
-                  {getRejectionDetails(rejection) && (
-                    <div className="text-xs text-muted-foreground">
-                      {getRejectionDetails(rejection)}
+                      )}
+                      
+                      {/* AI Analysis */}
+                      {aiEnabled && (
+                        <div className="pt-1 border-t border-border/20">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <Bot className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="text-[10px] font-medium text-muted-foreground">AI Analysis</span>
+                          </div>
+                          <AIAnalysisCell
+                            result={rejection.ai_analysis}
+                            isLoading={false}
+                            error={undefined}
+                          />
+                        </div>
+                      )}
                     </div>
-                  )}
-                </TableCell>
-                {aiEnabled && (
-                  <TableCell>
-                    <AIAnalysisCell
-                      result={rejection.ai_analysis}
-                      isLoading={false}
-                      error={undefined}
-                    />
-                  </TableCell>
-                )}
-                <TableCell>
-                  <Badge variant="outline" className="text-[10px]">
-                    {formatDistanceToNow(new Date(rejection.checked_at), { addSuffix: true })}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+                  </CollapsibleContent>
+                </div>
+              </Collapsible>
+            );
+          })}
         </div>
       </CardContent>
     </Card>
