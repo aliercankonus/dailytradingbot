@@ -192,49 +192,6 @@ export const PerformanceAnalytics = () => {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-2xl font-bold">Performance Analytics</h2>
-
-      {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <TrendingUp className="h-5 w-5 text-primary" />
-            <span className="text-sm font-medium">Total P&L</span>
-          </div>
-          <div className={`text-2xl font-bold ${totalPnL >= 0 ? 'text-profit' : 'text-loss'}`}>
-            ${totalPnL.toFixed(2)}
-          </div>
-        </Card>
-
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Target className="h-5 w-5 text-primary" />
-            <span className="text-sm font-medium">Win Rate</span>
-          </div>
-          <div className="text-2xl font-bold">{winRate.toFixed(1)}%</div>
-          <div className="text-xs text-muted-foreground">
-            {winningTrades}W / {losingTrades}L{breakEvenTrades > 0 ? ` / ${breakEvenTrades}BE` : ''}
-          </div>
-        </Card>
-
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Activity className="h-5 w-5 text-primary" />
-            <span className="text-sm font-medium">Total Trades</span>
-          </div>
-          <div className="text-2xl font-bold">{totalClosedTrades}</div>
-        </Card>
-
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <TrendingDown className="h-5 w-5 text-primary" />
-            <span className="text-sm font-medium">Avg Win/Loss</span>
-          </div>
-          <div className="text-2xl font-bold">
-            ${winningTrades > 0 ? (trades.filter(t => (t.realized_pnl || 0) > 0).reduce((s, t) => s + (t.realized_pnl || 0), 0) / winningTrades).toFixed(2) : '0.00'}
-          </div>
-        </Card>
-      </div>
 
       {/* Equity Curve */}
       {equityCurve.length > 0 && (
