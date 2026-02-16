@@ -8525,28 +8525,28 @@ export const SignalRejectionReasons = () => {
               <Collapsible key={rejection.id}>
                 <CollapsibleTrigger asChild>
                   <div className={`rounded-lg border p-3 cursor-pointer hover:bg-muted/20 transition-colors ${severityStyles.border} ${severityStyles.bg}`}>
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-medium text-sm truncate">{rejection.symbol}</span>
-                        <Badge variant="outline" className={`text-[9px] px-1.5 py-0 shrink-0 ${severityStyles.badge}`}>
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="font-medium text-sm">{rejection.symbol}</span>
+                        <Badge variant="outline" className={`text-[9px] px-2 py-0.5 shrink-0 ${severityStyles.badge}`}>
                           {severityStyles.label}
                         </Badge>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex items-center gap-2 shrink-0">
                         <span className="text-[10px] text-muted-foreground">
                           {formatDistanceToNow(new Date(rejection.checked_at), { addSuffix: true })}
                         </span>
                         <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-2 pl-0.5">
                       {getReasonIcon(rejection.rejection_reason ?? "")}
-                      <span className="text-xs font-medium truncate">
+                      <span className="text-xs font-medium">
                         {formatUserFriendlyReason(rejection.rejection_reason ?? "", rejection.filters_status)}
                       </span>
                     </div>
                     {adx !== undefined && typeof adx === 'number' && (
-                      <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground">
+                      <div className="flex items-center gap-2 mt-1.5 pl-0.5 text-[10px] text-muted-foreground">
                         <span className={`font-mono ${adx >= 25 ? 'text-green-400' : adx >= 20 ? 'text-yellow-400' : 'text-red-400'}`}>
                           ADX {adx.toFixed(0)}
                         </span>
@@ -8594,20 +8594,20 @@ export const SignalRejectionReasons = () => {
                 <div className={`rounded-lg border ${severityStyles.border} ${severityStyles.bg}`}>
                   {/* Clickable Summary Row */}
                   <CollapsibleTrigger asChild>
-                    <div className="flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-muted/20 transition-colors rounded-lg select-none">
+                    <div className="flex items-center gap-4 px-4 py-2.5 cursor-pointer hover:bg-muted/20 transition-colors rounded-lg select-none">
                       {/* Symbol + Severity */}
-                      <div className="flex items-center gap-2 w-[110px] shrink-0">
+                      <div className="flex items-center gap-2.5 w-[130px] shrink-0">
                         <span className="font-medium text-sm">{rejection.symbol}</span>
                         <Badge 
                           variant="outline" 
-                          className={`text-[9px] px-1.5 py-0 ${severityStyles.badge}`}
+                          className={`text-[9px] px-2 py-0.5 ${severityStyles.badge}`}
                         >
                           {severityStyles.label}
                         </Badge>
                       </div>
                       
                       {/* Friendly reason */}
-                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
                         {getReasonIcon(rejection.rejection_reason ?? "")}
                         <span className="text-xs font-medium truncate">
                           {formatUserFriendlyReason(rejection.rejection_reason ?? "", rejection.filters_status)}
