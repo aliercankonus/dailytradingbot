@@ -239,27 +239,6 @@ export const MomentumStatusDetails = () => {
                         ? "bg-green-50/50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
                         : "bg-muted/5 border-border"
                     }`}>
-                      {/* Timeframes */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="text-xs">
-                          <span className="text-muted-foreground">4h/1h:</span>
-                          <span className="ml-2 font-medium">
-                            {higherTimeframeFilter?.trend4h ?? "N/A"} / {higherTimeframeFilter?.trend1h ?? "N/A"}
-                          </span>
-                          {higherTimeframeFilter?.aligned ? (
-                            <CheckCircle className="inline h-3 w-3 ml-1 text-green-600 dark:text-green-400" />
-                          ) : (
-                            <AlertTriangle className="inline h-3 w-3 ml-1 text-yellow-600 dark:text-yellow-400" />
-                          )}
-                        </div>
-                        <div className="text-xs">
-                          <span className="text-muted-foreground">30m/15m:</span>
-                          <span className="ml-2 font-medium">
-                            {multiTimeframe?.trend30m ?? "N/A"} / {multiTimeframe?.trend15m ?? "N/A"}
-                          </span>
-                        </div>
-                      </div>
-
                       {/* Detail rows */}
                       <div className="space-y-2">
                         <div className="flex items-center justify-between text-sm">
