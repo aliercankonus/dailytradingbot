@@ -3263,9 +3263,20 @@ export const deriveTradeDirection = (
                                      decelRequirementMet &&
                                      regime === 'EARLY_TREND';
     
+    // ===== TIER 0.25 EXPANSION: DECLINING STRONG TREND BYPASS =====
+    // When a STRONG_TREND has negative ADX slope and StochRSI is deeply oversold/overbought (K < 10 or K > 90),
+    // treat it as "early exhaustion" for direction derivation purposes.
+    // This captures the DOT/ADA scenario: ADX 38-41, slope negative, K < 10 — structurally declining.
+    const DECLINING_STRONG_TREND_K_LOW = 10;
+    const DECLINING_STRONG_TREND_K_HIGH = 90;
+    const isDecliningStrongTrend = regime === 'STRONG_TREND' && adxSlope < 0;
+    const stochExtremeDecliningTrend = stochK4hEarly <= DECLINING_STRONG_TREND_K_LOW || 
+                                       stochK4hEarly >= DECLINING_STRONG_TREND_K_HIGH;
+    const decliningStrongTrendBypass = isDecliningStrongTrend && stochExtremeDecliningTrend;
+    
     // ===== TIER 0.25 TIGHTENING: REGIME GATE =====
     // Only allow exhaustion reversal in EXHAUSTION or RANGE regimes
-    // EXCEPTION: Absolute or Contextual extreme can bypass in EARLY_TREND
+    // EXCEPTION: Absolute extreme, Contextual extreme in EARLY_TREND, or Declining STRONG_TREND
     const regimeAllowsExhaustionReversal = regime === 'EXHAUSTION' || regime === 'RANGE';
     
     // ===== TIER 0.25 TIGHTENING: HTF WEAKENING GATE =====
@@ -3275,19 +3286,23 @@ export const deriveTradeDirection = (
     const TIER025_HTF_WEAKENING_1H = 55;  // 1h confidence must be below this
     const htfIsWeakening = conf4h < TIER025_HTF_WEAKENING_4H && conf1h < TIER025_HTF_WEAKENING_1H;
     
-    // Combined gate: (regime AND HTF weakening) OR absolute extreme bypass OR contextual extreme bypass
+    // Combined gate: (regime AND HTF weakening) OR absolute extreme bypass OR contextual extreme bypass OR declining strong trend bypass
     const tier025GatePasses = (regimeAllowsExhaustionReversal && htfIsWeakening) || 
                                absoluteExtremeBypass || 
-                               contextualExtremeBypass;
+                               contextualExtremeBypass ||
+                               decliningStrongTrendBypass;
     
     // Track which bypass path is being used for position sizing
     const usingAbsoluteBypass = absoluteExtremeBypass;
     const usingContextualBypass = contextualExtremeBypass && !absoluteExtremeBypass;
+    const usingDecliningStrongTrendBypass = decliningStrongTrendBypass && !absoluteExtremeBypass && !contextualExtremeBypass;
     
     if (!tier025GatePasses) {
       // Log skip reason for debugging
-      if (!regimeAllowsExhaustionReversal && !absoluteExtremeBypass && !contextualExtremeBypass) {
-        if (isAbsoluteExtreme) {
+      if (!regimeAllowsExhaustionReversal && !absoluteExtremeBypass && !contextualExtremeBypass && !decliningStrongTrendBypass) {
+        if (isDecliningStrongTrend && !stochExtremeDecliningTrend) {
+          reasons.push(`TIER 0.25 BLOCKED: regime=STRONG_TREND declining (adxSlope=${adxSlope.toFixed(2)}) but K=${stochK4hEarly.toFixed(0)} not extreme enough (<${DECLINING_STRONG_TREND_K_LOW} or >${DECLINING_STRONG_TREND_K_HIGH})`);
+        } else if (isAbsoluteExtreme) {
           // Explain why absolute extreme bypass didn't work
           const bypassBlockReasons: string[] = [];
           if (!adxAllowsAbsoluteExtreme) bypassBlockReasons.push(`ADX=${adxValueEarly.toFixed(1)} >= ${ER.ABSOLUTE_EXTREME_MAX_ADX ?? 22}`);
@@ -3303,7 +3318,7 @@ export const deriveTradeDirection = (
         } else {
           reasons.push(`TIER 0.25 BLOCKED: regime=${regime} ∉ {EXHAUSTION, RANGE} - exhaustion reversal requires weak regime or K >= ${contextualExtremeKHigh}/${contextualExtremeKLow} with deceleration`);
         }
-      } else if (!htfIsWeakening && !absoluteExtremeBypass && !contextualExtremeBypass) {
+      } else if (!htfIsWeakening && !absoluteExtremeBypass && !contextualExtremeBypass && !decliningStrongTrendBypass) {
         reasons.push(`TIER 0.25 BLOCKED: HTF not weakening (4h=${conf4h.toFixed(0)}% >= ${TIER025_HTF_WEAKENING_4H} OR 1h=${conf1h.toFixed(0)}% >= ${TIER025_HTF_WEAKENING_1H})`);
       }
     }
@@ -3313,12 +3328,15 @@ export const deriveTradeDirection = (
       reasons.push(`TIER 0.25 ABSOLUTE EXTREME BYPASS: K=${stochK4hEarly.toFixed(0)} (${isAbsoluteOverbought ? 'overbought' : 'oversold'}), ADX=${adxValueEarly.toFixed(1)}, slope=${momentumSlopeEarly.toFixed(2)} in ${regime}`);
     } else if (usingContextualBypass) {
       reasons.push(`TIER 0.25 CONTEXTUAL EXHAUSTION BYPASS: K=${stochK4hEarly.toFixed(0)} (${isContextualOverbought ? 'extreme overbought' : 'extreme oversold'}), ADX=${adxValueEarly.toFixed(1)}, slope=${momentumSlopeEarly.toFixed(2)}, adxSlope=${adxSlope.toFixed(2)} in ${regime}`);
+    } else if (usingDecliningStrongTrendBypass) {
+      reasons.push(`TIER 0.25 DECLINING STRONG TREND BYPASS: K=${stochK4hEarly.toFixed(0)}, ADX slope=${adxSlope.toFixed(2)}, regime=STRONG_TREND → treating as early exhaustion (0.20x sizing)`);
     }
     
     if (tier025GatePasses) {
-      // Position size modifier based on bypass type (more conservative for contextual)
+      // Position size modifier based on bypass type (more conservative for contextual/declining)
       const absoluteExtremePositionMult = ER.ABSOLUTE_EXTREME_POSITION_MULT ?? 0.30;
       const contextualExtremePositionMult = (ER as any).CONTEXTUAL_EXTREME_POSITION_MULT ?? 0.25;
+      const decliningStrongTrendPositionMult = 0.20; // Most conservative: STRONG_TREND still active
       // Get 4h StochRSI K value
       const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 
                        trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
@@ -3380,8 +3398,10 @@ export const deriveTradeDirection = (
         let erConfidence: number = ER.BASE_CONFIDENCE;
         let positionMult: number = ER.BASE_POSITION_MULTIPLIER;
         
-        // Cap position size for early-trend bypass entries (more conservative)
-        if (usingContextualBypass) {
+        // Cap position size for bypass entries (more conservative for weaker conviction)
+        if (usingDecliningStrongTrendBypass) {
+          positionMult = Math.min(positionMult, decliningStrongTrendPositionMult);
+        } else if (usingContextualBypass) {
           positionMult = Math.min(positionMult, contextualExtremePositionMult);
         } else if (usingAbsoluteBypass) {
           positionMult = Math.min(positionMult, absoluteExtremePositionMult);
@@ -3477,8 +3497,10 @@ export const deriveTradeDirection = (
           let erConfidence: number = ER.BASE_CONFIDENCE;
           let positionMult: number = ER.BASE_POSITION_MULTIPLIER;
           
-          // Cap position size for early-trend bypass entries (more conservative)
-          if (usingContextualBypass) {
+          // Cap position size for bypass entries (more conservative for weaker conviction)
+          if (usingDecliningStrongTrendBypass) {
+            positionMult = Math.min(positionMult, decliningStrongTrendPositionMult);
+          } else if (usingContextualBypass) {
             positionMult = Math.min(positionMult, contextualExtremePositionMult);
           } else if (usingAbsoluteBypass) {
             positionMult = Math.min(positionMult, absoluteExtremePositionMult);
