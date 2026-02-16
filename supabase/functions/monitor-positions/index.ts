@@ -1180,7 +1180,7 @@ serve(async (req) => {
       const isLowConfidenceStandard = isStandardEntry && (position.confidence_score ?? 100) < LOW_CONFIDENCE_STANDARD_EXIT.MAX_CONFIDENCE;
       
       if (LOW_CONFIDENCE_STANDARD_EXIT.EARLY_INVALIDATION_ENABLED && 
-          isStandardEntry && 
+          isLowConfidenceStandard && 
           !emergencyClose && 
           positionAgeMinutes >= LOW_CONFIDENCE_STANDARD_EXIT.EARLY_INVALIDATION_MIN_AGE_MINUTES) {
         
