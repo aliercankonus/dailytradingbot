@@ -2385,6 +2385,20 @@ export const HTF_EXTREME_HARD_GATES = {
   BYPASS_MIN_ADX: 35,              // Tier 2 bypass: ADX must be >= 35
   BYPASS_MAX_REVERSAL_SCORE: 45,   // Tier 2 bypass: Reversal score must be < 45
   BYPASS_POSITION_REDUCTION: 0.50, // Tier 2 bypass: 50% position size
+  
+  // ============= TIER 2 ZONE RESET COOLDOWN =============
+  // Prevents serial re-entries during persistent band-ride scenarios.
+  // After a Tier 2 graduated entry closes, a new Tier 2 entry is blocked
+  // until StochRSI K exits the Tier 2 zone and re-enters, proving oscillator reset.
+  TIER_2_ZONE_RESET: {
+    ENABLED: true,
+    // K must rise above this to "exit" oversold Tier 2 zone (for shorts)
+    OVERSOLD_EXIT_THRESHOLD: 25,
+    // K must drop below this to "exit" overbought Tier 2 zone (for longs)
+    OVERBOUGHT_EXIT_THRESHOLD: 75,
+    // Forensic logging for blocked entries
+    LOG_BLOCKS: true,
+  },
 } as const;
 
 // ============= TIER 3: CAUTION ZONE (PENALTY SCORING) =============
