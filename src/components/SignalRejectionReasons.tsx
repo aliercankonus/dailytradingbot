@@ -8513,55 +8513,49 @@ export const SignalRejectionReasons = () => {
       </CardHeader>
       <CardContent>
         {/* Mobile card view */}
-        <div className="md:hidden space-y-3">
+        <div className="md:hidden space-y-2">
           {rejections.map((rejection) => {
             const severity = getSeverityLevel(rejection.rejection_reason ?? "", rejection.filters_status);
             const severityStyles = getSeverityStyles(severity);
+            const fs = rejection.filters_status;
+            const td = rejection.trend_data;
+            const adx = fs?.adx ?? td?.volatility?.adx;
             
             return (
               <Collapsible key={rejection.id}>
-                <div className={`rounded-lg border p-3 space-y-2 ${severityStyles.border} ${severityStyles.bg}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-medium text-sm truncate">{rejection.symbol}</span>
-                      <Badge 
-                        variant="outline" 
-                        className={`text-[9px] px-1.5 py-0 shrink-0 ${severityStyles.badge}`}
-                      >
-                        {severityStyles.label}
-                      </Badge>
+                <CollapsibleTrigger asChild>
+                  <div className={`rounded-lg border p-3 cursor-pointer hover:bg-muted/20 transition-colors ${severityStyles.border} ${severityStyles.bg}`}>
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-medium text-sm truncate">{rejection.symbol}</span>
+                        <Badge variant="outline" className={`text-[9px] px-1.5 py-0 shrink-0 ${severityStyles.badge}`}>
+                          {severityStyles.label}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] text-muted-foreground">
+                          {formatDistanceToNow(new Date(rejection.checked_at), { addSuffix: true })}
+                        </span>
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      </div>
                     </div>
-                    <Badge variant="outline" className="text-[9px] shrink-0">
-                      {formatDistanceToNow(new Date(rejection.checked_at), { addSuffix: true })}
-                    </Badge>
+                    <div className="flex items-center gap-1.5">
+                      {getReasonIcon(rejection.rejection_reason ?? "")}
+                      <span className="text-xs font-medium truncate">
+                        {formatUserFriendlyReason(rejection.rejection_reason ?? "", rejection.filters_status)}
+                      </span>
+                    </div>
+                    {adx !== undefined && typeof adx === 'number' && (
+                      <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground">
+                        <span className={`font-mono ${adx >= 25 ? 'text-green-400' : adx >= 20 ? 'text-yellow-400' : 'text-red-400'}`}>
+                          ADX {adx.toFixed(0)}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  
-                  <div className="flex items-start gap-2">
-                    {getReasonIcon(rejection.rejection_reason ?? "")}
-                    <Badge 
-                      variant="outline"
-                      className={`text-[10px] font-medium whitespace-normal text-left leading-tight py-1 px-2 ${
-                        severity === "critical" 
-                          ? "bg-red-500/20 text-red-400 border-red-500/40" 
-                          : severity === "high"
-                          ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
-                          : severity === "medium"
-                          ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/40"
-                          : severity === "low"
-                          ? "bg-blue-500/20 text-blue-400 border-blue-500/40"
-                          : "bg-muted text-muted-foreground border-muted-foreground/30"
-                      }`}
-                    >
-                      {formatUserFriendlyReason(rejection.rejection_reason ?? "", rejection.filters_status)}
-                    </Badge>
-                  </div>
-
-                  <CollapsibleTrigger className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors w-full justify-center pt-1 border-t border-border/30">
-                    <ChevronDown className="h-3 w-3" />
-                    <span>Diagnostics & Details</span>
-                  </CollapsibleTrigger>
-                  
-                  <CollapsibleContent className="space-y-2 pt-1">
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className={`rounded-b-lg border border-t-0 px-3 pb-3 pt-2 space-y-2 ${severityStyles.border} ${severityStyles.bg}`}>
                     <div className="text-xs">
                       {renderFilterDetails(rejection)}
                     </div>
@@ -8577,15 +8571,15 @@ export const SignalRejectionReasons = () => {
                         error={undefined}
                       />
                     )}
-                  </CollapsibleContent>
-                </div>
+                  </div>
+                </CollapsibleContent>
               </Collapsible>
             );
           })}
         </div>
 
         {/* Desktop view - compact cards with expandable details */}
-        <div className="hidden md:block space-y-2">
+        <div className="hidden md:block space-y-1.5">
           {rejections.map((rejection) => {
             const severity = getSeverityLevel(rejection.rejection_reason ?? "", rejection.filters_status);
             const severityStyles = getSeverityStyles(severity);
@@ -8598,70 +8592,63 @@ export const SignalRejectionReasons = () => {
             return (
               <Collapsible key={rejection.id}>
                 <div className={`rounded-lg border ${severityStyles.border} ${severityStyles.bg}`}>
-                  {/* Summary Row - always visible */}
-                  <div className="flex items-center gap-3 px-4 py-2.5">
-                    {/* Symbol + Severity */}
-                    <div className="flex items-center gap-2 w-[120px] shrink-0">
-                      <span className="font-medium text-sm">{rejection.symbol}</span>
-                      <Badge 
-                        variant="outline" 
-                        className={`text-[9px] px-1.5 py-0 ${severityStyles.badge}`}
-                      >
-                        {severityStyles.label}
-                      </Badge>
-                    </div>
-                    
-                    {/* Friendly reason */}
-                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                      {getReasonIcon(rejection.rejection_reason ?? "")}
-                      <span className="text-xs font-medium truncate">
-                        {formatUserFriendlyReason(rejection.rejection_reason ?? "", rejection.filters_status)}
-                      </span>
-                    </div>
-                    
-                    {/* Key metrics - compact */}
-                    <div className="flex items-center gap-3 shrink-0">
-                      {adx !== undefined && typeof adx === 'number' && (
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className={`text-[10px] font-mono ${adx >= 25 ? 'text-green-400' : adx >= 20 ? 'text-yellow-400' : 'text-red-400'}`}>
-                                ADX {adx.toFixed(0)}
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent>ADX: {adx.toFixed(1)}</TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      )}
-                      {stochK !== undefined && typeof stochK === 'number' && (
-                        <span className={`text-[10px] font-mono ${stochK <= 10 || stochK >= 90 ? 'text-red-400' : stochK <= 20 || stochK >= 80 ? 'text-amber-400' : 'text-muted-foreground'}`}>
-                          K:{stochK.toFixed(0)}
-                        </span>
-                      )}
-                      {direction && (
+                  {/* Clickable Summary Row */}
+                  <CollapsibleTrigger asChild>
+                    <div className="flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-muted/20 transition-colors rounded-lg select-none">
+                      {/* Symbol + Severity */}
+                      <div className="flex items-center gap-2 w-[110px] shrink-0">
+                        <span className="font-medium text-sm">{rejection.symbol}</span>
                         <Badge 
                           variant="outline" 
-                          className={`text-[9px] px-1.5 py-0 ${
-                            direction === 'long' ? 'bg-green-500/20 text-green-400 border-green-500/40' : 
-                            direction === 'short' ? 'bg-red-500/20 text-red-400 border-red-500/40' : 
-                            'bg-muted/30 text-muted-foreground'
-                          }`}
+                          className={`text-[9px] px-1.5 py-0 ${severityStyles.badge}`}
                         >
-                          {direction.toUpperCase()}
+                          {severityStyles.label}
                         </Badge>
-                      )}
+                      </div>
+                      
+                      {/* Friendly reason */}
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                        {getReasonIcon(rejection.rejection_reason ?? "")}
+                        <span className="text-xs font-medium truncate">
+                          {formatUserFriendlyReason(rejection.rejection_reason ?? "", rejection.filters_status)}
+                        </span>
+                      </div>
+                      
+                      {/* Key metrics */}
+                      <div className="flex items-center gap-3 shrink-0">
+                        {adx !== undefined && typeof adx === 'number' && (
+                          <span className={`text-[10px] font-mono ${adx >= 25 ? 'text-green-400' : adx >= 20 ? 'text-yellow-400' : 'text-red-400'}`}>
+                            ADX {adx.toFixed(0)}
+                          </span>
+                        )}
+                        {stochK !== undefined && typeof stochK === 'number' && (
+                          <span className={`text-[10px] font-mono ${stochK <= 10 || stochK >= 90 ? 'text-red-400' : stochK <= 20 || stochK >= 80 ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                            K:{stochK.toFixed(0)}
+                          </span>
+                        )}
+                        {direction && (
+                          <Badge 
+                            variant="outline" 
+                            className={`text-[9px] px-1.5 py-0 ${
+                              direction === 'long' ? 'bg-green-500/20 text-green-400 border-green-500/40' : 
+                              direction === 'short' ? 'bg-red-500/20 text-red-400 border-red-500/40' : 
+                              'bg-muted/30 text-muted-foreground'
+                            }`}
+                          >
+                            {direction.toUpperCase()}
+                          </Badge>
+                        )}
+                      </div>
+                      
+                      {/* Time + chevron */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] text-muted-foreground">
+                          {formatDistanceToNow(new Date(rejection.checked_at), { addSuffix: true })}
+                        </span>
+                        <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform" />
+                      </div>
                     </div>
-                    
-                    {/* Time + expand trigger */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-[10px] text-muted-foreground">
-                        {formatDistanceToNow(new Date(rejection.checked_at), { addSuffix: true })}
-                      </span>
-                      <CollapsibleTrigger className="flex items-center text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-muted/50">
-                        <ChevronDown className="h-4 w-4 transition-transform data-[state=open]:rotate-180" />
-                      </CollapsibleTrigger>
-                    </div>
-                  </div>
+                  </CollapsibleTrigger>
                   
                   {/* Expanded Details */}
                   <CollapsibleContent>
