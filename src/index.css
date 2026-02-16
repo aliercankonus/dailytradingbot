@@ -107,6 +107,11 @@
   }
 }
 
+/* Smooth tab content transitions — triggers on every tab switch */
+[role="tabpanel"][data-state="active"] {
+  animation: fast-fade 0.15s ease-out;
+}
+
 /* Scrollbar hide */
 .scrollbar-hide {
   -ms-overflow-style: none;

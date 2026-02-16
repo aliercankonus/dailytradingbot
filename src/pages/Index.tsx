@@ -88,7 +88,7 @@ const Index = () => {
             <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-background to-transparent pointer-events-none md:hidden" />
           </div>
 
-          <TabsContent value="dashboard" className="space-y-4 animate-fast-fade">
+          <TabsContent value="dashboard" className="space-y-4">
             <div className="flex justify-end mb-2">
               <CloseAllTradesButton />
             </div>
@@ -113,13 +113,13 @@ const Index = () => {
             </Suspense>
           </TabsContent>
 
-          <TabsContent value="signals" className="space-y-6 animate-fast-fade">
+          <TabsContent value="signals" className="space-y-6">
             <Suspense fallback={<TabFallback />}>
               <SignalsOverview />
             </Suspense>
           </TabsContent>
 
-          <TabsContent value="positions" className="space-y-4 animate-fast-fade">
+          <TabsContent value="positions" className="space-y-4">
             <Suspense fallback={<Skeleton className="h-24 w-full" />}>
               <PositionsSummary />
             </Suspense>
@@ -131,25 +131,25 @@ const Index = () => {
                 <TabsTrigger value="warnings" className="min-w-[5.5rem] flex-shrink-0 text-xs">Early Warnings</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="active" className="space-y-4 animate-fast-fade">
+              <TabsContent value="active" className="space-y-4">
                 <Suspense fallback={<TabFallback />}>
                   <ActivePositions />
                 </Suspense>
               </TabsContent>
 
-              <TabsContent value="exits" className="animate-fast-fade">
+              <TabsContent value="exits">
                 <Suspense fallback={<TabFallback />}>
                   <ExitManagementDashboard />
                 </Suspense>
               </TabsContent>
 
-              <TabsContent value="trailing" className="animate-fast-fade">
+              <TabsContent value="trailing">
                 <Suspense fallback={<TabFallback />}>
                   <TrailingStopMonitor />
                 </Suspense>
               </TabsContent>
 
-              <TabsContent value="warnings" className="animate-fast-fade">
+              <TabsContent value="warnings">
                 <Suspense fallback={<TabFallback />}>
                   <EarlyWarningExitsDashboard />
                 </Suspense>
@@ -157,26 +157,26 @@ const Index = () => {
             </Tabs>
           </TabsContent>
 
-          <TabsContent value="history" className="animate-fast-fade">
+          <TabsContent value="history">
             <Suspense fallback={<TabFallback />}>
               <ClosedPositionsDashboard />
             </Suspense>
           </TabsContent>
 
-          <TabsContent value="analytics" className="animate-fast-fade">
+          <TabsContent value="analytics">
             <Tabs value={analyticsSubTab} onValueChange={setAnalyticsSubTab} className="space-y-4">
               <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-2 h-8">
                 <TabsTrigger value="performance" className="min-w-[5.5rem] flex-shrink-0 text-xs">Performance</TabsTrigger>
                 <TabsTrigger value="losses" className="min-w-[5.5rem] flex-shrink-0 text-xs">Loss Attribution</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="performance" className="animate-fast-fade">
+              <TabsContent value="performance">
                 <Suspense fallback={<TabFallback />}>
                   <PerformanceAnalytics />
                 </Suspense>
               </TabsContent>
 
-              <TabsContent value="losses" className="animate-fast-fade">
+              <TabsContent value="losses">
                 <Suspense fallback={<TabFallback />}>
                   <LossAttributionDashboard />
                 </Suspense>
@@ -184,7 +184,7 @@ const Index = () => {
             </Tabs>
           </TabsContent>
 
-          <TabsContent value="risk" className="animate-fast-fade">
+          <TabsContent value="risk">
             <Tabs value={riskSubTab} onValueChange={setRiskSubTab} className="space-y-4">
               <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4 h-8">
                 <TabsTrigger value="sizing" className="min-w-[5rem] flex-shrink-0 text-xs">Trade Sizing</TabsTrigger>
@@ -193,25 +193,25 @@ const Index = () => {
                 <TabsTrigger value="position" className="min-w-[5rem] flex-shrink-0 text-xs">Position Mgmt</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="sizing" className="animate-fast-fade">
+              <TabsContent value="sizing">
                 <Suspense fallback={<TabFallback />}>
                   <RiskManagementControls section="trade-sizing" />
                 </Suspense>
               </TabsContent>
 
-              <TabsContent value="basic" className="animate-fast-fade">
+              <TabsContent value="basic">
                 <Suspense fallback={<TabFallback />}>
                   <RiskManagementControls section="basic" />
                 </Suspense>
               </TabsContent>
 
-              <TabsContent value="advanced" className="animate-fast-fade">
+              <TabsContent value="advanced">
                 <Suspense fallback={<TabFallback />}>
                   <RiskManagementControls section="advanced" />
                 </Suspense>
               </TabsContent>
 
-              <TabsContent value="position" className="animate-fast-fade">
+              <TabsContent value="position">
                 <Suspense fallback={<TabFallback />}>
                   <RiskManagementControls section="position" />
                 </Suspense>
@@ -219,7 +219,7 @@ const Index = () => {
             </Tabs>
           </TabsContent>
 
-          <TabsContent value="monitor" className="animate-fast-fade">
+          <TabsContent value="monitor">
             <Tabs value={monitorSubTab} onValueChange={setMonitorSubTab} className="space-y-4">
               <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-5 h-8">
                 <TabsTrigger value="momentum" className="min-w-[5rem] flex-shrink-0 text-xs">Momentum</TabsTrigger>
@@ -229,31 +229,31 @@ const Index = () => {
                 <TabsTrigger value="orderflow" className="min-w-[5.5rem] flex-shrink-0 text-xs">Order Flow</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="momentum" className="animate-fast-fade">
+              <TabsContent value="momentum">
                 <Suspense fallback={<TabFallback />}>
                   <MomentumStatusDashboard />
                 </Suspense>
               </TabsContent>
 
-              <TabsContent value="regime" className="animate-fast-fade">
+              <TabsContent value="regime">
                 <Suspense fallback={<TabFallback />}>
                   <RegimeTransitionLog />
                 </Suspense>
               </TabsContent>
 
-              <TabsContent value="modules" className="animate-fast-fade">
+              <TabsContent value="modules">
                 <Suspense fallback={<TabFallback />}>
                   <ModuleInventoryDashboard />
                 </Suspense>
               </TabsContent>
 
-              <TabsContent value="opportunity" className="animate-fast-fade">
+              <TabsContent value="opportunity">
                 <Suspense fallback={<TabFallback />}>
                   <MarketOpportunityDensity />
                 </Suspense>
               </TabsContent>
 
-              <TabsContent value="orderflow" className="animate-fast-fade">
+              <TabsContent value="orderflow">
                 <Suspense fallback={<TabFallback />}>
                   <OrderFlowDashboard />
                 </Suspense>
