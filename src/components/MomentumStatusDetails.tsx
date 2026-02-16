@@ -171,7 +171,7 @@ export const MomentumStatusDetails = () => {
                             <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
                           </div>
                         </div>
-                        <div className="flex items-center gap-4 pl-[140px]">
+                        <div className="flex items-center gap-4 pl-7">
                           <span className="text-xs text-muted-foreground">
                             4h/1h: <span className="font-medium text-foreground">{higherTimeframeFilter?.trend4h ?? "?"}/{higherTimeframeFilter?.trend1h ?? "?"}</span>
                             {higherTimeframeFilter?.aligned ? (
