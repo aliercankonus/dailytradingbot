@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect } from "react";
+import React, { lazy, Suspense, useState, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { AppHeader } from "@/components/AppHeader";
 import { BotStatus } from "@/components/BotStatus";
@@ -46,12 +46,14 @@ const Index = () => {
   const [riskSubTab, setRiskSubTab] = useState("sizing");
   const [monitorSubTab, setMonitorSubTab] = useState("momentum");
 
-  // Reset to dashboard tab when navigating to "/" (e.g. clicking logo)
+  // Reset to dashboard tab only when explicitly navigating to "/" (e.g. clicking logo)
+  const prevLocationKey = useRef(location.key);
   useEffect(() => {
-    if (location.key) {
+    if (location.key !== prevLocationKey.current && location.pathname === "/") {
       setActiveTab("dashboard");
+      prevLocationKey.current = location.key;
     }
-  }, [location.key]);
+  }, [location.key, location.pathname]);
 
   return (
     <SignalRefreshProvider>
