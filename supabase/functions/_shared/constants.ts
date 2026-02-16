@@ -6875,9 +6875,20 @@ export const TRAILING_STOP_INLINE = {
 
 // ============= MICRO TREND EXIT PARAMS (monitor-positions) =============
 // Time-bound exit rules for MICRO_TREND entry exception type
+// MICRO_TREND targets quick 0.30-0.50% moves with short hold times (2-41 min empirical)
+// Problem: Standard trailing (1.0% activation, ATR-based distance) is too loose for these fast plays
+// Solution: Tighter trailing that matches the empirical hold profile
 export const MICRO_TREND_EXIT = {
-  MAX_AGE_MINUTES: 120,
+  // Hard time stop - close if not profitable within this window
+  MAX_AGE_MINUTES: 45,  // Reduced from 120 to 45 (empirical avg hold: 2-41 min)
   MIN_PROFIT_PERCENT: 0.3,
+  
+  // ===== MICRO_TREND TRAILING OVERRIDES =====
+  // These override the user's default trailing params for MICRO_TREND entries only
+  TRAILING_ACTIVATION_PERCENT: 0.20,  // Activate trailing at 0.20% (vs default ~1.0%)
+  TRAILING_DISTANCE_PERCENT: 0.20,    // Trail 0.20% behind price (vs ATR-based ~0.5-1.0%)
+  // When true, use fixed % distance instead of ATR-based distance for MICRO_TREND
+  USE_FIXED_TRAIL_DISTANCE: true,
 } as const;
 
 // ============= HEDGE EXIT PARAMS (monitor-positions) =============
