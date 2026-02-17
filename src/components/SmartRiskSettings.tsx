@@ -8,8 +8,14 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Brain, TrendingUp, Shield, Loader2 } from "lucide-react";
+import { RiskParameters } from "@/hooks/useRiskParameters";
 
-interface SmartRiskSettings {
+interface SmartRiskSettingsProps {
+  riskParams: RiskParameters | null;
+  updateRiskParameters: (updates: Partial<RiskParameters>) => Promise<void>;
+}
+
+interface SmartRiskSettingsData {
   dynamic_max_trades_enabled: boolean;
   kelly_criterion_enabled: boolean;
   trailing_daily_limit_enabled: boolean;
@@ -18,11 +24,10 @@ interface SmartRiskSettings {
   volatility_max_trades_reduction: number;
 }
 
-export default function SmartRiskSettings() {
+export default function SmartRiskSettings({ riskParams, updateRiskParameters }: SmartRiskSettingsProps) {
   const { toast } = useToast();
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [settings, setSettings] = useState<SmartRiskSettings>({
+  const [settings, setSettings] = useState<SmartRiskSettingsData>({
     dynamic_max_trades_enabled: true,
     kelly_criterion_enabled: true,
     trailing_daily_limit_enabled: true,
@@ -32,51 +37,22 @@ export default function SmartRiskSettings() {
   });
 
   useEffect(() => {
-    fetchSettings();
-  }, []);
-
-  const fetchSettings = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from("risk_parameters")
-        .select("dynamic_max_trades_enabled, kelly_criterion_enabled, trailing_daily_limit_enabled, kelly_max_risk_cap, min_trades_for_kelly, volatility_max_trades_reduction")
-        .eq("user_id", user.id)
-        .single();
-
-      if (error) throw error;
-      if (data) {
-        setSettings({
-          dynamic_max_trades_enabled: data.dynamic_max_trades_enabled ?? true,
-          kelly_criterion_enabled: data.kelly_criterion_enabled ?? true,
-          trailing_daily_limit_enabled: data.trailing_daily_limit_enabled ?? true,
-          kelly_max_risk_cap: data.kelly_max_risk_cap ?? 3.0,
-          min_trades_for_kelly: data.min_trades_for_kelly ?? 10,
-          volatility_max_trades_reduction: data.volatility_max_trades_reduction ?? 0.5,
-        });
-      }
-    } catch (error) {
-      console.error("Error fetching smart risk settings:", error);
-    } finally {
-      setLoading(false);
+    if (riskParams) {
+      setSettings({
+        dynamic_max_trades_enabled: (riskParams as any).dynamic_max_trades_enabled ?? true,
+        kelly_criterion_enabled: (riskParams as any).kelly_criterion_enabled ?? true,
+        trailing_daily_limit_enabled: (riskParams as any).trailing_daily_limit_enabled ?? true,
+        kelly_max_risk_cap: (riskParams as any).kelly_max_risk_cap ?? 3.0,
+        min_trades_for_kelly: (riskParams as any).min_trades_for_kelly ?? 10,
+        volatility_max_trades_reduction: (riskParams as any).volatility_max_trades_reduction ?? 0.5,
+      });
     }
-  };
+  }, [riskParams]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-
-      const { error } = await supabase
-        .from("risk_parameters")
-        .update(settings)
-        .eq("user_id", user.id);
-
-      if (error) throw error;
-
+      await updateRiskParameters(settings as any);
       toast({
         title: "Settings saved",
         description: "Smart risk management settings updated successfully.",
@@ -92,16 +68,6 @@ export default function SmartRiskSettings() {
       setSaving(false);
     }
   };
-
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </CardContent>
-      </Card>
-    );
-  }
 
   return (
     <Card>
