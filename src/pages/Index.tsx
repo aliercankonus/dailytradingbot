@@ -22,7 +22,7 @@ import { ExitManagementDashboard } from "@/components/ExitManagementDashboard";
 import { TrailingStopMonitor } from "@/components/TrailingStopMonitor";
 import { EarlyWarningExitsDashboard } from "@/components/EarlyWarningExitsDashboard";
 const ClosedPositionsDashboard = lazy(() => import("@/components/ClosedPositionsDashboard").then(m => ({ default: m.ClosedPositionsDashboard })));
-const RiskManagementControls = lazy(() => import("@/components/RiskManagementControls").then(m => ({ default: m.RiskManagementControls })));
+import { RiskManagementControls } from "@/components/RiskManagementControls";
 import { MomentumStatusDashboard } from "@/components/MomentumStatusDashboard";
 import ModuleInventoryDashboard from "@/components/ModuleInventoryDashboard";
 import { RegimeTransitionLog } from "@/components/RegimeTransitionLog";
@@ -161,27 +161,19 @@ const Index = () => {
               </TabsList>
 
               <TabsContent value="sizing">
-                <Suspense fallback={<TabFallback />}>
-                  <RiskManagementControls section="trade-sizing" />
-                </Suspense>
+                <RiskManagementControls section="trade-sizing" />
               </TabsContent>
 
               <TabsContent value="basic">
-                <Suspense fallback={<TabFallback />}>
-                  <RiskManagementControls section="basic" />
-                </Suspense>
+                <RiskManagementControls section="basic" />
               </TabsContent>
 
               <TabsContent value="advanced">
-                <Suspense fallback={<TabFallback />}>
-                  <RiskManagementControls section="advanced" />
-                </Suspense>
+                <RiskManagementControls section="advanced" />
               </TabsContent>
 
               <TabsContent value="position">
-                <Suspense fallback={<TabFallback />}>
-                  <RiskManagementControls section="position" />
-                </Suspense>
+                <RiskManagementControls section="position" />
               </TabsContent>
             </Tabs>
           </TabsContent>
