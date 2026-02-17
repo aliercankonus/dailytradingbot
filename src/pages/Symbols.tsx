@@ -13,13 +13,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useSymbols } from '@/hooks/useSymbols';
+import { useSymbolsContext } from '@/contexts/SymbolsContext';
 import { Plus, Trash2, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { AppHeader } from '@/components/AppHeader';
 import { BrandLogo } from '@/components/BrandLogo';
 
 const Symbols = () => {
-  const { symbols, activeSymbols, loading, toggleSymbol, addSymbol, deleteSymbol } = useSymbols();
+  const { symbols, activeSymbols, loading, toggleSymbol, addSymbol, deleteSymbol } = useSymbolsContext();
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newSymbol, setNewSymbol] = useState('');
   const [newDisplayName, setNewDisplayName] = useState('');
