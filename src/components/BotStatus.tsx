@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Play, Pause, RotateCcw, TrendingUp, TrendingDown, Minus, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useRiskParameters } from "@/hooks/useRiskParameters";
+import { useRiskParametersContext } from "@/contexts/RiskParametersContext";
 import { useToast } from "@/hooks/use-toast";
 import { useLiveTrend } from "@/hooks/useLiveTrend";
 import { useSymbols } from "@/hooks/useSymbols";
@@ -21,7 +21,7 @@ const StatusRow = ({ label, value, valueClass }: { label: string; value: React.R
 );
 
 export const BotStatus = () => {
-  const { riskParams, updateRiskParameters } = useRiskParameters();
+  const { riskParams, updateRiskParameters } = useRiskParametersContext();
   const { toast } = useToast();
   const { activeSymbols, symbols } = useSymbols();
   const { user } = useAuth();

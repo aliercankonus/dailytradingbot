@@ -12,7 +12,7 @@ import { useExecutionRejections } from '@/hooks/useExecutionRejections';
 import { supabase } from '@/integrations/supabase/client';
 import { TrendingUp, TrendingDown, Target, Shield, Zap, RefreshCw, Activity, AlertCircle, Clock, Info, AlertTriangle, Sparkles, ChevronDown, ChevronRight, Ban } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useRiskParameters } from '@/hooks/useRiskParameters';
+import { useRiskParametersContext } from '@/contexts/RiskParametersContext';
 import { getSignalPriorityTier, getSignalPriorityVariant } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { SignalRejectionReasons } from './SignalRejectionReasons';
@@ -82,7 +82,7 @@ export const TradingSignalsDashboard = () => {
   const { generateSignals, isGenerating } = useSignalGenerator();
   const { data: executionRejections } = useExecutionRejections();
   const { toast } = useToast();
-  const { riskParams, loading: riskLoading, updateRiskParameters } = useRiskParameters();
+  const { riskParams, loading: riskLoading, updateRiskParameters } = useRiskParametersContext();
   const autoExecEnabled = Boolean(riskParams?.auto_execute_signals);
   
   // Track which signal cards have expanded details

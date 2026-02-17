@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useRiskParameters } from "@/hooks/useRiskParameters";
+import { useRiskParametersContext } from "@/contexts/RiskParametersContext";
 import { 
   Cpu, 
   TrendingUp, 
@@ -34,7 +34,7 @@ interface ModuleItem {
 }
 
 const ModuleInventoryDashboard = () => {
-  const { riskParams, loading } = useRiskParameters();
+  const { riskParams, loading } = useRiskParametersContext();
 
   if (loading) {
     return (

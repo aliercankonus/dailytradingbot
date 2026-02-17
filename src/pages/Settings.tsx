@@ -8,7 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Key, Shield, Brain } from 'lucide-react';
 import { AppHeader } from '@/components/AppHeader';
-import { useRiskParameters } from '@/hooks/useRiskParameters';
+import { useRiskParametersContext } from '@/contexts/RiskParametersContext';
 import { PerformanceSettings } from '@/components/PerformanceSettings';
 
 import SmartRiskSettings from '@/components/SmartRiskSettings';
@@ -19,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function Settings() {
   const { toast } = useToast();
-  const { riskParams, updateRiskParameters } = useRiskParameters();
+  const { riskParams, updateRiskParameters } = useRiskParametersContext();
   const [loading, setLoading] = useState(false);
   const [apiKeysLoading, setApiKeysLoading] = useState(true);
   

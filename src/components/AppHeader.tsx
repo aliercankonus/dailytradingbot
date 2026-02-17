@@ -21,7 +21,6 @@ import { LogOut, Menu, LayoutDashboard, BarChart3, Coins, HeartPulse, Settings, 
 import { useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Link } from "react-router-dom";
-import { useRiskParameters } from "@/hooks/useRiskParameters";
 import { SystemStatusStrip } from "@/components/SystemStatusStrip";
 
 const navItems = [
