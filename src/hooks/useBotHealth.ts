@@ -37,6 +37,10 @@ export const useBotHeartbeats = (limit = 50) => {
       return data as BotHeartbeat[];
     },
     refetchInterval: 30000,
+    staleTime: 25000,
+    gcTime: 300000,
+    refetchOnWindowFocus: false,
+    placeholderData: (prev: BotHeartbeat[] | undefined) => prev,
   });
 };
 
@@ -53,5 +57,9 @@ export const useBotHealthStates = (limit = 50) => {
       return data as BotHealthState[];
     },
     refetchInterval: 30000,
+    staleTime: 25000,
+    gcTime: 300000,
+    refetchOnWindowFocus: false,
+    placeholderData: (prev: BotHealthState[] | undefined) => prev,
   });
 };
