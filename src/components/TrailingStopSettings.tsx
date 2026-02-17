@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Shield, Info, Lock, Brain, Zap, Clock } from "lucide-react";
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useRiskParametersContext } from "@/contexts/RiskParametersContext";
 import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 
 export const TrailingStopSettings = () => {
   const { toast } = useToast();
+  const { riskParams, updateRiskParameters } = useRiskParametersContext();
   const [loading, setLoading] = useState(false);
   const [enabled, setEnabled] = useState(true);
   const [activationPercent, setActivationPercent] = useState("1.0");
@@ -33,52 +34,29 @@ export const TrailingStopSettings = () => {
   const [earlyProfitLockThreshold, setEarlyProfitLockThreshold] = useState("0.3");
   const [momentumExitGuardEnabled, setMomentumExitGuardEnabled] = useState(true);
 
+  // Initialize from context instead of independent fetch
   useEffect(() => {
-    fetchSettings();
-  }, []);
-
-  const fetchSettings = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from('risk_parameters')
-        .select('trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, break_even_enabled, break_even_activation_percent, trailing_stop_profit_lock_percent, trailing_aggressiveness, progressive_lock_enabled, stale_peak_protection_enabled, decay_velocity_exit_enabled, early_profit_lock_enabled, early_profit_lock_threshold, momentum_exit_guard_enabled')
-        .eq('user_id', user.id)
-        .single();
-
-      if (error) throw error;
-
-      if (data) {
-        setEnabled(data.trailing_stop_enabled ?? true);
-        setActivationPercent((data.trailing_stop_activation_percent ?? 1.0).toString());
-        setDistanceMultiplier((data.trailing_stop_distance_multiplier ?? 1.5).toString());
-        setBreakEvenEnabled(data.break_even_enabled ?? true);
-        setBreakEvenActivationPercent((data.break_even_activation_percent ?? 0.5).toString());
-        setProfitLockPercent((data.trailing_stop_profit_lock_percent ?? 50).toString());
-        // Smart AITS
-        setTrailingAggressiveness(data.trailing_aggressiveness ?? 3);
-        setProgressiveLockEnabled(data.progressive_lock_enabled ?? true);
-        setStalePeakProtectionEnabled(data.stale_peak_protection_enabled ?? true);
-        setDecayVelocityExitEnabled(data.decay_velocity_exit_enabled ?? true);
-        // Pre-Activation Protection
-        setEarlyProfitLockEnabled(data.early_profit_lock_enabled ?? true);
-        setEarlyProfitLockThreshold((data.early_profit_lock_threshold ?? 0.3).toString());
-        setMomentumExitGuardEnabled(data.momentum_exit_guard_enabled ?? true);
-      }
-    } catch (error) {
-      console.error('Error fetching trailing stop settings:', error);
+    if (riskParams) {
+      setEnabled(riskParams.trailing_stop_enabled ?? true);
+      setActivationPercent((riskParams.trailing_stop_activation_percent ?? 1.0).toString());
+      setDistanceMultiplier((riskParams.trailing_stop_distance_multiplier ?? 1.5).toString());
+      setBreakEvenEnabled(riskParams.break_even_enabled ?? true);
+      setBreakEvenActivationPercent((riskParams.break_even_activation_percent ?? 0.5).toString());
+      setProfitLockPercent((riskParams.trailing_stop_profit_lock_percent ?? 50).toString());
+      setTrailingAggressiveness(riskParams.trailing_aggressiveness ?? 3);
+      setProgressiveLockEnabled(riskParams.progressive_lock_enabled ?? true);
+      setStalePeakProtectionEnabled(riskParams.stale_peak_protection_enabled ?? true);
+      setDecayVelocityExitEnabled(riskParams.decay_velocity_exit_enabled ?? true);
+      setEarlyProfitLockEnabled(riskParams.early_profit_lock_enabled ?? true);
+      setEarlyProfitLockThreshold((riskParams.early_profit_lock_threshold ?? 0.3).toString());
+      setMomentumExitGuardEnabled(riskParams.momentum_exit_guard_enabled ?? true);
     }
-  };
+  }, [riskParams]);
 
   const handleSave = async () => {
     try {
       setLoading(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
 
-      // Validate inputs
       const activationValue = parseFloat(activationPercent);
       const multiplierValue = parseFloat(distanceMultiplier);
       const breakEvenValue = parseFloat(breakEvenActivationPercent);
@@ -87,41 +65,31 @@ export const TrailingStopSettings = () => {
       if (isNaN(activationValue) || activationValue < 0.1 || activationValue > 10) {
         throw new Error('Activation threshold must be between 0.1% and 10%');
       }
-
       if (isNaN(multiplierValue) || multiplierValue < 0.5 || multiplierValue > 5) {
         throw new Error('Distance multiplier must be between 0.5x and 5x');
       }
-
       if (isNaN(breakEvenValue) || breakEvenValue < 0.1 || breakEvenValue > 5) {
         throw new Error('Break-even threshold must be between 0.1% and 5%');
       }
-
       if (isNaN(profitLockValue) || profitLockValue < 20 || profitLockValue > 90) {
         throw new Error('Profit lock percentage must be between 20% and 90%');
       }
 
-      const { error } = await supabase
-        .from('risk_parameters')
-        .update({
-          trailing_stop_enabled: enabled,
-          trailing_stop_activation_percent: activationValue,
-          trailing_stop_distance_multiplier: multiplierValue,
-          break_even_enabled: breakEvenEnabled,
-          break_even_activation_percent: breakEvenValue,
-          trailing_stop_profit_lock_percent: profitLockValue,
-          // Smart AITS
-          trailing_aggressiveness: trailingAggressiveness,
-          progressive_lock_enabled: progressiveLockEnabled,
-          stale_peak_protection_enabled: stalePeakProtectionEnabled,
-          decay_velocity_exit_enabled: decayVelocityExitEnabled,
-          // Pre-Activation Protection
-          early_profit_lock_enabled: earlyProfitLockEnabled,
-          early_profit_lock_threshold: parseFloat(earlyProfitLockThreshold),
-          momentum_exit_guard_enabled: momentumExitGuardEnabled,
-        })
-        .eq('user_id', user.id);
-
-      if (error) throw error;
+      await updateRiskParameters({
+        trailing_stop_enabled: enabled,
+        trailing_stop_activation_percent: activationValue,
+        trailing_stop_distance_multiplier: multiplierValue,
+        break_even_enabled: breakEvenEnabled,
+        break_even_activation_percent: breakEvenValue,
+        trailing_stop_profit_lock_percent: profitLockValue,
+        trailing_aggressiveness: trailingAggressiveness,
+        progressive_lock_enabled: progressiveLockEnabled,
+        stale_peak_protection_enabled: stalePeakProtectionEnabled,
+        decay_velocity_exit_enabled: decayVelocityExitEnabled,
+        early_profit_lock_enabled: earlyProfitLockEnabled,
+        early_profit_lock_threshold: parseFloat(earlyProfitLockThreshold),
+        momentum_exit_guard_enabled: momentumExitGuardEnabled,
+      });
 
       toast({
         title: "Settings Saved",

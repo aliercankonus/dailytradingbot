@@ -5,74 +5,40 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { useRiskParametersContext } from '@/contexts/RiskParametersContext';
 import { Loader2, TrendingUp, TrendingDown, Info } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export function DivergenceSettings() {
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
+  const { riskParams, updateRiskParameters } = useRiskParametersContext();
 
   const [enablePullback, setEnablePullback] = useState(true);
   const [enableEarlyReversal, setEnableEarlyReversal] = useState(true);
   const [pullbackSize, setPullbackSize] = useState(50);
   const [earlyReversalSize, setEarlyReversalSize] = useState(40);
 
+  // Initialize from context instead of independent fetch
   useEffect(() => {
-    fetchSettings();
-  }, []);
-
-  const fetchSettings = async () => {
-    try {
-      setLoading(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from('risk_parameters')
-        .select('enable_pullback_signals, enable_early_reversal_signals, pullback_position_size_percent, early_reversal_position_size_percent')
-        .eq('user_id', user.id)
-        .single();
-
-      if (error) throw error;
-
-      if (data) {
-        setEnablePullback(data.enable_pullback_signals ?? true);
-        setEnableEarlyReversal(data.enable_early_reversal_signals ?? true);
-        setPullbackSize(data.pullback_position_size_percent ?? 50);
-        setEarlyReversalSize(data.early_reversal_position_size_percent ?? 40);
-      }
-    } catch (error) {
-      console.error('Error fetching divergence settings:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load divergence settings',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
+    if (riskParams) {
+      setEnablePullback(riskParams.enable_pullback_signals ?? true);
+      setEnableEarlyReversal(riskParams.enable_early_reversal_signals ?? true);
+      setPullbackSize(riskParams.pullback_position_size_percent ?? 50);
+      setEarlyReversalSize(riskParams.early_reversal_position_size_percent ?? 40);
     }
-  };
+  }, [riskParams]);
 
   const handleSave = async () => {
     try {
       setSaving(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
 
-      const { error } = await supabase
-        .from('risk_parameters')
-        .update({
-          enable_pullback_signals: enablePullback,
-          enable_early_reversal_signals: enableEarlyReversal,
-          pullback_position_size_percent: pullbackSize,
-          early_reversal_position_size_percent: earlyReversalSize,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', user.id);
-
-      if (error) throw error;
+      await updateRiskParameters({
+        enable_pullback_signals: enablePullback,
+        enable_early_reversal_signals: enableEarlyReversal,
+        pullback_position_size_percent: pullbackSize,
+        early_reversal_position_size_percent: earlyReversalSize,
+      });
 
       toast({
         title: 'Success',
@@ -90,15 +56,8 @@ export function DivergenceSettings() {
     }
   };
 
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin" />
-        </CardContent>
-      </Card>
-    );
-  }
+  if (!riskParams) return null;
+
 
   return (
     <Card>
