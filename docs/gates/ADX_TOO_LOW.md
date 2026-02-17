@@ -42,6 +42,8 @@ START
   │   ├─ Mean Reversion Exception?
   │   │   ├─ earlyMeanReversionSignal.detected
   │   │   └─ earlyMeanReversionSignal.allowed ── YES → PASS (0.25x size)
+  │   │   NOTE: Tier 0.25 direction derivation passes ADX 18-22 via
+  │   │         ADX_TRANSITIONAL_BYPASS (regime gate deferred to ADX gate)
   │   │
   │   └─ No exception met? ───────────────── BLOCK
   │

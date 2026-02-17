@@ -3282,8 +3282,15 @@ export const deriveTradeDirection = (
     
     // ===== TIER 0.25 TIGHTENING: REGIME GATE =====
     // Only allow exhaustion reversal in EXHAUSTION or RANGE regimes
-    // EXCEPTION: Absolute extreme, Contextual extreme in EARLY_TREND, or Declining STRONG_TREND
+    // EXCEPTION: Absolute extreme, Contextual extreme in EARLY_TREND, Declining STRONG_TREND,
+    //            or ADX transitional zone (18-22) where downstream MR bypass handles gating
     const regimeAllowsExhaustionReversal = regime === 'EXHAUSTION' || regime === 'RANGE';
+    
+    // ===== ADX TRANSITIONAL ZONE BYPASS =====
+    // ADX 18-22 is a declared micro-regime where counter-trend probes are architecturally permitted.
+    // The downstream ADX gate (strategy-analyzer) enforces MR bypass conditions (detectExhaustion + 0.25x sizing).
+    // Tier 0.25 must not contradict that by blocking on regime classification alone.
+    const isAdxTransitional = adxValueEarly >= 18 && adxValueEarly <= 22;
     
     // ===== TIER 0.25 TIGHTENING: HTF WEAKENING GATE =====
     // Require evidence of higher-timeframe trend weakening before proposing reversal
@@ -3292,16 +3299,19 @@ export const deriveTradeDirection = (
     const TIER025_HTF_WEAKENING_1H = 55;  // 1h confidence must be below this
     const htfIsWeakening = conf4h < TIER025_HTF_WEAKENING_4H && conf1h < TIER025_HTF_WEAKENING_1H;
     
-    // Combined gate: (regime AND HTF weakening) OR absolute extreme bypass OR contextual extreme bypass OR declining strong trend bypass
+    // Combined gate: (regime AND HTF weakening) OR absolute extreme bypass OR contextual extreme bypass 
+    //                OR declining strong trend bypass OR ADX transitional zone
     const tier025GatePasses = (regimeAllowsExhaustionReversal && htfIsWeakening) || 
                                absoluteExtremeBypass || 
                                contextualExtremeBypass ||
-                               decliningStrongTrendBypass;
+                               decliningStrongTrendBypass ||
+                               isAdxTransitional;
     
     // Track which bypass path is being used for position sizing
     const usingAbsoluteBypass = absoluteExtremeBypass;
     const usingContextualBypass = contextualExtremeBypass && !absoluteExtremeBypass;
     const usingDecliningStrongTrendBypass = decliningStrongTrendBypass && !absoluteExtremeBypass && !contextualExtremeBypass;
+    const usingAdxTransitionalBypass = isAdxTransitional && !absoluteExtremeBypass && !contextualExtremeBypass && !decliningStrongTrendBypass && !regimeAllowsExhaustionReversal;
     hoistedDecliningStrongTrendBypass = usingDecliningStrongTrendBypass;
     
     if (!tier025GatePasses) {
@@ -3343,6 +3353,8 @@ export const deriveTradeDirection = (
       reasons.push(`TIER 0.25 CONTEXTUAL EXHAUSTION BYPASS: K=${stochK4hEarly.toFixed(0)} (${isContextualOverbought ? 'extreme overbought' : 'extreme oversold'}), ADX=${adxValueEarly.toFixed(1)}, slope=${momentumSlopeEarly.toFixed(2)}, adxSlope=${adxSlope.toFixed(2)} in ${regime}`);
     } else if (usingDecliningStrongTrendBypass) {
       reasons.push(`TIER 0.25 DECLINING STRONG TREND BYPASS: K=${stochK4hEarly.toFixed(0)}, ADX slope=${adxSlope.toFixed(2)}, regime=STRONG_TREND → treating as early exhaustion (0.20x sizing)`);
+    } else if (usingAdxTransitionalBypass) {
+      reasons.push(`TIER 0.25 ADX_TRANSITIONAL_BYPASS: ADX=${adxValueEarly.toFixed(1)} in 18-22 zone, regime=${regime} → deferring to downstream ADX gate MR bypass`);
     }
     
     if (tier025GatePasses) {
