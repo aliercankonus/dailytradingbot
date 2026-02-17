@@ -91,46 +91,20 @@ Deno.serve(async (req) => {
       console.log(`Deleted ${shadowDeleted || 0} shadow mode signals older than 7 days`);
     }
 
-    // Clean up signal_rejection_log - keep only last 500 rows
-    // Delete using timestamp cutoff instead of fetching IDs (more efficient)
-    console.log('Cleaning up signal_rejection_log table...');
+    // Clean up signal_rejection_log - prune entries older than 24 hours
+    console.log('Cleaning up signal_rejection_log table (keeping last 24h)...');
     
-    const { count: totalCount } = await supabase
+    const { error: rejectionDeleteError, count: rejectionDeletedCount } = await supabase
       .from('signal_rejection_log')
-      .select('*', { count: 'exact', head: true });
+      .delete({ count: 'exact' })
+      .lt('checked_at', oneDayAgo);
 
     let rejectionLogsDeleted = 0;
-    const MAX_REJECTION_LOGS = 500;
-    
-    if (totalCount && totalCount > MAX_REJECTION_LOGS) {
-      console.log(`Found ${totalCount} rejection logs, need to delete ${totalCount - MAX_REJECTION_LOGS}`);
-      
-      // Get the timestamp cutoff - the checked_at of the 500th newest log
-      const { data: cutoffLog, error: cutoffError } = await supabase
-        .from('signal_rejection_log')
-        .select('checked_at')
-        .order('checked_at', { ascending: false })
-        .range(MAX_REJECTION_LOGS - 1, MAX_REJECTION_LOGS - 1)
-        .single();
-
-      if (cutoffError) {
-        console.error('Error getting cutoff timestamp:', cutoffError);
-      } else if (cutoffLog) {
-        // Delete all logs older than the cutoff timestamp
-        const { error: deleteLogsError, count: deletedCount } = await supabase
-          .from('signal_rejection_log')
-          .delete({ count: 'exact' })
-          .lt('checked_at', cutoffLog.checked_at);
-
-        if (deleteLogsError) {
-          console.error('Error deleting old rejection logs:', deleteLogsError);
-        } else {
-          rejectionLogsDeleted = deletedCount || 0;
-          console.log(`Deleted ${rejectionLogsDeleted} old rejection logs, keeping last ${MAX_REJECTION_LOGS}`);
-        }
-      }
+    if (rejectionDeleteError) {
+      console.error('Error deleting old rejection logs:', rejectionDeleteError);
     } else {
-      console.log(`Rejection logs count (${totalCount}) is within limit of ${MAX_REJECTION_LOGS}`);
+      rejectionLogsDeleted = rejectionDeletedCount || 0;
+      console.log(`Deleted ${rejectionLogsDeleted} rejection logs older than 24h`);
     }
 
     // ============================================================
