@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
@@ -11,17 +10,19 @@ import {
   Brain, 
   TrendingUp, 
   Target, 
-  AlertTriangle, 
   BarChart3, 
-  Zap,
   Shield,
   Activity
 } from 'lucide-react';
-import { useRiskParameters } from '@/hooks/useRiskParameters';
+import { RiskParameters } from '@/hooks/useRiskParameters';
 import { useToast } from '@/hooks/use-toast';
 
-export function SmartTradingSettings() {
-  const { riskParams, loading, updateRiskParameters } = useRiskParameters();
+interface SmartTradingSettingsProps {
+  riskParams: RiskParameters | null;
+  updateRiskParameters: (updates: Partial<RiskParameters>) => Promise<void>;
+}
+
+export function SmartTradingSettings({ riskParams, updateRiskParameters }: SmartTradingSettingsProps) {
   const { toast } = useToast();
   
   const [formData, setFormData] = useState({
@@ -67,22 +68,6 @@ export function SmartTradingSettings() {
       });
     }
   };
-
-  if (loading || !riskParams) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Brain className="h-5 w-5" />
-            Smart Trading Intelligence
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="animate-pulse h-40 bg-muted rounded" />
-        </CardContent>
-      </Card>
-    );
-  }
 
   return (
     <Card>

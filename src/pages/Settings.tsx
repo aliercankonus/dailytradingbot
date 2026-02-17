@@ -44,7 +44,6 @@ export default function Settings() {
         const isEncrypted = (data as any).keys_encrypted === true;
         setHasEncryptedKeys(isEncrypted);
         
-        // If keys are encrypted, show masked version; otherwise show actual keys
         setFormData(prev => ({
           ...prev,
           binanceApiKey: isEncrypted ? '' : ((data as any).binance_api_key || ''),
@@ -58,7 +57,6 @@ export default function Settings() {
     }
   };
 
-  // Fetch user's API keys on load
   useEffect(() => {
     fetchApiKeys();
   }, []);
@@ -78,7 +76,6 @@ export default function Settings() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // Check if record exists
       const { data: existing } = await supabase
         .from('user_api_keys' as any)
         .select('id')
@@ -86,7 +83,6 @@ export default function Settings() {
         .maybeSingle();
 
       if (existing) {
-        // Update existing record
         const { error } = await supabase
           .from('user_api_keys' as any)
           .update({
@@ -98,7 +94,6 @@ export default function Settings() {
 
         if (error) throw error;
       } else {
-        // Insert new record
         const { error } = await supabase
           .from('user_api_keys' as any)
           .insert({
@@ -115,7 +110,6 @@ export default function Settings() {
         description: "Your Binance API credentials have been saved securely",
       });
 
-      // Refetch to show updated keys
       fetchApiKeys();
     } catch (error) {
       toast({
@@ -295,14 +289,14 @@ export default function Settings() {
 
         {/* Tab 3: Risk Management */}
         <TabsContent value="risk" className="space-y-6">
-          <SmartRiskSettings />
-          <HedgingSettings />
+          <SmartRiskSettings riskParams={riskParams} updateRiskParameters={updateRiskParameters} />
+          <HedgingSettings riskParams={riskParams} updateRiskParameters={updateRiskParameters} />
           <PerformanceSettings />
         </TabsContent>
 
         {/* Tab 4: Smart Trading */}
         <TabsContent value="smart" className="space-y-6">
-          <SmartTradingSettings />
+          <SmartTradingSettings riskParams={riskParams} updateRiskParameters={updateRiskParameters} />
         </TabsContent>
 
       </Tabs>

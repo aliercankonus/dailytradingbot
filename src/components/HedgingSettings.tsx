@@ -7,7 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Shield, AlertTriangle, TrendingDown, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { RiskParameters } from "@/hooks/useRiskParameters";
+
+interface HedgingSettingsProps {
+  riskParams: RiskParameters | null;
+  updateRiskParameters: (updates: Partial<RiskParameters>) => Promise<void>;
+}
 
 interface HedgingSettingsData {
   hedgingEnabled: boolean;
@@ -16,9 +21,8 @@ interface HedgingSettingsData {
   hedgePositionSizePercent: number;
 }
 
-export const HedgingSettings = () => {
+export const HedgingSettings = ({ riskParams, updateRiskParameters }: HedgingSettingsProps) => {
   const { toast } = useToast();
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<HedgingSettingsData>({
     hedgingEnabled: false,
@@ -28,44 +32,19 @@ export const HedgingSettings = () => {
   });
 
   useEffect(() => {
-    fetchSettings();
-  }, []);
-
-  const fetchSettings = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from("risk_parameters")
-        .select("hedging_enabled, hedge_reversal_risk_min, hedge_reversal_risk_max, hedge_position_size_percent")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (error) throw error;
-
-      if (data) {
-        setSettings({
-          hedgingEnabled: data.hedging_enabled ?? false,
-          hedgeReversalRiskMin: data.hedge_reversal_risk_min ?? 50,
-          hedgeReversalRiskMax: data.hedge_reversal_risk_max ?? 70,
-          hedgePositionSizePercent: data.hedge_position_size_percent ?? 50,
-        });
-      }
-    } catch (err) {
-      console.error("Error fetching hedging settings:", err);
-    } finally {
-      setLoading(false);
+    if (riskParams) {
+      setSettings({
+        hedgingEnabled: riskParams.hedging_enabled ?? false,
+        hedgeReversalRiskMin: riskParams.hedge_reversal_risk_min ?? 50,
+        hedgeReversalRiskMax: riskParams.hedge_reversal_risk_max ?? 70,
+        hedgePositionSizePercent: riskParams.hedge_position_size_percent ?? 50,
+      });
     }
-  };
+  }, [riskParams]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-
-      // Validate settings
       if (settings.hedgeReversalRiskMin >= settings.hedgeReversalRiskMax) {
         toast({
           title: "Invalid Settings",
@@ -76,17 +55,12 @@ export const HedgingSettings = () => {
         return;
       }
 
-      const { error } = await supabase
-        .from("risk_parameters")
-        .update({
-          hedging_enabled: settings.hedgingEnabled,
-          hedge_reversal_risk_min: settings.hedgeReversalRiskMin,
-          hedge_reversal_risk_max: settings.hedgeReversalRiskMax,
-          hedge_position_size_percent: settings.hedgePositionSizePercent,
-        })
-        .eq("user_id", user.id);
-
-      if (error) throw error;
+      await updateRiskParameters({
+        hedging_enabled: settings.hedgingEnabled,
+        hedge_reversal_risk_min: settings.hedgeReversalRiskMin,
+        hedge_reversal_risk_max: settings.hedgeReversalRiskMax,
+        hedge_position_size_percent: settings.hedgePositionSizePercent,
+      });
 
       toast({
         title: "Hedging Settings Saved",
@@ -103,16 +77,6 @@ export const HedgingSettings = () => {
       setSaving(false);
     }
   };
-
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </CardContent>
-      </Card>
-    );
-  }
 
   return (
     <Card>
