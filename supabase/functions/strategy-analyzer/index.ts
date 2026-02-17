@@ -4076,6 +4076,7 @@ serve(async (req) => {
         let mrTransitionalDirectionOverrideApplied = false;
         let mrTransitionalDirection: "long" | "short" | null = null;
         
+        const hasAnyDirectionSource = hasDirectionOverride || earlyIgnitionEntryApplied;
         if (!directionResult.direction && !lateGrindAccepted && !hasAnyDirectionSource) {
           const isAdxTransitional = adx >= 18 && adx <= 22;
           const htfConf4h = timeframes?.['4h']?.confidence ?? 0;

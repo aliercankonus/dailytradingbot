@@ -4511,7 +4511,7 @@ export const deriveTradeDirection = (
     
     if (ofIsStrongBullish && momentumNotExtreme && stochAllowsLong) {
       tier10Fired = true;
-      const ofConfidence = Math.min(60, 50 + (ofScore - 50) * 0.3);
+      const ofConfidence = Math.min(60, 50 + (tier105OfScore - 50) * 0.3);
       const ofPosition = 0.55;  // Conservative 55% position
       
       reasons.push(`TIER 10.5 ORDER FLOW OVERRIDE → LONG: OF score=${tier105OfScore.toFixed(0)} (${tier105OfSignal}) overrides moderate momentum (${tier105MomentumScore.toFixed(0)})`);
@@ -4541,7 +4541,7 @@ export const deriveTradeDirection = (
     
     if (ofIsStrongBearish && momentumNotExtreme && stochAllowsShort) {
       tier10Fired = true;
-      const ofConfidence = Math.min(60, 50 + (ofScore - 50) * 0.3);
+      const ofConfidence = Math.min(60, 50 + (tier105OfScore - 50) * 0.3);
       const ofPosition = 0.55;  // Conservative 55% position
       
       reasons.push(`TIER 10.5 ORDER FLOW OVERRIDE → SHORT: OF score=${tier105OfScore.toFixed(0)} (${tier105OfSignal}) overrides moderate momentum (${tier105MomentumScore.toFixed(0)})`);
