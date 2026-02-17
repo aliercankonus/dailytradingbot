@@ -19,9 +19,18 @@ import {
   ArrowDownRight,
   Minus
 } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { useState, memo } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+
+const getVolumeInfo = (ratio: number) => {
+  if (ratio >= 1.2) return { label: 'High', color: 'text-green-400', bg: 'bg-green-500/10 text-green-500 border-green-500/20' };
+  if (ratio >= 0.7) return { label: 'Normal', color: 'text-green-500', bg: 'bg-green-500/10 text-green-500 border-green-500/20' };
+  if (ratio >= 0.5) return { label: 'Low', color: 'text-yellow-500', bg: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' };
+  if (ratio >= 0.3) return { label: 'Very Low', color: 'text-orange-500', bg: 'bg-orange-500/10 text-orange-500 border-orange-500/20' };
+  return { label: 'Holiday', color: 'text-destructive', bg: 'bg-destructive/10 text-destructive border-destructive/20' };
+};
 
 const VolumeIndicator = ({ ratio }: { ratio: number | null }) => {
   if (ratio === null) {
@@ -29,13 +38,26 @@ const VolumeIndicator = ({ ratio }: { ratio: number | null }) => {
   }
   
   const percentage = Math.round(ratio * 100);
-  const color = ratio >= 0.7 ? 'text-green-500' : ratio >= 0.5 ? 'text-yellow-500' : ratio >= 0.3 ? 'text-orange-500' : 'text-destructive';
-  const label = ratio >= 0.7 ? 'Normal' : ratio >= 0.5 ? 'Low' : ratio >= 0.3 ? 'Very Low' : 'Holiday';
+  const info = getVolumeInfo(ratio);
   
   return (
     <div className="flex items-center gap-1.5">
-      <span className={`font-mono font-semibold text-sm ${color}`}>{percentage}%</span>
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={`font-mono font-semibold text-sm ${info.color}`}>{percentage}%</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 cursor-help ${info.bg}`}>
+            {info.label}
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent side="top" align="start" className="max-w-52 text-xs space-y-1 z-50">
+          <p className="font-semibold mb-1">Volume vs 20-period avg</p>
+          <p><span className="text-green-400">≥120%</span> — High</p>
+          <p><span className="text-green-500">70–119%</span> — Normal</p>
+          <p><span className="text-yellow-500">50–69%</span> — Low (+3 quality)</p>
+          <p><span className="text-orange-500">30–49%</span> — Very Low (+3 quality)</p>
+          <p><span className="text-destructive">&lt;30%</span> — Holiday mode</p>
+        </TooltipContent>
+      </Tooltip>
     </div>
   );
 };
@@ -137,6 +159,7 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
   const maxGate = Math.max(...Object.values(gateStatus));
 
   return (
+    <TooltipProvider>
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
@@ -185,13 +208,14 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
             )}
           </MetricCard>
 
-          <MetricCard icon={Shield} label="Quality Gate">
+          <MetricCard icon={Shield} label="Min Quality Threshold">
             <div className="flex items-baseline gap-1">
               <span className="font-mono font-semibold text-sm text-foreground">
                 {conditions.effectiveThreshold}
               </span>
               <span className="text-xs text-muted-foreground">/ 100</span>
             </div>
+            <p className="text-[10px] text-muted-foreground leading-tight">Min score required to pass</p>
             {!conditions.isVolumeUnknown && (conditions.averageVolumeRatio ?? 1) < 0.5 && (
               <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-yellow-500/10 text-yellow-500 border-yellow-500/20">
                 +3 low vol
@@ -264,10 +288,15 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
                         <div className="flex items-center gap-3 text-[10px] flex-1">
                           <span className="text-muted-foreground">
                             Vol: {sym.volumeRatio === null ? '—' : (
-                              <span className={
-                                sym.volumeRatio >= 0.7 ? 'text-green-500' : 
-                                sym.volumeRatio >= 0.5 ? 'text-yellow-500' : 'text-orange-500'
-                              }>{Math.round(sym.volumeRatio * 100)}%</span>
+                              <>
+                                <span className={getVolumeInfo(sym.volumeRatio).color}>
+                                  {Math.round(sym.volumeRatio * 100)}%
+                                </span>
+                                {' '}
+                                <span className={getVolumeInfo(sym.volumeRatio).color + ' opacity-70'}>
+                                  {getVolumeInfo(sym.volumeRatio).label}
+                                </span>
+                              </>
                             )}
                           </span>
                           <span className="text-muted-foreground">
@@ -312,5 +341,6 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
         )}
       </CardContent>
     </Card>
+    </TooltipProvider>
   );
 });
