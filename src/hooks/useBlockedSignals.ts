@@ -163,7 +163,7 @@ export function useBlockedSignals(limit: number = 20) {
         .select("id, symbol, rejection_reason, checked_at, filters_status, trend_data")
         .eq("user_id", user.id)
         .order("checked_at", { ascending: false })
-        .limit(limit);
+        .limit(Math.min(limit, 200));
 
       if (error) {
         console.error("Error fetching blocked signals:", error);

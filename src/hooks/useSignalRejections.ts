@@ -30,12 +30,13 @@ export const useSignalRejections = () => {
       // Calculate timestamp for 30 minutes ago
       const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       
-      // Get rejections from last 30 minutes, grouped by symbol (latest per symbol)
+      // Get rejections from last 30 minutes - select only needed columns, limit results
       const { data, error } = await supabase
         .from('signal_rejection_log')
-        .select('*')
+        .select('id, symbol, checked_at, rejection_reason, filters_status, trend_data, ai_analysis')
         .gte('checked_at', thirtyMinutesAgo)
-        .order('checked_at', { ascending: false });
+        .order('checked_at', { ascending: false })
+        .limit(200);
 
       if (error) throw error;
 
