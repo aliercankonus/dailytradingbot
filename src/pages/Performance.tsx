@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from "react";
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -7,17 +7,11 @@ import { AppHeader } from "@/components/AppHeader";
 import { usePortfolioHistory } from "@/hooks/usePortfolioHistory";
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { format } from "date-fns";
-import { Skeleton } from "@/components/ui/skeleton";
 
-const PerformanceAnalytics = lazy(() => import("@/components/PerformanceAnalytics").then(m => ({ default: m.PerformanceAnalytics })));
-const LossAttributionDashboard = lazy(() => import("@/components/LossAttributionDashboard").then(m => ({ default: m.LossAttributionDashboard })));
 
-const TabFallback = () => (
-  <div className="space-y-4">
-    <Skeleton className="h-32 w-full" />
-    <Skeleton className="h-64 w-full" />
-  </div>
-);
+import { PerformanceAnalytics } from "@/components/PerformanceAnalytics";
+import { LossAttributionDashboard } from "@/components/LossAttributionDashboard";
+
 
 const Performance = () => {
   const [timeRange, setTimeRange] = useState("30");
@@ -188,9 +182,7 @@ const Performance = () => {
             )}
 
             {/* Strategy Analytics (below portfolio chart) */}
-            <Suspense fallback={<TabFallback />}>
-              <PerformanceAnalytics />
-            </Suspense>
+            <PerformanceAnalytics />
           </TabsContent>
 
           {/* Analytics Tab - P&L, Win Rate, Risk combined */}
@@ -316,9 +308,7 @@ const Performance = () => {
 
           {/* Loss Analysis Tab */}
           <TabsContent value="losses" className="space-y-4">
-            <Suspense fallback={<TabFallback />}>
-              <LossAttributionDashboard />
-            </Suspense>
+            <LossAttributionDashboard />
           </TabsContent>
         </Tabs>
       </div>
