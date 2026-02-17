@@ -20,47 +20,47 @@ interface SignalRejection {
   ai_analysis: AIValidationResult | null;
 }
 
+export const fetchSignalRejections = async (): Promise<SignalRejection[]> => {
+  const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  
+  const { data, error } = await supabase
+    .from('signal_rejection_log')
+    .select('id, symbol, checked_at, rejection_reason, filters_status, trend_data, ai_analysis')
+    .gte('checked_at', thirtyMinutesAgo)
+    .order('checked_at', { ascending: false })
+    .limit(200);
+
+  if (error) throw error;
+
+  const latestBySymbol = new Map<string, SignalRejection>();
+  data?.forEach((rejection) => {
+    if (!latestBySymbol.has(rejection.symbol)) {
+      latestBySymbol.set(rejection.symbol, {
+        id: rejection.id,
+        symbol: rejection.symbol,
+        checked_at: rejection.checked_at,
+        rejection_reason: rejection.rejection_reason,
+        filters_status: rejection.filters_status,
+        trend_data: rejection.trend_data,
+        ai_analysis: rejection.ai_analysis as unknown as AIValidationResult | null,
+      });
+    }
+  });
+
+  return Array.from(latestBySymbol.values()).sort((a, b) => 
+    a.symbol.localeCompare(b.symbol)
+  );
+};
+
+export const SIGNAL_REJECTIONS_QUERY_KEY = ['signal-rejections'];
+
 export const useSignalRejections = () => {
   const { user } = useAuth();
   const { lastRefreshTime } = useSignalRefresh();
 
   const { data: rejections = [], isLoading: loading } = useQuery({
-    queryKey: ["signal-rejections", user?.id, lastRefreshTime],
-    queryFn: async (): Promise<SignalRejection[]> => {
-      // Calculate timestamp for 30 minutes ago
-      const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-      
-      // Get rejections from last 30 minutes - select only needed columns, limit results
-      const { data, error } = await supabase
-        .from('signal_rejection_log')
-        .select('id, symbol, checked_at, rejection_reason, filters_status, trend_data, ai_analysis')
-        .gte('checked_at', thirtyMinutesAgo)
-        .order('checked_at', { ascending: false })
-        .limit(200);
-
-      if (error) throw error;
-
-      // Get the latest rejection for each symbol within the last 30 minutes
-      const latestBySymbol = new Map<string, SignalRejection>();
-      data?.forEach((rejection) => {
-        if (!latestBySymbol.has(rejection.symbol)) {
-          latestBySymbol.set(rejection.symbol, {
-            id: rejection.id,
-            symbol: rejection.symbol,
-            checked_at: rejection.checked_at,
-            rejection_reason: rejection.rejection_reason,
-            filters_status: rejection.filters_status,
-            trend_data: rejection.trend_data,
-            ai_analysis: rejection.ai_analysis as unknown as AIValidationResult | null,
-          });
-        }
-      });
-
-      // Sort by symbol name ascending for consistent display order
-      return Array.from(latestBySymbol.values()).sort((a, b) => 
-        a.symbol.localeCompare(b.symbol)
-      );
-    },
+    queryKey: [...SIGNAL_REJECTIONS_QUERY_KEY, user?.id, lastRefreshTime],
+    queryFn: fetchSignalRejections,
     enabled: !!user?.id,
     staleTime: 55000,
     gcTime: 300000,

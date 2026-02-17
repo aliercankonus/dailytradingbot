@@ -37,7 +37,7 @@ interface MomentumData {
 // Staleness threshold: snapshots older than 7 minutes are considered stale
 const SNAPSHOT_STALE_MINUTES = 7;
 
-const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
+export const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
   // Get active trading symbols
   const { data: symbols, error: symbolsError } = await supabase
     .from('trading_symbols_config')

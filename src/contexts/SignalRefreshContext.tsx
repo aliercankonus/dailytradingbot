@@ -4,33 +4,44 @@ interface SignalRefreshContextType {
   lastRefreshTime: number;
   refreshNow: () => void;
   isRefreshing: boolean;
+  secondsUntilRefresh: number;
 }
 
 const SignalRefreshContext = createContext<SignalRefreshContextType | null>(null);
 
-const REFRESH_INTERVAL_MS = 60000; // 60 seconds - centralized interval for all signal data
+const REFRESH_INTERVAL_S = 60; // 60 seconds - centralized interval for all signal data
 
 export function SignalRefreshProvider({ children }: { children: ReactNode }) {
   const [lastRefreshTime, setLastRefreshTime] = useState<number>(Date.now());
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [secondsUntilRefresh, setSecondsUntilRefresh] = useState(REFRESH_INTERVAL_S);
 
   const refreshNow = useCallback(() => {
     setIsRefreshing(true);
     setLastRefreshTime(Date.now());
-    // Reset refreshing state after a short delay
+    setSecondsUntilRefresh(REFRESH_INTERVAL_S);
     setTimeout(() => setIsRefreshing(false), 500);
   }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      refreshNow();
-    }, REFRESH_INTERVAL_MS);
+      setSecondsUntilRefresh((prev) => {
+        if (prev <= 1) {
+          // Trigger refresh
+          setIsRefreshing(true);
+          setLastRefreshTime(Date.now());
+          setTimeout(() => setIsRefreshing(false), 500);
+          return REFRESH_INTERVAL_S;
+        }
+        return prev - 1;
+      });
+    }, 1000);
 
     return () => clearInterval(interval);
-  }, [refreshNow]);
+  }, []);
 
   return (
-    <SignalRefreshContext.Provider value={{ lastRefreshTime, refreshNow, isRefreshing }}>
+    <SignalRefreshContext.Provider value={{ lastRefreshTime, refreshNow, isRefreshing, secondsUntilRefresh }}>
       {children}
     </SignalRefreshContext.Provider>
   );

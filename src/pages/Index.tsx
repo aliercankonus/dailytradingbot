@@ -12,6 +12,8 @@ import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
 import { TradeCounterSync } from "@/components/TradeCounterSync";
 
 import { SignalRefreshProvider } from "@/contexts/SignalRefreshContext";
+import { useSignalDataPrefetch } from "@/hooks/useSignalDataPrefetch";
+import { RefreshCountdownBar } from "@/components/RefreshCountdownBar";
 
 import { MarketConditionsDashboard } from "@/components/MarketConditionsDashboard";
 import { SignalsOverview } from "@/components/SignalsOverview";
@@ -43,6 +45,9 @@ const usePersistedTab = (key: string, defaultValue: string) => {
 const Index = () => {
   const location = useLocation();
   const [activeTab, setActiveTab] = usePersistedTab("tf-active-tab", "dashboard");
+  
+  // Prefetch signal data so collapsed sections render instantly
+  useSignalDataPrefetch();
   const [positionsSubTab, setPositionsSubTab] = usePersistedTab("tf-positions-sub", "active");
   
   const [riskSubTab, setRiskSubTab] = usePersistedTab("tf-risk-sub", "sizing");
@@ -76,6 +81,9 @@ const Index = () => {
               <TabsTrigger value="monitor" className="min-w-[4.5rem] flex-shrink-0 text-xs">Monitor</TabsTrigger>
             </TabsList>
             <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-background to-transparent pointer-events-none md:hidden" />
+          </div>
+          <div className="flex justify-end">
+            <RefreshCountdownBar />
           </div>
 
           <TabsContent value="dashboard" className="space-y-4">
