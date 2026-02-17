@@ -1,43 +1,25 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
-import { useToast } from '@/hooks/use-toast';
 import { Activity, TrendingUp, TrendingDown, Zap, AlertTriangle, Grid3X3, ArrowUpDown, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-
-// Store price data for correlation calculation
-interface SymbolPriceData {
-  symbol: string;
-  closes: number[];
-  lastUpdated: Date;
-}
+import { useQuery } from '@tanstack/react-query';
 
 // Calculate Pearson correlation coefficient between two price series
 const calculatePearsonCorrelation = (prices1: number[], prices2: number[]): number => {
-  if (prices1.length !== prices2.length || prices1.length < 10) {
-    return 0;
-  }
-
+  if (prices1.length !== prices2.length || prices1.length < 10) return 0;
   const n = prices1.length;
-  
-  // Calculate returns (percent changes) for more accurate correlation
   const returns1: number[] = [];
   const returns2: number[] = [];
-  
   for (let i = 1; i < n; i++) {
     returns1.push((prices1[i] - prices1[i-1]) / prices1[i-1]);
     returns2.push((prices2[i] - prices2[i-1]) / prices2[i-1]);
   }
-
   const mean1 = returns1.reduce((a, b) => a + b, 0) / returns1.length;
   const mean2 = returns2.reduce((a, b) => a + b, 0) / returns2.length;
-
-  let numerator = 0;
-  let sum1Sq = 0;
-  let sum2Sq = 0;
-
+  let numerator = 0, sum1Sq = 0, sum2Sq = 0;
   for (let i = 0; i < returns1.length; i++) {
     const diff1 = returns1[i] - mean1;
     const diff2 = returns2[i] - mean2;
@@ -45,11 +27,8 @@ const calculatePearsonCorrelation = (prices1: number[], prices2: number[]): numb
     sum1Sq += diff1 * diff1;
     sum2Sq += diff2 * diff2;
   }
-
   const denominator = Math.sqrt(sum1Sq * sum2Sq);
-  if (denominator === 0) return 0;
-
-  return numerator / denominator;
+  return denominator === 0 ? 0 : numerator / denominator;
 };
 
 const getCorrelationColor = (correlation: number): string => {
@@ -97,310 +76,106 @@ interface OrderFlowData {
   reasons: string[];
   lastUpdated: Date;
   intendedDirection: "long" | "short";
-  directionSource: "strategy-analyzer" | "sma20"; // Track where direction came from
+  directionSource: "strategy-analyzer" | "sma20";
 }
 
-export const OrderFlowDashboard = () => {
-  const [orderFlowData, setOrderFlowData] = useState<OrderFlowData[]>([]);
-  const [priceData, setPriceData] = useState<Map<string, number[]>>(new Map());
-  const [correlationMatrix, setCorrelationMatrix] = useState<Map<string, Map<string, number>>>(new Map());
-  const [isLoading, setIsLoading] = useState(false);
-  const { toast } = useToast();
+// Staleness threshold — snapshots older than 7 minutes are stale
+const SNAPSHOT_STALE_MINUTES = 7;
 
-  // Get correlation from live-calculated matrix, or calculate on-the-fly
+const fetchOrderFlowFromCache = async (): Promise<{ orderFlowData: OrderFlowData[]; priceData: Map<string, number[]> }> => {
+  // Get active symbols
+  const { data: symbols, error: symbolsError } = await supabase
+    .from('trading_symbols_config')
+    .select('symbol')
+    .eq('is_active', true);
+
+  if (symbolsError) throw symbolsError;
+  if (!symbols || symbols.length === 0) return { orderFlowData: [], priceData: new Map() };
+
+  const symbolList = symbols.map(s => s.symbol);
+
+  // Read cached trend snapshots (order flow is embedded in snapshot_data by strategy-analyzer)
+  const { data: snapshots, error: snapshotError } = await supabase
+    .from('trend_snapshots')
+    .select('symbol, snapshot_data, recorded_at')
+    .in('symbol', symbolList);
+
+  if (snapshotError) throw snapshotError;
+
+  const now = Date.now();
+  const staleMs = SNAPSHOT_STALE_MINUTES * 60 * 1000;
+  const results: OrderFlowData[] = [];
+  const priceData = new Map<string, number[]>();
+
+  for (const snapshot of (snapshots || [])) {
+    const snapshotAge = now - new Date(snapshot.recorded_at).getTime();
+    if (snapshotAge > staleMs) continue; // Skip stale snapshots
+
+    const data = snapshot.snapshot_data as any;
+    const orderFlow = data?.orderFlow;
+    if (!orderFlow) continue; // No cached order flow yet
+
+    // Extract correlation closes
+    const closes = data?.correlationCloses;
+    if (Array.isArray(closes) && closes.length >= 10) {
+      priceData.set(snapshot.symbol, closes);
+    }
+
+    results.push({
+      symbol: snapshot.symbol,
+      volumeSpike: orderFlow.volumeSpike ?? { detected: false, magnitude: 1, type: "neutral", significance: "low" },
+      priceRejection: orderFlow.priceRejection ?? { detected: false, type: "none", wickRatio: 0, strength: 0, level: "none" },
+      pressure: orderFlow.pressure ?? { buyingPressure: 50, sellingPressure: 50, delta: 0, trend: "neutral" },
+      score: orderFlow.score ?? 50,
+      signal: orderFlow.signal ?? "neutral",
+      confidence: orderFlow.confidence ?? 0,
+      reasons: orderFlow.reasons ?? [],
+      lastUpdated: new Date(snapshot.recorded_at),
+      intendedDirection: orderFlow.intendedDirection ?? "long",
+      directionSource: orderFlow.directionSource ?? "sma20",
+    });
+  }
+
+  return { orderFlowData: results, priceData };
+};
+
+export const OrderFlowDashboard = () => {
+  const { data, isLoading, isFetching, refetch } = useQuery({
+    queryKey: ['order-flow-cached'],
+    queryFn: fetchOrderFlowFromCache,
+    staleTime: 5 * 60 * 1000,     // 5 min — aligned with strategy-analyzer cycle
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchInterval: 5 * 60 * 1000, // Refresh every 5 min
+    placeholderData: (prev) => prev,
+    structuralSharing: true,
+  });
+
+  const orderFlowData = data?.orderFlowData || [];
+  const priceData = data?.priceData || new Map<string, number[]>();
+
+  // Calculate correlation matrix from cached closes
+  const correlationMatrix = useMemo(() => {
+    const matrix = new Map<string, Map<string, number>>();
+    const symbolList = Array.from(priceData.keys());
+    for (const s1 of symbolList) {
+      const row = new Map<string, number>();
+      for (const s2 of symbolList) {
+        if (s1 === s2) { row.set(s2, 1.0); continue; }
+        const p1 = priceData.get(s1)!;
+        const p2 = priceData.get(s2)!;
+        row.set(s2, calculatePearsonCorrelation(p1, p2));
+      }
+      matrix.set(s1, row);
+    }
+    return matrix;
+  }, [priceData]);
+
   const getCorrelation = (symbol1: string, symbol2: string): number => {
     if (symbol1 === symbol2) return 1.0;
-    
-    // Check cached matrix first
-    const cached = correlationMatrix.get(symbol1)?.get(symbol2) ?? 
-                   correlationMatrix.get(symbol2)?.get(symbol1);
-    if (cached !== undefined) return cached;
-    
-    // Calculate from price data if available
-    const prices1 = priceData.get(symbol1);
-    const prices2 = priceData.get(symbol2);
-    if (prices1 && prices2) {
-      return calculatePearsonCorrelation(prices1, prices2);
-    }
-    
-    return 0; // No data available
+    return correlationMatrix.get(symbol1)?.get(symbol2) ?? 
+           correlationMatrix.get(symbol2)?.get(symbol1) ?? 0;
   };
-
-  const fetchOrderFlowData = async () => {
-    setIsLoading(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        toast({ title: "Not authenticated", variant: "destructive" });
-        return;
-      }
-
-      const { data: symbols } = await supabase
-        .from('trading_symbols_config')
-        .select('symbol')
-        .eq('is_active', true);
-
-      if (!symbols || symbols.length === 0) {
-        toast({ title: "No active symbols", description: "Configure trading symbols first" });
-        return;
-      }
-
-      // Fetch latest derived directions from signal_rejection_log
-      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-      const { data: rejectionData } = await supabase
-        .from('signal_rejection_log')
-        .select('symbol, filters_status, checked_at')
-        .gte('checked_at', tenMinutesAgo)
-        .order('checked_at', { ascending: false });
-
-      // Build map of latest derived direction per symbol
-      const derivedDirections = new Map<string, "long" | "short">();
-      rejectionData?.forEach((rejection) => {
-        if (!derivedDirections.has(rejection.symbol)) {
-          const filtersStatus = rejection.filters_status as any;
-          const derivedDir = filtersStatus?.derivedDirection;
-          if (derivedDir === 'long' || derivedDir === 'short') {
-            derivedDirections.set(rejection.symbol, derivedDir);
-          }
-        }
-      });
-
-      // Fetch kline data for all symbols via backend function (avoids CORS)
-      const symbolNames = symbols.map(({ symbol }) => symbol);
-      const { data: klineResponse, error: klineError } = await supabase.functions.invoke('fetch-klines', {
-        body: { symbols: symbolNames, interval: '1h', limit: 100 }
-      });
-
-      const klineResults: { symbol: string; klines: any[] }[] = 
-        (!klineError && klineResponse?.success) ? klineResponse.data : 
-        symbolNames.map(symbol => ({ symbol, klines: [] }));
-      
-      // Store price data for correlation calculation
-      const newPriceData = new Map<string, number[]>();
-      const results: OrderFlowData[] = [];
-      
-      for (const { symbol, klines } of klineResults) {
-        if (!Array.isArray(klines) || klines.length < 30) continue;
-
-        // Extract closes for correlation calculation (using last 50 candles)
-        const closes = klines.slice(-50).map((k: any) => parseFloat(k[4]));
-        newPriceData.set(symbol, closes);
-
-        // Get direction from strategy-analyzer if available, fallback to SMA20
-        let intendedDirection: "long" | "short";
-        let directionSource: "strategy-analyzer" | "sma20" = "sma20";
-        
-        if (derivedDirections.has(symbol)) {
-          intendedDirection = derivedDirections.get(symbol)!;
-          directionSource = "strategy-analyzer";
-        } else {
-          // Fallback to SMA20
-          const recentCloses = klines.map((k: any) => parseFloat(k[4]));
-          const sma20 = recentCloses.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20;
-          const currentPrice = recentCloses[recentCloses.length - 1];
-          intendedDirection = currentPrice > sma20 ? "long" : "short";
-        }
-        
-        const analysis = analyzeOrderFlowLocal(klines, intendedDirection);
-        results.push({
-          symbol,
-          ...analysis,
-          intendedDirection,
-          directionSource,
-          lastUpdated: new Date()
-        });
-      }
-
-      // Calculate live correlation matrix
-      const symbolList = Array.from(newPriceData.keys());
-      const newCorrelationMatrix = new Map<string, Map<string, number>>();
-      
-      for (const symbol1 of symbolList) {
-        const row = new Map<string, number>();
-        for (const symbol2 of symbolList) {
-          if (symbol1 === symbol2) {
-            row.set(symbol2, 1.0);
-          } else {
-            const prices1 = newPriceData.get(symbol1)!;
-            const prices2 = newPriceData.get(symbol2)!;
-            const corr = calculatePearsonCorrelation(prices1, prices2);
-            row.set(symbol2, corr);
-          }
-        }
-        newCorrelationMatrix.set(symbol1, row);
-      }
-
-      setPriceData(newPriceData);
-      setCorrelationMatrix(newCorrelationMatrix);
-      setOrderFlowData(results);
-    } catch (error) {
-      console.error('Error fetching order flow:', error);
-      toast({ title: "Error", description: "Failed to fetch order flow data", variant: "destructive" });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Local order flow analysis (matching edge function logic)
-  const analyzeOrderFlowLocal = (klines: any[], intendedDirection: "long" | "short") => {
-    // Volume spike detection
-    const volumes = klines.map(k => parseFloat(k[5])).filter(v => Number.isFinite(v) && v > 0);
-    const historicalVolumes = volumes.slice(-21, -1);
-    const avgVolume = historicalVolumes.reduce((sum, v) => sum + v, 0) / historicalVolumes.length;
-    const currentVolume = volumes[volumes.length - 1];
-    const magnitude = avgVolume > 0 ? currentVolume / avgVolume : 1;
-    
-    let volumeSignificance: "low" | "medium" | "high" | "extreme" = "low";
-    let volumeDetected = false;
-    
-    if (magnitude >= 4.0) { volumeSignificance = "extreme"; volumeDetected = true; }
-    else if (magnitude >= 2.5) { volumeSignificance = "high"; volumeDetected = true; }
-    else if (magnitude >= 1.8) { volumeSignificance = "medium"; volumeDetected = true; }
-    else if (magnitude >= 1.5) { volumeSignificance = "low"; volumeDetected = true; }
-    
-    const currentCandle = klines[klines.length - 1];
-    const open = parseFloat(currentCandle[1]);
-    const high = parseFloat(currentCandle[2]);
-    const low = parseFloat(currentCandle[3]);
-    const close = parseFloat(currentCandle[4]);
-    const priceChange = close - open;
-    
-    let volumeType: "bullish" | "bearish" | "neutral" = "neutral";
-    if (priceChange > 0) volumeType = "bullish";
-    else if (priceChange < 0) volumeType = "bearish";
-
-    // Price rejection detection
-    const body = Math.abs(close - open);
-    const upperWick = high - Math.max(open, close);
-    const lowerWick = Math.min(open, close) - low;
-    const totalRange = high - low;
-    
-    const upperWickRatio = body > 0 ? upperWick / body : upperWick / (totalRange * 0.1);
-    const lowerWickRatio = body > 0 ? lowerWick / body : lowerWick / (totalRange * 0.1);
-    
-    let rejectionDetected = false;
-    let rejectionType: "bullish_rejection" | "bearish_rejection" | "none" = "none";
-    let rejectionStrength = 0;
-    let rejectionLevel: "support" | "resistance" | "none" = "none";
-    
-    if (lowerWickRatio >= 2 && lowerWick > upperWick * 1.5) {
-      rejectionDetected = true;
-      rejectionType = "bullish_rejection";
-      rejectionLevel = "support";
-      rejectionStrength = Math.min(100, Math.round((lowerWick / totalRange) * 100 * 1.5));
-    } else if (upperWickRatio >= 2 && upperWick > lowerWick * 1.5) {
-      rejectionDetected = true;
-      rejectionType = "bearish_rejection";
-      rejectionLevel = "resistance";
-      rejectionStrength = Math.min(100, Math.round((upperWick / totalRange) * 100 * 1.5));
-    }
-
-    // Buying/selling pressure
-    const lookback = Math.min(10, klines.length);
-    const recentCandles = klines.slice(-lookback);
-    let buyingPressure = 0;
-    let sellingPressure = 0;
-    
-    for (const candle of recentCandles) {
-      const cOpen = parseFloat(candle[1]);
-      const cHigh = parseFloat(candle[2]);
-      const cLow = parseFloat(candle[3]);
-      const cClose = parseFloat(candle[4]);
-      const cVolume = parseFloat(candle[5]);
-      const cRange = cHigh - cLow;
-      if (cRange === 0) continue;
-      const closePosition = (cClose - cLow) / cRange;
-      buyingPressure += cVolume * closePosition;
-      sellingPressure += cVolume * (1 - closePosition);
-    }
-    
-    const totalPressure = buyingPressure + sellingPressure;
-    const normalizedBuying = totalPressure > 0 ? (buyingPressure / totalPressure) * 100 : 50;
-    const normalizedSelling = totalPressure > 0 ? (sellingPressure / totalPressure) * 100 : 50;
-    const delta = normalizedBuying - normalizedSelling;
-    
-    let pressureTrend: "accumulation" | "distribution" | "neutral" = "neutral";
-    if (delta > 15) pressureTrend = "accumulation";
-    else if (delta < -15) pressureTrend = "distribution";
-
-    // Calculate score - MUST respect intendedDirection like backend orderflow.ts
-    const isLong = intendedDirection === "long";
-    let score = 50;
-    let confidence = 0;
-    const reasons: string[] = [];
-    
-    // Volume spike contribution - aligned with direction = positive
-    if (volumeDetected) {
-      const volumePoints = volumeSignificance === "extreme" ? 15 :
-                          volumeSignificance === "high" ? 10 :
-                          volumeSignificance === "medium" ? 6 : 3;
-      
-      if (isLong && volumeType === "bullish") {
-        score += volumePoints; confidence += 15;
-      } else if (!isLong && volumeType === "bearish") {
-        score += volumePoints; confidence += 15;
-      } else if (volumeType !== "neutral") {
-        // Against our direction
-        score -= volumePoints * 0.7; confidence += 10;
-      }
-      reasons.push(`Volume spike ${magnitude.toFixed(1)}x (${volumeSignificance})`);
-    }
-    
-    // Price rejection contribution - aligned with direction = positive
-    if (rejectionDetected) {
-      const rejectionPoints = Math.min(20, rejectionStrength * 0.3);
-      
-      if (isLong && rejectionType === "bullish_rejection") {
-        score += rejectionPoints; confidence += 20;
-      } else if (!isLong && rejectionType === "bearish_rejection") {
-        score += rejectionPoints; confidence += 20;
-      } else if (rejectionType !== "none") {
-        // Against our direction
-        score -= rejectionPoints * 0.8; confidence += 15;
-      }
-      reasons.push(`${rejectionType.replace('_', ' ')} at ${rejectionLevel} (strength: ${rejectionStrength})`);
-    }
-    
-    // Pressure contribution - aligned with direction = positive
-    const pressurePoints = Math.abs(delta) * 0.15;
-    if (isLong && delta > 0) {
-      score += pressurePoints; confidence += Math.min(15, Math.abs(delta) * 0.3);
-    } else if (!isLong && delta < 0) {
-      score += pressurePoints; confidence += Math.min(15, Math.abs(delta) * 0.3);
-    } else if (Math.abs(delta) > 10) {
-      // Against our direction
-      score -= pressurePoints * 0.5;
-    }
-    if (Math.abs(delta) > 20) {
-      reasons.push(`${pressureTrend} detected (delta: ${delta > 0 ? '+' : ''}${delta.toFixed(0)})`);
-    }
-    
-    score = Math.max(0, Math.min(100, Math.round(score)));
-    confidence = Math.max(0, Math.min(100, Math.round(confidence)));
-    
-    let signal: "strong_buy" | "buy" | "neutral" | "sell" | "strong_sell";
-    if (score >= 75) signal = "strong_buy";
-    else if (score >= 60) signal = "buy";
-    else if (score >= 40) signal = "neutral";
-    else if (score >= 25) signal = "sell";
-    else signal = "strong_sell";
-
-    return {
-      volumeSpike: { detected: volumeDetected, magnitude: Math.round(magnitude * 100) / 100, type: volumeType, significance: volumeSignificance },
-      priceRejection: { detected: rejectionDetected, type: rejectionType, wickRatio: Math.max(upperWickRatio, lowerWickRatio), strength: rejectionStrength, level: rejectionLevel },
-      pressure: { buyingPressure: Math.round(normalizedBuying), sellingPressure: Math.round(normalizedSelling), delta: Math.round(delta * 10) / 10, trend: pressureTrend },
-      score,
-      signal,
-      confidence,
-      reasons
-    };
-  };
-
-  useEffect(() => {
-    fetchOrderFlowData();
-    const interval = setInterval(fetchOrderFlowData, 60000); // Refresh every minute
-    return () => clearInterval(interval);
-  }, []);
 
   const getSignalColor = (signal: string) => {
     switch (signal) {
@@ -421,9 +196,8 @@ export const OrderFlowDashboard = () => {
     return 'text-red-400';
   };
 
-  const getPressureGradient = (buying: number) => {
-    return `linear-gradient(to right, hsl(var(--destructive)) ${100 - buying}%, hsl(142 76% 36%) ${100 - buying}%)`;
-  };
+  const showLoading = isLoading && !data;
+  const isRefreshing = isFetching && !!data;
 
   return (
     <Card className="bg-card border-border">
@@ -440,17 +214,23 @@ export const OrderFlowDashboard = () => {
         <Button 
           variant="outline" 
           size="sm" 
-          onClick={fetchOrderFlowData}
-          disabled={isLoading}
+          onClick={() => refetch()}
+          disabled={isFetching}
           className="shrink-0 self-end sm:self-auto"
         >
-          {isLoading ? 'Loading...' : 'Refresh'}
+          {isRefreshing ? (
+            <><RefreshCw className="h-3 w-3 mr-1 animate-spin" /> Refreshing</>
+          ) : showLoading ? 'Loading...' : 'Refresh'}
         </Button>
       </CardHeader>
       <CardContent>
-        {orderFlowData.length === 0 ? (
+        {showLoading ? (
           <div className="text-center py-8 text-muted-foreground">
-            {isLoading ? 'Analyzing order flow...' : 'No data available. Click Refresh to load.'}
+            Loading order flow data...
+          </div>
+        ) : orderFlowData.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            No cached data yet — waiting for next analysis cycle (~5 min)
           </div>
         ) : (
           <Tabs defaultValue="orderflow" className="w-full">
@@ -608,7 +388,7 @@ export const OrderFlowDashboard = () => {
                       <h3 className="font-semibold text-base sm:text-lg">Correlation Matrix</h3>
                       <Badge variant="outline" className="text-xs border-emerald-500/30 text-emerald-400">
                         <RefreshCw className="h-3 w-3 mr-1" />
-                        Live
+                        Cached
                       </Badge>
                     </div>
                     <p className="text-xs sm:text-sm text-muted-foreground">
