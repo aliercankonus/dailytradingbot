@@ -2,8 +2,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { TrendingUp, Shield, Brain, Clock, Zap, AlertTriangle, Layers, ArrowUp, ArrowDown } from "lucide-react";
-import { useEffect, useState, useMemo } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useMemo } from "react";
+import { usePositions } from "@/hooks/usePositions";
+import { useRiskParametersContext } from "@/contexts/RiskParametersContext";
 import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
 import { formatPrice, formatPercent } from "@/lib/utils";
 
@@ -44,19 +45,22 @@ const extractHtfAlignment = (entrySnapshot: any) => {
     neutralCapped,
   };
 };
+
 export const TrailingStopMonitor = () => {
-  const [positions, setPositions] = useState<any[]>([]);
-  const [settings, setSettings] = useState({
-    enabled: true,
-    activationPercent: 1.0,
-    distanceMultiplier: 1.5,
-    profitLockPercent: 50,
-    trailingAggressiveness: 3,
-    progressiveLockEnabled: true,
-    stalePeakProtectionEnabled: true,
-    decayVelocityExitEnabled: true,
-  });
+  const { positions } = usePositions();
+  const { riskParams } = useRiskParametersContext();
   const { getPrice, priceVersion } = useRealtimePricesContext();
+
+  const settings = useMemo(() => ({
+    enabled: riskParams?.trailing_stop_enabled ?? true,
+    activationPercent: riskParams?.trailing_stop_activation_percent ?? 1.0,
+    distanceMultiplier: riskParams?.trailing_stop_distance_multiplier ?? 1.5,
+    profitLockPercent: riskParams?.trailing_stop_profit_lock_percent ?? 50,
+    trailingAggressiveness: riskParams?.trailing_aggressiveness ?? 3,
+    progressiveLockEnabled: riskParams?.progressive_lock_enabled ?? true,
+    stalePeakProtectionEnabled: riskParams?.stale_peak_protection_enabled ?? true,
+    decayVelocityExitEnabled: riskParams?.decay_velocity_exit_enabled ?? true,
+  }), [riskParams]);
 
   // ----------- HELPERS -----------
   const resolveCurrentPrice = (p: any) => {
@@ -112,50 +116,6 @@ export const TrailingStopMonitor = () => {
     return "text-slate-500";
   };
 
-  // ----------- INITIAL FETCH -----------
-  useEffect(() => {
-    const fetchSettings = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase
-        .from("risk_parameters")
-        .select("trailing_stop_enabled, trailing_stop_activation_percent, trailing_stop_distance_multiplier, trailing_stop_profit_lock_percent, trailing_aggressiveness, progressive_lock_enabled, stale_peak_protection_enabled, decay_velocity_exit_enabled")
-        .eq("user_id", user.id)
-        .single();
-      if (data) {
-        setSettings({
-          enabled: data.trailing_stop_enabled ?? true,
-          activationPercent: data.trailing_stop_activation_percent ?? 1.0,
-          distanceMultiplier: data.trailing_stop_distance_multiplier ?? 1.5,
-          profitLockPercent: data.trailing_stop_profit_lock_percent ?? 50,
-          trailingAggressiveness: data.trailing_aggressiveness ?? 3,
-          progressiveLockEnabled: data.progressive_lock_enabled ?? true,
-          stalePeakProtectionEnabled: data.stale_peak_protection_enabled ?? true,
-          decayVelocityExitEnabled: data.decay_velocity_exit_enabled ?? true,
-        });
-      }
-    };
-
-    const fetchPositions = async () => {
-      const { data } = await supabase.from("positions").select("*").eq("status", "active");
-      if (data) setPositions(data);
-    };
-
-    fetchSettings();
-    fetchPositions();
-
-    const channel = supabase
-      .channel("trailing-positions-updates")
-      .on("postgres_changes", { event: "*", schema: "public", table: "positions", filter: "status=eq.active" }, () => {
-        fetchPositions();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
   // Build price map
   const priceMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -174,7 +134,7 @@ export const TrailingStopMonitor = () => {
         const currentPrice = priceMap.get(p.symbol) ?? p.entry_price;
         const pnlPercent = calculatePnlPercent(p.side, p.entry_price, currentPrice);
         const peakPnl = Math.max(p.peak_pnl_percent || 0, pnlPercent);
-        const peakReachedAt = p.peak_reached_at ? new Date(p.peak_reached_at) : now;
+        const peakReachedAt = (p as any).peak_reached_at ? new Date((p as any).peak_reached_at) : now;
         const minutesSincePeak = (now.getTime() - peakReachedAt.getTime()) / (1000 * 60);
         
         return { position: p, currentPrice, pnlPercent, peakPnl, minutesSincePeak };
@@ -210,7 +170,7 @@ export const TrailingStopMonitor = () => {
         const isDecayCritical = decayVelocity > 0.03;
 
         // Extract HTF alignment from entry snapshot
-        const htfAlignment = extractHtfAlignment(position.entry_snapshot);
+        const htfAlignment = extractHtfAlignment((position as any).entry_snapshot);
 
         return {
           ...position,

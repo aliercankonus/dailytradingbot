@@ -60,6 +60,11 @@ export interface RiskParameters {
   notification_email: string | null;
   email_notifications_enabled: boolean;
   updated_at: string;
+  // Trailing Stop Smart AITS
+  trailing_aggressiveness: number;
+  progressive_lock_enabled: boolean;
+  stale_peak_protection_enabled: boolean;
+  decay_velocity_exit_enabled: boolean;
   // Smart Trading Settings (Phase 1-7)
   regime_aware_trading: boolean;
   min_momentum_score: number;
