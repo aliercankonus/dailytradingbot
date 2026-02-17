@@ -145,7 +145,7 @@ export const MomentumStatusDetails = () => {
                     <div
                       className={`rounded-lg border cursor-pointer transition-colors hover:bg-muted/30 ${
                         confirms
-                          ? "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800"
+                          ? "border-l-4 border-l-green-500 border-green-500/30 bg-muted/10"
                           : "bg-muted/10 border-border"
                       }`}
                     >
@@ -236,7 +236,7 @@ export const MomentumStatusDetails = () => {
                   <CollapsibleContent>
                     <div className={`mx-1 mb-2 p-4 rounded-b-lg border border-t-0 space-y-3 ${
                       confirms
-                        ? "bg-green-50/50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
+                        ? "border-l-4 border-l-green-500 border-green-500/30 bg-muted/5"
                         : "bg-muted/5 border-border"
                     }`}>
                       {/* Detail rows */}
