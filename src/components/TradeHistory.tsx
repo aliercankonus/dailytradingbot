@@ -2,7 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowUpRight, ArrowDownRight, Filter, Loader2, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Layers } from "lucide-react";
-import { useOpenTrades } from "@/hooks/useOpenTrades";
+import { usePositions } from "@/hooks/usePositions";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState, useMemo } from "react";
 import { formatPrice, formatQuantity } from "@/lib/utils";
@@ -11,7 +11,7 @@ type SortColumn = 'symbol' | 'strategy_name' | 'profit_loss' | 'status' | 'side'
 type SortDirection = 'asc' | 'desc';
 
 export const TradeHistory = () => {
-  const { trades, loading } = useOpenTrades();
+  const { positions: trades, loading } = usePositions();
   const [selectedStrategy, setSelectedStrategy] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [sortColumn, setSortColumn] = useState<SortColumn>('executed_at');

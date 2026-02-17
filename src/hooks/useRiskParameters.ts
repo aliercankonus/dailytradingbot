@@ -25,6 +25,9 @@ export interface RiskParameters {
   divergence_tp_multiplier: number;
   divergence_sl_multiplier: number;
   trailing_stop_profit_lock_percent: number;
+  trailing_stop_enabled: boolean;
+  trailing_stop_activation_percent: number;
+  trailing_stop_distance_multiplier: number;
   // Loss Management Settings
   drawdown_circuit_breaker_enabled: boolean;
   drawdown_circuit_breaker_percent: number;
