@@ -58,5 +58,8 @@ export const useRegimeTransitions = () => {
     enabled: !!user?.id,
     refetchInterval: 60000,
     staleTime: 55000,
+    gcTime: 300000,
+    refetchOnWindowFocus: false,
+    placeholderData: (prev: RegimeTransitionEntry[] | undefined) => prev,
   });
 };

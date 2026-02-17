@@ -23,11 +23,11 @@ const TrailingStopMonitor = lazy(() => import("@/components/TrailingStopMonitor"
 const EarlyWarningExitsDashboard = lazy(() => import("@/components/EarlyWarningExitsDashboard").then(m => ({ default: m.EarlyWarningExitsDashboard })));
 const ClosedPositionsDashboard = lazy(() => import("@/components/ClosedPositionsDashboard").then(m => ({ default: m.ClosedPositionsDashboard })));
 const RiskManagementControls = lazy(() => import("@/components/RiskManagementControls").then(m => ({ default: m.RiskManagementControls })));
-const MomentumStatusDashboard = lazy(() => import("@/components/MomentumStatusDashboard").then(m => ({ default: m.MomentumStatusDashboard })));
-const ModuleInventoryDashboard = lazy(() => import("@/components/ModuleInventoryDashboard"));
-const RegimeTransitionLog = lazy(() => import("@/components/RegimeTransitionLog").then(m => ({ default: m.RegimeTransitionLog })));
-const OrderFlowDashboard = lazy(() => import("@/components/OrderFlowDashboard").then(m => ({ default: m.OrderFlowDashboard })));
-const MarketOpportunityDensity = lazy(() => import("@/components/MarketOpportunityDensity"));
+import { MomentumStatusDashboard } from "@/components/MomentumStatusDashboard";
+import ModuleInventoryDashboard from "@/components/ModuleInventoryDashboard";
+import { RegimeTransitionLog } from "@/components/RegimeTransitionLog";
+import { OrderFlowDashboard } from "@/components/OrderFlowDashboard";
+import MarketOpportunityDensity from "@/components/MarketOpportunityDensity";
 
 const TabFallback = () => (
   <div className="space-y-4">
@@ -207,33 +207,23 @@ const Index = () => {
               </TabsList>
 
               <TabsContent value="momentum">
-                <Suspense fallback={<TabFallback />}>
-                  <MomentumStatusDashboard />
-                </Suspense>
+                <MomentumStatusDashboard />
               </TabsContent>
 
               <TabsContent value="regime">
-                <Suspense fallback={<TabFallback />}>
-                  <RegimeTransitionLog />
-                </Suspense>
+                <RegimeTransitionLog />
               </TabsContent>
 
               <TabsContent value="modules">
-                <Suspense fallback={<TabFallback />}>
-                  <ModuleInventoryDashboard />
-                </Suspense>
+                <ModuleInventoryDashboard />
               </TabsContent>
 
               <TabsContent value="opportunity">
-                <Suspense fallback={<TabFallback />}>
-                  <MarketOpportunityDensity />
-                </Suspense>
+                <MarketOpportunityDensity />
               </TabsContent>
 
               <TabsContent value="orderflow">
-                <Suspense fallback={<TabFallback />}>
-                  <OrderFlowDashboard />
-                </Suspense>
+                <OrderFlowDashboard />
               </TabsContent>
             </Tabs>
           </TabsContent>
