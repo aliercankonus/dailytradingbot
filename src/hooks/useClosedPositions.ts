@@ -55,8 +55,9 @@ export const useClosedPositions = (includeArchived: boolean = false) => {
         return data as ClosedPosition[];
       }
     },
-    staleTime: 60 * 1000,       // 60s stale — no refetch on tab switch
-    gcTime: 5 * 60 * 1000,      // 5 min cache retention
+    staleTime: 60 * 1000,
+    gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev,
   });
 };
