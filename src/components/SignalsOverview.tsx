@@ -1,9 +1,7 @@
-import { useState, lazy, Suspense } from "react";
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Activity,
   Ban,
   Brain,
   ChevronDown,
@@ -15,22 +13,9 @@ import { useBlockedSignals } from "@/hooks/useBlockedSignals";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-
-const TradingSignalsDashboard = lazy(() =>
-  import("@/components/TradingSignalsDashboard").then((m) => ({
-    default: m.TradingSignalsDashboard,
-  }))
-);
-const SignalRejectionMonitor = lazy(() =>
-  import("@/components/SignalRejectionMonitor").then((m) => ({
-    default: m.SignalRejectionMonitor,
-  }))
-);
-const AIAnalysisDashboard = lazy(() =>
-  import("@/components/AIAnalysisDashboard").then((m) => ({
-    default: m.AIAnalysisDashboard,
-  }))
-);
+import { TradingSignalsDashboard } from "@/components/TradingSignalsDashboard";
+import { SignalRejectionMonitor } from "@/components/SignalRejectionMonitor";
+import { AIAnalysisDashboard } from "@/components/AIAnalysisDashboard";
 
 type Section = "signals" | "rejections" | "ai" | null;
 
@@ -188,18 +173,11 @@ export const SignalsOverview = () => {
 
       {/* Expanded Section */}
       {expanded && (
-        <Suspense
-          fallback={
-            <div className="space-y-4">
-              <Skeleton className="h-32 w-full" />
-              <Skeleton className="h-64 w-full" />
-            </div>
-          }
-        >
+        <>
           {expanded === "signals" && <TradingSignalsDashboard />}
           {expanded === "rejections" && <SignalRejectionMonitor />}
           {expanded === "ai" && <AIAnalysisDashboard />}
-        </Suspense>
+        </>
       )}
     </div>
   );
