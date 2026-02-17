@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
 import { AlertTriangle, TrendingUp, TrendingDown, Clock } from 'lucide-react';
 import { format } from 'date-fns';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 
 interface EarlyWarningExit {
   id: string;
@@ -18,74 +19,54 @@ interface EarlyWarningExit {
   strategy_name: string | null;
 }
 
-interface PerformanceMetrics {
-  totalExits: number;
-  profitableExits: number;
-  avgPnlPercent: number;
-  totalPnl: number;
-  winRate: number;
-}
+const fetchEarlyWarningExits = async (): Promise<EarlyWarningExit[]> => {
+  const [positionsRes, archiveRes] = await Promise.all([
+    supabase
+      .from('positions')
+      .select('id, symbol, side, entry_price, exit_price, realized_pnl, realized_pnl_percent, close_reason, closed_at, strategy_name')
+      .like('close_reason', 'early_warning%')
+      .order('closed_at', { ascending: false })
+      .limit(50),
+    supabase
+      .from('positions_archive')
+      .select('id, symbol, side, entry_price, exit_price, realized_pnl, realized_pnl_percent, close_reason, closed_at, strategy_name')
+      .like('close_reason', 'early_warning%')
+      .order('closed_at', { ascending: false })
+      .limit(50),
+  ]);
+
+  if (positionsRes.error) console.error('Error fetching positions:', positionsRes.error);
+  if (archiveRes.error) console.error('Error fetching archive:', archiveRes.error);
+
+  return [...(positionsRes.data || []), ...(archiveRes.data || [])]
+    .sort((a, b) => new Date(b.closed_at || 0).getTime() - new Date(a.closed_at || 0).getTime())
+    .slice(0, 50);
+};
 
 export function EarlyWarningExitsDashboard() {
-  const [exits, setExits] = useState<EarlyWarningExit[]>([]);
-  const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: exits = [], isLoading: loading } = useQuery({
+    queryKey: ['early-warning-exits'],
+    queryFn: fetchEarlyWarningExits,
+    staleTime: 60000,
+    gcTime: 120000,
+    placeholderData: keepPreviousData,
+  });
 
-  useEffect(() => {
-    fetchEarlyWarningExits();
-  }, []);
+  const metrics = useMemo(() => {
+    if (exits.length === 0) return null;
 
-  const fetchEarlyWarningExits = async () => {
-    try {
-      // Fetch from both positions and archive
-      const { data: positionsData, error: posError } = await supabase
-        .from('positions')
-        .select('id, symbol, side, entry_price, exit_price, realized_pnl, realized_pnl_percent, close_reason, closed_at, strategy_name')
-        .like('close_reason', 'early_warning%')
-        .order('closed_at', { ascending: false })
-        .limit(50);
+    const profitableExits = exits.filter(e => (e.realized_pnl || 0) > 0).length;
+    const totalPnl = exits.reduce((sum, e) => sum + (e.realized_pnl || 0), 0);
+    const avgPnlPercent = exits.reduce((sum, e) => sum + (e.realized_pnl_percent || 0), 0) / exits.length;
 
-      const { data: archiveData, error: archError } = await supabase
-        .from('positions_archive')
-        .select('id, symbol, side, entry_price, exit_price, realized_pnl, realized_pnl_percent, close_reason, closed_at, strategy_name')
-        .like('close_reason', 'early_warning%')
-        .order('closed_at', { ascending: false })
-        .limit(50);
-
-      if (posError) console.error('Error fetching positions:', posError);
-      if (archError) console.error('Error fetching archive:', archError);
-
-      const allExits = [...(positionsData || []), ...(archiveData || [])]
-        .sort((a, b) => new Date(b.closed_at || 0).getTime() - new Date(a.closed_at || 0).getTime())
-        .slice(0, 50);
-
-      setExits(allExits);
-      calculateMetrics(allExits);
-    } catch (err) {
-      console.error('Error fetching early warning exits:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const calculateMetrics = (data: EarlyWarningExit[]) => {
-    if (data.length === 0) {
-      setMetrics(null);
-      return;
-    }
-
-    const profitableExits = data.filter(e => (e.realized_pnl || 0) > 0).length;
-    const totalPnl = data.reduce((sum, e) => sum + (e.realized_pnl || 0), 0);
-    const avgPnlPercent = data.reduce((sum, e) => sum + (e.realized_pnl_percent || 0), 0) / data.length;
-
-    setMetrics({
-      totalExits: data.length,
+    return {
+      totalExits: exits.length,
       profitableExits,
       avgPnlPercent,
       totalPnl,
-      winRate: (profitableExits / data.length) * 100,
-    });
-  };
+      winRate: (profitableExits / exits.length) * 100,
+    };
+  }, [exits]);
 
   const getCloseReasonLabel = (reason: string) => {
     if (reason === 'early_warning_1h_bearish') return '1h Bearish + 4h Weak';
