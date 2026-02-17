@@ -248,7 +248,7 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
             {isSymbolsOpen && (
               <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
                 {/* Table Header */}
-                <div className="grid grid-cols-[1fr_60px_50px_50px_auto] gap-2 px-2.5 py-1 text-[10px] text-muted-foreground uppercase tracking-wider font-medium border-b border-border/50">
+                <div className="grid grid-cols-[72px_1fr_1fr_1fr_40px] gap-3 px-2.5 py-1 text-[10px] text-muted-foreground uppercase tracking-wider font-medium border-b border-border/50">
                   <span>Symbol</span>
                   <span className="text-right">Volume</span>
                   <span className="text-right">ADX</span>
@@ -265,7 +265,7 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <div 
-                            className={`grid grid-cols-[1fr_60px_50px_50px_auto] gap-2 px-2.5 py-2 rounded-md border transition-colors hover:bg-muted/30 ${
+                            className={`grid grid-cols-[72px_1fr_1fr_1fr_40px] gap-3 px-2.5 py-2 rounded-md border transition-colors hover:bg-muted/30 ${
                               hasBlocks ? 'border-destructive/20 bg-destructive/5' : 'border-border/30 bg-card'
                             }`}
                           >
@@ -273,7 +273,7 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
                             <div className="flex items-center gap-1.5 min-w-0">
                               <TrendIcon direction={sym.trendDirection} />
                               <span className="font-mono text-xs font-semibold truncate text-foreground">
-                                {sym.symbol.replace('USDT', '')}
+                                {sym.symbol.replace(/USDT$/i, '')}
                               </span>
                             </div>
 
