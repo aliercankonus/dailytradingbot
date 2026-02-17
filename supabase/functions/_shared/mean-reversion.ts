@@ -938,8 +938,12 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
  * FIX: Evaluates exhaustion FIRST, then applies regime as modifier (not blocker)
  * when extreme exhaustion is detected. This prevents the deadlock where
  * regime blocks MR before exhaustion is even evaluated.
+ * 
+ * @param options.skipRegimeGating - When true, bypasses isMeanReversionAllowed() check.
+ *   Used by the ADX transitional zone (18-22) bypass, which already constrains the ADX range
+ *   and doesn't need the regime filter to re-block based on trend phase classification.
  */
-export function detectExhaustion(trendData: any): ExhaustionSignal {
+export function detectExhaustion(trendData: any, options?: { skipRegimeGating?: boolean }): ExhaustionSignal {
   // 1. FIRST: Evaluate exhaustion checks BEFORE regime gating
   // This prevents the regime from blocking detection of extreme exhaustion
   const oversoldSignal = checkOversoldExhaustion(trendData);
@@ -950,14 +954,22 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
   const expansionState = classifyExpansionState(trendData);
   
   // 3. Check if regime allows mean reversion
-  const regimeAllowsMR = isMeanReversionAllowed(trendPhase, expansionState);
+  //    skipRegimeGating: ADX transitional zone (18-22) already constrains the range,
+  //    so we don't need classifyTrendPhase to re-block (avoids the EARLY_TREND dead zone)
+  const skipRegime = options?.skipRegimeGating === true;
+  const regimeAllowsMR = skipRegime || isMeanReversionAllowed(trendPhase, expansionState);
   
   // 4. CRITICAL: Extreme exhaustion can override regime blocking
   // If K is at statistical extremes, regime becomes informational, not blocking
   const extremeExhaustionDetected = oversoldSignal.isExtremeExhaustion || overboughtSignal.isExtremeExhaustion;
   
   // Log regime override for diagnostics
-  if (extremeExhaustionDetected && !regimeAllowsMR) {
+  if (skipRegime) {
+    console.log(
+      `[MEAN_REVERSION] REGIME_GATING_SKIPPED: Called with skipRegimeGating=true ` +
+      `(phase=${trendPhase}/${expansionState}, would have ${isMeanReversionAllowed(trendPhase, expansionState) ? 'PASSED' : 'BLOCKED'})`
+    );
+  } else if (extremeExhaustionDetected && !regimeAllowsMR) {
     const stochK = trendData?.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 
                    trendData?.stochasticRsi?.['4h']?.k ?? 
                    trendData?.stochasticRsi?.aggregated?.k ?? 50;
@@ -968,7 +980,7 @@ export function detectExhaustion(trendData: any): ExhaustionSignal {
   }
   
   // 5. Determine if we should proceed
-  // Proceed if: regime allows MR OR extreme exhaustion detected
+  // Proceed if: regime allows MR OR extreme exhaustion detected OR regime gating skipped
   const allowed = regimeAllowsMR || extremeExhaustionDetected;
   
   if (!allowed) {

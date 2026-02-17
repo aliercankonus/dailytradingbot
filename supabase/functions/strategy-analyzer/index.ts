@@ -10674,29 +10674,38 @@ serve(async (req) => {
           }
 
           // 3. MEAN REVERSION BYPASS (Priority 3 - lowest)
-          // Only fires if Squeeze and Early Ignition both failed
-          // Uses upstream earlyMeanReversionSignal (computed at line ~7729, before ADX gate)
-          let meanReversionTransitionalActive = false;
-          let meanReversionTransitionalMultiplier = 1.0;
+           // Only fires if Squeeze and Early Ignition both failed
+           // Re-evaluates MR with skipRegimeGating=true to avoid the EARLY_TREND dead zone
+           // in classifyTrendPhase (ADX 20-22, slope < 0.3 → EARLY_TREND → blocks MR)
+           // Safe because the ADX gate already constrains to 18-22
+           let meanReversionTransitionalActive = false;
+           let meanReversionTransitionalMultiplier = 1.0;
 
-          if (!squeezeBreakoutActive && !earlyIgnitionActive && isInTransitionalZone &&
-              earlyMeanReversionSignal?.detected && earlyMeanReversionSignal?.allowed) {
+           if (!squeezeBreakoutActive && !earlyIgnitionActive && isInTransitionalZone) {
+             // Re-run detectExhaustion with regime gating skipped for transitional zone
+             const transitionalMRSignal = MEAN_REVERSION_CONFIG.ENABLED 
+               ? detectExhaustion(trendData, { skipRegimeGating: true }) 
+               : null;
+             
+             if (transitionalMRSignal?.detected && transitionalMRSignal?.allowed) {
             meanReversionTransitionalActive = true;
             meanReversionTransitionalMultiplier = COUNTER_TREND_ADMISSION.PROBE_POSITION_MULTIPLIER; // 0.25x
 
             if (ADX_GATE_V1_1.LOG_BYPASS_SELECTION) {
               logger.forSymbol(symbol).info(
                 `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION_BYPASS (v1.1): ADX=${adx.toFixed(1)} allowed ` +
-                `(exhaustionScore=${earlyMeanReversionSignal.exhaustionScore}, ` +
-                `direction=${earlyMeanReversionSignal.direction}, ` +
+                `(exhaustionScore=${transitionalMRSignal.exhaustionScore}, ` +
+                `direction=${transitionalMRSignal.direction}, ` +
+                `phase=${transitionalMRSignal.trendPhase}/${transitionalMRSignal.expansionState}, ` +
                 `${(meanReversionTransitionalMultiplier * 100).toFixed(0)}% size)`
               );
             }
             perSymbolGateAttribution.set(symbol, {
               gate: 'MEAN_REVERSION_TRANSITIONAL_V11',
-              details: `MR bypass in ADX transitional zone (score=${earlyMeanReversionSignal.exhaustionScore})`
+              details: `MR bypass in ADX transitional zone (score=${transitionalMRSignal.exhaustionScore}, regimeSkipped=true)`
             });
-          }
+            }
+           } // end transitional MR check
           
           // If no exception passed, block the signal
           if (!squeezeBreakoutActive && !earlyIgnitionActive && !meanReversionTransitionalActive) {
