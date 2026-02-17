@@ -91,13 +91,14 @@ Deno.serve(async (req) => {
       console.log(`Deleted ${shadowDeleted || 0} shadow mode signals older than 7 days`);
     }
 
-    // Clean up signal_rejection_log - prune entries older than 24 hours
-    console.log('Cleaning up signal_rejection_log table (keeping last 24h)...');
+    // Clean up signal_rejection_log - prune entries older than 6 hours
+    console.log('Cleaning up signal_rejection_log table (keeping last 6h)...');
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
     
     const { error: rejectionDeleteError, count: rejectionDeletedCount } = await supabase
       .from('signal_rejection_log')
       .delete({ count: 'exact' })
-      .lt('checked_at', oneDayAgo);
+      .lt('checked_at', sixHoursAgo);
 
     let rejectionLogsDeleted = 0;
     if (rejectionDeleteError) {
