@@ -8,11 +8,16 @@ import {
   Volume2, 
   Shield, 
   TrendingUp, 
+  TrendingDown,
   RefreshCw,
   Sun,
-  CloudOff,
   Activity,
-  BarChart3
+  BarChart3,
+  Zap,
+  Target,
+  ArrowUpRight,
+  ArrowDownRight,
+  Minus
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -21,67 +26,69 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
 import { useState, memo } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
-const VolumeStatusBadge = ({ ratio }: { ratio: number | null }) => {
-  // Handle unknown volume - don't show misleading data
+const VolumeIndicator = ({ ratio }: { ratio: number | null }) => {
   if (ratio === null) {
-    return (
-      <Badge variant="outline" className="bg-muted/50 text-muted-foreground border-muted-foreground/30">
-        N/A
-      </Badge>
-    );
+    return <span className="text-xs text-muted-foreground font-mono">N/A</span>;
   }
   
   const percentage = Math.round(ratio * 100);
-  
-  if (ratio >= 0.7) {
-    return (
-      <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/30">
-        {percentage}% Normal
-      </Badge>
-    );
-  } else if (ratio >= 0.5) {
-    return (
-      <Badge variant="outline" className="bg-yellow-500/10 text-yellow-500 border-yellow-500/30">
-        {percentage}% Low
-      </Badge>
-    );
-  } else if (ratio >= 0.3) {
-    return (
-      <Badge variant="outline" className="bg-orange-500/10 text-orange-500 border-orange-500/30">
-        {percentage}% Very Low
-      </Badge>
-    );
-  } else {
-    return (
-      <Badge variant="destructive">
-        {percentage}% Holiday Mode
-      </Badge>
-    );
-  }
-};
-
-const GateCountBadge = ({ count, label, color }: { count: number; label: string; color: string }) => {
-  if (count === 0) return null;
+  const color = ratio >= 0.7 ? 'text-green-500' : ratio >= 0.5 ? 'text-yellow-500' : ratio >= 0.3 ? 'text-orange-500' : 'text-destructive';
+  const label = ratio >= 0.7 ? 'Normal' : ratio >= 0.5 ? 'Low' : ratio >= 0.3 ? 'Very Low' : 'Holiday';
   
   return (
-    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg bg-${color}-500/10 border border-${color}-500/20`}>
-      <span className={`text-${color}-500 font-medium`}>{count}</span>
-      <span className="text-sm text-muted-foreground">{label}</span>
+    <div className="flex items-center gap-1.5">
+      <span className={`font-mono font-semibold text-sm ${color}`}>{percentage}%</span>
+      <span className="text-xs text-muted-foreground">{label}</span>
     </div>
   );
 };
 
+const TrendIcon = ({ direction }: { direction: string }) => {
+  if (direction.toLowerCase().includes('bull') || direction.toLowerCase().includes('up')) {
+    return <ArrowUpRight className="h-3.5 w-3.5 text-green-500" />;
+  }
+  if (direction.toLowerCase().includes('bear') || direction.toLowerCase().includes('down')) {
+    return <ArrowDownRight className="h-3.5 w-3.5 text-red-500" />;
+  }
+  return <Minus className="h-3.5 w-3.5 text-muted-foreground" />;
+};
+
+const GateBar = ({ count, label, total, color }: { count: number; label: string; total: number; color: string }) => {
+  if (count === 0) return null;
+  const widthPercent = total > 0 ? Math.max((count / total) * 100, 8) : 0;
+  
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-xs text-muted-foreground w-20 text-right shrink-0">{label}</span>
+      <div className="flex-1 flex items-center gap-2">
+        <div className="flex-1 h-2 rounded-full bg-muted/50 overflow-hidden">
+          <div 
+            className={`h-full rounded-full bg-${color}-500/70`} 
+            style={{ width: `${widthPercent}%` }}
+          />
+        </div>
+        <span className={`font-mono text-xs font-semibold text-${color}-400 w-5 text-right`}>{count}</span>
+      </div>
+    </div>
+  );
+};
+
+const MetricCard = ({ icon: Icon, label, children }: { icon: any; label: string; children: React.ReactNode }) => (
+  <div className="p-3 rounded-lg border bg-card space-y-2">
+    <div className="flex items-center gap-2 text-xs text-muted-foreground uppercase tracking-wider font-medium">
+      <Icon className="h-3.5 w-3.5" />
+      {label}
+    </div>
+    {children}
+  </div>
+);
+
 export const MarketConditionsDashboard = memo(function MarketConditionsDashboard() {
   const { conditions, loading, error, refresh } = useMarketConditions();
-  const [isSymbolsOpen, setIsSymbolsOpen] = useState(true);
+  const [isSymbolsOpen, setIsSymbolsOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleRefresh = async () => {
@@ -93,16 +100,16 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
   if (loading) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5" />
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Activity className="h-4 w-4" />
             Market Conditions
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <Skeleton className="h-20 w-full" />
+        <CardContent className="space-y-3">
           <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-20 w-full" />
         </CardContent>
       </Card>
     );
@@ -111,18 +118,18 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
   if (error || !conditions) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5" />
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Activity className="h-4 w-4" />
             Market Conditions
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-4">
-            <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
+          <div className="text-center py-6">
+            <AlertTriangle className="h-6 w-6 text-destructive mx-auto mb-2" />
             <p className="text-sm text-muted-foreground">{error || 'No data available'}</p>
-            <Button variant="outline" size="sm" onClick={handleRefresh} className="mt-2">
-              <RefreshCw className="h-4 w-4 mr-2" />
+            <Button variant="outline" size="sm" onClick={handleRefresh} className="mt-3">
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
               Retry
             </Button>
           </div>
@@ -133,237 +140,236 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
 
   const { gateStatus } = conditions;
   const totalGateBlocks = Object.values(gateStatus).reduce((a, b) => a + b, 0);
+  const maxGate = Math.max(...Object.values(gateStatus));
 
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5" />
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Activity className="h-4 w-4" />
             Market Conditions
           </CardTitle>
           <Button 
             variant="ghost" 
-            size="sm" 
+            size="icon"
+            className="h-7 w-7"
             onClick={handleRefresh}
             disabled={isRefreshing}
           >
-            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3">
         {/* Holiday Mode Banner */}
         {conditions.isGlobalHolidayMode && (
-          <div className="flex items-center gap-3 p-3 rounded-lg bg-orange-500/10 border border-orange-500/30">
-            <Sun className="h-5 w-5 text-orange-500" />
-            <div>
-              <p className="font-medium text-orange-500">Holiday Mode Active</p>
-              <p className="text-sm text-muted-foreground">
-                Volume is {Math.round(conditions.averageVolumeRatio * 100)}% of normal - thresholds raised
+          <div className="flex items-center gap-2.5 p-2.5 rounded-lg bg-orange-500/10 border border-orange-500/20">
+            <Sun className="h-4 w-4 text-orange-500 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-orange-500">Holiday Mode</p>
+              <p className="text-xs text-muted-foreground">
+                Volume at {Math.round((conditions.averageVolumeRatio ?? 0) * 100)}% — thresholds raised
               </p>
             </div>
           </div>
         )}
 
-        {/* Volume & Threshold Summary */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Volume Status */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Volume2 className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Average Volume</span>
-              </div>
-              <VolumeStatusBadge ratio={conditions.averageVolumeRatio} />
-            </div>
+        {/* Top Metrics Row */}
+        <div className="grid grid-cols-2 gap-2">
+          <MetricCard icon={Volume2} label="Volume">
             {conditions.isVolumeUnknown ? (
-              <>
-                <Progress value={0} className="h-2 opacity-50" />
-                <p className="text-xs text-muted-foreground">
-                  Volume data not available - backend does not log volume ratio for this rejection type
-                </p>
-              </>
+              <p className="text-xs text-muted-foreground">No data</p>
             ) : (
               <>
+                <VolumeIndicator ratio={conditions.averageVolumeRatio} />
                 <Progress 
                   value={Math.min((conditions.averageVolumeRatio ?? 0) * 100, 100)} 
-                  className="h-2"
+                  className="h-1.5"
                 />
-                <p className="text-xs text-muted-foreground">
-                  {(conditions.averageVolumeRatio ?? 0) >= 0.7 ? 'Normal trading conditions' : 
-                   (conditions.averageVolumeRatio ?? 0) >= 0.5 ? 'Reduced liquidity - caution advised' :
-                   (conditions.averageVolumeRatio ?? 0) >= 0.3 ? 'Very low volume - limited signals' :
-                   'Holiday-like conditions - signals paused'}
-                </p>
               </>
             )}
-          </div>
+          </MetricCard>
 
-          {/* Quality Threshold */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Shield className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Quality Threshold</span>
-              </div>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger>
-                    <Badge variant="outline">
-                      {conditions.effectiveThreshold}/100
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <div className="text-xs">
-                      <p>Base: 65</p>
-                      {conditions.averageVolumeRatio < 0.5 && (
-                        <p>Low Volume Boost: +3</p>
-                      )}
-                      <p className="font-medium">Effective: {conditions.effectiveThreshold}</p>
-                    </div>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+          <MetricCard icon={Shield} label="Quality Gate">
+            <div className="flex items-baseline gap-1">
+              <span className="font-mono font-semibold text-sm text-foreground">
+                {conditions.effectiveThreshold}
+              </span>
+              <span className="text-xs text-muted-foreground">/ 100</span>
             </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>Base: 65</span>
-              {!conditions.isVolumeUnknown && (conditions.averageVolumeRatio ?? 1) < 0.5 && (
-                <>
-                  <span>+</span>
-                  <Badge variant="outline" className="text-xs px-1 py-0 bg-yellow-500/10 text-yellow-500">
-                    +3 low volume
-                  </Badge>
-                </>
-              )}
-              <span>=</span>
-              <span className="font-medium">{conditions.effectiveThreshold}</span>
-            </div>
-          </div>
+            {!conditions.isVolumeUnknown && (conditions.averageVolumeRatio ?? 1) < 0.5 && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-yellow-500/10 text-yellow-500 border-yellow-500/20">
+                +3 low vol
+              </Badge>
+            )}
+          </MetricCard>
         </div>
 
-        {/* Gate Status Summary */}
-        <div className="space-y-2">
+        {/* Gate Blocks — Horizontal Bar Chart */}
+        <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CloudOff className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Signal Blocks by Gate</span>
-            </div>
-            <Badge variant={totalGateBlocks > 0 ? "secondary" : "outline"}>
-              {totalGateBlocks} total
-            </Badge>
+            <span className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Signal Blocks</span>
+            <span className="font-mono text-xs text-muted-foreground">
+              {totalGateBlocks === 0 ? (
+                <span className="text-green-500 font-semibold">All Clear</span>
+              ) : (
+                <>{totalGateBlocks} blocked</>
+              )}
+            </span>
           </div>
           
-          {totalGateBlocks === 0 ? (
-            <p className="text-sm text-green-500">All gates open - signals can flow</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {gateStatus.htfExtreme > 0 && (
-                <Badge variant="outline" className="bg-red-500/10 text-red-400 border-red-500/20">
-                  HTF Extreme: {gateStatus.htfExtreme}
-                </Badge>
-              )}
-              {gateStatus.bollingerPosition > 0 && (
-                <Badge variant="outline" className="bg-orange-500/10 text-orange-400 border-orange-500/20">
-                  Bollinger: {gateStatus.bollingerPosition}
-                </Badge>
-              )}
-              {gateStatus.qualityScore > 0 && (
-                <Badge variant="outline" className="bg-yellow-500/10 text-yellow-400 border-yellow-500/20">
-                  Quality: {gateStatus.qualityScore}
-                </Badge>
-              )}
-              {gateStatus.momentum > 0 && (
-                <Badge variant="outline" className="bg-purple-500/10 text-purple-400 border-purple-500/20">
-                  Momentum: {gateStatus.momentum}
-                </Badge>
-              )}
-              {gateStatus.trendDirection > 0 && (
-                <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20">
-                  Direction: {gateStatus.trendDirection}
-                </Badge>
-              )}
-              {gateStatus.ranging > 0 && (
-                <Badge variant="outline" className="bg-gray-500/10 text-gray-400 border-gray-500/20">
-                  Ranging: {gateStatus.ranging}
-                </Badge>
-              )}
+          {totalGateBlocks > 0 && (
+            <div className="space-y-1 py-1">
+              <GateBar count={gateStatus.htfExtreme} label="HTF Extreme" total={maxGate} color="red" />
+              <GateBar count={gateStatus.bollingerPosition} label="Bollinger" total={maxGate} color="orange" />
+              <GateBar count={gateStatus.qualityScore} label="Quality" total={maxGate} color="yellow" />
+              <GateBar count={gateStatus.momentum} label="Momentum" total={maxGate} color="purple" />
+              <GateBar count={gateStatus.trendDirection} label="Direction" total={maxGate} color="blue" />
+              <GateBar count={gateStatus.ranging} label="Ranging" total={maxGate} color="gray" />
             </div>
           )}
         </div>
 
-        {/* Per-Symbol Details (Collapsible) */}
+        {/* Per-Symbol Breakdown */}
         {conditions.symbols.length > 0 && (
-          <Collapsible open={isSymbolsOpen} onOpenChange={setIsSymbolsOpen}>
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" className="w-full justify-between p-2 h-auto">
-                <div className="flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4" />
-                  <span className="text-sm">Per-Symbol Status ({conditions.symbols.length})</span>
-                </div>
-                {isSymbolsOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="mt-2">
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {conditions.symbols.map((sym) => (
-                  <div 
-                    key={sym.symbol} 
-                    className="p-3 rounded-lg border bg-muted/30 space-y-2"
-                  >
-                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                       <div className="flex items-center gap-2 min-w-0">
-                         <span className="font-mono font-medium truncate">{sym.symbol}</span>
-                         <VolumeStatusBadge ratio={sym.volumeRatio} />
-                       </div>
-                       <div className="flex items-center gap-1 flex-wrap">
-                         {sym.trendDirection !== 'unknown' && (
-                           <Badge variant="outline" className="text-xs">
-                             <TrendingUp className="h-3 w-3 mr-1" />
-                             {sym.trendDirection}
-                           </Badge>
-                         )}
-                         {typeof sym.adx === 'number' && (
-                           <Badge variant="outline" className="text-xs">
-                             ADX: {sym.adx.toFixed(1)}
-                           </Badge>
-                         )}
-                       </div>
-                     </div>
-                    
-                    <div className="flex items-center gap-2 text-xs">
-                      {sym.qualityScore !== null && (
-                        <span className={sym.qualityScore >= sym.effectiveThreshold ? 'text-green-500' : 'text-yellow-500'}>
-                          Quality: {sym.qualityScore}/{sym.effectiveThreshold}
-                        </span>
-                      )}
-                      {sym.momentumState !== 'unknown' && (
-                        <span className="text-muted-foreground">
-                          • Momentum: {sym.momentumState}
-                        </span>
-                      )}
-                    </div>
-
-                    {sym.blockingGates.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {sym.blockingGates.map((gate) => (
-                          <Badge key={gate} variant="destructive" className="text-xs px-1.5 py-0">
-                            {gate}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
+          <div className="space-y-1.5">
+            <button 
+              onClick={() => setIsSymbolsOpen(!isSymbolsOpen)}
+              className="flex items-center justify-between w-full py-1.5 text-xs text-muted-foreground uppercase tracking-wider font-medium hover:text-foreground transition-colors"
+            >
+              <div className="flex items-center gap-1.5">
+                <BarChart3 className="h-3.5 w-3.5" />
+                Symbols ({conditions.symbols.length})
               </div>
-            </CollapsibleContent>
-          </Collapsible>
+              {isSymbolsOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+            
+            {isSymbolsOpen && (
+              <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
+                {/* Table Header */}
+                <div className="grid grid-cols-[1fr_60px_50px_50px_auto] gap-2 px-2.5 py-1 text-[10px] text-muted-foreground uppercase tracking-wider font-medium border-b border-border/50">
+                  <span>Symbol</span>
+                  <span className="text-right">Volume</span>
+                  <span className="text-right">ADX</span>
+                  <span className="text-right">Quality</span>
+                  <span className="text-center">Status</span>
+                </div>
+
+                {conditions.symbols.map((sym) => {
+                  const hasBlocks = sym.blockingGates.length > 0;
+                  const qualityOk = sym.qualityScore !== null && sym.qualityScore >= sym.effectiveThreshold;
+
+                  return (
+                    <TooltipProvider key={sym.symbol}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div 
+                            className={`grid grid-cols-[1fr_60px_50px_50px_auto] gap-2 px-2.5 py-2 rounded-md border transition-colors hover:bg-muted/30 ${
+                              hasBlocks ? 'border-destructive/20 bg-destructive/5' : 'border-border/30 bg-card'
+                            }`}
+                          >
+                            {/* Symbol + Trend */}
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <TrendIcon direction={sym.trendDirection} />
+                              <span className="font-mono text-xs font-semibold truncate text-foreground">
+                                {sym.symbol.replace('USDT', '')}
+                              </span>
+                            </div>
+
+                            {/* Volume */}
+                            <div className="text-right">
+                              {sym.volumeRatio === null ? (
+                                <span className="text-xs text-muted-foreground font-mono">—</span>
+                              ) : (
+                                <span className={`text-xs font-mono font-medium ${
+                                  sym.volumeRatio >= 0.7 ? 'text-green-500' : 
+                                  sym.volumeRatio >= 0.5 ? 'text-yellow-500' : 'text-orange-500'
+                                }`}>
+                                  {Math.round(sym.volumeRatio * 100)}%
+                                </span>
+                              )}
+                            </div>
+
+                            {/* ADX */}
+                            <div className="text-right">
+                              {typeof sym.adx === 'number' ? (
+                                <span className={`text-xs font-mono font-medium ${
+                                  sym.adx >= 25 ? 'text-foreground' : 'text-muted-foreground'
+                                }`}>
+                                  {sym.adx.toFixed(0)}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground font-mono">—</span>
+                              )}
+                            </div>
+
+                            {/* Quality */}
+                            <div className="text-right">
+                              {sym.qualityScore !== null ? (
+                                <span className={`text-xs font-mono font-medium ${
+                                  qualityOk ? 'text-green-500' : 'text-yellow-500'
+                                }`}>
+                                  {sym.qualityScore}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground font-mono">—</span>
+                              )}
+                            </div>
+
+                            {/* Status */}
+                            <div className="flex items-center justify-center">
+                              {hasBlocks ? (
+                                <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4">
+                                  {sym.blockingGates.length}
+                                </Badge>
+                              ) : (
+                                <div className="h-2 w-2 rounded-full bg-green-500" />
+                              )}
+                            </div>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="left" className="max-w-64">
+                          <div className="space-y-1.5 text-xs">
+                            <p className="font-semibold">{sym.symbol}</p>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                              <span className="text-muted-foreground">Trend</span>
+                              <span>{sym.trendDirection}</span>
+                              <span className="text-muted-foreground">Momentum</span>
+                              <span>{sym.momentumState}</span>
+                              {sym.qualityScore !== null && (
+                                <>
+                                  <span className="text-muted-foreground">Quality</span>
+                                  <span>{sym.qualityScore} / {sym.effectiveThreshold}</span>
+                                </>
+                              )}
+                            </div>
+                            {hasBlocks && (
+                              <div className="pt-1 border-t border-border/50">
+                                <p className="text-muted-foreground mb-1">Blocking Gates:</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {sym.blockingGates.map((gate) => (
+                                    <Badge key={gate} variant="destructive" className="text-[10px] px-1 py-0">
+                                      {gate}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
 
         {conditions.symbols.length === 0 && (
           <div className="text-center py-4 text-muted-foreground">
-            <p className="text-sm">No recent rejection data available</p>
-            <p className="text-xs">Signals may be flowing normally or no symbols are being analyzed</p>
+            <p className="text-xs">No recent rejection data</p>
           </div>
         )}
       </CardContent>
