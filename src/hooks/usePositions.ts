@@ -48,9 +48,10 @@ export const usePositions = () => {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: POSITIONS_QUERY_KEY,
     queryFn: fetchPositions,
-    staleTime: Infinity, // Data stays fresh until invalidated by real-time subscription
-    gcTime: 60000, // Cache kept for 1 minute
+    staleTime: Infinity,
+    gcTime: 60000,
     refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev,
   });
 
   return { 

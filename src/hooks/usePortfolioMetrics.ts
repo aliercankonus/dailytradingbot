@@ -55,8 +55,9 @@ export const usePortfolioMetrics = () => {
   return useQuery({
     queryKey: PORTFOLIO_METRICS_QUERY_KEY,
     queryFn: fetchPortfolioMetrics,
-    staleTime: Infinity, // Data stays fresh until invalidated by real-time subscription
-    gcTime: 300000, // Cache kept for 5 minutes
-    refetchOnWindowFocus: false, // Don't refetch on window focus (reduces queries)
+    staleTime: Infinity,
+    gcTime: 300000,
+    refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev,
   });
 };
