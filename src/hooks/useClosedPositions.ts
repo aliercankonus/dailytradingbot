@@ -24,9 +24,9 @@ export interface ClosedPosition {
   confidence_score?: number | null;
   trend_consistency?: number | null;
   peak_pnl_percent?: number | null;
-  // Fee tracking fields
   trading_fee_amount?: number | null;
   trading_fee_percent?: number | null;
+  current_price?: number | null;
 }
 
 export const useClosedPositions = (includeArchived: boolean = false) => {
@@ -34,26 +34,29 @@ export const useClosedPositions = (includeArchived: boolean = false) => {
     queryKey: ["closed-positions", includeArchived],
     queryFn: async () => {
       if (includeArchived) {
-        // Query the combined view that includes both active and archived
         const { data, error } = await supabase
           .from("positions_with_archive")
           .select('*')
           .eq("status", "closed")
-          .order("closed_at", { ascending: false });
+          .order("closed_at", { ascending: false })
+          .limit(200);
 
         if (error) throw error;
         return data as ClosedPosition[];
       } else {
-        // Query only the main positions table
         const { data, error } = await supabase
           .from("positions")
           .select('*')
           .eq("status", "closed")
-          .order("closed_at", { ascending: false });
+          .order("closed_at", { ascending: false })
+          .limit(200);
 
         if (error) throw error;
         return data as ClosedPosition[];
       }
     },
+    staleTime: 60 * 1000,       // 60s stale — no refetch on tab switch
+    gcTime: 5 * 60 * 1000,      // 5 min cache retention
+    refetchOnWindowFocus: false,
   });
 };
