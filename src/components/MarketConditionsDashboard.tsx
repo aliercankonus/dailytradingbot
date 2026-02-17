@@ -26,7 +26,8 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 
 const getVolumeInfo = (ratio: number) => {
   if (ratio >= 1.2) return { label: 'High', color: 'text-green-400', bg: 'bg-green-500/10 text-green-500 border-green-500/20' };
-  if (ratio >= 0.7) return { label: 'Normal', color: 'text-green-500', bg: 'bg-green-500/10 text-green-500 border-green-500/20' };
+  if (ratio >= 1.0) return { label: 'Above Avg', color: 'text-green-500', bg: 'bg-green-500/10 text-green-500 border-green-500/20' };
+  if (ratio >= 0.7) return { label: 'Normal', color: 'text-emerald-500', bg: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' };
   if (ratio >= 0.5) return { label: 'Low', color: 'text-yellow-500', bg: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' };
   if (ratio >= 0.3) return { label: 'Very Low', color: 'text-orange-500', bg: 'bg-orange-500/10 text-orange-500 border-orange-500/20' };
   return { label: 'Holiday', color: 'text-destructive', bg: 'bg-destructive/10 text-destructive border-destructive/20' };
@@ -52,7 +53,8 @@ const VolumeIndicator = ({ ratio }: { ratio: number | null }) => {
         <TooltipContent side="top" align="start" className="max-w-52 text-xs space-y-1 z-50">
           <p className="font-semibold mb-1">Volume vs 20-period avg</p>
           <p><span className="text-green-400">≥120%</span> — High</p>
-          <p><span className="text-green-500">70–119%</span> — Normal</p>
+          <p><span className="text-green-500">100–119%</span> — Above Avg</p>
+          <p><span className="text-emerald-500">70–99%</span> — Normal</p>
           <p><span className="text-yellow-500">50–69%</span> — Low (+3 quality)</p>
           <p><span className="text-orange-500">30–49%</span> — Very Low (+3 quality)</p>
           <p><span className="text-destructive">&lt;30%</span> — Holiday mode</p>
