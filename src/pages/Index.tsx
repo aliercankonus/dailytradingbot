@@ -16,11 +16,11 @@ import { SignalRefreshProvider } from "@/contexts/SignalRefreshContext";
 // Lazy load heavy tab content
 const MarketConditionsDashboard = lazy(() => import("@/components/MarketConditionsDashboard").then(m => ({ default: m.MarketConditionsDashboard })));
 const SignalsOverview = lazy(() => import("@/components/SignalsOverview").then(m => ({ default: m.SignalsOverview })));
-const ActivePositions = lazy(() => import("@/components/ActivePositions").then(m => ({ default: m.ActivePositions })));
-const PositionsSummary = lazy(() => import("@/components/PositionsSummary").then(m => ({ default: m.PositionsSummary })));
-const ExitManagementDashboard = lazy(() => import("@/components/ExitManagementDashboard").then(m => ({ default: m.ExitManagementDashboard })));
-const TrailingStopMonitor = lazy(() => import("@/components/TrailingStopMonitor").then(m => ({ default: m.TrailingStopMonitor })));
-const EarlyWarningExitsDashboard = lazy(() => import("@/components/EarlyWarningExitsDashboard").then(m => ({ default: m.EarlyWarningExitsDashboard })));
+import { ActivePositions } from "@/components/ActivePositions";
+import { PositionsSummary } from "@/components/PositionsSummary";
+import { ExitManagementDashboard } from "@/components/ExitManagementDashboard";
+import { TrailingStopMonitor } from "@/components/TrailingStopMonitor";
+import { EarlyWarningExitsDashboard } from "@/components/EarlyWarningExitsDashboard";
 const ClosedPositionsDashboard = lazy(() => import("@/components/ClosedPositionsDashboard").then(m => ({ default: m.ClosedPositionsDashboard })));
 const RiskManagementControls = lazy(() => import("@/components/RiskManagementControls").then(m => ({ default: m.RiskManagementControls })));
 import { MomentumStatusDashboard } from "@/components/MomentumStatusDashboard";
@@ -117,9 +117,7 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="positions" className="space-y-4">
-            <Suspense fallback={<Skeleton className="h-24 w-full" />}>
-              <PositionsSummary />
-            </Suspense>
+            <PositionsSummary />
             <Tabs value={positionsSubTab} onValueChange={setPositionsSubTab} className="space-y-4">
               <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4 h-8">
                 <TabsTrigger value="active" className="min-w-[4.5rem] flex-shrink-0 text-xs">Active</TabsTrigger>
@@ -129,27 +127,19 @@ const Index = () => {
               </TabsList>
 
               <TabsContent value="active" className="space-y-4">
-                <Suspense fallback={<TabFallback />}>
-                  <ActivePositions />
-                </Suspense>
+                <ActivePositions />
               </TabsContent>
 
               <TabsContent value="exits">
-                <Suspense fallback={<TabFallback />}>
-                  <ExitManagementDashboard />
-                </Suspense>
+                <ExitManagementDashboard />
               </TabsContent>
 
               <TabsContent value="trailing">
-                <Suspense fallback={<TabFallback />}>
-                  <TrailingStopMonitor />
-                </Suspense>
+                <TrailingStopMonitor />
               </TabsContent>
 
               <TabsContent value="warnings">
-                <Suspense fallback={<TabFallback />}>
-                  <EarlyWarningExitsDashboard />
-                </Suspense>
+                <EarlyWarningExitsDashboard />
               </TabsContent>
             </Tabs>
           </TabsContent>
