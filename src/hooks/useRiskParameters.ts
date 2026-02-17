@@ -85,6 +85,17 @@ export interface RiskParameters {
   enable_quality_based_sizing: boolean;
   // Compression Module
   compression_module_enabled: boolean;
+  // Break-Even & Pre-Activation Protection
+  break_even_enabled: boolean;
+  break_even_activation_percent: number;
+  early_profit_lock_enabled: boolean;
+  early_profit_lock_threshold: number;
+  momentum_exit_guard_enabled: boolean;
+  // Divergence Strategy
+  enable_pullback_signals: boolean;
+  enable_early_reversal_signals: boolean;
+  pullback_position_size_percent: number;
+  early_reversal_position_size_percent: number;
 }
 
 export const useRiskParameters = () => {
