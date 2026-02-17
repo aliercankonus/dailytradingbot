@@ -46,10 +46,11 @@ export const usePortfolioHistory = (days: number = 30) => {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['portfolio-history', days],
     queryFn: () => fetchPortfolioHistory(days),
-    staleTime: 300000, // Data stays fresh for 5 minutes
-    gcTime: 600000, // Cache kept for 10 minutes
-    refetchInterval: 300000, // Background refetch every 5 minutes
-    refetchOnWindowFocus: false, // Don't refetch on window focus
+    staleTime: 300000,
+    gcTime: 600000,
+    refetchInterval: 300000,
+    refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev,
   });
 
   return {
