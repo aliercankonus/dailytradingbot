@@ -1,11 +1,14 @@
 import { useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useRiskParametersContext } from '@/contexts/RiskParametersContext';
 
 /**
- * Hook to automatically sync current_open_trades counter with actual active positions
- * This prevents stale counters from blocking auto-execution
+ * Hook to automatically sync current_open_trades counter with actual active positions.
+ * Uses shared RiskParametersContext instead of duplicate risk_parameters fetch.
  */
 export const useSyncTradeCounters = () => {
+  const { riskParams } = useRiskParametersContext();
+
   useEffect(() => {
     const syncCounters = async () => {
       try {
@@ -26,19 +29,7 @@ export const useSyncTradeCounters = () => {
 
         const actualOpenTrades = activePositionsCount || 0;
 
-        // Get current risk parameters
-        const { data: riskParams, error: fetchError } = await supabase
-          .from('risk_parameters')
-          .select('id, current_open_trades')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-        if (fetchError) {
-          console.error('Error fetching risk parameters:', fetchError);
-          return;
-        }
-
-        // Update if there's a mismatch
+        // Use shared context value instead of separate fetch
         if (riskParams && riskParams.current_open_trades !== actualOpenTrades) {
           console.log(
             `[Startup] Syncing current_open_trades from ${riskParams.current_open_trades} to ${actualOpenTrades}`
@@ -67,12 +58,13 @@ export const useSyncTradeCounters = () => {
       }
     };
 
-    // Run immediately on mount
-    syncCounters();
+    // Run once riskParams are available
+    if (riskParams) {
+      syncCounters();
+    }
 
-    // Also sync periodically (every 5 minutes) to catch any drift
+    // Sync periodically (every 5 minutes)
     const interval = setInterval(syncCounters, 5 * 60 * 1000);
-
     return () => clearInterval(interval);
-  }, []);
+  }, [riskParams]);
 };
