@@ -544,6 +544,22 @@ const logRejectionWithAI = async (
     };
   }
 
+  // Deduplicate: skip if same symbol+reason was logged in last 30 minutes
+  const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const { data: existing } = await supabase
+    .from("signal_rejection_log")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("symbol", symbol)
+    .eq("rejection_reason", rejectionReason)
+    .gte("checked_at", thirtyMinAgo)
+    .limit(1);
+
+  if (existing && existing.length > 0) {
+    // Already logged recently, skip duplicate
+    return;
+  }
+
   const { data, error } = await supabase
     .from("signal_rejection_log")
     .insert({
