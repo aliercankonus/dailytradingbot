@@ -313,7 +313,7 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
                                   {sym.qualityScore}
                                 </span>
                               ) : (
-                                <span className="text-xs text-muted-foreground font-mono">—</span>
+                                <span className="text-[10px] text-muted-foreground">—</span>
                               )}
                             </div>
 
@@ -329,7 +329,7 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
                             </div>
                           </div>
                         </TooltipTrigger>
-                        <TooltipContent side="left" className="max-w-64">
+                        <TooltipContent side="top" align="center" className="max-w-64 z-50">
                           <div className="space-y-1.5 text-xs">
                             <p className="font-semibold">{sym.symbol}</p>
                             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
