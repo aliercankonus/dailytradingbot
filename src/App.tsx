@@ -3,7 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { WebSocketMonitorProvider } from "@/contexts/WebSocketMonitorContext";
 import { RealtimePricesProvider } from "@/contexts/RealtimePricesContext";
@@ -33,6 +33,17 @@ const PageFallback = () => (
 
 const AnimatedRoutes = () => {
   const location = useLocation();
+
+  // Prefetch secondary pages after initial render
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      import("./pages/Performance");
+      import("./pages/Health");
+      import("./pages/Settings");
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <div key={location.pathname} className="animate-fast-fade">
       <Suspense fallback={<PageFallback />}>
