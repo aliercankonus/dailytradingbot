@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { useSignalRefresh } from '@/contexts/SignalRefreshContext';
 
 interface MomentumData {
   symbol: string;
@@ -142,13 +143,14 @@ const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
 export const MOMENTUM_STATUS_QUERY_KEY = ['momentum-status'];
 
 export const useMomentumStatus = () => {
+  const { lastRefreshTime } = useSignalRefresh();
+
   const { data, isLoading, isFetching, error, refetch } = useQuery({
-    queryKey: MOMENTUM_STATUS_QUERY_KEY,
+    queryKey: [...MOMENTUM_STATUS_QUERY_KEY, lastRefreshTime],
     queryFn: fetchMomentumForSymbols,
-    staleTime: 30000,
+    staleTime: 55000,
     gcTime: 300000,
     refetchOnWindowFocus: false,
-    refetchInterval: 60000,
     placeholderData: (previousData) => previousData,
     structuralSharing: true,
   });
