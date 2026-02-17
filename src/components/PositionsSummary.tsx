@@ -3,28 +3,13 @@ import { Card } from "@/components/ui/card";
 import { Layers, TrendingUp, TrendingDown, Target } from "lucide-react";
 import { usePositions } from "@/hooks/usePositions";
 import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
-import { supabase } from "@/integrations/supabase/client";
-import { useQuery } from "@tanstack/react-query";
+import { useRiskParametersContext } from "@/contexts/RiskParametersContext";
 import { formatPrice } from "@/lib/utils";
 
 export const PositionsSummary = () => {
   const { positions } = usePositions();
   const { priceVersion, getPrice } = useRealtimePricesContext();
-
-  // Fetch risk parameters directly for trailing stop settings
-  const { data: riskParams } = useQuery({
-    queryKey: ["risk-params-trailing"],
-    queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return null;
-      const { data } = await supabase
-        .from("risk_parameters")
-        .select("trailing_stop_enabled, trailing_stop_activation_percent")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      return data;
-    },
-  });
+  const { riskParams } = useRiskParametersContext();
 
   const summary = useMemo(() => {
     let totalUnrealizedPnl = 0;

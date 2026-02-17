@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
-interface Position {
+export interface Position {
   id: string;
   symbol: string;
   side: string;
@@ -12,6 +12,12 @@ interface Position {
   take_profit: number;
   status: string;
   opened_at: string;
+  executed_at?: string | null;
+  closed_at?: string | null;
+  exit_price?: number | null;
+  realized_pnl?: number | null;
+  realized_pnl_percent?: number | null;
+  close_reason?: string | null;
   trend?: string;
   confidence_score?: number;
   trend_consistency?: number;
@@ -21,7 +27,7 @@ interface Position {
   is_hedge?: boolean;
   parent_position_id?: string;
   peak_pnl_percent?: number;
-  // NEW: Entry snapshot for forensics (can be JSON object or string)
+  order_type?: string;
   entry_snapshot?: unknown;
 }
 
