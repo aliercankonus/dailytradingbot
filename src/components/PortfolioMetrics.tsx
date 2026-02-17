@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, Wallet, Target, Activity } from "lucide-react";
 import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
-import { useRiskParameters } from "@/hooks/useRiskParameters";
+import { useRiskParametersContext } from "@/contexts/RiskParametersContext";
 import { usePositions } from "@/hooks/usePositions";
 import { useBinanceBalance } from "@/hooks/useBinanceBalance";
 import { usePortfolioMetrics } from "@/hooks/usePortfolioMetrics";
@@ -21,7 +21,7 @@ const MetricRow = ({ label, value, valueClass }: { label: string; value: string;
 export const PortfolioMetrics = () => {
   const { positions, loading: positionsLoading } = usePositions();
   const { prices, priceVersion, connected, getPrice } = useRealtimePricesContext();
-  const { riskParams, loading: riskLoading } = useRiskParameters();
+  const { riskParams, loading: riskLoading } = useRiskParametersContext();
   const { balance: binanceBalance, loading: balanceLoading } = useBinanceBalance();
   const { data: portfolioMetrics, isLoading: metricsLoading } = usePortfolioMetrics();
 

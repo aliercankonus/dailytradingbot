@@ -1,14 +1,14 @@
 import { Card } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
 import { useRealtimePricesContext } from "@/contexts/RealtimePricesContext";
-import { useSymbols } from "@/hooks/useSymbols";
+import { useSymbolsContext } from "@/contexts/SymbolsContext";
 import { useEffect, useState } from "react";
 import { WebSocketStatus } from "@/components/WebSocketStatus";
 import { useToast } from "@/hooks/use-toast";
 import { formatPrice, formatPercent } from "@/lib/utils";
 
 export const LivePriceCard = () => {
-  const { activeSymbols, loading: symbolsLoading } = useSymbols();
+  const { activeSymbols, loading: symbolsLoading } = useSymbolsContext();
   const { prices, priceVersion, connected, error } = useRealtimePricesContext();
   const [displayPrices, setDisplayPrices] = useState<any[]>([]);
   const { toast } = useToast();

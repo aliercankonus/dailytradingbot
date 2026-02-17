@@ -8,6 +8,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { WebSocketMonitorProvider } from "@/contexts/WebSocketMonitorContext";
 import { RealtimePricesProvider } from "@/contexts/RealtimePricesContext";
 import { RiskParametersProvider } from "@/contexts/RiskParametersContext";
+import { SymbolsProvider } from "@/contexts/SymbolsContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { BrandLogo } from "@/components/BrandLogo";
 import Auth from "./pages/Auth";
@@ -61,7 +62,9 @@ const App = () => (
           <WebSocketMonitorProvider>
             <RealtimePricesProvider>
               <RiskParametersProvider>
-                <AnimatedRoutes />
+                <SymbolsProvider>
+                  <AnimatedRoutes />
+                </SymbolsProvider>
               </RiskParametersProvider>
             </RealtimePricesProvider>
           </WebSocketMonitorProvider>
