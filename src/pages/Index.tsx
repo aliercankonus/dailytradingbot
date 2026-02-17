@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { AppHeader } from "@/components/AppHeader";
 import { BotStatus } from "@/components/BotStatus";
@@ -10,18 +10,17 @@ import { CloseAllTradesButton } from "@/components/CloseAllTradesButton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
 import { TradeCounterSync } from "@/components/TradeCounterSync";
-import { Skeleton } from "@/components/ui/skeleton";
+
 import { SignalRefreshProvider } from "@/contexts/SignalRefreshContext";
 
-// Lazy load heavy tab content
-const MarketConditionsDashboard = lazy(() => import("@/components/MarketConditionsDashboard").then(m => ({ default: m.MarketConditionsDashboard })));
-const SignalsOverview = lazy(() => import("@/components/SignalsOverview").then(m => ({ default: m.SignalsOverview })));
+import { MarketConditionsDashboard } from "@/components/MarketConditionsDashboard";
+import { SignalsOverview } from "@/components/SignalsOverview";
 import { ActivePositions } from "@/components/ActivePositions";
 import { PositionsSummary } from "@/components/PositionsSummary";
 import { ExitManagementDashboard } from "@/components/ExitManagementDashboard";
 import { TrailingStopMonitor } from "@/components/TrailingStopMonitor";
 import { EarlyWarningExitsDashboard } from "@/components/EarlyWarningExitsDashboard";
-const ClosedPositionsDashboard = lazy(() => import("@/components/ClosedPositionsDashboard").then(m => ({ default: m.ClosedPositionsDashboard })));
+import { ClosedPositionsDashboard } from "@/components/ClosedPositionsDashboard";
 import { RiskManagementControls } from "@/components/RiskManagementControls";
 import { MomentumStatusDashboard } from "@/components/MomentumStatusDashboard";
 import ModuleInventoryDashboard from "@/components/ModuleInventoryDashboard";
@@ -29,12 +28,6 @@ import { RegimeTransitionLog } from "@/components/RegimeTransitionLog";
 import { OrderFlowDashboard } from "@/components/OrderFlowDashboard";
 import MarketOpportunityDensity from "@/components/MarketOpportunityDensity";
 
-const TabFallback = () => (
-  <div className="space-y-4">
-    <Skeleton className="h-32 w-full" />
-    <Skeleton className="h-64 w-full" />
-  </div>
-);
 
 const usePersistedTab = (key: string, defaultValue: string) => {
   const [value, setValue] = useState(() => {
@@ -105,15 +98,11 @@ const Index = () => {
             <LivePriceCard />
             <TradeHistory />
 
-            <Suspense fallback={<Skeleton className="h-48 w-full" />}>
-              <MarketConditionsDashboard />
-            </Suspense>
+            <MarketConditionsDashboard />
           </TabsContent>
 
           <TabsContent value="signals" className="space-y-6">
-            <Suspense fallback={<TabFallback />}>
-              <SignalsOverview />
-            </Suspense>
+            <SignalsOverview />
           </TabsContent>
 
           <TabsContent value="positions" className="space-y-4">
@@ -145,9 +134,7 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="history">
-            <Suspense fallback={<TabFallback />}>
-              <ClosedPositionsDashboard />
-            </Suspense>
+            <ClosedPositionsDashboard />
           </TabsContent>
 
 
