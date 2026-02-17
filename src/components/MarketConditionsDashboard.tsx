@@ -240,7 +240,7 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
             </button>
             
             {isSymbolsOpen && (
-              <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
+              <div className="space-y-1 max-h-[320px] overflow-y-auto pr-1">
                 {conditions.symbols.map((sym) => {
                   const hasBlocks = sym.blockingGates.length > 0;
                   const qualityOk = sym.qualityScore !== null && sym.qualityScore >= sym.effectiveThreshold;
@@ -248,92 +248,55 @@ export const MarketConditionsDashboard = memo(function MarketConditionsDashboard
                   return (
                     <div 
                       key={sym.symbol}
-                      className={`rounded-lg border p-2.5 space-y-2 ${
+                      className={`rounded border px-2 py-1.5 ${
                         hasBlocks ? 'border-destructive/20 bg-destructive/5' : 'border-border/30 bg-card'
                       }`}
                     >
-                      {/* Row 1: Symbol + Status dot */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
+                      {/* Single compact row: Symbol + inline metrics */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1 min-w-[60px]">
                           <TrendIcon direction={sym.trendDirection} />
-                          <span className="font-mono text-xs font-semibold text-foreground">
+                          <span className="font-mono text-[11px] font-semibold text-foreground">
                             {sym.symbol.replace(/USDT$/i, '')}
                           </span>
-                          {hasBlocks ? (
-                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 ml-1">
-                              {sym.blockingGates.length} blocked
-                            </Badge>
-                          ) : (
-                            <div className="flex items-center gap-1 ml-1">
-                              <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                              <span className="text-[10px] text-green-500">Clear</span>
-                            </div>
-                          )}
                         </div>
-                      </div>
 
-                      {/* Row 2: Metrics grid */}
-                      <div className="grid grid-cols-4 gap-2">
-                        <div>
-                          <span className="text-[10px] text-muted-foreground block">Volume</span>
-                          {sym.volumeRatio === null ? (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          ) : (
-                            <span className={`text-xs font-mono font-medium ${
-                              sym.volumeRatio >= 0.7 ? 'text-green-500' : 
-                              sym.volumeRatio >= 0.5 ? 'text-yellow-500' : 'text-orange-500'
-                            }`}>
-                              {Math.round(sym.volumeRatio * 100)}%
+                        <div className="flex items-center gap-3 text-[10px] flex-1">
+                          <span className="text-muted-foreground">
+                            Vol: {sym.volumeRatio === null ? '—' : (
+                              <span className={
+                                sym.volumeRatio >= 0.7 ? 'text-green-500' : 
+                                sym.volumeRatio >= 0.5 ? 'text-yellow-500' : 'text-orange-500'
+                              }>{Math.round(sym.volumeRatio * 100)}%</span>
+                            )}
+                          </span>
+                          <span className="text-muted-foreground">
+                            ADX: {typeof sym.adx === 'number' ? (
+                              <span className={sym.adx >= 25 ? 'text-foreground' : 'text-muted-foreground'}>{sym.adx.toFixed(0)}</span>
+                            ) : '—'}
+                          </span>
+                          <span className="text-muted-foreground capitalize">
+                            {sym.trendDirection === 'unknown' ? '' : sym.trendDirection}
+                          </span>
+                          {sym.qualityScore !== null && (
+                            <span className="text-muted-foreground">
+                              Q: <span className={qualityOk ? 'text-green-500' : 'text-yellow-500'}>{sym.qualityScore}</span>
                             </span>
                           )}
                         </div>
-                        <div>
-                          <span className="text-[10px] text-muted-foreground block">ADX</span>
-                          {typeof sym.adx === 'number' ? (
-                            <span className={`text-xs font-mono font-medium ${
-                              sym.adx >= 25 ? 'text-foreground' : 'text-muted-foreground'
-                            }`}>
-                              {sym.adx.toFixed(0)}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-muted-foreground block">Trend</span>
-                          <span className="text-xs font-medium text-foreground capitalize">
-                            {sym.trendDirection === 'unknown' ? '—' : sym.trendDirection}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-muted-foreground block">Momentum</span>
-                          <span className="text-xs font-medium text-foreground capitalize">
-                            {sym.momentumState === 'unknown' ? '—' : sym.momentumState}
-                          </span>
-                        </div>
+
+                        {hasBlocks ? (
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {sym.blockingGates.map((gate) => (
+                              <Badge key={gate} variant="outline" className="text-[9px] px-1 py-0 h-3.5 bg-destructive/10 text-destructive border-destructive/20">
+                                {gate}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="h-1.5 w-1.5 rounded-full bg-green-500 shrink-0" />
+                        )}
                       </div>
-
-                      {/* Row 3: Quality if available */}
-                      {sym.qualityScore !== null && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-muted-foreground">Quality</span>
-                          <span className={`text-xs font-mono font-medium ${qualityOk ? 'text-green-500' : 'text-yellow-500'}`}>
-                            {sym.qualityScore}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground">/ {sym.effectiveThreshold}</span>
-                        </div>
-                      )}
-
-                      {/* Row 4: Blocking gates */}
-                      {hasBlocks && (
-                        <div className="flex flex-wrap gap-1">
-                          {sym.blockingGates.map((gate) => (
-                            <Badge key={gate} variant="outline" className="text-[10px] px-1.5 py-0 bg-destructive/10 text-destructive border-destructive/20">
-                              {gate}
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   );
                 })}
