@@ -3,12 +3,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { useRiskParameters } from '@/hooks/useRiskParameters';
+import { useRiskParametersContext } from '@/contexts/RiskParametersContext';
 import { useToast } from '@/hooks/use-toast';
 import { AlertOctagon, Clock, TrendingDown, ShieldAlert, Scissors, RefreshCcw } from 'lucide-react';
 
 export const LossManagementSettings = () => {
-  const { riskParams, updateRiskParameters } = useRiskParameters();
+  const { riskParams, updateRiskParameters } = useRiskParametersContext();
   const { toast } = useToast();
 
   if (!riskParams) return null;
