@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { useRiskParametersContext } from "@/contexts/RiskParametersContext";
 import { useToast } from "@/hooks/use-toast";
 import { useLiveTrend } from "@/hooks/useLiveTrend";
-import { useSymbols } from "@/hooks/useSymbols";
+import { useSymbolsContext } from "@/contexts/SymbolsContext";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,7 +23,7 @@ const StatusRow = ({ label, value, valueClass }: { label: string; value: React.R
 export const BotStatus = () => {
   const { riskParams, updateRiskParameters } = useRiskParametersContext();
   const { toast } = useToast();
-  const { activeSymbols, symbols } = useSymbols();
+  const { activeSymbols, symbols } = useSymbolsContext();
   const { user } = useAuth();
   const [selectedCrypto, setSelectedCrypto] = useState("");
   
