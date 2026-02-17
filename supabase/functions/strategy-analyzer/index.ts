@@ -10672,9 +10672,34 @@ serve(async (req) => {
               });
             }
           }
+
+          // 3. MEAN REVERSION BYPASS (Priority 3 - lowest)
+          // Only fires if Squeeze and Early Ignition both failed
+          // Uses upstream earlyMeanReversionSignal (computed at line ~7729, before ADX gate)
+          let meanReversionTransitionalActive = false;
+          let meanReversionTransitionalMultiplier = 1.0;
+
+          if (!squeezeBreakoutActive && !earlyIgnitionActive && isInTransitionalZone &&
+              earlyMeanReversionSignal?.detected && earlyMeanReversionSignal?.allowed) {
+            meanReversionTransitionalActive = true;
+            meanReversionTransitionalMultiplier = COUNTER_TREND_ADMISSION.PROBE_POSITION_MULTIPLIER; // 0.25x
+
+            if (ADX_GATE_V1_1.LOG_BYPASS_SELECTION) {
+              logger.forSymbol(symbol).info(
+                `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION_BYPASS (v1.1): ADX=${adx.toFixed(1)} allowed ` +
+                `(exhaustionScore=${earlyMeanReversionSignal.exhaustionScore}, ` +
+                `direction=${earlyMeanReversionSignal.direction}, ` +
+                `${(meanReversionTransitionalMultiplier * 100).toFixed(0)}% size)`
+              );
+            }
+            perSymbolGateAttribution.set(symbol, {
+              gate: 'MEAN_REVERSION_TRANSITIONAL_V11',
+              details: `MR bypass in ADX transitional zone (score=${earlyMeanReversionSignal.exhaustionScore})`
+            });
+          }
           
-          // If neither exception passed, block the signal
-          if (!squeezeBreakoutActive && !earlyIgnitionActive) {
+          // If no exception passed, block the signal
+          if (!squeezeBreakoutActive && !earlyIgnitionActive && !meanReversionTransitionalActive) {
             // Get diagnostic info for squeeze and ignition checks
             const squeezeCheck = isValidSqueezeBreakout(trendData, derivedDirection);
             const ignitionCheck = checkEarlyIgnitionException(trendData, derivedDirection, regime.regime);
@@ -10748,6 +10773,14 @@ serve(async (req) => {
         if (earlyIgnitionActive && earlyIgnitionPositionMultiplier < 1.0) {
           reversalPositionMultiplier = Math.min(reversalPositionMultiplier, earlyIgnitionPositionMultiplier);
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🚀 Early Ignition (v1.1) - position size capped at ${(earlyIgnitionPositionMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Apply MR transitional position size reduction if active
+        if (meanReversionTransitionalActive && meanReversionTransitionalMultiplier < 1.0) {
+          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, meanReversionTransitionalMultiplier);
+          logger.forSymbol(symbol).info(
+            `${LOG_CATEGORIES.RISK} 🔄 MR Transitional (v1.1) - position size capped at ${(meanReversionTransitionalMultiplier * 100).toFixed(0)}%`
+          );
         }
 
         // ============= LEGACY VARIABLE STUBS (v1.1 compatibility) =============

@@ -39,7 +39,11 @@ START
   │   │   ├─ 4H Confidence ≥ 55%
   │   │   └─ 1H aligned with 4H ─────────── YES → PASS (0.70x size)
   │   │
-  │   └─ Neither exception met? ─────────── BLOCK
+  │   ├─ Mean Reversion Exception?
+  │   │   ├─ earlyMeanReversionSignal.detected
+  │   │   └─ earlyMeanReversionSignal.allowed ── YES → PASS (0.25x size)
+  │   │
+  │   └─ No exception met? ───────────────── BLOCK
   │
   ├─ ADX ≥ Adaptive Threshold?
   │   │
@@ -63,6 +67,7 @@ START
 | Hard Floor | < 18 | None (absolute block) | 0.00x (BLOCKED) |
 | Squeeze Expansion | 18–22 | BB compressed, band edge, momentum building, slope ≥ +0.05, no divergence | 0.65x |
 | Early Ignition | 18–22 | EARLY_TREND regime, slope > 0, 4H ≥ 55%, 1H aligned | 0.70x |
+| Mean Reversion | 18–22 | earlyMeanReversionSignal detected + allowed | 0.25x |
 | Adaptive Pass (RANGE) | ≥ 22 | Regime = RANGE | 1.00x |
 | Adaptive Pass (EARLY_TREND) | ≥ 20 | Regime = EARLY_TREND | 1.00x |
 | Adaptive Pass (STRONG_TREND) | ≥ 18 | Regime = STRONG_TREND | 1.00x |
