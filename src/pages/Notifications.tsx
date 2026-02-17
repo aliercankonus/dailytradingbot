@@ -7,11 +7,11 @@ import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { Mail, Phone } from 'lucide-react';
 import { AppHeader } from '@/components/AppHeader';
-import { useRiskParameters } from '@/hooks/useRiskParameters';
+import { useRiskParametersContext } from '@/contexts/RiskParametersContext';
 
 export default function Notifications() {
   const { toast } = useToast();
-  const { riskParams, updateRiskParameters } = useRiskParameters();
+  const { riskParams, updateRiskParameters } = useRiskParametersContext();
   const [notificationEmail, setNotificationEmail] = useState('');
   const [notificationPhone, setNotificationPhone] = useState(riskParams?.notification_phone || '');
 

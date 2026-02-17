@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useRiskParameters } from '@/hooks/useRiskParameters';
+import { useRiskParametersContext } from '@/contexts/RiskParametersContext';
 import { useToast } from '@/hooks/use-toast';
 import { useState, useEffect } from 'react';
 import { TrendingUp, Shield, Sliders } from 'lucide-react';
@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/collapsible';
 
 export const UnifiedRiskSettings = () => {
-  const { riskParams, updateRiskParameters } = useRiskParameters();
+  const { riskParams, updateRiskParameters } = useRiskParametersContext();
   const { toast } = useToast();
   const [advancedOpen, setAdvancedOpen] = useState(false);
 

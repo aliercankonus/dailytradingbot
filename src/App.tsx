@@ -7,6 +7,7 @@ import { lazy, Suspense } from "react";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { WebSocketMonitorProvider } from "@/contexts/WebSocketMonitorContext";
 import { RealtimePricesProvider } from "@/contexts/RealtimePricesContext";
+import { RiskParametersProvider } from "@/contexts/RiskParametersContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { BrandLogo } from "@/components/BrandLogo";
 import Auth from "./pages/Auth";
@@ -59,7 +60,9 @@ const App = () => (
         <AuthProvider>
           <WebSocketMonitorProvider>
             <RealtimePricesProvider>
-              <AnimatedRoutes />
+              <RiskParametersProvider>
+                <AnimatedRoutes />
+              </RiskParametersProvider>
             </RealtimePricesProvider>
           </WebSocketMonitorProvider>
         </AuthProvider>

@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { useRiskParameters } from '@/hooks/useRiskParameters';
+import { useRiskParametersContext } from '@/contexts/RiskParametersContext';
 import { usePositions } from '@/hooks/usePositions';
 import { useRealtimePricesContext } from '@/contexts/RealtimePricesContext';
 import { Shield, AlertTriangle, DollarSign, TrendingDown, Target } from 'lucide-react';
@@ -26,7 +26,7 @@ interface RiskManagementControlsProps {
 }
 
 export const RiskManagementControls = ({ section }: RiskManagementControlsProps = {}) => {
-  const { riskParams, updateRiskParameters } = useRiskParameters();
+  const { riskParams, updateRiskParameters } = useRiskParametersContext();
   const { positions } = usePositions();
   
   // Get live prices from shared context

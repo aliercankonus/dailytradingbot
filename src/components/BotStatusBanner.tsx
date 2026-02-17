@@ -1,4 +1,4 @@
-import { useRiskParameters } from "@/hooks/useRiskParameters";
+import { useRiskParametersContext } from "@/contexts/RiskParametersContext";
 import { useToast } from "@/hooks/use-toast";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
@@ -6,7 +6,7 @@ import { Activity, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const BotStatusBanner = () => {
-  const { riskParams, updateRiskParameters } = useRiskParameters();
+  const { riskParams, updateRiskParameters } = useRiskParametersContext();
   const { toast } = useToast();
 
   const isActive = riskParams?.is_trading_enabled ?? false;

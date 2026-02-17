@@ -32,7 +32,7 @@ import {
   Code,
 } from "lucide-react";
 import { useSignalRejections } from "@/hooks/useSignalRejections";
-import { useRiskParameters } from "@/hooks/useRiskParameters";
+import { useRiskParametersContext } from "@/contexts/RiskParametersContext";
 import { formatDistanceToNow } from "date-fns";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from "react";
@@ -7411,7 +7411,7 @@ const AIAnalysisCell = ({
 
 export const SignalRejectionReasons = () => {
   const { rejections, loading } = useSignalRejections();
-  const { riskParams } = useRiskParameters();
+  const { riskParams } = useRiskParametersContext();
   
   // Use global AI analysis toggle from risk parameters
   const aiEnabled = riskParams?.ai_analysis_enabled ?? false;
