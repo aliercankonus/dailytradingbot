@@ -408,6 +408,93 @@ Trend Data: ${JSON.stringify(rejection.trend_data, null, 2)}`;
   }
 };
 
+// ============= REJECTION LOG BUFFER =============
+// Collects all rejections in-memory during a cycle, then flushes once at the end
+// with a single dedup SELECT + single batch INSERT. Eliminates N individual DB calls.
+interface BufferedRejection {
+  user_id: string;
+  symbol: string;
+  rejection_reason: string;
+  filters_status: any;
+  checked_at: string;
+  ai_context?: { trendData: any; enableAI: boolean };
+}
+
+class RejectionBuffer {
+  private buffer: BufferedRejection[] = [];
+  private dedupKeys = new Set<string>();
+
+  add(entry: Omit<BufferedRejection, 'checked_at'>) {
+    const dedupKey = `${entry.symbol}::${entry.rejection_reason}`;
+    if (this.dedupKeys.has(dedupKey)) return; // Same symbol+reason already in this cycle
+    this.dedupKeys.add(dedupKey);
+    this.buffer.push({ ...entry, checked_at: new Date().toISOString() });
+  }
+
+  async flush(supabase: any, logger: any) {
+    if (this.buffer.length === 0) return 0;
+
+    // Dedup against DB: check which symbol+reason combos were logged in last 30 min
+    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const userId = this.buffer[0].user_id;
+
+    const { data: recentLogs } = await supabase
+      .from("signal_rejection_log")
+      .select("symbol, rejection_reason")
+      .eq("user_id", userId)
+      .gte("checked_at", thirtyMinAgo);
+
+    const recentKeys = new Set(
+      (recentLogs || []).map((r: any) => `${r.symbol}::${r.rejection_reason}`)
+    );
+
+    const newEntries = this.buffer.filter(
+      e => !recentKeys.has(`${e.symbol}::${e.rejection_reason}`)
+    );
+
+    if (newEntries.length === 0) {
+      logger.info(`Rejection buffer: ${this.buffer.length} buffered, all deduplicated`);
+      return 0;
+    }
+
+    // Strip ai_context before insert (not a DB column)
+    const insertRows = newEntries.map(({ ai_context, ...row }) => row);
+
+    const { data: inserted, error } = await supabase
+      .from("signal_rejection_log")
+      .insert(insertRows)
+      .select("id, symbol, rejection_reason");
+
+    if (error) {
+      logger.error(`Rejection buffer flush failed: ${error.message}`);
+      return 0;
+    }
+
+    // Fire AI analysis for entries that requested it
+    for (const entry of newEntries) {
+      if (entry.ai_context?.enableAI && entry.ai_context?.trendData) {
+        const matchedRow = inserted?.find(
+          (r: any) => r.symbol === entry.symbol && r.rejection_reason === entry.rejection_reason
+        );
+        if (matchedRow) {
+          analyzeRejectionWithAI(supabase, matchedRow.id, {
+            symbol: entry.symbol,
+            rejection_reason: entry.rejection_reason,
+            filters_status: entry.filters_status,
+            trend_data: entry.ai_context.trendData,
+          }).catch((err: any) => logger.warn(`AI analysis failed for ${entry.symbol}: ${err}`));
+        }
+      }
+    }
+
+    logger.info(`Rejection buffer: ${this.buffer.length} buffered → ${newEntries.length} inserted (${this.buffer.length - newEntries.length} deduplicated)`);
+    return newEntries.length;
+  }
+}
+
+// Module-level active buffer reference - set during each cycle, used by logRejectionWithAI
+let activeRejectionBuffer: RejectionBuffer | null = null;
+
 // Helper function to log rejection with optional AI analysis and Order Flow data
 // ENHANCED: Automatically extracts StochRSI K/D and Bollinger %B values from trendData for all rejection logs
 const logRejectionWithAI = async (
@@ -417,8 +504,8 @@ const logRejectionWithAI = async (
   rejectionReason: string,
   filtersStatus: any,
   trendData: any,
-  enableAI: boolean = false,  // Default to false, controlled by ai_analysis_enabled
-  orderFlow?: OrderFlowAnalysis | null  // Optional Order Flow data
+  enableAI: boolean = false,
+  orderFlow?: OrderFlowAnalysis | null
 ) => {
   // CENTRALIZED: Use shared extractors for consistent StochRSI extraction across all edge functions
   // Extract all timeframe K/D values for full diagnostic visibility
@@ -544,22 +631,19 @@ const logRejectionWithAI = async (
     };
   }
 
-  // Deduplicate: skip if same symbol+reason was logged in last 30 minutes
-  const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-  const { data: existing } = await supabase
-    .from("signal_rejection_log")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("symbol", symbol)
-    .eq("rejection_reason", rejectionReason)
-    .gte("checked_at", thirtyMinAgo)
-    .limit(1);
-
-  if (existing && existing.length > 0) {
-    // Already logged recently, skip duplicate
+  // Use active buffer if set (batch mode), otherwise fall back to direct insert
+  if (activeRejectionBuffer) {
+    activeRejectionBuffer.add({
+      user_id: userId,
+      symbol,
+      rejection_reason: rejectionReason,
+      filters_status: enrichedFiltersStatus,
+      ai_context: { trendData, enableAI },
+    });
     return;
   }
 
+  // Legacy direct insert path (should not be reached in normal operation)
   const { data, error } = await supabase
     .from("signal_rejection_log")
     .insert({
@@ -577,9 +661,7 @@ const logRejectionWithAI = async (
     return;
   }
 
-  // Trigger AI analysis in background (don't await to avoid slowing down signal generation)
   if (enableAI && data?.id && trendData) {
-    // Fire and forget - don't block signal generation
     analyzeRejectionWithAI(supabase, data.id, {
       symbol,
       rejection_reason: rejectionReason,
@@ -2341,6 +2423,8 @@ serve(async (req) => {
       | 'TREND_EXHAUSTION_CONTINUATION_BLOCK';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
+    const rejectionBuffer = new RejectionBuffer();
+    activeRejectionBuffer = rejectionBuffer; // Enable batch mode for logRejectionWithAI
     
     // Loss Recovery Mode - increase quality threshold after consecutive losses
     const consecutiveLosses = riskParams.consecutive_losses || 0;
@@ -2578,22 +2662,20 @@ serve(async (req) => {
 
       if (existingSignalsSet.has(symbol)) {
         perSymbolGateAttribution.set(symbol, { gate: 'EXISTING_SIGNAL', details: 'Active signal from last minute' });
-        await supabase.from("signal_rejection_log").insert({
+        rejectionBuffer.add({
           user_id: userId, symbol,
           rejection_reason: "Already has active signal from last minute",
           filters_status: { currentTradeCount },
-          checked_at: new Date().toISOString(),
         });
         continue;
       }
 
       if (currentTradeCount >= riskParams.max_trades_per_symbol) {
         perSymbolGateAttribution.set(symbol, { gate: 'MAX_TRADES_PER_SYMBOL', details: `${currentTradeCount}/${riskParams.max_trades_per_symbol} active` });
-        await supabase.from("signal_rejection_log").insert({
+        rejectionBuffer.add({
           user_id: userId, symbol,
           rejection_reason: `Max trades per symbol reached: ${currentTradeCount}/${riskParams.max_trades_per_symbol} trades active`,
           filters_status: { currentTradeCount, maxTradesPerSymbol: riskParams.max_trades_per_symbol },
-          checked_at: new Date().toISOString(),
         });
         continue;
       }
@@ -2620,7 +2702,7 @@ serve(async (req) => {
         
         logger.forSymbol(symbol).info(`POSITION_DEDUP: Skipping - ${recentPosition.status} position opened ${openedAgo}min ago (within 30min window)`);
         
-        await supabase.from("signal_rejection_log").insert({
+        rejectionBuffer.add({
           user_id: userId, 
           symbol,
           rejection_reason: `Position deduplication: ${recentPosition.status} position opened ${openedAgo} minutes ago (within 30-minute window)`,
@@ -2632,7 +2714,6 @@ serve(async (req) => {
             deduplicationWindowMinutes: 30,
             gate: 'POSITION_DEDUPLICATION'
           },
-          checked_at: new Date().toISOString(),
         });
         continue;
       }
@@ -14826,7 +14907,7 @@ serve(async (req) => {
         if (!correlationCheck.canOpen) {
           rejectedByHardGates++;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} CORRELATION BLOCK - ${correlationCheck.reason}`);
-          await supabase.from("signal_rejection_log").insert({
+          rejectionBuffer.add({
             user_id: userId, symbol,
             rejection_reason: `Correlation risk: ${correlationCheck.reason}`,
             filters_status: {
@@ -14835,8 +14916,6 @@ serve(async (req) => {
               signalType,
               gate: "CORRELATION_RISK",
             },
-            trend_data: trendData,
-            checked_at: new Date().toISOString(),
           });
           continue;
         }
@@ -15762,6 +15841,12 @@ serve(async (req) => {
         logger.warn(`❤️ Heartbeat persist error: ${heartbeatErr}`);
       }
     }
+
+    // ============= FLUSH REJECTION BUFFER =============
+    // Single dedup SELECT + single batch INSERT instead of N individual round-trips
+    const rejectionsInserted = await rejectionBuffer.flush(supabase, logger);
+    activeRejectionBuffer = null; // Disable batch mode
+    logger.info(`📝 Rejection buffer flushed: ${rejectionsInserted} new entries persisted`);
 
     return new Response(JSON.stringify({
       signals,
