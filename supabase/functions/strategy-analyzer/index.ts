@@ -2171,6 +2171,8 @@ serve(async (req) => {
     // with the actual regime when reached. Any symbol that exits before classification
     // retains EARLY_BLOCK (deterministic terminal state, not NULL ambiguity).
     const symbolRegimeMap = new Map<string, string>();
+    // Collect order flow analysis + price closes for batch snapshot update (cached Order Flow dashboard)
+    const symbolOrderFlowMap = new Map<string, { orderFlow: OrderFlowAnalysis; closes: number[]; direction: "long" | "short"; directionSource: string }>();
     for (const { symbol } of activeSymbols) {
       symbolRegimeMap.set(symbol, 'EARLY_BLOCK');
     }
@@ -2727,6 +2729,17 @@ serve(async (req) => {
         
         if (earlyOrderFlowAnalysis && earlyOrderFlowAnalysis.reasons.length > 0) {
           logger.forSymbol(symbol).debug(`[EARLY_ORDER_FLOW] score=${earlyOrderFlowAnalysis.score}/100 signal=${earlyOrderFlowAnalysis.signal} | ${earlyOrderFlowAnalysis.reasons.slice(0, 2).join(' | ')}`);
+        }
+
+        // Cache order flow + price closes for frontend Order Flow dashboard (batch snapshot update)
+        if (earlyOrderFlowAnalysis && klines.length >= 30) {
+          const closes = klines.slice(-50).map((k: any) => parseFloat(k[4]));
+          symbolOrderFlowMap.set(symbol, {
+            orderFlow: earlyOrderFlowAnalysis,
+            closes,
+            direction: earlyIntendedDirection,
+            directionSource: "strategy-analyzer"
+          });
         }
 
         // ============= EARLY SMART MOMENTUM CALCULATION =============
@@ -15639,6 +15652,51 @@ serve(async (req) => {
         logger.warn(`⚠️ Failed to update regime for ${regimeErrors.length}/${symbolRegimeMap.size} symbols`);
       } else {
         logger.info(`🏷️ Updated regime column in trend_snapshots for ${symbolRegimeMap.size} symbols`);
+      }
+    }
+
+    // ============= BATCH UPDATE ORDER FLOW DATA IN TREND SNAPSHOTS =============
+    // Stores pre-computed order flow metrics + price closes for the frontend Order Flow dashboard
+    // Frontend reads this instead of calling fetch-klines → Binance API (eliminates latency)
+    if (symbolOrderFlowMap.size > 0) {
+      const orderFlowUpdatePromises = Array.from(symbolOrderFlowMap.entries()).map(([sym, data]) => {
+        // Read existing snapshot_data to merge (don't overwrite trend data)
+        return supabase
+          .from("trend_snapshots")
+          .select("snapshot_data")
+          .eq("user_id", userId)
+          .eq("symbol", sym)
+          .single()
+          .then(({ data: existing }) => {
+            const existingData = (existing?.snapshot_data as Record<string, unknown>) || {};
+            const mergedData = {
+              ...existingData,
+              orderFlow: {
+                volumeSpike: data.orderFlow.volumeSpike,
+                priceRejection: data.orderFlow.priceRejection,
+                pressure: data.orderFlow.pressure,
+                score: data.orderFlow.score,
+                signal: data.orderFlow.signal,
+                confidence: data.orderFlow.confidence,
+                reasons: data.orderFlow.reasons,
+                intendedDirection: data.direction,
+                directionSource: data.directionSource,
+              },
+              correlationCloses: data.closes, // Last 50 1H closes for live correlation matrix
+            };
+            return supabase
+              .from("trend_snapshots")
+              .update({ snapshot_data: mergedData })
+              .eq("user_id", userId)
+              .eq("symbol", sym);
+          });
+      });
+      const orderFlowResults = await Promise.all(orderFlowUpdatePromises);
+      const orderFlowErrors = orderFlowResults.filter(r => r?.error);
+      if (orderFlowErrors.length > 0) {
+        logger.warn(`⚠️ Failed to cache order flow for ${orderFlowErrors.length}/${symbolOrderFlowMap.size} symbols`);
+      } else {
+        logger.info(`📊 Cached order flow data in trend_snapshots for ${symbolOrderFlowMap.size} symbols`);
       }
     }
 
