@@ -4066,9 +4066,55 @@ serve(async (req) => {
           }
         }
         
-        // REJECT EARLY: If no clear trade direction can be determined AND no overrides applied (including early ignition)
-        const hasAnyDirectionSource = hasDirectionOverride || earlyIgnitionEntryApplied;
+        // ============= MR TRANSITIONAL DIRECTION OVERRIDE (ADX 18-22) =============
+        // When direction derivation returns null AND ADX is in transitional zone,
+        // allow exhaustion to derive direction. This completes the 3-layer MR bypass:
+        //   1. Tier 0.25 passes via ADX_TRANSITIONAL_BYPASS (scoring.ts)
+        //   2. This block derives direction from exhaustion (strategy-analyzer)
+        //   3. ADX gate evaluates MR bypass with skipRegimeGating (downstream)
+        // Guards: HTF must not be strongly trending (conf < 65%)
+        let mrTransitionalDirectionOverrideApplied = false;
+        let mrTransitionalDirection: "long" | "short" | null = null;
+        
         if (!directionResult.direction && !lateGrindAccepted && !hasAnyDirectionSource) {
+          const isAdxTransitional = adx >= 18 && adx <= 22;
+          const htfConf4h = timeframes?.['4h']?.confidence ?? 0;
+          const HTF_STRONG_TREND_THRESHOLD = 65;
+          const htfNotStrong = htfConf4h < HTF_STRONG_TREND_THRESHOLD;
+          
+          if (isAdxTransitional && htfNotStrong && MEAN_REVERSION_CONFIG.ENABLED) {
+            // Compute dedicated MR signal with regime gating skipped
+            const transitionalMRForDirection = detectExhaustion(trendData, { skipRegimeGating: true });
+            
+            if (transitionalMRForDirection?.detected && transitionalMRForDirection?.allowed && transitionalMRForDirection?.direction) {
+              mrTransitionalDirectionOverrideApplied = true;
+              mrTransitionalDirection = transitionalMRForDirection.direction as "long" | "short";
+              
+              logger.forSymbol(symbol).info(
+                `${LOG_CATEGORIES.SUCCESS} 🔄 MR_TRANSITIONAL_DIRECTION_OVERRIDE: ${symbol} → ${mrTransitionalDirection.toUpperCase()} ` +
+                `(ADX=${adx.toFixed(1)}, 4hConf=${htfConf4h.toFixed(0)}%, ` +
+                `exhaustionScore=${transitionalMRForDirection.exhaustionScore}, ` +
+                `phase=${transitionalMRForDirection.trendPhase})`
+              );
+              
+              perSymbolGateAttribution.set(symbol, {
+                gate: 'MR_TRANSITIONAL_DIRECTION_OVERRIDE',
+                details: `Exhaustion-derived ${mrTransitionalDirection} in ADX transitional zone (score=${transitionalMRForDirection.exhaustionScore})`
+              });
+            } else {
+              logger.forSymbol(symbol).debug(
+                `[MR_TRANSITIONAL_DIR] ADX=${adx.toFixed(1)} transitional but MR not detected/allowed ` +
+                `(detected=${transitionalMRForDirection?.detected}, allowed=${transitionalMRForDirection?.allowed})`
+              );
+            }
+          }
+        }
+        
+        // Update direction source check to include MR transitional override
+        const hasAnyDirectionSourceFinal = hasAnyDirectionSource || mrTransitionalDirectionOverrideApplied;
+
+        // REJECT EARLY: If no clear trade direction can be determined AND no overrides applied (including early ignition, MR transitional)
+        if (!directionResult.direction && !lateGrindAccepted && !hasAnyDirectionSourceFinal) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
@@ -4123,7 +4169,7 @@ serve(async (req) => {
         }
         
         // Use derived direction consistently throughout signal generation
-        // Priority: original direction > late grind > momentum override > order flow > pre-momentum > short-term alignment
+        // Priority: original direction > late grind > momentum override > order flow > pre-momentum > short-term alignment > MR transitional
         // NOTE: Using 'let' to allow COUNTER_TREND fallback to override direction
         let derivedDirection = (
           directionResult.direction || 
@@ -4131,21 +4177,24 @@ serve(async (req) => {
           momentumDerivedDirection || 
           orderFlowDerivedDirection ||
           preMomentumDirection ||
-          shortTermAlignmentDirection
+          shortTermAlignmentDirection ||
+          mrTransitionalDirection
         ) as "long" | "short";
         
         // Determine source for logging (can be updated by fallback)
-        let derivedSource = preMomentumStochRsiOverrideApplied
-          ? "pre-momentum-stochrsi-extreme"
-          : shortTermAlignmentOverrideApplied
-            ? "short-term-alignment"
-            : momentumDirectionOverrideApplied 
-              ? "momentum-direction-override"
-              : orderFlowDirectionOverrideApplied 
-                ? "order-flow-direction"
-                : lateGrindAccepted 
-                  ? "late-grind-acceptance" 
-                  : directionResult.source;
+        let derivedSource = mrTransitionalDirectionOverrideApplied
+          ? "mr-transitional-direction-override"
+          : preMomentumStochRsiOverrideApplied
+            ? "pre-momentum-stochrsi-extreme"
+            : shortTermAlignmentOverrideApplied
+              ? "short-term-alignment"
+              : momentumDirectionOverrideApplied 
+                ? "momentum-direction-override"
+                : orderFlowDirectionOverrideApplied 
+                  ? "order-flow-direction"
+                  : lateGrindAccepted 
+                    ? "late-grind-acceptance" 
+                    : directionResult.source;
         
         // Apply override position multipliers if used
         let overridePositionMultiplier = 1.0;
