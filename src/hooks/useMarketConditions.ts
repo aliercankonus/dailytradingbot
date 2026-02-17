@@ -49,9 +49,10 @@ const fetchMarketConditions = async (): Promise<MarketConditions> => {
   
   const { data, error: queryError } = await supabase
     .from('signal_rejection_log')
-    .select('*')
+    .select('symbol, rejection_reason, checked_at, filters_status')
     .gte('checked_at', tenMinutesAgo)
-    .order('checked_at', { ascending: false });
+    .order('checked_at', { ascending: false })
+    .limit(200);
 
   if (queryError) throw queryError;
 
@@ -77,12 +78,10 @@ const fetchMarketConditions = async (): Promise<MarketConditions> => {
 
   latestBySymbol.forEach((rejection, symbol) => {
     const filtersStatus = rejection.filters_status || {};
-    const trendData = rejection.trend_data || {};
     const reason = rejection.rejection_reason || '';
 
     const rawVolumeRatio = filtersStatus.volumeRatio ?? 
                            filtersStatus.volume_ratio ?? 
-                           trendData?.volume?.ratio ?? 
                            null;
     
     const volumeRatio = typeof rawVolumeRatio === 'number' && rawVolumeRatio >= 0 
@@ -95,21 +94,17 @@ const fetchMarketConditions = async (): Promise<MarketConditions> => {
     
     const trendDirection = filtersStatus.derivedDirection ?? 
                            filtersStatus.derived_direction ??
-                           trendData?.trend ?? 
-                           trendData?.direction ?? 
+                           filtersStatus.primaryTrend ??
                            'unknown';
     
     const rawAdx = filtersStatus.adx ?? 
                    filtersStatus.ADX ?? 
-                   trendData?.adx ?? 
-                   trendData?.ADX ?? 
                    null;
-    const adx = typeof rawAdx === 'number' ? rawAdx : null;
+    const adx = typeof rawAdx === 'number' ? rawAdx : (typeof rawAdx === 'string' ? parseFloat(rawAdx) : null);
     
     const momentumState = filtersStatus.momentumState ?? 
                           filtersStatus.momentum_state ?? 
                           filtersStatus.momentumDirection ??
-                          trendData?.momentumState ?? 
                           'unknown';
     
     const blockingGates: string[] = [];
