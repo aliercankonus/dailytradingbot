@@ -46,8 +46,7 @@ const Index = () => {
   const location = useLocation();
   const [activeTab, setActiveTab] = usePersistedTab("tf-active-tab", "dashboard");
   
-  // Prefetch signal data so collapsed sections render instantly
-  useSignalDataPrefetch();
+
   const [positionsSubTab, setPositionsSubTab] = usePersistedTab("tf-positions-sub", "active");
   
   const [riskSubTab, setRiskSubTab] = usePersistedTab("tf-risk-sub", "sizing");
@@ -70,6 +69,7 @@ const Index = () => {
       <main className="container mx-auto px-3 sm:px-4 py-4">
         <AutoSignalGenerator />
         <TradeCounterSync />
+        <SignalDataPrefetcher />
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <div className="relative md:contents">
             <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-6 h-8">
@@ -210,5 +210,11 @@ const Index = () => {
     </SignalRefreshProvider>
   );
 };
+
+// Renders inside SignalRefreshProvider to prefetch data for collapsed sections
+function SignalDataPrefetcher() {
+  useSignalDataPrefetch();
+  return null;
+}
 
 export default Index;
