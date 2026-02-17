@@ -23,8 +23,11 @@ export const useBinanceBalance = () => {
   const { data: balance, isLoading: loading, error, refetch } = useQuery({
     queryKey: ['binance-balance'],
     queryFn: fetchBinanceBalance,
-    staleTime: 20 * 1000,       // 20s stale (was 30s interval)
-    refetchInterval: 30 * 1000, // auto-refetch every 30s
+    staleTime: 20 * 1000,
+    gcTime: 300000,
+    refetchInterval: 30 * 1000,
+    refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev,
     retry: 1,
   });
 

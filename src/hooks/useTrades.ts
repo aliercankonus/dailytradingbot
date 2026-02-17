@@ -39,10 +39,11 @@ export const useTrades = () => {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: TRADES_QUERY_KEY,
     queryFn: fetchTrades,
-    staleTime: 30000, // 30 seconds
-    gcTime: 300000, // 5 minutes
-    refetchInterval: 60000, // Background refetch every 60 seconds
+    staleTime: 30000,
+    gcTime: 300000,
+    refetchInterval: 60000,
     refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev,
   });
 
   // Set up real-time subscription for positions

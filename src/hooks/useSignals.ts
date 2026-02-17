@@ -47,6 +47,7 @@ export const useSignals = () => {
       return (data || []).filter(signal => !usedSignalIds.has(signal.id));
     },
     staleTime: 55000,
+    gcTime: 300000,
     refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
     structuralSharing: true,

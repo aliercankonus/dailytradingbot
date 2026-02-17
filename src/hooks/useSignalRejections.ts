@@ -63,8 +63,8 @@ export const useSignalRejections = () => {
     },
     enabled: !!user?.id,
     staleTime: 55000,
+    gcTime: 300000,
     refetchOnWindowFocus: false,
-    // Keep previous data during refetch to prevent scroll position reset
     placeholderData: (previousData) => previousData,
     structuralSharing: true,
   });

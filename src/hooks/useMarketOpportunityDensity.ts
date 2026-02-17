@@ -137,6 +137,8 @@ export const useMarketOpportunityDensity = (days: number = 7) => {
     },
     enabled: !!user?.id,
     staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev,
   });
 };
