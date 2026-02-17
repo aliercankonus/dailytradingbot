@@ -107,9 +107,9 @@
   }
 }
 
-/* Smooth tab content transitions — triggers on every tab switch */
+/* Instant tab switches — no animation delay */
 [role="tabpanel"][data-state="active"] {
-  animation: fast-fade 0.15s ease-out;
+  animation: none;
 }
 
 /* Scrollbar hide */
