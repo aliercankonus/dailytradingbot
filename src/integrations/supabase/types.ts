@@ -143,6 +143,42 @@ export type Database = {
         }
         Relationships: []
       }
+      function_metrics: {
+        Row: {
+          created_at: string
+          duration_ms: number
+          error_message: string | null
+          function_name: string
+          id: string
+          phase_timings: Json | null
+          success: boolean
+          symbols_count: number | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          duration_ms: number
+          error_message?: string | null
+          function_name: string
+          id?: string
+          phase_timings?: Json | null
+          success?: boolean
+          symbols_count?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          duration_ms?: number
+          error_message?: string | null
+          function_name?: string
+          id?: string
+          phase_timings?: Json | null
+          success?: boolean
+          symbols_count?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       market_regime_history: {
         Row: {
           adx: number | null
