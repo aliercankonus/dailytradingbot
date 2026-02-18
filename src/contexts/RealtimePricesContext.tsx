@@ -63,58 +63,27 @@ export const RealtimePricesProvider = ({ children }: { children: ReactNode }) =>
 
     fetchSymbols();
 
-    // Only re-fetch on INSERT/DELETE events (new positions or closed positions)
-    // Not on UPDATE events (which happen frequently for price updates)
-    const insertChannel = supabase
-      .channel('positions-insert-sync')
+    // Single channel for all position changes that affect symbol list
+    const positionsChannel = supabase
+      .channel('positions-symbols-sync')
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'positions',
-          filter: `user_id=eq.${user.id}`,
-        },
-        () => {
-          console.log('[RealtimePricesContext] New position opened, refreshing symbols');
-          fetchSymbols();
-        }
-      )
-      .subscribe();
-
-    const deleteChannel = supabase
-      .channel('positions-delete-sync')
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'positions',
-          filter: `user_id=eq.${user.id}`,
-        },
-        () => {
-          console.log('[RealtimePricesContext] Position deleted, refreshing symbols');
-          fetchSymbols();
-        }
-      )
-      .subscribe();
-
-    // Also listen for status changes (position closed)
-    const updateChannel = supabase
-      .channel('positions-status-sync')
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
+          event: '*',
           schema: 'public',
           table: 'positions',
           filter: `user_id=eq.${user.id}`,
         },
         (payload) => {
-          // Only refresh if status changed to 'closed' (position no longer active)
-          const oldStatus = (payload.old as any)?.status;
-          const newStatus = (payload.new as any)?.status;
-          if (oldStatus === 'active' && newStatus === 'closed') {
+          // Refresh symbols on INSERT, DELETE, or status change to 'closed'
+          if (payload.eventType === 'INSERT' || payload.eventType === 'DELETE') {
+            console.log('[RealtimePricesContext] Position added/removed, refreshing symbols');
+            fetchSymbols();
+          } else if (
+            payload.eventType === 'UPDATE' &&
+            (payload.old as any)?.status === 'active' &&
+            (payload.new as any)?.status === 'closed'
+          ) {
             console.log('[RealtimePricesContext] Position closed, refreshing symbols');
             fetchSymbols();
           }
@@ -123,9 +92,7 @@ export const RealtimePricesProvider = ({ children }: { children: ReactNode }) =>
       .subscribe();
 
     return () => {
-      supabase.removeChannel(insertChannel);
-      supabase.removeChannel(deleteChannel);
-      supabase.removeChannel(updateChannel);
+      supabase.removeChannel(positionsChannel);
     };
   }, [user, fetchSymbols]);
 
