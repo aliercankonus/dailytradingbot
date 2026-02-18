@@ -8,7 +8,7 @@ import { PortfolioMetrics } from "@/components/PortfolioMetrics";
 import { LivePriceCard } from "@/components/LivePriceCard";
 import { CloseAllTradesButton } from "@/components/CloseAllTradesButton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AutoSignalGenerator } from "@/components/AutoSignalGenerator";
+
 import { TradeCounterSync } from "@/components/TradeCounterSync";
 
 import { SignalRefreshProvider } from "@/contexts/SignalRefreshContext";
@@ -67,7 +67,7 @@ const Index = () => {
       <AppHeader />
       
       <main className="container mx-auto px-3 sm:px-4 py-4">
-        <AutoSignalGenerator />
+        
         <TradeCounterSync />
         <SignalDataPrefetcher />
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
