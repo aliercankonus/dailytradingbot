@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
+import { useRealtimePositionSync } from "@/hooks/useRealtimePositionSync";
 import { AppHeader } from "@/components/AppHeader";
 import { BotStatus } from "@/components/BotStatus";
 import { TodayPerformanceWidget } from "@/components/TodayPerformanceWidget";
@@ -44,6 +45,9 @@ const usePersistedTab = (key: string, defaultValue: string) => {
 const Index = () => {
   const location = useLocation();
   const [activeTab, setActiveTab] = usePersistedTab("tf-active-tab", "dashboard");
+
+  // Always-on realtime sync regardless of active tab
+  useRealtimePositionSync();
   
 
   const [positionsSubTab, setPositionsSubTab] = usePersistedTab("tf-positions-sub", "active");

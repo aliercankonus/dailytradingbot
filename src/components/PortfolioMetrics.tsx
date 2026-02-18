@@ -5,7 +5,7 @@ import { useRiskParametersContext } from "@/contexts/RiskParametersContext";
 import { usePositions } from "@/hooks/usePositions";
 import { useBinanceBalance } from "@/hooks/useBinanceBalance";
 import { usePortfolioMetrics } from "@/hooks/usePortfolioMetrics";
-import { useRealtimePositionSync } from "@/hooks/useRealtimePositionSync";
+
 import { useMemo } from "react";
 import { formatPrice, formatPercent } from "@/lib/utils";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,7 @@ export const PortfolioMetrics = () => {
   const { balance: binanceBalance, loading: balanceLoading } = useBinanceBalance();
   const { data: portfolioMetrics, isLoading: metricsLoading } = usePortfolioMetrics();
 
-  useRealtimePositionSync();
+  // Real-time position sync is handled at page level (Index.tsx)
 
   const loading = riskLoading || metricsLoading || positionsLoading || balanceLoading;
 
