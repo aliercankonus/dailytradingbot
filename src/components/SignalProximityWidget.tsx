@@ -270,9 +270,9 @@ export const SignalProximityWidget = memo(function SignalProximityWidget() {
                   <div className="font-medium">{p.symbol} — Score Breakdown</div>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
                     <span className="text-muted-foreground">ADX proximity:</span>
-                    <span>{p.components.adxScore} {p.adx !== null ? `(${p.adx.toFixed(1)})` : ""}</span>
+                    <span>{p.components.adxScore} {typeof p.adx === "number" ? `(${p.adx.toFixed(1)})` : ""}</span>
                     <span className="text-muted-foreground">StochRSI proximity:</span>
-                    <span>{p.components.stochScore} {p.stochK4h !== null ? `(4h K=${p.stochK4h.toFixed(1)})` : ""}</span>
+                    <span>{p.components.stochScore} {typeof p.stochK4h === "number" ? `(4h K=${p.stochK4h.toFixed(1)})` : ""}</span>
                     <span className="text-muted-foreground">Momentum score:</span>
                     <span>{p.components.momentumScore}</span>
                     <span className="text-muted-foreground">Active gates:</span>
