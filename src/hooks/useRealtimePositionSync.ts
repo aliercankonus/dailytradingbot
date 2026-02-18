@@ -1,65 +1,43 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { POSITIONS_QUERY_KEY } from './usePositions';
+import { TRADES_QUERY_KEY } from './useTrades';
+import { PORTFOLIO_METRICS_QUERY_KEY } from './usePortfolioMetrics';
 
 /**
- * Hook that listens for real-time position changes and invalidates cache
- * Triggers instant updates when positions open, close, or update
+ * Consolidated hook that listens for ALL real-time position changes
+ * and invalidates positions, trades, closed-positions, and portfolio-metrics caches.
+ * Replaces both the old position-sync and positions-changes channels.
  */
 export const useRealtimePositionSync = () => {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    console.log('[RealtimePositionSync] Setting up real-time subscription for position updates');
+    console.log('[RealtimePositionSync] Setting up consolidated real-time subscription');
 
     const channel = supabase
-      .channel('position-sync')
+      .channel('positions-consolidated')
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
+          event: '*',
           schema: 'public',
           table: 'positions'
         },
         (payload) => {
-          console.log('[RealtimePositionSync] New position opened:', payload);
-          
-          // Invalidate positions cache to trigger immediate refetch
-          queryClient.invalidateQueries({ queryKey: ['positions'] });
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'positions'
-        },
-        (payload) => {
-          console.log('[RealtimePositionSync] Position updated:', payload);
-          
-          // Invalidate positions cache to trigger immediate refetch
-          queryClient.invalidateQueries({ queryKey: ['positions'] });
-          
+          console.log('[RealtimePositionSync] Position change detected:', payload.eventType);
+
+          // Always invalidate active positions and trades
+          queryClient.invalidateQueries({ queryKey: POSITIONS_QUERY_KEY });
+          queryClient.invalidateQueries({ queryKey: TRADES_QUERY_KEY });
+
           // If position was closed, also invalidate portfolio metrics and closed positions
-          if (payload.new.status === 'closed') {
-            queryClient.invalidateQueries({ queryKey: ['portfolio-metrics'] });
+          if (payload.eventType === 'UPDATE' && (payload.new as any)?.status === 'closed') {
+            console.log('[RealtimePositionSync] Position closed, invalidating portfolio & history caches');
+            queryClient.invalidateQueries({ queryKey: PORTFOLIO_METRICS_QUERY_KEY });
             queryClient.invalidateQueries({ queryKey: ['closed-positions'] });
           }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'positions'
-        },
-        (payload) => {
-          console.log('[RealtimePositionSync] Position deleted:', payload);
-          
-          // Invalidate positions cache to trigger immediate refetch
-          queryClient.invalidateQueries({ queryKey: ['positions'] });
         }
       )
       .subscribe((status) => {
