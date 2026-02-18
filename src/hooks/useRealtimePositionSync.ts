@@ -28,16 +28,12 @@ export const useRealtimePositionSync = () => {
         (payload) => {
           console.log('[RealtimePositionSync] Position change detected:', payload.eventType);
 
-          // Always invalidate active positions and trades
+          // Invalidate ALL position-related caches on every change
+          // This ensures active positions, history, trades, and metrics stay in sync
           queryClient.invalidateQueries({ queryKey: POSITIONS_QUERY_KEY });
           queryClient.invalidateQueries({ queryKey: TRADES_QUERY_KEY });
-
-          // If position was closed, also invalidate portfolio metrics and closed positions
-          if (payload.eventType === 'UPDATE' && (payload.new as any)?.status === 'closed') {
-            console.log('[RealtimePositionSync] Position closed, invalidating portfolio & history caches');
-            queryClient.invalidateQueries({ queryKey: PORTFOLIO_METRICS_QUERY_KEY });
-            queryClient.invalidateQueries({ queryKey: ['closed-positions'] });
-          }
+          queryClient.invalidateQueries({ queryKey: PORTFOLIO_METRICS_QUERY_KEY });
+          queryClient.invalidateQueries({ queryKey: ['closed-positions'] });
         }
       )
       .subscribe((status) => {
