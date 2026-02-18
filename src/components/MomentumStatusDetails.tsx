@@ -110,7 +110,7 @@ export const MomentumStatusDetails = () => {
           <p className="text-muted-foreground text-sm">Loading momentum data...</p>
         ) : (
           <div className="space-y-2">
-            {momentumData.map((data) => {
+            {[...momentumData].sort((a, b) => a.symbol.localeCompare(b.symbol)).map((data) => {
               if (data.error) {
                 return (
                   <div key={data.symbol} className="p-3 bg-destructive/10 rounded-lg border border-destructive/20">
