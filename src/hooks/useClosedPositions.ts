@@ -55,7 +55,7 @@ export const useClosedPositions = (includeArchived: boolean = false) => {
         return data as ClosedPosition[];
       }
     },
-    staleTime: 60 * 1000,
+    staleTime: 0,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
     placeholderData: (prev) => prev,
