@@ -58,6 +58,7 @@ export const useClosedPositions = (includeArchived: boolean = false) => {
     staleTime: 0,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
+    refetchOnMount: 'always',
     placeholderData: (prev) => prev,
   });
 };
