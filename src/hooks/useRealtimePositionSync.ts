@@ -28,12 +28,13 @@ export const useRealtimePositionSync = () => {
         (payload) => {
           console.log('[RealtimePositionSync] Position change detected:', payload.eventType);
 
-          // Invalidate ALL position-related caches on every change
-          // This ensures active positions, history, trades, and metrics stay in sync
+          // Invalidate AND force-refetch ALL position-related caches on every change
           queryClient.invalidateQueries({ queryKey: POSITIONS_QUERY_KEY });
           queryClient.invalidateQueries({ queryKey: TRADES_QUERY_KEY });
           queryClient.invalidateQueries({ queryKey: PORTFOLIO_METRICS_QUERY_KEY });
-          queryClient.invalidateQueries({ queryKey: ['closed-positions'] });
+          // Force refetch closed-positions (not just invalidate) because Radix Tabs
+          // keeps components mounted but hidden, so invalidation alone may not trigger a re-render
+          queryClient.refetchQueries({ queryKey: ['closed-positions'] });
         }
       )
       .subscribe((status) => {
