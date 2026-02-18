@@ -2311,6 +2311,41 @@ serve(async (req) => {
       symbolRegimeMap.set(symbol, 'EARLY_BLOCK');
     }
 
+    // ============= PRE-COMPUTE ORDER FLOW FOR ALL SYMBOLS =============
+    // Must happen BEFORE the main analysis loop because early gates (POSITION_DEDUPLICATION,
+    // EXISTING_SIGNAL, MAX_TRADES_PER_SYMBOL) use `continue` and skip the order flow caching.
+    // Without this, symbols blocked by those gates would never appear in the Order Flow dashboard.
+    for (const { symbol } of activeSymbols) {
+      const trendData = trendDataMap.get(symbol);
+      const historicalData = historicalDataMap.get(symbol);
+      if (!trendData || !historicalData) {
+        logger.forSymbol(symbol).info(`📊 ORDER_FLOW_PRECOMPUTE: skipped — trendData=${!!trendData}, historicalData=${!!historicalData}`);
+        continue;
+      }
+      
+      const trend = trendData.primaryTrend || "neutral";
+      const direction: "long" | "short" = trend === "bearish" ? "short" : "long";
+      const klines = historicalData.klines || [];
+      
+      if (klines.length >= 30) {
+        const orderFlowResult = analyzeOrderFlow(klines, direction);
+        if (orderFlowResult) {
+          const closes = klines.slice(-50).map((k: any) => parseFloat(k[4]));
+          symbolOrderFlowMap.set(symbol, {
+            orderFlow: orderFlowResult,
+            closes,
+            direction,
+            directionSource: "strategy-analyzer"
+          });
+        } else {
+          logger.forSymbol(symbol).debug(`📊 ORDER_FLOW_PRECOMPUTE: analyzeOrderFlow returned null`);
+        }
+      } else {
+        logger.forSymbol(symbol).debug(`📊 ORDER_FLOW_PRECOMPUTE: insufficient klines (${klines.length} < 30)`);
+      }
+    }
+    logger.info(`📊 Pre-computed order flow for ${symbolOrderFlowMap.size}/${activeSymbols.length} symbols`);
+
     // Track statistics
     const signals: SignalData[] = [];
     let totalSignalsGenerated = 0;
