@@ -41,9 +41,10 @@ export const useRealtimePositionSync = () => {
           // Invalidate positions cache to trigger immediate refetch
           queryClient.invalidateQueries({ queryKey: ['positions'] });
           
-          // If position was closed, also invalidate portfolio metrics
+          // If position was closed, also invalidate portfolio metrics and closed positions
           if (payload.new.status === 'closed') {
             queryClient.invalidateQueries({ queryKey: ['portfolio-metrics'] });
+            queryClient.invalidateQueries({ queryKey: ['closed-positions'] });
           }
         }
       )
