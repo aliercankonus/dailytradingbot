@@ -6019,6 +6019,11 @@ serve(async (req) => {
           // CENTRALIZED: Use shared extractor for StochRSI K
           const stochRsiK4h = extractStochRsiK(trendData, '4h');
           const adxSlope = fullAdxResult.adxSlope ?? 0;
+          // FIX: Regime-consistent slope for RISING_TREND_EXCEPTION (Fix #2 slope mismatch)
+          // The 4-State regime classifier uses trendData.volatility.adxSlope (e.g., 1.06 for BTC)
+          // but fullAdxResult.adxSlope can differ significantly (e.g., -0.48). Use regime slope
+          // for checks that condition on regime === 'BREAKOUT_SETUP'.
+          const regimeConsistentAdxSlope = trendData.volatility?.adxSlope ?? adxSlope;
           
           let moveExhaustionBlocked = false;
           let moveExhaustionReason = '';
@@ -6166,9 +6171,10 @@ serve(async (req) => {
           let risingTrendExceptionShadow = false;
           
           if (risingTrendEx?.ENABLED) {
+            // FIX: Use regimeConsistentAdxSlope (not fullAdxResult slope) to match what classified the regime
             const meetsConditions = 
               (!risingTrendEx.REQUIRE_BREAKOUT_SETUP_REGIME || fourStateRegime.regime === 'BREAKOUT_SETUP') &&
-              adxSlope >= risingTrendEx.MIN_ADX_SLOPE &&
+              regimeConsistentAdxSlope >= risingTrendEx.MIN_ADX_SLOPE &&
               adx >= risingTrendEx.MIN_ADX &&
               adx <= risingTrendEx.MAX_ADX;
             
@@ -6176,7 +6182,7 @@ serve(async (req) => {
               if (risingTrendEx.SHADOW_MODE) {
                 // SHADOW MODE: Log what WOULD happen but don't change thresholds
                 risingTrendExceptionShadow = true;
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 RISING_TREND_EXCEPTION [SHADOW]: Would raise thresholds to soft=${risingTrendEx.SOFT_THRESHOLD_PERCENT}%, hard=${risingTrendEx.HARD_THRESHOLD_PERCENT}% | ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, regime=${fourStateRegime.regime}`);
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 RISING_TREND_EXCEPTION [SHADOW]: Would raise thresholds to soft=${risingTrendEx.SOFT_THRESHOLD_PERCENT}%, hard=${risingTrendEx.HARD_THRESHOLD_PERCENT}% | ADX=${adx.toFixed(1)}, regimeSlope=${regimeConsistentAdxSlope.toFixed(2)}, fullAdxSlope=${adxSlope.toFixed(2)}, regime=${fourStateRegime.regime}`);
                 
                 // Log shadow signal for tracking
                 try {
