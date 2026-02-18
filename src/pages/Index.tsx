@@ -11,9 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { TradeCounterSync } from "@/components/TradeCounterSync";
 
-import { SignalRefreshProvider } from "@/contexts/SignalRefreshContext";
-import { useSignalDataPrefetch } from "@/hooks/useSignalDataPrefetch";
-import { RefreshCountdownBar } from "@/components/RefreshCountdownBar";
+
+
 
 import { MarketConditionsDashboard } from "@/components/MarketConditionsDashboard";
 import { SignalsOverview } from "@/components/SignalsOverview";
@@ -62,14 +61,14 @@ const Index = () => {
   }, [location.key, location.pathname]);
 
   return (
-    <SignalRefreshProvider>
+    <>
     <div className="min-h-screen bg-background">
       <AppHeader />
       
       <main className="container mx-auto px-3 sm:px-4 py-4">
         
         <TradeCounterSync />
-        <SignalDataPrefetcher />
+        
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <div className="relative md:contents">
             <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-6 h-8">
@@ -82,9 +81,7 @@ const Index = () => {
             </TabsList>
             <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-background to-transparent pointer-events-none md:hidden" />
           </div>
-          <div className="flex justify-end">
-            <RefreshCountdownBar />
-          </div>
+          
 
           <TabsContent value="dashboard" className="space-y-4">
             <div className="flex justify-end mb-2">
@@ -207,14 +204,8 @@ const Index = () => {
         </Tabs>
       </main>
     </div>
-    </SignalRefreshProvider>
+    </>
   );
 };
-
-// Renders inside SignalRefreshProvider to prefetch data for collapsed sections
-function SignalDataPrefetcher() {
-  useSignalDataPrefetch();
-  return null;
-}
 
 export default Index;

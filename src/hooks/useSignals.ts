@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useSignalRefresh } from '@/contexts/SignalRefreshContext';
 
 interface Signal {
   id: string;
@@ -20,10 +19,8 @@ interface Signal {
 }
 
 export const useSignals = () => {
-  const { lastRefreshTime } = useSignalRefresh();
-
   const { data: signals = [], isLoading: loading, error: queryError } = useQuery({
-    queryKey: ['trading-signals', lastRefreshTime],
+    queryKey: ['trading-signals'],
     queryFn: async (): Promise<Signal[]> => {
       const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       const now = new Date().toISOString();
@@ -46,8 +43,9 @@ export const useSignals = () => {
 
       return (data || []).filter(signal => !usedSignalIds.has(signal.id));
     },
-    staleTime: 55000,
-    gcTime: 300000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
     structuralSharing: true,

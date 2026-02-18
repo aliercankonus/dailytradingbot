@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { useSignalRefresh } from "@/contexts/SignalRefreshContext";
 
 // Zone analytics types for MOVE_EXHAUSTION gate
 export type MoveZone = 'FRESH' | 'SOFT' | 'HARD' | 'EXCEPTION' | 'RELAXED_SOFT' | 'RELAXED_HARD';
@@ -150,11 +149,9 @@ export interface BlockedSignal {
 
 export function useBlockedSignals(limit: number = 20) {
   const { user } = useAuth();
-  const { lastRefreshTime } = useSignalRefresh();
 
   return useQuery({
-    // Include lastRefreshTime in queryKey to trigger refetch when central refresh happens
-    queryKey: ["blocked-signals", user?.id, limit, lastRefreshTime],
+    queryKey: ["blocked-signals", user?.id, limit],
     queryFn: async (): Promise<BlockedSignal[]> => {
       if (!user?.id) return [];
 
@@ -180,8 +177,9 @@ export function useBlockedSignals(limit: number = 20) {
       }));
     },
     enabled: !!user?.id,
-    staleTime: 55000,
-    gcTime: 300000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
     structuralSharing: true,

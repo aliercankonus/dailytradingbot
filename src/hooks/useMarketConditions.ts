@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useSignalRefresh } from '@/contexts/SignalRefreshContext';
 
 // Constants matching edge function thresholds
 const LOW_VOLUME_THRESHOLD = 0.5; // 50% of average
@@ -183,13 +182,12 @@ const fetchMarketConditions = async (): Promise<MarketConditions> => {
 };
 
 export const useMarketConditions = () => {
-  const { lastRefreshTime } = useSignalRefresh();
-
   const { data: conditions, isLoading: loading, error, refetch } = useQuery({
-    queryKey: ['market-conditions', lastRefreshTime],
+    queryKey: ['market-conditions'],
     queryFn: fetchMarketConditions,
-    staleTime: 55000,
-    gcTime: 300000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
     placeholderData: (prev) => prev,
     retry: 1,

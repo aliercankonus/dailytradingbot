@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useSignalRefresh } from '@/contexts/SignalRefreshContext';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface AIValidationResult {
@@ -56,14 +55,14 @@ export const SIGNAL_REJECTIONS_QUERY_KEY = ['signal-rejections'];
 
 export const useSignalRejections = () => {
   const { user } = useAuth();
-  const { lastRefreshTime } = useSignalRefresh();
 
   const { data: rejections = [], isLoading: loading } = useQuery({
-    queryKey: [...SIGNAL_REJECTIONS_QUERY_KEY, user?.id, lastRefreshTime],
+    queryKey: [...SIGNAL_REJECTIONS_QUERY_KEY, user?.id],
     queryFn: fetchSignalRejections,
     enabled: !!user?.id,
-    staleTime: 55000,
-    gcTime: 300000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
     structuralSharing: true,
