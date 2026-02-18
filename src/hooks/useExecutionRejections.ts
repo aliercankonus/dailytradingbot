@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { useSignalRefresh } from '@/contexts/SignalRefreshContext';
 
 export interface ExecutionRejection {
   symbol: string;
@@ -16,14 +15,12 @@ export interface ExecutionRejection {
  */
 export function useExecutionRejections() {
   const { user } = useAuth();
-  const { lastRefreshTime } = useSignalRefresh();
 
   return useQuery({
-    queryKey: ['execution-rejections', user?.id, lastRefreshTime],
+    queryKey: ['execution-rejections', user?.id],
     queryFn: async (): Promise<Map<string, ExecutionRejection>> => {
       if (!user?.id) return new Map();
 
-      // Fetch execution-stage rejections from last 30 minutes
       const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
 
       const { data, error } = await supabase
@@ -39,7 +36,6 @@ export function useExecutionRejections() {
         throw error;
       }
 
-      // Group by symbol, keeping only the latest rejection per symbol
       const latestBySymbol = new Map<string, ExecutionRejection>();
       for (const row of data || []) {
         if (!latestBySymbol.has(row.symbol)) {
@@ -55,8 +51,9 @@ export function useExecutionRejections() {
       return latestBySymbol;
     },
     enabled: !!user?.id,
-    staleTime: 55000,
-    gcTime: 300000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
     placeholderData: (prev) => prev,
   });

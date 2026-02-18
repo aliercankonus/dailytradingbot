@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { useSignalRefresh } from '@/contexts/SignalRefreshContext';
 
 export interface RegimeTransitionEntry {
   symbol: string;
@@ -16,10 +15,9 @@ export interface RegimeTransitionEntry {
 
 export const useRegimeTransitions = () => {
   const { user } = useAuth();
-  const { lastRefreshTime } = useSignalRefresh();
 
   return useQuery({
-    queryKey: ['regime-transitions', user?.id, lastRefreshTime],
+    queryKey: ['regime-transitions', user?.id],
     queryFn: async (): Promise<RegimeTransitionEntry[]> => {
       const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
 
@@ -57,8 +55,9 @@ export const useRegimeTransitions = () => {
       return transitions;
     },
     enabled: !!user?.id,
-    staleTime: 55000,
-    gcTime: 300000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
     placeholderData: (prev: RegimeTransitionEntry[] | undefined) => prev,
   });
