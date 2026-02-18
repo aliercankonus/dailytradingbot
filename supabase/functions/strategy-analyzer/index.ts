@@ -6116,9 +6116,82 @@ serve(async (req) => {
             }
           }
           
+          // ============= RISING TREND EXCEPTION (Fix #2) =============
+          // When ADX slope is strongly rising AND regime is BREAKOUT_SETUP,
+          // the move is accelerating — raise MOVE_EXHAUSTED thresholds to 6%/8%
+          // so continuation entries aren't blocked during fast structural moves.
+          const risingTrendEx = MOVE_EXHAUSTION_FILTER_PARAMS.RISING_TREND_EXCEPTION;
+          let risingTrendExceptionApplied = false;
+          let risingTrendExceptionShadow = false;
+          
+          if (risingTrendEx?.ENABLED) {
+            const meetsConditions = 
+              (!risingTrendEx.REQUIRE_BREAKOUT_SETUP_REGIME || fourStateRegime.regime === 'BREAKOUT_SETUP') &&
+              adxSlope >= risingTrendEx.MIN_ADX_SLOPE &&
+              adx >= risingTrendEx.MIN_ADX &&
+              adx <= risingTrendEx.MAX_ADX;
+            
+            if (meetsConditions) {
+              if (risingTrendEx.SHADOW_MODE) {
+                // SHADOW MODE: Log what WOULD happen but don't change thresholds
+                risingTrendExceptionShadow = true;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 RISING_TREND_EXCEPTION [SHADOW]: Would raise thresholds to soft=${risingTrendEx.SOFT_THRESHOLD_PERCENT}%, hard=${risingTrendEx.HARD_THRESHOLD_PERCENT}% | ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, regime=${fourStateRegime.regime}`);
+                
+                // Log shadow signal for tracking
+                try {
+                  await logShadowSignal(supabase, {
+                    userId,
+                    symbol,
+                    signalType: derivedDirection as 'long' | 'short',
+                    strategyName: 'RISING_TREND_EXCEPTION',
+                    gateBlockedBy: 'volume_filter',  // Using existing enum value for move exhaustion
+                    oldGateResult: 'blocked',
+                    newGateResult: 'passed',
+                    gateDetails: {
+                      gate: 'RISING_TREND_EXCEPTION',
+                      shadowMode: true,
+                      regime: fourStateRegime.regime,
+                      adx: Number(adx.toFixed(1)),
+                      adxSlope: Number(adxSlope.toFixed(2)),
+                      currentSoftThreshold: effectiveSoftThreshold,
+                      currentHardThreshold: effectiveHardThreshold,
+                      wouldUseSoftThreshold: risingTrendEx.SOFT_THRESHOLD_PERCENT,
+                      wouldUseHardThreshold: risingTrendEx.HARD_THRESHOLD_PERCENT,
+                      wouldUsePositionMultiplier: risingTrendEx.POSITION_MULTIPLIER,
+                      stochRsiK4h: Number(stochRsiK4h.toFixed(1)),
+                      priceDistanceFromHigh: priceDistance?.distanceFromHighPercent?.toFixed(2),
+                      priceDistanceFromLow: priceDistance?.distanceFromLowPercent?.toFixed(2),
+                    },
+                    confidenceScore: undefined,
+                    entryPrice: trendData?.currentPrice,
+                    indicators: {
+                      adx: Number(adx.toFixed(1)),
+                      adxSlope: Number(adxSlope.toFixed(2)),
+                      stochRsiK: Number(stochRsiK4h.toFixed(1)),
+                      regime: fourStateRegime.regime,
+                    },
+                  });
+                } catch (shadowErr) {
+                  logger.forSymbol(symbol).warn(`Shadow log error (RISING_TREND_EXCEPTION): ${shadowErr}`);
+                }
+              } else {
+                // LIVE MODE: Apply relaxed thresholds
+                risingTrendExceptionApplied = true;
+                effectiveSoftThreshold = risingTrendEx.SOFT_THRESHOLD_PERCENT;
+                effectiveHardThreshold = risingTrendEx.HARD_THRESHOLD_PERCENT;
+                relaxedPositionSize = risingTrendEx.POSITION_MULTIPLIER;
+                useRelaxedThresholds = true;
+                relaxationCondition = `RISING_TREND: ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, regime=${fourStateRegime.regime}`;
+                
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚀 RISING_TREND_EXCEPTION [LIVE]: Thresholds raised to soft=${effectiveSoftThreshold}%, hard=${effectiveHardThreshold}%, size=${(relaxedPositionSize * 100).toFixed(0)}% | ${relaxationCondition}`);
+              }
+            }
+          }
+          
           // Determine effective thresholds based on graduated relaxation
           // Note: effectiveHardThreshold and effectiveSoftThreshold are already set
           // by the graduated slope logic above when useRelaxedThresholds = true
+          // OR by the RISING_TREND_EXCEPTION when conditions are met
           if (!useRelaxedThresholds) {
             // No relaxation — use default direction-specific thresholds
             effectiveHardThreshold = derivedDirection === 'short'
