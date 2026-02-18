@@ -2230,24 +2230,35 @@ serve(async (req) => {
 
     logger.info(`${LOG_CATEGORIES.SIGNAL} Fetching trend data for ${eligibleSymbols.length} eligible symbols (after win rate filter)`);
 
-    // Sequential fetch with delay to reduce Binance API rate limiting (429 errors)
-    // Each calculate-trend call makes multiple Binance API requests, so we need spacing
-    const TREND_FETCH_DELAY_MS = 150; // 150ms between symbols to stay under rate limits
+    // Bounded parallel fetch with concurrency limit to balance speed vs Binance rate limits
+    // Concurrency 3 reduces ~10s sequential to ~4-5s while staying under API limits
+    const TREND_CONCURRENCY = 3;
+    const TREND_FETCH_DELAY_MS = 100; // Small delay between batch starts
     
     const trendResults: { symbol: string; trendData: any }[] = [];
-    for (let i = 0; i < eligibleSymbols.length; i++) {
-      const symbol = eligibleSymbols[i];
-      try {
-        // Add delay between requests (skip first one)
-        if (i > 0) {
-          await new Promise(resolve => setTimeout(resolve, TREND_FETCH_DELAY_MS));
-        }
-        const { data, error } = await supabase.functions.invoke("calculate-trend", { body: { symbol } });
-        trendResults.push({ symbol, trendData: error ? null : data });
-      } catch (err) {
-        logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.BINANCE} Trend fetch failed: ${err}`);
-        trendResults.push({ symbol, trendData: null });
+    
+    // Process in batches of TREND_CONCURRENCY
+    for (let batchStart = 0; batchStart < eligibleSymbols.length; batchStart += TREND_CONCURRENCY) {
+      const batch = eligibleSymbols.slice(batchStart, batchStart + TREND_CONCURRENCY);
+      
+      // Add delay between batches (skip first)
+      if (batchStart > 0) {
+        await new Promise(resolve => setTimeout(resolve, TREND_FETCH_DELAY_MS));
       }
+      
+      const batchResults = await Promise.all(
+        batch.map(async (symbol) => {
+          try {
+            const { data, error } = await supabase.functions.invoke("calculate-trend", { body: { symbol } });
+            return { symbol, trendData: error ? null : data };
+          } catch (err) {
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.BINANCE} Trend fetch failed: ${err}`);
+            return { symbol, trendData: null };
+          }
+        })
+      );
+      
+      trendResults.push(...batchResults);
     }
 
     const trendDataMap = new Map<string, any>();
@@ -2256,6 +2267,10 @@ serve(async (req) => {
     });
 
     logger.success(`Got trend data for ${trendDataMap.size} symbols`);
+    
+    // Mark end of data fetching phase for per-phase timing
+    const dataFetchEndMs = Date.now();
+    logger.info(`⏱️ Data fetch phase: ${dataFetchEndMs - cycleStartMs}ms`);
 
     // ============= CACHE TREND SNAPSHOTS FOR FRONTEND (ATOMIC) =============
     // Upsert full calculate-trend response + extracted summary columns into trend_snapshots
@@ -15837,6 +15852,8 @@ serve(async (req) => {
             no_trade_reason: noTradeReason,
             details: {
               executionTimeMs: Date.now() - cycleStartMs,
+              dataFetchTimeMs: dataFetchEndMs ? dataFetchEndMs - cycleStartMs : null,
+              analysisTimeMs: dataFetchEndMs ? Date.now() - dataFetchEndMs : null,
               rejections: {
                 byHardGates: rejectedByHardGates,
                 byRegime: rejectedByRegime,
@@ -15870,6 +15887,24 @@ serve(async (req) => {
     const rejectionsInserted = await rejectionBuffer.flush(supabase, logger);
     activeRejectionBuffer = null; // Disable batch mode
     logger.info(`📝 Rejection buffer flushed: ${rejectionsInserted} new entries persisted`);
+
+    // ============= PERSIST FUNCTION METRICS =============
+    const totalDurationMs = Date.now() - cycleStartMs;
+    try {
+      await supabase.from('function_metrics').insert({
+        function_name: 'strategy-analyzer',
+        user_id: userId,
+        duration_ms: totalDurationMs,
+        phase_timings: {
+          dataFetchMs: dataFetchEndMs - cycleStartMs,
+          analysisMs: totalDurationMs - (dataFetchEndMs - cycleStartMs),
+        },
+        success: true,
+        symbols_count: perSymbolGateAttribution.size,
+      });
+    } catch (metricsErr) {
+      logger.warn(`⏱️ Metrics persist failed: ${metricsErr}`);
+    }
 
     return new Response(JSON.stringify({
       signals,

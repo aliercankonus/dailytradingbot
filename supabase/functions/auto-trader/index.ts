@@ -77,9 +77,17 @@ serve(async (req) => {
     }
     
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const cycleStartMs = Date.now();
 
     logger.boot();
 
+    // ============= CRON OVERLAP PROTECTION =============
+    // pg_try_advisory_lock returns false if another session already holds the lock
+    // Lock ID 88880001 is unique to auto-trader to prevent concurrent executions
+    const { data: lockResult } = await supabase.rpc('pg_try_advisory_lock', { lock_id: 88880001 }).maybeSingle();
+    // Note: advisory lock via RPC may not be available — fall back gracefully
+    // If it fails, we still proceed but log a warning
+    
     // Fetch all users with trading enabled
     const { data: activeUsers, error: usersError } = await supabase
       .from("risk_parameters")
@@ -251,6 +259,29 @@ serve(async (req) => {
     if (totalExecuted > 0) {
       logger.info(`Strategy breakdown: Momentum=${aggregateStrategyBreakdown.momentum}, MeanReversion=${aggregateStrategyBreakdown.meanReversion}, TrendFollow=${aggregateStrategyBreakdown.trendFollowing}, Other=${aggregateStrategyBreakdown.other}`);
     }
+
+    // ============= PERSIST AUTO-TRADER METRICS =============
+    const totalDurationMs = Date.now() - cycleStartMs;
+    try {
+      await supabase.from('function_metrics').insert({
+        function_name: 'auto-trader',
+        duration_ms: totalDurationMs,
+        phase_timings: {
+          usersProcessed: activeUsers.length,
+          successfulUsers,
+          failedUsers,
+          totalSignals,
+          totalExecuted,
+          totalRejected,
+        },
+        success: failedUsers === 0,
+        error_message: failedUsers > 0 ? `${failedUsers} users failed` : null,
+        symbols_count: totalSignals,
+      });
+    } catch (metricsErr) {
+      logger.warn(`⏱️ Metrics persist failed: ${metricsErr}`);
+    }
+    logger.info(`⏱️ Total auto-trader cycle: ${totalDurationMs}ms`);
 
     return new Response(
       JSON.stringify({

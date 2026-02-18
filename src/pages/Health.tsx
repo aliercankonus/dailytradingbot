@@ -1,10 +1,11 @@
 import { AppHeader } from "@/components/AppHeader";
-import { Activity, AlertTriangle, Clock, Radio, CheckCircle2, XCircle, Timer, TrendingUp } from "lucide-react";
+import { Activity, AlertTriangle, Clock, Radio, CheckCircle2, XCircle, Timer, TrendingUp, BarChart3 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WebSocketHealthDashboard } from "@/components/WebSocketHealthDashboard";
 import { useBotHeartbeats, useBotHealthStates } from "@/hooks/useBotHealth";
+import { FunctionMetricsCard } from "@/components/FunctionMetricsCard";
 import { format, formatDistanceToNow } from "date-fns";
 import { useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
@@ -189,6 +190,22 @@ const Health = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* Function Execution Metrics */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FunctionMetricsCard
+            functionName="strategy-analyzer"
+            displayName="Strategy Analyzer"
+            warningThresholdMs={10000}
+            dangerThresholdMs={20000}
+          />
+          <FunctionMetricsCard
+            functionName="auto-trader"
+            displayName="Auto Trader"
+            warningThresholdMs={15000}
+            dangerThresholdMs={30000}
+          />
+        </div>
 
         <WebSocketHealthDashboard />
 
