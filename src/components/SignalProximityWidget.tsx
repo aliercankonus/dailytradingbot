@@ -277,7 +277,7 @@ export const SignalProximityWidget = memo(function SignalProximityWidget() {
                     <span>{p.components.momentumScore}</span>
                     <span className="text-muted-foreground">Active gates:</span>
                     <span>{p.components.gateCount}</span>
-                    {p.adxSlope !== null && (
+                    {typeof p.adxSlope === "number" && (
                       <>
                         <span className="text-muted-foreground">ADX slope:</span>
                         <span className={p.adxSlope > 0 ? "text-green-400" : "text-red-400"}>
