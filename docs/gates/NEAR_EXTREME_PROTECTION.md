@@ -169,6 +169,24 @@ NEAR_EXTREME_PROTECTION_GATE = {
 - Distance 2.8% < 3.5% → soft zone entry allowed
 - Action: **ALLOW** with 45% position size
 
+## Fix #4: Breakout Setup Relaxation (v1.2 - Shadow Mode)
+
+During `BREAKOUT_SETUP` regime with `adx_slope >= 0.5`, the strict momentum requirement (-25 for shorts, +25 for longs) over-rejects valid continuation entries near extremes. Fix #4 relaxes the threshold to -10/+10 when acceleration is confirmed.
+
+### Activation Criteria (ALL required)
+| Condition | Threshold |
+|-----------|-----------|
+| Regime | BREAKOUT_SETUP |
+| ADX Slope | >= 0.5 |
+| Momentum (SHORT) | <= -10 (relaxed from -25) |
+| Momentum (LONG) | >= +10 (relaxed from +25) |
+
+### Position Sizing
+- **0.35x** position multiplier (conservative)
+
+### Shadow Mode
+Currently in shadow mode — logs to `shadow_mode_signals` with `strategy_name = 'NEAR_EXTREME_BREAKOUT_RELAXATION'` but does NOT override the block. Set `SHADOW_MODE: false` after 3-5 days of observation.
+
 ## Related Gates
 
 - `LTF_CONFIRMATION_GATE`: Requires LTF alignment for continuation
@@ -176,6 +194,13 @@ NEAR_EXTREME_PROTECTION_GATE = {
 - `ADX_SLOPE_GRADUATED`: Bollinger Breakdown Override
 
 ## Changelog
+
+### v1.2 (2025-02-18)
+- Added Fix #4: BREAKOUT_SETUP Relaxation (shadow mode)
+- Relaxes expanded hard block momentum from -25 to -10 (short) / +25 to +10 (long)
+- Requires BREAKOUT_SETUP regime + adx_slope >= 0.5
+- Position multiplier: 0.35x
+- Shadow mode enabled for 3-5 day observation
 
 ### v1.1 (2025-02-03)
 - Added Strong Trend Relaxation
