@@ -1432,6 +1432,10 @@ export type Database = {
         Args: { p_key_type: string; p_user_id: string }
         Returns: string
       }
+      get_market_opportunity_density: {
+        Args: { p_since: string; p_user_id: string }
+        Returns: Json
+      }
       get_user_binance_credentials: {
         Args: { p_user_id: string }
         Returns: {

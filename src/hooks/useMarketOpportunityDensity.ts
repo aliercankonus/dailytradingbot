@@ -12,7 +12,7 @@ export interface MODData {
   totalRejections: number;
 
   // Structural Expansion Candidates
-  structuralExpansionRate: number; // % of regime records that are TREND_EXPANSION
+  structuralExpansionRate: number;
 
   // Energy Index (composite)
   energyIndex: number;
@@ -35,99 +35,87 @@ export const useMarketOpportunityDensity = (days: number = 7) => {
     queryFn: async (): Promise<MODData> => {
       const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-      const [regimeRes, rejectionRes, heartbeatRes] = await Promise.all([
-        supabase
-          .from('market_regime_history')
-          .select('effective_regime, adx, adx_slope, bb_squeeze, symbol')
-          .gte('recorded_at', since),
-        supabase
-          .from('signal_rejection_log')
-          .select('symbol, filters_status')
-          .gte('checked_at', since),
-        supabase
-          .from('bot_heartbeat')
-          .select('no_trade_state')
-          .gte('recorded_at', since),
-      ]);
+      const { data: rpcResult, error } = await supabase.rpc(
+        'get_market_opportunity_density' as any,
+        { p_user_id: user!.id, p_since: since }
+      );
 
-      // Regime distribution
-      const regimeRecords = regimeRes.data || [];
-      const regimeCounts: Record<string, { count: number; adxSum: number; slopeSum: number; adxRising: number; squeeze: number }> = {};
-      
-      for (const r of regimeRecords) {
-        const regime = r.effective_regime || 'UNKNOWN';
-        if (!regimeCounts[regime]) regimeCounts[regime] = { count: 0, adxSum: 0, slopeSum: 0, adxRising: 0, squeeze: 0 };
-        regimeCounts[regime].count++;
-        regimeCounts[regime].adxSum += (r.adx ?? 0);
-        regimeCounts[regime].slopeSum += (r.adx_slope ?? 0);
-        if ((r.adx_slope ?? 0) > 0) regimeCounts[regime].adxRising++;
-        if (r.bb_squeeze) regimeCounts[regime].squeeze++;
+      if (error) {
+        console.error('MOD RPC error:', error);
+        throw error;
       }
 
-      const totalRegime = regimeRecords.length || 1;
+      const result = rpcResult as any;
+
+      // Parse regime data
+      const regimeRecords = result?.regimes || [];
       const regimeDistribution: MODData['regimeDistribution'] = {};
-      for (const [k, v] of Object.entries(regimeCounts)) {
-        regimeDistribution[k] = {
-          count: v.count,
-          pct: (v.count / totalRegime) * 100,
-          avgAdx: v.adxSum / v.count,
-          avgSlope: v.slopeSum / v.count,
-          adxRisingPct: (v.adxRising / v.count) * 100,
-          squeezePct: (v.squeeze / v.count) * 100,
+      let totalRegimeRecords = 0;
+
+      for (const r of regimeRecords) {
+        totalRegimeRecords += Number(r.count);
+      }
+      const totalRegime = totalRegimeRecords || 1;
+
+      for (const r of regimeRecords) {
+        regimeDistribution[r.effective_regime || 'UNKNOWN'] = {
+          count: Number(r.count),
+          pct: (Number(r.count) / totalRegime) * 100,
+          avgAdx: Number(r.avg_adx) || 0,
+          avgSlope: Number(r.avg_slope) || 0,
+          adxRisingPct: Number(r.adx_rising_pct) || 0,
+          squeezePct: Number(r.squeeze_pct) || 0,
         };
       }
 
-      // Rejection density by gate
-      const rejections = rejectionRes.data || [];
+      // Parse rejection data
+      const rejections = result?.rejections || {};
       const gateCounts: Record<string, number> = {};
-      const symbolGates: Record<string, Record<string, number>> = {};
-      
-      for (const r of rejections) {
-        const gate = (r.filters_status as any)?.gate || 'UNKNOWN';
-        gateCounts[gate] = (gateCounts[gate] || 0) + 1;
-        
-        const sym = r.symbol;
-        if (!symbolGates[sym]) symbolGates[sym] = {};
-        symbolGates[sym][gate] = (symbolGates[sym][gate] || 0) + 1;
+      const byGate = rejections.by_gate || {};
+      for (const [gate, count] of Object.entries(byGate)) {
+        gateCounts[gate] = Number(count);
       }
+
+      const totalRejections = Number(rejections.total) || 0;
 
       const symbolBreakdown: MODData['symbolBreakdown'] = {};
-      for (const [sym, gates] of Object.entries(symbolGates)) {
-        const sorted = Object.entries(gates).sort((a, b) => b[1] - a[1]);
-        symbolBreakdown[sym] = {
-          rejections: Object.values(gates).reduce((a, b) => a + b, 0),
-          dominantGate: sorted[0]?.[0] || 'UNKNOWN',
+      const bySymbol = rejections.by_symbol || [];
+      for (const s of bySymbol) {
+        symbolBreakdown[s.symbol] = {
+          rejections: Number(s.rejections),
+          dominantGate: s.dominant_gate || 'UNKNOWN',
         };
       }
 
-      // No-trade states
-      const heartbeats = heartbeatRes.data || [];
+      // Parse heartbeat data
       const noTradeStates: Record<string, number> = {};
-      for (const h of heartbeats) {
-        const state = h.no_trade_state || 'UNKNOWN';
-        noTradeStates[state] = (noTradeStates[state] || 0) + 1;
+      const heartbeats = result?.heartbeats || {};
+      for (const [state, count] of Object.entries(heartbeats)) {
+        noTradeStates[state] = Number(count);
       }
 
-      // Structural Expansion Rate
-      const expansionCount = regimeCounts['TREND_EXPANSION']?.count || 0;
+      // Calculate derived metrics
+      const expansionCount = regimeDistribution['TREND_EXPANSION']?.count || 0;
       const structuralExpansionRate = (expansionCount / totalRegime) * 100;
 
-      // Energy Index: composite of ADX rising %, compression %, expansion %
-      const totalAdxRising = regimeRecords.filter(r => (r.adx_slope ?? 0) > 0).length;
-      const adxRisingPct = (totalAdxRising / totalRegime) * 100;
+      // Energy Index
+      let totalAdxRisingWeighted = 0;
+      for (const r of regimeRecords) {
+        totalAdxRisingWeighted += (Number(r.adx_rising_pct) / 100) * Number(r.count);
+      }
+      const adxRisingPct = (totalAdxRisingWeighted / totalRegime) * 100;
       const compressionPct = regimeDistribution['RANGE_COMPRESSION']?.pct || 0;
       const expansionPct = structuralExpansionRate;
-      
-      // Energy = weighted: 40% expansion rate + 30% ADX rising + 30% (100 - compression%)
+
       const energyIndex = Math.min(100, Math.max(0,
         (expansionPct * 0.4) + (adxRisingPct * 0.3) + ((100 - compressionPct) * 0.3)
       ));
 
       return {
         regimeDistribution,
-        totalRegimeRecords: regimeRecords.length,
+        totalRegimeRecords,
         rejectionDensity: gateCounts,
-        totalRejections: rejections.length,
+        totalRejections,
         structuralExpansionRate,
         energyIndex,
         noTradeStates,
