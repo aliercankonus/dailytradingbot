@@ -5099,6 +5099,41 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
     },
   },
   
+  // ===== RISING TREND EXCEPTION (Fix #2) =====
+  // When ADX slope is strongly rising AND regime is BREAKOUT_SETUP,
+  // the move isn't exhausted — it's accelerating. Raise thresholds significantly.
+  // This captures continuation entries during fast drops/rallies where:
+  //   - Price has moved 3-5% (would normally be blocked)
+  //   - But ADX slope confirms energy is BUILDING, not decaying
+  //   - Regime is transitional (BREAKOUT_SETUP), not fully expanded
+  // SHADOW_MODE: When true, only logs what WOULD have changed — does NOT modify thresholds.
+  // Set to false after 3-5 days of observation to enable live execution.
+  RISING_TREND_EXCEPTION: {
+    ENABLED: true,
+    SHADOW_MODE: true,  // TRUE = log only, FALSE = apply relaxed thresholds
+    
+    // Conditions (ALL must be true)
+    REQUIRE_BREAKOUT_SETUP_REGIME: true,
+    MIN_ADX_SLOPE: 0.5,          // ADX must be strongly rising
+    MIN_ADX: 16,                 // Minimum ADX (not pure noise)
+    MAX_ADX: 30,                 // Below full trend confirmation
+    
+    // Relaxed thresholds when exception applies
+    SOFT_THRESHOLD_PERCENT: 5.0,  // Raised from 3.5%
+    HARD_THRESHOLD_PERCENT: 8.0,  // Raised from 5.0% (doubled hard block zone)
+    
+    // Position sizing (conservative - unconfirmed expansion)
+    POSITION_MULTIPLIER: 0.35,    // 35% of normal position
+    MAX_POSITION_MULTIPLIER: 0.45, // Max with HTF support
+    
+    // Safety: still respect extreme StochRSI
+    STOCHRSI_MIN_FOR_SHORT: 10,   // Only block at EXTREME oversold during expansion
+    STOCHRSI_MAX_FOR_LONG: 90,    // Only block at EXTREME overbought during expansion
+    
+    // Logging
+    LOG_SHADOW_CHECKS: true,
+  },
+  
   // ===== STOCHRSI ALIGNMENT REQUIRED =====
   // In soft zone, block if StochRSI indicates exhaustion
   // FIX: For SHORTs - K <= 65 was WRONG (blocked good continuation shorts)
