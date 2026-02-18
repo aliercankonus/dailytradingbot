@@ -29,6 +29,7 @@ interface MomentumData {
     trend30m: string;
   };
   trend: string;
+  snapshotRecordedAt?: string;
   loading?: boolean;
   error?: string;
 }
@@ -135,6 +136,7 @@ export const fetchMomentumForSymbols = async (): Promise<MomentumData[]> => {
         trend30m: getTfTrend("30m"),
       },
       trend: data.primaryTrend ?? "unknown",
+      snapshotRecordedAt: snapshot.recorded_at,
     } as MomentumData;
   });
 };

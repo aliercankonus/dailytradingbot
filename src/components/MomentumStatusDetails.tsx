@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useMomentumStatus } from "@/hooks/useMomentumStatus";
 import { useState } from "react";
+import { formatDistanceToNow } from "date-fns";
 
 const getMomentumBadge = (state: string) => {
   switch (state) {
@@ -160,6 +161,11 @@ export const MomentumStatusDetails = () => {
                           <span className="text-xs text-muted-foreground flex-1 truncate">
                             {getSummaryText(data)}
                           </span>
+                          {data.snapshotRecordedAt && (
+                            <span className="text-[10px] text-muted-foreground/70 font-mono shrink-0">
+                              {formatDistanceToNow(new Date(data.snapshotRecordedAt), { addSuffix: true })}
+                            </span>
+                          )}
                           <div className="flex items-center gap-2 shrink-0">
                             <Badge
                               variant={trend === "bullish" ? "default" : trend === "bearish" ? "destructive" : "secondary"}
@@ -210,7 +216,14 @@ export const MomentumStatusDetails = () => {
                             <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
                           </div>
                         </div>
-                        <span className="text-xs text-muted-foreground">{getSummaryText(data)}</span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-muted-foreground">{getSummaryText(data)}</span>
+                          {data.snapshotRecordedAt && (
+                            <span className="text-[10px] text-muted-foreground/70 font-mono">
+                              {formatDistanceToNow(new Date(data.snapshotRecordedAt), { addSuffix: true })}
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-3 text-xs text-muted-foreground">
                           <span>
                             4h/1h: <span className="font-medium text-foreground">{higherTimeframeFilter?.trend4h ?? "?"}/{higherTimeframeFilter?.trend1h ?? "?"}</span>
