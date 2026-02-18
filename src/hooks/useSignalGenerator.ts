@@ -1,14 +1,13 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { useRiskParametersContext } from '@/contexts/RiskParametersContext';
 
+// Manual-only signal generator — no auto-interval.
+// Server-side auto-trader cron (every 5 min) handles autonomous generation.
 export const useSignalGenerator = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const { toast } = useToast();
-  const { riskParams, loading } = useRiskParametersContext();
   const isRunningRef = useRef(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const generateSignals = useCallback(async () => {
     if (isRunningRef.current) {
@@ -19,20 +18,10 @@ export const useSignalGenerator = () => {
     try {
       isRunningRef.current = true;
       setIsGenerating(true);
-      
-      if (!riskParams?.is_trading_enabled) {
-        console.log('Bot is disabled, skipping signal generation');
-        return;
-      }
-      
+
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         console.log('No active session, skipping signal generation');
-        return;
-      }
-
-      if (document.hidden) {
-        console.log('Tab is hidden, skipping signal generation');
         return;
       }
 
@@ -40,19 +29,19 @@ export const useSignalGenerator = () => {
 
       if (error) {
         if (error.message?.includes('token') || error.message?.includes('401')) {
-          console.log('Authentication error during auto signal generation, session may have expired');
+          console.log('Authentication error during signal generation, session may have expired');
           return;
         }
         throw error;
       }
 
       if (data?.signals?.length > 0) {
-        const deduplicationInfo = data.totalSignalsGenerated > data.signalsAfterDeduplication 
-          ? ` (${data.totalSignalsGenerated} before deduplication)` 
+        const deduplicationInfo = data.totalSignalsGenerated > data.signalsAfterDeduplication
+          ? ` (${data.totalSignalsGenerated} before deduplication)`
           : '';
         toast({
           title: "Signals Generated",
-          description: data.autoExecuteEnabled 
+          description: data.autoExecuteEnabled
             ? `Generated ${data.signals.length} signals${deduplicationInfo}, executed ${data.executedSignals}`
             : `Found ${data.signals.length} new trading signals${deduplicationInfo}`,
         });
@@ -70,40 +59,7 @@ export const useSignalGenerator = () => {
       isRunningRef.current = false;
       setIsGenerating(false);
     }
-  }, [riskParams?.is_trading_enabled, toast]);
-
-  useEffect(() => {
-    if (loading) {
-      console.log('Waiting for risk parameters to load...');
-      return;
-    }
-
-    if (!riskParams?.is_trading_enabled) {
-      console.log('Bot is disabled, skipping signal generation');
-      return;
-    }
-
-    console.log('Bot is enabled, starting signal generation (90s interval)');
-    generateSignals();
-
-    intervalRef.current = setInterval(generateSignals, 90 * 1000);
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden && riskParams?.is_trading_enabled) {
-        console.log('Tab became visible, generating signals');
-        generateSignals();
-      }
-    };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [riskParams?.is_trading_enabled, loading, generateSignals]);
+  }, [toast]);
 
   return { generateSignals, isGenerating };
 };
