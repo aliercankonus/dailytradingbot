@@ -6247,9 +6247,11 @@ serve(async (req) => {
           
           if (risingTrendEx?.ENABLED) {
             // FIX: Use regimeConsistentAdxSlope (not fullAdxResult slope) to match what classified the regime
+            // SAFETY: Also require fullAdxSlope >= -0.5 to prevent triggering when real-time ADX is declining
             const meetsConditions = 
               (!risingTrendEx.REQUIRE_BREAKOUT_SETUP_REGIME || fourStateRegime.regime === 'BREAKOUT_SETUP') &&
               regimeConsistentAdxSlope >= risingTrendEx.MIN_ADX_SLOPE &&
+              adxSlope >= -0.5 &&  // Dual-slope guard: block if real-time ADX is clearly declining
               adx >= risingTrendEx.MIN_ADX &&
               adx <= risingTrendEx.MAX_ADX;
             
@@ -6274,7 +6276,9 @@ serve(async (req) => {
                       shadowMode: true,
                       regime: fourStateRegime.regime,
                       adx: Number(adx.toFixed(1)),
-                      adxSlope: Number(adxSlope.toFixed(2)),
+                      regimeAdxSlope: Number(regimeConsistentAdxSlope.toFixed(2)),
+                      fullAdxSlope: Number(adxSlope.toFixed(2)),
+                      minRequiredSlope: risingTrendEx.MIN_ADX_SLOPE,
                       currentSoftThreshold: effectiveSoftThreshold,
                       currentHardThreshold: effectiveHardThreshold,
                       wouldUseSoftThreshold: risingTrendEx.SOFT_THRESHOLD_PERCENT,
@@ -6288,7 +6292,8 @@ serve(async (req) => {
                     entryPrice: trendData?.currentPrice,
                     indicators: {
                       adx: Number(adx.toFixed(1)),
-                      adxSlope: Number(adxSlope.toFixed(2)),
+                      regimeAdxSlope: Number(regimeConsistentAdxSlope.toFixed(2)),
+                      fullAdxSlope: Number(adxSlope.toFixed(2)),
                       stochRsiK: Number(stochRsiK4h.toFixed(1)),
                       regime: fourStateRegime.regime,
                     },
