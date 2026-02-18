@@ -37,7 +37,9 @@ export const ClosedPositionsDashboard = () => {
         case 'take_profit': return 'Take Profit';
         case 'stop_loss': return 'Stop Loss';
         case 'trailing_stop_loss': return 'Trailing Stop';
+        case 'trailing_stop': return 'Trailing Stop';
         case 'break_even': return 'Break-Even';
+        case 'take_profit_approach': return 'Take Profit';
         // Trend exits - all grouped together
         case 'trend_reversal_bullish': return 'Trend Exit';
         case 'trend_reversal_bearish': return 'Trend Exit';
