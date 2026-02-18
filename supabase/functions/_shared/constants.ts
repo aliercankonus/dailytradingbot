@@ -6483,6 +6483,25 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
     MIN_MOMENTUM_SCORE_LONG: 25,     // momentum score must be >= 25 for LONG
     // Require momentum direction to match trade direction (neutral = NOT a pass)
     REQUIRE_DIRECTIONAL_MOMENTUM: true,
+    
+    // ===== FIX #4: BREAKOUT_SETUP RELAXATION (SHADOW MODE) =====
+    // When ADX slope > 0.5 and regime is BREAKOUT_SETUP, the market is accelerating
+    // into a new trend. The strict -25 momentum requirement blocks valid continuation
+    // entries. Relax to -10 to allow moderate bearish/bullish momentum through.
+    // SHADOW_MODE: When true, only logs what WOULD have passed — does NOT override block.
+    BREAKOUT_RELAXATION: {
+      ENABLED: true,
+      SHADOW_MODE: true,  // TRUE = log only, FALSE = allow trades
+      // Regime must be BREAKOUT_SETUP
+      REQUIRE_BREAKOUT_SETUP: true,
+      // ADX slope must be strongly rising (confirmed acceleration)
+      MIN_ADX_SLOPE: 0.5,
+      // Relaxed momentum requirements (from -25/-10 for short, 25/10 for long)
+      RELAXED_MIN_MOMENTUM_SCORE_SHORT: -10,
+      RELAXED_MIN_MOMENTUM_SCORE_LONG: 10,
+      // Position multiplier for relaxed entries
+      POSITION_MULTIPLIER: 0.35,  // 35% position (conservative)
+    },
   },
   
   // ===== LOGGING =====

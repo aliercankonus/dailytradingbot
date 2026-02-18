@@ -7248,37 +7248,98 @@ serve(async (req) => {
                 const momentumIsBearish = smartMomentum.score <= expandedBlock.MIN_MOMENTUM_SCORE_SHORT;
                 
                 if (!momentumIsBearish && !adxOverrideAllowed) {
-                  nearExtremeBlocked = true;
-                  rejectedByHardGates++;
-                  const blockReason = `NEAR_24H_LOW_EXPANDED: SHORT blocked - ${distanceFromLow.toFixed(2)}% from 24h low ($${priceDistance.low24h.toFixed(2)}), momentum_score=${smartMomentum.score.toFixed(0)} (need <=${expandedBlock.MIN_MOMENTUM_SCORE_SHORT}) - neutral momentum is NOT confirmation`;
-                  perSymbolGateAttribution.set(symbol, { 
-                    gate: 'NEAR_24H_LOW_HARD', 
-                    details: blockReason 
-                  });
+                  // ===== FIX #4: BREAKOUT_SETUP RELAXATION CHECK =====
+                  const breakoutRelax = expandedBlock.BREAKOUT_RELAXATION;
+                  const isBreakoutSetup = fourStateRegime.regime === 'BREAKOUT_SETUP';
+                  const breakoutRelaxApplies = breakoutRelax?.ENABLED && isBreakoutSetup && adxSlope >= breakoutRelax.MIN_ADX_SLOPE;
+                  const relaxedMomentumPass = breakoutRelaxApplies && smartMomentum.score <= breakoutRelax.RELAXED_MIN_MOMENTUM_SCORE_SHORT;
                   
-                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                  if (breakoutRelaxApplies && relaxedMomentumPass) {
+                    if (breakoutRelax.SHADOW_MODE) {
+                      // Shadow mode: log what would have passed but still block
+                      logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 👻 NEAR_24H_LOW_EXPANDED BREAKOUT_RELAXATION (SHADOW): SHORT would PASS with relaxed momentum ${smartMomentum.score.toFixed(0)} <= ${breakoutRelax.RELAXED_MIN_MOMENTUM_SCORE_SHORT} (default requires <=${expandedBlock.MIN_MOMENTUM_SCORE_SHORT}), regime=${fourStateRegime.regime}, adxSlope=${adxSlope.toFixed(2)}`);
+                      
+                      // Log shadow signal
+                      try {
+                        await supabase.from('shadow_mode_signals').insert({
+                          user_id: userId,
+                          symbol,
+                          signal_type: derivedDirection,
+                          strategy_name: 'NEAR_EXTREME_BREAKOUT_RELAXATION',
+                          gate_blocked_by: 'NEAR_24H_LOW_EXPANDED',
+                          old_gate_result: 'BLOCK',
+                          new_gate_result: 'ALLOW',
+                          old_position_multiplier: 0,
+                          new_position_multiplier: breakoutRelax.POSITION_MULTIPLIER,
+                          confidence_score: smartMomentum.score,
+                          entry_price: trendData?.currentPrice || null,
+                          gate_details: {
+                            fix: 'FIX_4_BREAKOUT_RELAXATION',
+                            distanceFromLow: distanceFromLow.toFixed(3),
+                            low24h: priceDistance.low24h,
+                            momentumScore: smartMomentum.score.toFixed(1),
+                            defaultRequired: expandedBlock.MIN_MOMENTUM_SCORE_SHORT,
+                            relaxedRequired: breakoutRelax.RELAXED_MIN_MOMENTUM_SCORE_SHORT,
+                            regime: fourStateRegime.regime,
+                            adxSlope: adxSlope.toFixed(2),
+                            adx: adx.toFixed(1),
+                          },
+                          trend: trendData?.trend || null,
+                        });
+                      } catch (shadowErr) {
+                        logger.forSymbol(symbol).warn(`Shadow log failed: ${shadowErr}`);
+                      }
+                      
+                      // Still block in shadow mode - fall through to normal block
+                    } else {
+                      // Live mode: allow with reduced position
+                      nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, breakoutRelax.POSITION_MULTIPLIER);
+                      logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 NEAR_24H_LOW_EXPANDED BREAKOUT_RELAXATION: SHORT allowed - momentum ${smartMomentum.score.toFixed(0)} <= ${breakoutRelax.RELAXED_MIN_MOMENTUM_SCORE_SHORT} (relaxed from ${expandedBlock.MIN_MOMENTUM_SCORE_SHORT}), regime=${fourStateRegime.regime}, adxSlope=${adxSlope.toFixed(2)} - position ${(breakoutRelax.POSITION_MULTIPLIER * 100).toFixed(0)}%`);
+                      // Skip the block below
+                    }
+                  }
                   
-                  await logRejectionWithAI(
-                    supabase, userId, symbol,
-                    blockReason,
-                    {
-                      gate: 'NEAR_24H_LOW_HARD',
-                      subGate: 'EXPANDED_MOMENTUM_BLOCK',
-                      derivedDirection,
-                      distanceFromLow: distanceFromLow.toFixed(3),
-                      low24h: priceDistance.low24h,
-                      expandedThreshold: expandedBlock.SHORT_NEAR_LOW_THRESHOLD_PERCENT,
-                      smartMomentumScore: smartMomentum.score.toFixed(1),
-                      momentumRequired: expandedBlock.MIN_MOMENTUM_SCORE_SHORT,
-                      momentumState: trendData?.momentum?.state || 'unknown',
-                      tf1hDir, tf30mDir,
-                      wouldPassWith: `momentum_score <= ${expandedBlock.MIN_MOMENTUM_SCORE_SHORT} OR ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
-                    },
-                    trendData,
-                    riskParams.ai_analysis_enabled !== false,
-                    earlyOrderFlowAnalysis
-                  );
-                  continue;
+                  // If not relaxed (or shadow mode), apply the original block
+                  if (!relaxedMomentumPass || (breakoutRelax?.SHADOW_MODE ?? true)) {
+                    nearExtremeBlocked = true;
+                    rejectedByHardGates++;
+                    const blockReason = `NEAR_24H_LOW_EXPANDED: SHORT blocked - ${distanceFromLow.toFixed(2)}% from 24h low ($${priceDistance.low24h.toFixed(2)}), momentum_score=${smartMomentum.score.toFixed(0)} (need <=${expandedBlock.MIN_MOMENTUM_SCORE_SHORT}) - neutral momentum is NOT confirmation`;
+                    perSymbolGateAttribution.set(symbol, { 
+                      gate: 'NEAR_24H_LOW_HARD', 
+                      details: blockReason + (breakoutRelaxApplies && relaxedMomentumPass ? ' [SHADOW: would pass with BREAKOUT_RELAXATION]' : '')
+                    });
+                    
+                    logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                    
+                    await logRejectionWithAI(
+                      supabase, userId, symbol,
+                      blockReason,
+                      {
+                        gate: 'NEAR_24H_LOW_HARD',
+                        subGate: 'EXPANDED_MOMENTUM_BLOCK',
+                        derivedDirection,
+                        distanceFromLow: distanceFromLow.toFixed(3),
+                        low24h: priceDistance.low24h,
+                        expandedThreshold: expandedBlock.SHORT_NEAR_LOW_THRESHOLD_PERCENT,
+                        smartMomentumScore: smartMomentum.score.toFixed(1),
+                        momentumRequired: expandedBlock.MIN_MOMENTUM_SCORE_SHORT,
+                        momentumState: trendData?.momentum?.state || 'unknown',
+                        tf1hDir, tf30mDir,
+                        breakoutRelaxation: {
+                          wouldTrigger: breakoutRelaxApplies,
+                          wouldPass: relaxedMomentumPass,
+                          regime: fourStateRegime.regime,
+                          adxSlope: adxSlope.toFixed(2),
+                          relaxedThreshold: breakoutRelax?.RELAXED_MIN_MOMENTUM_SCORE_SHORT,
+                        },
+                        wouldPassWith: `momentum_score <= ${expandedBlock.MIN_MOMENTUM_SCORE_SHORT} OR ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}${breakoutRelax?.ENABLED ? ` OR (BREAKOUT_SETUP + adxSlope>=${breakoutRelax.MIN_ADX_SLOPE} + momentum<=${breakoutRelax.RELAXED_MIN_MOMENTUM_SCORE_SHORT})` : ''}`,
+                      },
+                      trendData,
+                      riskParams.ai_analysis_enabled !== false,
+                      earlyOrderFlowAnalysis
+                    );
+                    continue;
+                  }
                 }
               }
               
@@ -7404,34 +7465,91 @@ serve(async (req) => {
                 const momentumIsBullish = smartMomentum.score >= expandedBlockLong.MIN_MOMENTUM_SCORE_LONG;
                 
                 if (!momentumIsBullish && !adxOverrideAllowed) {
-                  nearExtremeBlocked = true;
-                  rejectedByHardGates++;
-                  const blockReason = `NEAR_24H_HIGH_EXPANDED: LONG blocked - ${distanceFromHigh.toFixed(2)}% from 24h high ($${priceDistance.high24h.toFixed(2)}), momentum_score=${smartMomentum.score.toFixed(0)} (need >=${expandedBlockLong.MIN_MOMENTUM_SCORE_LONG}) - neutral momentum is NOT confirmation`;
-                  perSymbolGateAttribution.set(symbol, { gate: 'NEAR_24H_HIGH_HARD', details: blockReason });
+                  // ===== FIX #4: BREAKOUT_SETUP RELAXATION CHECK (LONG) =====
+                  const breakoutRelaxLong = expandedBlockLong.BREAKOUT_RELAXATION;
+                  const isBreakoutSetupLong = fourStateRegime.regime === 'BREAKOUT_SETUP';
+                  const breakoutRelaxAppliesLong = breakoutRelaxLong?.ENABLED && isBreakoutSetupLong && adxSlope >= breakoutRelaxLong.MIN_ADX_SLOPE;
+                  const relaxedMomentumPassLong = breakoutRelaxAppliesLong && smartMomentum.score >= breakoutRelaxLong.RELAXED_MIN_MOMENTUM_SCORE_LONG;
                   
-                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                  if (breakoutRelaxAppliesLong && relaxedMomentumPassLong) {
+                    if (breakoutRelaxLong.SHADOW_MODE) {
+                      logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 👻 NEAR_24H_HIGH_EXPANDED BREAKOUT_RELAXATION (SHADOW): LONG would PASS with relaxed momentum ${smartMomentum.score.toFixed(0)} >= ${breakoutRelaxLong.RELAXED_MIN_MOMENTUM_SCORE_LONG} (default requires >=${expandedBlockLong.MIN_MOMENTUM_SCORE_LONG}), regime=${fourStateRegime.regime}, adxSlope=${adxSlope.toFixed(2)}`);
+                      
+                      try {
+                        await supabase.from('shadow_mode_signals').insert({
+                          user_id: userId,
+                          symbol,
+                          signal_type: derivedDirection,
+                          strategy_name: 'NEAR_EXTREME_BREAKOUT_RELAXATION',
+                          gate_blocked_by: 'NEAR_24H_HIGH_EXPANDED',
+                          old_gate_result: 'BLOCK',
+                          new_gate_result: 'ALLOW',
+                          old_position_multiplier: 0,
+                          new_position_multiplier: breakoutRelaxLong.POSITION_MULTIPLIER,
+                          confidence_score: smartMomentum.score,
+                          entry_price: trendData?.currentPrice || null,
+                          gate_details: {
+                            fix: 'FIX_4_BREAKOUT_RELAXATION',
+                            distanceFromHigh: distanceFromHigh.toFixed(3),
+                            high24h: priceDistance.high24h,
+                            momentumScore: smartMomentum.score.toFixed(1),
+                            defaultRequired: expandedBlockLong.MIN_MOMENTUM_SCORE_LONG,
+                            relaxedRequired: breakoutRelaxLong.RELAXED_MIN_MOMENTUM_SCORE_LONG,
+                            regime: fourStateRegime.regime,
+                            adxSlope: adxSlope.toFixed(2),
+                            adx: adx.toFixed(1),
+                          },
+                          trend: trendData?.trend || null,
+                        });
+                      } catch (shadowErr) {
+                        logger.forSymbol(symbol).warn(`Shadow log failed: ${shadowErr}`);
+                      }
+                    } else {
+                      nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, breakoutRelaxLong.POSITION_MULTIPLIER);
+                      logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 NEAR_24H_HIGH_EXPANDED BREAKOUT_RELAXATION: LONG allowed - momentum ${smartMomentum.score.toFixed(0)} >= ${breakoutRelaxLong.RELAXED_MIN_MOMENTUM_SCORE_LONG} (relaxed from ${expandedBlockLong.MIN_MOMENTUM_SCORE_LONG}), regime=${fourStateRegime.regime}, adxSlope=${adxSlope.toFixed(2)} - position ${(breakoutRelaxLong.POSITION_MULTIPLIER * 100).toFixed(0)}%`);
+                    }
+                  }
                   
-                  await logRejectionWithAI(
-                    supabase, userId, symbol,
-                    blockReason,
-                    {
-                      gate: 'NEAR_24H_HIGH_HARD',
-                      subGate: 'EXPANDED_MOMENTUM_BLOCK',
-                      derivedDirection,
-                      distanceFromHigh: distanceFromHigh.toFixed(3),
-                      high24h: priceDistance.high24h,
-                      expandedThreshold: expandedBlockLong.LONG_NEAR_HIGH_THRESHOLD_PERCENT,
-                      smartMomentumScore: smartMomentum.score.toFixed(1),
-                      momentumRequired: expandedBlockLong.MIN_MOMENTUM_SCORE_LONG,
-                      momentumState: trendData?.momentum?.state || 'unknown',
-                      tf1hDir, tf30mDir,
-                      wouldPassWith: `momentum_score >= ${expandedBlockLong.MIN_MOMENTUM_SCORE_LONG} OR ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
-                    },
-                    trendData,
-                    riskParams.ai_analysis_enabled !== false,
-                    earlyOrderFlowAnalysis
-                  );
-                  continue;
+                  if (!relaxedMomentumPassLong || (breakoutRelaxLong?.SHADOW_MODE ?? true)) {
+                    nearExtremeBlocked = true;
+                    rejectedByHardGates++;
+                    const blockReason = `NEAR_24H_HIGH_EXPANDED: LONG blocked - ${distanceFromHigh.toFixed(2)}% from 24h high ($${priceDistance.high24h.toFixed(2)}), momentum_score=${smartMomentum.score.toFixed(0)} (need >=${expandedBlockLong.MIN_MOMENTUM_SCORE_LONG}) - neutral momentum is NOT confirmation`;
+                    perSymbolGateAttribution.set(symbol, { 
+                      gate: 'NEAR_24H_HIGH_HARD', 
+                      details: blockReason + (breakoutRelaxAppliesLong && relaxedMomentumPassLong ? ' [SHADOW: would pass with BREAKOUT_RELAXATION]' : '')
+                    });
+                    
+                    logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                    
+                    await logRejectionWithAI(
+                      supabase, userId, symbol,
+                      blockReason,
+                      {
+                        gate: 'NEAR_24H_HIGH_HARD',
+                        subGate: 'EXPANDED_MOMENTUM_BLOCK',
+                        derivedDirection,
+                        distanceFromHigh: distanceFromHigh.toFixed(3),
+                        high24h: priceDistance.high24h,
+                        expandedThreshold: expandedBlockLong.LONG_NEAR_HIGH_THRESHOLD_PERCENT,
+                        smartMomentumScore: smartMomentum.score.toFixed(1),
+                        momentumRequired: expandedBlockLong.MIN_MOMENTUM_SCORE_LONG,
+                        momentumState: trendData?.momentum?.state || 'unknown',
+                        tf1hDir, tf30mDir,
+                        breakoutRelaxation: {
+                          wouldTrigger: breakoutRelaxAppliesLong,
+                          wouldPass: relaxedMomentumPassLong,
+                          regime: fourStateRegime.regime,
+                          adxSlope: adxSlope.toFixed(2),
+                          relaxedThreshold: breakoutRelaxLong?.RELAXED_MIN_MOMENTUM_SCORE_LONG,
+                        },
+                        wouldPassWith: `momentum_score >= ${expandedBlockLong.MIN_MOMENTUM_SCORE_LONG} OR ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}${breakoutRelaxLong?.ENABLED ? ` OR (BREAKOUT_SETUP + adxSlope>=${breakoutRelaxLong.MIN_ADX_SLOPE} + momentum>=${breakoutRelaxLong.RELAXED_MIN_MOMENTUM_SCORE_LONG})` : ''}`,
+                      },
+                      trendData,
+                      riskParams.ai_analysis_enabled !== false,
+                      earlyOrderFlowAnalysis
+                    );
+                    continue;
+                  }
                 }
               }
               
