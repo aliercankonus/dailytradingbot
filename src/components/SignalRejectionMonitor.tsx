@@ -578,7 +578,9 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
                     </div>
                     {adx !== undefined && (
                       <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                        <span>ADX: <span className={`font-mono ${adx >= 25 ? "text-green-400" : adx >= 20 ? "text-yellow-400" : "text-red-400"}`}>{extractNumeric(adx, 1)}</span></span>
+                        <span>ADX: <span className={`font-mono ${adx >= 25 ? "text-green-400" : adx >= 20 ? "text-yellow-400" : "text-red-400"}`}>{extractNumeric(adx, 1)}</span>
+                          <span className="text-muted-foreground/60 ml-1">@ {new Date(signal.checked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </span>
                         <MRStatusBadge status={deriveMRStatus(fs)} />
                         <BypassBadge eligible={checkBypassEligible(fs)} />
                       </div>
@@ -664,13 +666,23 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
                           <DirectionBadge direction={direction} />
                         </TableCell>
                         <TableCell>
-                          <span className={`font-mono text-xs ${
-                            adx && adx >= 25 ? "text-green-400" : 
-                            adx && adx >= 20 ? "text-yellow-400" : 
-                            "text-red-400"
-                          }`}>
-                            {extractNumeric(adx, 1)}
-                          </span>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className={`font-mono text-xs cursor-help ${
+                                  adx && adx >= 25 ? "text-green-400" : 
+                                  adx && adx >= 20 ? "text-yellow-400" : 
+                                  "text-red-400"
+                                }`}>
+                                  {extractNumeric(adx, 1)}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">
+                                <p className="text-xs">Captured {formatDistanceToNow(new Date(signal.checked_at), { addSuffix: true })}</p>
+                                <p className="text-[10px] text-muted-foreground">{new Date(signal.checked_at).toLocaleTimeString()}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         </TableCell>
                         <TableCell>
                           <ADXSlopeIndicator slope={adxSlope} />
