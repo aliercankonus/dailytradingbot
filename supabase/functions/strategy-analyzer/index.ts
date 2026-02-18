@@ -5988,6 +5988,81 @@ serve(async (req) => {
           }
         }
         
+        // ============= FIX #1 EARLY SHADOW: TRANSITION_EXPANSION =============
+        // This shadow check runs BEFORE MOVE_EXHAUSTED and NEAR_24H gates so that
+        // even when those gates block and `continue`, we still capture whether
+        // TRANSITION_EXPANSION conditions were met for shadow analysis.
+        let earlyTransitionExpansionShadowFired = false;
+        if (ADX_GATE_V1_1.TRANSITION_EXPANSION.ENABLED && shadowModeEnabled) {
+          const teConfig = ADX_GATE_V1_1.TRANSITION_EXPANSION;
+          const earlyAdxSlope = fullAdxResult.adxSlope ?? 0;
+          const earlyPriceChange4h = extractPriceChange(trendData, '4h');
+          const earlyAbsPriceMove = Math.abs(earlyPriceChange4h);
+          const earlyMomentumDir = smartMomentum?.direction ?? 'neutral';
+          const earlyMomentumAligned = (
+            (derivedDirection === 'long' && earlyMomentumDir === 'bullish') ||
+            (derivedDirection === 'short' && earlyMomentumDir === 'bearish')
+          );
+          
+          const earlyTeConditions = {
+            regimeIsBreakoutSetup: fourStateRegime.regime === 'BREAKOUT_SETUP',
+            adxInRange: adx >= teConfig.MIN_ADX && adx <= teConfig.MAX_ADX,
+            slopeRising: earlyAdxSlope >= teConfig.MIN_ADX_SLOPE,
+            priceMoveEnough: earlyAbsPriceMove >= teConfig.MIN_PRICE_MOVE_PERCENT,
+            momentumAligned: !teConfig.REQUIRE_MOMENTUM_ALIGNMENT || earlyMomentumAligned,
+            directionMatchesPriceMove: (
+              (derivedDirection === 'short' && earlyPriceChange4h < 0) ||
+              (derivedDirection === 'long' && earlyPriceChange4h > 0)
+            ),
+          };
+          
+          const allEarlyConditionsMet = Object.values(earlyTeConditions).every(v => v === true);
+          
+          if (allEarlyConditionsMet) {
+            earlyTransitionExpansionShadowFired = true;
+            const teMultiplier = teConfig.POSITION_MULTIPLIER;
+            
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.SUCCESS} 🔮 TRANSITION_EXPANSION_EARLY_SHADOW: WOULD ALLOW ${derivedDirection.toUpperCase()} ` +
+              `(ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(3)}, priceMove=${earlyPriceChange4h.toFixed(2)}%, ` +
+              `regime=${fourStateRegime.regime}, momentum=${earlyMomentumDir}, size=${(teMultiplier * 100).toFixed(0)}%)`
+            );
+            
+            try {
+              await logShadowSignal(supabase as any, {
+                userId,
+                symbol,
+                signalType: derivedDirection === 'long' ? 'long' : 'short',
+                strategyName: 'TRANSITION_EXPANSION_V1',
+                gateBlockedBy: 'adx_exhaustion',
+                oldGateResult: 'blocked',
+                newGateResult: 'passed',
+                gateDetails: {
+                  gate: 'TRANSITION_EXPANSION',
+                  subGate: 'EARLY_SHADOW',
+                  shadowMode: true,
+                  adx: parseFloat(adx.toFixed(1)),
+                  adxSlope: parseFloat(earlyAdxSlope.toFixed(3)),
+                  priceChange4h: parseFloat(earlyPriceChange4h.toFixed(2)),
+                  regime: fourStateRegime.regime,
+                  momentumDirection: earlyMomentumDir,
+                  momentumScore: smartMomentum?.score ?? 0,
+                  positionMultiplier: teMultiplier,
+                  conditions: earlyTeConditions,
+                  note: 'Fired BEFORE MOVE_EXHAUSTED/NEAR_24H gates',
+                },
+                confidenceScore: trendData.confidence ?? 0,
+                entryPrice: trendData.currentPrice ?? 0,
+                trend: derivedDirection,
+                oldPositionMultiplier: 0,
+                newPositionMultiplier: teMultiplier,
+              });
+            } catch (shadowErr) {
+              logger.forSymbol(symbol).warn(`Early shadow log failed for TRANSITION_EXPANSION: ${shadowErr}`);
+            }
+          }
+        }
+        
         // ============= NEW: MOVE EXHAUSTION FILTER =============
         // Prevents late entries when price has already moved significantly from swing points
         // Example: AVAX dropped 10%+ from swing high - too late to SHORT
@@ -6449,8 +6524,60 @@ serve(async (req) => {
                                            MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERSOLD_FOR_SHORT ?? 20;
               if (MOVE_EXHAUSTION_FILTER_PARAMS.REQUIRE_STOCHRSI_ALIGNMENT && 
                   stochRsiK4h < stochRsiMinForShort) {
+                // ============= FIX #3 EXTENSION: CAPITULATION ACCELERATION IN SOFT ZONE (SHORT) =============
+                // Check if momentum is accelerating bearishly even in the soft zone
+                const capSoftShortTriggered = capConfig?.ENABLED &&
+                  momentumAcceleration !== null &&
+                  momentumAcceleration <= -capConfig.MIN_ACCELERATION_MAGNITUDE &&
+                  (!capConfig.REQUIRE_DIRECTION_ALIGNMENT || derivedDirection === 'short') &&
+                  adxSlope >= capConfig.MIN_ADX_SLOPE;
+                
+                if (capSoftShortTriggered && capConfig.SHADOW_MODE) {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 CAPITULATION_ACCELERATION [SHADOW SHORT SOFT]: Would override SOFT block | acceleration=${momentumAcceleration!.toFixed(1)} (<= -${capConfig.MIN_ACCELERATION_MAGNITUDE}), distance=${distanceFromHigh.toFixed(1)}%, K=${stochRsiK4h.toFixed(0)}, ADX_slope=${adxSlope.toFixed(2)}`);
+                  
+                  try {
+                    await logShadowSignal(supabase, {
+                      userId,
+                      symbol,
+                      signalType: 'short',
+                      strategyName: 'CAPITULATION_ACCELERATION',
+                      gateBlockedBy: 'volume_filter',
+                      oldGateResult: 'blocked',
+                      newGateResult: 'passed',
+                      gateDetails: {
+                        gate: 'CAPITULATION_ACCELERATION',
+                        subZone: 'SOFT',
+                        shadowMode: true,
+                        direction: 'short',
+                        momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
+                        currentScore: momentumAccelerationData?.current,
+                        oldestScore: momentumAccelerationData?.oldest,
+                        historyRecords: momentumAccelerationData?.records,
+                        distanceFromHigh: Number(distanceFromHigh.toFixed(2)),
+                        stochRsiK4h: Number(stochRsiK4h.toFixed(1)),
+                        softZoneThreshold: stochRsiMinForShort,
+                        adx: Number(adx.toFixed(1)),
+                        adxSlope: Number(adxSlope.toFixed(2)),
+                        regime: fourStateRegime.regime,
+                        wouldUsePositionMultiplier: capConfig.POSITION_MULTIPLIER,
+                      },
+                      confidenceScore: undefined,
+                      entryPrice: trendData?.currentPrice,
+                      indicators: {
+                        momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
+                        adx: Number(adx.toFixed(1)),
+                        adxSlope: Number(adxSlope.toFixed(2)),
+                        stochRsiK: Number(stochRsiK4h.toFixed(1)),
+                        regime: fourStateRegime.regime,
+                      },
+                    });
+                  } catch (shadowErr) {
+                    logger.forSymbol(symbol).warn(`Shadow log error (CAPITULATION_ACCELERATION SOFT SHORT): ${shadowErr}`);
+                  }
+                }
+                
                 moveExhaustionBlocked = true;
-                moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} < ${stochRsiMinForShort} (extreme oversold), too late to SHORT`;
+                moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} < ${stochRsiMinForShort} (extreme oversold), too late to SHORT${capSoftShortTriggered ? ' [CAPITULATION_SHADOW: accel=' + momentumAcceleration!.toFixed(1) + ']' : ''}`;
                 moveZoneDetails = {
                   zone: moveZone,
                   distancePercent: distanceFromHigh,
@@ -6461,6 +6588,8 @@ serve(async (req) => {
                   outcome: 'BLOCKED',
                   positionMultiplier: 0,
                   overrideReason: `StochRSI K=${stochRsiK4h.toFixed(0)} < ${stochRsiMinForShort} (extreme oversold)`,
+                  capitulationAcceleration: momentumAcceleration,
+                  capitulationShadowWouldOverride: capSoftShortTriggered,
                   relaxationApplied: useRelaxedThresholds,
                   relaxationCondition
                 };
@@ -6700,8 +6829,59 @@ serve(async (req) => {
               // For late longs: StochRSI must NOT be already overbought (K > 50)
               if (MOVE_EXHAUSTION_FILTER_PARAMS.REQUIRE_STOCHRSI_ALIGNMENT && 
                   stochRsiK4h > MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG) {
+                // ============= FIX #3 EXTENSION: CAPITULATION ACCELERATION IN SOFT ZONE (LONG) =============
+                const capSoftLongTriggered = capConfig?.ENABLED &&
+                  momentumAcceleration !== null &&
+                  momentumAcceleration >= capConfig.MIN_ACCELERATION_MAGNITUDE &&
+                  (!capConfig.REQUIRE_DIRECTION_ALIGNMENT || derivedDirection === 'long') &&
+                  adxSlope >= capConfig.MIN_ADX_SLOPE;
+                
+                if (capSoftLongTriggered && capConfig.SHADOW_MODE) {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 CAPITULATION_ACCELERATION [SHADOW LONG SOFT]: Would override SOFT block | acceleration=${momentumAcceleration!.toFixed(1)} (>= +${capConfig.MIN_ACCELERATION_MAGNITUDE}), distance=${distanceFromLow.toFixed(1)}%, K=${stochRsiK4h.toFixed(0)}, ADX_slope=${adxSlope.toFixed(2)}`);
+                  
+                  try {
+                    await logShadowSignal(supabase, {
+                      userId,
+                      symbol,
+                      signalType: 'long',
+                      strategyName: 'CAPITULATION_ACCELERATION',
+                      gateBlockedBy: 'volume_filter',
+                      oldGateResult: 'blocked',
+                      newGateResult: 'passed',
+                      gateDetails: {
+                        gate: 'CAPITULATION_ACCELERATION',
+                        subZone: 'SOFT',
+                        shadowMode: true,
+                        direction: 'long',
+                        momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
+                        currentScore: momentumAccelerationData?.current,
+                        oldestScore: momentumAccelerationData?.oldest,
+                        historyRecords: momentumAccelerationData?.records,
+                        distanceFromLow: Number(distanceFromLow.toFixed(2)),
+                        stochRsiK4h: Number(stochRsiK4h.toFixed(1)),
+                        softZoneThreshold: MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG,
+                        adx: Number(adx.toFixed(1)),
+                        adxSlope: Number(adxSlope.toFixed(2)),
+                        regime: fourStateRegime.regime,
+                        wouldUsePositionMultiplier: capConfig.POSITION_MULTIPLIER,
+                      },
+                      confidenceScore: undefined,
+                      entryPrice: trendData?.currentPrice,
+                      indicators: {
+                        momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
+                        adx: Number(adx.toFixed(1)),
+                        adxSlope: Number(adxSlope.toFixed(2)),
+                        stochRsiK: Number(stochRsiK4h.toFixed(1)),
+                        regime: fourStateRegime.regime,
+                      },
+                    });
+                  } catch (shadowErr) {
+                    logger.forSymbol(symbol).warn(`Shadow log error (CAPITULATION_ACCELERATION SOFT LONG): ${shadowErr}`);
+                  }
+                }
+                
                 moveExhaustionBlocked = true;
-                moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} > ${MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG} (overbought), too late to LONG`;
+                moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} > ${MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG} (overbought), too late to LONG${capSoftLongTriggered ? ' [CAPITULATION_SHADOW: accel=' + momentumAcceleration!.toFixed(1) + ']' : ''}`;
                 moveZoneDetails = {
                   zone: moveZone,
                   distancePercent: distanceFromLow,
@@ -6712,6 +6892,8 @@ serve(async (req) => {
                   outcome: 'BLOCKED',
                   positionMultiplier: 0,
                   overrideReason: `StochRSI K=${stochRsiK4h.toFixed(0)} > ${MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG} (overbought)`,
+                  capitulationAcceleration: momentumAcceleration,
+                  capitulationShadowWouldOverride: capSoftLongTriggered,
                   relaxationApplied: useRelaxedThresholds,
                   relaxationCondition
                 };
