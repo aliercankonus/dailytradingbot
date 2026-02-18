@@ -5186,6 +5186,44 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   USE_ATR_BASED_THRESHOLD: false,
   MAX_ATR_DISTANCE_FOR_ENTRY: 4.0,
   
+  // ===== CAPITULATION ACCELERATION OVERRIDE (Fix #3) =====
+  // Detects sustained momentum acceleration (not just snapshot) by comparing
+  // the current momentum_score against the score from 3 cycles ago.
+  // When acceleration exceeds threshold during a directional move,
+  // this is CAPITULATION — not exhaustion — and continuation entries are allowed.
+  // SHADOW_MODE: When true, only logs — does NOT override the block.
+  CAPITULATION_ACCELERATION: {
+    ENABLED: true,
+    SHADOW_MODE: true,  // TRUE = log only, FALSE = allow override
+    
+    // Minimum records required to compute acceleration (need at least 3 history points)
+    MIN_HISTORY_RECORDS: 3,
+    // Lookback window for querying momentum_analysis (minutes)
+    LOOKBACK_MINUTES: 30,
+    
+    // Acceleration threshold: current_score - score_3_cycles_ago
+    // Negative = bearish acceleration, Positive = bullish acceleration
+    // SHORT override: acceleration <= -15 (strong bearish acceleration)
+    // LONG override: acceleration >= +15 (strong bullish acceleration)
+    MIN_ACCELERATION_MAGNITUDE: 15,
+    
+    // Additional safety: momentum direction must align with derived direction
+    REQUIRE_DIRECTION_ALIGNMENT: true,
+    
+    // Position sizing (conservative — capitulation is volatile)
+    POSITION_MULTIPLIER: 0.30,        // 30% of normal position
+    MAX_POSITION_MULTIPLIER: 0.40,    // Max with HTF support
+    
+    // Safety: absolute hard block at extreme moves (10%+) — never override
+    ABSOLUTE_HARD_BLOCK_PERCENT: 10.0,
+    
+    // Safety: ADX slope must not be flat/declining (must confirm energy)
+    MIN_ADX_SLOPE: 0,  // At minimum flat (not decaying)
+    
+    // Logging
+    LOG_ACCELERATION_CHECKS: true,
+  },
+  
   // ===== LOGGING =====
   LOG_EXHAUSTION_CHECKS: true,
 } as const;

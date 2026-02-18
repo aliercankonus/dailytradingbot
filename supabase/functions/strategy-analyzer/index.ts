@@ -2492,7 +2492,9 @@ serve(async (req) => {
       // NEW: 4-State Regime Classifier gates
       | 'RANGE_COMPRESSION_BLOCK'
       | 'COMPRESSION_NO_SETUP'
-      | 'TREND_EXHAUSTION_CONTINUATION_BLOCK';
+      | 'TREND_EXHAUSTION_CONTINUATION_BLOCK'
+      // Fix #3: Capitulation acceleration override
+      | 'CAPITULATION_ACCELERATION';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     const rejectionBuffer = new RejectionBuffer();
@@ -6025,6 +6027,45 @@ serve(async (req) => {
           // ===== STRONG TREND THRESHOLD RELAXATION =====
           // Check if we should use relaxed thresholds (5%→8% for strong trends)
           const relaxation = MOVE_EXHAUSTION_FILTER_PARAMS.STRONG_TREND_RELAXATION;
+          // ============= FIX #3: CAPITULATION ACCELERATION DETECTOR =============
+          // Query last 3 momentum_analysis records for this symbol to compute acceleration
+          const capConfig = MOVE_EXHAUSTION_FILTER_PARAMS.CAPITULATION_ACCELERATION;
+          let momentumAcceleration: number | null = null;
+          let momentumAccelerationData: { current: number; oldest: number; records: number } | null = null;
+          
+          if (capConfig?.ENABLED) {
+            try {
+              const lookbackTime = new Date(Date.now() - capConfig.LOOKBACK_MINUTES * 60 * 1000).toISOString();
+              const { data: momentumHistory, error: momError } = await supabase
+                .from('momentum_analysis')
+                .select('momentum_score, recorded_at')
+                .eq('user_id', userId)
+                .eq('symbol', symbol)
+                .gte('recorded_at', lookbackTime)
+                .order('recorded_at', { ascending: false })
+                .limit(capConfig.MIN_HISTORY_RECORDS);
+              
+              if (!momError && momentumHistory && momentumHistory.length >= capConfig.MIN_HISTORY_RECORDS) {
+                const currentScore = Number(momentumHistory[0].momentum_score);
+                const oldestScore = Number(momentumHistory[momentumHistory.length - 1].momentum_score);
+                momentumAcceleration = currentScore - oldestScore;
+                momentumAccelerationData = {
+                  current: currentScore,
+                  oldest: oldestScore,
+                  records: momentumHistory.length,
+                };
+                
+                if (capConfig.LOG_ACCELERATION_CHECKS) {
+                  logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} 📊 Momentum acceleration: ${momentumAcceleration.toFixed(1)} (current=${currentScore.toFixed(1)}, oldest=${oldestScore.toFixed(1)}, records=${momentumHistory.length})`);
+                }
+              } else if (capConfig.LOG_ACCELERATION_CHECKS) {
+                logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} 📊 Momentum acceleration: insufficient data (${momentumHistory?.length ?? 0}/${capConfig.MIN_HISTORY_RECORDS} records${momError ? `, error: ${momError.message}` : ''})`);
+              }
+            } catch (accelErr) {
+              logger.forSymbol(symbol).warn(`Momentum acceleration query error: ${accelErr}`);
+            }
+          }
+          
           let useRelaxedThresholds = false;
           let relaxationCondition = '';
           
@@ -6264,29 +6305,122 @@ serve(async (req) => {
                 };
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔄 MOVE_EXHAUSTION MEAN_REVERSION: Price dropped ${distanceFromHigh.toFixed(1)}%, ADX=${adx.toFixed(1)} decaying (slope=${adxSlope.toFixed(2)}), K=${stochRsiK4h.toFixed(0)} (oversold) - allowing LONG bounce at ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}% position`);
               } else {
-                moveExhaustionBlocked = true;
-                moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% from 24h high ($${priceDistance.high24h.toFixed(2)}), too late to SHORT (threshold: ${effectiveHardThreshold}%${useRelaxedThresholds ? ' [relaxed]' : ''})`;
-                moveZoneDetails = {
-                  zone: useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD',
-                  distancePercent: distanceFromHigh,
-                  direction: 'short',
-                  stochRsiK: stochRsiK4h,
-                  adx,
-                  adxSlope,
-                  outcome: 'BLOCKED',
-                  positionMultiplier: 0,
-                  // Add mean reversion diagnostics to blocked signals
-                  meanReversionAllowed: false,
-                  meanReversionBlockReason: mrConfig ? 
-                    (adx >= mrConfig.MAX_ADX_FOR_EXCEPTION && adxSlope > mrConfig.MAX_ADX_SLOPE ? 
-                      `ADX=${adx.toFixed(1)} >= ${mrConfig.MAX_ADX_FOR_EXCEPTION} with slope=${adxSlope.toFixed(2)} > 0 (trend still expanding)` :
-                      stochRsiK4h > mrConfig.LONG_MAX_K_FOR_EXCEPTION ? 
-                        `K=${stochRsiK4h.toFixed(0)} > ${mrConfig.LONG_MAX_K_FOR_EXCEPTION} (not oversold enough for bounce)` :
-                        'Mean reversion conditions not met') : 
-                    'Mean reversion not configured',
-                  relaxationApplied: useRelaxedThresholds,
-                  relaxationCondition
-                };
+                // ============= FIX #3: CAPITULATION ACCELERATION OVERRIDE (SHORT) =============
+                // Check if momentum is accelerating bearishly — capitulation, not exhaustion
+                const capShortTriggered = capConfig?.ENABLED &&
+                  momentumAcceleration !== null &&
+                  momentumAcceleration <= -capConfig.MIN_ACCELERATION_MAGNITUDE &&
+                  (!capConfig.REQUIRE_DIRECTION_ALIGNMENT || derivedDirection === 'short') &&
+                  adxSlope >= capConfig.MIN_ADX_SLOPE &&
+                  distanceFromHigh < capConfig.ABSOLUTE_HARD_BLOCK_PERCENT;
+                
+                if (capShortTriggered) {
+                  if (capConfig.SHADOW_MODE) {
+                    // SHADOW MODE: Log what WOULD happen but don't override
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 CAPITULATION_ACCELERATION [SHADOW SHORT]: Would override MOVE_EXHAUSTED | acceleration=${momentumAcceleration!.toFixed(1)} (<= -${capConfig.MIN_ACCELERATION_MAGNITUDE}), distance=${distanceFromHigh.toFixed(1)}%, ADX_slope=${adxSlope.toFixed(2)}`);
+                    
+                    try {
+                      await logShadowSignal(supabase, {
+                        userId,
+                        symbol,
+                        signalType: 'short',
+                        strategyName: 'CAPITULATION_ACCELERATION',
+                        gateBlockedBy: 'volume_filter',
+                        oldGateResult: 'blocked',
+                        newGateResult: 'passed',
+                        gateDetails: {
+                          gate: 'CAPITULATION_ACCELERATION',
+                          shadowMode: true,
+                          direction: 'short',
+                          momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
+                          currentScore: momentumAccelerationData?.current,
+                          oldestScore: momentumAccelerationData?.oldest,
+                          historyRecords: momentumAccelerationData?.records,
+                          distanceFromHigh: Number(distanceFromHigh.toFixed(2)),
+                          effectiveHardThreshold,
+                          adx: Number(adx.toFixed(1)),
+                          adxSlope: Number(adxSlope.toFixed(2)),
+                          stochRsiK4h: Number(stochRsiK4h.toFixed(1)),
+                          regime: fourStateRegime.regime,
+                          wouldUsePositionMultiplier: capConfig.POSITION_MULTIPLIER,
+                        },
+                        confidenceScore: undefined,
+                        entryPrice: trendData?.currentPrice,
+                        indicators: {
+                          momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
+                          adx: Number(adx.toFixed(1)),
+                          adxSlope: Number(adxSlope.toFixed(2)),
+                          stochRsiK: Number(stochRsiK4h.toFixed(1)),
+                          regime: fourStateRegime.regime,
+                        },
+                      });
+                    } catch (shadowErr) {
+                      logger.forSymbol(symbol).warn(`Shadow log error (CAPITULATION_ACCELERATION): ${shadowErr}`);
+                    }
+                    
+                    // Still block in shadow mode
+                    moveExhaustionBlocked = true;
+                    moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% from 24h high ($${priceDistance.high24h.toFixed(2)}), too late to SHORT (threshold: ${effectiveHardThreshold}%${useRelaxedThresholds ? ' [relaxed]' : ''}) [CAPITULATION_SHADOW: accel=${momentumAcceleration!.toFixed(1)}]`;
+                    moveZoneDetails = {
+                      zone: useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD',
+                      distancePercent: distanceFromHigh,
+                      direction: 'short',
+                      stochRsiK: stochRsiK4h,
+                      adx,
+                      adxSlope,
+                      outcome: 'BLOCKED',
+                      positionMultiplier: 0,
+                      capitulationAcceleration: momentumAcceleration,
+                      capitulationShadowWouldOverride: true,
+                      relaxationApplied: useRelaxedThresholds,
+                      relaxationCondition
+                    };
+                  } else {
+                    // LIVE MODE: Override the block
+                    moveZone = 'CAPITULATION';
+                    moveExhaustionPositionMultiplier = capConfig.POSITION_MULTIPLIER;
+                    moveZoneDetails = {
+                      zone: 'CAPITULATION',
+                      distancePercent: distanceFromHigh,
+                      direction: 'short',
+                      stochRsiK: stochRsiK4h,
+                      adx,
+                      adxSlope,
+                      outcome: 'CAPITULATION_OVERRIDE',
+                      positionMultiplier: moveExhaustionPositionMultiplier,
+                      overrideReason: `Capitulation: acceleration=${momentumAcceleration!.toFixed(1)} <= -${capConfig.MIN_ACCELERATION_MAGNITUDE}, slope=${adxSlope.toFixed(2)}`,
+                      capitulationAcceleration: momentumAcceleration,
+                      relaxationApplied: useRelaxedThresholds,
+                      relaxationCondition
+                    };
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🌊 CAPITULATION_ACCELERATION [LIVE SHORT]: Override MOVE_EXHAUSTED | accel=${momentumAcceleration!.toFixed(1)}, distance=${distanceFromHigh.toFixed(1)}%, size=${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+                  }
+                } else {
+                  moveExhaustionBlocked = true;
+                  moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% from 24h high ($${priceDistance.high24h.toFixed(2)}), too late to SHORT (threshold: ${effectiveHardThreshold}%${useRelaxedThresholds ? ' [relaxed]' : ''})`;
+                  moveZoneDetails = {
+                    zone: useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD',
+                    distancePercent: distanceFromHigh,
+                    direction: 'short',
+                    stochRsiK: stochRsiK4h,
+                    adx,
+                    adxSlope,
+                    outcome: 'BLOCKED',
+                    positionMultiplier: 0,
+                    meanReversionAllowed: false,
+                    meanReversionBlockReason: mrConfig ? 
+                      (adx >= mrConfig.MAX_ADX_FOR_EXCEPTION && adxSlope > mrConfig.MAX_ADX_SLOPE ? 
+                        `ADX=${adx.toFixed(1)} >= ${mrConfig.MAX_ADX_FOR_EXCEPTION} with slope=${adxSlope.toFixed(2)} > 0 (trend still expanding)` :
+                        stochRsiK4h > mrConfig.LONG_MAX_K_FOR_EXCEPTION ? 
+                          `K=${stochRsiK4h.toFixed(0)} > ${mrConfig.LONG_MAX_K_FOR_EXCEPTION} (not oversold enough for bounce)` :
+                          'Mean reversion conditions not met') : 
+                      'Mean reversion not configured',
+                    capitulationAcceleration: momentumAcceleration,
+                    capitulationShadowWouldOverride: false,
+                    relaxationApplied: useRelaxedThresholds,
+                    relaxationCondition
+                  };
+                }
               }
             }
             // ===== SOFT GATE: Check StochRSI alignment =====
@@ -6430,29 +6564,118 @@ serve(async (req) => {
                 };
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔄 MOVE_EXHAUSTION MEAN_REVERSION: Price rallied ${distanceFromLow.toFixed(1)}%, ADX=${adx.toFixed(1)} decaying (slope=${adxSlope.toFixed(2)}), K=${stochRsiK4h.toFixed(0)} (overbought) - allowing SHORT fade at ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}% position`);
               } else {
-                moveExhaustionBlocked = true;
-                moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% from 24h low ($${priceDistance.low24h.toFixed(2)}), too late to LONG (threshold: ${effectiveHardThreshold}%${useRelaxedThresholds ? ' [relaxed]' : ''})`;
-                moveZoneDetails = {
-                  zone: useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD',
-                  distancePercent: distanceFromLow,
-                  direction: 'long',
-                  stochRsiK: stochRsiK4h,
-                  adx,
-                  adxSlope,
-                  outcome: 'BLOCKED',
-                  positionMultiplier: 0,
-                  // Add mean reversion diagnostics to blocked signals
-                  meanReversionAllowed: false,
-                  meanReversionBlockReason: mrConfig ? 
-                    (adx >= mrConfig.MAX_ADX_FOR_EXCEPTION && adxSlope > mrConfig.MAX_ADX_SLOPE ? 
-                      `ADX=${adx.toFixed(1)} >= ${mrConfig.MAX_ADX_FOR_EXCEPTION} with slope=${adxSlope.toFixed(2)} > 0 (trend still expanding)` :
-                      stochRsiK4h < mrConfig.SHORT_MIN_K_FOR_EXCEPTION ? 
-                        `K=${stochRsiK4h.toFixed(0)} < ${mrConfig.SHORT_MIN_K_FOR_EXCEPTION} (not overbought enough for fade)` :
-                        'Mean reversion conditions not met') : 
-                    'Mean reversion not configured',
-                  relaxationApplied: useRelaxedThresholds,
-                  relaxationCondition
-                };
+                // ============= FIX #3: CAPITULATION ACCELERATION OVERRIDE (LONG) =============
+                const capLongTriggered = capConfig?.ENABLED &&
+                  momentumAcceleration !== null &&
+                  momentumAcceleration >= capConfig.MIN_ACCELERATION_MAGNITUDE &&
+                  (!capConfig.REQUIRE_DIRECTION_ALIGNMENT || derivedDirection === 'long') &&
+                  adxSlope >= capConfig.MIN_ADX_SLOPE &&
+                  distanceFromLow < capConfig.ABSOLUTE_HARD_BLOCK_PERCENT;
+                
+                if (capLongTriggered) {
+                  if (capConfig.SHADOW_MODE) {
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 CAPITULATION_ACCELERATION [SHADOW LONG]: Would override MOVE_EXHAUSTED | acceleration=${momentumAcceleration!.toFixed(1)} (>= +${capConfig.MIN_ACCELERATION_MAGNITUDE}), distance=${distanceFromLow.toFixed(1)}%, ADX_slope=${adxSlope.toFixed(2)}`);
+                    
+                    try {
+                      await logShadowSignal(supabase, {
+                        userId,
+                        symbol,
+                        signalType: 'long',
+                        strategyName: 'CAPITULATION_ACCELERATION',
+                        gateBlockedBy: 'volume_filter',
+                        oldGateResult: 'blocked',
+                        newGateResult: 'passed',
+                        gateDetails: {
+                          gate: 'CAPITULATION_ACCELERATION',
+                          shadowMode: true,
+                          direction: 'long',
+                          momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
+                          currentScore: momentumAccelerationData?.current,
+                          oldestScore: momentumAccelerationData?.oldest,
+                          historyRecords: momentumAccelerationData?.records,
+                          distanceFromLow: Number(distanceFromLow.toFixed(2)),
+                          effectiveHardThreshold,
+                          adx: Number(adx.toFixed(1)),
+                          adxSlope: Number(adxSlope.toFixed(2)),
+                          stochRsiK4h: Number(stochRsiK4h.toFixed(1)),
+                          regime: fourStateRegime.regime,
+                          wouldUsePositionMultiplier: capConfig.POSITION_MULTIPLIER,
+                        },
+                        confidenceScore: undefined,
+                        entryPrice: trendData?.currentPrice,
+                        indicators: {
+                          momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
+                          adx: Number(adx.toFixed(1)),
+                          adxSlope: Number(adxSlope.toFixed(2)),
+                          stochRsiK: Number(stochRsiK4h.toFixed(1)),
+                          regime: fourStateRegime.regime,
+                        },
+                      });
+                    } catch (shadowErr) {
+                      logger.forSymbol(symbol).warn(`Shadow log error (CAPITULATION_ACCELERATION LONG): ${shadowErr}`);
+                    }
+                    
+                    moveExhaustionBlocked = true;
+                    moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% from 24h low ($${priceDistance.low24h.toFixed(2)}), too late to LONG (threshold: ${effectiveHardThreshold}%${useRelaxedThresholds ? ' [relaxed]' : ''}) [CAPITULATION_SHADOW: accel=${momentumAcceleration!.toFixed(1)}]`;
+                    moveZoneDetails = {
+                      zone: useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD',
+                      distancePercent: distanceFromLow,
+                      direction: 'long',
+                      stochRsiK: stochRsiK4h,
+                      adx,
+                      adxSlope,
+                      outcome: 'BLOCKED',
+                      positionMultiplier: 0,
+                      capitulationAcceleration: momentumAcceleration,
+                      capitulationShadowWouldOverride: true,
+                      relaxationApplied: useRelaxedThresholds,
+                      relaxationCondition
+                    };
+                  } else {
+                    moveZone = 'CAPITULATION';
+                    moveExhaustionPositionMultiplier = capConfig.POSITION_MULTIPLIER;
+                    moveZoneDetails = {
+                      zone: 'CAPITULATION',
+                      distancePercent: distanceFromLow,
+                      direction: 'long',
+                      stochRsiK: stochRsiK4h,
+                      adx,
+                      adxSlope,
+                      outcome: 'CAPITULATION_OVERRIDE',
+                      positionMultiplier: moveExhaustionPositionMultiplier,
+                      overrideReason: `Capitulation: acceleration=${momentumAcceleration!.toFixed(1)} >= +${capConfig.MIN_ACCELERATION_MAGNITUDE}, slope=${adxSlope.toFixed(2)}`,
+                      capitulationAcceleration: momentumAcceleration,
+                      relaxationApplied: useRelaxedThresholds,
+                      relaxationCondition
+                    };
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🌊 CAPITULATION_ACCELERATION [LIVE LONG]: Override MOVE_EXHAUSTED | accel=${momentumAcceleration!.toFixed(1)}, distance=${distanceFromLow.toFixed(1)}%, size=${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+                  }
+                } else {
+                  moveExhaustionBlocked = true;
+                  moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% from 24h low ($${priceDistance.low24h.toFixed(2)}), too late to LONG (threshold: ${effectiveHardThreshold}%${useRelaxedThresholds ? ' [relaxed]' : ''})`;
+                  moveZoneDetails = {
+                    zone: useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD',
+                    distancePercent: distanceFromLow,
+                    direction: 'long',
+                    stochRsiK: stochRsiK4h,
+                    adx,
+                    adxSlope,
+                    outcome: 'BLOCKED',
+                    positionMultiplier: 0,
+                    meanReversionAllowed: false,
+                    meanReversionBlockReason: mrConfig ? 
+                      (adx >= mrConfig.MAX_ADX_FOR_EXCEPTION && adxSlope > mrConfig.MAX_ADX_SLOPE ? 
+                        `ADX=${adx.toFixed(1)} >= ${mrConfig.MAX_ADX_FOR_EXCEPTION} with slope=${adxSlope.toFixed(2)} > 0 (trend still expanding)` :
+                        stochRsiK4h < mrConfig.SHORT_MIN_K_FOR_EXCEPTION ? 
+                          `K=${stochRsiK4h.toFixed(0)} < ${mrConfig.SHORT_MIN_K_FOR_EXCEPTION} (not overbought enough for fade)` :
+                          'Mean reversion conditions not met') : 
+                      'Mean reversion not configured',
+                    capitulationAcceleration: momentumAcceleration,
+                    capitulationShadowWouldOverride: false,
+                    relaxationApplied: useRelaxedThresholds,
+                    relaxationCondition
+                  };
+                }
               }
             }
             // ===== SOFT GATE: Check StochRSI alignment =====
