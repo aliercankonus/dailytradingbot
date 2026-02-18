@@ -23,9 +23,9 @@ export const useBinanceBalance = () => {
   const { data: balance, isLoading: loading, error, refetch } = useQuery({
     queryKey: ['binance-balance'],
     queryFn: fetchBinanceBalance,
-    staleTime: 20 * 1000,
-    gcTime: 300000,
-    refetchInterval: 30 * 1000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
     placeholderData: (prev) => prev,
     retry: 1,

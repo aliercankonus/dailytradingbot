@@ -39,9 +39,9 @@ export const useTrades = () => {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: TRADES_QUERY_KEY,
     queryFn: fetchTrades,
-    staleTime: 30000,
-    gcTime: 300000,
-    refetchInterval: 60000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
     placeholderData: (prev) => prev,
   });
