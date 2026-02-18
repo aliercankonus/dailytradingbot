@@ -1,6 +1,5 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useEffect } from 'react';
 
 interface Trade {
   id: string;
@@ -34,8 +33,6 @@ const fetchTrades = async (): Promise<Trade[]> => {
 export const TRADES_QUERY_KEY = ['trades'];
 
 export const useTrades = () => {
-  const queryClient = useQueryClient();
-  
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: TRADES_QUERY_KEY,
     queryFn: fetchTrades,
@@ -46,28 +43,7 @@ export const useTrades = () => {
     placeholderData: (prev) => prev,
   });
 
-  // Set up real-time subscription for positions
-  useEffect(() => {
-    const channel = supabase
-      .channel('positions-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'positions'
-        },
-        () => {
-          // Invalidate trades cache on any change
-          queryClient.invalidateQueries({ queryKey: TRADES_QUERY_KEY });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [queryClient]);
+  // Real-time updates are handled by useRealtimePositionSync (consolidated channel)
 
   return { 
     trades: data || [], 
