@@ -3151,21 +3151,23 @@ serve(async (req) => {
               // Fires when Capitulation Bounce didn't trigger due to ADX slope/structure guards
               // Flash crashes keep ADX slope positive and bounce on same candle as low
               let flashCrashProbeTriggered = false;
+              let phase1Triggered = false;
+              let phase2Triggered = false;
+              let phase2Details = '';
+              let recentMinK = earlyStochRsiK4h;
+              let phase2Diagnostics: Record<string, unknown> = {};
               if (!capitulationProbeTriggered && FLASH_CRASH_BOUNCE_PROBE.ENABLED) {
                 const priceDropPercent = trendData?.priceDistanceFromSwing?.distanceFromHighPercent ?? 0;
                 const stochK4h = earlyStochRsiK4h;
                 const stochK1h = extractStochRsiK(trendData, '1h');
                 
                 // ===== PHASE 1: STATIC EXHAUSTION (K currently pinned) =====
-                const phase1Triggered = stochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_1_MAX_STOCHRSI_K || 
+                phase1Triggered = stochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_1_MAX_STOCHRSI_K || 
                                         stochK1h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_1_MAX_STOCHRSI_K;
                 
                 // ===== PHASE 2: RELEASE STATE (K was recently pinned, now recovering) =====
                 // This catches V-shaped bounces where momentum leads price
-                let phase2Triggered = false;
-                let phase2Details = '';
-                let recentMinK = stochK4h;
-                let phase2Diagnostics: Record<string, unknown> = {};
+                recentMinK = stochK4h;
                 
                 if (!phase1Triggered && FLASH_CRASH_BOUNCE_PROBE.PHASE_2_ENABLED) {
                   // Extract recent StochRSI K values from klines
