@@ -20,12 +20,12 @@ interface SignalRejection {
 }
 
 export const fetchSignalRejections = async (): Promise<SignalRejection[]> => {
-  const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
   
   const { data, error } = await supabase
     .from('signal_rejection_log')
     .select('id, symbol, checked_at, rejection_reason, filters_status, trend_data, ai_analysis')
-    .gte('checked_at', thirtyMinutesAgo)
+    .gte('checked_at', threeHoursAgo)
     .order('checked_at', { ascending: false })
     .limit(200);
 

@@ -17,6 +17,7 @@ import { TradeCounterSync } from "@/components/TradeCounterSync";
 
 import { MarketConditionsDashboard } from "@/components/MarketConditionsDashboard";
 import { SignalsOverview } from "@/components/SignalsOverview";
+import { SignalProximityWidget } from "@/components/SignalProximityWidget";
 import { ActivePositions } from "@/components/ActivePositions";
 import { PositionsSummary } from "@/components/PositionsSummary";
 import { ExitManagementDashboard } from "@/components/ExitManagementDashboard";
@@ -111,6 +112,7 @@ const Index = () => {
           </TabsContent>
 
           <TabsContent value="signals" className="space-y-6">
+            <SignalProximityWidget />
             <SignalsOverview />
           </TabsContent>
 

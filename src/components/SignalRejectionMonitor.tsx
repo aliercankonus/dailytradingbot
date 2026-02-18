@@ -36,7 +36,7 @@ import { formatDistanceToNow } from "date-fns";
 import { useState, useMemo, memo } from "react";
 
 type PageSize = 10 | 25 | 50;
-type TimeRange = "15m" | "30m" | "1h";
+type TimeRange = "30m" | "1h" | "3h";
 type GateFilter = "all" | "momentum" | "regime" | "direction" | "htf" | "adx";
 type SymbolFilter = "all" | string;
 
@@ -316,8 +316,8 @@ const DirectionBadge = ({ direction }: { direction: string | undefined }) => {
 };
 
 export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
-  const { data: blockedSignals, isLoading, isFetching } = useBlockedSignals(100);
-  const [timeRange, setTimeRange] = useState<TimeRange>("30m");
+  const { data: blockedSignals, isLoading, isFetching } = useBlockedSignals(500);
+  const [timeRange, setTimeRange] = useState<TimeRange>("1h");
   const [gateFilter, setGateFilter] = useState<GateFilter>("all");
   const [symbolFilter, setSymbolFilter] = useState<SymbolFilter>("all");
   const [currentPage, setCurrentPage] = useState(1);
@@ -336,9 +336,9 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
     
     const now = Date.now();
     const ranges: Record<TimeRange, number> = {
-      "15m": 15 * 60 * 1000,
       "30m": 30 * 60 * 1000,
       "1h": 60 * 60 * 1000,
+      "3h": 3 * 60 * 60 * 1000,
     };
     
     return blockedSignals.filter(s => {
@@ -493,9 +493,9 @@ export const SignalRejectionMonitor = memo(function SignalRejectionMonitor() {
             <Clock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             <Tabs value={timeRange} onValueChange={(v) => setTimeRange(v as TimeRange)}>
               <TabsList className="h-7 flex overflow-x-auto scrollbar-hide">
-                <TabsTrigger value="15m" className="text-xs px-2 py-1 flex-shrink-0">15m</TabsTrigger>
                 <TabsTrigger value="30m" className="text-xs px-2 py-1 flex-shrink-0">30m</TabsTrigger>
                 <TabsTrigger value="1h" className="text-xs px-2 py-1 flex-shrink-0">1h</TabsTrigger>
+                <TabsTrigger value="3h" className="text-xs px-2 py-1 flex-shrink-0">3h</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
