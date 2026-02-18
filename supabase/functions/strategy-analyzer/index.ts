@@ -434,61 +434,82 @@ class RejectionBuffer {
   async flush(supabase: any, logger: any) {
     if (this.buffer.length === 0) return 0;
 
-    // Dedup against DB: check which symbol+reason combos were logged in last 30 min
+    // Check which symbol+reason combos already exist in last 30 min
     const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const userId = this.buffer[0].user_id;
 
     const { data: recentLogs } = await supabase
       .from("signal_rejection_log")
-      .select("symbol, rejection_reason")
+      .select("id, symbol, rejection_reason")
       .eq("user_id", userId)
       .gte("checked_at", thirtyMinAgo);
 
-    const recentKeys = new Set(
-      (recentLogs || []).map((r: any) => `${r.symbol}::${r.rejection_reason}`)
-    );
+    const recentMap = new Map<string, string>();
+    (recentLogs || []).forEach((r: any) => {
+      recentMap.set(`${r.symbol}::${r.rejection_reason}`, r.id);
+    });
 
-    const newEntries = this.buffer.filter(
-      e => !recentKeys.has(`${e.symbol}::${e.rejection_reason}`)
-    );
+    const newEntries: typeof this.buffer = [];
+    const touchIds: string[] = [];
 
-    if (newEntries.length === 0) {
-      logger.info(`Rejection buffer: ${this.buffer.length} buffered, all deduplicated`);
-      return 0;
+    for (const entry of this.buffer) {
+      const key = `${entry.symbol}::${entry.rejection_reason}`;
+      const existingId = recentMap.get(key);
+      if (existingId) {
+        // Same reason still active — just refresh the timestamp
+        touchIds.push(existingId);
+      } else {
+        newEntries.push(entry);
+      }
     }
 
-    // Strip ai_context before insert (not a DB column)
-    const insertRows = newEntries.map(({ ai_context, ...row }) => row);
-
-    const { data: inserted, error } = await supabase
-      .from("signal_rejection_log")
-      .insert(insertRows)
-      .select("id, symbol, rejection_reason");
-
-    if (error) {
-      logger.error(`Rejection buffer flush failed: ${error.message}`);
-      return 0;
+    // Batch-update checked_at for unchanged rejections so timestamps stay fresh
+    if (touchIds.length > 0) {
+      const { error: touchError } = await supabase
+        .from("signal_rejection_log")
+        .update({ checked_at: new Date().toISOString() })
+        .in("id", touchIds);
+      if (touchError) {
+        logger.warn(`Rejection timestamp refresh failed: ${touchError.message}`);
+      }
     }
 
-    // Fire AI analysis for entries that requested it
-    for (const entry of newEntries) {
-      if (entry.ai_context?.enableAI && entry.ai_context?.trendData) {
-        const matchedRow = inserted?.find(
-          (r: any) => r.symbol === entry.symbol && r.rejection_reason === entry.rejection_reason
-        );
-        if (matchedRow) {
-          analyzeRejectionWithAI(supabase, matchedRow.id, {
-            symbol: entry.symbol,
-            rejection_reason: entry.rejection_reason,
-            filters_status: entry.filters_status,
-            trend_data: entry.ai_context.trendData,
-          }).catch((err: any) => logger.warn(`AI analysis failed for ${entry.symbol}: ${err}`));
+    let insertedCount = 0;
+    if (newEntries.length > 0) {
+      // Strip ai_context before insert (not a DB column)
+      const insertRows = newEntries.map(({ ai_context, ...row }) => row);
+
+      const { data: inserted, error } = await supabase
+        .from("signal_rejection_log")
+        .insert(insertRows)
+        .select("id, symbol, rejection_reason");
+
+      if (error) {
+        logger.error(`Rejection buffer flush failed: ${error.message}`);
+      } else {
+        insertedCount = inserted?.length || 0;
+
+        // Fire AI analysis for entries that requested it
+        for (const entry of newEntries) {
+          if (entry.ai_context?.enableAI && entry.ai_context?.trendData) {
+            const matchedRow = inserted?.find(
+              (r: any) => r.symbol === entry.symbol && r.rejection_reason === entry.rejection_reason
+            );
+            if (matchedRow) {
+              analyzeRejectionWithAI(supabase, matchedRow.id, {
+                symbol: entry.symbol,
+                rejection_reason: entry.rejection_reason,
+                filters_status: entry.filters_status,
+                trend_data: entry.ai_context.trendData,
+              }).catch((err: any) => logger.warn(`AI analysis failed for ${entry.symbol}: ${err}`));
+            }
+          }
         }
       }
     }
 
-    logger.info(`Rejection buffer: ${this.buffer.length} buffered → ${newEntries.length} inserted (${this.buffer.length - newEntries.length} deduplicated)`);
-    return newEntries.length;
+    logger.info(`Rejection buffer: ${this.buffer.length} buffered → ${insertedCount} inserted, ${touchIds.length} refreshed`);
+    return insertedCount + touchIds.length;
   }
 }
 
