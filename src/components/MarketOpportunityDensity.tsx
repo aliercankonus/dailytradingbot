@@ -93,9 +93,9 @@ const getVerdict = (expansionRate: number, energy: number, topGate: string, topG
 
 export const MarketOpportunityDensity = () => {
   const [days, setDays] = useState(7);
-  const { data, isLoading } = useMarketOpportunityDensity(days);
+  const { data, isLoading, isFetching } = useMarketOpportunityDensity(days);
 
-  if (isLoading) {
+  if (isLoading && !data) {
     return (
       <Card className="border-border">
         <CardHeader>
