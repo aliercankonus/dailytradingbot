@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { usePositions } from '@/hooks/usePositions';
 import { useRealtimePricesContext } from '@/contexts/RealtimePricesContext';
-import { useRealtimePositionSync } from '@/hooks/useRealtimePositionSync';
+
 import { TrendingUp, TrendingDown, X, Loader2, Shield, RotateCw, Filter, Lock, ArrowUp, Layers, RefreshCw, AlertTriangle, Target, Crosshair, Zap } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -119,8 +119,7 @@ export const ActivePositions = () => {
   const [closingPosition, setClosingPosition] = useState<string | null>(null);
   const [selectedStrategy, setSelectedStrategy] = useState<string>('all');
   
-  // Enable real-time position updates
-  useRealtimePositionSync();
+  // Real-time position sync is handled at page level (Index.tsx)
   
   // Get live prices from shared context
   const { prices, priceVersion, getPrice } = useRealtimePricesContext();
