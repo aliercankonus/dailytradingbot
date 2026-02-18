@@ -202,8 +202,8 @@ export const useRiskParameters = () => {
       )
       .subscribe();
 
-    // Keep polling as backup
-    const interval = setInterval(fetchRiskParameters, 30000);
+    // Keep polling as backup (5-min cadence matches server-side updates)
+    const interval = setInterval(fetchRiskParameters, 5 * 60 * 1000);
 
     return () => {
       channel.unsubscribe();
