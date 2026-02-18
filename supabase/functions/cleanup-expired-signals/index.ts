@@ -91,6 +91,20 @@ Deno.serve(async (req) => {
       console.log(`Deleted ${shadowDeleted || 0} shadow mode signals older than 7 days`);
     }
 
+    // Clean up bot_heartbeat - keep only last 7 days
+    console.log('Cleaning up bot_heartbeat table (keeping last 7 days)...');
+    
+    const { error: heartbeatDeleteError, count: heartbeatDeleted } = await supabase
+      .from('bot_heartbeat')
+      .delete({ count: 'exact' })
+      .lt('recorded_at', sevenDaysAgo);
+
+    if (heartbeatDeleteError) {
+      console.error('Error deleting old bot heartbeats:', heartbeatDeleteError);
+    } else {
+      console.log(`Deleted ${heartbeatDeleted || 0} bot heartbeat records older than 7 days`);
+    }
+
     // Clean up signal_rejection_log - prune entries older than 6 hours
     console.log('Cleaning up signal_rejection_log table (keeping last 6h)...');
     const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
@@ -214,6 +228,7 @@ Deno.serve(async (req) => {
         marketRegimeDeleted: regimeDeleted || 0,
         momentumAnalysisDeleted: momentumDeleted || 0,
         shadowSignalsDeleted: shadowDeleted || 0,
+        heartbeatDeleted: heartbeatDeleted || 0,
         signals: signalsToDelete.map(s => ({
           symbol: s.symbol,
           type: s.signal_type,
