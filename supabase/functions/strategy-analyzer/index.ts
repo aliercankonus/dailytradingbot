@@ -1693,6 +1693,7 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const cycleStartMs = Date.now();
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -15835,6 +15836,7 @@ serve(async (req) => {
             no_trade_state: noTradeState,
             no_trade_reason: noTradeReason,
             details: {
+              executionTimeMs: Date.now() - cycleStartMs,
               rejections: {
                 byHardGates: rejectedByHardGates,
                 byRegime: rejectedByRegime,
