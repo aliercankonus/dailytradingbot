@@ -10855,6 +10855,92 @@ serve(async (req) => {
           continue;
         }
         
+        // ===== FIX #1: TRANSITION_EXPANSION SHADOW CHECK =====
+        // Detects regime transition latency: BREAKOUT_SETUP with rising ADX slope + price move
+        // SHADOW MODE: Only logs what WOULD have been allowed — does NOT alter trade flow
+        let transitionExpansionShadowTriggered = false;
+        if (ADX_GATE_V1_1.TRANSITION_EXPANSION.ENABLED) {
+          const teConfig = ADX_GATE_V1_1.TRANSITION_EXPANSION;
+          const priceChange4hForTE = extractPriceChange(trendData, '4h');
+          const absPriceMove = Math.abs(priceChange4hForTE);
+          const momentumDir = smartMomentum?.direction ?? 'neutral';
+          const momentumAligned = (
+            (derivedDirection === 'long' && momentumDir === 'bullish') ||
+            (derivedDirection === 'short' && momentumDir === 'bearish')
+          );
+          
+          const teConditions = {
+            regimeIsBreakoutSetup: regime.regime === 'BREAKOUT_SETUP',
+            adxInRange: adx >= teConfig.MIN_ADX && adx <= teConfig.MAX_ADX,
+            slopeRising: adxSlopeV11 >= teConfig.MIN_ADX_SLOPE,
+            priceMoveEnough: absPriceMove >= teConfig.MIN_PRICE_MOVE_PERCENT,
+            momentumAligned: !teConfig.REQUIRE_MOMENTUM_ALIGNMENT || momentumAligned,
+            // Direction must match price move direction
+            directionMatchesPriceMove: (
+              (derivedDirection === 'short' && priceChange4hForTE < 0) ||
+              (derivedDirection === 'long' && priceChange4hForTE > 0)
+            ),
+          };
+          
+          const allConditionsMet = Object.values(teConditions).every(v => v === true);
+          
+          if (allConditionsMet) {
+            transitionExpansionShadowTriggered = true;
+            const teMultiplier = teConfig.POSITION_MULTIPLIER;
+            
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.SUCCESS} 🔮 TRANSITION_EXPANSION_SHADOW: WOULD ALLOW ${derivedDirection.toUpperCase()} ` +
+              `(ADX=${adx.toFixed(1)}, slope=${adxSlopeV11.toFixed(3)}, priceMove=${priceChange4hForTE.toFixed(2)}%, ` +
+              `regime=${regime.regime}, momentum=${momentumDir}, size=${(teMultiplier * 100).toFixed(0)}%)`
+            );
+            
+            // Log to shadow_mode_signals table for tracking
+            if (shadowModeEnabled) {
+              try {
+                await logShadowSignal(supabase as any, {
+                  userId,
+                  symbol,
+                  signalType: derivedDirection === 'long' ? 'long' : 'short',
+                  strategyName: 'TRANSITION_EXPANSION_V1',
+                  gateBlockedBy: 'adx_exhaustion',
+                  oldGateResult: 'blocked',
+                  newGateResult: 'passed',
+                  gateDetails: {
+                    gate: 'TRANSITION_EXPANSION',
+                    shadowMode: true,
+                    adx: parseFloat(adx.toFixed(1)),
+                    adxSlope: parseFloat(adxSlopeV11.toFixed(3)),
+                    priceChange4h: parseFloat(priceChange4hForTE.toFixed(2)),
+                    regime: regime.regime,
+                    momentumDirection: momentumDir,
+                    momentumScore: smartMomentum?.score ?? 0,
+                    positionMultiplier: teMultiplier,
+                    conditions: teConditions,
+                  },
+                  confidenceScore: trendData.confidence ?? 0,
+                  entryPrice: trendData.currentPrice ?? 0,
+                  trend: derivedDirection,
+                  oldPositionMultiplier: 0,
+                  newPositionMultiplier: teMultiplier,
+                });
+              } catch (shadowErr) {
+                logger.forSymbol(symbol).warn(`Shadow log failed for TRANSITION_EXPANSION: ${shadowErr}`);
+              }
+            }
+          } else if (regime.regime === 'BREAKOUT_SETUP' && adx >= teConfig.MIN_ADX && adx <= teConfig.MAX_ADX) {
+            // Near-miss logging: regime matched but other conditions failed
+            const failedConditions = Object.entries(teConditions)
+              .filter(([, v]) => !v)
+              .map(([k]) => k);
+            logger.forSymbol(symbol).debug(
+              `${LOG_CATEGORIES.GATE} 🔮 TRANSITION_EXPANSION near-miss: ${failedConditions.join(', ')} ` +
+              `(ADX=${adx.toFixed(1)}, slope=${adxSlopeV11.toFixed(3)}, priceMove=${priceChange4hForTE.toFixed(2)}%)`
+            );
+          }
+        }
+        // NOTE: transitionExpansionShadowTriggered is NOT used in gate logic while SHADOW_MODE=true
+        // When SHADOW_MODE is set to false, add it to the bypass chain below
+        
         // ===== TRANSITIONAL ZONE (18-22): Only Squeeze or Early Ignition allowed =====
         if (adx < v11AdaptiveThreshold) {
           // ADX below adaptive threshold - check for v1.1 exceptions
@@ -10989,6 +11075,14 @@ serve(async (req) => {
                   needsADX: v11AdaptiveThreshold,
                   needsSqueeze: squeezeCheck.reasons.filter(r => r.includes("not") || r.includes("No")),
                   needsIgnition: ignitionCheck.reasons.filter(r => r.includes("not") || r.includes("No")),
+                },
+                // Fix #1: TRANSITION_EXPANSION shadow diagnostic
+                transitionExpansionShadow: {
+                  wouldHaveTriggered: transitionExpansionShadowTriggered,
+                  shadowModeActive: ADX_GATE_V1_1.TRANSITION_EXPANSION?.SHADOW_MODE ?? true,
+                  message: transitionExpansionShadowTriggered 
+                    ? 'WOULD HAVE ALLOWED entry if shadow mode disabled'
+                    : 'Conditions not met for transition expansion bypass',
                 }
               },
               trendData,

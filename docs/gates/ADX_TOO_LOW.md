@@ -47,6 +47,18 @@ START
   │   │
   │   └─ No exception met? ───────────────── BLOCK
   │
+  ├─ TRANSITION_EXPANSION Shadow Check (ADX 16-25)?
+  │   │   NOTE: This runs BEFORE the transitional zone but is SHADOW MODE ONLY
+  │   │   It logs what WOULD pass but does NOT allow trades yet.
+  │   │
+  │   ├─ Regime == BREAKOUT_SETUP
+  │   ├─ ADX BETWEEN 16 AND 25
+  │   ├─ ADX Slope ≥ +0.5 (strongly rising)
+  │   ├─ |priceMove4h| ≥ 1.5%
+  │   ├─ Momentum direction aligned with derived direction
+  │   └─ Direction matches price move ─────── YES → SHADOW LOG (0.30x size)
+  │                                            Does NOT allow trade until shadow mode disabled
+  │
   ├─ ADX ≥ Adaptive Threshold?
   │   │
   │   │   Threshold by Regime:
@@ -74,6 +86,7 @@ START
 | Adaptive Pass (EARLY_TREND) | ≥ 20 | Regime = EARLY_TREND | 1.00x |
 | Adaptive Pass (STRONG_TREND) | ≥ 18 | Regime = STRONG_TREND | 1.00x |
 | Adaptive Pass (EXHAUSTION) | ≥ 20 | Regime = EXHAUSTION | 1.00x |
+| **Transition Expansion** (SHADOW) | 16–25 | BREAKOUT_SETUP regime, slope ≥ 0.5, priceMove ≥ 1.5%, momentum aligned | 0.30x *(shadow only)* |
 
 ---
 
@@ -188,6 +201,14 @@ The `HardGateADXDisplay` component should show:
 ---
 
 ## Changelog
+
+### v1.2 (2026-02-18)
+- **ADDED**: TRANSITION_EXPANSION bypass tier (SHADOW MODE ONLY)
+  - Captures BREAKOUT_SETUP → TREND_EXPANSION transition window
+  - ADX 16-25 with slope ≥ 0.5, priceMove ≥ 1.5%, momentum aligned
+  - Position size: 0.30x (max 0.40x with HTF support)
+  - Shadow mode: logs to `shadow_mode_signals` table for 3-5 day observation
+  - Set `ADX_GATE_V1_1.TRANSITION_EXPANSION.SHADOW_MODE = false` to enable live
 
 ### v1.1 (2025-01-27)
 - **BREAKING**: Reduced exceptions from 6 to 2 (Squeeze, Early Ignition)

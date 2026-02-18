@@ -110,6 +110,35 @@ export const ADX_GATE_V1_1 = {
   // Log which bypass was selected
   LOG_BYPASS_SELECTION: true,
   
+  // ===== TRANSITION EXPANSION BYPASS (Fix #1 - SHADOW MODE ONLY) =====
+  // Purpose: Capture early expansion phase during BREAKOUT_SETUP → TREND_EXPANSION transition
+  // when ADX absolute value hasn't crossed threshold but slope confirms energy is building.
+  // SHADOW_MODE: When true, only logs what WOULD have passed — does NOT allow actual trades.
+  // Set to false after 3-5 days of observation to enable live execution.
+  TRANSITION_EXPANSION: {
+    ENABLED: true,
+    SHADOW_MODE: true,  // TRUE = log only, FALSE = allow trades
+    // Regime must be BREAKOUT_SETUP (transition forming)
+    REQUIRE_BREAKOUT_SETUP_REGIME: true,
+    // ADX range: 16-25 (below confirmation but above noise floor)
+    MIN_ADX: 16,
+    MAX_ADX: 25,
+    // ADX slope must be strongly rising (> 0.5 = confirmed expansion)
+    MIN_ADX_SLOPE: 0.5,
+    // Price must have moved >= 1.5% to confirm structural break
+    MIN_PRICE_MOVE_PERCENT: 1.5,
+    // Momentum direction must align with derived direction
+    REQUIRE_MOMENTUM_ALIGNMENT: true,
+    // Position size multiplier (conservative - early expansion)
+    POSITION_MULTIPLIER: 0.30,  // 30% of normal position
+    // Maximum position multiplier even with HTF support
+    MAX_POSITION_MULTIPLIER: 0.40,
+    // Tight stop: 1.0x ATR
+    STOP_LOSS_ATR_MULTIPLIER: 1.0,
+    // No scaling until ADX crosses 25
+    NO_SCALING_UNTIL_ADX: 25,
+  },
+  
   // ===== SQUEEZE EXPANSION EXCEPTION (Tier 2) =====
   // Purpose: Allow entries during BB compression breakouts where ADX hasn't yet responded
   SQUEEZE_EXPANSION: {
