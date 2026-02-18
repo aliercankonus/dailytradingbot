@@ -46,33 +46,33 @@ Deno.serve(async (req) => {
 
     console.log('Starting expired signals cleanup...');
 
-    // Clean up market_regime_history - keep only last 24 hours
-    console.log('Cleaning up market_regime_history table (keeping last 24h)...');
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    // Clean up market_regime_history - keep only last 7 days
+    console.log('Cleaning up market_regime_history table (keeping last 7 days)...');
+    const sevenDaysAgoRegime = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     
     const { error: regimeDeleteError, count: regimeDeleted } = await supabase
       .from('market_regime_history')
       .delete({ count: 'exact' })
-      .lt('recorded_at', oneDayAgo);
+      .lt('recorded_at', sevenDaysAgoRegime);
 
     if (regimeDeleteError) {
       console.error('Error deleting old market regime history:', regimeDeleteError);
     } else {
-      console.log(`Deleted ${regimeDeleted || 0} market regime history records older than 24h`);
+      console.log(`Deleted ${regimeDeleted || 0} market regime history records older than 7 days`);
     }
 
-    // Clean up momentum_analysis - keep only last 24 hours
-    console.log('Cleaning up momentum_analysis table (keeping last 24h)...');
+    // Clean up momentum_analysis - keep only last 7 days
+    console.log('Cleaning up momentum_analysis table (keeping last 7 days)...');
     
     const { error: momentumDeleteError, count: momentumDeleted } = await supabase
       .from('momentum_analysis')
       .delete({ count: 'exact' })
-      .lt('recorded_at', oneDayAgo);
+      .lt('recorded_at', sevenDaysAgoRegime);
 
     if (momentumDeleteError) {
       console.error('Error deleting old momentum analysis:', momentumDeleteError);
     } else {
-      console.log(`Deleted ${momentumDeleted || 0} momentum analysis records older than 24h`);
+      console.log(`Deleted ${momentumDeleted || 0} momentum analysis records older than 7 days`);
     }
 
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
       console.error('Error deleting old rejection logs:', rejectionDeleteError);
     } else {
       rejectionLogsDeleted = rejectionDeletedCount || 0;
-      console.log(`Deleted ${rejectionLogsDeleted} rejection logs older than 24h`);
+      console.log(`Deleted ${rejectionLogsDeleted} rejection logs older than 6h`);
     }
 
     // ============================================================
