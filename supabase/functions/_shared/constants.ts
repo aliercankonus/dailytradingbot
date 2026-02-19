@@ -1164,10 +1164,17 @@ export const RSI_THRESHOLDS = {
   BULLISH_PULLBACK: 40,
   NEUTRAL_LOW: 45,
   NEUTRAL: 50,
-  NEUTRAL_HIGH: 55,
-  BEARISH_RALLY: 60,
+  // RSI MID-ZONE FIX: Lowered from 55 to 52 so RSI contributes earlier
+  // At RSI=58, old contribution was 0.166/9.0 (negligible). New: 0.357/9.0 (meaningful)
+  NEUTRAL_HIGH: 52,
+  // Lowered from 60 to 57 — bearish rally threshold mirrors the neutral_high shift
+  BEARISH_RALLY: 57,
   BULLISH_STRONG: 65,
   OVERBOUGHT: 70,
+  // RSI scaling exponent for nonlinear amplification in moderate zone
+  // Applied as: weight * ((rsi - 50) / 50) ^ SCALING_EXPONENT
+  // 0.75 gives moderate RSI more influence without over-weighting extremes
+  RSI_SCALING_EXPONENT: 0.75,
 } as const;
 
 export const CONFIDENCE_THRESHOLDS = {
@@ -3613,14 +3620,30 @@ export const BIAS_RESOLUTION_TIER = {
 
 // ============= NET SIGNAL THRESHOLDS =============
 // Controls trend classification sensitivity in trend-core.ts
+// TIMEFRAME-AWARE: Lower timeframes use lower thresholds to reduce neutral bias
+// Production audit showed 1H neutral 100% of the time — thresholds were too strict
 export const NET_SIGNAL_THRESHOLDS = {
-  // Strong trend thresholds (±4.0 = definitive bullish/bearish)
+  // Default thresholds (used when no timeframe specified)
   STRONG_THRESHOLD: 4.0,
-  // Weak trend thresholds (±3.0 = weak_bullish/weak_bearish intermediate state)
-  // Lowered from ±4.0 to ±3.0 to capture early impulse phases
   WEAK_THRESHOLD: 3.0,
   // Enable weak trend intermediate states
   ENABLE_WEAK_TRENDS: true,
+  // Per-timeframe strong thresholds — lower TFs need lower thresholds due to noise profile
+  // 15m oscillates rapidly → ±3.0 captures early impulse without excessive false positives
+  // 4h is naturally smoother → ±4.5 ensures only structural moves classify as directional
+  TIMEFRAME_STRONG: {
+    '15m': 3.0,
+    '30m': 3.5,
+    '1h': 3.8,
+    '4h': 4.5,
+  } as Record<string, number>,
+  // Per-timeframe weak thresholds (extended trend states)
+  TIMEFRAME_WEAK: {
+    '15m': 2.0,
+    '30m': 2.5,
+    '1h': 2.8,
+    '4h': 3.5,
+  } as Record<string, number>,
 } as const;
 
 // ============= EXHAUSTION ESCAPE PARAMS =============

@@ -32,7 +32,7 @@ export interface TrendResult {
   };
 }
 
-export function calculateTrend(prices: number[]): TrendResult {
+export function calculateTrend(prices: number[], timeframe?: string): TrendResult {
   if (prices.length < 30) {
     return {
       trend: "neutral",
@@ -68,16 +68,22 @@ export function calculateTrend(prices: number[]): TrendResult {
   }
   totalWeight += emaWeight;
 
-  // RSI signal (weight 2.5)
+  // RSI signal (weight 2.5) — with nonlinear mid-zone amplification
   const rsiWeight = 2.5;
+  const rsiExponent = (RSI_THRESHOLDS as any).RSI_SCALING_EXPONENT ?? 1.0;
   let rsiSignal = "neutral";
   if (rsi > RSI_THRESHOLDS.BEARISH_RALLY) {
-    bullishSignals += rsiWeight * ((rsi - RSI_THRESHOLDS.BEARISH_RALLY) / (100 - RSI_THRESHOLDS.BEARISH_RALLY));
+    // Nonlinear scaling: amplify moderate RSI values
+    const rawRatio = (rsi - RSI_THRESHOLDS.BEARISH_RALLY) / (100 - RSI_THRESHOLDS.BEARISH_RALLY);
+    const scaledRatio = Math.pow(rawRatio, rsiExponent);
+    bullishSignals += rsiWeight * scaledRatio;
     if (rsi > RSI_THRESHOLDS.OVERBOUGHT) rsiSignal = "overbought";
     else if (rsi > RSI_THRESHOLDS.BULLISH_STRONG) rsiSignal = "strong_bullish";
     else rsiSignal = "bullish";
   } else if (rsi < RSI_THRESHOLDS.BULLISH_PULLBACK) {
-    bearishSignals += rsiWeight * ((RSI_THRESHOLDS.BULLISH_PULLBACK - rsi) / RSI_THRESHOLDS.BULLISH_PULLBACK);
+    const rawRatio = (RSI_THRESHOLDS.BULLISH_PULLBACK - rsi) / RSI_THRESHOLDS.BULLISH_PULLBACK;
+    const scaledRatio = Math.pow(rawRatio, rsiExponent);
+    bearishSignals += rsiWeight * scaledRatio;
     rsiSignal = rsi < RSI_THRESHOLDS.OVERSOLD ? "oversold" : "bearish";
   }
   totalWeight += rsiWeight;
@@ -100,27 +106,28 @@ export function calculateTrend(prices: number[]): TrendResult {
   let confidence = 30 + (Math.abs(netSignal) / totalWeight) * 100 * 0.65;
   confidence = Math.min(Math.max(confidence, 30), 95);
 
-  // NEUTRAL-BIAS FIX: Lower threshold from ±4.0 to ±3.0 and add weak intermediate states
-  // This captures early impulse phases that would previously be labeled "neutral"
-  const STRONG = NET_SIGNAL_THRESHOLDS?.STRONG_THRESHOLD ?? 4.0;
-  const WEAK = NET_SIGNAL_THRESHOLDS?.WEAK_THRESHOLD ?? 3.0;
+  // TIMEFRAME-AWARE THRESHOLDS: Each TF has its own sensitivity
+  // Lower TFs (15m, 30m) use lower thresholds to reduce neutral bias
+  // Higher TFs (4h) use higher thresholds for structural stability
+  const tfStrong = (timeframe && NET_SIGNAL_THRESHOLDS.TIMEFRAME_STRONG?.[timeframe]) 
+    ?? NET_SIGNAL_THRESHOLDS?.STRONG_THRESHOLD ?? 4.0;
+  const tfWeak = (timeframe && NET_SIGNAL_THRESHOLDS.TIMEFRAME_WEAK?.[timeframe])
+    ?? NET_SIGNAL_THRESHOLDS?.WEAK_THRESHOLD ?? 3.0;
   const ENABLE_WEAK = NET_SIGNAL_THRESHOLDS?.ENABLE_WEAK_TRENDS ?? true;
   
   let trend: "bullish" | "bearish" | "neutral" = "neutral";
   let extendedTrend: ExtendedTrend = "neutral";
   
-  if (netSignal >= STRONG) {
+  if (netSignal >= tfStrong) {
     trend = "bullish";
     extendedTrend = "bullish";
-  } else if (netSignal <= -STRONG) {
+  } else if (netSignal <= -tfStrong) {
     trend = "bearish";
     extendedTrend = "bearish";
-  } else if (ENABLE_WEAK && netSignal >= WEAK) {
-    // NEW: Weak bullish - signals directional bias without full confirmation
-    trend = "neutral";  // Backward compatible: main trend stays neutral
+  } else if (ENABLE_WEAK && netSignal >= tfWeak) {
+    trend = "neutral";
     extendedTrend = "weak_bullish";
-  } else if (ENABLE_WEAK && netSignal <= -WEAK) {
-    // NEW: Weak bearish
+  } else if (ENABLE_WEAK && netSignal <= -tfWeak) {
     trend = "neutral";
     extendedTrend = "weak_bearish";
   }
@@ -211,8 +218,8 @@ export function analyzeMultiTimeframe(
   const currentPrice = parseFloat(liveCandle[4]);
   
   // All structural indicators use CLOSED candle data
-  const trend1h = calculateTrend(prices1h);
-  const trend4h = calculateTrend(prices4h);
+  const trend1h = calculateTrend(prices1h, '1h');
+  const trend4h = calculateTrend(prices4h, '4h');
   
   const stochRsi1h = calculateStochasticRSI(prices1h, 14, 14, 3, 3, trend1h.indicators.rsiArray);
   const stochRsi4h = calculateStochasticRSI(prices4h, 14, 14, 3, 3, trend4h.indicators.rsiArray);
