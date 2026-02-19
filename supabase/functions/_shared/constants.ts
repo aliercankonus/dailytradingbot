@@ -6436,6 +6436,29 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
   HARD_ZONE_THRESHOLD_PERCENT: 1.5,
   BLOCK_IN_HARD_ZONE: true,
   
+  // ===== HARD ZONE GRADUATION (ADX-conditioned micro positions) =====
+  // Replaces binary hard block with ADX-graduated sizing when LTF is neutral
+  // Philosophy: ADX >= 30 + positive slope = trend continuation pressure, not exhaustion
+  // ADX < 25 or declining slope = genuine bounce risk, maintain hard block
+  HARD_ZONE_GRADUATION: {
+    ENABLED: true,
+    // Tier 1: Strong trend continuation (allow 0.25x)
+    STRONG_TREND: {
+      MIN_ADX: 30,
+      MIN_ADX_SLOPE: 0.0,  // Non-negative slope required
+      POSITION_MULTIPLIER: 0.25,
+    },
+    // Tier 2: Moderate trend (allow 0.15x)
+    MODERATE_TREND: {
+      MIN_ADX: 25,
+      MAX_ADX: 30,  // Below Tier 1
+      MIN_ADX_SLOPE: -0.5,  // Allow slight deceleration
+      POSITION_MULTIPLIER: 0.15,
+    },
+    // Hard block: ADX < 25 or slope < -1.0 (exhaustion/weak trend)
+    HARD_BLOCK_MAX_ADX_SLOPE: -1.0,  // Below this = structural collapse, always block
+  },
+  
   // ===== STRONG TREND RELAXATION =====
   // Similar to MOVE_EXHAUSTION: relax thresholds during strong trending regimes
   // Prevents over-rejection of high-conviction continuation moves

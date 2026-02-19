@@ -193,7 +193,34 @@ Currently in shadow mode — logs to `shadow_mode_signals` with `strategy_name =
 - `MOVE_EXHAUSTED`: Blocks after large price moves (also has relaxation)
 - `ADX_SLOPE_GRADUATED`: Bollinger Breakdown Override
 
+## Hard Zone Graduation (v1.3)
+
+The default hard zone (< 1.5%) previously applied a binary block when LTF was neutral and ADX < 50. This over-rejected trend continuation setups where ADX showed strong energy with positive slope (e.g., DOT at ADX 38, slope +0.69).
+
+### Graduation Tiers
+
+| ADX | ADX Slope | Multiplier | Rationale |
+|-----|-----------|------------|-----------|
+| ≥ 30 | ≥ 0.0 | 0.25x | Strong trend continuation — rising energy justifies micro entry |
+| 25–30 | ≥ -0.5 | 0.15x | Moderate trend — allow minimal exposure |
+| < 25 | Any | **BLOCK** | Weak trend — genuine bounce risk |
+| Any | < -1.0 | **BLOCK** | Structural collapse — always block regardless of ADX |
+
+### Regime Separation Evidence
+
+| Symbol | ADX | Slope | Result | Rationale |
+|--------|-----|-------|--------|-----------|
+| DOTUSDT | 38 | +0.69 | 0.25x ALLOW | Trend continuation, deeply oversold StochRSI |
+| XRPUSDT | 31 | -0.80 | **BLOCK** | Negative slope = deceleration, bounce risk |
+
 ## Changelog
+
+### v1.3 (2025-02-19)
+- Added Hard Zone Graduation: ADX-conditioned micro positions replace binary block
+- Tier 1: ADX ≥ 30 + slope ≥ 0 → 0.25x position
+- Tier 2: ADX 25-30 + slope ≥ -0.5 → 0.15x position
+- Safety: slope < -1.0 always hard blocks (structural collapse)
+- Applied symmetrically to both SHORT near low and LONG near high
 
 ### v1.2 (2025-02-18)
 - Added Fix #4: BREAKOUT_SETUP Relaxation (shadow mode)
