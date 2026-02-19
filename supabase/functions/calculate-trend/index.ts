@@ -858,10 +858,10 @@ serve(async (req) => {
           const bCurrentPrice = bPrices1h[bPrices1h.length - 1];
           
           // Calculate trends for all timeframes (aligned with single mode)
-          const bTrend15m = bPrices15m.length >= 20 ? calculateTrend(bPrices15m) : null;
-          const bTrend30m = bPrices30m.length >= 20 ? calculateTrend(bPrices30m) : null;
-          const bTrend1h = calculateTrend(bPrices1h);
-          const bTrend4h = calculateTrend(bPrices4h);
+          const bTrend15m = bPrices15m.length >= 20 ? calculateTrend(bPrices15m, '15m') : null;
+          const bTrend30m = bPrices30m.length >= 20 ? calculateTrend(bPrices30m, '30m') : null;
+          const bTrend1h = calculateTrend(bPrices1h, '1h');
+          const bTrend4h = calculateTrend(bPrices4h, '4h');
           
           // StochRSI for all timeframes
           const bStochRsi15m = bTrend15m ? calculateStochasticRSI(bPrices15m, 14, 14, 3, 3, bTrend15m.indicators.rsiArray) : null;
@@ -1119,10 +1119,10 @@ serve(async (req) => {
               trueAlignment: bTrueAlignment,
               
               timeframes: {
-                "15m": bTrend15m ? { trend: bTrend15m.trend, extendedTrend: bTrend15m.extendedTrend, confidence: bTrend15m.confidence, indicators: bTrend15m.indicators } : null,
-                "30m": bTrend30m ? { trend: bTrend30m.trend, extendedTrend: bTrend30m.extendedTrend, confidence: bTrend30m.confidence, indicators: bTrend30m.indicators } : null,
-                "1h": { trend: bTrend1h.trend, extendedTrend: bTrend1h.extendedTrend, confidence: bTrend1h.confidence, indicators: bTrend1h.indicators },
-                "4h": { trend: bTrend4h.trend, extendedTrend: bTrend4h.extendedTrend, confidence: bTrend4h.confidence, indicators: bTrend4h.indicators },
+                "15m": bTrend15m ? { trend: bTrend15m.trend, extendedTrend: bTrend15m.extendedTrend, netSignal: bTrend15m.netSignal, confidence: bTrend15m.confidence, indicators: bTrend15m.indicators } : null,
+                "30m": bTrend30m ? { trend: bTrend30m.trend, extendedTrend: bTrend30m.extendedTrend, netSignal: bTrend30m.netSignal, confidence: bTrend30m.confidence, indicators: bTrend30m.indicators } : null,
+                "1h": { trend: bTrend1h.trend, extendedTrend: bTrend1h.extendedTrend, netSignal: bTrend1h.netSignal, confidence: bTrend1h.confidence, indicators: bTrend1h.indicators },
+                "4h": { trend: bTrend4h.trend, extendedTrend: bTrend4h.extendedTrend, netSignal: bTrend4h.netSignal, confidence: bTrend4h.confidence, indicators: bTrend4h.indicators },
               },
               
               stochasticRsi: {
@@ -1329,10 +1329,10 @@ serve(async (req) => {
     logger.forSymbol(symbol).info(`📐 INTRA-CANDLE DEVIATION: livePrice=${currentPrice.toFixed(2)} vs lastClosed1h=${lastClosedPrice1h.toFixed(2)} (Δ${deviation1h >= 0 ? '+' : ''}${deviation1h.toFixed(4)}%) | lastClosed4h=${lastClosedPrice4h.toFixed(2)} (Δ${deviation4h >= 0 ? '+' : ''}${deviation4h.toFixed(4)}%)`);
 
     // Calculate trends using shared module
-    const trend15m = calculateTrend(prices15m);
-    const trend30m = calculateTrend(prices30m);
-    const trend1h = calculateTrend(prices1h);
-    const trend4h = calculateTrend(prices4h);
+    const trend15m = calculateTrend(prices15m, '15m');
+    const trend30m = calculateTrend(prices30m, '30m');
+    const trend1h = calculateTrend(prices1h, '1h');
+    const trend4h = calculateTrend(prices4h, '4h');
 
     // StochRSI using shared module (pass pre-calculated RSI arrays)
     const stochRsi15m = calculateStochasticRSI(prices15m, 14, 14, 3, 3, trend15m.indicators.rsiArray);
@@ -1895,10 +1895,10 @@ serve(async (req) => {
       },
       trueAlignment: trueAlignment,
       timeframes: {
-        "15m": { trend: trend15m.trend, extendedTrend: trend15m.extendedTrend, confidence: trend15m.confidence, enhancedConfidence: enhancedConfidence15m, indicators: trend15m.indicators },
-        "30m": { trend: trend30m.trend, extendedTrend: trend30m.extendedTrend, confidence: trend30m.confidence, enhancedConfidence: enhancedConfidence30m, indicators: trend30m.indicators },
-        "1h": { trend: trend1h.trend, extendedTrend: trend1h.extendedTrend, confidence: trend1h.confidence, enhancedConfidence: enhancedConfidence1h, indicators: trend1h.indicators },
-        "4h": { trend: trend4h.trend, extendedTrend: trend4h.extendedTrend, confidence: trend4h.confidence, enhancedConfidence: enhancedConfidence4h, indicators: trend4h.indicators },
+        "15m": { trend: trend15m.trend, extendedTrend: trend15m.extendedTrend, netSignal: trend15m.netSignal, confidence: trend15m.confidence, enhancedConfidence: enhancedConfidence15m, indicators: trend15m.indicators },
+        "30m": { trend: trend30m.trend, extendedTrend: trend30m.extendedTrend, netSignal: trend30m.netSignal, confidence: trend30m.confidence, enhancedConfidence: enhancedConfidence30m, indicators: trend30m.indicators },
+        "1h": { trend: trend1h.trend, extendedTrend: trend1h.extendedTrend, netSignal: trend1h.netSignal, confidence: trend1h.confidence, enhancedConfidence: enhancedConfidence1h, indicators: trend1h.indicators },
+        "4h": { trend: trend4h.trend, extendedTrend: trend4h.extendedTrend, netSignal: trend4h.netSignal, confidence: trend4h.confidence, enhancedConfidence: enhancedConfidence4h, indicators: trend4h.indicators },
       },
       stochasticRsi: {
         "15m": { ...stochRsi15m, kArray: undefined },  // Don't include large arrays in response
