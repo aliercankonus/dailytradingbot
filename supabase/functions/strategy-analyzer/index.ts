@@ -7492,18 +7492,70 @@ serve(async (req) => {
                     }
                   }
                   
-                  // If not relaxed (or shadow mode), apply the original block
-                  if (!relaxedMomentumPass || (breakoutRelax?.SHADOW_MODE ?? true)) {
+                  // ===== GRADUATED MOMENTUM BANDS (Option A) =====
+                  // Replace hard block with graduated sizing based on momentum score
+                  const graduatedMomentum = expandedBlock.GRADUATED_MOMENTUM;
+                  if (graduatedMomentum?.ENABLED) {
+                    const momScore = smartMomentum.score;
+                    
+                    // Band 2: Moderate conviction (momentum -25 to -10 for SHORT)
+                    if (momScore <= graduatedMomentum.MODERATE_SHORT_MAX) {
+                      nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, graduatedMomentum.MODERATE_MULTIPLIER);
+                      logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_LOW_EXPANDED GRADUATED: SHORT allowed - momentum ${momScore.toFixed(0)} <= ${graduatedMomentum.MODERATE_SHORT_MAX} (moderate conviction), ${distanceFromLow.toFixed(2)}% from low - position ${(graduatedMomentum.MODERATE_MULTIPLIER * 100).toFixed(0)}%`);
+                    }
+                    // Band 3: Low conviction / neutral (momentum -10 to +5 for SHORT)
+                    else if (momScore <= graduatedMomentum.NEUTRAL_SHORT_MAX) {
+                      nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, graduatedMomentum.NEUTRAL_MULTIPLIER);
+                      logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_LOW_EXPANDED GRADUATED: SHORT allowed - momentum ${momScore.toFixed(0)} neutral (${graduatedMomentum.MODERATE_SHORT_MAX} to ${graduatedMomentum.NEUTRAL_SHORT_MAX}), ${distanceFromLow.toFixed(2)}% from low - micro position ${(graduatedMomentum.NEUTRAL_MULTIPLIER * 100).toFixed(0)}%`);
+                    }
+                    // Band 4: Opposing momentum (> +5 for SHORT) — hard block
+                    else {
+                      nearExtremeBlocked = true;
+                      rejectedByHardGates++;
+                      const blockReason = `NEAR_24H_LOW_EXPANDED: SHORT blocked - ${distanceFromLow.toFixed(2)}% from 24h low ($${priceDistance.low24h.toFixed(2)}), momentum_score=${momScore.toFixed(0)} > ${graduatedMomentum.NEUTRAL_SHORT_MAX} — opposing momentum = location failure`;
+                      perSymbolGateAttribution.set(symbol, { 
+                        gate: 'NEAR_24H_LOW_HARD', 
+                        details: blockReason
+                      });
+                      
+                      logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                      
+                      await logRejectionWithAI(
+                        supabase, userId, symbol,
+                        blockReason,
+                        {
+                          gate: 'NEAR_24H_LOW_HARD',
+                          subGate: 'EXPANDED_OPPOSING_MOMENTUM',
+                          derivedDirection,
+                          distanceFromLow: distanceFromLow.toFixed(3),
+                          low24h: priceDistance.low24h,
+                          smartMomentumScore: momScore.toFixed(1),
+                          opposingThreshold: graduatedMomentum.NEUTRAL_SHORT_MAX,
+                          momentumState: trendData?.momentum?.state || 'unknown',
+                          tf1hDir, tf30mDir,
+                          graduatedBands: {
+                            fullPass: expandedBlock.MIN_MOMENTUM_SCORE_SHORT,
+                            moderate: `<= ${graduatedMomentum.MODERATE_SHORT_MAX} → ${(graduatedMomentum.MODERATE_MULTIPLIER * 100).toFixed(0)}%`,
+                            neutral: `<= ${graduatedMomentum.NEUTRAL_SHORT_MAX} → ${(graduatedMomentum.NEUTRAL_MULTIPLIER * 100).toFixed(0)}%`,
+                            block: `> ${graduatedMomentum.NEUTRAL_SHORT_MAX}`,
+                          },
+                        },
+                        trendData,
+                        riskParams.ai_analysis_enabled !== false,
+                        earlyOrderFlowAnalysis
+                      );
+                      continue;
+                    }
+                  } else {
+                    // Fallback: original hard block if graduated not enabled
                     nearExtremeBlocked = true;
                     rejectedByHardGates++;
                     const blockReason = `NEAR_24H_LOW_EXPANDED: SHORT blocked - ${distanceFromLow.toFixed(2)}% from 24h low ($${priceDistance.low24h.toFixed(2)}), momentum_score=${smartMomentum.score.toFixed(0)} (need <=${expandedBlock.MIN_MOMENTUM_SCORE_SHORT}) - neutral momentum is NOT confirmation`;
                     perSymbolGateAttribution.set(symbol, { 
                       gate: 'NEAR_24H_LOW_HARD', 
-                      details: blockReason + (breakoutRelaxApplies && relaxedMomentumPass ? ' [SHADOW: would pass with BREAKOUT_RELAXATION]' : '')
+                      details: blockReason
                     });
-                    
                     logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
-                    
                     await logRejectionWithAI(
                       supabase, userId, symbol,
                       blockReason,
@@ -7512,20 +7564,8 @@ serve(async (req) => {
                         subGate: 'EXPANDED_MOMENTUM_BLOCK',
                         derivedDirection,
                         distanceFromLow: distanceFromLow.toFixed(3),
-                        low24h: priceDistance.low24h,
-                        expandedThreshold: expandedBlock.SHORT_NEAR_LOW_THRESHOLD_PERCENT,
                         smartMomentumScore: smartMomentum.score.toFixed(1),
                         momentumRequired: expandedBlock.MIN_MOMENTUM_SCORE_SHORT,
-                        momentumState: trendData?.momentum?.state || 'unknown',
-                        tf1hDir, tf30mDir,
-                        breakoutRelaxation: {
-                          wouldTrigger: breakoutRelaxApplies,
-                          wouldPass: relaxedMomentumPass,
-                          regime: fourStateRegime.regime,
-                          adxSlope: adxSlope.toFixed(2),
-                          relaxedThreshold: breakoutRelax?.RELAXED_MIN_MOMENTUM_SCORE_SHORT,
-                        },
-                        wouldPassWith: `momentum_score <= ${expandedBlock.MIN_MOMENTUM_SCORE_SHORT} OR ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}${breakoutRelax?.ENABLED ? ` OR (BREAKOUT_SETUP + adxSlope>=${breakoutRelax.MIN_ADX_SLOPE} + momentum<=${breakoutRelax.RELAXED_MIN_MOMENTUM_SCORE_SHORT})` : ''}`,
                       },
                       trendData,
                       riskParams.ai_analysis_enabled !== false,
@@ -7703,17 +7743,69 @@ serve(async (req) => {
                     }
                   }
                   
-                  if (!relaxedMomentumPassLong || (breakoutRelaxLong?.SHADOW_MODE ?? true)) {
+                  // ===== GRADUATED MOMENTUM BANDS (Option A) =====
+                  const graduatedMomentumLong = expandedBlockLong.GRADUATED_MOMENTUM;
+                  if (graduatedMomentumLong?.ENABLED) {
+                    const momScore = smartMomentum.score;
+                    
+                    // Band 2: Moderate conviction (momentum 10 to 25 for LONG)
+                    if (momScore >= graduatedMomentumLong.MODERATE_LONG_MIN) {
+                      nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, graduatedMomentumLong.MODERATE_MULTIPLIER);
+                      logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_HIGH_EXPANDED GRADUATED: LONG allowed - momentum ${momScore.toFixed(0)} >= ${graduatedMomentumLong.MODERATE_LONG_MIN} (moderate conviction), ${distanceFromHigh.toFixed(2)}% from high - position ${(graduatedMomentumLong.MODERATE_MULTIPLIER * 100).toFixed(0)}%`);
+                    }
+                    // Band 3: Low conviction / neutral (momentum -5 to 10 for LONG)
+                    else if (momScore >= graduatedMomentumLong.NEUTRAL_LONG_MIN) {
+                      nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, graduatedMomentumLong.NEUTRAL_MULTIPLIER);
+                      logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_HIGH_EXPANDED GRADUATED: LONG allowed - momentum ${momScore.toFixed(0)} neutral (${graduatedMomentumLong.NEUTRAL_LONG_MIN} to ${graduatedMomentumLong.MODERATE_LONG_MIN}), ${distanceFromHigh.toFixed(2)}% from high - micro position ${(graduatedMomentumLong.NEUTRAL_MULTIPLIER * 100).toFixed(0)}%`);
+                    }
+                    // Band 4: Opposing momentum (< -5 for LONG) — hard block
+                    else {
+                      nearExtremeBlocked = true;
+                      rejectedByHardGates++;
+                      const blockReason = `NEAR_24H_HIGH_EXPANDED: LONG blocked - ${distanceFromHigh.toFixed(2)}% from 24h high ($${priceDistance.high24h.toFixed(2)}), momentum_score=${momScore.toFixed(0)} < ${graduatedMomentumLong.NEUTRAL_LONG_MIN} — opposing momentum = location failure`;
+                      perSymbolGateAttribution.set(symbol, { 
+                        gate: 'NEAR_24H_HIGH_HARD', 
+                        details: blockReason
+                      });
+                      
+                      logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                      
+                      await logRejectionWithAI(
+                        supabase, userId, symbol,
+                        blockReason,
+                        {
+                          gate: 'NEAR_24H_HIGH_HARD',
+                          subGate: 'EXPANDED_OPPOSING_MOMENTUM',
+                          derivedDirection,
+                          distanceFromHigh: distanceFromHigh.toFixed(3),
+                          high24h: priceDistance.high24h,
+                          smartMomentumScore: momScore.toFixed(1),
+                          opposingThreshold: graduatedMomentumLong.NEUTRAL_LONG_MIN,
+                          momentumState: trendData?.momentum?.state || 'unknown',
+                          tf1hDir, tf30mDir,
+                          graduatedBands: {
+                            fullPass: expandedBlockLong.MIN_MOMENTUM_SCORE_LONG,
+                            moderate: `>= ${graduatedMomentumLong.MODERATE_LONG_MIN} → ${(graduatedMomentumLong.MODERATE_MULTIPLIER * 100).toFixed(0)}%`,
+                            neutral: `>= ${graduatedMomentumLong.NEUTRAL_LONG_MIN} → ${(graduatedMomentumLong.NEUTRAL_MULTIPLIER * 100).toFixed(0)}%`,
+                            block: `< ${graduatedMomentumLong.NEUTRAL_LONG_MIN}`,
+                          },
+                        },
+                        trendData,
+                        riskParams.ai_analysis_enabled !== false,
+                        earlyOrderFlowAnalysis
+                      );
+                      continue;
+                    }
+                  } else {
+                    // Fallback: original hard block if graduated not enabled
                     nearExtremeBlocked = true;
                     rejectedByHardGates++;
                     const blockReason = `NEAR_24H_HIGH_EXPANDED: LONG blocked - ${distanceFromHigh.toFixed(2)}% from 24h high ($${priceDistance.high24h.toFixed(2)}), momentum_score=${smartMomentum.score.toFixed(0)} (need >=${expandedBlockLong.MIN_MOMENTUM_SCORE_LONG}) - neutral momentum is NOT confirmation`;
                     perSymbolGateAttribution.set(symbol, { 
                       gate: 'NEAR_24H_HIGH_HARD', 
-                      details: blockReason + (breakoutRelaxAppliesLong && relaxedMomentumPassLong ? ' [SHADOW: would pass with BREAKOUT_RELAXATION]' : '')
+                      details: blockReason
                     });
-                    
                     logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
-                    
                     await logRejectionWithAI(
                       supabase, userId, symbol,
                       blockReason,
@@ -7722,20 +7814,8 @@ serve(async (req) => {
                         subGate: 'EXPANDED_MOMENTUM_BLOCK',
                         derivedDirection,
                         distanceFromHigh: distanceFromHigh.toFixed(3),
-                        high24h: priceDistance.high24h,
-                        expandedThreshold: expandedBlockLong.LONG_NEAR_HIGH_THRESHOLD_PERCENT,
                         smartMomentumScore: smartMomentum.score.toFixed(1),
                         momentumRequired: expandedBlockLong.MIN_MOMENTUM_SCORE_LONG,
-                        momentumState: trendData?.momentum?.state || 'unknown',
-                        tf1hDir, tf30mDir,
-                        breakoutRelaxation: {
-                          wouldTrigger: breakoutRelaxAppliesLong,
-                          wouldPass: relaxedMomentumPassLong,
-                          regime: fourStateRegime.regime,
-                          adxSlope: adxSlope.toFixed(2),
-                          relaxedThreshold: breakoutRelaxLong?.RELAXED_MIN_MOMENTUM_SCORE_LONG,
-                        },
-                        wouldPassWith: `momentum_score >= ${expandedBlockLong.MIN_MOMENTUM_SCORE_LONG} OR ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}${breakoutRelaxLong?.ENABLED ? ` OR (BREAKOUT_SETUP + adxSlope>=${breakoutRelaxLong.MIN_ADX_SLOPE} + momentum>=${breakoutRelaxLong.RELAXED_MIN_MOMENTUM_SCORE_LONG})` : ''}`,
                       },
                       trendData,
                       riskParams.ai_analysis_enabled !== false,

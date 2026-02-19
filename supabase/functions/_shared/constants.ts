@@ -6501,11 +6501,33 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
     // Expanded hard zone for shorts near low / longs near high
     SHORT_NEAR_LOW_THRESHOLD_PERCENT: 1.2,
     LONG_NEAR_HIGH_THRESHOLD_PERCENT: 1.2,
-    // Must have STRONG directional momentum to enter within this zone
-    MIN_MOMENTUM_SCORE_SHORT: -25,   // momentum score must be <= -25 for SHORT
-    MIN_MOMENTUM_SCORE_LONG: 25,     // momentum score must be >= 25 for LONG
+    // Full pass threshold — momentum must be at least this strong for full sizing
+    MIN_MOMENTUM_SCORE_SHORT: -25,   // momentum score must be <= -25 for SHORT full pass
+    MIN_MOMENTUM_SCORE_LONG: 25,     // momentum score must be >= 25 for LONG full pass
     // Require momentum direction to match trade direction (neutral = NOT a pass)
     REQUIRE_DIRECTIONAL_MOMENTUM: true,
+    
+    // ===== GRADUATED MOMENTUM BANDS (replaces hard block) =====
+    // Philosophy: Neutral momentum is statistical discomfort, not structural invalidation
+    // Only opposing momentum (> +5 for SHORT, < -5 for LONG) is a genuine location failure
+    GRADUATED_MOMENTUM: {
+      ENABLED: true,
+      // Band 1: Strong confirmation — full pass (handled by MIN_MOMENTUM_SCORE above)
+      // SHORT: momentum <= -25, LONG: momentum >= 25
+      
+      // Band 2: Moderate conviction — reduced size
+      MODERATE_SHORT_MAX: -10,       // SHORT: momentum -25 to -10
+      MODERATE_LONG_MIN: 10,         // LONG: momentum 10 to 25
+      MODERATE_MULTIPLIER: 0.35,     // 35% position
+      
+      // Band 3: Low conviction (neutral) — micro position
+      NEUTRAL_SHORT_MAX: 5,          // SHORT: momentum -10 to +5
+      NEUTRAL_LONG_MIN: -5,          // LONG: momentum -5 to 10
+      NEUTRAL_MULTIPLIER: 0.20,      // 20% position (micro)
+      
+      // Band 4: Opposing momentum — hard block (genuine location failure)
+      // SHORT: momentum > +5, LONG: momentum < -5
+    },
     
     // ===== FIX #4: BREAKOUT_SETUP RELAXATION (SHADOW MODE) =====
     // When ADX slope > 0.5 and regime is BREAKOUT_SETUP, the market is accelerating
