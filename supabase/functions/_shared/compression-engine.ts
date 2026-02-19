@@ -84,9 +84,10 @@ export function checkCompressionKillSwitch(input: {
     return { killed: true, reason: `ADX ${input.adx.toFixed(1)} > ${cfg.KILL_ADX_THRESHOLD} kill threshold` };
   }
   
-  // Kill 2: ADX slope positive for 2+ candles — trend forming
-  if (input.adxSlope > 0.1) {
-    return { killed: true, reason: `ADX slope ${input.adxSlope.toFixed(2)} rising — expansion forming` };
+  // Kill 2: ADX slope rising meaningfully — trend forming
+  // Threshold 0.3 filters noise (0.1-0.2 range common in low-ADX regimes)
+  if (input.adxSlope > 0.3) {
+    return { killed: true, reason: `ADX slope ${input.adxSlope.toFixed(2)} > 0.3 — structural acceleration` };
   }
   
   // Kill 2b: Early expansion zone — ADX >= 23 AND slope positive
@@ -96,8 +97,9 @@ export function checkCompressionKillSwitch(input: {
   }
   
   // Kill 3: ATR expanding above dynamic threshold — volatility returning
-  if (input.atrPercent >= input.dynamicMinATR) {
-    return { killed: true, reason: `ATR ${input.atrPercent.toFixed(2)}% >= ${input.dynamicMinATR.toFixed(2)}% dynamic min — volatility expanding` };
+  // Strict > (not >=): equality belongs to compression regime, not expansion
+  if (input.atrPercent > input.dynamicMinATR) {
+    return { killed: true, reason: `ATR ${input.atrPercent.toFixed(2)}% > ${input.dynamicMinATR.toFixed(2)}% dynamic min — volatility expanding` };
   }
   
   // Kill 4: Large candle — regime shift brewing
@@ -259,9 +261,10 @@ export function evaluateCompressionEntry(input: CompressionEvalInput): Compressi
   }
   
   // ===== STEP 2: STRUCTURAL CONDITIONS =====
-  // ATR must be below dynamic threshold (compression)
-  if (input.atrPercent >= input.dynamicMinATR) {
-    defaultResult.reason = `ATR ${input.atrPercent.toFixed(2)}% >= ${input.dynamicMinATR.toFixed(2)}% — not compressed`;
+  // ATR must be below or equal to dynamic threshold (compression)
+  // Strict >: ATR at exact threshold is still compression territory
+  if (input.atrPercent > input.dynamicMinATR) {
+    defaultResult.reason = `ATR ${input.atrPercent.toFixed(2)}% > ${input.dynamicMinATR.toFixed(2)}% — not compressed`;
     return defaultResult;
   }
   
