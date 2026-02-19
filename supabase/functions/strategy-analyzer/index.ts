@@ -7577,40 +7577,68 @@ serve(async (req) => {
               }
               
               if (!nearExtremeBlocked && inHardZone && NEAR_EXTREME_PROTECTION_GATE.BLOCK_IN_HARD_ZONE && !adxOverrideAllowed && !ltfSupportsShort) {
-                // Hard block - too close to 24h low with no LTF support
-                nearExtremeBlocked = true;
-                rejectedByHardGates++;
-                perSymbolGateAttribution.set(symbol, { 
-                  gate: 'NEAR_24H_LOW_HARD', 
-                  details: `SHORT blocked: ${distanceFromLow.toFixed(1)}% from 24h low, LTF not bearish` 
-                });
+                // ===== HARD ZONE GRADUATION: ADX-conditioned micro positions =====
+                const hardGrad = NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_GRADUATION;
+                let hardZoneGraduated = false;
                 
-                const blockReason = `NEAR_24H_LOW_HARD: SHORT blocked - only ${distanceFromLow.toFixed(1)}% above 24h low ($${priceDistance.low24h.toFixed(2)}), 1h=${tf1hDir}, 30m=${tf30mDir} (need LTF bearish for near-low shorts)`;
-                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                if (hardGrad?.ENABLED) {
+                  // Safety: structural collapse always blocks
+                  if (adxSlope < hardGrad.HARD_BLOCK_MAX_ADX_SLOPE) {
+                    // Slope collapsing — maintain hard block
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔒 HARD_ZONE_GRADUATION: slope ${adxSlope.toFixed(2)} < ${hardGrad.HARD_BLOCK_MAX_ADX_SLOPE} — structural collapse, maintaining hard block`);
+                  } else if (adx >= hardGrad.STRONG_TREND.MIN_ADX && adxSlope >= hardGrad.STRONG_TREND.MIN_ADX_SLOPE) {
+                    // Tier 1: Strong trend continuation
+                    nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, hardGrad.STRONG_TREND.POSITION_MULTIPLIER);
+                    hardZoneGraduated = true;
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 HARD_ZONE_GRADUATION TIER1: SHORT allowed - ADX=${adx.toFixed(1)}>=${hardGrad.STRONG_TREND.MIN_ADX}, slope=${adxSlope.toFixed(2)}>=${hardGrad.STRONG_TREND.MIN_ADX_SLOPE}, ${distanceFromLow.toFixed(2)}% from low - position ${(hardGrad.STRONG_TREND.POSITION_MULTIPLIER * 100).toFixed(0)}%`);
+                  } else if (adx >= hardGrad.MODERATE_TREND.MIN_ADX && adxSlope >= hardGrad.MODERATE_TREND.MIN_ADX_SLOPE) {
+                    // Tier 2: Moderate trend
+                    nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, hardGrad.MODERATE_TREND.POSITION_MULTIPLIER);
+                    hardZoneGraduated = true;
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 HARD_ZONE_GRADUATION TIER2: SHORT allowed - ADX=${adx.toFixed(1)}>=${hardGrad.MODERATE_TREND.MIN_ADX}, slope=${adxSlope.toFixed(2)}>=${hardGrad.MODERATE_TREND.MIN_ADX_SLOPE}, ${distanceFromLow.toFixed(2)}% from low - position ${(hardGrad.MODERATE_TREND.POSITION_MULTIPLIER * 100).toFixed(0)}%`);
+                  }
+                }
                 
-                await logRejectionWithAI(
-                  supabase, userId, symbol,
-                  blockReason,
-                  {
-                    gate: 'NEAR_24H_LOW_HARD',
-                    derivedDirection,
-                    distanceFromLow: distanceFromLow.toFixed(2),
-                    low24h: priceDistance.low24h,
-                    tf1hDir, tf30mDir,
-                    adx: adx.toFixed(1),
-                    adxSlope: adxSlope.toFixed(2),
-                    ltfSupportsShort,
-                    hardZoneThreshold: effectiveHardThreshold,
-                    softZoneThreshold: effectiveSoftThreshold,
-                    relaxationApplied: nearExtremeRelaxationApplied,
-                    relaxationTrigger: nearExtremeRelaxationTrigger,
-                    wouldPassWith: `LTF (1h or 30m) must be bearish, or ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
-                  },
-                  trendData,
-                  riskParams.ai_analysis_enabled !== false,
-                  earlyOrderFlowAnalysis
-                );
-                continue;
+                if (!hardZoneGraduated) {
+                  // Hard block — ADX too low or graduation disabled
+                  nearExtremeBlocked = true;
+                  rejectedByHardGates++;
+                  perSymbolGateAttribution.set(symbol, { 
+                    gate: 'NEAR_24H_LOW_HARD', 
+                    details: `SHORT blocked: ${distanceFromLow.toFixed(1)}% from 24h low, LTF not bearish, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)} (below graduation thresholds)` 
+                  });
+                  
+                  const blockReason = `NEAR_24H_LOW_HARD: SHORT blocked - only ${distanceFromLow.toFixed(1)}% above 24h low ($${priceDistance.low24h.toFixed(2)}), 1h=${tf1hDir}, 30m=${tf30mDir}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)} (need ADX>=${hardGrad?.MODERATE_TREND?.MIN_ADX ?? 25} for graduated entry)`;
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                  
+                  await logRejectionWithAI(
+                    supabase, userId, symbol,
+                    blockReason,
+                    {
+                      gate: 'NEAR_24H_LOW_HARD',
+                      subGate: hardGrad?.ENABLED ? 'GRADUATION_FAILED' : 'HARD_BLOCK',
+                      derivedDirection,
+                      distanceFromLow: distanceFromLow.toFixed(2),
+                      low24h: priceDistance.low24h,
+                      tf1hDir, tf30mDir,
+                      adx: adx.toFixed(1),
+                      adxSlope: adxSlope.toFixed(2),
+                      ltfSupportsShort,
+                      hardZoneThreshold: effectiveHardThreshold,
+                      softZoneThreshold: effectiveSoftThreshold,
+                      relaxationApplied: nearExtremeRelaxationApplied,
+                      relaxationTrigger: nearExtremeRelaxationTrigger,
+                      graduationEnabled: hardGrad?.ENABLED ?? false,
+                      wouldPassWith: hardGrad?.ENABLED 
+                        ? `ADX >= ${hardGrad.MODERATE_TREND.MIN_ADX} + slope >= ${hardGrad.MODERATE_TREND.MIN_ADX_SLOPE} for 15%, ADX >= ${hardGrad.STRONG_TREND.MIN_ADX} + slope >= ${hardGrad.STRONG_TREND.MIN_ADX_SLOPE} for 25%`
+                        : `LTF (1h or 30m) must be bearish, or ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
+                    },
+                    trendData,
+                    riskParams.ai_analysis_enabled !== false,
+                    earlyOrderFlowAnalysis
+                  );
+                  continue;
+                }
               } else if (!nearExtremeBlocked && !ltfSupportsShort) {
                 // Soft gate - reduce position for near-low shorts without LTF support
                 if (adxOverrideAllowed) {
@@ -7827,39 +7855,63 @@ serve(async (req) => {
               }
               
               if (!nearExtremeBlocked && inHardZone && NEAR_EXTREME_PROTECTION_GATE.BLOCK_IN_HARD_ZONE && !adxOverrideAllowed && !ltfSupportsLong) {
-                nearExtremeBlocked = true;
-                rejectedByHardGates++;
-                perSymbolGateAttribution.set(symbol, { 
-                  gate: 'NEAR_24H_HIGH_HARD', 
-                  details: `LONG blocked: ${distanceFromHigh.toFixed(1)}% from 24h high, LTF not bullish` 
-                });
+                // ===== HARD ZONE GRADUATION: ADX-conditioned micro positions (LONG) =====
+                const hardGradLong = NEAR_EXTREME_PROTECTION_GATE.HARD_ZONE_GRADUATION;
+                let hardZoneGraduatedLong = false;
                 
-                const blockReason = `NEAR_24H_HIGH_HARD: LONG blocked - only ${distanceFromHigh.toFixed(1)}% below 24h high ($${priceDistance.high24h.toFixed(2)}), 1h=${tf1hDir}, 30m=${tf30mDir} (need LTF bullish for near-high longs)`;
-                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                if (hardGradLong?.ENABLED) {
+                  if (adxSlope < hardGradLong.HARD_BLOCK_MAX_ADX_SLOPE) {
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔒 HARD_ZONE_GRADUATION: slope ${adxSlope.toFixed(2)} < ${hardGradLong.HARD_BLOCK_MAX_ADX_SLOPE} — structural collapse, maintaining hard block`);
+                  } else if (adx >= hardGradLong.STRONG_TREND.MIN_ADX && adxSlope >= hardGradLong.STRONG_TREND.MIN_ADX_SLOPE) {
+                    nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, hardGradLong.STRONG_TREND.POSITION_MULTIPLIER);
+                    hardZoneGraduatedLong = true;
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 HARD_ZONE_GRADUATION TIER1: LONG allowed - ADX=${adx.toFixed(1)}>=${hardGradLong.STRONG_TREND.MIN_ADX}, slope=${adxSlope.toFixed(2)}>=${hardGradLong.STRONG_TREND.MIN_ADX_SLOPE}, ${distanceFromHigh.toFixed(2)}% from high - position ${(hardGradLong.STRONG_TREND.POSITION_MULTIPLIER * 100).toFixed(0)}%`);
+                  } else if (adx >= hardGradLong.MODERATE_TREND.MIN_ADX && adxSlope >= hardGradLong.MODERATE_TREND.MIN_ADX_SLOPE) {
+                    nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, hardGradLong.MODERATE_TREND.POSITION_MULTIPLIER);
+                    hardZoneGraduatedLong = true;
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 HARD_ZONE_GRADUATION TIER2: LONG allowed - ADX=${adx.toFixed(1)}>=${hardGradLong.MODERATE_TREND.MIN_ADX}, slope=${adxSlope.toFixed(2)}>=${hardGradLong.MODERATE_TREND.MIN_ADX_SLOPE}, ${distanceFromHigh.toFixed(2)}% from high - position ${(hardGradLong.MODERATE_TREND.POSITION_MULTIPLIER * 100).toFixed(0)}%`);
+                  }
+                }
                 
-                await logRejectionWithAI(
-                  supabase, userId, symbol,
-                  blockReason,
-                  {
-                    gate: 'NEAR_24H_HIGH_HARD',
-                    derivedDirection,
-                    distanceFromHigh: distanceFromHigh.toFixed(2),
-                    high24h: priceDistance.high24h,
-                    tf1hDir, tf30mDir,
-                    adx: adx.toFixed(1),
-                    adxSlope: adxSlope.toFixed(2),
-                    ltfSupportsLong,
-                    hardZoneThreshold: effectiveHardThreshold,
-                    softZoneThreshold: effectiveSoftThreshold,
-                    relaxationApplied: nearExtremeRelaxationApplied,
-                    relaxationTrigger: nearExtremeRelaxationTrigger,
-                    wouldPassWith: `LTF (1h or 30m) must be bullish, or ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
-                  },
-                  trendData,
-                  riskParams.ai_analysis_enabled !== false,
-                  earlyOrderFlowAnalysis
-                );
-                continue;
+                if (!hardZoneGraduatedLong) {
+                  nearExtremeBlocked = true;
+                  rejectedByHardGates++;
+                  perSymbolGateAttribution.set(symbol, { 
+                    gate: 'NEAR_24H_HIGH_HARD', 
+                    details: `LONG blocked: ${distanceFromHigh.toFixed(1)}% from 24h high, LTF not bullish, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)} (below graduation thresholds)` 
+                  });
+                  
+                  const blockReason = `NEAR_24H_HIGH_HARD: LONG blocked - only ${distanceFromHigh.toFixed(1)}% below 24h high ($${priceDistance.high24h.toFixed(2)}), 1h=${tf1hDir}, 30m=${tf30mDir}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)} (need ADX>=${hardGradLong?.MODERATE_TREND?.MIN_ADX ?? 25} for graduated entry)`;
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                  
+                  await logRejectionWithAI(
+                    supabase, userId, symbol,
+                    blockReason,
+                    {
+                      gate: 'NEAR_24H_HIGH_HARD',
+                      subGate: hardGradLong?.ENABLED ? 'GRADUATION_FAILED' : 'HARD_BLOCK',
+                      derivedDirection,
+                      distanceFromHigh: distanceFromHigh.toFixed(2),
+                      high24h: priceDistance.high24h,
+                      tf1hDir, tf30mDir,
+                      adx: adx.toFixed(1),
+                      adxSlope: adxSlope.toFixed(2),
+                      ltfSupportsLong,
+                      hardZoneThreshold: effectiveHardThreshold,
+                      softZoneThreshold: effectiveSoftThreshold,
+                      relaxationApplied: nearExtremeRelaxationApplied,
+                      relaxationTrigger: nearExtremeRelaxationTrigger,
+                      graduationEnabled: hardGradLong?.ENABLED ?? false,
+                      wouldPassWith: hardGradLong?.ENABLED 
+                        ? `ADX >= ${hardGradLong.MODERATE_TREND.MIN_ADX} + slope >= ${hardGradLong.MODERATE_TREND.MIN_ADX_SLOPE} for 15%, ADX >= ${hardGradLong.STRONG_TREND.MIN_ADX} + slope >= ${hardGradLong.STRONG_TREND.MIN_ADX_SLOPE} for 25%`
+                        : `LTF (1h or 30m) must be bullish, or ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
+                    },
+                    trendData,
+                    riskParams.ai_analysis_enabled !== false,
+                    earlyOrderFlowAnalysis
+                  );
+                  continue;
+                }
               } else if (!nearExtremeBlocked && !ltfSupportsLong) {
                 if (adxOverrideAllowed) {
                   nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_MULTIPLIER);
