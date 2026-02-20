@@ -4977,10 +4977,10 @@ export const classifyMasterRegime = (
 // each with specific trading rules and position sizing.
 //
 // Decision tree:
-//   1. ADX >= 30 AND slope >= 0 AND LTF aligned → TREND_EXPANSION (full trades)
-//   2. ADX >= 30 AND (slope < 0 OR exhausted) → TREND_EXHAUSTION (MR probes only)
-//   3. ADX < 25 AND neutral trend AND weak momentum → RANGE_COMPRESSION (hard block)
-//   4. ADX 18-30 AND slope rising > 0.5 → BREAKOUT_SETUP (confirmation required)
+//   1. ADX >= 25 AND slope >= 0 AND LTF aligned → TREND_EXPANSION (full trades)
+//   2. ADX >= 25 AND (slope < 0 OR exhausted) → TREND_EXHAUSTION (MR probes only)
+//   3. ADX < 20 AND neutral trend AND weak momentum → RANGE_COMPRESSION (hard block)
+//   4. ADX 18-25 AND slope rising > 0.3 → BREAKOUT_SETUP (confirmation required)
 //   5. Fallback → RANGE_COMPRESSION (default safe state)
 
 export interface FourStateRegimeResult {
