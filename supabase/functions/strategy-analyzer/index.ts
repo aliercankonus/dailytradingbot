@@ -4595,6 +4595,9 @@ serve(async (req) => {
             if (error) logger.forSymbol(symbol).debug(`Failed to store early regime history: ${error.message}`);
           });
         
+        // Apply 4-state regime position multiplier (declared early so BREAKOUT_WATCH can assign it)
+        let fourStatePositionMultiplier = fourStateRegime.positionMultiplier;
+        
         // HARD BLOCK: RANGE_COMPRESSION - no statistical edge exists
         // Note: MR bypass is checked via StochRSI extreme only (strategy-level MR check happens later)
         // NEW: Compression Module evaluation added as secondary engine for this regime
@@ -4820,8 +4823,7 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ TREND_EXHAUSTION: Continuation strategies will be HARD BLOCKED at strategy level, only MR probes proceed`);
         }
         
-        // Apply 4-state regime position multiplier (stacks with other multipliers)
-        let fourStatePositionMultiplier = fourStateRegime.positionMultiplier;
+        // fourStatePositionMultiplier already declared above (before RANGE_COMPRESSION block)
         
         // NOTE: MOMENTUM_DIRECTION_HARD_GATE and MOMENTUM_FLIP_DETECTION gates moved after smartMomentum calculation
         // (see after line ~3250 where smartMomentum is calculated)
@@ -6981,24 +6983,50 @@ serve(async (req) => {
                   }
                 }
                 
-                moveExhaustionBlocked = true;
-                moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} >= ${hardOverboughtThreshold} (overbought), too late to LONG${flipTriggered ? ' [EXHAUSTION_FLIP: SHORT probe eligible]' : ''}${capSoftLongTriggered ? ' [CAPITULATION_SHADOW: accel=' + momentumAcceleration!.toFixed(1) + ']' : ''}`;
-                moveZoneDetails = {
-                  zone: moveZone,
-                  distancePercent: distanceFromLow,
-                  direction: 'long',
-                  stochRsiK: stochRsiK4h,
-                  adx,
-                  adxSlope,
-                  outcome: 'BLOCKED',
-                  positionMultiplier: 0,
-                  overrideReason: `StochRSI K=${stochRsiK4h.toFixed(0)} >= ${hardOverboughtThreshold} (TIER 1 HARD overbought)`,
-                  capitulationAcceleration: momentumAcceleration,
-                  capitulationShadowWouldOverride: capSoftLongTriggered,
-                  exhaustionFlipEligible: flipTriggered,
-                  relaxationApplied: useRelaxedThresholds,
-                  relaxationCondition
-                };
+                // FIX #3: Symmetric Exhaustion Flip — instead of globally vetoing, flip to SHORT MR probe
+                if (flipTriggered) {
+                  const flipMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.SYMMETRIC_EXHAUSTION_FLIP?.FLIP_POSITION_MULTIPLIER ?? 0.25;
+                  derivedDirection = 'short';
+                  derivedSource = 'exhaustion-flip-short';
+                  moveExhaustionBlocked = false;
+                  moveExhaustionSoftGate = true;
+                  moveExhaustionPositionMultiplier = flipMultiplier;
+                  
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔄 EXHAUSTION_FLIP: LONG exhausted (K=${stochRsiK4h.toFixed(0)}, move=${distanceFromLow.toFixed(1)}%) → FLIPPED to SHORT MR probe at ${(flipMultiplier * 100).toFixed(0)}% position`);
+                  
+                  moveZoneDetails = {
+                    zone: moveZone,
+                    distancePercent: distanceFromLow,
+                    direction: 'short',
+                    stochRsiK: stochRsiK4h,
+                    adx,
+                    adxSlope,
+                    outcome: 'FLIPPED_TO_SHORT',
+                    positionMultiplier: flipMultiplier,
+                    overrideReason: `EXHAUSTION_FLIP: LONG exhausted → SHORT MR probe`,
+                    relaxationApplied: useRelaxedThresholds,
+                    relaxationCondition
+                  };
+                } else {
+                  moveExhaustionBlocked = true;
+                  moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} >= ${hardOverboughtThreshold} (overbought), too late to LONG${capSoftLongTriggered ? ' [CAPITULATION_SHADOW: accel=' + momentumAcceleration!.toFixed(1) + ']' : ''}`;
+                  moveZoneDetails = {
+                    zone: moveZone,
+                    distancePercent: distanceFromLow,
+                    direction: 'long',
+                    stochRsiK: stochRsiK4h,
+                    adx,
+                    adxSlope,
+                    outcome: 'BLOCKED',
+                    positionMultiplier: 0,
+                    overrideReason: `StochRSI K=${stochRsiK4h.toFixed(0)} >= ${hardOverboughtThreshold} (TIER 1 HARD overbought)`,
+                    capitulationAcceleration: momentumAcceleration,
+                    capitulationShadowWouldOverride: capSoftLongTriggered,
+                    exhaustionFlipEligible: false,
+                    relaxationApplied: useRelaxedThresholds,
+                    relaxationCondition
+                  };
+                }
               } else if (MOVE_EXHAUSTION_FILTER_PARAMS.REQUIRE_STOCHRSI_ALIGNMENT && 
                   stochRsiK4h >= softOverboughtThreshold) {
                 // TIER 2: K 75-85 — late but possible, reduce position significantly
@@ -8164,10 +8192,19 @@ serve(async (req) => {
             const momentumScoreTooLow = !hardBlock.REQUIRE_LOW_MOMENTUM_SCORE || absMomentumScore < hardBlock.MAX_ABS_MOMENTUM_SCORE;
             
             if (trendIsNeutral && momentumHasNoEdge && adxTooLow && momentumScoreTooLow) {
-              // Check if this is a mean reversion entry (allowed through)
-              const isMREntry = false; // Pre-strategy gate: no strategy selected yet
+              // Check bypass conditions: weak direction probe, breakout watch, exhaustion flip, or MR entry
+              const hasStructuralBypass = weakDirectionProbeApplied || 
+                (perSymbolGateAttribution.get(symbol)?.gate === 'BREAKOUT_WATCH') ||
+                (derivedSource === 'exhaustion-flip-short');
               
-              if (!isMREntry) {
+              if (hasStructuralBypass) {
+                // Allow through with reduced size — structural fixes have already applied position multipliers
+                const bypassReason = weakDirectionProbeApplied ? 'WEAK_DIRECTION_PROBE' 
+                  : derivedSource === 'exhaustion-flip-short' ? 'EXHAUSTION_FLIP'
+                  : 'BREAKOUT_WATCH';
+                rangingMarketPositionMultiplier = Math.min(rangingMarketPositionMultiplier, 0.30);
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔓 NO_TRADE_RANGE_REGIME: Would block but bypassed via ${bypassReason} → position capped at 30%`);
+              } else {
                 rejectedByHardGates++;
                 const blockReason = `NO_TRADE_RANGE_REGIME: HARD BLOCK - primaryTrend=${primaryTrend}, momentum=${momentumState}, ADX=${adx.toFixed(1)}<${hardBlock.MAX_ADX}, |score|=${absMomentumScore.toFixed(0)}<${hardBlock.MAX_ABS_MOMENTUM_SCORE} → no statistical edge, noise dominates`;
                 perSymbolGateAttribution.set(symbol, { gate: 'NO_TRADE_RANGE_REGIME', details: blockReason });
@@ -8187,8 +8224,6 @@ serve(async (req) => {
                   wouldPassWith: `ADX >= ${hardBlock.MAX_ADX} OR momentum_state=confirmed/building OR |momentum_score| >= ${hardBlock.MAX_ABS_MOMENTUM_SCORE}`,
                 }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                 continue;
-              } else {
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 NO_TRADE_RANGE_REGIME: Would block but allowing Mean Reversion entry`);
               }
             }
           }
