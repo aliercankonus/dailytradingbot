@@ -4342,7 +4342,7 @@ serve(async (req) => {
           `${LOG_CATEGORIES.GATE} 📊 DIRECTION_EVAL: direction=${directionResult.direction || 'null'}, ` +
           `weightedScore=${dirWeightedScoreForLog.toFixed(3)}, source=${directionResult.source}, ` +
           `weakProbe=${weakDirectionProbeApplied}, lateGrind=${lateGrindAccepted}, ` +
-          `anyOverride=${hasAnyDirectionSourceWithProbe}, regime=${fourStateRegime?.regime || 'unknown'}, ` +
+          `anyOverride=${hasAnyDirectionSourceWithProbe}, ` +
           `ADX=${adx.toFixed(1)}, bypassEligible=${Math.abs(dirWeightedScoreForLog) > 0.10}`
         );
         
@@ -11726,6 +11726,8 @@ serve(async (req) => {
         let squeezePositionMultiplier = 1.0;
         let earlyIgnitionActive = false;
         let earlyIgnitionPositionMultiplier = 1.0;
+        let meanReversionTransitionalActive = false;
+        let meanReversionTransitionalMultiplier = 1.0;
         
         // Get the v1.1 adaptive threshold based on regime
         const v11AdaptiveThreshold = ADX_GATE_V1_1.ADAPTIVE_THRESHOLDS[regime.regime] ?? 
@@ -11924,8 +11926,8 @@ serve(async (req) => {
            // Re-evaluates MR with skipRegimeGating=true to avoid the EARLY_TREND dead zone
            // in classifyTrendPhase (ADX 20-22, slope < 0.3 → EARLY_TREND → blocks MR)
            // Safe because the ADX gate already constrains to 18-22
-           let meanReversionTransitionalActive = false;
-           let meanReversionTransitionalMultiplier = 1.0;
+           meanReversionTransitionalActive = false;
+           meanReversionTransitionalMultiplier = 1.0;
 
            if (!squeezeBreakoutActive && !earlyIgnitionActive && isInTransitionalZone) {
              // Re-run detectExhaustion with regime gating skipped for transitional zone

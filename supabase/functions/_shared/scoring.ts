@@ -2474,6 +2474,7 @@ export interface DirectionContext {
   riskClass: 'LOW' | 'MEDIUM' | 'HIGH' | 'EXTREME';
   evidenceStrength: 'WEAK' | 'MODERATE' | 'STRONG' | 'VERY_STRONG';
   conflictsWith: string[];  // List of conflicting tiers/sources
+  weightedScore?: number;   // Continuous bias weighted sum for bypass evaluation
 }
 
 // Helper function to create DirectionContext with consistent defaults
@@ -2489,6 +2490,7 @@ const createDirectionContext = (
     riskClass?: DirectionContext['riskClass'];
     evidenceStrength?: DirectionContext['evidenceStrength'];
     conflictsWith?: string[];
+    weightedScore?: number;
   }
 ): DirectionContext => {
   // Derive riskClass from tier and position multiplier if not provided
@@ -2516,6 +2518,7 @@ const createDirectionContext = (
     riskClass: inferredRiskClass,
     evidenceStrength: inferredEvidenceStrength,
     conflictsWith: params.conflictsWith ?? [],
+    weightedScore: params.weightedScore,
   };
 };
 
@@ -2758,6 +2761,9 @@ export const deriveTradeDirection = (
   const conf4h = timeframes['4h']?.confidence || 0;
   const conf1h = timeframes['1h']?.confidence || 0;
   const conf30m = timeframes['30m']?.confidence || 0;
+  
+  // Track the weighted score across all paths for bypass evaluation
+  let outerWeightedScore = 0;
   
   // Get ADX for price action override check
   const adx = trendData.volatility?.adx || trendData.momentum?.adx || 0;
@@ -3025,6 +3031,7 @@ export const deriveTradeDirection = (
     
     // Apply momentum adjustment to weighted sum
     const weightedSum = baseWeightedSum + momentumAdjustment;
+    outerWeightedScore = weightedSum;
     
     // ============= GRADUATED MOMENTUM PENALTY IMPACT LOGGING =============
     // Track when momentum penalty changes direction outcome
@@ -3148,6 +3155,7 @@ export const deriveTradeDirection = (
           isCounterTrend: momentumImpact === 'strong_opposing' || momentumImpact === 'weak_opposing',
           riskClass: momentumImpact === 'strong_opposing' ? 'HIGH' : (momentumImpact === 'weak_opposing' ? 'MEDIUM' : 'LOW'),
           evidenceStrength: momentumImpact === 'aligned' ? 'VERY_STRONG' : (momentumImpact === 'neutral' ? 'STRONG' : 'WEAK'),
+          weightedScore: weightedSum,
         }),
       };
     }
@@ -3883,6 +3891,7 @@ export const deriveTradeDirection = (
               isCounterTrend: false,
               riskClass: 'LOW',
               evidenceStrength: isStrongMove ? 'STRONG' : 'MODERATE',
+              weightedScore: outerWeightedScore,
             }),
           };
         }
@@ -3913,6 +3922,7 @@ export const deriveTradeDirection = (
             isCounterTrend: false,
             riskClass: 'MEDIUM',
             evidenceStrength: isStrongMove ? 'STRONG' : 'MODERATE',
+            weightedScore: outerWeightedScore,
           }),
         };
       }
@@ -4368,6 +4378,7 @@ export const deriveTradeDirection = (
           isCounterTrend: false,
           riskClass: 'HIGH',
           evidenceStrength: biasScore >= 3 ? 'MODERATE' : 'WEAK',
+          weightedScore: outerWeightedScore,
         }),
       };
     } else if (BR.LOG_TIER_EVALUATION && biasEvidence.length > 0) {
@@ -4570,6 +4581,7 @@ export const deriveTradeDirection = (
           isCounterTrend: tier105MomentumScore < 0,  // Counter to momentum direction
           riskClass: 'HIGH',
           evidenceStrength: tier105OfScore >= 70 ? 'MODERATE' : 'WEAK',
+          weightedScore: outerWeightedScore,
         }),
       };
     }
@@ -4600,6 +4612,7 @@ export const deriveTradeDirection = (
           isCounterTrend: tier105MomentumScore > 0,  // Counter to momentum direction
           riskClass: 'HIGH',
           evidenceStrength: tier105OfScore >= 70 ? 'MODERATE' : 'WEAK',
+          weightedScore: outerWeightedScore,
         }),
       };
     }
@@ -4756,6 +4769,7 @@ export const deriveTradeDirection = (
       isCounterTrend: false,
       riskClass: 'EXTREME',
       evidenceStrength: 'WEAK',
+      weightedScore: outerWeightedScore,
     }),
   };
 };
