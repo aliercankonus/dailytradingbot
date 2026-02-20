@@ -2493,6 +2493,7 @@ serve(async (req) => {
       // NEW: 4-State Regime Classifier gates
       | 'RANGE_COMPRESSION_BLOCK'
       | 'COMPRESSION_NO_SETUP'
+      | 'BREAKOUT_WATCH'
       | 'TREND_EXHAUSTION_CONTINUATION_BLOCK'
       // Fix #3: Capitulation acceleration override
       | 'CAPITULATION_ACCELERATION';
@@ -4300,8 +4301,41 @@ serve(async (req) => {
         // Update direction source check to include MR transitional override
         const hasAnyDirectionSourceFinal = hasAnyDirectionSource || mrTransitionalDirectionOverrideApplied;
 
-        // REJECT EARLY: If no clear trade direction can be determined AND no overrides applied (including early ignition, MR transitional)
+        // ============= FIX #2: WEAK DIRECTION PROBE =============
+        // When direction derivation returns null but there's a weak directional bias,
+        // allow a probe entry at 0.25x position instead of hard blocking
+        let weakDirectionProbeApplied = false;
+        let weakDirectionProbeDirection: 'long' | 'short' | null = null;
+        let weakDirectionProbeMultiplier = 0.25;
+        
         if (!directionResult.direction && !lateGrindAccepted && !hasAnyDirectionSourceFinal) {
+          // Check if the direction context shows any bias even below threshold
+          const ctx = directionResult.directionContext;
+          const weightedScore = ctx?.weightedScore ?? 0;
+          const absScore = Math.abs(weightedScore);
+          
+          // Score 0.50-0.65 = weak bias, allow probe at 0.25x
+          // Score < 0.50 = true noise, hard block
+          if (absScore >= 0.30 && adx >= 15) {
+            weakDirectionProbeDirection = weightedScore > 0 ? 'long' : 'short';
+            weakDirectionProbeApplied = true;
+            
+            if (absScore >= 0.50) {
+              weakDirectionProbeMultiplier = 0.25;
+            } else if (absScore >= 0.40) {
+              weakDirectionProbeMultiplier = 0.20;
+            } else {
+              weakDirectionProbeMultiplier = 0.15;
+            }
+            
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔍 WEAK_DIRECTION_PROBE: ${weakDirectionProbeDirection.toUpperCase()} detected (weightedScore=${weightedScore.toFixed(2)}, absScore=${absScore.toFixed(2)}) → ${(weakDirectionProbeMultiplier * 100).toFixed(0)}% position`);
+          }
+        }
+        
+        const hasAnyDirectionSourceWithProbe = hasAnyDirectionSourceFinal || weakDirectionProbeApplied;
+
+        // REJECT EARLY: If no clear trade direction can be determined AND no overrides applied
+        if (!directionResult.direction && !lateGrindAccepted && !hasAnyDirectionSourceWithProbe) {
           rejectedByHardGates++;
           await logRejectionWithAI(
             supabase, userId, symbol,
@@ -4365,7 +4399,8 @@ serve(async (req) => {
           orderFlowDerivedDirection ||
           preMomentumDirection ||
           shortTermAlignmentDirection ||
-          mrTransitionalDirection
+          mrTransitionalDirection ||
+          weakDirectionProbeDirection
         ) as "long" | "short";
         
         // Determine source for logging (can be updated by fallback)
@@ -4724,37 +4759,57 @@ serve(async (req) => {
               continue; // Signal generated, skip to next symbol
             }
             
-            // Neither MR bypass nor compression fired — log standard rejection
-            rejectedByHardGates++;
+            // Check if BB width is expanding (compression ending → potential breakout)
             const compressionDiag = compressionEntryResult 
               ? `, compression: score=${compressionEntryResult.score}, reason=${compressionEntryResult.reason}`
               : ', compression: disabled';
-            const blockReason = `RANGE_COMPRESSION_BLOCK: 4-State regime=RANGE_COMPRESSION, primaryTrend=${primaryTrendForRegime}, momentum=${momentumStateForRegime}, ADX=${adx.toFixed(1)}, |score|=${Math.abs(earlySmartMomentum?.score ?? 0).toFixed(0)} → noise dominates, no edge${compressionDiag}`;
-            perSymbolGateAttribution.set(symbol, { gate: compressionEntryResult ? 'COMPRESSION_NO_SETUP' : 'RANGE_COMPRESSION_BLOCK', details: blockReason });
             
-            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+            // FIX #5: If BB width is expanding, transition to BREAKOUT_WATCH instead of hard block
+            const bbExpandingInCompression = compressionEntryResult?.diagnostics?.structuralConditions?.bbWidthContracting === false;
+            const adxSlopeForBreakout = adxSlope;
             
-            await logRejectionWithAI(supabase, userId, symbol, blockReason, {
-              gate: compressionEntryResult ? 'COMPRESSION_NO_SETUP' : 'RANGE_COMPRESSION_BLOCK',
-              fourStateRegime: fourStateRegime.regime,
-              derivedDirection,
-              primaryTrend: primaryTrendForRegime,
-              momentumState: momentumStateForRegime,
-              momentumScore: (earlySmartMomentum?.score ?? 0).toFixed(1),
-              adx: adx.toFixed(1),
-              adxSlope: adxSlope.toFixed(2),
-              alignedTimeframes: alignedTFCount,
-              stochRsiK4h: stochK4hForRegime.toFixed(1),
-              isSqueeze: isBBSqueeze,
-              diagnostics: fourStateRegime.diagnostics,
-              compressionEval: compressionEntryResult ? {
-                score: compressionEntryResult.score,
-                direction: compressionEntryResult.direction,
-                reason: compressionEntryResult.reason,
-                killSwitch: compressionEntryResult.diagnostics.killSwitch,
-              } : null,
-            }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
-            continue;
+            if (bbExpandingInCompression && adxSlopeForBreakout > 0 && derivedDirection) {
+              // BB expanding + ADX slope rising = compression ending, breakout forming
+              // Allow entry with reduced size instead of hard blocking
+              const breakoutWatchMultiplier = 0.30; // 30% position — probe the breakout
+              fourStatePositionMultiplier = breakoutWatchMultiplier;
+              
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔓 BREAKOUT_WATCH: BB expanding in RANGE_COMPRESSION + ADX slope=${adxSlopeForBreakout.toFixed(2)} > 0 → allowing ${derivedDirection.toUpperCase()} at ${(breakoutWatchMultiplier * 100).toFixed(0)}% position (compression→expansion transition)`);
+              perSymbolGateAttribution.set(symbol, { gate: 'BREAKOUT_WATCH', details: `Compression ending, BB expanding, ADX slope rising → probe entry at ${(breakoutWatchMultiplier * 100).toFixed(0)}%` });
+              // Don't continue — fall through to normal signal generation
+            } else {
+              // Standard compression rejection — neither MR nor breakout conditions met
+              rejectedByHardGates++;
+              const blockReason = `RANGE_COMPRESSION_BLOCK: 4-State regime=RANGE_COMPRESSION, primaryTrend=${primaryTrendForRegime}, momentum=${momentumStateForRegime}, ADX=${adx.toFixed(1)}, |score|=${Math.abs(earlySmartMomentum?.score ?? 0).toFixed(0)} → noise dominates, no edge${compressionDiag}`;
+              perSymbolGateAttribution.set(symbol, { gate: compressionEntryResult ? 'COMPRESSION_NO_SETUP' : 'RANGE_COMPRESSION_BLOCK', details: blockReason });
+              
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+              
+              await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                gate: compressionEntryResult ? 'COMPRESSION_NO_SETUP' : 'RANGE_COMPRESSION_BLOCK',
+                fourStateRegime: fourStateRegime.regime,
+                derivedDirection,
+                primaryTrend: primaryTrendForRegime,
+                momentumState: momentumStateForRegime,
+                momentumScore: (earlySmartMomentum?.score ?? 0).toFixed(1),
+                adx: adx.toFixed(1),
+                adxSlope: adxSlope.toFixed(2),
+                alignedTimeframes: alignedTFCount,
+                stochRsiK4h: stochK4hForRegime.toFixed(1),
+                isSqueeze: isBBSqueeze,
+                diagnostics: fourStateRegime.diagnostics,
+                compressionEval: compressionEntryResult ? {
+                  score: compressionEntryResult.score,
+                  direction: compressionEntryResult.direction,
+                  reason: compressionEntryResult.reason,
+                  killSwitch: compressionEntryResult.diagnostics.killSwitch,
+                } : null,
+                bbExpanding: bbExpandingInCompression,
+                adxSlopeForBreakout: adxSlopeForBreakout.toFixed(2),
+                breakoutWatchBlocked: bbExpandingInCompression ? `ADX slope ${adxSlopeForBreakout.toFixed(2)} <= 0 (not rising)` : 'BB not expanding',
+              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              continue;
+            }
           } else {
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 RANGE_COMPRESSION: Would block but MR bypass allowed (stochK=${stochK.toFixed(1)} at extreme)`);
           }
@@ -5742,26 +5797,40 @@ serve(async (req) => {
             ? ADX_SLOPE_GRADUATED_GATE.SHORT_HARD_BLOCK_SLOPE 
             : ADX_SLOPE_GRADUATED_GATE.LONG_HARD_BLOCK_SLOPE;
           
-          // ===== STEP 1: HARD BLOCK — Only true structural collapse (slope < -3.0) =====
+          // ===== STEP 1: HARD BLOCK — Only true structural collapse (slope < -5.0) =====
+          // FIX #4: Softened from -3.0 to -5.0. Slopes -3 to -5 are now graduated, not hard block.
+          // Additional guard: if ADX >= 25, convert to TREND_EXHAUSTION probe instead of hard block
           if (adxSlope < directionSpecificThreshold) {
-            rejectedByHardGates++;
-            const blockReason = `ADX_SLOPE_STRUCTURAL_COLLAPSE: ${derivedDirection.toUpperCase()} blocked - ADX slope=${adxSlope.toFixed(2)} < ${directionSpecificThreshold} (structural trend collapse), ADX=${adx.toFixed(1)}`;
-            perSymbolGateAttribution.set(symbol, { gate: 'ADX_SLOPE_GRADUATED', details: blockReason });
-            
-            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
-            
-            await logRejectionWithAI(supabase, userId, symbol, blockReason, {
-              gate: "ADX_SLOPE_GRADUATED",
-              subGate: "STRUCTURAL_COLLAPSE",
-              derivedDirection,
-              adx: adx.toFixed(1),
-              adxSlope: adxSlope.toFixed(2),
-              thresholds: {
-                hardBlockSlope: directionSpecificThreshold,
-              },
-              analysis: "ADX slope < -3.0 indicates rapid trend structure breakdown — hard block justified"
-            }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
-            continue;
+            // Check if ADX has enough energy to convert to exhaustion probe instead
+            const collapseToExhaustionMinAdx = ADX_SLOPE_GRADUATED_GATE.COLLAPSE_TO_EXHAUSTION_MIN_ADX ?? 25;
+            if (adx >= collapseToExhaustionMinAdx) {
+              // ADX still has energy — this is trend exhaustion, not structural collapse
+              // Convert to graduated penalty instead of hard block
+              adxSlopeGraduatedMultiplier = 0.30; // Severe reduction but not veto
+              adxSlopeGateApplied = true;
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ ADX_SLOPE_COLLAPSE_TO_EXHAUSTION: slope=${adxSlope.toFixed(2)} < ${directionSpecificThreshold} BUT ADX=${adx.toFixed(1)} >= ${collapseToExhaustionMinAdx} — converting to exhaustion probe at 30% position (not hard block)`);
+            } else {
+              // True structural collapse: low ADX + severe decline
+              rejectedByHardGates++;
+              const blockReason = `ADX_SLOPE_STRUCTURAL_COLLAPSE: ${derivedDirection.toUpperCase()} blocked - ADX slope=${adxSlope.toFixed(2)} < ${directionSpecificThreshold} (structural trend collapse), ADX=${adx.toFixed(1)} < ${collapseToExhaustionMinAdx} (no energy reservoir)`;
+              perSymbolGateAttribution.set(symbol, { gate: 'ADX_SLOPE_GRADUATED', details: blockReason });
+              
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+              
+              await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                gate: "ADX_SLOPE_GRADUATED",
+                subGate: "STRUCTURAL_COLLAPSE",
+                derivedDirection,
+                adx: adx.toFixed(1),
+                adxSlope: adxSlope.toFixed(2),
+                thresholds: {
+                  hardBlockSlope: directionSpecificThreshold,
+                  collapseToExhaustionMinAdx,
+                },
+                analysis: `ADX slope < ${directionSpecificThreshold} AND ADX < ${collapseToExhaustionMinAdx} — no energy reservoir, hard block justified`
+              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              continue;
+            }
           }
           
           // ===== STEP 2: GRADUATED PENALTIES — Scale position size, never block =====
@@ -6839,9 +6908,27 @@ serve(async (req) => {
                 moveZone = 'SOFT';
               }
               
-              // For late longs: StochRSI must NOT be already overbought (K > 50)
+              // For late longs: TIERED StochRSI exhaustion (replaces binary K>75 block)
+              // TIER 1 HARD: K >= 85 = true overbought exhaustion → hard block
+              // TIER 2 SOFT: K 75-85 = late but possible → reduce position to 25%
+              // TIER 3 ALLOW: K < 75 = trend continuation zone → allow with normal sizing
+              const hardOverboughtThreshold = MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG; // 85
+              const softOverboughtThreshold = MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_SOFT_OVERBOUGHT_FOR_LONG ?? 75;
+              
               if (MOVE_EXHAUSTION_FILTER_PARAMS.REQUIRE_STOCHRSI_ALIGNMENT && 
-                  stochRsiK4h > MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG) {
+                  stochRsiK4h >= hardOverboughtThreshold) {
+                // TIER 1: K >= 85 — true overbought exhaustion
+                // Check for symmetric exhaustion flip: evaluate SHORT MR probe instead of global veto
+                const flipConfig = MOVE_EXHAUSTION_FILTER_PARAMS.SYMMETRIC_EXHAUSTION_FLIP;
+                const flipTriggered = flipConfig?.ENABLED &&
+                  distanceFromLow >= (flipConfig.MIN_MOVE_FOR_FLIP_PERCENT ?? 5.0) &&
+                  adx >= (flipConfig.MIN_ADX_FOR_FLIP ?? 20) &&
+                  stochRsiK4h >= (flipConfig.LONG_EXHAUSTION_MIN_K ?? 85);
+                
+                if (flipTriggered && flipConfig.LOG_FLIP_CHECKS) {
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔄 SYMMETRIC_EXHAUSTION_FLIP: LONG exhausted (K=${stochRsiK4h.toFixed(0)}, move=${distanceFromLow.toFixed(1)}%) → evaluating SHORT MR probe (ADX=${adx.toFixed(1)})`);
+                }
+                
                 // ============= FIX #3 EXTENSION: CAPITULATION ACCELERATION IN SOFT ZONE (LONG) =============
                 const capSoftLongTriggered = capConfig?.ENABLED &&
                   momentumAcceleration !== null &&
@@ -6872,7 +6959,7 @@ serve(async (req) => {
                         historyRecords: momentumAccelerationData?.records,
                         distanceFromLow: Number(distanceFromLow.toFixed(2)),
                         stochRsiK4h: Number(stochRsiK4h.toFixed(1)),
-                        softZoneThreshold: MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG,
+                        softZoneThreshold: hardOverboughtThreshold,
                         adx: Number(adx.toFixed(1)),
                         adxSlope: Number(adxSlope.toFixed(2)),
                         regime: fourStateRegime.regime,
@@ -6895,7 +6982,7 @@ serve(async (req) => {
                 }
                 
                 moveExhaustionBlocked = true;
-                moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} > ${MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG} (overbought), too late to LONG${capSoftLongTriggered ? ' [CAPITULATION_SHADOW: accel=' + momentumAcceleration!.toFixed(1) + ']' : ''}`;
+                moveExhaustionReason = `MOVE_EXHAUSTED: Price rallied ${distanceFromLow.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} >= ${hardOverboughtThreshold} (overbought), too late to LONG${flipTriggered ? ' [EXHAUSTION_FLIP: SHORT probe eligible]' : ''}${capSoftLongTriggered ? ' [CAPITULATION_SHADOW: accel=' + momentumAcceleration!.toFixed(1) + ']' : ''}`;
                 moveZoneDetails = {
                   zone: moveZone,
                   distancePercent: distanceFromLow,
@@ -6905,12 +6992,33 @@ serve(async (req) => {
                   adxSlope,
                   outcome: 'BLOCKED',
                   positionMultiplier: 0,
-                  overrideReason: `StochRSI K=${stochRsiK4h.toFixed(0)} > ${MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG} (overbought)`,
+                  overrideReason: `StochRSI K=${stochRsiK4h.toFixed(0)} >= ${hardOverboughtThreshold} (TIER 1 HARD overbought)`,
                   capitulationAcceleration: momentumAcceleration,
                   capitulationShadowWouldOverride: capSoftLongTriggered,
+                  exhaustionFlipEligible: flipTriggered,
                   relaxationApplied: useRelaxedThresholds,
                   relaxationCondition
                 };
+              } else if (MOVE_EXHAUSTION_FILTER_PARAMS.REQUIRE_STOCHRSI_ALIGNMENT && 
+                  stochRsiK4h >= softOverboughtThreshold) {
+                // TIER 2: K 75-85 — late but possible, reduce position significantly
+                moveExhaustionSoftGate = true;
+                const tier2Multiplier = MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_SOFT_OVERBOUGHT_MULTIPLIER ?? 0.25;
+                moveExhaustionPositionMultiplier = tier2Multiplier;
+                moveZoneDetails = {
+                  zone: moveZone,
+                  distancePercent: distanceFromLow,
+                  direction: 'long',
+                  stochRsiK: stochRsiK4h,
+                  adx,
+                  adxSlope,
+                  outcome: 'REDUCED',
+                  positionMultiplier: tier2Multiplier,
+                  overrideReason: `StochRSI K=${stochRsiK4h.toFixed(0)} in TIER 2 (${softOverboughtThreshold}-${hardOverboughtThreshold}) — late entry with ${(tier2Multiplier * 100).toFixed(0)}% position`,
+                  relaxationApplied: useRelaxedThresholds,
+                  relaxationCondition
+                };
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTION TIER 2: Price rallied ${distanceFromLow.toFixed(1)}% with StochRSI K=${stochRsiK4h.toFixed(0)} (${softOverboughtThreshold}-${hardOverboughtThreshold}), reducing position to ${(tier2Multiplier * 100).toFixed(0)}%`);
               } else {
                 // Allow with reduced position - use appropriate sizing based on zone
                 moveExhaustionSoftGate = true;
