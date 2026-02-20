@@ -2808,43 +2808,78 @@ export const deriveTradeDirection = (
       return 0;
     };
     
-    const trendToValue = (trend: string, conf: number): number => {
-      // Use lowered neutral threshold (45% instead of 55%)
-      if (trend === "neutral" && conf < P.NEUTRAL_THRESHOLD) {
-        // ===== PARTIAL NEUTRAL CONTRIBUTION (PHASE 1 FIX) =====
-        // If enabled, neutral trends with meaningful confidence still contribute
-        if (P.ENABLE_PARTIAL_NEUTRAL_CONTRIBUTION && conf >= P.NEUTRAL_CONTRIBUTION_FLOOR) {
-          // Scale partial weight based on confidence: 40-60% → 0.0-0.6
-          const partialWeight = ((conf - P.NEUTRAL_CONTRIBUTION_FLOOR) / 
-            ((P.NEUTRAL_CONTRIBUTION_CEILING || 60) - P.NEUTRAL_CONTRIBUTION_FLOOR)) * 
-            (P.NEUTRAL_PARTIAL_MAX_WEIGHT || 0.6);
-          const hint = getMomentumDirectionHint();
-          const contribution = partialWeight * hint;
-          if (Math.abs(contribution) > 0.05) {
-            reasons.push(`PARTIAL NEUTRAL: conf=${conf.toFixed(0)}% → contrib=${(contribution * 100).toFixed(0)}% (hint=${hint > 0 ? 'bull' : hint < 0 ? 'bear' : 'none'})`);
-          }
-          return contribution;
-        }
-        return 0;
-      }
-      // Trends with conf 45-54% contribute partial weight
+    // ============= CONTINUOUS DIRECTION BIAS SCORING =============
+    // CRITICAL FIX: Replaces discrete {-1, 0, 1} classification with continuous bias model.
+    // Previous model: 51-58% confidence "neutral" → 0 score → weightedScore=0 → deadlock.
+    // New model: Every timeframe contributes a continuous bias based on per-TF indicators.
+    // This ensures bypasses (WEAK_DIRECTION_PROBE, BREAKOUT_WATCH, etc.) can actually activate.
+    const trendToValue = (trend: string, conf: number, tfIndicators?: any): number => {
+      // Trends with clear direction: use confidence-weighted value
       const confWeight = Math.min(1, conf / 65);  // Scale 0-65% to 0-1
       if (trend === "bullish" || trend === "weak_bullish") return confWeight;
       if (trend === "bearish" || trend === "weak_bearish") return -confWeight;
-      // For "neutral" but conf >= 45%, use partial contribution if enabled
+      
+      // ===== NEUTRAL TREND: CONTINUOUS BIAS EXTRACTION =====
+      // Instead of returning 0, extract directional bias from per-timeframe indicators.
+      // This is the core fix for the score=0 deadlock: crypto markets spend 60-70%
+      // of time in "neutral" classification, but there's ALWAYS a lean.
+      
+      // Priority 1: Use per-timeframe RSI + MACD for continuous bias
+      if (tfIndicators) {
+        const tfRsi = tfIndicators.rsi ?? tfIndicators.RSI ?? 50;
+        const tfMacdHist = tfIndicators.macdHistogram ?? tfIndicators.macd?.histogram ?? 0;
+        const tfEmaSignal = tfIndicators.emaSignal ?? null;
+        
+        // RSI continuous bias: center around 50, scale to [-0.20, +0.20]
+        // RSI 55 → +0.10, RSI 58 → +0.16, RSI 45 → -0.10, RSI 42 → -0.16
+        const rsiBias = ((tfRsi - 50) / 50) * 0.40;  // Doubled scale for better signal extraction
+        
+        // MACD direction hint: binary but weighted less
+        const macdBias = tfMacdHist > 0.001 ? 0.08 : (tfMacdHist < -0.001 ? -0.08 : 0);
+        
+        // EMA signal fallback
+        const emaBias = tfEmaSignal === 'bullish' ? 0.05 : (tfEmaSignal === 'bearish' ? -0.05 : 0);
+        
+        // Combine with RSI as primary (continuous), MACD + EMA as confirmation
+        const combinedBias = rsiBias + macdBias + emaBias;
+        
+        // Scale by confidence: higher confidence in "neutral" = less directional (closer to 0)
+        // Lower confidence = trend engine uncertain = potential emerging direction
+        const uncertaintyBoost = conf < 55 ? 1.0 : Math.max(0.3, 1.0 - (conf - 55) / 30);
+        const finalBias = combinedBias * uncertaintyBoost;
+        
+        if (Math.abs(finalBias) > 0.03) {
+          reasons.push(`CONTINUOUS_BIAS: neutral TF → bias=${finalBias.toFixed(3)} (rsi=${tfRsi.toFixed(1)}, macd=${tfMacdHist > 0 ? '+' : ''}${tfMacdHist.toFixed(4)}, conf=${conf.toFixed(0)}%)`);
+        }
+        
+        return finalBias;
+      }
+      
+      // Priority 2: Fallback to global momentum direction hint (legacy path)
       if (P.ENABLE_PARTIAL_NEUTRAL_CONTRIBUTION && conf >= P.NEUTRAL_CONTRIBUTION_FLOOR) {
         const partialWeight = ((conf - P.NEUTRAL_CONTRIBUTION_FLOOR) / 
           ((P.NEUTRAL_CONTRIBUTION_CEILING || 60) - P.NEUTRAL_CONTRIBUTION_FLOOR)) * 
           (P.NEUTRAL_PARTIAL_MAX_WEIGHT || 0.6);
         const hint = getMomentumDirectionHint();
-        return partialWeight * hint;
+        const contribution = partialWeight * hint;
+        if (Math.abs(contribution) > 0.05) {
+          reasons.push(`PARTIAL NEUTRAL FALLBACK: conf=${conf.toFixed(0)}% → contrib=${(contribution * 100).toFixed(0)}% (hint=${hint > 0 ? 'bull' : hint < 0 ? 'bear' : 'none'})`);
+        }
+        return contribution;
       }
       return 0;
     };
     
-    const val4h = trendToValue(trend4h, conf4h);
-    const val1h = trendToValue(trend1h, conf1h);
-    const val30m = trendToValue(trend30m, conf30m);
+    // ============= CONTINUOUS BIAS: PASS PER-TIMEFRAME INDICATORS =============
+    // Each timeframe's own RSI/MACD is used for direction extraction instead of global hints.
+    // This eliminates the score=0 deadlock where all TFs are "neutral" but have directional lean.
+    const indicators4h = timeframes['4h']?.indicators || {};
+    const indicators1h = timeframes['1h']?.indicators || {};
+    const indicators30m = timeframes['30m']?.indicators || {};
+    
+    const val4h = trendToValue(trend4h, conf4h, indicators4h);
+    const val1h = trendToValue(trend1h, conf1h, indicators1h);
+    const val30m = trendToValue(trend30m, conf30m, indicators30m);
     
     // ============= PHASE 1 FIX: DYNAMIC WEIGHT REALLOCATION =============
     // When 4H is neutral and contributes nothing (val4h = 0), redistribute its weight

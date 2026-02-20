@@ -4696,7 +4696,10 @@ export const RANGING_MARKET_PROTECTION = {
     // momentum_state must be in these states (no directional conviction)
     NO_EDGE_MOMENTUM_STATES: ['mixed', 'none'] as string[],
     // ADX below this = no trend energy
-    MAX_ADX: 28,
+    // LOWERED from 28 to 22: In crypto, ADX 22-28 is a valid tradable range.
+    // 28 was late-stage confirmation that blocked emerging trends (SOL/AVAX at ADX 24-25).
+    // ADX >= 22 = allow trend participation, >= 25 = full size, >= 28 = expansion bias.
+    MAX_ADX: 22,
     // Optional: Also check momentum score magnitude (abs < this = no directional edge)
     MAX_ABS_MOMENTUM_SCORE: 15,
     REQUIRE_LOW_MOMENTUM_SCORE: true,
