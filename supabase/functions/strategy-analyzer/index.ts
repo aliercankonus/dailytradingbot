@@ -4314,15 +4314,15 @@ serve(async (req) => {
           const weightedScore = ctx?.weightedScore ?? 0;
           const absScore = Math.abs(weightedScore);
           
-          // Score 0.50-0.65 = weak bias, allow probe at 0.25x
-          // Score < 0.50 = true noise, hard block
-          if (absScore >= 0.30 && adx >= 15) {
+          // Score >= 0.15 = weak bias, allow probe entry
+          // Score < 0.15 = true noise, hard block
+          if (absScore >= 0.15 && adx >= 15) {
             weakDirectionProbeDirection = weightedScore > 0 ? 'long' : 'short';
             weakDirectionProbeApplied = true;
             
             if (absScore >= 0.50) {
               weakDirectionProbeMultiplier = 0.25;
-            } else if (absScore >= 0.40) {
+            } else if (absScore >= 0.30) {
               weakDirectionProbeMultiplier = 0.20;
             } else {
               weakDirectionProbeMultiplier = 0.15;
