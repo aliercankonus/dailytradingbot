@@ -8218,18 +8218,22 @@ serve(async (req) => {
             );
             
             if (trendIsNeutral && momentumHasNoEdge && adxTooLow && momentumScoreTooLow) {
-              // Check bypass conditions: weak direction probe, breakout watch, exhaustion flip, or MR entry
-              const hasStructuralBypass = weakDirectionProbeApplied || 
+              // Check bypass conditions: derived direction, weak direction probe, breakout watch, exhaustion flip, or MR entry
+              // CRITICAL FIX: A valid derived direction (from weighted scoring) means the continuous bias engine
+              // found enough directional evidence — this should bypass the regime gate with reduced sizing.
+              const hasDerivedDirectionBypass = derivedDirection !== null && Math.abs(dirWeightedScore) >= 0.15;
+              const hasStructuralBypass = hasDerivedDirectionBypass || weakDirectionProbeApplied || 
                 (perSymbolGateAttribution.get(symbol)?.gate === 'BREAKOUT_WATCH') ||
                 (derivedSource === 'exhaustion-flip-short');
               
               if (hasStructuralBypass) {
                 // Allow through with reduced size — structural fixes have already applied position multipliers
-                const bypassReason = weakDirectionProbeApplied ? 'WEAK_DIRECTION_PROBE' 
+                const bypassReason = hasDerivedDirectionBypass ? `DERIVED_DIRECTION(${derivedDirection},score=${dirWeightedScore.toFixed(3)})`
+                  : weakDirectionProbeApplied ? 'WEAK_DIRECTION_PROBE' 
                   : derivedSource === 'exhaustion-flip-short' ? 'EXHAUSTION_FLIP'
                   : 'BREAKOUT_WATCH';
-                rangingMarketPositionMultiplier = Math.min(rangingMarketPositionMultiplier, 0.30);
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔓 NO_TRADE_RANGE_REGIME: Would block but bypassed via ${bypassReason} → position capped at 30%`);
+                rangingMarketPositionMultiplier = Math.min(rangingMarketPositionMultiplier, hasDerivedDirectionBypass ? 0.50 : 0.30);
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔓 NO_TRADE_RANGE_REGIME: Would block but bypassed via ${bypassReason} → position capped at ${(rangingMarketPositionMultiplier * 100).toFixed(0)}%`);
               } else {
                 rejectedByHardGates++;
                 const blockReason = `NO_TRADE_RANGE_REGIME: HARD BLOCK - primaryTrend=${primaryTrend}, momentum=${momentumState}, ADX=${adx.toFixed(1)}<${hardBlock.MAX_ADX}, |score|=${absMomentumScore.toFixed(0)}<${hardBlock.MAX_ABS_MOMENTUM_SCORE} → no statistical edge, noise dominates`;
