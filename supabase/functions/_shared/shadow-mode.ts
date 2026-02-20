@@ -3,6 +3,34 @@
 
 import { createLogger } from './logging.ts';
 
+/**
+ * Derive synthetic stop_loss and take_profit from ATR for shadow signals.
+ * Shadow signals are logged before signal construction, so SL/TP must be estimated.
+ * Uses 1.5×ATR for SL and 2.5×ATR for TP (standard risk:reward).
+ */
+export function deriveShadowSLTP(
+  entryPrice: number | undefined,
+  atr: number | undefined,
+  direction: 'long' | 'short'
+): { stopLoss: number | undefined; takeProfit: number | undefined } {
+  if (!entryPrice || !atr || atr <= 0) {
+    return { stopLoss: undefined, takeProfit: undefined };
+  }
+  const slDistance = atr * 1.5;
+  const tpDistance = atr * 2.5;
+  if (direction === 'long') {
+    return {
+      stopLoss: Number((entryPrice - slDistance).toFixed(6)),
+      takeProfit: Number((entryPrice + tpDistance).toFixed(6)),
+    };
+  } else {
+    return {
+      stopLoss: Number((entryPrice + slDistance).toFixed(6)),
+      takeProfit: Number((entryPrice - tpDistance).toFixed(6)),
+    };
+  }
+}
+
 export interface ShadowModeSignal {
   userId: string;
   symbol: string;
@@ -16,6 +44,8 @@ export interface ShadowModeSignal {
   entryPrice?: number;
   stopLoss?: number;
   takeProfit?: number;
+  /** ATR value for auto-deriving SL/TP when not explicitly provided */
+  atr?: number;
   trend?: string;
   oldPositionMultiplier?: number;
   newPositionMultiplier?: number;
@@ -213,6 +243,14 @@ export async function logShadowSignal(
   const logger = createLogger('shadow-mode');
   
   try {
+    // Auto-derive SL/TP from ATR when not explicitly provided
+    let { stopLoss, takeProfit } = signal;
+    if ((!stopLoss || !takeProfit) && signal.atr && signal.entryPrice) {
+      const derived = deriveShadowSLTP(signal.entryPrice, signal.atr, signal.signalType);
+      stopLoss = stopLoss ?? derived.stopLoss;
+      takeProfit = takeProfit ?? derived.takeProfit;
+    }
+
     const { error } = await supabaseClient
       .from('shadow_mode_signals')
       .insert({
@@ -226,8 +264,8 @@ export async function logShadowSignal(
         gate_details: signal.gateDetails,
         confidence_score: signal.confidenceScore,
         entry_price: signal.entryPrice,
-        stop_loss: signal.stopLoss,
-        take_profit: signal.takeProfit,
+        stop_loss: stopLoss,
+        take_profit: takeProfit,
         trend: signal.trend,
         old_position_multiplier: signal.oldPositionMultiplier,
         new_position_multiplier: signal.newPositionMultiplier,

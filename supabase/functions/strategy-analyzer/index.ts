@@ -277,6 +277,7 @@ import {
   compareMACDGate, 
   compareADXExhaustionGate, 
   compareStochRSIGate,
+  deriveShadowSLTP,
   type ShadowModeSignal 
 } from "../_shared/shadow-mode.ts";
 // NEW: Mean Reversion Strategy Module
@@ -5286,6 +5287,8 @@ serve(async (req) => {
                 newThreshold: adxExhaustionComparison.newThreshold,
               },
               confidenceScore: confidence,
+              entryPrice: trendData?.currentPrice,
+              atr: trendData?.volatility?.atr,
               trend,
               indicators: {
                 adxPeaked: fullAdxResult.adxPeaked,
@@ -6053,6 +6056,7 @@ serve(async (req) => {
                 },
                 confidenceScore: trendData.confidence ?? 0,
                 entryPrice: trendData.currentPrice ?? 0,
+                atr: trendData?.volatility?.atr,
                 trend: derivedDirection,
                 oldPositionMultiplier: 0,
                 newPositionMultiplier: teMultiplier,
@@ -6290,6 +6294,7 @@ serve(async (req) => {
                     },
                     confidenceScore: undefined,
                     entryPrice: trendData?.currentPrice,
+                    atr: trendData?.volatility?.atr,
                     indicators: {
                       adx: Number(adx.toFixed(1)),
                       regimeAdxSlope: Number(regimeConsistentAdxSlope.toFixed(2)),
@@ -6432,6 +6437,7 @@ serve(async (req) => {
                         },
                         confidenceScore: undefined,
                         entryPrice: trendData?.currentPrice,
+                        atr: trendData?.volatility?.atr,
                         indicators: {
                           momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
                           adx: Number(adx.toFixed(1)),
@@ -6568,6 +6574,7 @@ serve(async (req) => {
                       },
                       confidenceScore: undefined,
                       entryPrice: trendData?.currentPrice,
+                      atr: trendData?.volatility?.atr,
                       indicators: {
                         momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
                         adx: Number(adx.toFixed(1)),
@@ -6743,6 +6750,7 @@ serve(async (req) => {
                         },
                         confidenceScore: undefined,
                         entryPrice: trendData?.currentPrice,
+                        atr: trendData?.volatility?.atr,
                         indicators: {
                           momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
                           adx: Number(adx.toFixed(1)),
@@ -6872,6 +6880,7 @@ serve(async (req) => {
                       },
                       confidenceScore: undefined,
                       entryPrice: trendData?.currentPrice,
+                      atr: trendData?.volatility?.atr,
                       indicators: {
                         momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
                         adx: Number(adx.toFixed(1)),
@@ -7454,6 +7463,7 @@ serve(async (req) => {
                       
                       // Log shadow signal
                       try {
+                        const _shadowSLTP1 = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
                         await supabase.from('shadow_mode_signals').insert({
                           user_id: userId,
                           symbol,
@@ -7466,6 +7476,8 @@ serve(async (req) => {
                           new_position_multiplier: breakoutRelax.POSITION_MULTIPLIER,
                           confidence_score: smartMomentum.score,
                           entry_price: trendData?.currentPrice || null,
+                          stop_loss: _shadowSLTP1.stopLoss || null,
+                          take_profit: _shadowSLTP1.takeProfit || null,
                           gate_details: {
                             fix: 'FIX_4_BREAKOUT_RELAXATION',
                             distanceFromLow: distanceFromLow.toFixed(3),
@@ -7737,6 +7749,7 @@ serve(async (req) => {
                       logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 👻 NEAR_24H_HIGH_EXPANDED BREAKOUT_RELAXATION (SHADOW): LONG would PASS with relaxed momentum ${smartMomentum.score.toFixed(0)} >= ${breakoutRelaxLong.RELAXED_MIN_MOMENTUM_SCORE_LONG} (default requires >=${expandedBlockLong.MIN_MOMENTUM_SCORE_LONG}), regime=${fourStateRegime.regime}, adxSlope=${adxSlope.toFixed(2)}`);
                       
                       try {
+                        const _shadowSLTP2 = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
                         await supabase.from('shadow_mode_signals').insert({
                           user_id: userId,
                           symbol,
@@ -7749,6 +7762,8 @@ serve(async (req) => {
                           new_position_multiplier: breakoutRelaxLong.POSITION_MULTIPLIER,
                           confidence_score: smartMomentum.score,
                           entry_price: trendData?.currentPrice || null,
+                          stop_loss: _shadowSLTP2.stopLoss || null,
+                          take_profit: _shadowSLTP2.takeProfit || null,
                           gate_details: {
                             fix: 'FIX_4_BREAKOUT_RELAXATION',
                             distanceFromHigh: distanceFromHigh.toFixed(3),
@@ -11658,6 +11673,7 @@ serve(async (req) => {
                   },
                   confidenceScore: trendData.confidence ?? 0,
                   entryPrice: trendData.currentPrice ?? 0,
+                  atr: trendData?.volatility?.atr,
                   trend: derivedDirection,
                   oldPositionMultiplier: 0,
                   newPositionMultiplier: teMultiplier,
@@ -12969,6 +12985,8 @@ serve(async (req) => {
                 newThreshold: macdGateComparison.newThreshold,
               },
               confidenceScore: confidence,
+              entryPrice: trendData?.currentPrice,
+              atr: trendData?.volatility?.atr,
               trend,
               indicators: {
                 macdHistogram: macdHistogramValue,
