@@ -4335,6 +4335,17 @@ serve(async (req) => {
         const hasAnyDirectionSourceWithProbe = hasAnyDirectionSourceFinal || weakDirectionProbeApplied;
 
         // REJECT EARLY: If no clear trade direction can be determined AND no overrides applied
+        // ============= BYPASS EVALUATION LOGGING =============
+        const dirCtx = directionResult?.directionContext;
+        const dirWeightedScoreForLog = dirCtx?.weightedScore ?? 0;
+        logger.forSymbol(symbol).info(
+          `${LOG_CATEGORIES.GATE} 📊 DIRECTION_EVAL: direction=${directionResult.direction || 'null'}, ` +
+          `weightedScore=${dirWeightedScoreForLog.toFixed(3)}, source=${directionResult.source}, ` +
+          `weakProbe=${weakDirectionProbeApplied}, lateGrind=${lateGrindAccepted}, ` +
+          `anyOverride=${hasAnyDirectionSourceWithProbe}, regime=${fourStateRegime?.regime || 'unknown'}, ` +
+          `ADX=${adx.toFixed(1)}, bypassEligible=${Math.abs(dirWeightedScoreForLog) > 0.10}`
+        );
+        
         if (!directionResult.direction && !lateGrindAccepted && !hasAnyDirectionSourceWithProbe) {
           rejectedByHardGates++;
           await logRejectionWithAI(
@@ -8191,6 +8202,21 @@ serve(async (req) => {
             const adxTooLow = adx < hardBlock.MAX_ADX;
             const momentumScoreTooLow = !hardBlock.REQUIRE_LOW_MOMENTUM_SCORE || absMomentumScore < hardBlock.MAX_ABS_MOMENTUM_SCORE;
             
+            // ============= BYPASS EVALUATION LOGGING =============
+            // Always log bypass evaluation state so we can debug why signals are/aren't flowing
+            const directionCtx = directionResult?.directionContext;
+            const dirWeightedScore = directionCtx?.weightedScore ?? 0;
+            const bypassEligible = Math.abs(dirWeightedScore) > 0.10;
+            
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.GATE} 📊 RANGE_REGIME_EVAL: ` +
+              `trendNeutral=${trendIsNeutral}, momentumNoEdge=${momentumHasNoEdge}(${momentumState}), ` +
+              `adxTooLow=${adxTooLow}(${adx.toFixed(1)}<${hardBlock.MAX_ADX}), ` +
+              `momScoreLow=${momentumScoreTooLow}(|${absMomentumScore.toFixed(0)}|<${hardBlock.MAX_ABS_MOMENTUM_SCORE}), ` +
+              `dirScore=${dirWeightedScore.toFixed(3)}, bypassEligible=${bypassEligible}, ` +
+              `weakProbe=${weakDirectionProbeApplied}, derivedDir=${derivedDirection}, source=${derivedSource}`
+            );
+            
             if (trendIsNeutral && momentumHasNoEdge && adxTooLow && momentumScoreTooLow) {
               // Check bypass conditions: weak direction probe, breakout watch, exhaustion flip, or MR entry
               const hasStructuralBypass = weakDirectionProbeApplied || 
@@ -8221,6 +8247,9 @@ serve(async (req) => {
                   adxSlope: adxSlope.toFixed(2),
                   maxAdxThreshold: hardBlock.MAX_ADX,
                   maxAbsMomentumScore: hardBlock.MAX_ABS_MOMENTUM_SCORE,
+                  directionWeightedScore: dirWeightedScore.toFixed(3),
+                  bypassEligible,
+                  weakDirectionProbeApplied,
                   wouldPassWith: `ADX >= ${hardBlock.MAX_ADX} OR momentum_state=confirmed/building OR |momentum_score| >= ${hardBlock.MAX_ABS_MOMENTUM_SCORE}`,
                 }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                 continue;
