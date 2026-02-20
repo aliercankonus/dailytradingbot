@@ -3994,8 +3994,8 @@ export const FOUR_STATE_REGIME = {
   // ===== TREND EXPANSION =====
   // Strong directional move with aligned structure - best entries
   TREND_EXPANSION: {
-    // ADX must show trend energy
-    MIN_ADX: 30,
+    // ADX must show trend energy (lowered from 30 → 25: ADX≥30 only occurs 1.6% of time in crypto)
+    MIN_ADX: 25,
     // ADX slope must be non-negative for full expansion (not decaying)
     MIN_ADX_SLOPE: 0,
     // Buffer zone: slopes between -0.5 and 0 are noise, still EXPANSION at reduced sizing
@@ -4014,7 +4014,7 @@ export const FOUR_STATE_REGIME = {
   // Consistent with ADX_SLOPE_GRADUATED and MOVE_EXHAUSTION graduated architectures
   TREND_EXHAUSTION: {
     // ADX still elevated but slope is declining
-    MIN_ADX: 30,
+    MIN_ADX: 25,  // Matches TREND_EXPANSION.MIN_ADX (lowered from 30)
     
     // === GRADUATED SLOPE TIERS ===
     // TIER: CONDITIONAL (slope -1.5 to -0.5)
@@ -4048,8 +4048,8 @@ export const FOUR_STATE_REGIME = {
   // ===== RANGE COMPRESSION =====
   // No directional edge - HARD BLOCK all entries
   RANGE_COMPRESSION: {
-    // ADX below this = no trend energy
-    MAX_ADX: 25,
+    // ADX below this = no trend energy (lowered from 25 → 20: avg crypto ADX is 17.6, 25 blocks 87% of time)
+    MAX_ADX: 20,
     // Primary trend must be neutral/ranging
     REQUIRE_NEUTRAL_TREND: true,
     // Momentum must lack conviction
@@ -4070,7 +4070,7 @@ export const FOUR_STATE_REGIME = {
     MIN_ADX: 18,
     MAX_ADX: 30,
     // ADX slope must be clearly rising (new energy entering)
-    MIN_ADX_SLOPE: 0.5,
+    MIN_ADX_SLOPE: 0.3,  // ADX slope must be rising (lowered from 0.5 to catch more breakouts)
     // Require directional confirmation from at least 2 timeframes
     MIN_ALIGNED_TIMEFRAMES: 2,
     // OR: Bollinger squeeze breaking out
@@ -5054,17 +5054,18 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   
   // ===== BASE THRESHOLDS (Default) =====
   // LONG entries blocked if price already moved this much from 24h low
-  LONG_SOFT_THRESHOLD_PERCENT: 3.5,   // Reduce position at 3.5%+ move
-  LONG_HARD_THRESHOLD_PERCENT: 5.0,   // Hard block at 5%+ move
+  // (raised from 3.5/5.0: crypto routinely moves 3-5% in a single 4h candle)
+  LONG_SOFT_THRESHOLD_PERCENT: 5.0,   // Reduce position at 5%+ move (was 3.5%)
+  LONG_HARD_THRESHOLD_PERCENT: 7.0,   // Hard block at 7%+ move (was 5.0%)
   
   // SHORT entries blocked if price already moved this much from 24h high
-  SHORT_SOFT_THRESHOLD_PERCENT: 3.5,
-  SHORT_HARD_THRESHOLD_PERCENT: 5.0,
+  SHORT_SOFT_THRESHOLD_PERCENT: 5.0,  // (was 3.5%)
+  SHORT_HARD_THRESHOLD_PERCENT: 7.0,  // (was 5.0%)
   
   // Legacy unified thresholds (for backward compatibility)
-  SOFT_THRESHOLD_PERCENT: 3.5,        // Use direction-specific thresholds above
+  SOFT_THRESHOLD_PERCENT: 5.0,        // Use direction-specific thresholds above (was 3.5%)
   SOFT_THRESHOLD_POSITION_SIZE: 0.35, // 35% position for late entries
-  HARD_THRESHOLD_PERCENT: 5.0,        // Use direction-specific thresholds above
+  HARD_THRESHOLD_PERCENT: 7.0,        // Use direction-specific thresholds above (was 5.0%)
   
   // ===== STRONG TREND THRESHOLD RELAXATION =====
   // In strong trending regimes (high ADX, Bollinger squeeze/breakdown), relax thresholds
@@ -5165,7 +5166,7 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   // We only block if K < 20 (extreme exhaustion = bounce imminent)
   REQUIRE_STOCHRSI_ALIGNMENT: true,
   STOCHRSI_MIN_FOR_SHORT: 20,           // K must be >= 20 for late short (avoid extreme oversold only)
-  STOCHRSI_NOT_OVERBOUGHT_FOR_LONG: 50, // K must be < 50 for late long (tightened from 65)
+  STOCHRSI_NOT_OVERBOUGHT_FOR_LONG: 75, // K must be < 75 for late long (was 50 — K>50 is NOT overbought, overbought starts at 70-80)
   
   // Legacy alias (backward compatibility)
   STOCHRSI_NOT_OVERSOLD_FOR_SHORT: 20,  // Renamed - now means MIN K for short entry
