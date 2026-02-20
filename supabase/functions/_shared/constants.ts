@@ -5159,14 +5159,15 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   },
   
   // ===== STOCHRSI ALIGNMENT REQUIRED =====
-  // In soft zone, block if StochRSI indicates exhaustion
-  // FIX: For SHORTs - K <= 65 was WRONG (blocked good continuation shorts)
-  // Now using K >= 20: avoid ONLY extreme oversold exhaustion, not moderate oversold
-  // Logic: In a falling market, K can be 15-40 (oversold) but trend still has room
-  // We only block if K < 20 (extreme exhaustion = bounce imminent)
+  // In soft zone, use TIERED exhaustion instead of binary block
+  // Tier 1 (HARD): K >= 85 → hard block (true overbought exhaustion)
+  // Tier 2 (SOFT): K >= 75 → reduce position to 25% (late but possible)
+  // Tier 3 (ALLOW): K < 75 → allow with normal soft zone sizing (trend continuation zone)
   REQUIRE_STOCHRSI_ALIGNMENT: true,
   STOCHRSI_MIN_FOR_SHORT: 20,           // K must be >= 20 for late short (avoid extreme oversold only)
-  STOCHRSI_NOT_OVERBOUGHT_FOR_LONG: 75, // K must be < 75 for late long (was 50 — K>50 is NOT overbought, overbought starts at 70-80)
+  STOCHRSI_NOT_OVERBOUGHT_FOR_LONG: 85, // TIER 1 HARD: K >= 85 = true overbought exhaustion (was 75)
+  STOCHRSI_SOFT_OVERBOUGHT_FOR_LONG: 75, // TIER 2 SOFT: K 75-85 = late entry, reduce position
+  STOCHRSI_SOFT_OVERBOUGHT_MULTIPLIER: 0.25, // Position size for K 75-85 zone
   
   // Legacy alias (backward compatibility)
   STOCHRSI_NOT_OVERSOLD_FOR_SHORT: 20,  // Renamed - now means MIN K for short entry
@@ -5199,9 +5200,28 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
     MIN_MOVE_PERCENT_FOR_EXCEPTION: 5.0,
   },
   
+  // ===== SYMMETRIC EXHAUSTION FLIP =====
+  // When LONG is exhausted (K>=85 + move>=hard), evaluate SHORT MR probe
+  // When SHORT is exhausted (K<=15 + move>=hard), evaluate LONG MR probe
+  // This prevents global veto — exhaustion triggers reversal evaluation
+  SYMMETRIC_EXHAUSTION_FLIP: {
+    ENABLED: true,
+    // Minimum move for exhaustion flip to trigger
+    MIN_MOVE_FOR_FLIP_PERCENT: 5.0,
+    // ADX must be >= this (some trend energy present to flip from)
+    MIN_ADX_FOR_FLIP: 20,
+    // StochRSI thresholds for flip trigger
+    LONG_EXHAUSTION_MIN_K: 85,   // K >= 85 during LONG → evaluate SHORT
+    SHORT_EXHAUSTION_MAX_K: 15,  // K <= 15 during SHORT → evaluate LONG
+    // Position size for flip probes (very conservative)
+    FLIP_POSITION_MULTIPLIER: 0.20,
+    // Logging
+    LOG_FLIP_CHECKS: true,
+  },
+  
   // ===== ADDITIONAL ENTRY QUALITY GATES =====
   SOFT_SHORT_MIN_STOCHRSI: 35,
-  SOFT_LONG_MAX_STOCHRSI: 50,         // Tightened from 65
+  SOFT_LONG_MAX_STOCHRSI: 75,         // Aligned with new tiered system (was 50)
   
   // ===== LOOKBACK PERIOD =====
   SWING_LOOKBACK_HOURS: 24,
@@ -6586,11 +6606,15 @@ export const ADX_SLOPE_GRADUATED_GATE = {
   ENABLED: true,
   
   // ===== HARD BLOCK: Only true structural collapse =====
-  // Slope < -3.0 means ADX is collapsing rapidly — trend structure is breaking
-  HARD_BLOCK_SLOPE_THRESHOLD: -3.0,
-  // Direction-specific hard blocks (both at -3.0 for symmetry)
-  SHORT_HARD_BLOCK_SLOPE: -3.0,
-  LONG_HARD_BLOCK_SLOPE: -3.0,
+  // Slope < -5.0 means ADX is collapsing violently — trend structure is completely breaking
+  // FIX: Was -3.0, too sensitive for crypto derivatives. -3 to -5 is now graduated, not hard block.
+  // Additional guard: only hard block when ADX < 25 (no energy reservoir)
+  HARD_BLOCK_SLOPE_THRESHOLD: -5.0,
+  // Direction-specific hard blocks (softened from -3.0 to -5.0)
+  SHORT_HARD_BLOCK_SLOPE: -5.0,
+  LONG_HARD_BLOCK_SLOPE: -5.0,
+  // ADX context: if ADX >= this, convert collapse to TREND_EXHAUSTION probe instead of hard block
+  COLLAPSE_TO_EXHAUSTION_MIN_ADX: 25,
   
   // ===== GRADUATED PENALTY TIERS (soft — reduce size, never block) =====
   // Tier 1: Severe decline (-3.0 to -2.0) — significant size reduction
