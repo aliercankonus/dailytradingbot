@@ -183,6 +183,31 @@ export const ADX_GATE_V1_1 = {
     EXHAUSTION: 20,   // Exhaustion requires caution
   } as Record<string, number>,
   
+  // ===== EARLY TREND IGNITION BYPASS (Confluence Gate) =====
+  // Purpose: Capture pre-expansion energy builds where ADX lags strong directional bias
+  // NOT a blanket relaxation — requires 4-way confluence: ADX>=15, score>=0.60, direction confirmed, slope rising
+  EARLY_TREND_IGNITION: {
+    ENABLED: true,
+    // Minimum ADX to qualify (below HARD_FLOOR is still blocked)
+    MIN_ADX: 15,
+    // Maximum ADX (above this, normal adaptive threshold applies)
+    MAX_ADX: 22,
+    // Minimum absolute weighted score from direction derivation engine
+    MIN_WEIGHTED_SCORE: 0.60,
+    // ADX slope must be positive (rising = expansion building)
+    MIN_ADX_SLOPE: 0,  // > 0, strictly rising
+    // Position size multiplier (conservative probe)
+    POSITION_MULTIPLIER: 0.35,
+    // Maximum concurrent early ignition positions across all symbols
+    MAX_CONCURRENT_POSITIONS: 2,
+    // Tighter stop: 1.2x ATR (vs normal 1.5-2.0x)
+    STOP_LOSS_ATR_MULTIPLIER: 1.2,
+    // Faster break-even activation (lower threshold)
+    BREAK_EVEN_ACTIVATION_PERCENT: 0.5,
+    // Reduced TP multiplier
+    TAKE_PROFIT_MULTIPLIER: 0.75,
+  },
+  
   // ===== LOGGING =====
   LOG_GATE_CHECKS: true,
   LOG_EXCEPTION_DETAILS: true,

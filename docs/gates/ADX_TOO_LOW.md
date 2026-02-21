@@ -82,6 +82,7 @@ START
 | Squeeze Expansion | 18–22 | BB compressed, band edge, momentum building, slope ≥ +0.05, no divergence | 0.65x |
 | Early Ignition | 18–22 | EARLY_TREND regime, slope > 0, 4H ≥ 55%, 1H aligned | 0.70x |
 | Mean Reversion | 18–22 | earlyMeanReversionSignal detected + allowed | 0.25x |
+| **Early Trend Ignition** | **15–22** | **|weightedScore| ≥ 0.60, direction confirmed, slope > 0, max 2 concurrent** | **0.35x** |
 | Adaptive Pass (RANGE) | ≥ 22 | Regime = RANGE | 1.00x |
 | Adaptive Pass (EARLY_TREND) | ≥ 20 | Regime = EARLY_TREND | 1.00x |
 | Adaptive Pass (STRONG_TREND) | ≥ 18 | Regime = STRONG_TREND | 1.00x |
@@ -201,6 +202,16 @@ The `HardGateADXDisplay` component should show:
 ---
 
 ## Changelog
+
+### v1.3 (2026-02-21)
+- **ADDED**: EARLY_TREND_IGNITION confluence bypass
+  - Captures pre-expansion energy builds where ADX lags strong directional bias
+  - Requires 4-way confluence: ADX 15–22, |weightedScore| ≥ 0.60, direction confirmed, ADX slope > 0
+  - Position size: 0.35x (probe entry)
+  - Safety: MAX_CONCURRENT_POSITIONS = 2 (prevents correlated ignition risk)
+  - Tighter stop (1.2x ATR), faster break-even (0.5%), reduced TP (0.75x)
+  - Expected: BNB (score=1.000) qualifies, BTC (0.433) does not, SOL (0.259) does not
+  - Tagged as `entry_exception_type: EARLY_TREND_IGNITION` for analytics tracking
 
 ### v1.2 (2026-02-18)
 - **ADDED**: TRANSITION_EXPANSION bypass tier (SHADOW MODE ONLY)
