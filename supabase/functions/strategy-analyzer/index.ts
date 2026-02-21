@@ -8289,7 +8289,7 @@ serve(async (req) => {
             }
             
             if (atrPercent24h > 0 && atrPercent24h < atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT) {
-              // HARD BLOCK: Below structural floor — truly dead volatility
+              // HARD BLOCK: Below structural floor (0.50%) — truly dead volatility
               const isMREntry = false; // Pre-strategy gate: no strategy selected yet
               
               if (!isMREntry) {
@@ -8313,26 +8313,44 @@ serve(async (req) => {
               } else {
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 LOW_ATR: ATR=${atrPercent24h.toFixed(2)}% < ${atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT}% but allowing Mean Reversion`);
               }
+            } else if (atrPercent24h > 0 && atrPercent24h < (atrFilter as any).PROBE_ZONE_HIGH) {
+              // PROBE ZONE: 0.50% – 0.70% — previously hard-blocked, now graduated probes
+              const probeZoneLow = (atrFilter as any).PROBE_ZONE_LOW ?? 0.60;
+              let atrProbeMultiplier: number;
+              let probeZone: string;
+              
+              if (atrPercent24h < probeZoneLow) {
+                // Low probe: 0.50% – 0.60% — micro position with tight stops
+                atrProbeMultiplier = (atrFilter as any).PROBE_ZONE_LOW_MULTIPLIER ?? 0.15;
+                probeZone = `LOW_PROBE (${atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT}%-${probeZoneLow}%)`;
+              } else {
+                // High probe: 0.60% – 0.70% — reduced position
+                atrProbeMultiplier = (atrFilter as any).PROBE_ZONE_HIGH_MULTIPLIER ?? 0.25;
+                probeZone = `HIGH_PROBE (${probeZoneLow}%-${(atrFilter as any).PROBE_ZONE_HIGH}%)`;
+              }
+              
+              rangingMarketPositionMultiplier = Math.min(rangingMarketPositionMultiplier, atrProbeMultiplier);
+              
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 ATR_PROBE_ENTRY: ATR=${atrPercent24h.toFixed(2)}% in ${probeZone} → position reduced to ${(atrProbeMultiplier * 100).toFixed(0)}% (was hard block at 0.70%)`);
             } else if (atrPercent24h > 0 && atrPercent24h < dynamicHighThreshold) {
-              // SOFT PENALTY ZONE: Graduated position multiplier instead of hard block
+              // SOFT PENALTY ZONE: 0.70% – dynamic high — graduated position multiplier
               const softZoneLow = atrFilter.SOFT_ZONE_LOW ?? 0.90;
               let atrPenaltyMultiplier: number;
               let penaltyZone: string;
               
               if (atrPercent24h < softZoneLow) {
-                // Lower soft zone: heavy reduction
-                atrPenaltyMultiplier = atrFilter.SOFT_ZONE_LOW_MULTIPLIER ?? 0.25;
-                penaltyZone = `LOW_SOFT (${atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT}%-${softZoneLow}%)`;
+                // Lower soft zone: moderate reduction
+                atrPenaltyMultiplier = atrFilter.SOFT_ZONE_LOW_MULTIPLIER ?? 0.30;
+                penaltyZone = `LOW_SOFT (${(atrFilter as any).PROBE_ZONE_HIGH}%-${softZoneLow}%)`;
               } else {
-                // Upper soft zone: moderate reduction
+                // Upper soft zone: light reduction
                 atrPenaltyMultiplier = atrFilter.SOFT_ZONE_HIGH_MULTIPLIER ?? 0.50;
                 penaltyZone = `HIGH_SOFT (${softZoneLow}%-${dynamicHighThreshold.toFixed(2)}%)`;
               }
               
-              // Apply as position multiplier (stacks with other multipliers via Math.min)
               rangingMarketPositionMultiplier = Math.min(rangingMarketPositionMultiplier, atrPenaltyMultiplier);
               
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 ATR_SOFT_PENALTY: ATR=${atrPercent24h.toFixed(2)}% in ${penaltyZone} → position reduced to ${(atrPenaltyMultiplier * 100).toFixed(0)}% (was hard block at 1.10%)`);
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 ATR_SOFT_PENALTY: ATR=${atrPercent24h.toFixed(2)}% in ${penaltyZone} → position reduced to ${(atrPenaltyMultiplier * 100).toFixed(0)}%`);
             }
           }
           
