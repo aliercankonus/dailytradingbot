@@ -4736,16 +4736,22 @@ export const RANGING_MARKET_PROTECTION = {
   // Adapts to volatility regime shifts without manual retuning
   MIN_ATR_FILTER: {
     ENABLED: true,
-    // Hard block floor — never trade below this (true compression, no edge)
-    ABSOLUTE_FLOOR_ATR_PERCENT: 0.70,
-    // Graduated soft penalty zones replace the old 1.10% cliff
-    // ATR between ABSOLUTE_FLOOR and SOFT_ZONE_LOW → reduced multiplier
-    // ATR between SOFT_ZONE_LOW and SOFT_ZONE_HIGH → moderate multiplier
-    // ATR >= SOFT_ZONE_HIGH → full sizing (no penalty)
+    // Hard block floor — truly dead volatility, no tradeable edge at all
+    // Lowered from 0.70% → 0.50% to align with graded participation model
+    ABSOLUTE_FLOOR_ATR_PERCENT: 0.50,
+    // ===== PROBE ZONES (0.50% – 0.70%) =====
+    // Previously hard-blocked; now graduated probe entries with tight stops
+    // These unlock SOL/AVAX/XRP which consistently sit at 0.60-0.69%
+    PROBE_ZONE_LOW: 0.60,              // boundary between low and high probe
+    PROBE_ZONE_LOW_MULTIPLIER: 0.15,   // 0.50% – 0.60%: micro probe (tight stops)
+    PROBE_ZONE_HIGH: 0.70,             // boundary between probe and soft penalty
+    PROBE_ZONE_HIGH_MULTIPLIER: 0.25,  // 0.60% – 0.70%: reduced probe
+    // ===== SOFT PENALTY ZONES (0.70% – dynamic high) =====
+    // Graduated position multiplier instead of full sizing
     SOFT_ZONE_LOW: 0.90,
-    SOFT_ZONE_LOW_MULTIPLIER: 0.25,   // 0.70% – 0.90%: heavy reduction
+    SOFT_ZONE_LOW_MULTIPLIER: 0.30,    // 0.70% – 0.90%: moderate reduction (was 0.25)
     SOFT_ZONE_HIGH: 1.10,
-    SOFT_ZONE_HIGH_MULTIPLIER: 0.50,  // 0.90% – 1.10%: moderate reduction
+    SOFT_ZONE_HIGH_MULTIPLIER: 0.50,   // 0.90% – 1.10%: light reduction
     // Adaptive multiplier applied to 30-bar rolling average ATR%
     ADAPTIVE_MULTIPLIER: 0.8,
     // Legacy fallback if historical ATR is unavailable
