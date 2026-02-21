@@ -10345,32 +10345,55 @@ serve(async (req) => {
           
           // Block SHORT when K is in severe oversold zone (5 <= K < 15)
           // BUT allow LONG if mean reversion detected AND formal criteria met
+          // GATE-LEVEL LONG FLIP: When blocking a SHORT at K<=10, evaluate LONG MR probe
           if (intendedTradeDirection === "short" && isSevereOversold) {
-            rejectedByHardGates++;
-            perSymbolGateAttribution.set(symbol, { gate: 'SEVERE_HTF_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} in severe zone [${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}-${severeOversoldThreshold})` });
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 SEVERE OVERSOLD GATE - Blocking SHORT at 4h K=${stochRsiK4h.toFixed(1)} (in severe zone ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}-${severeOversoldThreshold}, NO BYPASS)`);
-            logger.forSymbol(symbol).info(`   → Bounce probability ~70%+ in severe zone, %B=${percentB.toFixed(1)}, ADX=${adx.toFixed(1)}`);
-            await logRejectionWithAI(
-              supabase, userId, symbol,
-              `SEVERE OVERSOLD GATE (TIER 1): SHORT blocked - 4h StochRSI K=${stochRsiK4h.toFixed(1)} is in severe oversold zone (${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD} <= K < ${severeOversoldThreshold})`,
-              { 
-                gate: "SEVERE_HTF_OVERSOLD",
-                tier: 1,
-                direction: "short",
-                stochRsiK4h: stochRsiK4h.toFixed(1),
-                severeThreshold: severeOversoldThreshold,
-                deepThreshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
-                percentB: percentB.toFixed(1),
-                adx: adx.toFixed(1),
-                bypassAllowed: false,
-                meanReversionBypass: false,
-                message: `Bounce probability ~70%+ in severe zone K=${stochRsiK4h.toFixed(1)}, blocking SHORT with NO bypass allowed`
-              },
-              trendData,
-              false,
-              earlyOrderFlowAnalysis
-            );
-            continue;
+            const effectiveRegimeOS = fourStateRegime?.regime || currentRegime || 'UNKNOWN';
+            const isStrongTrendRegimeOS = effectiveRegimeOS === 'STRONG_TREND' || effectiveRegimeOS === 'EARLY_TREND';
+            const stochTurningUp = stochRsiK4h > stochRsiD4h;
+            const adxAllowsMRLong = adx < 40;
+            
+            const canFlipToLong = stochTurningUp && !isStrongTrendRegimeOS && adxAllowsMRLong;
+            
+            if (canFlipToLong) {
+              intendedTradeDirection = 'long';
+              isReversalEntry = true;
+              const mrLongMultiplier = 0.20;
+              reversalPositionSizeOverride = mrLongMultiplier;
+              reversalPositionMultiplier = Math.min(reversalPositionMultiplier, mrLongMultiplier);
+              
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔄 SEVERE_GATE_LONG_FLIP: SHORT blocked at K=${stochRsiK4h.toFixed(0)} → FLIPPED to LONG MR probe at ${(mrLongMultiplier * 100).toFixed(0)}% position`);
+              logger.forSymbol(symbol).info(`   → K=${stochRsiK4h.toFixed(1)} > D=${stochRsiD4h.toFixed(1)} (turning up), regime=${effectiveRegimeOS}, ADX=${adx.toFixed(1)}, %B=${percentB.toFixed(1)}`);
+            } else {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 SEVERE OVERSOLD GATE - Blocking SHORT at 4h K=${stochRsiK4h.toFixed(1)} (in severe zone ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}-${severeOversoldThreshold}, NO BYPASS)`);
+              logger.forSymbol(symbol).info(`   → Bounce probability ~70%+ in severe zone, %B=${percentB.toFixed(1)}, ADX=${adx.toFixed(1)}`);
+              logger.forSymbol(symbol).info(`   → LONG flip not eligible: K>D=${stochTurningUp}, strongTrend=${isStrongTrendRegimeOS}, adx<40=${adxAllowsMRLong}`);
+              
+              rejectedByHardGates++;
+              perSymbolGateAttribution.set(symbol, { gate: 'SEVERE_HTF_OVERSOLD_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} in severe zone [${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}-${severeOversoldThreshold})` });
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `SEVERE OVERSOLD GATE (TIER 1): SHORT blocked - 4h StochRSI K=${stochRsiK4h.toFixed(1)} is in severe oversold zone (${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD} <= K < ${severeOversoldThreshold})`,
+                { 
+                  gate: "SEVERE_HTF_OVERSOLD",
+                  tier: 1,
+                  direction: "short",
+                  stochRsiK4h: stochRsiK4h.toFixed(1),
+                  severeThreshold: severeOversoldThreshold,
+                  deepThreshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
+                  percentB: percentB.toFixed(1),
+                  adx: adx.toFixed(1),
+                  bypassAllowed: false,
+                  meanReversionBypass: false,
+                  shortFlipEligible: false,
+                  shortFlipReason: `K>D=${stochTurningUp}, strongTrend=${isStrongTrendRegimeOS}, adx<40=${adxAllowsMRLong}`,
+                  message: `Bounce probability ~70%+ in severe zone K=${stochRsiK4h.toFixed(1)}, blocking SHORT with NO bypass allowed`
+                },
+                trendData,
+                false,
+                earlyOrderFlowAnalysis
+              );
+              continue;
+            }
           }
           
           // Log if mean reversion bypass allowed a LONG in severe oversold zone
@@ -10381,32 +10404,64 @@ serve(async (req) => {
           
           // Block LONG when K is in severe overbought zone (85 < K <= 95)
           // BUT allow SHORT if mean reversion detected (that's the entry opportunity)
+          // GATE-LEVEL SHORT FLIP: When blocking a LONG at K>=90, evaluate SHORT MR probe
           if (intendedTradeDirection === "long" && isSevereOverbought) {
-            rejectedByHardGates++;
-            perSymbolGateAttribution.set(symbol, { gate: 'SEVERE_HTF_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} in severe zone (${severeOverboughtThreshold}-${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}]` });
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 SEVERE OVERBOUGHT GATE - Blocking LONG at 4h K=${stochRsiK4h.toFixed(1)} (in severe zone ${severeOverboughtThreshold}-${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}, NO BYPASS)`);
-            logger.forSymbol(symbol).info(`   → Pullback probability ~70%+ in severe zone, %B=${percentB.toFixed(1)}, ADX=${adx.toFixed(1)}`);
-            await logRejectionWithAI(
-              supabase, userId, symbol,
-              `SEVERE OVERBOUGHT GATE (TIER 1): LONG blocked - 4h StochRSI K=${stochRsiK4h.toFixed(1)} is in severe overbought zone (${severeOverboughtThreshold} < K <= ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD})`,
-              { 
-                gate: "SEVERE_HTF_OVERBOUGHT",
-                tier: 1,
-                direction: "long",
-                stochRsiK4h: stochRsiK4h.toFixed(1),
-                severeThreshold: severeOverboughtThreshold,
-                deepThreshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
-                percentB: percentB.toFixed(1),
-                adx: adx.toFixed(1),
-                bypassAllowed: false,
-                meanReversionBypass: false,
-                message: `Pullback probability ~70%+ in severe zone K=${stochRsiK4h.toFixed(1)}, blocking LONG with NO bypass allowed`
-              },
-              trendData,
-              false,
-              earlyOrderFlowAnalysis
-            );
-            continue;
+            // ===== EVALUATE SHORT MR PROBE BEFORE REJECTING =====
+            // Conditions for gate-level flip:
+            // 1. K < D (momentum turning down — StochRSI rolling over)
+            // 2. Regime is NOT STRONG_TREND (don't counter-trade parabolic moves)
+            // 3. ADX < 40 (not in extreme trend acceleration)
+            const effectiveRegime = fourStateRegime?.regime || currentRegime || 'UNKNOWN';
+            const isStrongTrendRegime = effectiveRegime === 'STRONG_TREND' || effectiveRegime === 'EARLY_TREND';
+            const stochTurningDown = stochRsiK4h < stochRsiD4h;
+            const adxAllowsMRShort = adx < 40;
+            
+            const canFlipToShort = stochTurningDown && !isStrongTrendRegime && adxAllowsMRShort;
+            
+            if (canFlipToShort) {
+              // FLIP: Convert blocked LONG into SHORT MR probe
+              intendedTradeDirection = 'short';
+              isReversalEntry = true;
+              const mrShortMultiplier = 0.20; // Conservative probe sizing
+              reversalPositionSizeOverride = mrShortMultiplier;
+              reversalPositionMultiplier = Math.min(reversalPositionMultiplier, mrShortMultiplier);
+              
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔄 SEVERE_GATE_SHORT_FLIP: LONG blocked at K=${stochRsiK4h.toFixed(0)} → FLIPPED to SHORT MR probe at ${(mrShortMultiplier * 100).toFixed(0)}% position`);
+              logger.forSymbol(symbol).info(`   → K=${stochRsiK4h.toFixed(1)} < D=${stochRsiD4h.toFixed(1)} (turning down), regime=${effectiveRegime}, ADX=${adx.toFixed(1)}, %B=${percentB.toFixed(1)}`);
+              
+              // Don't continue — let the SHORT proceed through remaining gates
+            } else {
+              // Log why flip was not possible
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 SEVERE OVERBOUGHT GATE - Blocking LONG at 4h K=${stochRsiK4h.toFixed(1)} (in severe zone ${severeOverboughtThreshold}-${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}, NO BYPASS)`);
+              logger.forSymbol(symbol).info(`   → Pullback probability ~70%+ in severe zone, %B=${percentB.toFixed(1)}, ADX=${adx.toFixed(1)}`);
+              logger.forSymbol(symbol).info(`   → SHORT flip not eligible: K<D=${stochTurningDown}, strongTrend=${isStrongTrendRegime}, adx<40=${adxAllowsMRShort}`);
+              
+              rejectedByHardGates++;
+              perSymbolGateAttribution.set(symbol, { gate: 'SEVERE_HTF_OVERBOUGHT_BLOCK', details: `K=${stochRsiK4h.toFixed(1)} in severe zone (${severeOverboughtThreshold}-${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}]` });
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `SEVERE OVERBOUGHT GATE (TIER 1): LONG blocked - 4h StochRSI K=${stochRsiK4h.toFixed(1)} is in severe overbought zone (${severeOverboughtThreshold} < K <= ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD})`,
+                { 
+                  gate: "SEVERE_HTF_OVERBOUGHT",
+                  tier: 1,
+                  direction: "long",
+                  stochRsiK4h: stochRsiK4h.toFixed(1),
+                  severeThreshold: severeOverboughtThreshold,
+                  deepThreshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
+                  percentB: percentB.toFixed(1),
+                  adx: adx.toFixed(1),
+                  bypassAllowed: false,
+                  meanReversionBypass: false,
+                  shortFlipEligible: false,
+                  shortFlipReason: `K<D=${stochTurningDown}, strongTrend=${isStrongTrendRegime}, adx<40=${adxAllowsMRShort}`,
+                  message: `Pullback probability ~70%+ in severe zone K=${stochRsiK4h.toFixed(1)}, blocking LONG with NO bypass allowed`
+                },
+                trendData,
+                false,
+                earlyOrderFlowAnalysis
+              );
+              continue;
+            }
           }
           
           // Log if mean reversion bypass allowed a SHORT in severe overbought zone
