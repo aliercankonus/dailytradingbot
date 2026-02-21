@@ -2034,9 +2034,14 @@ serve(async (req) => {
 
     const { data: activePositions } = await supabase
       .from("positions")
-      .select("symbol, side, quantity, entry_price, strategy_name, opened_at, executed_at, status")
+      .select("symbol, side, quantity, entry_price, strategy_name, opened_at, executed_at, status, entry_exception_type")
       .eq("user_id", userId)
       .eq("status", "active");
+
+    // Count active EARLY_TREND_IGNITION positions for concurrent cap enforcement
+    const activeIgnitionPositionCount = (activePositions || []).filter(
+      (p: any) => p.entry_exception_type === 'EARLY_TREND_IGNITION'
+    ).length;
 
     // ============= TIER 2 ZONE RESET: Query last closed Tier 2 graduated positions =============
     // Used to detect if a symbol had a recent Tier 2 graduated entry that closed,
@@ -2466,6 +2471,8 @@ serve(async (req) => {
       // v1.1: ADX Gate minimal spec exceptions
       | 'SQUEEZE_EXPANSION_V11'
       | 'EARLY_IGNITION_V11'
+      // NEW: ADX Early Trend Ignition (strong directional bias confluence bypass)
+      | 'EARLY_TREND_IGNITION'
       // NEW: Early Ignition Entry module (pre-expansion detection)
       | 'EARLY_IGNITION_ENTRY'
       // NEW: LTF Confirmation and Near-Extreme Protection Gates
@@ -11732,6 +11739,8 @@ serve(async (req) => {
         let earlyIgnitionPositionMultiplier = 1.0;
         let meanReversionTransitionalActive = false;
         let meanReversionTransitionalMultiplier = 1.0;
+        let earlyTrendIgnitionActive = false;
+        let earlyTrendIgnitionMultiplier = 1.0;
         
         // Get the v1.1 adaptive threshold based on regime
         const v11AdaptiveThreshold = ADX_GATE_V1_1.ADAPTIVE_THRESHOLDS[regime.regime] ?? 
@@ -11958,9 +11967,64 @@ serve(async (req) => {
             });
             }
            } // end transitional MR check
+
+          // ===== EARLY TREND IGNITION BYPASS (Confluence Gate) =====
+          // Captures pre-expansion energy: low ADX + strong directional bias + rising slope
+          // NOT a blanket relaxation — requires 4-way confluence
+          if (!squeezeBreakoutActive && !earlyIgnitionActive && !meanReversionTransitionalActive) {
+            const etiConfig = ADX_GATE_V1_1.EARLY_TREND_IGNITION;
+            if (etiConfig.ENABLED) {
+              const dirCtxForETI = directionResult?.directionContext;
+              const etiWeightedScore = dirCtxForETI?.weightedScore ?? 0;
+              const etiAbsScore = Math.abs(etiWeightedScore);
+              const etiDirConfirmed = derivedDirection !== null;
+              const etiSlopeRising = adxSlopeV11 > etiConfig.MIN_ADX_SLOPE; // strictly > 0
+              const etiAdxInRange = adx >= etiConfig.MIN_ADX && adx < etiConfig.MAX_ADX;
+              const etiScoreQualifies = etiAbsScore >= etiConfig.MIN_WEIGHTED_SCORE;
+              const etiUnderConcurrentCap = activeIgnitionPositionCount < etiConfig.MAX_CONCURRENT_POSITIONS;
+
+              const etiConditions = {
+                adxInRange: etiAdxInRange,
+                scoreQualifies: etiScoreQualifies,
+                directionConfirmed: etiDirConfirmed,
+                slopeRising: etiSlopeRising,
+                underConcurrentCap: etiUnderConcurrentCap,
+              };
+
+              const allETIMet = Object.values(etiConditions).every(v => v === true);
+
+              if (allETIMet) {
+                earlyTrendIgnitionActive = true;
+                earlyTrendIgnitionMultiplier = etiConfig.POSITION_MULTIPLIER; // 0.35x
+
+                logger.forSymbol(symbol).info(
+                  `${LOG_CATEGORIES.SUCCESS} 🔥 EARLY_TREND_IGNITION: ADX=${adx.toFixed(1)} allowed ` +
+                  `(weightedScore=${etiWeightedScore.toFixed(3)}, absScore=${etiAbsScore.toFixed(3)}, ` +
+                  `slope=${adxSlopeV11.toFixed(3)}, direction=${derivedDirection}, ` +
+                  `activeIgnitions=${activeIgnitionPositionCount}/${etiConfig.MAX_CONCURRENT_POSITIONS}, ` +
+                  `size=${(earlyTrendIgnitionMultiplier * 100).toFixed(0)}%)`
+                );
+
+                perSymbolGateAttribution.set(symbol, {
+                  gate: 'EARLY_TREND_IGNITION',
+                  details: `Strong directional bias (score=${etiAbsScore.toFixed(3)}) + rising ADX slope (${adxSlopeV11.toFixed(3)}) = pre-expansion ignition`
+                });
+              } else {
+                // Log near-miss for diagnostics
+                const failedConds = Object.entries(etiConditions)
+                  .filter(([, v]) => !v)
+                  .map(([k]) => k);
+                logger.forSymbol(symbol).debug(
+                  `${LOG_CATEGORIES.GATE} 🔥 EARLY_TREND_IGNITION near-miss: failed=[${failedConds.join(',')}] ` +
+                  `(ADX=${adx.toFixed(1)}, absScore=${etiAbsScore.toFixed(3)}, slope=${adxSlopeV11.toFixed(3)}, ` +
+                  `dir=${derivedDirection}, activeIgnitions=${activeIgnitionPositionCount})`
+                );
+              }
+            }
+          }
           
           // If no exception passed, block the signal
-          if (!squeezeBreakoutActive && !earlyIgnitionActive && !meanReversionTransitionalActive) {
+          if (!squeezeBreakoutActive && !earlyIgnitionActive && !meanReversionTransitionalActive && !earlyTrendIgnitionActive) {
             // Get diagnostic info for squeeze and ignition checks
             const squeezeCheck = isValidSqueezeBreakout(trendData, derivedDirection);
             const ignitionCheck = checkEarlyIgnitionException(trendData, derivedDirection, regime.regime);
@@ -12003,11 +12067,30 @@ serve(async (req) => {
                   ...ignitionCheck.checkDetails,
                   failReasons: ignitionCheck.reasons
                 },
+                // Early Trend Ignition diagnostic
+                earlyTrendIgnitionCheck: (() => {
+                  const etiConfig = ADX_GATE_V1_1.EARLY_TREND_IGNITION;
+                  const dirCtxETI = directionResult?.directionContext;
+                  const etiScore = Math.abs(dirCtxETI?.weightedScore ?? 0);
+                  return {
+                    enabled: etiConfig.ENABLED,
+                    adxInRange: adx >= etiConfig.MIN_ADX && adx < etiConfig.MAX_ADX,
+                    weightedScore: (dirCtxETI?.weightedScore ?? 0).toFixed(3),
+                    absScoreVsThreshold: `${etiScore.toFixed(3)} vs ${etiConfig.MIN_WEIGHTED_SCORE}`,
+                    scoreQualifies: etiScore >= etiConfig.MIN_WEIGHTED_SCORE,
+                    directionConfirmed: derivedDirection !== null,
+                    slopeRising: adxSlopeV11 > 0,
+                    adxSlope: adxSlopeV11.toFixed(3),
+                    underConcurrentCap: activeIgnitionPositionCount < etiConfig.MAX_CONCURRENT_POSITIONS,
+                    activeIgnitions: `${activeIgnitionPositionCount}/${etiConfig.MAX_CONCURRENT_POSITIONS}`,
+                  };
+                })(),
                 // v1.1 bypass hints
                 bypassHints: {
                   needsADX: v11AdaptiveThreshold,
                   needsSqueeze: squeezeCheck.reasons.filter(r => r.includes("not") || r.includes("No")),
                   needsIgnition: ignitionCheck.reasons.filter(r => r.includes("not") || r.includes("No")),
+                  needsETI: `absScore >= ${ADX_GATE_V1_1.EARLY_TREND_IGNITION.MIN_WEIGHTED_SCORE} + rising slope + confirmed direction`,
                 },
                 // Fix #1: TRANSITION_EXPANSION shadow diagnostic
                 transitionExpansionShadow: {
@@ -12049,6 +12132,14 @@ serve(async (req) => {
           reversalPositionMultiplier = Math.min(reversalPositionMultiplier, meanReversionTransitionalMultiplier);
           logger.forSymbol(symbol).info(
             `${LOG_CATEGORIES.RISK} 🔄 MR Transitional (v1.1) - position size capped at ${(meanReversionTransitionalMultiplier * 100).toFixed(0)}%`
+          );
+        }
+
+        // Apply Early Trend Ignition position size reduction if active
+        if (earlyTrendIgnitionActive && earlyTrendIgnitionMultiplier < 1.0) {
+          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, earlyTrendIgnitionMultiplier);
+          logger.forSymbol(symbol).info(
+            `${LOG_CATEGORIES.RISK} 🔥 Early Trend Ignition - position size capped at ${(earlyTrendIgnitionMultiplier * 100).toFixed(0)}%`
           );
         }
 
@@ -16482,7 +16573,7 @@ serve(async (req) => {
             },
             // PHASE 3: Exception hierarchy tracking for analytics
             // Override exception type for Tier 2 graduated entries (for zone reset tracking)
-            exceptionType: tier2GraduatedApplied ? 'TIER_2_GRADUATED' : appliedExceptionType,
+            exceptionType: earlyTrendIgnitionActive ? 'EARLY_TREND_IGNITION' : tier2GraduatedApplied ? 'TIER_2_GRADUATED' : appliedExceptionType,
             tier2Graduated: tier2GraduatedApplied,
             exceptionDetails: {
               type: exceptionResult.exceptionType,
