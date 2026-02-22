@@ -117,7 +117,7 @@ export const ADX_GATE_V1_1 = {
   // Set to false after 3-5 days of observation to enable live execution.
   TRANSITION_EXPANSION: {
     ENABLED: true,
-    SHADOW_MODE: true,  // TRUE = log only, FALSE = allow trades
+    SHADOW_MODE: false,  // ACTIVATED: Was shadow-only, now allows live trades
     // Regime must be BREAKOUT_SETUP (transition forming)
     REQUIRE_BREAKOUT_SETUP_REGIME: true,
     // ADX range: 16-25 (below confirmation but above noise floor)
@@ -4737,15 +4737,16 @@ export const RANGING_MARKET_PROTECTION = {
   MIN_ATR_FILTER: {
     ENABLED: true,
     // Hard block floor — truly dead volatility, no tradeable edge at all
-    // Lowered from 0.70% → 0.50% to align with graded participation model
-    ABSOLUTE_FLOOR_ATR_PERCENT: 0.50,
-    // ===== PROBE ZONES (0.50% – 0.70%) =====
+    // Lowered from 0.50% → 0.35% — BNB consistently sits at 0.40-0.45% and was permanently blocked
+    // 0.35% still filters genuinely dead markets while allowing lower-vol majors
+    ABSOLUTE_FLOOR_ATR_PERCENT: 0.35,
+    // ===== PROBE ZONES (0.35% – 0.70%) =====
     // Previously hard-blocked; now graduated probe entries with tight stops
-    // These unlock SOL/AVAX/XRP which consistently sit at 0.60-0.69%
-    PROBE_ZONE_LOW: 0.60,              // boundary between low and high probe
-    PROBE_ZONE_LOW_MULTIPLIER: 0.15,   // 0.50% – 0.60%: micro probe (tight stops)
+    // These unlock BNB/SOL/AVAX/XRP which consistently sit at 0.40-0.69%
+    PROBE_ZONE_LOW: 0.50,              // boundary between low and high probe
+    PROBE_ZONE_LOW_MULTIPLIER: 0.15,   // 0.35% – 0.50%: micro probe (tight stops)
     PROBE_ZONE_HIGH: 0.70,             // boundary between probe and soft penalty
-    PROBE_ZONE_HIGH_MULTIPLIER: 0.25,  // 0.60% – 0.70%: reduced probe
+    PROBE_ZONE_HIGH_MULTIPLIER: 0.25,  // 0.50% – 0.70%: reduced probe
     // ===== SOFT PENALTY ZONES (0.70% – dynamic high) =====
     // Graduated position multiplier instead of full sizing
     SOFT_ZONE_LOW: 0.90,
@@ -5168,7 +5169,7 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   // Set to false after 3-5 days of observation to enable live execution.
   RISING_TREND_EXCEPTION: {
     ENABLED: true,
-    SHADOW_MODE: true,  // TRUE = log only, FALSE = apply relaxed thresholds
+    SHADOW_MODE: false,  // ACTIVATED: Was shadow-only, now allows relaxed thresholds
     
     // Conditions (ALL must be true)
     REQUIRE_BREAKOUT_SETUP_REGIME: true,
@@ -5272,7 +5273,7 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   // SHADOW_MODE: When true, only logs — does NOT override the block.
   CAPITULATION_ACCELERATION: {
     ENABLED: true,
-    SHADOW_MODE: true,  // TRUE = log only, FALSE = allow override
+    SHADOW_MODE: false,  // ACTIVATED: Was shadow-only, now allows capitulation override
     
     // Minimum records required to compute acceleration (need at least 3 history points)
     MIN_HISTORY_RECORDS: 3,
@@ -6488,8 +6489,9 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
   
   // ===== HARD ZONE (DEFAULT) =====
   // Full block if in hard zone (even closer to extreme)
-  HARD_ZONE_THRESHOLD_PERCENT: 1.5,
-  BLOCK_IN_HARD_ZONE: true,
+   // FIXED: Was 1.5% — in bearish markets most coins sit within 1.5% of lows permanently
+   HARD_ZONE_THRESHOLD_PERCENT: 0.8,
+   BLOCK_IN_HARD_ZONE: true,
   
   // ===== HARD ZONE GRADUATION (ADX-conditioned micro positions) =====
   // Replaces binary hard block with ADX-graduated sizing when LTF is neutral
@@ -6561,11 +6563,15 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
     // Block if distance from extreme < this AND regime is not strong
     PROXIMITY_THRESHOLD_PERCENT: 0.4,
     // Regime strength requirements to bypass the block
-    MIN_ADX_TO_BYPASS: 32,
+    // FIXED: Was 32 — unreachable in most market conditions (typical ADX 15-28)
+    // Lowered to 25 to allow shorts in moderate trending environments
+    MIN_ADX_TO_BYPASS: 25,
     // Momentum must be decisive (absolute score) to bypass
-    MIN_MOMENTUM_SCORE_TO_BYPASS: 20,
+    // FIXED: Was 20 — too strict when momentum is building (scores 5-15 are common)
+    MIN_MOMENTUM_SCORE_TO_BYPASS: 10,
     // Order flow must confirm breakdown to bypass
-    MIN_ORDER_FLOW_SCORE_TO_BYPASS: 20,
+    // FIXED: Was 20 — most readings sit 30-70 neutral range, <=20 rarely occurs
+    MIN_ORDER_FLOW_SCORE_TO_BYPASS: 10,
     // If ANY of these bypass conditions met, allow with reduced size
     BYPASS_POSITION_MULTIPLIER: 0.35,
   },
@@ -6614,7 +6620,7 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
     // SHADOW_MODE: When true, only logs what WOULD have passed — does NOT override block.
     BREAKOUT_RELAXATION: {
       ENABLED: true,
-      SHADOW_MODE: true,  // TRUE = log only, FALSE = allow trades
+      SHADOW_MODE: false,  // ACTIVATED: Was shadow-only, now allows breakout relaxed entries
       // Regime must be BREAKOUT_SETUP
       REQUIRE_BREAKOUT_SETUP: true,
       // ADX slope must be strongly rising (confirmed acceleration)
