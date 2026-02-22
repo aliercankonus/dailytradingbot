@@ -1314,27 +1314,26 @@ export const DECAY_VELOCITY_TIERS = {
 // Key insight: Any favorable movement is signal confirmation worth monetizing
 export const MICRO_PROFIT_LOCK_PARAMS = {
   ENABLED: true,
-  // FEE-AWARE MICRO TIERS (v2.0):
-  // CRITICAL FIX: Remove tiers below fee coverage (~0.22% round-trip fees)
-  // Previous tiers at 0.15%, 0.20% locked in guaranteed losses after fees
-  // Now: Only lock BE once peak >= 0.22% (covers ~0.20% fees + 0.02% buffer)
+  // FEE-AWARE MICRO TIERS (v3.0):
+  // CRITICAL FIX v3: Lock targets must cover FULL round-trip fees (0.20%)
+  // Previous v2 tiers locked 0-0.25% gross which = -0.20% to +0.05% net = LOSSES
+  // Now: lockTarget = desired_net_profit + round_trip_fees (0.20%)
   // Each tier only moves stop UP - monotonic, never regresses
   TIERS: [
-    // TRUE break-even: Only after fees are covered (0.22% = 0.20% fees + 0.02% buffer)
-    { peakThreshold: 0.22, lockTarget: 0.0 },    // At 0.22% peak → TRUE break-even (net $0)
-    { peakThreshold: 0.28, lockTarget: 0.05 },   // At 0.28% peak → lock +0.05% net
-    { peakThreshold: 0.33, lockTarget: 0.10 },   // At 0.33% peak → lock +0.10% net
-    { peakThreshold: 0.38, lockTarget: 0.15 },   // At 0.38% peak → lock +0.15% net
-    { peakThreshold: 0.43, lockTarget: 0.20 },   // At 0.43% peak → lock +0.20% net
-    { peakThreshold: 0.48, lockTarget: 0.25 },   // At 0.48% peak → lock +0.25% net
+    // TRUE break-even: Lock at +0.22% gross = +0.02% net (covers 0.20% fees + buffer)
+    { peakThreshold: 0.30, lockTarget: 0.22 },   // At 0.30% peak → lock +0.22% gross (+0.02% net)
+    { peakThreshold: 0.35, lockTarget: 0.25 },   // At 0.35% peak → lock +0.25% gross (+0.05% net)
+    { peakThreshold: 0.40, lockTarget: 0.28 },   // At 0.40% peak → lock +0.28% gross (+0.08% net)
+    { peakThreshold: 0.45, lockTarget: 0.32 },   // At 0.45% peak → lock +0.32% gross (+0.12% net)
+    { peakThreshold: 0.50, lockTarget: 0.35 },   // At 0.50% peak → lock +0.35% gross (+0.15% net)
   ],
   // Handoff to progressive/break-even logic at this threshold
-  HANDOFF_THRESHOLD: 0.50,
+  HANDOFF_THRESHOLD: 0.55,
   // Slippage buffer: ensures locked profit survives execution
   SLIPPAGE_BUFFER_PERCENT: 0.02,
   // TRUE_BE_FLOOR: Minimum peak required before ANY protection triggers
-  // Prevents "accept fee loss" scenarios that create artificial churn
-  TRUE_BE_FLOOR_PERCENT: 0.22,
+  // Raised from 0.22% to 0.30% - don't protect until we have enough room for fees
+  TRUE_BE_FLOOR_PERCENT: 0.30,
 } as const;
 
 // ============= PROGRESSIVE PROFIT LOCK PARAMETERS =============
@@ -1348,9 +1347,8 @@ export const PROGRESSIVE_PROFIT_LOCK_PARAMS = {
   // Extended tiers provide continuous profit protection from 0.50% to 2.50% peak
   // This ensures price-based locks are primary, decay exits are failsafe only
   TIERS: [
-    // Standard tiers (0.50% - 0.80%)
-    { peakThreshold: 0.50, lockTarget: 0.30 },  // At 0.50% peak → lock +0.30%
-    { peakThreshold: 0.55, lockTarget: 0.35 },  // Lock +0.35% at +0.55% peak
+    // Standard tiers (0.55% - 0.80%) - adjusted for new handoff at 0.55%
+    { peakThreshold: 0.55, lockTarget: 0.35 },  // At 0.55% peak → lock +0.35% gross (+0.15% net)
     { peakThreshold: 0.60, lockTarget: 0.40 },  // Lock +0.40% at +0.60% peak
     { peakThreshold: 0.65, lockTarget: 0.45 },  // Lock +0.45% at +0.65% peak
     { peakThreshold: 0.70, lockTarget: 0.50 },  // Lock +0.50% at +0.70% peak
