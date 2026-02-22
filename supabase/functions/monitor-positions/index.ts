@@ -1228,6 +1228,7 @@ serve(async (req) => {
       // ============= MICRO-PROFIT LOCK: Delegated to shared exit-strategies module =============
       // FIX #1: Low-confidence STANDARD entries use enhanced (tighter) micro-profit tiers
       let microProfitLockApplied = false;
+      let microLockFloorStop: number | null = null; // CRITICAL: Floor that trailing CANNOT regress below
       
       {
         // For low-confidence STANDARD entries, apply enhanced micro-profit lock inline
@@ -1243,17 +1244,18 @@ serve(async (req) => {
             const slippageBuffer = position.entry_price * (MICRO_PROFIT_LOCK_PARAMS.SLIPPAGE_BUFFER_PERCENT / 100);
             const lockProfit = position.entry_price * (matchedTier.lockTarget / 100);
             let lockStop: number;
-            let shouldApply: boolean;
             if (position.side === "BUY") {
               lockStop = position.entry_price + lockProfit - slippageBuffer;
-              shouldApply = lockStop > position.stop_loss;
             } else {
               lockStop = position.entry_price - lockProfit + slippageBuffer;
-              shouldApply = lockStop < position.stop_loss;
             }
+            const shouldApply = position.side === "BUY" 
+              ? lockStop > position.stop_loss 
+              : lockStop < position.stop_loss;
             if (shouldApply) {
               microProfitLockApplied = true;
               newStopLoss = lockStop;
+              microLockFloorStop = lockStop; // Set floor
               positionLogger.trade(`⚡ ENHANCED_MICRO_LOCK (conf<${LOW_CONFIDENCE_STANDARD_EXIT.MAX_CONFIDENCE}) for ${position.side}: Peak ${newPeakPnl.toFixed(3)}% → ${matchedTier.peakThreshold}%→+${matchedTier.lockTarget.toFixed(2)}% → Stop ${lockStop.toFixed(2)}`);
               const { error: microLockError } = await supabase
                 .from("positions")
@@ -1278,6 +1280,7 @@ serve(async (req) => {
           if (microResult.applied && microResult.newStopLoss !== null) {
             microProfitLockApplied = true;
             newStopLoss = microResult.newStopLoss;
+            microLockFloorStop = microResult.newStopLoss; // Set floor
             positionLogger.trade(`MICRO_PROFIT_LOCK_APPLIED for ${position.side}: Peak ${newPeakPnl.toFixed(3)}% → ${microResult.tierLabel} → Stop ${microResult.newStopLoss.toFixed(2)} (was ${position.stop_loss?.toFixed(2)})`);
             const { error: microLockError } = await supabase
               .from("positions")
@@ -1294,6 +1297,7 @@ serve(async (req) => {
       }
       
       // ============= PROGRESSIVE PROFIT LOCK: Delegated to shared exit-strategies module =============
+      let progressiveLockFloorStop: number | null = null;
       {
         if (!microProfitLockApplied) {
           const progResult = evaluateProgressiveProfitLock(
@@ -1302,6 +1306,7 @@ serve(async (req) => {
           );
           if (progResult.applied && progResult.newStopLoss !== null) {
             newStopLoss = progResult.newStopLoss;
+            progressiveLockFloorStop = progResult.newStopLoss; // Set floor
             positionLogger.trade(`PROGRESSIVE_LOCK_APPLIED for ${position.side}: Peak ${newPeakPnl.toFixed(3)}% → ${progResult.tierLabel} → Stop ${progResult.newStopLoss.toFixed(2)}`);
             
             const { error: progLockError } = await supabase
@@ -1318,6 +1323,9 @@ serve(async (req) => {
           }
         }
       }
+      
+      // PROFIT LOCK FLOOR: The highest-priority profit protection stop that trailing MUST NOT regress below
+      const profitLockFloor = microLockFloorStop || progressiveLockFloorStop;
       
       
       // ============= PHASE 3: R-MULTIPLE BASED TRAILING ACTIVATION =============
@@ -1873,6 +1881,19 @@ serve(async (req) => {
             }
           }
         }
+        
+        // 🔒 PROFIT LOCK FLOOR INVARIANT: Trailing stop MUST NEVER regress below micro/progressive lock
+        // This fixes the root cause of trades peaking at 0.3-0.6% but closing at losses
+        if (profitLockFloor !== null && newStopLoss !== null && trailingActivated) {
+          if (position.side === "BUY" && newStopLoss < profitLockFloor) {
+            positionLogger.trade(`🔒 PROFIT_LOCK_FLOOR_BUY: Trailing tried ${newStopLoss.toFixed(4)} but floor is ${profitLockFloor.toFixed(4)} → enforcing floor`);
+            newStopLoss = profitLockFloor;
+          } else if (position.side === "SELL" && newStopLoss > profitLockFloor) {
+            positionLogger.trade(`🔒 PROFIT_LOCK_FLOOR_SELL: Trailing tried ${newStopLoss.toFixed(4)} but floor is ${profitLockFloor.toFixed(4)} → enforcing floor`);
+            newStopLoss = profitLockFloor;
+          }
+        }
+        
         // Update stop loss in database if trailing was activated
         // NOTE: peak_pnl_percent is updated earlier (outside activation check) to track peak always
         if (trailingActivated) {
