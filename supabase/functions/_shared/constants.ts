@@ -1320,20 +1320,23 @@ export const MICRO_PROFIT_LOCK_PARAMS = {
   // Now: lockTarget = desired_net_profit + round_trip_fees (0.20%)
   // Each tier only moves stop UP - monotonic, never regresses
   TIERS: [
-    // TRUE break-even: Lock at +0.22% gross = +0.02% net (covers 0.20% fees + buffer)
-    { peakThreshold: 0.30, lockTarget: 0.22 },   // At 0.30% peak → lock +0.22% gross (+0.02% net)
-    { peakThreshold: 0.35, lockTarget: 0.25 },   // At 0.35% peak → lock +0.25% gross (+0.05% net)
-    { peakThreshold: 0.40, lockTarget: 0.28 },   // At 0.40% peak → lock +0.28% gross (+0.08% net)
-    { peakThreshold: 0.45, lockTarget: 0.32 },   // At 0.45% peak → lock +0.32% gross (+0.12% net)
-    { peakThreshold: 0.50, lockTarget: 0.35 },   // At 0.50% peak → lock +0.35% gross (+0.15% net)
+    // FEE-AWARE TIERS v4.0: Lowered activation to 0.22% to protect more trades
+    // Even small peaks above fee coverage deserve protection vs full loss
+    { peakThreshold: 0.22, lockTarget: 0.21 },   // At 0.22% peak → lock +0.21% gross (+0.01% net) — barely profitable but NOT a loss
+    { peakThreshold: 0.25, lockTarget: 0.22 },   // At 0.25% peak → lock +0.22% gross (+0.02% net)
+    { peakThreshold: 0.30, lockTarget: 0.23 },   // At 0.30% peak → lock +0.23% gross (+0.03% net)
+    { peakThreshold: 0.35, lockTarget: 0.26 },   // At 0.35% peak → lock +0.26% gross (+0.06% net)
+    { peakThreshold: 0.40, lockTarget: 0.29 },   // At 0.40% peak → lock +0.29% gross (+0.09% net)
+    { peakThreshold: 0.45, lockTarget: 0.33 },   // At 0.45% peak → lock +0.33% gross (+0.13% net)
+    { peakThreshold: 0.50, lockTarget: 0.36 },   // At 0.50% peak → lock +0.36% gross (+0.16% net)
   ],
   // Handoff to progressive/break-even logic at this threshold
   HANDOFF_THRESHOLD: 0.55,
   // Slippage buffer: ensures locked profit survives execution
   SLIPPAGE_BUFFER_PERCENT: 0.02,
   // TRUE_BE_FLOOR: Minimum peak required before ANY protection triggers
-  // Raised from 0.22% to 0.30% - don't protect until we have enough room for fees
-  TRUE_BE_FLOOR_PERCENT: 0.30,
+  // Lowered from 0.30% to 0.22% — protect as soon as fees are covered
+  TRUE_BE_FLOOR_PERCENT: 0.22,
 } as const;
 
 // ============= PROGRESSIVE PROFIT LOCK PARAMETERS =============

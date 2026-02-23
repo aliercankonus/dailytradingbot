@@ -1324,8 +1324,47 @@ serve(async (req) => {
         }
       }
       
-      // PROFIT LOCK FLOOR: The highest-priority profit protection stop that trailing MUST NOT regress below
-      const profitLockFloor = microLockFloorStop || progressiveLockFloorStop;
+      // PROFIT LOCK FLOOR: ALWAYS computed from peak_pnl_percent, not just when lock "applies"
+      // BUG FIX: Previously, profitLockFloor was only set when the lock CHANGED the stop.
+      // On subsequent cycles (stop already at lock level), applied=false → floor=null → trailing regressed freely.
+      // Now: We compute the theoretical lock price every cycle based on peak, ensuring trailing can NEVER regress.
+      let profitLockFloor: number | null = microLockFloorStop || progressiveLockFloorStop;
+      
+      // If neither lock applied this cycle (stop already covers), compute floor from peak anyway
+      if (profitLockFloor === null && newPeakPnl > 0 && position.stop_loss !== null) {
+        // Check micro-profit range
+        if (newPeakPnl < MICRO_PROFIT_LOCK_PARAMS.HANDOFF_THRESHOLD && MICRO_PROFIT_LOCK_PARAMS.ENABLED) {
+          const sortedMicroTiers = [...MICRO_PROFIT_LOCK_PARAMS.TIERS].sort((a, b) => b.peakThreshold - a.peakThreshold);
+          for (const tier of sortedMicroTiers) {
+            if (newPeakPnl >= tier.peakThreshold) {
+              const lockProfit = position.entry_price * (tier.lockTarget / 100);
+              const slipBuf = position.entry_price * (MICRO_PROFIT_LOCK_PARAMS.SLIPPAGE_BUFFER_PERCENT / 100);
+              profitLockFloor = position.side === "BUY"
+                ? position.entry_price + lockProfit - slipBuf
+                : position.entry_price - lockProfit + slipBuf;
+              break;
+            }
+          }
+        }
+        // Check progressive range
+        else if (newPeakPnl >= MICRO_PROFIT_LOCK_PARAMS.HANDOFF_THRESHOLD && newPeakPnl < PROGRESSIVE_PROFIT_LOCK_PARAMS.DEFER_TO_TRAILING_AT && PROGRESSIVE_PROFIT_LOCK_PARAMS.ENABLED) {
+          const sortedProgTiers = [...PROGRESSIVE_PROFIT_LOCK_PARAMS.TIERS].sort((a, b) => b.peakThreshold - a.peakThreshold);
+          for (const tier of sortedProgTiers) {
+            if (newPeakPnl >= tier.peakThreshold) {
+              const lockProfit = position.entry_price * (tier.lockTarget / 100);
+              const slipBuf = position.entry_price * (SLIPPAGE_PARAMS.BREAK_EVEN_BUFFER_PERCENT / 100);
+              profitLockFloor = position.side === "BUY"
+                ? position.entry_price + lockProfit - slipBuf
+                : position.entry_price - lockProfit + slipBuf;
+              break;
+            }
+          }
+        }
+        
+        if (profitLockFloor !== null) {
+          positionLogger.debug(`🔒 COMPUTED_FLOOR (no lock change): peak=${newPeakPnl.toFixed(3)}%, floor=${profitLockFloor.toFixed(4)}`);
+        }
+      }
       
       
       // ============= PHASE 3: R-MULTIPLE BASED TRAILING ACTIVATION =============
@@ -1883,13 +1922,14 @@ serve(async (req) => {
         }
         
         // 🔒 PROFIT LOCK FLOOR INVARIANT: Trailing stop MUST NEVER regress below micro/progressive lock
-        // This fixes the root cause of trades peaking at 0.3-0.6% but closing at losses
-        if (profitLockFloor !== null && newStopLoss !== null && trailingActivated) {
+        // FIX: Now enforced ALWAYS when profitLockFloor exists, not just when trailingActivated
+        // This prevents ANY stop regression, whether from trailing, break-even, or other logic
+        if (profitLockFloor !== null && newStopLoss !== null) {
           if (position.side === "BUY" && newStopLoss < profitLockFloor) {
-            positionLogger.trade(`🔒 PROFIT_LOCK_FLOOR_BUY: Trailing tried ${newStopLoss.toFixed(4)} but floor is ${profitLockFloor.toFixed(4)} → enforcing floor`);
+            positionLogger.trade(`🔒 PROFIT_LOCK_FLOOR_BUY: Stop tried ${newStopLoss.toFixed(4)} but floor is ${profitLockFloor.toFixed(4)} → enforcing floor`);
             newStopLoss = profitLockFloor;
           } else if (position.side === "SELL" && newStopLoss > profitLockFloor) {
-            positionLogger.trade(`🔒 PROFIT_LOCK_FLOOR_SELL: Trailing tried ${newStopLoss.toFixed(4)} but floor is ${profitLockFloor.toFixed(4)} → enforcing floor`);
+            positionLogger.trade(`🔒 PROFIT_LOCK_FLOOR_SELL: Stop tried ${newStopLoss.toFixed(4)} but floor is ${profitLockFloor.toFixed(4)} → enforcing floor`);
             newStopLoss = profitLockFloor;
           }
         }
