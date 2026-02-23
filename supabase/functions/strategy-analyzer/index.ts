@@ -2503,7 +2503,9 @@ serve(async (req) => {
       | 'BREAKOUT_WATCH'
       | 'TREND_EXHAUSTION_CONTINUATION_BLOCK'
       // Fix #3: Capitulation acceleration override
-      | 'CAPITULATION_ACCELERATION';
+      | 'CAPITULATION_ACCELERATION'
+      // Error alerting: symbol-level exceptions during analysis
+      | 'ANALYZER_ERROR';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     const rejectionBuffer = new RejectionBuffer();
@@ -16927,7 +16929,16 @@ serve(async (req) => {
           logger.forSymbol(symbol).success(`${signalType.toUpperCase()} via "${strategy.name}" | Quality: ${qualityScore} | Entry: ${pullbackAnalysis.isPullback ? "PULLBACK" : "STANDARD"}`);
         }
       } catch (error) {
-        logger.forSymbol(symbol).error(`Error analyzing: ${error}`);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.forSymbol(symbol).error(`Error analyzing: ${errorMsg}`);
+        // Log to signal_rejection_log so ANALYZER_ERROR is visible in the dashboard
+        rejectionBuffer.add({
+          user_id: userId,
+          symbol,
+          rejection_reason: `ANALYZER_ERROR: ${errorMsg.substring(0, 200)}`,
+          filters_status: { gate: 'ANALYZER_ERROR', error: errorMsg.substring(0, 500) },
+        });
+        perSymbolGateAttribution.set(symbol, { gate: 'ANALYZER_ERROR' as GateType, details: errorMsg.substring(0, 80) });
       }
     }
 
