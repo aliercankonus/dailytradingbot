@@ -8267,8 +8267,48 @@ serve(async (req) => {
               }
             }
           }
-          
-          // ===== IMPROVEMENT #2: GRADUATED ATR FILTER =====
+           
+           // ===== NEUTRAL REGIME MOMENTUM GATE =====
+           // Statistical validation: neutral primary_trend has 48% win rate (coin flip).
+           // In range regimes, momentum confirmation becomes mandatory — without it there is no edge.
+           // This gate fires REGARDLESS of ADX (covers ADX 28+ that bypasses NO_TRADE_RANGE_REGIME).
+           {
+             const primaryTrend = trendData?.primaryTrend || 'neutral';
+             const momentumConfirms = trendData?.momentum?.confirms === true;
+             const qualityScore = entryQualityResult?.score ?? 0;
+             const isNeutralTrend = primaryTrend === 'neutral' || primaryTrend === 'ranging';
+             
+             if (isNeutralTrend && !momentumConfirms) {
+               // Allow if quality >= 80 (strong structural setup can overcome neutral trend)
+               if (qualityScore >= 80) {
+                 logger.forSymbol(symbol).info(
+                   `${LOG_CATEGORIES.GATE} 🔓 NEUTRAL_REGIME_MOMENTUM: trend=${primaryTrend}, momentum_confirms=false BUT quality=${qualityScore} >= 80 → allowing with reduced size`
+                 );
+                 // Cap position size - high quality but no momentum = reduced conviction
+                 rangingMarketPositionMultiplier = Math.min(rangingMarketPositionMultiplier, 0.50);
+               } else {
+                 rejectedByHardGates++;
+                 const blockReason = `NEUTRAL_REGIME_NO_MOMENTUM: primaryTrend=${primaryTrend}, momentum_confirms=false, quality=${qualityScore} < 80 → no directional edge in range regime (48% historical win rate)`;
+                 perSymbolGateAttribution.set(symbol, { gate: 'NEUTRAL_REGIME_NO_MOMENTUM', details: blockReason });
+                 
+                 logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                 
+                 await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+                   gate: 'NEUTRAL_REGIME_NO_MOMENTUM',
+                   derivedDirection,
+                   primaryTrend,
+                   momentumConfirms: false,
+                   qualityScore,
+                   adx: adx.toFixed(1),
+                   momentumState: trendData?.momentum?.state || 'none',
+                   wouldPassWith: 'momentum_confirms=true OR quality_score >= 80',
+                 }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                 continue;
+               }
+             }
+           }
+           
+           // ===== IMPROVEMENT #2: GRADUATED ATR FILTER =====
           // Replaces binary 1.10% cliff with graduated soft penalty zones
           // Hard block only below structural floor (0.70%), soft penalties 0.70-1.10%
           const atrFilter = RANGING_MARKET_PROTECTION.MIN_ATR_FILTER;
