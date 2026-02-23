@@ -8276,7 +8276,10 @@ serve(async (req) => {
            {
              const primaryTrend = trendData?.primaryTrend || 'neutral';
              const momentumConfirms = trendData?.momentum?.confirms === true;
-             const qualityScore = entryQualityResult?.score ?? 0;
+              // Note: Entry quality is computed later in the pipeline (line ~14290),
+              // so at this gate stage we default to 0. The quality bypass (>=80) 
+              // will only apply if we move this gate after quality computation.
+              const qualityScore = 0;
              const isNeutralTrend = primaryTrend === 'neutral' || primaryTrend === 'ranging';
              const momentumState = trendData?.momentum?.state || 'none';
              const momScore = Math.abs(smartMomentum?.score ?? 0);
