@@ -8268,40 +8268,53 @@ serve(async (req) => {
             }
           }
            
-           // ===== NEUTRAL REGIME MOMENTUM GATE =====
-           // Statistical validation: neutral primary_trend has 48% win rate (coin flip).
-           // In range regimes, momentum confirmation becomes mandatory — without it there is no edge.
-           // This gate fires REGARDLESS of ADX (covers ADX 28+ that bypasses NO_TRADE_RANGE_REGIME).
+           // ===== MOMENTUM CONFIRMATION GATE =====
+           // Two layers:
+           // 1. Neutral trend: requires momentum_confirms=true (48% win rate without it)
+           // 2. ANY trend: if mom_score=0 AND momentum_state=mixed, requires momentum_confirms=true
+           //    (directional label without actual momentum = false edge, caused ETHUSDT disasters)
            {
              const primaryTrend = trendData?.primaryTrend || 'neutral';
              const momentumConfirms = trendData?.momentum?.confirms === true;
              const qualityScore = entryQualityResult?.score ?? 0;
              const isNeutralTrend = primaryTrend === 'neutral' || primaryTrend === 'ranging';
+             const momentumState = trendData?.momentum?.state || 'none';
+             const momScore = Math.abs(smartMomentum?.score ?? 0);
              
-             if (isNeutralTrend && !momentumConfirms) {
-               // Allow if quality >= 80 (strong structural setup can overcome neutral trend)
+             // Layer 2: Zero-momentum mixed-state check (applies to ALL trends including bearish/bullish)
+             const isZeroMomentumMixed = momScore === 0 && momentumState === 'mixed';
+             
+             const shouldBlock = (isNeutralTrend && !momentumConfirms) || (isZeroMomentumMixed && !momentumConfirms);
+             
+             if (shouldBlock) {
+               const gateReason = isZeroMomentumMixed && !isNeutralTrend 
+                 ? `ZERO_MOMENTUM_MIXED` 
+                 : `NEUTRAL_REGIME`;
+               
+               // Allow if quality >= 80 (strong structural setup can overcome)
                if (qualityScore >= 80) {
                  logger.forSymbol(symbol).info(
-                   `${LOG_CATEGORIES.GATE} 🔓 NEUTRAL_REGIME_MOMENTUM: trend=${primaryTrend}, momentum_confirms=false BUT quality=${qualityScore} >= 80 → allowing with reduced size`
+                   `${LOG_CATEGORIES.GATE} 🔓 MOMENTUM_GATE_BYPASS: ${gateReason} trend=${primaryTrend}, mom_state=${momentumState}, mom_score=${momScore}, momentum_confirms=false BUT quality=${qualityScore} >= 80 → allowing with reduced size`
                  );
-                 // Cap position size - high quality but no momentum = reduced conviction
                  rangingMarketPositionMultiplier = Math.min(rangingMarketPositionMultiplier, 0.50);
                } else {
                  rejectedByHardGates++;
-                 const blockReason = `NEUTRAL_REGIME_NO_MOMENTUM: primaryTrend=${primaryTrend}, momentum_confirms=false, quality=${qualityScore} < 80 → no directional edge in range regime (48% historical win rate)`;
-                 perSymbolGateAttribution.set(symbol, { gate: 'NEUTRAL_REGIME_NO_MOMENTUM', details: blockReason });
+                 const blockReason = `NO_MOMENTUM_EDGE: ${gateReason} — primaryTrend=${primaryTrend}, momentum_confirms=false, mom_score=${momScore}, mom_state=${momentumState}, quality=${qualityScore} < 80 → directional label without momentum backing`;
+                 perSymbolGateAttribution.set(symbol, { gate: 'NO_MOMENTUM_EDGE', details: blockReason });
                  
                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
                  
                  await logRejectionWithAI(supabase, userId, symbol, blockReason, {
-                   gate: 'NEUTRAL_REGIME_NO_MOMENTUM',
+                   gate: 'NO_MOMENTUM_EDGE',
+                   gateReason,
                    derivedDirection,
                    primaryTrend,
                    momentumConfirms: false,
+                   momentumState,
+                   momentumScore: momScore,
                    qualityScore,
                    adx: adx.toFixed(1),
-                   momentumState: trendData?.momentum?.state || 'none',
-                   wouldPassWith: 'momentum_confirms=true OR quality_score >= 80',
+                   wouldPassWith: 'momentum_confirms=true OR quality_score >= 80 OR momentum_score > 0',
                  }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                  continue;
                }
