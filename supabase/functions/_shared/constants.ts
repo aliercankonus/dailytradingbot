@@ -6837,6 +6837,22 @@ export const STOCHRSI_RUNWAY_GATE = {
   // Very high ADX can override (momentum continuation)
   HIGH_ADX_EXCEPTION_THRESHOLD: 60,
   
+  // ===== DEEP EXHAUSTION COMPOUND BLOCK =====
+  // Hard block when StochRSI is at extreme AND price already moved significantly
+  // Prevents shorting deep oversold after 3% drops, or longing deep overbought after 3% rallies
+  DEEP_EXHAUSTION_COMPOUND: {
+    ENABLED: true,
+    // SHORT: Block when K < 15 AND moveFromHigh > 2%
+    SHORT_MAX_K: 15,
+    SHORT_MIN_MOVE_PERCENT: 2.0,
+    // LONG: Block when K > 85 AND moveFromLow > 2%
+    LONG_MIN_K: 85,
+    LONG_MIN_MOVE_PERCENT: 2.0,
+    // Position multiplier if ADX is very high (probe instead of block)
+    HIGH_ADX_PROBE_MULTIPLIER: 0.15,
+    HIGH_ADX_PROBE_THRESHOLD: 45,
+  },
+  
   LOG_GATE_CHECKS: true,
 } as const;
 

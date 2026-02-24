@@ -4642,14 +4642,17 @@ serve(async (req) => {
         const AGE_DECAY = FOUR_STATE_REGIME.REGIME_AGE_DECAY;
         const regimeAge = regimeAgeBySymbol.get(symbol) || 0;
         let ageDecayMultiplier = 1.0;
-        const currentAdxSlope = trendData?.volatility?.adxSlope ?? 0;
+        // FIX: Use smoothed ADX slope (3-point avg over 5-bar window) for hard block decisions
+        // Raw slope is noisy — single-candle spikes could block healthy pullback entries
+        const currentAdxSlopeSmoothed = fullAdxResult?.adxSlopeSmoothed ?? fullAdxResult?.adxSlope ?? trendData?.volatility?.adxSlope ?? 0;
+        const currentAdxSlopeRaw = trendData?.volatility?.adxSlope ?? 0;
         
         if (AGE_DECAY.ENABLED && regimeAge > 0 && AGE_DECAY.AFFECTED_REGIMES.includes(fourStateRegime.regime)) {
           // ===== HARD BLOCK: Old regime + declining ADX slope = exhausted move =====
           if (AGE_DECAY.HARD_BLOCK_ENABLED && 
               regimeAge >= AGE_DECAY.HARD_BLOCK_AGE_CANDLES && 
-              currentAdxSlope <= AGE_DECAY.HARD_BLOCK_MAX_ADX_SLOPE) {
-            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.TREND} 🚫 REGIME AGE HARD BLOCK: ${fourStateRegime.regime} age=${regimeAge} candles, ADX slope=${currentAdxSlope.toFixed(2)} — move exhausted, blocking new entries`);
+              currentAdxSlopeSmoothed <= AGE_DECAY.HARD_BLOCK_MAX_ADX_SLOPE) {
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.TREND} 🚫 REGIME AGE HARD BLOCK: ${fourStateRegime.regime} age=${regimeAge} candles, ADX slopeSmoothed=${currentAdxSlopeSmoothed.toFixed(2)} (raw=${currentAdxSlopeRaw.toFixed(2)}) — move exhausted, blocking new entries`);
             
             rejectionBuffer.add({
               user_id: userId,
@@ -4658,7 +4661,8 @@ serve(async (req) => {
               filters_status: {
                 regimeAge,
                 regime: fourStateRegime.regime,
-                adxSlope: currentAdxSlope,
+                adxSlopeSmoothed: currentAdxSlopeSmoothed,
+                adxSlopeRaw: currentAdxSlopeRaw,
                 hardBlockThreshold: AGE_DECAY.HARD_BLOCK_AGE_CANDLES,
               },
             });
@@ -4682,14 +4686,25 @@ serve(async (req) => {
         }
         
         // ===== FRESH REGIME BONUS: Reward early entries in new trends =====
+        // Guards: TREND_EXPANSION only, ADX slope rising, movePercent not already extreme
+        const priceDistForFreshBonus = trendData?.priceDistanceFromSwing;
+        const freshBonusMovePercent = derivedDirection === 'short' 
+          ? (priceDistForFreshBonus?.distanceFromHighPercent ?? 0)
+          : (priceDistForFreshBonus?.distanceFromLowPercent ?? 0);
+        const freshBonusMoveExcessive = freshBonusMovePercent > 2.0; // >2% move = already extended
+        
         if (AGE_DECAY.FRESH_REGIME_BONUS_ENABLED && 
             regimeAge <= AGE_DECAY.FRESH_REGIME_MAX_AGE && 
             fourStateRegime.regime === 'TREND_EXPANSION' &&
-            currentAdxSlope >= AGE_DECAY.FRESH_REGIME_MIN_ADX_SLOPE) {
+            currentAdxSlopeRaw >= AGE_DECAY.FRESH_REGIME_MIN_ADX_SLOPE &&
+            !freshBonusMoveExcessive) {
           fourStateRegime.positionMultiplier = Math.round(
             Math.min(fourStateRegime.positionMultiplier * AGE_DECAY.FRESH_REGIME_BONUS_MULTIPLIER, 1.0) * 100
           ) / 100;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🚀 FRESH REGIME BONUS: age=${regimeAge}/${AGE_DECAY.FRESH_REGIME_MAX_AGE}, ADX slope=${currentAdxSlope.toFixed(2)}, posMultiplier boosted to ${fourStateRegime.positionMultiplier.toFixed(2)}`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🚀 FRESH REGIME BONUS: age=${regimeAge}/${AGE_DECAY.FRESH_REGIME_MAX_AGE}, ADX slope=${currentAdxSlopeRaw.toFixed(2)}, move=${freshBonusMovePercent.toFixed(1)}%, posMultiplier boosted to ${fourStateRegime.positionMultiplier.toFixed(2)}`);
+        } else if (AGE_DECAY.FRESH_REGIME_BONUS_ENABLED && freshBonusMoveExcessive && 
+                   regimeAge <= AGE_DECAY.FRESH_REGIME_MAX_AGE && fourStateRegime.regime === 'TREND_EXPANSION') {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} ⚠️ FRESH REGIME BONUS BLOCKED: move=${freshBonusMovePercent.toFixed(1)}% > 2.0% — price already extended, not a fresh entry`);
         }
         // Store RAW detected regime to history (BEFORE persistence override)
         // CRITICAL: Must store raw regime, not effective regime, otherwise persistence
@@ -6256,6 +6271,51 @@ serve(async (req) => {
                 if (STOCHRSI_RUNWAY_GATE.LOG_GATE_CHECKS) {
                   logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ STOCHRSI_RUNWAY: ${reason}, ADX slope=${adxSlope.toFixed(2)}, LTF neutral=${bothLtfNeutral} - reducing to ${(stochRsiRunwayMultiplier * 100).toFixed(0)}%`);
                 }
+              }
+            }
+          }
+          
+          // ===== DEEP EXHAUSTION COMPOUND BLOCK =====
+          // Block shorts at deep oversold + big move, longs at deep overbought + big move
+          // Prevents shorting after 3% drops at K<15, or longing after 3% rallies at K>85
+          const deepExhaustion = STOCHRSI_RUNWAY_GATE.DEEP_EXHAUSTION_COMPOUND;
+          if (deepExhaustion.ENABLED) {
+            const stochK4hDeep = extractStochRsiK(trendData, '4h');
+            const priceDistForRunway = trendData?.priceDistanceFromSwing;
+            const moveFromHigh = priceDistForRunway?.distanceFromHighPercent ?? 0;
+            const moveFromLow = priceDistForRunway?.distanceFromLowPercent ?? 0;
+            
+            const shortDeepExhausted = derivedDirection === 'short' && 
+              stochK4hDeep < deepExhaustion.SHORT_MAX_K && moveFromHigh > deepExhaustion.SHORT_MIN_MOVE_PERCENT;
+            const longDeepExhausted = derivedDirection === 'long' && 
+              stochK4hDeep > deepExhaustion.LONG_MIN_K && moveFromLow > deepExhaustion.LONG_MIN_MOVE_PERCENT;
+            
+            if (shortDeepExhausted || longDeepExhausted) {
+              const moveStr = shortDeepExhausted 
+                ? `K=${stochK4hDeep.toFixed(0)} < ${deepExhaustion.SHORT_MAX_K}, moveFromHigh=${moveFromHigh.toFixed(1)}%`
+                : `K=${stochK4hDeep.toFixed(0)} > ${deepExhaustion.LONG_MIN_K}, moveFromLow=${moveFromLow.toFixed(1)}%`;
+              
+              if (adx >= deepExhaustion.HIGH_ADX_PROBE_THRESHOLD) {
+                stochRsiRunwayMultiplier = Math.min(stochRsiRunwayMultiplier, deepExhaustion.HIGH_ADX_PROBE_MULTIPLIER);
+                stochRsiRunwayGateApplied = true;
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ DEEP_EXHAUSTION_COMPOUND: ${moveStr} but ADX=${adx.toFixed(1)} >= ${deepExhaustion.HIGH_ADX_PROBE_THRESHOLD} — micro probe at ${(deepExhaustion.HIGH_ADX_PROBE_MULTIPLIER * 100).toFixed(0)}%`);
+              } else {
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION_COMPOUND BLOCK: ${derivedDirection?.toUpperCase()} blocked — ${moveStr}, ADX=${adx.toFixed(1)}`);
+                
+                rejectionBuffer.add({
+                  user_id: userId,
+                  symbol,
+                  rejection_reason: 'DEEP_EXHAUSTION_COMPOUND',
+                  filters_status: {
+                    gate: 'DEEP_EXHAUSTION_COMPOUND',
+                    direction: derivedDirection,
+                    stochK4h: stochK4hDeep,
+                    moveFromHigh,
+                    moveFromLow,
+                    adx,
+                  },
+                });
+                continue;
               }
             }
           }
