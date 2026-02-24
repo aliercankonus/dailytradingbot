@@ -2196,7 +2196,7 @@ serve(async (req) => {
     // Fetch historical klines using shared Binance utilities
     const fetchHistoricalKlines = async (symbol: string): Promise<{ prices: number[]; volumes: number[]; klines: any[]; livePrice: number }> => {
       try {
-        const klines = await getKlines(symbol, "15m", 50);
+        const klines = await getKlines(symbol, "15m", 55);
         // HYBRID CANDLE SEPARATION: Use closed candles for indicator data
         const closedKlines = klines.length > 1 ? klines.slice(0, -1) : klines;
         const liveCandle = klines[klines.length - 1];
