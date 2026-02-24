@@ -126,6 +126,7 @@ import {
   DISABLED_LEGACY_STRATEGIES,
   // PHASE 10-13: Trend exhaustion protection gates
   SAME_DIRECTION_REENTRY_PROTECTION,
+  SAME_DIRECTION_STACKING_PREVENTION,
   TREND_EXHAUSTION_PROTECTION,
   REGIME_TRANSITION_PROTECTION,
   MOMENTUM_REVERSAL_PROTECTION,
@@ -2505,7 +2506,10 @@ serve(async (req) => {
       // Fix #3: Capitulation acceleration override
       | 'CAPITULATION_ACCELERATION'
       // Error alerting: symbol-level exceptions during analysis
-      | 'ANALYZER_ERROR';
+      | 'ANALYZER_ERROR'
+      // Dead-momentum-chasing prevention
+      | 'WORSE_PRICE_REENTRY_BLOCK'
+      | 'SAME_DIRECTION_STACKING';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     const rejectionBuffer = new RejectionBuffer();
@@ -2765,6 +2769,16 @@ serve(async (req) => {
         continue;
       }
 
+      // ============= SAME-DIRECTION STACKING PREVENTION =============
+      // Prevent opening 2 positions in the SAME direction on the same symbol
+      // After "dead momentum chasing" analysis: stacking 2 shorts doubled losses
+      if (SAME_DIRECTION_STACKING_PREVENTION.ENABLED && currentTradeCount >= 1) {
+        const activeForSymbol = activePositions?.filter(p => p.symbol === symbol && p.status === 'active') || [];
+        const activeSides = new Set(activeForSymbol.map(p => p.side?.toLowerCase()));
+        // We'll check this later after direction derivation - store for now
+        // (can't check yet because derivedDirection isn't known at this point)
+      }
+
       // ============= PHASE 5: POSITION DEDUPLICATION (30-MINUTE WINDOW) =============
       // Expert insight: Prevent multiple concurrent entries on the same symbol within 30 minutes
       // This reduces compound losses from duplicate entries during rapid signal generation
@@ -2805,17 +2819,19 @@ serve(async (req) => {
 
       // ============= PHASE 10: SAME-DIRECTION RE-ENTRY COOLDOWN =============
       // Expert insight: "When a trade closes due to timeout or trailing stop, the trend pauses"
-      // Block same-direction entries for 45 minutes after non-loss exits
-      // This was added after analyzing AVAXUSDT losses from re-entering same direction too quickly
+      // Block same-direction entries for 45 minutes after ANY close
+      // Enhanced after "dead momentum chasing" analysis: ALL close reasons now trigger cooldown
       let sameDirectionCooldownActive = false;
       let cooldownSide: string | null = null;
+      let lastExitPrice: number | null = null;
+      let lastExitSide: string | null = null;
       
       if (SAME_DIRECTION_REENTRY_PROTECTION.ENABLED) {
         const cooldownCutoff = new Date(Date.now() - SAME_DIRECTION_REENTRY_PROTECTION.COOLDOWN_MINUTES * 60 * 1000).toISOString();
         
         const { data: recentTimeoutClose } = await supabase
           .from('positions')
-          .select('id, side, close_reason, closed_at, symbol')
+          .select('id, side, close_reason, closed_at, symbol, exit_price')
           .eq('user_id', userId)
           .eq('symbol', symbol)
           .eq('status', 'closed')
@@ -2829,10 +2845,33 @@ serve(async (req) => {
           const closedMinutesAgo = Math.round((Date.now() - new Date(recentClose.closed_at).getTime()) / (1000 * 60));
           cooldownSide = recentClose.side;
           sameDirectionCooldownActive = true;
+          lastExitPrice = recentClose.exit_price;
+          lastExitSide = recentClose.side;
           
           if (SAME_DIRECTION_REENTRY_PROTECTION.LOG_BLOCKS) {
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⏳ SAME_DIRECTION_COOLDOWN: ${symbol} | ${recentClose.close_reason} closed ${closedMinutesAgo}min ago | Blocking ${cooldownSide === 'sell' ? 'SHORT' : 'LONG'} for ${SAME_DIRECTION_REENTRY_PROTECTION.COOLDOWN_MINUTES - closedMinutesAgo}min`);
           }
+        }
+      }
+      
+      // === WORSE-PRICE RE-ENTRY PROTECTION ===
+      // Fetch last exit price for worse-price check (separate from cooldown, longer lookback)
+      if (SAME_DIRECTION_REENTRY_PROTECTION.WORSE_PRICE_BLOCK_ENABLED && !lastExitPrice) {
+        const worsePriceCutoff = new Date(Date.now() - SAME_DIRECTION_REENTRY_PROTECTION.WORSE_PRICE_LOOKBACK_MINUTES * 60 * 1000).toISOString();
+        const { data: recentExits } = await supabase
+          .from('positions')
+          .select('side, exit_price, closed_at')
+          .eq('user_id', userId)
+          .eq('symbol', symbol)
+          .eq('status', 'closed')
+          .not('exit_price', 'is', null)
+          .gte('closed_at', worsePriceCutoff)
+          .order('closed_at', { ascending: false })
+          .limit(1);
+        
+        if (recentExits && recentExits.length > 0) {
+          lastExitPrice = recentExits[0].exit_price;
+          lastExitSide = recentExits[0].side;
         }
       }
 
@@ -4881,6 +4920,88 @@ serve(async (req) => {
             continue;
           } else if (SAME_DIRECTION_REENTRY_PROTECTION.LOG_BLOCKS) {
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ SAME_DIRECTION_COOLDOWN: Opposite direction ${derivedDirection.toUpperCase()} allowed during cooldown`);
+          }
+        }
+        
+        // ============= WORSE-PRICE RE-ENTRY BLOCK =============
+        // Block same-direction entries at a worse price than the last exit
+        // SHORT: new entry BELOW last exit = chasing completed move downward
+        // LONG: new entry ABOVE last exit = chasing completed move upward
+        if (SAME_DIRECTION_REENTRY_PROTECTION.WORSE_PRICE_BLOCK_ENABLED && lastExitPrice && lastExitSide) {
+          const isSameDir = (lastExitSide === 'sell' && derivedDirection === 'short') ||
+                            (lastExitSide === 'buy' && derivedDirection === 'long');
+          if (isSameDir) {
+            const currentPrice = trendData.currentPrice || trendData.price || 0;
+            // For SHORT: entering at a LOWER price than exit = chasing (already captured that zone)
+            // For LONG: entering at a HIGHER price than exit = chasing (already captured that zone)
+            const isWorsePrice = (derivedDirection === 'short' && currentPrice < lastExitPrice) ||
+                                 (derivedDirection === 'long' && currentPrice > lastExitPrice);
+            if (isWorsePrice) {
+              rejectedByHardGates++;
+              const priceDiff = Math.abs(currentPrice - lastExitPrice);
+              const priceDiffPct = (priceDiff / lastExitPrice * 100).toFixed(2);
+              const blockMsg = `${derivedDirection.toUpperCase()} at ${currentPrice.toFixed(2)} is WORSE than last exit ${lastExitPrice.toFixed(2)} (${priceDiffPct}% beyond) — already captured that zone`;
+              perSymbolGateAttribution.set(symbol, { gate: 'WORSE_PRICE_REENTRY_BLOCK', details: blockMsg });
+              
+              if (SAME_DIRECTION_REENTRY_PROTECTION.WORSE_PRICE_LOG) {
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 WORSE_PRICE_REENTRY: ${blockMsg}`);
+              }
+              
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `WORSE_PRICE_REENTRY: ${blockMsg}`,
+                {
+                  gate: "WORSE_PRICE_REENTRY_BLOCK",
+                  derivedDirection,
+                  currentPrice,
+                  lastExitPrice,
+                  lastExitSide,
+                  priceDiffPercent: parseFloat(priceDiffPct),
+                },
+                trendData,
+                riskParams.ai_analysis_enabled !== false,
+                earlyOrderFlowAnalysis
+              );
+              continue;
+            }
+          }
+        }
+        
+        // ============= SAME-DIRECTION STACKING PREVENTION =============
+        // Prevent opening 2 positions in the SAME direction on the same symbol
+        // Cuts losses in half during dead-momentum-chasing scenarios
+        if (SAME_DIRECTION_STACKING_PREVENTION.ENABLED) {
+          const activeForSymbol = activePositions?.filter(p => p.symbol === symbol && p.status === 'active') || [];
+          if (activeForSymbol.length > 0) {
+            const sameDirectionActive = activeForSymbol.some(p => {
+              const posSide = p.side?.toLowerCase();
+              return (posSide === 'sell' && derivedDirection === 'short') ||
+                     (posSide === 'buy' && derivedDirection === 'long');
+            });
+            if (sameDirectionActive) {
+              rejectedByHardGates++;
+              const blockMsg = `Already have active ${derivedDirection.toUpperCase()} position on ${symbol} — same-direction stacking blocked`;
+              perSymbolGateAttribution.set(symbol, { gate: 'SAME_DIRECTION_STACKING', details: blockMsg });
+              
+              if (SAME_DIRECTION_STACKING_PREVENTION.LOG_BLOCKS) {
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 SAME_DIRECTION_STACKING: ${blockMsg}`);
+              }
+              
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `SAME_DIRECTION_STACKING: ${blockMsg}`,
+                {
+                  gate: "SAME_DIRECTION_STACKING",
+                  derivedDirection,
+                  activePositionCount: activeForSymbol.length,
+                  activeSides: activeForSymbol.map(p => p.side),
+                },
+                trendData,
+                riskParams.ai_analysis_enabled !== false,
+                earlyOrderFlowAnalysis
+              );
+              continue;
+            }
           }
         }
         

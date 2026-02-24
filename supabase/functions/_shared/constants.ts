@@ -4896,18 +4896,40 @@ export const SAME_DIRECTION_REENTRY_PROTECTION = {
   // Cooldown minutes after these close reasons
   COOLDOWN_MINUTES: 45,
   
-  // Close reasons that trigger cooldown (non-loss exits that indicate trend pause)
+  // Close reasons that trigger cooldown — ALL close types now included
+  // After the "dead momentum chasing" analysis: bot was re-entering SHORT at worse prices
+  // immediately after closing shorts, because only trailing/timeout were covered
   TRIGGER_CLOSE_REASONS: [
     'trailing_stop_loss',
     'micro_trend_timeout', 
     'volume_relaxation_timeout',
     'break_even',
+    'stop_loss',
+    'partial_loss',
+    'smart_aits_rapid_decay',
+    'volatility_divergence',
   ] as readonly string[],
   
   // Allow opposite direction entries during cooldown
   ALLOW_OPPOSITE_DIRECTION: true,
   
   // Logging
+  LOG_BLOCKS: true,
+  
+  // === WORSE-PRICE RE-ENTRY PROTECTION ===
+  // Block same-direction entries at a worse price than the last exit
+  // SHORT: block if new entry < last exit (already captured that zone)
+  // LONG: block if new entry > last exit (already captured that zone)
+  WORSE_PRICE_BLOCK_ENABLED: true,
+  WORSE_PRICE_LOOKBACK_MINUTES: 120, // Look back 2 hours for last exit price
+  WORSE_PRICE_LOG: true,
+} as const;
+
+// ============= SAME-DIRECTION STACKING PREVENTION =============
+// Prevent opening 2 positions in the SAME direction on the same symbol
+// This halves losses during dead-momentum-chasing scenarios
+export const SAME_DIRECTION_STACKING_PREVENTION = {
+  ENABLED: true,
   LOG_BLOCKS: true,
 } as const;
 
