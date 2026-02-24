@@ -193,7 +193,7 @@ export const ADX_GATE_V1_1 = {
     // Maximum ADX (above this, normal adaptive threshold applies)
     MAX_ADX: 22,
     // Minimum absolute weighted score from direction derivation engine
-    MIN_WEIGHTED_SCORE: 0.60,
+    MIN_WEIGHTED_SCORE: 0.45,  // Reduced from 0.60 → 0.45 to catch trends earlier
     // ADX slope must be positive (rising = expansion building)
     MIN_ADX_SLOPE: 0,  // > 0, strictly rising
     // Position size multiplier (conservative probe)
@@ -4210,15 +4210,28 @@ export const FOUR_STATE_REGIME = {
     // Number of candles at which regime starts to fatigue
     FATIGUE_START_CANDLES: 20,
     // Maximum decay factor (position size multiplier at full fatigue)
-    // 0.60 means at max fatigue, sizing reduced to 60% of normal
-    MAX_FATIGUE_MULTIPLIER: 0.60,
+    MAX_FATIGUE_MULTIPLIER: 0.50,  // Tightened from 0.60 → 0.50 to reduce late-entry exposure
     // Candle count for full fatigue (linear interpolation from 1.0 to MAX_FATIGUE_MULTIPLIER)
-    FULL_FATIGUE_CANDLES: 60,
+    FULL_FATIGUE_CANDLES: 50,  // Tightened from 60 → 50 (faster decay)
     // Regimes affected by age decay (expansion and exhaustion benefit most)
     AFFECTED_REGIMES: ['TREND_EXPANSION', 'TREND_EXHAUSTION'] as string[],
     // Compression doesn't decay — it's already a blocked state
     // Breakout doesn't decay — it's transitional by nature
     LOG_AGE_DECAY: true,
+    
+    // ===== HARD BLOCK: Late entry with declining ADX slope =====
+    // When regime is old AND ADX slope is declining, the move is exhausted — hard block new entries
+    HARD_BLOCK_ENABLED: true,
+    HARD_BLOCK_AGE_CANDLES: 40,        // Block after 40 candles (was allowing up to 60 with 0.60x)
+    HARD_BLOCK_MAX_ADX_SLOPE: -0.3,    // Only block when slope is declining (confirms exhaustion)
+    HARD_BLOCK_REASON: 'REGIME_AGE_EXHAUSTED',
+    
+    // ===== FRESH REGIME BONUS: Reward early entries =====
+    // First 10 candles of a new TREND_EXPANSION get a sizing boost
+    FRESH_REGIME_BONUS_ENABLED: true,
+    FRESH_REGIME_MAX_AGE: 10,          // Bonus applies for first 10 candles
+    FRESH_REGIME_BONUS_MULTIPLIER: 1.15, // +15% sizing for fresh trends
+    FRESH_REGIME_MIN_ADX_SLOPE: 0.1,   // Only if ADX slope is rising (confirming expansion)
   },
   
   // ===== LOGGING =====
