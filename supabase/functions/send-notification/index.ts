@@ -18,7 +18,7 @@ const corsHeaders = {
 };
 
 interface NotificationRequest {
-  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated' | 'bot_health_critical' | 'bot_health_warning' | 'websocket_failure' | 'binance_api_error';
+  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated' | 'bot_health_critical' | 'bot_health_warning' | 'websocket_failure' | 'binance_api_error' | 'circuit_breaker_triggered' | 'break_even_activated' | 'partial_loss_taken' | 'partial_take_profit';
   userId?: string;
   tradeId?: string;
   symbol?: string;
@@ -422,6 +422,79 @@ const handler = async (req: Request): Promise<Response> => {
         `;
         smsMessage = `${isCredentialError ? '🚨 CRITICAL' : '⚠️'} Binance API error: ${operation}. ${binanceMsg}`;
         break;
+
+      case 'circuit_breaker_triggered':
+        subject = `🚨 Circuit Breaker Triggered — Drawdown ${((payload as any).drawdownPercent ?? 0).toFixed(1)}%`;
+        message = `
+          <h2>🚨 Circuit Breaker Triggered</h2>
+          <p style="color: #ef4444; font-size: 1.1em;"><strong>Portfolio drawdown exceeded the safety threshold.</strong></p>
+          <div style="background: #fef2f2; padding: 15px; border-radius: 8px; border-left: 4px solid #ef4444; margin: 20px 0;">
+            <p><strong>Current Drawdown:</strong> ${((payload as any).drawdownPercent ?? 0).toFixed(2)}%</p>
+            <p><strong>Threshold:</strong> ${(payload as any).threshold ?? '?'}%</p>
+          </div>
+          <p>All new trades are <strong>paused</strong> until you manually re-enable trading in Settings.</p>
+        `;
+        smsMessage = `🚨 CIRCUIT BREAKER: Drawdown ${((payload as any).drawdownPercent ?? 0).toFixed(1)}% exceeded ${(payload as any).threshold ?? '?'}% threshold. Trading paused.`;
+        break;
+
+      case 'break_even_activated':
+        subject = `🛡️ Break-Even Activated: ${payload.symbol}`;
+        message = `
+          <h2>🛡️ Break-Even Stop Applied</h2>
+          <p>Your position's stop loss has been moved to break-even to protect against a retrace.</p>
+          <div style="background: #f0fdf4; padding: 15px; border-radius: 8px; border-left: 4px solid #10b981; margin: 20px 0;">
+            <p><strong>Symbol:</strong> ${payload.symbol}</p>
+            <p><strong>Side:</strong> ${payload.side}</p>
+            <p><strong>Entry Price:</strong> $${((payload as any).entryPrice ?? 0).toFixed(4)}</p>
+            <p><strong>Current Price:</strong> $${(payload.price ?? 0).toFixed(4)}</p>
+            <p><strong>Current P&L:</strong> +${((payload as any).pnlPercent ?? 0).toFixed(2)}%</p>
+          </div>
+          <p>Your stop loss is now at entry — risk-free position.</p>
+        `;
+        smsMessage = `🛡️ BREAK-EVEN: ${payload.symbol} ${payload.side} stop moved to entry. P&L: +${((payload as any).pnlPercent ?? 0).toFixed(2)}%`;
+        break;
+
+      case 'partial_loss_taken':
+        subject = `⚠️ Partial Loss Cut: ${payload.symbol}`;
+        message = `
+          <h2>⚠️ Partial Loss Taken</h2>
+          <p>A portion of your losing position has been closed to reduce risk.</p>
+          <div style="background: #fef3c7; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 20px 0;">
+            <p><strong>Symbol:</strong> ${payload.symbol}</p>
+            <p><strong>Side:</strong> ${payload.side}</p>
+            <p><strong>Closed Qty:</strong> ${(payload as any).closedQuantity}</p>
+            <p><strong>Remaining Qty:</strong> ${(payload as any).remainingQuantity}</p>
+            <p><strong>Exit Price:</strong> $${((payload as any).exitPrice ?? 0).toFixed(4)}</p>
+            <p><strong>Partial Loss:</strong> <span style="color: #ef4444;">$${((payload as any).partialLoss ?? 0).toFixed(2)} (${((payload as any).partialLossPercent ?? 0).toFixed(2)}%)</span></p>
+          </div>
+        `;
+        smsMessage = `⚠️ PARTIAL LOSS: ${payload.symbol} closed ${(payload as any).closedQuantity} @ $${((payload as any).exitPrice ?? 0).toFixed(4)}. Loss: $${((payload as any).partialLoss ?? 0).toFixed(2)}`;
+        break;
+
+      case 'partial_take_profit':
+        subject = `✅ Partial Take Profit (TP${(payload as any).tpLevel ?? '?'}): ${payload.symbol}`;
+        message = `
+          <h2>✅ Partial Take Profit Achieved</h2>
+          <p>A portion of your winning position has been closed to lock in profits.</p>
+          <div style="background: #f0fdf4; padding: 15px; border-radius: 8px; border-left: 4px solid #10b981; margin: 20px 0;">
+            <p><strong>Symbol:</strong> ${payload.symbol}</p>
+            <p><strong>Side:</strong> ${payload.side}</p>
+            <p><strong>TP Level:</strong> ${(payload as any).tpLevel ?? '?'}</p>
+            <p><strong>Closed Qty:</strong> ${(payload as any).closedQuantity}</p>
+            <p><strong>Remaining Qty:</strong> ${(payload as any).remainingQuantity}</p>
+            <p><strong>Exit Price:</strong> $${((payload as any).exitPrice ?? 0).toFixed(4)}</p>
+            <p><strong>Partial Profit:</strong> <span style="color: #10b981;">$${((payload as any).partialPnl ?? 0).toFixed(2)} (+${((payload as any).partialPnlPercent ?? 0).toFixed(2)}%)</span></p>
+          </div>
+        `;
+        smsMessage = `✅ PARTIAL TP${(payload as any).tpLevel ?? ''}: ${payload.symbol} closed ${(payload as any).closedQuantity} @ $${((payload as any).exitPrice ?? 0).toFixed(4)}. Profit: $${((payload as any).partialPnl ?? 0).toFixed(2)}`;
+        break;
+
+      default:
+        console.warn(`Unknown notification type: ${payload.type} — skipping email`);
+        return new Response(
+          JSON.stringify({ success: false, error: `Unknown notification type: ${payload.type}` }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
     }
 
     // Determine email recipient - prioritize payload.email, then risk_parameters notification_email
