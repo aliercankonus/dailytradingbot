@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, DYNAMIC_REVERSAL_EXIT, COMPRESSION_TRADE_EXIT, STRATEGY_EXIT_ADJUSTMENTS, HTF_ALIGNMENT_EXIT, TRAILING_STOP_INLINE, MICRO_TREND_EXIT, MOMENTUM_CONTINUATION_EXIT, LOW_CONFIDENCE_STANDARD_EXIT, HEDGE_EXIT_PARAMS, REVERSAL_RISK_EXIT_SCORES, TIME_STOP_MULTIPLIER as TIME_STOP_MULT, PARTIAL_TP_LADDER, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, DYNAMIC_REVERSAL_EXIT, COMPRESSION_TRADE_EXIT, STRATEGY_EXIT_ADJUSTMENTS, HTF_ALIGNMENT_EXIT, TRAILING_STOP_INLINE, MICRO_TREND_EXIT, MOMENTUM_CONTINUATION_EXIT, LOW_CONFIDENCE_STANDARD_EXIT, HEDGE_EXIT_PARAMS, REVERSAL_RISK_EXIT_SCORES, TIME_STOP_MULTIPLIER as TIME_STOP_MULT, PARTIAL_TP_LADDER, TRAILING_MIN_PROFIT_FLOOR, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import {
   evaluateDecayVelocity,
   evaluateMicroProfitLock,
@@ -1392,7 +1392,38 @@ serve(async (req) => {
       const microTrendActivation = isMicroTrendEntry && pnlPercent > MICRO_TREND_EXIT.TRAILING_ACTIVATION_PERCENT;
       const rMultipleActivated = useRMultipleActivation && currentRMultiple >= R_MULTIPLE_TRAILING_PARAMS.ACTIVATION_R_MULTIPLE;
       const percentActivated = pnlPercent > userSettings.activationPercent;
-      const shouldActivateTrailing = microTrendActivation || rMultipleActivated || (R_MULTIPLE_TRAILING_PARAMS.FALLBACK_TO_PERCENT && percentActivated);
+      let shouldActivateTrailing = microTrendActivation || rMultipleActivated || (R_MULTIPLE_TRAILING_PARAMS.FALLBACK_TO_PERCENT && percentActivated);
+
+      // ============= FEE-AWARE MINIMUM PROFIT FLOOR =============
+      // Prevent trailing from activating until profit meaningfully exceeds costs
+      // This stops the pattern where trailing chops out at 0.02-0.20% net profit
+      if (shouldActivateTrailing && !microTrendActivation) {
+        const totalCosts = TRAILING_MIN_PROFIT_FLOOR.ROUND_TRIP_FEE_PERCENT + TRAILING_MIN_PROFIT_FLOOR.SLIPPAGE_ESTIMATE_PERCENT;
+        let minProfitFloor = totalCosts * TRAILING_MIN_PROFIT_FLOOR.MIN_PROFIT_OVER_COSTS_MULTIPLIER;
+
+        // ADX-aware strong trend floor: let strong trends develop further
+        if (TRAILING_MIN_PROFIT_FLOOR.STRONG_TREND_ENABLED) {
+          const { adx: posAdx } = extractADX(trendDataForPosition);
+          if (posAdx >= TRAILING_MIN_PROFIT_FLOOR.VERY_STRONG_TREND_MIN_ADX) {
+            minProfitFloor = Math.max(minProfitFloor, TRAILING_MIN_PROFIT_FLOOR.VERY_STRONG_TREND_MIN_PROFIT_PERCENT);
+            positionLogger.debug(`TRAILING FLOOR: Very strong trend (ADX ${posAdx.toFixed(1)}) → min profit ${minProfitFloor.toFixed(2)}%`);
+          } else if (posAdx >= TRAILING_MIN_PROFIT_FLOOR.STRONG_TREND_MIN_ADX) {
+            minProfitFloor = Math.max(minProfitFloor, TRAILING_MIN_PROFIT_FLOOR.STRONG_TREND_MIN_PROFIT_PERCENT);
+            positionLogger.debug(`TRAILING FLOOR: Strong trend (ADX ${posAdx.toFixed(1)}) → min profit ${minProfitFloor.toFixed(2)}%`);
+          }
+        }
+
+        // Panic override: if profit is dropping fast from peak, allow trailing regardless
+        const drawdownFromPeak = newPeakPnl - pnlPercent;
+        const panicOverride = newPeakPnl >= minProfitFloor && drawdownFromPeak >= TRAILING_MIN_PROFIT_FLOOR.PANIC_DRAWDOWN_FROM_PEAK_PERCENT;
+
+        if (pnlPercent < minProfitFloor && !panicOverride) {
+          shouldActivateTrailing = false;
+          positionLogger.debug(`TRAILING DELAYED: P&L ${pnlPercent.toFixed(2)}% < floor ${minProfitFloor.toFixed(2)}% (costs ${totalCosts.toFixed(2)}% × ${TRAILING_MIN_PROFIT_FLOOR.MIN_PROFIT_OVER_COSTS_MULTIPLIER})`);
+        } else if (panicOverride) {
+          positionLogger.trade(`TRAILING PANIC OVERRIDE: Peak was ${newPeakPnl.toFixed(2)}%, dropped ${drawdownFromPeak.toFixed(2)}% → activating trailing to protect remaining profit`);
+        }
+      }
       
       // ============= PHASE 3: DYNAMIC R-MULTIPLE TRAILING =============
       // Use ADX-aware activation and momentum-based trailing distance

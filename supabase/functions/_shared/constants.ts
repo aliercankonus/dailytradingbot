@@ -1250,6 +1250,35 @@ export const RISK_PARAMS = {
   MIN_QUALITY_THRESHOLD: 65,
 } as const;
 
+// ============= FEE-AWARE TRAILING ACTIVATION FLOOR =============
+// Prevents trailing stop from activating until profit exceeds round-trip fees + buffer
+// Problem: Trailing activates at 0.02-0.20% P&L, fees consume 80-92% of gross profit
+// Solution: Require minimum net profit before trailing engages
+export const TRAILING_MIN_PROFIT_FLOOR = {
+  // Round-trip fee estimate (entry + exit): 0.1% × 2 = 0.20%
+  ROUND_TRIP_FEE_PERCENT: 0.20,
+  // Slippage estimate for market/trailing stop fills
+  SLIPPAGE_ESTIMATE_PERCENT: 0.06,
+  // Minimum net profit multiplier over fees before trailing activates
+  // e.g., 2.0 means profit must be ≥ 2× total costs (fees + slippage)
+  MIN_PROFIT_OVER_COSTS_MULTIPLIER: 2.0,
+  // Calculated: min activation = (0.20 + 0.06) × 2.0 = 0.52%
+  // This ensures at least ~0.26% net profit after trailing triggers
+
+  // Strong trend floor: When ADX ≥ 30 and trend aligned, require higher minimum
+  // to let the trend develop instead of chopping out early
+  STRONG_TREND_ENABLED: true,
+  STRONG_TREND_MIN_ADX: 30,
+  STRONG_TREND_MIN_PROFIT_PERCENT: 0.80,  // Must reach 0.80% before trailing in strong trends
+
+  // Very strong trend floor: ADX ≥ 40, let the move run
+  VERY_STRONG_TREND_MIN_ADX: 40,
+  VERY_STRONG_TREND_MIN_PROFIT_PERCENT: 1.20,  // Must reach 1.20% before trailing
+
+  // Override: Always allow trailing if profit is dropping fast (panic protection)
+  PANIC_DRAWDOWN_FROM_PEAK_PERCENT: 0.40,  // If fallen 0.40% from peak, activate regardless
+} as const;
+
 // ============= PHASE 3: R-MULTIPLE TRAILING PARAMETERS =============
 // Ties trailing activation to R-multiple instead of fixed percentage
 // R = (currentPrice - entry) / (entry - stopLoss) for longs, inverted for shorts
