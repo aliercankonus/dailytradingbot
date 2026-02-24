@@ -2251,6 +2251,10 @@ serve(async (req) => {
       momentum_overextension_atr: signal.indicators?.smartMomentum?.overextensionATR ?? null,
       momentum_state: signal.indicators?.momentumState ?? trendData?.momentum?.state ?? null,
       momentum_confirms: signal.indicators?.momentumConfirms ?? trendData?.momentum?.confirms ?? null,
+      // ENTRY DISTRIBUTION FORENSICS (Point 6: track for post-trade analysis)
+      weighted_score: signal.indicators?.directionContext?.weightedScore ?? signal.indicators?.weightedScore ?? null,
+      derived_direction: signal.indicators?.derivedDirection ?? null,
+      derived_source: signal.indicators?.derivedSource ?? null,
       // Timestamp
       snapshot_created_at: new Date().toISOString(),
     };
