@@ -2984,6 +2984,32 @@ serve(async (req) => {
         
         logger.forSymbol(symbol).debug(`📊 EARLY SMART MOMENTUM: score=${earlySmartMomentum.score.toFixed(0)} (${earlySmartMomentum.direction}) | ADX slope=${earlyAdxSlope.toFixed(3)}, rising=${earlySmartAdxRising}`);
 
+        // ============= STORE MOMENTUM ANALYSIS EARLY =============
+        // Moved BEFORE gate checks so ALL symbols get momentum data recorded,
+        // not just those that pass all gates. Uses early momentum calculation.
+        // Pullback data will be updated later if symbol passes gates.
+        supabase
+          .from("momentum_analysis")
+          .insert({
+            user_id: userId,
+            symbol,
+            momentum_score: earlySmartMomentum.score,
+            trend_direction: earlySmartMomentum.direction,
+            ema_spread_roc: earlySmartMomentum.components.emaSpreadRoC,
+            rsi_momentum: earlySmartMomentum.components.rsiMomentum,
+            macd_slope: earlySmartMomentum.components.macdSlope,
+            is_accelerating: earlySmartMomentum.isAccelerating,
+            is_exhausted: earlySmartMomentum.isExhausted,
+            overextension_atr: earlySmartMomentum.overextensionATR,
+            pullback_depth: 0,
+            timeframe_alignment: { 
+              earlyRecord: true
+            }
+          })
+          .then(({ error }) => {
+            if (error) logger.forSymbol(symbol).debug(`Failed to store early momentum analysis: ${error.message}`);
+          });
+
         // ============= RANGING MARKET DETECTION =============
         // Log informational message when market is genuinely ranging (all timeframes neutral, low ADX, low volume)
         if (RANGING_MARKET_DETECTION_PARAMS.ENABLE_LOGGING) {
@@ -9060,30 +9086,8 @@ serve(async (req) => {
           // If override allowed, continue processing (don't reject)
         }
         
-        // Store momentum analysis in database (async, don't block)
-        supabase
-          .from("momentum_analysis")
-          .insert({
-            user_id: userId,
-            symbol,
-            momentum_score: smartMomentum.score,
-            trend_direction: smartMomentum.direction,
-            ema_spread_roc: smartMomentum.components.emaSpreadRoC,
-            rsi_momentum: smartMomentum.components.rsiMomentum,
-            macd_slope: smartMomentum.components.macdSlope,
-            is_accelerating: smartMomentum.isAccelerating,
-            is_exhausted: smartMomentum.isExhausted,
-            overextension_atr: smartMomentum.overextensionATR,
-            pullback_depth: smartPullback.pullbackDepth,
-            timeframe_alignment: { 
-              pullbackType: smartPullback.pullbackType,
-              isValidPullback: smartPullback.isValidPullback,
-              rsiInZone: smartPullback.rsiInZone 
-            }
-          })
-          .then(({ error }) => {
-            if (error) logger.forSymbol(symbol).debug(`Failed to store momentum analysis: ${error.message}`);
-          });
+        // NOTE: momentum_analysis is now stored EARLY (before gate checks) so ALL symbols get recorded.
+        // See "STORE MOMENTUM ANALYSIS EARLY" block above.
         
         // NOTE: Regime history is now stored early (after 4-state classification, before gate blocks)
         // to ensure persistence engine has data even for symbols blocked by gates.
