@@ -3230,6 +3230,43 @@ serve(async (req) => {
           }
         }
       }
+      // ============= FEE-AWARE MINIMUM PROFIT GATE (ALL EXIT TYPES) =============
+      // Prevent closing at a tiny profit that would be consumed by fees
+      // Only applies to "soft" exits where position is profitable but below fee threshold
+      // Emergency exits, stop losses, take profits, and losing positions are exempt
+      if (shouldClose && pnlPercent > 0) {
+        const totalCosts = TRAILING_MIN_PROFIT_FLOOR.ROUND_TRIP_FEE_PERCENT + TRAILING_MIN_PROFIT_FLOOR.SLIPPAGE_ESTIMATE_PERCENT;
+        const minNetProfit = totalCosts * TRAILING_MIN_PROFIT_FLOOR.MIN_PROFIT_OVER_COSTS_MULTIPLIER;
+        
+        // Exempt categories that should ALWAYS close regardless of fee efficiency:
+        // - Emergency exits (flash crash, volatility, divergence)
+        // - Take profit (price target hit)
+        // - Stop loss (risk management)
+        // - Break-even (capital protection)
+        // - Losses (pnlPercent <= 0) — handled by outer if
+        const feeExemptReasons = new Set([
+          "flash_crash", "extreme_volatility", "volatility_divergence",
+          "momentum_divergence_critical", "divergence_volume_spike", "momentum_divergence_exit",
+          "take_profit", "stop_loss", "break_even",
+          "partial_loss", "circuit_breaker",
+          "mean_reversion_adverse", "mean_reversion_early_failure", "mean_reversion_trend_acceleration",
+        ]);
+        
+        const isExempt = feeExemptReasons.has(closeReason) || exitPriority >= EXIT_PRIORITY.TAKE_PROFIT_HIT;
+        
+        // Also exempt if profit is dropping fast from peak (panic protection)
+        const drawdownFromPeak = newPeakPnl - pnlPercent;
+        const panicOverride = newPeakPnl >= minNetProfit && drawdownFromPeak >= TRAILING_MIN_PROFIT_FLOOR.PANIC_DRAWDOWN_FROM_PEAK_PERCENT;
+        
+        if (!isExempt && !panicOverride && pnlPercent < minNetProfit) {
+          positionLogger.trade(`FEE GATE BLOCKED: ${closeReason} at ${pnlPercent.toFixed(3)}% < min ${minNetProfit.toFixed(2)}% (fees would consume ${((totalCosts / pnlPercent) * 100).toFixed(0)}% of profit)`);
+          shouldClose = false;
+          closeReason = "";
+        } else if (!isExempt && panicOverride) {
+          positionLogger.trade(`FEE GATE PANIC: Allowing ${closeReason} — peak ${newPeakPnl.toFixed(2)}% dropped ${drawdownFromPeak.toFixed(2)}%`);
+        }
+      }
+
       if (shouldClose) {
         // For break-even closes, ensure P&L is at least 0 by using entry price
         // This prevents slippage from causing false losses on break-even exits
