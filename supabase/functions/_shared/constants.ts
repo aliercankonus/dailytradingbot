@@ -7172,14 +7172,16 @@ export const PEAK_ADAPTIVE_TRAILING = {
   // Tiers: when peak P&L >= threshold, cap trailing distance to max_distance_percent
   // Philosophy: early trade = volatility tolerant, mid = protect edge, strong = lock aggressively
   TIERS: [
-    // Below 0.3%: let breathe — use default ATR distance (no override)
-    { peakThreshold: 0.30, maxDistancePercent: 0.55 },  // Wide — still building
-    { peakThreshold: 0.50, maxDistancePercent: 0.30 },  // Medium — entering harvest zone
-    { peakThreshold: 0.80, maxDistancePercent: 0.25 },  // Tight — must capture
-    { peakThreshold: 1.00, maxDistancePercent: 0.22 },  // Very tight — strong move
+    // Below 0.3%: probe phase — let breathe with wide distance
+    { peakThreshold: 0.30, maxDistancePercent: 0.45 },  // Probe → medium-wide (0.30-0.50% zone)
+    { peakThreshold: 0.50, maxDistancePercent: 0.30 },  // Harvest zone — tighten
+    { peakThreshold: 0.80, maxDistancePercent: 0.25 },  // Must capture — floor is 0.25%
+    { peakThreshold: 1.00, maxDistancePercent: 0.22 },  // Strong move — very tight
     { peakThreshold: 1.50, maxDistancePercent: 0.20 },  // Lock it down
     { peakThreshold: 2.00, maxDistancePercent: 0.18 },  // Exceptional — minimal giveback
   ],
+  // Default distance for peak < 0.30% (probe phase — maximum breathing room)
+  DEFAULT_DISTANCE_PERCENT: 0.55,
   // ADX-aware relaxation: in strong trends, allow slightly wider distance
   // to avoid chopping out during normal trend pullbacks
   STRONG_TREND_RELAXATION_ENABLED: true,
