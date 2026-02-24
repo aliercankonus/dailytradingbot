@@ -7159,6 +7159,42 @@ export const HTF_ALIGNMENT_EXIT = {
   WEAK_MAX_TF4H_CONFIDENCE: 40,
 } as const;
 
+// ============= PEAK-ADAPTIVE TRAILING DISTANCE TIERS =============
+// Problem: ATR-based trailing distance (~1.5% of price) is too wide for 0.5-0.8% peak zone
+// Result: 65-90% giveback — a 0.7% winner becomes a 0.02% scratch trade
+// Solution: Progressively shrink trailing distance as peak P&L increases
+// This is complementary to progressive profit locks (which set floor stops)
+// Progressive locks = "stop can never go below X"
+// Peak-adaptive trailing = "stop follows price within Y% distance"
+// Together they create a tightening funnel: floor rises AND ceiling drops
+export const PEAK_ADAPTIVE_TRAILING = {
+  ENABLED: true,
+  // Tiers: when peak P&L >= threshold, cap trailing distance to max_distance_percent
+  // Philosophy: early trade = volatility tolerant, mid = protect edge, strong = lock aggressively
+  TIERS: [
+    // Below 0.3%: let breathe — use default ATR distance (no override)
+    { peakThreshold: 0.30, maxDistancePercent: 0.55 },  // Wide — still building
+    { peakThreshold: 0.50, maxDistancePercent: 0.30 },  // Medium — entering harvest zone
+    { peakThreshold: 0.80, maxDistancePercent: 0.25 },  // Tight — must capture
+    { peakThreshold: 1.00, maxDistancePercent: 0.22 },  // Very tight — strong move
+    { peakThreshold: 1.50, maxDistancePercent: 0.20 },  // Lock it down
+    { peakThreshold: 2.00, maxDistancePercent: 0.18 },  // Exceptional — minimal giveback
+  ],
+  // ADX-aware relaxation: in strong trends, allow slightly wider distance
+  // to avoid chopping out during normal trend pullbacks
+  STRONG_TREND_RELAXATION_ENABLED: true,
+  STRONG_TREND_MIN_ADX: 30,
+  STRONG_TREND_DISTANCE_MULTIPLIER: 1.30,  // 30% wider in strong trends
+  VERY_STRONG_TREND_MIN_ADX: 40,
+  VERY_STRONG_TREND_DISTANCE_MULTIPLIER: 1.50,  // 50% wider in very strong trends
+  // Don't apply to MICRO_TREND entries (they have their own fixed distance)
+  EXEMPT_MICRO_TREND: true,
+  // Don't apply to MOMENTUM_CONTINUATION (they use decay as primary exit)
+  EXEMPT_MOMENTUM_CONTINUATION: true,
+  // Logging
+  LOG_DISTANCE_TIGHTENING: true,
+} as const;
+
 // ============= TRAILING STOP INLINE PARAMS (monitor-positions) =============
 // Inline trailing stop thresholds that were previously hardcoded
 export const TRAILING_STOP_INLINE = {
