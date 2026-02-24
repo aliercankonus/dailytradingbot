@@ -4642,8 +4642,29 @@ serve(async (req) => {
         const AGE_DECAY = FOUR_STATE_REGIME.REGIME_AGE_DECAY;
         const regimeAge = regimeAgeBySymbol.get(symbol) || 0;
         let ageDecayMultiplier = 1.0;
+        const currentAdxSlope = trendData?.volatility?.adxSlope ?? 0;
         
         if (AGE_DECAY.ENABLED && regimeAge > 0 && AGE_DECAY.AFFECTED_REGIMES.includes(fourStateRegime.regime)) {
+          // ===== HARD BLOCK: Old regime + declining ADX slope = exhausted move =====
+          if (AGE_DECAY.HARD_BLOCK_ENABLED && 
+              regimeAge >= AGE_DECAY.HARD_BLOCK_AGE_CANDLES && 
+              currentAdxSlope <= AGE_DECAY.HARD_BLOCK_MAX_ADX_SLOPE) {
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.TREND} 🚫 REGIME AGE HARD BLOCK: ${fourStateRegime.regime} age=${regimeAge} candles, ADX slope=${currentAdxSlope.toFixed(2)} — move exhausted, blocking new entries`);
+            
+            rejectionBuffer.add({
+              user_id: userId,
+              symbol,
+              rejection_reason: AGE_DECAY.HARD_BLOCK_REASON,
+              filters_status: {
+                regimeAge,
+                regime: fourStateRegime.regime,
+                adxSlope: currentAdxSlope,
+                hardBlockThreshold: AGE_DECAY.HARD_BLOCK_AGE_CANDLES,
+              },
+            });
+            continue; // Skip this symbol entirely
+          }
+          
           if (regimeAge >= AGE_DECAY.FATIGUE_START_CANDLES) {
             // Linear interpolation from 1.0 to MAX_FATIGUE_MULTIPLIER
             const fatigueProgress = Math.min(1.0, (regimeAge - AGE_DECAY.FATIGUE_START_CANDLES) / (AGE_DECAY.FULL_FATIGUE_CANDLES - AGE_DECAY.FATIGUE_START_CANDLES));
@@ -4658,6 +4679,17 @@ serve(async (req) => {
           } else if (AGE_DECAY.LOG_AGE_DECAY && regimeAge >= AGE_DECAY.FATIGUE_START_CANDLES - 5) {
             logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.TREND} ⏳ REGIME AGE: ${fourStateRegime.regime} age=${regimeAge}/${AGE_DECAY.FATIGUE_START_CANDLES} (approaching fatigue)`);
           }
+        }
+        
+        // ===== FRESH REGIME BONUS: Reward early entries in new trends =====
+        if (AGE_DECAY.FRESH_REGIME_BONUS_ENABLED && 
+            regimeAge <= AGE_DECAY.FRESH_REGIME_MAX_AGE && 
+            fourStateRegime.regime === 'TREND_EXPANSION' &&
+            currentAdxSlope >= AGE_DECAY.FRESH_REGIME_MIN_ADX_SLOPE) {
+          fourStateRegime.positionMultiplier = Math.round(
+            Math.min(fourStateRegime.positionMultiplier * AGE_DECAY.FRESH_REGIME_BONUS_MULTIPLIER, 1.0) * 100
+          ) / 100;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🚀 FRESH REGIME BONUS: age=${regimeAge}/${AGE_DECAY.FRESH_REGIME_MAX_AGE}, ADX slope=${currentAdxSlope.toFixed(2)}, posMultiplier boosted to ${fourStateRegime.positionMultiplier.toFixed(2)}`);
         }
         // Store RAW detected regime to history (BEFORE persistence override)
         // CRITICAL: Must store raw regime, not effective regime, otherwise persistence
