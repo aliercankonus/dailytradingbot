@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { TrendingUp, TrendingDown, Layers, Target, ShieldAlert, ArrowRight, Clock, DollarSign, Percent } from 'lucide-react';
+import { TrendingUp, TrendingDown, Layers, Target, ShieldAlert, ArrowRight, Clock, DollarSign, Percent, Receipt } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { formatPrice, formatPercent, formatQuantity } from '@/lib/utils';
@@ -28,6 +28,7 @@ interface RelatedPosition {
   take_profit: number | null;
   realized_pnl: number | null;
   realized_pnl_percent: number | null;
+  trading_fee_amount: number | null;
   status: string;
   close_reason: string | null;
   strategy_name: string | null;
@@ -195,9 +196,10 @@ export const TradeLifecycleDialog = ({ positionId, open, onOpenChange }: TradeLi
       events.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
       // Calculate totals
-      const totalPnL = allPositions
-        .filter(p => p.status === 'closed')
-        .reduce((sum, p) => sum + (p.realized_pnl || 0), 0);
+      const closedPositions = allPositions.filter(p => p.status === 'closed');
+      const totalNetPnL = closedPositions.reduce((sum, p) => sum + (p.realized_pnl || 0), 0);
+      const totalFees = closedPositions.reduce((sum, p) => sum + (p.trading_fee_amount || 0), 0);
+      const totalGrossPnL = totalNetPnL + totalFees;
 
       return {
         mainPosition: mainPosition as RelatedPosition,
@@ -205,7 +207,9 @@ export const TradeLifecycleDialog = ({ positionId, open, onOpenChange }: TradeLi
         partialCloses: partialCloses as RelatedPosition[],
         hedgePositions: hedgePositions as RelatedPosition[],
         events,
-        totalPnL,
+        totalPnL: totalNetPnL,
+        totalFees,
+        totalGrossPnL,
         allPositions: allPositions as RelatedPosition[]
       };
     },
@@ -451,16 +455,32 @@ export const TradeLifecycleDialog = ({ positionId, open, onOpenChange }: TradeLi
               </>
             )}
 
-            {/* Grand Total */}
+            {/* P&L Breakdown */}
             <Card className={lifecycleData.totalPnL >= 0 ? 'bg-success/5 border-success/20' : 'bg-destructive/5 border-destructive/20'}>
-              <CardContent className="py-4">
+              <CardContent className="py-4 space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Gross P&L</span>
+                  <span className={`font-mono font-medium ${lifecycleData.totalGrossPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
+                    {lifecycleData.totalGrossPnL >= 0 ? '+' : ''}{formatPrice(lifecycleData.totalGrossPnL, 4, '$')}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground flex items-center gap-1">
+                    <Receipt className="h-3 w-3" />
+                    Trading Fees
+                  </span>
+                  <span className="font-mono font-medium text-warning">
+                    -{formatPrice(lifecycleData.totalFees, 4, '$')}
+                  </span>
+                </div>
+                <Separator />
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <DollarSign className={`h-5 w-5 ${lifecycleData.totalPnL >= 0 ? 'text-success' : 'text-destructive'}`} />
-                    <span className="font-semibold">Total Trade P&L</span>
+                    <span className="font-semibold">Net P&L</span>
                   </div>
                   <div className={`text-2xl font-bold ${lifecycleData.totalPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
-                    {lifecycleData.totalPnL >= 0 ? '+' : ''}{formatPrice(lifecycleData.totalPnL, 2, '$')}
+                    {lifecycleData.totalPnL >= 0 ? '+' : ''}{formatPrice(lifecycleData.totalPnL, 4, '$')}
                   </div>
                 </div>
               </CardContent>
