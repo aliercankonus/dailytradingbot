@@ -4644,7 +4644,7 @@ serve(async (req) => {
         let ageDecayMultiplier = 1.0;
         // FIX: Use smoothed ADX slope (3-point avg over 5-bar window) for hard block decisions
         // Raw slope is noisy — single-candle spikes could block healthy pullback entries
-        const currentAdxSlopeSmoothed = fullAdxResult?.adxSlopeSmoothed ?? fullAdxResult?.adxSlope ?? trendData?.volatility?.adxSlope ?? 0;
+        const currentAdxSlopeSmoothed = earlyFullAdxResult?.adxSlopeSmoothed ?? earlyFullAdxResult?.adxSlope ?? trendData?.volatility?.adxSlope ?? 0;
         const currentAdxSlopeRaw = trendData?.volatility?.adxSlope ?? 0;
         
         if (AGE_DECAY.ENABLED && regimeAge > 0 && AGE_DECAY.AFFECTED_REGIMES.includes(fourStateRegime.regime)) {
