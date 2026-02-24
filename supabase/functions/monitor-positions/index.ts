@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, DYNAMIC_REVERSAL_EXIT, COMPRESSION_TRADE_EXIT, STRATEGY_EXIT_ADJUSTMENTS, HTF_ALIGNMENT_EXIT, TRAILING_STOP_INLINE, MICRO_TREND_EXIT, MOMENTUM_CONTINUATION_EXIT, LOW_CONFIDENCE_STANDARD_EXIT, HEDGE_EXIT_PARAMS, REVERSAL_RISK_EXIT_SCORES, TIME_STOP_MULTIPLIER as TIME_STOP_MULT, PARTIAL_TP_LADDER, TRAILING_MIN_PROFIT_FLOOR, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, CONTEXT_AWARE_STOP_PARAMS, PHASE3_R_MULTIPLE_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, DYNAMIC_REVERSAL_EXIT, COMPRESSION_TRADE_EXIT, STRATEGY_EXIT_ADJUSTMENTS, HTF_ALIGNMENT_EXIT, TRAILING_STOP_INLINE, MICRO_TREND_EXIT, MOMENTUM_CONTINUATION_EXIT, LOW_CONFIDENCE_STANDARD_EXIT, HEDGE_EXIT_PARAMS, REVERSAL_RISK_EXIT_SCORES, TIME_STOP_MULTIPLIER as TIME_STOP_MULT, PARTIAL_TP_LADDER, TRAILING_MIN_PROFIT_FLOOR, PEAK_ADAPTIVE_TRAILING, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import {
   evaluateDecayVelocity,
   evaluateMicroProfitLock,
@@ -1755,6 +1755,49 @@ serve(async (req) => {
           }
         }
         
+        // ============= PEAK-ADAPTIVE TRAILING DISTANCE TIGHTENING =============
+        // When peak P&L enters "harvest zone", cap trailing distance to prevent 65-90% giveback
+        // Complementary to progressive locks (floor stops) — this tightens the ceiling
+        if (PEAK_ADAPTIVE_TRAILING.ENABLED && newPeakPnl > 0) {
+          const exemptMicro = PEAK_ADAPTIVE_TRAILING.EXEMPT_MICRO_TREND && isMicroTrendEntry;
+          const exemptMomentum = PEAK_ADAPTIVE_TRAILING.EXEMPT_MOMENTUM_CONTINUATION && isMomentumContinuationEntry;
+          
+          if (!exemptMicro && !exemptMomentum) {
+            // Find the highest matching tier
+            let matchedTier: { peakThreshold: number; maxDistancePercent: number } | null = null;
+            for (let i = PEAK_ADAPTIVE_TRAILING.TIERS.length - 1; i >= 0; i--) {
+              if (newPeakPnl >= PEAK_ADAPTIVE_TRAILING.TIERS[i].peakThreshold) {
+                matchedTier = PEAK_ADAPTIVE_TRAILING.TIERS[i];
+                break;
+              }
+            }
+            
+            if (matchedTier) {
+              let maxDistance = currentPrice * (matchedTier.maxDistancePercent / 100);
+              
+              // ADX-aware relaxation: wider distance in strong trends
+              if (PEAK_ADAPTIVE_TRAILING.STRONG_TREND_RELAXATION_ENABLED) {
+                const { adx: peakAdx } = extractADX(trendDataForPosition);
+                if (peakAdx >= PEAK_ADAPTIVE_TRAILING.VERY_STRONG_TREND_MIN_ADX) {
+                  maxDistance *= PEAK_ADAPTIVE_TRAILING.VERY_STRONG_TREND_DISTANCE_MULTIPLIER;
+                } else if (peakAdx >= PEAK_ADAPTIVE_TRAILING.STRONG_TREND_MIN_ADX) {
+                  maxDistance *= PEAK_ADAPTIVE_TRAILING.STRONG_TREND_DISTANCE_MULTIPLIER;
+                }
+              }
+              
+              // Apply cap: if current distance exceeds max, tighten it
+              if (baseTrailingDistance > maxDistance) {
+                const oldDistance = baseTrailingDistance;
+                baseTrailingDistance = maxDistance;
+                minTrailingDistance = maxDistance; // Override HTF adjustment too
+                if (PEAK_ADAPTIVE_TRAILING.LOG_DISTANCE_TIGHTENING) {
+                  positionLogger.trade(`📐 PEAK_ADAPTIVE_TRAIL: peak=${newPeakPnl.toFixed(2)}% → tier ${matchedTier.peakThreshold}% → distance ${oldDistance.toFixed(2)} → ${maxDistance.toFixed(2)} (${matchedTier.maxDistancePercent}% of price)`);
+                }
+              }
+            }
+          }
+        }
+
         if (htfAlignmentMultiplier !== 1.0) {
           positionLogger.debug(`HTF-adjusted trailing: base=${baseTrailingDistance.toFixed(2)} × ${htfAlignmentMultiplier.toFixed(2)} = ${minTrailingDistance.toFixed(2)}`);
         }
@@ -3356,6 +3399,22 @@ serve(async (req) => {
           positionLogger.trade(
             `Closed position ${position.id} - ${position.side} - ${closeReason} [${exitCategory}] at ${finalExitPrice} (P&L: $${finalPnl.toFixed(2)} / ${currentRMultiple.toFixed(2)}R)`,
           );
+          
+          // ============= GIVEBACK RATIO FORENSICS =============
+          // Track peak-to-close decay for trailing stop optimization
+          if (newPeakPnl > 0) {
+            const givebackPercent = newPeakPnl > 0 ? ((newPeakPnl - finalPnlPercent) / newPeakPnl * 100) : 0;
+            const givebackAbsolute = newPeakPnl - finalPnlPercent;
+            const feeCostPercent = feeAmount > 0 ? (feeAmount / (position.entry_price * position.quantity) * 100) : 0;
+            positionLogger.trade(
+              `📊 GIVEBACK: peak=${newPeakPnl.toFixed(2)}% → close=${finalPnlPercent.toFixed(2)}% | giveback=${givebackPercent.toFixed(0)}% (${givebackAbsolute.toFixed(2)}pp) | fees=${feeCostPercent.toFixed(3)}% | reason=${closeReason}`
+            );
+            if (givebackPercent > 50 && newPeakPnl >= 0.30) {
+              positionLogger.warn(
+                `⚠️ HIGH_GIVEBACK: ${position.symbol} gave back ${givebackPercent.toFixed(0)}% of ${newPeakPnl.toFixed(2)}% peak (closed at ${finalPnlPercent.toFixed(2)}%) — trailing may be too loose`
+              );
+            }
+          }
           
           // 🆕 HEDGE CLEANUP: If parent position had a hedge, close the hedge too
           if (position.hedge_position_id) {
