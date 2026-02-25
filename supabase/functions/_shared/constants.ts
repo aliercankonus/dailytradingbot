@@ -8091,8 +8091,10 @@ export const RALLY_OVERRIDE = {
   // ===== MOVE_EXHAUSTED THRESHOLD OVERRIDE =====
   // When rally override is active, raise MOVE_EXHAUSTED hard threshold
   // from default 7% to this value — prevents blocking during broad rallies
-  RALLY_HARD_THRESHOLD_PERCENT: 12.0,
-  RALLY_SOFT_THRESHOLD_PERCENT: 8.0,
+  // FIX: Raised from 12/8 to 20/12 — SOL moved 15% and was still blocked.
+  // During confirmed multi-TF rallies, 15-20% moves from swing lows are normal.
+  RALLY_HARD_THRESHOLD_PERCENT: 20.0,
+  RALLY_SOFT_THRESHOLD_PERCENT: 12.0,
   RALLY_POSITION_SIZE: 0.50,  // 50% position for rally-relaxed entries
   
   // ===== FRESH BREAKOUT EXEMPTION =====

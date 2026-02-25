@@ -5441,12 +5441,11 @@ serve(async (req) => {
             ? momScoreForRally >= RALLY_OVERRIDE.MIN_MOMENTUM_SCORE_LONG
             : momScoreForRally <= RALLY_OVERRIDE.MAX_MOMENTUM_SCORE_SHORT;
           
-          // Check StochRSI safety
-          const stochK4hForRally = extractStochRsiK(trendData, '4h');
-          const deepExtreme = RALLY_OVERRIDE.RESPECT_DEEP_STOCHRSI_EXTREMES && (
-            (derivedDirection === 'long' && stochK4hForRally > 95) ||
-            (derivedDirection === 'short' && stochK4hForRally < 5)
-          );
+          // FIX: REMOVED the K>95 kill-switch that prevented rally override from EVER
+          // activating during actual rallies (K is always 95-100 in rallies).
+          // Rally override now trusts multi-TF alignment + momentum confirmation.
+          // The parabolic micro-probe handles extreme K entries with conservative sizing.
+          const deepExtreme = false;
           
           if (rallyAlignedCount >= RALLY_OVERRIDE.MIN_ALIGNED_TIMEFRAMES && 
               adx >= RALLY_OVERRIDE.MIN_ADX && 
@@ -6486,7 +6485,10 @@ serve(async (req) => {
                 ? `K=${stochK4hDeep.toFixed(0)} < ${deepExhaustion.SHORT_MAX_K}, moveFromHigh=${moveFromHigh.toFixed(1)}%`
                 : `K=${stochK4hDeep.toFixed(0)} > ${deepExhaustion.LONG_MIN_K}, moveFromLow=${moveFromLow.toFixed(1)}%`;
               
-              if (adx >= deepExhaustion.HIGH_ADX_PROBE_THRESHOLD) {
+              // FIX: Rally override bypasses DEEP_EXHAUSTION_COMPOUND entirely
+              if (rallyOverrideActive && RALLY_OVERRIDE.BYPASSES_DEEP_EXHAUSTION_COMPOUND) {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚀 DEEP_EXHAUSTION_COMPOUND bypassed by RALLY OVERRIDE: ${moveStr}, rally at ${(rallyOverrideMultiplier * 100).toFixed(0)}%`);
+              } else if (adx >= deepExhaustion.HIGH_ADX_PROBE_THRESHOLD) {
                 stochRsiRunwayMultiplier = Math.min(stochRsiRunwayMultiplier, deepExhaustion.HIGH_ADX_PROBE_MULTIPLIER);
                 stochRsiRunwayGateApplied = true;
                 logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ DEEP_EXHAUSTION_COMPOUND: ${moveStr} but ADX=${adx.toFixed(1)} >= ${deepExhaustion.HIGH_ADX_PROBE_THRESHOLD} — micro probe at ${(deepExhaustion.HIGH_ADX_PROBE_MULTIPLIER * 100).toFixed(0)}%`);
