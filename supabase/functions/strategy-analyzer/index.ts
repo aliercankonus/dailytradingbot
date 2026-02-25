@@ -4644,7 +4644,12 @@ serve(async (req) => {
         let ageDecayMultiplier = 1.0;
         // FIX: Use smoothed ADX slope (3-point avg over 5-bar window) for hard block decisions
         // Raw slope is noisy — single-candle spikes could block healthy pullback entries
-        const currentAdxSlopeSmoothed = earlyFullAdxResult?.adxSlopeSmoothed ?? earlyFullAdxResult?.adxSlope ?? trendData?.volatility?.adxSlope ?? 0;
+        // FIX #4: Ensure robust fallback chain — earlyFullAdxResult may lack adxSlopeSmoothed in some code paths
+        const currentAdxSlopeSmoothed = earlyFullAdxResult?.adxSlopeSmoothed 
+          ?? earlyFullAdxResult?.adxSlope 
+          ?? trendData?.volatility?.adxSlope 
+          ?? trendData?.volatility?.adx_slope 
+          ?? 0;
         const currentAdxSlopeRaw = trendData?.volatility?.adxSlope ?? 0;
         
         if (AGE_DECAY.ENABLED && regimeAge > 0 && AGE_DECAY.AFFECTED_REGIMES.includes(fourStateRegime.regime)) {
@@ -5343,7 +5348,66 @@ serve(async (req) => {
           }
         }
 
-        // ============= CRITICAL: MOVE EXHAUSTED REVERSAL GATE (SHORT SYMMETRY FIX) =============
+        // ============= FIX #1: OPPOSING SMART MOMENTUM HARD BLOCK =============
+        // Root cause: System entered shorts when smartMomentum.score was actively bullish (+38, +48)
+        // This is a stronger check than MOMENTUM_DIRECTION_HARD_GATE — it uses the raw polarity
+        // of smartMomentum to ensure we never trade AGAINST active momentum energy
+        {
+          const momScore = smartMomentum.score;
+          const OPPOSING_THRESHOLD = 15; // Block if momentum > +15 for SHORT, < -15 for LONG
+          const isOpposingShort = derivedDirection === 'short' && momScore > OPPOSING_THRESHOLD;
+          const isOpposingLong = derivedDirection === 'long' && momScore < -OPPOSING_THRESHOLD;
+          
+          if (isOpposingShort || isOpposingLong) {
+            // Exception: Very high ADX (>= 40) with HTF alignment allows reduced position
+            const htfAligned = (derivedDirection === 'short' && htfTrend4h === 'bearish') ||
+                               (derivedDirection === 'long' && htfTrend4h === 'bullish');
+            const adxException = adx >= 40 && htfAligned;
+            
+            if (!adxException) {
+              const blockReason = `OPPOSING_SMART_MOMENTUM: ${derivedDirection.toUpperCase()} blocked — smartMomentum=${momScore.toFixed(0)} (${momScore > 0 ? 'bullish' : 'bearish'} energy opposes ${derivedDirection}), ADX=${adx.toFixed(1)}, 4h=${htfTrend4h}`;
+              rejectedByHardGates++;
+              perSymbolGateAttribution.set(symbol, { gate: 'OPPOSING_SMART_MOMENTUM', details: blockReason });
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+              
+              await logRejectionWithAI(supabase, userId, symbol, blockReason,
+                { gate: 'OPPOSING_SMART_MOMENTUM', derivedDirection, smartMomentumScore: momScore, adx, htfTrend4h, htfTrend1h, threshold: OPPOSING_THRESHOLD },
+                trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              continue;
+            } else {
+              // ADX exception: allow with 0.30x position
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ OPPOSING_SMART_MOMENTUM bypassed: ADX=${adx.toFixed(1)}>=40 + 4h=${htfTrend4h} — position at 30%`);
+              (trendData as any).opposingMomentumMultiplier = 0.30;
+            }
+          }
+        }
+
+        // ============= FIX #2: MOMENTUM STATE CONFIRMATION GATE =============
+        // Root cause: Multiple losses entered with momentum_state='none' — no trend backing
+        // Block entries when momentum has no confirmed state unless ADX shows extreme strength
+        {
+          const momState = trendData?.momentum?.state || smartMomentum?.state || 'none';
+          const MIN_ADX_FOR_NO_MOMENTUM = 35; // Only strong trends can justify entries without momentum
+          
+          if (momState === 'none' || momState === 'mixed') {
+            if (adx < MIN_ADX_FOR_NO_MOMENTUM) {
+              const blockReason = `NO_MOMENTUM_STATE: ${derivedDirection.toUpperCase()} blocked — momentum_state='${momState}' (no trend backing), ADX=${adx.toFixed(1)} < ${MIN_ADX_FOR_NO_MOMENTUM}`;
+              rejectedByHardGates++;
+              perSymbolGateAttribution.set(symbol, { gate: 'NO_MOMENTUM_STATE', details: blockReason });
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+              
+              await logRejectionWithAI(supabase, userId, symbol, blockReason,
+                { gate: 'NO_MOMENTUM_STATE', derivedDirection, momentumState: momState, smartMomentumScore: smartMomentum.score, adx, htfTrend4h },
+                trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              continue;
+            } else {
+              // High ADX exception: allow with 0.40x position
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NO_MOMENTUM_STATE bypassed: ADX=${adx.toFixed(1)}>=${MIN_ADX_FOR_NO_MOMENTUM} — position at 40%`);
+              (trendData as any).noMomentumStateMultiplier = 0.40;
+            }
+          }
+        }
+
         // ROOT CAUSE FIX: SHORTs have no equivalent gate to block entries during rallies
         // LONGs are blocked by "MOVE_EXHAUSTED: Price rallied 5%" but SHORTs were missing this
         if (MOVE_EXHAUSTED_REVERSAL_GATE.ENABLED && derivedDirection === 'short') {
@@ -16727,6 +16791,20 @@ serve(async (req) => {
           const lowConfMultiplier = LOW_CONFIDENCE_STANDARD_EXIT.POSITION_SIZE_MULTIPLIER;
           positionSizeMultiplier *= lowConfMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ LOW CONFIDENCE STANDARD (${entryConfidence} < ${LOW_CONFIDENCE_STANDARD_EXIT.MAX_CONFIDENCE}) - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (${(lowConfMultiplier * 100).toFixed(0)}% multiplier, gray zone de-risk)`);
+        }
+        
+        // Step 24b: Apply opposing smart momentum bypass reduction (30%)
+        const opposingMomMultiplier = (trendData as any).opposingMomentumMultiplier ?? 1.0;
+        if (opposingMomMultiplier < 1.0) {
+          positionSizeMultiplier *= opposingMomMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ OPPOSING SMART MOMENTUM bypass - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 24c: Apply no-momentum-state bypass reduction (40%)
+        const noMomStateMultiplier = (trendData as any).noMomentumStateMultiplier ?? 1.0;
+        if (noMomStateMultiplier < 1.0) {
+          positionSizeMultiplier *= noMomStateMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ NO MOMENTUM STATE bypass - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
         // Use user-configured base values from risk_parameters instead of legacy strategy templates
