@@ -6800,10 +6800,66 @@ serve(async (req) => {
             }
           }
           
+          // ============= RALLY OVERRIDE THRESHOLD RELAXATION =============
+          // When rally override is active, raise MOVE_EXHAUSTED from 7% to 12%
+          // This is the primary fix for missing broad rallies
+          let rallyThresholdApplied = false;
+          if (rallyOverrideActive && RALLY_OVERRIDE.BYPASSES_MOVE_EXHAUSTED) {
+            effectiveHardThreshold = RALLY_OVERRIDE.RALLY_HARD_THRESHOLD_PERCENT;
+            effectiveSoftThreshold = RALLY_OVERRIDE.RALLY_SOFT_THRESHOLD_PERCENT;
+            relaxedPositionSize = RALLY_OVERRIDE.RALLY_POSITION_SIZE;
+            useRelaxedThresholds = true;
+            rallyThresholdApplied = true;
+            relaxationCondition = `RALLY_OVERRIDE: ${rallyOverrideActive ? 'active' : 'inactive'}, thresholds raised to soft=${effectiveSoftThreshold}%, hard=${effectiveHardThreshold}%`;
+            
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚀 RALLY_OVERRIDE MOVE_EXHAUSTED relaxation: hard=${effectiveHardThreshold}%, soft=${effectiveSoftThreshold}%, size=${(relaxedPositionSize * 100).toFixed(0)}%`);
+          }
+          
+          // ============= FRESH BREAKOUT EXEMPTION =============
+          // Bypass MOVE_EXHAUSTED for 2 hours after breaking above/below 4H BB band with rising ADX
+          let freshBreakoutExemption = false;
+          const breakoutExConfig = RALLY_OVERRIDE.FRESH_BREAKOUT_EXEMPTION;
+          if (breakoutExConfig?.ENABLED && !rallyThresholdApplied) {
+            const bb4hForBreakout = trendData?.bollingerBands?.["4h"];
+            const percentB4hBreakout = bb4hForBreakout?.percentB ?? 50;
+            const bbBreakoutTimestamp = bb4hForBreakout?.bandBreakTimestamp;
+            
+            // Check if price is beyond BB band
+            const isBeyondBand = derivedDirection === 'long' 
+              ? percentB4hBreakout >= breakoutExConfig.LONG_MIN_PERCENT_B
+              : percentB4hBreakout <= breakoutExConfig.SHORT_MAX_PERCENT_B;
+            
+            // Check ADX conditions
+            const adxMeetsBreakout = adx >= breakoutExConfig.MIN_ADX && adxSlope >= breakoutExConfig.MIN_ADX_SLOPE;
+            
+            // Check time window: if we have a breakout timestamp, ensure within 2h
+            // If no timestamp available, use %B position as proxy (beyond band = recent breakout)
+            let withinWindow = true;
+            if (bbBreakoutTimestamp) {
+              const breakoutAge = (Date.now() - new Date(bbBreakoutTimestamp).getTime()) / (1000 * 60 * 60);
+              withinWindow = breakoutAge <= breakoutExConfig.EXEMPTION_WINDOW_HOURS;
+            }
+            
+            if (isBeyondBand && adxMeetsBreakout && withinWindow) {
+              freshBreakoutExemption = true;
+              effectiveHardThreshold = 15.0;  // Effectively disable hard block
+              effectiveSoftThreshold = 10.0;  // Very wide soft zone
+              relaxedPositionSize = breakoutExConfig.POSITION_MULTIPLIER;
+              useRelaxedThresholds = true;
+              relaxationCondition = `FRESH_BREAKOUT: %B=${percentB4hBreakout.toFixed(1)}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}`;
+              
+              if (breakoutExConfig.LOG_BREAKOUT_CHECKS) {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 💥 FRESH_BREAKOUT_EXEMPTION: Price beyond 4H BB band (%B=${percentB4hBreakout.toFixed(1)}), ADX=${adx.toFixed(1)} rising (slope=${adxSlope.toFixed(2)}) — MOVE_EXHAUSTED bypassed at ${(relaxedPositionSize * 100).toFixed(0)}% position`);
+              }
+            } else if (breakoutExConfig.LOG_BREAKOUT_CHECKS && (isBeyondBand || adxMeetsBreakout)) {
+              logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} 💥 FRESH_BREAKOUT check: %B=${percentB4hBreakout.toFixed(1)} (need >=${breakoutExConfig.LONG_MIN_PERCENT_B} for LONG), ADX=${adx.toFixed(1)}>=${breakoutExConfig.MIN_ADX}, slope=${adxSlope.toFixed(2)}>=${breakoutExConfig.MIN_ADX_SLOPE}, withinWindow=${withinWindow} — NOT triggered`);
+            }
+          }
+          
           // Determine effective thresholds based on graduated relaxation
           // Note: effectiveHardThreshold and effectiveSoftThreshold are already set
           // by the graduated slope logic above when useRelaxedThresholds = true
-          // OR by the RISING_TREND_EXCEPTION when conditions are met
+          // OR by the RISING_TREND_EXCEPTION, RALLY_OVERRIDE, or FRESH_BREAKOUT when conditions are met
           if (!useRelaxedThresholds) {
             // No relaxation — use default direction-specific thresholds
             effectiveHardThreshold = derivedDirection === 'short'
