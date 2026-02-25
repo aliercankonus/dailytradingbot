@@ -178,7 +178,9 @@ import {
   // NEW: Compression Micro-Range Module
   COMPRESSION_MODULE,
   // Centralized adaptive entry thresholds
-  ADAPTIVE_ENTRY_THRESHOLDS
+  ADAPTIVE_ENTRY_THRESHOLDS,
+  // NEW: Multi-TF Rally Override for fixing SHORT bias
+  RALLY_OVERRIDE
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
@@ -4654,9 +4656,35 @@ serve(async (req) => {
         
         if (AGE_DECAY.ENABLED && regimeAge > 0 && AGE_DECAY.AFFECTED_REGIMES.includes(fourStateRegime.regime)) {
           // ===== HARD BLOCK: Old regime + declining ADX slope = exhausted move =====
+          // FIX: Check for rally override BEFORE hard-blocking
+          // Pre-compute rally alignment to avoid blocking entries during broad rallies
+          let earlyRallyBypass = false;
+          if (RALLY_OVERRIDE.ENABLED && RALLY_OVERRIDE.BYPASSES_REGIME_AGE_EXHAUSTED) {
+            let earlyAlignedCount = 0;
+            const earlyTfTrends = trendData.timeframes || {};
+            for (const tf of ['15m', '30m', '1h', '4h']) {
+              const tfTrend = earlyTfTrends[tf]?.trend;
+              if ((derivedDirection === 'long' && (tfTrend === 'bullish' || tfTrend === 'weak_bullish')) ||
+                  (derivedDirection === 'short' && (tfTrend === 'bearish' || tfTrend === 'weak_bearish'))) {
+                earlyAlignedCount++;
+              }
+            }
+            const earlyMomScore = earlySmartMomentum?.score ?? 0;
+            const earlyMomConfirms = derivedDirection === 'long' 
+              ? earlyMomScore >= RALLY_OVERRIDE.MIN_MOMENTUM_SCORE_LONG
+              : earlyMomScore <= RALLY_OVERRIDE.MAX_MOMENTUM_SCORE_SHORT;
+            
+            if (earlyAlignedCount >= RALLY_OVERRIDE.MIN_ALIGNED_TIMEFRAMES && 
+                adx >= RALLY_OVERRIDE.MIN_ADX && earlyMomConfirms) {
+              earlyRallyBypass = true;
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🚀 RALLY OVERRIDE bypasses REGIME_AGE_EXHAUSTED: ${earlyAlignedCount}/4 TFs aligned, age=${regimeAge}`);
+            }
+          }
+          
           if (AGE_DECAY.HARD_BLOCK_ENABLED && 
               regimeAge >= AGE_DECAY.HARD_BLOCK_AGE_CANDLES && 
-              currentAdxSlopeSmoothed <= AGE_DECAY.HARD_BLOCK_MAX_ADX_SLOPE) {
+              currentAdxSlopeSmoothed <= AGE_DECAY.HARD_BLOCK_MAX_ADX_SLOPE &&
+              !earlyRallyBypass) {  // RALLY OVERRIDE BYPASS
             logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.TREND} 🚫 REGIME AGE HARD BLOCK: ${fourStateRegime.regime} age=${regimeAge} candles, ADX slopeSmoothed=${currentAdxSlopeSmoothed.toFixed(2)} (raw=${currentAdxSlopeRaw.toFixed(2)}) — move exhausted, blocking new entries`);
             
             rejectionBuffer.add({
@@ -5348,11 +5376,58 @@ serve(async (req) => {
           }
         }
 
+        // ============= FIX #2: MULTI-TIMEFRAME RALLY OVERRIDE =============
+        // ROOT CAUSE: Bot has 87% SHORT bias — LONGs are blocked by cascade of gates
+        // When 3+ timeframes agree on direction, it's a BROAD RALLY — bypass restrictive gates
+        let rallyOverrideActive = false;
+        let rallyOverrideMultiplier = 1.0;
+        
+        if (RALLY_OVERRIDE.ENABLED) {
+          // Count timeframes aligned with derived direction
+          let rallyAlignedCount = 0;
+          const rallyTfTrends = trendData.timeframes || {};
+          for (const tf of ['15m', '30m', '1h', '4h']) {
+            const tfTrend = rallyTfTrends[tf]?.trend;
+            if ((derivedDirection === 'long' && (tfTrend === 'bullish' || tfTrend === 'weak_bullish')) ||
+                (derivedDirection === 'short' && (tfTrend === 'bearish' || tfTrend === 'weak_bearish'))) {
+              rallyAlignedCount++;
+            }
+          }
+          
+          // Check momentum confirmation
+          const momScoreForRally = smartMomentum.score;
+          const momentumConfirmsRally = derivedDirection === 'long' 
+            ? momScoreForRally >= RALLY_OVERRIDE.MIN_MOMENTUM_SCORE_LONG
+            : momScoreForRally <= RALLY_OVERRIDE.MAX_MOMENTUM_SCORE_SHORT;
+          
+          // Check StochRSI safety
+          const stochK4hForRally = extractStochRsiK(trendData, '4h');
+          const deepExtreme = RALLY_OVERRIDE.RESPECT_DEEP_STOCHRSI_EXTREMES && (
+            (derivedDirection === 'long' && stochK4hForRally > 95) ||
+            (derivedDirection === 'short' && stochK4hForRally < 5)
+          );
+          
+          if (rallyAlignedCount >= RALLY_OVERRIDE.MIN_ALIGNED_TIMEFRAMES && 
+              adx >= RALLY_OVERRIDE.MIN_ADX && 
+              momentumConfirmsRally && 
+              !deepExtreme) {
+            rallyOverrideActive = true;
+            rallyOverrideMultiplier = rallyAlignedCount >= 4 
+              ? RALLY_OVERRIDE.UNANIMOUS_POSITION_MULTIPLIER 
+              : RALLY_OVERRIDE.POSITION_MULTIPLIER;
+            
+            if (RALLY_OVERRIDE.LOG_RALLY_OVERRIDE) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚀 RALLY OVERRIDE ACTIVE: ${rallyAlignedCount}/4 TFs aligned ${derivedDirection.toUpperCase()}, ADX=${adx.toFixed(1)}, momentum=${momScoreForRally.toFixed(0)} — bypassing restrictive gates at ${(rallyOverrideMultiplier * 100).toFixed(0)}% position`);
+            }
+          }
+        }
+
         // ============= FIX #1: OPPOSING SMART MOMENTUM HARD BLOCK =============
         // Root cause: System entered shorts when smartMomentum.score was actively bullish (+38, +48)
         // This is a stronger check than MOMENTUM_DIRECTION_HARD_GATE — it uses the raw polarity
         // of smartMomentum to ensure we never trade AGAINST active momentum energy
-        {
+        // RALLY OVERRIDE: Skip this gate if rally conditions are met (unless explicitly not bypassed)
+        if (!rallyOverrideActive || !RALLY_OVERRIDE.BYPASSES_OPPOSING_SMART_MOMENTUM) {
           const momScore = smartMomentum.score;
           const OPPOSING_THRESHOLD = 15; // Block if momentum > +15 for SHORT, < -15 for LONG
           const isOpposingShort = derivedDirection === 'short' && momScore > OPPOSING_THRESHOLD;
@@ -5382,12 +5457,14 @@ serve(async (req) => {
           }
         }
 
-        // ============= FIX #2: MOMENTUM STATE CONFIRMATION GATE =============
+        // ============= FIX #2b: MOMENTUM STATE CONFIRMATION GATE =============
         // Root cause: Multiple losses entered with momentum_state='none' — no trend backing
         // Block entries when momentum has no confirmed state unless ADX shows extreme strength
-        {
+        // RALLY OVERRIDE: Skip this gate if rally conditions are met
+        if (!rallyOverrideActive || !RALLY_OVERRIDE.BYPASSES_NO_MOMENTUM_STATE) {
           const momState = trendData?.momentum?.state || smartMomentum?.state || 'none';
-          const MIN_ADX_FOR_NO_MOMENTUM = 35; // Only strong trends can justify entries without momentum
+          // RELAXED: Was 35 → 25 — ADX 25-35 is common in early rallies and was blocking LONGs
+          const MIN_ADX_FOR_NO_MOMENTUM = 25;
           
           if (momState === 'none' || momState === 'mixed') {
             if (adx < MIN_ADX_FOR_NO_MOMENTUM) {
@@ -5401,11 +5478,20 @@ serve(async (req) => {
                 trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             } else {
-              // High ADX exception: allow with 0.40x position
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NO_MOMENTUM_STATE bypassed: ADX=${adx.toFixed(1)}>=${MIN_ADX_FOR_NO_MOMENTUM} — position at 40%`);
-              (trendData as any).noMomentumStateMultiplier = 0.40;
+              // High ADX exception: allow with 0.50x position (was 0.40x, relaxed to allow more participation)
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NO_MOMENTUM_STATE bypassed: ADX=${adx.toFixed(1)}>=${MIN_ADX_FOR_NO_MOMENTUM} — position at 50%`);
+              (trendData as any).noMomentumStateMultiplier = 0.50;
             }
           }
+        } else if (rallyOverrideActive) {
+          // Rally override active — skip NO_MOMENTUM_STATE gate entirely
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚀 NO_MOMENTUM_STATE skipped: RALLY OVERRIDE active`);
+        }
+        
+        // Store rally override multiplier for position sizing
+        if (rallyOverrideActive) {
+          (trendData as any).rallyOverrideMultiplier = rallyOverrideMultiplier;
+          (trendData as any).rallyOverrideActive = true;
         }
 
         // ROOT CAUSE FIX: SHORTs have no equivalent gate to block entries during rallies
@@ -16805,6 +16891,13 @@ serve(async (req) => {
         if (noMomStateMultiplier < 1.0) {
           positionSizeMultiplier *= noMomStateMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ NO MOMENTUM STATE bypass - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        }
+        
+        // Step 24d: Apply rally override position multiplier (65-80%)
+        const rallyMult = (trendData as any).rallyOverrideMultiplier ?? 1.0;
+        if (rallyMult < 1.0) {
+          positionSizeMultiplier *= rallyMult;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🚀 RALLY OVERRIDE - position size set to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
         
         // Use user-configured base values from risk_parameters instead of legacy strategy templates
