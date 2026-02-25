@@ -499,7 +499,10 @@ export const STRONG_TREND_TIER0_OVERRIDE = {
   
   // ===== ADX REQUIREMENTS =====
   // Minimum ADX for override consideration
-  MIN_ADX: 40,
+  // Lowered from 40 to 30: during confirmed rallies with 3+ TF alignment,
+  // ADX 30+ represents strong directional energy. 40 was filtering out 
+  // legitimate strong trends (BNB 37.4, XRP 33.4) during parabolic moves.
+  MIN_ADX: 30,
   // ADX slope must not be sharply falling (trend still has energy)
    // NOTE: Consider tightening to -0.5 for cleaner continuation if false positives occur
   MIN_ADX_SLOPE: -1.0,

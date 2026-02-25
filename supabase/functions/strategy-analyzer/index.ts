@@ -3070,8 +3070,9 @@ serve(async (req) => {
             // ===== STRONG TREND OVERRIDE PREPARATION =====
             // Extract values needed to check if Strong Trend Override applies
             const earlyAdxSlope = trendData?.volatility?.adxSlope ?? 0;
-            const earlyMomentumScore = trendData?.momentum?.smartMomentum?.score ?? 0;
-            const earlyMomentumDirection = trendData?.momentum?.smartMomentum?.direction ?? 'neutral';
+            // FIX: Read from correct path - smartMomentum is injected at top-level trendData, not under .momentum
+            const earlyMomentumScore = trendData.smartMomentum?.score ?? trendData?.momentum?.smartMomentum?.score ?? 0;
+            const earlyMomentumDirection = trendData.smartMomentum?.direction ?? trendData?.momentum?.smartMomentum?.direction ?? 'neutral';
             const early1hTrend = timeframes?.['1h']?.trend ?? 'neutral';
             const early1hConfidence = timeframes?.['1h']?.confidence ?? 0;
             
@@ -3707,41 +3708,61 @@ serve(async (req) => {
                 
                 // Continue processing instead of blocking
               } else {
-                // Standard block - no override allowed
-                rejectedByHardGates++;
-                perSymbolGateAttribution.set(symbol, { 
-                  gate: 'EARLY_TIER_0_DEEP_OVERBOUGHT', 
-                  details: `K=${earlyStochRsiK4h.toFixed(1)} > ${effectiveOverboughtThreshold} (pre-strategy${earlyRallyConditions ? ', rally-relaxed from ' + DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD : ''})` 
-                });
-                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 EARLY TIER 0 (CIRCUIT BREAKER) - LONG blocked at 4h K=${earlyStochRsiK4h.toFixed(1)} > ${effectiveOverboughtThreshold}${earlyRallyConditions ? ' (rally-relaxed threshold)' : ''}`);
-                logger.forSymbol(symbol).warn(`   → Strong Trend Override check: ${overrideCheck.reason}`);
-                await logRejectionWithAI(
-                  supabase, userId, symbol,
-                  `EARLY TIER 0 CIRCUIT BREAKER: LONG blocked - 4h StochRSI K=${earlyStochRsiK4h.toFixed(1)} is deeply overbought (> ${effectiveOverboughtThreshold})`,
-                  { 
-                    gate: "EARLY_TIER_0_DEEP_OVERBOUGHT",
-                    tier: 0,
-                    direction: "long",
-                    earlyDirection,
-                    stochRsiK4h: earlyStochRsiK4h.toFixed(1),
-                    threshold: effectiveOverboughtThreshold,
-                    baseThreshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
-                    rallyRelaxed: earlyRallyConditions,
-                    rallyAlignedCount: earlyRallyAlignedCount,
-                    adx: adx.toFixed(1),
-                    adxSlope: earlyAdxSlope.toFixed(2),
-                    momentumScore: earlyMomentumScore.toFixed(0),
-                    momentumDirection: earlyMomentumDirection,
-                    strongTrendOverrideAttempted: true,
-                    strongTrendOverrideReason: overrideCheck.reason,
-                    isPreStrategy: true,
-                    message: `Pullback probability ~90%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}`
-                  },
-                  trendData,
-                  riskParams.ai_analysis_enabled !== false,
-                  earlyOrderFlowAnalysis
-                );
-                continue;
+                // ============= PARABOLIC RALLY MICRO-PROBE FALLBACK =============
+                // When Strong Trend Override fails but rally conditions are confirmed,
+                // allow a tiny micro-probe entry (0.15x) to participate in parabolic moves.
+                // Requirements: 3+ TF aligned, ADX >= 25, rally conditions met
+                const parabolicProbeEligible = earlyRallyConditions && adx >= 25 && earlySmartMomentum.score > 0;
+                
+                if (parabolicProbeEligible) {
+                  // PARABOLIC RALLY MICRO-PROBE: Allow with very small size
+                  strongTrendTier0OverrideApplied = true;
+                  strongTrendTier0PositionMultiplier = 0.15;  // 15% position — minimal exposure
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔥 PARABOLIC RALLY MICRO-PROBE: LONG allowed at K=${earlyStochRsiK4h.toFixed(1)} with 15% size`);
+                  logger.forSymbol(symbol).info(`   → Rally conditions: ${earlyRallyAlignedCount} TFs aligned, ADX=${adx.toFixed(1)}, momentum=${earlySmartMomentum.score.toFixed(0)}`);
+                  logger.forSymbol(symbol).info(`   → Strong Trend Override failed: ${overrideCheck.reason}`);
+                  // Continue processing instead of blocking
+                } else {
+                  // Standard block - no override or probe allowed
+                  rejectedByHardGates++;
+                  perSymbolGateAttribution.set(symbol, { 
+                    gate: 'EARLY_TIER_0_DEEP_OVERBOUGHT', 
+                    details: `K=${earlyStochRsiK4h.toFixed(1)} > ${effectiveOverboughtThreshold} (pre-strategy${earlyRallyConditions ? ', rally-relaxed from ' + DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD : ''})` 
+                  });
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 EARLY TIER 0 (CIRCUIT BREAKER) - LONG blocked at 4h K=${earlyStochRsiK4h.toFixed(1)} > ${effectiveOverboughtThreshold}${earlyRallyConditions ? ' (rally-relaxed threshold)' : ''}`);
+                  logger.forSymbol(symbol).warn(`   → Strong Trend Override check: ${overrideCheck.reason}`);
+                  logger.forSymbol(symbol).warn(`   → Parabolic probe ineligible: rally=${earlyRallyConditions}, ADX=${adx.toFixed(1)}>=25, momentum=${earlySmartMomentum.score.toFixed(0)}>0`);
+                  await logRejectionWithAI(
+                    supabase, userId, symbol,
+                    `EARLY TIER 0 CIRCUIT BREAKER: LONG blocked - 4h StochRSI K=${earlyStochRsiK4h.toFixed(1)} is deeply overbought (> ${effectiveOverboughtThreshold})`,
+                    { 
+                      gate: "EARLY_TIER_0_DEEP_OVERBOUGHT",
+                      tier: 0,
+                      direction: "long",
+                      earlyDirection,
+                      stochRsiK4h: earlyStochRsiK4h.toFixed(1),
+                      threshold: effectiveOverboughtThreshold,
+                      baseThreshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
+                      rallyRelaxed: earlyRallyConditions,
+                      rallyAlignedCount: earlyRallyAlignedCount,
+                      adx: adx.toFixed(1),
+                      adxSlope: earlyAdxSlope.toFixed(2),
+                      momentumScore: earlyMomentumScore.toFixed(0),
+                      momentumDirection: earlyMomentumDirection,
+                      strongTrendOverrideAttempted: true,
+                      strongTrendOverrideReason: overrideCheck.reason,
+                      parabolicProbeChecked: true,
+                      parabolicProbeEligible: false,
+                      parabolicProbeReason: `rally=${earlyRallyConditions}, ADX=${adx.toFixed(1)}, momentum=${earlySmartMomentum.score.toFixed(0)}`,
+                      isPreStrategy: true,
+                      message: `Pullback probability ~90%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}. Parabolic probe ineligible.`
+                    },
+                    trendData,
+                    riskParams.ai_analysis_enabled !== false,
+                    earlyOrderFlowAnalysis
+                  );
+                  continue;
+                }
               }
             }
             // TIER 0 SOFT CAP: LONGs at K 95-97 → allow with 0.5x position cap (early climax zone)
