@@ -8085,6 +8085,33 @@ export const RALLY_OVERRIDE = {
   // Maximum number of rally override entries per symbol per day
   MAX_ENTRIES_PER_SYMBOL_PER_DAY: 2,
   
+  // ===== MOVE_EXHAUSTED THRESHOLD OVERRIDE =====
+  // When rally override is active, raise MOVE_EXHAUSTED hard threshold
+  // from default 7% to this value — prevents blocking during broad rallies
+  RALLY_HARD_THRESHOLD_PERCENT: 12.0,
+  RALLY_SOFT_THRESHOLD_PERCENT: 8.0,
+  RALLY_POSITION_SIZE: 0.50,  // 50% position for rally-relaxed entries
+  
+  // ===== FRESH BREAKOUT EXEMPTION =====
+  // Bypass MOVE_EXHAUSTED entirely for 2 hours after breaking above/below 4H BB band
+  // with rising ADX — the move is structurally fresh, not exhausted
+  FRESH_BREAKOUT_EXEMPTION: {
+    ENABLED: true,
+    // %B threshold: price must be beyond upper/lower Bollinger band
+    LONG_MIN_PERCENT_B: 100,   // %B >= 100 = above upper band
+    SHORT_MAX_PERCENT_B: 0,    // %B <= 0 = below lower band
+    // ADX must be rising (slope > 0)
+    MIN_ADX_SLOPE: 0,
+    // Minimum ADX for breakout validity
+    MIN_ADX: 20,
+    // How long the exemption lasts after breakout (in hours)
+    EXEMPTION_WINDOW_HOURS: 2,
+    // Position sizing for breakout entries
+    POSITION_MULTIPLIER: 0.60,  // 60% of normal — fresh but extended
+    // Logging
+    LOG_BREAKOUT_CHECKS: true,
+  },
+  
   // ===== LOGGING =====
   LOG_RALLY_OVERRIDE: true,
   ENTRY_TYPE_TAG: 'RALLY_OVERRIDE' as const,
