@@ -4222,8 +4222,8 @@ export const FOUR_STATE_REGIME = {
     // ===== HARD BLOCK: Late entry with declining ADX slope =====
     // When regime is old AND ADX slope is declining, the move is exhausted — hard block new entries
     HARD_BLOCK_ENABLED: true,
-    HARD_BLOCK_AGE_CANDLES: 40,        // Block after 40 candles (was allowing up to 60 with 0.60x)
-    HARD_BLOCK_MAX_ADX_SLOPE: -0.3,    // Only block when slope is declining (confirms exhaustion)
+    HARD_BLOCK_AGE_CANDLES: 35,        // TIGHTENED: Was 40 — positions at regimeAge 35-40 were still losing
+    HARD_BLOCK_MAX_ADX_SLOPE: -0.15,   // TIGHTENED: Was -0.3 — slope -0.15 to -0.3 still showed exhaustion
     HARD_BLOCK_REASON: 'REGIME_AGE_EXHAUSTED',
     
     // ===== FRESH REGIME BONUS: Reward early entries =====
@@ -6624,19 +6624,18 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
   REGIME_AWARE_BLOCK: {
     ENABLED: true,
     // Block if distance from extreme < this AND regime is not strong
-    PROXIMITY_THRESHOLD_PERCENT: 0.4,
+    // TIGHTENED: Was 0.4% — still allowed shorts at 0.5-0.8% from low (bounce zone)
+    PROXIMITY_THRESHOLD_PERCENT: 0.8,
     // Regime strength requirements to bypass the block
-    // FIXED: Was 32 — unreachable in most market conditions (typical ADX 15-28)
-    // Lowered to 25 to allow shorts in moderate trending environments
-    MIN_ADX_TO_BYPASS: 25,
+    // TIGHTENED: Was 25 — too easy to bypass, most losing shorts had ADX 25-30
+    MIN_ADX_TO_BYPASS: 32,
     // Momentum must be decisive (absolute score) to bypass
-    // FIXED: Was 20 — too strict when momentum is building (scores 5-15 are common)
-    MIN_MOMENTUM_SCORE_TO_BYPASS: 10,
+    // TIGHTENED: Was 10 — neutral momentum (5-15) is NOT confirmation
+    MIN_MOMENTUM_SCORE_TO_BYPASS: 20,
     // Order flow must confirm breakdown to bypass
-    // FIXED: Was 20 — most readings sit 30-70 neutral range, <=20 rarely occurs
-    MIN_ORDER_FLOW_SCORE_TO_BYPASS: 10,
+    MIN_ORDER_FLOW_SCORE_TO_BYPASS: 15,
     // If ANY of these bypass conditions met, allow with reduced size
-    BYPASS_POSITION_MULTIPLIER: 0.35,
+    BYPASS_POSITION_MULTIPLIER: 0.30,
   },
   
   // ===== IMPROVEMENT #3: EXPANDED NEAR-EXTREME HARD BLOCK =====
