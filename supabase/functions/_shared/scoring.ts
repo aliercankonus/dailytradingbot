@@ -5284,11 +5284,16 @@ export const classify4StateRegime = (
   }
   
   // ===== STATE 3: RANGE COMPRESSION =====
+  // FIX: BB width expanding = NOT compression. Only classify as RANGE_COMPRESSION
+  // if volatility is actually contracting, not expanding.
   const momentumHasNoEdge = R.RANGE_COMPRESSION.NO_EDGE_MOMENTUM_STATES.includes(momentumState);
   const adxBelowThreshold = adx < R.RANGE_COMPRESSION.MAX_ADX;
   const momentumScoreTooLow = absMomentumScore < R.RANGE_COMPRESSION.MAX_ABS_MOMENTUM_SCORE;
   
-  const isExplicitRangeCompression = trendIsNeutral && (adxBelowThreshold || (momentumHasNoEdge && momentumScoreTooLow));
+  // BB width expanding check: if relativeATR > 1.1 (above historical avg), volatility is expanding → not compression
+  const bbWidthExpanding = relativeATR > 1.1;
+  
+  const isExplicitRangeCompression = trendIsNeutral && !bbWidthExpanding && (adxBelowThreshold || (momentumHasNoEdge && momentumScoreTooLow));
   
   // Transition buffer: if confidence is in the lower transition zone (45-55), allow cautious entries
   if (isExplicitRangeCompression) {
