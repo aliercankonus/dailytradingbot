@@ -2806,7 +2806,7 @@ serve(async (req) => {
         rejectionBuffer.add({
           user_id: userId, 
           symbol,
-          rejection_reason: `Position deduplication: ${recentPosition.status} position opened ${openedAgo} minutes ago (within 30-minute window)`,
+          rejection_reason: `POSITION_DEDUPLICATION: ${recentPosition.status} position within 30-minute window`,
           filters_status: { 
             recentPositionId: recentPosition.id,
             recentPositionStatus: recentPosition.status,
@@ -3674,10 +3674,27 @@ serve(async (req) => {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ TIER 0 SOFT CAP: SHORT at K=${earlyStochRsiK4h.toFixed(1)} → position capped at ${(tier0SoftCapMultiplier * 100).toFixed(0)}% (early capitulation zone ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD}-${DEEP_STOCHRSI_HARD_GATE.SOFT_CAP_OVERSOLD_K_THRESHOLD})`);
             }
 
-            // TIER 0 DEEP OVERBOUGHT: Block LONGs when K > 97 (hard), soft cap at 95-97
+            // TIER 0 DEEP OVERBOUGHT: Block LONGs when K > threshold (hard), soft cap below that
             // EXCEPTION 1: Mean reversion strategies targeting reversal (SHORT) are allowed at K > 95
             // EXCEPTION 2: Strong Trend Override allows LONG if ADX>40 and momentum confirms
-            if (earlyDirection === 'long' && earlyStochRsiK4h > DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD) {
+            // FIX: During RALLY_OVERRIDE conditions (3+ TFs aligned), raise threshold from 97 to 98
+            // to prevent borderline K=97.6 from blocking confirmed rallies
+            const earlyRallyAlignedCount = (() => {
+              let count = 0;
+              const tfTrends = trendData.timeframes || {};
+              for (const tf of ['15m', '30m', '1h', '4h']) {
+                const tfTrend = tfTrends[tf]?.trend;
+                if ((earlyDirection === 'long' && (tfTrend === 'bullish' || tfTrend === 'weak_bullish')) ||
+                    (earlyDirection === 'short' && (tfTrend === 'bearish' || tfTrend === 'weak_bearish'))) {
+                  count++;
+                }
+              }
+              return count;
+            })();
+            const earlyRallyConditions = earlyRallyAlignedCount >= 3 && adx >= 20;
+            const effectiveOverboughtThreshold = earlyRallyConditions ? 98 : DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD;
+            
+            if (earlyDirection === 'long' && earlyStochRsiK4h > effectiveOverboughtThreshold) {
               const overrideCheck = checkStrongTrendOverride('long');
               
               if (overrideCheck.allowed) {
@@ -3694,20 +3711,23 @@ serve(async (req) => {
                 rejectedByHardGates++;
                 perSymbolGateAttribution.set(symbol, { 
                   gate: 'EARLY_TIER_0_DEEP_OVERBOUGHT', 
-                  details: `K=${earlyStochRsiK4h.toFixed(1)} > ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD} (pre-strategy)` 
+                  details: `K=${earlyStochRsiK4h.toFixed(1)} > ${effectiveOverboughtThreshold} (pre-strategy${earlyRallyConditions ? ', rally-relaxed from ' + DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD : ''})` 
                 });
-                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 EARLY TIER 0 (CIRCUIT BREAKER) - LONG blocked at 4h K=${earlyStochRsiK4h.toFixed(1)} > ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD}`);
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 EARLY TIER 0 (CIRCUIT BREAKER) - LONG blocked at 4h K=${earlyStochRsiK4h.toFixed(1)} > ${effectiveOverboughtThreshold}${earlyRallyConditions ? ' (rally-relaxed threshold)' : ''}`);
                 logger.forSymbol(symbol).warn(`   → Strong Trend Override check: ${overrideCheck.reason}`);
                 await logRejectionWithAI(
                   supabase, userId, symbol,
-                  `EARLY TIER 0 CIRCUIT BREAKER: LONG blocked - 4h StochRSI K=${earlyStochRsiK4h.toFixed(1)} is deeply overbought (> ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD})`,
+                  `EARLY TIER 0 CIRCUIT BREAKER: LONG blocked - 4h StochRSI K=${earlyStochRsiK4h.toFixed(1)} is deeply overbought (> ${effectiveOverboughtThreshold})`,
                   { 
                     gate: "EARLY_TIER_0_DEEP_OVERBOUGHT",
                     tier: 0,
                     direction: "long",
                     earlyDirection,
                     stochRsiK4h: earlyStochRsiK4h.toFixed(1),
-                    threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
+                    threshold: effectiveOverboughtThreshold,
+                    baseThreshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
+                    rallyRelaxed: earlyRallyConditions,
+                    rallyAlignedCount: earlyRallyAlignedCount,
                     adx: adx.toFixed(1),
                     adxSlope: earlyAdxSlope.toFixed(2),
                     momentumScore: earlyMomentumScore.toFixed(0),
