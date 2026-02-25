@@ -4146,19 +4146,22 @@ export const FOUR_STATE_REGIME = {
     TRANSITIONS: {
       // COMPRESSION → EXPANSION: Immediate (explosive breakout from compression)
       RANGE_COMPRESSION_TO_TREND_EXPANSION: 0,  // No delay - compression breakouts are explosive
-      // EXPANSION → EXHAUSTION: Fast (1 candle) - don't delay risk reduction
-      TREND_EXPANSION_TO_TREND_EXHAUSTION: 1,
-      // EXHAUSTION → EXPANSION: Standard (2 candles) - confirm recovery
-      TREND_EXHAUSTION_TO_TREND_EXPANSION: 2,
-      // BREAKOUT ↔ EXPANSION: Standard (2 candles)
-      BREAKOUT_SETUP_TO_TREND_EXPANSION: 2,
+      // EXPANSION → EXHAUSTION: IMMEDIATE — don't delay risk reduction
+      // FIX: Was 1 candle, but this caused 1-candle lag in recognizing exhaustion
+      TREND_EXPANSION_TO_TREND_EXHAUSTION: 0,   // TIGHTENED from 1 → 0: immediate exhaustion recognition
+      // EXHAUSTION → EXPANSION: FAST — confirm recovery quickly
+      // FIX: Was 2 candles, but this prevented the system from catching trend reversals
+      // When price action contradicts exhaustion classification, flip faster
+      TREND_EXHAUSTION_TO_TREND_EXPANSION: 1,   // TIGHTENED from 2 → 1: faster recovery recognition
+      // BREAKOUT ↔ EXPANSION: Fast (1 candle)
+      BREAKOUT_SETUP_TO_TREND_EXPANSION: 1,     // TIGHTENED from 2 → 1
       TREND_EXPANSION_TO_BREAKOUT_SETUP: 2,
       // Any → COMPRESSION: Standard (2 candles) - confirm energy truly gone
       TREND_EXPANSION_TO_RANGE_COMPRESSION: 2,
       BREAKOUT_SETUP_TO_RANGE_COMPRESSION: 2,
       TREND_EXHAUSTION_TO_RANGE_COMPRESSION: 2,
-      // COMPRESSION → BREAKOUT: Standard (2 candles)
-      RANGE_COMPRESSION_TO_BREAKOUT_SETUP: 2,
+      // COMPRESSION → BREAKOUT: Fast (1 candle)
+      RANGE_COMPRESSION_TO_BREAKOUT_SETUP: 1,   // TIGHTENED from 2 → 1: catch breakouts faster
       // COMPRESSION → EXHAUSTION: Immediate (already in low-energy state)
       RANGE_COMPRESSION_TO_TREND_EXHAUSTION: 0,
     } as Record<string, number>,
@@ -7197,26 +7200,28 @@ export const HTF_ALIGNMENT_EXIT = {
 // Together they create a tightening funnel: floor rises AND ceiling drops
 export const PEAK_ADAPTIVE_TRAILING = {
   ENABLED: true,
-  // Tiers: when peak P&L >= threshold, cap trailing distance to max_distance_percent
-  // Philosophy: early trade = volatility tolerant, mid = protect edge, strong = lock aggressively
+  // TIGHTENED 40-50%: Previous distances caused 73% average giveback
+  // Root cause: a 0.7% peak trade would trail 0.45% → exit at 0.25% (64% giveback)
+  // Fix: shrink all distances so max giveback is ~35-45% of peak
   TIERS: [
-    // Below 0.3%: probe phase — let breathe with wide distance
-    { peakThreshold: 0.30, maxDistancePercent: 0.45 },  // Probe → medium-wide (0.30-0.50% zone)
-    { peakThreshold: 0.50, maxDistancePercent: 0.30 },  // Harvest zone — tighten
-    { peakThreshold: 0.80, maxDistancePercent: 0.25 },  // Must capture — floor is 0.25%
-    { peakThreshold: 1.00, maxDistancePercent: 0.22 },  // Strong move — very tight
-    { peakThreshold: 1.50, maxDistancePercent: 0.20 },  // Lock it down
-    { peakThreshold: 2.00, maxDistancePercent: 0.18 },  // Exceptional — minimal giveback
+    // Below 0.3%: probe phase — tighter breathing room
+    { peakThreshold: 0.20, maxDistancePercent: 0.25 },  // NEW: catch early probes
+    { peakThreshold: 0.30, maxDistancePercent: 0.22 },  // Was 0.45 → 0.22 (-51%)
+    { peakThreshold: 0.50, maxDistancePercent: 0.18 },  // Was 0.30 → 0.18 (-40%)
+    { peakThreshold: 0.80, maxDistancePercent: 0.15 },  // Was 0.25 → 0.15 (-40%)
+    { peakThreshold: 1.00, maxDistancePercent: 0.12 },  // Was 0.22 → 0.12 (-45%)
+    { peakThreshold: 1.50, maxDistancePercent: 0.10 },  // Was 0.20 → 0.10 (-50%)
+    { peakThreshold: 2.00, maxDistancePercent: 0.08 },  // Was 0.18 → 0.08 (-56%)
   ],
-  // Default distance for peak < 0.30% (probe phase — maximum breathing room)
-  DEFAULT_DISTANCE_PERCENT: 0.55,
+  // Default distance for peak < 0.20% (probe phase — moderate breathing room)
+  DEFAULT_DISTANCE_PERCENT: 0.35,  // Was 0.55 → 0.35 (-36%)
   // ADX-aware relaxation: in strong trends, allow slightly wider distance
-  // to avoid chopping out during normal trend pullbacks
+  // REDUCED: Was 30-50% wider, now 15-25% wider (still prevents chopout but less giveback)
   STRONG_TREND_RELAXATION_ENABLED: true,
   STRONG_TREND_MIN_ADX: 30,
-  STRONG_TREND_DISTANCE_MULTIPLIER: 1.30,  // 30% wider in strong trends
+  STRONG_TREND_DISTANCE_MULTIPLIER: 1.15,  // Was 1.30 → 1.15
   VERY_STRONG_TREND_MIN_ADX: 40,
-  VERY_STRONG_TREND_DISTANCE_MULTIPLIER: 1.50,  // 50% wider in very strong trends
+  VERY_STRONG_TREND_DISTANCE_MULTIPLIER: 1.25,  // Was 1.50 → 1.25
   // Don't apply to MICRO_TREND entries (they have their own fixed distance)
   EXEMPT_MICRO_TREND: true,
   // Don't apply to MOMENTUM_CONTINUATION (they use decay as primary exit)
@@ -7229,9 +7234,10 @@ export const PEAK_ADAPTIVE_TRAILING = {
 // Inline trailing stop thresholds that were previously hardcoded
 export const TRAILING_STOP_INLINE = {
   // Minimum trailing distance as % of current price
-  MIN_TRAILING_DISTANCE_PERCENT: 1.5,
+  // TIGHTENED: Was 1.5% → 0.8% — 1.5% is wider than most trades' entire peak P&L
+  MIN_TRAILING_DISTANCE_PERCENT: 0.8,
   // Aggressive stop distance from current price (for Phase 3 exit signals)
-  AGGRESSIVE_STOP_DISTANCE_PERCENT: 0.5,
+  AGGRESSIVE_STOP_DISTANCE_PERCENT: 0.3,  // Was 0.5 → 0.3
   // Decay velocity override in smart AITS
   DECAY_OVERRIDE_VELOCITY_THRESHOLD: 0.02,  // %/min
   DECAY_OVERRIDE_LOCK_PERCENT: 0.80,
@@ -8040,4 +8046,46 @@ export const ENTRY_QUALITY_GRADES = {
   MIN_RECOMMENDED: 60,
   // Breakout volume threshold
   BREAKOUT_VOLUME: 1.5,
+} as const;
+
+// ============= MULTI-TIMEFRAME RALLY OVERRIDE =============
+// ROOT CAUSE FIX: Bot missed entire rallies because gates blocked LONGs one-by-one
+// When 3+ timeframes align bullish, the system should recognize a BROAD RALLY
+// and bypass restrictive gates (MOVE_EXHAUSTED, NO_MOMENTUM_STATE, REGIME_AGE_EXHAUSTED)
+// This creates an "express lane" for clear directional markets
+export const RALLY_OVERRIDE = {
+  ENABLED: true,
+  
+  // ===== ACTIVATION CONDITIONS =====
+  // Minimum aligned timeframes (out of 4: 15m, 30m, 1h, 4h)
+  MIN_ALIGNED_TIMEFRAMES: 3,
+  // ADX must show trend energy
+  MIN_ADX: 20,
+  // Smart momentum must confirm direction
+  MIN_MOMENTUM_SCORE_LONG: 10,   // Score > +10 for LONG rally
+  MAX_MOMENTUM_SCORE_SHORT: -10, // Score < -10 for SHORT rally
+  
+  // ===== GATES BYPASSED BY RALLY OVERRIDE =====
+  // These gates are SKIPPED when rally conditions are met
+  BYPASSES_MOVE_EXHAUSTED: true,
+  BYPASSES_NO_MOMENTUM_STATE: true,
+  BYPASSES_REGIME_AGE_EXHAUSTED: true,
+  BYPASSES_OPPOSING_SMART_MOMENTUM: false,  // Still respect raw opposing momentum
+  BYPASSES_DEEP_EXHAUSTION_COMPOUND: true,
+  
+  // ===== POSITION SIZING =====
+  // Reduced position for rally entries (still somewhat late)
+  POSITION_MULTIPLIER: 0.65,  // 65% of normal — late but directionally correct
+  // Boost if 4/4 timeframes align (unanimous)
+  UNANIMOUS_POSITION_MULTIPLIER: 0.80,  // 80% when ALL 4 TFs agree
+  
+  // ===== SAFETY =====
+  // Don't override if StochRSI is at absolute extremes (K > 95 or K < 5)
+  RESPECT_DEEP_STOCHRSI_EXTREMES: true,
+  // Maximum number of rally override entries per symbol per day
+  MAX_ENTRIES_PER_SYMBOL_PER_DAY: 2,
+  
+  // ===== LOGGING =====
+  LOG_RALLY_OVERRIDE: true,
+  ENTRY_TYPE_TAG: 'RALLY_OVERRIDE' as const,
 } as const;
