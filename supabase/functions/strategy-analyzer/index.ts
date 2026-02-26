@@ -4722,9 +4722,15 @@ serve(async (req) => {
             }
           }
           
+          // FIX: ADX-graduated slope threshold — when ADX is very high, the trend is still strong
+          // even with slightly declining slope. ADX>=50: allow slope down to -0.5, ADX>=40: -0.35
+          const effectiveHardBlockSlope = adx >= 50 ? -0.50 
+            : adx >= 40 ? -0.35 
+            : AGE_DECAY.HARD_BLOCK_MAX_ADX_SLOPE; // default -0.15
+          
           if (AGE_DECAY.HARD_BLOCK_ENABLED && 
               regimeAge >= AGE_DECAY.HARD_BLOCK_AGE_CANDLES && 
-              currentAdxSlopeSmoothed <= AGE_DECAY.HARD_BLOCK_MAX_ADX_SLOPE &&
+              currentAdxSlopeSmoothed <= effectiveHardBlockSlope &&
               !earlyRallyBypass) {  // RALLY OVERRIDE BYPASS
             logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.TREND} 🚫 REGIME AGE HARD BLOCK: ${fourStateRegime.regime} age=${regimeAge} candles, ADX slopeSmoothed=${currentAdxSlopeSmoothed.toFixed(2)} (raw=${currentAdxSlopeRaw.toFixed(2)}) — move exhausted, blocking new entries`);
             
@@ -6702,7 +6708,13 @@ serve(async (req) => {
             relaxedPositionSize = relaxation.RELAXED_SOFT_POSITION_SIZE;
             
             if (!slopeFullyBlocksRelaxation && gradSlope?.ENABLED) {
-              if (adxSlope >= gradSlope.FULL_RELAXATION_SLOPE) {
+              // FIX: New ACCELERATING tier — when ADX slope is strongly positive, raise threshold to 10%
+              if (adxSlope >= (gradSlope.ACCELERATING_SLOPE ?? 0.5)) {
+                relaxationTier = 'ACCELERATING';
+                effectiveHardThreshold = gradSlope.ACCELERATING_HARD_THRESHOLD ?? 10.0;
+                effectiveSoftThreshold = relaxation.RELAXED_SOFT_THRESHOLD_PERCENT;
+                relaxedPositionSize = gradSlope.ACCELERATING_POSITION_SIZE ?? 0.40;
+              } else if (adxSlope >= gradSlope.FULL_RELAXATION_SLOPE) {
                 relaxationTier = 'FULL';
                 effectiveHardThreshold = gradSlope.FULL_HARD_THRESHOLD;
                 effectiveSoftThreshold = relaxation.RELAXED_SOFT_THRESHOLD_PERCENT;
@@ -11803,8 +11815,10 @@ serve(async (req) => {
           // When ADX >= 50 and 4h is aligned, ignore the "K <= D" (not rising) condition
           // for K values in the 80-92 range. Only hard block if K >= 93 AND K <= D
           // This fixes false rejections in very strong trends during consolidation
+          // FIX: Lowered from ADX>=50 to ADX>=45 to match parabolic mode activation
+          // Parabolic mode activates at 45, so bypass should too — prevents contradiction
           const veryHighAdxBypassAllowed = (
-            adx >= 50 &&
+            adx >= 45 &&
             stochFilterTrend4h === "bullish" &&
             stochFilterConf4h >= 60 &&
             stochRsiK4h >= 80 &&
