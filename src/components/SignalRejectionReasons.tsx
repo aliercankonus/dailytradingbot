@@ -513,6 +513,132 @@ const RangeCompressionBlockDisplay = ({ filtersStatus, trendData }: { filtersSta
   );
 };
 
+// Trend Expansion Exemption Display — shows why the exemption didn't fire
+const TrendExpansionExemptionDisplay = ({ filtersStatus }: { filtersStatus: any }) => {
+  const vals = filtersStatus?.trendExpansionExemptionValues || {};
+  const thresholds = filtersStatus?.trendExpansionExemptionThresholds || {};
+  const reason = filtersStatus?.trendExpansionExemptionReason || '';
+  const direction = filtersStatus?.direction || 'long';
+  
+  const adx = coerceNumeric(vals.adx, 0);
+  const adxSlope = coerceNumeric(vals.adxSlope, 0);
+  const momScore = coerceNumeric(vals.momentumScore, 0);
+  const alignedTFs = coerceNumeric(vals.alignedTFs, 0);
+  
+  const minAdx = coerceNumeric(thresholds.minAdx, 30);
+  const minSlope = coerceNumeric(thresholds.minAdxSlope, 0);
+  const minMom = coerceNumeric(thresholds.minMomentumScore, 15);
+  const minTFs = coerceNumeric(thresholds.minAlignedTFs, 2);
+  const softMult = coerceNumeric(thresholds.softZoneMultiplier, 0.40);
+  const deepMult = coerceNumeric(thresholds.deepZoneMultiplier, 0.30);
+  
+  // Determine which conditions pass
+  const adxPasses = adx >= minAdx;
+  const slopePasses = adxSlope >= minSlope;
+  const momPasses = direction === 'short' ? momScore <= -minMom : momScore >= minMom;
+  const tfPasses = alignedTFs >= minTFs;
+  const passCount = [adxPasses, slopePasses, momPasses, tfPasses].filter(Boolean).length;
+
+  const ConditionRow = ({ label, value, threshold, passes, format }: { 
+    label: string; value: number; threshold: number; passes: boolean; format?: (v: number) => string 
+  }) => {
+    const fmt = format || ((v: number) => v.toFixed(1));
+    const pct = threshold > 0 ? Math.min((Math.abs(value) / threshold) * 100, 100) : (value >= threshold ? 100 : 0);
+    return (
+      <div className="space-y-0.5">
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="text-muted-foreground">{label}</span>
+          <div className="flex items-center gap-1">
+            <span className={`font-mono font-medium ${passes ? 'text-green-400' : 'text-red-400'}`}>
+              {fmt(value)}
+            </span>
+            <span className="text-muted-foreground">/ {fmt(threshold)}</span>
+            {passes ? (
+              <CheckCircle2 className="h-3 w-3 text-green-400" />
+            ) : (
+              <XCircle className="h-3 w-3 text-red-400" />
+            )}
+          </div>
+        </div>
+        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+          <div 
+            className={`h-full rounded-full transition-all ${passes ? 'bg-green-500' : pct >= 70 ? 'bg-amber-500' : 'bg-red-500'}`}
+            style={{ width: `${Math.max(2, pct)}%` }}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-2 p-2 bg-muted/30 rounded-md border border-border/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Zap className="h-3.5 w-3.5 text-blue-400" />
+          <span className="text-xs font-medium">Trend Expansion Exemption</span>
+        </div>
+        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
+          passCount >= 3 ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' : 'bg-red-500/20 text-red-400 border-red-500/40'
+        }`}>
+          {passCount}/4 conditions met
+        </Badge>
+      </div>
+      
+      <div className="text-[10px] text-muted-foreground italic">
+        This gate allows {direction.toUpperCase()} entries during strong trend expansion even at extreme StochRSI levels. 
+        It requires all 4 conditions to pass — would size at {(softMult * 100).toFixed(0)}–{(deepMult * 100).toFixed(0)}% position.
+      </div>
+      
+      <div className="space-y-1.5 pt-1 border-t border-border/50">
+        <ConditionRow 
+          label="ADX (trend strength)" 
+          value={adx} 
+          threshold={minAdx} 
+          passes={adxPasses}
+        />
+        <ConditionRow 
+          label="ADX Slope (acceleration)" 
+          value={adxSlope} 
+          threshold={minSlope} 
+          passes={slopePasses}
+          format={(v) => (v >= 0 ? '+' : '') + v.toFixed(2)}
+        />
+        <ConditionRow 
+          label={`Momentum Score${direction === 'short' ? ' (bearish)' : ''}`}
+          value={direction === 'short' ? Math.abs(momScore) : momScore} 
+          threshold={minMom} 
+          passes={momPasses}
+          format={(v) => v.toFixed(0)}
+        />
+        <ConditionRow 
+          label="Aligned Timeframes" 
+          value={alignedTFs} 
+          threshold={minTFs} 
+          passes={tfPasses}
+          format={(v) => `${v.toFixed(0)} TFs`}
+        />
+      </div>
+      
+      {reason && (
+        <div className="text-[9px] text-muted-foreground pt-1 border-t border-border/30 font-mono">
+          Failed: {reason}
+        </div>
+      )}
+      
+      <div className="text-[9px] text-muted-foreground pt-1 border-t border-border/30">
+        💡 {!adxPasses 
+          ? `ADX needs to reach ${minAdx}+ to confirm trend expansion (currently ${adx.toFixed(1)}).`
+          : !slopePasses 
+          ? `ADX slope must be ≥ ${minSlope} (rising/flat) — currently declining at ${adxSlope.toFixed(2)}.`
+          : !momPasses 
+          ? `Momentum score needs to reach ${direction === 'short' ? `≤ -${minMom}` : `≥ ${minMom}`} to confirm directional conviction.`
+          : `Need ${minTFs}+ timeframes aligned ${direction === 'short' ? 'bearish' : 'bullish'} (currently ${alignedTFs}).`
+        }
+      </div>
+    </div>
+  );
+};
+
 // Market Regime Details component for early rejections
 const MarketRegimeDetails = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const adx = coerceNumeric(filtersStatus?.adx ?? trendData?.volatility?.adx, undefined as any);
@@ -8624,6 +8750,10 @@ export const SignalRejectionReasons = () => {
       return (
         <div className="space-y-2">
           <SevereHTFGateDisplay filtersStatus={fs} trendData={rejection.trend_data} />
+          {/* Show Trend Expansion Exemption diagnostics if checked */}
+          {fs?.trendExpansionExemptionChecked && !fs?.trendExpansionExemptionAllowed && (
+            <TrendExpansionExemptionDisplay filtersStatus={fs} />
+          )}
           {/* Show Flash Crash Bounce Probe Phase 2 diagnostics if checked */}
           {fs?.flashCrashProbeChecked && (
             <FlashCrashProbePhase2Display filtersStatus={fs} trendData={rejection.trend_data} />

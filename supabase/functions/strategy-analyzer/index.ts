@@ -3688,6 +3688,24 @@ serve(async (req) => {
                       recentKValuesCount: phase2Diagnostics.recentKValuesCount,
                     } : null,
                     flashCrashDropPercent: trendData?.priceDistanceFromSwing?.distanceFromHighPercent?.toFixed(1) ?? null,
+                    // Trend Expansion Exemption diagnostics (SHORT side)
+                    trendExpansionExemptionChecked: true,
+                    trendExpansionExemptionAllowed: false,
+                    trendExpansionExemptionReason: shortTrendExpExemptionCheck.reason,
+                    trendExpansionExemptionThresholds: {
+                      minAdx: TREND_EXPANSION_EXEMPTION.MIN_ADX,
+                      minAdxSlope: TREND_EXPANSION_EXEMPTION.MIN_ADX_SLOPE,
+                      minMomentumScore: TREND_EXPANSION_EXEMPTION.MIN_MOMENTUM_SCORE,
+                      minAlignedTFs: TREND_EXPANSION_EXEMPTION.MIN_ALIGNED_TIMEFRAMES,
+                      softZoneMultiplier: TREND_EXPANSION_EXEMPTION.SOFT_ZONE_POSITION_MULTIPLIER,
+                      deepZoneMultiplier: TREND_EXPANSION_EXEMPTION.DEEP_ZONE_POSITION_MULTIPLIER,
+                    },
+                    trendExpansionExemptionValues: {
+                      adx: parseFloat(adx.toFixed(1)),
+                      adxSlope: parseFloat(earlyAdxSlope.toFixed(2)),
+                      momentumScore: parseFloat(earlyMomentumScore.toFixed(0)),
+                      alignedTFs: (() => { let bc = 0; const tfs = trendData.timeframes || {}; for (const tf of ['15m','30m','1h','4h']) { const t = tfs[tf]?.trend; if (t === 'bearish' || t === 'weak_bearish') bc++; } return bc; })(),
+                    },
                     isPreStrategy: true,
                     message: `Bounce probability ~80%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}. Flash Crash Phase 2: ${phase2Triggered ? 'TRIGGERED' : (Object.keys(phase2Diagnostics).length > 0 ? 'EVALUATED' : 'NOT_CHECKED')}`
                   },
@@ -3824,6 +3842,24 @@ serve(async (req) => {
                       parabolicProbeChecked: true,
                       parabolicProbeEligible: false,
                       parabolicProbeReason: `rally=${earlyRallyConditions}, ADX=${adx.toFixed(1)}, momentum=${earlySmartMomentum.score.toFixed(0)}`,
+                      // Trend Expansion Exemption diagnostics
+                      trendExpansionExemptionChecked: true,
+                      trendExpansionExemptionAllowed: false,
+                      trendExpansionExemptionReason: trendExpExemptionCheck.reason,
+                      trendExpansionExemptionThresholds: {
+                        minAdx: TREND_EXPANSION_EXEMPTION.MIN_ADX,
+                        minAdxSlope: TREND_EXPANSION_EXEMPTION.MIN_ADX_SLOPE,
+                        minMomentumScore: TREND_EXPANSION_EXEMPTION.MIN_MOMENTUM_SCORE,
+                        minAlignedTFs: TREND_EXPANSION_EXEMPTION.MIN_ALIGNED_TIMEFRAMES,
+                        softZoneMultiplier: TREND_EXPANSION_EXEMPTION.SOFT_ZONE_POSITION_MULTIPLIER,
+                        deepZoneMultiplier: TREND_EXPANSION_EXEMPTION.DEEP_ZONE_POSITION_MULTIPLIER,
+                      },
+                      trendExpansionExemptionValues: {
+                        adx: parseFloat(adx.toFixed(1)),
+                        adxSlope: parseFloat(earlyAdxSlope.toFixed(2)),
+                        momentumScore: parseFloat(earlyMomentumScore.toFixed(0)),
+                        alignedTFs: earlyRallyAlignedCount,
+                      },
                       isPreStrategy: true,
                       message: `Pullback probability ~90%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}. Parabolic probe ineligible.`
                     },
