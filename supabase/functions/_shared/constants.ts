@@ -8063,6 +8063,60 @@ export const ENTRY_QUALITY_GRADES = {
   BREAKOUT_VOLUME: 1.5,
 } as const;
 
+// ============= TREND EXPANSION STOCHRSI EXEMPTION =============
+// ROOT CAUSE FIX: During confirmed TREND_EXPANSION (ADX > 30, rising slope),
+// 4H StochRSI K > 95 is NOT exhaustion — it's trend confirmation.
+// The standard Tier 0 gate blocks LONGs at K > 97, but in strong expansion
+// regimes, K can stay pegged at 95-100 while price continues 5-15%+.
+//
+// This exemption allows reduced-size entries when:
+// 1. ADX >= 30 (TREND_EXPANSION territory)
+// 2. ADX slope >= 0 (trend still accelerating or cruising)
+// 3. Smart momentum confirms direction (score >= 15)
+// 4. At least 2 timeframes align with direction
+//
+// Position sizing: 0.30-0.40x (captures the move while limiting late-entry risk)
+// K 95-97: 0.40x (soft cap zone, strong expansion)
+// K > 97: 0.30x (deep overbought, max caution)
+export const TREND_EXPANSION_EXEMPTION = {
+  ENABLED: true,
+
+  // ===== REGIME PROXY CONDITIONS =====
+  // Since 4-state regime isn't classified yet at early gate,
+  // we use the same indicators to detect expansion-like conditions
+  MIN_ADX: 30,
+  MIN_ADX_SLOPE: 0,         // Slope >= 0: trend accelerating or cruising
+  
+  // ===== MOMENTUM CONFIRMATION =====
+  // Lower than Strong Trend Override (30) — we only need direction confirmation
+  MIN_MOMENTUM_SCORE: 15,
+  
+  // ===== TIMEFRAME ALIGNMENT =====
+  // At least 2 of 4 timeframes must align (less strict than rally override's 3)
+  MIN_ALIGNED_TIMEFRAMES: 2,
+  
+  // ===== POSITION SIZING =====
+  // K 95-97 (soft cap zone): more room to run
+  SOFT_ZONE_POSITION_MULTIPLIER: 0.40,
+  // K > 97 (deep zone): maximum caution
+  DEEP_ZONE_POSITION_MULTIPLIER: 0.30,
+  // Boost if ADX slope > 0.5 (strongly accelerating)
+  ACCELERATING_SLOPE_THRESHOLD: 0.5,
+  ACCELERATING_BOOST: 0.05,  // +5% position when strongly accelerating
+  
+  // ===== SAFETY =====
+  // Absolute ceiling — never allow above K=99 (statistical blow-off)
+  ABSOLUTE_MAX_K: 99,
+  // Minimum for shorts (symmetric)
+  ABSOLUTE_MIN_K: 1,
+  
+  // ===== ENTRY TYPE TAGGING =====
+  ENTRY_TYPE_TAG: 'TREND_EXPANSION_EXEMPTION' as const,
+  
+  // ===== LOGGING =====
+  LOG_EXEMPTION_CHECKS: true,
+} as const;
+
 // ============= MULTI-TIMEFRAME RALLY OVERRIDE =============
 // ROOT CAUSE FIX: Bot missed entire rallies because gates blocked LONGs one-by-one
 // When 3+ timeframes align bullish, the system should recognize a BROAD RALLY
