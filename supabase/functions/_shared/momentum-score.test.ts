@@ -1,6 +1,6 @@
 import { assertEquals, assertAlmostEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { calculateMomentumScore } from "./smart-momentum.ts";
-import { generateBTCPrices, generateADAPrices, generateKlines, generateRallyPrices } from "./test-helpers.ts";
+import { generateBTCPrices, generateADAPrices, generateKlines, generateRallyPrices, generatePriceSeries } from "./test-helpers.ts";
 
 // ============= MOMENTUM SCORE BOUNDARY TESTS =============
 
@@ -28,8 +28,9 @@ Deno.test("Momentum score is bounded for small-cap prices (ADA)", () => {
 Deno.test("BTC and ADA momentum scores should be comparable for similar % moves", () => {
   // Both have ~10% rally - momentum scores shouldn't differ by more than 40 points
   // This catches the old bug where BTC hit -100 while ADA was -20 for equivalent moves
-  const btcPrices = generateBTCPrices(80, 10);
-  const adaPrices = generateADAPrices(80, 10);
+  // Use low noise (0.05%) to isolate normalization behavior from random walk artifacts
+  const btcPrices = generatePriceSeries(80, 87000, 10, 0.05);
+  const adaPrices = generatePriceSeries(80, 0.30, 10, 0.05);
   
   const btcResult = calculateMomentumScore(generateKlines(btcPrices), btcPrices, 30, true, 500);
   const adaResult = calculateMomentumScore(generateKlines(adaPrices), adaPrices, 30, true, 0.003);
