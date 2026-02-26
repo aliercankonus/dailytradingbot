@@ -108,11 +108,17 @@ export function calculateMomentumScore(
     const slope = (histCurrent - histPrev3) / 3;
     const isExpanding = Math.abs(histCurrent) > Math.abs(histPrev1);
     
+    // Normalize slope by price to make scoring fair across assets (BTC ~$87K vs ADA ~$0.30)
+    const priceNorm = prices[prices.length - 1] || 1;
+    const normalizedSlope = (slope / priceNorm) * 10000; // Normalize to basis points
+    
     let macdScore = 0;
     if (histCurrent > 0) {
-      macdScore = isExpanding ? Math.min(30, slope * 100) : Math.max(-15, slope * 50);
+      // Expanding bullish: cap at +30; Contracting bullish: bounded [-15, +15]
+      macdScore = isExpanding ? Math.min(30, normalizedSlope * 100) : Math.min(15, Math.max(-15, normalizedSlope * 50));
     } else {
-      macdScore = isExpanding ? Math.max(-30, slope * 100) : Math.min(15, slope * 50);
+      // Expanding bearish: cap at -30; Contracting bearish: bounded [-15, +15]  
+      macdScore = isExpanding ? Math.max(-30, normalizedSlope * 100) : Math.max(-15, Math.min(15, normalizedSlope * 50));
     }
     
     totalScore += macdScore;
