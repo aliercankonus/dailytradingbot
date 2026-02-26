@@ -5212,6 +5212,11 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
     // Graduated relaxation tiers based on slope
     GRADUATED_SLOPE_RELAXATION: {
       ENABLED: true,
+      // FIX: Added ACCELERATING tier for strongly rising ADX slope (>= 0.5)
+      // When ADX slope is positive and strong, the trend is accelerating — 10% threshold
+      ACCELERATING_SLOPE: 0.5,
+      ACCELERATING_HARD_THRESHOLD: 10.0,
+      ACCELERATING_POSITION_SIZE: 0.40,
       // slope >= -1.0: full relaxation (6.0% hard threshold)
       FULL_RELAXATION_SLOPE: -1.0,
       FULL_HARD_THRESHOLD: 6.0,
@@ -6854,8 +6859,9 @@ export const STOCHRSI_RUNWAY_GATE = {
     LONG_MIN_K: 85,
     LONG_MIN_MOVE_PERCENT: 2.0,
     // Position multiplier if ADX is very high (probe instead of block)
+    // FIX: Lowered from 45 to 40 — STRONG_TREND tier1 (ADX>=40) should get probe, not hard block
     HIGH_ADX_PROBE_MULTIPLIER: 0.15,
-    HIGH_ADX_PROBE_THRESHOLD: 45,
+    HIGH_ADX_PROBE_THRESHOLD: 40,
   },
   
   LOG_GATE_CHECKS: true,
