@@ -7896,6 +7896,32 @@ export const SignalRejectionReasons = () => {
       return "⚡ Execution-time filter triggered";
     }
     
+    // REGIME_AGE_EXHAUSTED - regime has been active too long, trend energy fading
+    if (reason.includes("REGIME_AGE_EXHAUSTED") || filtersStatus?.gate === "REGIME_AGE_EXHAUSTED") {
+      const age = filtersStatus?.regimeAge;
+      const regime = filtersStatus?.regime;
+      if (age && regime) return `⏳ ${regime === 'TREND_EXHAUSTION' ? 'Exhaustion' : 'Trend'} aged out (${age} candles)`;
+      return "⏳ Regime too old — trend energy fading";
+    }
+    
+    // TREND_EXHAUSTION_PROTECTION - ADX declining with weak trend strength
+    if (reason.includes("TREND_EXHAUSTION_PROTECTION") || filtersStatus?.gate === "TREND_EXHAUSTION_PROTECTION") {
+      const adxVal = filtersStatus?.adx;
+      const slope = filtersStatus?.adxSlope;
+      if (adxVal && slope) return `📉 Trend exhausting — ADX ${adxVal.toFixed?.(1) ?? adxVal} declining`;
+      return "📉 Trend exhausting — declining momentum";
+    }
+    
+    // TREND_EXHAUSTION_CONTINUATION_BLOCK - 4-state regime blocks continuation strategies
+    if (reason.includes("TREND_EXHAUSTION_CONTINUATION_BLOCK") || filtersStatus?.gate === "TREND_EXHAUSTION_CONTINUATION_BLOCK") {
+      return "🔄 Exhaustion regime — only reversal probes allowed";
+    }
+    
+    // DEEP_EXHAUSTION_COMPOUND - multiple exhaustion signals compound
+    if (reason.includes("DEEP_EXHAUSTION_COMPOUND") || filtersStatus?.gate === "DEEP_EXHAUSTION_COMPOUND") {
+      return "🛑 Deep exhaustion — multiple decay signals";
+    }
+    
     // COUNTER_TREND_PROTECTION - direction blocked against strong trend
     if (reason.includes("COUNTER_TREND_PROTECTION")) {
       const sideMatch = reason.match(/(\w+)\s+blocked/i);
@@ -8008,6 +8034,224 @@ export const SignalRejectionReasons = () => {
     // Execution rejections - signals blocked during trade execution
     if (reason.startsWith("EXECUTION:")) {
       return <ExecutionRejectionDisplay filtersStatus={fs} />;
+    }
+    
+    // ============= REGIME EXHAUSTION GATES =============
+    
+    // REGIME_AGE_EXHAUSTED - regime has been active too long
+    if (reason.includes("REGIME_AGE_EXHAUSTED") || fs?.gate === "REGIME_AGE_EXHAUSTED") {
+      const regimeAge = coerceNumeric(fs?.regimeAge, 0);
+      const regime = fs?.regime || 'TREND_EXPANSION';
+      const adxSlopeSmoothed = coerceNumeric(fs?.adxSlopeSmoothed, 0);
+      const adxSlopeRaw = coerceNumeric(fs?.adxSlopeRaw, 0);
+      const hardBlockThreshold = coerceNumeric(fs?.hardBlockThreshold, 35);
+      
+      return (
+        <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Timer className="h-3.5 w-3.5 text-amber-400" />
+              <span className="text-xs font-medium">Regime Age Hard Block</span>
+            </div>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-red-500/20 text-red-400 border-red-500/30">
+              {regimeAge} / {hardBlockThreshold} candles
+            </Badge>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground italic">
+            This {regime === 'TREND_EXHAUSTION' ? 'exhaustion' : 'trend'} regime has been active for {regimeAge} candles with declining ADX slope — trend energy is fading and new entries are blocked to avoid late entries.
+          </div>
+          
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1 border-t border-border/50">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Regime</span>
+              <Badge variant="outline" className="text-[9px] px-1 py-0">{regime.replace(/_/g, ' ')}</Badge>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Age</span>
+              <span className="font-mono text-red-400">{regimeAge} candles</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">ADX Slope (smooth)</span>
+              <span className={`font-mono ${adxSlopeSmoothed > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {adxSlopeSmoothed >= 0 ? '+' : ''}{adxSlopeSmoothed.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">ADX Slope (raw)</span>
+              <span className={`font-mono ${adxSlopeRaw > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {adxSlopeRaw >= 0 ? '+' : ''}{adxSlopeRaw.toFixed(2)}
+              </span>
+            </div>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+            <span className="text-amber-400">💡</span> The trend has been running for too long with declining momentum. Wait for a fresh regime transition (new trend or compression breakout) before entering.
+          </div>
+        </div>
+      );
+    }
+    
+    // TREND_EXHAUSTION_PROTECTION - ADX declining with weak trend strength
+    if (reason.includes("TREND_EXHAUSTION_PROTECTION") || fs?.gate === "TREND_EXHAUSTION_PROTECTION") {
+      const adx = coerceNumeric(fs?.adx, 0);
+      const adxSlope = coerceNumeric(fs?.adxSlope, 0);
+      const trendStrength = coerceNumeric(fs?.trendStrength, 0);
+      const trend4h = fs?.trend4h || 'unknown';
+      const trend1h = fs?.trend1h || 'unknown';
+      const direction = fs?.derivedDirection || fs?.direction || 'unknown';
+      
+      return (
+        <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <TrendingDown className="h-3.5 w-3.5 text-amber-400" />
+              <span className="text-xs font-medium">Trend Exhaustion Protection</span>
+            </div>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30">
+              Continuation Blocked
+            </Badge>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground italic">
+            ADX is declining ({adxSlope >= 0 ? '+' : ''}{adxSlope.toFixed(2)}) with weakening trend strength ({trendStrength}%) — continuing {direction.toUpperCase()} entries would be chasing a fading trend.
+          </div>
+          
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1 border-t border-border/50">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">ADX</span>
+              <span className={`font-mono ${adx >= 25 ? 'text-green-400' : 'text-amber-400'}`}>{adx.toFixed(1)}</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">ADX Slope</span>
+              <span className={`font-mono ${adxSlope > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {adxSlope >= 0 ? '+' : ''}{adxSlope.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Trend Strength</span>
+              <span className={`font-mono ${trendStrength >= 50 ? 'text-green-400' : 'text-red-400'}`}>{trendStrength}%</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Direction</span>
+              <span className="font-medium capitalize">{direction}</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">4H Trend</span>
+              <span className="font-medium capitalize">{trend4h}</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">1H Trend</span>
+              <span className="font-medium capitalize">{trend1h}</span>
+            </div>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+            <span className="text-amber-400">💡</span> The prior trend is losing steam. Wait for ADX slope to turn positive (new trend leg) or look for mean-reversion setups in the opposite direction.
+          </div>
+        </div>
+      );
+    }
+    
+    // TREND_EXHAUSTION_CONTINUATION_BLOCK - 4-state regime blocks continuation
+    if (reason.includes("TREND_EXHAUSTION_CONTINUATION_BLOCK") || fs?.gate === "TREND_EXHAUSTION_CONTINUATION_BLOCK") {
+      const regime = fs?.regime || 'TREND_EXHAUSTION';
+      const strategy = fs?.strategyName || fs?.strategy || '';
+      const adx = coerceNumeric(fs?.adx, 0);
+      const adxSlope = coerceNumeric(fs?.adxSlope, 0);
+      
+      return (
+        <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Ban className="h-3.5 w-3.5 text-red-400" />
+              <span className="text-xs font-medium">Exhaustion Regime Block</span>
+            </div>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-red-500/20 text-red-400 border-red-500/30">
+              MR Only
+            </Badge>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground italic">
+            Market regime is TREND_EXHAUSTION — only mean-reversion (counter-trend) probes are permitted. 
+            {strategy && <> Strategy "<span className="font-medium text-foreground">{strategy}</span>" is a continuation type and was blocked.</>}
+          </div>
+          
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1 border-t border-border/50">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Regime</span>
+              <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30">
+                {regime.replace(/_/g, ' ')}
+              </Badge>
+            </div>
+            {adx > 0 && (
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">ADX</span>
+                <span className="font-mono">{adx.toFixed(1)}</span>
+              </div>
+            )}
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+            <span className="text-blue-400">💡</span> When the regime classifier detects exhaustion, trend-following strategies are hard blocked to prevent late entries. Only reversal probes are allowed.
+          </div>
+        </div>
+      );
+    }
+    
+    // DEEP_EXHAUSTION_COMPOUND - multiple exhaustion signals compound
+    if (reason.includes("DEEP_EXHAUSTION_COMPOUND") || fs?.gate === "DEEP_EXHAUSTION_COMPOUND") {
+      const adx = coerceNumeric(fs?.adx, 0);
+      const adxSlope = coerceNumeric(fs?.adxSlope, 0);
+      const signals = fs?.exhaustionSignals || fs?.compoundSignals || [];
+      
+      return (
+        <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
+              <span className="text-xs font-medium">Deep Exhaustion (Compound)</span>
+            </div>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-red-500/20 text-red-400 border-red-500/30">
+              Hard Block
+            </Badge>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground italic">
+            Multiple exhaustion indicators are firing simultaneously — ADX slope is deeply negative, momentum is fading, and StochRSI is depegging from extremes. This is a high-conviction exhaustion signal.
+          </div>
+          
+          {Array.isArray(signals) && signals.length > 0 && (
+            <div className="pt-1 border-t border-border/50">
+              <div className="text-[10px] text-muted-foreground mb-1">Compound signals:</div>
+              <div className="flex flex-wrap gap-1">
+                {signals.map((sig: string, i: number) => (
+                  <Badge key={i} variant="outline" className="text-[9px] px-1 py-0 text-red-400 border-red-500/30">
+                    {sig}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1 border-t border-border/50">
+            {adx > 0 && (
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">ADX</span>
+                <span className="font-mono">{adx.toFixed(1)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">ADX Slope</span>
+              <span className="font-mono text-red-400">{adxSlope >= 0 ? '+' : ''}{adxSlope.toFixed(2)}</span>
+            </div>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+            <span className="text-red-400">⛔</span> Multiple overlapping exhaustion signals confirm the trend is collapsing. Wait for a clear regime reset before re-entering.
+          </div>
+        </div>
+      );
     }
     
     // COUNTER_TREND_PROTECTION - direction blocked against strong trend
