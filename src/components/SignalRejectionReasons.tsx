@@ -7967,6 +7967,20 @@ export const SignalRejectionReasons = () => {
       return "📉 Opposing momentum accelerating";
     }
     
+    // MR_EXTREME_MOMENTUM_BLOCK - mean-reversion probe blocked by extreme opposing momentum
+    if (reason.includes("MR_EXTREME_MOMENTUM_BLOCK") || filtersStatus?.gate === "MR_EXTREME_MOMENTUM_BLOCK") {
+      const momScore = Math.abs(coerceNumeric(filtersStatus?.momentumScore, 0));
+      const threshold = coerceNumeric(filtersStatus?.extremeThreshold, 55);
+      const dir = (filtersStatus?.derivedDirection || "").toUpperCase() || "MR";
+      return `⛔ ${dir} MR probe blocked — momentum (${momScore}) exceeds ±${threshold}`;
+    }
+    
+    // MR_SAFETY_CHECK_FAILED - mean-reversion probe failed safety conditions
+    if (reason.includes("MR_SAFETY_CHECK_FAILED") || filtersStatus?.gate === "MR_SAFETY_CHECK_FAILED") {
+      const dir = (filtersStatus?.derivedDirection || "").toUpperCase() || "MR";
+      return `🔒 ${dir} MR probe failed safety checks`;
+    }
+    
     // COUNTER_TREND_ADMISSION - counter-trend probe rejected
     if (reason.includes("COUNTER_TREND_ADMISSION") || filtersStatus?.gate === "COUNTER_TREND_ADMISSION") {
       const failReason = filtersStatus?.reason || reason || "";
@@ -8300,6 +8314,153 @@ export const SignalRejectionReasons = () => {
         reason.includes("EXTREME MOMENTUM VETO") || 
         fs?.gate === "EXTREME_MOMENTUM_VETO") {
       return <ExtremeMomentumVetoDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // MR_EXTREME_MOMENTUM_BLOCK - mean-reversion probe blocked by extreme opposing momentum
+    if (reason.includes("MR_EXTREME_MOMENTUM_BLOCK") || fs?.gate === "MR_EXTREME_MOMENTUM_BLOCK") {
+      const momScore = coerceNumeric(fs?.momentumScore, 0);
+      const absMom = Math.abs(momScore);
+      const threshold = coerceNumeric(fs?.extremeThreshold, 55);
+      const dir = (fs?.derivedDirection || "unknown").toUpperCase();
+      const adx = coerceNumeric(fs?.adx, 0);
+      const delta = coerceNumeric(fs?.momentumDelta, 0);
+      const persistence = coerceNumeric(fs?.adxPersistence, 0);
+      const wouldPass = fs?.wouldPassWith || null;
+      
+      return (
+        <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Zap className="h-3.5 w-3.5 text-red-400" />
+              <span className="text-xs font-medium">MR Probe — Extreme Momentum Block</span>
+            </div>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-red-500/20 text-red-400 border-red-500/30">
+              |mom| {absMom} &gt; ±{threshold}
+            </Badge>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground italic">
+            A {dir} mean-reversion probe was detected but momentum ({momScore >= 0 ? '+' : ''}{momScore.toFixed(0)}) is too extreme — entering against this force has very low odds. The system requires momentum to weaken below ±{threshold} before allowing MR entries.
+          </div>
+          
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1 border-t border-border/50">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Momentum</span>
+              <span className={`font-mono ${absMom >= threshold ? 'text-red-400' : 'text-green-400'}`}>
+                {momScore >= 0 ? '+' : ''}{momScore.toFixed(0)}
+              </span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Threshold</span>
+              <span className="font-mono">±{threshold}</span>
+            </div>
+            {adx > 0 && (
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">ADX</span>
+                <span className="font-mono">{typeof adx === 'number' ? adx.toFixed?.(1) : adx}</span>
+              </div>
+            )}
+            {delta !== 0 && (
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">Mom Delta</span>
+                <span className={`font-mono ${delta > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {delta >= 0 ? '+' : ''}{delta.toFixed(1)}
+                </span>
+              </div>
+            )}
+            {persistence > 0 && (
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">ADX Persistence</span>
+                <span className="font-mono">{persistence}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Direction</span>
+              <span className="font-medium">{dir}</span>
+            </div>
+          </div>
+          
+          {wouldPass && (
+            <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+              <span className="text-blue-400">💡</span> {wouldPass}
+            </div>
+          )}
+          {!wouldPass && (
+            <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+              <span className="text-blue-400">💡</span> Wait for momentum to decay closer to neutral before attempting a mean-reversion entry. High opposing momentum makes reversal entries very risky.
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    // MR_SAFETY_CHECK_FAILED - mean-reversion probe failed safety conditions
+    if (reason.includes("MR_SAFETY_CHECK_FAILED") || fs?.gate === "MR_SAFETY_CHECK_FAILED") {
+      const dir = (fs?.derivedDirection || "unknown").toUpperCase();
+      const adx = coerceNumeric(fs?.adx, 0);
+      const persistence = coerceNumeric(fs?.adxPersistence, 0);
+      const persistenceThreshold = coerceNumeric(fs?.adxPersistenceThreshold, 0);
+      const delta = coerceNumeric(fs?.momentumDelta, 0);
+      const failReasons = fs?.failureReasons || [];
+      
+      return (
+        <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+              <span className="text-xs font-medium">MR Probe — Safety Check Failed</span>
+            </div>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30">
+              Conditions Not Met
+            </Badge>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground italic">
+            A {dir} mean-reversion setup was detected but failed safety checks — the trend hasn't decayed long enough or momentum isn't improving yet.
+          </div>
+          
+          {Array.isArray(failReasons) && failReasons.length > 0 && (
+            <div className="pt-1 border-t border-border/50">
+              <div className="text-[10px] text-muted-foreground mb-1">Failed checks:</div>
+              <div className="flex flex-wrap gap-1">
+                {failReasons.map((r: string, i: number) => {
+                  const friendly = r.includes('ADX_PERSISTENCE') 
+                    ? `ADX decay too short (${persistence} < ${persistenceThreshold})`
+                    : r.includes('DELTA_NOT_IMPROVING')
+                    ? `Momentum not improving (Δ=${delta.toFixed(1)})`
+                    : r.replace(/_/g, ' ');
+                  return (
+                    <Badge key={i} variant="outline" className="text-[9px] px-1.5 py-0 text-amber-400 border-amber-500/30">
+                      {friendly}
+                    </Badge>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1 border-t border-border/50">
+            {adx > 0 && (
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">ADX</span>
+                <span className="font-mono">{typeof adx === 'number' ? adx.toFixed?.(1) : adx}</span>
+              </div>
+            )}
+            {persistence > 0 && (
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">ADX Persistence</span>
+                <span className={`font-mono ${persistence >= persistenceThreshold ? 'text-green-400' : 'text-red-400'}`}>
+                  {persistence} / {persistenceThreshold}
+                </span>
+              </div>
+            )}
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+            <span className="text-amber-400">💡</span> The system needs more evidence of trend decay (longer ADX decline or improving momentum delta) before allowing this mean-reversion entry.
+          </div>
+        </div>
+      );
     }
     
     // COUNTER_TREND_ADMISSION - counter-trend probe rejected
