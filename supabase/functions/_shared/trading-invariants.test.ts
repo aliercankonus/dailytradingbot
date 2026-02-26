@@ -60,6 +60,8 @@ function evaluateMoveExhausted(
       if (G.ENABLED) {
         if (adxSlope >= G.ACCELERATING_SLOPE) {
           hardThreshold = Number(G.ACCELERATING_HARD_THRESHOLD);
+        } else if (adxSlope >= (G.RISING_SLOPE ?? 0.0)) {
+          hardThreshold = Number(G.RISING_HARD_THRESHOLD ?? 8.0);
         } else if (adxSlope >= G.FULL_RELAXATION_SLOPE) {
           hardThreshold = Number(G.FULL_HARD_THRESHOLD);
         } else if (adxSlope >= G.PARTIAL_RELAXATION_SLOPE) {
@@ -122,23 +124,24 @@ function evaluateDeepExhaustionCompound(
 // the system should allow entry (even with reduced size) up to 10% move.
 // ================================================================
 
-Deno.test("INVARIANT: Strong trend (ADX=35, rising slope=0.3) with 5.5% move must NOT be hard-blocked", () => {
+Deno.test("INVARIANT: Strong trend (ADX=35, rising slope=0.3) with 7.5% move must NOT be hard-blocked", () => {
   // ADX=35 (STRONG), slope=0.3 (rising) — this is a live trend with energy
-  // 5.5% is within the FULL relaxation threshold (6.0%) — should not block
-  const result = evaluateMoveExhausted('long', 5.5, 35, 0.3);
+  // With RISING tier (8.0% threshold), 7.5% should NOT block
+  const result = evaluateMoveExhausted('long', 7.5, 35, 0.3);
   assertEquals(result.blocked, false,
-    "A 5.5% move in a strong rising trend (ADX=35, slope=0.3) should NOT be blocked. " +
-    "If blocked, the FULL relaxation threshold is too tight.");
+    "A 7.5% move in a strong rising trend (ADX=35, slope=0.3) should NOT be blocked. " +
+    "RISING tier threshold is 8.0% — this move is within that.");
 });
 
-Deno.test("INVARIANT: Rising ADX slope (0.3) gets at least FULL relaxation (6%)", () => {
-  // Positive slope should never get a TIGHTER threshold than FULL relaxation
-  // Current gap: slope 0.0 to 0.5 all get 6.0% — a 6.0% move at slope=0.3 IS blocked
-  // This documents the gap: positive slope should arguably get > 6.0%
+Deno.test("INVARIANT: Rising ADX slope (0.3) gets RISING tier relaxation (8%)", () => {
+  // FIXED: Positive slope now gets its own RISING tier (8.0%) instead of FULL (6.0%)
   const G = MOVE_EXHAUSTION_FILTER_PARAMS.STRONG_TREND_RELAXATION.GRADUATED_SLOPE_RELAXATION;
-  assert(G.FULL_HARD_THRESHOLD >= 6.0,
-    `FULL relaxation threshold (${G.FULL_HARD_THRESHOLD}%) should be >= 6.0%. ` +
-    `A positive ADX slope means the trend is building — 6% is a normal move in strong trends.`);
+  assert(G.RISING_HARD_THRESHOLD > G.FULL_HARD_THRESHOLD,
+    `RISING threshold (${G.RISING_HARD_THRESHOLD}%) must be > FULL (${G.FULL_HARD_THRESHOLD}%). ` +
+    `A positive ADX slope means the trend is building — it deserves more room than flat/declining slopes.`);
+  assert(G.RISING_HARD_THRESHOLD >= 7.5,
+    `RISING threshold (${G.RISING_HARD_THRESHOLD}%) should be >= 7.5%. ` +
+    `Positive slopes routinely produce 6-8% moves that are continuation, not exhaustion.`);
 });
 
 Deno.test("INVARIANT: Accelerating trend (ADX=30, slope=0.6) allows up to 9% move", () => {
@@ -404,8 +407,10 @@ Deno.test("INVARIANT: Graduated relaxation thresholds decrease with declining sl
   const G = MOVE_EXHAUSTION_FILTER_PARAMS.STRONG_TREND_RELAXATION.GRADUATED_SLOPE_RELAXATION;
   
   // More positive slope = more relaxed (higher threshold)
-  assert(G.ACCELERATING_HARD_THRESHOLD > G.FULL_HARD_THRESHOLD,
-    `Accelerating (${G.ACCELERATING_HARD_THRESHOLD}) > Full (${G.FULL_HARD_THRESHOLD})`);
+  assert(G.ACCELERATING_HARD_THRESHOLD > G.RISING_HARD_THRESHOLD,
+    `Accelerating (${G.ACCELERATING_HARD_THRESHOLD}) > Rising (${G.RISING_HARD_THRESHOLD})`);
+  assert(G.RISING_HARD_THRESHOLD > G.FULL_HARD_THRESHOLD,
+    `Rising (${G.RISING_HARD_THRESHOLD}) > Full (${G.FULL_HARD_THRESHOLD})`);
   assert(G.FULL_HARD_THRESHOLD > G.PARTIAL_HARD_THRESHOLD,
     `Full (${G.FULL_HARD_THRESHOLD}) > Partial (${G.PARTIAL_HARD_THRESHOLD})`);
   assert(G.PARTIAL_HARD_THRESHOLD > G.LIMITED_HARD_THRESHOLD,

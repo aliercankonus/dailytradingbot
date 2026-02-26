@@ -54,6 +54,9 @@ function evaluateMoveExhausted(
         if (adxSlope >= G.ACCELERATING_SLOPE) {
           hardThreshold = Number(G.ACCELERATING_HARD_THRESHOLD);
           relaxed = true;
+        } else if (adxSlope >= (G.RISING_SLOPE ?? 0.0)) {
+          hardThreshold = Number(G.RISING_HARD_THRESHOLD ?? 8.0);
+          relaxed = true;
         } else if (adxSlope >= G.FULL_RELAXATION_SLOPE) {
           hardThreshold = Number(G.FULL_HARD_THRESHOLD);
           relaxed = true;
@@ -188,14 +191,20 @@ Deno.test("MOVE_EXHAUSTED: strong trend relaxation raises hard threshold", () =>
   const resultNoRelax = evaluateMoveExhausted('long', 6.5, 20, 0.0);
   assertEquals(resultNoRelax.blocked, false, "6.5% < default 7.0% — passes without relaxation");
   
-  // ADX=30 >= 28 qualifies for relaxation, slope=0.0 >= FULL_RELAXATION_SLOPE(-1.0) → hard=6.0%
-  // 6.5 > 6.0 → blocked WITH relaxation (tighter threshold)
+  // ADX=30 >= 28 qualifies for relaxation, slope=0.0 >= RISING_SLOPE(0.0) → hard=8.0%
+  // 6.5 < 8.0 → NOT blocked with RISING tier
   const resultRelaxed = evaluateMoveExhausted('long', 6.5, 30, 0.0);
-  assertEquals(resultRelaxed.blocked, true, "6.5% > 6.0% full relaxation threshold — blocked");
+  assertEquals(resultRelaxed.blocked, false, "6.5% < 8.0% RISING relaxation threshold — passes");
 
-  // 5.8% should pass with relaxation (< 6.0%)
-  const resultPasses = evaluateMoveExhausted('long', 5.8, 30, 0.0);
-  assertEquals(resultPasses.blocked, false, "5.8% should pass with 6.0% relaxed threshold");
+  // 8.5% should be blocked with RISING tier (> 8.0%)
+  const resultBlocked = evaluateMoveExhausted('long', 8.5, 30, 0.0);
+  assertEquals(resultBlocked.blocked, true, "8.5% > 8.0% RISING threshold — blocked");
+
+  // ADX=30, slope=-0.5 → FULL tier (6.0%)
+  const resultFull = evaluateMoveExhausted('long', 5.8, 30, -0.5);
+  assertEquals(resultFull.blocked, false, "5.8% < 6.0% FULL threshold — passes");
+  const resultFullBlocked = evaluateMoveExhausted('long', 6.5, 30, -0.5);
+  assertEquals(resultFullBlocked.blocked, true, "6.5% > 6.0% FULL threshold — blocked");
 });
 
 Deno.test("MOVE_EXHAUSTED: ACCELERATING tier raises threshold to 10%", () => {

@@ -5217,6 +5217,12 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
       ACCELERATING_SLOPE: 0.5,
       ACCELERATING_HARD_THRESHOLD: 10.0,
       ACCELERATING_POSITION_SIZE: 0.40,
+      // NEW: RISING tier for positive but not accelerating slope (0.0 to 0.5)
+      // Invariant tests found that positive slopes were getting the same 6.0% as flat/declining
+      // A rising ADX slope means trend is building — deserves 8.0% threshold
+      RISING_SLOPE: 0.0,
+      RISING_HARD_THRESHOLD: 8.0,
+      RISING_POSITION_SIZE: 0.45,
       // slope >= -1.0: full relaxation (6.0% hard threshold)
       FULL_RELAXATION_SLOPE: -1.0,
       FULL_HARD_THRESHOLD: 6.0,
