@@ -1236,26 +1236,33 @@ const CounterTrendAdmissionDisplay = ({ filtersStatus, trendData }: { filtersSta
       const match = reason.match(/(\d+)\s*<\s*(\d+)/);
       if (match) {
         return {
-          title: "Trend decay not confirmed",
-          detail: `ADX slope has been negative for ${match[1]} candle(s), but needs ${match[2]} consecutive candles`,
+          title: "Trend decay not confirmed yet",
+          detail: `ADX slope has been negative for only ${match[1]} candle(s), but needs at least ${match[2]} consecutive candles of decay to confirm exhaustion`,
           icon: Timer
         };
       }
-      return { title: "Trend decay not confirmed", detail: "Need more consecutive candles with declining ADX", icon: Timer };
+      return { title: "Trend decay not confirmed yet", detail: "The ADX slope hasn't been declining long enough — need 2+ consecutive candles of decay to prove the trend is truly fading", icon: Timer };
     }
     if (reason.includes("ADX_NOT_EXHAUSTED")) {
-      return { title: "Trend still strong", detail: `ADX ${adx.toFixed(1)} indicates significant trend energy remains`, icon: Zap };
+      return { title: "Trend still has too much energy", detail: `ADX is ${adx.toFixed(1)} (must be below 45 for exhaustion). The trend is still dominant — counter-trend entries would fight too much momentum`, icon: Zap };
     }
-    if (reason.includes("STOCHRSI_NOT_DEPEGGED")) {
-      return { title: "Momentum not resetting", detail: `StochRSI K=${stochK4h.toFixed(1)} hasn't returned from extreme zone`, icon: Gauge };
+    if (reason.includes("ADX_STILL_EXPANDING")) {
+      return { title: "Trend is accelerating, not decaying", detail: "ADX slope is positive — the trend is getting stronger. Counter-trend probes require the trend to be losing energy (declining ADX)", icon: TrendingUp };
     }
-    if (reason.includes("VOLATILITY")) {
-      return { title: "Volatility not contracting", detail: volatilityReason || "Bollinger/ATR not showing exhaustion", icon: Activity };
+    if (reason.includes("STOCHRSI_NOT_DEPEGGED") || reason.includes("STOCHRSI_STILL_PEGGED")) {
+      const zone = stochK4h > 50 ? "overbought" : "oversold";
+      return { title: "Momentum hasn't reset from extremes", detail: `StochRSI K=${stochK4h.toFixed(1)} is still pegged in the ${zone} zone. Need it to pull back from the extreme before entering counter-trend`, icon: Gauge };
+    }
+    if (reason.includes("MOMENTUM_NOT_DECAYING")) {
+      return { title: "Momentum still building", detail: "The momentum magnitude is still increasing, meaning the current impulse hasn't peaked yet. Wait for momentum to start flattening or declining", icon: Activity };
+    }
+    if (reason.includes("VOLATILITY_EXPANDING") || reason.includes("VOLATILITY")) {
+      return { title: "Volatility not contracting", detail: volatilityReason || "Bollinger Band width and ATR are still expanding — a genuine exhaustion requires volatility to contract as the impulse fades", icon: Activity };
     }
     if (reason.includes("LTF_NO_STRUCTURE_FLIP")) {
-      return { title: "Lower timeframe not confirming", detail: "15m/30m structure hasn't flipped to support counter-trend", icon: Layers };
+      return { title: "Lower timeframes not confirming reversal", detail: "The 15m/30m price structure hasn't flipped to support a counter-trend entry. Need lower timeframes to show higher-lows (for longs) or lower-highs (for shorts)", icon: Layers };
     }
-    return { title: "Counter-trend conditions not met", detail: reason, icon: AlertTriangle };
+    return { title: "Counter-trend conditions not met", detail: "Multiple exhaustion criteria must align before a counter-trend probe is permitted — this protects against fighting a strong trend", icon: AlertTriangle };
   };
   
   const failure = getFailureExplanation(failReason);
@@ -7962,25 +7969,37 @@ export const SignalRejectionReasons = () => {
     
     // COUNTER_TREND_ADMISSION - counter-trend probe rejected
     if (reason.includes("COUNTER_TREND_ADMISSION") || filtersStatus?.gate === "COUNTER_TREND_ADMISSION") {
-      const failReason = filtersStatus?.reason || "";
+      const failReason = filtersStatus?.reason || reason || "";
       const htfTrend = filtersStatus?.htfTrend || "unknown";
       const direction = filtersStatus?.direction || "unknown";
+      const dirLabel = direction.toUpperCase();
       
-      // User-friendly failure reason extraction
+      // User-friendly failure reason extraction — covers all FAILURE_REASONS codes
       if (failReason.includes("ADX_PERSISTENCE_INSUFFICIENT")) {
-        return `⏳ Counter-trend ${direction.toUpperCase()} needs more trend decay`;
+        return `⏳ ${dirLabel} probe needs more trend decay confirmation`;
       }
       if (failReason.includes("ADX_NOT_EXHAUSTED")) {
-        return `⚡ Trend still too strong for counter-${direction}`;
+        const adxVal = filtersStatus?.adx;
+        return `⚡ Trend too strong for ${dirLabel} probe${adxVal ? ` (ADX ${adxVal.toFixed?.(1) ?? adxVal})` : ''}`;
       }
-      if (failReason.includes("STOCHRSI_NOT_DEPEGGED")) {
-        return `📊 Momentum not resetting - wait for de-peg`;
+      if (failReason.includes("ADX_STILL_EXPANDING")) {
+        return `📈 ADX still rising — trend expanding, not decaying`;
       }
-      if (failReason.includes("VOLATILITY")) {
-        return `📉 Waiting for volatility contraction`;
+      if (failReason.includes("STOCHRSI_NOT_DEPEGGED") || failReason.includes("STOCHRSI_STILL_PEGGED")) {
+        const k = filtersStatus?.stochRsiK4h ?? filtersStatus?.stochRsiK;
+        return `📊 StochRSI still pegged${k ? ` (K=${typeof k === 'number' ? k.toFixed(0) : k})` : ''} — wait for de-peg`;
+      }
+      if (failReason.includes("MOMENTUM_NOT_DECAYING")) {
+        return `💨 Momentum still building — not yet exhausted`;
+      }
+      if (failReason.includes("VOLATILITY_EXPANDING") || failReason.includes("VOLATILITY")) {
+        return `📉 Volatility still expanding — no contraction yet`;
+      }
+      if (failReason.includes("LTF_NO_STRUCTURE_FLIP")) {
+        return `🔀 Lower timeframes not confirming reversal structure`;
       }
       
-      return `🔄 Counter-trend ${direction.toUpperCase()} blocked vs ${htfTrend} trend`;
+      return `🔄 ${dirLabel} counter-trend probe blocked vs ${htfTrend} trend`;
     }
     
     // If nothing matched, return a cleaned up version
