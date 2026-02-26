@@ -109,10 +109,10 @@ export function calculateTrend(prices: number[], timeframe?: string): TrendResul
   // TIMEFRAME-AWARE THRESHOLDS: Each TF has its own sensitivity
   // Lower TFs (15m, 30m) use lower thresholds to reduce neutral bias
   // Higher TFs (4h) use higher thresholds for structural stability
-  const tfStrong = (timeframe && NET_SIGNAL_THRESHOLDS.TIMEFRAME_STRONG?.[timeframe]) 
-    ?? NET_SIGNAL_THRESHOLDS?.STRONG_THRESHOLD ?? 4.0;
-  const tfWeak = (timeframe && NET_SIGNAL_THRESHOLDS.TIMEFRAME_WEAK?.[timeframe])
-    ?? NET_SIGNAL_THRESHOLDS?.WEAK_THRESHOLD ?? 3.0;
+  const tfStrong: number = Number((timeframe && NET_SIGNAL_THRESHOLDS.TIMEFRAME_STRONG?.[timeframe]) 
+    ?? NET_SIGNAL_THRESHOLDS?.STRONG_THRESHOLD ?? 4.0);
+  const tfWeak: number = Number((timeframe && NET_SIGNAL_THRESHOLDS.TIMEFRAME_WEAK?.[timeframe])
+    ?? NET_SIGNAL_THRESHOLDS?.WEAK_THRESHOLD ?? 3.0);
   const ENABLE_WEAK = NET_SIGNAL_THRESHOLDS?.ENABLE_WEAK_TRENDS ?? true;
   
   let trend: "bullish" | "bearish" | "neutral" = "neutral";
