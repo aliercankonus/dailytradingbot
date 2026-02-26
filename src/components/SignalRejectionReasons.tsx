@@ -8325,6 +8325,125 @@ export const SignalRejectionReasons = () => {
       );
     }
     
+    // DYING_TREND_LTF_UNALIGNED - old regime with declining ADX and LTFs not confirming
+    if (reason.includes("DYING_TREND_LTF_UNALIGNED") || fs?.gate === "DYING_TREND_LTF_UNALIGNED") {
+      const regimeAge = coerceNumeric(fs?.regimeAge, 0);
+      const regime = fs?.regime || 'TREND_EXPANSION';
+      const adx = coerceNumeric(fs?.adx, 0);
+      const adxSlopeSmoothed = coerceNumeric(fs?.adxSlopeSmoothed, 0);
+      const adxSlopeRaw = coerceNumeric(fs?.adxSlopeRaw, 0);
+      const trend4h = fs?.trend4h || 'unknown';
+      const trend1h = fs?.trend1h || 'unknown';
+      const trend30m = fs?.trend30m || 'unknown';
+      const is1hAligned = fs?.is1hAligned === true;
+      const is30mAligned = fs?.is30mAligned === true;
+      const minAgeThreshold = coerceNumeric(fs?.minAgeThreshold, 40);
+      const maxSlopeThreshold = coerceNumeric(fs?.maxSlopeThreshold, 0);
+      
+      const ageProgress = Math.min(100, (regimeAge / minAgeThreshold) * 100);
+      const slopeProgress = Math.min(100, Math.max(0, (1 - adxSlopeSmoothed / maxSlopeThreshold) * 50));
+      
+      return (
+        <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <TrendingDown className="h-3.5 w-3.5 text-red-400" />
+              <span className="text-xs font-medium">Dying Trend — LTFs Not Aligned</span>
+            </div>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-red-500/20 text-red-400 border-red-500/30">
+              Hard Block
+            </Badge>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground italic">
+            The {regime.replace(/_/g, ' ')} regime has been active for {regimeAge} candles with ADX slope declining at {adxSlopeSmoothed >= 0 ? '+' : ''}{adxSlopeSmoothed.toFixed(2)}. Lower timeframes (1h, 30m) are not confirming the 4h {trend4h} direction — the trend is structurally dying.
+          </div>
+          
+          {/* Regime Age Progress */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Regime Age</span>
+              <span className="font-mono text-red-400">{regimeAge} candles (block ≥ {minAgeThreshold})</span>
+            </div>
+            <Progress value={ageProgress} className="h-1.5" />
+          </div>
+          
+          {/* ADX Slope Progress */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">ADX Slope</span>
+              <span className={`font-mono ${adxSlopeSmoothed > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {adxSlopeSmoothed >= 0 ? '+' : ''}{adxSlopeSmoothed.toFixed(2)} (block &lt; {maxSlopeThreshold.toFixed(1)})
+              </span>
+            </div>
+            <Progress value={slopeProgress} className="h-1.5" />
+          </div>
+          
+          {/* LTF Alignment Grid */}
+          <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/50">
+            <div className="text-center">
+              <div className="text-[9px] text-muted-foreground mb-0.5">4H (HTF)</div>
+              <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${
+                trend4h === 'bullish' ? 'bg-green-500/20 text-green-400 border-green-500/30' : 
+                trend4h === 'bearish' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 
+                'bg-muted text-muted-foreground'
+              }`}>
+                {trend4h}
+              </Badge>
+            </div>
+            <div className="text-center">
+              <div className="text-[9px] text-muted-foreground mb-0.5">1H</div>
+              <div className="flex items-center justify-center gap-1">
+                {is1hAligned 
+                  ? <CheckCircle2 className="h-3 w-3 text-green-400" />
+                  : <XCircle className="h-3 w-3 text-red-400" />
+                }
+                <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${
+                  trend1h === 'bullish' ? 'bg-green-500/20 text-green-400 border-green-500/30' : 
+                  trend1h === 'bearish' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 
+                  'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                }`}>
+                  {trend1h}
+                </Badge>
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-[9px] text-muted-foreground mb-0.5">30M</div>
+              <div className="flex items-center justify-center gap-1">
+                {is30mAligned 
+                  ? <CheckCircle2 className="h-3 w-3 text-green-400" />
+                  : <XCircle className="h-3 w-3 text-red-400" />
+                }
+                <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${
+                  trend30m === 'bullish' ? 'bg-green-500/20 text-green-400 border-green-500/30' : 
+                  trend30m === 'bearish' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 
+                  'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                }`}>
+                  {trend30m}
+                </Badge>
+              </div>
+            </div>
+          </div>
+          
+          {/* Additional metrics */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1 border-t border-border/50">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">ADX</span>
+              <span className={`font-mono ${adx >= 30 ? 'text-green-400' : 'text-amber-400'}`}>{adx.toFixed(1)}</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Regime</span>
+              <Badge variant="outline" className="text-[9px] px-1 py-0">{regime.replace(/_/g, ' ')}</Badge>
+            </div>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+            <span className="text-amber-400">💡</span> The 4H trend is {trend4h} but 1h ({trend1h}) and 30m ({trend30m}) aren't confirming — the trend has lost lower-timeframe support. Wait for 1h/30m to re-align with 4h before entering, or look for mean-reversion opportunities.
+          </div>
+        </div>
+      );
+    }
+    
     // TREND_EXHAUSTION_PROTECTION - ADX declining with weak trend strength
     if (reason.includes("TREND_EXHAUSTION_PROTECTION") || fs?.gate === "TREND_EXHAUSTION_PROTECTION") {
       const adx = coerceNumeric(fs?.adx, 0);

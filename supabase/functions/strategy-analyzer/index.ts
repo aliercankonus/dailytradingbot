@@ -4856,6 +4856,58 @@ serve(async (req) => {
             continue; // Skip this symbol entirely
           }
           
+          // ===== DYING TREND BLOCK: Old regime + declining ADX + LTFs not aligned =====
+          // Catches entries the existing hard block misses (e.g., when ADX >= 40 relaxes slope threshold)
+          // If the trend is old, ADX declining, and lower timeframes aren't confirming — the move is dead
+          const DYING = AGE_DECAY.DYING_TREND_BLOCK;
+          if (DYING?.ENABLED && !earlyRallyBypass) {
+            const dyingEffectiveMaxSlope = adx >= DYING.HIGH_ENERGY_ADX_THRESHOLD 
+              ? DYING.HIGH_ENERGY_MAX_SLOPE 
+              : DYING.MAX_ADX_SLOPE;
+            
+            if (regimeAge >= DYING.MIN_REGIME_AGE && currentAdxSlopeSmoothed < dyingEffectiveMaxSlope) {
+              // Check LTF alignment with 4h direction
+              const trend4hDir = htfTrend4h;
+              const trend1hDir = htfTrend1h;
+              const trend30mDir = trendData.timeframes?.['30m']?.trend || trendData.multiTimeframeTrends?.timeframe30m?.trend || 'neutral';
+              
+              const is1hAligned = (trend4hDir === 'bullish' && trend1hDir === 'bullish') || 
+                                  (trend4hDir === 'bearish' && trend1hDir === 'bearish');
+              const is30mAligned = (trend4hDir === 'bullish' && trend30mDir === 'bullish') || 
+                                   (trend4hDir === 'bearish' && trend30mDir === 'bearish');
+              
+              const shouldBlock = DYING.REQUIRE_BOTH_LTF_UNALIGNED 
+                ? (!is1hAligned && !is30mAligned)  // Both must be unaligned
+                : (!is1hAligned || !is30mAligned); // Either unaligned triggers block
+              
+              if (shouldBlock && (!DYING.BLOCK_CONTINUATION_ONLY || fourStateRegime.allowContinuation)) {
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.TREND} 🚫 DYING TREND BLOCK: ${fourStateRegime.regime} age=${regimeAge}, ADX slope=${currentAdxSlopeSmoothed.toFixed(2)}, 4h=${trend4hDir}, 1h=${trend1hDir}(${is1hAligned ? '✓' : '✗'}), 30m=${trend30mDir}(${is30mAligned ? '✓' : '✗'}) — LTFs not confirming dying trend`);
+                
+                rejectionBuffer.add({
+                  user_id: userId,
+                  symbol,
+                  rejection_reason: DYING.BLOCK_REASON,
+                  filters_status: {
+                    gate: DYING.BLOCK_REASON,
+                    regimeAge,
+                    regime: fourStateRegime.regime,
+                    adx,
+                    adxSlopeSmoothed: currentAdxSlopeSmoothed,
+                    adxSlopeRaw: currentAdxSlopeRaw,
+                    trend4h: trend4hDir,
+                    trend1h: trend1hDir,
+                    trend30m: trend30mDir,
+                    is1hAligned,
+                    is30mAligned,
+                    minAgeThreshold: DYING.MIN_REGIME_AGE,
+                    maxSlopeThreshold: dyingEffectiveMaxSlope,
+                  },
+                });
+                continue; // Skip this symbol entirely
+              }
+            }
+          }
+          
           if (regimeAge >= AGE_DECAY.FATIGUE_START_CANDLES) {
             // Linear interpolation from 1.0 to MAX_FATIGUE_MULTIPLIER
             const fatigueProgress = Math.min(1.0, (regimeAge - AGE_DECAY.FATIGUE_START_CANDLES) / (AGE_DECAY.FULL_FATIGUE_CANDLES - AGE_DECAY.FATIGUE_START_CANDLES));

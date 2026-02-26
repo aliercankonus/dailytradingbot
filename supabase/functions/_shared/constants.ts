@@ -4239,6 +4239,28 @@ export const FOUR_STATE_REGIME = {
     FRESH_REGIME_BONUS_MULTIPLIER: 1.15, // +15% sizing for fresh trends
     FRESH_REGIME_MIN_ADX_SLOPE: 0.1,   // Only if ADX slope is rising (confirming expansion)
   },
+    
+    // ===== DYING TREND BLOCK: ADX declining + old regime + LTFs not aligned =====
+    // Root cause fix: DOTUSDT lost -0.64% entering a continuation trade where ADX slope was -1.05,
+    // regime age was 68, and 1h/30m were neutral (not aligned with 4h bullish).
+    // The existing hard block was bypassed because ADX >= 40 relaxes the slope threshold.
+    // This gate catches the case where the trend is structurally dying even if ADX is still high.
+    DYING_TREND_BLOCK: {
+      ENABLED: true,
+      // Minimum regime age for this block to apply
+      MIN_REGIME_AGE: 40,
+      // ADX slope must be negative (trend decelerating)
+      MAX_ADX_SLOPE: 0,
+      // Requires that NEITHER 1h NOR 30m are aligned with 4h direction
+      // If at least one LTF confirms, the trend may still have legs
+      REQUIRE_BOTH_LTF_UNALIGNED: false,  // false = block if EITHER is unaligned; true = block only if BOTH are unaligned
+      // Only applies to continuation strategies (not MR)
+      BLOCK_CONTINUATION_ONLY: true,
+      BLOCK_REASON: 'DYING_TREND_LTF_UNALIGNED',
+      // ADX energy override: if ADX is extremely high, allow slightly negative slopes
+      HIGH_ENERGY_ADX_THRESHOLD: 50,
+      HIGH_ENERGY_MAX_SLOPE: -0.5,  // More tolerance when ADX >= 50
+    },
   
   // ===== LOGGING =====
   LOG_REGIME_CLASSIFICATION: true,
