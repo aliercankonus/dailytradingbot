@@ -8045,17 +8045,91 @@ export const SignalRejectionReasons = () => {
       return <LowAtrBlockDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
-    // NO_TRADE_RANGE_REGIME - hard block when market is ranging
-    if (reason.includes("NO_TRADE_RANGE_REGIME")) {
-      return <RangeCompressionBlockDisplay filtersStatus={{
-        ...fs,
-        fourStateRegime: 'RANGE_COMPRESSION',
-        primaryTrend: fs?.primaryTrend || 'neutral',
-        adx: fs?.adx,
-        adxSlope: fs?.adxSlope,
-        momentumState: fs?.momentumState || 'mixed',
-        momentumScore: fs?.momentumScore ?? 0,
-      }} trendData={rejection.trend_data} />;
+    // NO_TRADE_RANGE_REGIME - hard block when market is ranging with no edge
+    if (reason.includes("NO_TRADE_RANGE_REGIME") || fs?.gate === "NO_TRADE_RANGE_REGIME") {
+      const adx = coerceNumeric(fs?.adx, 0);
+      const adxSlope = coerceNumeric(fs?.adxSlope, 0);
+      const momScore = coerceNumeric(fs?.momentumScore, 0);
+      const absMom = Math.abs(momScore);
+      const primaryTrend = fs?.primaryTrend || 'neutral';
+      const momentumState = fs?.momentumState || 'mixed';
+      const maxAdx = coerceNumeric(fs?.maxAdxThreshold, 18);
+      const maxAbsMom = coerceNumeric(fs?.maxAbsMomentumScore, 15);
+      const wouldPass = fs?.wouldPassWith || null;
+      const dirScore = fs?.directionWeightedScore;
+      
+      const adxPct = maxAdx > 0 ? Math.min((adx / maxAdx) * 100, 100) : 0;
+      const momPct = maxAbsMom > 0 ? Math.min((absMom / maxAbsMom) * 100, 100) : 0;
+      
+      return (
+        <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Minimize2 className="h-3.5 w-3.5 text-amber-400" />
+              <span className="text-xs font-medium">No-Trade Range Regime</span>
+            </div>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-red-500/20 text-red-400 border-red-500/30">
+              Hard Block
+            </Badge>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground italic">
+            Market is ranging with no statistical edge — ADX ({adx.toFixed(1)}) and momentum (|{momScore.toFixed(0)}|) are both below the thresholds needed for profitable entries. Noise dominates price action in this regime.
+          </div>
+          
+          <div className="space-y-1.5 pt-1 border-t border-border/50">
+            <div className="text-[10px] text-muted-foreground mb-0.5">Exit conditions (any one):</div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] w-[90px] shrink-0">ADX ≥ {maxAdx}</span>
+              <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                <div className={`h-full rounded-full ${adx >= maxAdx ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${adxPct}%` }} />
+              </div>
+              <span className={`text-[10px] font-mono w-[40px] text-right ${adx >= maxAdx ? 'text-green-400' : 'text-red-400'}`}>{adx.toFixed(1)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] w-[90px] shrink-0">|Mom| ≥ {maxAbsMom}</span>
+              <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                <div className={`h-full rounded-full ${absMom >= maxAbsMom ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${momPct}%` }} />
+              </div>
+              <span className={`text-[10px] font-mono w-[40px] text-right ${absMom >= maxAbsMom ? 'text-green-400' : 'text-red-400'}`}>{absMom.toFixed(0)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] w-[90px] shrink-0">Mom state</span>
+              <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${
+                momentumState === 'confirmed' || momentumState === 'building' 
+                  ? 'text-green-400 border-green-500/30' 
+                  : 'text-red-400 border-red-500/30'
+              }`}>
+                {momentumState}
+              </Badge>
+              <span className="text-[10px] text-muted-foreground">(needs confirmed/building)</span>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1 border-t border-border/50">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Primary Trend</span>
+              <span className="font-medium capitalize">{primaryTrend}</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">ADX Slope</span>
+              <span className={`font-mono ${adxSlope > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {adxSlope >= 0 ? '+' : ''}{adxSlope.toFixed(2)}
+              </span>
+            </div>
+            {dirScore && (
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">Dir. Weight</span>
+                <span className="font-mono">{dirScore}</span>
+              </div>
+            )}
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+            <span className="text-amber-400">💡</span> {wouldPass || `Wait for ADX to rise above ${maxAdx}, momentum to strengthen (|score| ≥ ${maxAbsMom}), or momentum state to shift to confirmed/building before entering.`}
+          </div>
+        </div>
+      );
     }
     
     // RANGE_COMPRESSION_BLOCK - 4-state regime identifies no edge
