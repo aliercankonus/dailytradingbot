@@ -2749,6 +2749,9 @@ serve(async (req) => {
     let regimeTransitionsBlocked = 0;
     let regimeTransitionsConfirmed = 0;
 
+    // Track executions across the loop (immediate execution model)
+    let executedSignals = 0;
+
     // Analyze each symbol (using filtered activeSymbols that passed win rate check)
     for (const { symbol } of activeSymbols) {
       const currentTradeCount = openTradesPerSymbol.get(symbol) || 0;
@@ -5125,10 +5128,30 @@ serve(async (req) => {
               if (insertError) {
                 logger.forSymbol(symbol).error(`Compression signal insert error: ${insertError.message}`);
               } else if (insertedSignal) {
-                signals.push({ ...compressionSignal, id: insertedSignal.id });
+                const signalWithId = { ...compressionSignal, id: insertedSignal.id };
+                signals.push(signalWithId);
                 totalSignalsGenerated++;
                 existingSignalsSet.add(symbol);
                 logger.forSymbol(symbol).success(`📦 COMPRESSION ${signalType.toUpperCase()} via "${COMPRESSION_MODULE.STRATEGY_NAME}" | Score: ${compressionEntryResult.score} | Entry: ${currentPrice.toFixed(2)} | TP: ${takeProfit.toFixed(2)} | SL: ${stopLoss.toFixed(2)}`);
+                // IMMEDIATE EXECUTION: Execute signal right after generation instead of batching
+                if (riskParams.auto_execute_signals) {
+                  try {
+                    const execStartMs = Date.now();
+                    const { error: executeError } = await supabase.functions.invoke("execute-trade", {
+                      headers: { "x-user-id": userId },
+                      body: { signalId: insertedSignal.id, action: "execute" },
+                    });
+                    const execLatencyMs = Date.now() - execStartMs;
+                    if (!executeError) {
+                      executedSignals++;
+                      logger.forSymbol(symbol).success(`⚡ Immediately executed (${execLatencyMs}ms latency)`);
+                    } else {
+                      logger.forSymbol(symbol).error(`Immediate execution failed: ${executeError}`);
+                    }
+                  } catch (execErr) {
+                    logger.forSymbol(symbol).error(`Immediate execution error: ${execErr}`);
+                  }
+                }
               }
               continue; // Signal generated, skip to next symbol
             }
@@ -17588,10 +17611,30 @@ serve(async (req) => {
         }
 
         if (!insertError && insertedSignal) {
-          signals.push({ ...signal, id: insertedSignal.id });
+          const signalWithId = { ...signal, id: insertedSignal.id };
+          signals.push(signalWithId);
           totalSignalsGenerated++;
           existingSignalsSet.add(symbol);
           logger.forSymbol(symbol).success(`${signalType.toUpperCase()} via "${strategy.name}" | Quality: ${qualityScore} | Entry: ${pullbackAnalysis.isPullback ? "PULLBACK" : "STANDARD"}`);
+          // IMMEDIATE EXECUTION: Execute signal right after generation instead of batching
+          if (riskParams.auto_execute_signals) {
+            try {
+              const execStartMs = Date.now();
+              const { error: executeError } = await supabase.functions.invoke("execute-trade", {
+                headers: { "x-user-id": userId },
+                body: { signalId: insertedSignal.id, action: "execute" },
+              });
+              const execLatencyMs = Date.now() - execStartMs;
+              if (!executeError) {
+                executedSignals++;
+                logger.forSymbol(symbol).success(`⚡ Immediately executed (${execLatencyMs}ms latency)`);
+              } else {
+                logger.forSymbol(symbol).error(`Immediate execution failed: ${executeError}`);
+              }
+            } catch (execErr) {
+              logger.forSymbol(symbol).error(`Immediate execution error: ${execErr}`);
+            }
+          }
         }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -17607,27 +17650,9 @@ serve(async (req) => {
       }
     }
 
-    // Auto-execute if enabled
-    let executedSignals = 0;
-    if (riskParams.auto_execute_signals && signals.length > 0) {
-      // Sort by quality score - execute best signals first
-      signals.sort((a, b) => (b.qualityScore || 0) - (a.qualityScore || 0));
-      
-      for (const signal of signals) {
-        try {
-          const { error: executeError } = await supabase.functions.invoke("execute-trade", {
-            headers: { "x-user-id": userId },
-            body: { signalId: signal.id, action: "execute" },
-          });
-          if (!executeError) {
-            executedSignals++;
-            logger.forSymbol(signal.symbol).success(`Executed (quality: ${signal.qualityScore})`);
-          }
-        } catch (error) {
-          logger.error(`Error executing signal: ${error}`);
-        }
-      }
-    }
+    // NOTE: Signals are now executed IMMEDIATELY after generation inside the symbol loop above.
+    // This eliminates the latency gap where signals waited for all symbols to finish analysis.
+    // The old batch-execution block has been removed.
 
     logger.summary(`${totalSignalsGenerated} signals | Rejected: hardGates=${rejectedByHardGates} regime=${rejectedByRegime} reversal=${rejectedByReversalRisk} stochRsiExtreme=${rejectedByStochRsiExtreme} quality=${rejectedByQuality} strategy=${rejectedByStrategy} | StrongTrendException: used=${strongTrendExceptionUsed} notApplicable=${strongTrendExceptionNotApplicable}`);
     
