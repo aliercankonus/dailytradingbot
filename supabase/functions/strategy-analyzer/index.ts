@@ -180,7 +180,9 @@ import {
   // Centralized adaptive entry thresholds
   ADAPTIVE_ENTRY_THRESHOLDS,
   // NEW: Multi-TF Rally Override for fixing SHORT bias
-  RALLY_OVERRIDE
+  RALLY_OVERRIDE,
+  // NEW: Trend Expansion StochRSI Exemption
+  TREND_EXPANSION_EXEMPTION
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
@@ -3596,9 +3598,37 @@ serve(async (req) => {
                 }
               }
               
-              // If capitulation or flash crash probe triggered, skip the standard Tier 0 block
+              // ============= TREND EXPANSION EXEMPTION (SHORT side) =============
+              const shortTrendExpExemptionCheck = (() => {
+                const TEE = TREND_EXPANSION_EXEMPTION;
+                if (!TEE.ENABLED || capitulationProbeTriggered || flashCrashProbeTriggered) return { allowed: false, reason: 'N/A', multiplier: 0 };
+                if (earlyStochRsiK4h <= TEE.ABSOLUTE_MIN_K) return { allowed: false, reason: `K=${earlyStochRsiK4h.toFixed(1)} <= ${TEE.ABSOLUTE_MIN_K} absolute floor`, multiplier: 0 };
+                if (adx < TEE.MIN_ADX) return { allowed: false, reason: `ADX ${adx.toFixed(1)} < ${TEE.MIN_ADX}`, multiplier: 0 };
+                if (earlyAdxSlope < TEE.MIN_ADX_SLOPE) return { allowed: false, reason: `ADX slope ${earlyAdxSlope.toFixed(2)} < ${TEE.MIN_ADX_SLOPE}`, multiplier: 0 };
+                const momScore = earlySmartMomentum.score ?? 0;
+                if (momScore > -TEE.MIN_MOMENTUM_SCORE) return { allowed: false, reason: `Momentum ${momScore.toFixed(0)} > ${-TEE.MIN_MOMENTUM_SCORE}`, multiplier: 0 };
+                // Count bearish aligned TFs
+                let bearishCount = 0;
+                const tfTrends = trendData.timeframes || {};
+                for (const tf of ['15m', '30m', '1h', '4h']) {
+                  const tfTrend = tfTrends[tf]?.trend;
+                  if (tfTrend === 'bearish' || tfTrend === 'weak_bearish') bearishCount++;
+                }
+                if (bearishCount < TEE.MIN_ALIGNED_TIMEFRAMES) return { allowed: false, reason: `${bearishCount} bearish TFs < ${TEE.MIN_ALIGNED_TIMEFRAMES}`, multiplier: 0 };
+                const isDeepZone = earlyStochRsiK4h < DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD;
+                let multiplier = isDeepZone ? TEE.DEEP_ZONE_POSITION_MULTIPLIER : TEE.SOFT_ZONE_POSITION_MULTIPLIER;
+                if (earlyAdxSlope >= TEE.ACCELERATING_SLOPE_THRESHOLD) multiplier = Math.min(multiplier + TEE.ACCELERATING_BOOST, 0.45);
+                return { allowed: true, reason: `TREND_EXPANSION confirmed (SHORT): ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)}, mom=${momScore.toFixed(0)}, ${bearishCount}TF aligned`, multiplier };
+              })();
+              
               if (capitulationProbeTriggered || flashCrashProbeTriggered) {
                 // Continue to normal processing with flipped direction
+              } else if (shortTrendExpExemptionCheck.allowed) {
+                strongTrendTier0OverrideApplied = true;
+                strongTrendTier0PositionMultiplier = shortTrendExpExemptionCheck.multiplier;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 📉 TREND EXPANSION EXEMPTION: SHORT allowed at K=${earlyStochRsiK4h.toFixed(1)} — low K is trend confirmation, not bounce signal`);
+                logger.forSymbol(symbol).info(`   → ${shortTrendExpExemptionCheck.reason}`);
+                logger.forSymbol(symbol).info(`   → Position size: ${(strongTrendTier0PositionMultiplier * 100).toFixed(0)}%`);
               } else if (overrideCheck.allowed) {
                 // STRONG TREND OVERRIDE ACTIVATED - allow SHORT with reduced size
                 strongTrendTier0OverrideApplied = true;
@@ -3696,6 +3726,46 @@ serve(async (req) => {
             const effectiveOverboughtThreshold = earlyRallyConditions ? 98 : DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD;
             
             if (earlyDirection === 'long' && earlyStochRsiK4h > effectiveOverboughtThreshold) {
+              // ============= TREND EXPANSION EXEMPTION =============
+              // Before checking Strong Trend Override, check if we're in a TREND_EXPANSION-like state
+              // where high StochRSI K is trend confirmation, not exhaustion.
+              // This fires at K > 95 (soft cap zone) or K > 97 (deep zone) during strong expansion.
+              const trendExpExemptionCheck = (() => {
+                const TEE = TREND_EXPANSION_EXEMPTION;
+                if (!TEE.ENABLED) return { allowed: false, reason: 'Disabled', multiplier: 0 };
+                if (earlyStochRsiK4h >= TEE.ABSOLUTE_MAX_K) return { allowed: false, reason: `K=${earlyStochRsiK4h.toFixed(1)} >= ${TEE.ABSOLUTE_MAX_K} absolute ceiling`, multiplier: 0 };
+                if (adx < TEE.MIN_ADX) return { allowed: false, reason: `ADX ${adx.toFixed(1)} < ${TEE.MIN_ADX}`, multiplier: 0 };
+                if (earlyAdxSlope < TEE.MIN_ADX_SLOPE) return { allowed: false, reason: `ADX slope ${earlyAdxSlope.toFixed(2)} < ${TEE.MIN_ADX_SLOPE}`, multiplier: 0 };
+                const momScore = earlySmartMomentum.score ?? 0;
+                if (momScore < TEE.MIN_MOMENTUM_SCORE) return { allowed: false, reason: `Momentum ${momScore.toFixed(0)} < ${TEE.MIN_MOMENTUM_SCORE}`, multiplier: 0 };
+                if (earlyRallyAlignedCount < TEE.MIN_ALIGNED_TIMEFRAMES) return { allowed: false, reason: `${earlyRallyAlignedCount} aligned TFs < ${TEE.MIN_ALIGNED_TIMEFRAMES}`, multiplier: 0 };
+                
+                // All conditions met — calculate position multiplier
+                const isDeepZone = earlyStochRsiK4h > DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD;
+                let multiplier = isDeepZone ? TEE.DEEP_ZONE_POSITION_MULTIPLIER : TEE.SOFT_ZONE_POSITION_MULTIPLIER;
+                // Boost if strongly accelerating
+                if (earlyAdxSlope >= TEE.ACCELERATING_SLOPE_THRESHOLD) {
+                  multiplier = Math.min(multiplier + TEE.ACCELERATING_BOOST, 0.45);
+                }
+                return { 
+                  allowed: true, 
+                  reason: `TREND_EXPANSION confirmed: ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)}, mom=${momScore.toFixed(0)}, ${earlyRallyAlignedCount}TF aligned, K=${earlyStochRsiK4h.toFixed(1)}${isDeepZone ? ' (deep)' : ' (soft)'}`,
+                  multiplier 
+                };
+              })();
+              
+              if (trendExpExemptionCheck.allowed) {
+                // TREND EXPANSION EXEMPTION ACTIVATED — allow LONG with graduated sizing
+                strongTrendTier0OverrideApplied = true;
+                strongTrendTier0PositionMultiplier = trendExpExemptionCheck.multiplier;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 📈 TREND EXPANSION EXEMPTION: LONG allowed at K=${earlyStochRsiK4h.toFixed(1)} — high K is trend confirmation, not exhaustion`);
+                logger.forSymbol(symbol).info(`   → ${trendExpExemptionCheck.reason}`);
+                logger.forSymbol(symbol).info(`   → Position size: ${(strongTrendTier0PositionMultiplier * 100).toFixed(0)}%`);
+                // Continue processing instead of blocking
+              }
+              
+              // Fall through to existing Strong Trend Override if exemption didn't fire
+              else {
               const overrideCheck = checkStrongTrendOverride('long');
               
               if (overrideCheck.allowed) {
@@ -3765,6 +3835,7 @@ serve(async (req) => {
                 }
               }
             }
+            } // close trend expansion exemption else
             // TIER 0 SOFT CAP: LONGs at K 95-97 → allow with 0.5x position cap (early climax zone)
             else if (earlyDirection === 'long' && earlyStochRsiK4h > DEEP_STOCHRSI_HARD_GATE.SOFT_CAP_OVERBOUGHT_K_THRESHOLD) {
               tier0SoftCapApplied = true;
