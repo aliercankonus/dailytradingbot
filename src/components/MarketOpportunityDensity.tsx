@@ -51,6 +51,7 @@ const GATE_LABELS: Record<string, { label: string; icon: typeof Activity; color:
   STOCHRSI_OVERSOLD_BLOCK: { label: "StochRSI Oversold", icon: TrendingDown, color: "text-red-400" },
   OPPOSING_SMART_MOMENTUM: { label: "Opposing Momentum", icon: Zap, color: "text-red-400" },
   OVEREXTENSION_ATR_BLOCK: { label: "ATR Overextended", icon: TrendingUp, color: "text-amber-400" },
+  FEE_VIABILITY_BLOCK: { label: "Fee-Dominated", icon: Ban, color: "text-amber-400" },
 };
 
 const getGateInfo = (gate: string) => {

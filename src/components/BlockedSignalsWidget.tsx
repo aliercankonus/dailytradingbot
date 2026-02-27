@@ -62,6 +62,7 @@ const getSeverityLevel = (reason: string, filtersStatus: any): SeverityLevel => 
     gate === "MOMENTUM_DIRECTION_OPPOSING" ||
     gate === "OPPOSING_SMART_MOMENTUM" ||
     gate === "OVEREXTENSION_ATR_BLOCK" ||
+    gate === "FEE_VIABILITY_BLOCK" ||
     gate === "MOMENTUM_SLOPE_GATE" ||
     lowerReason.includes("adx too low") ||
     lowerReason.includes("htf not aligned") ||
