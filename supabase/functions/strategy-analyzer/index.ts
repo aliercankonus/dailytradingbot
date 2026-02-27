@@ -9016,7 +9016,7 @@ serve(async (req) => {
            // ===== IMPROVEMENT #2: GRADUATED ATR FILTER =====
           // Replaces binary 1.10% cliff with graduated soft penalty zones
           // Hard block only below structural floor (0.70%), soft penalties 0.70-1.10%
-          const atrFilter = RANGING_MARKET_PROTECTION.MIN_ATR_FILTER;
+           const atrFilter = RANGING_MARKET_PROTECTION.MIN_ATR_FILTER;
           if (atrFilter?.ENABLED) {
             const currentPrice = trendData?.currentPrice || 0;
             const currentATR = trendData?.volatility?.atr ?? 0;
@@ -9496,7 +9496,10 @@ serve(async (req) => {
         const roundTripFeePercent = feeRatePercent * 2; // Entry + exit fees
         const feeViabilityMultiplier = 2.0; // Expected move must clear 2x fees
         const minRequiredMovePercent = roundTripFeePercent * feeViabilityMultiplier;
-        const expectedAtrMovePercent = currentPrice > 0 ? (currentATR / currentPrice) * 100 : 0;
+        // Use trendData price/ATR for fee viability check (before marketData price is parsed later)
+        const feeCheckPrice = trendData?.currentPrice || 0;
+        const feeCheckATR = trendData?.volatility?.atr ?? 0;
+        const expectedAtrMovePercent = feeCheckPrice > 0 ? (feeCheckATR / feeCheckPrice) * 100 : 0;
         
         if (expectedAtrMovePercent > 0 && expectedAtrMovePercent < minRequiredMovePercent) {
           rejectedByHardGates++;
@@ -9515,8 +9518,8 @@ serve(async (req) => {
               roundTripFeePercent: roundTripFeePercent.toFixed(4),
               minRequiredMovePercent: minRequiredMovePercent.toFixed(4),
               feeRatePercent,
-              currentATR,
-              currentPrice,
+              currentATR: feeCheckATR,
+              currentPrice: feeCheckPrice,
               architecture: "Hard block — no exceptions"
             },
             trendData,
