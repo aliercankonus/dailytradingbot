@@ -9460,8 +9460,8 @@ serve(async (req) => {
         const currentOverextensionAtr = smartMomentum.overextensionATR;
         if (currentOverextensionAtr > maxOverextensionAtr && !bbSqueeze.isBreakingOut && !qualifiesForContinuationMode) {
           // Allow MR entries in overextended conditions (they trade against the overextension)
-          const isMRDirection = (derivedDirection === 'long' && currentOverextensionAtr < 0) || 
-                                (derivedDirection === 'short' && currentOverextensionAtr > 0);
+          // overextensionATR is always >= 0 (absolute distance), so check moveZone instead
+          const isMRDirection = moveZone === 'MEAN_REVERSION' && moveZoneDetails?.meanReversionAllowed;
           if (!isMRDirection) {
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { 
