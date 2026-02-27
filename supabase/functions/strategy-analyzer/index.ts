@@ -9453,6 +9453,42 @@ serve(async (req) => {
           continue;
         }
         
+        // Gate 1b: OVEREXTENSION ATR HARD BLOCK
+        // Block entries when price is too far from EMA (overextension measured in ATR multiples)
+        // This prevents chasing moves that are statistically likely to revert
+        const maxOverextensionAtr = riskParams.max_overextension_atr ?? 2.0;
+        const currentOverextensionAtr = smartMomentum.overextensionATR;
+        if (currentOverextensionAtr > maxOverextensionAtr && !bbSqueeze.isBreakingOut && !qualifiesForContinuationMode) {
+          // Allow MR entries in overextended conditions (they trade against the overextension)
+          const isMRDirection = (derivedDirection === 'long' && currentOverextensionAtr < 0) || 
+                                (derivedDirection === 'short' && currentOverextensionAtr > 0);
+          if (!isMRDirection) {
+            rejectedByHardGates++;
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'OVEREXTENSION_ATR_BLOCK', 
+              details: `overextATR=${currentOverextensionAtr.toFixed(2)} > max=${maxOverextensionAtr}, ADX=${adx.toFixed(1)}` 
+            });
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⛔ OVEREXTENSION ATR HARD BLOCK: ${currentOverextensionAtr.toFixed(2)} ATR > max ${maxOverextensionAtr} ATR — price too far from EMA for ${derivedDirection.toUpperCase()} entry`);
+            await logRejectionWithAI(
+              supabase, userId, symbol,
+              `OVEREXTENSION ATR: ${currentOverextensionAtr.toFixed(2)} ATR from EMA exceeds max ${maxOverextensionAtr} ATR — chasing blocked`,
+              {
+                gate: "OVEREXTENSION_ATR_BLOCK",
+                derivedDirection,
+                overextensionATR: currentOverextensionAtr,
+                maxOverextensionATR: maxOverextensionAtr,
+                adx: adx.toFixed(1),
+                momentumScore: smartMomentum.score,
+                architecture: "Hard block — no ADX override"
+              },
+              trendData,
+              riskParams.ai_analysis_enabled !== false,
+              earlyOrderFlowAnalysis
+            );
+            continue;
+          }
+        }
+        
         // Gate 2: Block entries when momentum is WEAKENING against trade direction
         const momentumAligned = (derivedDirection === "long" && smartMomentum.score > 0) ||
                                 (derivedDirection === "short" && smartMomentum.score < 0);
