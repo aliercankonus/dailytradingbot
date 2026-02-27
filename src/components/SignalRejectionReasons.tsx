@@ -7737,6 +7737,238 @@ const AIAnalysisCell = ({
   );
 };
 
+// ============= OPPOSING SMART MOMENTUM DISPLAY =============
+const OpposingSmartMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const momScore = coerceNumeric(filtersStatus?.smartMomentumScore, 0);
+  const adx = coerceNumeric(filtersStatus?.adx, 0);
+  const threshold = coerceNumeric(filtersStatus?.threshold, 15);
+  const direction = filtersStatus?.derivedDirection || 'unknown';
+  const htf4h = filtersStatus?.htfTrend4h || 'unknown';
+  const htf1h = filtersStatus?.htfTrend1h || 'unknown';
+
+  const momentumPolarity = momScore > 0 ? 'bullish' : 'bearish';
+  const momentumStrength = Math.abs(momScore);
+  const exceptionAdx = 40;
+  const adxPct = Math.min((adx / exceptionAdx) * 100, 100);
+  const htfAligned = (direction === 'short' && htf4h === 'bearish') || (direction === 'long' && htf4h === 'bullish');
+  const canBypass = adx >= exceptionAdx && htfAligned;
+
+  const stochStrip = [
+    { tf: '4h', k: coerceNumeric(filtersStatus?.stochRsiK4h, null as any) },
+    { tf: '1h', k: coerceNumeric(filtersStatus?.stochRsiK1h, null as any) },
+    { tf: '30m', k: coerceNumeric(filtersStatus?.stochRsiK30m, null as any) },
+    { tf: '15m', k: coerceNumeric(filtersStatus?.stochRsiK15m, null as any) },
+  ];
+
+  return (
+    <div className="space-y-2.5 p-2.5 bg-muted/30 rounded-md border border-border/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Zap className="h-3.5 w-3.5 text-red-400" />
+          <span className="text-xs font-medium">Opposing Momentum Block</span>
+        </div>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-red-500/20 text-red-400 border-red-500/30">
+          Hard Gate
+        </Badge>
+      </div>
+
+      <div className="text-[10px] text-muted-foreground italic">
+        Smart momentum is actively <span className="text-foreground font-medium">{momentumPolarity}</span> ({momScore > 0 ? '+' : ''}{momScore.toFixed(0)}) which opposes <span className="font-medium text-foreground">{direction.toUpperCase()}</span>. Trading against momentum energy leads to stop-outs.
+      </div>
+
+      {/* Momentum vs threshold */}
+      <div className="space-y-1 pt-1 border-t border-border/50">
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="text-muted-foreground">Momentum Strength</span>
+          <span className={`font-mono font-medium ${momentumStrength >= 30 ? 'text-red-400' : 'text-amber-400'}`}>
+            |{momScore.toFixed(0)}| vs ±{threshold}
+          </span>
+        </div>
+        <div className="relative h-2 bg-muted rounded-full overflow-hidden">
+          <div className="absolute top-0 h-full w-px bg-foreground/40" style={{ left: `${Math.min((threshold / 60) * 100, 100)}%` }} />
+          <div className={`h-full rounded-full ${momentumStrength >= 30 ? 'bg-red-500' : 'bg-amber-500'}`} style={{ width: `${Math.min((momentumStrength / 60) * 100, 100)}%` }} />
+        </div>
+        <div className="flex justify-between text-[9px] text-muted-foreground"><span>0</span><span>±{threshold} block</span><span>60</span></div>
+      </div>
+
+      {/* Metrics */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-1 border-t border-border/50">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Direction</span>
+          <Badge variant="outline" className={`text-[9px] px-1 py-0 ${direction === 'long' ? 'text-green-400 border-green-500/40' : 'text-red-400 border-red-500/40'}`}>{direction.toUpperCase()}</Badge>
+        </div>
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Polarity</span>
+          <Badge variant="outline" className={`text-[9px] px-1 py-0 ${momentumPolarity === 'bullish' ? 'text-green-400 border-green-500/40' : 'text-red-400 border-red-500/40'}`}>{momentumPolarity === 'bullish' ? '🐂' : '🐻'} {momentumPolarity}</Badge>
+        </div>
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">4H Trend</span>
+          <span className={`font-medium capitalize ${htf4h === 'bullish' ? 'text-green-400' : htf4h === 'bearish' ? 'text-red-400' : 'text-muted-foreground'}`}>{htf4h}</span>
+        </div>
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">1H Trend</span>
+          <span className={`font-medium capitalize ${htf1h === 'bullish' ? 'text-green-400' : htf1h === 'bearish' ? 'text-red-400' : 'text-muted-foreground'}`}>{htf1h}</span>
+        </div>
+      </div>
+
+      {/* ADX exception bypass */}
+      <div className="space-y-1 pt-1 border-t border-border/50">
+        <div className="text-[10px] text-muted-foreground mb-0.5">Bypass: ADX ≥ {exceptionAdx} + 4H aligned → 30% position</div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] w-[70px] shrink-0">ADX ≥ {exceptionAdx}</span>
+          <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+            <div className={`h-full rounded-full ${adx >= exceptionAdx ? 'bg-green-500' : adxPct >= 70 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${adxPct}%` }} />
+          </div>
+          <span className={`text-[10px] font-mono w-[36px] text-right ${adx >= exceptionAdx ? 'text-green-400' : 'text-red-400'}`}>{adx.toFixed(1)}</span>
+        </div>
+        <div className="flex items-center gap-1 text-[10px]">
+          {htfAligned ? <CheckCircle2 className="h-3 w-3 text-green-400" /> : <XCircle className="h-3 w-3 text-red-400" />}
+          <span className={htfAligned ? 'text-green-400' : 'text-red-400'}>
+            4H {htfAligned ? 'aligned' : `${htf4h} (need ${direction === 'long' ? 'bullish' : 'bearish'})`}
+          </span>
+        </div>
+      </div>
+
+      {/* StochRSI strip */}
+      {stochStrip.some(s => typeof s.k === 'number' && s.k !== 0) && (
+        <div className="pt-1 border-t border-border/50">
+          <div className="text-[10px] text-muted-foreground mb-1">StochRSI</div>
+          <div className="grid grid-cols-4 gap-1">
+            {stochStrip.map(s => (
+              <div key={s.tf} className="text-center">
+                <div className="text-[9px] text-muted-foreground">{s.tf}</div>
+                <div className={`text-[10px] font-mono ${typeof s.k === 'number' ? (s.k >= 80 ? 'text-red-400' : s.k <= 20 ? 'text-green-400' : 'text-foreground') : 'text-muted-foreground'}`}>
+                  {typeof s.k === 'number' ? s.k.toFixed(0) : '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="text-[9px] text-muted-foreground pt-1 border-t border-border/30">
+        💡 {momentumStrength >= 30
+          ? `Strong ${momentumPolarity} momentum — wait for it to weaken below ±${threshold} or flip.`
+          : `Momentum opposes at ${momScore > 0 ? '+' : ''}${momScore.toFixed(0)}. Need ADX ≥ ${exceptionAdx} with aligned 4H for bypass.`
+        }
+      </div>
+    </div>
+  );
+};
+
+// ============= OVEREXTENSION ATR BLOCK DISPLAY =============
+const OverextensionAtrBlockDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const overextATR = coerceNumeric(filtersStatus?.overextensionATR, 0);
+  const maxATR = coerceNumeric(filtersStatus?.maxOverextensionATR, 2);
+  const adx = coerceNumeric(filtersStatus?.adx, 0);
+  const adxSlope = filtersStatus?.adxSlope;
+  const direction = filtersStatus?.derivedDirection || 'unknown';
+  const momScore = coerceNumeric(filtersStatus?.momentumScore, 0);
+  const architecture = filtersStatus?.architecture || '';
+
+  const overextPct = maxATR > 0 ? (overextATR / maxATR) * 100 : 0;
+  const excessATR = overextATR - maxATR;
+  const severityLabel = excessATR >= 1.0 ? 'Extreme' : excessATR >= 0.5 ? 'High' : 'Moderate';
+
+  const bb1h = filtersStatus?.bollinger1h;
+  const bb4h = filtersStatus?.bollinger4h;
+
+  return (
+    <div className="space-y-2.5 p-2.5 bg-muted/30 rounded-md border border-border/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <TrendingUp className="h-3.5 w-3.5 text-amber-400" />
+          <span className="text-xs font-medium">Overextension ATR Block</span>
+        </div>
+        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
+          severityLabel === 'Extreme' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+          severityLabel === 'High' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
+          'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+        }`}>
+          {severityLabel} — {overextATR.toFixed(2)} ATR
+        </Badge>
+      </div>
+
+      <div className="text-[10px] text-muted-foreground italic">
+        Price moved <span className="text-foreground font-medium">{overextATR.toFixed(2)} ATR</span> from EMA (max: {maxATR}). Entering {direction.toUpperCase()} risks chasing a move prone to reversion.
+      </div>
+
+      {/* ATR distance visual */}
+      <div className="space-y-1 pt-1 border-t border-border/50">
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="text-muted-foreground">EMA Distance</span>
+          <span className={`font-mono font-medium ${excessATR >= 1.0 ? 'text-red-400' : excessATR >= 0.5 ? 'text-amber-400' : 'text-yellow-400'}`}>
+            {overextATR.toFixed(2)} / {maxATR} ATR
+          </span>
+        </div>
+        <div className="relative h-2.5 bg-muted rounded-full overflow-hidden">
+          <div className="absolute top-0 h-full w-0.5 bg-foreground/50 z-10" style={{ left: '50%' }} />
+          <div className={`h-full rounded-full ${overextPct >= 150 ? 'bg-red-500' : overextPct >= 120 ? 'bg-amber-500' : 'bg-yellow-500'}`} style={{ width: `${Math.min(overextPct / 2, 100)}%` }} />
+        </div>
+        <div className="flex justify-between text-[9px] text-muted-foreground"><span>0</span><span>↑ {maxATR} max</span><span>{(maxATR * 2).toFixed(0)}</span></div>
+      </div>
+
+      {/* Metrics */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1 border-t border-border/50">
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Direction</span>
+          <Badge variant="outline" className={`text-[9px] px-1 py-0 ${direction === 'long' ? 'text-green-400 border-green-500/40' : 'text-red-400 border-red-500/40'}`}>{direction.toUpperCase()}</Badge>
+        </div>
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">ADX</span>
+          <span className={`font-mono font-medium ${adx >= 25 ? 'text-green-400' : 'text-amber-400'}`}>{adx.toFixed(1)}</span>
+        </div>
+        {typeof adxSlope === 'number' && (
+          <div className="flex justify-between text-[10px]">
+            <span className="text-muted-foreground">ADX Slope</span>
+            <span className={`font-mono ${adxSlope > 0 ? 'text-green-400' : 'text-red-400'}`}>{adxSlope >= 0 ? '+' : ''}{adxSlope.toFixed(2)}</span>
+          </div>
+        )}
+        <div className="flex justify-between text-[10px]">
+          <span className="text-muted-foreground">Momentum</span>
+          <span className={`font-mono ${momScore > 0 ? 'text-green-400' : momScore < 0 ? 'text-red-400' : 'text-muted-foreground'}`}>{momScore > 0 ? '+' : ''}{momScore.toFixed(0)}</span>
+        </div>
+      </div>
+
+      {/* Bollinger context */}
+      {(bb1h || bb4h) && (
+        <div className="pt-1 border-t border-border/50">
+          <div className="text-[10px] text-muted-foreground mb-1">Bollinger Context</div>
+          <div className="grid grid-cols-2 gap-2">
+            {bb4h && (
+              <div className="text-center">
+                <div className="text-[9px] text-muted-foreground">4H %B</div>
+                <div className={`text-[10px] font-mono ${coerceNumeric(bb4h.percentB, 50) > 100 ? 'text-red-400' : coerceNumeric(bb4h.percentB, 50) < 0 ? 'text-blue-400' : 'text-foreground'}`}>
+                  {coerceNumeric(bb4h.percentB, 0).toFixed(1)}%
+                </div>
+              </div>
+            )}
+            {bb1h && (
+              <div className="text-center">
+                <div className="text-[9px] text-muted-foreground">1H %B{bb1h.squeeze ? ' 🔒' : ''}</div>
+                <div className={`text-[10px] font-mono ${coerceNumeric(bb1h.percentB, 50) > 100 ? 'text-red-400' : coerceNumeric(bb1h.percentB, 50) < 0 ? 'text-blue-400' : 'text-foreground'}`}>
+                  {coerceNumeric(bb1h.percentB, 0).toFixed(1)}%
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {architecture && (
+        <div className="text-[9px] text-muted-foreground pt-1 border-t border-border/30 font-mono">{architecture}</div>
+      )}
+
+      <div className="text-[9px] text-muted-foreground pt-1 border-t border-border/30">
+        💡 {excessATR >= 1.0
+          ? `Significantly overextended at ${overextATR.toFixed(1)} ATR. Wait for pullback toward ${maxATR}-ATR range.`
+          : `Just crossed ${maxATR}-ATR threshold. A ${excessATR.toFixed(2)}-ATR pullback clears this gate.`
+        }
+      </div>
+    </div>
+  );
+};
+
 export const SignalRejectionReasons = () => {
   const { rejections, loading } = useSignalRejections();
   const { riskParams } = useRiskParametersContext();
@@ -7774,6 +8006,8 @@ export const SignalRejectionReasons = () => {
     if (gate === "SQUEEZE_CONTEXT_MEAN_REVERSION") return "high";
     if (gate === "STOCHRSI_NOT_RISING" || gate === "STOCHRSI_NOT_FALLING") return "high";
     if (gate === "NO_CLEAR_DIRECTION") return "high";
+    if (gate === "OPPOSING_SMART_MOMENTUM") return "high";
+    if (gate === "OVEREXTENSION_ATR_BLOCK") return "high";
     // Move exhaustion and momentum direction gates
     if (gate === "MOVE_EXHAUSTED_SHORT" || gate === "MOVE_EXHAUSTED_LONG") return "high";
     if (gate === "MOMENTUM_DIRECTION_OPPOSING") return "high";
@@ -8131,6 +8365,20 @@ export const SignalRejectionReasons = () => {
       const t1h = filtersStatus?.trend1h;
       if (t4h && t1h) return `📈 Timeframes misaligned: 4H ${t4h}, 1H ${t1h}`;
       return "📈 Higher timeframes not aligned";
+    }
+    
+    // OPPOSING SMART MOMENTUM (hard gate)
+    if (reason.includes("OPPOSING_SMART_MOMENTUM") || filtersStatus?.gate === "OPPOSING_SMART_MOMENTUM") {
+      const momVal = coerceNumeric(filtersStatus?.smartMomentumScore, 0);
+      const dir = filtersStatus?.derivedDirection || '';
+      return `⛔ ${momVal > 0 ? 'Bullish' : 'Bearish'} momentum (${momVal > 0 ? '+' : ''}${momVal.toFixed(0)}) blocks ${dir.toUpperCase()}`;
+    }
+    
+    // OVEREXTENSION ATR BLOCK
+    if (reason.includes("OVEREXTENSION ATR") || filtersStatus?.gate === "OVEREXTENSION_ATR_BLOCK") {
+      const oe = coerceNumeric(filtersStatus?.overextensionATR, 0);
+      const mx = coerceNumeric(filtersStatus?.maxOverextensionATR, 2);
+      return `📏 Overextended ${oe.toFixed(1)} / ${mx} ATR from EMA`;
     }
     
     // MOMENTUM DIRECTION OPPOSING
@@ -9006,6 +9254,16 @@ export const SignalRejectionReasons = () => {
     // HARD BLOCK: Absolute max StochRSI (K >= 98)
     if (reason.includes("HARD BLOCK") || fs?.gate === "ABSOLUTE_MAX_STOCHRSI_HARD_BLOCK") {
       return <HardBlockStochRsiDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // OPPOSING_SMART_MOMENTUM — momentum polarity opposes trade direction
+    if (fs?.gate === "OPPOSING_SMART_MOMENTUM" || reason.includes("OPPOSING_SMART_MOMENTUM")) {
+      return <OpposingSmartMomentumDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // OVEREXTENSION_ATR_BLOCK — price too far from EMA
+    if (fs?.gate === "OVEREXTENSION_ATR_BLOCK" || reason.includes("OVEREXTENSION ATR")) {
+      return <OverextensionAtrBlockDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // HARD GATE: ADX too low

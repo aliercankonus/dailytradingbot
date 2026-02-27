@@ -60,6 +60,8 @@ const getSeverityLevel = (reason: string, filtersStatus: any): SeverityLevel => 
     gate === "NO_MOMENTUM_STATE" ||
     gate === "HTF_NOT_ALIGNED" ||
     gate === "MOMENTUM_DIRECTION_OPPOSING" ||
+    gate === "OPPOSING_SMART_MOMENTUM" ||
+    gate === "OVEREXTENSION_ATR_BLOCK" ||
     gate === "MOMENTUM_SLOPE_GATE" ||
     lowerReason.includes("adx too low") ||
     lowerReason.includes("htf not aligned") ||
@@ -203,6 +205,20 @@ const formatUserFriendlyReason = (reason: string, filters?: any): string => {
   if (lowerReason.includes("symbol disabled")) {
     const wr = filters?.winRate;
     return wr !== undefined ? `🚫 Symbol disabled (${wr.toFixed(0)}% win rate)` : "🚫 Symbol disabled - poor performance";
+  }
+  
+  // OPPOSING_SMART_MOMENTUM
+  if (lowerReason.includes("opposing_smart_momentum") || filters?.gate === "OPPOSING_SMART_MOMENTUM") {
+    const mom = filters?.smartMomentumScore;
+    const dir = filters?.derivedDirection?.toUpperCase() || '';
+    return `⛔ ${mom > 0 ? 'Bullish' : 'Bearish'} momentum (${mom > 0 ? '+' : ''}${mom?.toFixed?.(0) ?? '?'}) blocks ${dir}`;
+  }
+  
+  // OVEREXTENSION_ATR_BLOCK
+  if (lowerReason.includes("overextension atr") || filters?.gate === "OVEREXTENSION_ATR_BLOCK") {
+    const oe = filters?.overextensionATR;
+    const mx = filters?.maxOverextensionATR ?? 2;
+    return `📏 Overextended ${oe?.toFixed?.(1) ?? '?'} / ${mx} ATR from EMA`;
   }
   
   // NO_MOMENTUM_STATE (v4.5 gate)
