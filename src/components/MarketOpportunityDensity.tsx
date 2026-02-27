@@ -33,6 +33,7 @@ const GATE_LABELS: Record<string, { label: string; icon: typeof Activity; color:
   ADX_TOO_LOW: { label: "ADX Too Low", icon: Gauge, color: "text-yellow-400" },
   LTF_CONFIRMATION: { label: "LTF Not Confirming", icon: Layers, color: "text-amber-400" },
   NO_MOMENTUM_CONFIRMATION: { label: "No Momentum", icon: Activity, color: "text-yellow-400" },
+  NO_MOMENTUM_STATE: { label: "No Momentum State", icon: Activity, color: "text-amber-400" },
   HTF_NOT_ALIGNED: { label: "HTF Misaligned", icon: BarChart3, color: "text-orange-400" },
   MOMENTUM_DIRECTION_OPPOSING: { label: "Opposing Momentum", icon: Activity, color: "text-red-400" },
   STOCHRSI_NOT_RISING: { label: "StochRSI Not Rising", icon: TrendingDown, color: "text-yellow-400" },
