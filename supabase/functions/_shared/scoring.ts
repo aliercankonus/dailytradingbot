@@ -5162,14 +5162,40 @@ export const classify4StateRegime = (
   const isBufferedExpansion = adx >= R.TREND_EXPANSION.MIN_ADX && adxSlope >= R.TREND_EXPANSION.BUFFER_SLOPE_THRESHOLD && adxSlope < R.TREND_EXPANSION.MIN_ADX_SLOPE && ltfAligned;
   
   if (isFullExpansion || isBufferedExpansion) {
-    // Apply transition buffer: if confidence is in the upper transition zone, reduce sizing
+    // ===== TRANSITION BUFFER ENFORCEMENT =====
+    // Hard block when regimeConfidence < TRANSITION_LOW (45) even if ADX/slope meet expansion criteria
+    // This prevents entries with strong ADX but weak overall conviction (opposing momentum, poor DI separation, etc.)
+    if (TB.ENABLED && regimeConfidence < TB.TRANSITION_LOW) {
+      return {
+        regime: 'RANGE_COMPRESSION',
+        positionMultiplier: 0,
+        allowContinuation: false,
+        allowMeanReversion: R.RANGE_COMPRESSION.ALLOW_MR_BYPASS,
+        requireConfirmation: false,
+        reason: `RANGE_COMPRESSION [CONFIDENCE HARD BLOCK]: ADX=${adx.toFixed(1)} meets expansion criteria but regimeConfidence=${regimeConfidence} < ${TB.TRANSITION_LOW} → HARD BLOCK (weak conviction despite strong ADX)`,
+        regimeConfidence,
+        isTransitionZone: false,
+        diagnostics: diag,
+      };
+    }
+    
+    // Apply transition buffer: graduated sizing based on confidence bands
     let posMultiplier = isBufferedExpansion ? R.TREND_EXPANSION.BUFFER_POSITION_MULTIPLIER : R.TREND_EXPANSION.POSITION_MULTIPLIER;
     let isTransition = isBufferedExpansion;
-    if (TB.ENABLED && regimeConfidence < TB.EXPANSION_THRESHOLD && regimeConfidence >= TB.TRANSITION_LOW) {
-      posMultiplier = Math.min(posMultiplier, TB.TRANSITION_POSITION_MULTIPLIER_HIGH);
+    
+    if (TB.ENABLED && regimeConfidence < TB.EXPANSION_THRESHOLD) {
+      if (regimeConfidence >= 55) {
+        // Upper transition (55-70): cautious expansion at 70% sizing
+        posMultiplier = Math.min(posMultiplier, TB.TRANSITION_POSITION_MULTIPLIER_HIGH);
+      } else {
+        // Lower transition (45-54): very cautious at 40% sizing
+        posMultiplier = Math.min(posMultiplier, TB.TRANSITION_POSITION_MULTIPLIER_LOW);
+      }
       isTransition = true;
     }
     
+    const confidenceLabel = regimeConfidence < 55 ? ` [LOWER TRANSITION: 40% sizing]` : 
+                            regimeConfidence < 70 ? ` [UPPER TRANSITION: 70% sizing]` : '';
     const bufferLabel = isBufferedExpansion ? ` [BUFFERED: slope=${adxSlope.toFixed(2)} in noise band, ${(posMultiplier * 100).toFixed(0)}% sizing]` : '';
     
     return {
@@ -5178,7 +5204,7 @@ export const classify4StateRegime = (
       allowContinuation: true,
       allowMeanReversion: true,
       requireConfirmation: isTransition,
-      reason: `TREND_EXPANSION: ADX=${adx.toFixed(1)}≥${R.TREND_EXPANSION.MIN_ADX}, slope=${adxSlope.toFixed(2)}, LTF aligned, confidence=${regimeConfidence}${bufferLabel}${isTransition && !isBufferedExpansion ? ' [TRANSITION BUFFER: 70% sizing]' : ''} → continuation allowed`,
+      reason: `TREND_EXPANSION: ADX=${adx.toFixed(1)}≥${R.TREND_EXPANSION.MIN_ADX}, slope=${adxSlope.toFixed(2)}, LTF aligned, confidence=${regimeConfidence}${bufferLabel}${confidenceLabel} → continuation allowed`,
       regimeConfidence,
       isTransitionZone: isTransition,
       diagnostics: diag,
