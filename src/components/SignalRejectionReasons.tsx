@@ -2845,6 +2845,178 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
   );
 };
 
+// NO_MOMENTUM_EDGE — Neutral regime blocks entry because momentum doesn't confirm direction
+// Shows: gate reason, momentum state vs requirements, quality score, bypass conditions
+const NoMomentumEdgeDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const fs = filtersStatus || {};
+  const gateReason = fs.gateReason || 'NEUTRAL_REGIME';
+  const primaryTrend = fs.primaryTrend || 'neutral';
+  const momentumState = fs.momentumState || 'none';
+  const momentumConfirms = fs.momentumConfirms ?? false;
+  const momentumScore = coerceNumeric(fs.momentumScore, 0);
+  const qualityScore = coerceNumeric(fs.qualityScore, 0);
+  const direction = fs.derivedDirection || 'unknown';
+  const adx = coerceNumeric(fs.adx, 0);
+  const wouldPassWith = fs.wouldPassWith || '';
+
+  // StochRSI across timeframes
+  const kValues = {
+    '4h': coerceNumeric(fs.stochRsiK4h ?? fs.stochRsi4h?.k, -1),
+    '1h': coerceNumeric(fs.stochRsiK1h ?? fs.stochRsi1h?.k, -1),
+    '30m': coerceNumeric(fs.stochRsiK30m ?? fs.stochRsi30m?.k, -1),
+    '15m': coerceNumeric(fs.stochRsiK15m ?? fs.stochRsi15m?.k, -1),
+  };
+
+  // Order flow context
+  const orderFlow = fs.order_flow || {};
+  const ofSignal = orderFlow.signal || 'neutral';
+  const ofScore = coerceNumeric(orderFlow.score, 0);
+
+  // Quality bypass progress
+  const qualityThreshold = 80;
+  const qualityProgress = Math.min(100, (qualityScore / qualityThreshold) * 100);
+  const qualityGap = Math.max(0, qualityThreshold - qualityScore);
+
+  // Gate reason explanation
+  const reasonExplanation = (() => {
+    if (gateReason === 'NEUTRAL_REGIME') return 'The 4H trend is neutral — no directional conviction to back this entry.';
+    if (gateReason === 'STATE_BLOCK') return `Momentum state "${momentumState}" doesn't support entries.`;
+    return `Gate reason: ${gateReason}`;
+  })();
+
+  // Bypass conditions
+  const bypasses: { met: boolean; label: string; detail: string }[] = [
+    {
+      met: momentumConfirms,
+      label: 'Momentum confirms direction',
+      detail: momentumConfirms ? 'Momentum backs the trade direction' : `State: "${momentumState}" — need confirmed backing`,
+    },
+    {
+      met: qualityScore >= qualityThreshold,
+      label: `Quality score ≥ ${qualityThreshold}`,
+      detail: qualityScore >= qualityThreshold 
+        ? `Quality at ${qualityScore} — bypass active`
+        : `Quality at ${qualityScore} — need ${qualityGap} more points`,
+    },
+    {
+      met: momentumScore > 0,
+      label: 'Positive momentum score',
+      detail: momentumScore > 0 ? `Score: +${momentumScore}` : `Score: ${momentumScore} — need positive`,
+    },
+  ];
+
+  const metCount = bypasses.filter(b => b.met).length;
+
+  return (
+    <div className="space-y-3 p-3 bg-orange-500/10 rounded-md border border-orange-500/30">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Ban className="h-4 w-4 text-orange-500" />
+          <span className="text-xs font-semibold text-orange-400">No Momentum Edge</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 capitalize ${direction === 'long' ? 'text-green-400 bg-green-500/15 border-green-500/30' : direction === 'short' ? 'text-red-400 bg-red-500/15 border-red-500/30' : 'text-muted-foreground'}`}>
+            {direction === 'long' ? '↑ Long' : direction === 'short' ? '↓ Short' : direction}
+          </Badge>
+          <Badge className="text-[10px] px-1.5 py-0 border-0 text-orange-400 bg-orange-500/15">
+            {gateReason.replace(/_/g, ' ')}
+          </Badge>
+        </div>
+      </div>
+
+      {/* Explanation */}
+      <div className="text-[11px] text-muted-foreground bg-muted/20 rounded p-2">
+        {reasonExplanation} Directional label "{direction}" has no momentum backing — the signal carries no edge.
+      </div>
+
+      {/* Momentum + Quality grid */}
+      <div className="grid grid-cols-4 gap-2">
+        <div className="bg-muted/20 rounded p-1.5 text-center">
+          <div className="text-[9px] text-muted-foreground">Trend</div>
+          <div className={`text-xs font-semibold capitalize ${primaryTrend === 'neutral' ? 'text-muted-foreground' : primaryTrend === 'bullish' ? 'text-green-400' : 'text-red-400'}`}>
+            {primaryTrend}
+          </div>
+        </div>
+        <div className="bg-muted/20 rounded p-1.5 text-center">
+          <div className="text-[9px] text-muted-foreground">Mom State</div>
+          <div className={`text-xs font-semibold capitalize ${momentumState === 'confirmed' ? 'text-green-400' : momentumState === 'none' ? 'text-red-400' : 'text-amber-400'}`}>
+            {momentumState}
+          </div>
+        </div>
+        <div className="bg-muted/20 rounded p-1.5 text-center">
+          <div className="text-[9px] text-muted-foreground">Mom Score</div>
+          <div className={`text-xs font-semibold ${momentumScore > 0 ? 'text-green-400' : momentumScore < 0 ? 'text-red-400' : 'text-muted-foreground'}`}>
+            {momentumScore > 0 ? '+' : ''}{momentumScore}
+          </div>
+        </div>
+        <div className="bg-muted/20 rounded p-1.5 text-center">
+          <div className="text-[9px] text-muted-foreground">ADX</div>
+          <div className={`text-xs font-semibold ${adx >= 25 ? 'text-green-400' : 'text-amber-400'}`}>
+            {adx.toFixed(1)}
+          </div>
+        </div>
+      </div>
+
+      {/* Quality score progress */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="text-muted-foreground">Quality Score (bypass at ≥{qualityThreshold})</span>
+          <span className={qualityScore >= qualityThreshold ? 'text-green-400' : 'text-orange-400'}>{qualityScore} / {qualityThreshold}</span>
+        </div>
+        <Progress value={qualityProgress} className="h-1.5 bg-muted/30" />
+      </div>
+
+      {/* Bypass conditions */}
+      <div className="space-y-1">
+        <div className="text-[10px] font-medium text-muted-foreground">Bypass conditions (any 1 needed):</div>
+        {bypasses.map((bp, i) => (
+          <div key={i} className={`flex items-start gap-1.5 p-1.5 rounded text-[10px] ${bp.met ? 'bg-green-500/10' : 'bg-muted/20'}`}>
+            {bp.met 
+              ? <CheckCircle2 className="h-3 w-3 text-green-400 mt-0.5 shrink-0" /> 
+              : <XCircle className="h-3 w-3 text-red-400 mt-0.5 shrink-0" />
+            }
+            <div>
+              <span className={bp.met ? 'text-green-400' : 'text-foreground'}>{bp.label}</span>
+              <span className="text-muted-foreground ml-1">— {bp.detail}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* StochRSI strip + Order Flow */}
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 text-[10px]">
+          <span className="text-muted-foreground">StochRSI:</span>
+          {Object.entries(kValues).map(([tf, k]) => (
+            k >= 0 && (
+              <span key={tf} className={`px-1 py-0.5 rounded text-[9px] font-mono ${
+                k > 80 ? 'bg-red-500/20 text-red-400' : k < 20 ? 'bg-green-500/20 text-green-400' : 'bg-muted/30 text-muted-foreground'
+              }`}>
+                {tf}:{k.toFixed(0)}
+              </span>
+            )
+          ))}
+        </div>
+        <div className="flex items-center gap-1 text-[10px]">
+          <span className="text-muted-foreground">Flow:</span>
+          <span className={`text-[9px] font-medium ${ofSignal === 'buy' ? 'text-green-400' : ofSignal === 'sell' ? 'text-red-400' : 'text-muted-foreground'}`}>
+            {ofSignal} ({ofScore})
+          </span>
+        </div>
+      </div>
+
+      {/* Would pass with hint */}
+      {wouldPassWith && (
+        <div className="text-[10px] text-muted-foreground bg-muted/15 rounded p-1.5 border border-dashed border-muted-foreground/20">
+          <Info className="h-3 w-3 inline mr-1 text-blue-400" />
+          Would pass if: {wouldPassWith}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // NO_MOMENTUM_STATE — user-friendly display for the v4.5 momentum gate
 // Shows: momentum state, ADX vs bypass threshold, smart momentum, what needs to change
 const NoMomentumStateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
@@ -7998,6 +8170,7 @@ export const SignalRejectionReasons = () => {
     // HIGH - Important gates that block trades (Tier 2 with restricted bypass)
     if (gate === "ADX_TOO_LOW") return "high";
     if (gate === "NO_MOMENTUM_STATE") return "high";
+    if (gate === "NO_MOMENTUM_EDGE") return "high";
     if (gate === "NO_MOMENTUM_CONFIRMATION") return "high";
     if (gate === "BOLLINGER_OVEREXTENSION_GATE" || gate === "BOLLINGER_UNDEREXTENSION_GATE") return "high";
     if (gate === "HTF_EXTREME_OVERSOLD_BLOCK" || gate === "HTF_EXTREME_OVERBOUGHT_BLOCK") return "critical";
@@ -8341,6 +8514,14 @@ export const SignalRejectionReasons = () => {
         return `⚠️ Low trend energy (ADX ${adxVal})`;
       }
       return "⚠️ Trend energy insufficient";
+    }
+    
+    // NO_MOMENTUM_EDGE (neutral regime, no momentum backing)
+    if (reason.includes("NO_MOMENTUM_EDGE") || filtersStatus?.gate === "NO_MOMENTUM_EDGE") {
+      const state = filtersStatus?.momentumState || 'none';
+      const quality = coerceNumeric(filtersStatus?.qualityScore, 0);
+      const trend = filtersStatus?.primaryTrend || 'neutral';
+      return `🚫 No edge — ${trend} trend, momentum ${state}${quality > 0 ? `, quality ${quality}/80` : ''}`;
     }
     
     // NO_MOMENTUM_STATE (v4.5 gate)
@@ -9382,6 +9563,11 @@ export const SignalRejectionReasons = () => {
     // HARD GATE: ADX too low
     if (reason.includes("HARD GATE: ADX too low") || fs?.gate === "ADX_TOO_LOW") {
       return <HardGateAdxDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // NO_MOMENTUM_EDGE — neutral regime, no momentum backing
+    if (fs?.gate === "NO_MOMENTUM_EDGE" || reason.includes("NO_MOMENTUM_EDGE")) {
+      return <NoMomentumEdgeDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // NO_MOMENTUM_STATE — v4.5 momentum gate with rich diagnostics
