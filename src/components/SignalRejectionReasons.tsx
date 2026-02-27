@@ -2845,6 +2845,201 @@ const HardGateMomentumDisplay = ({ filtersStatus, trendData }: { filtersStatus: 
   );
 };
 
+// NO_MOMENTUM_STATE — user-friendly display for the v4.5 momentum gate
+// Shows: momentum state, ADX vs bypass threshold, smart momentum, what needs to change
+const NoMomentumStateDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
+  const fs = filtersStatus || {};
+  const momentumState = fs.momentumState || 'none';
+  const adx = coerceNumeric(fs.adx, 0);
+  const adxSlope = fs.adxSlope !== undefined ? coerceNumeric(fs.adxSlope, 0) : null;
+  const adxRising = fs.adxRising ?? (adxSlope !== null && adxSlope > 0);
+  const smartMom = coerceNumeric(fs.smartMomentumScore, 0);
+  const direction = fs.derivedDirection || 'unknown';
+  const htf4h = fs.htfTrend4h || 'neutral';
+
+  // StochRSI across timeframes
+  const kValues = {
+    '4h': coerceNumeric(fs.stochRsiK4h ?? fs.stochRsi4h?.k, -1),
+    '1h': coerceNumeric(fs.stochRsiK1h ?? fs.stochRsi1h?.k, -1),
+    '30m': coerceNumeric(fs.stochRsiK30m ?? fs.stochRsi30m?.k, -1),
+    '15m': coerceNumeric(fs.stochRsiK15m ?? fs.stochRsi15m?.k, -1),
+  };
+
+  // Volume context
+  const volRatio = coerceNumeric(fs.volumeRatio, 0);
+  const volTrend = fs.volumeTrend || 'unknown';
+  const volSpike = fs.volumeSpike ?? false;
+
+  // ADX bypass thresholds
+  const bypassThreshold = 25;
+  const adxGap = Math.max(0, bypassThreshold - adx);
+  const adxProgress = Math.min(100, (adx / bypassThreshold) * 100);
+
+  // Determine state severity
+  const stateInfo = (() => {
+    switch (momentumState) {
+      case 'none': return { label: 'No Momentum', color: 'text-red-400 bg-red-500/15', icon: '🚫', desc: 'No directional momentum detected across timeframes' };
+      case 'mixed': return { label: 'Mixed Signals', color: 'text-amber-400 bg-amber-500/15', icon: '⚡', desc: 'Timeframes disagree on direction — no clear backing' };
+      case 'building': return { label: 'Building', color: 'text-yellow-400 bg-yellow-500/15', icon: '🔄', desc: 'Momentum starting to form but not yet confirmed' };
+      case 'exhausted': return { label: 'Exhausted', color: 'text-orange-400 bg-orange-500/15', icon: '💨', desc: 'Momentum has peaked and is fading' };
+      default: return { label: momentumState, color: 'text-muted-foreground bg-muted/30', icon: '❓', desc: 'Unknown momentum state' };
+    }
+  })();
+
+  // What needs to change for entry
+  const requirements: { met: boolean; label: string; detail: string }[] = [
+    {
+      met: momentumState === 'confirmed',
+      label: 'Momentum confirmed',
+      detail: momentumState === 'none' 
+        ? 'Need consistent directional candles across timeframes'
+        : momentumState === 'mixed'
+        ? 'Timeframes must agree on direction'
+        : momentumState === 'building'
+        ? 'Almost there — need 1-2 more confirming candles'
+        : 'Momentum must rebuild after exhaustion',
+    },
+    {
+      met: adx >= bypassThreshold,
+      label: `ADX ≥ ${bypassThreshold}`,
+      detail: adx >= bypassThreshold 
+        ? `ADX at ${adx.toFixed(1)} — strong trend` 
+        : `ADX at ${adx.toFixed(1)} — need ${adxGap.toFixed(1)} more points`,
+    },
+    {
+      met: htf4h !== 'neutral' && htf4h !== 'ranging',
+      label: '4H trend directional',
+      detail: htf4h === 'neutral' || htf4h === 'ranging'
+        ? '4H is neutral — need bullish or bearish confirmation'
+        : `4H is ${htf4h}`,
+    },
+  ];
+
+  const metCount = requirements.filter(r => r.met).length;
+
+  return (
+    <div className="space-y-3 p-3 bg-amber-500/10 rounded-md border border-amber-500/30">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Activity className="h-4 w-4 text-amber-500" />
+          <span className="text-xs font-semibold text-amber-400">Momentum Not Confirmed</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 capitalize ${direction === 'long' ? 'text-green-400 bg-green-500/15 border-green-500/30' : direction === 'short' ? 'text-red-400 bg-red-500/15 border-red-500/30' : 'text-muted-foreground'}`}>
+            {direction === 'long' ? '↑ Long' : direction === 'short' ? '↓ Short' : direction}
+          </Badge>
+          <Badge className={`text-[10px] px-1.5 py-0 border-0 ${stateInfo.color}`}>
+            {stateInfo.icon} {stateInfo.label}
+          </Badge>
+        </div>
+      </div>
+
+      {/* Plain language explanation */}
+      <div className="text-[11px] text-muted-foreground bg-muted/20 rounded p-2">
+        {stateInfo.desc}. 
+        {adx < bypassThreshold 
+          ? ` ADX is ${adx.toFixed(1)} (need ${bypassThreshold} to bypass this gate).`
+          : ` ADX at ${adx.toFixed(1)} meets bypass threshold, but momentum state "${momentumState}" still blocks.`
+        }
+      </div>
+
+      {/* Requirements checklist */}
+      <div className="space-y-1">
+        <div className="text-[10px] font-medium text-muted-foreground">What needs to happen ({metCount}/{requirements.length}):</div>
+        {requirements.map((req, i) => (
+          <div key={i} className={`flex items-start gap-1.5 p-1.5 rounded text-[10px] ${req.met ? 'bg-green-500/10' : 'bg-muted/20'}`}>
+            {req.met 
+              ? <CheckCircle2 className="h-3 w-3 text-green-400 mt-0.5 shrink-0" /> 
+              : <XCircle className="h-3 w-3 text-red-400 mt-0.5 shrink-0" />
+            }
+            <div>
+              <span className={req.met ? 'text-green-400' : 'text-foreground'}>{req.label}</span>
+              <span className="text-muted-foreground ml-1">— {req.detail}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ADX Progress toward bypass */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="text-muted-foreground">ADX → Bypass Threshold</span>
+          <span className={`font-medium ${adx >= bypassThreshold ? 'text-green-400' : adx >= 22 ? 'text-yellow-400' : 'text-red-400'}`}>
+            {adx.toFixed(1)} / {bypassThreshold}
+          </span>
+        </div>
+        <div className="h-2 bg-muted/30 rounded-full overflow-hidden">
+          <div 
+            className={`h-full rounded-full transition-all ${adx >= bypassThreshold ? 'bg-green-500' : adx >= 22 ? 'bg-yellow-500' : adx >= 18 ? 'bg-orange-500' : 'bg-red-500'}`}
+            style={{ width: `${adxProgress}%` }}
+          />
+        </div>
+        {adxSlope !== null && (
+          <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
+            {adxRising 
+              ? <TrendingUp className="h-3 w-3 text-green-400" />
+              : <TrendingDown className="h-3 w-3 text-red-400" />
+            }
+            <span>
+              Slope: {adxSlope > 0 ? '+' : ''}{adxSlope.toFixed(2)} 
+              {adxRising ? ' (strengthening)' : ' (weakening)'}
+            </span>
+            {adxRising && adxGap > 0 && adxSlope > 0.1 && (
+              <span className="text-green-400 ml-1">
+                ~{Math.ceil(adxGap / adxSlope)} candles to threshold
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Smart Momentum + Market Context */}
+      <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+        <div className="p-1.5 bg-muted/20 rounded text-center">
+          <div className="text-muted-foreground">Smart Mom.</div>
+          <div className={`font-bold ${Math.abs(smartMom) >= 30 ? 'text-green-400' : Math.abs(smartMom) >= 15 ? 'text-yellow-400' : 'text-muted-foreground'}`}>
+            {smartMom > 0 ? '+' : ''}{smartMom}
+          </div>
+          <div className="text-[8px] text-muted-foreground">
+            {smartMom > 15 ? '↑ bullish' : smartMom < -15 ? '↓ bearish' : '↔ neutral'}
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/20 rounded text-center">
+          <div className="text-muted-foreground">4H Trend</div>
+          <div className={`font-bold capitalize ${htf4h === 'bullish' ? 'text-green-400' : htf4h === 'bearish' ? 'text-red-400' : 'text-amber-400'}`}>
+            {htf4h}
+          </div>
+        </div>
+        <div className="p-1.5 bg-muted/20 rounded text-center">
+          <div className="text-muted-foreground">Volume</div>
+          <div className={`font-bold ${volSpike ? 'text-green-400' : volRatio >= 1.5 ? 'text-yellow-400' : 'text-muted-foreground'}`}>
+            {volRatio.toFixed(1)}x
+          </div>
+          <div className="text-[8px] text-muted-foreground capitalize">{volTrend}</div>
+        </div>
+      </div>
+
+      {/* StochRSI mini strip */}
+      <div className="space-y-1">
+        <div className="text-[10px] text-muted-foreground">StochRSI K across timeframes:</div>
+        <div className="grid grid-cols-4 gap-1 text-[9px]">
+          {Object.entries(kValues).map(([tf, k]) => {
+            if (k < 0) return null;
+            const zone = k > 80 ? 'text-red-400 bg-red-500/15' : k < 20 ? 'text-green-400 bg-green-500/15' : 'text-muted-foreground bg-muted/20';
+            return (
+              <div key={tf} className={`p-1 rounded text-center ${zone}`}>
+                <div className="font-medium">{tf}</div>
+                <div className="font-bold">{k.toFixed(0)}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const HardGateHtfDisplay = ({ filtersStatus, trendData }: { filtersStatus: any; trendData?: any }) => {
   const htfAligned = filtersStatus?.htfAligned ?? false;
   const confidence = extractConfidence(filtersStatus, trendData);
@@ -7570,6 +7765,7 @@ export const SignalRejectionReasons = () => {
     
     // HIGH - Important gates that block trades (Tier 2 with restricted bypass)
     if (gate === "ADX_TOO_LOW") return "high";
+    if (gate === "NO_MOMENTUM_STATE") return "high";
     if (gate === "NO_MOMENTUM_CONFIRMATION") return "high";
     if (gate === "BOLLINGER_OVEREXTENSION_GATE" || gate === "BOLLINGER_UNDEREXTENSION_GATE") return "high";
     if (gate === "HTF_EXTREME_OVERSOLD_BLOCK" || gate === "HTF_EXTREME_OVERBOUGHT_BLOCK") return "critical";
@@ -7911,7 +8107,17 @@ export const SignalRejectionReasons = () => {
       return "⚠️ Trend energy insufficient";
     }
     
-    // NO MOMENTUM CONFIRMATION
+    // NO_MOMENTUM_STATE (v4.5 gate)
+    if (reason.includes("NO_MOMENTUM_STATE") || filtersStatus?.gate === "NO_MOMENTUM_STATE") {
+      const state = filtersStatus?.momentumState || 'none';
+      const adxVal = coerceNumeric(filtersStatus?.adx, 0);
+      if (state === 'none') return `🚫 No momentum backing (ADX ${adxVal.toFixed(0)})`;
+      if (state === 'mixed') return `⚡ Mixed momentum signals (ADX ${adxVal.toFixed(0)})`;
+      if (state === 'exhausted') return `💨 Momentum exhausted (ADX ${adxVal.toFixed(0)})`;
+      return `⏳ Momentum "${state}" — not confirmed`;
+    }
+    
+    // NO MOMENTUM CONFIRMATION (legacy)
     if (reason.includes("No momentum") || filtersStatus?.gate === "NO_MOMENTUM_CONFIRMATION") {
       const state = filtersStatus?.momentum?.state;
       if (state === 'exhausted') return "💨 Momentum exhausted";
@@ -8805,6 +9011,11 @@ export const SignalRejectionReasons = () => {
     // HARD GATE: ADX too low
     if (reason.includes("HARD GATE: ADX too low") || fs?.gate === "ADX_TOO_LOW") {
       return <HardGateAdxDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // NO_MOMENTUM_STATE — v4.5 momentum gate with rich diagnostics
+    if (fs?.gate === "NO_MOMENTUM_STATE" || reason.includes("NO_MOMENTUM_STATE")) {
+      return <NoMomentumStateDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
     }
     
     // HARD GATE: No momentum confirmation

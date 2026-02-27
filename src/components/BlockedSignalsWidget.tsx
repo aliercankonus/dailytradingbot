@@ -57,6 +57,7 @@ const getSeverityLevel = (reason: string, filtersStatus: any): SeverityLevel => 
     gate === "NO_CLEAR_DIRECTION" ||
     gate === "ADX_TOO_LOW" ||
     gate === "NO_MOMENTUM_CONFIRMATION" ||
+    gate === "NO_MOMENTUM_STATE" ||
     gate === "HTF_NOT_ALIGNED" ||
     gate === "MOMENTUM_DIRECTION_OPPOSING" ||
     gate === "MOMENTUM_SLOPE_GATE" ||
@@ -204,7 +205,16 @@ const formatUserFriendlyReason = (reason: string, filters?: any): string => {
     return wr !== undefined ? `🚫 Symbol disabled (${wr.toFixed(0)}% win rate)` : "🚫 Symbol disabled - poor performance";
   }
   
-  // NO MOMENTUM CONFIRMATION
+  // NO_MOMENTUM_STATE (v4.5 gate)
+  if (lowerReason.includes("no_momentum_state") || filters?.gate === "NO_MOMENTUM_STATE") {
+    const state = filters?.momentumState || 'none';
+    const adxVal = filters?.adx;
+    if (state === 'none') return `🚫 No momentum (ADX ${adxVal?.toFixed?.(0) ?? '?'})`;
+    if (state === 'mixed') return `⚡ Mixed momentum (ADX ${adxVal?.toFixed?.(0) ?? '?'})`;
+    return `⏳ Momentum "${state}" — not confirmed`;
+  }
+  
+  // NO MOMENTUM CONFIRMATION (legacy)
   if (lowerReason.includes("no momentum") || filters?.gate === "NO_MOMENTUM_CONFIRMATION") {
     const state = filters?.momentum?.state;
     if (state === 'exhausted') return "💨 Momentum exhausted";
