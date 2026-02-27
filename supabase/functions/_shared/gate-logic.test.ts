@@ -397,3 +397,101 @@ Deno.test("CONSISTENCY: DEEP_EXHAUSTION K thresholds are symmetric", () => {
   assertEquals(shortSymmetric, longSymmetric, 
     `SHORT_MAX_K (${D.SHORT_MAX_K}) and LONG_MIN_K (${D.LONG_MIN_K}) should be symmetric around 50`);
 });
+
+// ================================================================
+// TEST SUITE: FEE VIABILITY GATE (Regression)
+// Ensures currentPrice/ATR scoping works correctly across regime transitions.
+// Bug history: TDZ error when Fee Viability Gate referenced `currentPrice`
+// before it was declared, causing ANALYZER_ERROR for symbols in transition.
+// ================================================================
+
+function evaluateFeeViability(
+  currentPrice: number | undefined | null,
+  atr: number | undefined | null,
+  feeRatePercent: number = 0.1,
+): { blocked: boolean; expectedMovePercent: number; minRequired: number; reason: string } {
+  const roundTripFeePercent = feeRatePercent * 2;
+  const feeViabilityMultiplier = 2.0;
+  const minRequiredMovePercent = roundTripFeePercent * feeViabilityMultiplier;
+
+  // Mirror the fix: use trendData fields directly, not outer-scoped variables
+  const feeCheckPrice = currentPrice || 0;
+  const feeCheckATR = atr ?? 0;
+  const expectedAtrMovePercent = feeCheckPrice > 0 ? (feeCheckATR / feeCheckPrice) * 100 : 0;
+
+  if (expectedAtrMovePercent > 0 && expectedAtrMovePercent < minRequiredMovePercent) {
+    return {
+      blocked: true,
+      expectedMovePercent: expectedAtrMovePercent,
+      minRequired: minRequiredMovePercent,
+      reason: `ATR move ${expectedAtrMovePercent.toFixed(3)}% < ${minRequiredMovePercent.toFixed(3)}%`,
+    };
+  }
+  return {
+    blocked: false,
+    expectedMovePercent: expectedAtrMovePercent,
+    minRequired: minRequiredMovePercent,
+    reason: expectedAtrMovePercent === 0 ? 'no price data — skipped' : 'viable',
+  };
+}
+
+Deno.test("FEE_VIABILITY: allows trade when ATR move exceeds 2x fee threshold", () => {
+  // BTC: price=87000, ATR=500 → move = 0.575% > 0.4% (2x 0.1% fee)
+  const result = evaluateFeeViability(87000, 500, 0.1);
+  assertEquals(result.blocked, false);
+  assert(result.expectedMovePercent > result.minRequired);
+});
+
+Deno.test("FEE_VIABILITY: blocks trade when ATR move is fee-dominated", () => {
+  // Low-vol symbol: price=1.00, ATR=0.001 → move = 0.1% < 0.4%
+  const result = evaluateFeeViability(1.0, 0.001, 0.1);
+  assertEquals(result.blocked, true);
+  assert(result.reason.includes('ATR move'));
+});
+
+Deno.test("FEE_VIABILITY: handles undefined price gracefully (no crash)", () => {
+  // Regression: undefined trendData.currentPrice must not throw TDZ error
+  const result = evaluateFeeViability(undefined, 500, 0.1);
+  assertEquals(result.blocked, false);
+  assertEquals(result.expectedMovePercent, 0, "Should return 0 move when price is undefined");
+  assert(result.reason.includes('no price data'));
+});
+
+Deno.test("FEE_VIABILITY: handles null ATR gracefully (no crash)", () => {
+  const result = evaluateFeeViability(87000, null, 0.1);
+  assertEquals(result.blocked, false);
+  assertEquals(result.expectedMovePercent, 0);
+});
+
+Deno.test("FEE_VIABILITY: handles both undefined price and ATR", () => {
+  const result = evaluateFeeViability(undefined, undefined, 0.1);
+  assertEquals(result.blocked, false);
+  assertEquals(result.expectedMovePercent, 0);
+});
+
+Deno.test("FEE_VIABILITY: zero price does not divide by zero", () => {
+  const result = evaluateFeeViability(0, 500, 0.1);
+  assertEquals(result.blocked, false);
+  assertEquals(result.expectedMovePercent, 0);
+});
+
+Deno.test("FEE_VIABILITY: boundary — exactly at 2x fee threshold is NOT blocked", () => {
+  // fee=0.1%, roundTrip=0.2%, minRequired=0.4%
+  // Need ATR/price*100 = 0.4% exactly → ATR = price * 0.004
+  const price = 1000;
+  const atr = price * 0.004; // exactly 0.4%
+  const result = evaluateFeeViability(price, atr, 0.1);
+  // expectedAtrMovePercent = 0.4, minRequired = 0.4 → NOT < minRequired → not blocked
+  assertEquals(result.blocked, false, "Exactly at threshold should NOT be blocked (uses < not <=)");
+});
+
+Deno.test("FEE_VIABILITY: regime transition scenario — trendData available but ATR filter was disabled", () => {
+  // Simulates the original bug scenario: symbol transitions regime,
+  // ATR filter block was skipped, but Fee Viability gate still needs price/ATR.
+  // With the fix, it reads from trendData directly instead of outer-scoped variables.
+  const trendDataPrice = 650; // e.g. BNBUSDT
+  const trendDataATR = 5.2;   // reasonable ATR
+  const result = evaluateFeeViability(trendDataPrice, trendDataATR, 0.1);
+  assertEquals(result.blocked, false);
+  assert(result.expectedMovePercent > 0, "Should compute valid move percent from trendData");
+});
