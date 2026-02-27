@@ -8008,6 +8008,7 @@ export const SignalRejectionReasons = () => {
     if (gate === "NO_CLEAR_DIRECTION") return "high";
     if (gate === "OPPOSING_SMART_MOMENTUM") return "high";
     if (gate === "OVEREXTENSION_ATR_BLOCK") return "high";
+    if (gate === "FEE_VIABILITY_BLOCK") return "high";
     // Move exhaustion and momentum direction gates
     if (gate === "MOVE_EXHAUSTED_SHORT" || gate === "MOVE_EXHAUSTED_LONG") return "high";
     if (gate === "MOMENTUM_DIRECTION_OPPOSING") return "high";
@@ -8111,6 +8112,7 @@ export const SignalRejectionReasons = () => {
     if (reason.includes("Reversal risk")) return <AlertCircle className="h-4 w-4 text-red-500" />;
     if (reason.includes("StochRSI extreme")) return <Gauge className="h-4 w-4 text-orange-500" />;
     if (reason.includes("timeframe")) return <TrendingDown className="h-4 w-4" />;
+    if (reason.includes("FEE VIABILITY")) return <DollarSign className="h-4 w-4 text-amber-400" />;
     if (reason.includes("momentum")) return <Activity className="h-4 w-4" />;
     if (reason.includes("ranging")) return <Minimize2 className="h-4 w-4" />;
     if (reason.includes("pullback")) return <TrendingUp className="h-4 w-4" />;
@@ -8381,6 +8383,13 @@ export const SignalRejectionReasons = () => {
       return `📏 Overextended ${oe.toFixed(1)} / ${mx} ATR from EMA`;
     }
     
+    // FEE_VIABILITY_BLOCK
+    if (reason.includes("FEE VIABILITY") || filtersStatus?.gate === "FEE_VIABILITY_BLOCK") {
+      const atrMove = coerceNumeric(filtersStatus?.expectedAtrMovePercent, 0);
+      const minReq = coerceNumeric(filtersStatus?.minRequiredMovePercent, 0);
+      return `💸 Fee-dominated (move ${atrMove.toFixed(2)}% < ${minReq.toFixed(2)}% min)`;
+    }
+    
     // MOMENTUM DIRECTION OPPOSING
     if (reason.includes("MOMENTUM_DIRECTION") || filtersStatus?.gate === "MOMENTUM_DIRECTION_OPPOSING") {
       const absScore = Math.abs(score ?? 0);
@@ -8619,6 +8628,110 @@ export const SignalRejectionReasons = () => {
     const fs = rejection.filters_status;
     const reason = rejection.rejection_reason || "";
     const reasonLower = reason.toLowerCase();
+    
+    // FEE_VIABILITY_BLOCK - expected ATR move doesn't clear 2x round-trip fees
+    if (reason.includes("FEE VIABILITY") || fs?.gate === "FEE_VIABILITY_BLOCK") {
+      const expectedMove = coerceNumeric(fs?.expectedAtrMovePercent, 0);
+      const minRequired = coerceNumeric(fs?.minRequiredMovePercent, 0);
+      const roundTripFee = coerceNumeric(fs?.roundTripFeePercent, 0);
+      const feeRate = coerceNumeric(fs?.feeRatePercent, 0.1);
+      const currentATR = coerceNumeric(fs?.currentATR, 0);
+      const currentPrice = coerceNumeric(fs?.currentPrice, 0);
+      const direction = fs?.derivedDirection || 'unknown';
+      
+      const moveRatio = minRequired > 0 ? (expectedMove / minRequired) * 100 : 0;
+      const deficit = minRequired - expectedMove;
+      
+      // Severity based on how far from threshold
+      const severity = moveRatio < 25 ? 'extreme' : moveRatio < 50 ? 'high' : 'moderate';
+      const severityLabel = severity === 'extreme' ? 'Deeply Fee-Dominated' : severity === 'high' ? 'Fee-Dominated' : 'Near Fee Threshold';
+      const severityColor = severity === 'extreme' ? 'text-red-400 bg-red-500/20 border-red-500/30' : severity === 'high' ? 'text-orange-400 bg-orange-500/20 border-orange-500/30' : 'text-amber-400 bg-amber-500/20 border-amber-500/30';
+      
+      return (
+        <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <DollarSign className="h-3.5 w-3.5 text-amber-400" />
+              <span className="text-xs font-medium">Fee Viability Block</span>
+            </div>
+            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${severityColor}`}>
+              {severityLabel}
+            </Badge>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground italic">
+            The expected 1-ATR price move ({expectedMove.toFixed(3)}%) is smaller than 2× the round-trip trading fee ({minRequired.toFixed(3)}%). 
+            Any profit from this trade would be eaten by fees — the system blocks these "fee-dominated" setups.
+          </div>
+          
+          {/* Move vs Fee Threshold */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Expected Move vs Required</span>
+              <span className={`font-mono ${moveRatio >= 100 ? 'text-green-400' : 'text-red-400'}`}>
+                {expectedMove.toFixed(3)}% / {minRequired.toFixed(3)}%
+              </span>
+            </div>
+            <div className="h-2 bg-muted rounded-full overflow-hidden relative">
+              <div 
+                className={`h-full rounded-full transition-all ${moveRatio >= 100 ? 'bg-green-500' : moveRatio >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
+                style={{ width: `${Math.min(100, Math.max(2, moveRatio))}%` }}
+              />
+              {/* Threshold marker */}
+              <div className="absolute top-0 right-0 h-full w-0.5 bg-foreground/50" />
+            </div>
+            <div className="flex justify-between text-[9px] text-muted-foreground">
+              <span>0%</span>
+              <span>Min: {minRequired.toFixed(3)}%</span>
+            </div>
+          </div>
+          
+          {/* Fee Breakdown */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1 border-t border-border/50">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Fee Rate</span>
+              <span className="font-mono">{feeRate.toFixed(2)}% per side</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Round-Trip</span>
+              <span className="font-mono">{roundTripFee.toFixed(3)}%</span>
+            </div>
+            {currentATR > 0 && (
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">ATR</span>
+                <span className="font-mono">{currentATR.toFixed(currentATR < 1 ? 4 : 2)}</span>
+              </div>
+            )}
+            {currentPrice > 0 && (
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">Price</span>
+                <span className="font-mono">${currentPrice.toFixed(currentPrice < 10 ? 4 : 2)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-[10px]">
+              <span className="text-muted-foreground">Deficit</span>
+              <span className="font-mono text-red-400">-{deficit.toFixed(3)}%</span>
+            </div>
+            {direction !== 'unknown' && (
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">Direction</span>
+                <Badge variant="outline" className={`text-[9px] px-1 py-0 ${direction === 'long' ? 'text-green-400 border-green-500/40' : 'text-red-400 border-red-500/40'}`}>
+                  {direction.toUpperCase()}
+                </Badge>
+              </div>
+            )}
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+            <span className="text-amber-400">💡</span> {
+              severity === 'extreme' 
+                ? `This symbol's volatility is extremely low relative to fees. ATR needs to increase ~${(deficit / expectedMove * 100).toFixed(0)}% or wait for a volatility expansion event.`
+                : `ATR move needs to increase by ${deficit.toFixed(3)}% to clear the fee threshold. Look for higher volatility periods or symbols with wider ATR spreads.`
+            }
+          </div>
+        </div>
+      );
+    }
     
     // LOW_ATR_BLOCK - volatility too compressed for profitable trades
     if (reason.includes("LOW_ATR_BLOCK") || fs?.gate === "LOW_ATR_BLOCK") {
