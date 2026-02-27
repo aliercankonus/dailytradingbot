@@ -17320,10 +17320,7 @@ serve(async (req) => {
           }
         }
         
-        // Cap position size
-        unifiedPositionSize = Math.max(0.2, Math.min(5.0, unifiedPositionSize));
-        
-        const strategyPositionSize = unifiedPositionSize;
+        // NOTE: Do NOT cap yet - late gates below still need to reduce size
         
         // Calculate stop loss with risk profile adjustment
         let stopLossPercent = baseStopLoss * profileMult.sl;
@@ -17349,55 +17346,58 @@ serve(async (req) => {
         
         // Apply position reduction for move exhaustion (soft gate entries at 35%)
         if (moveExhaustionPositionMultiplier < 1.0) {
-          positionSizeMultiplier *= moveExhaustionPositionMultiplier;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⛔ MOVE EXHAUSTION entry - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+          unifiedPositionSize *= moveExhaustionPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⛔ MOVE EXHAUSTION entry - position size reduced to ${unifiedPositionSize.toFixed(2)}%`);
         }
         
         // Apply position reduction for LTF Confirmation Gate (when 1h/30m neutral with 4h directional)
         if (ltfConfirmationPositionMultiplier < 1.0) {
-          positionSizeMultiplier *= ltfConfirmationPositionMultiplier;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🔻 LTF CONFIRMATION - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (lower timeframes not aligned)`);
+          unifiedPositionSize *= ltfConfirmationPositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🔻 LTF CONFIRMATION - position size reduced to ${unifiedPositionSize.toFixed(2)}% (lower timeframes not aligned)`);
         }
         
         // Apply position reduction for Near-Extreme Protection (shorts near 24h low, longs near 24h high)
         if (nearExtremePositionMultiplier < 1.0) {
-          positionSizeMultiplier *= nearExtremePositionMultiplier;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ NEAR 24H EXTREME - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (near price extreme)`);
+          unifiedPositionSize *= nearExtremePositionMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ NEAR 24H EXTREME - position size reduced to ${unifiedPositionSize.toFixed(2)}% (near price extreme)`);
         }
         
         // ===== NEW: BE ANALYSIS GATES =====
         // Apply ADX slope graduated gate multiplier (BE trade prevention)
         if (adxSlopeGraduatedMultiplier < 1.0) {
-          positionSizeMultiplier *= adxSlopeGraduatedMultiplier;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ ADX SLOPE GRADUATED - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (declining trend energy)`);
+          unifiedPositionSize *= adxSlopeGraduatedMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ ADX SLOPE GRADUATED - position size reduced to ${unifiedPositionSize.toFixed(2)}% (declining trend energy)`);
         }
         
         // Apply high ADX 1h confirmation gate multiplier
         if (highAdx1hConfirmationMultiplier < 1.0) {
-          positionSizeMultiplier *= highAdx1hConfirmationMultiplier;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ HIGH_ADX_1H - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (1h not confirming high ADX)`);
+          unifiedPositionSize *= highAdx1hConfirmationMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ HIGH_ADX_1H - position size reduced to ${unifiedPositionSize.toFixed(2)}% (1h not confirming high ADX)`);
         }
         
         // Apply StochRSI runway gate multiplier
         if (stochRsiRunwayMultiplier < 1.0) {
-          positionSizeMultiplier *= stochRsiRunwayMultiplier;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ STOCHRSI RUNWAY - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (limited directional runway)`);
+          unifiedPositionSize *= stochRsiRunwayMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ STOCHRSI RUNWAY - position size reduced to ${unifiedPositionSize.toFixed(2)}% (limited directional runway)`);
         }
         
         // ===== TRIPLE STACK MONITORING (BE Prevention Analysis) =====
-        // Log when multiple BE gates stack to create very small positions (<15%)
-        // This helps identify if these probe trades add value or should be skipped
         const beGatesApplied = [
           adxSlopeGraduatedMultiplier < 1.0 ? `ADX_SLOPE(${(adxSlopeGraduatedMultiplier * 100).toFixed(0)}%)` : null,
           highAdx1hConfirmationMultiplier < 1.0 ? `HIGH_ADX_1H(${(highAdx1hConfirmationMultiplier * 100).toFixed(0)}%)` : null,
           stochRsiRunwayMultiplier < 1.0 ? `STOCHRSI_RUNWAY(${(stochRsiRunwayMultiplier * 100).toFixed(0)}%)` : null,
         ].filter(Boolean);
         
-        if (positionSizeMultiplier < 0.15 && beGatesApplied.length >= 2) {
+        if (unifiedPositionSize < 0.3 && beGatesApplied.length >= 2) {
           const tf1hDir = trendData.timeframes?.['1h']?.direction || 'N/A';
           const tf30mDir = trendData.timeframes?.['30m']?.direction || 'N/A';
-          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.RISK} 🛡️ TRIPLE STACK REDUCTION: Final multiplier ${(positionSizeMultiplier * 100).toFixed(1)}% - effectively a probe trade. Gates: ${beGatesApplied.join(' × ')}. ADX=${trendData.adx?.toFixed(1)}, Slope=${trendData.adxSlope?.toFixed(2)}, StochK=${trendData.stochrsiK?.toFixed(0)}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
+          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.RISK} 🛡️ TRIPLE STACK REDUCTION: Final size ${unifiedPositionSize.toFixed(2)}% - effectively a probe trade. Gates: ${beGatesApplied.join(' × ')}. ADX=${trendData.adx?.toFixed(1)}, Slope=${trendData.adxSlope?.toFixed(2)}, StochK=${trendData.stochrsiK?.toFixed(0)}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
         }
+        
+        // Cap position size AFTER all gates applied
+        unifiedPositionSize = Math.max(0.2, Math.min(5.0, unifiedPositionSize));
+        
+        const strategyPositionSize = unifiedPositionSize;
         
         // Apply tighter stops for late grind acceptance entries (50% of normal = 50% tighter)
         if (lateGrindAccepted && lateGrindStopMultiplier < 1.0) {
