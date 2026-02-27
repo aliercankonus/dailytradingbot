@@ -58,6 +58,7 @@ const getSeverityLevel = (reason: string, filtersStatus: any): SeverityLevel => 
     gate === "ADX_TOO_LOW" ||
     gate === "NO_MOMENTUM_CONFIRMATION" ||
     gate === "NO_MOMENTUM_STATE" ||
+    gate === "NO_MOMENTUM_EDGE" ||
     gate === "HTF_NOT_ALIGNED" ||
     gate === "MOMENTUM_DIRECTION_OPPOSING" ||
     gate === "OPPOSING_SMART_MOMENTUM" ||
@@ -220,6 +221,13 @@ const formatUserFriendlyReason = (reason: string, filters?: any): string => {
     const oe = filters?.overextensionATR;
     const mx = filters?.maxOverextensionATR ?? 2;
     return `📏 Overextended ${oe?.toFixed?.(1) ?? '?'} / ${mx} ATR from EMA`;
+  }
+  
+  // NO_MOMENTUM_EDGE (neutral regime, no edge)
+  if (lowerReason.includes("no_momentum_edge") || filters?.gate === "NO_MOMENTUM_EDGE") {
+    const state = filters?.momentumState || 'none';
+    const trend = filters?.primaryTrend || 'neutral';
+    return `🚫 No edge — ${trend} trend, ${state} momentum`;
   }
   
   // NO_MOMENTUM_STATE (v4.5 gate)
