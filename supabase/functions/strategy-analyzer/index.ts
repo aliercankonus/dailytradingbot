@@ -9489,6 +9489,43 @@ serve(async (req) => {
           }
         }
         
+        // Gate 1c: MINIMUM NOTIONAL / FEE VIABILITY GATE
+        // Block trades where the expected ATR move won't clear 2x the round-trip fee threshold
+        // This prevents fee-dominated losses on small-ATR symbols or micro-positions
+        const feeRatePercent = riskParams.trading_fee_rate_percent ?? 0.1;
+        const roundTripFeePercent = feeRatePercent * 2; // Entry + exit fees
+        const feeViabilityMultiplier = 2.0; // Expected move must clear 2x fees
+        const minRequiredMovePercent = roundTripFeePercent * feeViabilityMultiplier;
+        const expectedAtrMovePercent = currentPrice > 0 ? (currentATR / currentPrice) * 100 : 0;
+        
+        if (expectedAtrMovePercent > 0 && expectedAtrMovePercent < minRequiredMovePercent) {
+          rejectedByHardGates++;
+          perSymbolGateAttribution.set(symbol, { 
+            gate: 'FEE_VIABILITY_BLOCK', 
+            details: `atrMove=${expectedAtrMovePercent.toFixed(3)}% < minRequired=${minRequiredMovePercent.toFixed(3)}% (2x fee=${roundTripFeePercent.toFixed(3)}%)` 
+          });
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⛔ FEE VIABILITY BLOCK: Expected ATR move ${expectedAtrMovePercent.toFixed(3)}% < ${minRequiredMovePercent.toFixed(3)}% (2x round-trip fee ${roundTripFeePercent.toFixed(3)}%) — trade would be fee-dominated`);
+          await logRejectionWithAI(
+            supabase, userId, symbol,
+            `FEE VIABILITY: ATR move ${expectedAtrMovePercent.toFixed(3)}% < 2x fees ${minRequiredMovePercent.toFixed(3)}% — fee-dominated trade blocked`,
+            {
+              gate: "FEE_VIABILITY_BLOCK",
+              derivedDirection,
+              expectedAtrMovePercent: expectedAtrMovePercent.toFixed(4),
+              roundTripFeePercent: roundTripFeePercent.toFixed(4),
+              minRequiredMovePercent: minRequiredMovePercent.toFixed(4),
+              feeRatePercent,
+              currentATR,
+              currentPrice,
+              architecture: "Hard block — no exceptions"
+            },
+            trendData,
+            riskParams.ai_analysis_enabled !== false,
+            earlyOrderFlowAnalysis
+          );
+          continue;
+        }
+        
         // Gate 2: Block entries when momentum is WEAKENING against trade direction
         const momentumAligned = (derivedDirection === "long" && smartMomentum.score > 0) ||
                                 (derivedDirection === "short" && smartMomentum.score < 0);
