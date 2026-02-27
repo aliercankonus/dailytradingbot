@@ -49,6 +49,8 @@ const GATE_LABELS: Record<string, { label: string; icon: typeof Activity; color:
   NO_TRADE_RANGE_REGIME: { label: "Range Regime Block", icon: Minimize2, color: "text-amber-400" },
   BULLISH_DIVERGENCE_AT_EXTREME: { label: "Divergence at Extreme", icon: TrendingUp, color: "text-orange-400" },
   STOCHRSI_OVERSOLD_BLOCK: { label: "StochRSI Oversold", icon: TrendingDown, color: "text-red-400" },
+  OPPOSING_SMART_MOMENTUM: { label: "Opposing Momentum", icon: Zap, color: "text-red-400" },
+  OVEREXTENSION_ATR_BLOCK: { label: "ATR Overextended", icon: TrendingUp, color: "text-amber-400" },
 };
 
 const getGateInfo = (gate: string) => {
