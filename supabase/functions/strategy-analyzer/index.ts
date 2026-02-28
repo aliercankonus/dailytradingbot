@@ -16361,6 +16361,7 @@ serve(async (req) => {
         const FALLBACK_MIN_HTF_CONF = 60;
         const FALLBACK_MAX_REVERSAL = 40;
         const FALLBACK_POSITION_MULT = 0.40;
+        const FALLBACK_MIN_ATR_PERCENT = 0.80;  // Block fallback entries on low-vol symbols where fees eat the move
         
         if (candidates.length === 0) {
           const conf4h = stochFilterConf4h || 0;
@@ -16382,11 +16383,19 @@ serve(async (req) => {
             fallbackDirection = 'short';
           }
           
+          // ATR floor gate: block fallback entries where move magnitude can't clear 2x fees
+          const fallbackAtrBlocked = atrPercent24h > 0 && atrPercent24h < FALLBACK_MIN_ATR_PERCENT;
+          
           const canUseFallback = 
             qualityScore >= FALLBACK_MIN_QUALITY &&
             fallbackDirection !== null &&
             (momentumConfirmed || adx >= ADX_THRESHOLDS.STRONG) &&
-            reversalScore < FALLBACK_MAX_REVERSAL;
+            reversalScore < FALLBACK_MAX_REVERSAL &&
+            !fallbackAtrBlocked;
+          
+          if (fallbackAtrBlocked && qualityScore >= FALLBACK_MIN_QUALITY && fallbackDirection !== null) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 FALLBACK_ATR_FLOOR: ATR=${atrPercent24h.toFixed(2)}% < ${FALLBACK_MIN_ATR_PERCENT}% → blocking Quality+Momentum Fallback (fees would eat move)`);
+          }
           
           if (canUseFallback && fallbackDirection) {
             // Create fallback candidate
@@ -16447,12 +16456,20 @@ serve(async (req) => {
             nearQualityDirection = 'short';
           }
           
+          // ATR floor gate: same as regular fallback
+          const nearQualityAtrBlocked = atrPercent24h > 0 && atrPercent24h < FALLBACK_MIN_ATR_PERCENT;
+          
           const canUseNearQualityFallback = 
             qualityScore >= NEAR_QUALITY_MIN &&
             qualityScore <= NEAR_QUALITY_MAX &&  // Between 60-69
             adx >= NEAR_QUALITY_MIN_ADX &&  // Confirmed trend
             nearQualityDirection !== null &&
-            reversalScore < NEAR_QUALITY_MAX_REVERSAL;  // Stricter reversal check
+            reversalScore < NEAR_QUALITY_MAX_REVERSAL &&  // Stricter reversal check
+            !nearQualityAtrBlocked;
+          
+          if (nearQualityAtrBlocked && qualityScore >= NEAR_QUALITY_MIN && nearQualityDirection !== null) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 NEAR_QUALITY_ATR_FLOOR: ATR=${atrPercent24h.toFixed(2)}% < ${FALLBACK_MIN_ATR_PERCENT}% → blocking Near-Quality Fallback (fees would eat move)`);
+          }
           
           if (canUseNearQualityFallback && nearQualityDirection) {
             // Create near-quality fallback candidate
@@ -16767,7 +16784,10 @@ serve(async (req) => {
                 htf1h: `${htfTrend1h} ${stochFilterConf1h?.toFixed(0) ?? 0}%`,
                 momentumState: momentum?.state,
                 reversalScore: unifiedReversal.score,
-                eligible: qualityScore >= FALLBACK_MIN_QUALITY ? 'yes' : 'quality too low'
+                atrPercent: atrPercent24h.toFixed(3),
+                atrFloor: FALLBACK_MIN_ATR_PERCENT,
+                atrBlocked: atrPercent24h > 0 && atrPercent24h < FALLBACK_MIN_ATR_PERCENT,
+                eligible: qualityScore >= FALLBACK_MIN_QUALITY ? (atrPercent24h < FALLBACK_MIN_ATR_PERCENT ? 'ATR too low' : 'yes') : 'quality too low'
               }
             },
             trendData,
