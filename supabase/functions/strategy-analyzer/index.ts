@@ -1322,27 +1322,19 @@ const analyzePullbackEntry = (trendData: any, trend: string, smartPullback: Pull
   const isMomentumBuilding = momentumState === "building";
   const isActiveMomentum = isMomentumConfirmed || isMomentumBuilding || momentum.confirms === true;
   
-  // Strong Trend Continuation Check: 4h + 1h aligned + momentum active
+  // Strong Trend Continuation Check: 4h + 1h aligned + CONFIRMED momentum
+  // PATCH: Require strict momentum confirmation for STC — 'mixed' state with score=0
+  // was allowing entries on symbols like ETHUSDT where price never moved favorably
   const trend4h = timeframes['4h']?.trend || timeframes['4h']?.indicators?.emaSignal || "neutral";
   const trend1h = timeframes['1h']?.trend || timeframes['1h']?.indicators?.emaSignal || "neutral";
   const isBullishAligned = trend4h === "bullish" && trend1h === "bullish";
   const isBearishAligned = trend4h === "bearish" && trend1h === "bearish";
   
-  // UNIFIED: Use smartPullback structural data for RSI pullback detection
-  // Instead of independently checking RSI thresholds, delegate to detectPullback's analysis
-  const hasStructuralPullback = smartPullback.isPullback;
-  const hasValidPullback = smartPullback.isValidPullback;
-  const hasBounceConfirmation = smartPullback.hasBounceConfirmation;
-  const isRsiRecovering = smartPullback.rsiRecovering;
-  const rsiDipped = smartPullback.rsiDipped;
-  const structuralDepth = smartPullback.pullbackDepth;
+  // Strict momentum for STC: must be confirmed/building OR momentum.confirms=true
+  // Explicitly exclude 'mixed' state unless momentum.confirms is independently true
+  const isStrictMomentumConfirmed = momentumState === "confirmed" || isMomentumBuilding || momentum.confirms === true;
   
-  // NEW: 30m pullback confirmation - pullback visible on 30m timeframe too
-  const has30mPullbackConfirm = trend === "bullish" 
-    ? (percentB30m < 40 || rsi30m < 45 || k30m < 40)  // Bullish: 30m showing oversold/pullback
-    : (percentB30m > 60 || rsi30m > 55 || k30m > 60); // Bearish: 30m showing overbought/rally
-  
-  const hasStrongTrendContinuation = isMinTrend && isActiveMomentum && (
+  const hasStrongTrendContinuation = isMinTrend && isStrictMomentumConfirmed && (
     (trend === "bullish" && isBullishAligned) ||
     (trend === "bearish" && isBearishAligned)
   );
