@@ -8490,6 +8490,12 @@ export const SignalRejectionReasons = () => {
       return `🔄 Ranging market — no edge (ADX ${adxVal || '?'}, |mom| ${momScore})`;
     }
     
+    // REGIME_ZERO_SIZING_BLOCK - regime multiplier 0, hard block
+    if (reason.includes("REGIME_ZERO_SIZING_BLOCK") || filtersStatus?.gate === "REGIME_ZERO_SIZING_BLOCK") {
+      const regime = filtersStatus?.fourStateRegime || filtersStatus?.regime || '?';
+      return `⛔ Regime zero-sizing block — ${regime} assigned 0x multiplier, no exception path allowed`;
+    }
+    
     // ADX_SLOPE_CONTINUATION_FAIL - trend decaying without LTF follow-through
     if (reason.includes("ADX_SLOPE_CONTINUATION_FAIL") || filtersStatus?.subGate === "CONTINUATION_FAIL_MODERATE") {
       const slope = filtersStatus?.adxSlope;
@@ -9010,6 +9016,85 @@ export const SignalRejectionReasons = () => {
     if (fs?.gate === "RANGE_COMPRESSION_BLOCK" || reason.includes("RANGE_COMPRESSION_BLOCK") ||
         fs?.fourStateRegime === "RANGE_COMPRESSION") {
       return <RangeCompressionBlockDisplay filtersStatus={fs} trendData={rejection.trend_data} />;
+    }
+    
+    // REGIME_ZERO_SIZING_BLOCK - regime multiplier is 0, hard block to prevent exception path leaks
+    if (reason.includes("REGIME_ZERO_SIZING_BLOCK") || fs?.gate === "REGIME_ZERO_SIZING_BLOCK") {
+      const regime = fs?.fourStateRegime || fs?.regime || 'unknown';
+      const multiplier = coerceNumeric(fs?.fourStatePositionMultiplier ?? fs?.regimeMultiplier, 0);
+      const adx = coerceNumeric(fs?.adx, 0);
+      const adxSlope = coerceNumeric(fs?.adxSlope, 0);
+      const momState = fs?.momentumState || 'none';
+      const momScore = coerceNumeric(fs?.momentumScore, 0);
+      const primaryTrend = fs?.primaryTrend || 'neutral';
+      const derivedDirection = fs?.derivedDirection || fs?.direction || '-';
+      const isSqueeze = fs?.isSqueeze || false;
+      
+      return (
+        <div className="space-y-2 p-2 bg-muted/30 rounded-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Ban className="h-3.5 w-3.5 text-red-400" />
+              <span className="text-xs font-medium">Regime Zero-Sizing Block</span>
+            </div>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-red-500/20 text-red-400 border-red-500/30">
+              Hard Block
+            </Badge>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground italic">
+            The 4-state regime classifier assigned a position multiplier of <span className="font-mono text-red-400">0x</span> — no edge exists in the current market structure. This gate prevents exception paths from overriding the regime's safety signal.
+          </div>
+          
+          <div className="space-y-1.5 pt-1 border-t border-border/50">
+            <div className="text-[10px] text-muted-foreground mb-0.5">Regime diagnostics:</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">Regime</span>
+                <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-amber-500/20 text-amber-400 border-amber-500/40">
+                  {regime}
+                </Badge>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">Multiplier</span>
+                <span className="font-mono text-red-400">{multiplier.toFixed(2)}x</span>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">ADX</span>
+                <span className={`font-mono ${adx >= 18 ? 'text-green-400' : 'text-red-400'}`}>{adx.toFixed(1)}</span>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">ADX Slope</span>
+                <span className={`font-mono ${adxSlope > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {adxSlope >= 0 ? '+' : ''}{adxSlope.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">Momentum</span>
+                <span className={`font-mono ${Math.abs(momScore) >= 15 ? 'text-green-400' : 'text-red-400'}`}>
+                  {momState} ({momScore >= 0 ? '+' : ''}{momScore.toFixed(0)})
+                </span>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-muted-foreground">Trend</span>
+                <span className="font-medium capitalize">{primaryTrend}</span>
+              </div>
+              {isSqueeze && (
+                <div className="flex justify-between text-[10px] col-span-2">
+                  <span className="text-muted-foreground">BB Squeeze</span>
+                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-purple-500/20 text-purple-400 border-purple-500/30">
+                    Active
+                  </Badge>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <div className="text-[10px] text-muted-foreground border-t border-muted/30 pt-2">
+            <span className="text-red-400">⛔</span> Previously, exception paths (divergence, early reversal) could override this 0x sizing and enter at 0.20x — causing consistent losses in compressed markets. This gate now enforces the regime's rejection.
+          </div>
+        </div>
+      );
     }
     
     // Execution rejections - signals blocked during trade execution

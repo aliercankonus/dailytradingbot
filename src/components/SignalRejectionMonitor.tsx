@@ -289,6 +289,10 @@ const getFriendlyRejection = (reason: string): { label: string; summary: string;
   if (r.includes("near_extreme")) {
     return { label: "Near Extreme", summary: "Price near extreme zone", icon: AlertCircle };
   }
+  if (r.includes("regime_zero_sizing_block")) {
+    const regime = reason.match(/regime[=:]\s*(\w+)/i)?.[1] || "RANGE_COMPRESSION";
+    return { label: "Regime 0x Block", summary: `${regime} — multiplier is 0, entry rejected`, icon: Ban };
+  }
   
   // Fallback: extract first meaningful word
   const code = reason.split(":")[0].trim();
