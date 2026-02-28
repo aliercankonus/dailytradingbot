@@ -17224,6 +17224,28 @@ serve(async (req) => {
         
         // Step 22b: Apply 4-STATE REGIME position multiplier (BREAKOUT_SETUP=50%, TREND_EXHAUSTION=25%)
         if (fourStatePositionMultiplier < 1.0) {
+          // HARD BLOCK: When regime gives 0x sizing (RANGE_COMPRESSION with no breakout/MR),
+          // non-reversal entries must be rejected entirely — the 0.20x floor was rescuing
+          // statistically unprofitable entries (5 trades audited: 80% loss rate, -3.73% total P&L)
+          if (fourStatePositionMultiplier === 0 && !isReversalEntry) {
+            rejectedByHardGates++;
+            const blockReason = `REGIME_ZERO_SIZING_BLOCK: ${fourStateRegime.regime} regime gave 0x position multiplier — non-reversal ${intendedTradeDirection?.toUpperCase() ?? derivedDirection?.toUpperCase()} entry blocked (no statistical edge in this regime)`;
+            perSymbolGateAttribution.set(symbol, { gate: 'REGIME_ZERO_SIZING_BLOCK', details: blockReason });
+            logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+            
+            await logRejectionWithAI(supabase, userId, symbol, blockReason, {
+              gate: 'REGIME_ZERO_SIZING_BLOCK',
+              fourStateRegime: fourStateRegime.regime,
+              fourStatePositionMultiplier,
+              derivedDirection,
+              intendedTradeDirection,
+              isReversalEntry,
+              primaryTrend: primaryTrendForRegime,
+              adx: adx.toFixed(1),
+            }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+            continue;
+          }
+          
           positionSizeMultiplier *= fourStatePositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🏷️ 4-STATE REGIME (${fourStateRegime.regime}) - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
         }
