@@ -209,7 +209,7 @@ serve(async (req) => {
           activationPercent: rp.trailing_stop_activation_percent ?? 1.0,
           distanceMultiplier: rp.trailing_stop_distance_multiplier ?? 1.5,
           breakEvenEnabled: rp.break_even_enabled ?? true,
-          breakEvenActivationPercent: rp.break_even_activation_percent ?? 0.5,
+          breakEvenActivationPercent: rp.break_even_activation_percent ?? 0.55,
           profitLockPercent: (rp.trailing_stop_profit_lock_percent ?? 50) / 100, // Convert to decimal
           // Loss Management Settings
           portfolioValue: rp.portfolio_value ?? 10000,
@@ -974,7 +974,7 @@ serve(async (req) => {
         activationPercent: 1.0,
         distanceMultiplier: 1.5,
         breakEvenEnabled: true,
-        breakEvenActivationPercent: 0.5,
+        breakEvenActivationPercent: 0.55,
         profitLockPercent: 0.5,
         // Loss Management defaults
         portfolioValue: 10000,

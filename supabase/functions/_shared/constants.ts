@@ -1229,9 +1229,9 @@ export const CONFIDENCE_THRESHOLDS = {
 } as const;
 
 export const RISK_PARAMS = {
-  // ADJUSTED: Increased from 0.3% to 0.5% to give positions more room to develop
-  // BTC positions were hitting break-even too early, preventing +1% profit targets
-  BREAK_EVEN_ACTIVATION_PERCENT: 0.5,
+  // ADJUSTED: Raised from 0.5% to 0.55% so break-even only activates after clearing
+  // the 0.52% net profit floor — prevents stop placement at entry on sub-fee-floor moves
+  BREAK_EVEN_ACTIVATION_PERCENT: 0.55,
   // SCENARIO 5 FIX: Context-aware break-even - use 1.0% for strong trends (ADX >= 30)
   // Strong trends often retest 0.3–0.6%, so tighter break-even converts winners into scratches
   BREAK_EVEN_STRONG_TREND_ACTIVATION_PERCENT: 1.0,
