@@ -97,6 +97,8 @@ export function calculateMomentumScore(
   }
 
   // 3. MACD Histogram Slope (max ±30 points)
+  // FIX: Contracting histogram now respects polarity — going from -50 to -40 scores
+  // as weakly bearish (not bullish), preventing false positive momentum scores during selloffs
   const macdResult = calculateMACD(prices);
   if (macdResult.histogramArray.length >= 5) {
     const hist = macdResult.histogramArray;
@@ -117,28 +119,50 @@ export function calculateMomentumScore(
       // Expanding bullish: cap at +30; Contracting bullish: bounded [-15, +15]
       macdScore = isExpanding ? Math.min(30, normalizedSlope * 100) : Math.min(15, Math.max(-15, normalizedSlope * 50));
     } else {
-      // Expanding bearish: cap at -30; Contracting bearish: bounded [-15, +15]  
-      macdScore = isExpanding ? Math.max(-30, normalizedSlope * 100) : Math.max(-15, Math.min(15, normalizedSlope * 50));
+      // Expanding bearish: cap at -30
+      // FIX: Contracting bearish (histogram still negative but becoming less negative)
+      // should score as WEAKLY BEARISH (negative), not positive
+      // Old: normalizedSlope * 50 → positive when slope > 0 (histogram rising toward zero)
+      // New: bounded to [-15, 0] — can reduce bearish penalty but never flip to bullish
+      if (isExpanding) {
+        macdScore = Math.max(-30, normalizedSlope * 100);
+      } else {
+        // Histogram is negative and contracting: momentum is weakening but still bearish
+        // Score proportional to how negative the histogram still is (not the slope direction)
+        const contractionScore = normalizedSlope * 50; // positive slope = less bearish
+        macdScore = Math.max(-15, Math.min(0, contractionScore - 5)); // bias negative, cap at 0
+      }
     }
     
     totalScore += macdScore;
     
     if (isExpanding && histCurrent > 0) reasons.push(`MACD expanding bullish: +${macdScore.toFixed(0)}`);
     else if (isExpanding && histCurrent < 0) reasons.push(`MACD expanding bearish: ${macdScore.toFixed(0)}`);
-    else if (!isExpanding) reasons.push(`MACD contracting: ${macdScore.toFixed(0)}`);
+    else if (!isExpanding && histCurrent > 0) reasons.push(`MACD contracting bullish: ${macdScore.toFixed(0)}`);
+    else if (!isExpanding) reasons.push(`MACD contracting bearish: ${macdScore.toFixed(0)}`);
     
     defaultResult.components.macdSlope = slope;
   }
 
   // 4. ADX Trend Contribution (max ±MOMENTUM_SCORE_COMPONENTS.ADX_TREND_MAX points)
+  // FIX: ADX is now DIRECTION-AWARE. Strong rising ADX during a bearish trend contributes
+  // negative score (strong bearish energy), not positive. Previously, ADX_STRONG_RISING always
+  // added +15 regardless of trend direction, causing +30 point artifact during selloffs.
+  // Direction is derived from EMA crossover (most reliable structural signal).
+  const emaTrendDirection = (ema12Array.length > 0 && ema26Array.length > 0)
+    ? (ema12Array[ema12Array.length - 1] > ema26Array[ema26Array.length - 1] ? 1 : -1)
+    : 0; // +1 = bullish structure, -1 = bearish structure
+  
   let adxScore = 0;
   if (adx >= ADX_THRESHOLDS.STRONG) {
-    adxScore = adxRising ? MOMENTUM_SCORE_COMPONENTS.ADX_STRONG_RISING : MOMENTUM_SCORE_COMPONENTS.ADX_STRONG_FALLING;
-    if (adxRising) reasons.push(`Strong ADX rising: +${adxScore}`);
+    const rawAdxScore = adxRising ? MOMENTUM_SCORE_COMPONENTS.ADX_STRONG_RISING : MOMENTUM_SCORE_COMPONENTS.ADX_STRONG_FALLING;
+    adxScore = rawAdxScore * emaTrendDirection; // Sign by trend direction
+    if (adxRising) reasons.push(`Strong ADX rising (${emaTrendDirection > 0 ? 'bullish' : 'bearish'} energy): ${adxScore > 0 ? '+' : ''}${adxScore}`);
   } else if (adx >= ADX_THRESHOLDS.MINIMUM) {
-    adxScore = adxRising ? MOMENTUM_SCORE_COMPONENTS.ADX_MODERATE_RISING : MOMENTUM_SCORE_COMPONENTS.ADX_MODERATE_FALLING;
+    const rawAdxScore = adxRising ? MOMENTUM_SCORE_COMPONENTS.ADX_MODERATE_RISING : MOMENTUM_SCORE_COMPONENTS.ADX_MODERATE_FALLING;
+    adxScore = rawAdxScore * emaTrendDirection; // Sign by trend direction
   } else {
-    adxScore = MOMENTUM_SCORE_COMPONENTS.ADX_WEAK;
+    adxScore = MOMENTUM_SCORE_COMPONENTS.ADX_WEAK; // Weak ADX is always a penalty (direction-agnostic)
     reasons.push(`Weak ADX (${adx.toFixed(1)}): ${adxScore}`);
   }
   totalScore += adxScore;
