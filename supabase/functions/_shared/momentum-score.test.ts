@@ -69,17 +69,36 @@ Deno.test("Bullish rally produces bullish or neutral direction, never bearish", 
     `15% rally with ADX 40 rising should not be bearish (got ${result.direction}, score=${result.score})`);
 });
 
-Deno.test("Strong bearish move produces bearish or neutral direction", () => {
-  // With random noise, a 15% drop may still register as neutral due to EMA lag
-  // The key invariant: score should be negative or near-zero, not strongly positive
+Deno.test("Strong bearish move produces bearish or neutral direction, never bullish", () => {
+  // FIX VALIDATION: With direction-aware ADX and polarity-correct MACD contraction,
+  // a 15% drop should never score as bullish (the old bug gave +34 during selloffs)
   const prices = generateBTCPrices(80, -15);
   const klines = generateKlines(prices);
   
-  const result = calculateMomentumScore(klines, prices, 35, false, 500);
+  // ADX=35 and RISING — simulates the ETHUSDT scenario where strong bearish trend
+  // was incorrectly scoring as bullish momentum due to direction-blind ADX (+15)
+  const result = calculateMomentumScore(klines, prices, 35, true, 500);
   
-  // Score should not be strongly bullish during a 15% drop
-  assertEquals(result.score < 40, true,
-    `15% BTC drop should not have strongly positive momentum (got score=${result.score})`);
+  // Score must be negative or near-zero during a selloff, never strongly positive
+  assertEquals(result.score < 20, true,
+    `15% BTC drop with ADX=35 rising should not have positive momentum (got score=${result.score})`);
+  
+  // Direction must not be bullish
+  assertEquals(result.direction !== "bullish", true,
+    `15% BTC drop should not classify as bullish momentum (got ${result.direction}, score=${result.score})`);
+});
+
+Deno.test("ADX contribution is negative during bearish EMA structure", () => {
+  // Validates the direction-aware ADX fix: when EMA12 < EMA26 (bearish),
+  // ADX_STRONG_RISING should contribute -15 (bearish energy), not +15
+  const prices = generateBTCPrices(80, -10); // Bearish structure
+  const klines = generateKlines(prices);
+  
+  const result = calculateMomentumScore(klines, prices, 40, true, 500);
+  
+  // ADX component should be negative (bearish energy direction)
+  assertEquals(result.components.adxTrend < 0, true,
+    `ADX component should be negative during bearish EMA structure (got ${result.components.adxTrend})`);
 });
 
 // ============= INSUFFICIENT DATA =============
