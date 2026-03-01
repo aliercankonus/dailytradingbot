@@ -4988,6 +4988,14 @@ serve(async (req) => {
         // Apply 4-state regime position multiplier (declared early so BREAKOUT_WATCH can assign it)
         let fourStatePositionMultiplier = fourStateRegime.positionMultiplier;
         
+        // ===== UNKNOWN REGIME DEFENSIVE GATE =====
+        // When regime derivation fails or returns unknown, apply 0.5x multiplier instead of crashing
+        // This converts a potential runtime error into graceful degradation
+        if (!fourStateRegime.regime || fourStateRegime.regime === 'UNKNOWN') {
+          fourStatePositionMultiplier = 0.50;
+          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ UNKNOWN_REGIME_DEFENSIVE: regime=${fourStateRegime.regime || 'undefined'} → applying 0.50x safety multiplier`);
+        }
+        
         // HARD BLOCK: RANGE_COMPRESSION - no statistical edge exists
         // Note: MR bypass is checked via StochRSI extreme only (strategy-level MR check happens later)
         // NEW: Compression Module evaluation added as secondary engine for this regime
@@ -5437,13 +5445,39 @@ serve(async (req) => {
           const trendExpBypass = MOMENTUM_DIRECTION_HARD_GATE.TREND_EXPANSION_BYPASS;
           const htfAlignedWith4h = (derivedDirection === 'long' && htfTrend4h === 'bullish') ||
                                    (derivedDirection === 'short' && htfTrend4h === 'bearish');
-          const regimeIsTrendExpansion = (fourStateRegime?.regime || '') === 'TREND_EXPANSION';
-          const regimeIsEarlyTrendRising = (fourStateRegime?.regime || '') === 'EARLY_TREND' && 
+          const currentRegimeStr = fourStateRegime?.regime || 'UNKNOWN';
+          const regimeIsTrendExpansion = currentRegimeStr === 'TREND_EXPANSION';
+          const regimeIsEarlyTrendRising = currentRegimeStr === 'EARLY_TREND' && 
             trendExpBypass?.ALLOW_EARLY_TREND_WITH_RISING_ADX && fullAdxResult.adxRising;
+          
+          // ===== REGIME-AWARE ADX SCALING + COMPOSITE TREND SCORE =====
+          // Replace binary ADX >= 25 with regime-dependent thresholds
+          let regimeAdjustedAdxThreshold = trendExpBypass.MIN_ADX ?? 25;
+          if (trendExpBypass.ENABLE_REGIME_ADX_SCALING && trendExpBypass.REGIME_ADX_THRESHOLDS) {
+            regimeAdjustedAdxThreshold = trendExpBypass.REGIME_ADX_THRESHOLDS[currentRegimeStr] ?? trendExpBypass.MIN_ADX ?? 25;
+          }
+          
+          // Composite Trend Score: (ADX-20)*0.6 + (slope*10)*0.4
+          // More stable than binary threshold; captures rising trends with lower ADX (e.g. BNB ADX 23.9, slope 0.8)
+          let compositeBypassEligible = false;
+          let compositeTrendScore = 0;
+          if (trendExpBypass.ENABLE_COMPOSITE_TREND_SCORE) {
+            const adxComponent = (adx - (trendExpBypass.COMPOSITE_ADX_BASELINE ?? 20)) * (trendExpBypass.COMPOSITE_ADX_WEIGHT ?? 0.6);
+            const slopeComponent = ((fullAdxResult.slope ?? 0) * (trendExpBypass.COMPOSITE_SLOPE_SCALE ?? 10)) * (trendExpBypass.COMPOSITE_SLOPE_WEIGHT ?? 0.4);
+            compositeTrendScore = adxComponent + slopeComponent;
+            compositeBypassEligible = compositeTrendScore >= (trendExpBypass.COMPOSITE_TREND_SCORE_THRESHOLD ?? 3.0);
+          }
+          
+          const adxMeetsThreshold = adx >= regimeAdjustedAdxThreshold || compositeBypassEligible;
+          
           const trendExpansionBypassEligible = trendExpBypass?.ENABLED && 
-            adx >= (trendExpBypass.MIN_ADX ?? 25) &&
+            adxMeetsThreshold &&
             (!trendExpBypass.REQUIRE_4H_ALIGNMENT || htfAlignedWith4h) &&
             (regimeIsTrendExpansion || regimeIsEarlyTrendRising);
+          
+          if (compositeBypassEligible && adx < regimeAdjustedAdxThreshold) {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 COMPOSITE_TREND_SCORE: score=${compositeTrendScore.toFixed(2)} >= ${trendExpBypass.COMPOSITE_TREND_SCORE_THRESHOLD ?? 3.0} → ADX ${adx.toFixed(1)} < regime threshold ${regimeAdjustedAdxThreshold} BYPASSED`);
+          }
           
           // Use relaxed thresholds during TREND_EXPANSION, strict otherwise
           const effectiveBlockLongBelow = trendExpansionBypassEligible 

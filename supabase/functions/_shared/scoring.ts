@@ -2609,7 +2609,8 @@ interface GraduatedPenaltyResult {
 
 const calculateGraduatedMomentumPenalty = (
   absMomentum: number,
-  P: typeof DIRECTION_DERIVATION_PARAMS
+  P: typeof DIRECTION_DERIVATION_PARAMS,
+  htfAlignment?: 'aligned' | 'neutral' | 'opposing'
 ): GraduatedPenaltyResult => {
   const basePenalty = P.MOMENTUM_STRONG_OPPOSING_PENALTY;
   const baseConfReduction = P.MOMENTUM_CONFIDENCE_REDUCTION_STRONG;
@@ -2636,7 +2637,25 @@ const calculateGraduatedMomentumPenalty = (
     const range = 100 - 15; // 85
     const normalizedScore = Math.max(0, absMomentum - 15) / range; // 0 at 15, 1 at 100
     const scaledPenalty = minPenalty + (normalizedScore * (maxPenalty - minPenalty));
-    const clampedPenalty = Math.min(maxPenalty, Math.max(minPenalty, scaledPenalty));
+    let clampedPenalty = Math.min(maxPenalty, Math.max(minPenalty, scaledPenalty));
+    
+    // ===== v3.3: HTF-AWARE PENALTY CLAMPING =====
+    // When HTF trend aligns with tentative direction, cap penalty to prevent bias death
+    // Root cause: bias=0.285 with penalty=0.19 → 0.095 < threshold → NO_CLEAR_DIRECTION
+    if (P.ENABLE_HTF_PENALTY_CLAMPING && htfAlignment) {
+      let htfMaxPenalty: number;
+      if (htfAlignment === 'aligned') {
+        htfMaxPenalty = P.HTF_ALIGNED_MAX_PENALTY || 0.08;
+      } else if (htfAlignment === 'neutral') {
+        htfMaxPenalty = P.HTF_NEUTRAL_MAX_PENALTY || 0.15;
+      } else {
+        htfMaxPenalty = P.HTF_OPPOSING_MAX_PENALTY || 0.30;
+      }
+      
+      if (clampedPenalty > htfMaxPenalty) {
+        clampedPenalty = htfMaxPenalty;
+      }
+    }
     
     // Scale confidence reduction and position multiplier similarly
     // At score 15: confReduction = 10%, posMult = 0.85
@@ -3003,14 +3022,17 @@ export const deriveTradeDirection = (
           // Strongly opposing momentum for LONG (negative momentum opposes bullish)
           // Penalty should REDUCE the positive weighted sum → subtract penalty
           const absMomentum = Math.abs(momentumScore);
-          const graduatedResult = calculateGraduatedMomentumPenalty(absMomentum, P);
+          // Determine HTF alignment for penalty clamping
+          const htfAlignForLong: 'aligned' | 'neutral' | 'opposing' = 
+            trend4h === 'bullish' ? 'aligned' : (trend4h === 'neutral' ? 'neutral' : 'opposing');
+          const graduatedResult = calculateGraduatedMomentumPenalty(absMomentum, P, htfAlignForLong);
           
           momentumAdjustment = -graduatedResult.penalty; // Negative adjustment reduces positive sum
           momentumImpact = graduatedResult.tier;
           momentumConfidenceReduction = graduatedResult.confidenceReduction;
           momentumPositionMultiplier = graduatedResult.positionMultiplier;
           
-          reasons.push(`GRADUATED MOMENTUM: |${momentumScore.toFixed(0)}| → ${graduatedResult.tier} (penalty=${graduatedResult.penalty.toFixed(2)}, conf-${graduatedResult.confidenceReduction}%, pos=${(graduatedResult.positionMultiplier * 100).toFixed(0)}%)`);
+          reasons.push(`GRADUATED MOMENTUM: |${momentumScore.toFixed(0)}| → ${graduatedResult.tier} (penalty=${graduatedResult.penalty.toFixed(2)}, htf=${htfAlignForLong}, conf-${graduatedResult.confidenceReduction}%, pos=${(graduatedResult.positionMultiplier * 100).toFixed(0)}%)`);
         } else if (momentumScore <= P.MOMENTUM_WEAK_OPPOSING_THRESHOLD) {
           // Weakly opposing momentum (e.g., -8 < -5)
           momentumAdjustment = -P.MOMENTUM_WEAK_OPPOSING_PENALTY;
@@ -3028,7 +3050,10 @@ export const deriveTradeDirection = (
           // Strongly opposing momentum for SHORT (positive momentum opposes bearish)
           // Penalty should REDUCE the negative weighted sum magnitude → add penalty (positive)
           const absMomentum = Math.abs(momentumScore);
-          const graduatedResult = calculateGraduatedMomentumPenalty(absMomentum, P);
+          // Determine HTF alignment for penalty clamping
+          const htfAlignForShort: 'aligned' | 'neutral' | 'opposing' = 
+            trend4h === 'bearish' ? 'aligned' : (trend4h === 'neutral' ? 'neutral' : 'opposing');
+          const graduatedResult = calculateGraduatedMomentumPenalty(absMomentum, P, htfAlignForShort);
           
           momentumAdjustment = +graduatedResult.penalty; // Positive adjustment reduces negative sum magnitude
           momentumImpact = graduatedResult.tier;
@@ -3036,7 +3061,7 @@ export const deriveTradeDirection = (
           momentumPositionMultiplier = graduatedResult.positionMultiplier;
           
           
-          reasons.push(`GRADUATED MOMENTUM: |${momentumScore.toFixed(0)}| → ${graduatedResult.tier} (penalty=+${graduatedResult.penalty.toFixed(2)} to reduce SHORT, conf-${graduatedResult.confidenceReduction}%, pos=${(graduatedResult.positionMultiplier * 100).toFixed(0)}%)`);
+          reasons.push(`GRADUATED MOMENTUM: |${momentumScore.toFixed(0)}| → ${graduatedResult.tier} (penalty=+${graduatedResult.penalty.toFixed(2)} to reduce SHORT, htf=${htfAlignForShort}, conf-${graduatedResult.confidenceReduction}%, pos=${(graduatedResult.positionMultiplier * 100).toFixed(0)}%)`);
         } else if (momentumScore >= -P.MOMENTUM_WEAK_OPPOSING_THRESHOLD) {
           // Weakly opposing momentum for SHORT → positive adjustment
           momentumAdjustment = +P.MOMENTUM_WEAK_OPPOSING_PENALTY;

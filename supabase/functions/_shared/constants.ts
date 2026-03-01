@@ -3600,6 +3600,15 @@ export const DIRECTION_DERIVATION_PARAMS = {
   GRADUATED_MAX_PENALTY: 0.60,          // Maximum penalty at |momentum| = 100
   GRADUATED_MIN_PENALTY: 0.10,          // Minimum penalty at |momentum| = 15
   
+  // ===== HTF-AWARE MOMENTUM PENALTY CLAMPING (v3.3) =====
+  // When HTF trend aligns with tentative direction, cap max penalty to prevent bias death
+  // Root cause: bias=0.285 with momentumPenalty=0.19 → 0.095 < threshold → NO_CLEAR_DIRECTION
+  // HTF trend should protect LTF momentum opposition from killing direction derivation
+  ENABLE_HTF_PENALTY_CLAMPING: true,
+  HTF_ALIGNED_MAX_PENALTY: 0.08,       // Max penalty when 4H aligns with direction
+  HTF_NEUTRAL_MAX_PENALTY: 0.15,       // Max penalty when 4H is neutral
+  HTF_OPPOSING_MAX_PENALTY: 0.30,      // Max penalty when 4H opposes direction (full penalty)
+  
   // Tier thresholds (used when GRADUATED_SCALING_ENABLED = false)
   MOMENTUM_EXTREME_THRESHOLD: 50,       // Score magnitude >= 50 = "extreme" momentum
   MOMENTUM_VERY_STRONG_THRESHOLD: 30,   // Score magnitude >= 30 = "very strong" momentum
@@ -4042,7 +4051,7 @@ export type MasterMarketRegime = 'PARABOLIC' | 'STRONG_TREND' | 'NORMAL' | 'STEA
 //   TREND_EXHAUSTION   → Block continuation, allow MR probes only (0.25x sizing)
 //   RANGE_COMPRESSION  → HARD BLOCK - no trades (noise dominates)
 //   BREAKOUT_SETUP     → Allow only on directional confirmation (0.50x sizing)
-export type FourStateRegime = 'TREND_EXPANSION' | 'TREND_EXHAUSTION' | 'RANGE_COMPRESSION' | 'BREAKOUT_SETUP';
+export type FourStateRegime = 'TREND_EXPANSION' | 'TREND_EXHAUSTION' | 'RANGE_COMPRESSION' | 'BREAKOUT_SETUP' | 'UNKNOWN';
 
 export const FOUR_STATE_REGIME = {
   ENABLED: true,
@@ -5786,8 +5795,18 @@ export const MOMENTUM_DIRECTION_HARD_GATE = {
     // Relaxed thresholds during TREND_EXPANSION
     RELAXED_BLOCK_LONG_BELOW_SCORE: -30,   // From -15 to -30 during expansion
     RELAXED_BLOCK_SHORT_ABOVE_SCORE: 30,   // From 15 to 30 during expansion
-    // Minimum ADX for bypass eligibility
-    MIN_ADX: 25,
+    // ===== REGIME-AWARE ADX SCALING =====
+    // Dynamic ADX threshold based on regime: early movers (BNB ADX 23-24.7) captured
+    MIN_ADX: 25,  // Default (used for STRONG_TREND / non-regime contexts)
+    REGIME_ADX_THRESHOLDS: {
+      TREND_EXPANSION: 23,    // Early expansion entries need less ADX confirmation
+      EARLY_TREND: 23,        // Early trend detection benefits from lower threshold
+      BREAKOUT_SETUP: 23,     // Breakout setups are transitional - lower threshold
+      TREND_EXHAUSTION: 28,   // Exhaustion needs stronger confirmation
+      RANGE_COMPRESSION: 28,  // Ranging = need higher ADX to bypass
+      UNKNOWN: 28,            // Unknown = conservative
+    } as Record<string, number>,
+    ENABLE_REGIME_ADX_SCALING: true,
     // Require 4h trend to align with derived direction
     REQUIRE_4H_ALIGNMENT: true,
     // Position multiplier for relaxed entries (conservative)
@@ -5795,6 +5814,15 @@ export const MOMENTUM_DIRECTION_HARD_GATE = {
     POSITION_MULTIPLIER_MODERATE: 0.45, // |score| 22-30: 45% position
     // Also allow during EARLY_TREND if ADX is rising
     ALLOW_EARLY_TREND_WITH_RISING_ADX: true,
+    // ===== COMPOSITE TREND SCORE (v2 model) =====
+    // Replace binary ADX threshold with (ADX-20)*0.6 + (slope*10)*0.4
+    // More stable than binary threshold; captures rising trends with lower ADX
+    ENABLE_COMPOSITE_TREND_SCORE: true,
+    COMPOSITE_TREND_SCORE_THRESHOLD: 3.0,  // Bypass if composite score >= 3
+    COMPOSITE_ADX_WEIGHT: 0.6,
+    COMPOSITE_SLOPE_WEIGHT: 0.4,
+    COMPOSITE_ADX_BASELINE: 20,  // Subtract baseline before weighting
+    COMPOSITE_SLOPE_SCALE: 10,   // Multiply slope by this before weighting
   },
   
   // ===== LOGGING =====
