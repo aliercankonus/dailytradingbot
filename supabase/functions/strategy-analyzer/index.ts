@@ -5433,12 +5433,56 @@ serve(async (req) => {
         // This gate runs BEFORE any exception overrides (MICRO_TREND, STRONG_TREND, etc.)
         // Root cause fix: System entered SHORT just as momentum flipped bullish (from -64 to +36)
         if (MOMENTUM_DIRECTION_HARD_GATE.ENABLED) {
+          // ===== TREND EXPANSION REGIME BYPASS: Relax thresholds during expansion =====
+          const trendExpBypass = MOMENTUM_DIRECTION_HARD_GATE.TREND_EXPANSION_BYPASS;
+          const htfAlignedWith4h = (derivedDirection === 'long' && htfTrend4h === 'bullish') ||
+                                   (derivedDirection === 'short' && htfTrend4h === 'bearish');
+          const regimeIsTrendExpansion = (fourStateRegime?.regime || '') === 'TREND_EXPANSION';
+          const regimeIsEarlyTrendRising = (fourStateRegime?.regime || '') === 'EARLY_TREND' && 
+            trendExpBypass?.ALLOW_EARLY_TREND_WITH_RISING_ADX && fullAdxResult.adxRising;
+          const trendExpansionBypassEligible = trendExpBypass?.ENABLED && 
+            adx >= (trendExpBypass.MIN_ADX ?? 25) &&
+            (!trendExpBypass.REQUIRE_4H_ALIGNMENT || htfAlignedWith4h) &&
+            (regimeIsTrendExpansion || regimeIsEarlyTrendRising);
+          
+          // Use relaxed thresholds during TREND_EXPANSION, strict otherwise
+          const effectiveBlockLongBelow = trendExpansionBypassEligible 
+            ? (trendExpBypass.RELAXED_BLOCK_LONG_BELOW_SCORE ?? -30)
+            : MOMENTUM_DIRECTION_HARD_GATE.BLOCK_LONG_BELOW_SCORE;
+          const effectiveBlockShortAbove = trendExpansionBypassEligible
+            ? (trendExpBypass.RELAXED_BLOCK_SHORT_ABOVE_SCORE ?? 30)
+            : MOMENTUM_DIRECTION_HARD_GATE.BLOCK_SHORT_ABOVE_SCORE;
+          
           const momentumCheck = checkMomentumDirectionAlignment(
             smartMomentum.score,
             derivedDirection,
-            MOMENTUM_DIRECTION_HARD_GATE.BLOCK_SHORT_ABOVE_SCORE,
-            MOMENTUM_DIRECTION_HARD_GATE.BLOCK_LONG_BELOW_SCORE
+            effectiveBlockShortAbove,
+            effectiveBlockLongBelow
           );
+          
+          // Track if trend expansion bypass was used (for position sizing)
+          let trendExpansionBypassApplied = false;
+          let trendExpansionPositionMult = 1.0;
+          if (trendExpansionBypassEligible && !momentumCheck.blocked) {
+            // Check if it WOULD have been blocked with strict thresholds
+            const strictCheck = checkMomentumDirectionAlignment(
+              smartMomentum.score,
+              derivedDirection,
+              MOMENTUM_DIRECTION_HARD_GATE.BLOCK_SHORT_ABOVE_SCORE,
+              MOMENTUM_DIRECTION_HARD_GATE.BLOCK_LONG_BELOW_SCORE
+            );
+            if (strictCheck.blocked) {
+              trendExpansionBypassApplied = true;
+              const absMom = Math.abs(smartMomentum.score);
+              trendExpansionPositionMult = absMom <= 22 
+                ? (trendExpBypass.POSITION_MULTIPLIER_MILD ?? 0.60)
+                : (trendExpBypass.POSITION_MULTIPLIER_MODERATE ?? 0.45);
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ TREND_EXPANSION_MOMENTUM_BYPASS: ${derivedDirection.toUpperCase()} allowed`);
+              logger.forSymbol(symbol).info(`   → Regime=${effectiveRegime}, ADX=${adx.toFixed(1)}, 4h=${htfTrend4h}, momentum=${smartMomentum.score.toFixed(0)}`);
+              logger.forSymbol(symbol).info(`   → Strict threshold=${MOMENTUM_DIRECTION_HARD_GATE.BLOCK_LONG_BELOW_SCORE}, relaxed=${effectiveBlockLongBelow}, position=${(trendExpansionPositionMult * 100).toFixed(0)}%`);
+              (trendData as any).trendExpansionMomentumBypassMultiplier = trendExpansionPositionMult;
+            }
+          }
           
           if (momentumCheck.blocked) {
             // Check for exception #1: High ADX with HTF alignment
