@@ -5776,6 +5776,27 @@ export const MOMENTUM_DIRECTION_HARD_GATE = {
     HARD_ZONE_THRESHOLD_PERCENT: 5.0,  // Matches MOVE_EXHAUSTION_FILTER_PARAMS.HARD_THRESHOLD_PERCENT
   },
   
+  // ===== TREND EXPANSION REGIME BYPASS =====
+  // During TREND_EXPANSION with ADX > 25, relax thresholds to allow entries
+  // when 4h trend is bullish but 1h momentum lags behind
+  // Root cause: 15 blocks during 4-8% rally because momentum score was -20 to -26
+  // while 4h was clearly bullish and ADX was 27-34
+  TREND_EXPANSION_BYPASS: {
+    ENABLED: true,
+    // Relaxed thresholds during TREND_EXPANSION
+    RELAXED_BLOCK_LONG_BELOW_SCORE: -30,   // From -15 to -30 during expansion
+    RELAXED_BLOCK_SHORT_ABOVE_SCORE: 30,   // From 15 to 30 during expansion
+    // Minimum ADX for bypass eligibility
+    MIN_ADX: 25,
+    // Require 4h trend to align with derived direction
+    REQUIRE_4H_ALIGNMENT: true,
+    // Position multiplier for relaxed entries (conservative)
+    POSITION_MULTIPLIER_MILD: 0.60,    // |score| 15-22: 60% position
+    POSITION_MULTIPLIER_MODERATE: 0.45, // |score| 22-30: 45% position
+    // Also allow during EARLY_TREND if ADX is rising
+    ALLOW_EARLY_TREND_WITH_RISING_ADX: true,
+  },
+  
   // ===== LOGGING =====
   LOG_ALL_CHECKS: true,
   LOG_BLOCKS: true,
