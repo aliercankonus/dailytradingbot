@@ -2865,13 +2865,19 @@ export const deriveTradeDirection = (
          
          // ADX-backed amplification: when ADX confirms trend strength exists,
          // amplify the neutral-TF bias since the market IS trending but indicators lag
+         // SAFEGUARD: Only amplify when there's a committed directional lean, NOT noise.
+         // During compression breakouts ADX spikes from range contraction before price commits,
+         // so we require: (1) minimum bias floor, (2) RSI+MACD agreement (same sign)
          const adxVal = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
-         const adxAmplifier = adxVal >= 30 ? 1.35 : (adxVal >= 25 ? 1.20 : 1.0);
+         const preBias = combinedBias * uncertaintyBoost;
+         const rsiAndMacdAgree = (rsiBias > 0 && macdBias >= 0) || (rsiBias < 0 && macdBias <= 0) || Math.abs(macdBias) < 0.01;
+         const hasCommittedLean = Math.abs(preBias) >= 0.10 && rsiAndMacdAgree;
+         const adxAmplifier = hasCommittedLean ? (adxVal >= 30 ? 1.35 : (adxVal >= 25 ? 1.20 : 1.0)) : 1.0;
          
-         const finalBias = combinedBias * uncertaintyBoost * adxAmplifier;
+         const finalBias = preBias * adxAmplifier;
          
          if (Math.abs(finalBias) > 0.03) {
-           reasons.push(`CONTINUOUS_BIAS: neutral TF → bias=${finalBias.toFixed(3)} (rsi=${tfRsi.toFixed(1)}, macd=${tfMacdHist > 0 ? '+' : ''}${tfMacdHist.toFixed(4)}, macdStr=${absMacd > 0.001 ? (absHist/absMacd).toFixed(2) : 'n/a'}, adxAmp=${adxAmplifier.toFixed(2)}, conf=${conf.toFixed(0)}%)`);
+           reasons.push(`CONTINUOUS_BIAS: neutral TF → bias=${finalBias.toFixed(3)} (rsi=${tfRsi.toFixed(1)}, macd=${tfMacdHist > 0 ? '+' : ''}${tfMacdHist.toFixed(4)}, macdStr=${absMacd > 0.001 ? (absHist/absMacd).toFixed(2) : 'n/a'}, adxAmp=${adxAmplifier.toFixed(2)}${!hasCommittedLean && adxVal >= 25 ? ' [SUPPRESSED:no-lean]' : ''}, conf=${conf.toFixed(0)}%)`);
          }
          
          return finalBias;
