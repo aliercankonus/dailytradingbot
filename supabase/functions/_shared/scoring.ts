@@ -2830,36 +2830,52 @@ export const deriveTradeDirection = (
       // This is the core fix for the score=0 deadlock: crypto markets spend 60-70%
       // of time in "neutral" classification, but there's ALWAYS a lean.
       
-      // Priority 1: Use per-timeframe RSI + MACD for continuous bias
-      if (tfIndicators) {
-        const tfRsi = tfIndicators.rsi ?? tfIndicators.RSI ?? 50;
-        const tfMacdHist = tfIndicators.macdHistogram ?? tfIndicators.macd?.histogram ?? 0;
-        const tfEmaSignal = tfIndicators.emaSignal ?? null;
-        
-        // RSI continuous bias: center around 50, scale to [-0.20, +0.20]
-        // RSI 55 → +0.10, RSI 58 → +0.16, RSI 45 → -0.10, RSI 42 → -0.16
-        const rsiBias = ((tfRsi - 50) / 50) * 0.40;  // Doubled scale for better signal extraction
-        
-        // MACD direction hint: binary but weighted less
-        const macdBias = tfMacdHist > 0.001 ? 0.08 : (tfMacdHist < -0.001 ? -0.08 : 0);
-        
-        // EMA signal fallback
-        const emaBias = tfEmaSignal === 'bullish' ? 0.05 : (tfEmaSignal === 'bearish' ? -0.05 : 0);
-        
-        // Combine with RSI as primary (continuous), MACD + EMA as confirmation
-        const combinedBias = rsiBias + macdBias + emaBias;
-        
-        // Scale by confidence: higher confidence in "neutral" = less directional (closer to 0)
-        // Lower confidence = trend engine uncertain = potential emerging direction
-        const uncertaintyBoost = conf < 55 ? 1.0 : Math.max(0.3, 1.0 - (conf - 55) / 30);
-        const finalBias = combinedBias * uncertaintyBoost;
-        
-        if (Math.abs(finalBias) > 0.03) {
-          reasons.push(`CONTINUOUS_BIAS: neutral TF → bias=${finalBias.toFixed(3)} (rsi=${tfRsi.toFixed(1)}, macd=${tfMacdHist > 0 ? '+' : ''}${tfMacdHist.toFixed(4)}, conf=${conf.toFixed(0)}%)`);
-        }
-        
-        return finalBias;
-      }
+       // Priority 1: Use per-timeframe RSI + MACD for continuous bias
+       if (tfIndicators) {
+         const tfRsi = tfIndicators.rsi ?? tfIndicators.RSI ?? 50;
+         const tfMacdHist = tfIndicators.macdHistogram ?? tfIndicators.macd?.histogram ?? 0;
+         const tfMacdValue = tfIndicators.macd ?? 0;
+         const tfEmaSignal = tfIndicators.emaSignal ?? null;
+         
+         // RSI continuous bias: center around 50, scale to [-0.20, +0.20]
+         // RSI 55 → +0.10, RSI 58 → +0.16, RSI 45 → -0.10, RSI 42 → -0.16
+         const rsiBias = ((tfRsi - 50) / 50) * 0.40;  // Doubled scale for better signal extraction
+         
+         // MACD direction hint: PROPORTIONAL to histogram magnitude
+         // Old: binary ±0.08 regardless of strength → BTC MACD +130 same as +0.002
+         // New: scales from 0.08 (weak) to 0.22 (strong) based on |histogram/macd| ratio
+         // This fixes the BTC rally blindspot where huge MACD was wasted as flat 0.08
+         const absHist = Math.abs(tfMacdHist);
+         const absMacd = Math.abs(tfMacdValue);
+         let macdBias = 0;
+         if (absHist > 0.001) {
+           const macdStrength = absMacd > 0.001 ? Math.min(absHist / absMacd, 1.0) : 0.5;
+           macdBias = Math.sign(tfMacdHist) * (0.08 + 0.14 * macdStrength);
+         }
+         
+         // EMA signal fallback
+         const emaBias = tfEmaSignal === 'bullish' ? 0.05 : (tfEmaSignal === 'bearish' ? -0.05 : 0);
+         
+         // Combine with RSI as primary (continuous), MACD + EMA as confirmation
+         const combinedBias = rsiBias + macdBias + emaBias;
+         
+         // Scale by confidence: higher confidence in "neutral" = less directional (closer to 0)
+         // Lower confidence = trend engine uncertain = potential emerging direction
+         const uncertaintyBoost = conf < 55 ? 1.0 : Math.max(0.3, 1.0 - (conf - 55) / 30);
+         
+         // ADX-backed amplification: when ADX confirms trend strength exists,
+         // amplify the neutral-TF bias since the market IS trending but indicators lag
+         const adxVal = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
+         const adxAmplifier = adxVal >= 30 ? 1.35 : (adxVal >= 25 ? 1.20 : 1.0);
+         
+         const finalBias = combinedBias * uncertaintyBoost * adxAmplifier;
+         
+         if (Math.abs(finalBias) > 0.03) {
+           reasons.push(`CONTINUOUS_BIAS: neutral TF → bias=${finalBias.toFixed(3)} (rsi=${tfRsi.toFixed(1)}, macd=${tfMacdHist > 0 ? '+' : ''}${tfMacdHist.toFixed(4)}, macdStr=${absMacd > 0.001 ? (absHist/absMacd).toFixed(2) : 'n/a'}, adxAmp=${adxAmplifier.toFixed(2)}, conf=${conf.toFixed(0)}%)`);
+         }
+         
+         return finalBias;
+       }
       
       // Priority 2: Fallback to global momentum direction hint (legacy path)
       if (P.ENABLE_PARTIAL_NEUTRAL_CONTRIBUTION && conf >= P.NEUTRAL_CONTRIBUTION_FLOOR) {
