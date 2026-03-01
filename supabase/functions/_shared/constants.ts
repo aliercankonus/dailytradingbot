@@ -4228,8 +4228,8 @@ export const FOUR_STATE_REGIME = {
     // ===== HARD BLOCK: Late entry with declining ADX slope =====
     // When regime is old AND ADX slope is declining, the move is exhausted — hard block new entries
     HARD_BLOCK_ENABLED: true,
-    HARD_BLOCK_AGE_CANDLES: 35,        // TIGHTENED: Was 40 — positions at regimeAge 35-40 were still losing
-    HARD_BLOCK_MAX_ADX_SLOPE: -0.15,   // TIGHTENED: Was -0.3 — slope -0.15 to -0.3 still showed exhaustion
+    HARD_BLOCK_AGE_CANDLES: 45,        // RELAXED: Was 35 — crypto trends routinely last 12-18h (45 candles on 15m)
+    HARD_BLOCK_MAX_ADX_SLOPE: -0.30,   // RELAXED: Was -0.15 — allow more slope decay before hard-blocking
     HARD_BLOCK_REASON: 'REGIME_AGE_EXHAUSTED',
     
     // ===== FRESH REGIME BONUS: Reward early entries =====
@@ -4258,8 +4258,8 @@ export const FOUR_STATE_REGIME = {
       BLOCK_CONTINUATION_ONLY: true,
       BLOCK_REASON: 'DYING_TREND_LTF_UNALIGNED',
       // ADX energy override: if ADX is extremely high, allow slightly negative slopes
-      HIGH_ENERGY_ADX_THRESHOLD: 50,
-      HIGH_ENERGY_MAX_SLOPE: -0.5,  // More tolerance when ADX >= 50
+      HIGH_ENERGY_ADX_THRESHOLD: 25,   // RELAXED: Was 50 — allow slope tolerance when ADX shows any trend energy
+      HIGH_ENERGY_MAX_SLOPE: -0.50,   // Allow slope decay to -0.50 when ADX >= 25
     },
   
   // ===== LOGGING =====
@@ -5237,17 +5237,17 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
       // FIX: Added ACCELERATING tier for strongly rising ADX slope (>= 0.5)
       // When ADX slope is positive and strong, the trend is accelerating — 10% threshold
       ACCELERATING_SLOPE: 0.5,
-      ACCELERATING_HARD_THRESHOLD: 10.0,
+      ACCELERATING_HARD_THRESHOLD: 12.0,  // RAISED: Was 10% — crypto rallies routinely move 10%+ during acceleration
       ACCELERATING_POSITION_SIZE: 0.40,
-      // NEW: RISING tier for positive but not accelerating slope (0.0 to 0.5)
-      // Invariant tests found that positive slopes were getting the same 6.0% as flat/declining
-      // A rising ADX slope means trend is building — deserves 8.0% threshold
+      // RISING tier for positive but not accelerating slope (0.0 to 0.5)
       RISING_SLOPE: 0.0,
-      RISING_HARD_THRESHOLD: 8.0,
+      RISING_HARD_THRESHOLD: 10.0,  // RAISED: Was 8% — positive slope = trend building, deserves more room
       RISING_POSITION_SIZE: 0.45,
-      // slope >= -1.0: full relaxation (6.0% hard threshold)
+      // slope >= -1.0: full relaxation
       FULL_RELAXATION_SLOPE: -1.0,
-      FULL_HARD_THRESHOLD: 6.0,
+      FULL_HARD_THRESHOLD: 8.0,    // RAISED: Was 6% — allows participation during mild slope decay
+      // TREND_EXPANSION regime bonus: +3% added to all thresholds when regime is TREND_EXPANSION
+      TREND_EXPANSION_REGIME_BONUS: 3.0,
       // slope -1.0 to -2.0: partial relaxation (5.5% hard threshold, reduced size)
       PARTIAL_RELAXATION_SLOPE: -2.0,
       PARTIAL_HARD_THRESHOLD: 5.5,
@@ -8117,8 +8117,22 @@ export const TREND_EXPANSION_EXEMPTION = {
   // At least 2 of 4 timeframes must align (less strict than rally override's 3)
   MIN_ALIGNED_TIMEFRAMES: 2,
   
+  // ===== StochRSI K THRESHOLDS (RELAXED for expansion) =====
+  // During TREND_EXPANSION, overbought thresholds are raised to avoid premature blocking
+  // K 85-93: normal zone — no exemption needed (standard gates handle)
+  // K 93-97: soft cap zone — exemption allows entry at reduced size
+  // K > 97: deep zone — max caution but still allowed
+  SEVERE_K_THRESHOLD: 93,     // RAISED: Was implicit 90 — K must reach 93 to trigger soft cap
+  SOFT_CAP_K_THRESHOLD: 97,   // RAISED: Was implicit 95 — K must reach 97 for deep zone
+  
+  // ===== 4H StochRSI WEIGHTING =====
+  // Cross-timeframe divergence (1h oversold vs 4h overbought) was causing paralysis
+  // Weight 4H at 70% to resolve — 4H is the dominant trend timeframe
+  WEIGHT_4H_STOCHRSI: 0.70,   // 4H contributes 70% to effective K
+  WEIGHT_1H_STOCHRSI: 0.30,   // 1H contributes 30% to effective K
+  
   // ===== POSITION SIZING =====
-  // K 95-97 (soft cap zone): more room to run
+  // K 93-97 (soft cap zone): more room to run
   SOFT_ZONE_POSITION_MULTIPLIER: 0.40,
   // K > 97 (deep zone): maximum caution
   DEEP_ZONE_POSITION_MULTIPLIER: 0.30,
