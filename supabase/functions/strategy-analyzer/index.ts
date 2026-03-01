@@ -3610,10 +3610,22 @@ serve(async (req) => {
                   if (tfTrend === 'bearish' || tfTrend === 'weak_bearish') bearishCount++;
                 }
                 if (bearishCount < TEE.MIN_ALIGNED_TIMEFRAMES) return { allowed: false, reason: `${bearishCount} bearish TFs < ${TEE.MIN_ALIGNED_TIMEFRAMES}`, multiplier: 0 };
-                const isDeepZone = earlyStochRsiK4h < DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD;
+                
+                // Weighted StochRSI: 70% 4H + 30% 1H (symmetric with LONG side)
+                const stochRsiK1h = trendData?.stochasticRsi?.['1h']?.k ?? earlyStochRsiK4h;
+                const effectiveK = (earlyStochRsiK4h * (TEE.WEIGHT_4H_STOCHRSI ?? 0.70)) + 
+                                   (stochRsiK1h * (TEE.WEIGHT_1H_STOCHRSI ?? 0.30));
+                
+                const severeK = 100 - (TEE.SEVERE_K_THRESHOLD ?? 93);  // Mirror: 7
+                const softCapK = 100 - (TEE.SOFT_CAP_K_THRESHOLD ?? 97);  // Mirror: 3
+                const isDeepZone = effectiveK < softCapK;
+                const isSoftZone = effectiveK < (100 - (TEE.SEVERE_K_THRESHOLD ?? 93));
+                
+                if (!isSoftZone) return { allowed: false, reason: `Weighted K=${effectiveK.toFixed(1)} > ${100 - (TEE.SEVERE_K_THRESHOLD ?? 93)} (above expansion exemption zone for SHORT)`, multiplier: 0 };
+                
                 let multiplier = isDeepZone ? TEE.DEEP_ZONE_POSITION_MULTIPLIER : TEE.SOFT_ZONE_POSITION_MULTIPLIER;
                 if (earlyAdxSlope >= TEE.ACCELERATING_SLOPE_THRESHOLD) multiplier = Math.min(multiplier + TEE.ACCELERATING_BOOST, 0.45);
-                return { allowed: true, reason: `TREND_EXPANSION confirmed (SHORT): ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)}, mom=${momScore.toFixed(0)}, ${bearishCount}TF aligned`, multiplier };
+                return { allowed: true, reason: `TREND_EXPANSION confirmed (SHORT): ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)}, mom=${momScore.toFixed(0)}, ${bearishCount}TF aligned, K4h=${earlyStochRsiK4h.toFixed(1)}, K1h=${stochRsiK1h.toFixed(1)}, weightedK=${effectiveK.toFixed(1)}`, multiplier };
               })();
               
               if (capitulationProbeTriggered || flashCrashProbeTriggered) {
@@ -3753,8 +3765,19 @@ serve(async (req) => {
                 if (momScore < TEE.MIN_MOMENTUM_SCORE) return { allowed: false, reason: `Momentum ${momScore.toFixed(0)} < ${TEE.MIN_MOMENTUM_SCORE}`, multiplier: 0 };
                 if (earlyRallyAlignedCount < TEE.MIN_ALIGNED_TIMEFRAMES) return { allowed: false, reason: `${earlyRallyAlignedCount} aligned TFs < ${TEE.MIN_ALIGNED_TIMEFRAMES}`, multiplier: 0 };
                 
-                // All conditions met — calculate position multiplier
-                const isDeepZone = earlyStochRsiK4h > DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD;
+                // Weighted StochRSI: 70% 4H + 30% 1H to resolve cross-TF divergence
+                const stochRsiK1h = trendData?.stochasticRsi?.['1h']?.k ?? earlyStochRsiK4h;
+                const effectiveK = (earlyStochRsiK4h * (TEE.WEIGHT_4H_STOCHRSI ?? 0.70)) + 
+                                   (stochRsiK1h * (TEE.WEIGHT_1H_STOCHRSI ?? 0.30));
+                
+                // All conditions met — calculate position multiplier using SEVERE/SOFT_CAP thresholds
+                const severeK = TEE.SEVERE_K_THRESHOLD ?? 93;
+                const softCapK = TEE.SOFT_CAP_K_THRESHOLD ?? 97;
+                const isDeepZone = effectiveK > softCapK;
+                const isSoftZone = effectiveK > severeK;
+                
+                if (!isSoftZone) return { allowed: false, reason: `Weighted K=${effectiveK.toFixed(1)} < ${severeK} (below expansion exemption zone)`, multiplier: 0 };
+                
                 let multiplier = isDeepZone ? TEE.DEEP_ZONE_POSITION_MULTIPLIER : TEE.SOFT_ZONE_POSITION_MULTIPLIER;
                 // Boost if strongly accelerating
                 if (earlyAdxSlope >= TEE.ACCELERATING_SLOPE_THRESHOLD) {
@@ -3762,7 +3785,7 @@ serve(async (req) => {
                 }
                 return { 
                   allowed: true, 
-                  reason: `TREND_EXPANSION confirmed: ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)}, mom=${momScore.toFixed(0)}, ${earlyRallyAlignedCount}TF aligned, K=${earlyStochRsiK4h.toFixed(1)}${isDeepZone ? ' (deep)' : ' (soft)'}`,
+                  reason: `TREND_EXPANSION confirmed: ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)}, mom=${momScore.toFixed(0)}, ${earlyRallyAlignedCount}TF aligned, K4h=${earlyStochRsiK4h.toFixed(1)}, K1h=${stochRsiK1h.toFixed(1)}, weightedK=${effectiveK.toFixed(1)}${isDeepZone ? ' (deep)' : ' (soft)'}`,
                   multiplier 
                 };
               })();
@@ -4824,11 +4847,12 @@ serve(async (req) => {
             }
           }
           
-          // FIX: ADX-graduated slope threshold — when ADX is very high, the trend is still strong
-          // even with slightly declining slope. ADX>=50: allow slope down to -0.5, ADX>=40: -0.35
+          // FIX: ADX-graduated slope threshold — when ADX shows trend energy, allow more slope decay
+          // ADX>=50: allow slope down to -0.50, ADX>=40: -0.35, ADX>=25: use HIGH_ENERGY_MAX_SLOPE
           const effectiveHardBlockSlope = adx >= 50 ? -0.50 
             : adx >= 40 ? -0.35 
-            : AGE_DECAY.HARD_BLOCK_MAX_ADX_SLOPE; // default -0.15
+            : adx >= (AGE_DECAY.DYING_TREND_BLOCK?.HIGH_ENERGY_ADX_THRESHOLD ?? 25) ? (AGE_DECAY.DYING_TREND_BLOCK?.HIGH_ENERGY_MAX_SLOPE ?? -0.50)
+            : AGE_DECAY.HARD_BLOCK_MAX_ADX_SLOPE; // default -0.30
           
           if (AGE_DECAY.HARD_BLOCK_ENABLED && 
               regimeAge >= AGE_DECAY.HARD_BLOCK_AGE_CANDLES && 
@@ -6882,21 +6906,24 @@ serve(async (req) => {
             relaxedPositionSize = relaxation.RELAXED_SOFT_POSITION_SIZE;
             
             if (!slopeFullyBlocksRelaxation && gradSlope?.ENABLED) {
-              // FIX: New ACCELERATING tier — when ADX slope is strongly positive, raise threshold to 10%
+              // TREND_EXPANSION regime bonus: add +3% to all thresholds during expansion
+              const regimeBonus = (fourStateRegime?.regime === 'TREND_EXPANSION' && gradSlope.TREND_EXPANSION_REGIME_BONUS) 
+                ? gradSlope.TREND_EXPANSION_REGIME_BONUS : 0;
+              
               if (adxSlope >= (gradSlope.ACCELERATING_SLOPE ?? 0.5)) {
                 relaxationTier = 'ACCELERATING';
-                effectiveHardThreshold = gradSlope.ACCELERATING_HARD_THRESHOLD ?? 10.0;
-                effectiveSoftThreshold = relaxation.RELAXED_SOFT_THRESHOLD_PERCENT;
+                effectiveHardThreshold = (gradSlope.ACCELERATING_HARD_THRESHOLD ?? 12.0) + regimeBonus;
+                effectiveSoftThreshold = relaxation.RELAXED_SOFT_THRESHOLD_PERCENT + regimeBonus;
                 relaxedPositionSize = gradSlope.ACCELERATING_POSITION_SIZE ?? 0.40;
               } else if (adxSlope >= (gradSlope.RISING_SLOPE ?? 0.0)) {
                 relaxationTier = 'RISING';
-                effectiveHardThreshold = gradSlope.RISING_HARD_THRESHOLD ?? 8.0;
-                effectiveSoftThreshold = relaxation.RELAXED_SOFT_THRESHOLD_PERCENT;
+                effectiveHardThreshold = (gradSlope.RISING_HARD_THRESHOLD ?? 10.0) + regimeBonus;
+                effectiveSoftThreshold = relaxation.RELAXED_SOFT_THRESHOLD_PERCENT + regimeBonus;
                 relaxedPositionSize = gradSlope.RISING_POSITION_SIZE ?? 0.45;
               } else if (adxSlope >= gradSlope.FULL_RELAXATION_SLOPE) {
                 relaxationTier = 'FULL';
-                effectiveHardThreshold = gradSlope.FULL_HARD_THRESHOLD;
-                effectiveSoftThreshold = relaxation.RELAXED_SOFT_THRESHOLD_PERCENT;
+                effectiveHardThreshold = gradSlope.FULL_HARD_THRESHOLD + regimeBonus;
+                effectiveSoftThreshold = relaxation.RELAXED_SOFT_THRESHOLD_PERCENT + regimeBonus;
                 relaxedPositionSize = relaxation.RELAXED_SOFT_POSITION_SIZE;
               } else if (adxSlope >= gradSlope.PARTIAL_RELAXATION_SLOPE) {
                 relaxationTier = 'PARTIAL';
@@ -6908,6 +6935,10 @@ serve(async (req) => {
                 effectiveHardThreshold = gradSlope.LIMITED_HARD_THRESHOLD;
                 effectiveSoftThreshold = MOVE_EXHAUSTION_FILTER_PARAMS.SOFT_THRESHOLD_PERCENT;
                 relaxedPositionSize = gradSlope.LIMITED_POSITION_SIZE;
+              }
+              
+              if (regimeBonus > 0) {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📈 TREND_EXPANSION regime bonus: +${regimeBonus}% added to MOVE_EXHAUSTED thresholds (hard=${effectiveHardThreshold.toFixed(1)}%)`);
               }
               // else: slope < -2.5, relaxationTier stays 'NONE'
             } else if (!slopeFullyBlocksRelaxation && !gradSlope?.ENABLED) {
