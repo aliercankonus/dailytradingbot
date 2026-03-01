@@ -5478,7 +5478,7 @@ serve(async (req) => {
                 ? (trendExpBypass.POSITION_MULTIPLIER_MILD ?? 0.60)
                 : (trendExpBypass.POSITION_MULTIPLIER_MODERATE ?? 0.45);
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ TREND_EXPANSION_MOMENTUM_BYPASS: ${derivedDirection.toUpperCase()} allowed`);
-              logger.forSymbol(symbol).info(`   → Regime=${effectiveRegime}, ADX=${adx.toFixed(1)}, 4h=${htfTrend4h}, momentum=${smartMomentum.score.toFixed(0)}`);
+              logger.forSymbol(symbol).info(`   → Regime=${fourStateRegime?.regime || 'UNKNOWN'}, ADX=${adx.toFixed(1)}, 4h=${htfTrend4h}, momentum=${smartMomentum.score.toFixed(0)}`);
               logger.forSymbol(symbol).info(`   → Strict threshold=${MOMENTUM_DIRECTION_HARD_GATE.BLOCK_LONG_BELOW_SCORE}, relaxed=${effectiveBlockLongBelow}, position=${(trendExpansionPositionMult * 100).toFixed(0)}%`);
               (trendData as any).trendExpansionMomentumBypassMultiplier = trendExpansionPositionMult;
             }
