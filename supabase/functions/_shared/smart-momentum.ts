@@ -8,18 +8,28 @@ import { calculateEMAArray, calculateRSIArray, calculateMACD, calculateADXWithDi
 import { ADX_THRESHOLDS, ADX_EXHAUSTION_PARAMS, MOMENTUM_SCORE_COMPONENTS, DYNAMIC_TRAILING_PARAMS, CONTEXT_STOP_PARAMS, EXIT_SIGNAL_SCORING, PULLBACK_DETECTION_PARAMS, ENTRY_CONFIRMATION_PARAMS, ENTRY_QUALITY_GRADES } from "./constants.ts";
 
 // ============= TREND MOMENTUM SCORE =============
-// Scores momentum from -100 (strong bearish) to +100 (strong bullish)
+// v2.0: Comprehensive lag fix
+// - ADX decoupled from direction (magnitude-only energy indicator)
+// - EMA spread RoC transition detection (catches crossover BEFORE it happens)
+// - Price impulse factor (fast price moves precede EMA crossover)
+// - 5-phase state machine (strong_bullish, bullish, transition_up, transition_down, strong_bearish)
+export type MomentumPhase = "strong_bullish" | "bullish" | "transition_up" | "neutral" | "transition_down" | "bearish" | "strong_bearish";
+
 export interface MomentumScoreResult {
   score: number;                    // -100 to +100
   direction: "bullish" | "bearish" | "neutral";
+  phase: MomentumPhase;            // v2.0: 5-phase state (more granular than direction)
   isAccelerating: boolean;
   isWeakening: boolean;
   isExhausted: boolean;
+  isTransitioning: boolean;        // v2.0: true when EMA spread narrowing toward crossover
   components: {
     emaSpreadRoC: number;          // Rate of change of EMA spread
     rsiMomentum: number;           // RSI directional momentum
     macdSlope: number;             // MACD histogram slope
-    adxTrend: number;              // ADX direction contribution
+    adxTrend: number;              // ADX magnitude contribution (v2.0: no direction sign)
+    transitionBonus: number;       // v2.0: bonus for EMA narrowing toward crossover
+    priceImpulse: number;          // v2.0: fast price move bonus
   };
   overextensionATR: number;        // How many ATRs from EMA
   reasons: string[];
@@ -35,10 +45,12 @@ export function calculateMomentumScore(
   const defaultResult: MomentumScoreResult = {
     score: 0,
     direction: "neutral",
+    phase: "neutral",
     isAccelerating: false,
     isWeakening: false,
     isExhausted: false,
-    components: { emaSpreadRoC: 0, rsiMomentum: 0, macdSlope: 0, adxTrend: 0 },
+    isTransitioning: false,
+    components: { emaSpreadRoC: 0, rsiMomentum: 0, macdSlope: 0, adxTrend: 0, transitionBonus: 0, priceImpulse: 0 },
     overextensionATR: 0,
     reasons: []
   };
@@ -47,22 +59,26 @@ export function calculateMomentumScore(
 
   const reasons: string[] = [];
   let totalScore = 0;
+  const MSC = MOMENTUM_SCORE_COMPONENTS;
 
-  // 1. EMA Spread Rate of Change (max ±MOMENTUM_SCORE_COMPONENTS.EMA_SPREAD_MAX points)
+  // 1. EMA Spread Rate of Change (max ±MSC.EMA_SPREAD_MAX points)
   const ema12Array = calculateEMAArray(prices, 12);
   const ema26Array = calculateEMAArray(prices, 26);
   
+  let spreadCurrent = 0;
+  let spreadRoC = 0;
+  let isTransitioning = false;
+  let transitionBonus = 0;
+  
   if (ema12Array.length >= 5 && ema26Array.length >= 5) {
-    const spreadCurrent = ema12Array[ema12Array.length - 1] - ema26Array[ema26Array.length - 1];
+    spreadCurrent = ema12Array[ema12Array.length - 1] - ema26Array[ema26Array.length - 1];
     const spreadPrev1 = ema12Array[ema12Array.length - 2] - ema26Array[ema26Array.length - 2];
     const spreadPrev5 = ema12Array[ema12Array.length - 5] - ema26Array[ema26Array.length - 5];
     
     // Calculate rate of change of spread
     const currentEma = ema26Array[ema26Array.length - 1] || 1;
-    const spreadRoC = ((spreadCurrent - spreadPrev5) / Math.abs(currentEma || 1)) * 100;
-    const spreadChange = spreadCurrent - spreadPrev1;
+    spreadRoC = ((spreadCurrent - spreadPrev5) / Math.abs(currentEma || 1)) * 100;
     
-    const MSC = MOMENTUM_SCORE_COMPONENTS;
     const emaSpreadScore = Math.min(MSC.EMA_SPREAD_MAX, Math.max(-MSC.EMA_SPREAD_MAX, spreadRoC * MSC.EMA_SPREAD_SCORE_MULTIPLIER));
     totalScore += emaSpreadScore;
     
@@ -70,9 +86,30 @@ export function calculateMomentumScore(
     else if (spreadRoC < MSC.EMA_SPREAD_NARROWING) reasons.push(`EMA spread narrowing: ${emaSpreadScore.toFixed(0)}`);
     
     defaultResult.components.emaSpreadRoC = spreadRoC;
+
+    // ===== v2.0: TRANSITION DETECTION =====
+    // When EMA spread is negative but narrowing (RoC > 0) → bullish transition
+    // When EMA spread is positive but narrowing (RoC < 0) → bearish transition
+    // This catches the crossover BEFORE it happens, eliminating the structural lag
+    if (MSC.TRANSITION_REQUIRE_NARROWING) {
+      if (spreadCurrent < 0 && spreadRoC > 0) {
+        // Bearish structure but NARROWING → transitioning bullish
+        isTransitioning = true;
+        transitionBonus = Math.min(MSC.TRANSITION_BONUS_MAX, spreadRoC * MSC.TRANSITION_ROC_MULTIPLIER);
+        totalScore += transitionBonus;
+        reasons.push(`🔄 TRANSITION_UP: spread=${spreadCurrent.toFixed(2)}, RoC=+${spreadRoC.toFixed(3)} → bonus +${transitionBonus.toFixed(0)}`);
+      } else if (spreadCurrent > 0 && spreadRoC < 0) {
+        // Bullish structure but NARROWING → transitioning bearish
+        isTransitioning = true;
+        transitionBonus = Math.max(-MSC.TRANSITION_BONUS_MAX, spreadRoC * MSC.TRANSITION_ROC_MULTIPLIER);
+        totalScore += transitionBonus;
+        reasons.push(`🔄 TRANSITION_DOWN: spread=${spreadCurrent.toFixed(2)}, RoC=${spreadRoC.toFixed(3)} → penalty ${transitionBonus.toFixed(0)}`);
+      }
+    }
+    defaultResult.components.transitionBonus = transitionBonus;
   }
 
-  // 2. RSI Momentum (max ±MOMENTUM_SCORE_COMPONENTS.RSI_MOMENTUM_MAX points)
+  // 2. RSI Momentum (max ±MSC.RSI_MOMENTUM_MAX points)
   const rsiArray = calculateRSIArray(prices, 14);
   if (rsiArray.length >= 5) {
     const rsiCurrent = rsiArray[rsiArray.length - 1];
@@ -87,7 +124,7 @@ export function calculateMomentumScore(
     }
     
     const rsiMomentum = (rsiCurrent - rsiPrev3) / 3;
-    const rsiScore = Math.min(MOMENTUM_SCORE_COMPONENTS.RSI_MOMENTUM_MAX, Math.max(-MOMENTUM_SCORE_COMPONENTS.RSI_MOMENTUM_MAX, rsiMomentum * 2));
+    const rsiScore = Math.min(MSC.RSI_MOMENTUM_MAX, Math.max(-MSC.RSI_MOMENTUM_MAX, rsiMomentum * 2));
     totalScore += rsiScore;
     
     if (consecutiveHigherLows >= 2) reasons.push(`RSI higher lows: +${rsiScore.toFixed(0)}`);
@@ -122,15 +159,12 @@ export function calculateMomentumScore(
       // Expanding bearish: cap at -30
       // FIX: Contracting bearish (histogram still negative but becoming less negative)
       // should score as WEAKLY BEARISH (negative), not positive
-      // Old: normalizedSlope * 50 → positive when slope > 0 (histogram rising toward zero)
-      // New: bounded to [-15, 0] — can reduce bearish penalty but never flip to bullish
       if (isExpanding) {
         macdScore = Math.max(-30, normalizedSlope * 100);
       } else {
         // Histogram is negative and contracting: momentum is weakening but still bearish
-        // Score proportional to how negative the histogram still is (not the slope direction)
-        const contractionScore = normalizedSlope * 50; // positive slope = less bearish
-        macdScore = Math.max(-15, Math.min(0, contractionScore - 5)); // bias negative, cap at 0
+        const contractionScore = normalizedSlope * 50;
+        macdScore = Math.max(-15, Math.min(0, contractionScore - 5));
       }
     }
     
@@ -144,31 +178,46 @@ export function calculateMomentumScore(
     defaultResult.components.macdSlope = slope;
   }
 
-  // 4. ADX Trend Contribution (max ±MOMENTUM_SCORE_COMPONENTS.ADX_TREND_MAX points)
-  // FIX: ADX is now DIRECTION-AWARE. Strong rising ADX during a bearish trend contributes
-  // negative score (strong bearish energy), not positive. Previously, ADX_STRONG_RISING always
-  // added +15 regardless of trend direction, causing +30 point artifact during selloffs.
-  // Direction is derived from EMA crossover (most reliable structural signal).
-  const emaTrendDirection = (ema12Array.length > 0 && ema26Array.length > 0)
-    ? (ema12Array[ema12Array.length - 1] > ema26Array[ema26Array.length - 1] ? 1 : -1)
-    : 0; // +1 = bullish structure, -1 = bearish structure
-  
+  // 4. ADX Energy Contribution (max ±MSC.ADX_TREND_MAX points)
+  // v2.0 FIX: ADX is now MAGNITUDE-ONLY — measures trend energy, NOT direction.
+  // Direction is determined by EMA/MACD/RSI components above.
+  // Previously: rawAdxScore * emaTrendDirection caused ±15 point swings at crossover lag
+  // Now: ADX contributes unsigned energy — strong rising ADX = market has conviction (either way)
+  // This eliminates the phase misalignment where ADX punished correct direction during transitions.
   let adxScore = 0;
   if (adx >= ADX_THRESHOLDS.STRONG) {
-    const rawAdxScore = adxRising ? MOMENTUM_SCORE_COMPONENTS.ADX_STRONG_RISING : MOMENTUM_SCORE_COMPONENTS.ADX_STRONG_FALLING;
-    adxScore = rawAdxScore * emaTrendDirection; // Sign by trend direction
-    if (adxRising) reasons.push(`Strong ADX rising (${emaTrendDirection > 0 ? 'bullish' : 'bearish'} energy): ${adxScore > 0 ? '+' : ''}${adxScore}`);
+    adxScore = adxRising ? MSC.ADX_STRONG_RISING : MSC.ADX_STRONG_FALLING;
+    if (adxRising) reasons.push(`Strong ADX energy (${adx.toFixed(1)}, rising): +${adxScore}`);
+    else reasons.push(`Strong ADX declining (${adx.toFixed(1)}): ${adxScore}`);
   } else if (adx >= ADX_THRESHOLDS.MINIMUM) {
-    const rawAdxScore = adxRising ? MOMENTUM_SCORE_COMPONENTS.ADX_MODERATE_RISING : MOMENTUM_SCORE_COMPONENTS.ADX_MODERATE_FALLING;
-    adxScore = rawAdxScore * emaTrendDirection; // Sign by trend direction
+    adxScore = adxRising ? MSC.ADX_MODERATE_RISING : MSC.ADX_MODERATE_FALLING;
   } else {
-    adxScore = MOMENTUM_SCORE_COMPONENTS.ADX_WEAK; // Weak ADX is always a penalty (direction-agnostic)
+    adxScore = MSC.ADX_WEAK;
     reasons.push(`Weak ADX (${adx.toFixed(1)}): ${adxScore}`);
   }
   totalScore += adxScore;
   defaultResult.components.adxTrend = adxScore;
 
-  // 5. Calculate Overextension
+  // 5. v2.0: PRICE IMPULSE FACTOR
+  // Catches fast price moves that precede EMA crossover.
+  // If price moved > 1.5 ATR in last N bars, add direction-aligned bonus.
+  // This is a SCORE COMPONENT, not an override — keeps the scoring framework intact.
+  let priceImpulse = 0;
+  const lookback = Math.min(MSC.PRICE_IMPULSE_LOOKBACK, prices.length - 1);
+  if (lookback > 0 && currentATR > 0) {
+    const priceChange = prices[prices.length - 1] - prices[prices.length - 1 - lookback];
+    const impulseRatio = priceChange / currentATR; // Positive = bullish, negative = bearish
+    
+    if (Math.abs(impulseRatio) >= MSC.PRICE_IMPULSE_ATR_THRESHOLD) {
+      priceImpulse = Math.min(MSC.PRICE_IMPULSE_MAX, Math.max(-MSC.PRICE_IMPULSE_MAX, 
+        impulseRatio * MSC.PRICE_IMPULSE_SCALE));
+      totalScore += priceImpulse;
+      reasons.push(`⚡ Price impulse ${impulseRatio.toFixed(2)} ATR: ${priceImpulse > 0 ? '+' : ''}${priceImpulse.toFixed(0)}`);
+    }
+  }
+  defaultResult.components.priceImpulse = priceImpulse;
+
+  // 6. Calculate Overextension
   const ema26Current = ema26Array.length > 0 ? ema26Array[ema26Array.length - 1] : prices[prices.length - 1];
   const currentPrice = prices[prices.length - 1];
   const distanceFromEma = Math.abs(currentPrice - ema26Current);
@@ -176,25 +225,53 @@ export function calculateMomentumScore(
   defaultResult.overextensionATR = overextensionATR;
 
   // Determine states
-  const isAccelerating = totalScore > MOMENTUM_SCORE_COMPONENTS.ACCELERATING_THRESHOLD && defaultResult.components.macdSlope > 0;
+  const isAccelerating = totalScore > MSC.ACCELERATING_THRESHOLD && defaultResult.components.macdSlope > 0;
   const isWeakening = 
     (totalScore > 0 && defaultResult.components.macdSlope < 0 && !adxRising) ||
     (totalScore < 0 && defaultResult.components.macdSlope > 0 && !adxRising);
   const isExhausted = 
     adx >= ADX_THRESHOLDS.EXTREME && 
-    overextensionATR >= MOMENTUM_SCORE_COMPONENTS.EXHAUSTION_ATR_THRESHOLD && 
+    overextensionATR >= MSC.EXHAUSTION_ATR_THRESHOLD && 
     !adxRising;
 
   if (isWeakening) reasons.push("⚠️ Momentum WEAKENING");
   if (isExhausted) reasons.push("🛑 Trend EXHAUSTED");
   if (isAccelerating) reasons.push("🚀 Momentum ACCELERATING");
 
+  // v2.0: 5-PHASE STATE CLASSIFICATION
+  // More granular than 3-way direction — captures transition zones
+  const finalScore = Math.min(100, Math.max(-100, Math.round(totalScore)));
+  let phase: MomentumPhase = "neutral";
+  if (finalScore >= MSC.STRONG_BULLISH_THRESHOLD) {
+    phase = "strong_bullish";
+  } else if (finalScore >= MSC.BULLISH_THRESHOLD) {
+    phase = "bullish";
+  } else if (finalScore >= MSC.TRANSITION_UP_THRESHOLD && isTransitioning && spreadRoC > 0) {
+    phase = "transition_up";
+  } else if (finalScore <= MSC.STRONG_BEARISH_THRESHOLD) {
+    phase = "strong_bearish";
+  } else if (finalScore <= MSC.BEARISH_THRESHOLD) {
+    phase = "bearish";
+  } else if (finalScore <= MSC.TRANSITION_DOWN_THRESHOLD && isTransitioning && spreadRoC < 0) {
+    phase = "transition_down";
+  }
+  // If transitioning but score is in neutral zone, use transition phase
+  if (phase === "neutral" && isTransitioning) {
+    phase = spreadRoC > 0 ? "transition_up" : "transition_down";
+  }
+
+  const direction = finalScore > MSC.BULLISH_THRESHOLD ? "bullish" 
+    : finalScore < MSC.BEARISH_THRESHOLD ? "bearish" 
+    : "neutral";
+
   return {
-    score: Math.min(100, Math.max(-100, Math.round(totalScore))),
-    direction: totalScore > MOMENTUM_SCORE_COMPONENTS.BULLISH_THRESHOLD ? "bullish" : totalScore < MOMENTUM_SCORE_COMPONENTS.BEARISH_THRESHOLD ? "bearish" : "neutral",
+    score: finalScore,
+    direction,
+    phase,
     isAccelerating,
     isWeakening,
     isExhausted,
+    isTransitioning,
     components: defaultResult.components,
     overextensionATR: Math.round(overextensionATR * 100) / 100,
     reasons

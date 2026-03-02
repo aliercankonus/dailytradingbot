@@ -7991,20 +7991,37 @@ export const MARKET_REGIME_DETECTION = {
 
 // ============= MOMENTUM SCORE COMPONENT LIMITS (smart-momentum.ts) =============
 // Max contribution per component in momentum score calculation
+// v2.0: Comprehensive lag fix — ADX decoupled from direction, transition detection added
 export const MOMENTUM_SCORE_COMPONENTS = {
   EMA_SPREAD_MAX: 30,
   RSI_MOMENTUM_MAX: 25,
   MACD_HISTOGRAM_MAX: 30,
+  // v2.0: ADX is now MAGNITUDE-ONLY (never multiplied by direction sign)
+  // ADX answers "how much energy?" not "which direction?"
   ADX_TREND_MAX: 15,
-  // ADX contribution scores
-  ADX_STRONG_RISING: 15,
+  ADX_STRONG_RISING: 12,   // Reduced from 15 — magnitude only, no direction flip
   ADX_STRONG_FALLING: -5,
-  ADX_MODERATE_RISING: 8,
+  ADX_MODERATE_RISING: 6,  // Reduced from 8
   ADX_MODERATE_FALLING: -3,
   ADX_WEAK: -10,
+  // v2.0: TRANSITION DETECTION — catches EMA crossover BEFORE it happens
+  // When EMA spread is negative but narrowing (RoC > 0), add a bullish transition bonus
+  TRANSITION_BONUS_MAX: 15,           // Max bonus points during transition
+  TRANSITION_ROC_MULTIPLIER: 20,      // Scale factor for spread RoC bonus
+  TRANSITION_REQUIRE_NARROWING: true, // Only bonus when spread < 0 AND RoC > 0 (or vice versa)
+  // v2.0: PRICE IMPULSE FACTOR — fast price moves that precede EMA crossover
+  PRICE_IMPULSE_MAX: 12,              // Max impulse bonus points
+  PRICE_IMPULSE_LOOKBACK: 6,          // Look back N bars for price change
+  PRICE_IMPULSE_ATR_THRESHOLD: 1.5,   // Min impulse ratio (priceChange/ATR) to qualify
+  PRICE_IMPULSE_SCALE: 5,             // Points per ATR of impulse
   // Direction determination
-  BULLISH_THRESHOLD: 20,
-  BEARISH_THRESHOLD: -20,
+  BULLISH_THRESHOLD: 15,   // Reduced from 20 — transition zone should reach bullish easier
+  BEARISH_THRESHOLD: -15,  // Reduced from -20
+  // v2.0: 5-PHASE STATE THRESHOLDS
+  STRONG_BULLISH_THRESHOLD: 40,
+  STRONG_BEARISH_THRESHOLD: -40,
+  TRANSITION_UP_THRESHOLD: 5,    // Score between -15 and +5 with positive RoC = transition_up
+  TRANSITION_DOWN_THRESHOLD: -5, // Score between -5 and +15 with negative RoC = transition_down
   // State thresholds
   ACCELERATING_THRESHOLD: 30,
   // Overextension
