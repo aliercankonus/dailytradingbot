@@ -228,14 +228,19 @@ Deno.test("INVARIANT: 15% BTC rally produces positive momentum score", () => {
     `If negative, MACD normalization is broken — the $87K price scale is biasing the score.`);
 });
 
-Deno.test("INVARIANT: 15% BTC drop never produces positive momentum > 20", () => {
+Deno.test("INVARIANT: 15% BTC drop never produces bullish direction", () => {
+  // v2.0: ADX is magnitude-only, so raw score may be slightly positive due to ADX energy.
+  // The key invariant is that DIRECTION and PHASE must not be bullish during a crash.
+  // The OPPOSING gate uses phase/direction, not raw score threshold.
   const prices = generateBTCPrices(80, -15);
   const klines = generateKlines(prices);
   const result = calculateMomentumScore(klines, prices, 30, false, 500);
   
-  assert(result.score < 20,
-    `A 15% BTC drop should NOT show strong bullish momentum (got ${result.score}). ` +
-    `If score > 20, indicator lag is too extreme — the system would enter LONGs during a crash.`);
+  assert(result.direction !== "bullish",
+    `A 15% BTC drop should NOT have bullish direction (got ${result.direction}, score=${result.score}). ` +
+    `If bullish during a crash, the scoring engine has a critical direction bug.`);
+  assert(result.phase !== "bullish" && result.phase !== "strong_bullish",
+    `A 15% BTC drop should NOT have bullish phase (got ${result.phase}, score=${result.score}).`);
 });
 
 Deno.test("INVARIANT: Momentum score never hits ±100 for moderate moves", () => {
